@@ -113,14 +113,27 @@ Everyone else sees exactly the WhatsApp they saw before the desk existed: no
 reply, no hint that a feature exists, other bots answering as usual. Empty or
 unset means everyone, which is the shipped behaviour.
 
-```
-ERP_WA_COMMANDS_ALLOW=<the director's mobile>
-```
+**Where it lives: `deploy/desk-cutover-runtime.env`, committed.** Not on the
+Cloud Run service by hand, and not as a cloudbuild substitution fed from
+`.env.local` the way the notify mobiles are. Both of those fail the same
+way here, and the failure is the dangerous direction:
 
-The live pilot value is the director's own number. It is deliberately not
-written down here: this file is in the repository forever, and the value has
-no effect from a document anyway. Cloud Run holds the only copy that does
-anything, and it is the source of truth.
+- Set by hand with `gcloud run services update`, it is erased by the next
+  deploy, because `--set-env-vars` replaces the whole environment.
+- As a substitution defaulting to `""`, the build trigger — which has no
+  `.env.local` — would supply an empty allowlist. **Empty means everyone.**
+  So the first push that happened to deploy would hand all 28 staff with
+  mobiles a desk that can message parents, silently.
+
+This variable fails OPEN. Every other way of setting it has a path to
+"empty", and empty is school-wide. So the number is in git. That is a real
+cost — the director's own mobile is in the repository history now — and it
+was weighed against handing 28 people a live parent-messaging desk by
+accident. If that trade stops being worth it, the fix is not to move the
+value somewhere emptier; it is to put `ERP_WA_COMMANDS=off` back so the
+failure direction reverses.
+
+Current value: the director's mobile, one number.
 
 Commas, spaces, newlines, `+91` and a leading `0` are all tolerated, because
 this gets pasted out of a phone book. A person is matched on any number the
@@ -133,9 +146,11 @@ of the `commands off` brake, so somebody who is not on the list cannot pause
 the desk either.
 
 A typo that empties the variable opens the desk to everyone rather than
-closing it to nobody. That is the safer failure of the two — a school locked
-out of its own ERP by a stray character would be worse — but it does mean the
-value is worth reading back after you set it.
+closing it to nobody. That is the safer failure for a school that already
+trusts the desk — being locked out of your own ERP by a stray character is
+worse — but during a one-number pilot it is the wrong way round, which is
+the whole reason the value is committed rather than supplied at deploy
+time. Read it back after any edit.
 
 ---
 
@@ -154,12 +169,13 @@ wrongly — described as the default.
 
 ### Stage B — a real pilot, one number
 
-1. Set `ERP_WA_COMMANDS_ALLOW` to the director's own mobile. That number was
-   checked against the roster before the pilot: active staff record, login
-   enabled, designation Director, and a protected super-admin email, so every
-   gate from the allowlist through to RBAC passes for it. Leave
-   `ERP_WA_COMMANDS` unset (or anything but `off`).
-2. Redeploy.
+1. Already done in `deploy/desk-cutover-runtime.env`:
+   `ERP_WA_COMMANDS_ALLOW=<the director's mobile>`. That number was checked
+   against the roster before the pilot: active staff record, login enabled,
+   designation Director, and a protected super-admin email, so every gate
+   from the allowlist through to RBAC passes for it. `ERP_WA_COMMANDS` stays
+   unset.
+2. Deploy. Nothing to set by hand — that is the point.
 3. The desk answers **you and nobody else**. Every other staff member's
    WhatsApp is unchanged and they are told nothing.
 4. Run Stage C below.
@@ -212,6 +228,74 @@ every staff member immediately, with no deploy. `commands on` resumes it.
 
 ---
 
+## 5b. What the desk does NOT answer, and what happens then
+
+Since 2026-09-07 the staff keyword bot is **silent unless summoned**.
+
+Before that it answered every staff message the desk stepped aside from,
+which on a number staff also use to talk to the school meant a greeting
+got a menu and a half-typed thought got a canned line about admissions.
+
+| A staff member sends | Answered by |
+|---|---|
+| a command (`5A me aaj kaun absent hai`) | the desk |
+| `help` | the desk — the full command list |
+| `IN` / `OUT` | the attendance punch bot, unchanged |
+| `menu` / `main` / `start` | the greeting menu, unchanged |
+| `school bot` | the old staff bot, awake for 30 minutes |
+| `bot off` | closes it again |
+| anything else | **nothing** — logged to Comms → WhatsApp inbox for a human |
+
+The silence is deliberate and it is the part to watch during the pilot: a
+staff member who does not know about `school bot` will read it as the
+number being dead. The desk's `help` reply says so in its last line,
+which is the only place they can find out.
+
+**Parents, visitors, admission enquiries, vendors and job applicants are
+untouched.** They have nothing but that bot, so for them every keyword and
+greeting works exactly as before. This rule applies only to a sender who
+resolves to an active staff record.
+
+The teacher class channel (homework to parents) and the staff attendance
+punch bot both run BEFORE this gate and are unaffected.
+
+## 5c. An outsider who messages the school number
+
+Unchanged in principle — a vendor, a job seeker or a stranger has nothing
+but the bots, so they are still greeted, asked their name, and asked what
+they need. Three things changed on 2026-09-07, all of them from one live
+thread that had been looping since 18 August.
+
+| They send | Before | Now |
+|---|---|---|
+| a forwarded link, or a photo with no caption | full purpose menu, every time | **logged, no reply** |
+| something that is not a usable name | accepted as their name | refused, re-asked |
+| a third unusable reply | asked again, forever | **parked** — one "the office will reply", thread flagged |
+| anything naming a real purpose, after parking | — | picked straight back up |
+| `menu` | restarts | restarts (unchanged) |
+
+**What the office sees.** A parked thread is escalated once and sits in
+Comms → WhatsApp inbox with its full history. Nothing is deleted and no
+message is hidden — the bot simply stops talking, and a person decides
+whether it is worth answering.
+
+**A name is now refused** if it carries a URL, runs past 60 characters or
+six words, or is not mostly letters. The thread that prompted this had
+`https://www.facebook.com/share/r/1BkJUpZ93g/good morning have a glorious
+day` recorded as a visitor's name and read back to them, in bold, on every
+reply for three weeks.
+
+**Purpose detection now checks job before admission.** "Apply" belongs to
+both and admission held it, so "I want to apply for a teacher vacancy"
+was creating an admission lead with an enquiry number for the office to
+chase.
+
+**What is still true:** who they are and why they are writing is entirely
+self-declared. Nobody verifies it. For an admission enquiry there is a
+real lead record; for everything else it is a labelled thread for a human.
+
+---
+
 ## 6. What reaches a parent, and when
 
 Only after a staff member confirms a write command. Always as an approved
@@ -231,6 +315,17 @@ families are outside Meta's 24-hour window.
 | `raise_complaint` | **nothing** — the card says plainly that the family is not messaged |
 | `staff_broadcast` | staff only, never families |
 
+**A template family must be approved in BOTH Hindi and English, or the
+command refuses.** Not "send whichever half exists" — that writes to a
+parent in a language they did not choose, and the concrete case was a
+family who had just paid at the counter being told, in the wrong
+language, to pay a link (see `templateFamilyReady`, PR #101). The refusal
+names the missing language so the office knows what to chase.
+
+At BHB on 2026-09-07 only `fees_pay_link` was approved at all, and only in
+Hindi — so **every** parent-facing write refuses today, the pay link
+included, until Meta approves the English halves.
+
 Where no approved template exists, the command says so rather than sending
 nothing silently or implying it sent.
 
@@ -249,7 +344,8 @@ At 50 staff × 10 commands a day that is roughly **₹60/day** from October.
 
 ## 8. Before you go live — checklist
 
-- [ ] `ERP_WA_COMMANDS_ALLOW` set to the director's mobile on the Cloud Run service, and read back after saving
+- [ ] `ERP_WA_COMMANDS_ALLOW` present in `deploy/desk-cutover-runtime.env`
+      (NOT set by hand on the service — the next deploy erases that)
 - [ ] The director's own number is on that list, or the `commands off` brake is out of reach — it is, for the value above
 - [ ] Approved WhatsApp templates exist for the writes you intend to use
       (fee reminder, pay link, notice, bus delay) — Masters → WhatsApp templates
@@ -258,6 +354,10 @@ At 50 staff × 10 commands a day that is roughly **₹60/day** from October.
       `scripts/setup-cloud-scheduler.sh`
 - [ ] The 4 director/principal numbers know that `commands off` is the brake
 - [ ] Someone is watching Comms → WhatsApp inbox for the first hour
+- [ ] The pilot numbers know that anything which is not a command gets no
+      reply now, and that `school bot` brings the old menu back
+- [ ] Whoever watches Comms knows that a *parked* outsider thread is one
+      the bot gave up on and a person has to answer
 
 ---
 

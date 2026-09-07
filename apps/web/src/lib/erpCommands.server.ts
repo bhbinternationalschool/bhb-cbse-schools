@@ -75,6 +75,7 @@ import { publicOrigin } from "@/lib/birthday.server";
 import { ensureFeesHydratedServer } from "@/lib/feesPersistence.server";
 import { formatInr, loadMasters } from "@/lib/masters";
 import { classLabel } from "@/lib/homework";
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { isOfficeLike } from "@/lib/erpChatAccess";
 import { writeAudit } from "@/lib/audit.server";
 import { istDateOf } from "@/lib/teaching";
@@ -137,6 +138,24 @@ import {
   parseStudentFeesQuery,
   noteCommandUse,
   parseCommandsSwitch,
+  looksLikeBareName,
+  followUpCommandFor,
+  followUpIsFresh,
+  parsePickNumber,
+  pickIsFresh,
+  type PickOption,
+  absentListPicks,
+  classDefaultersPicks,
+  pendingLeavesPicks,
+  sectionProblemPicks,
+  routePicks,
+  ptmSlotPicks,
+  helpPicks,
+  formatCommandHelpDetail,
+  templatesByLanguage,
+  templateForFamily,
+  missingLanguagesLabel,
+  formatTemplateMixLabel,
   parseCommandAllowList,
   commandActorAllowed,
   parseConfirmReply,
@@ -199,6 +218,26 @@ type CommandStore = {
    * confirm card can warn that these families were just told.
    */
   busDelayedAt?: Record<string, string>;
+  /**
+   * The last list the desk showed each person, so a bare name typed in
+   * reply resolves inside it. Scope, not names: a section id list is a
+   * fraction of the size of the roster it stands for, and this slice is
+   * shared with every other bot's state.
+   */
+  followUp?: Record<
+    string,
+    { at: string; commandId: string; sectionIds: string[]; label: string }
+  >;
+  /**
+   * The numbered "which one did you mean?" list each person last saw, so
+   * a reply of "2" resolves to a student. Ids only — the names were on
+   * the message that asked, and this slice is shared with every other
+   * bot's state.
+   */
+  pick?: Record<
+    string,
+    { at: string; commandId: string; originalText: string; options: PickOption[] }
+  >;
 };
 
 let memoryStore: CommandStore = {
@@ -279,6 +318,86 @@ export function staffSessionFor(
   };
 }
 
+/**
+ * The per-language template set as frozen onto the confirm card.
+ *
+ * Undefined rather than an empty object when the card predates this, so
+ * the send falls back to the single template it was built with instead of
+ * finding nothing for every language.
+ */
+function parseTemplatesByLang(
+  raw: string | undefined,
+): Record<string, import("@/lib/erpCommands").PickedTemplate | null> | undefined {
+  if (!raw) return undefined;
+  try {
+    const j = JSON.parse(raw) as Record<string, import("@/lib/erpCommands").PickedTemplate | null>;
+    return j && typeof j === "object" ? j : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Remember the list just printed, so its numbers mean something.
+ *
+ * Every list the desk shows is registered here in the order it was
+ * printed, by the number shown on each row — so a teacher reading "7.
+ * Aarav Sharma" and replying "7" gets Aarav, and never the seventh row of
+ * some other list. Replacing rather than merging: a new list retires the
+ * old one, because a number that could answer either question answers
+ * neither.
+ */
+async function rememberPick(
+  actor: string,
+  commandId: string,
+  originalText: string,
+  options: PickOption[],
+): Promise<void> {
+  const st = await readStore();
+  const next = { ...(st.pick ?? {}) };
+  if (options.length) {
+    next[actor] = {
+      at: new Date().toISOString(),
+      commandId,
+      originalText,
+      options,
+    };
+  } else {
+    // Nothing to pick from. Leaving the previous list armed would let a
+    // number answer a question that is two replies old.
+    delete next[actor];
+  }
+  await writeStore({ ...st, pick: next });
+}
+
+/** Mobiles bucketed by family language, as frozen onto the confirm card. */
+function parseMobilesByLang(
+  raw: string | undefined,
+): Record<string, string[]> | undefined {
+  if (!raw) return undefined;
+  try {
+    const j = JSON.parse(raw) as Record<string, string[]>;
+    if (!j || typeof j !== "object") return undefined;
+    const out: Record<string, string[]> = {};
+    for (const [k, v] of Object.entries(j)) {
+      if (Array.isArray(v)) out[k] = v.filter((x) => typeof x === "string" && x);
+    }
+    return Object.keys(out).length ? out : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** How many recipients read each language, for the confirm card. */
+function countByLanguage(rows: { language?: string }[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const r of rows) {
+    const k = r.language || "hi";
+    out[k] = (out[k] ?? 0) + 1;
+  }
+  return out;
+}
+
 function allowedCommandsFor(
   session: DemoSession,
   masters: MastersState,
@@ -316,6 +435,17 @@ function random(): string {
 /**
  * Entry point. See the file header for the order of checks.
  */
+/**
+ * Commands whose reply is a list of children, and so can be followed by a
+ * bare name. A reading about one student already names that student, and a
+ * school-wide summary has no list to point into.
+ */
+const FOLLOW_UP_LIST_COMMANDS = new Set([
+  "absent_list",
+  "class_defaulters",
+  "pending_leaves",
+]);
+
 export async function handleErpStaffCommand(
   inbound: ErpCommandInbound,
 ): Promise<ErpCommandResult> {
@@ -421,6 +551,14 @@ export async function handleErpStaffCommand(
 
   // 4. Parse — regex first, then the model, only for command-shaped text.
   let parsed: ParsedErpCommand | null = parseErpCommandLocal(text);
+  // Set when a bare name was resolved against a list the desk just showed;
+  // the student lookup below searches those sections instead of the school.
+  let resolvedFollowUpSections: string[] | null = null;
+  // Set when a bare number answered a numbered list the desk printed. The
+  // lookups below skip matching entirely and use these ids.
+  let pinnedStudentId: string | null = null;
+  let pinnedSection: SectionMatch | null = null;
+  let pinnedRouteId: string | null = null;
 
   // Paused: answer anything command-shaped without spending a model call,
   // and leave everything else to the bots that were going to answer it.
@@ -462,6 +600,81 @@ export async function handleErpStaffCommand(
       };
     }
   }
+  // 4a2. A bare number in reply to the desk's own numbered list.
+  //
+  // Runs before the parse so that "2" is read as an answer rather than as
+  // a fragment of nothing. Nothing else in the desk answers a bare digit,
+  // and it only means anything for five minutes after THIS desk asked
+  // THIS person to choose — so a "2" typed into any other conversation
+  // still falls through untouched.
+  if (!parsed) {
+    const pk = (store.pick ?? {})[actor];
+    if (pk && pickIsFresh(pk.at, nowMs) && pk.options.length) {
+      const highest = Math.max(...pk.options.map((o) => o.n));
+      const n = parsePickNumber(text, highest);
+      const opt = n === null ? undefined : pk.options.find((o) => o.n === n);
+      if (opt) {
+        // Spent. A second "2" is a new message, not the same choice again.
+        const cleared = { ...(store.pick ?? {}) };
+        delete cleared[actor];
+        store = { ...store, pick: cleared };
+        await writeStore(store);
+
+        // A number typed at the help list explains a command; it does not
+        // run one. Running "mark attendance" because somebody was reading
+        // the menu would be the worst possible reading of a keystroke.
+        if (opt.describe) {
+          const def = findErpCommand(opt.commandId);
+          if (def) {
+            return {
+              handled: true,
+              audience: "erp_command_help",
+              text: formatCommandHelpDetail(def),
+            };
+          }
+        }
+        pinnedStudentId = opt.studentId || null;
+        pinnedSection = opt.section || null;
+        pinnedRouteId = opt.routeId || null;
+        // The original wording carries the date, the minutes, the message
+        // body — everything the number did not choose. Re-running against
+        // the bare digit would silently drop all of it.
+        text = opt.rerunText || pk.originalText || text;
+        parsed =
+          parseErpCommandLocal(text) ?? {
+            commandId: opt.commandId,
+            fields: { student: opt.rerunText || "", section: "" },
+            source: "local",
+          };
+        // The pins decide, not whatever the re-parse found in the text.
+        if (parsed.commandId !== opt.commandId) {
+          parsed = { ...parsed, commandId: opt.commandId };
+        }
+      }
+    }
+  }
+
+  // 4b. A bare name in reply to a list the desk just showed.
+  //
+  // The desk answers command-shaped text and stays quiet otherwise, which
+  // is what keeps it out of ordinary staff conversation. The one bad case
+  // is the most natural reply there is: it prints a class list, somebody
+  // types a name, and that falls through to the older bots. Answered only
+  // when THIS desk showed THIS person a list in the last few minutes, and
+  // only for a name found inside it — anything else still falls through
+  // untouched.
+  if (!parsed && looksLikeBareName(text)) {
+    const fu = (store.followUp ?? {})[actor];
+    if (fu && followUpIsFresh(fu.at, nowMs) && fu.sectionIds.length) {
+      parsed = {
+        commandId: followUpCommandFor(fu.commandId),
+        fields: { student: text.trim(), section: "" },
+        source: "local",
+      };
+      resolvedFollowUpSections = fu.sectionIds;
+    }
+  }
+
   if (!parsed) return { handled: false };
 
   // 2b. Hourly cap per staff member.
@@ -515,11 +728,16 @@ export async function handleErpStaffCommand(
   }
 
   if (command.id === "help") {
+    const menu = allowed.filter((c) => c.id !== "help");
+    // The menu's numbers describe a command; they never run one. Somebody
+    // reading the list and typing "11" must not find they have marked a
+    // register.
+    await rememberPick(actor, "help", text, helpPicks(menu));
     return {
       handled: true,
       audience: "erp_command_help",
       text: formatHelpReply(
-        allowed.filter((c) => c.id !== "help"),
+        menu,
         inbound.staff.fullName.split(" ")[0] || inbound.displayName,
       ),
     };
@@ -625,17 +843,29 @@ export async function handleErpStaffCommand(
     resolved.sectionIds = sections.map((s) => s.sectionId).join(",");
     if (limitedTo) resolved.limitedTo = limitedTo.join("|");
   } else if (command.fields.some((f) => f.type === "section")) {
+    // A number already answered "which section?" — nothing left to match.
     const askedRaw = parsed.fields.section || "";
-    const refs = extractSectionRefs(askedRaw || text);
-    if (!refs.length) {
+    const refs = pinnedSection ? [] : extractSectionRefs(askedRaw || text);
+    if (!pinnedSection && !refs.length) {
       return {
         handled: true,
         audience: "erp_command_ask",
         text: "Which class and section? e.g. _5A_ or _VIII B_.",
       };
     }
-    const res = resolveSectionRef(refs[0]!, masters);
+    const res = pinnedSection
+      ? ({ ok: true, match: pinnedSection } as const)
+      : resolveSectionRef(refs[0]!, masters);
     if (!res.ok) {
+      // The options are numbered as printed, so "2" picks the second one
+      // and re-runs THIS command against it — keeping the date, the
+      // message body and everything else the number did not choose.
+      await rememberPick(
+        actor,
+        command.id,
+        text,
+        sectionProblemPicks(res.reason, res.options, command.id),
+      );
       return {
         handled: true,
         audience: "erp_command_ask",
@@ -691,9 +921,38 @@ export async function handleErpStaffCommand(
     const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
     const mine = staffAllowedSections(inbound.staff, masters, ay, roleCodes);
     const mineIds = new Set(mine.map((s) => s.sectionId));
-    const matches = matchStudents(q, sis.students, { academicYearCode: ay, sectionId });
+    // A bare name is only ever looked for inside the list it replied to.
+    // Searching the whole school here would let "Manvi" after a IV-A list
+    // land on a Manvi in IX-B, which is a wrong answer wearing the clothes
+    // of a right one.
+    const pool = resolvedFollowUpSections
+      ? sis.students.filter((st) => resolvedFollowUpSections!.includes(st.sectionId))
+      : sis.students;
     const label = (st: SisStudent) => classLabel(masters, st.classId, st.sectionId);
+    // A number already answered this question — the choice was made from a
+    // list this desk printed, so there is nothing left to match.
+    const pinned = pinnedStudentId
+      ? sis.students.find((st) => st.id === pinnedStudentId)
+      : undefined;
+    const matches = pinned
+      ? [{ student: pinned, score: 3 }]
+      : matchStudents(q, pool, { academicYearCode: ay, sectionId });
     if (matches.length !== 1) {
+      // Remember the list so a bare number answers it, in the order it is
+      // about to be printed — the numbering IS the list.
+      await rememberPick(
+        actor,
+        command.id,
+        text,
+        matches.length > 1
+          ? matches.map((m, i) => ({
+              n: i + 1,
+              label: m.student.fullName,
+              commandId: command.id,
+              studentId: m.student.id,
+            }))
+          : [],
+      );
       return {
         handled: true,
         audience: "erp_command_ask",
@@ -702,6 +961,8 @@ export async function handleErpStaffCommand(
             fullName: m.student.fullName,
             classLabel: label(m.student),
             rollNo: m.student.rollNo,
+            fatherName: m.student.fatherName,
+            admissionNo: m.student.admissionNo,
           })),
           asked,
         ),
@@ -898,17 +1159,29 @@ export async function handleErpStaffCommand(
         text: `No parent WhatsApp number on record for ${due.studentName}. Add it in the ERP first.`,
       };
     }
-    const { ensureWaTemplatesHydrated } = await import("@/lib/waTemplatesPersistence");
-    const { listApprovedTemplates, loadWaTemplates } = await import("@/lib/waTemplates");
-    await ensureWaTemplatesHydrated();
-    const feeTemplates = listApprovedTemplates(loadWaTemplates(), { module: "fees" });
-    const tpl =
-      feeTemplates.find((x) => x.familyKey === "fees_pay_link" && x.language === "en") ??
-      feeTemplates.find((x) => x.familyKey === "fees_pay_link") ??
-      null;
-    resolved.templateMetaName = tpl ? tpl.metaName || tpl.name : "";
-    resolved.templateLanguage = tpl ? tpl.metaLanguage || tpl.language : "";
+    const { approvedTemplatesServer } = await import("@/lib/waTemplatesRead.server");
+    const readFeeTemplates = await approvedTemplatesServer("fees");
+    if (!readFeeTemplates.ok) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: "Couldn't read the school's WhatsApp templates just now, so I can't set up the pay link. Nothing was sent. Please try again in a minute.",
+      };
+    }
+    // One family, so one language: theirs.
+    const payLinkTpls = templatesByLanguage(readFeeTemplates.templates, ["fees_pay_link"]);
+    if (payLinkTpls.missing.length) {
+      return {
+        handled: true,
+        audience: "erp_command_denied",
+        text: `The pay-link template isn't approved in ${missingLanguagesLabel(payLinkTpls.missing)} yet, so a family who reads it would get the wrong language. Ask the office to finish it in Masters → WhatsApp templates. Nothing was sent.`,
+      };
+    }
+    const tpl = payLinkTpls.byLang[due.language]!;
+    resolved.templateMetaName = tpl?.metaName || "";
+    resolved.templateLanguage = tpl?.language || "";
     resolved.templateVariables = (tpl?.variables ?? []).join(",");
+    resolved.familyLanguage = due.language;
     resolved.totalPaise = String(due.totalPaise);
     resolved.expiresInDays = "7";
     resolved.cardSummary = formatPayLinkCard({
@@ -960,21 +1233,25 @@ export async function handleErpStaffCommand(
     if (!res.ok) {
       return { handled: true, audience: "erp_command_ask", text: formatSectionProblem(res.reason, res.options, askedRaw || text) };
     }
-    const { ensureWaTemplatesHydrated } = await import("@/lib/waTemplatesPersistence");
-    const { listApprovedTemplates, loadWaTemplates } = await import("@/lib/waTemplates");
-    await ensureWaTemplatesHydrated();
-    const feeTemplates = listApprovedTemplates(loadWaTemplates(), { module: "fees" });
-    const tpl =
-      feeTemplates.find((x) => x.familyKey === "fees_stage_reminder" && x.language === "en") ??
-      feeTemplates.find((x) => x.familyKey === "fees_stage_reminder") ??
-      feeTemplates.find((x) => x.familyKey === "fees_soft_reminder" && x.language === "en") ??
-      feeTemplates.find((x) => x.familyKey === "fees_soft_reminder") ??
-      null;
+    const { approvedTemplatesServer } = await import("@/lib/waTemplatesRead.server");
+    const readFeeTemplates = await approvedTemplatesServer("fees");
+    if (!readFeeTemplates.ok) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: "Couldn't read the school's WhatsApp templates just now, so I can't set up the fee reminder. Nothing was sent. Please try again in a minute.",
+      };
+    }
+    const reminderTpls = templatesByLanguage(readFeeTemplates.templates, [
+      "fees_stage_reminder",
+      "fees_soft_reminder",
+    ]);
+    const tpl = reminderTpls.ready;
     if (!tpl) {
       return {
         handled: true,
         audience: "erp_command_denied",
-        text: "No approved fee reminder template yet, and free text can't reach parents outside the 24-hour window. Ask the office to get *Fee overdue stage reminder* approved in Masters → WhatsApp templates.",
+        text: `The fee reminder template isn't approved in ${missingLanguagesLabel(reminderTpls.missing) || "either language"} yet, and free text can't reach parents outside the 24-hour window. Ask the office to finish *Fee overdue stage reminder* in Masters → WhatsApp templates. Nothing was sent.`,
       };
     }
     await ensureFeesHydratedServer();
@@ -1000,6 +1277,7 @@ export async function handleErpStaffCommand(
           householdId: d.householdId,
           mobile: hh ? householdWhatsApp(hh) || hh.mobile : "",
           guardianName: hh?.guardianName || "",
+          language: waTemplateLanguageFor(hh ?? {}),
           studentName: d.fullName,
           classLabel: classLabel(masters, d.student.classId, d.student.sectionId).replace(" · ", " "),
           amountPaise: d.overdueAmountPaise,
@@ -1023,13 +1301,17 @@ export async function handleErpStaffCommand(
       };
     }
     resolved.title = res.wholeClass ? `Class ${res.className}` : res.sections[0]!.label;
-    resolved.templateMetaName = tpl.metaName || tpl.name;
-    resolved.templateLanguage = tpl.metaLanguage || tpl.language;
+    resolved.templateMetaName = tpl.metaName;
+    resolved.templateLanguage = tpl.language;
     resolved.templateVariables = (tpl.variables ?? []).join(",");
+    resolved.templatesByLang = JSON.stringify(reminderTpls.byLang);
     resolved.recipients = JSON.stringify(plan.send);
     resolved.cardSummary = formatFeeReminderCard({
       title: resolved.title,
-      templateLabel: `${tpl.name} (${tpl.language.toUpperCase()})`,
+      templateLabel: formatTemplateMixLabel(
+        reminderTpls.byLang,
+        countByLanguage(plan.send),
+      ),
       send: plan.send.map((x) => ({
         studentName: x.studentName,
         classLabel: x.classLabel,
@@ -1083,9 +1365,20 @@ export async function handleErpStaffCommand(
     const { planBusDelayNotice } = await import("@/lib/busDelayNotice.server");
     const plan = await planBusDelayNotice({
       routeAsked,
+      // A number already answered "which route?" — its id is exact, and
+      // the wording still carries the minutes.
+      routeId: pinnedRouteId || undefined,
       academicYearCode: session.academicYearCode,
     });
     if (!plan.ok) {
+      // The routes are numbered as printed; picking one re-runs the same
+      // message, so "20 minute late" survives choosing the bus.
+      await rememberPick(
+        actor,
+        command.id,
+        text,
+        routePicks(plan.optionRoutes, command.id, text),
+      );
       return {
         handled: true,
         audience: "erp_command_ask",
@@ -1110,20 +1403,23 @@ export async function handleErpStaffCommand(
         text: `No family on ${p.routeLabel} can be messaged right now${why}. Nothing was sent.`,
       };
     }
-    const { ensureWaTemplatesHydrated } = await import("@/lib/waTemplatesPersistence");
-    const { listApprovedTemplates, loadWaTemplates } = await import("@/lib/waTemplates");
-    await ensureWaTemplatesHydrated();
-    const transportTemplates = listApprovedTemplates(loadWaTemplates(), { module: "transport" });
-    const wantLang = messageScriptLanguage(text);
-    const tpl =
-      transportTemplates.find((x) => x.familyKey === "transport_delay" && x.language === wantLang) ??
-      transportTemplates.find((x) => x.familyKey === "transport_delay") ??
-      null;
+    const { approvedTemplatesServer } = await import("@/lib/waTemplatesRead.server");
+    const readTransportTemplates = await approvedTemplatesServer("transport");
+    if (!readTransportTemplates.ok) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: "Couldn't read the school's WhatsApp templates just now, so I can't set up the bus delay notice. Nothing was sent. Please try again in a minute.",
+      };
+    }
+    // Not the script the staff member typed in — each family's own.
+    const delayTpls = templatesByLanguage(readTransportTemplates.templates, ["transport_delay"]);
+    const tpl = delayTpls.ready;
     if (!tpl) {
       return {
         handled: true,
         audience: "erp_command_denied",
-        text: "No approved bus delay template yet, and free text can't reach parents outside the 24-hour window. Ask the office to get *Bus running late* approved in Masters → WhatsApp templates.",
+        text: `The bus delay template isn't approved in ${missingLanguagesLabel(delayTpls.missing) || "either language"} yet, and free text can't reach parents outside the 24-hour window. Ask the office to finish *Bus running late* in Masters → WhatsApp templates. Nothing was sent.`,
       };
     }
     const lastAt = (store.busDelayedAt ?? {})[p.route.id];
@@ -1134,9 +1430,10 @@ export async function handleErpStaffCommand(
     resolved.routeLabel = p.routeLabel;
     resolved.busNo = p.route.busNo || p.route.code || "";
     resolved.minutesLate = String(minutes);
-    resolved.templateMetaName = tpl.metaName || tpl.name;
-    resolved.templateLanguage = tpl.metaLanguage || tpl.language;
+    resolved.templateMetaName = tpl.metaName;
+    resolved.templateLanguage = tpl.language;
     resolved.templateVariables = (tpl.variables ?? []).join(",");
+    resolved.templatesByLang = JSON.stringify(delayTpls.byLang);
     resolved.recipients = JSON.stringify(p.send);
     resolved.cardSummary = formatBusDelayCard({
       routeLabel: p.routeLabel,
@@ -1149,7 +1446,7 @@ export async function handleErpStaffCommand(
       optedOut: p.optedOut,
       suspended: p.suspended,
       noMobile: p.noMobile,
-      templateLabel: `${tpl.name} (${tpl.language.toUpperCase()})`,
+      templateLabel: formatTemplateMixLabel(delayTpls.byLang, countByLanguage(p.send)),
       lastNoticeMinutesAgo:
         minutesAgo !== undefined && minutesAgo >= 0 && minutesAgo <= 60 ? minutesAgo : undefined,
     });
@@ -1184,6 +1481,14 @@ export async function handleErpStaffCommand(
       ? free.find((sl) => wanted.includes(sl.startAt)) ?? null
       : null;
     if (!picked) {
+      // The open times are numbered as printed; picking one re-runs the
+      // booking for the same child at that time.
+      await rememberPick(
+        actor,
+        command.id,
+        text,
+        ptmSlotPicks(free, o.student.fullName),
+      );
       return {
         handled: true,
         audience: "erp_command_ask",
@@ -1201,14 +1506,23 @@ export async function handleErpStaffCommand(
     // The family is told on the app either way; WhatsApp needs an approved
     // notice template, because free text cannot reach a parent outside the
     // 24-hour window.
-    const { ensureWaTemplatesHydrated } = await import("@/lib/waTemplatesPersistence");
-    const { listApprovedTemplates, loadWaTemplates } = await import("@/lib/waTemplates");
-    await ensureWaTemplatesHydrated();
-    const approved = listApprovedTemplates(loadWaTemplates(), { module: "comms" });
-    const notice =
-      approved.find((tpl) => tpl.familyKey === "comms_notice" && tpl.language === "en") ??
-      approved.find((tpl) => tpl.familyKey === "comms_notice") ??
-      null;
+    const { approvedTemplatesServer } = await import("@/lib/waTemplatesRead.server");
+    const readApproved = await approvedTemplatesServer("comms");
+    if (!readApproved.ok) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: "Couldn't read the school's WhatsApp templates just now, so I can't set up the PTM booking. Nothing was sent. Please try again in a minute.",
+      };
+    }
+    // One family, so one language: theirs.
+    const ptmSis = loadSis();
+    const ptmHh = ptmSis.households.find((h) => h.id === o.householdId);
+    const ptmLang = waTemplateLanguageFor(ptmHh ?? {});
+    const ptmTpls = templatesByLanguage(readApproved.templates, ["comms_notice"]);
+    // Half-approved means no WhatsApp for this family — the app
+    // notification below still goes, so the booking is not lost.
+    const notice = ptmTpls.missing.length ? null : ptmTpls.byLang[ptmLang];
     const { modeLabel } = await import("@/lib/ptm");
     const noticeBody = [
       `PTM booked for ${o.student.fullName}.`,
@@ -1228,9 +1542,13 @@ export async function handleErpStaffCommand(
     resolved.startAt = picked.startAt;
     resolved.householdId = o.householdId;
     resolved.guardianName = o.guardianName;
-    resolved.templateId = notice?.id || "";
-    resolved.templateMetaName = notice ? notice.metaName || notice.name : "";
-    resolved.templateLanguage = notice ? notice.metaLanguage || notice.language : "";
+    resolved.templateMetaName = notice?.metaName || "";
+    resolved.templateLanguage = notice?.language || "";
+    // Frozen here rather than looked up again on confirm: Meta positions
+    // template parameters, so the order the card was built from is the
+    // order the send has to use.
+    resolved.templateVariables = (notice?.variables ?? []).join(",");
+    resolved.familyLanguage = ptmLang;
     resolved.vars = JSON.stringify(vars);
     resolved.cardSummary = formatBookPtmCard({
       studentName: o.student.fullName,
@@ -1245,7 +1563,9 @@ export async function handleErpStaffCommand(
       guardianName: o.guardianName,
       mobileMasked: o.mobile ? maskMobile10(o.mobile) : "",
       familyLinked: !!o.householdId,
-      templateLabel: notice ? `${notice.name} (${notice.language.toUpperCase()})` : "",
+      templateLabel: notice
+        ? `${ptmTpls.rawReady?.name || notice.metaName} (${notice.language.toUpperCase()})`
+        : "",
     });
   }
   if (command.id === "decide_leave" && resolved.studentId) {
@@ -1396,10 +1716,16 @@ export async function handleErpStaffCommand(
       };
     }
     const activeStaff = (masters.staff ?? []).filter((st) => st.status === "active");
-    const { ensureWaTemplatesHydrated } = await import("@/lib/waTemplatesPersistence");
-    const { listApprovedTemplates, loadWaTemplates } = await import("@/lib/waTemplates");
-    await ensureWaTemplatesHydrated();
-    const approved = listApprovedTemplates(loadWaTemplates(), { module: "comms" });
+    const { approvedTemplatesServer } = await import("@/lib/waTemplatesRead.server");
+    const readApproved = await approvedTemplatesServer("comms");
+    if (!readApproved.ok) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: "Couldn't read the school's WhatsApp templates just now, so I can't set up the staff broadcast. Nothing was sent. Please try again in a minute.",
+      };
+    }
+    const approved = readApproved.templates;
     const wantLang = messageScriptLanguage(message);
     const notice =
       approved.find((tpl) => tpl.familyKey === "comms_notice" && tpl.language === wantLang) ??
@@ -1417,6 +1743,7 @@ export async function handleErpStaffCommand(
     resolved.templateMetaName = notice ? notice.metaName || notice.name : "";
     resolved.templateLanguage = notice ? notice.metaLanguage || notice.language : "";
     resolved.templateLabel = notice ? `${notice.name} (${notice.language.toUpperCase()})` : "";
+    resolved.templateVariables = (notice?.variables ?? []).join(",");
     resolved.vars = JSON.stringify(vars);
     resolved.cardSummary = formatStaffBroadcastCard({
       message,
@@ -1441,23 +1768,28 @@ export async function handleErpStaffCommand(
         text: "That message is too long for one WhatsApp notice. Please shorten it to about 700 characters.",
       };
     }
-    const { ensureWaTemplatesHydrated } = await import("@/lib/waTemplatesPersistence");
-    const { listApprovedTemplates, loadWaTemplates } = await import("@/lib/waTemplates");
-    await ensureWaTemplatesHydrated();
-    const approved = listApprovedTemplates(loadWaTemplates(), { module: "comms" });
-    const wantLang = messageScriptLanguage(message);
-    const notice =
-      approved.find((tpl) => tpl.familyKey === "comms_notice" && tpl.language === wantLang) ??
-      approved.find((tpl) => tpl.familyKey === "comms_notice") ??
-      null;
+    const { approvedTemplatesServer } = await import("@/lib/waTemplatesRead.server");
+    const readApproved = await approvedTemplatesServer("comms");
+    if (!readApproved.ok) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: "Couldn't read the school's WhatsApp templates just now, so I can't set up the class message. Nothing was sent. Please try again in a minute.",
+      };
+    }
+    // Each family in their own language, not in the script the teacher
+    // happened to type the notice in.
+    const noticeTpls = templatesByLanguage(readApproved.templates, ["comms_notice"]);
+    const notice = noticeTpls.ready;
     if (!notice) {
       return {
         handled: true,
         audience: "erp_command_denied",
-        text: "There's no approved WhatsApp notice template yet, and free text can't be sent to parents outside the 24-hour window. Ask the office to get *School notice broadcast* approved in Masters → WhatsApp templates.",
+        text: `The notice template isn't approved in ${missingLanguagesLabel(noticeTpls.missing) || "either language"} yet, and free text can't be sent to parents outside the 24-hour window. Ask the office to finish *School notice broadcast* in Masters → WhatsApp templates. Nothing was sent.`,
       };
     }
-    const contacts = listSectionParentContacts(resolved.sectionId, session.academicYearCode, loadSis());
+    const classSis = loadSis();
+    const contacts = listSectionParentContacts(resolved.sectionId, session.academicYearCode, classSis);
     if (!contacts.length) {
       return {
         handled: true,
@@ -1472,17 +1804,33 @@ export async function handleErpStaffCommand(
       guardianName: "Parent",
       childName: "your child",
     };
-    resolved.templateId = notice.id;
-    resolved.templateMetaName = notice.metaName || notice.name;
-    resolved.templateLanguage = notice.metaLanguage || notice.language;
-    resolved.templateLabel = `${notice.name} (${notice.language.toUpperCase()})`;
+    // Mobiles bucketed by the language each family reads, so the confirm
+    // step can send one broadcast per language instead of one message.
+    const byLangMobiles: Record<string, string[]> = {};
+    for (const c of contacts) {
+      if (!c.mobile) continue;
+      const hh = classSis.households.find((h) => h.id === c.householdId);
+      const lang = waTemplateLanguageFor(hh ?? {});
+      (byLangMobiles[lang] ??= []).push(c.mobile);
+    }
+    resolved.templateMetaName = notice.metaName;
+    resolved.templateLanguage = notice.language;
+    resolved.templateVariables = (notice.variables ?? []).join(",");
+    resolved.templatesByLang = JSON.stringify(noticeTpls.byLang);
+    resolved.mobilesByLang = JSON.stringify(byLangMobiles);
+    resolved.templateLabel = formatTemplateMixLabel(
+      noticeTpls.byLang,
+      Object.fromEntries(
+        Object.entries(byLangMobiles).map(([k, v]) => [k, v.length]),
+      ),
+    );
     resolved.message = message;
     resolved.vars = JSON.stringify(vars);
     resolved.mobiles = contacts.map((c) => c.mobile).filter(Boolean).join(",");
     resolved.cardSummary = formatClassMessageCard({
       sectionLabel: (resolved.sectionLabel || "").replace(" · ", " "),
       templateLabel: resolved.templateLabel,
-      rendered: renderTemplateBody(notice.body, vars),
+      rendered: renderTemplateBody(noticeTpls.rawReady?.body || "", vars),
       familyCount: contacts.length,
       optedOut: 0,
     });
@@ -1673,48 +2021,89 @@ export async function handleErpStaffCommand(
 
   // 8. Read commands run at once.
   const reply = await runReadCommand(command, resolved, session, todayIso);
+
+  // Remember what was just listed, so a bare name in reply resolves inside
+  // it. Only the commands that actually print students qualify.
+  if (FOLLOW_UP_LIST_COMMANDS.has(command.id)) {
+    const sections = [
+      ...(resolved.sectionId ? [resolved.sectionId] : []),
+      ...(resolved.sectionIds ? resolved.sectionIds.split(",").filter(Boolean) : []),
+    ];
+    if (sections.length) {
+      const st = await readStore();
+      await writeStore({
+        ...st,
+        followUp: {
+          ...(st.followUp ?? {}),
+          [actor]: {
+            at: new Date().toISOString(),
+            commandId: command.id,
+            sectionIds: [...new Set(sections)],
+            label: (resolved.sectionLabel || resolved.title || "").replace(" · ", " "),
+          },
+        },
+      });
+    }
+  }
+  // …and what its numbers mean. A list with no usable numbering clears
+  // the previous one rather than leaving it armed.
+  await rememberPick(actor, command.id, text, reply.picks);
   void audit(session, command, parsed.fields, text, "ok", {
     ...resolved,
     source: parsed.source,
     voice: fromVoice,
     channel: inbound.channel,
   });
-  return { handled: true, audience: `erp_command_${command.id}`, text: reply };
+  return { handled: true, audience: `erp_command_${command.id}`, text: reply.text };
 }
+
+/**
+ * A read's reply, and the numbers its list can be answered by.
+ *
+ * Only the three commands whose reply is a list of children carry picks;
+ * the rest are a single reading or a school-wide summary, with nothing to
+ * point into.
+ */
+type ReadReply = { text: string; picks: PickOption[] };
+
+const plain = async (text: Promise<string> | string): Promise<ReadReply> => ({
+  text: await text,
+  picks: [],
+});
 
 async function runReadCommand(
   command: ErpCommandDef,
   resolved: Record<string, string>,
   session: DemoSession,
   todayIso: string,
-): Promise<string> {
+): Promise<ReadReply> {
   switch (command.id) {
     case "absent_list":
       return absentList(resolved, session, todayIso);
     case "student_fees":
-      return studentFees(resolved, session, todayIso);
+      return plain(studentFees(resolved, session, todayIso));
     case "attendance_summary":
-      return attendanceSummary(resolved, session, todayIso);
+      return plain(attendanceSummary(resolved, session, todayIso));
     case "class_defaulters":
       return classDefaulters(resolved, session, todayIso);
     case "collection_today":
-      return collectionToday(resolved, session, todayIso);
+      return plain(collectionToday(resolved, session, todayIso));
     case "free_teachers":
-      return freeTeachers(resolved, resolved.period || "now", session, todayIso);
+      return plain(freeTeachers(resolved, resolved.period || "now", session, todayIso));
     case "pending_leaves":
       return pendingLeaves(resolved, session, todayIso);
     case "homework_posted":
-      return homeworkPosted(resolved, session, todayIso);
+      return plain(homeworkPosted(resolved, session, todayIso));
     case "bus_manifest":
-      return busManifest(resolved, session, todayIso);
+      return plain(busManifest(resolved, session, todayIso));
     case "student_details":
-      return studentDetails(resolved, session);
+      return plain(studentDetails(resolved, session));
     case "school_snapshot":
-      return schoolSnapshot(session, todayIso);
+      return plain(schoolSnapshot(session, todayIso));
     case "admissions_week":
-      return admissionsPeriod(resolved.period || "week", session, todayIso);
+      return plain(admissionsPeriod(resolved.period || "week", session, todayIso));
     default:
-      return "That command isn't wired up yet.";
+      return plain("That command isn't wired up yet.");
   }
 }
 
@@ -1722,7 +2111,7 @@ async function absentList(
   resolved: Record<string, string>,
   session: DemoSession,
   todayIso: string,
-): Promise<string> {
+): Promise<ReadReply> {
   await ensureAttendanceHydratedServer();
   const ay = session.academicYearCode;
   const sis = loadSis();
@@ -1739,10 +2128,11 @@ async function absentList(
     (register?.marks ?? [])
       .filter((m) => m.status === status && byId.has(m.studentId))
       .map((m) => ({
+        id: m.studentId,
         rollNo: byId.get(m.studentId)!.rollNo,
         fullName: byId.get(m.studentId)!.fullName,
       }));
-  return formatAbsentListReply({
+  const absentInput = {
     sectionLabel: resolved.sectionLabel || "",
     date: resolved.date!,
     todayIso,
@@ -1752,7 +2142,11 @@ async function absentList(
     leave: pick("LE"),
     late: pick("L"),
     halfDay: pick("HD"),
-  });
+  };
+  return {
+    text: formatAbsentListReply(absentInput),
+    picks: absentListPicks(absentInput),
+  };
 }
 
 async function attendanceSummary(
@@ -2171,7 +2565,7 @@ async function pendingLeaves(
   resolved: Record<string, string>,
   session: DemoSession,
   todayIso: string,
-): Promise<string> {
+): Promise<ReadReply> {
   // Same reset-then-hydrate the app's leave list does, so the answer is what
   // the database holds rather than what an earlier request left cached.
   writeStudentLeaveLocalRaw(emptyStudentLeaveState());
@@ -2204,18 +2598,23 @@ async function pendingLeaves(
         reason: r.reason || "",
         requestedAt: r.createdAt,
         approver: pendingApproverHint(r).replace(/\s*\(.*\)$/, ""),
+        studentId: r.studentId,
       };
     });
   const approvedToday = all.filter(
     (r) => r.status === "approved" && r.fromDate <= todayIso && (r.toDate || r.fromDate) >= todayIso,
   ).length;
-  return formatPendingLeavesReply({
+  const leavesInput = {
     todayIso,
     scope: (resolved.scope as "school" | "mine" | "section") || "school",
     scopeLabel: resolved.scopeLabel,
     rows,
     approvedToday,
-  });
+  };
+  return {
+    text: formatPendingLeavesReply(leavesInput),
+    picks: pendingLeavesPicks(leavesInput),
+  };
 }
 
 function istHhmm(now = new Date()): string {
@@ -2413,7 +2812,7 @@ async function classDefaulters(
   resolved: Record<string, string>,
   session: DemoSession,
   todayIso: string,
-): Promise<string> {
+): Promise<ReadReply> {
   await ensureFeesHydratedServer();
   const sis = loadSis();
   const masters = loadMasters();
@@ -2433,15 +2832,20 @@ async function classDefaulters(
       overdueDays: d.overdueDays,
       earliestDueOn: d.earliestDueOn,
       onPlan: !!d.planCode,
+      studentId: d.student.id,
     }));
-  return formatClassDefaultersReply({
+  const input = {
     title: resolved.title || "Class",
     todayIso,
     wholeClass: resolved.wholeClass === "1",
     rows,
     limitedTo: resolved.limitedTo ? resolved.limitedTo.split("|") : undefined,
     formatInr,
-  });
+  };
+  return {
+    text: formatClassDefaultersReply(input),
+    picks: classDefaultersPicks(input),
+  };
 }
 
 async function studentFees(
@@ -2525,6 +2929,27 @@ async function studentFees(
  * Phase 2 commands plug into: resolve nothing again (IDs were frozen on
  * the card), run the same server function the app calls, audit, reply.
  */
+/**
+ * The order to fill a template's parameters in.
+ *
+ * Meta positions body parameters — {{1}}, {{2}} — so the order the confirm
+ * card was built from is the order the send has to use. It is frozen onto
+ * the card for exactly that reason; the lookup by id is only for a card
+ * that was raised before this was stored, and returns an empty list rather
+ * than throwing, which is what the old browser-path lookup did on every
+ * single send.
+ */
+async function templateVariableOrder(
+  r: Record<string, string>,
+): Promise<string[]> {
+  const frozen = (r.templateVariables || "").split(",").filter(Boolean);
+  if (frozen.length) return frozen;
+  if (!r.templateId) return [];
+  const { getTemplateByIdServer } = await import("@/lib/waTemplatesRead.server");
+  const tpl = await getTemplateByIdServer(r.templateId);
+  return tpl?.variables ?? [];
+}
+
 async function runConfirmedWrite(
   inbound: ErpCommandInbound,
   pending: PendingErpConfirm,
@@ -2704,6 +3129,7 @@ async function runConfirmedWrite(
         language: r.templateLanguage || "en",
         variables: (r.templateVariables || "").split(",").filter(Boolean),
       },
+      templatesByLang: parseTemplatesByLang(r.templatesByLang),
       todayIso: today,
     });
     // Record who was reminded so the weekly cap holds across channels.
@@ -2765,6 +3191,7 @@ async function runConfirmedWrite(
         language: r.templateLanguage || "en",
         variables: (r.templateVariables || "").split(",").filter(Boolean),
       },
+      templatesByLang: parseTemplatesByLang(r.templatesByLang),
       // The minutes are part of the key so a second notice on the same
       // route is a new message, not a de-duplicated repeat of the first.
       noticeKey: `${r.routeId || ""}_${minutes}_${sentAt.slice(0, 16)}`,
@@ -2827,8 +3254,7 @@ async function runConfirmedWrite(
     } catch {
       vars = {};
     }
-    const { getTemplateById, loadWaTemplates } = await import("@/lib/waTemplates");
-    const tpl = r.templateId ? getTemplateById(loadWaTemplates(), r.templateId) : null;
+    const ptmVars = await templateVariableOrder(r);
     const { bookPtmSlotServer } = await import("@/lib/ptmBook.server");
     const res = await bookPtmSlotServer({
       studentId: r.studentId,
@@ -2843,7 +3269,7 @@ async function runConfirmedWrite(
         ? {
             metaName: r.templateMetaName,
             language: r.templateLanguage || "en",
-            variables: tpl?.variables ?? [],
+            variables: ptmVars,
             vars,
           }
         : null,
@@ -3002,15 +3428,15 @@ async function runConfirmedWrite(
         vars = {};
       }
       const { buildWaTemplateBodyComponent } = await import("@/lib/waSend");
-      const { getTemplateById, loadWaTemplates } = await import("@/lib/waTemplates");
-      const tpl = getTemplateById(loadWaTemplates(), r.templateId || "");
       const { broadcastTemplateToMobiles } = await import("@/lib/waBroadcast.server");
       wa = await broadcastTemplateToMobiles({
         mobiles,
         template: {
           name: r.templateMetaName,
           language: r.templateLanguage || "en",
-          components: [buildWaTemplateBodyComponent(tpl?.variables ?? [], vars)],
+          components: [
+            buildWaTemplateBodyComponent(await templateVariableOrder(r), vars),
+          ],
         },
         module: "notices",
         originUrl: publicOrigin(),
@@ -3067,23 +3493,42 @@ async function runConfirmedWrite(
       vars = {};
     }
     const { buildWaTemplateBodyComponent } = await import("@/lib/waSend");
-    const { getTemplateById, loadWaTemplates } = await import("@/lib/waTemplates");
-    const tpl = getTemplateById(loadWaTemplates(), r.templateId || "");
     const { broadcastTemplateToMobiles } = await import("@/lib/waBroadcast.server");
-    const res = await broadcastTemplateToMobiles({
-      mobiles,
-      template: {
-        name: r.templateMetaName,
-        language: r.templateLanguage || "en",
-        components: [buildWaTemplateBodyComponent(tpl?.variables ?? [], vars)],
-      },
-      module: "notices",
-      originUrl: publicOrigin(),
-    });
+    const order = await templateVariableOrder(r);
+    const fallbackTpl = {
+      metaName: r.templateMetaName,
+      language: r.templateLanguage || "en",
+      variables: order,
+    };
+    const byLang = parseTemplatesByLang(r.templatesByLang);
+    // One broadcast per language the section's families read. A single
+    // send would have written to all of them in whichever language the
+    // teacher happened to type the notice in.
+    const groups = parseMobilesByLang(r.mobilesByLang) ?? { "": mobiles };
+    const res = { recipientCount: 0, skippedOptOut: 0, sent: 0, failed: 0 };
+    for (const [lang, groupMobiles] of Object.entries(groups)) {
+      if (!groupMobiles.length) continue;
+      const tpl = templateForFamily(byLang ?? null, lang, fallbackTpl) ?? fallbackTpl;
+      const one = await broadcastTemplateToMobiles({
+        mobiles: groupMobiles,
+        template: {
+          name: tpl.metaName,
+          language: tpl.language,
+          components: [buildWaTemplateBodyComponent(tpl.variables, vars)],
+        },
+        module: "notices",
+        originUrl: publicOrigin(),
+      });
+      res.recipientCount += one.recipientCount;
+      res.skippedOptOut += one.skippedOptOut;
+      res.sent += one.sent;
+      res.failed += one.failed;
+    }
     void audit(session, command, pending.fields, pending.originalText, "ok", {
       channel: inbound.channel,
       sectionId: r.sectionId,
       template: r.templateMetaName,
+      languages: Object.keys(groups).filter((k) => groups[k]!.length).join(","),
       recipients: res.recipientCount,
       sent: res.sent,
       failed: res.failed,

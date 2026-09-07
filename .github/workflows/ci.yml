@@ -102,6 +102,13 @@ jobs:
       - name: Test — a parent is asked their language once, and it is remembered
         working-directory: apps/web
         run: npm run test:wa-language-gate
+      - name: Self-test — when the WhatsApp bots speak, and when they stay quiet
+        working-directory: apps/web
+        run: npm run test:wa-bot-silence
+
+      - name: Self-test — a CV becomes a routable job application
+        working-directory: apps/web
+        run: npm run test:job-applications
 
       - name: Test — which number sends which template, and both languages
         working-directory: apps/web

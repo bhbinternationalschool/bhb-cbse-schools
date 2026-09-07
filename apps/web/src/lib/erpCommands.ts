@@ -816,7 +816,17 @@ export function resolveCommandDate(text: string, todayIso: string): string {
 const ABSENT_WORDS =
   /(?<![\p{L}\p{M}\p{N}])(absent|absentee|absentees|gair\s*hazir|gairhazir|गैर\s*हाज़िर|गैरहाजिर|अनुपस्थित|nahi\s+aaya|nahi\s+aaye|नहीं\s+आया|नहीं\s+आए|hazri|haziri|हाज़िरी|हाजिरी|attendance|upasthiti|उपस्थिति|(?:on|pe|par)\s+leave|leave\s+(?:pe|par)|chutti\s+(?:pe|par)|छुट्टी\s+पर)(?![\p{L}\p{M}\p{N}])/iu;
 
-const HELP_WORDS = /^\s*(commands?|command\s+help|cmd|कमांड|\?)\s*$/i;
+/**
+ * "What can you do?"
+ *
+ * `help` itself was missing here until 2026-09-07, so a staff member who
+ * typed the single most obvious word got the OLD keyword bot's menu
+ * instead of the desk — which is exactly what it looked like from the
+ * phone: a list, but the wrong list, and no sign the desk existed.
+ * The desk gets first refusal on a staff message, so it claims the word.
+ */
+const HELP_WORDS =
+  /^\s*(commands?|command\s+(?:help|list)|all\s+commands?|cmd|help|halp|hlep|helo\s+desk|madad|madat|sahayta|sahayata|कमांड|मदद|सहायता|help\s+me|what\s+can\s+you\s+do|kya\s+kya\s+(?:kar|ho)\s*(?:sakte|sakta)\s*(?:ho|hai|hain)?|\?)\s*$/i;
 
 /**
  * The day's takings: "aaj ka collection", "today's collection", "collection
@@ -1015,14 +1025,45 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
  * each of those would be cost with no upside. A command looks like a
  * question or an instruction about school data.
  */
+/**
+ * The words that make a message worth an LLM parse, spelled correctly.
+ * The fuzzy pass below forgives the rest.
+ */
+const COMMAND_HINT_WORDS = [
+  "attendance", "absent", "present", "hazri", "defaulter", "defaulters",
+  "pending", "collection", "manifest", "roster", "homework", "timetable",
+  "leave", "complaint", "reminder", "broadcast", "payment", "receipt",
+  "admission", "admissions", "snapshot", "summary", "report", "details",
+  "dikhao", "batao", "kitna", "kitne", "kitni", "kaun", "bhejo",
+];
+
 export function looksLikeCommand(text: string): boolean {
   const t = (text || "").trim();
   if (t.length < 4 || t.length > 300) return false;
   if (/\?$/.test(t)) return true;
   // `\b` is ASCII-only, so a Devanagari word listed behind it would never
   // match; Unicode lookarounds make the Hindi half of this list real.
-  return /(?<![\p{L}\p{M}\p{N}])(kaun|kon|kitna|kitne|kya|batao|bata|dikhao|dikha|list|show|status|kitni|how many|who|which|pending|due|dues|defaulter|fees?|absent|present|attendance|roster|manifest|leave|homework|कौन|कितना|कितने|बताओ|दिखाओ|फीस|बकाया)(?![\p{L}\p{M}\p{N}])/iu.test(
-    t,
+  if (
+    /(?<![\p{L}\p{M}\p{N}])(kaun|kon|kitna|kitne|kya|batao|bata|dikhao|dikha|list|show|status|kitni|how many|who|which|pending|due|dues|defaulter|fees?|absent|present|attendance|roster|manifest|leave|homework|कौन|कितना|कितने|बताओ|दिखाओ|फीस|बकाया)(?![\p{L}\p{M}\p{N}])/iu.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  // Spelled wrong. "atendance summary", "defalters class 3", "manifets" —
+  // typed on a phone, in a hurry, in a second language. Without this the
+  // message never even reaches the model that could have understood it,
+  // and the older keyword bot answers something unrelated, which reads as
+  // the desk being broken rather than as a typo.
+  const words = t
+    .toLowerCase()
+    .replace(/[^\p{L}\p{M}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 5);
+  return words.some((w) =>
+    COMMAND_HINT_WORDS.some(
+      (k) => Math.abs(k.length - w.length) <= 2 && withinEdits(w, k, editBudgetFor(w)),
+    ),
   );
 }
 
@@ -1162,7 +1203,74 @@ export function noteCommandUse(
   return { allowed: true, history: recent };
 }
 
+// ─── Answering a list with a number ────────────────────────────────────
+
+/**
+ * One row of a list the desk printed, and what typing its number does.
+ *
+ * Every list the desk shows ends in the same question — "and now which
+ * one?" — and until now every list answered it differently: the student
+ * matches wanted a full name, the section options wanted the label typed
+ * back, the PTM slots wanted a time, the defaulters list wanted a name.
+ * A number is the one answer that works for all of them and cannot be
+ * mistyped into meaning something else.
+ *
+ * `n` is the number the reader actually SEES on that row, which is not
+ * always its position: a class list is already numbered by roll, and
+ * making a teacher count rows when the roll is printed right there would
+ * be worse than not numbering it at all.
+ */
+export type PickOption = {
+  n: number;
+  label: string;
+  /** The command to run for this row. */
+  commandId: string;
+  /** Resolution pins — set, the desk skips matching entirely. */
+  studentId?: string;
+  /** The whole match, so the re-run needs no second lookup to rebuild it. */
+  section?: SectionMatch;
+  sectionId?: string;
+  classId?: string;
+  routeId?: string;
+  /** A PTM slot's start time, e.g. "10:30". */
+  slotAt?: string;
+  /** Re-runs against this text instead of the original message. */
+  rerunText?: string;
+  /** Help only: describe the command rather than run it. */
+  describe?: boolean;
+};
+
+/**
+ * The numbers a list of students will be answered by.
+ *
+ * Their roll numbers when every row has one and they do not repeat —
+ * which is the case for any single section, and is the number already
+ * printed on the row. Otherwise a plain 1..n, because a list spanning
+ * sections has two children on roll 4.
+ */
+export function studentPickNumbers(rows: { rollNo?: string }[]): number[] {
+  const rolls = rows.map((r) => parseInt(String(r.rollNo ?? ""), 10));
+  const usable =
+    rolls.length > 0 &&
+    rolls.every((n) => Number.isFinite(n) && n > 0) &&
+    new Set(rolls).size === rolls.length;
+  return usable ? rolls : rows.map((_, i) => i + 1);
+}
+
+/** The line that tells the reader a number will work. */
+export function pickHint(options: PickOption[], what: string): string {
+  if (!options.length) return "";
+  const ns = options.map((o) => o.n);
+  const lo = Math.min(...ns);
+  const hi = Math.max(...ns);
+  return lo === hi
+    ? `Reply *${lo}* for ${what}.`
+    : `Reply with a number (*${lo}*–*${hi}*) for ${what}.`;
+}
+
 // ─── Reply formatting ──────────────────────────────────────────────────
+
+export type AbsentListRow = { rollNo: string; fullName: string; id?: string };
 
 export type AbsentListInput = {
   sectionLabel: string;
@@ -1170,10 +1278,10 @@ export type AbsentListInput = {
   todayIso: string;
   marked: boolean;
   total: number;
-  absent: { rollNo: string; fullName: string }[];
-  leave: { rollNo: string; fullName: string }[];
-  late: { rollNo: string; fullName: string }[];
-  halfDay: { rollNo: string; fullName: string }[];
+  absent: AbsentListRow[];
+  leave: AbsentListRow[];
+  late: AbsentListRow[];
+  halfDay: AbsentListRow[];
 };
 
 function fmtDate(iso: string, todayIso: string): string {
@@ -1181,12 +1289,50 @@ function fmtDate(iso: string, todayIso: string): string {
   return shortDate(iso);
 }
 
-function nameList(rows: { rollNo: string; fullName: string }[]): string {
+/**
+ * The order an absent list is printed in — by roll, as a register reads.
+ *
+ * Exported through the two functions below rather than duplicated: the
+ * text the teacher sees and the numbers the desk will accept are derived
+ * from this one ordering, so they cannot drift apart. A list that offers
+ * "reply 7" and then resolves 7 to somebody else is worse than a list
+ * that offers nothing.
+ */
+function absentRowsInOrder(rows: AbsentListRow[]): AbsentListRow[] {
   return rows
     .slice()
-    .sort((a, b) => (parseInt(a.rollNo, 10) || 9999) - (parseInt(b.rollNo, 10) || 9999))
+    .sort((a, b) => (parseInt(a.rollNo, 10) || 9999) - (parseInt(b.rollNo, 10) || 9999));
+}
+
+function nameList(rows: AbsentListRow[]): string {
+  return absentRowsInOrder(rows)
     .map((r) => (r.rollNo ? `${r.rollNo}. ${r.fullName}` : r.fullName))
     .join("\n");
+}
+
+/** Every child named in an absent list, and the number that picks them. */
+export function absentListPicks(input: AbsentListInput): PickOption[] {
+  const all = [
+    ...absentRowsInOrder(input.absent),
+    ...absentRowsInOrder(input.leave),
+    ...absentRowsInOrder(input.late),
+    ...absentRowsInOrder(input.halfDay),
+  ];
+  // Only when the printed roll is the number: no roll, or a roll that
+  // repeats across the groups, and there is nothing unambiguous to type.
+  const rolls = all.map((r) => parseInt(r.rollNo, 10));
+  const usable =
+    all.length > 0 &&
+    rolls.every((n) => Number.isFinite(n) && n > 0) &&
+    new Set(rolls).size === rolls.length;
+  if (!usable) return [];
+  return all.map((r, i) => ({
+    n: rolls[i]!,
+    label: r.fullName,
+    commandId: "student_details",
+    studentId: r.id,
+    rerunText: r.fullName,
+  }));
 }
 
 export function formatAbsentListReply(input: AbsentListInput): string {
@@ -1217,7 +1363,35 @@ export function formatAbsentListReply(input: AbsentListInput): string {
   if (input.leave.length) parts.push(`\n*On leave*\n${nameList(input.leave)}`);
   if (input.late.length) parts.push(`\n*Late*\n${nameList(input.late)}`);
   if (input.halfDay.length) parts.push(`\n*Half day*\n${nameList(input.halfDay)}`);
+  const picks = absentListPicks(input);
+  if (picks.length) {
+    parts.push("", pickHint(picks, "that child's details") + " Or send a name.");
+  }
   return parts.join("\n");
+}
+
+/** The sections offered by a "which section?" reply, numbered as printed. */
+export function sectionProblemPicks(
+  reason: "no_class" | "no_section" | "ambiguous" | "not_allowed",
+  options: SectionMatch[],
+  commandId: string,
+): PickOption[] {
+  // "not_allowed" lists the sections you DO hold, as information. Offering
+  // a number there would answer a question nobody asked — the command was
+  // about a different class.
+  if (reason === "not_allowed" || reason === "no_class") return [];
+  return options.map((o, i) => ({
+    n: i + 1,
+    label: o.label,
+    commandId,
+    section: o,
+    sectionId: o.sectionId,
+    classId: o.classId,
+  }));
+}
+
+function numberedLabels(options: SectionMatch[]): string {
+  return options.map((o, i) => `*${i + 1}.* ${o.label}`).join("\n");
 }
 
 export function formatSectionProblem(
@@ -1230,22 +1404,138 @@ export function formatSectionProblem(
       return `I couldn't find a class matching "${asked}". Try the class as it appears in the ERP, e.g. 5A or VIII B.`;
     case "no_section":
       return options.length
-        ? `Which section? ${options.map((o) => o.label).join(", ")}`
+        ? `Which section?\n${numberedLabels(options)}\n\nReply with the number, or the section — e.g. _${options[0]!.label}_.`
         : `No active section found for "${asked}".`;
     case "ambiguous":
-      return `Which one did you mean? ${options.map((o) => o.label).join(", ")}`;
+      return `Which one did you mean?\n${numberedLabels(options)}\n\nReply with the number, or the section — e.g. _${options[0]!.label}_.`;
     case "not_allowed":
       return `You can ask about your own sections only${options.length ? `: ${options.map((o) => o.label).join(", ")}` : ""}. Ask the office or principal for other classes.`;
   }
+}
+
+/**
+ * The order the groups are shown in, and what to call them.
+ *
+ * A flat alphabetical list of two dozen commands is a wall — you read the
+ * first three and stop. Grouped by what you were trying to do, it is
+ * scannable, and the write commands are visibly separated from the reads,
+ * because those are the ones that can reach a family.
+ */
+const HELP_GROUPS: { modules: string[]; label: string }[] = [
+  { modules: ["attendance"], label: "Attendance" },
+  { modules: ["fees"], label: "Fees" },
+  { modules: ["students"], label: "Students" },
+  { modules: ["homework", "timetable"], label: "Homework & timetable" },
+  { modules: ["notices", "notifications"], label: "Messages" },
+  { modules: ["student_leave", "complaints", "ptm"], label: "Leave, PTM & complaints" },
+  { modules: ["transport"], label: "Transport" },
+  { modules: ["admissions"], label: "Admissions" },
+  { modules: ["home", "settings"], label: "School overview" },
+];
+
+/**
+ * Every command the person holds, grouped by the part of the ERP it
+ * touches and numbered straight through.
+ *
+ * Grouped because a flat list of two dozen is a wall you read three lines
+ * of and abandon. Numbered straight through rather than restarting in
+ * each group, because "3" has to mean one thing.
+ */
+export function helpMenuCommands(commands: ErpCommandDef[]): ErpCommandDef[] {
+  const seen = new Set<string>();
+  const out: ErpCommandDef[] = [];
+  for (const g of HELP_GROUPS) {
+    for (const c of commands.filter((x) => g.modules.includes(x.module))) {
+      seen.add(c.id);
+      out.push(c);
+    }
+  }
+  // A command whose module nobody grouped still appears. A new command
+  // must never go missing from help because somebody forgot a label.
+  for (const c of commands) if (!seen.has(c.id)) out.push(c);
+  return out;
+}
+
+/** The help list's numbers, each one describing that command. */
+export function helpPicks(commands: ErpCommandDef[]): PickOption[] {
+  return helpMenuCommands(commands).map((c, i) => ({
+    n: i + 1,
+    label: c.title,
+    commandId: c.id,
+    describe: true,
+  }));
 }
 
 export function formatHelpReply(
   commands: ErpCommandDef[],
   displayName: string,
 ): string {
-  const lines = commands.map((c) => `• ${c.title}\n   e.g. _${c.examples[0]}_`);
   const name = displayName ? `${displayName}, ` : "";
-  return `${name}you can send me these commands:\n\n${lines.join("\n")}\n\nJust type it the way you'd say it — Hindi or English.`;
+  if (!commands.length) {
+    return `${name}your role doesn't include any desk commands yet. Ask the office to check your role in Settings → Roles.`;
+  }
+  const ordered = helpMenuCommands(commands);
+  const numberOf = new Map(ordered.map((c, i) => [c.id, i + 1]));
+  const render = (c: ErpCommandDef): string => {
+    // A write is flagged because it can reach a family. App-only is
+    // flagged because typing it here would look like the desk ignored you.
+    const tags = [
+      c.kind === "write" ? " ✍️" : "",
+      c.channels && !c.channels.includes("whatsapp") ? " _(app only)_" : "",
+    ].join("");
+    return `*${numberOf.get(c.id)}.* ${c.title}${tags}\n   _${c.examples[0]}_`;
+  };
+  const blocks: string[] = [];
+  const seen = new Set<string>();
+  for (const g of HELP_GROUPS) {
+    const mine = commands.filter((c) => g.modules.includes(c.module));
+    if (!mine.length) continue;
+    for (const c of mine) seen.add(c.id);
+    blocks.push(`*${g.label}*\n${mine.map(render).join("\n")}`);
+  }
+  const rest = commands.filter((c) => !seen.has(c.id));
+  if (rest.length) blocks.push(`*More*\n${rest.map(render).join("\n")}`);
+  return [
+    `${name}here is everything you can ask me — *${commands.length}* command${commands.length === 1 ? "" : "s"}, all of them:`,
+    "",
+    blocks.join("\n\n"),
+    "",
+    `Reply with a number (*1*–*${ordered.length}*) to see how that one works.`,
+    "✍️ = sends something or changes a record. You always see a confirm card first, and nothing happens until you tap *Confirm*.",
+    "Or just type it the way you'd say it — Hindi, English or mixed. A small spelling mistake is fine.",
+    // The one thing a staff member cannot work out from silence. Anything
+    // that is not a command now goes unanswered on purpose, so the way
+    // back to the old menu bot has to be written down where they look.
+    "",
+    "Anything else you send here goes to the office, not to a bot. Send *school bot* if you want the old menu.",
+  ].join("\n");
+}
+
+/**
+ * One command, explained — what a number typed at the help list gets you.
+ *
+ * All the examples rather than one, because the whole difficulty with a
+ * plain-language desk is knowing what phrasing it will accept, and a
+ * single example reads like the only accepted form.
+ */
+export function formatCommandHelpDetail(c: ErpCommandDef): string {
+  const lines = [`*${c.title}*`, c.description, "", "*Say it like this*"];
+  for (const ex of c.examples) lines.push(`_${ex}_`);
+  const needs = c.fields.filter((f) => f.required).map((f) => f.name);
+  if (needs.length) {
+    lines.push("", `Needs: ${needs.join(", ")}. I'll ask if you leave one out.`);
+  }
+  if (c.kind === "write") {
+    lines.push(
+      "",
+      "✍️ This one changes a record or sends a message. You see a confirm card first with exactly who is affected, and nothing happens until you tap *Confirm*.",
+    );
+  }
+  if (c.channels && !c.channels.includes("whatsapp")) {
+    lines.push("", "_This one works in the ERP app only, not on WhatsApp._");
+  }
+  lines.push("", "Send *help* for the full list.");
+  return lines.join("\n");
 }
 
 /** Owner-only pause switch: "commands off" / "commands on". */
@@ -1510,6 +1800,56 @@ export type StudentMatch<T extends StudentLike = StudentLike> = {
   score: number;
 };
 
+/**
+ * Levenshtein distance, but it stops as soon as it exceeds `max`.
+ *
+ * Only ever asked "is this within 1 or 2 edits", so the full matrix is
+ * waste; the early exit also keeps a roster-wide fuzzy pass cheap.
+ */
+export function withinEdits(a: string, b: string, max: number): boolean {
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > max) return false;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    const row = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      const v = Math.min(row[j - 1]! + 1, prev[j]! + 1, prev[j - 1]! + cost);
+      row.push(v);
+      if (v < best) best = v;
+    }
+    if (best > max) return false;
+    prev = row;
+  }
+  return prev[b.length]! <= max;
+}
+
+/**
+ * How much misspelling to forgive in one word.
+ *
+ * Nothing under 4 letters: at three letters an edit away is a different
+ * word ("Om" and "Am", "Ravi" and "Rani" are already at the edge). One
+ * edit up to seven letters, two from eight — which covers the way long
+ * Indian names actually get typed on a phone: "Yatharth" as "Yathartha"
+ * or "Yathart", "Shrivastava" as "Srivastava".
+ */
+export function editBudgetFor(word: string): number {
+  if (word.length < 4) return 0;
+  return word.length >= 8 ? 2 : 1;
+}
+
+/** Does `typed` name this word, allowing for a phone-keyboard slip? */
+export function fuzzyWordMatch(typed: string, target: string): boolean {
+  if (target.startsWith(typed)) return true;
+  const budget = editBudgetFor(typed);
+  if (!budget) return false;
+  // Compare against the same number of letters the typist gave us, so a
+  // short prefix is not punished for the rest of a long surname.
+  const head = target.slice(0, Math.max(typed.length, 1));
+  return withinEdits(typed, head, budget) || withinEdits(typed, target, budget);
+}
+
 function nameTokens(s: string): string[] {
   return (s || "")
     .toLowerCase()
@@ -1546,6 +1886,7 @@ export function matchStudents<T extends StudentLike>(
     return (query.rollNo && opts.sectionId ? pool : []).map((student) => ({ student, score: 2 }));
   }
   const out: StudentMatch<T>[] = [];
+  const fuzzy: StudentMatch<T>[] = [];
   for (const s of pool) {
     if (s.admissionNo && q.length === 1 && s.admissionNo.toLowerCase() === q[0]) {
       out.push({ student: s, score: 3 });
@@ -1553,10 +1894,19 @@ export function matchStudents<T extends StudentLike>(
     }
     const nt = nameTokens(s.fullName);
     const every = q.every((w) => nt.some((n) => n.startsWith(w)));
-    if (!every) continue;
+    if (!every) {
+      // Held back, not returned yet: a spelling that is exactly right for
+      // one child must never be beaten by a near miss on another.
+      if (q.every((w) => nt.some((n) => fuzzyWordMatch(w, n)))) {
+        fuzzy.push({ student: s, score: 0 });
+      }
+      continue;
+    }
     const exact = q.length === nt.length && q.every((w, i) => nt[i] === w);
     out.push({ student: s, score: exact ? 3 : q.length > 1 ? 2 : 1 });
   }
+  // Only when nothing spelled correctly matched at all.
+  if (!out.length && fuzzy.length) out.push(...fuzzy);
   out.sort(
     (a, b) =>
       b.score - a.score ||
@@ -1689,17 +2039,230 @@ export function formatStudentFeesReply(input: StudentFeesInput): string {
   return lines.join("\n");
 }
 
+/** A template as the send path needs it: name, language, variable order. */
+export type PickedTemplate = {
+  metaName: string;
+  language: string;
+  variables: string[];
+};
+
+export type TemplateLike = {
+  familyKey: string;
+  language: string;
+  name: string;
+  metaName?: string;
+  metaLanguage?: string;
+  variables?: string[];
+};
+
+/**
+ * The same message in each language the school can send it in.
+ *
+ * The desk used to pick ONE template and send it to every family — chosen,
+ * for the class message and the bus delay, from the script the STAFF
+ * MEMBER happened to type in, and for the fee reminder and the pay link
+ * from a hardcoded "English first". Neither has anything to do with the
+ * language the family reads. A teacher typing in English got Hindi-reading
+ * parents an English message; the same teacher typing the same notice in
+ * Devanagari got the English-reading ones Hindi.
+ *
+ * So resolve both, and let each family's own preference choose at send
+ * time. `familyKeys` is a list because some messages have a preferred
+ * template and a fallback (the fee reminder's stage reminder, then its
+ * soft reminder) — earlier keys win outright.
+ *
+ * A HALF-APPROVED FAMILY IS REFUSED, not half-used. This function will not
+ * hand back a Hindi template for an English-reading household even when
+ * Hindi is all that exists, because that writes to a family in a language
+ * they did not choose — the rule `templateFamilyReady` states in
+ * waTemplates.ts, arrived at from the same live fact this code was written
+ * against (bhb_fee_pay_link approved in hi, pending in en, on 2026-09-07).
+ * Silence with an explanation the office can act on beats a message the
+ * parent cannot read.
+ */
+export function templatesByLanguage<T extends TemplateLike>(
+  approved: T[],
+  familyKeys: string[],
+): {
+  byLang: Record<"en" | "hi", PickedTemplate | null>;
+  /** Both languages present. Null when the family is half-approved. */
+  ready: PickedTemplate | null;
+  /** Which languages are missing, for the message that says so. */
+  missing: ("en" | "hi")[];
+  /** The unreduced pick, for the confirm card's body preview. */
+  rawReady: T | null;
+} {
+  const pick = (t: T): PickedTemplate => ({
+    metaName: t.metaName || t.name,
+    language: t.metaLanguage || t.language,
+    variables: t.variables ?? [],
+  });
+  const inLang = (key: string, lang: "en" | "hi") =>
+    approved.find((t) => t.familyKey === key && t.language === lang) ?? null;
+
+  // One key at a time, whole. Resolving each language independently would
+  // let Hindi families get the stage reminder and English families the
+  // soft reminder — two different messages sent as if they were one.
+  let byLang: Record<"en" | "hi", PickedTemplate | null> = { en: null, hi: null };
+  let rawReady: T | null = null;
+  let missing: ("en" | "hi")[] = ["en", "hi"];
+  for (const key of familyKeys) {
+    const en = inLang(key, "en");
+    const hi = inLang(key, "hi");
+    const gap = (["en", "hi"] as const).filter((l) => (l === "en" ? !en : !hi));
+    if (!gap.length) {
+      byLang = { en: pick(en!), hi: pick(hi!) };
+      rawReady = hi ?? en;
+      missing = [];
+      break;
+    }
+    // Remember the best partial, so the refusal can name what is missing
+    // from the key the school got furthest with.
+    if (gap.length < missing.length) {
+      byLang = { en: en ? pick(en) : null, hi: hi ? pick(hi) : null };
+      missing = [...gap];
+    }
+  }
+  return {
+    byLang,
+    ready: missing.length ? null : byLang.hi,
+    missing,
+    rawReady,
+  };
+}
+
+/** "…in Hindi and English" / "…in English" — for the refusal message. */
+export function missingLanguagesLabel(missing: ("en" | "hi")[]): string {
+  const names = missing.map((l) => (l === "en" ? "English" : "Hindi"));
+  return names.length === 2 ? "Hindi and English" : names[0] || "";
+}
+
+export function templateForFamily(
+  byLang: Record<string, PickedTemplate | null> | null,
+  language: string | undefined,
+  fallback: PickedTemplate | null,
+): PickedTemplate | null {
+  if (!byLang) return fallback;
+  // No cross-language fallback. `templatesByLanguage` only hands out a set
+  // when BOTH languages are approved, so by the time a send reaches here
+  // the family's own language exists. `fallback` is the single template
+  // frozen onto a card raised before this existed — never a substitute for
+  // the language the family chose.
+  return byLang[language || ""] ?? fallback;
+}
+
+/**
+ * What the confirm card says about language, when one command writes to
+ * families who read different ones.
+ *
+ * The card has to be honest about this: "12 families in Hindi, 3 in
+ * English" is a fact the sender can act on, and "3 in Hindi because no
+ * English template is approved" is one they need to know BEFORE they tap
+ * Confirm, not afterwards.
+ */
+export function formatTemplateMixLabel(
+  byLang: Record<string, PickedTemplate | null>,
+  counts: Record<string, number>,
+): string {
+  // Only languages that are actually served. A half-approved family never
+  // reaches a confirm card — it is refused where the card would be built —
+  // so there is no "and these 3 get the wrong language" line any more.
+  const langs = Object.keys(counts).filter((l) => counts[l]! > 0 && byLang[l]);
+  if (!langs.length) return "";
+  return langs
+    .sort((a, b) => counts[b]! - counts[a]!)
+    .map((l) => `${counts[l]} in ${l.toUpperCase()}`)
+    .join(" · ");
+}
+
+export type StudentPickRow = {
+  fullName: string;
+  classLabel: string;
+  rollNo: string;
+  fatherName?: string;
+  admissionNo?: string;
+};
+
+/**
+ * How long a numbered "which one?" list stays answerable.
+ *
+ * Shorter than the bare-name window: a stray "2" is a far more likely
+ * thing to type into an unrelated conversation than somebody's name.
+ */
+export const PICK_WINDOW_MINUTES = 5;
+
+/**
+ * The line that tells two children of the same name apart.
+ *
+ * The school has three Yatharths. Class and roll separate them when they
+ * are in different sections; inside one section only the father's name
+ * does, which is the same thing the office asks on the phone. Admission
+ * number is the last resort and is shown only when nothing else differs.
+ *
+ * Nothing here is restricted: class, roll, father's name and admission
+ * number are what a class list already shows. No mobile, no address, no
+ * document number — a disambiguation prompt is not a student record.
+ */
+function pickRowDetail(m: StudentPickRow, ambiguous: boolean): string {
+  const bits = [m.classLabel, m.rollNo ? `roll ${m.rollNo}` : ""].filter(Boolean);
+  if (m.fatherName) bits.push(`father ${m.fatherName}`);
+  if (ambiguous && m.admissionNo) bits.push(m.admissionNo);
+  return bits.join(", ");
+}
+
+/**
+ * "Which one did you mean?" — numbered, and answerable with the number.
+ *
+ * It used to end "Reply with the full name and class", which is fine for
+ * an Amay and an Amay Gupta and useless for three children actually
+ * called Yatharth: repeating the name reproduces the ambiguity. A number
+ * is unambiguous by construction, and it is one keystroke.
+ */
 export function formatStudentMatchesAsk(
-  matches: { fullName: string; classLabel: string; rollNo: string }[],
+  matches: StudentPickRow[],
   asked: string,
 ): string {
   if (!matches.length) {
-    return `I couldn't find an active student matching "${asked}". Try the full name, or add the class, e.g. _Amay Gupta 4B_.`;
+    return `I couldn't find an active student matching "${asked}". Check the spelling, try the full name, or add the class — e.g. _Amay Gupta 4B_.`;
   }
+  // Same name AND same class: roll and father's name are carrying the
+  // distinction on their own, so show the admission number too.
+  const ambiguous = new Set(
+    matches.map((m) => `${m.fullName.toLowerCase()}|${m.classLabel}`),
+  ).size < matches.length;
   const rows = matches.map(
-    (m) => `• ${m.fullName} (${m.classLabel}${m.rollNo ? `, roll ${m.rollNo}` : ""})`,
+    (m, i) => `*${i + 1}.* ${m.fullName} — ${pickRowDetail(m, ambiguous)}`,
   );
-  return `Which one did you mean?\n${rows.join("\n")}\nReply with the full name and class.`;
+  const same = matches.every(
+    (m) => m.fullName.toLowerCase() === matches[0]!.fullName.toLowerCase(),
+  );
+  const head = same
+    ? `There are ${matches.length} students called ${matches[0]!.fullName}.`
+    : `Which one did you mean?`;
+  return `${head}\n${rows.join("\n")}\n\nReply with the number — *1*${matches.length > 1 ? ` to *${matches.length}*` : ""}.`;
+}
+
+/**
+ * A reply that is nothing but a number, answering a numbered list.
+ *
+ * Deliberately strict: bare digits only, optionally "no. 2" or "2." as
+ * people type. Anything with other words in it is a fresh message, not a
+ * pick — "2 din se absent hai" must never select the second student.
+ */
+export function parsePickNumber(text: string, max: number): number | null {
+  const t = (text || "").trim();
+  const m = /^(?:no\.?\s*|#|option\s+)?([0-9]{1,2})[.)]?$/i.exec(t);
+  if (!m) return null;
+  const n = parseInt(m[1]!, 10);
+  return n >= 1 && n <= max ? n : null;
+}
+
+/** Is a stored pick list still answerable? */
+export function pickIsFresh(at: string, nowMs: number): boolean {
+  const t = Date.parse(at || "");
+  if (!Number.isFinite(t)) return false;
+  const age = nowMs - t;
+  return age >= 0 && age <= PICK_WINDOW_MINUTES * 60_000;
 }
 
 // ─── Attendance summary ────────────────────────────────────────────────
@@ -1864,6 +2427,7 @@ export type DefaulterRow = {
   overdueDays: number;
   earliestDueOn: string;
   onPlan: boolean;
+  studentId?: string;
 };
 
 export type ClassDefaultersInput = {
@@ -1876,6 +2440,43 @@ export type ClassDefaultersInput = {
   formatInr: (paise: number) => string;
 };
 
+const DEFAULTERS_SHOWN = 30;
+
+/**
+ * The order a defaulters list prints in: biggest debt first, and grouped
+ * by section for a whole class. Both the text and the numbers come from
+ * here, so the number offered is always the number resolved.
+ */
+function defaultersInOrder(input: ClassDefaultersInput): DefaulterRow[] {
+  const sorted = [...input.rows].sort(
+    (a, b) => b.overdueAmountPaise - a.overdueAmountPaise || b.overdueDays - a.overdueDays,
+  );
+  if (!input.wholeClass) return sorted.slice(0, DEFAULTERS_SHOWN);
+  const bySection = new Map<string, DefaulterRow[]>();
+  for (const r of sorted) bySection.set(r.sectionLabel, [...(bySection.get(r.sectionLabel) ?? []), r]);
+  const out: DefaulterRow[] = [];
+  for (const [, rows] of [...bySection.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    for (const r of rows) {
+      if (out.length >= DEFAULTERS_SHOWN) break;
+      out.push(r);
+    }
+  }
+  return out;
+}
+
+/** The children on a defaulters list, and the number that picks them. */
+export function classDefaultersPicks(input: ClassDefaultersInput): PickOption[] {
+  const shown = defaultersInOrder(input);
+  const ns = studentPickNumbers(shown);
+  return shown.map((r, i) => ({
+    n: ns[i]!,
+    label: r.fullName,
+    commandId: "student_fees",
+    studentId: r.studentId,
+    rerunText: r.fullName,
+  }));
+}
+
 export function formatClassDefaultersReply(input: ClassDefaultersInput): string {
   const inr = input.formatInr;
   const lines: string[] = [`*${input.title}* · defaulters · ${input.todayIso === input.todayIso ? "today" : input.todayIso}`];
@@ -1886,34 +2487,44 @@ export function formatClassDefaultersReply(input: ClassDefaultersInput): string 
   }
   const total = input.rows.reduce((s, r) => s + r.overdueAmountPaise, 0);
   lines.push(`${input.rows.length} student${input.rows.length === 1 ? "" : "s"} · *${inr(total)}* overdue`);
-  const sorted = [...input.rows].sort(
-    (a, b) => b.overdueAmountPaise - a.overdueAmountPaise || b.overdueDays - a.overdueDays,
-  );
-  const cap = 30;
-  const row = (r: DefaulterRow) => {
+  const shown = defaultersInOrder(input);
+  const ns = studentPickNumbers(shown);
+  // The number is printed once, at the front. Where it is not the roll —
+  // a whole class, where roll 4 exists in every section — the roll moves
+  // into the detail rather than sitting next to a different number and
+  // inviting the wrong one to be typed.
+  const asRoll = shown.every((r, i) => parseInt(r.rollNo, 10) === ns[i]);
+  const row = (r: DefaulterRow, i: number) => {
     const since = r.earliestDueOn ? shortDate(r.earliestDueOn) : "";
-    return `${r.rollNo ? `${r.rollNo}. ` : ""}${r.fullName}  ${inr(r.overdueAmountPaise)} · ${r.overdueDays}d${since ? ` (${since})` : ""}${r.onPlan ? " · plan" : ""}`;
+    const name = asRoll || !r.rollNo ? r.fullName : `${r.fullName} (roll ${r.rollNo})`;
+    return `*${ns[i]}.* ${name}  ${inr(r.overdueAmountPaise)} · ${r.overdueDays}d${since ? ` (${since})` : ""}${r.onPlan ? " · plan" : ""}`;
   };
   if (input.wholeClass) {
+    let i = 0;
     const bySection = new Map<string, DefaulterRow[]>();
-    for (const r of sorted) bySection.set(r.sectionLabel, [...(bySection.get(r.sectionLabel) ?? []), r]);
-    let shown = 0;
+    for (const r of shown) bySection.set(r.sectionLabel, [...(bySection.get(r.sectionLabel) ?? []), r]);
     for (const [label, rows] of [...bySection.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
       const sub = rows.reduce((s, r) => s + r.overdueAmountPaise, 0);
       lines.push("", `*${label}* · ${rows.length} · ${inr(sub)}`);
       for (const r of rows) {
-        if (shown >= cap) break;
-        lines.push(row(r));
-        shown++;
+        lines.push(row(r, i));
+        i += 1;
       }
     }
-    if (sorted.length > cap) lines.push(`+${sorted.length - cap} more — open Fees → Defaulters for the full list.`);
   } else {
     lines.push("");
-    for (const r of sorted.slice(0, cap)) lines.push(row(r));
-    if (sorted.length > cap) lines.push(`+${sorted.length - cap} more — open Fees → Defaulters for the full list.`);
+    shown.forEach((r, idx) => lines.push(row(r, idx)));
   }
-  lines.push("", "Reply with a name for the full ledger.");
+  if (input.rows.length > shown.length) {
+    lines.push(`+${input.rows.length - shown.length} more — open Fees → Defaulters for the full list.`);
+  }
+  const picks = classDefaultersPicks(input);
+  lines.push(
+    "",
+    picks.length
+      ? `${pickHint(picks, "that child's ledger")} Or send a name.`
+      : "Reply with a name for the full ledger.",
+  );
   return lines.join("\n");
 }
 
@@ -2268,6 +2879,7 @@ export type PendingLeaveRow = {
   reason: string;
   requestedAt: string; // ISO
   approver: string;
+  studentId?: string;
 };
 
 export type PendingLeavesInput = {
@@ -2287,6 +2899,31 @@ function agoLabel(iso: string, todayIso: string): string {
   return `${days}d ago`;
 }
 
+/** Oldest first, and capped — the order the reply prints and numbers by. */
+const PENDING_LEAVES_SHOWN = 15;
+
+function pendingLeavesInOrder(input: PendingLeavesInput): PendingLeaveRow[] {
+  return [...input.rows]
+    .sort((a, b) => a.requestedAt.localeCompare(b.requestedAt))
+    .slice(0, PENDING_LEAVES_SHOWN);
+}
+
+/**
+ * The children on a pending-leave list, and the number that picks them.
+ *
+ * Position, not roll: this list spans classes, so two children on roll 4
+ * is the normal case rather than the exception.
+ */
+export function pendingLeavesPicks(input: PendingLeavesInput): PickOption[] {
+  return pendingLeavesInOrder(input).map((r, i) => ({
+    n: i + 1,
+    label: r.studentName,
+    commandId: "student_details",
+    studentId: r.studentId,
+    rerunText: r.studentName,
+  }));
+}
+
 export function formatPendingLeavesReply(input: PendingLeavesInput): string {
   const where =
     input.scope === "school" ? "school" : input.scope === "section" ? input.scopeLabel || "section" : "your sections";
@@ -2295,8 +2932,8 @@ export function formatPendingLeavesReply(input: PendingLeavesInput): string {
     lines.push("Nothing waiting for approval. ✅");
   } else {
     lines.push(`${input.rows.length} waiting · oldest first`);
-    const sorted = [...input.rows].sort((a, b) => a.requestedAt.localeCompare(b.requestedAt));
-    for (const r of sorted.slice(0, 15)) {
+    const shown = pendingLeavesInOrder(input);
+    shown.forEach((r, i) => {
       const span =
         r.fromDate === r.toDate
           ? shortDate(r.fromDate)
@@ -2304,12 +2941,16 @@ export function formatPendingLeavesReply(input: PendingLeavesInput): string {
       const reason = r.reason.trim();
       lines.push(
         "",
-        `*${r.studentName}* · ${r.classLabel}${r.rollNo ? ` · roll ${r.rollNo}` : ""}`,
+        `*${i + 1}.* *${r.studentName}* · ${r.classLabel}${r.rollNo ? ` · roll ${r.rollNo}` : ""}`,
         `${span} · ${r.typeLabel}${reason ? ` · ${reason.length > 60 ? `${reason.slice(0, 57).trimEnd()}…` : reason}` : ""}`,
         `asked ${agoLabel(r.requestedAt, input.todayIso)} · approver: ${r.approver}`,
       );
+    });
+    if (input.rows.length > PENDING_LEAVES_SHOWN) {
+      lines.push("", `+${input.rows.length - PENDING_LEAVES_SHOWN} more`);
     }
-    if (sorted.length > 15) lines.push("", `+${sorted.length - 15} more`);
+    const picks = pendingLeavesPicks(input);
+    if (picks.length) lines.push("", pickHint(picks, "that child's details"));
   }
   if (input.approvedToday) {
     lines.push("", `${input.approvedToday} student${input.approvedToday === 1 ? "" : "s"} on approved leave today.`);
@@ -2441,7 +3082,26 @@ export function formatBusManifestReply(input: BusManifestInput): string {
 
 export function formatRouteNotFound(asked: string, options: string[]): string {
   if (!options.length) return `No active bus route matches "${asked}".`;
-  return `Which route? ${options.join(", ")}`;
+  const rows = options.map((o, i) => `*${i + 1}.* ${o}`).join("\n");
+  return `Which route?\n${rows}\n\nReply with the number, or the route name.`;
+}
+
+/** The routes offered by a "which route?" reply, numbered as printed. */
+export function routePicks(
+  options: { id: string; label: string }[],
+  commandId: string,
+  originalText: string,
+): PickOption[] {
+  return options.map((o, i) => ({
+    n: i + 1,
+    label: o.label,
+    commandId,
+    // A delay notice carries its minutes in the original wording, so the
+    // re-run keeps that text and only swaps the route in — picking the
+    // route must not quietly turn "20 minute late" into no minutes.
+    rerunText: originalText,
+    routeId: o.id,
+  }));
 }
 
 // ─── Student details ───────────────────────────────────────────────────
@@ -3594,12 +4254,32 @@ export function formatPtmSlotPicker(input: {
       : `${input.eventName} · ${shortDate(input.eventDate)} — open times for ${input.studentName}:`,
   ];
   if (input.askedTime) lines.push(`Open times for ${input.studentName}:`);
-  for (const s of input.slots.slice(0, 12)) {
-    lines.push(`${s.startAt} · ${s.teacherName}${s.free > 1 ? ` (${s.free} places)` : ""}`);
+  const shown = input.slots.slice(0, PTM_SLOTS_SHOWN);
+  shown.forEach((s, i) => {
+    lines.push(`*${i + 1}.* ${s.startAt} · ${s.teacherName}${s.free > 1 ? ` (${s.free} places)` : ""}`);
+  });
+  if (input.slots.length > PTM_SLOTS_SHOWN) {
+    lines.push(`…and ${input.slots.length - PTM_SLOTS_SHOWN} more.`);
   }
-  if (input.slots.length > 12) lines.push(`…and ${input.slots.length - 12} more.`);
-  lines.push("", `Send the time, e.g. _book PTM for ${input.studentName} ${input.slots[0]!.startAt}_.`);
+  lines.push("", `Reply with the number, or the time — e.g. _${shown[0]!.startAt}_.`);
   return lines.join("\n");
+}
+
+const PTM_SLOTS_SHOWN = 12;
+
+/** The open PTM times, and the number that books each one. */
+export function ptmSlotPicks(
+  slots: { startAt: string }[],
+  studentName: string,
+): PickOption[] {
+  return slots.slice(0, PTM_SLOTS_SHOWN).map((s, i) => ({
+    n: i + 1,
+    label: s.startAt,
+    commandId: "book_ptm",
+    slotAt: s.startAt,
+    // The student is already decided; the number only chooses the time.
+    rerunText: `book PTM for ${studentName} ${s.startAt}`,
+  }));
 }
 
 export function formatBookPtmCard(input: {
@@ -3827,4 +4507,74 @@ export function commandActorAllowed(
     const m = normalizeCommandMobile(c);
     return !!m && set.has(m);
   });
+}
+
+// ─── Follow-up: a bare name after a list ───────────────────────────────
+
+/**
+ * How long a list stays answerable. Long enough to read a class list and
+ * type a name, short enough that a name typed into an unrelated
+ * conversation half an hour later is not swallowed by the desk.
+ */
+export const FOLLOW_UP_WINDOW_MINUTES = 10;
+
+/** Words that are never a person, however name-shaped they look. */
+const FOLLOW_UP_STOP_WORDS = new Set([
+  "menu", "help", "staff", "fee", "fees", "admissions", "admission", "human",
+  "yes", "no", "ok", "okay", "thanks", "thank you", "hi", "hello", "hey",
+  "start", "stop", "cancel", "back", "director", "teacher", "parent",
+  "commands", "list", "details", "info", "dues", "absent", "present",
+  // Ordinary ERP nouns. A message made only of these is a half-typed
+  // command, not a child — and while the parser gets first refusal on
+  // every message, a phrasing it misses should not become a name lookup.
+  "attendance", "summary", "collection", "defaulters", "homework", "leave",
+  "timetable", "report", "manifest", "bus", "class", "section", "student",
+]);
+
+/**
+ * Is this a bare person's name — nothing but the name itself?
+ *
+ * The desk answers command-shaped messages and stays quiet otherwise, which
+ * is what keeps it out of ordinary staff conversation. That silence has one
+ * bad case: after the desk itself prints a class list, the most natural
+ * thing a person types next is a name, and it falls through to the older
+ * bots. This recognises that reply — and only that: one to four words, no
+ * digits, no punctuation beyond what names carry, and nothing from the
+ * keyword vocabulary the other bots own.
+ */
+export function looksLikeBareName(text: string): boolean {
+  const t = (text || "").trim();
+  if (!t || t.length > 60) return false;
+  if (/[0-9]/.test(t)) return false;
+  if (!/^[\p{L}\p{M}][\p{L}\p{M}\s'.-]*$/u.test(t)) return false;
+  const words = t.split(/\s+/).filter(Boolean);
+  if (words.length < 1 || words.length > 4) return false;
+  if (FOLLOW_UP_STOP_WORDS.has(t.toLowerCase())) return false;
+  if (words.every((w) => FOLLOW_UP_STOP_WORDS.has(w.toLowerCase()))) return false;
+  // A single word has to look like a name rather than an interjection.
+  if (words.length === 1 && t.length < 3) return false;
+  return true;
+}
+
+/**
+ * What a bare name means, given what the desk was just asked.
+ *
+ * After a list about money, a name is a question about that family's money.
+ * After anything else it is "who is this child" — the general reading, and
+ * the safe one, since student details mask what the asker may not see.
+ */
+export function followUpCommandFor(originCommandId: string): "student_fees" | "student_details" {
+  return originCommandId === "class_defaulters" ||
+    originCommandId === "student_fees" ||
+    originCommandId === "collection_today"
+    ? "student_fees"
+    : "student_details";
+}
+
+/** Whether a stored list is still young enough to answer a bare name. */
+export function followUpIsFresh(atIso: string, nowMs: number): boolean {
+  const at = Date.parse(atIso || "");
+  if (!Number.isFinite(at)) return false;
+  const age = nowMs - at;
+  return age >= 0 && age <= FOLLOW_UP_WINDOW_MINUTES * 60 * 1000;
 }

@@ -14,6 +14,7 @@
  * existing paths — this only creates the link and hands it over.
  */
 
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import type { DemoSession } from "@/lib/auth";
 import type { MastersState } from "@/lib/masters";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
@@ -52,7 +53,7 @@ export async function openDuesForPayLink(opts: {
   academicYearCode: string;
   todayIso: string;
 }): Promise<
-  | { ok: true; dues: FeeDueLine[]; rows: PayLinkDueRow[]; totalPaise: number; studentName: string; classLabel: string; householdId: string; guardianName: string; mobile: string }
+  | { ok: true; dues: FeeDueLine[]; rows: PayLinkDueRow[]; totalPaise: number; studentName: string; classLabel: string; householdId: string; guardianName: string; mobile: string; language: "en" | "hi" }
   | { ok: false; error: string }
 > {
   await ensureSchoolMirrorHydrated();
@@ -94,6 +95,9 @@ export async function openDuesForPayLink(opts: {
     householdId: student.householdId,
     guardianName: hh?.guardianName || "",
     mobile: hh ? householdWhatsApp(hh) || hh.mobile || hh.altMobile || "" : "",
+    // The language THIS family reads, not the one the staff member typed
+    // in. Falls back to the school default when they have never said.
+    language: waTemplateLanguageFor(hh ?? {}),
   };
 }
 

@@ -7,97 +7,122 @@
  * half (RBAC, data, audit, WhatsApp) is exercised live via the webhook.
  */
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 
 import {
+  BUS_DELAY_MAX_MINUTES,
   ERP_COMMANDS,
+  FOLLOW_UP_WINDOW_MINUTES,
+  PICK_WINDOW_MINUTES,
+  absentListPicks,
   buildErpCommandSystemPrompt,
+  classDefaultersPicks,
   classKey,
+  commandActorAllowed,
+  complaintSubjectFrom,
   confirmButtonIds,
   confirmIsFresh,
+  daysSince,
+  editBudgetFor,
   extractSectionRefs,
+  feeReminderTooSoon,
+  followUpCommandFor,
+  followUpIsFresh,
   formatAbsentListReply,
-  formatHelpReply,
-  formatSectionProblem,
-  looksLikeCommand,
-  noteCommandUse,
-  parseCommandsSwitch,
-  parseCommandAllowList,
-  commandActorAllowed,
-  normalizeCommandMobile,
-  parseConfirmReply,
-  parseErpCommandLlmJson,
-  parseErpCommandLocal,
-  resolveCommandDate,
-  resolveSectionRef,
-  waMarkersToAssistantText,
+  formatAdmissionsPeriodReply,
+  formatAttendanceSummaryReply,
+  formatBookPtmCard,
+  formatBusDelayCard,
+  formatBusManifestReply,
+  formatClassDefaultersReply,
+  formatClassMessageCard,
+  formatCollectionReply,
   formatCommandDigest,
   formatCommandDigestOneLine,
-  summarizeCommandAudit,
-  parseStudentFeesQuery,
-  matchStudents,
+  formatCommandHelpDetail,
+  formatDecideLeaveCard,
+  formatFeeReminderCard,
+  formatFreeTeachersReply,
+  formatHelpReply,
+  formatHomeworkReply,
+  formatLeaveRequestPicker,
+  formatMarkAttendanceCard,
+  formatPayLinkCard,
+  formatPendingLeavesReply,
+  formatPostHomeworkCard,
+  formatPtmSlotPicker,
+  formatRaiseComplaintCard,
+  formatRouteNotFound,
+  formatSchoolSnapshotReply,
+  formatSectionProblem,
+  formatStaffBroadcastCard,
+  formatStudentDetailsReply,
   formatStudentFeesReply,
   formatStudentMatchesAsk,
-  formatAttendanceSummaryReply,
-  formatClassDefaultersReply,
-  formatCollectionReply,
-  formatFreeTeachersReply,
-  formatPendingLeavesReply,
-  formatHomeworkReply,
-  parseHomeworkQuery,
-  formatBusManifestReply,
-  formatRouteNotFound,
-  parseBusManifestQuery,
-  formatStudentDetailsReply,
-  parseStudentDetailsQuery,
-  formatSchoolSnapshotReply,
-  formatAdmissionsPeriodReply,
-  parseAdmissionsQuery,
-  parsePostHomeworkQuery,
-  splitPostHomeworkRest,
-  parseDueDate,
-  homeworkTitleFrom,
-  formatPostHomeworkCard,
-  parseMarkAttendanceQuery,
-  parseAttendanceSpec,
-  isCorrectingAttendance,
-  formatMarkAttendanceCard,
-  parseClassMessageQuery,
-  messageScriptLanguage,
-  noticeTitleFrom,
-  renderTemplateBody,
-  formatClassMessageCard,
-  parseStaffBroadcastQuery,
-  formatStaffBroadcastCard,
-  parsePayLinkQuery,
-  formatPayLinkCard,
-  parseBusDelayQuery,
-  formatBusDelayCard,
-  matchTransportRoutes,
-  BUS_DELAY_MAX_MINUTES,
-  parseBookPtmQuery,
-  parsePtmTime,
-  ptmTimeCandidates,
-  formatBookPtmCard,
-  formatPtmSlotPicker,
-  parseFeeReminderQuery,
-  formatFeeReminderCard,
-  inFeeReminderQuietHours,
-  feeReminderTooSoon,
-  daysSince,
-  istHourOf,
-  parseDecideLeaveQuery,
-  formatDecideLeaveCard,
-  formatLeaveRequestPicker,
-  parseRaiseComplaintQuery,
+  formatTemplateMixLabel,
+  fuzzyWordMatch,
   guessComplaintCategory,
-  complaintSubjectFrom,
-  formatRaiseComplaintCard,
+  helpMenuCommands,
+  helpPicks,
+  homeworkTitleFrom,
+  inFeeReminderQuietHours,
+  isCorrectingAttendance,
+  istHourOf,
+  looksLikeBareName,
+  looksLikeCommand,
+  matchStudents,
+  matchTransportRoutes,
+  messageScriptLanguage,
+  normalizeCommandMobile,
+  noteCommandUse,
+  noticeTitleFrom,
+  parseAdmissionsQuery,
+  parseAttendanceSpec,
+  parseBookPtmQuery,
+  parseBusDelayQuery,
+  parseBusManifestQuery,
+  parseClassMessageQuery,
+  parseCommandAllowList,
+  parseCommandsSwitch,
+  parseConfirmReply,
+  parseDecideLeaveQuery,
+  parseDueDate,
+  parseErpCommandLlmJson,
+  parseErpCommandLocal,
+  parseFeeReminderQuery,
   parseFreeTeachersQuery,
+  parseHomeworkQuery,
+  parseMarkAttendanceQuery,
+  parsePayLinkQuery,
+  parsePickNumber,
+  parsePostHomeworkQuery,
+  parsePtmTime,
+  parseRaiseComplaintQuery,
+  parseStaffBroadcastQuery,
+  parseStudentDetailsQuery,
+  parseStudentFeesQuery,
+  pendingLeavesPicks,
   periodAtTime,
+  pickIsFresh,
+  ptmSlotPicks,
+  ptmTimeCandidates,
+  renderTemplateBody,
   resolveClassOrSectionRef,
+  resolveCommandDate,
+  resolveSectionRef,
+  routePicks,
+  sectionProblemPicks,
+  splitPostHomeworkRest,
+  summarizeCommandAudit,
+  templateForFamily,
+  templatesByLanguage,
+  missingLanguagesLabel,
   type CommandAuditRow,
   type PendingErpConfirm,
   type StudentLike,
+  waMarkersToAssistantText,
+  withinEdits,
 } from "./erpCommands";
 
 console.log("erpCommands.selftest.ts");
@@ -348,7 +373,12 @@ const masters = {
   assert.equal(parseErpCommandLocal("5A"), null, "a bare section with no ask is not a command");
   assert.equal(parseErpCommandLocal("absent"), null, "absent with no section is not a command");
   assert.equal(parseErpCommandLocal("IN"), null, "punch keyword stays with the attendance bot");
-  assert.equal(parseErpCommandLocal("help"), null, "'help' stays with the office escalation");
+  // "help" belongs to the desk now. It used to be ceded to the office
+  // escalation keyword, which meant the one word a staff member is most
+  // likely to try was answered by the visitor menu and the desk was never
+  // asked. The escalation word people actually use is HUMAN, and that is
+  // untouched.
+  assert.equal(parseErpCommandLocal("help")?.commandId, "help");
 }
 
 // ─── looksLikeCommand gate for the model ───────────────────────────────
@@ -460,7 +490,7 @@ const masters = {
   assert.ok(yesterday.includes("No one absent."));
 
   const help = formatHelpReply(ERP_COMMANDS.filter((c) => c.id !== "help"), "Sunita");
-  assert.ok(help.startsWith("Sunita, you can send me"));
+  assert.ok(help.startsWith("Sunita, here is everything you can ask me"));
   assert.ok(help.includes("Absent list for a section"));
 
   assert.ok(formatSectionProblem("no_class", [], "13A").includes('"13A"'));
@@ -472,7 +502,8 @@ const masters = {
         { classId: "c5", sectionId: "s5b", className: "V", sectionName: "B", label: "V B" },
       ],
       "5",
-    ).includes("V A, V B"),
+      // Numbered now, one per line, so a reply of "2" is unambiguous.
+    ).includes("*1.* V A\n*2.* V B"),
   );
   assert.ok(formatSectionProblem("not_allowed", [], "V A").includes("own sections"));
 }
@@ -699,7 +730,13 @@ const masters = {
     ],
     "aarav sharma",
   );
-  assert.ok(ask.includes("• Aarav Sharma (V · A, roll 4)\n• Aarav Sharma (V · B, roll 9)"), ask);
+  // Numbered, and the number is the answer — two children of the same name
+  // cannot be told apart by being asked to repeat the name.
+  assert.ok(
+    ask.includes("*1.* Aarav Sharma — V · A, roll 4\n*2.* Aarav Sharma — V · B, roll 9"),
+    ask,
+  );
+  assert.match(ask, /Reply with the number/);
 }
 
 // ─── attendance summary reply ──────────────────────────────────────────
@@ -772,12 +809,15 @@ const masters = {
   const whole = formatClassDefaultersReply({ title: "Class V", todayIso: "2026-09-05", wholeClass: true, rows, formatInr: inr });
   assert.ok(whole.startsWith("*Class V* · defaulters · today"), whole);
   assert.ok(whole.includes("3 students · *₹24,400* overdue"), whole);
-  assert.ok(whole.includes("*V A* · 2 · ₹12,400\n4. Aarav Sharma  ₹8,400 · 45d (22 Jul)\n11. Riya Verma  ₹4,000 · 26d (10 Aug)"), whole);
-  assert.ok(whole.includes("*V B* · 1 · ₹12,000\n9. Kabir Ali  ₹12,000 · 12d (24 Aug) · plan"), whole);
-  assert.ok(whole.endsWith("Reply with a name for the full ledger."));
+  // These three rolls happen not to collide across the sections, so the
+  // roll is still the number you reply with.
+  assert.ok(whole.includes("*V A* · 2 · ₹12,400\n*4.* Aarav Sharma  ₹8,400 · 45d (22 Jul)\n*11.* Riya Verma  ₹4,000 · 26d (10 Aug)"), whole);
+  assert.ok(whole.includes("*V B* · 1 · ₹12,000\n*9.* Kabir Ali  ₹12,000 · 12d (24 Aug) · plan"), whole);
+  assert.ok(whole.endsWith("Or send a name."), whole);
+  assert.match(whole, /Reply with a number/);
 
   const section = formatClassDefaultersReply({ title: "V A", todayIso: "2026-09-05", wholeClass: false, rows: rows.filter((r) => r.sectionLabel === "V A"), formatInr: inr });
-  assert.ok(section.includes("2 students · *₹12,400* overdue\n\n4. Aarav Sharma"), section);
+  assert.ok(section.includes("2 students · *₹12,400* overdue\n\n*4.* Aarav Sharma"), section);
   assert.ok(!section.includes("*V A* · 2"), "no per-section header for a single section");
 
   const limited = formatClassDefaultersReply({ title: "Class V", todayIso: "2026-09-05", wholeClass: true, rows: [], limitedTo: ["V A"], formatInr: inr });
@@ -981,7 +1021,7 @@ const masters = {
   assert.ok(empty.includes("No students assigned to this route."), empty);
 
   assert.ok(formatRouteNotFound("7", []).includes('"7"'));
-  assert.ok(formatRouteNotFound("civil", ["Bus 3 · Civil Lines", "Bus 4 · Civil Court"]).includes("Bus 3 · Civil Lines, Bus 4 · Civil Court"));
+  assert.ok(formatRouteNotFound("civil", ["Bus 3 · Civil Lines", "Bus 4 · Civil Court"]).includes("*1.* Bus 3 · Civil Lines\n*2.* Bus 4 · Civil Court"));
 }
 
 // ─── student details reply ─────────────────────────────────────────────
@@ -1646,7 +1686,9 @@ const masters = {
   });
   assert.ok(picker.includes("Term PTM · 12 Sep — open times for Riya Verma:"), picker);
   assert.ok(picker.includes("10:30 · Sunita Sharma (2 places)"), picker);
-  assert.ok(picker.includes("book PTM for Riya Verma 10:00"), picker);
+  // The tail used to spell out a whole command to retype. The number is
+  // the shorter answer and the time still works.
+  assert.ok(picker.includes("Reply with the number, or the time — e.g. _10:00_."), picker);
 
   const taken = formatPtmSlotPicker({
     studentName: "Riya Verma", eventName: "Term PTM", eventDate: "2026-09-12",
@@ -1819,6 +1861,536 @@ const masters = {
   );
   // An id must never match by accident.
   assert.equal(commandActorAllowed(["9876543210"], ["staff:9876543210x"]), false);
+}
+
+// ─── follow-up: a bare name after a list ───────────────────────────────
+{
+  // The case this exists for: the desk prints a class list, somebody types
+  // the name they see.
+  assert.equal(looksLikeBareName("Manvi Singh"), true);
+  assert.equal(looksLikeBareName("Aarav"), true);
+  assert.equal(looksLikeBareName("रिया वर्मा"), true, "Devanagari names count");
+  assert.equal(looksLikeBareName("Mary D'Souza"), true);
+  assert.equal(looksLikeBareName("Anne-Marie Fernandes"), true);
+
+  // Anything carrying a question is a command, and goes down the normal
+  // path where it can be parsed properly.
+  assert.equal(looksLikeBareName("Manvi Singh details"), true, "still a name-shape; the parser gets first refusal");
+  assert.equal(looksLikeBareName("5A me kaun absent hai"), false, "digits");
+  assert.equal(looksLikeBareName("attendance summary"), false, "two stop words");
+  assert.equal(looksLikeBareName("roll 4"), false);
+
+  // The keyword vocabulary the older bots own must never be swallowed.
+  for (const kw of ["MENU", "menu", "STAFF", "FEE", "ADMISSIONS", "HUMAN", "help", "YES", "no"]) {
+    assert.equal(looksLikeBareName(kw), false, `"${kw}" belongs to another bot`);
+  }
+  assert.equal(looksLikeBareName(""), false);
+  assert.equal(looksLikeBareName("ok"), false, "too short to be a name");
+  assert.equal(looksLikeBareName("a very long sentence about five words"), false, "too many words");
+  assert.equal(looksLikeBareName("x".repeat(61)), false, "too long");
+
+  // What a name means depends on the list it answers.
+  assert.equal(followUpCommandFor("class_defaulters"), "student_fees", "after money, money");
+  assert.equal(followUpCommandFor("collection_today"), "student_fees");
+  assert.equal(followUpCommandFor("absent_list"), "student_details");
+  assert.equal(followUpCommandFor("pending_leaves"), "student_details");
+  assert.equal(followUpCommandFor("anything_else"), "student_details", "details is the safe default");
+
+  // The window: long enough to read a list, short enough that a name typed
+  // into an unrelated conversation later is not swallowed.
+  const now = Date.parse("2026-09-07T10:00:00.000Z");
+  const ago = (min: number) => new Date(now - min * 60_000).toISOString();
+  assert.equal(followUpIsFresh(ago(0), now), true);
+  assert.equal(followUpIsFresh(ago(FOLLOW_UP_WINDOW_MINUTES - 1), now), true);
+  assert.equal(followUpIsFresh(ago(FOLLOW_UP_WINDOW_MINUTES + 1), now), false);
+  assert.equal(followUpIsFresh("", now), false);
+  assert.equal(followUpIsFresh("not a date", now), false);
+  // A timestamp from the future is not fresh, it is broken.
+  assert.equal(followUpIsFresh(new Date(now + 60_000).toISOString(), now), false);
+}
+
+// ── Which language a family is written to in ──────────────────────────
+// The desk used to pick ONE template for everybody: for the class message
+// and the bus delay, from the script the STAFF MEMBER typed in; for the
+// fee reminder and the pay link, from a hardcoded "English first". Neither
+// has anything to do with what the family reads.
+{
+  const tpl = (familyKey: string, language: string) => ({
+    familyKey,
+    language,
+    name: `${familyKey} ${language}`,
+    metaName: `bhb_${familyKey}_${language}`,
+    metaLanguage: language,
+    variables: ["schoolName", "childName"],
+  });
+
+  const both = templatesByLanguage(
+    [tpl("comms_notice", "en"), tpl("comms_notice", "hi")],
+    ["comms_notice"],
+  );
+  assert.equal(both.byLang.en?.metaName, "bhb_comms_notice_en");
+  assert.equal(both.byLang.hi?.metaName, "bhb_comms_notice_hi");
+
+  // A Hindi-reading family gets Hindi even though English exists.
+  assert.equal(
+    templateForFamily(both.byLang, "hi", null)?.metaName,
+    "bhb_comms_notice_hi",
+  );
+  assert.equal(
+    templateForFamily(both.byLang, "en", null)?.metaName,
+    "bhb_comms_notice_en",
+  );
+
+  // Only Hindi approved — the family is REFUSED, not half-served.
+  //
+  // This test used to assert the opposite: that an English-reading family
+  // got the Hindi template because silence was the worse answer. #101
+  // settled it the other way, and it is right — sending a parent a
+  // language they did not choose is not "reaching" them, and the concrete
+  // case was a family who had just paid at the counter being told in the
+  // wrong language to pay a link. The school actually had this shape on
+  // 2026-09-07: fees_pay_link approved in hi, pending in en.
+  const hiOnly = templatesByLanguage([tpl("fees_pay_link", "hi")], ["fees_pay_link"]);
+  assert.equal(hiOnly.byLang.hi?.metaName, "bhb_fees_pay_link_hi");
+  assert.equal(hiOnly.byLang.en, null);
+  assert.equal(hiOnly.ready, null, "a half-approved family is not usable");
+  assert.deepEqual(hiOnly.missing, ["en"]);
+  assert.equal(hiOnly.rawReady, null);
+  assert.equal(
+    templateForFamily(hiOnly.byLang, "en", null),
+    null,
+    "no cross-language fallback: an English reader is never handed Hindi",
+  );
+  assert.equal(missingLanguagesLabel(hiOnly.missing), "English");
+  assert.equal(missingLanguagesLabel(["en", "hi"]), "Hindi and English");
+
+  // Earlier family keys win outright, per language.
+  const staged = templatesByLanguage(
+    [
+      tpl("fees_soft_reminder", "hi"),
+      tpl("fees_soft_reminder", "en"),
+      tpl("fees_stage_reminder", "hi"),
+      tpl("fees_stage_reminder", "en"),
+    ],
+    ["fees_stage_reminder", "fees_soft_reminder"],
+  );
+  assert.equal(staged.byLang.hi?.metaName, "bhb_fees_stage_reminder_hi");
+  assert.equal(staged.byLang.en?.metaName, "bhb_fees_stage_reminder_en");
+  assert.ok(staged.ready, "both languages present, so it is usable");
+
+  // A family half-approved on the PREFERRED key does not silently drop to
+  // the fallback key's other language. Both must be whole.
+  const halfStaged = templatesByLanguage(
+    [tpl("fees_stage_reminder", "hi"), tpl("fees_soft_reminder", "en")],
+    ["fees_stage_reminder", "fees_soft_reminder"],
+  );
+  assert.equal(halfStaged.ready, null);
+
+  // Nothing approved at all is still "nothing", not a broken template.
+  const none = templatesByLanguage([], ["comms_notice"]);
+  assert.equal(none.ready, null);
+  assert.deepEqual(none.missing, ["en", "hi"]);
+  assert.equal(templateForFamily(none.byLang, "hi", null), null);
+
+  // The card has to say what the mix is BEFORE anyone taps Confirm — and
+  // it can only ever name languages that are actually served now.
+  assert.equal(
+    formatTemplateMixLabel(both.byLang, { hi: 12, en: 3 }),
+    "12 in HI · 3 in EN",
+  );
+  assert.equal(formatTemplateMixLabel(both.byLang, { hi: 15 }), "15 in HI");
+  assert.equal(
+    formatTemplateMixLabel(none.byLang, { hi: 4 }),
+    "",
+    "nothing approved means no card is built at all, so no label",
+  );
+}
+
+// ── Three children called Yatharth ────────────────────────────────────
+// "Reply with the full name and class" is a fine answer for an Amay and an
+// Amay Gupta, and useless for three children who share a name: repeating
+// the name reproduces the ambiguity. The list is numbered and the number
+// is the answer.
+{
+  const rows = [
+    { fullName: "Yatharth Singh", classLabel: "IV A", rollNo: "12", fatherName: "Rakesh Singh", admissionNo: "ADM-101" },
+    { fullName: "Yatharth Singh", classLabel: "IV A", rollNo: "31", fatherName: "Manoj Singh", admissionNo: "ADM-233" },
+    { fullName: "Yatharth Singh", classLabel: "VII A", rollNo: "8", fatherName: "Dinesh Singh", admissionNo: "ADM-402" },
+  ];
+  const ask = formatStudentMatchesAsk(rows, "Yatharth");
+  assert.match(ask, /There are 3 students called Yatharth Singh/);
+  for (const n of ["*1.*", "*2.*", "*3.*"]) assert.ok(ask.includes(n), `numbered ${n}`);
+  // Two of them share a class, so roll and father's name are doing the
+  // work and the admission number is shown as well.
+  assert.ok(ask.includes("father Rakesh Singh"));
+  assert.ok(ask.includes("ADM-101"));
+  assert.match(ask, /Reply with the number/);
+  // Nothing restricted is ever in a disambiguation prompt.
+  for (const leak of ["aadhaar", "pan", "9", "@"]) {
+    assert.equal(
+      ask.toLowerCase().includes(leak) && leak === "aadhaar",
+      false,
+      "no document number in a pick list",
+    );
+  }
+
+  // Different classes: no admission number needed, class does the work.
+  const spread = formatStudentMatchesAsk(
+    [
+      { fullName: "Riya Verma", classLabel: "IV A", rollNo: "3", fatherName: "A", admissionNo: "ADM-1" },
+      { fullName: "Riya Sharma", classLabel: "VI A", rollNo: "9", fatherName: "B", admissionNo: "ADM-2" },
+    ],
+    "Riya",
+  );
+  assert.match(spread, /Which one did you mean\?/);
+  assert.equal(spread.includes("ADM-1"), false, "admission number only when nothing else separates them");
+
+  assert.match(formatStudentMatchesAsk([], "Zzz"), /couldn't find/i);
+
+  // The number, and only the number.
+  assert.equal(parsePickNumber("2", 3), 2);
+  assert.equal(parsePickNumber(" 3 ", 3), 3);
+  assert.equal(parsePickNumber("no. 1", 3), 1);
+  assert.equal(parsePickNumber("#2", 3), 2);
+  assert.equal(parsePickNumber("2.", 3), 2);
+  assert.equal(parsePickNumber("4", 3), null, "off the end of the list");
+  assert.equal(parsePickNumber("0", 3), null);
+  assert.equal(parsePickNumber("", 3), null);
+  // The case that must never select a student: a real message that starts
+  // with a digit.
+  assert.equal(parsePickNumber("2 din se absent hai", 3), null);
+  assert.equal(parsePickNumber("5A me kaun absent hai", 3), null);
+  assert.equal(parsePickNumber("2 students", 3), null);
+
+  // Short window: a stray "2" is far likelier than a stray name.
+  const now = Date.parse("2026-09-07T10:00:00.000Z");
+  assert.equal(pickIsFresh(new Date(now - 60_000).toISOString(), now), true);
+  assert.equal(
+    pickIsFresh(new Date(now - (PICK_WINDOW_MINUTES + 1) * 60_000).toISOString(), now),
+    false,
+  );
+  assert.equal(pickIsFresh("", now), false);
+  assert.equal(pickIsFresh(new Date(now + 60_000).toISOString(), now), false);
+  assert.ok(PICK_WINDOW_MINUTES < FOLLOW_UP_WINDOW_MINUTES);
+}
+
+// ── Typed on a phone, in a hurry, in a second language ────────────────
+{
+  // A misspelt command still reaches the parse. Without this the message
+  // never gets to the model that would have understood it, and the older
+  // keyword bot answers something unrelated — which reads as the desk
+  // being broken rather than as a typo.
+  for (const t of [
+    "atendance summary",
+    "attendence summary 5A",
+    "defalters class 3",
+    "manifets bus 3",
+    "homwork posted 6B",
+    "payement link for Riya",
+  ]) {
+    assert.equal(looksLikeCommand(t), true, `"${t}" is a typo, not a new sentence`);
+  }
+  // And ordinary conversation still is not a command.
+  for (const t of [
+    "kal milte hain",
+    "good morning sir",
+    "chalo chalte hain",
+    "meeting kal subah",
+    "ok thanks",
+  ]) {
+    assert.equal(looksLikeCommand(t), false, `"${t}" must stay with the other bots`);
+  }
+
+  // Bounded edit distance, and it stops early rather than filling a matrix.
+  assert.equal(withinEdits("abc", "abc", 0), true);
+  assert.equal(withinEdits("abc", "abd", 1), true);
+  assert.equal(withinEdits("abc", "xyz", 1), false);
+  assert.equal(withinEdits("kitten", "sitting", 3), true);
+  assert.equal(withinEdits("kitten", "sitting", 2), false);
+
+  // Short words get no budget: at three letters, one edit is a different
+  // name. "Om" and "Am", "Ravi" and "Rani" are already at the edge.
+  assert.equal(editBudgetFor("om"), 0);
+  assert.equal(editBudgetFor("ram"), 0);
+  assert.equal(editBudgetFor("riya"), 1);
+  assert.equal(editBudgetFor("yatharth"), 2);
+  assert.equal(fuzzyWordMatch("ram", "ravi"), false, "no budget, no match");
+  assert.equal(fuzzyWordMatch("yathart", "yatharth"), true);
+  assert.equal(fuzzyWordMatch("srivastava", "shrivastava"), true);
+  assert.equal(fuzzyWordMatch("riya", "riya"), true);
+  assert.equal(fuzzyWordMatch("ri", "riya"), true, "a short prefix is still a prefix");
+}
+
+// ── Help lists every command the person actually holds ────────────────
+// `help` — the single most obvious word — was not in the help pattern at
+// all, so it fell through to the older keyword bot. From the phone that
+// looked like the desk answering with the wrong list.
+{
+  assert.deepEqual(parseErpCommandLocal("help"), { commandId: "help", fields: {}, source: "local" });
+  for (const t of ["HELP", "commands", "command list", "all commands", "madad", "मदद", "?", "cmd"]) {
+    assert.equal(parseErpCommandLocal(t)?.commandId, "help", `"${t}" asks for help`);
+  }
+  // Not a request for the command list.
+  for (const t of ["helpline number", "help me with Riya's fees"]) {
+    assert.notEqual(parseErpCommandLocal(t)?.commandId, "help", `"${t}" is not the help list`);
+  }
+
+  const all = ERP_COMMANDS.filter((c) => c.id !== "help");
+  const reply = formatHelpReply(all, "Ashish");
+  for (const c of all) {
+    assert.ok(reply.includes(c.title), `help must list "${c.title}"`);
+  }
+  // One WhatsApp message, not three.
+  assert.ok(reply.length < 4096, `help is ${reply.length} chars, over one message`);
+  // A write is marked, because a write can reach a family.
+  assert.ok(reply.includes("✍️"));
+  // App-only commands say so rather than looking ignored.
+  assert.ok(reply.includes("(app only)"));
+  // A role with nothing still gets a usable answer.
+  assert.match(formatHelpReply([], "Ashish"), /doesn't include any desk commands/);
+  // A command whose module nobody grouped still appears.
+  const odd = formatHelpReply(
+    [{ ...all[0]!, module: "vault" }],
+    "",
+  );
+  assert.ok(odd.includes(all[0]!.title), "an ungrouped command must not vanish from help");
+}
+
+// ── The number printed is the number resolved ─────────────────────────
+//
+// This is the whole risk of numbering a list: the text and the pick list
+// are produced by two different functions, and if they ever disagree the
+// desk offers "reply 7" and hands back somebody else's child. So every
+// list is checked BOTH ways — the numbers the formatter printed are
+// exactly the numbers the picks accept, in the same order.
+{
+  const printedNumbers = (text: string): number[] =>
+    [...text.matchAll(/(?:^|\n)\*?(\d{1,3})\.\*?\s/g)].map((m) => Number(m[1]));
+
+  const agree = (text: string, picks: { n: number; label: string }[], what: string) => {
+    assert.deepEqual(
+      printedNumbers(text),
+      picks.map((p) => p.n),
+      `${what}: the numbers printed must be the numbers accepted\n${text}`,
+    );
+  };
+
+  // Absent list — numbered by roll, because the roll is already printed
+  // and making a teacher count rows past a visible number is worse than
+  // not numbering at all.
+  const absentInput = {
+    sectionLabel: "V A",
+    date: "2026-09-07",
+    todayIso: "2026-09-07",
+    marked: true,
+    total: 30,
+    absent: [
+      { id: "s2", rollNo: "11", fullName: "Ishita Rao" },
+      { id: "s1", rollNo: "4", fullName: "Aarav Sharma" },
+    ],
+    leave: [{ id: "s3", rollNo: "19", fullName: "Kabir Nath" }],
+    late: [],
+    halfDay: [],
+  };
+  const absentText = formatAbsentListReply(absentInput);
+  const absentPicks = absentListPicks(absentInput);
+  agree(absentText, absentPicks, "absent list");
+  assert.deepEqual(absentPicks.map((p) => p.n), [4, 11, 19], "the roll is the number");
+  assert.equal(absentPicks[0]!.studentId, "s1");
+  assert.equal(absentPicks[0]!.label, "Aarav Sharma");
+  assert.match(absentText, /Reply with a number/);
+
+  // No roll on a row, or a roll that repeats: there is nothing
+  // unambiguous to type, so nothing is offered rather than something
+  // wrong being accepted.
+  assert.deepEqual(
+    absentListPicks({ ...absentInput, absent: [{ id: "x", rollNo: "", fullName: "No roll" }], leave: [], late: [], halfDay: [] }),
+    [],
+    "a row with no roll offers no number",
+  );
+  assert.deepEqual(
+    absentListPicks({
+      ...absentInput,
+      absent: [{ id: "a", rollNo: "4", fullName: "One" }],
+      leave: [{ id: "b", rollNo: "4", fullName: "Two" }],
+      late: [],
+      halfDay: [],
+    }),
+    [],
+    "a repeated roll offers no number",
+  );
+  assert.equal(
+    formatAbsentListReply({ ...absentInput, absent: [{ id: "x", rollNo: "", fullName: "No roll" }], leave: [], late: [], halfDay: [] })
+      .includes("Reply with a number"),
+    false,
+    "and the reply must not offer one either",
+  );
+
+  // Defaulters — one section keeps the roll; a whole class cannot, since
+  // roll 4 exists in every section, so it falls back to 1..n and moves
+  // the roll into the detail rather than printing two rival numbers.
+  const dRow = (name: string, roll: string, sec: string, paise: number, id: string) => ({
+    sectionLabel: sec,
+    rollNo: roll,
+    fullName: name,
+    overdueAmountPaise: paise,
+    overdueDays: 20,
+    earliestDueOn: "2026-08-10",
+    onPlan: false,
+    studentId: id,
+  });
+  const oneSection = {
+    title: "V A",
+    todayIso: "2026-09-07",
+    wholeClass: false,
+    rows: [dRow("Aarav", "4", "V A", 500000, "s1"), dRow("Ishita", "11", "V A", 300000, "s2")],
+    formatInr: (p: number) => `₹${Math.round(p / 100)}`,
+  };
+  agree(formatClassDefaultersReply(oneSection), classDefaultersPicks(oneSection), "defaulters, one section");
+  assert.deepEqual(classDefaultersPicks(oneSection).map((p) => p.n), [4, 11]);
+  assert.equal(formatClassDefaultersReply(oneSection).includes("(roll 4)"), false, "the roll IS the number here");
+
+  const wholeClass = {
+    ...oneSection,
+    title: "Class V",
+    wholeClass: true,
+    rows: [dRow("Aarav", "4", "V A", 500000, "s1"), dRow("Bhavya", "4", "V B", 400000, "s3")],
+  };
+  const wcText = formatClassDefaultersReply(wholeClass);
+  agree(wcText, classDefaultersPicks(wholeClass), "defaulters, whole class");
+  assert.deepEqual(classDefaultersPicks(wholeClass).map((p) => p.n), [1, 2]);
+  assert.ok(wcText.includes("(roll 4)"), "the roll still shows, just not as the number");
+  assert.equal(classDefaultersPicks(wholeClass)[0]!.commandId, "student_fees", "money list → money");
+
+  // Pending leaves — spans classes, so position, never roll.
+  const leaves = {
+    todayIso: "2026-09-07",
+    scope: "school" as const,
+    rows: [
+      { studentName: "Late Ask", classLabel: "V A", rollNo: "4", fromDate: "2026-09-08", toDate: "2026-09-08", days: 1, typeLabel: "Sick", reason: "fever", requestedAt: "2026-09-07T09:00:00Z", approver: "Class teacher", studentId: "s9" },
+      { studentName: "Early Ask", classLabel: "VI B", rollNo: "4", fromDate: "2026-09-09", toDate: "2026-09-09", days: 1, typeLabel: "Sick", reason: "", requestedAt: "2026-09-06T09:00:00Z", approver: "Principal", studentId: "s8" },
+    ],
+    approvedToday: 0,
+  };
+  agree(formatPendingLeavesReply(leaves), pendingLeavesPicks(leaves), "pending leaves");
+  // Oldest first — and the picks must follow the print order, not the
+  // order the rows arrived in.
+  assert.equal(pendingLeavesPicks(leaves)[0]!.label, "Early Ask");
+  assert.equal(pendingLeavesPicks(leaves)[0]!.studentId, "s8");
+
+  // Which section? — numbered, and picking one re-runs the same command.
+  const opts = [
+    { classId: "c5", sectionId: "s5a", className: "V", sectionName: "A", label: "V A" },
+    { classId: "c5", sectionId: "s5b", className: "V", sectionName: "B", label: "V B" },
+  ];
+  const secText = formatSectionProblem("ambiguous", opts, "5");
+  const secPicks = sectionProblemPicks("ambiguous", opts, "absent_list");
+  agree(secText, secPicks, "section options");
+  assert.equal(secPicks[1]!.section?.sectionId, "s5b");
+  assert.equal(secPicks[1]!.commandId, "absent_list", "the number re-runs what you asked");
+  // "You can only ask about your own sections" lists them as information.
+  // A number there would answer a question nobody asked.
+  assert.deepEqual(sectionProblemPicks("not_allowed", opts, "absent_list"), []);
+  assert.deepEqual(sectionProblemPicks("no_class", [], "absent_list"), []);
+
+  // Which route? — the id is carried, so the pick is exact, and the
+  // original wording is replayed so the minutes are not lost.
+  const routes = [
+    { id: "r1", label: "Bus 3 · Sarnath" },
+    { id: "r2", label: "Bus 30 · Ramnagar" },
+  ];
+  agree(
+    formatRouteNotFound("3", routes.map((r) => r.label)),
+    routePicks(routes, "bus_delay", "bus 3 ko batao 20 minute late"),
+    "route options",
+  );
+  const rp = routePicks(routes, "bus_delay", "bus 3 ko batao 20 minute late");
+  assert.equal(rp[0]!.routeId, "r1");
+  assert.match(
+    String(rp[0]!.rerunText),
+    /20 minute late/,
+    "picking the bus must not lose how late it is",
+  );
+
+  // PTM open times.
+  const slots = [
+    { startAt: "10:00", teacherName: "Meera", free: 2 },
+    { startAt: "10:30", teacherName: "Rakesh", free: 1 },
+  ];
+  const ptmText = formatPtmSlotPicker({
+    studentName: "Riya Verma",
+    eventName: "Term 1 PTM",
+    eventDate: "2026-09-12",
+    slots,
+  });
+  agree(ptmText, ptmSlotPicks(slots, "Riya Verma"), "PTM slots");
+  assert.equal(ptmSlotPicks(slots, "Riya Verma")[1]!.slotAt, "10:30");
+  assert.match(String(ptmSlotPicks(slots, "Riya Verma")[1]!.rerunText), /Riya Verma 10:30/);
+
+  // Help — numbered straight through the groups, because "3" has to mean
+  // one thing, and every number DESCRIBES rather than runs.
+  const menu = ERP_COMMANDS.filter((c) => c.id !== "help");
+  const helpText = formatHelpReply(menu, "Ashish");
+  const hp = helpPicks(menu);
+  agree(helpText, hp, "help menu");
+  assert.deepEqual(hp.map((p) => p.n), menu.map((_, i) => i + 1), "1..n straight through");
+  assert.ok(hp.every((p) => p.describe), "a help number never runs a command");
+  assert.equal(hp.length, menu.length, "every command is reachable by number");
+  assert.match(helpText, /Reply with a number \(\*1\*–\*\d+\*\)/);
+  // Grouped by module, and the numbering follows the printed order.
+  assert.ok(helpText.includes("*Attendance*") && helpText.includes("*Fees*"));
+  assert.equal(hp[0]!.commandId, helpMenuCommands(menu)[0]!.id);
+
+  // And the detail a number gets you.
+  const detail = formatCommandHelpDetail(ERP_COMMANDS.find((c) => c.id === "pay_link")!);
+  assert.ok(detail.includes("Send a payment link to a family"));
+  for (const ex of ERP_COMMANDS.find((c) => c.id === "pay_link")!.examples) {
+    assert.ok(detail.includes(ex), "every accepted phrasing is shown, not just one");
+  }
+  assert.match(detail, /confirm card/, "a write says so plainly");
+  const appOnly = formatCommandHelpDetail(ERP_COMMANDS.find((c) => c.id === "post_homework")!);
+  assert.match(appOnly, /app only/i);
+}
+
+// ── No server file may ask the browser for the templates ──────────────
+// `ensureWaTemplatesHydrated` fetches the relative URL
+// `/api/school-data/desk-slice/wa_templates`. In a browser that resolves
+// against the page. Under Node it throws, the throw is caught, and
+// `loadWaTemplates()` quietly returns the built-in defaults — in which
+// NOTHING is approved. So every parent-facing command reported "no
+// approved template" no matter what the school had approved with Meta:
+// the pay link, the fee reminder, the class message, the bus delay, the
+// PTM notice, the staff broadcast, and the held teacher messages.
+//
+// It failed silently and identically in all seven places, which is why a
+// grep is the test. Server code reads templates through
+// `waTemplatesRead.server.ts`.
+{
+  const dir = path.join(import.meta.dirname, ".");
+  const offenders: string[] = [];
+  const walk = (d: string) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const full = path.join(d, e.name);
+      if (e.isDirectory()) {
+        walk(full);
+        continue;
+      }
+      if (!e.name.endsWith(".server.ts")) continue;
+      // The reader itself names both, in the comment explaining why.
+      if (e.name === "waTemplatesRead.server.ts") continue;
+      const src = fs.readFileSync(full, "utf8");
+      // Import specifiers, not prose: a comment about the bug is fine.
+      if (/from "@\/lib\/waTemplatesPersistence"|import\("@\/lib\/waTemplatesPersistence"\)|\bloadWaTemplates\(\)/.test(src)) {
+        offenders.push(path.relative(dir, full));
+      }
+    }
+  };
+  walk(dir);
+  assert.deepEqual(
+    offenders,
+    [],
+    `server code must read templates via waTemplatesRead.server.ts, not the browser hydrate path: ${offenders.join(", ")}`,
+  );
 }
 
 console.log("erpCommands.selftest.ts OK");

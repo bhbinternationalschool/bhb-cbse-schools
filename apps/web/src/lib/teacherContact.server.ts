@@ -21,8 +21,7 @@ import {
 } from "@/lib/teacherContact";
 import { findGrid, loadTimetable } from "@/lib/timetable";
 import { buildWaTemplateBodyComponent, sendWhatsAppTemplate, sendWhatsAppText } from "@/lib/waSend";
-import { listApprovedTemplates, loadWaTemplates } from "@/lib/waTemplates";
-import { ensureWaTemplatesHydrated } from "@/lib/waTemplatesPersistence";
+import { approvedTemplatesServer } from "@/lib/waTemplatesRead.server";
 import { sendPushToSubjects } from "@/lib/webPush.server";
 
 /** Class teacher(s) first, then every teacher on the section's timetable. */
@@ -217,11 +216,12 @@ export async function flushHeldTeacherMessages(): Promise<{ delivered: number; f
 
 /** The approved "teacher_message" template, English first, if Meta has approved one. */
 async function approvedTeacherTemplate() {
-  try {
-    await ensureWaTemplatesHydrated();
-  } catch {
-    /* fall through to whatever is cached locally */
-  }
-  const approved = listApprovedTemplates(loadWaTemplates()).filter((t) => t.familyKey === "teacher_message");
+  // Read the desk slice directly. `ensureWaTemplatesHydrated` is the browser
+  // path — it fetches a relative URL, which Node rejects — so on the server
+  // it always fell through to the built-in defaults, where nothing is
+  // approved, and every held teacher message reported "no template".
+  const read = await approvedTemplatesServer();
+  if (!read.ok) return null;
+  const approved = read.templates.filter((t) => t.familyKey === "teacher_message");
   return approved.find((t) => t.language === "en") ?? approved[0] ?? null;
 }

@@ -12,6 +12,13 @@ import {
   flowKindFromRole,
   flowKindFromVisitorPurpose,
   isUnifiedMenuCommand,
+  looksLikeForward,
+  readVisitorName,
+  visitorNameRetryText,
+  VISITOR_ASK_LIMIT,
+  parseStaffBotSwitch,
+  staffBotAwake,
+  STAFF_BOT_WINDOW_MINUTES,
   type WaVisitorPurpose,
 } from "@/lib/waUnifiedBotEngine";
 import {
@@ -57,11 +64,24 @@ export type WaUnifiedSession = {
   mobile: string;
   displayName: string;
   visitorName: string;
-  phase: "menu" | "pick_role" | "collect_name" | "collect_purpose" | "active";
+  phase: "menu" | "pick_role" | "collect_name" | "collect_purpose" | "active" | "parked";
   activeFlow: WaUnifiedFlow | null;
   updatedAt: string;
   /** Pending gate check-in (VISIT keyword / poster WhatsApp QR). */
   gate?: WaGateVisitPending | null;
+  /**
+   * Until when the staff keyword bot answers this person, ISO. Unset or
+   * past means the desk answers their commands and nothing answers the
+   * rest — which is the point: on a number staff also use to talk to the
+   * school, a bot that replies to everything is an interruption.
+   */
+  staffBotUntil?: string;
+  /**
+   * How many times we have re-asked this unknown caller for a name or a
+   * purpose. At VISITOR_ASK_LIMIT the bot stops asking and parks the
+   * thread for a person, rather than sending the same menu forever.
+   */
+  visitorAsks?: number;
 };
 
 type WaUnifiedStore = {
@@ -188,6 +208,7 @@ async function delegateActiveFlow(
       accuracyM?: number;
     };
     audio?: { mediaId: string; mimeType?: string } | null;
+    document?: { mediaId: string; mimeType?: string; fileName?: string } | null;
   },
   identity: WaResolvedIdentity,
   session: WaUnifiedSession,
@@ -250,6 +271,91 @@ async function delegateActiveFlow(
   }
 
   if (flow === "owner" || flow === "staff") {
+    // The staff keyword bot answers only when it has been summoned.
+    //
+    // Before this, it answered every staff message the desk stepped aside
+    // from. On a number staff also use to talk to the school, that is a
+    // bot cutting into conversation: a greeting got a menu, a half-typed
+    // thought got a canned line about admissions. The desk stays where it
+    // was — it answers commands and says nothing else — and this bot now
+    // waits to be asked for.
+    const nowMs = Date.now();
+    const sw = parseStaffBotSwitch(opts.text);
+    if (sw) {
+      const store = await readStore();
+      const base = store.sessions[mobile10] ?? session;
+      await writeStore({
+        ...store,
+        sessions: {
+          ...store.sessions,
+          [mobile10]: {
+            ...base,
+            staffBotUntil:
+              sw === "on"
+                ? new Date(nowMs + STAFF_BOT_WINDOW_MINUTES * 60_000).toISOString()
+                : "",
+            updatedAt: nowIso(),
+          },
+        },
+      });
+      if (sw === "off") {
+        await sendBotReply({
+          mobile10,
+          displayName: session.displayName || identity.displayName,
+          category: categoryForUnifiedAudience(flow, flow),
+          audience: "staff_bot_off",
+          flow,
+          text: "School bot closed. Commands still work as always — send *help* for the list.",
+          inbound: { text: opts.text, waMessageId: opts.waMessageId },
+        });
+        return { replied: true, escalate: false, audience: "staff_bot_off", stub: false };
+      }
+      const pack = menuKnownUserGreeting(identity);
+      await sendBotReply({
+        mobile10,
+        displayName: session.displayName || identity.displayName,
+        category: categoryForUnifiedAudience(flow, flow),
+        audience: "staff_bot_on",
+        flow,
+        menu: pack,
+        inbound: { text: opts.text, waMessageId: opts.waMessageId },
+      });
+      return { replied: true, escalate: false, audience: "staff_bot_on", stub: false };
+    }
+
+    if (!staffBotAwake(session.staffBotUntil, nowMs)) {
+      // Silence, not a reply saying it will be silent — a "I'm not
+      // answering that" on every message is the same interruption wearing
+      // an apology. The message is still recorded in Comms → WhatsApp
+      // inbox, so the office can see what was sent and answer as a human.
+      await sendBotReply({
+        mobile10,
+        displayName: session.displayName || identity.displayName,
+        category: categoryForUnifiedAudience(flow, flow),
+        audience: "staff_quiet",
+        flow,
+        inbound: { text: opts.text || "", waMessageId: opts.waMessageId },
+      });
+      return { replied: false, escalate: false, audience: "staff_quiet", stub: false };
+    }
+
+    // Awake, and this message keeps it awake.
+    {
+      const store = await readStore();
+      const base = store.sessions[mobile10] ?? session;
+      await writeStore({
+        ...store,
+        sessions: {
+          ...store.sessions,
+          [mobile10]: {
+            ...base,
+            staffBotUntil: new Date(nowMs + STAFF_BOT_WINDOW_MINUTES * 60_000).toISOString(),
+            updatedAt: nowIso(),
+          },
+        },
+      });
+    }
+
     const intent = detectStaffBotIntent(opts.text);
     if (intent === "menu") {
       const pack = menuKnownUserGreeting(identity);
@@ -426,6 +532,39 @@ async function delegateActiveFlow(
   if (flow === "job" || flow === "meeting" || flow === "other") {
     const name = session.visitorName || session.displayName || "Guest";
     const note = opts.text.trim();
+
+    // A CV sent after choosing JOB is the application. Capture it into the
+    // same inbox the careers page fills, so the office has one pile rather
+    // than a page, a CRM thread and somebody's phone. The CRM thread below
+    // still gets the message either way — this adds a record, it does not
+    // take the conversation away from the humans.
+    if (flow === "job" && opts.document?.mediaId) {
+      const { captureWhatsAppJobCv } = await import(
+        "@/lib/jobApplicationsIntake.server"
+      );
+      const captured = await captureWhatsAppJobCv({
+        mediaId: opts.document.mediaId,
+        mobile10,
+        applicantName: name,
+      });
+      await sendBotReply({
+        mobile10,
+        displayName: name,
+        category: categoryForUnifiedAudience("visitor_job", "job"),
+        audience: "visitor_job",
+        flow,
+        text: captured.ok
+          ? "Thank you — the school office has your CV. If it matches a vacancy, someone will call you."
+          : "Thank you. We could not read that file, so please send your CV as a PDF or a clear photo, or reply with your subject and the classes you teach.",
+        inbound: { text: opts.text || "[CV]", waMessageId: opts.waMessageId },
+      });
+      return {
+        replied: true,
+        escalate: captured.ok,
+        audience: "visitor_job",
+        stub: false,
+      };
+    }
     await handleWaCrmBotInbound({
       ...inbound,
       text: note ? `[${flow.toUpperCase()}] ${note}` : `HUMAN`,
@@ -507,6 +646,12 @@ export async function handleWaUnifiedInbound(opts: {
   };
   /** Voice note (audio media) — transcribed only for staff command flows. */
   audio?: { mediaId: string; mimeType?: string } | null;
+  /**
+   * A document or photo. Only the job flow reads it today, where the
+   * attachment IS the application; every other flow ignores it exactly as
+   * it did before, so a parent sending a photo is unaffected.
+   */
+  document?: { mediaId: string; mimeType?: string; fileName?: string } | null;
 }): Promise<{
   replied: boolean;
   escalate: boolean;
@@ -589,7 +734,19 @@ export async function handleWaUnifiedInbound(opts: {
     return { replied: ok, escalate: false, audience: gate.audience, stub: !ok };
   }
 
-  if (isUnifiedMenuCommand(text)) {
+  // A staff member's greeting is a greeting, and their "help" is a
+  // question for the command desk — neither is a request for the visitor
+  // menu. Both are allowed past this branch and reach delegateActiveFlow
+  // below. "menu", "main" and "start" still reset, for everyone.
+  const isStaff =
+    identity.isKnown &&
+    identity.roles.some((role) => ["teacher", "staff", "owner"].includes(flowKindFromRole(role)));
+  // An unknown caller already in a conversation who forwards a link or
+  // drops a photo with no caption is not asking for the welcome menu.
+  // Empty text reads as a menu command, so without this a bare photo
+  // re-sent the whole welcome every time one arrived.
+  const visitorForward = !identity.isKnown && !!session && looksLikeForward(text);
+  if (!visitorForward && isUnifiedMenuCommand(text, { staff: isStaff })) {
     session = sessionFor(mobile10, identity, opts.profileName);
     if (identity.isKnown && identity.roles.length === 1) {
       session.phase = "active";
@@ -638,21 +795,74 @@ export async function handleWaUnifiedInbound(opts: {
     }
   }
 
+  // ── An unknown caller who has been asked enough ───────────────────
+  // The bot gave up and handed the thread to a person. Everything is
+  // still logged; nothing more is sent. They get out by saying "hi" or
+  // "menu" (handled above), or by finally naming what they want.
+  if (!identity.isKnown && session.phase === "parked") {
+    const purpose = detectVisitorPurpose(text);
+    if (!purpose) {
+      await sendBotReply({
+        mobile10,
+        displayName: session.visitorName || identity.displayName,
+        category: "general",
+        audience: "visitor_parked",
+        inbound: inboundLog,
+      });
+      return { replied: false, escalate: false, audience: "visitor_parked", stub: false };
+    }
+    // They said something real after all. Pick them back up.
+    session.phase = "collect_purpose";
+    session.visitorAsks = 0;
+  }
+
   if (!identity.isKnown && session.phase === "collect_name") {
-    const name = text.trim();
-    if (name.length < 2) {
+    // A forwarded link or a bare media drop is a broadcast, not an
+    // answer. Log it and say nothing — replying is how a "good morning"
+    // chain became a three-week correspondence with a bot.
+    if (looksLikeForward(text)) {
       await sendBotReply({
         mobile10,
         displayName: identity.displayName,
         category: "general",
-        audience: "visitor",
-        text: "Please send your full name (at least 2 characters).",
+        audience: "visitor_forward",
         inbound: inboundLog,
       });
-      return { replied: true, escalate: false, audience: "visitor", stub: false };
+      return { replied: false, escalate: false, audience: "visitor_forward", stub: false };
     }
+    const read = readVisitorName(text);
+    if (!read.ok) {
+      const asks = (session.visitorAsks ?? 0) + 1;
+      session.visitorAsks = asks;
+      const giveUp = asks >= VISITOR_ASK_LIMIT;
+      if (giveUp) session.phase = "parked";
+      store = {
+        ...store,
+        sessions: { ...store.sessions, [mobile10]: { ...session, updatedAt: nowIso() } },
+      };
+      await writeStore(store);
+      await sendBotReply({
+        mobile10,
+        displayName: identity.displayName,
+        category: "general",
+        audience: giveUp ? "visitor_parked" : "visitor",
+        text: giveUp
+          ? "I'll pass this to the school office and someone will reply. Send *menu* any time to start again."
+          : visitorNameRetryText(read.reason),
+        inbound: inboundLog,
+      });
+      return {
+        replied: true,
+        // Parking is the point at which a person has to look at it.
+        escalate: giveUp,
+        audience: giveUp ? "visitor_parked" : "visitor",
+        stub: false,
+      };
+    }
+    const name = read.name;
     session.visitorName = name;
     session.displayName = name;
+    session.visitorAsks = 0;
     session.phase = "collect_purpose";
     store = {
       ...store,
@@ -674,6 +884,37 @@ export async function handleWaUnifiedInbound(opts: {
   if (!identity.isKnown && session.phase === "collect_purpose") {
     const purpose = detectVisitorPurpose(text);
     if (!purpose) {
+      // Same rule as the name step: a forward is logged, never answered.
+      if (looksLikeForward(text)) {
+        await sendBotReply({
+          mobile10,
+          displayName: session.visitorName || session.displayName,
+          category: "general",
+          audience: "visitor_forward",
+          inbound: inboundLog,
+        });
+        return { replied: false, escalate: false, audience: "visitor_forward", stub: false };
+      }
+      const asks = (session.visitorAsks ?? 0) + 1;
+      session.visitorAsks = asks;
+      const giveUp = asks >= VISITOR_ASK_LIMIT;
+      if (giveUp) session.phase = "parked";
+      store = {
+        ...store,
+        sessions: { ...store.sessions, [mobile10]: { ...session, updatedAt: nowIso() } },
+      };
+      await writeStore(store);
+      if (giveUp) {
+        await sendBotReply({
+          mobile10,
+          displayName: session.visitorName || session.displayName,
+          category: "general",
+          audience: "visitor_parked",
+          text: "I'll pass this to the school office and someone will reply. Send *menu* any time to start again.",
+          inbound: inboundLog,
+        });
+        return { replied: true, escalate: true, audience: "visitor_parked", stub: false };
+      }
       const purposePack = menuVisitorPurpose(session.visitorName || "there");
       await sendBotReply({
         mobile10,
@@ -685,6 +926,7 @@ export async function handleWaUnifiedInbound(opts: {
       });
       return { replied: true, escalate: false, audience: "visitor", stub: false };
     }
+    session.visitorAsks = 0;
     const flow = flowKindFromVisitorPurpose(purpose);
     session.activeFlow = flow;
     session.phase = "active";
