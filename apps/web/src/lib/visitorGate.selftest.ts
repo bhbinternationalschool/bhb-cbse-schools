@@ -21,6 +21,8 @@ import {
   releaseRefusal,
 } from "./api/v1/staffVisitors.server";
 import { defaultMobileAccess, resolveMobileFeatures } from "./mobileFeatures";
+import { defaultBuiltInRoles, inferRoleCodes, normalizeRbacState } from "./rbac";
+import type { MastersState } from "./masters";
 import type { GatePass, VisitorEntry, VisitorState } from "./visitors";
 
 console.log("visitorGate.selftest.ts");
@@ -269,5 +271,108 @@ assert.equal(
   false,
   "letting somebody log visitors is not letting them hand over a child",
 );
+
+// ── The gate role: a guard gets the gate, and only the gate ───────────
+// Before this role existed a gateman matched no designation pattern, fell
+// through to `support`, and held no visitors grant — so the gate could not
+// reach their phone without two separate by-name grants.
+{
+  const gateRole = defaultBuiltInRoles().find((r) => r.code === "gate");
+  assert.ok(gateRole, "the gate role is built in");
+  const visitors = gateRole!.permissions.find((p) => p.module === "visitors");
+  assert.deepEqual(
+    visitors?.actions,
+    ["view", "create"],
+    "see who is on campus, and log someone in or out",
+  );
+  assert.equal(
+    visitors?.actions.includes("edit"),
+    false,
+    "no visitors.edit — releasing a child on a gate pass is a separate trust",
+  );
+  // Nothing else about the school is the guard's business.
+  for (const mod of ["fees", "students", "marks", "staff", "transport"]) {
+    assert.equal(
+      gateRole!.permissions.some((p) => p.module === mod),
+      false,
+      `the gate role holds no ${mod} grant`,
+    );
+  }
+
+  const gate = resolveMobileFeatures({
+    roleCodes: ["gate"],
+    access: defaultMobileAccess(),
+    can: everything,
+  });
+  assert.ok(gate.features.includes("visitor_gate"), "the tile is on by default");
+  assert.equal(
+    gate.features.includes("gate_pass_release"),
+    false,
+    "the pass release stays off, and the role holds no edit to back it anyway",
+  );
+  assert.equal(gate.features.includes("fee_take"), false);
+  assert.equal(gate.features.includes("route_manifest"), false);
+}
+
+// ── A guard on the roster resolves to it, however it is spelt ─────────
+{
+  const staffMasters = (designation: string): MastersState =>
+    ({
+      designations: [{ id: "des_1", code: "", name: designation }],
+      staff: [
+        {
+          id: "stf_guard",
+          fullName: "Gate staff",
+          designationId: "des_1",
+          stream: "non_teaching",
+          mobile: "9000000001",
+          status: "active",
+        },
+      ],
+    }) as unknown as MastersState;
+
+  const session = {
+    persona: "staff" as const,
+    fullName: "Gate staff",
+    staffId: "stf_guard",
+    roleCode: "",
+  };
+  for (const spelling of ["Guard", "Gateman", "Gate Man", "Watchman", "Security Guard", "Chowkidar"]) {
+    assert.ok(
+      inferRoleCodes(session, staffMasters(spelling)).includes("gate"),
+      `"${spelling}" is a gateman`,
+    );
+  }
+  // The people who were already falling through to support still do.
+  for (const other of ["Sweeper", "Gardner", "Peon"]) {
+    assert.deepEqual(
+      inferRoleCodes(session, staffMasters(other)),
+      ["support"],
+      `"${other}" is unchanged`,
+    );
+  }
+  // And a driver is still a driver, not a guard.
+  assert.ok(inferRoleCodes(session, staffMasters("Transport Attendent")).includes("driver"));
+}
+
+// ── An existing tenant picks the role up ──────────────────────────────
+// Schools already have their roles saved, so a new built-in that only
+// existed in the defaults would never reach them.
+{
+  const persisted = normalizeRbacState({
+    version: 1,
+    roles: defaultBuiltInRoles().filter((r) => r.code !== "gate"),
+    assignments: [],
+    audit: [],
+  });
+  assert.ok(
+    persisted.roles.some((r) => r.code === "gate"),
+    "the gate role is added to a state saved before it existed",
+  );
+  assert.ok(
+    persisted.mobile?.roleFeatures?.gate?.includes("visitor_gate"),
+    "and its app tile comes with it, without the office configuring anything",
+  );
+}
 
 console.log("OK");

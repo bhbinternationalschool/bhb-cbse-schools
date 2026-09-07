@@ -411,6 +411,11 @@ export function defaultMobileAccess(): MobileAccessState {
       teacher: [...SELF_SERVICE, ...TEACHING],
       transport: [...SELF_SERVICE, "route_manifest", "transport_requests", "students_view"],
       driver: [...SELF_SERVICE, "route_manifest"],
+      // The gate, and nothing else. `gate_pass_release` is left off on
+      // purpose: handing a child over is a separate trust from writing
+      // down who came to the office, and the role holds no `visitors.edit`
+      // to back it even if somebody switches the tile on.
+      gate: [...SELF_SERVICE, "visitor_gate"],
       support: [...SELF_SERVICE],
       parent: [],
     },
