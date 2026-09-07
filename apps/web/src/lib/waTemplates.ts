@@ -23,23 +23,34 @@ export type WaTemplateCategory =
 
 export type WaTemplateLanguage = "en" | "hi";
 
-export type WaTemplateModule =
-  | "admissions"
-  | "fees"
-  | "attendance"
-  | "homework"
-  | "exams"
-  | "ptm"
-  | "leave"
-  | "vault"
-  | "comms"
-  | "store"
-  | "transport"
-  | "certificates"
-  | "rte"
-  | "field"
-  | "staff"
-  | "general";
+/**
+ * The modules a template can belong to.
+ *
+ * The LIST is the source and the type is derived from it, not the other way
+ * round. A hand-kept copy beside a union drifts, and the drift is invisible:
+ * the routing screen would simply not offer the module nobody added to the
+ * list, and that module would quietly keep using the default number.
+ */
+export const WA_TEMPLATE_MODULES = [
+  "admissions",
+  "fees",
+  "attendance",
+  "homework",
+  "exams",
+  "ptm",
+  "leave",
+  "vault",
+  "comms",
+  "store",
+  "transport",
+  "certificates",
+  "rte",
+  "field",
+  "staff",
+  "general",
+] as const;
+
+export type WaTemplateModule = (typeof WA_TEMPLATE_MODULES)[number];
 
 export type WaHeaderFormat =
   | "NONE"
@@ -1295,6 +1306,7 @@ export function updateTemplateLocal(
       | "localFallbackBody"
       | "mediaUrl"
       | "mediaFileName"
+      | "senderNumberId"
       | "headerFormat"
       | "headerText"
       | "carousel"

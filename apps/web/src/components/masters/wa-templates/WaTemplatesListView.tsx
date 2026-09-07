@@ -37,6 +37,7 @@ export function WaTemplatesListView({
   syncing,
   onSyncMeta,
   onCreate,
+  onOpenNumbers,
   onEdit,
 }: {
   state: WaTemplatesState;
@@ -45,6 +46,7 @@ export function WaTemplatesListView({
   syncing: boolean;
   onSyncMeta: () => void;
   onCreate: () => void;
+  onOpenNumbers: () => void;
   onEdit: (id: string) => void;
 }) {
   const [tab, setTab] = useState<ListTab>("approved");
@@ -99,6 +101,14 @@ export function WaTemplatesListView({
               {notice}
             </span>
           ) : null}
+          <button
+            type="button"
+            className={waBtnTeal}
+            onClick={onOpenNumbers}
+            title="Which of the school's numbers each module sends from"
+          >
+            Numbers
+          </button>
           <button
             type="button"
             disabled={readOnly}
