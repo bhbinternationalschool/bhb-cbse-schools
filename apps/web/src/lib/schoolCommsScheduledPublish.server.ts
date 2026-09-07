@@ -62,7 +62,7 @@ export async function loadSchoolCommsStateServer(): Promise<SchoolCommsState> {
   );
 }
 
-async function persistSchoolCommsStateServer(
+export async function persistSchoolCommsStateServer(
   state: SchoolCommsState,
 ): Promise<void> {
   await Promise.all([

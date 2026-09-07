@@ -547,6 +547,8 @@ export async function confirmClassChannelDraft(input: {
       ok: true;
       draft: ClassChannelDraft;
       broadcast: { sent: number; stub: number };
+      /** How the ERP write went — see `applyDraftToErpServer`. */
+      erp: ClassChannelErpApply;
     }
   | { ok: false; error: string }
 > {
@@ -564,14 +566,80 @@ export async function confirmClassChannelDraft(input: {
   }
   await writeStore(store);
   const bc = await broadcastClassChannelDraft(draft.id);
+  // The ERP write happens here, not in a browser effect: parents have just
+  // been messaged, and a homework post they can see must exist in the
+  // school's own record whether or not anyone opens Comms today.
+  const erp = await applyDraftToErpServer(draft.id);
+  const fresh = await readStore();
+  const latest = fresh.drafts.find((d) => d.id === draft.id) ?? draft;
   if (!bc.ok) {
-    return { ok: true, draft, broadcast: { sent: 0, stub: 0 } };
+    return { ok: true, draft: latest, broadcast: { sent: 0, stub: 0 }, erp };
   }
   return {
     ok: true,
-    draft,
+    draft: latest,
     broadcast: { sent: bc.sent, stub: bc.stub },
+    erp,
   };
+}
+
+export type ClassChannelErpApply =
+  /** Written to the ERP and the draft marked applied. */
+  | { status: "applied"; detail: string }
+  /** Nothing to write — a question or a chat message with no ERP mapping. */
+  | { status: "skipped"; detail: string }
+  /** Tried and failed; the draft stays `confirmed` for the browser retry. */
+  | { status: "failed"; error: string };
+
+/**
+ * Write a confirmed draft into homework / notices and mark it applied.
+ *
+ * Marking it applied is what stops the browser panel writing it a second
+ * time: `ClassChannelsPanel` only applies drafts still marked `confirmed`,
+ * so a failure here leaves that fallback intact rather than losing the
+ * record entirely.
+ */
+export async function applyDraftToErpServer(
+  draftId: string,
+): Promise<ClassChannelErpApply> {
+  const store = await readStore();
+  const draft = store.drafts.find((d) => d.id === draftId);
+  if (!draft) return { status: "failed", error: "Draft not found" };
+  if (draft.status === "applied") {
+    return { status: "skipped", detail: "Already applied" };
+  }
+  if (draft.status !== "confirmed") {
+    return { status: "failed", error: "Draft not confirmed" };
+  }
+  if (draft.erpTarget === "none") {
+    return { status: "skipped", detail: "No ERP module mapping" };
+  }
+  const channel = store.channels.find((c) => c.id === draft.channelId);
+  if (!channel) return { status: "failed", error: "Channel not found" };
+
+  const { applyClassChannelDraftServer } = await import(
+    "@/lib/waClassChannelApply.server"
+  );
+  let res;
+  try {
+    res = await applyClassChannelDraftServer(draft, {
+      classId: channel.classId,
+      sectionId: channel.sectionId,
+      academicYearCode: channel.academicYearCode,
+    });
+  } catch (e) {
+    const error = e instanceof Error ? e.message : "ERP write failed";
+    console.warn("[class-channel] erp apply threw", error);
+    return { status: "failed", error };
+  }
+  if (!res.ok) {
+    console.warn("[class-channel] erp apply failed", res.error);
+    return { status: "failed", error: res.error };
+  }
+  if (!res.applied) return { status: "skipped", detail: res.detail };
+
+  await markClassChannelDraftApplied(draftId);
+  return { status: "applied", detail: res.detail };
 }
 
 export async function cancelClassChannelDraft(
@@ -732,7 +800,16 @@ export async function handleWaClassChannelInbound(msg: {
       if (!conf.ok) {
         replyText = conf.error;
       } else {
-        replyText = `Published · notified ~${conf.broadcast.sent + conf.broadcast.stub} contacts (${conf.broadcast.sent} sent${conf.broadcast.stub ? `, ${conf.broadcast.stub} stub` : ""}).\nERP will pick this up in Class channels / Homework / Notices.`;
+        // Say what actually happened to the ERP record. "Will pick this
+        // up" was the old wording, and it was only true if somebody
+        // opened Comms in a browser afterwards.
+        const erpLine =
+          conf.erp.status === "applied"
+            ? `Saved in the ERP · ${conf.erp.detail}.`
+            : conf.erp.status === "skipped"
+              ? "Nothing to file in the ERP for this one."
+              : `⚠️ Parents were told, but the ERP record could not be saved (${conf.erp.error}). The office can retry it in Comms → Class channels.`;
+        replyText = `Published · notified ~${conf.broadcast.sent + conf.broadcast.stub} contacts (${conf.broadcast.sent} sent${conf.broadcast.stub ? `, ${conf.broadcast.stub} stub` : ""}).\n${erpLine}`;
         const fresh = await readStore();
         const th = fresh.threads.find((t) => t.id === thread.id);
         if (th) {

@@ -94,7 +94,10 @@ export function ClassChannelsPanel() {
       setThreads(Array.isArray(json.threads) ? json.threads : []);
       if (!selectedRef.current && ch[0]) setSelectedChannelId(ch[0].id);
 
-      // Auto-apply confirmed drafts into ERP modules
+      // Fallback only. The ERP write now happens server-side the moment a
+      // draft is confirmed (see applyDraftToErpServer), which marks the
+      // draft "applied"; anything still sitting at "confirmed" is either
+      // from before that existed or failed there, so it is retried here.
       for (const d of json.drafts || []) {
         if (d.status !== "confirmed") continue;
         const channel = ch.find((c) => c.id === d.channelId);
@@ -176,12 +179,17 @@ export function ClassChannelsPanel() {
         error?: string;
         draft?: Draft;
         broadcast?: { sent: number; stub: number };
+        erp?: { status: "applied" | "skipped" | "failed"; detail?: string; error?: string };
       };
       if (!res.ok) {
         setError(json.error || "Confirm failed");
         return;
       }
-      if (json.draft) {
+      // The server writes the ERP record itself now and returns what
+      // happened. Only retry from the browser when it could not — writing
+      // here as well would file the same homework twice.
+      let erp = json.erp ?? null;
+      if (json.draft && (!erp || erp.status === "failed")) {
         const channel = channels.find((c) => c.id === json.draft!.channelId);
         if (channel) {
           const applied = applyClassChannelDraftToErp(json.draft, channel);
@@ -194,14 +202,27 @@ export function ClassChannelsPanel() {
                 draftId: json.draft.id,
               }),
             });
+            erp = { status: "applied", detail: applied.detail };
+          } else if (!erp) {
+            erp = { status: "failed", error: applied.error };
           }
         }
       }
       await refresh();
       const bc = json.broadcast;
-      flash(
-        `Published · WA ${bc?.sent ?? 0} sent${bc?.stub ? `, ${bc.stub} stub` : ""} · ERP updated`,
-      );
+      // Say which of the two writes actually happened. "ERP updated" used
+      // to be printed whether or not anything reached the ERP.
+      const erpBit =
+        erp?.status === "applied"
+          ? "ERP updated"
+          : erp?.status === "skipped"
+            ? "nothing to file in the ERP"
+            : erp
+              ? `ERP write failed (${erp.error || "unknown"})`
+              : "ERP pending";
+      const line = `Published · WA ${bc?.sent ?? 0} sent${bc?.stub ? `, ${bc.stub} stub` : ""} · ${erpBit}`;
+      if (erp?.status === "failed") setError(line);
+      else flash(line);
     } finally {
       setBusy(false);
     }
