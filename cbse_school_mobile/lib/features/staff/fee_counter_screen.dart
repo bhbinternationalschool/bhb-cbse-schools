@@ -55,8 +55,9 @@ class _FeeCounterScreenState extends State<FeeCounterScreen> {
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() => _error = "Could not reach the school server.");
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -67,7 +68,7 @@ class _FeeCounterScreenState extends State<FeeCounterScreen> {
     final hits = _hits;
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Collect fees", style: TextStyle(fontSize: 16)),
+        title: const Text("Collect fees", style: AppText.titleMedium),
       ),
       body: Column(
         children: [
@@ -101,7 +102,7 @@ class _FeeCounterScreenState extends State<FeeCounterScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Text(
                 _error!,
-                style: const TextStyle(color: AppColors.danger, fontSize: 12.5),
+                style: AppText.bodySmall.copyWith(color: AppColors.danger),
               ),
             ),
           Expanded(
@@ -114,7 +115,7 @@ class _FeeCounterScreenState extends State<FeeCounterScreen> {
                       child: Text(
                         "Nobody matched. Try the admission number, or the parent's mobile.",
                         textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 13, color: AppColors.muted),
+                        style: AppText.bodyMediumMuted,
                       ),
                     ),
                   )
@@ -134,18 +135,13 @@ class _FeeCounterScreenState extends State<FeeCounterScreen> {
                           ),
                           title: Text(
                             s.fullName,
-                            style: const TextStyle(
-                              fontSize: 13.5,
+                            style: AppText.bodyMediumInk.copyWith(
                               fontWeight: FontWeight.w600,
-                              color: AppColors.ink,
                             ),
                           ),
                           subtitle: Text(
                             "${s.classLabel}${s.admissionNo.isEmpty ? "" : " · ${s.admissionNo}"} · ${s.guardianName}",
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: AppColors.muted,
-                            ),
+                            style: AppText.bodySmallMuted,
                           ),
                           trailing: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -153,21 +149,17 @@ class _FeeCounterScreenState extends State<FeeCounterScreen> {
                             children: [
                               Text(
                                 owes ? s.openLabel : "Clear",
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w700,
+                                style: AppText.bodyMedium.copyWith(
                                   color: owes
                                       ? AppColors.danger
                                       : AppColors.success,
+                                  fontWeight: FontWeight.w700,
                                 ),
                               ),
                               if (owes)
                                 Text(
                                   "${s.dueCount} due${s.dueCount == 1 ? "" : "s"}",
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    color: AppColors.muted,
-                                  ),
+                                  style: AppText.labelMediumMuted,
                                 ),
                             ],
                           ),
@@ -186,7 +178,7 @@ class _Hint extends StatelessWidget {
   const _Hint();
 
   @override
-  Widget build(BuildContext context) => const Center(
+  Widget build(BuildContext context) => Center(
     child: Padding(
       padding: EdgeInsets.all(28),
       child: Column(
@@ -197,7 +189,7 @@ class _Hint extends StatelessWidget {
           Text(
             "Find the child first.\nThe receipt is issued by the school's own book, so it continues the same numbering as the counter.",
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 13, color: AppColors.muted, height: 1.5),
+            style: AppText.bodyMediumMuted.copyWith(height: 1.5),
           ),
         ],
       ),
@@ -261,8 +253,9 @@ class _CounterScreenState extends State<CounterScreen> {
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() => _error = "Could not reach the school server.");
+      }
     }
   }
 
@@ -286,15 +279,12 @@ class _CounterScreenState extends State<CounterScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(due.label, style: const TextStyle(fontSize: 15)),
+        title: Text(due.label, style: AppText.titleSmall),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              "Outstanding ${due.balanceLabel}",
-              style: const TextStyle(fontSize: 12.5),
-            ),
+            Text("Outstanding ${due.balanceLabel}", style: AppText.bodySmall),
             const SizedBox(height: 8),
             TextField(
               controller: ctl,
@@ -363,15 +353,12 @@ class _CounterScreenState extends State<CounterScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              "From ${c.guardianName}",
-              style: const TextStyle(fontSize: 13),
-            ),
-            Text("By ${mode.label}", style: const TextStyle(fontSize: 13)),
+            Text("From ${c.guardianName}", style: AppText.bodyMedium),
+            Text("By ${mode.label}", style: AppText.bodyMedium),
             const SizedBox(height: 8),
             const Text(
               "A receipt is issued at once and the parent is notified.",
-              style: TextStyle(fontSize: 12, color: AppColors.muted),
+              style: AppText.bodySmallMuted,
             ),
           ],
         ),
@@ -443,12 +430,12 @@ class _CounterScreenState extends State<CounterScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(widget.student.fullName, style: const TextStyle(fontSize: 15)),
+            Text(widget.student.fullName, style: AppText.titleSmall),
             Text(
               c == null
                   ? widget.student.classLabel
                   : "${c.guardianName} · ${c.mobile}",
-              style: const TextStyle(fontSize: 11, color: AppColors.muted),
+              style: AppText.labelMediumMuted,
             ),
           ],
         ),
@@ -480,21 +467,18 @@ class _CounterScreenState extends State<CounterScreen> {
                     padding: const EdgeInsets.only(top: 6, bottom: 4),
                     child: Text(
                       "${child.fullName} · ${child.classLabel}${child.isPrimary ? "" : " (sibling)"}",
-                      style: const TextStyle(
-                        fontSize: 13,
+                      style: AppText.bodyMediumInk.copyWith(
                         fontWeight: FontWeight.w700,
-                        color: AppColors.ink,
                       ),
                     ),
                   ),
                   if (child.dues.isEmpty)
-                    const Card(
+                    Card(
                       child: Padding(
                         padding: EdgeInsets.all(12),
                         child: Text(
                           "Nothing outstanding.",
-                          style: TextStyle(
-                            fontSize: 12.5,
+                          style: AppText.bodySmall.copyWith(
                             color: AppColors.success,
                           ),
                         ),
@@ -509,19 +493,10 @@ class _CounterScreenState extends State<CounterScreen> {
                           "${child.studentId}|${d.dueKey}",
                         ),
                         onChanged: (v) => _toggle(child, d, v ?? false),
-                        title: Text(
-                          d.label,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: AppColors.ink,
-                          ),
-                        ),
+                        title: Text(d.label, style: AppText.bodyMediumInk),
                         subtitle: Text(
                           "${d.balanceLabel} outstanding${d.dueOn.isEmpty ? "" : " · due ${formatDateLabel(d.dueOn)}"}",
-                          style: const TextStyle(
-                            fontSize: 11.5,
-                            color: AppColors.muted,
-                          ),
+                          style: AppText.labelMediumMuted,
                         ),
                         secondary: TextButton(
                           onPressed: () => _editAmount(child, d),
@@ -534,7 +509,7 @@ class _CounterScreenState extends State<CounterScreen> {
                                         100,
                                   )
                                 : "Part",
-                            style: const TextStyle(fontSize: 12),
+                            style: AppText.bodySmall,
                           ),
                         ),
                       ),
@@ -569,10 +544,7 @@ class _CounterScreenState extends State<CounterScreen> {
                           Padding(
                             padding: const EdgeInsets.only(right: 6),
                             child: ChoiceChip(
-                              label: Text(
-                                m.label,
-                                style: const TextStyle(fontSize: 12),
-                              ),
+                              label: Text(m.label, style: AppText.bodySmall),
                               selected: _mode == m.value,
                               onSelected: (_) =>
                                   setState(() => _mode = m.value),
@@ -602,12 +574,11 @@ class _CounterScreenState extends State<CounterScreen> {
                           _total == 0
                               ? "Tick what is being paid"
                               : "Taking ${rupees(_total / 100)}",
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
+                          style: AppText.titleSmall.copyWith(
                             color: _total == 0
                                 ? AppColors.muted
                                 : AppColors.ink,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
                       ),
@@ -640,7 +611,7 @@ class _ReceiptDialog extends StatelessWidget {
           Expanded(
             child: Text(
               receipt.duplicate ? "Already collected" : "Received",
-              style: const TextStyle(fontSize: 16),
+              style: AppText.titleMedium,
             ),
           ),
         ],
@@ -649,28 +620,21 @@ class _ReceiptDialog extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            receipt.receiptNo,
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: AppColors.ink,
-            ),
-          ),
+          Text(receipt.receiptNo, style: AppText.titleLargeInk),
           Text(
             "${receipt.totalLabel} from ${receipt.guardianName}",
-            style: const TextStyle(fontSize: 13, color: AppColors.ink),
+            style: AppText.bodyMediumInk,
           ),
           const SizedBox(height: 8),
           for (final l in receipt.lines)
             Text(
               "${l.studentName} · ${l.label} — ${l.amountLabel}",
-              style: const TextStyle(fontSize: 12, color: AppColors.muted),
+              style: AppText.bodySmallMuted,
             ),
           const SizedBox(height: 10),
           const Text(
             "The parent has been notified in their app.",
-            style: TextStyle(fontSize: 12, color: AppColors.muted),
+            style: AppText.bodySmallMuted,
           ),
         ],
       ),

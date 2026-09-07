@@ -90,15 +90,14 @@ class _ModuleShellState<T> extends State<ModuleShell<T>> {
     return Scaffold(
       appBar: AppBar(
         title: widget.subtitle == null
-            ? Text(widget.title, style: const TextStyle(fontSize: 16))
+            ? Text(widget.title, style: AppText.titleMedium)
             : Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(widget.title, style: const TextStyle(fontSize: 16)),
+                  Text(widget.title, style: AppText.titleMedium),
                   Text(
                     widget.subtitle!,
-                    style: const TextStyle(
-                      fontSize: 11,
+                    style: AppText.labelMedium.copyWith(
                       color: Color(0xFFB8C0D4),
                     ),
                   ),
@@ -168,10 +167,7 @@ class _ModuleShellState<T> extends State<ModuleShell<T>> {
                               child: Text(
                                 widget.emptyText,
                                 textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  color: AppColors.muted,
-                                  fontSize: 13,
-                                ),
+                                style: AppText.bodyMediumMuted,
                               ),
                             ),
                           ],
@@ -209,19 +205,12 @@ void showComingSoon(BuildContext context, String module, String reason) {
           children: [
             const Icon(Icons.hourglass_empty, size: 36, color: AppColors.muted),
             const SizedBox(height: 12),
-            Text(
-              "$module is coming soon",
-              style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: AppColors.ink,
-              ),
-            ),
+            Text("$module is coming soon", style: AppText.titleSmallInk),
             const SizedBox(height: 6),
             Text(
               reason,
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 12.5, color: AppColors.muted),
+              style: AppText.bodySmallMuted,
             ),
           ],
         ),

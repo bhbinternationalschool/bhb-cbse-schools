@@ -502,27 +502,23 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                       children: [
                         Text(
                           _greeting(),
-                          style: const TextStyle(
+                          style: AppText.bodySmall.copyWith(
                             color: AppColors.accentSoft,
-                            fontSize: 12,
                           ),
                         ),
                         Text(
                           summary.fullName,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
+                          style: AppText.titleMedium.copyWith(
                             color: Colors.white,
-                            fontSize: 17,
-                            fontWeight: FontWeight.w600,
                           ),
                         ),
                         Text(
                           ct == null
                               ? "Staff"
                               : "Class teacher · ${ct.className} ${ct.sectionName}",
-                          style: const TextStyle(
+                          style: AppText.bodySmall.copyWith(
                             color: Color(0xFFB8C0D4),
-                            fontSize: 12,
                           ),
                         ),
                       ],
@@ -586,20 +582,15 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                           size: 22,
                         ),
                       ),
-                      title: const Text(
+                      title: Text(
                         "My attendance",
-                        style: TextStyle(
-                          fontSize: 13.5,
+                        style: AppText.bodyMediumInk.copyWith(
                           fontWeight: FontWeight.w600,
-                          color: AppColors.ink,
                         ),
                       ),
                       subtitle: const Text(
                         "GPS punch in / out from campus",
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          color: AppColors.muted,
-                        ),
+                        style: AppText.labelMediumMuted,
                       ),
                       trailing: const Icon(
                         Icons.chevron_right,
@@ -628,20 +619,15 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                           size: 22,
                         ),
                       ),
-                      title: const Text(
+                      title: Text(
                         "School presence",
-                        style: TextStyle(
-                          fontSize: 13.5,
+                        style: AppText.bodyMediumInk.copyWith(
                           fontWeight: FontWeight.w600,
-                          color: AppColors.ink,
                         ),
                       ),
                       subtitle: const Text(
                         "Share location during school hours (works with app closed)",
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          color: AppColors.muted,
-                        ),
+                        style: AppText.labelMediumMuted,
                       ),
                       trailing: const Icon(
                         Icons.chevron_right,
@@ -649,12 +635,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                       ),
                     ),
                   ),
-                  const Text(
+                  Text(
                     "Today's periods",
-                    style: TextStyle(
-                      fontSize: 14,
+                    style: AppText.bodyLargeInk.copyWith(
                       fontWeight: FontWeight.w600,
-                      color: AppColors.ink,
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -664,10 +648,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                         padding: EdgeInsets.all(14),
                         child: Text(
                           "No periods for you today on the published timetable.",
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            color: AppColors.muted,
-                          ),
+                          style: AppText.bodySmallMuted,
                         ),
                       ),
                     )
@@ -690,18 +671,12 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                     Expanded(
                                       child: Text(
                                         "${p.periodNo} · ${p.subjectName.isEmpty ? "Period" : p.subjectName} — ${p.className} ${p.sectionName}",
-                                        style: const TextStyle(
-                                          fontSize: 12.5,
-                                          color: AppColors.ink,
-                                        ),
+                                        style: AppText.bodySmallInk,
                                       ),
                                     ),
                                     Text(
                                       p.startTime,
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        color: AppColors.muted,
-                                      ),
+                                      style: AppText.bodySmallMuted,
                                     ),
                                   ],
                                 ),
@@ -717,12 +692,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                     refreshKey: _refresh,
                   ),
                   const SizedBox(height: 8),
-                  const Text(
+                  Text(
                     "Modules",
-                    style: TextStyle(
-                      fontSize: 14,
+                    style: AppText.bodyLargeInk.copyWith(
                       fontWeight: FontWeight.w600,
-                      color: AppColors.ink,
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -760,10 +733,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                 m.label,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  color: AppColors.ink,
-                                ),
+                                style: AppText.labelMediumInk,
                               ),
                             ],
                           ),
@@ -802,14 +772,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Text(
-                          summary.fullName,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.ink,
-                          ),
-                        ),
+                        Text(summary.fullName, style: AppText.titleMediumInk),
                         const SizedBox(height: 16),
                         OutlinedButton.icon(
                           onPressed: () {
@@ -888,17 +851,15 @@ class _AttendanceBanner extends StatelessWidget {
                   children: [
                     Text(
                       title,
-                      style: const TextStyle(
+                      style: AppText.bodyMedium.copyWith(
                         color: Colors.white,
-                        fontSize: 13.5,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                     Text(
                       subtitle,
-                      style: const TextStyle(
+                      style: AppText.labelMedium.copyWith(
                         color: Color(0xFFE8ECE4),
-                        fontSize: 11.5,
                       ),
                     ),
                   ],

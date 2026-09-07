@@ -56,13 +56,9 @@ class AttendanceHistoryScreen extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
-          const Text(
+          Text(
             "Day by day",
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: AppColors.ink,
-            ),
+            style: AppText.bodyLargeInk.copyWith(fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 8),
           Card(
@@ -79,8 +75,8 @@ class AttendanceHistoryScreen extends StatelessWidget {
                             width: 10,
                             height: 10,
                             decoration: BoxDecoration(
-                              color: _statusMeta[e.status]?.$2 ??
-                                  AppColors.muted,
+                              color:
+                                  _statusMeta[e.status]?.$2 ?? AppColors.muted,
                               shape: BoxShape.circle,
                             ),
                           ),
@@ -88,17 +84,12 @@ class AttendanceHistoryScreen extends StatelessWidget {
                           Expanded(
                             child: Text(
                               formatDateLabel(e.date),
-                              style: const TextStyle(
-                                fontSize: 12.5,
-                                color: AppColors.ink,
-                              ),
+                              style: AppText.bodySmallInk,
                             ),
                           ),
                           Text(
                             _statusMeta[e.status]?.$1 ?? e.status,
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
+                            style: AppText.labelLarge.copyWith(
                               color:
                                   _statusMeta[e.status]?.$2 ?? AppColors.muted,
                             ),
@@ -137,16 +128,9 @@ class _StatCard extends StatelessWidget {
             children: [
               Text(
                 "$value",
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
-                  color: color,
-                ),
+                style: AppText.headlineSmall.copyWith(color: color),
               ),
-              Text(
-                label,
-                style: const TextStyle(fontSize: 11, color: AppColors.muted),
-              ),
+              Text(label, style: AppText.labelMediumMuted),
             ],
           ),
         ),

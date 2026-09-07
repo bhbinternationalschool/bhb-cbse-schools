@@ -21,7 +21,7 @@ class StudentIdScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Student ID", style: TextStyle(fontSize: 16)),
+        title: const Text("Student ID", style: AppText.titleMedium),
       ),
       body: Center(
         child: SingleChildScrollView(
@@ -41,14 +41,13 @@ class StudentIdScreen extends StatelessWidget {
                           const SizedBox.shrink(),
                     ),
                     const SizedBox(height: 8),
-                    const Text(
+                    Text(
                       "BHB INTERNATIONAL SCHOOL",
                       textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.primary,
+                      style: AppText.bodyMedium.copyWith(
                         letterSpacing: 0.4,
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                     const SizedBox(height: 18),
@@ -61,9 +60,7 @@ class StudentIdScreen extends StatelessWidget {
                       child: child.photoUrl == null
                           ? Text(
                               child.initials,
-                              style: const TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.w700,
+                              style: AppText.headlineMedium.copyWith(
                                 color: AppColors.primary,
                               ),
                             )
@@ -73,26 +70,15 @@ class StudentIdScreen extends StatelessWidget {
                     Text(
                       child.fullName,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 16.5,
+                      style: AppText.titleMediumInk.copyWith(
                         fontWeight: FontWeight.w700,
-                        color: AppColors.ink,
                       ),
                     ),
-                    Text(
-                      child.classLabel,
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        color: AppColors.muted,
-                      ),
-                    ),
+                    Text(child.classLabel, style: AppText.bodySmallMuted),
                     if (guardianName.isNotEmpty)
                       Text(
                         "Guardian: $guardianName",
-                        style: const TextStyle(
-                          fontSize: 11.5,
-                          color: AppColors.muted,
-                        ),
+                        style: AppText.labelMediumMuted,
                       ),
                     const SizedBox(height: 18),
                     if (child.admissionNo.isEmpty)
@@ -101,10 +87,7 @@ class StudentIdScreen extends StatelessWidget {
                         child: Text(
                           "No admission number on record yet — contact the school office.",
                           textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            color: AppColors.muted,
-                          ),
+                          style: AppText.bodySmallMuted,
                         ),
                       )
                     else ...[
@@ -133,21 +116,16 @@ class StudentIdScreen extends StatelessWidget {
                       const SizedBox(height: 10),
                       Text(
                         child.admissionNo,
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
+                        style: AppText.titleSmallInk.copyWith(
                           letterSpacing: 1.1,
-                          color: AppColors.ink,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                       const SizedBox(height: 6),
                       const Text(
                         "Show this QR at the school gate, library or fee counter.",
                         textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          color: AppColors.muted,
-                        ),
+                        style: AppText.labelMediumMuted,
                       ),
                     ],
                   ],

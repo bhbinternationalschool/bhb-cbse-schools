@@ -79,14 +79,14 @@ class _Card extends StatelessWidget {
           children: [
             Text(
               "${r.studentName} · ${r.leaveTypeLabel} · ${r.fromDate == r.toDate ? formatDateLabel(r.fromDate) : "${formatDateLabel(r.fromDate)} – ${formatDateLabel(r.toDate)}"}",
-              style: const TextStyle(fontSize: 13),
+              style: AppText.bodyMedium,
             ),
             if (approve)
               const Padding(
                 padding: EdgeInsets.only(top: 6),
                 child: Text(
                   "The attendance register will show leave for these days.",
-                  style: TextStyle(fontSize: 12, color: AppColors.muted),
+                  style: AppText.bodySmallMuted,
                 ),
               ),
             const SizedBox(height: 10),
@@ -148,10 +148,8 @@ class _Card extends StatelessWidget {
                 Expanded(
                   child: Text(
                     "${r.studentName} · ${r.classLabel}",
-                    style: const TextStyle(
-                      fontSize: 14,
+                    style: AppText.bodyLargeInk.copyWith(
                       fontWeight: FontWeight.w600,
-                      color: AppColors.ink,
                     ),
                   ),
                 ),
@@ -161,28 +159,21 @@ class _Card extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               "${r.leaveTypeLabel} · ${r.fromDate == r.toDate ? formatDateLabel(r.fromDate) : "${formatDateLabel(r.fromDate)} – ${formatDateLabel(r.toDate)}"} · ${r.days} day${r.days == 1 ? "" : "s"}",
-              style: const TextStyle(fontSize: 12.5, color: AppColors.ink),
+              style: AppText.bodySmallInk,
             ),
             const SizedBox(height: 6),
-            Text(
-              r.reason,
-              style: const TextStyle(
-                fontSize: 12.5,
-                color: AppColors.ink,
-                height: 1.4,
-              ),
-            ),
+            Text(r.reason, style: AppText.bodySmallInk.copyWith(height: 1.4)),
             const SizedBox(height: 4),
             Text(
               "Asked by ${r.requestedBy.isEmpty ? "parent" : r.requestedBy}${r.status == "pending" ? " · decides: ${r.approverHint}" : ""}",
-              style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
+              style: AppText.labelMediumMuted,
             ),
             if (r.decisionNote.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 6),
                 child: Text(
                   "${r.decidedBy}: ${r.decisionNote}",
-                  style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                  style: AppText.bodySmallMuted,
                 ),
               ),
             if (r.status == "pending")
@@ -204,12 +195,11 @@ class _Card extends StatelessWidget {
                         ),
                       ],
                     )
-                  : const Padding(
+                  : Padding(
                       padding: EdgeInsets.only(top: 6),
                       child: Text(
                         "Waiting for the principal.",
-                        style: TextStyle(
-                          fontSize: 12,
+                        style: AppText.bodySmall.copyWith(
                           color: AppColors.warning,
                         ),
                       ),

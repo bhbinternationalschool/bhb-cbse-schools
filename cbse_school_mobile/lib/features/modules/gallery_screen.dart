@@ -54,11 +54,7 @@ class _AlbumBlock extends StatelessWidget {
         children: [
           Text(
             album.title,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: AppColors.ink,
-            ),
+            style: AppText.bodyLargeInk.copyWith(fontWeight: FontWeight.w600),
           ),
           Padding(
             padding: const EdgeInsets.only(top: 2, bottom: 10),
@@ -67,7 +63,7 @@ class _AlbumBlock extends StatelessWidget {
                 if (album.description.isNotEmpty) album.description,
                 "${album.photos.length} photo${album.photos.length == 1 ? "" : "s"}",
               ].join(" · "),
-              style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
+              style: AppText.labelMediumMuted,
             ),
           ),
           SizedBox(
@@ -147,7 +143,7 @@ class _PhotoTile extends StatelessWidget {
                 photo.caption,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white, fontSize: 11.5),
+                style: AppText.labelMedium.copyWith(color: Colors.white),
               ),
             ),
           ),
@@ -190,10 +186,7 @@ class _PhotoViewerState extends State<_PhotoViewer> {
       appBar: AppBar(
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
-        title: Text(
-          widget.album.title,
-          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-        ),
+        title: Text(widget.album.title, style: AppText.titleSmall),
         // Position, because a parent swiping through thirty photos of a sports
         // day should be able to tell how far along they are.
         actions: [
@@ -202,7 +195,7 @@ class _PhotoViewerState extends State<_PhotoViewer> {
             child: Center(
               child: Text(
                 "${_index + 1} / ${photos.length}",
-                style: const TextStyle(color: Colors.white70, fontSize: 12.5),
+                style: AppText.bodySmall.copyWith(color: Colors.white70),
               ),
             ),
           ),
@@ -239,10 +232,7 @@ class _PhotoViewerState extends State<_PhotoViewer> {
                   child: Text(
                     photo.caption,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 12.5,
-                    ),
+                    style: AppText.bodySmall.copyWith(color: Colors.white70),
                   ),
                 ),
             ],

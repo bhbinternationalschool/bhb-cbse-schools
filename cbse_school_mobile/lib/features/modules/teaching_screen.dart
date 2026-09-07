@@ -88,16 +88,17 @@ class TeachingScreen extends StatelessWidget {
               status == "not_delivered"
                   ? "Recorded — period not taught"
                   : flagged
-                      ? "Recorded — ${period.label} taught. Logged away from campus, so the office will see a location note."
-                      : "Recorded — ${period.label} taught",
+                  ? "Recorded — ${period.label} taught. Logged away from campus, so the office will see a location note."
+                  : "Recorded — ${period.label} taught",
             ),
           ),
         );
       }
     } on ApiException catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message)));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.message)));
       }
     }
   }
@@ -125,14 +126,12 @@ class TeachingScreen extends StatelessWidget {
         child: ListView(
           shrinkWrap: true,
           children: [
-            const Padding(
+            Padding(
               padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Text(
                 "What did you cover?",
-                style: TextStyle(
-                  fontSize: 14,
+                style: AppText.bodyLargeInk.copyWith(
                   fontWeight: FontWeight.w600,
-                  color: AppColors.ink,
                 ),
               ),
             ),
@@ -141,10 +140,8 @@ class TeachingScreen extends StatelessWidget {
                 dense: true,
                 title: Text(
                   chapter.label,
-                  style: const TextStyle(
-                    fontSize: 13,
+                  style: AppText.bodyMediumInk.copyWith(
                     fontWeight: FontWeight.w600,
-                    color: AppColors.ink,
                   ),
                 ),
                 trailing: period.unitIds.contains(chapter.id)
@@ -157,13 +154,7 @@ class TeachingScreen extends StatelessWidget {
                   padding: const EdgeInsets.only(left: 24),
                   child: ListTile(
                     dense: true,
-                    title: Text(
-                      topic.title,
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        color: AppColors.muted,
-                      ),
-                    ),
+                    title: Text(topic.title, style: AppText.bodySmallMuted),
                     trailing: period.unitIds.contains(topic.id)
                         ? const Icon(Icons.check, color: AppColors.success)
                         : null,
@@ -200,14 +191,12 @@ class TeachingScreen extends StatelessWidget {
         child: ListView(
           shrinkWrap: true,
           children: [
-            const Padding(
+            Padding(
               padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Text(
                 "Which lesson plan?",
-                style: TextStyle(
-                  fontSize: 14,
+                style: AppText.bodyLargeInk.copyWith(
                   fontWeight: FontWeight.w600,
-                  color: AppColors.ink,
                 ),
               ),
             ),
@@ -216,22 +205,20 @@ class TeachingScreen extends StatelessWidget {
                 padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
                 child: Text(
                   "No lesson plans for this subject yet.",
-                  style: TextStyle(fontSize: 12.5, color: AppColors.muted),
+                  style: AppText.bodySmallMuted,
                 ),
               ),
             for (final plan in period.lessonPlans)
               ListTile(
                 dense: true,
-                title: Text(plan.title,
-                    style: const TextStyle(fontSize: 13, color: AppColors.ink)),
+                title: Text(plan.title, style: AppText.bodyMediumInk),
                 subtitle: plan.objectives.isEmpty
                     ? null
                     : Text(
                         plan.objectives,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 11.5, color: AppColors.muted),
+                        style: AppText.labelMediumMuted,
                       ),
                 trailing: period.lessonPlanId == plan.id
                     ? const Icon(Icons.check, color: AppColors.success)
@@ -242,9 +229,9 @@ class TeachingScreen extends StatelessWidget {
             ListTile(
               dense: true,
               leading: const Icon(Icons.add, size: 20, color: AppColors.info),
-              title: const Text(
+              title: Text(
                 "Write a new lesson plan",
-                style: TextStyle(fontSize: 13, color: AppColors.info),
+                style: AppText.bodyMedium.copyWith(color: AppColors.info),
               ),
               onTap: () => Navigator.pop(context, _newPlanSentinel),
             ),
@@ -305,16 +292,17 @@ class TeachingScreen extends StatelessWidget {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.fact_check_outlined,
-                      size: 20, color: AppColors.success),
+                  const Icon(
+                    Icons.fact_check_outlined,
+                    size: 20,
+                    color: AppColors.success,
+                  ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
                       "$logged of ${day.periods.length} periods logged",
-                      style: const TextStyle(
-                        fontSize: 13,
+                      style: AppText.bodyMediumInk.copyWith(
                         fontWeight: FontWeight.w600,
-                        color: AppColors.ink,
                       ),
                     ),
                   ),
@@ -378,17 +366,13 @@ class _ScheduleUnavailable extends StatelessWidget {
         const Text(
           "Nothing to log",
           textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-            color: AppColors.ink,
-          ),
+          style: AppText.titleSmallInk,
         ),
         const SizedBox(height: 6),
         Text(
           _message,
           textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 12.5, color: AppColors.muted),
+          style: AppText.bodySmallMuted,
         ),
       ],
     );
@@ -424,9 +408,9 @@ Future<void> _openResource(
   }
   final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
   if (!ok && context.mounted) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("Could not open ${resource.title}")),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text("Could not open ${resource.title}")));
   }
 }
 
@@ -451,31 +435,31 @@ class _PeriodCard extends StatelessWidget {
         return (
           label: "Taught",
           color: AppColors.success,
-          background: ModuleTone.teal.background
+          background: ModuleTone.teal.background,
         );
       case "substituted":
         return (
           label: "Taught (substitute)",
           color: AppColors.info,
-          background: ModuleTone.blue.background
+          background: ModuleTone.blue.background,
         );
       case "not_delivered":
         return (
           label: "Not taught",
           color: AppColors.danger,
-          background: ModuleTone.coral.background
+          background: ModuleTone.coral.background,
         );
       case "unlogged":
         return (
           label: "Not logged",
           color: AppColors.warning,
-          background: ModuleTone.amber.background
+          background: ModuleTone.amber.background,
         );
       default:
         return (
           label: "Not due yet",
           color: AppColors.muted,
-          background: ModuleTone.gray.background
+          background: ModuleTone.gray.background,
         );
     }
   }
@@ -520,38 +504,31 @@ class _PeriodCard extends StatelessWidget {
                     children: [
                       Text(
                         "${period.label} · ${period.classLabel}",
-                        style: const TextStyle(
-                          fontSize: 14,
+                        style: AppText.bodyLargeInk.copyWith(
                           fontWeight: FontWeight.w600,
-                          color: AppColors.ink,
                         ),
                       ),
                       const SizedBox(height: 2),
                       Text(
                         "${period.subjectName} · ${period.startTime}–${period.endTime}"
                         "${period.isSubstituted ? " · substitution" : ""}",
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppColors.muted,
-                        ),
+                        style: AppText.bodySmallMuted,
                       ),
                     ],
                   ),
                 ),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: status.background,
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
                     status.label,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: status.color,
-                    ),
+                    style: AppText.labelMedium.copyWith(color: status.color),
                   ),
                 ),
               ],
@@ -568,7 +545,7 @@ class _PeriodCard extends StatelessWidget {
                               period.status == "substituted"
                           ? "Taught"
                           : "Mark taught",
-                      style: const TextStyle(fontSize: 12.5),
+                      style: AppText.bodySmall,
                     ),
                   ),
                 ),
@@ -577,10 +554,7 @@ class _PeriodCard extends StatelessWidget {
                   child: OutlinedButton.icon(
                     onPressed: onNotTaught,
                     icon: const Icon(Icons.close, size: 17),
-                    label: const Text(
-                      "Not taught",
-                      style: TextStyle(fontSize: 12.5),
-                    ),
+                    label: const Text("Not taught", style: AppText.bodySmall),
                   ),
                 ),
               ],
@@ -604,13 +578,11 @@ class _PeriodCard extends StatelessWidget {
               const SizedBox(height: 8),
               const Divider(height: 1),
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 "CONTENT",
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
+                style: AppText.labelSmallMuted.copyWith(
                   letterSpacing: 0.6,
-                  color: AppColors.muted,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
               const SizedBox(height: 4),
@@ -622,23 +594,28 @@ class _PeriodCard extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(vertical: 6),
                     child: Row(
                       children: [
-                        Icon(_resourceIcon(r.kind),
-                            size: 17, color: AppColors.info),
+                        Icon(
+                          _resourceIcon(r.kind),
+                          size: 17,
+                          color: AppColors.info,
+                        ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             r.locator.isEmpty
                                 ? r.title
                                 : "${r.title} · ${r.locator}",
-                            style: const TextStyle(
-                              fontSize: 12.5,
+                            style: AppText.bodySmall.copyWith(
                               color: AppColors.info,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
                         ),
-                        const Icon(Icons.open_in_new,
-                            size: 15, color: AppColors.muted),
+                        const Icon(
+                          Icons.open_in_new,
+                          size: 15,
+                          color: AppColors.muted,
+                        ),
                       ],
                     ),
                   ),
@@ -678,8 +655,7 @@ class _PickRow extends StatelessWidget {
             Expanded(
               child: Text(
                 label,
-                style: TextStyle(
-                  fontSize: 12.5,
+                style: AppText.bodySmall.copyWith(
                   color: muted ? AppColors.muted : AppColors.ink,
                 ),
               ),

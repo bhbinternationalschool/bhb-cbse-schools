@@ -77,7 +77,7 @@ class _Card extends StatelessWidget {
           children: [
             Text(
               "${r.staffName} · ${r.typeCode} · ${r.fromDate == r.toDate ? formatDateLabel(r.fromDate) : "${formatDateLabel(r.fromDate)} – ${formatDateLabel(r.toDate)}"}",
-              style: const TextStyle(fontSize: 13),
+              style: AppText.bodyMedium,
             ),
             const SizedBox(height: 10),
             TextField(
@@ -139,10 +139,8 @@ class _Card extends StatelessWidget {
                 Expanded(
                   child: Text(
                     r.staffName,
-                    style: const TextStyle(
-                      fontSize: 14,
+                    style: AppText.bodyLargeInk.copyWith(
                       fontWeight: FontWeight.w600,
-                      color: AppColors.ink,
                     ),
                   ),
                 ),
@@ -150,40 +148,29 @@ class _Card extends StatelessWidget {
               ],
             ),
             if (r.designation.isNotEmpty)
-              Text(
-                r.designation,
-                style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
-              ),
+              Text(r.designation, style: AppText.labelMediumMuted),
             const SizedBox(height: 6),
             Text(
               "${r.typeName} (${r.typeCode}) · ${r.fromDate == r.toDate ? formatDateLabel(r.fromDate) : "${formatDateLabel(r.fromDate)} – ${formatDateLabel(r.toDate)}"}${r.halfDay ? " · half day" : ""} · ${r.days == r.days.roundToDouble() ? r.days.toInt() : r.days} day${r.days == 1 ? "" : "s"}",
-              style: const TextStyle(fontSize: 12.5, color: AppColors.ink),
+              style: AppText.bodySmallInk,
             ),
             if (r.remaining != null && !r.unlimited)
               Text(
                 "${r.remaining! == r.remaining!.roundToDouble() ? r.remaining!.toInt() : r.remaining} ${r.typeCode} left after this",
-                style: TextStyle(
-                  fontSize: 12,
+                style: AppText.bodySmall.copyWith(
                   color: (r.remaining ?? 0) < r.days
                       ? AppColors.danger
                       : AppColors.muted,
                 ),
               ),
             const SizedBox(height: 6),
-            Text(
-              r.reason,
-              style: const TextStyle(
-                fontSize: 12.5,
-                color: AppColors.ink,
-                height: 1.4,
-              ),
-            ),
+            Text(r.reason, style: AppText.bodySmallInk.copyWith(height: 1.4)),
             if (r.decisionNote.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 6),
                 child: Text(
                   "${r.decidedBy}: ${r.decisionNote}",
-                  style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                  style: AppText.bodySmallMuted,
                 ),
               ),
             if (r.isPending)

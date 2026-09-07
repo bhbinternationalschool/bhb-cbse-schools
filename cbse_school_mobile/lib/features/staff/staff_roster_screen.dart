@@ -43,10 +43,9 @@ class StaffRosterScreen extends StatelessWidget {
                 padding: const EdgeInsets.all(12),
                 child: Text(
                   "${r.missingMobile} of ${r.total} staff have no mobile on record, so they cannot sign in to the staff app. Tap a name to add the number.",
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    color: ModuleTone.amber.foreground,
+                  style: AppText.bodySmall.copyWith(
                     height: 1.4,
+                    color: ModuleTone.amber.foreground,
                   ),
                 ),
               ),
@@ -71,16 +70,13 @@ class StaffRosterScreen extends StatelessWidget {
                 ),
                 title: Text(
                   s.fullName,
-                  style: const TextStyle(
-                    fontSize: 13.5,
+                  style: AppText.bodyMediumInk.copyWith(
                     fontWeight: FontWeight.w600,
-                    color: AppColors.ink,
                   ),
                 ),
                 subtitle: Text(
                   "${s.designation.isEmpty ? _kindLabel(s.homeKind) : s.designation} · ${s.hasMobile ? s.mobile : "no mobile — cannot sign in"}",
-                  style: TextStyle(
-                    fontSize: 12,
+                  style: AppText.bodySmall.copyWith(
                     color: s.hasMobile ? AppColors.muted : AppColors.danger,
                   ),
                 ),
@@ -136,7 +132,7 @@ class StaffRosterScreen extends StatelessWidget {
           children: [
             Text(
               "${s.fullName}${s.designation.isEmpty ? "" : " · ${s.designation}"}",
-              style: const TextStyle(fontSize: 13),
+              style: AppText.bodyMedium,
             ),
             const SizedBox(height: 10),
             TextField(
@@ -180,10 +176,11 @@ class StaffRosterScreen extends StatelessWidget {
       await reload();
     } on ApiException catch (e) {
       Haptics.warning();
-      if (context.mounted)
+      if (context.mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(e.message)));
+      }
     }
   }
 }

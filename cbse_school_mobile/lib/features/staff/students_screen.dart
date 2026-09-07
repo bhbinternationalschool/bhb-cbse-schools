@@ -41,7 +41,7 @@ class StudentsScreen extends StatelessWidget {
         children: [
           Text(
             "${roster.students.length} students · attendance ${roster.attendanceMarked ? "marked" : "not marked"} today · tap a student for a merit, discipline or sick-room note",
-            style: const TextStyle(fontSize: 12, color: AppColors.muted),
+            style: AppText.bodySmallMuted,
           ),
           const SizedBox(height: 10),
           for (final s in roster.students)
@@ -59,33 +59,29 @@ class StudentsScreen extends StatelessWidget {
                   backgroundColor: ModuleTone.teal.background,
                   child: Text(
                     s.rollNo.isEmpty ? "–" : s.rollNo,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
+                    style: AppText.bodySmall.copyWith(
                       color: ModuleTone.teal.foreground,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
                 title: Text(
                   s.fullName,
-                  style: const TextStyle(
-                    fontSize: 13,
+                  style: AppText.bodyMediumInk.copyWith(
                     fontWeight: FontWeight.w600,
-                    color: AppColors.ink,
                   ),
                 ),
                 trailing: s.status == null
                     ? null
                     : Text(
                         s.status!,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
+                        style: AppText.bodyMedium.copyWith(
                           color: switch (s.status) {
                             "P" => AppColors.success,
                             "A" => AppColors.danger,
                             _ => AppColors.warning,
                           },
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
               ),

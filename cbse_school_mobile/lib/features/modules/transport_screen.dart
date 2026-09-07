@@ -65,16 +65,9 @@ class _ChildCard extends StatelessWidget {
           children: [
             Text(
               child.fullName,
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: AppColors.ink,
-              ),
+              style: AppText.bodyLargeInk.copyWith(fontWeight: FontWeight.w600),
             ),
-            Text(
-              child.classLabel,
-              style: const TextStyle(fontSize: 12, color: AppColors.muted),
-            ),
+            Text(child.classLabel, style: AppText.bodySmallMuted),
             const SizedBox(height: 10),
             if (t != null) ...[
               _Row(Icons.alt_route, "Bus ${t.routeCode} · ${t.routeName}"),
@@ -97,11 +90,11 @@ class _ChildCard extends StatelessWidget {
               if (t.monthlyFeeLabel.isNotEmpty && t.monthlyFeeLabel != "₹0")
                 _Row(Icons.payments_outlined, "${t.monthlyFeeLabel} per month"),
               if (t.suspended)
-                const Padding(
+                Padding(
                   padding: EdgeInsets.only(top: 6),
                   child: Text(
                     "Boarding is paused by the office at the moment.",
-                    style: TextStyle(fontSize: 12, color: AppColors.warning),
+                    style: AppText.bodySmall.copyWith(color: AppColors.warning),
                   ),
                 ),
               const SizedBox(height: 8),
@@ -117,10 +110,7 @@ class _ChildCard extends StatelessWidget {
                     Expanded(
                       child: Text(
                         "Driver: ${t.driverName.isEmpty ? "—" : t.driverName}",
-                        style: const TextStyle(
-                          fontSize: 13,
-                          color: AppColors.ink,
-                        ),
+                        style: AppText.bodyMediumInk,
                       ),
                     ),
                     if (t.canCallDriver)
@@ -134,12 +124,12 @@ class _ChildCard extends StatelessWidget {
               else
                 const Text(
                   "Driver's number is not on the school's record yet.",
-                  style: TextStyle(fontSize: 12, color: AppColors.muted),
+                  style: AppText.bodySmallMuted,
                 ),
             ] else ...[
               const Text(
                 "Not using school transport.",
-                style: TextStyle(fontSize: 13, color: AppColors.ink),
+                style: AppText.bodyMediumInk,
               ),
               const SizedBox(height: 8),
               if (r != null && r.isActive) ...[
@@ -147,7 +137,7 @@ class _ChildCard extends StatelessWidget {
                 const SizedBox(height: 4),
                 const Text(
                   "The transport in-charge will call you about the stop and the fee.",
-                  style: TextStyle(fontSize: 12, color: AppColors.muted),
+                  style: AppText.bodySmallMuted,
                 ),
               ] else ...[
                 if (r != null) ...[_StatusLine(r), const SizedBox(height: 6)],
@@ -232,10 +222,9 @@ class _StatusLine extends StatelessWidget {
           ),
           child: Text(
             label,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
+            style: AppText.labelMedium.copyWith(
               color: tone.foreground,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ),
@@ -244,7 +233,7 @@ class _StatusLine extends StatelessWidget {
             padding: const EdgeInsets.only(top: 4),
             child: Text(
               "School: ${r.handlingNote}",
-              style: const TextStyle(fontSize: 12, color: AppColors.muted),
+              style: AppText.bodySmallMuted,
             ),
           ),
       ],
@@ -266,12 +255,7 @@ class _Row extends StatelessWidget {
         children: [
           Icon(icon, size: 18, color: AppColors.muted),
           const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              text,
-              style: const TextStyle(fontSize: 13, color: AppColors.ink),
-            ),
-          ),
+          Expanded(child: Text(text, style: AppText.bodyMediumInk)),
         ],
       ),
     );
@@ -358,21 +342,13 @@ class _RequestFormState extends State<_RequestForm> {
           children: [
             Text(
               "School transport for ${widget.child.fullName}",
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: AppColors.ink,
-              ),
+              style: AppText.titleMediumInk,
             ),
             const SizedBox(height: 4),
-            const Text(
+            Text(
               "Tell the school where to pick up from. The transport in-charge "
               "will call to confirm the stop and the monthly fee.",
-              style: TextStyle(
-                fontSize: 12,
-                color: AppColors.muted,
-                height: 1.4,
-              ),
+              style: AppText.bodySmallMuted.copyWith(height: 1.4),
             ),
             const SizedBox(height: 12),
             TextField(

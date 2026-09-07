@@ -48,29 +48,30 @@ class HomeworkScreen extends StatelessWidget {
       floatingActionButton: !canPost
           ? null
           : (context, feed, reload) => FloatingActionButton.extended(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
-                onPressed: () async {
-                  final posted = await showModalBottomSheet<bool>(
-                    context: context,
-                    isScrollControlled: true,
-                    backgroundColor: Colors.white,
-                    shape: const RoundedRectangleBorder(
-                      borderRadius:
-                          BorderRadius.vertical(top: Radius.circular(24)),
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+              onPressed: () async {
+                final posted = await showModalBottomSheet<bool>(
+                  context: context,
+                  isScrollControlled: true,
+                  backgroundColor: Colors.white,
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(24),
                     ),
-                    builder: (context) => _ComposeSheet(
-                      api: api,
-                      classId: classId!,
-                      sectionId: sectionId!,
-                      subjects: feed.subjects,
-                    ),
-                  );
-                  if (posted == true) reload();
-                },
-                icon: const Icon(Icons.add),
-                label: const Text("Post homework"),
-              ),
+                  ),
+                  builder: (context) => _ComposeSheet(
+                    api: api,
+                    classId: classId!,
+                    sectionId: sectionId!,
+                    subjects: feed.subjects,
+                  ),
+                );
+                if (posted == true) reload();
+              },
+              icon: const Icon(Icons.add),
+              label: const Text("Post homework"),
+            ),
       builder: (context, feed, _) => ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),
@@ -99,43 +100,33 @@ class HomeworkScreen extends StatelessWidget {
                             item.subjectName.isEmpty
                                 ? "Homework"
                                 : item.subjectName,
-                            style: TextStyle(
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.w700,
+                            style: AppText.labelSmall.copyWith(
                               color: item.isDiary
                                   ? ModuleTone.amber.foreground
                                   : ModuleTone.purple.foreground,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
                         ),
                         const Spacer(),
                         Text(
                           formatDateLabel(item.date),
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: AppColors.muted,
-                          ),
+                          style: AppText.labelMediumMuted,
                         ),
                       ],
                     ),
                     const SizedBox(height: 8),
                     Text(
                       item.title,
-                      style: const TextStyle(
-                        fontSize: 13.5,
+                      style: AppText.bodyMediumInk.copyWith(
                         fontWeight: FontWeight.w600,
-                        color: AppColors.ink,
                       ),
                     ),
                     if (item.body.isNotEmpty) ...[
                       const SizedBox(height: 4),
                       Text(
                         item.body,
-                        style: const TextStyle(
-                          fontSize: 12.5,
-                          color: AppColors.ink,
-                          height: 1.4,
-                        ),
+                        style: AppText.bodySmallInk.copyWith(height: 1.4),
                       ),
                     ],
                     const SizedBox(height: 8),
@@ -144,15 +135,11 @@ class HomeworkScreen extends StatelessWidget {
                         Expanded(
                           child: Text(
                             [
-                              if (item.teacherName.isNotEmpty)
-                                item.teacherName,
+                              if (item.teacherName.isNotEmpty) item.teacherName,
                               if ((item.dueAt ?? "").isNotEmpty)
                                 "due ${formatDateLabel(item.dueAt!)}",
                             ].join(" · "),
-                            style: const TextStyle(
-                              fontSize: 11,
-                              color: AppColors.muted,
-                            ),
+                            style: AppText.labelMediumMuted,
                           ),
                         ),
                         if (child != null)
@@ -179,7 +166,7 @@ class HomeworkScreen extends StatelessWidget {
                             icon: const Icon(Icons.school_outlined, size: 16),
                             label: const Text(
                               "Ask tutor",
-                              style: TextStyle(fontSize: 12),
+                              style: AppText.bodySmall,
                             ),
                           ),
                       ],
@@ -270,14 +257,7 @@ class _ComposeSheetState extends State<_ComposeSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text(
-            "Post homework",
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: AppColors.ink,
-            ),
-          ),
+          const Text("Post homework", style: AppText.titleMediumInk),
           const SizedBox(height: 14),
           DropdownButtonFormField<String>(
             initialValue: _subjectId,
@@ -308,7 +288,7 @@ class _ComposeSheetState extends State<_ComposeSheet> {
             const SizedBox(height: 8),
             Text(
               _error!,
-              style: const TextStyle(color: AppColors.danger, fontSize: 12),
+              style: AppText.bodySmall.copyWith(color: AppColors.danger),
             ),
           ],
           const SizedBox(height: 14),

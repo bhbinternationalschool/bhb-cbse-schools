@@ -48,16 +48,12 @@ class ChildProfileScreen extends StatelessWidget {
             _Header(api: api, child: child),
             const SizedBox(height: 16),
             const _Section("Documents the school needs"),
-            const Padding(
+            Padding(
               padding: EdgeInsets.fromLTRB(4, 0, 4, 8),
               child: Text(
                 "Upload a clear photo or scan of each. The office verifies every "
                 "document; you will see the result here.",
-                style: TextStyle(
-                  fontSize: 12,
-                  color: AppColors.muted,
-                  height: 1.4,
-                ),
+                style: AppText.bodySmallMuted.copyWith(height: 1.4),
               ),
             ),
             for (final doc in child.docs)
@@ -80,16 +76,12 @@ class ChildProfileScreen extends StatelessWidget {
                 ),
               ),
             ),
-            const Padding(
+            Padding(
               padding: EdgeInsets.fromLTRB(4, 8, 4, 0),
               child: Text(
                 "Something wrong in the record? Tell the school office — these "
                 "details are changed there, with your documents in hand.",
-                style: TextStyle(
-                  fontSize: 12,
-                  color: AppColors.muted,
-                  height: 1.4,
-                ),
+                style: AppText.bodySmallMuted.copyWith(height: 1.4),
               ),
             ),
           ],
@@ -179,10 +171,7 @@ class ChildProfileScreen extends StatelessWidget {
               Text(result.message, style: const TextStyle(height: 1.4)),
               if (result.checks.isNotEmpty) ...[
                 const SizedBox(height: 12),
-                const Text(
-                  "Automatic check",
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                ),
+                const Text("Automatic check", style: AppText.labelLarge),
                 for (final c in result.checks)
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
@@ -210,7 +199,7 @@ class ChildProfileScreen extends StatelessWidget {
                             "missing_record" => "not on record",
                             _ => c.status,
                           }}",
-                          style: const TextStyle(fontSize: 12.5),
+                          style: AppText.bodySmall,
                         ),
                       ],
                     ),
@@ -403,18 +392,11 @@ class _Header extends StatelessWidget {
                 children: [
                   Text(
                     child.fullName,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 17,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: AppText.titleMedium.copyWith(color: Colors.white),
                   ),
                   Text(
                     "${child.classLabel} · Adm. ${child.admissionNo}",
-                    style: const TextStyle(
-                      color: Color(0xFFB8C0D4),
-                      fontSize: 12.5,
-                    ),
+                    style: AppText.bodySmall.copyWith(color: Color(0xFFB8C0D4)),
                   ),
                   const SizedBox(height: 8),
                   ClipRRect(
@@ -429,9 +411,8 @@ class _Header extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     "Profile ${child.completeness}% complete",
-                    style: const TextStyle(
+                    style: AppText.labelMedium.copyWith(
                       color: Color(0xFFB8C0D4),
-                      fontSize: 11.5,
                     ),
                   ),
                 ],
@@ -470,10 +451,9 @@ class _PhotoAvatar extends StatelessWidget {
       backgroundColor: AppColors.accentSoft,
       child: Text(
         initials,
-        style: const TextStyle(
+        style: AppText.titleLarge.copyWith(
           color: AppColors.primary,
           fontWeight: FontWeight.w600,
-          fontSize: 18,
         ),
       ),
     );
@@ -530,10 +510,8 @@ class _DocTile extends StatelessWidget {
                 Expanded(
                   child: Text(
                     doc.label,
-                    style: const TextStyle(
-                      fontSize: 13.5,
+                    style: AppText.bodyMediumInk.copyWith(
                       fontWeight: FontWeight.w600,
-                      color: AppColors.ink,
                     ),
                   ),
                 ),
@@ -548,10 +526,9 @@ class _DocTile extends StatelessWidget {
                   ),
                   child: Text(
                     chipLabel,
-                    style: TextStyle(
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w700,
+                    style: AppText.labelSmall.copyWith(
                       color: tone.foreground,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
@@ -561,18 +538,14 @@ class _DocTile extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 checklist!.hint,
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: AppColors.muted,
-                  height: 1.4,
-                ),
+                style: AppText.bodySmallMuted.copyWith(height: 1.4),
               ),
             ],
             if (doc.hasFile) ...[
               const SizedBox(height: 4),
               Text(
                 "${doc.fileName}${doc.uploadedAt.isNotEmpty ? " · ${formatDateLabel(doc.uploadedAt.split("T").first)}" : ""}",
-                style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                style: AppText.bodySmallMuted,
               ),
             ],
             if (doc.isRejected && doc.reviewNote.isNotEmpty) ...[
@@ -586,10 +559,9 @@ class _DocTile extends StatelessWidget {
                 ),
                 child: Text(
                   "Office: ${doc.reviewNote}",
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: ModuleTone.coral.foreground,
+                  style: AppText.bodySmall.copyWith(
                     height: 1.4,
+                    color: ModuleTone.coral.foreground,
                   ),
                 ),
               ),
@@ -627,16 +599,12 @@ class _Row extends StatelessWidget {
         children: [
           SizedBox(
             width: 128,
-            child: Text(
-              label,
-              style: const TextStyle(fontSize: 12, color: AppColors.muted),
-            ),
+            child: Text(label, style: AppText.bodySmallMuted),
           ),
           Expanded(
             child: Text(
               value.isEmpty ? "—" : value,
-              style: TextStyle(
-                fontSize: 13,
+              style: AppText.bodyMedium.copyWith(
                 color: value.isEmpty ? AppColors.muted : AppColors.ink,
               ),
             ),
@@ -657,11 +625,7 @@ class _Section extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
       child: Text(
         text,
-        style: const TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-          color: AppColors.ink,
-        ),
+        style: AppText.bodyLargeInk.copyWith(fontWeight: FontWeight.w600),
       ),
     );
   }

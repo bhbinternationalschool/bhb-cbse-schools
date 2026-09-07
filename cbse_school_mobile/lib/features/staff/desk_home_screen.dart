@@ -338,25 +338,21 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
                       children: [
                         Text(
                           _greeting(),
-                          style: const TextStyle(
+                          style: AppText.bodySmall.copyWith(
                             color: AppColors.accentSoft,
-                            fontSize: 12,
                           ),
                         ),
                         Text(
                           _name.isEmpty ? "Staff" : _name,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
+                          style: AppText.titleMedium.copyWith(
                             color: Colors.white,
-                            fontSize: 17,
-                            fontWeight: FontWeight.w600,
                           ),
                         ),
                         Text(
                           office ? "Office · कार्यालय" : "Staff · कर्मचारी",
-                          style: const TextStyle(
+                          style: AppText.bodySmall.copyWith(
                             color: Color(0xFFB8C0D4),
-                            fontSize: 12,
                           ),
                         ),
                       ],
@@ -397,17 +393,15 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
                           color: ModuleTone.teal.foreground,
                         ),
                       ),
-                      title: const Text(
+                      title: Text(
                         "Mark my attendance · हाज़िरी लगाएँ",
-                        style: TextStyle(
-                          fontSize: 13.5,
+                        style: AppText.bodyMediumInk.copyWith(
                           fontWeight: FontWeight.w600,
-                          color: AppColors.ink,
                         ),
                       ),
                       subtitle: const Text(
                         "GPS punch in and out at school",
-                        style: TextStyle(fontSize: 12, color: AppColors.muted),
+                        style: AppText.bodySmallMuted,
                       ),
                       trailing: const Icon(
                         Icons.chevron_right,
@@ -449,19 +443,13 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
                                 t.label,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 11.5,
-                                  color: AppColors.ink,
-                                ),
+                                style: AppText.labelMediumInk,
                               ),
                               Text(
                                 t.hindi,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 10.5,
-                                  color: AppColors.muted,
-                                ),
+                                style: AppText.labelSmallMuted,
                               ),
                             ],
                           ),

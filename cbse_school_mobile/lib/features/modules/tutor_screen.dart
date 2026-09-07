@@ -327,14 +327,14 @@ class _TutorScreenState extends State<TutorScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text("AI tutor", style: TextStyle(fontSize: 16)),
+            const Text("AI tutor", style: AppText.titleMedium),
             Text(
               widget.context.homeworkTitle.isNotEmpty
                   ? widget.context.homeworkTitle
                   : child.fullName,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11, color: Color(0xFFB8C0D4)),
+              style: AppText.labelMedium.copyWith(color: Color(0xFFB8C0D4)),
             ),
           ],
         ),
@@ -415,10 +415,7 @@ class _TutorScreenState extends State<TutorScreen> {
                             _language == "en"
                                 ? "Reply language"
                                 : "उत्तर की भाषा · Reply language",
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: AppColors.muted,
-                            ),
+                            style: AppText.bodySmallMuted,
                           ),
                         ),
                         _LanguageToggle(
@@ -549,9 +546,7 @@ class _ModeBar extends StatelessWidget {
                       ],
                       Text(
                         m.label,
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
+                        style: AppText.labelLarge.copyWith(
                           color: on ? Colors.white : AppColors.ink,
                         ),
                       ),
@@ -604,8 +599,7 @@ class _AllowanceStrip extends StatelessWidget {
           Expanded(
             child: Text(
               text,
-              style: TextStyle(
-                fontSize: 11.5,
+              style: AppText.labelMedium.copyWith(
                 color: allowance.hasPass ? AppColors.success : AppColors.muted,
                 fontWeight: FontWeight.w500,
               ),
@@ -641,20 +635,14 @@ class _Welcome extends StatelessWidget {
             children: [
               Text(
                 mode?.label ?? "Tutor",
-                style: const TextStyle(
-                  fontSize: 15,
+                style: AppText.titleSmallInk.copyWith(
                   fontWeight: FontWeight.w700,
-                  color: AppColors.ink,
                 ),
               ),
               const SizedBox(height: Space.xs),
               Text(
                 mode?.blurb ?? "",
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: AppColors.ink,
-                  height: 1.4,
-                ),
+                style: AppText.bodyMediumInk.copyWith(height: 1.4),
               ),
             ],
           ),
@@ -669,18 +657,11 @@ class _Welcome extends StatelessWidget {
             ),
           ),
         const SizedBox(height: Space.lg),
-        Text(
-          note,
-          style: const TextStyle(
-            fontSize: 12,
-            color: AppColors.muted,
-            height: 1.45,
-          ),
-        ),
+        Text(note, style: AppText.bodySmallMuted.copyWith(height: 1.45)),
         const SizedBox(height: Space.sm),
-        const Text(
+        Text(
           "Replies are written by an AI and can be wrong. Check anything that matters with the class teacher.",
-          style: TextStyle(fontSize: 12, color: AppColors.muted, height: 1.45),
+          style: AppText.bodySmallMuted.copyWith(height: 1.45),
         ),
       ],
     );
@@ -746,8 +727,7 @@ class _Bubble extends StatelessWidget {
                     // The model is asked for plain text but still bolds with
                     // asterisks now and then; a parent should never see them.
                     msg.text.replaceAll("**", ""),
-                    style: TextStyle(
-                      fontSize: 13.5,
+                    style: AppText.bodyMedium.copyWith(
                       height: 1.45,
                       color: mine ? Colors.white : AppColors.ink,
                     ),
@@ -758,10 +738,7 @@ class _Bubble extends StatelessWidget {
                       children: [
                         Text(
                           msg.charge == "free" ? "Free hint" : "Full tutor",
-                          style: const TextStyle(
-                            fontSize: 10,
-                            color: AppColors.muted,
-                          ),
+                          style: AppText.labelSmallMuted,
                         ),
                         const Spacer(),
                         if (onVideos != null)
@@ -784,9 +761,7 @@ class _Bubble extends StatelessWidget {
                                   const SizedBox(width: 4),
                                   Text(
                                     hindi ? _hi["watch"]! : "Watch videos",
-                                    style: const TextStyle(
-                                      fontSize: 11.5,
-                                      fontWeight: FontWeight.w600,
+                                    style: AppText.labelMedium.copyWith(
                                       color: AppColors.danger,
                                     ),
                                   ),
@@ -1059,21 +1034,15 @@ class _PassSheetState extends State<_PassSheet> {
           children: [
             Text(
               "Tutor pass for $first",
-              style: const TextStyle(
-                fontSize: 17,
+              style: AppText.titleMediumInk.copyWith(
                 fontWeight: FontWeight.w700,
-                color: AppColors.ink,
               ),
             ),
             const SizedBox(height: Space.xs),
             Text(
               widget.reason ??
                   "Unlock the full tutor for $first — teaching, worked examples, practice questions, answer checking, homework help and exam preparation, all at the $classLabel level.",
-              style: const TextStyle(
-                fontSize: 13,
-                color: AppColors.ink,
-                height: 1.45,
-              ),
+              style: AppText.bodyMediumInk.copyWith(height: 1.45),
             ),
             if (a.hasPass) ...[
               const SizedBox(height: Space.md),
@@ -1087,10 +1056,7 @@ class _PassSheetState extends State<_PassSheet> {
                   const SizedBox(width: 6),
                   Text(
                     "${a.passPlanLabel.isNotEmpty ? "${a.passPlanLabel} pass · " : ""}${a.validLabel}. A new pass starts when this one ends.",
-                    style: const TextStyle(
-                      fontSize: 12.5,
-                      color: AppColors.success,
-                    ),
+                    style: AppText.bodySmall.copyWith(color: AppColors.success),
                   ),
                 ],
               ),
@@ -1109,21 +1075,13 @@ class _PassSheetState extends State<_PassSheet> {
               const SizedBox(height: Space.sm),
               Text(
                 "Waiting for the bank: ${pending.map((o) => "${o.days}-day pass (${o.amountLabel})").join(", ")}. The pass switches on by itself once the payment is confirmed.",
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: AppColors.muted,
-                  height: 1.4,
-                ),
+                style: AppText.bodySmallMuted.copyWith(height: 1.4),
               ),
             ],
             const SizedBox(height: Space.sm),
             Text(
               "A pass is for one child and covers $first's class ($classLabel) only — a brother or sister needs their own pass. Fair use: up to 60 tutor messages a day. Hints stay free every day.",
-              style: const TextStyle(
-                fontSize: 11.5,
-                color: AppColors.muted,
-                height: 1.4,
-              ),
+              style: AppText.labelMediumMuted.copyWith(height: 1.4),
             ),
           ],
         ),
@@ -1163,18 +1121,13 @@ class _PlanTile extends StatelessWidget {
                   children: [
                     Text(
                       plan.label,
-                      style: const TextStyle(
-                        fontSize: 14,
+                      style: AppText.bodyLargeInk.copyWith(
                         fontWeight: FontWeight.w600,
-                        color: AppColors.ink,
                       ),
                     ),
                     Text(
                       "Full tutor for ${plan.days == 1 ? "one day" : "${plan.days} days"}",
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        color: AppColors.muted,
-                      ),
+                      style: AppText.labelMediumMuted,
                     ),
                   ],
                 ),
@@ -1188,10 +1141,9 @@ class _PlanTile extends StatelessWidget {
               else
                 Text(
                   plan.priceLabel,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
+                  style: AppText.titleSmall.copyWith(
                     color: AppColors.primary,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               const SizedBox(width: 6),
@@ -1235,14 +1187,13 @@ class _LanguageToggle extends StatelessWidget {
           ),
           child: Text(
             label,
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
+            style: AppText.bodySmall.copyWith(
               color: on
                   ? AppColors.primary
                   : dark
                   ? Colors.white
                   : AppColors.ink,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ),
@@ -1343,10 +1294,8 @@ class _VideosSheetState extends State<_VideosSheet> {
           children: [
             Text(
               _hindi ? _hi["videosTitle"]! : "Videos on this topic",
-              style: const TextStyle(
-                fontSize: 17,
+              style: AppText.titleMediumInk.copyWith(
                 fontWeight: FontWeight.w700,
-                color: AppColors.ink,
               ),
             ),
             const SizedBox(height: Space.xs),
@@ -1354,7 +1303,7 @@ class _VideosSheetState extends State<_VideosSheet> {
               widget.topic,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12.5, color: AppColors.muted),
+              style: AppText.bodySmallMuted,
             ),
             const SizedBox(height: Space.lg),
             if (v == null && _error == null)
@@ -1372,7 +1321,7 @@ class _VideosSheetState extends State<_VideosSheet> {
                   _hindi
                       ? _hi["noVideos"]!
                       : "No videos found yet — search YouTube instead.",
-                  style: const TextStyle(fontSize: 13, color: AppColors.ink),
+                  style: AppText.bodyMediumInk,
                 ),
               for (final item in v.items) ...[
                 _VideoTile(video: item, onTap: () => _play(item)),
@@ -1389,7 +1338,7 @@ class _VideosSheetState extends State<_VideosSheet> {
                 _hindi
                     ? "वीडियो YouTube के हैं, स्कूल के नहीं — देखकर ही भरोसा करें।"
                     : "Videos are from YouTube, not the school — judge them as you watch.",
-                style: const TextStyle(fontSize: 11, color: AppColors.muted),
+                style: AppText.labelMediumMuted,
               ),
             ],
           ],
@@ -1437,11 +1386,9 @@ class _VideoTile extends StatelessWidget {
                       video.title,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.ink,
+                      style: AppText.bodyMediumInk.copyWith(
                         height: 1.3,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                     const SizedBox(height: 3),
@@ -1449,10 +1396,7 @@ class _VideoTile extends StatelessWidget {
                       video.channel,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: AppColors.muted,
-                      ),
+                      style: AppText.labelMediumMuted,
                     ),
                   ],
                 ),
@@ -1578,23 +1522,14 @@ class _GuideSheet extends StatelessWidget {
               hindi
                   ? "ट्यूशन की ज़रूरत नहीं — ट्यूटर से रोज़ 30 मिनट"
                   : "No tuition needed — 30 minutes a day with the tutor",
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: AppColors.ink,
-                height: 1.3,
-              ),
+              style: AppText.titleLargeInk.copyWith(height: 1.3),
             ),
             const SizedBox(height: Space.xs),
             Text(
               hindi
                   ? "$n के साथ बैठें, यह क्रम रोज़ दोहराएँ। ट्यूटर उसकी कक्षा (CBSE) के हिसाब से पढ़ाता है, हिंदी या अंग्रेज़ी में।"
                   : "Sit with $n and follow this routine every day. The tutor teaches at $n's class level (CBSE), in Hindi or English.",
-              style: const TextStyle(
-                fontSize: 13,
-                color: AppColors.muted,
-                height: 1.45,
-              ),
+              style: AppText.bodyMediumMuted.copyWith(height: 1.45),
             ),
             const SizedBox(height: Space.lg),
             for (final (icon, title, body) in steps) ...[
@@ -1621,20 +1556,14 @@ class _GuideSheet extends StatelessWidget {
                       children: [
                         Text(
                           title,
-                          style: const TextStyle(
-                            fontSize: 14,
+                          style: AppText.bodyLargeInk.copyWith(
                             fontWeight: FontWeight.w700,
-                            color: AppColors.ink,
                           ),
                         ),
                         const SizedBox(height: 2),
                         Text(
                           body,
-                          style: const TextStyle(
-                            fontSize: 12.5,
-                            color: AppColors.ink,
-                            height: 1.45,
-                          ),
+                          style: AppText.bodySmallInk.copyWith(height: 1.45),
                         ),
                       ],
                     ),

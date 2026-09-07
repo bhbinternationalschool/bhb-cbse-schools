@@ -20,10 +20,10 @@ class PtmScreen extends StatelessWidget {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text("Book this slot?", style: TextStyle(fontSize: 16)),
+        title: const Text("Book this slot?", style: AppText.titleMedium),
         content: Text(
           "${event.name} — ${slot.teacherName}\n${formatDateLabel(event.date)}, ${formatTimeLabel(slot.startAt)}–${formatTimeLabel(slot.endAt)}\nfor ${child.fullName}",
-          style: const TextStyle(fontSize: 13),
+          style: AppText.bodyMedium,
         ),
         actions: [
           TextButton(
@@ -53,8 +53,9 @@ class PtmScreen extends StatelessWidget {
       }
     } on ApiException catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message)));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.message)));
       }
     }
   }
@@ -70,14 +71,15 @@ class PtmScreen extends StatelessWidget {
       await api.cancelPtmBooking(bookingId);
       await reload();
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Booking cancelled")),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text("Booking cancelled")));
       }
     } on ApiException catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message)));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.message)));
       }
     }
   }
@@ -105,19 +107,14 @@ class PtmScreen extends StatelessWidget {
                   children: [
                     Text(
                       event.name,
-                      style: const TextStyle(
-                        fontSize: 14.5,
+                      style: AppText.bodyLargeInk.copyWith(
                         fontWeight: FontWeight.w600,
-                        color: AppColors.ink,
                       ),
                     ),
                     const SizedBox(height: 3),
                     Text(
                       "${formatDateLabel(event.date)} · ${event.modeLabel}${event.note.isEmpty ? "" : "\n${event.note}"}",
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.muted,
-                      ),
+                      style: AppText.bodySmallMuted,
                     ),
                     const SizedBox(height: 10),
                     if (event.myBookingId != null)
@@ -126,14 +123,7 @@ class PtmScreen extends StatelessWidget {
                         onCancel: () => _cancel(context, event, reload),
                       )
                     else ...[
-                      const Text(
-                        "Choose a slot",
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.ink,
-                        ),
-                      ),
+                      const Text("Choose a slot", style: AppText.labelLargeInk),
                       const SizedBox(height: 6),
                       for (final slot in event.slots)
                         Padding(
@@ -163,18 +153,11 @@ class PtmScreen extends StatelessWidget {
                                       children: [
                                         Text(
                                           slot.teacherName,
-                                          style: const TextStyle(
-                                            fontSize: 12.5,
-                                            fontWeight: FontWeight.w600,
-                                            color: AppColors.ink,
-                                          ),
+                                          style: AppText.labelLargeInk,
                                         ),
                                         Text(
                                           "${formatTimeLabel(slot.startAt)}–${formatTimeLabel(slot.endAt)}${slot.roomOrLink.isEmpty ? "" : " · ${slot.roomOrLink}"}",
-                                          style: const TextStyle(
-                                            fontSize: 11,
-                                            color: AppColors.muted,
-                                          ),
+                                          style: AppText.labelMediumMuted,
                                         ),
                                       ],
                                     ),
@@ -183,9 +166,7 @@ class PtmScreen extends StatelessWidget {
                                     slot.seatsLeft > 0
                                         ? "${slot.seatsLeft} left"
                                         : "Full",
-                                    style: TextStyle(
-                                      fontSize: 11.5,
-                                      fontWeight: FontWeight.w600,
+                                    style: AppText.labelMedium.copyWith(
                                       color: slot.seatsLeft > 0
                                           ? ModuleTone.teal.foreground
                                           : AppColors.muted,
@@ -234,9 +215,7 @@ class _BookedBanner extends StatelessWidget {
               slot == null
                   ? "Slot booked"
                   : "Booked — ${slot.teacherName}, ${formatTimeLabel(slot.startAt)}",
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
+              style: AppText.labelLarge.copyWith(
                 color: ModuleTone.green.foreground,
               ),
             ),

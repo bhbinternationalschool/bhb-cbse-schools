@@ -26,7 +26,12 @@ const _baseUrlKey = "bhb_presence_base_url";
 const presenceNotificationChannelId = "bhb_presence";
 
 class PresenceConfig {
-  const PresenceConfig({required this.enabled, required this.tracking, required this.pingIntervalMin, required this.window});
+  const PresenceConfig({
+    required this.enabled,
+    required this.tracking,
+    required this.pingIntervalMin,
+    required this.window,
+  });
   final bool enabled;
   final bool tracking;
   final int pingIntervalMin;
@@ -43,11 +48,15 @@ Future<void> initPresenceService() async {
       autoStartOnBoot: true,
       notificationChannelId: presenceNotificationChannelId,
       initialNotificationTitle: "School presence",
-      initialNotificationContent: "Sharing location with school during school hours",
+      initialNotificationContent:
+          "Sharing location with school during school hours",
       foregroundServiceNotificationId: 8123,
       foregroundServiceTypes: [AndroidForegroundType.location],
     ),
-    iosConfiguration: IosConfiguration(autoStart: false, onForeground: presenceServiceEntry),
+    iosConfiguration: IosConfiguration(
+      autoStart: false,
+      onForeground: presenceServiceEntry,
+    ),
   );
 }
 
@@ -76,7 +85,9 @@ Future<void> presenceServiceEntry(ServiceInstance service) async {
   var intervalMin = 5;
 
   Future<void> tick() async {
-    final baseUrl = await storage.read(key: _baseUrlKey) ?? "https://bhbinternational.school";
+    final baseUrl =
+        await storage.read(key: _baseUrlKey) ??
+        "https://bhbinternational.school";
     final cookie = await storage.read(key: _cookieKey);
     if (cookie == null || cookie.isEmpty) {
       await service.stopSelf();
@@ -86,11 +97,17 @@ Future<void> presenceServiceEntry(ServiceInstance service) async {
     //    school timing. Off-hours: do not touch the GPS at all.
     var tracking = true;
     try {
-      final cfg = await http.get(Uri.parse("$baseUrl/api/staff-geo/ping")).timeout(const Duration(seconds: 15));
+      final cfg = await http
+          .get(Uri.parse("$baseUrl/api/staff-geo/ping"))
+          .timeout(const Duration(seconds: 15));
       if (cfg.statusCode == 200) {
         final j = jsonDecode(cfg.body) as Map<String, dynamic>;
         if (j["enabled"] == false) {
-          _setNotification(service, "School presence", "Tracking is switched off by the school");
+          _setNotification(
+            service,
+            "School presence",
+            "Tracking is switched off by the school",
+          );
           return;
         }
         tracking = j["tracking"] == true;
@@ -101,7 +118,11 @@ Future<void> presenceServiceEntry(ServiceInstance service) async {
           timer = Timer.periodic(Duration(minutes: intervalMin), (_) => tick());
         }
         if (!tracking) {
-          _setNotification(service, "School presence", "Outside school timing (${j["window"] ?? ""}) — location not read");
+          _setNotification(
+            service,
+            "School presence",
+            "Outside school timing (${j["window"] ?? ""}) — location not read",
+          );
           return;
         }
       }
@@ -113,7 +134,10 @@ Future<void> presenceServiceEntry(ServiceInstance service) async {
     Position pos;
     try {
       pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, timeLimit: Duration(seconds: 25)),
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 25),
+        ),
       );
     } catch (_) {
       _setNotification(service, "School presence", "Waiting for GPS…");
@@ -125,7 +149,10 @@ Future<void> presenceServiceEntry(ServiceInstance service) async {
       final res = await http
           .post(
             Uri.parse("$baseUrl/api/staff-geo/ping"),
-            headers: {"Content-Type": "application/json", "Cookie": "$_cookieName=$cookie"},
+            headers: {
+              "Content-Type": "application/json",
+              "Cookie": "$_cookieName=$cookie",
+            },
             body: jsonEncode({
               "lat": pos.latitude,
               "lng": pos.longitude,
@@ -140,13 +167,21 @@ Future<void> presenceServiceEntry(ServiceInstance service) async {
         return;
       }
       if (res.statusCode == 428) {
-        _setNotification(service, "School presence", "Open the app once to give consent");
+        _setNotification(
+          service,
+          "School presence",
+          "Open the app once to give consent",
+        );
         return;
       }
       if (res.statusCode == 400) {
         final j = jsonDecode(res.body) as Map<String, dynamic>;
         final err = (j["error"] as String?) ?? "Ping rejected";
-        _setNotification(service, "School presence — problem", err.length > 90 ? "${err.substring(0, 90)}…" : err);
+        _setNotification(
+          service,
+          "School presence — problem",
+          err.length > 90 ? "${err.substring(0, 90)}…" : err,
+        );
         return;
       }
       final j = jsonDecode(res.body) as Map<String, dynamic>;
@@ -156,7 +191,9 @@ Future<void> presenceServiceEntry(ServiceInstance service) async {
       _setNotification(
         service,
         "School presence — sharing",
-        inside ? "On premises · last sent $at" : "${dist ?? "?"} m from campus · last sent $at",
+        inside
+            ? "On premises · last sent $at"
+            : "${dist ?? "?"} m from campus · last sent $at",
       );
     } catch (_) {
       _setNotification(service, "School presence", "No network — will retry");
@@ -175,7 +212,9 @@ void _setNotification(ServiceInstance service, String title, String content) {
 
 class TimeOfDayLabel {
   static String now() {
-    final ist = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
+    final ist = DateTime.now().toUtc().add(
+      const Duration(hours: 5, minutes: 30),
+    );
     final h = ist.hour.toString().padLeft(2, "0");
     final m = ist.minute.toString().padLeft(2, "0");
     return "$h:$m IST";

@@ -12,9 +12,6 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initPresenceService();
   runApp(
-    const CbseSchoolApp(
-      audience: AppAudience.staff,
-      buildRoutes: staffRoutes,
-    ),
+    const CbseSchoolApp(audience: AppAudience.staff, buildRoutes: staffRoutes),
   );
 }

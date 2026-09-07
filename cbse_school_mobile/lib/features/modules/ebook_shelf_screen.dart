@@ -45,12 +45,11 @@ class EbookShelfScreen extends StatelessWidget {
                 child: ListTile(
                   onTap: () => _open(context, shelf.shelfUrl),
                   leading: const Icon(Icons.auto_stories, color: Colors.white),
-                  title: const Text(
+                  title: Text(
                     "Open the whole shelf",
-                    style: TextStyle(
+                    style: AppText.bodyLarge.copyWith(
                       color: Colors.white,
                       fontWeight: FontWeight.w600,
-                      fontSize: 14,
                     ),
                   ),
                   subtitle: shelf.shelfKey.isEmpty
@@ -74,7 +73,7 @@ class EbookShelfScreen extends StatelessWidget {
                   "No individual books catalogued yet — the shelf link above "
                   "has everything the library has published.",
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12.5, color: AppColors.muted),
+                  style: AppText.bodySmallMuted,
                 ),
               ),
             // Each subject is a shelf you browse by cover, which is the one
@@ -87,10 +86,8 @@ class EbookShelfScreen extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(4, 14, 4, 6),
                 child: Text(
                   entry.key,
-                  style: const TextStyle(
-                    fontSize: 13,
+                  style: AppText.bodyMediumInk.copyWith(
                     fontWeight: FontWeight.w600,
-                    color: AppColors.ink,
                   ),
                 ),
               ),
@@ -118,10 +115,8 @@ class EbookShelfScreen extends StatelessWidget {
                     ),
                     title: Text(
                       b.title,
-                      style: const TextStyle(
-                        fontSize: 13.5,
+                      style: AppText.bodyMediumInk.copyWith(
                         fontWeight: FontWeight.w600,
-                        color: AppColors.ink,
                       ),
                     ),
                     subtitle: Column(
@@ -134,10 +129,7 @@ class EbookShelfScreen extends StatelessWidget {
                               if (b.classLabels.isNotEmpty)
                                 "Class ${b.classLabels.join(", ")}",
                             ].join(" · "),
-                            style: const TextStyle(
-                              fontSize: 11.5,
-                              color: AppColors.muted,
-                            ),
+                            style: AppText.labelMediumMuted,
                           ),
                         if (b.passKey.isNotEmpty)
                           _KeyLine(
@@ -224,10 +216,8 @@ class _SubjectCarousel extends StatelessWidget {
                       b.title,
                       maxLines: 3,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12.5,
+                      style: AppText.labelLarge.copyWith(
                         height: 1.25,
-                        fontWeight: FontWeight.w600,
                         color: ModuleTone.green.foreground,
                       ),
                     ),
@@ -258,7 +248,10 @@ class _KeyLine extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text("$label: $value", style: TextStyle(fontSize: 11.5, color: color)),
+        Text(
+          "$label: $value",
+          style: AppText.labelMedium.copyWith(color: color),
+        ),
         const SizedBox(width: 4),
         InkWell(
           onTap: () async {

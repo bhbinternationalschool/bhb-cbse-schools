@@ -27,22 +27,45 @@ class Insets {
   Insets._();
 
   /// A scrolling page body under an app bar.
-  static const page = EdgeInsets.fromLTRB(Space.xl, Space.lg, Space.lg, Space.xxxl);
+  static const page = EdgeInsets.fromLTRB(
+    Space.xl,
+    Space.lg,
+    Space.lg,
+    Space.xxxl,
+  );
 
   /// A page section that sits below a header block and needs no top inset.
-  static const pageBelowHeader =
-      EdgeInsets.fromLTRB(Space.xl, 0, Space.lg, Space.xxxl);
+  static const pageBelowHeader = EdgeInsets.fromLTRB(
+    Space.xl,
+    0,
+    Space.lg,
+    Space.xxxl,
+  );
 
   /// A horizontal gutter with no vertical inset — rows inside a page.
   static const gutter = EdgeInsets.fromLTRB(Space.xl, 0, Space.lg, 0);
 
   /// The inside of a card.
-  static const card = EdgeInsets.fromLTRB(Space.lg, Space.md, Space.md, Space.lg);
+  static const card = EdgeInsets.fromLTRB(
+    Space.lg,
+    Space.md,
+    Space.md,
+    Space.lg,
+  );
 
   /// A modal bottom sheet's content.
-  static const sheet =
-      EdgeInsets.fromLTRB(Space.xl, Space.xl, Space.lg, Space.xxl);
+  static const sheet = EdgeInsets.fromLTRB(
+    Space.xl,
+    Space.xl,
+    Space.lg,
+    Space.xxl,
+  );
 
   /// A centred state (error, empty) that needs room on every side.
-  static const state = EdgeInsets.fromLTRB(Space.xxl, Space.xl, Space.xxl, Space.xxxl);
+  static const state = EdgeInsets.fromLTRB(
+    Space.xxl,
+    Space.xl,
+    Space.xxl,
+    Space.xxxl,
+  );
 }

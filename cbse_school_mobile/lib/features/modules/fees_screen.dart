@@ -135,25 +135,17 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
               }),
         title: Text(
           due.label,
-          style: const TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: AppColors.ink,
-          ),
+          style: AppText.bodyMediumInk.copyWith(fontWeight: FontWeight.w600),
         ),
         subtitle: due.dueOn.isEmpty
             ? null
             : Text(
                 "${ahead ? "Falls due" : "Due"} ${formatDateLabel(due.dueOn)}",
-                style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
+                style: AppText.labelMediumMuted,
               ),
         secondary: Text(
           due.balanceLabel,
-          style: const TextStyle(
-            fontSize: 13.5,
-            fontWeight: FontWeight.w700,
-            color: AppColors.ink,
-          ),
+          style: AppText.bodyMediumInk.copyWith(fontWeight: FontWeight.w700),
         ),
       ),
     );
@@ -214,21 +206,18 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
                 padding: const EdgeInsets.all(16),
                 child: Row(
                   children: [
-                    const Expanded(
+                    Expanded(
                       child: Text(
                         "Total due",
-                        style: TextStyle(
+                        style: AppText.bodyMedium.copyWith(
                           color: Color(0xFFB8C0D4),
-                          fontSize: 13,
                         ),
                       ),
                     ),
                     Text(
                       ledger.openBalanceLabel,
-                      style: const TextStyle(
+                      style: AppText.headlineSmall.copyWith(
                         color: Colors.white,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ],
@@ -240,7 +229,7 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
               padding: EdgeInsets.fromLTRB(4, 4, 4, 6),
               child: Text(
                 "Tick the fees you want to pay now.",
-                style: TextStyle(fontSize: 12, color: AppColors.muted),
+                style: AppText.bodySmallMuted,
               ),
             ),
             for (final due in ledger.openDues) _dueTile(due, ahead: false),
@@ -250,10 +239,8 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
                 padding: const EdgeInsets.fromLTRB(4, 4, 4, 6),
                 child: Text(
                   "Pay ahead · ${ledger.futureBalanceLabel} for the months to come",
-                  style: const TextStyle(
-                    fontSize: 13,
+                  style: AppText.bodyMediumInk.copyWith(
                     fontWeight: FontWeight.w600,
-                    color: AppColors.ink,
                   ),
                 ),
               ),
@@ -261,7 +248,7 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
                 padding: EdgeInsets.fromLTRB(4, 0, 4, 6),
                 child: Text(
                   "Not due yet. Tick any you would like to clear now.",
-                  style: TextStyle(fontSize: 12, color: AppColors.muted),
+                  style: AppText.bodySmallMuted,
                 ),
               ),
               for (final due in ledger.futureDues) _dueTile(due, ahead: true),
@@ -278,13 +265,15 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
                   Icons.receipt_long_outlined,
                   color: AppColors.primary,
                 ),
-                title: const Text(
+                title: Text(
                   "Previous receipts",
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  style: AppText.bodyMedium.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 subtitle: const Text(
                   "Every payment so far, as a PDF",
-                  style: TextStyle(fontSize: 11.5, color: AppColors.muted),
+                  style: AppText.labelMediumMuted,
                 ),
                 trailing: const Icon(
                   Icons.chevron_right,

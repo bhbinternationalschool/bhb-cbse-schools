@@ -12,7 +12,8 @@ double _distanceM(double lat1, double lng1, double lat2, double lng2) {
   const r = 6371000.0;
   final dLat = (lat2 - lat1) * math.pi / 180;
   final dLng = (lng2 - lng1) * math.pi / 180;
-  final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
+  final a =
+      math.sin(dLat / 2) * math.sin(dLat / 2) +
       math.cos(lat1 * math.pi / 180) *
           math.cos(lat2 * math.pi / 180) *
           math.sin(dLng / 2) *
@@ -75,7 +76,8 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
     setState(() => _locationError = null);
     if (!await Geolocator.isLocationServiceEnabled()) {
       setState(
-          () => _locationError = "Turn on location (GPS) to punch attendance.");
+        () => _locationError = "Turn on location (GPS) to punch attendance.",
+      );
       return;
     }
     var permission = await Geolocator.checkPermission();
@@ -84,26 +86,29 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
     }
     if (permission == LocationPermission.denied ||
         permission == LocationPermission.deniedForever) {
-      setState(() => _locationError =
-          "Location permission is needed to confirm you are on campus. Enable it in phone settings.");
+      setState(
+        () => _locationError =
+            "Location permission is needed to confirm you are on campus. Enable it in phone settings.",
+      );
       return;
     }
     await _positions?.cancel();
-    _positions = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.best,
-        distanceFilter: 2,
-      ),
-    ).listen(
-      (pos) {
-        if (mounted) setState(() => _position = pos);
-      },
-      onError: (_) {
-        if (mounted) {
-          setState(() => _locationError = "Could not read GPS. Try again.");
-        }
-      },
-    );
+    _positions =
+        Geolocator.getPositionStream(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.best,
+            distanceFilter: 2,
+          ),
+        ).listen(
+          (pos) {
+            if (mounted) setState(() => _position = pos);
+          },
+          onError: (_) {
+            if (mounted) {
+              setState(() => _locationError = "Could not read GPS. Try again.");
+            }
+          },
+        );
   }
 
   Future<void> _punch(String kind) async {
@@ -111,9 +116,13 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
     if (pos == null || _punching) return;
     if (pos.isMocked) {
       Haptics.warning();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
           content: Text(
-              "Mock location is ON (fake-GPS app / developer setting). Disable it — mock punches are rejected and flagged.")));
+            "Mock location is ON (fake-GPS app / developer setting). Disable it — mock punches are rejected and flagged.",
+          ),
+        ),
+      );
       return;
     }
     setState(() => _punching = true);
@@ -127,21 +136,27 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
       );
       if (!mounted) return;
       Haptics.success();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(
-          "Punched ${result.kind.toUpperCase()} at ${result.time} — ${result.distanceM} m from campus",
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            "Punched ${result.kind.toUpperCase()} at ${result.time} — ${result.distanceM} m from campus",
+          ),
         ),
-      ));
+      );
       await _load();
     } on ApiException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message)));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.message)));
       }
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text("Could not punch. Check the connection.")));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Could not punch. Check the connection."),
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _punching = false);
@@ -154,9 +169,15 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
     final pos = _position;
 
     final distance = (state != null && pos != null)
-        ? _distanceM(pos.latitude, pos.longitude, state.fenceLat, state.fenceLng)
+        ? _distanceM(
+            pos.latitude,
+            pos.longitude,
+            state.fenceLat,
+            state.fenceLng,
+          )
         : null;
-    final accuracyOk = state != null &&
+    final accuracyOk =
+        state != null &&
         pos != null &&
         (state.maxAccuracyM <= 0 || pos.accuracy <= state.maxAccuracyM);
     final insideFence =
@@ -174,11 +195,11 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text("My attendance", style: TextStyle(fontSize: 16)),
+            const Text("My attendance", style: AppText.titleMedium),
             if (state != null)
               Text(
                 "${state.staffName} · ${state.date}",
-                style: const TextStyle(fontSize: 11, color: Color(0xFFB8C0D4)),
+                style: AppText.labelMedium.copyWith(color: Color(0xFFB8C0D4)),
               ),
           ],
         ),
@@ -195,7 +216,9 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
                           Text(_error!, textAlign: TextAlign.center),
                           const SizedBox(height: 12),
                           FilledButton(
-                              onPressed: _load, child: const Text("Retry")),
+                            onPressed: _load,
+                            child: const Text("Retry"),
+                          ),
                         ],
                       ),
                     ),
@@ -224,13 +247,9 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
                           done
                               ? "Day complete"
                               : punchedIn
-                                  ? "On campus"
-                                  : "Not punched in",
-                          style: const TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.muted,
-                          ),
+                              ? "On campus"
+                              : "Not punched in",
+                          style: AppText.labelLargeMuted,
                         ),
                       ],
                     ),
@@ -249,13 +268,13 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
                               pos == null
                                   ? Icons.gps_not_fixed
                                   : insideFence
-                                      ? Icons.where_to_vote
-                                      : Icons.fmd_bad_outlined,
+                                  ? Icons.where_to_vote
+                                  : Icons.fmd_bad_outlined,
                               color: pos == null
                                   ? AppColors.muted
                                   : insideFence
-                                      ? AppColors.success
-                                      : AppColors.danger,
+                                  ? AppColors.success
+                                  : AppColors.danger,
                             ),
                             const SizedBox(width: 10),
                             Expanded(
@@ -264,11 +283,9 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
                                     (pos == null || distance == null
                                         ? "Getting your location…"
                                         : insideFence
-                                            ? "On campus — ${_distanceLabel(distance)} from the school point"
-                                            : "${_distanceLabel(distance)} from campus (limit ${state.fenceRadiusM.round()} m)"),
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  color: AppColors.ink,
+                                        ? "On campus — ${_distanceLabel(distance)} from the school point"
+                                        : "${_distanceLabel(distance)} from campus (limit ${state.fenceRadiusM.round()} m)"),
+                                style: AppText.bodyMediumInk.copyWith(
                                   height: 1.35,
                                 ),
                               ),
@@ -279,8 +296,7 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
                           const SizedBox(height: 8),
                           Text(
                             "GPS accuracy ±${pos.accuracy.round()} m${accuracyOk ? "" : " — too vague (need ≤ ${state.maxAccuracyM.round()} m). Move outdoors."}",
-                            style: TextStyle(
-                              fontSize: 11.5,
+                            style: AppText.labelMedium.copyWith(
                               color: accuracyOk
                                   ? AppColors.muted
                                   : AppColors.danger,
@@ -298,8 +314,7 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
                       padding: EdgeInsets.all(14),
                       child: Text(
                         "Self punch is disabled by the school. Use the WhatsApp attendance number instead.",
-                        style:
-                            TextStyle(fontSize: 12.5, color: AppColors.muted),
+                        style: AppText.bodySmallMuted,
                       ),
                     ),
                   )
@@ -309,16 +324,16 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
                       padding: EdgeInsets.all(14),
                       child: Text(
                         "Both punches recorded for today. Have a good evening!",
-                        style:
-                            TextStyle(fontSize: 12.5, color: AppColors.muted),
+                        style: AppText.bodySmallMuted,
                       ),
                     ),
                   )
                 else
                   FilledButton(
                     style: FilledButton.styleFrom(
-                      backgroundColor:
-                          nextKind == "in" ? AppColors.success : AppColors.warning,
+                      backgroundColor: nextKind == "in"
+                          ? AppColors.success
+                          : AppColors.warning,
                       minimumSize: const Size.fromHeight(52),
                     ),
                     onPressed: canPunch ? () => _punch(nextKind) : null,
@@ -330,8 +345,9 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
                           )
                         : Text(
                             "Punch ${nextKind.toUpperCase()}",
-                            style: const TextStyle(
-                                fontSize: 15, fontWeight: FontWeight.w700),
+                            style: AppText.titleSmall.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                   ),
               ],
@@ -358,20 +374,12 @@ class _TimeBox extends StatelessWidget {
       children: [
         Text(
           label,
-          style: TextStyle(
-            fontSize: 10.5,
-            fontWeight: FontWeight.w700,
+          style: AppText.labelSmall.copyWith(
             color: color,
-          ),
-        ),
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 18,
             fontWeight: FontWeight.w700,
-            color: AppColors.ink,
           ),
         ),
+        Text(value, style: AppText.titleLargeInk),
       ],
     );
   }

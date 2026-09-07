@@ -74,11 +74,11 @@ class PayslipsScreen extends StatelessWidget {
                   p.preparing == 1
                       ? "One month's salary is being prepared"
                       : "${p.preparing} months' salary are being prepared",
-                  style: const TextStyle(fontSize: 13, color: AppColors.ink),
+                  style: AppText.bodyMediumInk,
                 ),
                 subtitle: const Text(
                   "It appears here once the office approves the payroll.",
-                  style: TextStyle(fontSize: 12, color: AppColors.muted),
+                  style: AppText.bodySmallMuted,
                 ),
               ),
             ),
@@ -109,19 +109,16 @@ class _SlipCard extends StatelessWidget {
             Expanded(
               child: Text(
                 monthLabel(s.month),
-                style: const TextStyle(
-                  fontSize: 14,
+                style: AppText.bodyLargeInk.copyWith(
                   fontWeight: FontWeight.w600,
-                  color: AppColors.ink,
                 ),
               ),
             ),
             Text(
               rupees(s.amountPayable),
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
+              style: AppText.titleSmall.copyWith(
                 color: tone.foreground,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ],
@@ -135,7 +132,7 @@ class _SlipCard extends StatelessWidget {
           "${s.paymentDate.isNotEmpty ? " · ${formatDateLabel(s.paymentDate)}" : ""}"
           "${s.paymentModeLabel.isNotEmpty ? " · ${s.paymentModeLabel}" : ""}"
           "${s.onHold ? " · on hold" : ""}",
-          style: const TextStyle(fontSize: 12, color: AppColors.muted),
+          style: AppText.bodySmallMuted,
         ),
         childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
         children: [
@@ -166,7 +163,7 @@ class _SlipCard extends StatelessWidget {
               padding: const EdgeInsets.only(top: 6),
               child: Text(
                 s.holdNote,
-                style: const TextStyle(fontSize: 12, color: AppColors.warning),
+                style: AppText.bodySmall.copyWith(color: AppColors.warning),
               ),
             ),
         ],
@@ -187,11 +184,9 @@ class _Row extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final style = TextStyle(
-      fontSize: 12.5,
-      fontWeight: bold ? FontWeight.w700 : FontWeight.w400,
-      color: bold ? AppColors.ink : AppColors.muted,
-    );
+    final style = bold
+        ? AppText.labelLargeInk.copyWith(fontWeight: FontWeight.w700)
+        : AppText.labelLargeMuted.copyWith(fontWeight: FontWeight.w400);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(

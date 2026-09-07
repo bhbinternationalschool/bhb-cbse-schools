@@ -46,7 +46,9 @@ class _SyllabusScanScreenState extends State<SyllabusScanScreen> {
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
-      if (mounted) setState(() => _error = "Could not reach the school server.");
+      if (mounted) {
+        setState(() => _error = "Could not reach the school server.");
+      }
     }
   }
 
@@ -137,14 +139,14 @@ class _SyllabusScanScreenState extends State<SyllabusScanScreen> {
     final scan = _scan;
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Scan syllabus", style: TextStyle(fontSize: 16)),
+        title: const Text("Scan syllabus", style: AppText.titleMedium),
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           const Text(
             "Photograph the contents page of the textbook. Chapters and topics are detected for you to check before they are added.",
-            style: TextStyle(fontSize: 12.5, color: AppColors.muted),
+            style: AppText.bodySmallMuted,
           ),
           const SizedBox(height: 14),
           DropdownButtonFormField<PlanTargetClass>(
@@ -182,19 +184,21 @@ class _SyllabusScanScreenState extends State<SyllabusScanScreen> {
             children: [
               Expanded(
                 child: FilledButton.icon(
-                  onPressed:
-                      _canScan && !_busy ? () => _scanFrom(ImageSource.camera) : null,
+                  onPressed: _canScan && !_busy
+                      ? () => _scanFrom(ImageSource.camera)
+                      : null,
                   icon: const Icon(Icons.photo_camera_outlined, size: 18),
-                  label: const Text("Camera", style: TextStyle(fontSize: 13)),
+                  label: const Text("Camera", style: AppText.bodyMedium),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed:
-                      _canScan && !_busy ? () => _scanFrom(ImageSource.gallery) : null,
+                  onPressed: _canScan && !_busy
+                      ? () => _scanFrom(ImageSource.gallery)
+                      : null,
                   icon: const Icon(Icons.photo_library_outlined, size: 18),
-                  label: const Text("Gallery", style: TextStyle(fontSize: 13)),
+                  label: const Text("Gallery", style: AppText.bodyMedium),
                 ),
               ),
             ],
@@ -204,7 +208,7 @@ class _SyllabusScanScreenState extends State<SyllabusScanScreen> {
               padding: EdgeInsets.only(top: 8),
               child: Text(
                 "Pick the class and subject first.",
-                style: TextStyle(fontSize: 11.5, color: AppColors.muted),
+                style: AppText.labelMediumMuted,
               ),
             ),
           if (_busy)
@@ -217,7 +221,7 @@ class _SyllabusScanScreenState extends State<SyllabusScanScreen> {
               padding: const EdgeInsets.only(top: 12),
               child: Text(
                 _error!,
-                style: const TextStyle(fontSize: 12.5, color: AppColors.danger),
+                style: AppText.bodySmall.copyWith(color: AppColors.danger),
               ),
             ),
           if (scan != null) ...[
@@ -225,17 +229,13 @@ class _SyllabusScanScreenState extends State<SyllabusScanScreen> {
             _VerdictBanner(verdict: scan.verdict, count: scan.chapters.length),
             const SizedBox(height: 10),
             for (final chapter in scan.chapters)
-              _ChapterTile(
-                chapter: chapter,
-                onChanged: () => setState(() {}),
-              ),
+              _ChapterTile(chapter: chapter, onChanged: () => setState(() {})),
             if (scan.ignored.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(
                   "${scan.ignored.length} line(s) on the page were not used.",
-                  style: const TextStyle(
-                      fontSize: 11.5, color: AppColors.muted),
+                  style: AppText.labelMediumMuted,
                 ),
               ),
             const SizedBox(height: 14),
@@ -264,20 +264,20 @@ class _VerdictBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final (String text, Color colour, Color background) = switch (verdict) {
       "good" => (
-          "Found $count chapter(s). Check before saving.",
-          AppColors.success,
-          ModuleTone.teal.background
-        ),
+        "Found $count chapter(s). Check before saving.",
+        AppColors.success,
+        ModuleTone.teal.background,
+      ),
       "partial" => (
-          "Read only partly — please check every row.",
-          AppColors.warning,
-          ModuleTone.amber.background
-        ),
+        "Read only partly — please check every row.",
+        AppColors.warning,
+        ModuleTone.amber.background,
+      ),
       _ => (
-          "Nothing recognisable. Try a straighter, brighter photo of just the contents page.",
-          AppColors.danger,
-          ModuleTone.coral.background
-        ),
+        "Nothing recognisable. Try a straighter, brighter photo of just the contents page.",
+        AppColors.danger,
+        ModuleTone.coral.background,
+      ),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -285,11 +285,7 @@ class _VerdictBanner extends StatelessWidget {
         color: background,
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Text(
-        text,
-        style: TextStyle(
-            fontSize: 12.5, color: colour, fontWeight: FontWeight.w600),
-      ),
+      child: Text(text, style: AppText.labelLarge.copyWith(color: colour)),
     );
   }
 }
@@ -322,7 +318,7 @@ class _ChapterTile extends StatelessWidget {
                   child: TextFormField(
                     initialValue: chapter.title,
                     onChanged: (v) => chapter.title = v,
-                    style: const TextStyle(fontSize: 13.5),
+                    style: AppText.bodyMedium,
                     decoration: const InputDecoration(
                       isDense: true,
                       border: InputBorder.none,
@@ -332,16 +328,16 @@ class _ChapterTile extends StatelessWidget {
                 if (chapter.confidence == "low")
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 7, vertical: 3),
+                      horizontal: 7,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
                       color: ModuleTone.amber.background,
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    child: const Text(
+                    child: Text(
                       "guess",
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
+                      style: AppText.labelSmall.copyWith(
                         color: AppColors.warning,
                       ),
                     ),
@@ -364,8 +360,7 @@ class _ChapterTile extends StatelessWidget {
                       child: TextFormField(
                         initialValue: topic.title,
                         onChanged: (v) => topic.title = v,
-                        style: const TextStyle(
-                            fontSize: 12.5, color: AppColors.muted),
+                        style: AppText.bodySmallMuted,
                         decoration: const InputDecoration(
                           isDense: true,
                           border: InputBorder.none,

@@ -133,10 +133,8 @@ class _LeadCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     lead.childName,
-                    style: const TextStyle(
-                      fontSize: 14,
+                    style: AppText.bodyLargeInk.copyWith(
                       fontWeight: FontWeight.w700,
-                      color: AppColors.ink,
                     ),
                   ),
                 ),
@@ -159,18 +157,14 @@ class _LeadCard extends StatelessWidget {
                             : formatDateLabel(lead.nextFollowUpAt),
                       _ => "No date",
                     },
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: tone.foreground,
-                    ),
+                    style: AppText.labelMedium.copyWith(color: tone.foreground),
                   ),
                 ),
               ],
             ),
             Text(
               "${lead.guardianName}${digits.isEmpty ? "" : " · $digits"}",
-              style: const TextStyle(fontSize: 12.5, color: AppColors.ink),
+              style: AppText.bodySmallInk,
             ),
             Text(
               [
@@ -179,17 +173,14 @@ class _LeadCard extends StatelessWidget {
                 lead.stageLabel,
                 if (lead.enquiryNo.isNotEmpty) lead.enquiryNo,
               ].join(" · "),
-              style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
+              style: AppText.labelMediumMuted,
             ),
             if (lead.lastOutcome.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(
                   "Last: ${lead.lastChannel} — ${lead.lastOutcome}${lead.lastNote.isEmpty ? "" : " · ${lead.lastNote}"}",
-                  style: const TextStyle(
-                    fontSize: 11.5,
-                    color: AppColors.muted,
-                  ),
+                  style: AppText.labelMediumMuted,
                 ),
               ),
             Row(
@@ -221,10 +212,7 @@ class _LeadCard extends StatelessWidget {
                   ),
                 FilledButton.tonal(
                   onPressed: () => _log(context),
-                  child: const Text(
-                    "Log call",
-                    style: TextStyle(fontSize: 12.5),
-                  ),
+                  child: const Text("Log call", style: AppText.bodySmall),
                 ),
               ],
             ),
@@ -313,15 +301,11 @@ class _LeadFollowupSheetState extends State<_LeadFollowupSheet> {
           children: [
             Text(
               "Call with ${widget.lead.guardianName}",
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: AppColors.ink,
-              ),
+              style: AppText.titleMediumInk,
             ),
             Text(
               "about ${widget.lead.childName}",
-              style: const TextStyle(fontSize: 12.5, color: AppColors.muted),
+              style: AppText.bodySmallMuted,
             ),
             const SizedBox(height: 10),
             Wrap(
@@ -333,7 +317,7 @@ class _LeadFollowupSheetState extends State<_LeadFollowupSheet> {
                   ("visit", "Visited"),
                 ])
                   ChoiceChip(
-                    label: Text(l, style: const TextStyle(fontSize: 12)),
+                    label: Text(l, style: AppText.bodySmall),
                     selected: _channel == v,
                     onSelected: (_) => setState(() => _channel = v),
                   ),
@@ -354,7 +338,7 @@ class _LeadFollowupSheetState extends State<_LeadFollowupSheet> {
                   ("admitted", "Admitted"),
                 ])
                   ChoiceChip(
-                    label: Text(l, style: const TextStyle(fontSize: 12)),
+                    label: Text(l, style: AppText.bodySmall),
                     selected: _outcome == v,
                     onSelected: (_) => setState(() => _outcome = v),
                   ),

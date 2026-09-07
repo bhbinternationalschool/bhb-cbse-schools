@@ -29,7 +29,7 @@ class BusRoutesScreen extends StatelessWidget {
             padding: EdgeInsets.only(bottom: 10),
             child: Text(
               "All published school bus routes. Ask the office which one your child is on.",
-              style: TextStyle(fontSize: 12, color: AppColors.muted),
+              style: AppText.bodySmallMuted,
             ),
           ),
           for (final route in routes)
@@ -52,10 +52,9 @@ class BusRoutesScreen extends StatelessWidget {
                           ),
                           child: Text(
                             route.code,
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
+                            style: AppText.labelMedium.copyWith(
                               color: ModuleTone.blue.foreground,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
                         ),
@@ -63,10 +62,8 @@ class BusRoutesScreen extends StatelessWidget {
                         Expanded(
                           child: Text(
                             route.name,
-                            style: const TextStyle(
-                              fontSize: 14,
+                            style: AppText.bodyLargeInk.copyWith(
                               fontWeight: FontWeight.w600,
-                              color: AppColors.ink,
                             ),
                           ),
                         ),
@@ -82,10 +79,7 @@ class BusRoutesScreen extends StatelessWidget {
                         if ((route.driverName ?? "").isNotEmpty)
                           "Driver: ${route.driverName}",
                       ].join(" · "),
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.muted,
-                      ),
+                      style: AppText.bodySmallMuted,
                     ),
                     const SizedBox(height: 12),
                     for (var i = 0; i < route.stops.length; i++)
@@ -120,18 +114,12 @@ class BusRoutesScreen extends StatelessWidget {
                             Expanded(
                               child: Text(
                                 route.stops[i].name,
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  color: AppColors.ink,
-                                ),
+                                style: AppText.bodyMediumInk,
                               ),
                             ),
                             Text(
                               "${route.stops[i].distanceKm} km",
-                              style: const TextStyle(
-                                fontSize: 11.5,
-                                color: AppColors.muted,
-                              ),
+                              style: AppText.labelMediumMuted,
                             ),
                           ],
                         ),

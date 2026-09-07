@@ -93,10 +93,9 @@ class _WaitingCardState extends State<WaitingCard> {
           children: [
             Text(
               "Waiting for you · ${d.total}",
-              style: TextStyle(
-                fontSize: 13.5,
-                fontWeight: FontWeight.w700,
+              style: AppText.bodyMedium.copyWith(
                 color: ModuleTone.amber.foreground,
+                fontWeight: FontWeight.w700,
               ),
             ),
             const SizedBox(height: 8),
@@ -112,10 +111,7 @@ class _WaitingCardState extends State<WaitingCard> {
                       color: ModuleTone.amber.foreground,
                     ),
                     label: Text("$label · $n"),
-                    labelStyle: const TextStyle(
-                      fontSize: 12,
-                      color: AppColors.ink,
-                    ),
+                    labelStyle: AppText.bodySmallInk,
                     backgroundColor: Colors.white,
                     side: BorderSide.none,
                     onPressed: () => widget.onOpen(kind),
