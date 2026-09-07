@@ -5,6 +5,7 @@ import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
 import "child_profile_screen.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// The family as the school has it, and a door into each child's record.
 ///
@@ -54,7 +55,7 @@ class ProfileScreen extends StatelessWidget {
                     child: TextButton.icon(
                       onPressed: () => _edit(context, profile, reload),
                       icon: const Icon(Icons.edit_outlined, size: 18),
-                      label: const Text("Update family details"),
+                      label: Text(context.l10n.updateFamilyDetails),
                     ),
                   ),
                 ],
@@ -101,7 +102,7 @@ class ProfileScreen extends StatelessWidget {
           OutlinedButton.icon(
             onPressed: onSignOut,
             icon: const Icon(Icons.logout, size: 18),
-            label: const Text("Sign out"),
+            label: Text(context.l10n.signOut),
           ),
         ],
       ),
@@ -127,9 +128,7 @@ class ProfileScreen extends StatelessWidget {
       await reload();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Saved. The school office can see the update."),
-          ),
+          SnackBar(content: Text(context.l10n.savedTheSchoolOfficeCanSee)),
         );
       }
     }
@@ -178,7 +177,7 @@ class _HouseholdFormState extends State<_HouseholdForm> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Could not reach the school server.")),
+          SnackBar(content: Text(context.l10n.couldNotReachTheSchoolServer)),
         );
       }
     } finally {
@@ -196,7 +195,10 @@ class _HouseholdFormState extends State<_HouseholdForm> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text("Update family details", style: AppText.titleMediumInk),
+            Text(
+              context.l10n.updateFamilyDetails,
+              style: AppText.titleMediumInk,
+            ),
             const SizedBox(height: 4),
             Text(
               "Registered mobile ${widget.profile.household["mobile"]} is your sign-in and "

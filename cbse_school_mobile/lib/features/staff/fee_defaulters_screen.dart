@@ -6,6 +6,7 @@ import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
 import "fee_counter_screen.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// Families with money outstanding — biggest first, with the guardian one tap
 /// away on a call or WhatsApp, and a place to record what they promised.
@@ -60,7 +61,7 @@ class _FeeDefaultersScreenState extends State<FeeDefaultersScreen> {
             onSubmitted: (v) => setState(() => _query = v.trim()),
             decoration: InputDecoration(
               isDense: true,
-              hintText: "Search child, parent or mobile",
+              hintText: context.l10n.searchChildParentOrMobile,
               prefixIcon: const Icon(Icons.search),
               suffixIcon: _query.isEmpty
                   ? null
@@ -215,7 +216,10 @@ class _HouseholdCard extends StatelessWidget {
                               ),
                             )
                             .then((_) => reload()),
-                        child: const Text("Collect", style: AppText.bodySmall),
+                        child: Text(
+                          context.l10n.collect,
+                          style: AppText.bodySmall,
+                        ),
                       ),
                   ],
                 ),
@@ -240,7 +244,7 @@ class _HouseholdCard extends StatelessWidget {
               children: [
                 if (_digits.length >= 10) ...[
                   IconButton(
-                    tooltip: "Call",
+                    tooltip: context.l10n.call,
                     onPressed: () => launchUrl(Uri.parse("tel:$_digits")),
                     icon: const Icon(
                       Icons.call_outlined,
@@ -248,7 +252,7 @@ class _HouseholdCard extends StatelessWidget {
                     ),
                   ),
                   IconButton(
-                    tooltip: "WhatsApp",
+                    tooltip: context.l10n.whatsapp,
                     onPressed: () => launchUrl(
                       Uri.parse("https://wa.me/91$_digits?text=${_waText()}"),
                       mode: LaunchMode.externalApplication,
@@ -261,7 +265,7 @@ class _HouseholdCard extends StatelessWidget {
                 ],
                 TextButton(
                   onPressed: () => _logFollowup(context),
-                  child: const Text("Log call", style: AppText.bodySmall),
+                  child: Text(context.l10n.logCall, style: AppText.bodySmall),
                 ),
               ],
             ),
@@ -357,8 +361,8 @@ class _FollowupSheetState extends State<_FollowupSheet> {
             if (widget.household.children.length > 1)
               DropdownButtonFormField<String>(
                 initialValue: _studentId,
-                decoration: const InputDecoration(
-                  labelText: "About",
+                decoration: InputDecoration(
+                  labelText: context.l10n.about,
                   isDense: true,
                 ),
                 items: [
@@ -428,7 +432,7 @@ class _FollowupSheetState extends State<_FollowupSheet> {
               controller: _note,
               maxLines: 2,
               textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(labelText: "Note (optional)"),
+              decoration: InputDecoration(labelText: context.l10n.noteOptional),
             ),
             const SizedBox(height: 14),
             FilledButton(

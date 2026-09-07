@@ -8,6 +8,7 @@ import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/dictate_field.dart";
 import "../modules/module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// Door-to-door survey: pick the beat you are walking, then record each
 /// family. Each capture becomes an admissions lead assigned to the agent,
@@ -23,8 +24,7 @@ class SurveyScreen extends StatelessWidget {
       title: "Field survey",
       load: api.fetchSurveySetup,
       emptyIcon: Icons.map_outlined,
-      emptyText:
-          "No survey beat is active. The admissions desk sets the areas to canvass.",
+      emptyText: context.l10n.noSurveyBeatIsActiveThe,
       isEmpty: (s) => s.beats.isEmpty,
       builder: (context, setup, reload) => ListView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -47,7 +47,7 @@ class SurveyScreen extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            "Choose the beat you are walking",
+            context.l10n.chooseTheBeatYouAreWalking,
             style: AppText.bodyMediumInk.copyWith(fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 6),
@@ -146,9 +146,7 @@ class _CaptureSheetState extends State<_CaptureSheet> {
   Future<void> _save() async {
     if (!_consent) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Ask the parent before recording their details."),
-        ),
+        SnackBar(content: Text(context.l10n.askTheParentBeforeRecordingTheir)),
       );
       return;
     }
@@ -206,8 +204,8 @@ class _CaptureSheetState extends State<_CaptureSheet> {
             TextField(
               controller: _child,
               textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(
-                labelText: "Child's name",
+              decoration: InputDecoration(
+                labelText: context.l10n.childSName,
                 isDense: true,
               ),
             ),
@@ -215,8 +213,8 @@ class _CaptureSheetState extends State<_CaptureSheet> {
             TextField(
               controller: _guardian,
               textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(
-                labelText: "Parent's name",
+              decoration: InputDecoration(
+                labelText: context.l10n.parentSName,
                 isDense: true,
               ),
             ),
@@ -226,8 +224,8 @@ class _CaptureSheetState extends State<_CaptureSheet> {
               keyboardType: TextInputType.phone,
               maxLength: 10,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: const InputDecoration(
-                labelText: "Mobile",
+              decoration: InputDecoration(
+                labelText: context.l10n.mobile,
                 isDense: true,
                 counterText: "",
               ),
@@ -236,8 +234,8 @@ class _CaptureSheetState extends State<_CaptureSheet> {
             DropdownButtonFormField<String>(
               initialValue: _classId.isEmpty ? null : _classId,
               isExpanded: true,
-              decoration: const InputDecoration(
-                labelText: "Class sought",
+              decoration: InputDecoration(
+                labelText: context.l10n.classSought,
                 isDense: true,
               ),
               items: [
@@ -252,8 +250,8 @@ class _CaptureSheetState extends State<_CaptureSheet> {
                 Expanded(
                   child: DropdownButtonFormField<int>(
                     initialValue: _age == 0 ? null : _age,
-                    decoration: const InputDecoration(
-                      labelText: "Age (approx)",
+                    decoration: InputDecoration(
+                      labelText: context.l10n.ageApprox,
                       isDense: true,
                     ),
                     items: [
@@ -263,17 +261,23 @@ class _CaptureSheetState extends State<_CaptureSheet> {
                     onChanged: (v) => setState(() => _age = v ?? 0),
                   ),
                 ),
-                const SizedBox(width: 8),
+                SizedBox(width: 8),
                 Expanded(
                   child: DropdownButtonFormField<String>(
                     initialValue: _gender.isEmpty ? null : _gender,
-                    decoration: const InputDecoration(
-                      labelText: "Gender",
+                    decoration: InputDecoration(
+                      labelText: context.l10n.gender,
                       isDense: true,
                     ),
-                    items: const [
-                      DropdownMenuItem(value: "male", child: Text("Boy")),
-                      DropdownMenuItem(value: "female", child: Text("Girl")),
+                    items: [
+                      DropdownMenuItem(
+                        value: "male",
+                        child: Text(context.l10n.boy),
+                      ),
+                      DropdownMenuItem(
+                        value: "female",
+                        child: Text(context.l10n.girl),
+                      ),
                     ],
                     onChanged: (v) => setState(() => _gender = v ?? ""),
                   ),
@@ -283,8 +287,8 @@ class _CaptureSheetState extends State<_CaptureSheet> {
             const SizedBox(height: 8),
             TextField(
               controller: _locality,
-              decoration: const InputDecoration(
-                labelText: "Locality / street",
+              decoration: InputDecoration(
+                labelText: context.l10n.localityStreet,
                 isDense: true,
               ),
             ),
@@ -301,13 +305,13 @@ class _CaptureSheetState extends State<_CaptureSheet> {
               dense: true,
               value: _consent,
               onChanged: (v) => setState(() => _consent = v ?? false),
-              title: const Text(
-                "The parent agreed to be contacted by the school",
+              title: Text(
+                context.l10n.theParentAgreedToBeContacted,
                 style: AppText.bodySmall,
               ),
             ),
-            const Text(
-              "Age is kept as the parent said it — an approximate age, never turned into a date of birth.",
+            Text(
+              context.l10n.ageIsKeptAsTheParent,
               style: AppText.labelMediumMuted,
             ),
             const SizedBox(height: 12),

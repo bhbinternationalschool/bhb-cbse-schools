@@ -3,6 +3,7 @@ import "package:go_router/go_router.dart";
 
 import "../core/api/api_client.dart";
 import "../core/config/app_config.dart";
+import "../core/i18n/locale_controller.dart";
 
 /// Who a build is for.
 ///
@@ -94,7 +95,7 @@ class WrongAppScreen extends StatelessWidget {
                   await api.signOut();
                   if (context.mounted) context.go("/login");
                 },
-                child: const Text("Back to sign in"),
+                child: Text(context.l10n.backToSignIn),
               ),
             ],
           ),

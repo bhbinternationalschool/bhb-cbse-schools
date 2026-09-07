@@ -4,6 +4,7 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/motion.dart";
 import "../../core/ui/spacing.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// Shared chrome for module screens: navy app bar, pull-to-refresh list,
 /// one loading/error/empty pattern so every module behaves the same way.
@@ -103,6 +104,10 @@ class _ModuleShellState<T> extends State<ModuleShell<T>> {
                   ),
                 ],
               ),
+        // Every inner screen gets the language switch here, so a gateman or
+        // driver can flip the app without first finding a settings page in a
+        // language he cannot read.
+        actions: const [LanguageToggle(onLight: true)],
       ),
       floatingActionButton: data == null
           ? null
@@ -134,7 +139,7 @@ class _ModuleShellState<T> extends State<ModuleShell<T>> {
                             const SizedBox(height: 12),
                             FilledButton(
                               onPressed: _load,
-                              child: const Text("Retry"),
+                              child: Text(context.l10n.retry),
                             ),
                           ],
                         ),

@@ -5,6 +5,8 @@ import "package:go_router/go_router.dart";
 
 import "../core/api/api_client.dart";
 import "../core/config/app_config.dart";
+import "../core/i18n/locale_controller.dart";
+import "../l10n/app_localizations.dart";
 import "../core/push/push_service.dart";
 import "../core/theme/app_theme.dart";
 import "app_audience.dart";
@@ -36,6 +38,7 @@ class CbseSchoolApp extends StatefulWidget {
 class _CbseSchoolAppState extends State<CbseSchoolApp> {
   late final ApiClient _api = ApiClient(widget.config);
   late final PushService _push = PushService(_api);
+  final LocaleController _locale = LocaleController();
 
   late final GoRouter _router = GoRouter(
     initialLocation: "/login",
@@ -97,6 +100,7 @@ class _CbseSchoolAppState extends State<CbseSchoolApp> {
   @override
   void initState() {
     super.initState();
+    unawaited(_locale.load());
     _api.beforeSignOut = _push.unregister;
     _push.init().then((_) {
       _push.onOpenRoute.listen(_openFromNotification);
@@ -109,16 +113,29 @@ class _CbseSchoolAppState extends State<CbseSchoolApp> {
 
   @override
   void dispose() {
+    _locale.dispose();
     _push.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp.router(
-      title: widget.audience.appName,
-      theme: buildAppTheme(),
-      routerConfig: _router,
+    // LocaleScope sits ABOVE MaterialApp so the toggle is reachable from every
+    // screen, and the ValueListenableBuilder rebuilds the whole app when the
+    // language changes — the one place that has to happen.
+    return LocaleScope(
+      controller: _locale,
+      child: ValueListenableBuilder<Locale?>(
+        valueListenable: _locale,
+        builder: (context, locale, _) => MaterialApp.router(
+          title: widget.audience.appName,
+          theme: buildAppTheme(),
+          locale: locale,
+          localizationsDelegates: L.localizationsDelegates,
+          supportedLocales: LocaleController.supported,
+          routerConfig: _router,
+        ),
+      ),
     );
   }
 }

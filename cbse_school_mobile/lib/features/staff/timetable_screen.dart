@@ -3,6 +3,7 @@ import "package:flutter/material.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../modules/module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// The staff member's week from the published timetable, one day per tab,
 /// today selected. Substitutions this week — periods they cover, and their
@@ -18,9 +19,7 @@ class TimetableScreen extends StatelessWidget {
       title: "My timetable",
       load: api.fetchStaffTimetable,
       emptyIcon: Icons.calendar_view_week_outlined,
-      emptyText:
-          "No periods are assigned to you on the timetable yet. The office "
-          "publishes it from Timetable on the desk.",
+      emptyText: context.l10n.noPeriodsAreAssignedToYou,
       isEmpty: (t) => t.periodCount == 0 && t.substitutions.isEmpty,
       builder: (context, t, _) => _Week(t: t),
     );
@@ -57,13 +56,13 @@ class _WeekState extends State<_Week> {
           Padding(
             padding: EdgeInsets.only(bottom: 10),
             child: Text(
-              "Working draft — the office has not published this timetable yet.",
+              context.l10n.workingDraftTheOfficeHasNot,
               style: AppText.bodySmall.copyWith(color: AppColors.warning),
             ),
           ),
         if (t.substitutions.isNotEmpty) ...[
           Text(
-            "This week's arrangements",
+            context.l10n.thisWeekSArrangements,
             style: AppText.bodyMediumInk.copyWith(fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 6),
@@ -119,11 +118,11 @@ class _WeekState extends State<_Week> {
         ),
         const SizedBox(height: 10),
         if (day == null || day.periods.isEmpty)
-          const Card(
+          Card(
             child: Padding(
               padding: EdgeInsets.all(16),
               child: Text(
-                "No periods this day.",
+                context.l10n.noPeriodsThisDay,
                 style: AppText.bodySmallMuted,
               ),
             ),

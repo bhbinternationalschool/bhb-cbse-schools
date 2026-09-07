@@ -2,6 +2,7 @@ import "package:flutter/material.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// School-wide WhatsApp + app-push broadcast for principal/owner roles —
 /// the same choices as the web owner dashboard's Broadcast modal:
@@ -163,7 +164,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text("Send to everyone?"),
+        title: Text(context.l10n.sendToEveryone),
         content: Text(
           "This will send ${viaTemplate ? "the approved template “${_template!.name}”" : "your message"} "
           "on WhatsApp to ${preview.recipientCount} $who"
@@ -173,7 +174,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text("Cancel"),
+            child: Text(context.l10n.cancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
@@ -228,25 +229,25 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
     final templates = _templates;
     final t = _template;
     return Scaffold(
-      appBar: AppBar(title: const Text("Broadcast message")),
+      appBar: AppBar(title: Text(context.l10n.broadcastMessage)),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          const Text(
-            "Audience",
+          Text(
+            context.l10n.audience,
             style: TextStyle(fontWeight: FontWeight.w600, color: AppColors.ink),
           ),
-          const SizedBox(height: 6),
+          SizedBox(height: 6),
           SegmentedButton<String>(
-            segments: const [
+            segments: [
               ButtonSegment(
                 value: "parents",
-                label: Text("All parents"),
+                label: Text(context.l10n.allParents),
                 icon: Icon(Icons.family_restroom_outlined),
               ),
               ButtonSegment(
                 value: "staff",
-                label: Text("All staff"),
+                label: Text(context.l10n.allStaff),
                 icon: Icon(Icons.badge_outlined),
               ),
             ],
@@ -260,13 +261,13 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
                   }),
           ),
           const SizedBox(height: 16),
-          const Text(
-            "Message type",
+          Text(
+            context.l10n.messageType,
             style: TextStyle(fontWeight: FontWeight.w600, color: AppColors.ink),
           ),
           const SizedBox(height: 6),
           if (templates == null)
-            const Padding(
+            Padding(
               padding: EdgeInsets.symmetric(vertical: 8),
               child: Row(
                 children: [
@@ -277,7 +278,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
                   ),
                   SizedBox(width: 10),
                   Text(
-                    "Loading approved templates…",
+                    context.l10n.loadingApprovedTemplates,
                     style: AppText.bodySmallMuted,
                   ),
                 ],
@@ -295,9 +296,9 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
                 isDense: true,
               ),
               items: [
-                const DropdownMenuItem(
+                DropdownMenuItem(
                   value: "",
-                  child: Text("Free text (24-hour window only)"),
+                  child: Text(context.l10n.freeTextHourWindowOnly),
                 ),
                 for (final tpl in templates)
                   DropdownMenuItem(
@@ -340,7 +341,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      "Approved template · reaches every recipient regardless of the 24-hour window.",
+                      context.l10n.approvedTemplateReachesEveryRecipientRegardl,
                       style: AppText.labelMedium.copyWith(
                         color: ModuleTone.teal.foreground,
                       ),
@@ -351,8 +352,8 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
             ),
             if (t.variables.isNotEmpty) ...[
               const SizedBox(height: 8),
-              const Text(
-                "The same value is used for every recipient — a school-wide send has no per-person data to fill placeholders with.",
+              Text(
+                context.l10n.theSameValueIsUsedFor,
                 style: AppText.labelMediumMuted,
               ),
               for (final v in t.variables)
@@ -379,19 +380,16 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
               maxLines: 10,
               maxLength: 1000,
               textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(
-                labelText: "Message",
-                hintText:
-                    "e.g. School will remain closed tomorrow on account of heavy rain. Classes resume Wednesday.",
+              decoration: InputDecoration(
+                labelText: context.l10n.message,
+                hintText: context.l10n.eGSchoolWillRemainClosed,
                 alignLabelWithHint: true,
                 border: OutlineInputBorder(),
               ),
               onChanged: (_) => _resetOutcome(),
             ),
             Text(
-              "Free text only reaches recipients who messaged the school's WhatsApp "
-              "number in the last 24 hours — Meta blocks it outside that window. "
-              "Pick an approved template above to reach everyone.",
+              context.l10n.freeTextOnlyReachesRecipientsWho,
               style: AppText.labelMedium.copyWith(color: AppColors.warning),
             ),
           ],
@@ -419,7 +417,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          "Sent",
+                          context.l10n.sent,
                           style: TextStyle(
                             fontWeight: FontWeight.w700,
                             color: ModuleTone.teal.foreground,
@@ -457,8 +455,8 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    const Text(
-                      "Nothing has been sent yet. Review the message above, then confirm.",
+                    Text(
+                      context.l10n.nothingHasBeenSentYetReview,
                       style: AppText.bodySmallMuted,
                     ),
                     const SizedBox(height: 10),
@@ -481,13 +479,11 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.people_outline),
-              label: const Text("Preview recipients"),
+              label: Text(context.l10n.previewRecipients),
             ),
           const SizedBox(height: 16),
-          const Text(
-            "Goes out on WhatsApp from the school number and as a push notification "
-            "to families/staff using the app. Parents who replied STOP are skipped "
-            "automatically. Every send is logged in the ERP's household message log.",
+          Text(
+            context.l10n.goesOutOnWhatsappFromThe,
             style: AppText.labelMediumMuted,
           ),
         ],

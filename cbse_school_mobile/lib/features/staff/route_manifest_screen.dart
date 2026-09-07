@@ -3,6 +3,7 @@ import "package:geolocator/geolocator.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// रूट हाज़िरी — the list a driver or attendant actually works from.
 ///
@@ -157,20 +158,26 @@ class _RouteManifestScreenState extends State<RouteManifestScreen> {
           IconButton(
             onPressed: _load,
             icon: const Icon(Icons.refresh),
-            tooltip: "ताज़ा करें",
+            tooltip: context.l10n.refresh,
           ),
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(56),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            padding: EdgeInsets.fromLTRB(12, 0, 12, 8),
             child: Row(
               children: [
                 Expanded(
                   child: SegmentedButton<String>(
-                    segments: const [
-                      ButtonSegment(value: "AM", label: Text("सुबह — लेना")),
-                      ButtonSegment(value: "PM", label: Text("दोपहर — छोड़ना")),
+                    segments: [
+                      ButtonSegment(
+                        value: "AM",
+                        label: Text(context.l10n.morningPickup),
+                      ),
+                      ButtonSegment(
+                        value: "PM",
+                        label: Text(context.l10n.afternoonDrop),
+                      ),
                     ],
                     selected: {_trip},
                     onSelectionChanged: (v) {
@@ -197,7 +204,7 @@ class _RouteManifestScreenState extends State<RouteManifestScreen> {
                   const SizedBox(height: 12),
                   FilledButton(
                     onPressed: _load,
-                    child: const Text("दोबारा कोशिश करें"),
+                    child: Text(context.l10n.tryAgain),
                   ),
                 ],
               ),
@@ -205,7 +212,7 @@ class _RouteManifestScreenState extends State<RouteManifestScreen> {
           : stops.isEmpty
           ? Center(
               child: Text(
-                "इस रूट पर कोई स्टॉप नहीं है",
+                context.l10n.noStopsOnRoute,
                 style: AppText.titleLarge,
               ),
             )
@@ -255,7 +262,7 @@ class _RouteManifestScreenState extends State<RouteManifestScreen> {
             Padding(
               padding: EdgeInsets.all(14),
               child: Text(
-                "इस स्टॉप पर कोई बच्चा नहीं",
+                context.l10n.noChildrenAtStop,
                 style: AppText.titleSmall,
               ),
             )
@@ -316,7 +323,7 @@ class _RouteManifestScreenState extends State<RouteManifestScreen> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   ),
                   SizedBox(width: 10),
-                  Text("लोकेशन ली जा रही है…", style: AppText.titleSmall),
+                  Text(context.l10n.gettingLocation, style: AppText.titleSmall),
                 ],
               ),
             )
@@ -338,7 +345,7 @@ class _RouteManifestScreenState extends State<RouteManifestScreen> {
                 TextButton(
                   onPressed: () =>
                       _mark(id, name, _trip == "AM" ? "boarded" : "offboarded"),
-                  child: Text("बदलें", style: AppText.titleSmall),
+                  child: Text(context.l10n.change, style: AppText.titleSmall),
                 ),
               ],
             )
@@ -364,7 +371,10 @@ class _RouteManifestScreenState extends State<RouteManifestScreen> {
                 const SizedBox(width: 8),
                 OutlinedButton(
                   onPressed: () => _mark(id, name, "absent"),
-                  child: Text("नहीं आया", style: AppText.titleMedium),
+                  child: Text(
+                    context.l10n.didNotBoard,
+                    style: AppText.titleMedium,
+                  ),
                 ),
               ],
             ),

@@ -3,6 +3,7 @@ import "package:qr_flutter/qr_flutter.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// Digital student ID: the child's details and a QR of their admission
 /// number, scannable at the gate, library, or fee counter into the ERP's
@@ -21,7 +22,7 @@ class StudentIdScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Student ID", style: AppText.titleMedium),
+        title: Text(context.l10n.studentId, style: AppText.titleMedium),
       ),
       body: Center(
         child: SingleChildScrollView(
@@ -42,7 +43,7 @@ class StudentIdScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      "BHB INTERNATIONAL SCHOOL",
+                      context.l10n.bhbInternationalSchool,
                       textAlign: TextAlign.center,
                       style: AppText.bodyMedium.copyWith(
                         letterSpacing: 0.4,
@@ -82,10 +83,10 @@ class StudentIdScreen extends StatelessWidget {
                       ),
                     const SizedBox(height: 18),
                     if (child.admissionNo.isEmpty)
-                      const Padding(
+                      Padding(
                         padding: EdgeInsets.symmetric(vertical: 24),
                         child: Text(
-                          "No admission number on record yet — contact the school office.",
+                          context.l10n.noAdmissionNumberOnRecordYet,
                           textAlign: TextAlign.center,
                           style: AppText.bodySmallMuted,
                         ),
@@ -122,8 +123,8 @@ class StudentIdScreen extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 6),
-                      const Text(
-                        "Show this QR at the school gate, library or fee counter.",
+                      Text(
+                        context.l10n.showThisQrAtTheSchool,
                         textAlign: TextAlign.center,
                         style: AppText.labelMediumMuted,
                       ),

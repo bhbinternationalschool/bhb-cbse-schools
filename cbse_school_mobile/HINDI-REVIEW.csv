@@ -1,0 +1,321 @@
+﻿key,screen,english,hindi (draft — correct this column)
+languageName,—,English,हिन्दी
+chooseLanguage,—,Language,भाषा
+english,—,English,English
+hindi,—,हिन्दी,हिन्दी
+backToSignIn,app audience,Back to sign in,वापस साइन इन पर
+changeMobileNumber,login,Change mobile number,मोबाइल नंबर बदलें
+password,login,Password,पासवर्ड
+schoolEmail,login,School email,स्कूल ईमेल
+digitCodeFromWhatsapp,login,6-digit code from WhatsApp,व्हाट्सएप से आया 6 अंकों का कोड
+otp,login,OTP,ओटीपी
+digitWhatsappNumber,login,10-digit WhatsApp number,10 अंकों का व्हाट्सएप नंबर
+mobileNumber,"login, visitor gate",Mobile number,मोबाइल नंबर
+staff,login,Staff,स्टाफ़
+parent,login,Parent,अभिभावक
+chatWithTheSchoolOnWhatsapp,home,Chat with the school on WhatsApp,स्कूल से व्हाट्सएप पर बात करें
+signOut,"desk home, home, principal home, profile, teacher home",Sign out,साइन आउट
+notices,home,Notices,सूचनाएँ
+noActiveStudentsFoundForThis,home,No active students found for this account. Contact the school office.,इस खाते से कोई चालू छात्र नहीं जुड़ा है। स्कूल दफ़्तर से संपर्क करें।
+retry,"attendance, chat thread, fee counter, home, marks, module shell, principal home, self attendance, teacher home, tutor",Retry,दोबारा कोशिश करें
+showThisQrAtTheSchool,student id,"Show this QR at the school gate, library or fee counter.","यह क्यूआर स्कूल गेट, पुस्तकालय या फ़ीस काउंटर पर दिखाएँ।"
+noAdmissionNumberOnRecordYet,student id,No admission number on record yet — contact the school office.,अभी कोई प्रवेश संख्या दर्ज नहीं है — स्कूल दफ़्तर से संपर्क करें।
+bhbInternationalSchool,student id,BHB INTERNATIONAL SCHOOL,बी एच बी इंटरनेशनल स्कूल
+studentId,student id,Student ID,छात्र पहचान पत्र
+dayByDay,attendance history,Day by day,दिन-प्रतिदिन
+noAttendanceMarkedYetThisTerm,attendance history,No attendance marked yet this term. Records appear here the day the class teacher marks the register.,इस सत्र में अभी हाज़िरी नहीं लगी है। कक्षा अध्यापक के रजिस्टर भरते ही यहाँ दिखेगी।
+allPublishedSchoolBusRoutesAsk,bus routes,All published school bus routes. Ask the office which one your child is on.,"स्कूल की सभी प्रकाशित बस रूट। आपका बच्चा किस रूट पर है, दफ़्तर से पूछें।"
+noBusRoutesPublishedYetContact,bus routes,No bus routes published yet. Contact the school office to find your child's route.,अभी कोई बस रूट प्रकाशित नहीं है। अपने बच्चे का रूट जानने के लिए दफ़्तर से संपर्क करें।
+youReNotSetAsA,chat inbox,"You're not set as a class teacher for any section, so there's no parent inbox here yet.","आप किसी सेक्शन के कक्षा अध्यापक नहीं हैं, इसलिए यहाँ अभिभावकों का इनबॉक्स नहीं है।"
+typeAMessage,chat thread,Type a message…,संदेश लिखें…
+couldNotSendCheckYourConnection,chat thread,Could not send. Check your connection.,भेजा नहीं जा सका। अपना नेटवर्क देखें।
+whatHappenedWhenAndWhatYou,complaints,"What happened, when, and what you would like the school to do","क्या हुआ, कब हुआ, और आप स्कूल से क्या चाहते हैं"
+details,complaints,Details,विवरण
+subject,"complaints, homework, syllabus scan",Subject,विषय
+generalNotAboutOneChild,complaints,General — not about one child,सामान्य — किसी एक बच्चे के बारे में नहीं
+concerning,complaints,Concerning,किसके बारे में
+whatIsItAbout,complaints,What is it about?,बात किस बारे में है?
+raiseAComplaint,complaints,Raise a complaint,शिकायत दर्ज करें
+couldNotReachTheSchoolServer,"complaints, leave, profile, transport, tutor",Could not reach the school server.,स्कूल सर्वर से संपर्क नहीं हुआ।
+pleaseFillInTheSubjectAnd,complaints,Please fill in the subject and the details.,कृपया विषय और विवरण भरें।
+noComplaintsRaisedIfSomethingAt,complaints,"No complaints raised. If something at school needs the office's attention, use the button below.",कोई शिकायत दर्ज नहीं है। स्कूल में कुछ ध्यान देने योग्य हो तो नीचे के बटन से बताएँ।
+couldNotOpenThisBook,ebook shelf,Could not open this book.,यह किताब नहीं खुल सकी।
+noIndividualBooksCataloguedYetThe,ebook shelf,No individual books catalogued yet — the shelf link above has everything the library has published.,अभी अलग-अलग किताबें दर्ज नहीं हैं — ऊपर दी गई शेल्फ़ में पुस्तकालय का सब कुछ है।
+openTheWholeShelf,ebook shelf,Open the whole shelf,पूरी शेल्फ़ खोलें
+theSchoolSEBookShelf,ebook shelf,The school's e-book shelf is not switched on yet. Books appear here as soon as the library sets it up.,स्कूल की ई-बुक शेल्फ़ अभी चालू नहीं है। पुस्तकालय के सेट करते ही किताबें यहाँ दिखेंगी।
+everyPaymentSoFarAsA,fees,"Every payment so far, as a PDF","अब तक का हर भुगतान, पीडीएफ़ में"
+previousReceipts,fees,Previous receipts,पिछली रसीदें
+notDueYetTickAnyYou,fees,Not due yet. Tick any you would like to clear now.,अभी देय नहीं। जो अभी जमा करना चाहें उस पर निशान लगाएँ।
+tickTheFeesYouWantTo,fees,Tick the fees you want to pay now.,जो फ़ीस अभी जमा करनी है उस पर निशान लगाएँ।
+totalDue,fees,Total due,कुल देय
+noPendingFeesAllDuesAre,fees,No pending fees — all dues are cleared. Thank you!,कोई फ़ीस बाकी नहीं — सब जमा हो चुका है। धन्यवाद!
+checkingForYourPaymentPaidDues,fees,Checking for your payment. Paid dues disappear from this list once the bank confirms — usually within a minute.,आपका भुगतान देखा जा रहा है। बैंक की पुष्टि होते ही जमा फ़ीस इस सूची से हट जाएगी — आमतौर पर एक मिनट में।
+noAlbumsPublishedYetPhotosFrom,gallery,No albums published yet. Photos from school events appear here.,अभी कोई एल्बम प्रकाशित नहीं है। स्कूल के कार्यक्रमों की तस्वीरें यहाँ दिखेंगी।
+publish,homework,Publish,प्रकाशित करें
+homeworkDetailsForParents,homework,Homework details for parents…,अभिभावकों के लिए गृहकार्य का विवरण…
+title,homework,Title,शीर्षक
+postHomework,homework,Post homework,गृहकार्य भेजें
+askTutor,homework,Ask tutor,ट्यूटर से पूछें
+eGFeverDoctorAdvisedRest,leave,e.g. Fever — doctor advised rest,जैसे: बुख़ार — डॉक्टर ने आराम कहा है
+reason,"leave, staff leave",Reason,कारण
+typeOfLeave,leave,Type of leave,छुट्टी का प्रकार
+pleaseGiveAReason,leave,Please give a reason.,कृपया कारण बताएँ।
+withdraw,"leave, staff leave",Withdraw,वापस लें
+keep,"child profile, leave, staff leave",Keep,रहने दें
+withdrawThisRequest,"leave, staff leave",Withdraw this request?,यह अनुरोध वापस लें?
+withdrawRequest,leave,Withdraw request,अनुरोध वापस लें
+requestLeave,leave,Request leave,छुट्टी का अनुरोध
+covers,lesson plan editor,COVERS,शामिल
+lessonTitle,lesson plan editor,Lesson title,पाठ का शीर्षक
+tapSpeakOnAnyBoxTo,lesson plan editor,Tap Speak on any box to dictate instead of typing.,टाइप करने के बजाय किसी भी बॉक्स पर बोलें दबाकर बोलें।
+newLessonPlan,lesson plan editor,New lesson plan,नई पाठ योजना
+noNoticesPublishedYetSchoolCirculars,notices,No notices published yet. School circulars and news will appear here.,अभी कोई सूचना प्रकाशित नहीं है। स्कूल के परिपत्र और समाचार यहाँ दिखेंगे।
+cancel,"broadcast, command bar, fee counter, ptm, staff roster, transport requests, visitor gate",Cancel,रद्द करें
+chooseASlot,ptm,Choose a slot,समय चुनें
+bookingCancelled,ptm,Booking cancelled,बुकिंग रद्द हुई
+slotBookedSeeYouThere,ptm,Slot booked — see you there!,समय तय हुआ — मिलते हैं!
+book,ptm,Book,बुक करें
+bookThisSlot,ptm,Book this slot?,यह समय बुक करें?
+couldNotFetchTheReceiptCheck,receipts,Could not fetch the receipt. Check your connection.,रसीद नहीं मिल सकी। अपना नेटवर्क देखें।
+fetchingReceipt,receipts,Fetching receipt…,रसीद लाई जा रही है…
+noReceiptsYetEveryPaymentMade,receipts,No receipts yet. Every payment made at the counter or online appears here.,अभी कोई रसीद नहीं। काउंटर पर या ऑनलाइन किया गया हर भुगतान यहाँ दिखेगा।
+guess,syllabus scan,guess,अनुमान
+discard,"marks, syllabus scan",Discard,छोड़ दें
+addToPlan,syllabus scan,Add to plan,योजना में जोड़ें
+pickTheClassAndSubjectFirst,syllabus scan,Pick the class and subject first.,पहले कक्षा और विषय चुनें।
+gallery,syllabus scan,Gallery,गैलरी
+camera,syllabus scan,Camera,कैमरा
+photographTheContentsPageOfThe,syllabus scan,Photograph the contents page of the textbook. Chapters and topics are detected for you to check before they are added.,"पाठ्यपुस्तक का विषय-सूची पृष्ठ फ़ोटो करें। अध्याय और विषय अपने आप पहचाने जाएँगे, जोड़ने से पहले जाँच लें।"
+scanSyllabus,syllabus scan,Scan syllabus,पाठ्यक्रम स्कैन करें
+chatInApp,teachers,Chat in app,ऐप में बात करें
+noTeachersAreLinkedToThis,teachers,No teachers are linked to this class yet. The school office assigns the class teacher and publishes the timetable.,इस कक्षा से अभी कोई अध्यापक नहीं जुड़ा है। स्कूल दफ़्तर कक्षा अध्यापक तय करता है और समय-सारणी प्रकाशित करता है।
+whatsappIsNotInstalledOnThis,teachers,WhatsApp is not installed on this phone.,इस फ़ोन में व्हाट्सएप नहीं है।
+content,teaching,CONTENT,विषय-वस्तु
+notTaught,teaching,Not taught,नहीं पढ़ाया
+thatLinkIsNotAValid,teaching,That link is not a valid web address.,यह लिंक सही वेब पता नहीं है।
+nothingToLog,teaching,Nothing to log,दर्ज करने को कुछ नहीं
+noPeriodsOnYourTimetableToday,teaching,No periods on your timetable today.,आज आपकी समय-सारणी में कोई पीरियड नहीं है।
+writeANewLessonPlan,teaching,Write a new lesson plan,नई पाठ योजना लिखें
+noLessonPlansForThisSubject,teaching,No lesson plans for this subject yet.,इस विषय की अभी कोई पाठ योजना नहीं है।
+whichLessonPlan,teaching,Which lesson plan?,कौन सी पाठ योजना?
+whatDidYouCover,teaching,What did you cover?,आपने क्या पढ़ाया?
+noSyllabusPlanSetForThis,teaching,No syllabus plan set for this subject yet.,इस विषय के लिए अभी पाठ्यक्रम योजना तय नहीं है।
+anythingElse,transport,Anything else,और कुछ
+preferredStopIfYouKnowOne,transport,Preferred stop (if you know one),पसंदीदा स्टॉप (यदि पता हो)
+landmark,transport,Landmark,पहचान चिह्न
+localityVillage,transport,Locality / village,मोहल्ला / गाँव
+pickupAddress,transport,Pickup address,लेने का पता
+tellTheSchoolWhereToPick,transport,Tell the school where to pick up from. The transport in-charge will call to confirm the stop and the monthly fee.,स्कूल को बताएँ कि बच्चे को कहाँ से लेना है। परिवहन प्रभारी स्टॉप और मासिक शुल्क की पुष्टि के लिए फ़ोन करेंगे।
+pleaseGiveThePickupAddress,transport,Please give the pickup address.,कृपया लेने का पता बताएँ।
+requestSentTheSchoolWillGet,transport,Request sent. The school will get in touch.,अनुरोध भेज दिया गया। स्कूल संपर्क करेगा।
+theTransportInChargeWillCall,transport,The transport in-charge will call you about the stop and the fee.,परिवहन प्रभारी स्टॉप और शुल्क के बारे में आपको फ़ोन करेंगे।
+notUsingSchoolTransport,transport,Not using school transport.,स्कूल परिवहन का उपयोग नहीं कर रहे।
+driverSNumberIsNotOn,transport,Driver's number is not on the school's record yet.,चालक का नंबर अभी स्कूल के रिकॉर्ड में नहीं है।
+call,"admission leads, fee defaulters, principal lists, ptm teacher, staff roster, transport, transport requests",Call,फ़ोन करें
+boardingIsPausedByTheOffice,transport,Boarding is paused by the office at the moment.,दफ़्तर ने फ़िलहाल बोर्डिंग रोक रखी है।
+seeAllBusRoutesAndStops,transport,See all bus routes and stops,सभी बस रूट और स्टॉप देखें
+voiceInputIsNotAvailableOn,tutor,Voice input is not available on this phone. Please type your question.,इस फ़ोन में बोलकर लिखना उपलब्ध नहीं है। कृपया अपना प्रश्न टाइप करें।
+repliesAreWrittenByAnAi,tutor,Replies are written by an AI and can be wrong. Check anything that matters with the class teacher.,उत्तर एआई लिखता है और ग़लत हो सकते हैं। ज़रूरी बात कक्षा अध्यापक से जाँच लें।
+howToUseTheTutorAs,tutor,How to use the tutor as daily tuition · रोज़ की ट्यूशन कैसे करें,ट्यूटर को रोज़ की ट्यूशन की तरह कैसे इस्तेमाल करें
+theTutorIsNotSwitchedOn,tutor,The tutor is not switched on yet. Please check back later.,ट्यूटर अभी चालू नहीं है। कृपया बाद में देखें।
+howToUseTheTutor,tutor,How to use the tutor,ट्यूटर कैसे इस्तेमाल करें
+aiTutor,tutor,AI tutor,एआई ट्यूटर
+fromYoutubeNotTheSchoolJudge,video player,"From YouTube, not the school — judge it as you watch.","यह यूट्यूब से है, स्कूल से नहीं — देखते समय स्वयं परखें।"
+chooseAPdfOrFile,child profile,Choose a PDF or file,पीडीएफ़ या फ़ाइल चुनें
+chooseFromGallery,child profile,Choose from gallery,गैलरी से चुनें
+takeAPhoto,child profile,Take a photo,फ़ोटो लें
+couldNotReachTheSchoolServer2,child profile,Could not reach the school server. Nothing was uploaded.,स्कूल सर्वर से संपर्क नहीं हुआ। कुछ भी अपलोड नहीं हुआ।
+ok,child profile,OK,ठीक है
+done,"child profile, fee counter",Done,हो गया
+automaticCheck,child profile,Automatic check,स्वतः जाँच
+submittedSuccessfully,child profile,Submitted successfully,सफलतापूर्वक जमा हुआ
+checkingAndUploading,child profile,Checking and uploading…,जाँच और अपलोड हो रहा है…
+replace,child profile,Replace,बदलें
+theOfficeHasAlreadyVerifiedThis,child profile,The office has already verified this one. A new upload goes back to them for verification.,दफ़्तर इसे पहले ही सत्यापित कर चुका है। नया अपलोड फिर से सत्यापन के लिए जाएगा।
+replaceAVerifiedDocument,child profile,Replace a verified document?,सत्यापित दस्तावेज़ बदलें?
+somethingWrongInTheRecordTell,child profile,"Something wrong in the record? Tell the school office — these details are changed there, with your documents in hand.","रिकॉर्ड में कुछ ग़लत है? स्कूल दफ़्तर को बताएँ — ये विवरण वहीं, आपके दस्तावेज़ देखकर बदले जाते हैं।"
+uploadAClearPhotoOrScan,child profile,Upload a clear photo or scan of each. The office verifies every document; you will see the result here.,हर दस्तावेज़ की साफ़ फ़ोटो या स्कैन अपलोड करें। दफ़्तर हर दस्तावेज़ जाँचता है; परिणाम यहाँ दिखेगा।
+thisChildIsNoLongerOn,child profile,This child is no longer on your account.,यह बच्चा अब आपके खाते में नहीं है।
+updateFamilyDetails,profile,Update family details,पारिवारिक विवरण अद्यतन करें
+savedTheSchoolOfficeCanSee,profile,Saved. The school office can see the update.,सहेज लिया गया। स्कूल दफ़्तर इसे देख सकता है।
+whatWasSaid,admission leads,What was said,क्या बात हुई
+logCall,"admission leads, fee defaulters",Log call,कॉल दर्ज करें
+whatsapp,"admission leads, fee defaulters, principal lists, staff roster, transport requests",WhatsApp,व्हाट्सएप
+searchChildParentOrMobile,"admission leads, fee defaulters","Search child, parent or mobile","बच्चा, अभिभावक या मोबाइल खोजें"
+nothingToCallRightNow,admission leads,Nothing to call right now.,अभी किसी को फ़ोन नहीं करना है।
+alreadyMarkedTodaySavingAgainWill,attendance,Already marked today — saving again will update the register.,आज पहले ही लग चुकी है — दोबारा सहेजने पर रजिस्टर अद्यतन हो जाएगा।
+noActiveStudentsInThisSection,"attendance, students",No active students in this section.,इस सेक्शन में कोई चालू छात्र नहीं है।
+attendanceSaved,attendance,Attendance saved,हाज़िरी सहेज ली गई
+goesOutOnWhatsappFromThe,broadcast,Goes out on WhatsApp from the school number and as a push notification to families/staff using the app. Parents who replied STOP are skipped automatically. Every send is logged in the ERP's household message log.,स्कूल के नंबर से व्हाट्सएप पर और ऐप वाले परिवारों/स्टाफ़ को पुश सूचना के रूप में जाता है। जिन अभिभावकों ने STOP भेजा है वे अपने आप छोड़ दिए जाते हैं। हर भेजा संदेश ईआरपी के परिवार संदेश लॉग में दर्ज होता है।
+previewRecipients,broadcast,Preview recipients,प्राप्तकर्ता देखें
+nothingHasBeenSentYetReview,broadcast,"Nothing has been sent yet. Review the message above, then confirm.","अभी कुछ नहीं भेजा गया है। ऊपर संदेश देखें, फिर पुष्टि करें।"
+sent,broadcast,Sent,भेजा गया
+freeTextOnlyReachesRecipientsWho,broadcast,Free text only reaches recipients who messaged the school's WhatsApp number in the last 24 hours — Meta blocks it outside that window. Pick an approved template above to reach everyone.,खुला संदेश केवल उन्हीं तक पहुँचता है जिन्होंने पिछले 24 घंटे में स्कूल के व्हाट्सएप नंबर पर संदेश भेजा हो — मेटा इसके बाहर रोक देता है। सबको भेजने के लिए ऊपर से स्वीकृत टेम्पलेट चुनें।
+eGSchoolWillRemainClosed,broadcast,e.g. School will remain closed tomorrow on account of heavy rain. Classes resume Wednesday.,जैसे: भारी वर्षा के कारण कल विद्यालय बंद रहेगा। कक्षाएँ बुधवार से चलेंगी।
+message,broadcast,Message,संदेश
+theSameValueIsUsedFor,broadcast,The same value is used for every recipient — a school-wide send has no per-person data to fill placeholders with.,हर प्राप्तकर्ता के लिए यही मान जाता है — पूरे विद्यालय को भेजने में प्रत्येक व्यक्ति का अलग विवरण नहीं होता।
+approvedTemplateReachesEveryRecipientRegardl,broadcast,Approved template · reaches every recipient regardless of the 24-hour window.,स्वीकृत टेम्पलेट · 24 घंटे की सीमा के बिना हर प्राप्तकर्ता तक पहुँचता है।
+freeTextHourWindowOnly,broadcast,Free text (24-hour window only),खुला संदेश (केवल 24 घंटे की सीमा में)
+loadingApprovedTemplates,broadcast,Loading approved templates…,स्वीकृत टेम्पलेट लाए जा रहे हैं…
+messageType,broadcast,Message type,संदेश का प्रकार
+allStaff,broadcast,All staff,सारा स्टाफ़
+allParents,broadcast,All parents,सारे अभिभावक
+audience,broadcast,Audience,किसे भेजें
+broadcastMessage,broadcast,Broadcast message,सामूहिक संदेश
+sendToEveryone,broadcast,Send to everyone?,सबको भेजें?
+gpsPunchInAndOutAt,desk home,GPS punch in and out at school,विद्यालय में जीपीएस पंच इन और आउट
+markMyAttendance,desk home,Mark my attendance · हाज़िरी लगाएँ,हाज़िरी लगाएँ
+reject,"documents, leave approvals",Reject,अस्वीकार करें
+back,"documents, fee counter, leave approvals, staff complaints, student leave queue",Back,वापस
+eGBlurredWrongChildExpired,documents,"e.g. blurred, wrong child, expired","जैसे: धुंधला, ग़लत बच्चा, अवधि समाप्त"
+whyTheParentReadsThis,documents,Why — the parent reads this,कारण — अभिभावक इसे पढ़ेंगे
+rejectDocument,documents,Reject document,दस्तावेज़ अस्वीकार करें
+transportRequestsFromParents,driver home,Transport requests from parents,अभिभावकों के परिवहन अनुरोध
+theParentHasBeenNotifiedIn,fee counter,The parent has been notified in their app.,अभिभावक को उनके ऐप में सूचना भेज दी गई है।
+nothingOutstanding,fee counter,Nothing outstanding.,कुछ बकाया नहीं।
+takeMoney,fee counter,Take money,पैसे लें
+aReceiptIsIssuedAtOnce,fee counter,A receipt is issued at once and the parent is notified.,रसीद तुरंत बनती है और अभिभावक को सूचना चली जाती है।
+partPaymentIsAllowedMoreThan,fee counter,Part payment is allowed; more than the balance is not,आंशिक भुगतान ले सकते हैं; बकाया से ज़्यादा नहीं
+payingNow,fee counter,Paying now (₹),अभी जमा (₹)
+nobodyMatchedTryTheAdmissionNumber,fee counter,"Nobody matched. Try the admission number, or the parent's mobile.",कोई नहीं मिला। प्रवेश संख्या या अभिभावक का मोबाइल आज़माएँ।
+nameAdmissionNoOrMobile,fee counter,"Name, admission no. or mobile","नाम, प्रवेश संख्या या मोबाइल"
+collectFees,fee counter,Collect fees,फ़ीस लें
+noteOptional,fee defaulters,Note (optional),टिप्पणी (वैकल्पिक)
+about,fee defaulters,About,बारे में
+collect,fee defaulters,Collect,लें
+approve,"leave approvals, student leave queue",Approve,स्वीकृत करें
+noDateSheetHasBeenPublished,marks,No date sheet has been published for this year yet.,इस वर्ष की परीक्षा तिथि-पत्र अभी प्रकाशित नहीं हुई है।
+stay,marks,Stay,रुकें
+discardUnsavedMarks,marks,Discard unsaved marks?,बिना सहेजे अंक छोड़ दें?
+noExamSubjectsAreLinkedTo,marks,No exam subjects are linked to this class yet. The exams desk links subjects from Masters.,इस कक्षा से अभी कोई परीक्षा विषय नहीं जुड़ा है। परीक्षा डेस्क मास्टर्स से विषय जोड़ती है।
+examDateSheet,marks,Exam date sheet,परीक्षा तिथि-पत्र
+noExamIsSetUpFor,marks,"No exam is set up for this year yet. The exams desk creates terms (unit tests, half-yearly, annual) and mark entry opens here.","इस वर्ष की कोई परीक्षा अभी तय नहीं हुई है। परीक्षा डेस्क सत्र (इकाई परीक्षा, अर्धवार्षिक, वार्षिक) बनाती है और तब अंक भरना यहाँ खुलेगा।"
+youHaveNotCollectedAnythingToday,my collections,You have not collected anything today.,आपने आज कुछ नहीं लिया है।
+itAppearsHereOnceTheOffice,payslips,It appears here once the office approves the payroll.,दफ़्तर के वेतन स्वीकृत करते ही यह यहाँ दिखेगा।
+noPayslipHasBeenReleasedYet,payslips,No payslip has been released yet. One appears here for each month once the office approves that month's payroll.,अभी कोई वेतन पर्ची जारी नहीं हुई है। दफ़्तर के उस महीने का वेतन स्वीकृत करते ही हर महीने की पर्ची यहाँ आ जाएगी।
+stopSharing,presence,Stop sharing,साझा करना बंद करें
+androidWillAskForLocationAccess,presence,Android will ask for location access — choose “Allow all the time” so sharing continues with the app closed. A permanent notification shows while sharing.,एंड्रॉइड लोकेशन की अनुमति माँगेगा — “हमेशा अनुमति दें” चुनें ताकि ऐप बंद रहने पर भी साझा होता रहे। साझा करते समय एक स्थायी सूचना दिखती रहेगी।
+byStartingYouAgreeThatThe,presence,"By starting, you agree that the school receives your phone's location during school timing on working days to confirm presence on campus, and may alert the management when you are off campus or your location is unavailable. Only your latest position and incidents are kept — not a movement trail. You can stop any time (stopping during school timing is flagged).","शुरू करने पर आप सहमत हैं कि कार्य-दिवसों में विद्यालय समय के दौरान स्कूल आपके फ़ोन की लोकेशन लेगा ताकि परिसर में उपस्थिति की पुष्टि हो सके, और आपके परिसर से बाहर होने या लोकेशन न मिलने पर प्रबंधन को सूचित कर सकता है। केवल आपकी नवीनतम स्थिति और घटनाएँ रखी जाती हैं — चलने का पूरा रास्ता नहीं। आप कभी भी रोक सकते हैं (विद्यालय समय में रोकना दर्ज होता है)।"
+theSchoolHasNotEnabledPresence,presence,The school has not enabled presence tracking yet.,विद्यालय ने अभी उपस्थिति ट्रैकिंग चालू नहीं की है।
+schoolPresence,"presence, teacher home",School presence,विद्यालय उपस्थिति
+figuresUpdateLiveFromTheSchool,principal home,Figures update live from the school ERP. Pull down to refresh.,आँकड़े विद्यालय ईआरपी से सीधे आते हैं। ताज़ा करने के लिए नीचे खींचें।
+tapToSeeRegistersBySection,principal home,Tap to see registers by section,सेक्शन के रजिस्टर देखने के लिए दबाएँ
+noSectionsMarkedYetToday,principal home,No sections marked yet today.,आज अभी किसी सेक्शन की हाज़िरी नहीं लगी।
+couldNotLoadTheClassList,principal home,Could not load the class list.,कक्षा सूची नहीं आ सकी।
+noFollowUpsAreDueNice,principal lists,No follow-ups are due. Nice.,कोई फ़ॉलो-अप बाकी नहीं। बढ़िया।
+noActiveStaffOnTheRoster,"principal lists, staff roster",No active staff on the roster.,रोस्टर में कोई चालू स्टाफ़ नहीं है।
+tapASectionToViewOr,principal lists,Tap a section to view or mark its register.,रजिस्टर देखने या भरने के लिए सेक्शन दबाएँ।
+noActiveSectionsConfigured,principal lists,No active sections configured.,कोई चालू सेक्शन तय नहीं है।
+noMobileOnFile,principal lists,No mobile on file,रिकॉर्ड में मोबाइल नहीं है
+whatsappIsNotAvailableOnThis,principal lists,WhatsApp is not available on this phone.,इस फ़ोन में व्हाट्सएप उपलब्ध नहीं है।
+couldNotOpenTheDialer,principal lists,Could not open the dialer.,डायलर नहीं खुल सका।
+addNote,ptm teacher,Add note,टिप्पणी जोड़ें
+metAddNote,ptm teacher,Met · add note,मिले · टिप्पणी जोड़ें
+didNotCome,ptm teacher,Did not come,नहीं आए
+save,"ptm teacher, staff roster, transport requests",Save,सहेजें
+agreedFollowUp,ptm teacher,Agreed follow-up,तय हुआ फ़ॉलो-अप
+needsAttention,ptm teacher,Needs attention,ध्यान देने की ज़रूरत
+doingWell,ptm teacher,Doing well,अच्छा कर रहे हैं
+aShortNoteForTheParent,ptm teacher,A short note for the parent and the report card. All three are optional.,अभिभावक और रिपोर्ट कार्ड के लिए छोटी टिप्पणी। तीनों वैकल्पिक हैं।
+noPtmSlotsAreYoursRight,ptm teacher,No PTM slots are yours right now. The office schedules PTM days and slots from the PTM desk.,अभी आपका कोई पीटीएम समय नहीं है। दफ़्तर पीटीएम डेस्क से दिन और समय तय करता है।
+chooseClassSection,section picker,Choose class & section,कक्षा और सेक्शन चुनें
+bothPunchesRecordedForTodayHave,self attendance,Both punches recorded for today. Have a good evening!,आज के दोनों पंच दर्ज हो गए। शुभ संध्या!
+selfPunchIsDisabledByThe,self attendance,Self punch is disabled by the school. Use the WhatsApp attendance number instead.,विद्यालय ने स्वयं पंच बंद कर रखा है। व्हाट्सएप हाज़िरी नंबर का उपयोग करें।
+myAttendance,"self attendance, teacher home",My attendance,मेरी हाज़िरी
+couldNotPunchCheckTheConnection,self attendance,Could not punch. Check the connection.,पंच नहीं हुआ। नेटवर्क देखें।
+mockLocationIsOnFakeGps,self attendance,Mock location is ON (fake-GPS app / developer setting). Disable it — mock punches are rejected and flagged.,नक़ली लोकेशन चालू है (फ़ेक-जीपीएस ऐप / डेवलपर सेटिंग)। इसे बंद करें — नक़ली पंच अस्वीकार होते हैं और दर्ज किए जाते हैं।
+close,staff complaints,Close,बंद करें
+resolve,staff complaints,Resolve,निपटाएँ
+inProgress,staff complaints,In progress,चल रहा है
+takeUp,staff complaints,Take up,हाथ में लें
+callParent,staff complaints,Call parent,अभिभावक को फ़ोन करें
+theParentReadsThisInTheir,staff complaints,The parent reads this in their app,अभिभावक इसे अपने ऐप में पढ़ेंगे
+whatWasDone,staff complaints,What was done,क्या किया गया
+resolveComplaint,staff complaints,Resolve complaint,शिकायत निपटाएँ
+shortAndClearThePrincipalReads,staff leave,Short and clear — the principal reads this,छोटा और स्पष्ट — प्रधानाचार्य इसे पढ़ेंगे
+halfDay,staff leave,Half day,आधा दिन
+to,staff leave,to,से
+applyForLeave,staff leave,Apply for leave,छुट्टी के लिए आवेदन
+noLeaveAppliedYetThisYear,staff leave,No leave applied yet this year.,इस वर्ष अभी कोई छुट्टी नहीं ली गई है।
+myRequests,staff leave,My requests,मेरे अनुरोध
+unpaid,staff leave,Unpaid,अवैतनिक
+balanceThisYear,staff leave,Balance this year,इस वर्ष शेष
+staffSignInWithAnOtp,staff roster,Staff sign in with an OTP sent to this number,स्टाफ़ इसी नंबर पर आए ओटीपी से साइन इन करते हैं
+digitMobile,staff roster,10-digit mobile,10 अंकों का मोबाइल
+waitingForThePrincipal,student leave queue,Waiting for the principal.,प्रधानाचार्य की प्रतीक्षा है।
+decline,"student leave queue, transport requests",Decline,अस्वीकार करें
+theAttendanceRegisterWillShowLeave,student leave queue,The attendance register will show leave for these days.,हाज़िरी रजिस्टर में इन दिनों की छुट्टी दिखेगी।
+tellTheParentNowAppNotification,student note sheet,Tell the parent now (app notification),अभी अभिभावक को बताएँ (ऐप सूचना)
+referredToHospitalSentHome,student note sheet,Referred to hospital / sent home,अस्पताल भेजा / घर भेजा
+sayWhatTheChildReported,student note sheet,Say what the child reported.,"बच्चे ने क्या बताया, लिखें।"
+describeWhatHappened,student note sheet,Describe what happened.,"क्या हुआ, बताएँ।"
+sickRoomFirstAid,student note sheet,Sick room / first aid,बीमार कक्ष / प्राथमिक उपचार
+disciplineNote,student note sheet,Discipline note,अनुशासन टिप्पणी
+meritGoodConduct,student note sheet,Merit / good conduct,प्रशंसा / अच्छा आचरण
+ageIsKeptAsTheParent,survey,"Age is kept as the parent said it — an approximate age, never turned into a date of birth.","आयु वैसी ही रखी जाती है जैसी अभिभावक ने बताई — अनुमानित आयु, इसे कभी जन्म तिथि नहीं बनाया जाता।"
+theParentAgreedToBeContacted,survey,The parent agreed to be contacted by the school,अभिभावक विद्यालय से संपर्क के लिए सहमत हुए
+localityStreet,survey,Locality / street,मोहल्ला / गली
+girl,survey,Girl,बालिका
+boy,survey,Boy,बालक
+gender,survey,Gender,लिंग
+ageApprox,survey,Age (approx),आयु (लगभग)
+classSought,survey,Class sought,वांछित कक्षा
+mobile,survey,Mobile,मोबाइल
+parentSName,survey,Parent's name,अभिभावक का नाम
+childSName,survey,Child's name,बच्चे का नाम
+askTheParentBeforeRecordingTheir,survey,Ask the parent before recording their details.,विवरण दर्ज करने से पहले अभिभावक से पूछ लें।
+chooseTheBeatYouAreWalking,survey,Choose the beat you are walking,आप जिस क्षेत्र में जा रहे हैं वह चुनें
+noSurveyBeatIsActiveThe,survey,No survey beat is active. The admissions desk sets the areas to canvass.,कोई सर्वेक्षण क्षेत्र चालू नहीं है। प्रवेश डेस्क क्षेत्र तय करती है।
+modules,teacher home,Modules,मॉड्यूल
+noPeriodsForYouTodayOn,teacher home,No periods for you today on the published timetable.,प्रकाशित समय-सारणी में आज आपका कोई पीरियड नहीं है।
+todaySPeriods,teacher home,Today's periods,आज के पीरियड
+shareLocationDuringSchoolHoursWorks,teacher home,Share location during school hours (works with app closed),विद्यालय समय में लोकेशन साझा करें (ऐप बंद होने पर भी चलता है)
+gpsPunchInOutFromCampus,teacher home,GPS punch in / out from campus,कैंपस से जीपीएस पंच इन / आउट
+noPeriodsThisDay,timetable,No periods this day.,इस दिन कोई पीरियड नहीं।
+thisWeekSArrangements,timetable,This week's arrangements,इस सप्ताह की व्यवस्था
+workingDraftTheOfficeHasNot,timetable,Working draft — the office has not published this timetable yet.,कच्चा प्रारूप — दफ़्तर ने यह समय-सारणी अभी प्रकाशित नहीं की है।
+noPeriodsAreAssignedToYou,timetable,No periods are assigned to you on the timetable yet. The office publishes it from Timetable on the desk.,समय-सारणी में अभी आपको कोई पीरियड नहीं दिया गया है। दफ़्तर इसे डेस्क की समय-सारणी से प्रकाशित करता है।
+noteForTheFamilyTheyWill,transport requests,Note for the family (they will see it),परिवार के लिए टिप्पणी (वे इसे देखेंगे)
+assigned,transport requests,Assigned,सौंपा गया
+contacted,transport requests,Contacted,संपर्क हुआ
+nothingHereAParentSRequest,transport requests,Nothing here. A parent's request from the app appears the moment it is sent.,यहाँ कुछ नहीं। अभिभावक के ऐप से अनुरोध आते ही तुरंत दिखेगा।
+aadhaarLastLicenceNo,visitor gate,"Aadhaar last 4, licence no., …","आधार के अंतिम 4 अंक, लाइसेंस नं., …"
+idShownOptional,visitor gate,ID shown (optional),दिखाया गया पहचान पत्र (वैकल्पिक)
+whoAreTheyHereToMeet,visitor gate,Who are they here to meet?,किससे मिलने आए हैं?
+whyAreTheyHere,visitor gate,Why are they here?,किस काम से आए हैं?
+visitorSName,visitor gate,Visitor's name,आगंतुक का नाम
+checkThemOutInstead,visitor gate,Check them out instead,इसके बजाय बाहर दर्ज करें
+checkAVisitorIn,visitor gate,Check a visitor in,आगंतुक को अंदर दर्ज करें
+handOver,visitor gate,Hand over,सौंपें
+out,visitor gate,Out,बाहर
+checkIn,visitor gate,Check in,अंदर दर्ज करें
+nameOfThePersonAtThe,visitor gate,Name of the person at the gate,गेट पर खड़े व्यक्ति का नाम
+whoIsCollectingTheChild,visitor gate,Who is collecting the child?,बच्चे को कौन ले जा रहा है?
+checkOut,visitor gate,Check out,बाहर दर्ज करें
+notYet,visitor gate,Not yet,अभी नहीं
+classLabel,syllabus scan,Class,कक्षा
+setLabel,fee counter,Set,सेट
+leaveEmptyHint,leave,No leave requested yet. Use the button below to tell the school when {name} will be away.,"अभी कोई छुट्टी नहीं माँगी गई है। {name} कब नहीं आएँगे, यह बताने के लिए नीचे का बटन दबाएँ।"
+withdrawLeaveBody,leave,The school will no longer see the leave request for {date}.,{date} की छुट्टी का अनुरोध अब विद्यालय को नहीं दिखेगा।
+routeWay,driver home,Route,रास्ता
+takeAttendance,driver home,Take attendance,हाज़िरी लें
+noRoutesYet,driver home,No routes yet. They appear here as soon as the office creates them.,अभी कोई रूट नहीं है। दफ़्तर से रूट बनते ही यहाँ दिखेंगे।
+route,driver home,Route,रूट
+gpsPunchCampus,driver home,GPS punch in / out from campus,कैंपस से GPS पंच इन / आउट
+myAttendanceHome,driver home,My attendance,मेरी हाज़िरी
+signOutCrew,driver home,Sign out,साइन आउट
+transport,driver home,Transport,परिवहन
+tryAgain,"driver home, route manifest",Try again,दोबारा कोशिश करें
+noStopOnMap,driver home,No stop on this route is placed on the map — tell the office,इस रूट का कोई स्टॉप मैप पर नहीं लगा है — दफ़्तर से कहें
+didNotBoard,route manifest,Did not come,नहीं आया
+change,route manifest,Change,बदलें
+gettingLocation,route manifest,Getting location…,लोकेशन ली जा रही है…
+noChildrenAtStop,route manifest,No children at this stop,इस स्टॉप पर कोई बच्चा नहीं
+noStopsOnRoute,route manifest,No stops on this route,इस रूट पर कोई स्टॉप नहीं है
+afternoonDrop,route manifest,Afternoon — drop,दोपहर — छोड़ना
+morningPickup,route manifest,Morning — pick up,सुबह — लेना
+refresh,route manifest,Refresh,ताज़ा करें
+expiresInMinutes,command bar,Expires in 5 minutes,5 मिनट में समाप्त
+confirm,command bar,Confirm,पुष्टि करें
+send,command bar,Send,भेजें
+askTheErp,command bar,Ask the ERP,ईआरपी से पूछें

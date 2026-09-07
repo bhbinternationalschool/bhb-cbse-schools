@@ -6,6 +6,7 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// The active roster for leadership and the office. Staff with no mobile
 /// on record sit at the top — they cannot sign in to this app until a
@@ -30,7 +31,7 @@ class StaffRosterScreen extends StatelessWidget {
       title: "Staff contacts",
       load: api.fetchStaffRoster,
       emptyIcon: Icons.badge_outlined,
-      emptyText: "No active staff on the roster.",
+      emptyText: context.l10n.noActiveStaffOnTheRoster,
       isEmpty: (r) => r.staff.isEmpty,
       builder: (context, r, reload) => ListView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -85,7 +86,7 @@ class StaffRosterScreen extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           IconButton(
-                            tooltip: "Call",
+                            tooltip: context.l10n.call,
                             onPressed: () =>
                                 launchUrl(Uri.parse("tel:${s.mobile}")),
                             icon: const Icon(
@@ -95,7 +96,7 @@ class StaffRosterScreen extends StatelessWidget {
                             ),
                           ),
                           IconButton(
-                            tooltip: "WhatsApp",
+                            tooltip: context.l10n.whatsapp,
                             onPressed: () => launchUrl(
                               Uri.parse("https://wa.me/91${s.mobile}"),
                               mode: LaunchMode.externalApplication,
@@ -141,9 +142,9 @@ class StaffRosterScreen extends StatelessWidget {
               keyboardType: TextInputType.phone,
               maxLength: 10,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: const InputDecoration(
-                labelText: "10-digit mobile",
-                helperText: "Staff sign in with an OTP sent to this number",
+              decoration: InputDecoration(
+                labelText: context.l10n.digitMobile,
+                helperText: context.l10n.staffSignInWithAnOtp,
               ),
             ),
           ],
@@ -151,11 +152,11 @@ class StaffRosterScreen extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text("Cancel"),
+            child: Text(context.l10n.cancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text("Save"),
+            child: Text(context.l10n.save),
           ),
         ],
       ),

@@ -5,6 +5,7 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// The office's queue of transport requests from parents — the same rows
 /// the web desk's Transport → Requests tab shows. Owner, admin, principal
@@ -34,8 +35,7 @@ class _TransportRequestsScreenState extends State<TransportRequestsScreen> {
       },
       load: () => widget.api.fetchTransportRequests(status: _filter),
       emptyIcon: Icons.directions_bus_outlined,
-      emptyText:
-          "Nothing here. A parent's request from the app appears the moment it is sent.",
+      emptyText: context.l10n.nothingHereAParentSRequest,
       isEmpty: (list) => list.isEmpty,
       builder: (context, list, reload) => ListView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -149,7 +149,7 @@ class _RequestCard extends StatelessWidget {
                   OutlinedButton.icon(
                     onPressed: () => launchUrl(Uri.parse("tel:$digits")),
                     icon: const Icon(Icons.call, size: 16),
-                    label: const Text("Call"),
+                    label: Text(context.l10n.call),
                   ),
                   OutlinedButton.icon(
                     onPressed: () => launchUrl(
@@ -159,22 +159,22 @@ class _RequestCard extends StatelessWidget {
                       mode: LaunchMode.externalApplication,
                     ),
                     icon: const Icon(Icons.chat_outlined, size: 16),
-                    label: const Text("WhatsApp"),
+                    label: Text(context.l10n.whatsapp),
                   ),
                 ],
                 if (r.isActive) ...[
                   if (r.status == "open")
                     FilledButton.tonal(
                       onPressed: () => _move(context, "contacted"),
-                      child: const Text("Contacted"),
+                      child: Text(context.l10n.contacted),
                     ),
                   FilledButton(
                     onPressed: () => _move(context, "assigned"),
-                    child: const Text("Assigned"),
+                    child: Text(context.l10n.assigned),
                   ),
                   TextButton(
                     onPressed: () => _move(context, "declined"),
-                    child: const Text("Decline"),
+                    child: Text(context.l10n.decline),
                   ),
                 ],
               ],
@@ -198,18 +198,18 @@ class _RequestCard extends StatelessWidget {
         content: TextField(
           controller: note,
           maxLines: 2,
-          decoration: const InputDecoration(
-            labelText: "Note for the family (they will see it)",
+          decoration: InputDecoration(
+            labelText: context.l10n.noteForTheFamilyTheyWill,
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text("Cancel"),
+            child: Text(context.l10n.cancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text("Save"),
+            child: Text(context.l10n.save),
           ),
         ],
       ),

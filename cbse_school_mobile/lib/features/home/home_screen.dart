@@ -25,6 +25,7 @@ import "../modules/tutor_screen.dart";
 import "../profile/profile_screen.dart";
 import "home_stats.dart";
 import "student_id_screen.dart";
+import "../../core/i18n/locale_controller.dart";
 
 class _Module {
   const _Module(this.label, this.icon, this.tone);
@@ -324,11 +325,11 @@ class _HomeScreenState extends State<HomeScreen> {
                       const SizedBox(height: 16),
                       FilledButton(
                         onPressed: _load,
-                        child: const Text("Retry"),
+                        child: Text(context.l10n.retry),
                       ),
                       TextButton(
                         onPressed: _signOut,
-                        child: const Text("Sign out"),
+                        child: Text(context.l10n.signOut),
                       ),
                     ],
                   ),
@@ -351,11 +352,14 @@ class _HomeScreenState extends State<HomeScreen> {
                   color: AppColors.muted,
                 ),
                 const SizedBox(height: 12),
-                const Text(
-                  "No active students found for this account. Contact the school office.",
+                Text(
+                  context.l10n.noActiveStudentsFoundForThis,
                   textAlign: TextAlign.center,
                 ),
-                TextButton(onPressed: _signOut, child: const Text("Sign out")),
+                TextButton(
+                  onPressed: _signOut,
+                  child: Text(context.l10n.signOut),
+                ),
               ],
             ),
           ),
@@ -592,13 +596,13 @@ class _Header extends StatelessWidget {
                     ),
                     _RoundAction(
                       icon: Icons.notifications_none_rounded,
-                      tooltip: "Notices",
+                      tooltip: context.l10n.notices,
                       onTap: onNotices,
                     ),
                     const SizedBox(width: 8),
                     _RoundAction(
                       icon: Icons.logout_rounded,
-                      tooltip: "Sign out",
+                      tooltip: context.l10n.signOut,
                       onTap: onLogout,
                     ),
                   ],
@@ -1082,7 +1086,7 @@ class _WhatsAppCard extends StatelessWidget {
             child: SvgPicture.asset("assets/icons/whatsapp.svg"),
           ),
           title: Text(
-            "Chat with the school on WhatsApp",
+            context.l10n.chatWithTheSchoolOnWhatsapp,
             style: AppText.bodyMedium.copyWith(fontWeight: FontWeight.w600),
           ),
           subtitle: Text(

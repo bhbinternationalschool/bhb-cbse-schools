@@ -6,6 +6,7 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// One child: the full record as the school holds it, and the document
 /// checklist with upload.
@@ -36,9 +37,7 @@ class ChildProfileScreen extends StatelessWidget {
             .where((c) => c.id == studentId)
             .firstOrNull;
         if (child == null) {
-          return const Center(
-            child: Text("This child is no longer on your account."),
-          );
+          return Center(child: Text(context.l10n.thisChildIsNoLongerOn));
         }
         final hints = {for (final d in profile.documents) d.key: d};
         return ListView(
@@ -51,8 +50,7 @@ class ChildProfileScreen extends StatelessWidget {
             Padding(
               padding: EdgeInsets.fromLTRB(4, 0, 4, 8),
               child: Text(
-                "Upload a clear photo or scan of each. The office verifies every "
-                "document; you will see the result here.",
+                context.l10n.uploadAClearPhotoOrScan,
                 style: AppText.bodySmallMuted.copyWith(height: 1.4),
               ),
             ),
@@ -79,8 +77,7 @@ class ChildProfileScreen extends StatelessWidget {
             Padding(
               padding: EdgeInsets.fromLTRB(4, 8, 4, 0),
               child: Text(
-                "Something wrong in the record? Tell the school office — these "
-                "details are changed there, with your documents in hand.",
+                context.l10n.somethingWrongInTheRecordTell,
                 style: AppText.bodySmallMuted.copyWith(height: 1.4),
               ),
             ),
@@ -101,19 +98,16 @@ class ChildProfileScreen extends StatelessWidget {
       final sure = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text("Replace a verified document?"),
-          content: const Text(
-            "The office has already verified this one. A new upload goes back "
-            "to them for verification.",
-          ),
+          title: Text(context.l10n.replaceAVerifiedDocument),
+          content: Text(context.l10n.theOfficeHasAlreadyVerifiedThis),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text("Keep"),
+              child: Text(context.l10n.keep),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text("Replace"),
+              child: Text(context.l10n.replace),
             ),
           ],
         ),
@@ -130,7 +124,7 @@ class ChildProfileScreen extends StatelessWidget {
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const AlertDialog(
+      builder: (_) => AlertDialog(
         content: Row(
           children: [
             SizedBox(
@@ -139,7 +133,7 @@ class ChildProfileScreen extends StatelessWidget {
               child: CircularProgressIndicator(strokeWidth: 2),
             ),
             SizedBox(width: 16),
-            Expanded(child: Text("Checking and uploading…")),
+            Expanded(child: Text(context.l10n.checkingAndUploading)),
           ],
         ),
       ),
@@ -163,7 +157,7 @@ class ChildProfileScreen extends StatelessWidget {
             color: AppColors.success,
             size: 40,
           ),
-          title: const Text("Submitted successfully"),
+          title: Text(context.l10n.submittedSuccessfully),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -171,7 +165,7 @@ class ChildProfileScreen extends StatelessWidget {
               Text(result.message, style: const TextStyle(height: 1.4)),
               if (result.checks.isNotEmpty) ...[
                 const SizedBox(height: 12),
-                const Text("Automatic check", style: AppText.labelLarge),
+                Text(context.l10n.automaticCheck, style: AppText.labelLarge),
                 for (final c in result.checks)
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
@@ -210,7 +204,7 @@ class ChildProfileScreen extends StatelessWidget {
           actions: [
             FilledButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text("Done"),
+              child: Text(context.l10n.done),
             ),
           ],
         ),
@@ -237,7 +231,7 @@ class ChildProfileScreen extends StatelessWidget {
           actions: [
             FilledButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text("OK"),
+              child: Text(context.l10n.ok),
             ),
           ],
         ),
@@ -246,11 +240,7 @@ class ChildProfileScreen extends StatelessWidget {
       if (!context.mounted) return;
       Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            "Could not reach the school server. Nothing was uploaded.",
-          ),
-        ),
+        SnackBar(content: Text(context.l10n.couldNotReachTheSchoolServer2)),
       );
     }
   }
@@ -273,18 +263,18 @@ class ChildProfileScreen extends StatelessWidget {
           children: [
             ListTile(
               leading: const Icon(Icons.photo_camera_outlined),
-              title: const Text("Take a photo"),
+              title: Text(context.l10n.takeAPhoto),
               onTap: () => Navigator.pop(context, "camera"),
             ),
             ListTile(
               leading: const Icon(Icons.photo_library_outlined),
-              title: const Text("Choose from gallery"),
+              title: Text(context.l10n.chooseFromGallery),
               onTap: () => Navigator.pop(context, "gallery"),
             ),
             if (allowPdf)
               ListTile(
                 leading: const Icon(Icons.picture_as_pdf_outlined),
-                title: const Text("Choose a PDF or file"),
+                title: Text(context.l10n.chooseAPdfOrFile),
                 onTap: () => Navigator.pop(context, "file"),
               ),
           ],

@@ -6,6 +6,7 @@ import "../../core/theme/app_theme.dart";
 import "route_manifest_screen.dart";
 import "self_attendance_screen.dart";
 import "transport_requests_screen.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// Driver home (field persona): the school's routes with ordered stops and
 /// vehicle details, GPS self-attendance, and the day's boarding list.
@@ -71,11 +72,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     if (pinned.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              "इस रूट का कोई स्टॉप मैप पर नहीं लगा है — दफ़्तर से कहें",
-              style: AppText.titleSmall,
-            ),
+          SnackBar(
+            content: Text(context.l10n.noStopOnMap, style: AppText.titleSmall),
           ),
         );
       }
@@ -116,11 +114,11 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                       const SizedBox(height: 12),
                       FilledButton(
                         onPressed: _load,
-                        child: const Text("दोबारा कोशिश करें"),
+                        child: Text(context.l10n.tryAgain),
                       ),
                       TextButton(
                         onPressed: _signOut,
-                        child: const Text("साइन आउट"),
+                        child: Text(context.l10n.signOutCrew),
                       ),
                     ],
                   ),
@@ -177,7 +175,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                           ),
                         ),
                         Text(
-                          "परिवहन",
+                          context.l10n.transport,
                           style: AppText.bodySmall.copyWith(
                             color: Color(0xFFB8C0D4),
                           ),
@@ -186,7 +184,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                     ),
                   ),
                   IconButton(
-                    tooltip: "साइन आउट",
+                    tooltip: context.l10n.signOutCrew,
                     onPressed: _signOut,
                     icon: const Icon(Icons.logout, color: Colors.white),
                   ),
@@ -214,7 +212,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                         color: AppColors.primary,
                       ),
                       title: Text(
-                        "Transport requests from parents",
+                        context.l10n.transportRequestsFromParents,
                         style: AppText.bodyMedium.copyWith(
                           fontWeight: FontWeight.w600,
                         ),
@@ -246,13 +244,13 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                         ),
                       ),
                       title: Text(
-                        "मेरी हाज़िरी",
+                        context.l10n.myAttendanceHome,
                         style: AppText.bodyMediumInk.copyWith(
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      subtitle: const Text(
-                        "कैंपस से GPS पंच इन / आउट",
+                      subtitle: Text(
+                        context.l10n.gpsPunchCampus,
                         style: AppText.labelMediumMuted,
                       ),
                       trailing: const Icon(
@@ -263,18 +261,18 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                   ),
                   const SizedBox(height: 14),
                   Text(
-                    "रूट",
+                    context.l10n.route,
                     style: AppText.bodyLargeInk.copyWith(
                       fontWeight: FontWeight.w600,
                     ),
                   ),
                   const SizedBox(height: 8),
                   if (routes.isEmpty)
-                    const Card(
+                    Card(
                       child: Padding(
                         padding: EdgeInsets.all(14),
                         child: Text(
-                          "अभी कोई रूट नहीं है। दफ़्तर से रूट बनते ही यहाँ दिखेंगे।",
+                          context.l10n.noRoutesYet,
                           style: AppText.bodySmallMuted,
                         ),
                       ),
@@ -355,7 +353,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                                         size: 18,
                                       ),
                                       label: Text(
-                                        "हाज़िरी लें",
+                                        context.l10n.takeAttendance,
                                         style: AppText.bodyLarge.copyWith(
                                           fontWeight: FontWeight.w700,
                                         ),
@@ -369,8 +367,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                                       Icons.map_outlined,
                                       size: 18,
                                     ),
-                                    label: const Text(
-                                      "रास्ता",
+                                    label: Text(
+                                      context.l10n.routeWay,
                                       style: AppText.bodyLarge,
                                     ),
                                   ),

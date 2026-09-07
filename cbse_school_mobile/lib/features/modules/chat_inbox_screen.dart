@@ -4,6 +4,7 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "chat_thread_screen.dart";
 import "module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// Class teacher's inbox: one row per student in their section, threaded
 /// into the same ChatThreadScreen the parent side uses.
@@ -18,9 +19,7 @@ class ChatInboxScreen extends StatelessWidget {
       title: "Messages",
       load: api.fetchChatThreads,
       emptyIcon: Icons.chat_bubble_outline,
-      emptyText:
-          "You're not set as a class teacher for any section, so there's no "
-          "parent inbox here yet.",
+      emptyText: context.l10n.youReNotSetAsA,
       isEmpty: (threads) => threads.isEmpty,
       builder: (context, threads, reload) => ListView.separated(
         physics: const AlwaysScrollableScrollPhysics(),

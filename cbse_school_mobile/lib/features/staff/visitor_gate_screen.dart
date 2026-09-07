@@ -5,6 +5,7 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// The gate, on the phone of whoever is standing at it.
 ///
@@ -54,7 +55,7 @@ class _Board extends StatelessWidget {
     final ok = await showDialog<bool>(
       context: context,
       builder: (dctx) => AlertDialog(
-        title: const Text("Check out"),
+        title: Text(context.l10n.checkOut),
         content: Text(
           "${v.visitorName} came in at ${formatTimeLabel(v.inTime)}"
           "${v.personToMeet.isEmpty ? "" : " to meet ${v.personToMeet}"}.",
@@ -62,11 +63,11 @@ class _Board extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dctx, false),
-            child: const Text("Not yet"),
+            child: Text(context.l10n.notYet),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dctx, true),
-            child: const Text("Check out"),
+            child: Text(context.l10n.checkOut),
           ),
         ],
       ),
@@ -116,9 +117,9 @@ class _Board extends StatelessWidget {
               controller: controller,
               autofocus: true,
               textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(
-                labelText: "Who is collecting the child?",
-                hintText: "Name of the person at the gate",
+              decoration: InputDecoration(
+                labelText: context.l10n.whoIsCollectingTheChild,
+                hintText: context.l10n.nameOfThePersonAtThe,
               ),
             ),
           ],
@@ -126,11 +127,11 @@ class _Board extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dctx),
-            child: const Text("Cancel"),
+            child: Text(context.l10n.cancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dctx, controller.text.trim()),
-            child: const Text("Hand over"),
+            child: Text(context.l10n.handOver),
           ),
         ],
       ),
@@ -217,7 +218,7 @@ class _Board extends StatelessWidget {
           child: FloatingActionButton.extended(
             onPressed: () => _checkIn(context),
             icon: const Icon(Icons.person_add_alt_1),
-            label: const Text("Check in"),
+            label: Text(context.l10n.checkIn),
           ),
         ),
       ],
@@ -282,7 +283,7 @@ class _VisitorCard extends StatelessWidget {
         isThreeLine: true,
         trailing: onCheckOut == null
             ? null
-            : TextButton(onPressed: onCheckOut, child: const Text("Out")),
+            : TextButton(onPressed: onCheckOut, child: Text(context.l10n.out)),
       ),
     );
   }
@@ -338,7 +339,10 @@ class _PassCard extends StatelessWidget {
         ),
         isThreeLine: true,
         trailing: canRelease && p.releasable
-            ? FilledButton(onPressed: onRelease, child: const Text("Hand over"))
+            ? FilledButton(
+                onPressed: onRelease,
+                child: Text(context.l10n.handOver),
+              )
             : null,
       ),
     );
@@ -496,7 +500,7 @@ class _CheckInSheetState extends State<_CheckInSheet> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              "Check a visitor in",
+              context.l10n.checkAVisitorIn,
               style: AppText.titleSmallInk.copyWith(
                 fontWeight: FontWeight.w700,
               ),
@@ -510,7 +514,7 @@ class _CheckInSheetState extends State<_CheckInSheet> {
                 LengthLimitingTextInputFormatter(12),
               ],
               decoration: InputDecoration(
-                labelText: "Mobile number",
+                labelText: context.l10n.mobileNumber,
                 suffixIcon: _looking
                     ? const Padding(
                         padding: EdgeInsets.all(12),
@@ -547,7 +551,7 @@ class _CheckInSheetState extends State<_CheckInSheet> {
                       const SizedBox(height: 8),
                       FilledButton(
                         onPressed: _saving ? null : () => _checkOutOpen(open),
-                        child: const Text("Check them out instead"),
+                        child: Text(context.l10n.checkThemOutInstead),
                       ),
                     ],
                   ),
@@ -565,13 +569,13 @@ class _CheckInSheetState extends State<_CheckInSheet> {
             TextField(
               controller: _name,
               textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(labelText: "Visitor's name"),
+              decoration: InputDecoration(labelText: context.l10n.visitorSName),
             ),
             const SizedBox(height: 10),
             DropdownButtonFormField<String>(
               initialValue: _purpose.isEmpty ? null : _purpose,
-              decoration: const InputDecoration(
-                labelText: "Why are they here?",
+              decoration: InputDecoration(
+                labelText: context.l10n.whyAreTheyHere,
               ),
               items: [
                 for (final p in widget.purposes)
@@ -583,16 +587,16 @@ class _CheckInSheetState extends State<_CheckInSheet> {
             TextField(
               controller: _meet,
               textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(
-                labelText: "Who are they here to meet?",
+              decoration: InputDecoration(
+                labelText: context.l10n.whoAreTheyHereToMeet,
               ),
             ),
             const SizedBox(height: 10),
             TextField(
               controller: _idNote,
-              decoration: const InputDecoration(
-                labelText: "ID shown (optional)",
-                hintText: "Aadhaar last 4, licence no., …",
+              decoration: InputDecoration(
+                labelText: context.l10n.idShownOptional,
+                hintText: context.l10n.aadhaarLastLicenceNo,
               ),
             ),
             if (_error != null) ...[
@@ -610,7 +614,7 @@ class _CheckInSheetState extends State<_CheckInSheet> {
             const SizedBox(height: 8),
             TextButton(
               onPressed: _saving ? null : () => Navigator.pop(context, false),
-              child: const Text("Cancel"),
+              child: Text(context.l10n.cancel),
             ),
           ],
         ),

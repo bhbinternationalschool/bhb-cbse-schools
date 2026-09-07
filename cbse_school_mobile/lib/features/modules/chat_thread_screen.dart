@@ -3,6 +3,7 @@ import "package:flutter/material.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// One student's chat thread — same screen for the parent side and the
 /// class-teacher side; the server decides who may read/write it.
@@ -84,9 +85,7 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Could not send. Check your connection."),
-          ),
+          SnackBar(content: Text(context.l10n.couldNotSendCheckYourConnection)),
         );
       }
     } finally {
@@ -137,7 +136,7 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
                                 const SizedBox(height: 12),
                                 FilledButton(
                                   onPressed: _load,
-                                  child: const Text("Retry"),
+                                  child: Text(context.l10n.retry),
                                 ),
                               ],
                             ),
@@ -238,7 +237,7 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
                         textInputAction: TextInputAction.send,
                         onSubmitted: (_) => _send(),
                         decoration: InputDecoration(
-                          hintText: "Type a message…",
+                          hintText: context.l10n.typeAMessage,
                           filled: true,
                           fillColor: Colors.white,
                           contentPadding: const EdgeInsets.symmetric(

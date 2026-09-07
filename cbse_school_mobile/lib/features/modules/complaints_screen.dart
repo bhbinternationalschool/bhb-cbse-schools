@@ -4,6 +4,7 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// The household's complaints, and a form to raise one.
 ///
@@ -29,9 +30,7 @@ class ComplaintsScreen extends StatelessWidget {
       title: "Complaints",
       load: api.fetchComplaints,
       emptyIcon: Icons.support_agent_outlined,
-      emptyText:
-          "No complaints raised. If something at school needs the office's "
-          "attention, use the button below.",
+      emptyText: context.l10n.noComplaintsRaisedIfSomethingAt,
       isEmpty: (list) => list.tickets.isEmpty,
       floatingActionButton: (context, list, reload) =>
           FloatingActionButton.extended(
@@ -39,7 +38,7 @@ class ComplaintsScreen extends StatelessWidget {
             backgroundColor: AppColors.primary,
             foregroundColor: Colors.white,
             icon: const Icon(Icons.add),
-            label: const Text("Raise a complaint"),
+            label: Text(context.l10n.raiseAComplaint),
           ),
       builder: (context, list, reload) => ListView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -202,9 +201,7 @@ class _ComplaintFormState extends State<_ComplaintForm> {
     if (subject.isEmpty || description.isEmpty) {
       Haptics.warning();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Please fill in the subject and the details."),
-        ),
+        SnackBar(content: Text(context.l10n.pleaseFillInTheSubjectAnd)),
       );
       return;
     }
@@ -226,7 +223,7 @@ class _ComplaintFormState extends State<_ComplaintForm> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Could not reach the school server.")),
+          SnackBar(content: Text(context.l10n.couldNotReachTheSchoolServer)),
         );
       }
     } finally {
@@ -244,11 +241,13 @@ class _ComplaintFormState extends State<_ComplaintForm> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text("Raise a complaint", style: AppText.titleMediumInk),
+            Text(context.l10n.raiseAComplaint, style: AppText.titleMediumInk),
             const SizedBox(height: 14),
             DropdownButtonFormField<String>(
               initialValue: _category,
-              decoration: const InputDecoration(labelText: "What is it about?"),
+              decoration: InputDecoration(
+                labelText: context.l10n.whatIsItAbout,
+              ),
               items: [
                 for (final c in widget.categories)
                   DropdownMenuItem(value: c.value, child: Text(c.label)),
@@ -260,13 +259,13 @@ class _ComplaintFormState extends State<_ComplaintForm> {
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
               initialValue: _studentId,
-              decoration: const InputDecoration(labelText: "Concerning"),
+              decoration: InputDecoration(labelText: context.l10n.concerning),
               items: [
                 for (final c in widget.children)
                   DropdownMenuItem(value: c.id, child: Text(c.fullName)),
-                const DropdownMenuItem(
+                DropdownMenuItem(
                   value: "",
-                  child: Text("General — not about one child"),
+                  child: Text(context.l10n.generalNotAboutOneChild),
                 ),
               ],
               onChanged: (v) {
@@ -278,17 +277,16 @@ class _ComplaintFormState extends State<_ComplaintForm> {
               controller: _subject,
               maxLength: 120,
               textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(labelText: "Subject"),
+              decoration: InputDecoration(labelText: context.l10n.subject),
             ),
             TextField(
               controller: _description,
               maxLines: 4,
               maxLength: 2000,
               textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(
-                labelText: "Details",
-                hintText:
-                    "What happened, when, and what you would like the school to do",
+              decoration: InputDecoration(
+                labelText: context.l10n.details,
+                hintText: context.l10n.whatHappenedWhenAndWhatYou,
               ),
             ),
             const SizedBox(height: 8),

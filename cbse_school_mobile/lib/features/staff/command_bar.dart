@@ -3,6 +3,7 @@ import "package:speech_to_text/speech_to_text.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// One line to the ERP — typed or spoken — and the answer underneath.
 ///
@@ -140,7 +141,7 @@ class _StaffCommandBarState extends State<StaffCommandBar> {
                   color: AppColors.accent,
                 ),
                 const SizedBox(width: 6),
-                const Text("Ask the ERP", style: AppText.labelLargeInk),
+                Text(context.l10n.askTheErp, style: AppText.labelLargeInk),
                 const Spacer(),
                 if (_busy)
                   const SizedBox(
@@ -188,7 +189,7 @@ class _StaffCommandBarState extends State<StaffCommandBar> {
                   ),
                 ),
                 IconButton(
-                  tooltip: "Send",
+                  tooltip: context.l10n.send,
                   onPressed: _busy ? null : () => _send(_controller.text),
                   icon: const Icon(
                     Icons.send_rounded,
@@ -291,7 +292,7 @@ class _ReplyBubble extends StatelessWidget {
                     onPressed: busy
                         ? null
                         : () => onDecision(confirm.yesId, "Confirm"),
-                    child: const Text("Confirm"),
+                    child: Text(context.l10n.confirm),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -300,14 +301,14 @@ class _ReplyBubble extends StatelessWidget {
                     onPressed: busy
                         ? null
                         : () => onDecision(confirm.noId, "Cancel"),
-                    child: const Text("Cancel"),
+                    child: Text(context.l10n.cancel),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 4),
             Text(
-              "Expires in 5 minutes",
+              context.l10n.expiresInMinutes,
               style: AppText.labelSmall.copyWith(
                 color: tone.foreground.withValues(alpha: 0.7),
               ),

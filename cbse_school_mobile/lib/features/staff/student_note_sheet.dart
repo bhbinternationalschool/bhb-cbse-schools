@@ -4,6 +4,7 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/dictate_field.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// Actions on one student from the roster: a discipline note (merit or
 /// demerit) or a sick-room visit. Both land on the desk's discipline /
@@ -35,7 +36,7 @@ Future<void> showStudentNoteSheet(
                 Icons.star_outline,
                 color: ModuleTone.green.foreground,
               ),
-              title: const Text("Merit / good conduct"),
+              title: Text(context.l10n.meritGoodConduct),
               onTap: () {
                 Navigator.pop(context);
                 _openDiscipline(
@@ -51,7 +52,7 @@ Future<void> showStudentNoteSheet(
                 Icons.flag_outlined,
                 color: ModuleTone.coral.foreground,
               ),
-              title: const Text("Discipline note"),
+              title: Text(context.l10n.disciplineNote),
               onTap: () {
                 Navigator.pop(context);
                 _openDiscipline(
@@ -67,7 +68,7 @@ Future<void> showStudentNoteSheet(
                 Icons.medical_services_outlined,
                 color: ModuleTone.pink.foreground,
               ),
-              title: const Text("Sick room / first aid"),
+              title: Text(context.l10n.sickRoomFirstAid),
               onTap: () {
                 Navigator.pop(context);
                 _openHealth(context, api: api, student: student);
@@ -156,9 +157,9 @@ class _DisciplineSheetState extends State<_DisciplineSheet> {
 
   Future<void> _save() async {
     if (_desc.text.trim().length < 5) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text("Describe what happened.")));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.describeWhatHappened)),
+      );
       return;
     }
     setState(() => _busy = true);
@@ -262,8 +263,8 @@ class _DisciplineSheetState extends State<_DisciplineSheet> {
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               dense: true,
-              title: const Text(
-                "Tell the parent now (app notification)",
+              title: Text(
+                context.l10n.tellTheParentNowAppNotification,
                 style: AppText.bodyMedium,
               ),
               value: _notify,
@@ -315,7 +316,7 @@ class _HealthSheetState extends State<_HealthSheet> {
   Future<void> _save() async {
     if (_symptoms.text.trim().length < 3) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Say what the child reported.")),
+        SnackBar(content: Text(context.l10n.sayWhatTheChildReported)),
       );
       return;
     }
@@ -403,8 +404,8 @@ class _HealthSheetState extends State<_HealthSheet> {
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               dense: true,
-              title: const Text(
-                "Referred to hospital / sent home",
+              title: Text(
+                context.l10n.referredToHospitalSentHome,
                 style: AppText.bodyMedium,
               ),
               value: _referred,
@@ -413,8 +414,8 @@ class _HealthSheetState extends State<_HealthSheet> {
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               dense: true,
-              title: const Text(
-                "Tell the parent now (app notification)",
+              title: Text(
+                context.l10n.tellTheParentNowAppNotification,
                 style: AppText.bodyMedium,
               ),
               value: _notify,

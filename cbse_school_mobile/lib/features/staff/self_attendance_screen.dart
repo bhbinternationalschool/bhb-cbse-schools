@@ -7,6 +7,7 @@ import "package:geolocator/geolocator.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
+import "../../core/i18n/locale_controller.dart";
 
 double _distanceM(double lat1, double lng1, double lat2, double lng2) {
   const r = 6371000.0;
@@ -117,11 +118,7 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
     if (pos.isMocked) {
       Haptics.warning();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            "Mock location is ON (fake-GPS app / developer setting). Disable it — mock punches are rejected and flagged.",
-          ),
-        ),
+        SnackBar(content: Text(context.l10n.mockLocationIsOnFakeGps)),
       );
       return;
     }
@@ -153,9 +150,7 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Could not punch. Check the connection."),
-          ),
+          SnackBar(content: Text(context.l10n.couldNotPunchCheckTheConnection)),
         );
       }
     } finally {
@@ -195,7 +190,7 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text("My attendance", style: AppText.titleMedium),
+            Text(context.l10n.myAttendance, style: AppText.titleMedium),
             if (state != null)
               Text(
                 "${state.staffName} · ${state.date}",
@@ -217,7 +212,7 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
                           const SizedBox(height: 12),
                           FilledButton(
                             onPressed: _load,
-                            child: const Text("Retry"),
+                            child: Text(context.l10n.retry),
                           ),
                         ],
                       ),
@@ -309,21 +304,21 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
                 ),
                 const SizedBox(height: 16),
                 if (!state.allowSelfPunch)
-                  const Card(
+                  Card(
                     child: Padding(
                       padding: EdgeInsets.all(14),
                       child: Text(
-                        "Self punch is disabled by the school. Use the WhatsApp attendance number instead.",
+                        context.l10n.selfPunchIsDisabledByThe,
                         style: AppText.bodySmallMuted,
                       ),
                     ),
                   )
                 else if (done)
-                  const Card(
+                  Card(
                     child: Padding(
                       padding: EdgeInsets.all(14),
                       child: Text(
-                        "Both punches recorded for today. Have a good evening!",
+                        context.l10n.bothPunchesRecordedForTodayHave,
                         style: AppText.bodySmallMuted,
                       ),
                     ),

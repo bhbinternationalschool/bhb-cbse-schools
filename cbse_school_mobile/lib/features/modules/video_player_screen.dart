@@ -3,6 +3,7 @@ import "package:webview_flutter/webview_flutter.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// Plays a YouTube video inside the app. A watch or embed link handed to
 /// the system is claimed by the YouTube app on most phones and drops the
@@ -108,8 +109,8 @@ iframe{position:absolute;inset:0;width:100%;height:100%;border:0}</style>
                   style: AppText.bodySmall.copyWith(color: Colors.white70),
                 ),
                 const SizedBox(height: 14),
-                const Text(
-                  "From YouTube, not the school — judge it as you watch.",
+                Text(
+                  context.l10n.fromYoutubeNotTheSchoolJudge,
                   style: AppText.labelMediumMuted,
                 ),
               ],

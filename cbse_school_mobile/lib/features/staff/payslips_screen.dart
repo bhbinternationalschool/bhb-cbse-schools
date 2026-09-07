@@ -3,6 +3,7 @@ import "package:flutter/material.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../modules/module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
 
 String rupees(double v) {
   final whole = v.round().abs();
@@ -54,9 +55,7 @@ class PayslipsScreen extends StatelessWidget {
       title: "Payslips",
       load: api.fetchPayslips,
       emptyIcon: Icons.receipt_long_outlined,
-      emptyText:
-          "No payslip has been released yet. One appears here for each month "
-          "once the office approves that month's payroll.",
+      emptyText: context.l10n.noPayslipHasBeenReleasedYet,
       isEmpty: (p) => p.slips.isEmpty && p.preparing == 0,
       builder: (context, p, _) => ListView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -76,8 +75,8 @@ class PayslipsScreen extends StatelessWidget {
                       : "${p.preparing} months' salary are being prepared",
                   style: AppText.bodyMediumInk,
                 ),
-                subtitle: const Text(
-                  "It appears here once the office approves the payroll.",
+                subtitle: Text(
+                  context.l10n.itAppearsHereOnceTheOffice,
                   style: AppText.bodySmallMuted,
                 ),
               ),

@@ -3,6 +3,7 @@ import "package:flutter/material.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
 
 const _statusMeta = {
   "P": ("Present", AppColors.success),
@@ -27,8 +28,7 @@ class AttendanceHistoryScreen extends StatelessWidget {
       subtitle: child.fullName,
       load: () => api.fetchAttendanceHistory(child.id),
       emptyIcon: Icons.event_available_outlined,
-      emptyText:
-          "No attendance marked yet this term. Records appear here the day the class teacher marks the register.",
+      emptyText: context.l10n.noAttendanceMarkedYetThisTerm,
       isEmpty: (h) => h.entries.isEmpty,
       builder: (context, history, _) => ListView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -57,7 +57,7 @@ class AttendanceHistoryScreen extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           Text(
-            "Day by day",
+            context.l10n.dayByDay,
             style: AppText.bodyLargeInk.copyWith(fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 8),

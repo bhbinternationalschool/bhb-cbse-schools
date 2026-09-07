@@ -4,6 +4,7 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
 
 class PtmScreen extends StatelessWidget {
   const PtmScreen({super.key, required this.api, required this.child});
@@ -20,7 +21,7 @@ class PtmScreen extends StatelessWidget {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text("Book this slot?", style: AppText.titleMedium),
+        title: Text(context.l10n.bookThisSlot, style: AppText.titleMedium),
         content: Text(
           "${event.name} — ${slot.teacherName}\n${formatDateLabel(event.date)}, ${formatTimeLabel(slot.startAt)}–${formatTimeLabel(slot.endAt)}\nfor ${child.fullName}",
           style: AppText.bodyMedium,
@@ -28,11 +29,11 @@ class PtmScreen extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text("Cancel"),
+            child: Text(context.l10n.cancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text("Book"),
+            child: Text(context.l10n.book),
           ),
         ],
       ),
@@ -48,7 +49,7 @@ class PtmScreen extends StatelessWidget {
       await reload();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Slot booked — see you there!")),
+          SnackBar(content: Text(context.l10n.slotBookedSeeYouThere)),
         );
       }
     } on ApiException catch (e) {
@@ -73,7 +74,7 @@ class PtmScreen extends StatelessWidget {
       if (context.mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text("Booking cancelled")));
+        ).showSnackBar(SnackBar(content: Text(context.l10n.bookingCancelled)));
       }
     } on ApiException catch (e) {
       if (context.mounted) {
@@ -123,7 +124,10 @@ class PtmScreen extends StatelessWidget {
                         onCancel: () => _cancel(context, event, reload),
                       )
                     else ...[
-                      const Text("Choose a slot", style: AppText.labelLargeInk),
+                      Text(
+                        context.l10n.chooseASlot,
+                        style: AppText.labelLargeInk,
+                      ),
                       const SizedBox(height: 6),
                       for (final slot in event.slots)
                         Padding(
@@ -220,7 +224,7 @@ class _BookedBanner extends StatelessWidget {
               ),
             ),
           ),
-          TextButton(onPressed: onCancel, child: const Text("Cancel")),
+          TextButton(onPressed: onCancel, child: Text(context.l10n.cancel)),
         ],
       ),
     );

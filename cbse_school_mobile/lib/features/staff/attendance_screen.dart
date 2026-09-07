@@ -3,6 +3,7 @@ import "package:flutter/material.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
+import "../../core/i18n/locale_controller.dart";
 
 const _statuses = [
   ("P", "Present", AppColors.success),
@@ -89,7 +90,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       Haptics.success();
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text("Attendance saved")));
+      ).showSnackBar(SnackBar(content: Text(context.l10n.attendanceSaved)));
     } on ApiException catch (e) {
       if (mounted) {
         setState(() {
@@ -141,16 +142,16 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                           const SizedBox(height: 12),
                           FilledButton(
                             onPressed: _load,
-                            child: const Text("Retry"),
+                            child: Text(context.l10n.retry),
                           ),
                         ],
                       ),
                     ),
             )
           : roster.students.isEmpty
-          ? const Center(
+          ? Center(
               child: Text(
-                "No active students in this section.",
+                context.l10n.noActiveStudentsInThisSection,
                 style: TextStyle(color: AppColors.muted),
               ),
             )
@@ -165,7 +166,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                       vertical: 8,
                     ),
                     child: Text(
-                      "Already marked today — saving again will update the register.",
+                      context.l10n.alreadyMarkedTodaySavingAgainWill,
                       style: AppText.labelMedium.copyWith(
                         color: Color(0xFF854F0B),
                       ),

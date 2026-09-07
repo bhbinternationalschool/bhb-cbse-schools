@@ -3,6 +3,7 @@ import "package:flutter/material.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
 
 class NoticesScreen extends StatelessWidget {
   const NoticesScreen({super.key, required this.api});
@@ -15,8 +16,7 @@ class NoticesScreen extends StatelessWidget {
       title: "Notices & news",
       load: api.fetchCommsFeed,
       emptyIcon: Icons.campaign_outlined,
-      emptyText:
-          "No notices published yet. School circulars and news will appear here.",
+      emptyText: context.l10n.noNoticesPublishedYetSchoolCirculars,
       isEmpty: (items) => items.isEmpty,
       builder: (context, items, _) => ListView(
         physics: const AlwaysScrollableScrollPhysics(),

@@ -31,6 +31,7 @@ import "section_picker.dart";
 import "presence_screen.dart";
 import "self_attendance_screen.dart";
 import "students_screen.dart";
+import "../../core/i18n/locale_controller.dart";
 
 String _greeting() {
   final h = DateTime.now().hour;
@@ -124,7 +125,7 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
       } catch (_) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Could not load the class list.")),
+            SnackBar(content: Text(context.l10n.couldNotLoadTheClassList)),
           );
         }
         return null;
@@ -247,11 +248,11 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                       const SizedBox(height: 12),
                       FilledButton(
                         onPressed: _load,
-                        child: const Text("Retry"),
+                        child: Text(context.l10n.retry),
                       ),
                       TextButton(
                         onPressed: _signOut,
-                        child: const Text("Sign out"),
+                        child: Text(context.l10n.signOut),
                       ),
                     ],
                   ),
@@ -313,7 +314,7 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                     ),
                   ),
                   IconButton(
-                    tooltip: "Sign out",
+                    tooltip: context.l10n.signOut,
                     onPressed: _signOut,
                     icon: const Icon(Icons.logout, color: Colors.white),
                   ),
@@ -387,11 +388,11 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                     Card(
                       child: ListTile(
                         dense: true,
-                        title: const Text(
-                          "No sections marked yet today.",
+                        title: Text(
+                          context.l10n.noSectionsMarkedYetToday,
                           style: AppText.bodySmallMuted,
                         ),
-                        subtitle: const Text("Tap to see registers by section"),
+                        subtitle: Text(context.l10n.tapToSeeRegistersBySection),
                         trailing: const Icon(Icons.chevron_right, size: 18),
                         onTap: () => _push(RegistersScreen(api: widget.api)),
                       ),
@@ -699,8 +700,8 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  const Text(
-                    "Figures update live from the school ERP. Pull down to refresh.",
+                  Text(
+                    context.l10n.figuresUpdateLiveFromTheSchool,
                     style: AppText.labelMediumMuted,
                   ),
                 ],

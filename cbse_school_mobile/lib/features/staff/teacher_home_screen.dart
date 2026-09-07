@@ -27,6 +27,7 @@ import "student_leave_queue_screen.dart";
 import "students_screen.dart";
 import "timetable_screen.dart";
 import "waiting_card.dart";
+import "../../core/i18n/locale_controller.dart";
 
 String _greeting() {
   final h = DateTime.now().hour;
@@ -439,11 +440,11 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                       const SizedBox(height: 16),
                       FilledButton(
                         onPressed: _load,
-                        child: const Text("Retry"),
+                        child: Text(context.l10n.retry),
                       ),
                       TextButton(
                         onPressed: _signOut,
-                        child: const Text("Sign out"),
+                        child: Text(context.l10n.signOut),
                       ),
                     ],
                   ),
@@ -525,7 +526,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                     ),
                   ),
                   IconButton(
-                    tooltip: "Sign out",
+                    tooltip: context.l10n.signOut,
                     onPressed: _signOut,
                     icon: const Icon(Icons.logout, color: Colors.white),
                   ),
@@ -583,13 +584,13 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                         ),
                       ),
                       title: Text(
-                        "My attendance",
+                        context.l10n.myAttendance,
                         style: AppText.bodyMediumInk.copyWith(
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      subtitle: const Text(
-                        "GPS punch in / out from campus",
+                      subtitle: Text(
+                        context.l10n.gpsPunchInOutFromCampus,
                         style: AppText.labelMediumMuted,
                       ),
                       trailing: const Icon(
@@ -620,13 +621,13 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                         ),
                       ),
                       title: Text(
-                        "School presence",
+                        context.l10n.schoolPresence,
                         style: AppText.bodyMediumInk.copyWith(
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      subtitle: const Text(
-                        "Share location during school hours (works with app closed)",
+                      subtitle: Text(
+                        context.l10n.shareLocationDuringSchoolHoursWorks,
                         style: AppText.labelMediumMuted,
                       ),
                       trailing: const Icon(
@@ -636,18 +637,18 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                     ),
                   ),
                   Text(
-                    "Today's periods",
+                    context.l10n.todaySPeriods,
                     style: AppText.bodyLargeInk.copyWith(
                       fontWeight: FontWeight.w600,
                     ),
                   ),
                   const SizedBox(height: 8),
                   if (summary.periodsToday.isEmpty)
-                    const Card(
+                    Card(
                       child: Padding(
                         padding: EdgeInsets.all(14),
                         child: Text(
-                          "No periods for you today on the published timetable.",
+                          context.l10n.noPeriodsForYouTodayOn,
                           style: AppText.bodySmallMuted,
                         ),
                       ),
@@ -693,7 +694,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    "Modules",
+                    context.l10n.modules,
                     style: AppText.bodyLargeInk.copyWith(
                       fontWeight: FontWeight.w600,
                     ),
@@ -780,7 +781,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                             _signOut();
                           },
                           icon: const Icon(Icons.logout, size: 18),
-                          label: const Text("Sign out"),
+                          label: Text(context.l10n.signOut),
                         ),
                       ],
                     ),
