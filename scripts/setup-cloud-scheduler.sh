@@ -133,6 +133,26 @@ create_job "bhb-birthday-tick" "5 * * * *" \
   "${APP_URL}/api/birthday/tick" \
   "Asia/Kolkata" "300s"
 
+# Fee integrity: money that has lost its breakdown.
+#
+# A live receipt with an amount and no lines has a guardian and a total and no
+# student, no fee head and no month — and because dues clear FROM the lines,
+# every month those families paid reads unpaid again and the counter starts
+# re-collecting money it already has.
+#
+# This has happened twice (134 receipts on 2026-09-01, all 502 on 2026-09-06).
+# Both times the Accounts controls page raised it correctly and nobody was
+# looking at the Accounts controls page; the second ran about fourteen hours
+# until the director noticed on his own screen. Hourly, because the cost of a
+# cold start is nothing against re-collecting a family's fees.
+#
+# The tick returns 500 while a blank receipt exists, so Cloud Scheduler retries
+# and the failure is visible in the job history — a job that only ever shows
+# green teaches everyone to ignore it.
+create_job "bhb-fee-integrity-tick" "35 * * * *" \
+  "${APP_URL}/api/fees/integrity/tick" \
+  "Asia/Kolkata" "120s"
+
 # ERP command desk: the director's end-of-day digest of what staff asked the
 # ERP over WhatsApp / app / assistant. Sends once after ERP_COMMANDS_DIGEST_HOUR
 # (default 19:00 IST), only on days with commands; idempotent per date, so the
