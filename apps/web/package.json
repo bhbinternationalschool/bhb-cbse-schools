@@ -141,6 +141,7 @@
     "test:wa-receipt-template": "npx tsx src/lib/waReceiptTemplate.selftest.ts",
     "test:wa-language-gate": "npx tsx src/lib/waLanguageGate.selftest.ts",
     "test:wa-bot-silence": "npx tsx src/lib/waBotSilence.selftest.ts",
+    "test:wa-sender-routing": "npx tsx src/lib/waSenderRouting.selftest.ts",
     "test:receipt-repair": "npx tsx src/lib/receiptRepair.selftest.ts",
     "test:projection-double-post": "npx tsx src/lib/ledger/projectionDoublePost.selftest.ts",
     "test:holiday-import": "npx tsx src/lib/holidayImport.selftest.ts",

@@ -9,6 +9,7 @@ import {
 } from "@/lib/feeDiscountRuntime";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { waTemplateLanguageFor } from "@/lib/householdPrefs";
+import { sendFromSchoolWhatsApp } from "@/lib/waMe";
 import {
   getSchoolMirrorSync,
   scheduleClientSchoolMirrorSync,
@@ -3721,14 +3722,6 @@ export function composeWhatsAppFeeReceipt(
   return lines.join("\n");
 }
 
-export function whatsAppFeeReceiptUrl(
-  mobile: string,
-  message: string,
-): string | null {
-  const e164 = toWhatsAppE164(mobile);
-  if (!e164) return null;
-  return `https://wa.me/${e164}?text=${encodeURIComponent(message)}`;
-}
 
 export function markWhatsAppReceiptSent(voucherId: string): boolean {
   const fees = loadFees();
@@ -3862,13 +3855,10 @@ export async function deliverWhatsAppFeeReceipt(input: {
     try {
       const {
         loadWaTemplates,
-        listApprovedTemplates,
-        pickTemplateForFamily,
+        resolveTemplateForSend,
         templateVariablePositions,
       } = await import("@/lib/waTemplates");
-      const approvedFees = listApprovedTemplates(loadWaTemplates(), {
-        module: "fees",
-      });
+      const waState = loadWaTemplates();
 
       // ONLY the receipt template. This used to take the first approved
       // template in the whole `fees` module matching the family's language,
@@ -3877,12 +3867,20 @@ export async function deliverWhatsAppFeeReceipt(input: {
       // had paid at the counter. Falling back across template FAMILIES is
       // never right: the fallback for "no Hindi receipt" is the English
       // receipt, never a different message.
+      // ONE resolver, so a template added in Masters is the one that goes
+      // out — and so the number it goes out FROM follows the school's own
+      // routing (per template, else per module, else the default) instead of
+      // a single hardcoded env var.
       const wantLang = waTemplateLanguageFor(hh);
-      const feeTpl = pickTemplateForFamily(
-        approvedFees,
-        "fees_receipt",
-        wantLang,
-      );
+      const resolved = resolveTemplateForSend({
+        state: waState,
+        familyKey: "fees_receipt",
+        language: wantLang,
+      });
+      const feeTpl = resolved.ok ? resolved.template : undefined;
+      const fromPhoneNumberId = resolved.ok
+        ? resolved.sender?.phoneNumberId
+        : undefined;
 
       // Meta rejects a send whose parameter count does not match the
       // registered template, so the positions come from the template's OWN
@@ -3915,7 +3913,10 @@ export async function deliverWhatsAppFeeReceipt(input: {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: [{ mobile, fallbackMobile, body: message, template }],
+          module: "fees",
+          messages: [
+            { mobile, fallbackMobile, body: message, template, fromPhoneNumberId },
+          ],
         }),
       });
       const dispatch = (await res.json()) as {
@@ -3978,12 +3979,26 @@ export async function deliverWhatsAppFeeReceipt(input: {
     pdfDownloaded = true;
   }
 
-  const url = whatsAppFeeReceiptUrl(mobile, message);
-  if (!url) {
-    return { ok: false, error: "Could not build WhatsApp link" };
-  }
-  if (typeof window !== "undefined") {
-    window.open(url, "_blank", "noopener,noreferrer");
+  // The school sends the receipt, or nobody does.
+  //
+  // This used to open the cashier's own WhatsApp whenever the API path had
+  // not fired — silently, so a receipt the office believed came from the
+  // school had actually gone from whoever was at the counter, and the school
+  // held no record of it. Today that fallback was firing on EVERY receipt,
+  // because the template was not recognised as approved.
+  const sent = await sendFromSchoolWhatsApp({
+    mobile,
+    text: message,
+    module: "fees",
+  });
+  if (!sent.ok) {
+    return {
+      ok: false,
+      error:
+        `The school's WhatsApp could not send this receipt: ${sent.error}. ` +
+        `Nothing was sent from your own WhatsApp. The PDF is downloaded — ` +
+        `attach it by hand if the family needs it now.`,
+    };
   }
   if (input.markSent !== false) {
     markWhatsAppReceiptSent(input.voucher.id);
@@ -3999,45 +4014,6 @@ export async function deliverWhatsAppFeeReceipt(input: {
 }
 
 /** @deprecated Prefer deliverWhatsAppFeeReceipt — text-only open */
-export function openWhatsAppFeeReceipt(input: {
-  voucher: CollectionVoucher;
-  mobile?: string;
-  sis?: SisState | null;
-  masters?: MastersState | null;
-  markSent?: boolean;
-}):
-  | { ok: true; url: string; mobile: string }
-  | { ok: false; error: string } {
-  if (input.voucher.voidedAt) {
-    return { ok: false, error: "Cannot send a voided receipt" };
-  }
-  const s = input.sis ?? loadSis();
-  const hh = householdOf(s, input.voucher.householdId);
-  const mobile =
-    normalizeMobile(input.mobile ?? "") || householdWhatsApp(hh);
-  if (!isValidMobile(mobile)) {
-    return {
-      ok: false,
-      error: "Add a valid 10-digit WhatsApp number for this household",
-    };
-  }
-  const message = composeWhatsAppFeeReceipt(
-    input.voucher,
-    s,
-    input.masters,
-  );
-  const url = whatsAppFeeReceiptUrl(mobile, message);
-  if (!url) {
-    return { ok: false, error: "Could not build WhatsApp link" };
-  }
-  if (typeof window !== "undefined") {
-    window.open(url, "_blank", "noopener,noreferrer");
-  }
-  if (input.markSent !== false) {
-    markWhatsAppReceiptSent(input.voucher.id);
-  }
-  return { ok: true, url, mobile };
-}
 
 function syncVoucherTenderRealisation(
   voucher: CollectionVoucher,

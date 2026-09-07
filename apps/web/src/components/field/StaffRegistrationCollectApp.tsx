@@ -20,12 +20,12 @@ import {
   setLeadRegistrationFee,
   takeRegistrationPayment,
   todayYmd,
-  whatsAppUrl,
 } from "@/lib/admissions";
 import { formatInr, TENDER_MODES, type TenderMode } from "@/lib/fees";
 import { loadMasters } from "@/lib/masters";
 import type { DemoSession } from "@/lib/auth";
 import { TENANT } from "@/lib/types";
+import { openWaMe } from "@/lib/waMe";
 
 const inp =
   "w-full rounded-xl border border-[rgba(32,48,80,0.18)] bg-white px-3 py-3 text-base";
@@ -251,7 +251,7 @@ export function StaffRegistrationCollectApp({
     setCollectAmount(still > 0 ? String(still / 100) : "0");
     setRef("");
     setUpiQr(null);
-    window.open(whatsAppUrl(mobile || r.payment.mobile, text), "_blank", "noopener,noreferrer");
+    openWaMe(mobile || r.payment.mobile, text, undefined, { module: "admissions" });
   }
 
   function confirmPaidAndWhatsApp() {
@@ -290,7 +290,7 @@ export function StaffRegistrationCollectApp({
         .filter(Boolean)
         .join(" · "),
     );
-    window.open(whatsAppUrl(mobile || r.payment.mobile, text), "_blank", "noopener,noreferrer");
+    openWaMe(mobile || r.payment.mobile, text, undefined, { module: "admissions" });
     setUtr("");
     setCollectAmount(still > 0 ? String(still / 100) : "0");
     setUpiQr(null);

@@ -8,9 +8,10 @@ import { WaTemplatesListView } from "./wa-templates/WaTemplatesListView";
 import { WaTemplatesCreateView } from "./wa-templates/WaTemplatesCreateView";
 import { WaTemplatesEditView } from "./wa-templates/WaTemplatesEditView";
 import { WaAccountHealthCard } from "./wa-templates/WaAccountHealthCard";
+import { WaSenderNumbersView } from "./wa-templates/WaSenderNumbersView";
 import { useWaTemplatesDesk } from "./wa-templates/useWaTemplatesDesk";
 
-type Screen = "list" | "create" | "edit";
+type Screen = "list" | "create" | "edit" | "numbers";
 
 export function WaTemplatesPanel() {
   const desk = useWaTemplatesDesk();
@@ -72,6 +73,7 @@ export function WaTemplatesPanel() {
           syncing={desk.syncing}
           onSyncMeta={() => void desk.syncMeta()}
           onCreate={() => setScreen("create")}
+          onOpenNumbers={() => setScreen("numbers")}
           onEdit={goEdit}
         />
       );
@@ -79,6 +81,7 @@ export function WaTemplatesPanel() {
     return (
       <WaTemplatesEditView
         template={selected}
+        senders={desk.state.senders ?? []}
         readOnly={desk.readOnly}
         notice={desk.notice}
         submitting={desk.submitting}
@@ -99,10 +102,22 @@ export function WaTemplatesPanel() {
     );
   }
 
+  if (screen === "numbers") {
+    return (
+      <WaSenderNumbersView
+        state={desk.state}
+        readOnly={desk.readOnly}
+        onBack={() => setScreen("list")}
+        onCommit={desk.commit}
+      />
+    );
+  }
+
   return (
     <>
       <WaAccountHealthCard />
       <WaTemplatesListView
+        onOpenNumbers={() => setScreen("numbers")}
         state={desk.state}
         readOnly={desk.readOnly}
         notice={desk.notice}

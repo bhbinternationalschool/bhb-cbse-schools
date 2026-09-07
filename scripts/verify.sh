@@ -108,6 +108,7 @@ SELFTESTS=(
   test:wa-receipt-template
   test:wa-language-gate
   test:wa-bot-silence
+  test:wa-sender-routing
   test:receipt-repair
   test:projection-double-post
   test:holiday-import

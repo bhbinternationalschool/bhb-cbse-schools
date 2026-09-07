@@ -12,6 +12,7 @@ import {
   type DashboardModuleId,
 } from "@/lib/moduleDashboards";
 import { useDemoSessionOptional } from "@/components/shell/SessionContext";
+import { openWaMe } from "@/lib/waMe";
 
 export function ModuleDashboardHost({
   moduleId,
@@ -113,10 +114,9 @@ async function runRowAction(
   row: DashboardTableRow,
 ): Promise<void> {
   if (kind !== "whatsapp-defaulter") return;
-  const [{ composeWhatsAppDefaulterReminder }, { whatsAppPaymentLinkUrl }, { TENANT }] =
+  const [{ composeWhatsAppDefaulterReminder }, { TENANT }] =
     await Promise.all([
       import("@/lib/playbook"),
-      import("@/lib/payments"),
       import("@/lib/types"),
     ]);
   const message = composeWhatsAppDefaulterReminder({
@@ -141,5 +141,5 @@ async function runRowAction(
     }
     return;
   }
-  window.open(whatsAppPaymentLinkUrl(mobile, message), "_blank", "noopener");
+  openWaMe(mobile, message, undefined, { module: "fees" });
 }
