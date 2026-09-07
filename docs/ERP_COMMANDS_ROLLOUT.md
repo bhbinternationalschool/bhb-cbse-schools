@@ -212,6 +212,39 @@ every staff member immediately, with no deploy. `commands on` resumes it.
 
 ---
 
+## 5b. What the desk does NOT answer, and what happens then
+
+Since 2026-09-07 the staff keyword bot is **silent unless summoned**.
+
+Before that it answered every staff message the desk stepped aside from,
+which on a number staff also use to talk to the school meant a greeting
+got a menu and a half-typed thought got a canned line about admissions.
+
+| A staff member sends | Answered by |
+|---|---|
+| a command (`5A me aaj kaun absent hai`) | the desk |
+| `help` | the desk — the full command list |
+| `IN` / `OUT` | the attendance punch bot, unchanged |
+| `menu` / `main` / `start` | the greeting menu, unchanged |
+| `school bot` | the old staff bot, awake for 30 minutes |
+| `bot off` | closes it again |
+| anything else | **nothing** — logged to Comms → WhatsApp inbox for a human |
+
+The silence is deliberate and it is the part to watch during the pilot: a
+staff member who does not know about `school bot` will read it as the
+number being dead. The desk's `help` reply says so in its last line,
+which is the only place they can find out.
+
+**Parents, visitors, admission enquiries, vendors and job applicants are
+untouched.** They have nothing but that bot, so for them every keyword and
+greeting works exactly as before. This rule applies only to a sender who
+resolves to an active staff record.
+
+The teacher class channel (homework to parents) and the staff attendance
+punch bot both run BEFORE this gate and are unaffected.
+
+---
+
 ## 6. What reaches a parent, and when
 
 Only after a staff member confirms a write command. Always as an approved
@@ -258,6 +291,8 @@ At 50 staff × 10 commands a day that is roughly **₹60/day** from October.
       `scripts/setup-cloud-scheduler.sh`
 - [ ] The 4 director/principal numbers know that `commands off` is the brake
 - [ ] Someone is watching Comms → WhatsApp inbox for the first hour
+- [ ] The pilot numbers know that anything which is not a command gets no
+      reply now, and that `school bot` brings the old menu back
 
 ---
 

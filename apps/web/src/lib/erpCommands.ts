@@ -1503,6 +1503,11 @@ export function formatHelpReply(
     `Reply with a number (*1*–*${ordered.length}*) to see how that one works.`,
     "✍️ = sends something or changes a record. You always see a confirm card first, and nothing happens until you tap *Confirm*.",
     "Or just type it the way you'd say it — Hindi, English or mixed. A small spelling mistake is fine.",
+    // The one thing a staff member cannot work out from silence. Anything
+    // that is not a command now goes unanswered on purpose, so the way
+    // back to the old menu bot has to be written down where they look.
+    "",
+    "Anything else you send here goes to the office, not to a bot. Send *school bot* if you want the old menu.",
   ].join("\n");
 }
 

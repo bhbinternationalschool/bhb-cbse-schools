@@ -34,30 +34,63 @@ export const VISITOR_PURPOSE_OPTIONS: {
 ];
 
 /**
+ * The staff keyword bot answers a staff member only when they ask for it.
+ *
+ * It was answering everything the command desk stepped aside from, which
+ * on a number staff also use to talk to the school meant it cut into
+ * ordinary conversation — a greeting got a menu, a half-typed thought got
+ * a canned answer about admissions. A parent or a visitor has nothing but
+ * that bot, so for them it is unchanged; a staff member has the desk, and
+ * the desk says nothing when a message is not a command.
+ *
+ * So they summon it: "school bot". It then answers them for
+ * STAFF_BOT_WINDOW_MINUTES of quiet, or until they send "bot off".
+ */
+export const STAFF_BOT_WINDOW_MINUTES = 30;
+
+export function parseStaffBotSwitch(text: string): "on" | "off" | null {
+  const t = (text || "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (
+    /^(school ?bot|skool ?bot|school ?bot (start|on|chalu)|bot (on|start|chalu)|start bot|स्कूल ?बॉट|बॉट (चालू|शुरू))$/.test(
+      t,
+    )
+  ) {
+    return "on";
+  }
+  if (/^(bot off|bot band|stop bot|exit bot|bot stop|close bot|बॉट बंद)$/.test(t)) {
+    return "off";
+  }
+  return null;
+}
+
+/** Is the staff bot still awake for this person? */
+export function staffBotAwake(until: string | undefined, nowMs: number): boolean {
+  const t = Date.parse(until || "");
+  return Number.isFinite(t) && t > nowMs;
+}
+
+/**
  * A greeting that should reset to the top menu.
  *
- * `staffAsksDesk` exists because "help" means two different things
- * depending on who typed it. To a parent or a visitor it means "show me
- * the menu", which is what this whole branch is for. To a staff member it
- * means "what can the command desk do?" — and because this check runs
- * BEFORE the desk gets the message, their "help" was answered with the
- * visitor menu and the desk was never asked. That is what a director saw
- * on the first day of the pilot: a list, but the wrong list, and no sign
- * the desk existed.
+ * `staff` exists because these words mean two different things depending
+ * on who typed them. To a parent or a visitor "hi" means "show me the
+ * menu", which is what this branch is for. From a staff member it is a
+ * greeting to a colleague, and answering it with a menu is the bot
+ * interrupting. "help" is the same: to staff it asks what the command
+ * desk can do, and because this check runs BEFORE the desk is asked, it
+ * was answered with the visitor menu and the desk was never reached —
+ * which is what a director saw on the first day of the pilot.
  *
- * Only "help" and its Hindi equivalents are handed over. "hi", "menu",
- * "start" still reset the menu for everybody, staff included — those are
- * how you get out of a flow.
+ * Staff keep the explicit ones — "menu", "main", "start" — so there is
+ * always a way back to the old bot without remembering a new phrase.
  */
 export function isUnifiedMenuCommand(
   text: string,
-  opts?: { staffAsksDesk?: boolean },
+  opts?: { staff?: boolean },
 ): boolean {
   const t = (text || "").trim();
   if (!t) return true;
-  if (opts?.staffAsksDesk && /^(help|madad|madat|sahayta|sahayata|मदद|सहायता)$/i.test(t)) {
-    return false;
-  }
+  if (opts?.staff) return /^(menu|main|start)$/i.test(t);
   return /^(hi|hello|namaste|hey|start|menu|main|help)$/i.test(t);
 }
 

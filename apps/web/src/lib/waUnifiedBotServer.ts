@@ -12,6 +12,9 @@ import {
   flowKindFromRole,
   flowKindFromVisitorPurpose,
   isUnifiedMenuCommand,
+  parseStaffBotSwitch,
+  staffBotAwake,
+  STAFF_BOT_WINDOW_MINUTES,
   type WaVisitorPurpose,
 } from "@/lib/waUnifiedBotEngine";
 import {
@@ -62,6 +65,13 @@ export type WaUnifiedSession = {
   updatedAt: string;
   /** Pending gate check-in (VISIT keyword / poster WhatsApp QR). */
   gate?: WaGateVisitPending | null;
+  /**
+   * Until when the staff keyword bot answers this person, ISO. Unset or
+   * past means the desk answers their commands and nothing answers the
+   * rest — which is the point: on a number staff also use to talk to the
+   * school, a bot that replies to everything is an interruption.
+   */
+  staffBotUntil?: string;
 };
 
 type WaUnifiedStore = {
@@ -250,6 +260,91 @@ async function delegateActiveFlow(
   }
 
   if (flow === "owner" || flow === "staff") {
+    // The staff keyword bot answers only when it has been summoned.
+    //
+    // Before this, it answered every staff message the desk stepped aside
+    // from. On a number staff also use to talk to the school, that is a
+    // bot cutting into conversation: a greeting got a menu, a half-typed
+    // thought got a canned line about admissions. The desk stays where it
+    // was — it answers commands and says nothing else — and this bot now
+    // waits to be asked for.
+    const nowMs = Date.now();
+    const sw = parseStaffBotSwitch(opts.text);
+    if (sw) {
+      const store = await readStore();
+      const base = store.sessions[mobile10] ?? session;
+      await writeStore({
+        ...store,
+        sessions: {
+          ...store.sessions,
+          [mobile10]: {
+            ...base,
+            staffBotUntil:
+              sw === "on"
+                ? new Date(nowMs + STAFF_BOT_WINDOW_MINUTES * 60_000).toISOString()
+                : "",
+            updatedAt: nowIso(),
+          },
+        },
+      });
+      if (sw === "off") {
+        await sendBotReply({
+          mobile10,
+          displayName: session.displayName || identity.displayName,
+          category: categoryForUnifiedAudience(flow, flow),
+          audience: "staff_bot_off",
+          flow,
+          text: "School bot closed. Commands still work as always — send *help* for the list.",
+          inbound: { text: opts.text, waMessageId: opts.waMessageId },
+        });
+        return { replied: true, escalate: false, audience: "staff_bot_off", stub: false };
+      }
+      const pack = menuKnownUserGreeting(identity);
+      await sendBotReply({
+        mobile10,
+        displayName: session.displayName || identity.displayName,
+        category: categoryForUnifiedAudience(flow, flow),
+        audience: "staff_bot_on",
+        flow,
+        menu: pack,
+        inbound: { text: opts.text, waMessageId: opts.waMessageId },
+      });
+      return { replied: true, escalate: false, audience: "staff_bot_on", stub: false };
+    }
+
+    if (!staffBotAwake(session.staffBotUntil, nowMs)) {
+      // Silence, not a reply saying it will be silent — a "I'm not
+      // answering that" on every message is the same interruption wearing
+      // an apology. The message is still recorded in Comms → WhatsApp
+      // inbox, so the office can see what was sent and answer as a human.
+      await sendBotReply({
+        mobile10,
+        displayName: session.displayName || identity.displayName,
+        category: categoryForUnifiedAudience(flow, flow),
+        audience: "staff_quiet",
+        flow,
+        inbound: { text: opts.text || "", waMessageId: opts.waMessageId },
+      });
+      return { replied: false, escalate: false, audience: "staff_quiet", stub: false };
+    }
+
+    // Awake, and this message keeps it awake.
+    {
+      const store = await readStore();
+      const base = store.sessions[mobile10] ?? session;
+      await writeStore({
+        ...store,
+        sessions: {
+          ...store.sessions,
+          [mobile10]: {
+            ...base,
+            staffBotUntil: new Date(nowMs + STAFF_BOT_WINDOW_MINUTES * 60_000).toISOString(),
+            updatedAt: nowIso(),
+          },
+        },
+      });
+    }
+
     const intent = detectStaffBotIntent(opts.text);
     if (intent === "menu") {
       const pack = menuKnownUserGreeting(identity);
@@ -589,13 +684,14 @@ export async function handleWaUnifiedInbound(opts: {
     return { replied: ok, escalate: false, audience: gate.audience, stub: !ok };
   }
 
-  // A staff member's "help" is a question for the command desk, not a
-  // request for the visitor menu — so it is allowed past this branch and
-  // reaches delegateActiveFlow below.
-  const staffAsksDesk =
+  // A staff member's greeting is a greeting, and their "help" is a
+  // question for the command desk — neither is a request for the visitor
+  // menu. Both are allowed past this branch and reach delegateActiveFlow
+  // below. "menu", "main" and "start" still reset, for everyone.
+  const isStaff =
     identity.isKnown &&
     identity.roles.some((role) => ["teacher", "staff", "owner"].includes(flowKindFromRole(role)));
-  if (isUnifiedMenuCommand(text, { staffAsksDesk })) {
+  if (isUnifiedMenuCommand(text, { staff: isStaff })) {
     session = sessionFor(mobile10, identity, opts.profileName);
     if (identity.isKnown && identity.roles.length === 1) {
       session.phase = "active";
