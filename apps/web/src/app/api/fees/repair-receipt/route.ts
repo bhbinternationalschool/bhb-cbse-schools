@@ -94,12 +94,20 @@ export async function POST(req: Request) {
   // mattered more here than anywhere: this is the screen the office uses to
   // REPAIR a blank receipt, so its failure mode was to blank the thing it was
   // asked to mend.
-  const { error: rpcErr } = await sb.rpc("replace_fee_desk_voucher_lines", {
+  // The ONLY path allowed to change what a receipt settled.
+  //
+  // Receipt lines are append-only (20260907130000): a desk sync may add the
+  // lines of a receipt that has none, and may never rewrite or remove the
+  // lines of one that has them — which is what stopped four separate
+  // incidents this week from being possible at all. A correction has to be
+  // asked for by name, and this is the name. The function announces itself to
+  // the trigger, refuses an allocation that does not equal the money taken,
+  // and stamps who did it onto every line it writes.
+  const { error: rpcErr } = await sb.rpc("repair_fee_receipt_allocation", {
     p_tenant_id: tenantId,
-    p_line_voucher_ids: [voucherId],
-    p_tender_voucher_ids: null,
+    p_voucher_id: voucherId,
     p_lines: lines,
-    p_tenders: null,
+    p_actor: auth.ctx.session?.fullName || auth.ctx.session?.email || "",
   });
   if (rpcErr) {
     return NextResponse.json(
