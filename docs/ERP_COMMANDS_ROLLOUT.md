@@ -38,6 +38,7 @@ order matters more than any single check.
 | # | Check | Fails → |
 |---|---|---|
 | 1 | **Env kill switch** `ERP_WA_COMMANDS` | branch does nothing; other bots answer as before |
+| 1½ | **Pilot list** `ERP_WA_COMMANDS_ALLOW` | silent for anyone not on it, exactly like the kill switch |
 | 2 | Voice note transcribed to text | asks you to type it |
 | 3 | **Director pause switch** — `commands off` / `commands on` | non-director is told only the director may |
 | 4 | Pending confirm card (`YES` / `NO`) | expired after 5 minutes |
@@ -81,15 +82,32 @@ when you tap Confirm, not trusted from the card.
 
 ---
 
-## 4. There is no per-person pilot
+## 4. The pilot list
 
-Worth stating plainly, because it shapes the rollout: **the code has no
-allowlist.** The desk is on for every staff member with a mobile, or off for
-everyone. "Try it with just my number first" is not supported today.
+`ERP_WA_COMMANDS_ALLOW` limits the desk to named mobiles. When it is set,
+**only those numbers** may use it — on WhatsApp and in the app alike.
+Everyone else sees exactly the WhatsApp they saw before the desk existed: no
+reply, no hint that a feature exists, other bots answering as usual. Empty or
+unset means everyone, which is the shipped behaviour.
 
-That is a gap, not a decision. A small `ERP_WA_COMMANDS_ALLOW` list of
-mobiles, consulted at check 1, would make a true pilot possible and is a
-short change. Until it exists, the two honest options are everyone or nobody.
+```
+ERP_WA_COMMANDS_ALLOW=9876543210, +91 90000 00000
+```
+
+Commas, spaces, newlines, `+91` and a leading `0` are all tolerated, because
+this gets pasted out of a phone book. A person is matched on any number the
+school knows them by — the number they messaged from, plus the mobile and
+alternate mobile on their staff record — so a director on the list messaging
+from their second phone still reaches their own brake.
+
+**Put the director's number on the list.** The check sits at step 1½, ahead
+of the `commands off` brake, so somebody who is not on the list cannot pause
+the desk either.
+
+A typo that empties the variable opens the desk to everyone rather than
+closing it to nobody. That is the safer failure of the two — a school locked
+out of its own ERP by a stray character would be worse — but it does mean the
+value is worth reading back after you set it.
 
 ---
 
@@ -106,16 +124,24 @@ short change. Until it exists, the two honest options are everyone or nobody.
 Nothing about the desk is live. This is the state I previously — and
 wrongly — described as the default.
 
-### Stage B — go live
+### Stage B — a real pilot, one number
 
-1. Remove `ERP_WA_COMMANDS` (or set it to anything other than `off`).
+1. Set `ERP_WA_COMMANDS_ALLOW` to your own mobile. Leave `ERP_WA_COMMANDS`
+   unset (or anything but `off`).
 2. Redeploy.
-3. **The desk is live for all 28 staff from that moment.** There is a window
-   between the deploy finishing and anyone sending `commands off`. Reads in
-   that window are harmless; a write cannot happen by accident, because it
-   needs a command *and* a confirmation.
-4. Send `commands off` from a director number if you want to park it while
-   you watch, then `commands on` when ready.
+3. The desk answers **you and nobody else**. Every other staff member's
+   WhatsApp is unchanged and they are told nothing.
+4. Run Stage C below.
+
+### Stage B2 — widen it
+
+Add numbers to `ERP_WA_COMMANDS_ALLOW` and redeploy — the office, then a
+couple of class teachers, then the fee desk. When you are ready for everyone,
+remove the variable entirely.
+
+That last step is the one with no undo short of another deploy, so it is
+worth doing on a quiet morning with somebody watching Comms → WhatsApp
+inbox.
 
 ### Stage C — the first real test, from your own number
 
@@ -184,7 +210,8 @@ At 50 staff × 10 commands a day that is roughly **₹60/day** from October.
 
 ## 8. Before you go live — checklist
 
-- [ ] Decide Stage A or straight to Stage B, knowing B is live for all 28 staff at once
+- [ ] `ERP_WA_COMMANDS_ALLOW` set to the pilot numbers, and read back after saving
+- [ ] The director's own number is on that list, or the `commands off` brake is out of reach
 - [ ] Approved WhatsApp templates exist for the writes you intend to use
       (fee reminder, pay link, notice, bus delay) — Masters → WhatsApp templates
 - [ ] `ERP_COMMANDS_DIGEST_HOUR` set if you want the director's nightly digest

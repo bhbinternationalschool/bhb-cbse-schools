@@ -137,6 +137,8 @@ import {
   parseStudentFeesQuery,
   noteCommandUse,
   parseCommandsSwitch,
+  parseCommandAllowList,
+  commandActorAllowed,
   parseConfirmReply,
   parseErpCommandLocal,
   resolveClassOrSectionRef,
@@ -249,6 +251,14 @@ export function erpCommandsEnabledByEnv(): boolean {
 }
 
 /**
+ * `ERP_WA_COMMANDS_ALLOW` — a pilot list of mobiles. Empty or unset means
+ * everyone, which is how the desk shipped.
+ */
+export function erpCommandAllowList(): string[] {
+  return parseCommandAllowList(process.env.ERP_WA_COMMANDS_ALLOW);
+}
+
+/**
  * A staff record standing in for a signed-in session. roleCode stays empty
  * exactly as the staff login route leaves it — RBAC resolves the role from
  * the roster record (assignments, then designation), never from a string a
@@ -310,6 +320,22 @@ export async function handleErpStaffCommand(
   inbound: ErpCommandInbound,
 ): Promise<ErpCommandResult> {
   if (!erpCommandsEnabledByEnv()) return { handled: false };
+
+  // Pilot list. Silent for everyone else, exactly like the kill switch: a
+  // staff member who is not on it must see the WhatsApp they saw before the
+  // desk existed, not a message telling them about a feature they cannot
+  // use. Checked here, before the voice note is transcribed, so a pilot
+  // costs nothing for the people outside it.
+  const allow = erpCommandAllowList();
+  if (
+    !commandActorAllowed(allow, [
+      inbound.actorKey,
+      inbound.staff?.mobile,
+      inbound.staff?.altMobile,
+    ])
+  ) {
+    return { handled: false };
+  }
 
   const nowMs = Date.now();
   const todayIso = istDateOf();

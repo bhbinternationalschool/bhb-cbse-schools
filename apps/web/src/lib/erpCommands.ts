@@ -3755,3 +3755,76 @@ export function formatBusDelayCard(input: {
   lines.push("", "Each family gets their own child's name and stop.");
   return lines.join("\n");
 }
+
+// ─── Pilot allowlist ───────────────────────────────────────────────────
+
+/**
+ * A mobile as ten digits, or "" if it is not one.
+ *
+ * The actor key is a mobile on WhatsApp but `staff:<id>` in the app, and an
+ * id full of digits must never be mistaken for a phone number — so anything
+ * that does not reduce to exactly ten digits is refused rather than
+ * truncated into something that might collide.
+ */
+export function normalizeCommandMobile(raw: string | undefined | null): string {
+  const str = String(raw ?? "");
+  // A phone number carries no letters. Stripping them instead of refusing
+  // would let an actor key like "staff:9876543210x" reduce to a listed
+  // number and walk into the pilot.
+  if (/[a-z]/i.test(str)) return "";
+  const d = str.replace(/\D/g, "");
+  const local =
+    d.length === 12 && d.startsWith("91")
+      ? d.slice(2)
+      : d.length === 11 && d.startsWith("0")
+        ? d.slice(1)
+        : d;
+  return local.length === 10 ? local : "";
+}
+
+/**
+ * `ERP_WA_COMMANDS_ALLOW` — the pilot list. Commas, spaces or newlines;
+ * +91, 0 and stray punctuation are all tolerated, because this gets pasted
+ * out of a phone book.
+ *
+ * An empty or unset list means everyone, which is the shipped behaviour.
+ */
+export function parseCommandAllowList(raw: string | undefined | null): string[] {
+  const out = new Set<string>();
+  // Separators first, then whitespace only as a fallback: a number pasted
+  // as "+91 98765 43210" carries spaces INSIDE it, so splitting on
+  // whitespace up front shreds it into three fragments and silently drops
+  // the person from the pilot.
+  for (const part of String(raw ?? "").split(/[,;\n\r|]+/)) {
+    const whole = normalizeCommandMobile(part);
+    if (whole) {
+      out.add(whole);
+      continue;
+    }
+    for (const piece of part.split(/\s+/)) {
+      const m = normalizeCommandMobile(piece);
+      if (m) out.add(m);
+    }
+  }
+  return [...out];
+}
+
+/**
+ * Whether this person may use the desk while a pilot list is set.
+ *
+ * Any of the numbers we know them by counts: the number the message came
+ * from, and the mobile and alternate mobile on their staff record — so a
+ * director on the list who messages from their second phone is not locked
+ * out of their own brake.
+ */
+export function commandActorAllowed(
+  allow: string[],
+  candidates: (string | undefined | null)[],
+): boolean {
+  if (!allow.length) return true;
+  const set = new Set(allow);
+  return candidates.some((c) => {
+    const m = normalizeCommandMobile(c);
+    return !!m && set.has(m);
+  });
+}
