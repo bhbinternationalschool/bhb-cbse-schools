@@ -45,7 +45,12 @@ function unmapLineKind(kind: string, original?: string): VoucherLine["kind"] {
   return kind as VoucherLine["kind"];
 }
 
-function voucherToRows(
+/**
+ * Exported for the self-test. What it must never emit is as load-bearing as
+ * what it does: a row the database's own CHECK rejects fails the whole
+ * receipt now that header, lines and tenders share one transaction.
+ */
+export function voucherToRows(
   tenantId: string,
   v: CollectionVoucher,
 ): {
@@ -80,7 +85,16 @@ function voucherToRows(
     updated_at: new Date().toISOString(),
   };
 
-  const lines = (v.lines || []).map((line) => ({
+  // A ₹0 line cannot be stored — fee_desk_voucher_lines has
+  // CHECK (amount_paise > 0) — and one of them would fail the WHOLE receipt,
+  // taking every other line with it now that the write is a single
+  // transaction. A fully-waived head is a real thing to have on a receipt and
+  // must not be able to cost the receipt its breakdown. It contributes
+  // nothing to the total, so dropping it leaves the lines still summing to
+  // the money collected.
+  const lines = (v.lines || [])
+    .filter((line) => Math.round(line.amountPaise) > 0)
+    .map((line) => ({
     id: `${v.id}:${line.dueKey}`,
     voucher_id: v.id,
     tenant_id: tenantId,
@@ -101,7 +115,11 @@ function voucherToRows(
     },
   }));
 
-  const tenders = (v.tenders || []).map((t, idx) => ({
+  // Same rule for tenders — CHECK (amount_paise > 0) there too. A ₹0 tender
+  // is not a payment mode, and must not fail the receipt that carries it.
+  const tenders = (v.tenders || [])
+    .filter((t) => Math.round(t.amountPaise) > 0)
+    .map((t, idx) => ({
     id: `${v.id}:t${idx}`,
     voucher_id: v.id,
     tenant_id: tenantId,

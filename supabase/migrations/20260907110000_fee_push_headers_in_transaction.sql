@@ -113,7 +113,17 @@ begin
       e ->> 'mode',
       (e ->> 'amount_paise')::bigint,
       coalesce(e ->> 'ref', ''),
-      nullif(e ->> 'instrument_date', ''),
+      -- ::date, and nullif first so "" becomes NULL rather than a cast error.
+      --
+      -- Without the cast Postgres refuses the whole statement ("column
+      -- instrument_date is of type date but expression is of type text"), the
+      -- transaction rolls the lines back with it, and the receipt is left
+      -- blank. Every counter receipt carries a tender, so this failed EVERY
+      -- push from the moment the function went live — RCV-00503..00509,
+      -- ₹34,500, on 2026-09-07. It survived the first proof because that test
+      -- only reached the LINES insert: a rollback test that never executes the
+      -- statement underneath it proves the rollback, not the write.
+      nullif(e ->> 'instrument_date', '')::date,
       coalesce(e ->> 'bank_name', ''),
       coalesce(e ->> 'realisation', ''),
       coalesce(e -> 'tender_json', '{}'::jsonb)
