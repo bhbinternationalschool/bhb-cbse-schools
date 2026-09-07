@@ -6,6 +6,7 @@ import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
 import "staff_leave_screen.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../modules/dictate_field.dart";
 
 /// Parents' leave requests for the teacher's sections (every section for
 /// leadership). A class teacher decides short leave; over 3 days, medical or
@@ -91,14 +92,12 @@ class _Card extends StatelessWidget {
                 ),
               ),
             const SizedBox(height: 10),
-            TextField(
+            DictateField(
+              label: approve
+                  ? "Note to parent (optional)"
+                  : "Reason for the parent",
               controller: note,
               maxLines: 2,
-              decoration: InputDecoration(
-                labelText: approve
-                    ? "Note to parent (optional)"
-                    : "Reason for the parent",
-              ),
             ),
           ],
         ),

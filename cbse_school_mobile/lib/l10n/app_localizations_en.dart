@@ -1061,4 +1061,17 @@ class LEn extends L {
 
   @override
   String get askTheErp => 'Ask the ERP';
+
+  @override
+  String get speak => 'Speak';
+
+  @override
+  String get listening => 'Listening…';
+
+  @override
+  String get couldNotHearYou => 'Could not hear you';
+
+  @override
+  String get dictationNotAvailable =>
+      'Dictation is not available on this phone';
 }

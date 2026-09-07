@@ -333,5 +333,9 @@
   "expiresInMinutes": "5 मिनट में समाप्त",
   "confirm": "पुष्टि करें",
   "send": "भेजें",
-  "askTheErp": "ईआरपी से पूछें"
+  "askTheErp": "ईआरपी से पूछें",
+  "speak": "बोलें",
+  "listening": "सुन रहे हैं…",
+  "couldNotHearYou": "सुनाई नहीं दिया",
+  "dictationNotAvailable": "इस फ़ोन में बोलकर लिखना उपलब्ध नहीं है"
 }

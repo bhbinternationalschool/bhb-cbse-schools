@@ -6,6 +6,7 @@ import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
 import "staff_leave_screen.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../modules/dictate_field.dart";
 
 /// The principal's staff-leave queue — approve or reject each request with
 /// an optional note; the applicant is pushed the decision.
@@ -81,15 +82,11 @@ class _Card extends StatelessWidget {
               style: AppText.bodyMedium,
             ),
             const SizedBox(height: 10),
-            TextField(
+            DictateField(
+              label: approve ? "Note (optional)" : "Reason",
               controller: note,
               maxLines: 2,
-              decoration: InputDecoration(
-                labelText: approve ? "Note (optional)" : "Reason",
-                hintText: approve
-                    ? "e.g. arrange your classes"
-                    : "Tell them why",
-              ),
+              hint: approve ? "e.g. arrange your classes" : "Tell them why",
             ),
           ],
         ),

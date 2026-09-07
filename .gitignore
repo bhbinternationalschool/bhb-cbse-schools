@@ -1,5 +1,9 @@
 # Dependencies
-node_modules/
+# No trailing slash: a bare `node_modules` SYMLINK slipped past the
+# directory-only pattern in PR #82 and was committed. On checkout git
+# materialises it pointing at itself, npm cannot resolve the workspaces, and
+# the dev server exits 194.
+node_modules
 apps/*/node_modules/
 packages/*/node_modules/
 .pnpm-store/

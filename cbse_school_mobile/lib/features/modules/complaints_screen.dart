@@ -5,6 +5,7 @@ import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "module_shell.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../modules/dictate_field.dart";
 
 /// The household's complaints, and a form to raise one.
 ///
@@ -279,15 +280,12 @@ class _ComplaintFormState extends State<_ComplaintForm> {
               textCapitalization: TextCapitalization.sentences,
               decoration: InputDecoration(labelText: context.l10n.subject),
             ),
-            TextField(
+            DictateField(
+              label: context.l10n.details,
               controller: _description,
               maxLines: 4,
-              maxLength: 2000,
               textCapitalization: TextCapitalization.sentences,
-              decoration: InputDecoration(
-                labelText: context.l10n.details,
-                hintText: context.l10n.whatHappenedWhenAndWhatYou,
-              ),
+              hint: context.l10n.whatHappenedWhenAndWhatYou,
             ),
             const SizedBox(height: 8),
             FilledButton(

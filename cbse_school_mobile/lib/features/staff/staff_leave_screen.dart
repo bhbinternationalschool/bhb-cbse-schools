@@ -5,6 +5,7 @@ import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../modules/dictate_field.dart";
 
 /// The staff member's own leave: this year's balances and their requests,
 /// with a form to apply. A request goes to the principal (unless HR has
@@ -388,15 +389,13 @@ class _ApplyLeaveSheetState extends State<_ApplyLeaveSheet> {
               value: _halfDay,
               onChanged: (v) => setState(() => _halfDay = v),
             ),
-            TextField(
+            DictateField(
+              label: context.l10n.reason,
               controller: _reason,
               minLines: 2,
               maxLines: 4,
               textCapitalization: TextCapitalization.sentences,
-              decoration: InputDecoration(
-                labelText: context.l10n.reason,
-                hintText: context.l10n.shortAndClearThePrincipalReads,
-              ),
+              hint: context.l10n.shortAndClearThePrincipalReads,
             ),
             if (_error != null)
               Padding(

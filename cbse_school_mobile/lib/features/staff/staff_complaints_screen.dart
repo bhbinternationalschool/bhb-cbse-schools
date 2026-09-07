@@ -6,6 +6,7 @@ import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../modules/dictate_field.dart";
 
 /// Parents' complaints this staff member should act on — everything for
 /// leadership and the office, else the ones assigned to them or about a
@@ -91,15 +92,13 @@ class _Card extends StatelessWidget {
         context: context,
         builder: (context) => AlertDialog(
           title: Text(context.l10n.resolveComplaint),
-          content: TextField(
+          content: DictateField(
+            label: context.l10n.whatWasDone,
             controller: ctl,
             maxLines: 3,
             autofocus: true,
             textCapitalization: TextCapitalization.sentences,
-            decoration: InputDecoration(
-              labelText: context.l10n.whatWasDone,
-              hintText: context.l10n.theParentReadsThisInTheir,
-            ),
+            hint: context.l10n.theParentReadsThisInTheir,
           ),
           actions: [
             TextButton(

@@ -333,5 +333,9 @@
   "expiresInMinutes": "Expires in 5 minutes",
   "confirm": "Confirm",
   "send": "Send",
-  "askTheErp": "Ask the ERP"
+  "askTheErp": "Ask the ERP",
+  "speak": "Speak",
+  "listening": "Listening…",
+  "couldNotHearYou": "Could not hear you",
+  "dictationNotAvailable": "Dictation is not available on this phone"
 }

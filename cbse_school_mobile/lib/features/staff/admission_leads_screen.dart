@@ -6,6 +6,7 @@ import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../modules/dictate_field.dart";
 
 /// The counsellor's call list. Overdue first, because that is the order the
 /// day gets worked through: call, say what happened, set the next date.
@@ -360,11 +361,11 @@ class _LeadFollowupSheetState extends State<_LeadFollowupSheet> {
               label: Text("Call again on ${formatDateLabel(_iso(_next))}"),
             ),
             const SizedBox(height: 8),
-            TextField(
+            DictateField(
+              label: context.l10n.whatWasSaid,
               controller: _note,
               maxLines: 2,
               textCapitalization: TextCapitalization.sentences,
-              decoration: InputDecoration(labelText: context.l10n.whatWasSaid),
             ),
             const SizedBox(height: 14),
             FilledButton(

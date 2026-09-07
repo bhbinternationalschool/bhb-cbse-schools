@@ -5,6 +5,7 @@ import "../../core/theme/app_theme.dart";
 import "module_shell.dart";
 import "tutor_screen.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../modules/dictate_field.dart";
 
 /// Homework feed for one section. Parents pass [studentId]; teachers pass
 /// [classId]+[sectionId] and get a compose button.
@@ -277,13 +278,11 @@ class _ComposeSheetState extends State<_ComposeSheet> {
             decoration: InputDecoration(hintText: context.l10n.title),
           ),
           const SizedBox(height: 10),
-          TextField(
+          DictateField(
             controller: _body,
             maxLines: 4,
             textCapitalization: TextCapitalization.sentences,
-            decoration: InputDecoration(
-              hintText: context.l10n.homeworkDetailsForParents,
-            ),
+            hint: context.l10n.homeworkDetailsForParents,
           ),
           if (_error != null) ...[
             const SizedBox(height: 8),

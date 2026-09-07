@@ -6,6 +6,7 @@ import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../modules/dictate_field.dart";
 
 /// The teacher's PTM day: their slots, who has booked each, and a one-tap
 /// record of the meeting (met + note, or no-show). Parents see the note in
@@ -108,29 +109,25 @@ class _Booking extends StatelessWidget {
                 style: AppText.bodySmallMuted,
               ),
               const SizedBox(height: 12),
-              TextField(
+              DictateField(
+                label: context.l10n.doingWell,
                 controller: strengths,
                 maxLines: 2,
                 textCapitalization: TextCapitalization.sentences,
-                decoration: InputDecoration(labelText: context.l10n.doingWell),
               ),
               const SizedBox(height: 8),
-              TextField(
+              DictateField(
+                label: context.l10n.needsAttention,
                 controller: areas,
                 maxLines: 2,
                 textCapitalization: TextCapitalization.sentences,
-                decoration: InputDecoration(
-                  labelText: context.l10n.needsAttention,
-                ),
               ),
               const SizedBox(height: 8),
-              TextField(
+              DictateField(
+                label: context.l10n.agreedFollowUp,
                 controller: followUp,
                 maxLines: 2,
                 textCapitalization: TextCapitalization.sentences,
-                decoration: InputDecoration(
-                  labelText: context.l10n.agreedFollowUp,
-                ),
               ),
               const SizedBox(height: 14),
               FilledButton(

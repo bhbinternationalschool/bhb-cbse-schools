@@ -6,6 +6,7 @@ import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../modules/dictate_field.dart";
 
 /// The office's queue of transport requests from parents — the same rows
 /// the web desk's Transport → Requests tab shows. Owner, admin, principal
@@ -195,12 +196,10 @@ class _RequestCard extends StatelessWidget {
           "assigned" => "Mark as assigned",
           _ => "Decline this request",
         }),
-        content: TextField(
+        content: DictateField(
+          label: context.l10n.noteForTheFamilyTheyWill,
           controller: note,
           maxLines: 2,
-          decoration: InputDecoration(
-            labelText: context.l10n.noteForTheFamilyTheyWill,
-          ),
         ),
         actions: [
           TextButton(

@@ -5,6 +5,7 @@ import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "module_shell.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../modules/dictate_field.dart";
 
 /// One child's leave requests, and a form to make a new one.
 ///
@@ -319,15 +320,12 @@ class _LeaveFormState extends State<_LeaveForm> {
               ],
             ),
             const SizedBox(height: 12),
-            TextField(
+            DictateField(
+              label: context.l10n.reason,
               controller: _reason,
               maxLines: 3,
-              maxLength: 500,
               textCapitalization: TextCapitalization.sentences,
-              decoration: InputDecoration(
-                labelText: context.l10n.reason,
-                hintText: context.l10n.eGFeverDoctorAdvisedRest,
-              ),
+              hint: context.l10n.eGFeverDoctorAdvisedRest,
             ),
             const SizedBox(height: 8),
             FilledButton(
