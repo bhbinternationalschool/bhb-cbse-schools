@@ -2721,6 +2721,22 @@ class ApiClient {
   /// Starts buying a pass for one child; the returned checkout URL opens
   /// in the browser and the pass switches on by itself once the bank
   /// confirms.
+  /// Hand Play's purchase token to the server, which verifies it with Google
+  /// and grants the pass. Returns the new end date. The token alone proves
+  /// nothing — this call is the only thing that opens the tutor.
+  Future<String> grantTutorPassFromPlay({
+    required String productId,
+    required String purchaseToken,
+    required String studentId,
+  }) async {
+    final data = await _postData("/api/v1/tutor/play-purchase", {
+      "productId": productId,
+      "purchaseToken": purchaseToken,
+      "studentId": studentId,
+    });
+    return _s(data, "endsAt");
+  }
+
   Future<TutorBuyResult> buyTutorPass({
     required String planCode,
     required String studentId,
