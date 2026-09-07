@@ -167,6 +167,26 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
     scope: "any",
   },
   {
+    id: "book_ptm",
+    title: "Book a PTM slot for a family",
+    kind: "write",
+    module: "ptm",
+    action: "edit",
+    description:
+      "Book a parent-teacher meeting slot on a family's behalf — for the parent who rings the office or catches you at the gate instead of using the app. Names the student and, optionally, the time; without a time it offers the open ones.",
+    examples: [
+      "Book PTM slot for Riya Verma, 10:30",
+      "book ptm for Aarav Sharma 11 am",
+      "Amay Gupta 4B ka PTM 10:30 book karo",
+      "fix ptm appointment for Kabir Ali",
+    ],
+    fields: [
+      { name: "student", type: "student", required: true, description: "The child whose parent is coming" },
+      { name: "text", type: "text", required: false, description: "Slot time as written, e.g. 10:30 or 11 am" },
+    ],
+    scope: "own_sections",
+  },
+  {
     id: "decide_leave",
     title: "Approve or reject a leave request",
     kind: "write",
@@ -882,6 +902,14 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
       source: "local",
     };
   }
+  const ptmBooking = parseBookPtmQuery(t);
+  if (ptmBooking) {
+    return {
+      commandId: "book_ptm",
+      fields: { student: ptmBooking.student, text: ptmBooking.time },
+      source: "local",
+    };
+  }
   const admPeriod = parseAdmissionsQuery(t);
   if (admPeriod) {
     return { commandId: "admissions_week", fields: { text: admPeriod }, source: "local" };
@@ -962,7 +990,9 @@ export function looksLikeCommand(text: string): boolean {
   const t = (text || "").trim();
   if (t.length < 4 || t.length > 300) return false;
   if (/\?$/.test(t)) return true;
-  return /\b(kaun|kon|kitna|kitne|kya|batao|bata|dikhao|dikha|list|show|status|kitni|how many|who|which|pending|due|dues|defaulter|fees?|absent|present|attendance|roster|manifest|leave|homework|कौन|कितना|कितने|बताओ|दिखाओ|फीस|बकाया)\b/i.test(
+  // `\b` is ASCII-only, so a Devanagari word listed behind it would never
+  // match; Unicode lookarounds make the Hindi half of this list real.
+  return /(?<![\p{L}\p{M}\p{N}])(kaun|kon|kitna|kitne|kya|batao|bata|dikhao|dikha|list|show|status|kitni|how many|who|which|pending|due|dues|defaulter|fees?|absent|present|attendance|roster|manifest|leave|homework|कौन|कितना|कितने|बताओ|दिखाओ|फीस|बकाया)(?![\p{L}\p{M}\p{N}])/iu.test(
     t,
   );
 }
@@ -3399,6 +3429,187 @@ export function formatPayLinkCard(input: {
     input.templateReady
       ? "The receipt is sent automatically once they pay."
       : "⚠️ No approved pay-link template — the link will be created but not sent; share it yourself.",
+  );
+  return lines.join("\n");
+}
+
+// ─── Book a PTM slot for a family (write) ──────────────────────────────
+
+const PTM_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(ptm|parent[\s-]*teacher\s*meeting|पीटीएम)(?![\p{L}\p{M}\p{N}])/iu;
+
+/**
+ * Booking words. Without one of these "PTM kab hai" — a question about the
+ * date — would be read as an instruction to book something.
+ */
+const PTM_BOOK_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(book(?:ing)?|slot|schedule|appointment|fix|reserve|बुक|स्लॉट)(?![\p{L}\p{M}\p{N}])/iu;
+
+/**
+ * "Riya ka PTM slot kab hai" carries both words but is a question about
+ * the timetable, not an instruction; booking against it would put a
+ * question word into the student's name.
+ */
+const PTM_QUESTION_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(kab|kaun|kon|kya|kitne|kitna|when|what|which|who|available|khali|khaali)(?![\p{L}\p{M}\p{N}])/iu;
+
+const PTM_FILLER = new Set([
+  "ptm", "book", "booking", "slot", "slots", "schedule", "appointment", "fix", "reserve",
+  "parent", "parents", "teacher", "teachers", "meeting", "for", "to", "of", "at", "on", "the",
+  "with", "please", "pls", "karo", "kar", "do", "dijiye", "ka", "ki", "ke", "ko", "liye",
+  "am", "pm", "baje", "bje", "time", "पीटीएम", "बुक", "स्लॉट", "समय", "बजे", "का", "की", "के", "को", "लिए",
+]);
+
+/**
+ * A time in a booking message: "10:30", "10.30 am", "2 pm", "11 baje".
+ * A bare number is never a time — "4B" and "roll 4" are far commoner in
+ * these messages than an hour written alone.
+ */
+export function parsePtmTime(
+  text: string,
+): { hh: number; mm: number; meridiem: "am" | "pm" | null } | null {
+  const t = (text || "").trim();
+  const withMinutes =
+    /(?<![\p{L}\p{M}\p{N}])(\d{1,2})[:.](\d{2})\s*(a\.?m\.?|p\.?m\.?)?(?![\p{L}\p{M}\p{N}])/iu.exec(t);
+  if (withMinutes) {
+    const hh = parseInt(withMinutes[1]!, 10);
+    const mm = parseInt(withMinutes[2]!, 10);
+    if (hh <= 23 && mm <= 59) {
+      const mer = (withMinutes[3] || "").toLowerCase().startsWith("p")
+        ? "pm"
+        : withMinutes[3]
+          ? "am"
+          : null;
+      return { hh, mm, meridiem: mer };
+    }
+  }
+  const hourOnly =
+    /(?<![\p{L}\p{M}\p{N}])(\d{1,2})\s*(a\.?m\.?|p\.?m\.?|baje|bje|बजे)(?![\p{L}\p{M}\p{N}])/iu.exec(t);
+  if (hourOnly) {
+    const hh = parseInt(hourOnly[1]!, 10);
+    if (hh <= 23) {
+      const w = (hourOnly[2] || "").toLowerCase();
+      return { hh, mm: 0, meridiem: w.startsWith("p") ? "pm" : w.startsWith("a") ? "am" : null };
+    }
+  }
+  return null;
+}
+
+/**
+ * The "HH:MM" values a written time could mean, best first.
+ *
+ * "10:30" is 10:30 in a school day; "2:30" almost certainly means the
+ * afternoon. Rather than guess, both readings are returned and the caller
+ * matches them against the slots that actually exist — an hour nobody is
+ * sitting for is never chosen.
+ */
+export function ptmTimeCandidates(t: { hh: number; mm: number; meridiem: "am" | "pm" | null }): string[] {
+  const pad = (h: number, m: number) => `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  if (t.meridiem === "pm") return [pad(t.hh === 12 ? 12 : (t.hh % 12) + 12, t.mm)];
+  if (t.meridiem === "am") return [pad(t.hh === 12 ? 0 : t.hh, t.mm)];
+  const out = [pad(t.hh, t.mm)];
+  if (t.hh >= 1 && t.hh <= 7) out.push(pad(t.hh + 12, t.mm));
+  return out;
+}
+
+/**
+ * "Book PTM slot for Riya Verma, 10:30", "Riya Verma ka PTM 10:30 book
+ * karo". Needs the PTM word, a booking word and a name; the time is
+ * optional — without it the desk offers the open times.
+ */
+export function parseBookPtmQuery(
+  text: string,
+): { student: string; time: string } | null {
+  const t = (text || "").trim();
+  if (!t || !PTM_WORD.test(t) || !PTM_BOOK_WORD.test(t)) return null;
+  if (/[?？]\s*$/.test(t) || PTM_QUESTION_WORD.test(t)) return null;
+  const time = parsePtmTime(t);
+  const refs = extractSectionRefs(t);
+  let rest = t.toLowerCase();
+  // Strip the time before the name is read, so "10:30" cannot become part
+  // of it, and the section, which is carried separately.
+  rest = rest.replace(/(?<![\p{L}\p{M}\p{N}])\d{1,2}[:.]\d{2}(?![\p{L}\p{M}\p{N}])/gu, " ");
+  if (refs.length) {
+    rest = rest
+      .replace(/(?<![\p{L}\p{M}\p{N}])(?:class|grade|std|kaksha|कक्षा)\s*[a-z0-9]+(?:st|nd|rd|th)?\s*(?:-|\s)?\s*(?:section|sec\.?)?\s*[a-h]?(?![\p{L}\p{M}\p{N}])/giu, " ")
+      .replace(/(?<![a-z0-9])(\d{1,2}|[ivx]{1,4}|nursery|lkg|ukg|kg|pg)(?:st|nd|rd|th)?\s*-?\s*[a-h](?![a-z0-9])/g, " ");
+  }
+  const words = rest
+    .replace(/[^\p{L}\p{M}\p{N}\s'.-]/gu, " ")
+    .split(/\s+/)
+    .map((w) => w.replace(/^[.'-]+|[.'-]+$/g, ""))
+    .filter((w) => w && !PTM_FILLER.has(w) && !/^\d+$/.test(w));
+  const name = words.join(" ").trim();
+  if (!name || !/[\p{L}\p{M}]{2,}/u.test(name)) return null;
+  const sec = refs[0];
+  return {
+    student: [name, sec ? `${sec.classKey}${sec.sectionName}` : ""].filter(Boolean).join(" "),
+    time: time ? `${String(time.hh).padStart(2, "0")}:${String(time.mm).padStart(2, "0")}${time.meridiem ?? ""}` : "",
+  };
+}
+
+/** The open times, when the message named none or named one that is taken. */
+export function formatPtmSlotPicker(input: {
+  studentName: string;
+  eventName: string;
+  eventDate: string;
+  slots: { startAt: string; teacherName: string; free: number }[];
+  askedTime?: string;
+}): string {
+  if (!input.slots.length) {
+    return `Every slot in ${input.eventName} (${shortDate(input.eventDate)}) is full. Add slots in the ERP: PTM → slots.`;
+  }
+  const lines = [
+    input.askedTime
+      ? `No free slot at ${input.askedTime} in ${input.eventName} (${shortDate(input.eventDate)}).`
+      : `${input.eventName} · ${shortDate(input.eventDate)} — open times for ${input.studentName}:`,
+  ];
+  if (input.askedTime) lines.push(`Open times for ${input.studentName}:`);
+  for (const s of input.slots.slice(0, 12)) {
+    lines.push(`${s.startAt} · ${s.teacherName}${s.free > 1 ? ` (${s.free} places)` : ""}`);
+  }
+  if (input.slots.length > 12) lines.push(`…and ${input.slots.length - 12} more.`);
+  lines.push("", `Send the time, e.g. _book PTM for ${input.studentName} ${input.slots[0]!.startAt}_.`);
+  return lines.join("\n");
+}
+
+export function formatBookPtmCard(input: {
+  studentName: string;
+  classLabel: string;
+  eventName: string;
+  eventDate: string;
+  modeLabel: string;
+  startAt: string;
+  endAt: string;
+  teacherName: string;
+  roomOrLink: string;
+  guardianName: string;
+  mobileMasked: string;
+  /** False when no household is linked — then nobody can be told. */
+  familyLinked: boolean;
+  templateLabel: string;
+}): string {
+  const lines = [
+    `*Book PTM* · ${input.studentName} · ${input.classLabel}`,
+    `${input.eventName} · ${shortDate(input.eventDate)} · ${input.startAt}–${input.endAt}`,
+    `With: ${input.teacherName}`,
+  ];
+  if (input.roomOrLink) lines.push(`Where: ${input.roomOrLink} (${input.modeLabel})`);
+  else lines.push(`Mode: ${input.modeLabel}`);
+  lines.push("");
+  if (!input.familyLinked) {
+    lines.push(
+      "⚠️ No family record is linked to this child, so nobody can be told — the slot is only held in the ERP.",
+    );
+    return lines.join("\n");
+  }
+  lines.push(
+    `Booked for ${input.guardianName || "the parent"}${input.mobileMasked ? ` ${input.mobileMasked}` : ""}, who is told on the parent app.`,
+  );
+  lines.push(
+    input.templateLabel
+      ? `WhatsApp: ${input.templateLabel}`
+      : "⚠️ No approved notice template — the family is told on the app only.",
   );
   return lines.join("\n");
 }

@@ -67,6 +67,11 @@ import {
   formatStaffBroadcastCard,
   parsePayLinkQuery,
   formatPayLinkCard,
+  parseBookPtmQuery,
+  parsePtmTime,
+  ptmTimeCandidates,
+  formatBookPtmCard,
+  formatPtmSlotPicker,
   parseFeeReminderQuery,
   formatFeeReminderCard,
   inFeeReminderQuietHours,
@@ -1527,6 +1532,141 @@ const masters = {
     "without a template the card does not pretend the parent will receive it",
   );
   assert.ok(noTpl.includes("Goes to the parent 98xxxxxx21"), noTpl);
+}
+
+// ─── book a PTM slot ───────────────────────────────────────────────────
+{
+  // A time needs a separator or a marker; a bare number is a class or roll.
+  assert.deepEqual(parsePtmTime("10:30"), { hh: 10, mm: 30, meridiem: null });
+  assert.deepEqual(parsePtmTime("10.30 am"), { hh: 10, mm: 30, meridiem: "am" });
+  assert.deepEqual(parsePtmTime("2 pm"), { hh: 2, mm: 0, meridiem: "pm" });
+  assert.deepEqual(parsePtmTime("11 baje"), { hh: 11, mm: 0, meridiem: null });
+  assert.deepEqual(parsePtmTime("11 बजे"), { hh: 11, mm: 0, meridiem: null });
+  assert.equal(parsePtmTime("Riya Verma 4B"), null, "a section is not a time");
+  assert.equal(parsePtmTime("roll 4"), null, "a roll number is not a time");
+
+  // Without am/pm both readings are offered and the slots decide.
+  assert.deepEqual(ptmTimeCandidates({ hh: 10, mm: 30, meridiem: null }), ["10:30"]);
+  assert.deepEqual(ptmTimeCandidates({ hh: 2, mm: 30, meridiem: null }), ["02:30", "14:30"]);
+  assert.deepEqual(ptmTimeCandidates({ hh: 2, mm: 0, meridiem: "pm" }), ["14:00"]);
+  assert.deepEqual(ptmTimeCandidates({ hh: 12, mm: 0, meridiem: "pm" }), ["12:00"]);
+  assert.deepEqual(ptmTimeCandidates({ hh: 12, mm: 15, meridiem: "am" }), ["00:15"]);
+
+  assert.deepEqual(parseBookPtmQuery("Book PTM slot for Riya Verma, 10:30"), {
+    student: "riya verma",
+    time: "10:30",
+  });
+  assert.deepEqual(parseBookPtmQuery("book ptm for Aarav Sharma 11 am"), {
+    student: "aarav sharma",
+    time: "11:00am",
+  });
+  assert.deepEqual(parseBookPtmQuery("Amay Gupta 4B ka PTM 10:30 book karo"), {
+    student: "amay gupta 4B",
+    time: "10:30",
+  });
+  assert.deepEqual(parseBookPtmQuery("fix ptm appointment for Kabir Ali"), {
+    student: "kabir ali",
+    time: "",
+  }, "no time is allowed — the desk offers the open ones");
+  assert.equal(parseBookPtmQuery("PTM kab hai"), null, "asking the date is not an instruction to book");
+  assert.equal(parseBookPtmQuery("book slot for Riya Verma"), null, "without PTM it is not this command");
+  assert.equal(
+    parseBookPtmQuery("Riya ka PTM slot kab hai"),
+    null,
+    "a question about the slot is not an instruction to book one",
+  );
+  assert.equal(parseBookPtmQuery("kaun se PTM slot khali hain?"), null);
+
+  // A notice that merely mentions the PTM stays a notice.
+  const notice = parseErpCommandLocal("message 5A parents: PTM slot booking is open");
+  assert.equal(notice?.commandId, "class_message", JSON.stringify(notice));
+  const booking = parseErpCommandLocal("Book PTM slot for Riya Verma, 10:30");
+  assert.equal(booking?.commandId, "book_ptm", JSON.stringify(booking));
+  assert.equal(booking?.fields.student, "riya verma");
+  assert.equal(booking?.fields.text, "10:30");
+
+  const card = formatBookPtmCard({
+    studentName: "Riya Verma",
+    classLabel: "V A",
+    eventName: "Term PTM",
+    eventDate: "2026-09-12",
+    modeLabel: "In person",
+    startAt: "10:30",
+    endAt: "10:45",
+    teacherName: "Sunita Sharma",
+    roomOrLink: "Room 12",
+    guardianName: "Suresh Verma",
+    mobileMasked: "98xxxxxx21",
+    familyLinked: true,
+    templateLabel: "School notice broadcast (EN)",
+  });
+  assert.ok(card.startsWith("*Book PTM* · Riya Verma · V A"), card);
+  assert.ok(card.includes("Term PTM · 12 Sep · 10:30–10:45"), card);
+  assert.ok(card.includes("With: Sunita Sharma"), card);
+  assert.ok(card.includes("Where: Room 12 (In person)"), card);
+  assert.ok(card.includes("Booked for Suresh Verma 98xxxxxx21"), card);
+
+  const noTpl = formatBookPtmCard({
+    studentName: "R", classLabel: "V A", eventName: "Term PTM", eventDate: "2026-09-12",
+    modeLabel: "Video", startAt: "10:30", endAt: "10:45", teacherName: "S", roomOrLink: "",
+    guardianName: "", mobileMasked: "", familyLinked: true, templateLabel: "",
+  });
+  assert.ok(noTpl.includes("Mode: Video"), noTpl);
+  assert.ok(
+    noTpl.includes("⚠️ No approved notice template — the family is told on the app only."),
+    "without a template the card does not promise a WhatsApp message",
+  );
+
+  const noFamily = formatBookPtmCard({
+    studentName: "R", classLabel: "V A", eventName: "Term PTM", eventDate: "2026-09-12",
+    modeLabel: "In person", startAt: "10:30", endAt: "10:45", teacherName: "S", roomOrLink: "",
+    guardianName: "", mobileMasked: "", familyLinked: false, templateLabel: "School notice broadcast (EN)",
+  });
+  assert.ok(
+    noFamily.includes("⚠️ No family record is linked to this child, so nobody can be told"),
+    "an unlinked child never gets a card promising the parent will hear",
+  );
+  assert.ok(!noFamily.includes("WhatsApp:"), noFamily);
+
+  const picker = formatPtmSlotPicker({
+    studentName: "Riya Verma",
+    eventName: "Term PTM",
+    eventDate: "2026-09-12",
+    slots: [
+      { startAt: "10:00", teacherName: "Sunita Sharma", free: 1 },
+      { startAt: "10:30", teacherName: "Sunita Sharma", free: 2 },
+    ],
+  });
+  assert.ok(picker.includes("Term PTM · 12 Sep — open times for Riya Verma:"), picker);
+  assert.ok(picker.includes("10:30 · Sunita Sharma (2 places)"), picker);
+  assert.ok(picker.includes("book PTM for Riya Verma 10:00"), picker);
+
+  const taken = formatPtmSlotPicker({
+    studentName: "Riya Verma", eventName: "Term PTM", eventDate: "2026-09-12",
+    slots: [{ startAt: "11:00", teacherName: "S", free: 1 }], askedTime: "10:30",
+  });
+  assert.ok(taken.startsWith("No free slot at 10:30 in Term PTM (12 Sep)."), taken);
+
+  const full = formatPtmSlotPicker({
+    studentName: "Riya Verma", eventName: "Term PTM", eventDate: "2026-09-12", slots: [],
+  });
+  assert.ok(full.includes("Every slot in Term PTM (12 Sep) is full."), full);
+
+  // `\b` never sits beside a Devanagari letter, so the Hindi half of the
+  // model-parse gate used to be unreachable.
+  assert.equal(looksLikeCommand("5A me kaun absent hai"), true);
+  assert.equal(looksLikeCommand("कक्षा 5 में कौन absent hai"), true);
+  assert.equal(looksLikeCommand("फीस बकाया दिखाओ"), true);
+  assert.equal(
+    looksLikeCommand("PTM ke liye ready rehna"),
+    false,
+    "book_ptm is matched by regex, so PTM chatter never buys a model call",
+  );
+  assert.equal(looksLikeCommand("thik hai ji"), false);
+
+  const def = ERP_COMMANDS.find((c) => c.id === "book_ptm");
+  assert.ok(def && def.kind === "write" && def.module === "ptm" && def.action === "edit");
+  assert.equal(def!.scope, "own_sections", "a teacher books only for their own children");
 }
 
 console.log("erpCommands.selftest.ts OK");

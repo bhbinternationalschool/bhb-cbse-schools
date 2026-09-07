@@ -100,6 +100,10 @@ import {
   formatDecideLeaveCard,
   formatFeeReminderCard,
   formatPayLinkCard,
+  formatBookPtmCard,
+  formatPtmSlotPicker,
+  parsePtmTime,
+  ptmTimeCandidates,
   formatLeaveRequestPicker,
   formatRaiseComplaintCard,
   formatStaffBroadcastCard,
@@ -1001,6 +1005,100 @@ export async function handleErpStaffCommand(
       formatInr,
     });
   }
+  if (command.id === "book_ptm" && resolved.studentId) {
+    const { ptmOptionsForStudent } = await import("@/lib/ptmBook.server");
+    const opts = await ptmOptionsForStudent({
+      studentId: resolved.studentId,
+      academicYearCode: session.academicYearCode,
+      todayIso,
+    });
+    if (!opts.ok) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: `${opts.error}. Create one in the ERP: PTM → events.`,
+      };
+    }
+    const o = opts.options;
+    if (o.existing) {
+      const at = o.existing.slot ? `${o.existing.slot.startAt} with ${o.existing.slot.teacherName}` : "a slot";
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: `${o.student.fullName} is already booked for ${o.event.name} — ${at}. Cancel it in the ERP first if the family wants a different time.`,
+      };
+    }
+    const free = o.slots.filter((sl) => sl.free > 0);
+    const asked = parsePtmTime(parsed.fields.text || text);
+    const wanted = asked ? ptmTimeCandidates(asked) : [];
+    const picked = wanted.length
+      ? free.find((sl) => wanted.includes(sl.startAt)) ?? null
+      : null;
+    if (!picked) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: formatPtmSlotPicker({
+          studentName: o.student.fullName,
+          eventName: o.event.name,
+          eventDate: o.event.date,
+          slots: free.map((sl) => ({ startAt: sl.startAt, teacherName: sl.teacherName, free: sl.free })),
+          // The normalized reading, not the raw words: the model may have
+          // written the time differently from the staff member.
+          askedTime: wanted[0],
+        }),
+      };
+    }
+    // The family is told on the app either way; WhatsApp needs an approved
+    // notice template, because free text cannot reach a parent outside the
+    // 24-hour window.
+    const { ensureWaTemplatesHydrated } = await import("@/lib/waTemplatesPersistence");
+    const { listApprovedTemplates, loadWaTemplates } = await import("@/lib/waTemplates");
+    await ensureWaTemplatesHydrated();
+    const approved = listApprovedTemplates(loadWaTemplates(), { module: "comms" });
+    const notice =
+      approved.find((tpl) => tpl.familyKey === "comms_notice" && tpl.language === "en") ??
+      approved.find((tpl) => tpl.familyKey === "comms_notice") ??
+      null;
+    const { modeLabel } = await import("@/lib/ptm");
+    const noticeBody = [
+      `PTM booked for ${o.student.fullName}.`,
+      `${o.event.name} · ${o.event.date} · ${picked.startAt}-${picked.endAt}`,
+      `With ${picked.teacherName}${picked.roomOrLink ? ` · ${picked.roomOrLink}` : ""} (${modeLabel(o.event.mode)}).`,
+    ].join(" ");
+    const vars: Record<string, string> = {
+      schoolName: TENANT.nameDisplay,
+      noticeTitle: `PTM ${picked.startAt} · ${o.student.fullName}`,
+      noticeBody,
+      guardianName: o.guardianName || "Parent",
+      childName: o.student.fullName,
+    };
+    resolved.eventId = o.event.id;
+    resolved.eventName = o.event.name;
+    resolved.slotId = picked.id;
+    resolved.startAt = picked.startAt;
+    resolved.householdId = o.householdId;
+    resolved.guardianName = o.guardianName;
+    resolved.templateId = notice?.id || "";
+    resolved.templateMetaName = notice ? notice.metaName || notice.name : "";
+    resolved.templateLanguage = notice ? notice.metaLanguage || notice.language : "";
+    resolved.vars = JSON.stringify(vars);
+    resolved.cardSummary = formatBookPtmCard({
+      studentName: o.student.fullName,
+      classLabel: o.classLabel,
+      eventName: o.event.name,
+      eventDate: o.event.date,
+      modeLabel: modeLabel(o.event.mode),
+      startAt: picked.startAt,
+      endAt: picked.endAt,
+      teacherName: picked.teacherName,
+      roomOrLink: picked.roomOrLink,
+      guardianName: o.guardianName,
+      mobileMasked: o.mobile ? maskMobile10(o.mobile) : "",
+      familyLinked: !!o.householdId,
+      templateLabel: notice ? `${notice.name} (${notice.language.toUpperCase()})` : "",
+    });
+  }
   if (command.id === "decide_leave" && resolved.studentId) {
     writeStudentLeaveLocalRaw(emptyStudentLeaveState());
     await ensureStudentLeaveHydratedServer();
@@ -1353,7 +1451,9 @@ export async function handleErpStaffCommand(
   if (command.kind === "write") {
     const token = random();
     const summary =
-      command.id === "pay_link"
+      command.id === "book_ptm"
+        ? resolved.cardSummary || command.title
+        : command.id === "pay_link"
         ? resolved.cardSummary || command.title
         : command.id === "fee_reminder"
         ? resolved.cardSummary || command.title
@@ -2488,6 +2588,91 @@ async function runConfirmedWrite(
       handled: true,
       audience: "erp_command_fee_reminder",
       text: `${bits.join(" · ")}.${res.errors.length ? `\nFirst error: ${res.errors[0]}` : ""}\nReplies land in Comms → WhatsApp inbox.`,
+    };
+  }
+  if (command.id === "book_ptm") {
+    if (!r.slotId || !r.eventId || !r.studentId) {
+      return {
+        handled: true,
+        audience: "erp_command_error",
+        text: "That PTM booking is no longer valid. Send the command again.",
+      };
+    }
+    {
+      const roleCodes = resolveSessionRoles(rbac, session, masters).map((x) => x.code);
+      if (!isOfficeLike(roleCodes)) {
+        const mine = staffAllowedSections(inbound.staff, masters, session.academicYearCode, roleCodes);
+        const st = loadSis().students.find((x) => x.id === r.studentId);
+        if (st && !mine.some((x) => x.sectionId === st.sectionId)) {
+          void audit(session, command, pending.fields, pending.originalText, "denied", {
+            reason: "scope_at_confirm",
+            channel: inbound.channel,
+          });
+          return {
+            handled: true,
+            audience: "erp_command_denied",
+            text: "That child's section is no longer one of yours, so nothing was booked.",
+          };
+        }
+      }
+    }
+    let vars: Record<string, string> = {};
+    try {
+      vars = JSON.parse(r.vars || "{}") as Record<string, string>;
+    } catch {
+      vars = {};
+    }
+    const { getTemplateById, loadWaTemplates } = await import("@/lib/waTemplates");
+    const tpl = r.templateId ? getTemplateById(loadWaTemplates(), r.templateId) : null;
+    const { bookPtmSlotServer } = await import("@/lib/ptmBook.server");
+    const res = await bookPtmSlotServer({
+      studentId: r.studentId,
+      eventId: r.eventId,
+      slotId: r.slotId,
+      // The booking belongs to the family, not to the staff member who
+      // took the call, so the parent's name is what the register shows.
+      parentName: r.guardianName || "Parent",
+      householdId: r.householdId || "",
+      notify: true,
+      template: r.templateMetaName
+        ? {
+            metaName: r.templateMetaName,
+            language: r.templateLanguage || "en",
+            variables: tpl?.variables ?? [],
+            vars,
+          }
+        : null,
+    });
+    if (!res.ok) {
+      void audit(session, command, pending.fields, pending.originalText, "error", {
+        reason: res.error,
+        channel: inbound.channel,
+        studentId: r.studentId,
+      });
+      return { handled: true, audience: "erp_command_error", text: `Couldn't book it: ${res.error}` };
+    }
+    void audit(session, command, pending.fields, pending.originalText, "ok", {
+      channel: inbound.channel,
+      studentId: r.studentId,
+      eventId: r.eventId,
+      slotId: r.slotId,
+      bookingId: res.booking.id,
+      persisted: res.persisted,
+      pushSent: res.pushSent,
+      whatsappSent: res.whatsapp.sent,
+    });
+    const bits = [
+      `Booked · ${res.studentName} · ${res.event.name} ${res.slot.startAt} with ${res.slot.teacherName}`,
+    ];
+    if (res.pushSent) bits.push("family told on the app");
+    bits.push(res.whatsapp.sent ? "WhatsApp sent" : `WhatsApp not sent (${res.whatsapp.error || "no template"})`);
+    const tail = res.persisted
+      ? "Change it in the ERP: PTM → bookings."
+      : `⚠️ Saved here but not to the database (${res.persistError}) — check PTM → bookings in the ERP.`;
+    return {
+      handled: true,
+      audience: "erp_command_book_ptm",
+      text: `${bits.join(" · ")}.\n${tail}`,
     };
   }
   if (command.id === "decide_leave") {
