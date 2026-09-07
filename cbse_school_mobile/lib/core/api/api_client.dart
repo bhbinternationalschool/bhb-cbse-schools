@@ -2907,6 +2907,54 @@ class ApiClient {
     );
   }
 
+  /// Message a family from the SCHOOL's WhatsApp number.
+  ///
+  /// Until 2026-09-07 five screens opened `https://wa.me/…` instead, so a
+  /// parent heard from whichever teacher was holding a phone, on a number the
+  /// school does not control and keeps no record of.
+  ///
+  /// The app deliberately sends only the number, a family key and the values.
+  /// The LANGUAGE (the family's own choice), the TEMPLATE and the sending
+  /// NUMBER are all decided by the server, so they cannot drift from the web
+  /// and cannot be got wrong here. Throws with the server's reason when the
+  /// school's WhatsApp declines — there is no personal-WhatsApp fallback, on
+  /// purpose.
+  Future<({bool sent, bool deferred, String reason})> sendSchoolWhatsApp({
+    required String mobile,
+    String familyKey = "",
+    String text = "",
+    Map<String, String> variables = const {},
+    bool urgent = false,
+  }) async {
+    final envelope = await postJson("/api/v1/staff/wa/send", {
+      "mobile": mobile,
+      if (familyKey.isNotEmpty) "familyKey": familyKey,
+      if (text.isNotEmpty) "text": text,
+      if (variables.isNotEmpty) "variables": variables,
+      if (urgent) "urgent": true,
+    });
+
+    // postJson only throws on 5xx and hands back the raw envelope, so a 400 —
+    // "that template is approved in one language only", "you do not hold that
+    // permission" — would otherwise read as a quiet "not sent" with no reason.
+    // A staff member who is told nothing reaches for their own WhatsApp, which
+    // is the whole thing this replaces.
+    if (envelope["ok"] != true) {
+      final err = envelope["error"];
+      final message = err is Map ? (err["message"] ?? "").toString() : "";
+      throw Exception(
+        message.isEmpty ? "The school's WhatsApp could not send this" : message,
+      );
+    }
+
+    final data = (envelope["data"] as Map?) ?? const {};
+    return (
+      sent: data["sent"] == true,
+      deferred: data["deferred"] == true,
+      reason: (data["reason"] ?? "").toString(),
+    );
+  }
+
   Future<FeeLedger> fetchFeeLedger(String studentId) async =>
       FeeLedger.fromJson(await _getData("/api/v1/fees/ledger/$studentId"));
 
