@@ -132,3 +132,60 @@ import { firstDuplicateId } from "./feesNormalized.server";
 }
 
 console.log("feePushLineSafety.selftest.ts OK");
+
+/* ------------------------------------------------------------------ *
+ * 2026-09-07: a row the database will refuse must never be sent.
+ *
+ * fee_desk_voucher_lines and fee_desk_voucher_tenders both carry
+ * CHECK (amount_paise > 0). Since header, lines and tenders now share one
+ * transaction, a single ₹0 row does not just get dropped — it fails the
+ * ENTIRE receipt and takes every other line with it. A fully-waived head is
+ * an ordinary thing to have on a receipt, and must not be able to cost that
+ * receipt its breakdown.
+ *
+ * It contributes nothing to the total, so dropping it leaves the remaining
+ * lines still summing to the money actually collected.
+ * ------------------------------------------------------------------ */
+
+import { voucherToRows } from "./feesNormalized.server";
+
+{
+  const rows = voucherToRows("tenant-1", {
+    id: "rcv_x",
+    receiptNo: "RCV-00001",
+    academicYearCode: "2026-27",
+    collectionDate: "2026-09-07",
+    totalPaise: 50000,
+    lines: [
+      { dueKey: "acad:1", studentId: "s1", label: "Tuition · April", kind: "academic", amountPaise: 50000 },
+      { dueKey: "acad:2", studentId: "s1", label: "Tuition · May (fully waived)", kind: "academic", amountPaise: 0 },
+    ],
+    tenders: [
+      { mode: "cash", amountPaise: 50000 },
+      { mode: "upi", amountPaise: 0 },
+    ],
+  } as unknown as CollectionVoucher);
+
+  assert.equal(rows.lines.length, 1, "the ₹0 line must not be sent");
+  assert.equal(
+    rows.lines[0].amount_paise,
+    50000,
+    "the paying line survives untouched",
+  );
+  assert.equal(rows.tenders.length, 1, "the ₹0 tender must not be sent");
+
+  assert.ok(
+    rows.lines.every((l) => Number(l.amount_paise) > 0),
+    "no line may carry an amount the CHECK constraint refuses",
+  );
+  assert.ok(
+    rows.tenders.every((t) => Number(t.amount_paise) > 0),
+    "no tender may carry an amount the CHECK constraint refuses",
+  );
+
+  // Tender ids are positional, so they must renumber after a drop rather than
+  // leaving a hole — (voucher_id, tender_index) is UNIQUE.
+  assert.equal(rows.tenders[0].id, "rcv_x:t0", "tender index closes the gap");
+}
+
+console.log("feePushLineSafety.selftest.ts — zero-amount rows OK");
