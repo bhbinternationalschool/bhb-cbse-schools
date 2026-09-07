@@ -45,6 +45,8 @@ import {
 import {
   loadMasters,
   currentAcademicYearCode,
+  CONCESSION_GROUNDS,
+  type ConcessionGround,
   type MastersState,
 } from "@/lib/masters";
 import {
@@ -293,6 +295,18 @@ export function FeeTakeWorkspace() {
     Record<string, string>
   >({});
   const [counterDiscountReason, setCounterDiscountReason] = useState("");
+  /**
+   * WHY this family gets the discount.
+   *
+   * The note beside it was optional, so it was usually blank, and a blank one
+   * became the string "Counter concession" — which is where the discount was
+   * applied, not why it was owed. 108 of the 149 live grants say exactly that,
+   * leaving 99 of the 120 children on a concession with no recorded ground.
+   * Nothing can recover those; this is what stops the next hundred.
+   */
+  const [counterDiscountGround, setCounterDiscountGround] = useState<
+    ConcessionGround | ""
+  >("");
   /**
    * Dues whose discount the clerk has chosen to make recurring.
    *
@@ -1006,6 +1020,7 @@ export function FeeTakeWorkspace() {
       fromDueOn,
       academicYearCode: ay,
       reason: counterDiscountReason.trim(),
+      ground: counterDiscountGround,
       by: session.fullName,
     });
     if (!res.ok) {
@@ -1287,6 +1302,11 @@ export function FeeTakeWorkspace() {
       return;
     }
 
+    if (counterDiscountPaise > 0 && !counterDiscountGround) {
+      failCollect("Choose why this discount is being given");
+      return;
+    }
+
     if (counterDiscountPaise > 0) {
       const candidates = listFutureConcessionCandidates(
         discountSlices,
@@ -1366,6 +1386,7 @@ export function FeeTakeWorkspace() {
         candidates,
         applyKeys: applyFutureKeys,
         reason: counterDiscountReason.trim() || "Counter concession",
+        ground: counterDiscountGround,
         academicYearCode: ay,
         sourceVoucherId: voucher?.id,
         sourceReceiptNo: voucher?.receiptNo,
@@ -2129,6 +2150,8 @@ export function FeeTakeWorkspace() {
               }}
               counterDiscountReason={counterDiscountReason}
               onCounterDiscountReason={setCounterDiscountReason}
+              counterDiscountGround={counterDiscountGround}
+              onCounterDiscountGround={setCounterDiscountGround}
               collectTarget={collectTarget}
               isPartialCollect={isPartialCollect}
               collectAmountRupees={collectAmountRupees}
@@ -2393,6 +2416,8 @@ function CollectPanel({
   onChangeHeadDiscount,
   counterDiscountReason,
   onCounterDiscountReason,
+  counterDiscountGround,
+  onCounterDiscountGround,
   collectTarget,
   isPartialCollect,
   collectAmountRupees,
@@ -2461,6 +2486,8 @@ function CollectPanel({
   onChangeHeadDiscount: (due: FeeDueLine, rupees: string) => void;
   counterDiscountReason: string;
   onCounterDiscountReason: (v: string) => void;
+  counterDiscountGround: ConcessionGround | "";
+  onCounterDiscountGround: (v: ConcessionGround | "") => void;
   collectTarget: number;
   isPartialCollect: boolean;
   collectAmountRupees: string;
@@ -3235,7 +3262,28 @@ function CollectPanel({
                   </ul>
                   <label className="mt-3 block text-xs">
                     <span className="mb-1 block text-xs font-medium text-white/75">
-                      Reason for discount
+                      Why is this discount given?
+                    </span>
+                    <select
+                      className={`${COLLECT_FIELD} w-full !border-white/25 !bg-white !py-2`}
+                      value={counterDiscountGround}
+                      onChange={(e) =>
+                        onCounterDiscountGround(
+                          e.target.value as ConcessionGround | "",
+                        )
+                      }
+                    >
+                      <option value="">Choose a ground…</option>
+                      {CONCESSION_GROUNDS.map((g) => (
+                        <option key={g.id} value={g.id}>
+                          {g.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="mt-3 block text-xs">
+                    <span className="mb-1 block text-xs font-medium text-white/75">
+                      Note (optional)
                     </span>
                     <input
                       className={`${COLLECT_FIELD} w-full !border-white/25 !bg-white !py-2`}

@@ -18,6 +18,7 @@ const row = (p: Partial<ConcessionStudentListRow>): ConcessionStudentListRow => 
   status: "approved",
   effectiveFrom: "2026-05-01",
   reason: "Hardship",
+  groundLabel: "Not recorded",
   siblingNote: "—",
   concessionCode: "IMP_TUIT_10PCT",
   concessionName: "Discount 10%",

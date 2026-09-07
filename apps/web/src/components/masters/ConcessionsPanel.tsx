@@ -27,6 +27,9 @@ import {
   grantsForConcessionPolicy,
   listConcessionPolicies,
   newId,
+  concessionGroundFromKind,
+  concessionGroundLabel,
+  CONCESSION_GROUNDS,
   normalizeSiblingTier,
   ordinalChildLabel,
   parseInrToPaise,
@@ -34,6 +37,7 @@ import {
   removeConcessionKind,
   resolveConcessionKinds,
   resolveSiblingTierValue,
+  type ConcessionGround,
   type ConcessionRule,
   type ConcessionValueMode,
   type MastersState,
@@ -1020,6 +1024,16 @@ function GrantStudentsCard({
   const [childNoOverride, setChildNoOverride] = useState<number | 0>(0);
   const [reason, setReason] = useState("");
   /**
+   * WHY the family qualifies. Pre-filled from the rule's own kind where the
+   * rule declares one — a `sibling` rule grants a sibling discount and there
+   * is nothing to ask. Where it does not, the grant cannot be made until
+   * somebody says, because "Counter concession" as a reason is what left 99
+   * of 120 children with a discount nobody can explain.
+   */
+  const [ground, setGround] = useState<ConcessionGround | "">(() =>
+    concessionGroundFromKind(concession.kind),
+  );
+  /**
    * The month the discount starts from.
    *
    * This used to be today, with nothing to change it — so a discount agreed
@@ -1040,6 +1054,7 @@ function GrantStudentsCard({
     setChildNoOverride(0);
     setQuery("");
     setReason("");
+    setGround(concessionGroundFromKind(concession.kind));
     setClassId("");
     setSectionId("");
   }, [concession.id, concession.kind]);
@@ -1198,6 +1213,10 @@ function GrantStudentsCard({
   function grant(e: React.FormEvent) {
     e.preventDefault();
     if (selectedIds.length === 0) return;
+    if (!ground) {
+      commit(state, "Say on what ground this discount is given");
+      return;
+    }
     // The first of the chosen month: a fee month is billed whole, so a
     // mid-month start would be a date the biller cannot act on.
     const effectiveFrom = /^\d{4}-\d{2}$/.test(fromMonth)
@@ -1223,6 +1242,7 @@ function GrantStudentsCard({
           id: newId("cg"),
           concessionId: concession.id,
           studentId: id,
+          ground,
           status,
           reason:
             reason.trim() ||
@@ -1254,6 +1274,30 @@ function GrantStudentsCard({
     );
     clearSelection();
     setReason("");
+    setGround(concessionGroundFromKind(concession.kind));
+  }
+
+  /**
+   * Record the ground on a grant that already exists.
+   *
+   * Without this the 149 grants made before 2026-09-08 would stay unexplained
+   * for as long as they run — the new field would only ever describe grants
+   * from today onwards, and the existing hole would simply age. Recording it
+   * is not approving it, so it is not gated on approval authority: whoever
+   * knows why the family qualifies should be able to write it down.
+   */
+  function setGrantGround(grantId: string, next: ConcessionGround | "") {
+    commit(
+      {
+        ...state,
+        concessionGrants: (state.concessionGrants ?? []).map((g) =>
+          g.id === grantId ? { ...g, ground: next } : g,
+        ),
+      },
+      next
+        ? `Ground recorded — ${concessionGroundLabel(next)}`
+        : "Ground cleared",
+    );
   }
 
   function setStatus(
@@ -1685,7 +1729,24 @@ function GrantStudentsCard({
         </label>
         <label className="block text-sm">
           <span className="mb-1 block text-[11px] text-[var(--muted)]">
-            Reason
+            On what ground
+          </span>
+          <select
+            className="field !py-1.5"
+            value={ground}
+            onChange={(e) => setGround(e.target.value as ConcessionGround | "")}
+          >
+            <option value="">Choose…</option>
+            {CONCESSION_GROUNDS.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block text-[11px] text-[var(--muted)]">
+            Note
           </span>
           <input
             className="field !py-1.5"
@@ -1739,6 +1800,39 @@ function GrantStudentsCard({
                     : ""}
                   {g.reason ? ` · ${g.reason}` : ""}
                 </div>
+                {/*
+                  Said in its own line, and said even when it is missing.
+                  A grant whose ground nobody recorded should look unfinished,
+                  because it is — that is how the 108 get filled in.
+                */}
+                <label className="mt-1 flex items-center gap-1.5 text-[11px]">
+                  <span
+                    className={
+                      g.ground
+                        ? "text-[var(--muted)]"
+                        : "font-semibold text-[var(--warning,#a86b00)]"
+                    }
+                  >
+                    {g.ground ? "Ground" : "Ground not recorded"}
+                  </span>
+                  <select
+                    className="rounded border border-[var(--line)] bg-transparent px-1 py-0.5 text-[11px]"
+                    value={g.ground}
+                    onChange={(e) =>
+                      setGrantGround(
+                        g.id,
+                        e.target.value as ConcessionGround | "",
+                      )
+                    }
+                  >
+                    <option value="">Choose…</option>
+                    {CONCESSION_GROUNDS.map((x) => (
+                      <option key={x.id} value={x.id}>
+                        {x.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {g.status !== "approved" ? (
@@ -2053,6 +2147,7 @@ function ConcessionFamilyPrintTable({
                 {showPolicy ? <th className="px-3 py-2">Discount</th> : null}
                 <th className="px-3 py-2">Sibling</th>
                 <th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2">Ground</th>
                 <th className="px-3 py-2">From</th>
               </tr>
             </ErpTableHead>
@@ -2069,6 +2164,7 @@ function ConcessionFamilyPrintTable({
                     {row.siblingNote}
                   </td>
                   <td className="status px-3 py-2 capitalize">{row.status}</td>
+                  <td className="px-3 py-2">{row.groundLabel}</td>
                   <td className="whitespace-nowrap px-3 py-2">
                     {row.effectiveFrom}
                   </td>
@@ -2103,6 +2199,7 @@ function ConcessionStudentPrintTable({
             <th className="px-3 py-2.5">Class</th>
             {showPolicy ? <th className="px-3 py-2.5">Discount</th> : null}
             <th className="px-3 py-2.5">Status</th>
+            <th className="px-3 py-2.5">Ground</th>
             <th className="px-3 py-2.5">From</th>
             <th className="px-3 py-2.5">Reason</th>
           </tr>
@@ -2121,6 +2218,7 @@ function ConcessionStudentPrintTable({
                 <td className="px-3 py-2">{row.concessionName}</td>
               ) : null}
               <td className="status px-3 py-2 capitalize">{row.status}</td>
+              <td className="px-3 py-2">{row.groundLabel}</td>
               <td className="px-3 py-2 whitespace-nowrap">
                 {row.effectiveFrom}
               </td>
