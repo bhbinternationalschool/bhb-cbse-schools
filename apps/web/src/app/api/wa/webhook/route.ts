@@ -201,6 +201,16 @@ export async function POST(req: Request) {
         msg.media?.mediaType === "audio"
           ? { mediaId: msg.media.mediaId, mimeType: msg.media.mimeType }
           : null,
+      // A document or photo, for the flows that can use one — today the
+      // job enquiry, where the attachment IS the application.
+      document:
+        msg.media && (msg.media.mediaType === "document" || msg.media.mediaType === "image")
+          ? {
+              mediaId: msg.media.mediaId,
+              mimeType: msg.media.mimeType,
+              fileName: msg.media.filename,
+            }
+          : null,
     });
     results.push({
       audience: r.audience,

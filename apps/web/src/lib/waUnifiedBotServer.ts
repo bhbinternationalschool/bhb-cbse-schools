@@ -208,6 +208,7 @@ async function delegateActiveFlow(
       accuracyM?: number;
     };
     audio?: { mediaId: string; mimeType?: string } | null;
+    document?: { mediaId: string; mimeType?: string; fileName?: string } | null;
   },
   identity: WaResolvedIdentity,
   session: WaUnifiedSession,
@@ -531,6 +532,39 @@ async function delegateActiveFlow(
   if (flow === "job" || flow === "meeting" || flow === "other") {
     const name = session.visitorName || session.displayName || "Guest";
     const note = opts.text.trim();
+
+    // A CV sent after choosing JOB is the application. Capture it into the
+    // same inbox the careers page fills, so the office has one pile rather
+    // than a page, a CRM thread and somebody's phone. The CRM thread below
+    // still gets the message either way — this adds a record, it does not
+    // take the conversation away from the humans.
+    if (flow === "job" && opts.document?.mediaId) {
+      const { captureWhatsAppJobCv } = await import(
+        "@/lib/jobApplicationsIntake.server"
+      );
+      const captured = await captureWhatsAppJobCv({
+        mediaId: opts.document.mediaId,
+        mobile10,
+        applicantName: name,
+      });
+      await sendBotReply({
+        mobile10,
+        displayName: name,
+        category: categoryForUnifiedAudience("visitor_job", "job"),
+        audience: "visitor_job",
+        flow,
+        text: captured.ok
+          ? "Thank you — the school office has your CV. If it matches a vacancy, someone will call you."
+          : "Thank you. We could not read that file, so please send your CV as a PDF or a clear photo, or reply with your subject and the classes you teach.",
+        inbound: { text: opts.text || "[CV]", waMessageId: opts.waMessageId },
+      });
+      return {
+        replied: true,
+        escalate: captured.ok,
+        audience: "visitor_job",
+        stub: false,
+      };
+    }
     await handleWaCrmBotInbound({
       ...inbound,
       text: note ? `[${flow.toUpperCase()}] ${note}` : `HUMAN`,
@@ -612,6 +646,12 @@ export async function handleWaUnifiedInbound(opts: {
   };
   /** Voice note (audio media) — transcribed only for staff command flows. */
   audio?: { mediaId: string; mimeType?: string } | null;
+  /**
+   * A document or photo. Only the job flow reads it today, where the
+   * attachment IS the application; every other flow ignores it exactly as
+   * it did before, so a parent sending a photo is unaffected.
+   */
+  document?: { mediaId: string; mimeType?: string; fileName?: string } | null;
 }): Promise<{
   replied: boolean;
   escalate: boolean;
