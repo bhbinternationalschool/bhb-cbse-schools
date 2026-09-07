@@ -23,23 +23,34 @@ export type WaTemplateCategory =
 
 export type WaTemplateLanguage = "en" | "hi";
 
-export type WaTemplateModule =
-  | "admissions"
-  | "fees"
-  | "attendance"
-  | "homework"
-  | "exams"
-  | "ptm"
-  | "leave"
-  | "vault"
-  | "comms"
-  | "store"
-  | "transport"
-  | "certificates"
-  | "rte"
-  | "field"
-  | "staff"
-  | "general";
+/**
+ * The modules a template can belong to.
+ *
+ * The LIST is the source and the type is derived from it, not the other way
+ * round. A hand-kept copy beside a union drifts, and the drift is invisible:
+ * the routing screen would simply not offer the module nobody added to the
+ * list, and that module would quietly keep using the default number.
+ */
+export const WA_TEMPLATE_MODULES = [
+  "admissions",
+  "fees",
+  "attendance",
+  "homework",
+  "exams",
+  "ptm",
+  "leave",
+  "vault",
+  "comms",
+  "store",
+  "transport",
+  "certificates",
+  "rte",
+  "field",
+  "staff",
+  "general",
+] as const;
+
+export type WaTemplateModule = (typeof WA_TEMPLATE_MODULES)[number];
 
 export type WaHeaderFormat =
   | "NONE"
@@ -93,6 +104,15 @@ export type WaTemplate = {
   /** Uploaded header media filename (PDF/JPG etc.) */
   mediaFileName: string;
   carousel: WaCarouselCard[];
+  /**
+   * Send this ONE template from a specific number, overriding the module's.
+   *
+   * Empty is the normal case and is not a gap: the module's number is the
+   * setting people actually maintain, and per-template routing exists for the
+   * exception, not the rule. Sixty-seven templates each needing a number set
+   * is sixty-seven chances to forget one.
+   */
+  senderNumberId?: string;
   /** Free-text fallback for 24h session / wa.me */
   localFallbackBody: string;
   paused: boolean;
@@ -100,11 +120,35 @@ export type WaTemplate = {
   createdAt: string;
 };
 
+/**
+ * A WhatsApp number the school can send FROM.
+ *
+ * Templates are registered against the WABA, not against a number, so every
+ * number here can send every approved template — which number sends what is
+ * the school's routing decision, not Meta's restriction.
+ */
+export type WaSenderNumber = {
+  id: string;
+  /** What staff call it: "Office", "Fees counter", "Admissions". */
+  label: string;
+  /** Meta's phone_number_id — the thing the Graph API is actually posted to. */
+  phoneNumberId: string;
+  /** Shown to staff so they can tell which number a family will see. */
+  displayNumber: string;
+  /** Used by any module with no sender of its own. Exactly one is true. */
+  isDefault: boolean;
+  paused: boolean;
+};
+
 export type WaTemplatesState = {
   version: 1;
   templates: WaTemplate[];
   lastMetaSyncAt: string;
   audit: { at: string; by: string; action: string; detail: string }[];
+  /** Numbers the school can send from. Empty = the single env-configured one. */
+  senders: WaSenderNumber[];
+  /** Which number each module sends from. A module absent here uses the default. */
+  moduleSenders: Partial<Record<WaTemplateModule, string>>;
 };
 
 function nid(prefix: string) {
@@ -859,6 +903,8 @@ export function emptyWaTemplates(): WaTemplatesState {
     templates: seedWaTemplates(),
     lastMetaSyncAt: "",
     audit: [],
+    senders: [],
+    moduleSenders: {},
   };
 }
 
@@ -959,6 +1005,8 @@ export function normalizeWaTemplatesState(
           detail: String(a?.detail || ""),
         }))
       : [],
+    senders: normalizeSenders(raw.senders),
+    moduleSenders: normalizeModuleSenders(raw.moduleSenders),
   };
 }
 
@@ -986,6 +1034,51 @@ export function writeWaTemplatesLocalRaw(state: WaTemplatesState): void {
     JSON.stringify(normalizeWaTemplatesState(state)),
   );
   window.dispatchEvent(new CustomEvent("bhb-wa-templates"));
+}
+
+/**
+ * Exactly one default, no blanks, ids kept stable.
+ *
+ * A registry with two defaults, or none, is worse than an empty one: the send
+ * path would pick whichever came first in an array whose order nobody
+ * controls. If the data disagrees, the FIRST usable number wins and the rest
+ * are demoted — deterministic beats clever.
+ */
+function normalizeSenders(raw: unknown): WaSenderNumber[] {
+  if (!Array.isArray(raw)) return [];
+  const out: WaSenderNumber[] = [];
+  for (const r of raw) {
+    const o = (r ?? {}) as Partial<WaSenderNumber>;
+    const phoneNumberId = String(o.phoneNumberId || "").trim();
+    if (!phoneNumberId) continue;
+    out.push({
+      id: String(o.id || "").trim() || nid("was"),
+      label: String(o.label || "").trim() || phoneNumberId,
+      phoneNumberId,
+      displayNumber: String(o.displayNumber || "").trim(),
+      isDefault: false,
+      paused: !!o.paused,
+    });
+  }
+  const wanted = (raw as Partial<WaSenderNumber>[]).findIndex((r) => r?.isDefault);
+  const firstUsable = out.findIndex((sd) => !sd.paused);
+  const idx = wanted >= 0 && wanted < out.length && !out[wanted].paused
+    ? wanted
+    : firstUsable;
+  if (idx >= 0) out[idx].isDefault = true;
+  return out;
+}
+
+function normalizeModuleSenders(
+  raw: unknown,
+): Partial<Record<WaTemplateModule, string>> {
+  const out: Partial<Record<WaTemplateModule, string>> = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const id = String(v || "").trim();
+    if (id) out[k as WaTemplateModule] = id;
+  }
+  return out;
 }
 
 export function waTemplatesIsEmpty(state: WaTemplatesState): boolean {
@@ -1081,6 +1174,111 @@ export function templateVariablePositions(
   );
 }
 
+/**
+ * Is this template family usable at all?
+ *
+ * A family is BOTH languages or it is nothing. The school writes to families
+ * in Hindi or English and the parent chooses which; a family approved only in
+ * English silently sends English to a Hindi household, and a family approved
+ * only in Hindi does the reverse. On 2026-09-07 the fee module had exactly
+ * that shape — bhb_fee_pay_link approved in hi and pending in en — and the
+ * receipt sender, reaching for "any approved fees template in this language",
+ * would have told a family who had just paid at the counter to pay a link.
+ *
+ * So the resolver refuses a half-approved family outright rather than picking
+ * the half that exists.
+ */
+export function templateFamilyReady(
+  state: WaTemplatesState,
+  familyKey: string,
+): { ready: true } | { ready: false; missing: WaTemplateLanguage[] } {
+  const missing: WaTemplateLanguage[] = [];
+  for (const lang of ["en", "hi"] as WaTemplateLanguage[]) {
+    const t = state.templates.find(
+      (x) =>
+        x.familyKey === familyKey &&
+        x.language === lang &&
+        x.status === "approved" &&
+        !x.paused,
+    );
+    if (!t) missing.push(lang);
+  }
+  return missing.length === 0 ? { ready: true } : { ready: false, missing };
+}
+
+/**
+ * The number a given template sends from.
+ *
+ * Per-template override first, then the module's number, then the school's
+ * default, then the single env-configured number. The chain exists so that
+ * adding a second number is a Masters decision rather than a deploy, and so
+ * that a module nobody has routed still sends rather than silently failing.
+ */
+export function resolveSenderNumber(
+  state: WaTemplatesState,
+  template: Pick<WaTemplate, "module" | "senderNumberId">,
+): WaSenderNumber | null {
+  const live = (state.senders ?? []).filter((sd) => !sd.paused);
+  const byId = (id?: string) =>
+    id ? live.find((sd) => sd.id === id) ?? null : null;
+  return (
+    byId(template.senderNumberId) ||
+    byId(state.moduleSenders?.[template.module]) ||
+    live.find((sd) => sd.isDefault) ||
+    null
+  );
+}
+
+export type TemplateForSend =
+  | {
+      ok: true;
+      template: WaTemplate;
+      /** null = fall back to the env-configured number. */
+      sender: WaSenderNumber | null;
+    }
+  | { ok: false; reason: string };
+
+/**
+ * THE resolver. Every sender should come through here.
+ *
+ * Before this, each sender chose its own way — the fee receipt by family and
+ * language, others by "first approved template in the module" — which is why
+ * adding a template in Masters did not reliably change what went out, and why
+ * a Hindi family could receive the wrong message entirely.
+ *
+ * `language` is the FAMILY's choice, never the sender's. There is no argument
+ * here for overriding it, on purpose.
+ */
+export function resolveTemplateForSend(input: {
+  state: WaTemplatesState;
+  familyKey: string;
+  language: WaTemplateLanguage;
+}): TemplateForSend {
+  const { state, familyKey, language } = input;
+  const ready = templateFamilyReady(state, familyKey);
+  if (!ready.ready) {
+    return {
+      ok: false,
+      reason:
+        `The "${familyKey}" template is only approved in ` +
+        `${ready.missing.length === 2 ? "neither language" : ready.missing[0] === "hi" ? "English" : "Hindi"}` +
+        `. Both Hindi and English must be approved before the school sends it, ` +
+        `so a family always gets the language they chose.`,
+    };
+  }
+  const template = state.templates.find(
+    (t) =>
+      t.familyKey === familyKey &&
+      t.language === language &&
+      t.status === "approved" &&
+      !t.paused,
+  );
+  if (!template) {
+    return { ok: false, reason: `No approved "${familyKey}" template in ${language}` };
+  }
+  return { ok: true, template, sender: resolveSenderNumber(state, template) };
+}
+
 export function getTemplateById(
   state: WaTemplatesState,
   id: string,
@@ -1108,6 +1306,7 @@ export function updateTemplateLocal(
       | "localFallbackBody"
       | "mediaUrl"
       | "mediaFileName"
+      | "senderNumberId"
       | "headerFormat"
       | "headerText"
       | "carousel"

@@ -3855,13 +3855,10 @@ export async function deliverWhatsAppFeeReceipt(input: {
     try {
       const {
         loadWaTemplates,
-        listApprovedTemplates,
-        pickTemplateForFamily,
+        resolveTemplateForSend,
         templateVariablePositions,
       } = await import("@/lib/waTemplates");
-      const approvedFees = listApprovedTemplates(loadWaTemplates(), {
-        module: "fees",
-      });
+      const waState = loadWaTemplates();
 
       // ONLY the receipt template. This used to take the first approved
       // template in the whole `fees` module matching the family's language,
@@ -3870,12 +3867,20 @@ export async function deliverWhatsAppFeeReceipt(input: {
       // had paid at the counter. Falling back across template FAMILIES is
       // never right: the fallback for "no Hindi receipt" is the English
       // receipt, never a different message.
+      // ONE resolver, so a template added in Masters is the one that goes
+      // out — and so the number it goes out FROM follows the school's own
+      // routing (per template, else per module, else the default) instead of
+      // a single hardcoded env var.
       const wantLang = waTemplateLanguageFor(hh);
-      const feeTpl = pickTemplateForFamily(
-        approvedFees,
-        "fees_receipt",
-        wantLang,
-      );
+      const resolved = resolveTemplateForSend({
+        state: waState,
+        familyKey: "fees_receipt",
+        language: wantLang,
+      });
+      const feeTpl = resolved.ok ? resolved.template : undefined;
+      const fromPhoneNumberId = resolved.ok
+        ? resolved.sender?.phoneNumberId
+        : undefined;
 
       // Meta rejects a send whose parameter count does not match the
       // registered template, so the positions come from the template's OWN
@@ -3908,7 +3913,10 @@ export async function deliverWhatsAppFeeReceipt(input: {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: [{ mobile, fallbackMobile, body: message, template }],
+          module: "fees",
+          messages: [
+            { mobile, fallbackMobile, body: message, template, fromPhoneNumberId },
+          ],
         }),
       });
       const dispatch = (await res.json()) as {

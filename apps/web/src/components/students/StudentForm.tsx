@@ -267,6 +267,8 @@ export function StudentForm({
   const [whatsappMobile, setWhatsappMobile] = useState("");
   const [altMobile, setAltMobile] = useState("");
   const [preferredLanguage, setPreferredLanguage] = useState("");
+  /** The office may change a family's language, but has to mean it. */
+  const [languageOverride, setLanguageOverride] = useState(false);
   const [channelPreference, setChannelPreference] = useState("");
   const [quietHoursStart, setQuietHoursStart] = useState("");
   const [quietHoursEnd, setQuietHoursEnd] = useState("");
@@ -799,6 +801,33 @@ export function StudentForm({
       quietHoursStart,
       quietHoursEnd,
     };
+
+    // The family owns its language. When the office changes it for them, say
+    // so in the audit trail — who, for which household, from what to what.
+    // Without this the override is indistinguishable from the parent's own
+    // choice, and a family written to in the wrong language has no trail
+    // explaining why.
+    if (languageOverride) {
+      const before = households.find((h) => h.id === householdId)
+        ?.preferredLanguage ?? "";
+      if (before !== preferredLanguage) {
+        void fetch("/api/audit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            module: "students",
+            action: "edit",
+            entityType: "household_language",
+            entityId: householdId || "",
+            summary:
+              `Language for ${guardianName || "a family"} set by the office to ` +
+              `${preferredLanguage || "(not asked)"} — was ` +
+              `${before || "(not asked)"}. The family sets this themselves by ` +
+              `replying LANG on WhatsApp.`,
+          }),
+        }).catch(() => null);
+      }
+    }
 
     if (householdId && households.some((h) => h.id === householdId)) {
       households = households.map((h) =>
@@ -2048,6 +2077,7 @@ export function StudentForm({
                   <select
                     className="field"
                     value={preferredLanguage}
+                    disabled={!languageOverride}
                     onChange={(e) => setPreferredLanguage(e.target.value)}
                   >
                     <option value="">Not asked yet</option>
@@ -2057,10 +2087,31 @@ export function StudentForm({
                       </option>
                     ))}
                   </select>
-                  <p className="mt-1 text-[11px] text-[var(--muted)]">
-                    Messages, reminders and AI drafts for this family are
-                    written in this language.
-                  </p>
+                  {/*
+                    The FAMILY owns this. They set it themselves over WhatsApp
+                    by replying LANG, and the school writes to them in the
+                    language they chose — which is the whole point of asking.
+                    The office can still change it for a parent who asks at the
+                    counter, but deliberately: one extra click, and the change
+                    is written to the audit trail with who made it. A field
+                    anyone can quietly flip is how a family ends up being
+                    written to in a language they did not pick.
+                  */}
+                  {languageOverride ? (
+                    <p className="mt-1 text-[11px] text-[var(--warning)]">
+                      Overriding the family’s own choice — this is recorded
+                      against your name.
+                    </p>
+                  ) : (
+                    <button
+                      type="button"
+                      className="mt-1 text-[11px] underline text-[var(--muted)]"
+                      onClick={() => setLanguageOverride(true)}
+                    >
+                      Set by the family over WhatsApp (reply LANG) — override
+                      for them
+                    </button>
+                  )}
                 </Field>
                 <Field label="Preferred channel">
                   <select

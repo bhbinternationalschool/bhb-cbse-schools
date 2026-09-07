@@ -103,6 +103,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:wa-language-gate
 
+      - name: Test — which number sends which template, and both languages
+        working-directory: apps/web
+        run: npm run test:wa-sender-routing
+
       - name: Test — optimistic-locking token survives normalization
         working-directory: apps/web
         run: npm run test:sis-revision

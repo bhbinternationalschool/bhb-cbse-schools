@@ -26,6 +26,18 @@ export function metaAccessToken(): string {
   );
 }
 
+/**
+ * The number a send goes out FROM.
+ *
+ * `fromPhoneNumberId` is the school's routing decision, resolved in Masters
+ * (per template, else per module, else the school default). It falls back to
+ * the single env-configured number so that a school which has never opened
+ * the Numbers screen keeps working exactly as before.
+ */
+export function resolvePhoneNumberId(fromPhoneNumberId?: string): string {
+  return (fromPhoneNumberId || "").trim() || metaPhoneNumberId();
+}
+
 export function metaPhoneNumberId(): string {
   return (
     process.env.WA_PHONE_NUMBER_ID ||
@@ -51,6 +63,8 @@ export async function sendWhatsAppText(opts: {
   toMobile: string;
   body: string;
   clientMessageId?: string;
+  /** Meta phone_number_id to send FROM; env default when absent. */
+  fromPhoneNumberId?: string;
 }): Promise<{ ok: boolean; providerId?: string; error?: string; mode: string }> {
   const to = waDigitsToE164India(opts.toMobile);
   const text = (opts.body || "").slice(0, 4096);
@@ -71,7 +85,7 @@ export async function sendWhatsAppText(opts: {
     };
   }
 
-  const phoneNumberId = metaPhoneNumberId();
+  const phoneNumberId = resolvePhoneNumberId(opts.fromPhoneNumberId);
   const metaToken = metaAccessToken();
   if (phoneNumberId && metaToken) {
     const version = metaGraphVersion();
@@ -290,6 +304,8 @@ export async function sendWhatsAppTemplate(opts: {
   language: string;
   components?: WaTemplateComponent[];
   clientMessageId?: string;
+  /** Meta phone_number_id to send FROM; env default when absent. */
+  fromPhoneNumberId?: string;
 }): Promise<{ ok: boolean; providerId?: string; error?: string; mode: string }> {
   const to = waDigitsToE164India(opts.toMobile);
   if (!to || to.length < 10) {
@@ -302,7 +318,7 @@ export async function sendWhatsAppTemplate(opts: {
     return { ok: false, error: "Contact has opted out (STOP)", mode: "none" };
   }
 
-  const phoneNumberId = metaPhoneNumberId();
+  const phoneNumberId = resolvePhoneNumberId(opts.fromPhoneNumberId);
   const metaToken = metaAccessToken();
   const languageCode = (opts.language || "en").slice(0, 5);
 
@@ -448,6 +464,8 @@ export async function sendWaWithFailover(opts: {
     components?: WaTemplateComponent[];
   };
   clientMessageId?: string;
+  /** Which of the school's numbers to send FROM; env default when absent. */
+  fromPhoneNumberId?: string;
 }): Promise<{
   ok: boolean;
   providerId?: string;
@@ -464,11 +482,13 @@ export async function sendWaWithFailover(opts: {
           language: opts.template.language,
           components: opts.template.components,
           clientMessageId: opts.clientMessageId,
+          fromPhoneNumberId: opts.fromPhoneNumberId,
         })
       : sendWhatsAppText({
           toMobile,
           body: opts.body || "",
           clientMessageId: opts.clientMessageId,
+          fromPhoneNumberId: opts.fromPhoneNumberId,
         });
 
   const primaryResult = await send(opts.primaryMobile);
