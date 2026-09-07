@@ -32,18 +32,13 @@ class MyCollectionsScreen extends StatelessWidget {
                 children: [
                   Text(
                     d.totalLabel,
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.w700,
+                    style: AppText.headlineLarge.copyWith(
                       color: ModuleTone.teal.foreground,
                     ),
                   ),
                   Text(
                     "${d.count} receipt${d.count == 1 ? "" : "s"} · ${formatDateLabel(d.date)}",
-                    style: const TextStyle(
-                      fontSize: 12.5,
-                      color: AppColors.muted,
-                    ),
+                    style: AppText.bodySmallMuted,
                   ),
                   if (d.byMode.isNotEmpty)
                     Padding(
@@ -55,7 +50,7 @@ class MyCollectionsScreen extends StatelessWidget {
                             Chip(
                               label: Text(
                                 "${m.mode} ${m.label}",
-                                style: const TextStyle(fontSize: 11.5),
+                                style: AppText.labelMedium,
                               ),
                               backgroundColor: Colors.white,
                               side: BorderSide.none,
@@ -83,26 +78,19 @@ class MyCollectionsScreen extends StatelessWidget {
                 ),
                 title: Text(
                   r.receiptNo,
-                  style: const TextStyle(
-                    fontSize: 13,
+                  style: AppText.bodyMediumInk.copyWith(
                     fontWeight: FontWeight.w700,
-                    color: AppColors.ink,
                   ),
                 ),
                 subtitle: Text(
                   "${r.guardianName}${r.studentNames.isEmpty ? "" : " · ${r.studentNames}"}\n${r.modes.join(", ")}${r.collectedAt.isEmpty ? "" : " · ${formatTimeLabel(r.collectedAt)}"}",
-                  style: const TextStyle(
-                    fontSize: 11.5,
-                    color: AppColors.muted,
-                  ),
+                  style: AppText.labelMediumMuted,
                 ),
                 isThreeLine: true,
                 trailing: Text(
                   r.totalLabel,
-                  style: const TextStyle(
-                    fontSize: 14,
+                  style: AppText.bodyLargeInk.copyWith(
                     fontWeight: FontWeight.w700,
-                    color: AppColors.ink,
                   ),
                 ),
               ),

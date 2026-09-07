@@ -77,11 +77,7 @@ class TeachersScreen extends StatelessWidget {
           Text(
             "WhatsApp messages go to the school's number (${d.schoolWhatsAppDisplay}) and are passed to the teacher — the message is already addressed, just type below the last line and send.\n"
             "व्हाट्सऐप संदेश स्कूल के नंबर पर जाता है और शिक्षक तक पहुँचाया जाता है — संदेश पहले से पता किया हुआ है, बस आख़िरी पंक्ति के नीचे लिखकर भेजें।",
-            style: const TextStyle(
-              fontSize: 11.5,
-              color: AppColors.muted,
-              height: 1.45,
-            ),
+            style: AppText.labelMediumMuted.copyWith(height: 1.45),
           ),
         ],
       ),
@@ -121,10 +117,9 @@ class _HoursBanner extends StatelessWidget {
                   open
                       ? "Teachers are available till 8 PM"
                       : "Teachers are available ${contacts.hoursLabel}",
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
+                  style: AppText.bodyLarge.copyWith(
                     color: tone.foreground,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
                 const SizedBox(height: 3),
@@ -132,20 +127,18 @@ class _HoursBanner extends StatelessWidget {
                   open
                       ? "शिक्षक रात 8 बजे तक उपलब्ध हैं।"
                       : "अभी शिक्षक उपलब्ध नहीं हैं (सुबह 8 – रात 8)। ऐप में भेजा संदेश सुरक्षित रहेगा और सुबह पहुँचेगा।",
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    color: tone.foreground,
+                  style: AppText.bodySmall.copyWith(
                     height: 1.4,
+                    color: tone.foreground,
                   ),
                 ),
                 if (!open) ...[
                   const SizedBox(height: 3),
                   Text(
                     contacts.hoursNote,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: tone.foreground,
+                    style: AppText.bodySmall.copyWith(
                       height: 1.4,
+                      color: tone.foreground,
                     ),
                   ),
                 ],
@@ -194,12 +187,11 @@ class _TeacherCard extends StatelessWidget {
                       : ModuleTone.purple.background,
                   child: Text(
                     initials,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
+                    style: AppText.bodyMedium.copyWith(
                       color: teacher.isClassTeacher
                           ? Colors.white
                           : ModuleTone.purple.foreground,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
@@ -210,19 +202,11 @@ class _TeacherCard extends StatelessWidget {
                     children: [
                       Text(
                         teacher.name,
-                        style: const TextStyle(
-                          fontSize: 14.5,
+                        style: AppText.bodyLargeInk.copyWith(
                           fontWeight: FontWeight.w600,
-                          color: AppColors.ink,
                         ),
                       ),
-                      Text(
-                        teacher.role,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppColors.muted,
-                        ),
-                      ),
+                      Text(teacher.role, style: AppText.bodySmallMuted),
                     ],
                   ),
                 ),

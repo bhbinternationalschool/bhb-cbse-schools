@@ -73,7 +73,8 @@ class PushService {
     );
     await _local
         .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
+          AndroidFlutterLocalNotificationsPlugin
+        >()
         ?.createNotificationChannel(
           const AndroidNotificationChannel(
             _channelId,
@@ -86,10 +87,10 @@ class PushService {
     // iOS: show banners while the app is in the foreground too.
     await FirebaseMessaging.instance
         .setForegroundNotificationPresentationOptions(
-      alert: true,
-      badge: true,
-      sound: true,
-    );
+          alert: true,
+          badge: true,
+          sound: true,
+        );
 
     // Foreground messages: FCM does NOT display these on Android, so render
     // them ourselves through the local plugin.
@@ -150,7 +151,9 @@ class PushService {
     try {
       final info = await PackageInfo.fromPlatform();
       version = "${info.version}+${info.buildNumber}";
-    } catch (_) {/* optional */}
+    } catch (_) {
+      /* optional */
+    }
     await api.registerPushToken(
       token: token,
       platform: Platform.isIOS ? "ios" : "android",
@@ -212,7 +215,9 @@ class PushService {
         final url = data["url"] as String;
         if (url.startsWith("/")) return url;
       }
-    } catch (_) {/* ignore */}
+    } catch (_) {
+      /* ignore */
+    }
     return null;
   }
 

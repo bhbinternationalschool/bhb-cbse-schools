@@ -32,8 +32,11 @@ class NoticesScreen extends StatelessWidget {
                     Row(
                       children: [
                         if (item.pinned) ...[
-                          const Icon(Icons.push_pin,
-                              size: 14, color: AppColors.warning),
+                          const Icon(
+                            Icons.push_pin,
+                            size: 14,
+                            color: AppColors.warning,
+                          ),
                           const SizedBox(width: 4),
                         ],
                         Container(
@@ -49,32 +52,26 @@ class NoticesScreen extends StatelessWidget {
                           ),
                           child: Text(
                             item.isNews ? "News" : "Notice",
-                            style: TextStyle(
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.w700,
+                            style: AppText.labelSmall.copyWith(
                               color: item.isNews
                                   ? ModuleTone.blue.foreground
                                   : ModuleTone.coral.foreground,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
                         ),
                         const Spacer(),
                         Text(
                           formatDateLabel(item.publishedAt.split("T").first),
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: AppColors.muted,
-                          ),
+                          style: AppText.labelMediumMuted,
                         ),
                       ],
                     ),
                     const SizedBox(height: 8),
                     Text(
                       item.title,
-                      style: const TextStyle(
-                        fontSize: 13.5,
+                      style: AppText.bodyMediumInk.copyWith(
                         fontWeight: FontWeight.w600,
-                        color: AppColors.ink,
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -82,11 +79,7 @@ class NoticesScreen extends StatelessWidget {
                       item.summary.isNotEmpty ? item.summary : item.body,
                       maxLines: 6,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        color: AppColors.ink,
-                        height: 1.4,
-                      ),
+                      style: AppText.bodySmallInk.copyWith(height: 1.4),
                     ),
                   ],
                 ),

@@ -54,10 +54,8 @@ class LeaveScreen extends StatelessWidget {
                             r.fromDate == r.toDate
                                 ? formatDateLabel(r.fromDate)
                                 : "${formatDateLabel(r.fromDate)} – ${formatDateLabel(r.toDate)}",
-                            style: const TextStyle(
-                              fontSize: 13.5,
+                            style: AppText.bodyMediumInk.copyWith(
                               fontWeight: FontWeight.w600,
-                              color: AppColors.ink,
                             ),
                           ),
                         ),
@@ -67,29 +65,18 @@ class LeaveScreen extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(
                       "${r.leaveTypeLabel} · ${r.days} day${r.days == 1 ? "" : "s"}",
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.muted,
-                      ),
+                      style: AppText.bodySmallMuted,
                     ),
                     const SizedBox(height: 6),
                     Text(
                       r.reason,
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        color: AppColors.ink,
-                        height: 1.4,
-                      ),
+                      style: AppText.bodySmallInk.copyWith(height: 1.4),
                     ),
                     if (r.decisionNote.isNotEmpty) ...[
                       const SizedBox(height: 6),
                       Text(
                         "School: ${r.decisionNote}",
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppColors.muted,
-                          height: 1.4,
-                        ),
+                        style: AppText.bodySmallMuted.copyWith(height: 1.4),
                       ),
                     ],
                     if (r.isPending)
@@ -189,10 +176,9 @@ class _StatusChip extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: TextStyle(
-          fontSize: 10.5,
-          fontWeight: FontWeight.w700,
+        style: AppText.labelSmall.copyWith(
           color: tone.foreground,
+          fontWeight: FontWeight.w700,
         ),
       ),
     );
@@ -298,11 +284,7 @@ class _LeaveFormState extends State<_LeaveForm> {
           children: [
             Text(
               "Leave for ${widget.child.fullName}",
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: AppColors.ink,
-              ),
+              style: AppText.titleMediumInk,
             ),
             const SizedBox(height: 14),
             DropdownButtonFormField<LeaveTypeInfo>(
@@ -385,10 +367,7 @@ class _DateField extends StatelessWidget {
           labelText: label,
           suffixIcon: const Icon(Icons.calendar_today_outlined, size: 18),
         ),
-        child: Text(
-          value,
-          style: const TextStyle(fontSize: 14, color: AppColors.ink),
-        ),
+        child: Text(value, style: AppText.bodyLargeInk),
       ),
     );
   }

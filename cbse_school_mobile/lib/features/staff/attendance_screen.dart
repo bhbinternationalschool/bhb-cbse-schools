@@ -87,9 +87,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         _saved = true;
       });
       Haptics.success();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Attendance saved")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Attendance saved")));
     } on ApiException catch (e) {
       if (mounted) {
         setState(() {
@@ -120,13 +120,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              "Attendance · ${widget.title}",
-              style: const TextStyle(fontSize: 16),
-            ),
+            Text("Attendance · ${widget.title}", style: AppText.titleMedium),
             Text(
               widget.date,
-              style: const TextStyle(fontSize: 11, color: Color(0xFFB8C0D4)),
+              style: AppText.labelMedium.copyWith(color: Color(0xFFB8C0D4)),
             ),
           ],
         ),
@@ -151,146 +148,136 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                     ),
             )
           : roster.students.isEmpty
-              ? const Center(
-                  child: Text(
-                    "No active students in this section.",
-                    style: TextStyle(color: AppColors.muted),
-                  ),
-                )
-              : Column(
-                  children: [
-                    if (roster.attendanceMarked && !_saved)
-                      Container(
-                        width: double.infinity,
-                        color: const Color(0xFFF5EDD4),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
-                        ),
-                        child: const Text(
-                          "Already marked today — saving again will update the register.",
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            color: Color(0xFF854F0B),
-                          ),
-                        ),
-                      ),
-                    Expanded(
-                      child: ListView.separated(
-                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                        itemCount: roster.students.length,
-                        separatorBuilder: (_, i) => const SizedBox(height: 8),
-                        itemBuilder: (context, i) {
-                          final s = roster.students[i];
-                          return Card(
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 8,
-                              ),
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          s.fullName,
-                                          style: const TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w600,
-                                            color: AppColors.ink,
-                                          ),
-                                        ),
-                                        if (s.rollNo.isNotEmpty)
-                                          Text(
-                                            "Roll ${s.rollNo}",
-                                            style: const TextStyle(
-                                              fontSize: 11,
-                                              color: AppColors.muted,
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                  ),
-                                  for (final (code, _, color) in _statuses)
-                                    Padding(
-                                      padding: const EdgeInsets.only(left: 6),
-                                      child: InkWell(
-                                        borderRadius: BorderRadius.circular(10),
-                                        onTap: () =>
-                                            setState(() => s.status = code),
-                                        child: Container(
-                                          width: 34,
-                                          height: 34,
-                                          decoration: BoxDecoration(
-                                            color: s.status == code
-                                                ? color
-                                                : color.withValues(alpha: 0.1),
-                                            borderRadius:
-                                                BorderRadius.circular(10),
-                                          ),
-                                          child: Center(
-                                            child: Text(
-                                              code,
-                                              style: TextStyle(
-                                                fontSize: 13,
-                                                fontWeight: FontWeight.w700,
-                                                color: s.status == code
-                                                    ? Colors.white
-                                                    : color,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          );
-                        },
+          ? const Center(
+              child: Text(
+                "No active students in this section.",
+                style: TextStyle(color: AppColors.muted),
+              ),
+            )
+          : Column(
+              children: [
+                if (roster.attendanceMarked && !_saved)
+                  Container(
+                    width: double.infinity,
+                    color: const Color(0xFFF5EDD4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    child: Text(
+                      "Already marked today — saving again will update the register.",
+                      style: AppText.labelMedium.copyWith(
+                        color: Color(0xFF854F0B),
                       ),
                     ),
-                    SafeArea(
-                      top: false,
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            if (_error != null)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 8),
-                                child: Text(
-                                  _error!,
-                                  style: const TextStyle(
-                                    color: AppColors.danger,
-                                    fontSize: 12,
-                                  ),
+                  ),
+                Expanded(
+                  child: ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                    itemCount: roster.students.length,
+                    separatorBuilder: (_, i) => const SizedBox(height: 8),
+                    itemBuilder: (context, i) {
+                      final s = roster.students[i];
+                      return Card(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      s.fullName,
+                                      style: AppText.bodyMediumInk.copyWith(
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    if (s.rollNo.isNotEmpty)
+                                      Text(
+                                        "Roll ${s.rollNo}",
+                                        style: AppText.labelMediumMuted,
+                                      ),
+                                  ],
                                 ),
                               ),
-                            FilledButton(
-                              onPressed: _saving ? null : _submit,
-                              child: _saving
-                                  ? const SizedBox(
-                                      height: 20,
-                                      width: 20,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
+                              for (final (code, _, color) in _statuses)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 6),
+                                  child: InkWell(
+                                    borderRadius: BorderRadius.circular(10),
+                                    onTap: () =>
+                                        setState(() => s.status = code),
+                                    child: Container(
+                                      width: 34,
+                                      height: 34,
+                                      decoration: BoxDecoration(
+                                        color: s.status == code
+                                            ? color
+                                            : color.withValues(alpha: 0.1),
+                                        borderRadius: BorderRadius.circular(10),
                                       ),
-                                    )
-                                  : Text(
-                                      "Save · $presentCount present, $absentCount absent",
+                                      child: Center(
+                                        child: Text(
+                                          code,
+                                          style: AppText.bodyMedium.copyWith(
+                                            color: s.status == code
+                                                ? Colors.white
+                                                : color,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ),
                                     ),
-                            ),
-                          ],
+                                  ),
+                                ),
+                            ],
+                          ),
                         ),
-                      ),
-                    ),
-                  ],
+                      );
+                    },
+                  ),
                 ),
+                SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (_error != null)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Text(
+                              _error!,
+                              style: AppText.bodySmall.copyWith(
+                                color: AppColors.danger,
+                              ),
+                            ),
+                          ),
+                        FilledButton(
+                          onPressed: _saving ? null : _submit,
+                          child: _saving
+                              ? const SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : Text(
+                                  "Save · $presentCount present, $absentCount absent",
+                                ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
     );
   }
 }

@@ -41,25 +41,22 @@ class MarksScreen extends StatelessWidget {
                     t.code.isEmpty
                         ? "?"
                         : t.code.substring(0, t.code.length.clamp(0, 3)),
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
+                    style: AppText.labelMedium.copyWith(
                       color: ModuleTone.amber.foreground,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
                 title: Text(
                   t.label,
-                  style: const TextStyle(
-                    fontSize: 13.5,
+                  style: AppText.bodyMediumInk.copyWith(
                     fontWeight: FontWeight.w600,
-                    color: AppColors.ink,
                   ),
                 ),
                 subtitle: Text(
                   "Max ${t.maxMarks}${t.startsOn.isNotEmpty ? " · ${formatDateLabel(t.startsOn)}${t.endsOn.isNotEmpty && t.endsOn != t.startsOn ? " – ${formatDateLabel(t.endsOn)}" : ""}" : ""}"
                   "${t.sheetCount > 0 ? " · ${t.sheetCount} sheet${t.sheetCount == 1 ? "" : "s"} entered" : ""}",
-                  style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                  style: AppText.bodySmallMuted,
                 ),
                 trailing: const Icon(
                   Icons.chevron_right,
@@ -165,8 +162,9 @@ class _MarkEntryScreenState extends State<MarkEntryScreen> {
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() => _error = "Could not reach the school server.");
+      }
     }
   }
 
@@ -235,10 +233,11 @@ class _MarkEntryScreenState extends State<MarkEntryScreen> {
       }
     } on ApiException catch (e) {
       Haptics.warning();
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(e.message)));
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -255,15 +254,14 @@ class _MarkEntryScreenState extends State<MarkEntryScreen> {
           children: [
             Text(
               "${widget.term.label} · ${widget.title}",
-              style: const TextStyle(fontSize: 15),
+              style: AppText.titleSmall,
             ),
             if (s != null)
               Text(
                 s.locked
                     ? "Locked by the exams desk"
                     : "Blank = absent / not entered",
-                style: TextStyle(
-                  fontSize: 11,
+                style: AppText.labelMedium.copyWith(
                   color: s.locked ? AppColors.warning : AppColors.muted,
                 ),
               ),
@@ -364,10 +362,8 @@ class _MarkEntryScreenState extends State<MarkEntryScreen> {
                                 width: 30,
                                 child: Text(
                                   st.rollNo.isEmpty ? "–" : st.rollNo,
-                                  style: const TextStyle(
-                                    fontSize: 12,
+                                  style: AppText.bodySmallMuted.copyWith(
                                     fontWeight: FontWeight.w700,
-                                    color: AppColors.muted,
                                   ),
                                 ),
                               ),
@@ -377,19 +373,14 @@ class _MarkEntryScreenState extends State<MarkEntryScreen> {
                                   children: [
                                     Text(
                                       st.fullName,
-                                      style: const TextStyle(
-                                        fontSize: 13,
+                                      style: AppText.bodyMediumInk.copyWith(
                                         fontWeight: FontWeight.w600,
-                                        color: AppColors.ink,
                                       ),
                                     ),
                                     if ((m?.grade ?? "").isNotEmpty)
                                       Text(
                                         "Grade ${m!.grade}",
-                                        style: const TextStyle(
-                                          fontSize: 11,
-                                          color: AppColors.muted,
-                                        ),
+                                        style: AppText.labelMediumMuted,
                                       ),
                                   ],
                                 ),
@@ -472,10 +463,8 @@ class DateSheetScreen extends StatelessWidget {
                 padding: const EdgeInsets.only(top: 6, bottom: 4),
                 child: Text(
                   "${formatDateLabel(e.key)}${e.value.first.termLabel.isNotEmpty ? " · ${e.value.first.termLabel}" : ""}",
-                  style: const TextStyle(
-                    fontSize: 13,
+                  style: AppText.bodyMediumInk.copyWith(
                     fontWeight: FontWeight.w700,
-                    color: AppColors.ink,
                   ),
                 ),
               ),
@@ -489,27 +478,18 @@ class DateSheetScreen extends StatelessWidget {
                           width: 54,
                           child: Text(
                             r.startTime,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: AppColors.muted,
-                            ),
+                            style: AppText.bodySmallMuted,
                           ),
                         ),
                         title: Text(
                           "${r.className} · ${r.subjectName}",
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: AppColors.ink,
-                          ),
+                          style: AppText.bodyMediumInk,
                         ),
                         subtitle: r.note.isEmpty && r.durationMinutes == 0
                             ? null
                             : Text(
                                 "${r.durationMinutes > 0 ? "${r.durationMinutes} min" : ""}${r.note.isNotEmpty ? " · ${r.note}" : ""}",
-                                style: const TextStyle(
-                                  fontSize: 11.5,
-                                  color: AppColors.muted,
-                                ),
+                                style: AppText.labelMediumMuted,
                               ),
                       ),
                   ],

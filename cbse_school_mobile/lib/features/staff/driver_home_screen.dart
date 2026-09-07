@@ -74,7 +74,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
           const SnackBar(
             content: Text(
               "इस रूट का कोई स्टॉप मैप पर नहीं लगा है — दफ़्तर से कहें",
-              style: TextStyle(fontSize: 15),
+              style: AppText.titleSmall,
             ),
           ),
         );
@@ -172,17 +172,14 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                         Text(
                           _name ?? "चालक",
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
+                          style: AppText.titleMedium.copyWith(
                             color: Colors.white,
-                            fontSize: 17,
-                            fontWeight: FontWeight.w600,
                           ),
                         ),
-                        const Text(
+                        Text(
                           "परिवहन",
-                          style: TextStyle(
+                          style: AppText.bodySmall.copyWith(
                             color: Color(0xFFB8C0D4),
-                            fontSize: 12,
                           ),
                         ),
                       ],
@@ -216,10 +213,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                         Icons.directions_bus_outlined,
                         color: AppColors.primary,
                       ),
-                      title: const Text(
+                      title: Text(
                         "Transport requests from parents",
-                        style: TextStyle(
-                          fontSize: 13,
+                        style: AppText.bodyMedium.copyWith(
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -249,20 +245,15 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                           size: 22,
                         ),
                       ),
-                      title: const Text(
+                      title: Text(
                         "मेरी हाज़िरी",
-                        style: TextStyle(
-                          fontSize: 13.5,
+                        style: AppText.bodyMediumInk.copyWith(
                           fontWeight: FontWeight.w600,
-                          color: AppColors.ink,
                         ),
                       ),
                       subtitle: const Text(
                         "कैंपस से GPS पंच इन / आउट",
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          color: AppColors.muted,
-                        ),
+                        style: AppText.labelMediumMuted,
                       ),
                       trailing: const Icon(
                         Icons.chevron_right,
@@ -271,12 +262,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                     ),
                   ),
                   const SizedBox(height: 14),
-                  const Text(
+                  Text(
                     "रूट",
-                    style: TextStyle(
-                      fontSize: 14,
+                    style: AppText.bodyLargeInk.copyWith(
                       fontWeight: FontWeight.w600,
-                      color: AppColors.ink,
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -286,10 +275,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                         padding: EdgeInsets.all(14),
                         child: Text(
                           "अभी कोई रूट नहीं है। दफ़्तर से रूट बनते ही यहाँ दिखेंगे।",
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            color: AppColors.muted,
-                          ),
+                          style: AppText.bodySmallMuted,
                         ),
                       ),
                     )
@@ -314,10 +300,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                                     ),
                                     child: Text(
                                       route.code,
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w700,
+                                      style: AppText.labelMedium.copyWith(
                                         color: ModuleTone.blue.foreground,
+                                        fontWeight: FontWeight.w700,
                                       ),
                                     ),
                                   ),
@@ -325,10 +310,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                                   Expanded(
                                     child: Text(
                                       route.name,
-                                      style: const TextStyle(
-                                        fontSize: 14,
+                                      style: AppText.bodyLargeInk.copyWith(
                                         fontWeight: FontWeight.w600,
-                                        color: AppColors.ink,
                                       ),
                                     ),
                                   ),
@@ -346,10 +329,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                                   if ((route.driverName ?? "").isNotEmpty)
                                     "चालक: ${route.driverName}",
                                 ].join(" · "),
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: AppColors.muted,
-                                ),
+                                style: AppText.bodySmallMuted,
                               ),
                               const SizedBox(height: 12),
                               Row(
@@ -374,10 +354,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                                         Icons.fact_check_outlined,
                                         size: 18,
                                       ),
-                                      label: const Text(
+                                      label: Text(
                                         "हाज़िरी लें",
-                                        style: TextStyle(
-                                          fontSize: 14,
+                                        style: AppText.bodyLarge.copyWith(
                                           fontWeight: FontWeight.w700,
                                         ),
                                       ),
@@ -392,7 +371,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                                     ),
                                     label: const Text(
                                       "रास्ता",
-                                      style: TextStyle(fontSize: 14),
+                                      style: AppText.bodyLarge,
                                     ),
                                   ),
                                 ],
@@ -435,10 +414,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                                           ),
                                           child: Text(
                                             route.stops[i].name,
-                                            style: const TextStyle(
-                                              fontSize: 13,
-                                              color: AppColors.ink,
-                                            ),
+                                            style: AppText.bodyMediumInk,
                                           ),
                                         ),
                                       ),
@@ -446,8 +422,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                                         route.stops[i].hasPin
                                             ? "${route.stops[i].distanceKm} कि.मी."
                                             : "मैप पर नहीं",
-                                        style: TextStyle(
-                                          fontSize: 11.5,
+                                        style: AppText.labelMedium.copyWith(
                                           color: route.stops[i].hasPin
                                               ? AppColors.muted
                                               : AppColors.danger,

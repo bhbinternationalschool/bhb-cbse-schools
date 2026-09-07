@@ -241,7 +241,10 @@ class _HomeScreenState extends State<HomeScreen> {
       case "Attendance":
         screen = AttendanceHistoryScreen(api: api, child: child);
       case "Tutor":
-        screen = TutorScreen(api: api, context: TutorContext(child: child));
+        screen = TutorScreen(
+          api: api,
+          context: TutorContext(child: child),
+        );
       case "Homework":
         screen = HomeworkScreen(
           api: api,
@@ -451,8 +454,10 @@ class _HomeScreenState extends State<HomeScreen> {
                             Haptics.tap();
                             Navigator.of(context).push(
                               MaterialPageRoute(
-                                builder: (_) =>
-                                    TeachersScreen(api: widget.api, child: child),
+                                builder: (_) => TeachersScreen(
+                                  api: widget.api,
+                                  child: child,
+                                ),
                               ),
                             );
                           },
@@ -578,11 +583,10 @@ class _Header extends StatelessWidget {
                     Expanded(
                       child: Text(
                         _greeting(),
-                        style: const TextStyle(
-                          color: AppColors.accentSoft,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
+                        style: AppText.bodyMedium.copyWith(
                           letterSpacing: 0.2,
+                          color: AppColors.accentSoft,
+                          fontWeight: FontWeight.w500,
                         ),
                       ),
                     ),
@@ -618,19 +622,16 @@ class _Header extends StatelessWidget {
                           Text(
                             child.fullName,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 20,
-                              fontWeight: FontWeight.w700,
+                            style: AppText.headlineSmall.copyWith(
                               letterSpacing: -0.2,
+                              color: Colors.white,
                             ),
                           ),
                           const SizedBox(height: 2),
                           Text(
                             child.classLabel,
-                            style: const TextStyle(
+                            style: AppText.bodyMedium.copyWith(
                               color: Color(0xFFC3CBDD),
-                              fontSize: 13,
                             ),
                           ),
                         ],
@@ -743,10 +744,9 @@ class _ChildChip extends StatelessWidget {
                   ),
                   child: AnimatedDefaultTextStyle(
                     duration: AppMotion.fast,
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
+                    style: AppText.labelSmall.copyWith(
                       color: selected ? AppColors.accentSoft : Colors.white,
+                      fontWeight: FontWeight.w700,
                     ),
                     child: Text(child.initials),
                   ),
@@ -754,9 +754,7 @@ class _ChildChip extends StatelessWidget {
                 const SizedBox(width: 8),
                 AnimatedDefaultTextStyle(
                   duration: AppMotion.fast,
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
+                  style: AppText.labelLarge.copyWith(
                     color: selected ? AppColors.primary : Colors.white,
                   ),
                   child: Text(
@@ -921,19 +919,14 @@ class _StatCard extends StatelessWidget {
                   alignment: Alignment.centerLeft,
                   child: Text(
                     value,
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: valueColor,
+                    style: AppText.titleLarge.copyWith(
                       letterSpacing: -0.3,
+                      color: valueColor,
                     ),
                   ),
                 ),
                 const SizedBox(height: 2),
-                Text(
-                  label,
-                  style: const TextStyle(fontSize: 11, color: AppColors.muted),
-                ),
+                Text(label, style: AppText.labelMediumMuted),
               ],
             ),
           ),
@@ -952,11 +945,9 @@ class _SectionTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       text,
-      style: const TextStyle(
-        fontSize: 15,
-        fontWeight: FontWeight.w700,
-        color: AppColors.ink,
+      style: AppText.titleSmallInk.copyWith(
         letterSpacing: -0.2,
+        fontWeight: FontWeight.w700,
       ),
     );
   }
@@ -1004,11 +995,7 @@ class _ModuleGrid extends StatelessWidget {
                         m.label,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.ink,
-                        ),
+                        style: AppText.labelMediumInk,
                       ),
                     ],
                   ),
@@ -1057,12 +1044,9 @@ class _ActionCard extends StatelessWidget {
           ),
           title: Text(
             title,
-            style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+            style: AppText.bodyMedium.copyWith(fontWeight: FontWeight.w600),
           ),
-          subtitle: Text(
-            subtitle,
-            style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
-          ),
+          subtitle: Text(subtitle, style: AppText.labelMediumMuted),
           trailing: const Icon(Icons.chevron_right, color: AppColors.muted),
         ),
       ),
@@ -1097,14 +1081,14 @@ class _WhatsAppCard extends StatelessWidget {
             ),
             child: SvgPicture.asset("assets/icons/whatsapp.svg"),
           ),
-          title: const Text(
+          title: Text(
             "Chat with the school on WhatsApp",
-            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            style: AppText.bodyMedium.copyWith(fontWeight: FontWeight.w600),
           ),
           subtitle: Text(
             "${contact.display} · dues, receipts, pay by UPI, or ask for a "
             "person. Message from the mobile registered with the school.",
-            style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
+            style: AppText.labelMediumMuted,
           ),
           trailing: const Icon(
             Icons.open_in_new,

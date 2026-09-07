@@ -49,7 +49,7 @@ class ChatInboxScreen extends StatelessWidget {
                 t.lastMessage ?? "No messages yet — say hello",
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                style: AppText.bodySmallMuted,
               ),
               trailing: t.unreadCount > 0
                   ? CircleAvatar(
@@ -57,8 +57,7 @@ class ChatInboxScreen extends StatelessWidget {
                       backgroundColor: AppColors.danger,
                       child: Text(
                         "${t.unreadCount}",
-                        style: const TextStyle(
-                          fontSize: 10,
+                        style: AppText.labelSmall.copyWith(
                           color: Colors.white,
                           fontWeight: FontWeight.w700,
                         ),

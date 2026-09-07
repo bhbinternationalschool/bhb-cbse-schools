@@ -72,9 +72,7 @@ class _DictateFieldState extends State<DictateField> {
       );
     }
     if (!_available) {
-      setState(
-        () => _error = "Dictation is not available on this phone",
-      );
+      setState(() => _error = "Dictation is not available on this phone");
       return;
     }
 
@@ -89,8 +87,7 @@ class _DictateFieldState extends State<DictateField> {
         final said = result.recognizedWords.trim();
         if (said.isEmpty) return;
         final existing = widget.controller.text.trim();
-        widget.controller.text =
-            existing.isEmpty ? said : "$existing $said";
+        widget.controller.text = existing.isEmpty ? said : "$existing $said";
         widget.controller.selection = TextSelection.fromPosition(
           TextPosition(offset: widget.controller.text.length),
         );
@@ -107,21 +104,16 @@ class _DictateFieldState extends State<DictateField> {
         children: [
           Row(
             children: [
-              Text(
-                widget.label,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.ink,
-                ),
-              ),
+              Text(widget.label, style: AppText.labelLargeInk),
               const SizedBox(width: 8),
               InkWell(
                 borderRadius: BorderRadius.circular(20),
                 onTap: _toggle,
                 child: Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 4),
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: _listening
                         ? ModuleTone.coral.background
@@ -134,16 +126,12 @@ class _DictateFieldState extends State<DictateField> {
                       Icon(
                         _listening ? Icons.stop : Icons.mic_none,
                         size: 14,
-                        color: _listening
-                            ? AppColors.danger
-                            : AppColors.muted,
+                        color: _listening ? AppColors.danger : AppColors.muted,
                       ),
                       const SizedBox(width: 4),
                       Text(
                         _listening ? "Listening…" : "Speak",
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
+                        style: AppText.labelMedium.copyWith(
                           color: _listening
                               ? AppColors.danger
                               : AppColors.muted,
@@ -158,8 +146,7 @@ class _DictateFieldState extends State<DictateField> {
                 Expanded(
                   child: Text(
                     _error!,
-                    style: const TextStyle(
-                        fontSize: 10.5, color: AppColors.danger),
+                    style: AppText.labelSmall.copyWith(color: AppColors.danger),
                   ),
                 ),
               ],
@@ -170,11 +157,10 @@ class _DictateFieldState extends State<DictateField> {
             controller: widget.controller,
             minLines: widget.minLines,
             maxLines: widget.maxLines,
-            style: const TextStyle(fontSize: 13),
+            style: AppText.bodyMedium,
             decoration: InputDecoration(
               hintText: widget.hint,
-              hintStyle:
-                  const TextStyle(fontSize: 12.5, color: AppColors.muted),
+              hintStyle: AppText.bodySmallMuted,
               border: const OutlineInputBorder(),
               isDense: true,
             ),

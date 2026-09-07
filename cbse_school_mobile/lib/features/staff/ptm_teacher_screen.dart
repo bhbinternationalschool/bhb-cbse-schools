@@ -32,17 +32,9 @@ class PtmTeacherScreen extends StatelessWidget {
           for (final e in events) ...[
             Text(
               "${e.name} · ${formatDateLabel(e.date)}${e.modeLabel.isNotEmpty ? " · ${e.modeLabel}" : ""}",
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-                color: AppColors.ink,
-              ),
+              style: AppText.bodyLargeInk.copyWith(fontWeight: FontWeight.w700),
             ),
-            if (e.note.isNotEmpty)
-              Text(
-                e.note,
-                style: const TextStyle(fontSize: 12, color: AppColors.muted),
-              ),
+            if (e.note.isNotEmpty) Text(e.note, style: AppText.bodySmallMuted),
             const SizedBox(height: 6),
             for (final s in e.slots)
               Card(
@@ -55,18 +47,13 @@ class PtmTeacherScreen extends StatelessWidget {
                         "${formatTimeLabel(s.startAt)} – ${formatTimeLabel(s.endAt)}"
                         "${s.roomOrLink.isNotEmpty ? " · ${s.roomOrLink}" : ""}"
                         "${s.isMine ? "" : " · ${s.teacherName}"}",
-                        style: const TextStyle(
-                          fontSize: 13,
+                        style: AppText.bodyMediumInk.copyWith(
                           fontWeight: FontWeight.w600,
-                          color: AppColors.ink,
                         ),
                       ),
                       Text(
                         "${s.bookings.length} of ${s.capacity} booked",
-                        style: const TextStyle(
-                          fontSize: 11.5,
-                          color: AppColors.muted,
-                        ),
+                        style: AppText.labelMediumMuted,
                       ),
                       for (final b in s.bookings)
                         _Booking(api: api, b: b, reload: reload),
@@ -114,16 +101,12 @@ class _Booking extends StatelessWidget {
             children: [
               Text(
                 "Met ${b.parentName.isEmpty ? "the parent" : b.parentName} · ${b.studentName}",
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.ink,
-                ),
+                style: AppText.titleMediumInk,
               ),
               const SizedBox(height: 4),
               const Text(
                 "A short note for the parent and the report card. All three are optional.",
-                style: TextStyle(fontSize: 12, color: AppColors.muted),
+                style: AppText.bodySmallMuted,
               ),
               const SizedBox(height: 12),
               TextField(
@@ -172,10 +155,11 @@ class _Booking extends StatelessWidget {
       Haptics.success();
       await reload();
     } on ApiException catch (e) {
-      if (context.mounted)
+      if (context.mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(e.message)));
+      }
     }
   }
 
@@ -185,10 +169,11 @@ class _Booking extends StatelessWidget {
       Haptics.tap();
       await reload();
     } on ApiException catch (e) {
-      if (context.mounted)
+      if (context.mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(e.message)));
+      }
     }
   }
 
@@ -206,10 +191,8 @@ class _Booking extends StatelessWidget {
               Expanded(
                 child: Text(
                   "${b.studentName}${b.classLabel.isNotEmpty ? " · ${b.classLabel}" : ""}",
-                  style: const TextStyle(
-                    fontSize: 13,
+                  style: AppText.bodyMediumInk.copyWith(
                     fontWeight: FontWeight.w600,
-                    color: AppColors.ink,
                   ),
                 ),
               ),
@@ -229,7 +212,7 @@ class _Booking extends StatelessWidget {
           ),
           Text(
             "${b.parentName.isEmpty ? "Parent" : b.parentName}${digits.length >= 10 ? " · $digits" : ""}",
-            style: const TextStyle(fontSize: 12, color: AppColors.muted),
+            style: AppText.bodySmallMuted,
           ),
           if (fb != null)
             Padding(
@@ -243,11 +226,7 @@ class _Booking extends StatelessWidget {
                   if ((fb["followUp"] as String?)?.isNotEmpty == true)
                     "Follow-up: ${fb["followUp"]}",
                 ].join("\n"),
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: AppColors.ink,
-                  height: 1.4,
-                ),
+                style: AppText.bodySmallInk.copyWith(height: 1.4),
               ),
             ),
           Wrap(

@@ -51,21 +51,19 @@ class ReceiptsScreen extends StatelessWidget {
                     Expanded(
                       child: Text(
                         r.receiptNo,
-                        style: const TextStyle(
-                          fontSize: 13.5,
+                        style: AppText.bodyMedium.copyWith(
                           fontWeight: FontWeight.w600,
                         ),
                       ),
                     ),
                     Text(
                       r.totalLabel,
-                      style: TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w700,
-                        color: r.voided ? AppColors.muted : AppColors.ink,
+                      style: AppText.bodyMedium.copyWith(
                         decoration: r.voided
                             ? TextDecoration.lineThrough
                             : null,
+                        color: r.voided ? AppColors.muted : AppColors.ink,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ],
@@ -74,11 +72,7 @@ class ReceiptsScreen extends StatelessWidget {
                   "${formatDateLabel(r.date)} · ${r.paidBy}"
                   "${r.students.isNotEmpty ? "\n${r.students.join(", ")}" : ""}"
                   "${r.voided ? "\nVOID — cancelled by the office" : ""}",
-                  style: const TextStyle(
-                    fontSize: 11.5,
-                    color: AppColors.muted,
-                    height: 1.4,
-                  ),
+                  style: AppText.labelMediumMuted.copyWith(height: 1.4),
                 ),
                 isThreeLine: true,
                 trailing: const Icon(
@@ -166,10 +160,7 @@ class _ReceiptPdfScreenState extends State<ReceiptPdfScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          "Receipt ${widget.title}",
-          style: const TextStyle(fontSize: 16),
-        ),
+        title: Text("Receipt ${widget.title}", style: AppText.titleMedium),
       ),
       body: PdfViewPinch(controller: _controller),
     );

@@ -92,11 +92,7 @@ class _FeeDefaultersScreenState extends State<FeeDefaultersScreen> {
           const SizedBox(height: 8),
           Text(
             "${list.householdCount} families · ${list.totalOpenLabel} outstanding",
-            style: const TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w600,
-              color: AppColors.ink,
-            ),
+            style: AppText.labelLargeInk,
           ),
           const SizedBox(height: 6),
           for (final h in list.households)
@@ -155,16 +151,13 @@ class _HouseholdCard extends StatelessWidget {
                     children: [
                       Text(
                         h.guardianName,
-                        style: const TextStyle(
-                          fontSize: 14,
+                        style: AppText.bodyLargeInk.copyWith(
                           fontWeight: FontWeight.w700,
-                          color: AppColors.ink,
                         ),
                       ),
                       Text(
                         _digits.isEmpty ? "No mobile on record" : _digits,
-                        style: TextStyle(
-                          fontSize: 12,
+                        style: AppText.bodySmall.copyWith(
                           color: _digits.isEmpty
                               ? AppColors.danger
                               : AppColors.muted,
@@ -178,19 +171,15 @@ class _HouseholdCard extends StatelessWidget {
                   children: [
                     Text(
                       h.openLabel,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
+                      style: AppText.titleSmall.copyWith(
                         color: AppColors.danger,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                     if (h.overdueDays > 0)
                       Text(
                         "${h.overdueDays} days overdue",
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: AppColors.muted,
-                        ),
+                        style: AppText.labelMediumMuted,
                       ),
                   ],
                 ),
@@ -205,10 +194,7 @@ class _HouseholdCard extends StatelessWidget {
                     Expanded(
                       child: Text(
                         "${c.fullName} · ${c.classLabel} — ${c.openLabel}",
-                        style: const TextStyle(
-                          fontSize: 12.5,
-                          color: AppColors.ink,
-                        ),
+                        style: AppText.bodySmallInk,
                       ),
                     ),
                     if (canCollect)
@@ -229,10 +215,7 @@ class _HouseholdCard extends StatelessWidget {
                               ),
                             )
                             .then((_) => reload()),
-                        child: const Text(
-                          "Collect",
-                          style: TextStyle(fontSize: 12),
-                        ),
+                        child: const Text("Collect", style: AppText.bodySmall),
                       ),
                   ],
                 ),
@@ -247,8 +230,7 @@ class _HouseholdCard extends StatelessWidget {
                 ),
                 child: Text(
                   "Promised ${formatDateLabel(promised.promisedOn)}${promised.promiseNote.isEmpty ? "" : " · ${promised.promiseNote}"}",
-                  style: TextStyle(
-                    fontSize: 11.5,
+                  style: AppText.labelMedium.copyWith(
                     color: ModuleTone.amber.foreground,
                   ),
                 ),
@@ -279,10 +261,7 @@ class _HouseholdCard extends StatelessWidget {
                 ],
                 TextButton(
                   onPressed: () => _logFollowup(context),
-                  child: const Text(
-                    "Log call",
-                    style: TextStyle(fontSize: 12.5),
-                  ),
+                  child: const Text("Log call", style: AppText.bodySmall),
                 ),
               ],
             ),
@@ -372,11 +351,7 @@ class _FollowupSheetState extends State<_FollowupSheet> {
           children: [
             Text(
               "What did ${widget.household.guardianName} say?",
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: AppColors.ink,
-              ),
+              style: AppText.titleMediumInk,
             ),
             const SizedBox(height: 10),
             if (widget.household.children.length > 1)
@@ -405,7 +380,7 @@ class _FollowupSheetState extends State<_FollowupSheet> {
                   ("visit", "Visited"),
                 ])
                   ChoiceChip(
-                    label: Text(l, style: const TextStyle(fontSize: 12)),
+                    label: Text(l, style: AppText.bodySmall),
                     selected: _channel == v,
                     onSelected: (_) => setState(() => _channel = v),
                   ),
@@ -423,7 +398,7 @@ class _FollowupSheetState extends State<_FollowupSheet> {
                   ("wrong_number", "Wrong number"),
                 ])
                   ChoiceChip(
-                    label: Text(l, style: const TextStyle(fontSize: 12)),
+                    label: Text(l, style: AppText.bodySmall),
                     selected: _outcome == v,
                     onSelected: (_) => setState(() => _outcome = v),
                   ),

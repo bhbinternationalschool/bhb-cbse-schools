@@ -27,10 +27,7 @@ class AppConfig {
       "SCHOOL_NAME",
       defaultValue: "BHB INTERNATIONAL SCHOOL",
     ),
-    supabaseUrl: String.fromEnvironment(
-      "SUPABASE_URL",
-      defaultValue: "",
-    ),
+    supabaseUrl: String.fromEnvironment("SUPABASE_URL", defaultValue: ""),
     supabaseAnonKey: String.fromEnvironment(
       "SUPABASE_ANON_KEY",
       defaultValue: "",

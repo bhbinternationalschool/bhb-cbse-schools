@@ -2,6 +2,7 @@ import "package:flutter/material.dart";
 import "package:geolocator/geolocator.dart";
 
 import "../../core/api/api_client.dart";
+import "../../core/theme/app_theme.dart";
 
 /// रूट हाज़िरी — the list a driver or attendant actually works from.
 ///
@@ -118,8 +119,8 @@ class _RouteManifestScreenState extends State<RouteManifestScreen> {
         kind == "boarded"
             ? "$name — बस में चढ़ गए"
             : kind == "offboarded"
-                ? "$name — बस से उतर गए"
-                : "$name — अनुपस्थित",
+            ? "$name — बस से उतर गए"
+            : "$name — अनुपस्थित",
       );
       await _load();
     } catch (e) {
@@ -133,7 +134,7 @@ class _RouteManifestScreenState extends State<RouteManifestScreen> {
   void _toast(String msg, {bool isError = false}) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(msg, style: const TextStyle(fontSize: 16)),
+        content: Text(msg, style: AppText.titleMedium),
         backgroundColor: isError ? Colors.red.shade700 : Colors.green.shade700,
         duration: const Duration(seconds: 2),
       ),
@@ -179,13 +180,7 @@ class _RouteManifestScreenState extends State<RouteManifestScreen> {
                   ),
                 ),
                 const SizedBox(width: 12),
-                Text(
-                  "$marked / $total",
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+                Text("$marked / $total", style: AppText.titleLarge),
               ],
             ),
           ),
@@ -194,34 +189,34 @@ class _RouteManifestScreenState extends State<RouteManifestScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(_error!, style: const TextStyle(fontSize: 18)),
-                      const SizedBox(height: 12),
-                      FilledButton(
-                        onPressed: _load,
-                        child: const Text("दोबारा कोशिश करें"),
-                      ),
-                    ],
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(_error!, style: AppText.titleLarge),
+                  const SizedBox(height: 12),
+                  FilledButton(
+                    onPressed: _load,
+                    child: const Text("दोबारा कोशिश करें"),
                   ),
-                )
-              : stops.isEmpty
-                  ? const Center(
-                      child: Text(
-                        "इस रूट पर कोई स्टॉप नहीं है",
-                        style: TextStyle(fontSize: 18),
-                      ),
-                    )
-                  : RefreshIndicator(
-                      onRefresh: _load,
-                      child: ListView.builder(
-                        itemCount: stops.length,
-                        itemBuilder: (context, i) =>
-                            _stopCard(stops[i] as Map<String, dynamic>, i + 1),
-                      ),
-                    ),
+                ],
+              ),
+            )
+          : stops.isEmpty
+          ? Center(
+              child: Text(
+                "इस रूट पर कोई स्टॉप नहीं है",
+                style: AppText.titleLarge,
+              ),
+            )
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: ListView.builder(
+                itemCount: stops.length,
+                itemBuilder: (context, i) =>
+                    _stopCard(stops[i] as Map<String, dynamic>, i + 1),
+              ),
+            ),
     );
   }
 
@@ -244,17 +239,11 @@ class _RouteManifestScreenState extends State<RouteManifestScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        "${stop["name"]}",
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+                      Text("${stop["name"]}", style: AppText.titleLarge),
                       Text(
                         "${students.length} बच्चे"
                         "${km != null && km != 0 ? " · स्कूल से $km कि.मी." : ""}",
-                        style: const TextStyle(fontSize: 13),
+                        style: AppText.bodyMedium,
                       ),
                     ],
                   ),
@@ -263,10 +252,12 @@ class _RouteManifestScreenState extends State<RouteManifestScreen> {
             ),
           ),
           if (students.isEmpty)
-            const Padding(
+            Padding(
               padding: EdgeInsets.all(14),
-              child: Text("इस स्टॉप पर कोई बच्चा नहीं",
-                  style: TextStyle(fontSize: 15)),
+              child: Text(
+                "इस स्टॉप पर कोई बच्चा नहीं",
+                style: AppText.titleSmall,
+              ),
             )
           else
             ...students.map((s) => _studentRow(s as Map<String, dynamic>)),
@@ -295,13 +286,11 @@ class _RouteManifestScreenState extends State<RouteManifestScreen> {
                 // the script the school recorded it in.
                 child: Text(
                   name,
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: done ? Colors.grey.shade600 : null,
+                  style: AppText.headlineSmall.copyWith(
                     decoration: status == "absent"
                         ? TextDecoration.lineThrough
                         : null,
+                    color: done ? Colors.grey.shade600 : null,
                   ),
                 ),
               ),
@@ -313,11 +302,11 @@ class _RouteManifestScreenState extends State<RouteManifestScreen> {
           ),
           Text(
             "${s["admissionNo"]}",
-            style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+            style: AppText.bodySmall.copyWith(color: Colors.grey.shade700),
           ),
           const SizedBox(height: 8),
           if (busy)
-            const Padding(
+            Padding(
               padding: EdgeInsets.symmetric(vertical: 8),
               child: Row(
                 children: [
@@ -327,7 +316,7 @@ class _RouteManifestScreenState extends State<RouteManifestScreen> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   ),
                   SizedBox(width: 10),
-                  Text("लोकेशन ली जा रही है…", style: TextStyle(fontSize: 15)),
+                  Text("लोकेशन ली जा रही है…", style: AppText.titleSmall),
                 ],
               ),
             )
@@ -341,15 +330,15 @@ class _RouteManifestScreenState extends State<RouteManifestScreen> {
                 const SizedBox(width: 6),
                 Text(
                   status == "absent" ? "अनुपस्थित" : "दर्ज हो गया",
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
+                  style: AppText.titleSmall.copyWith(
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
                 const Spacer(),
                 TextButton(
-                  onPressed: () => _mark(id, name, _trip == "AM" ? "boarded" : "offboarded"),
-                  child: const Text("बदलें", style: TextStyle(fontSize: 15)),
+                  onPressed: () =>
+                      _mark(id, name, _trip == "AM" ? "boarded" : "offboarded"),
+                  child: Text("बदलें", style: AppText.titleSmall),
                 ),
               ],
             )
@@ -366,9 +355,8 @@ class _RouteManifestScreenState extends State<RouteManifestScreen> {
                     icon: const Icon(Icons.how_to_reg),
                     label: Text(
                       _trip == "AM" ? "चढ़ गए" : "उतर गए",
-                      style: const TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.bold,
+                      style: AppText.titleMedium.copyWith(
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ),
@@ -376,10 +364,7 @@ class _RouteManifestScreenState extends State<RouteManifestScreen> {
                 const SizedBox(width: 8),
                 OutlinedButton(
                   onPressed: () => _mark(id, name, "absent"),
-                  child: const Text(
-                    "नहीं आया",
-                    style: TextStyle(fontSize: 16),
-                  ),
+                  child: Text("नहीं आया", style: AppText.titleMedium),
                 ),
               ],
             ),
@@ -395,11 +380,11 @@ class _Tag extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.secondaryContainer,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Text(text, style: const TextStyle(fontSize: 12)),
-      );
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: Theme.of(context).colorScheme.secondaryContainer,
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: Text(text, style: AppText.bodySmall),
+  );
 }

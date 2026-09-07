@@ -57,10 +57,8 @@ class ComplaintsScreen extends StatelessWidget {
                         Expanded(
                           child: Text(
                             t.subject,
-                            style: const TextStyle(
-                              fontSize: 13.5,
+                            style: AppText.bodyMediumInk.copyWith(
                               fontWeight: FontWeight.w600,
-                              color: AppColors.ink,
                             ),
                           ),
                         ),
@@ -74,19 +72,12 @@ class ComplaintsScreen extends StatelessWidget {
                         formatDateLabel(t.date),
                         if (t.studentName.isNotEmpty) "about ${t.studentName}",
                       ].join(" · "),
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.muted,
-                      ),
+                      style: AppText.bodySmallMuted,
                     ),
                     const SizedBox(height: 6),
                     Text(
                       t.description,
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        color: AppColors.ink,
-                        height: 1.4,
-                      ),
+                      style: AppText.bodySmallInk.copyWith(height: 1.4),
                     ),
                     if (t.resolutionNote.isNotEmpty) ...[
                       const SizedBox(height: 8),
@@ -99,10 +90,9 @@ class ComplaintsScreen extends StatelessWidget {
                         ),
                         child: Text(
                           "School's response: ${t.resolutionNote}",
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: ModuleTone.green.foreground,
+                          style: AppText.bodySmall.copyWith(
                             height: 1.4,
+                            color: ModuleTone.green.foreground,
                           ),
                         ),
                       ),
@@ -163,10 +153,9 @@ class _StatusChip extends StatelessWidget {
       ),
       child: Text(
         label.isEmpty ? status : label,
-        style: TextStyle(
-          fontSize: 10.5,
-          fontWeight: FontWeight.w700,
+        style: AppText.labelSmall.copyWith(
           color: tone.foreground,
+          fontWeight: FontWeight.w700,
         ),
       ),
     );
@@ -255,14 +244,7 @@ class _ComplaintFormState extends State<_ComplaintForm> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
-              "Raise a complaint",
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: AppColors.ink,
-              ),
-            ),
+            const Text("Raise a complaint", style: AppText.titleMediumInk),
             const SizedBox(height: 14),
             DropdownButtonFormField<String>(
               initialValue: _category,

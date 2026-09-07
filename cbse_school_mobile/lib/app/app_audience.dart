@@ -26,9 +26,9 @@ enum AppAudience {
   staff;
 
   String get appName => switch (this) {
-        AppAudience.parent => "BHB School — Parents",
-        AppAudience.staff => "BHB School — Staff",
-      };
+    AppAudience.parent => "BHB School — Parents",
+    AppAudience.staff => "BHB School — Staff",
+  };
 
   /// Whether this build can serve the persona the ERP hands back.
   ///
@@ -36,18 +36,19 @@ enum AppAudience {
   /// on that path — so null counts as a parent, matching how the router has
   /// always treated it.
   bool servesPersona(String? persona) => switch (this) {
-        AppAudience.parent => persona != "staff" && persona != "field",
-        AppAudience.staff => persona == "staff" || persona == "field",
-      };
+    AppAudience.parent => persona != "staff" && persona != "field",
+    AppAudience.staff => persona == "staff" || persona == "field",
+  };
 }
 
 /// Routes are supplied by the entry point rather than built here, so a parent
 /// build never imports a staff screen and the tree-shaker can drop them.
-typedef RoutesBuilder = List<RouteBase> Function(
-  ApiClient api,
-  AppConfig config,
-  Future<void> Function() onSignedIn,
-);
+typedef RoutesBuilder =
+    List<RouteBase> Function(
+      ApiClient api,
+      AppConfig config,
+      Future<void> Function() onSignedIn,
+    );
 
 /// Shown when someone signs in to the wrong one of the two apps.
 ///
@@ -56,11 +57,7 @@ typedef RoutesBuilder = List<RouteBase> Function(
 /// review too: a reviewer given a parent login will try it against whichever
 /// app they are reviewing.
 class WrongAppScreen extends StatelessWidget {
-  const WrongAppScreen({
-    super.key,
-    required this.audience,
-    required this.api,
-  });
+  const WrongAppScreen({super.key, required this.audience, required this.api});
 
   final AppAudience audience;
   final ApiClient api;

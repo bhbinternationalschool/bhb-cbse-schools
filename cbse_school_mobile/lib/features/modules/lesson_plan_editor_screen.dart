@@ -19,8 +19,7 @@ class LessonPlanEditorScreen extends StatefulWidget {
   final TeachingPeriod period;
 
   @override
-  State<LessonPlanEditorScreen> createState() =>
-      _LessonPlanEditorScreenState();
+  State<LessonPlanEditorScreen> createState() => _LessonPlanEditorScreenState();
 }
 
 class _LessonPlanEditorScreenState extends State<LessonPlanEditorScreen> {
@@ -89,28 +88,24 @@ class _LessonPlanEditorScreenState extends State<LessonPlanEditorScreen> {
     final p = widget.period;
     return Scaffold(
       appBar: AppBar(
-        title: const Text("New lesson plan", style: TextStyle(fontSize: 16)),
+        title: const Text("New lesson plan", style: AppText.titleMedium),
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           Text(
             "${p.subjectName} · ${p.classLabel}",
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: AppColors.ink,
-            ),
+            style: AppText.bodyMediumInk.copyWith(fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 4),
           const Text(
             "Tap Speak on any box to dictate instead of typing.",
-            style: TextStyle(fontSize: 11.5, color: AppColors.muted),
+            style: AppText.labelMediumMuted,
           ),
           const SizedBox(height: 14),
           TextField(
             controller: _title,
-            style: const TextStyle(fontSize: 13),
+            style: AppText.bodyMedium,
             decoration: const InputDecoration(
               labelText: "Lesson title",
               border: OutlineInputBorder(),
@@ -119,13 +114,11 @@ class _LessonPlanEditorScreenState extends State<LessonPlanEditorScreen> {
           ),
           const SizedBox(height: 14),
           if (p.chapters.isNotEmpty) ...[
-            const Text(
+            Text(
               "COVERS",
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
+              style: AppText.labelSmallMuted.copyWith(
                 letterSpacing: 0.6,
-                color: AppColors.muted,
+                fontWeight: FontWeight.w700,
               ),
             ),
             for (final chapter in p.chapters) ...[
@@ -134,8 +127,7 @@ class _LessonPlanEditorScreenState extends State<LessonPlanEditorScreen> {
                 contentPadding: EdgeInsets.zero,
                 controlAffinity: ListTileControlAffinity.leading,
                 value: _unitIds.contains(chapter.id),
-                title: Text(chapter.label,
-                    style: const TextStyle(fontSize: 12.5)),
+                title: Text(chapter.label, style: AppText.bodySmall),
                 onChanged: (v) => setState(() {
                   if (v == true) {
                     _unitIds.add(chapter.id);
@@ -152,11 +144,7 @@ class _LessonPlanEditorScreenState extends State<LessonPlanEditorScreen> {
                     contentPadding: EdgeInsets.zero,
                     controlAffinity: ListTileControlAffinity.leading,
                     value: _unitIds.contains(topic.id),
-                    title: Text(
-                      topic.title,
-                      style: const TextStyle(
-                          fontSize: 12, color: AppColors.muted),
-                    ),
+                    title: Text(topic.title, style: AppText.bodySmallMuted),
                     onChanged: (v) => setState(() {
                       if (v == true) {
                         _unitIds.add(topic.id);
@@ -195,8 +183,7 @@ class _LessonPlanEditorScreenState extends State<LessonPlanEditorScreen> {
               padding: const EdgeInsets.only(bottom: 10),
               child: Text(
                 _error!,
-                style: const TextStyle(
-                    fontSize: 12.5, color: AppColors.danger),
+                style: AppText.bodySmall.copyWith(color: AppColors.danger),
               ),
             ),
           FilledButton(

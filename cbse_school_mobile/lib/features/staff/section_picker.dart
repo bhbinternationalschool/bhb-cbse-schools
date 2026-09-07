@@ -22,11 +22,7 @@ class SectionPicker extends StatelessWidget {
             children: [
               const Text(
                 "Choose class & section",
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.ink,
-                ),
+                style: AppText.titleMediumInk,
               ),
               const SizedBox(height: 12),
               Expanded(
@@ -44,10 +40,8 @@ class SectionPicker extends StatelessWidget {
                                 padding: const EdgeInsets.only(top: 8),
                                 child: Text(
                                   c.name,
-                                  style: const TextStyle(
-                                    fontSize: 13,
+                                  style: AppText.bodyMediumInk.copyWith(
                                     fontWeight: FontWeight.w600,
-                                    color: AppColors.ink,
                                   ),
                                 ),
                               ),
@@ -66,10 +60,11 @@ class SectionPicker extends StatelessWidget {
                                         fontWeight: FontWeight.w600,
                                       ),
                                       side: BorderSide.none,
-                                      onPressed: () => Navigator.pop(
-                                        context,
-                                        (c.id, s.id, "${c.name} ${s.name}"),
-                                      ),
+                                      onPressed: () => Navigator.pop(context, (
+                                        c.id,
+                                        s.id,
+                                        "${c.name} ${s.name}",
+                                      )),
                                     ),
                                 ],
                               ),

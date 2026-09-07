@@ -27,18 +27,8 @@ Future<void> showStudentNoteSheet(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              student.fullName,
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: AppColors.ink,
-              ),
-            ),
-            Text(
-              classLabel,
-              style: const TextStyle(fontSize: 12, color: AppColors.muted),
-            ),
+            Text(student.fullName, style: AppText.titleMediumInk),
+            Text(classLabel, style: AppText.bodySmallMuted),
             const SizedBox(height: 12),
             ListTile(
               leading: Icon(
@@ -195,10 +185,11 @@ class _DisciplineSheetState extends State<_DisciplineSheet> {
       Navigator.pop(context);
     } on ApiException catch (e) {
       Haptics.warning();
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(e.message)));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -223,11 +214,7 @@ class _DisciplineSheetState extends State<_DisciplineSheet> {
               widget.merit
                   ? "Merit · ${widget.student.fullName}"
                   : "Discipline note · ${widget.student.fullName}",
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: AppColors.ink,
-              ),
+              style: AppText.titleMediumInk,
             ),
             const SizedBox(height: 10),
             if (cats == null)
@@ -239,10 +226,7 @@ class _DisciplineSheetState extends State<_DisciplineSheet> {
                 children: [
                   for (final c in cats)
                     ChoiceChip(
-                      label: Text(
-                        c.label,
-                        style: const TextStyle(fontSize: 12),
-                      ),
+                      label: Text(c.label, style: AppText.bodySmall),
                       selected: _category == c.value,
                       onSelected: (_) => setState(() => _category = c.value),
                     ),
@@ -253,7 +237,7 @@ class _DisciplineSheetState extends State<_DisciplineSheet> {
               children: [
                 Text(
                   widget.merit ? "Points" : "Demerit points",
-                  style: const TextStyle(fontSize: 13, color: AppColors.ink),
+                  style: AppText.bodyMediumInk,
                 ),
                 const Spacer(),
                 for (final p in const [1, 2, 3, 5])
@@ -280,7 +264,7 @@ class _DisciplineSheetState extends State<_DisciplineSheet> {
               dense: true,
               title: const Text(
                 "Tell the parent now (app notification)",
-                style: TextStyle(fontSize: 13),
+                style: AppText.bodyMedium,
               ),
               value: _notify,
               onChanged: (v) => setState(() => _notify = v),
@@ -357,10 +341,11 @@ class _HealthSheetState extends State<_HealthSheet> {
       Navigator.pop(context);
     } on ApiException catch (e) {
       Haptics.warning();
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(e.message)));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -383,11 +368,7 @@ class _HealthSheetState extends State<_HealthSheet> {
           children: [
             Text(
               "Sick room · ${widget.student.fullName}",
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: AppColors.ink,
-              ),
+              style: AppText.titleMediumInk,
             ),
             const SizedBox(height: 10),
             if (reasons == null)
@@ -399,10 +380,7 @@ class _HealthSheetState extends State<_HealthSheet> {
                 children: [
                   for (final r in reasons)
                     ChoiceChip(
-                      label: Text(
-                        r.label,
-                        style: const TextStyle(fontSize: 12),
-                      ),
+                      label: Text(r.label, style: AppText.bodySmall),
                       selected: _reason == r.value,
                       onSelected: (_) => setState(() => _reason = r.value),
                     ),
@@ -427,7 +405,7 @@ class _HealthSheetState extends State<_HealthSheet> {
               dense: true,
               title: const Text(
                 "Referred to hospital / sent home",
-                style: TextStyle(fontSize: 13),
+                style: AppText.bodyMedium,
               ),
               value: _referred,
               onChanged: (v) => setState(() => _referred = v),
@@ -437,7 +415,7 @@ class _HealthSheetState extends State<_HealthSheet> {
               dense: true,
               title: const Text(
                 "Tell the parent now (app notification)",
-                style: TextStyle(fontSize: 13),
+                style: AppText.bodyMedium,
               ),
               value: _notify,
               onChanged: (v) => setState(() => _notify = v),

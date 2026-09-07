@@ -72,7 +72,7 @@ iframe{position:absolute;inset:0;width:100%;height:100%;border:0}</style>
           widget.video.title,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 14),
+          style: AppText.bodyLarge,
         ),
       ),
       body: Column(
@@ -97,22 +97,20 @@ iframe{position:absolute;inset:0;width:100%;height:100%;border:0}</style>
               children: [
                 Text(
                   widget.video.title,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
+                  style: AppText.titleSmall.copyWith(
                     height: 1.35,
+                    color: Colors.white,
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   widget.video.channel,
-                  style: const TextStyle(color: Colors.white70, fontSize: 12.5),
+                  style: AppText.bodySmall.copyWith(color: Colors.white70),
                 ),
                 const SizedBox(height: 14),
                 const Text(
                   "From YouTube, not the school — judge it as you watch.",
-                  style: TextStyle(color: AppColors.muted, fontSize: 11.5),
+                  style: AppText.labelMediumMuted,
                 ),
               ],
             ),

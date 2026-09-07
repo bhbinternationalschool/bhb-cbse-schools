@@ -128,10 +128,11 @@ class _Card extends StatelessWidget {
       await reload();
     } on ApiException catch (e) {
       Haptics.warning();
-      if (context.mounted)
+      if (context.mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(e.message)));
+      }
     }
   }
 
@@ -155,10 +156,8 @@ class _Card extends StatelessWidget {
                 Expanded(
                   child: Text(
                     t.subject,
-                    style: const TextStyle(
-                      fontSize: 14,
+                    style: AppText.bodyLargeInk.copyWith(
                       fontWeight: FontWeight.w600,
-                      color: AppColors.ink,
                     ),
                   ),
                 ),
@@ -173,11 +172,7 @@ class _Card extends StatelessWidget {
                   ),
                   child: Text(
                     t.statusLabel,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: tone.foreground,
-                    ),
+                    style: AppText.labelMedium.copyWith(color: tone.foreground),
                   ),
                 ),
               ],
@@ -185,29 +180,25 @@ class _Card extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               "${t.categoryLabel} · ${formatDateLabel(t.date)}${t.studentName.isNotEmpty ? " · ${t.studentName}${t.classLabel.isNotEmpty ? " (${t.classLabel})" : ""}" : ""}",
-              style: const TextStyle(fontSize: 12, color: AppColors.muted),
+              style: AppText.bodySmallMuted,
             ),
             const SizedBox(height: 6),
             Text(
               t.description,
-              style: const TextStyle(
-                fontSize: 12.5,
-                color: AppColors.ink,
-                height: 1.4,
-              ),
+              style: AppText.bodySmallInk.copyWith(height: 1.4),
             ),
             const SizedBox(height: 6),
             Text(
               "From ${t.raisedByName.isEmpty ? "parent" : t.raisedByName} via ${t.sourceLabel}"
               "${t.assignedToName.isNotEmpty ? " · with ${t.assignedToMe ? "you" : t.assignedToName}" : ""}",
-              style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
+              style: AppText.labelMediumMuted,
             ),
             if (t.resolutionNote.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 6),
                 child: Text(
                   "Resolution: ${t.resolutionNote}",
-                  style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                  style: AppText.bodySmallMuted,
                 ),
               ),
             const SizedBox(height: 6),

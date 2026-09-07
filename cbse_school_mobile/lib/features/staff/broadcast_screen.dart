@@ -29,6 +29,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
 
   List<WaBroadcastTemplate>? _templates; // null = loading
   String? _templatesError;
+
   /// null → free text
   WaBroadcastTemplate? _template;
 
@@ -81,10 +82,14 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
   /// Prefer an English broadcast-style template; skip the OTP one, which is
   /// approved but not something anyone broadcasts.
   WaBroadcastTemplate? _pickDefault(List<WaBroadcastTemplate> list) {
-    final usable =
-        list.where((t) => !t.metaName.toLowerCase().contains("otp")).toList();
+    final usable = list
+        .where((t) => !t.metaName.toLowerCase().contains("otp"))
+        .toList();
     if (usable.isEmpty) return null;
-    return usable.firstWhere((t) => t.language == "en", orElse: () => usable.first);
+    return usable.firstWhere(
+      (t) => t.language == "en",
+      orElse: () => usable.first,
+    );
   }
 
   void _selectTemplate(WaBroadcastTemplate? t) {
@@ -102,20 +107,26 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
   Map<String, String> _variableValues() {
     final t = _template;
     if (t == null) return const {};
-    return {for (final v in t.variables) v.key: (_vars[v.key]?.text ?? "").trim()};
+    return {
+      for (final v in t.variables) v.key: (_vars[v.key]?.text ?? "").trim(),
+    };
   }
 
   bool get _canPreview {
     final t = _template;
     if (t == null) return _body.text.trim().isNotEmpty;
-    return t.variables.every((v) => (_vars[v.key]?.text ?? "").trim().isNotEmpty);
+    return t.variables.every(
+      (v) => (_vars[v.key]?.text ?? "").trim().isNotEmpty,
+    );
   }
 
   Future<void> _dryRun() async {
     if (!_canPreview) {
-      setState(() => _error = _template == null
-          ? "Type the message first."
-          : "Fill every template field first.");
+      setState(
+        () => _error = _template == null
+            ? "Type the message first."
+            : "Fill every template field first.",
+      );
       return;
     }
     setState(() {
@@ -136,7 +147,9 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
-      if (mounted) setState(() => _error = "Could not reach the school server.");
+      if (mounted) {
+        setState(() => _error = "Could not reach the school server.");
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -191,7 +204,9 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
-      if (mounted) setState(() => _error = "Could not reach the school server.");
+      if (mounted) {
+        setState(() => _error = "Could not reach the school server.");
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -239,10 +254,10 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
             onSelectionChanged: _busy
                 ? null
                 : (s) => setState(() {
-                      _audience = s.first;
-                      _preview = null;
-                      _sent = null;
-                    }),
+                    _audience = s.first;
+                    _preview = null;
+                    _sent = null;
+                  }),
           ),
           const SizedBox(height: 16),
           const Text(
@@ -261,8 +276,10 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   ),
                   SizedBox(width: 10),
-                  Text("Loading approved templates…",
-                      style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
+                  Text(
+                    "Loading approved templates…",
+                    style: AppText.bodySmallMuted,
+                  ),
                 ],
               ),
             )
@@ -294,17 +311,19 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
               onChanged: _busy
                   ? null
                   : (id) => setState(() {
-                        _selectTemplate(
-                          id == null || id.isEmpty
-                              ? null
-                              : templates.firstWhere((x) => x.id == id),
-                        );
-                      }),
+                      _selectTemplate(
+                        id == null || id.isEmpty
+                            ? null
+                            : templates.firstWhere((x) => x.id == id),
+                      );
+                    }),
             ),
           if (_templatesError != null) ...[
             const SizedBox(height: 4),
-            Text(_templatesError!,
-                style: const TextStyle(fontSize: 11.5, color: AppColors.danger)),
+            Text(
+              _templatesError!,
+              style: AppText.labelMedium.copyWith(color: AppColors.danger),
+            ),
           ],
           const SizedBox(height: 12),
           if (t != null) ...[
@@ -317,13 +336,14 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
                   children: [
                     Text(
                       t.preview(_variableValues()),
-                      style: const TextStyle(fontSize: 13, color: AppColors.ink),
+                      style: AppText.bodyMediumInk,
                     ),
                     const SizedBox(height: 6),
                     Text(
                       "Approved template · reaches every recipient regardless of the 24-hour window.",
-                      style: TextStyle(
-                          fontSize: 11, color: ModuleTone.teal.foreground),
+                      style: AppText.labelMedium.copyWith(
+                        color: ModuleTone.teal.foreground,
+                      ),
                     ),
                   ],
                 ),
@@ -333,7 +353,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
               const SizedBox(height: 8),
               const Text(
                 "The same value is used for every recipient — a school-wide send has no per-person data to fill placeholders with.",
-                style: TextStyle(fontSize: 11.5, color: AppColors.muted),
+                style: AppText.labelMediumMuted,
               ),
               for (final v in t.variables)
                 Padding(
@@ -368,17 +388,19 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
               ),
               onChanged: (_) => _resetOutcome(),
             ),
-            const Text(
+            Text(
               "Free text only reaches recipients who messaged the school's WhatsApp "
               "number in the last 24 hours — Meta blocks it outside that window. "
               "Pick an approved template above to reach everyone.",
-              style: TextStyle(fontSize: 11.5, color: AppColors.warning),
+              style: AppText.labelMedium.copyWith(color: AppColors.warning),
             ),
           ],
           if (_error != null) ...[
             const SizedBox(height: 6),
-            Text(_error!,
-                style: const TextStyle(color: AppColors.danger, fontSize: 12.5)),
+            Text(
+              _error!,
+              style: AppText.bodySmall.copyWith(color: AppColors.danger),
+            ),
           ],
           const SizedBox(height: 12),
           if (sent != null)
@@ -391,8 +413,10 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
                   children: [
                     Row(
                       children: [
-                        Icon(Icons.check_circle,
-                            color: ModuleTone.teal.foreground),
+                        Icon(
+                          Icons.check_circle,
+                          color: ModuleTone.teal.foreground,
+                        ),
                         const SizedBox(width: 8),
                         Text(
                           "Sent",
@@ -409,7 +433,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
                       "${sent.failed > 0 ? ", ${sent.failed} failed" : ""}"
                       "${sent.skippedOptOut > 0 ? ", ${sent.skippedOptOut} opted out skipped" : ""}.\n"
                       "App notifications: ${sent.pushSent} sent.",
-                      style: const TextStyle(fontSize: 12.5),
+                      style: AppText.bodySmall,
                     ),
                   ],
                 ),
@@ -435,7 +459,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
                     const SizedBox(height: 4),
                     const Text(
                       "Nothing has been sent yet. Review the message above, then confirm.",
-                      style: TextStyle(fontSize: 12, color: AppColors.muted),
+                      style: AppText.bodySmallMuted,
                     ),
                     const SizedBox(height: 10),
                     FilledButton.icon(
@@ -464,7 +488,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
             "Goes out on WhatsApp from the school number and as a push notification "
             "to families/staff using the app. Parents who replied STOP are skipped "
             "automatically. Every send is logged in the ERP's household message log.",
-            style: TextStyle(fontSize: 11.5, color: AppColors.muted),
+            style: AppText.labelMediumMuted,
           ),
         ],
       ),

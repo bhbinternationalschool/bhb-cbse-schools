@@ -46,10 +46,7 @@ class _ContactButtons extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (mobile.isEmpty) {
-      return const Text(
-        "No mobile on file",
-        style: TextStyle(fontSize: 11, color: AppColors.muted),
-      );
+      return const Text("No mobile on file", style: AppText.labelMediumMuted);
     }
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -87,10 +84,9 @@ class _Pill extends StatelessWidget {
     ),
     child: Text(
       text,
-      style: TextStyle(
-        fontSize: 10.5,
-        fontWeight: FontWeight.w700,
+      style: AppText.labelSmall.copyWith(
         color: tone.foreground,
+        fontWeight: FontWeight.w700,
       ),
     ),
   );
@@ -119,12 +115,12 @@ class RegistersScreen extends StatelessWidget {
             Text(
               "${formatDateLabel(d.date)} · ${d.sections.length - pending}/${d.sections.length} marked"
               "${pending > 0 ? " · $pending pending" : ""}",
-              style: const TextStyle(fontSize: 12.5, color: AppColors.muted),
+              style: AppText.bodySmallMuted,
             ),
             const SizedBox(height: 4),
             const Text(
               "Tap a section to view or mark its register.",
-              style: TextStyle(fontSize: 11.5, color: AppColors.muted),
+              style: AppText.labelMediumMuted,
             ),
             const SizedBox(height: 10),
             for (final s in d.sections)
@@ -145,7 +141,7 @@ class RegistersScreen extends StatelessWidget {
                         ? "P ${s.present} · A ${s.absent} · L ${s.leave}"
                               "${s.markedBy.isNotEmpty ? " · by ${s.markedBy}" : ""}"
                         : "Not marked yet",
-                    style: const TextStyle(fontSize: 11.5),
+                    style: AppText.labelMedium,
                   ),
                   trailing: s.holiday
                       ? _Pill("Holiday", tone: ModuleTone.blue)
@@ -212,7 +208,7 @@ class StaffAttendanceTodayScreen extends StatelessWidget {
             Text(
               "${formatDateLabel(d.date)} · $present present · $absent absent"
               "${unmarked > 0 ? " · $unmarked not marked" : ""}",
-              style: const TextStyle(fontSize: 12.5, color: AppColors.muted),
+              style: AppText.bodySmallMuted,
             ),
             const SizedBox(height: 10),
             for (final s in d.staff)
@@ -232,7 +228,7 @@ class StaffAttendanceTodayScreen extends StatelessWidget {
                       if (s.inTime.isNotEmpty)
                         "in ${s.inTime}${s.outTime.isNotEmpty ? " · out ${s.outTime}" : ""}",
                     ].join(" · "),
-                    style: const TextStyle(fontSize: 11.5),
+                    style: AppText.labelMedium,
                   ),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -274,7 +270,7 @@ class FollowUpsScreen extends StatelessWidget {
               padding: const EdgeInsets.only(bottom: 10),
               child: Text(
                 "${leads.length} leads · oldest first",
-                style: const TextStyle(fontSize: 12.5, color: AppColors.muted),
+                style: AppText.bodySmallMuted,
               ),
             );
           }
@@ -296,10 +292,8 @@ class FollowUpsScreen extends StatelessWidget {
                         child: Text(
                           "${l.childName.isEmpty ? "(no name)" : l.childName}"
                           "${l.classSought.isNotEmpty ? " · Class ${l.classSought}" : ""}",
-                          style: const TextStyle(
-                            fontSize: 14,
+                          style: AppText.bodyLargeInk.copyWith(
                             fontWeight: FontWeight.w600,
-                            color: AppColors.ink,
                           ),
                         ),
                       ),
@@ -313,10 +307,7 @@ class FollowUpsScreen extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     "${l.guardianName} · ${l.enquiryNo}",
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: AppColors.muted,
-                    ),
+                    style: AppText.bodySmallMuted,
                   ),
                   Row(
                     children: [
@@ -324,8 +315,7 @@ class FollowUpsScreen extends StatelessWidget {
                         child: Text(
                           "Due ${formatDateLabel(l.nextFollowUpAt)}"
                           "${l.overdueDays > 0 ? " · ${l.overdueDays}d overdue" : ""}",
-                          style: TextStyle(
-                            fontSize: 12,
+                          style: AppText.bodySmall.copyWith(
                             color: l.overdueDays > 0
                                 ? AppColors.danger
                                 : AppColors.muted,

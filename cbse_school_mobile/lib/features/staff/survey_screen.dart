@@ -38,22 +38,17 @@ class SurveyScreen extends StatelessWidget {
                 setup.capturedTodayByMe == 0
                     ? "No families recorded by you today."
                     : "${setup.capturedTodayByMe} famil${setup.capturedTodayByMe == 1 ? "y" : "ies"} recorded by you today.",
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
+                style: AppText.bodyMedium.copyWith(
                   color: ModuleTone.green.foreground,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ),
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             "Choose the beat you are walking",
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: AppColors.ink,
-            ),
+            style: AppText.bodyMediumInk.copyWith(fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 6),
           for (final b in setup.beats)
@@ -69,15 +64,13 @@ class SurveyScreen extends StatelessWidget {
                 ),
                 title: Text(
                   b.name,
-                  style: const TextStyle(
-                    fontSize: 13.5,
+                  style: AppText.bodyMediumInk.copyWith(
                     fontWeight: FontWeight.w600,
-                    color: AppColors.ink,
                   ),
                 ),
                 subtitle: Text(
                   "${b.area}${b.targetHouseholds > 0 ? " · target ${b.targetHouseholds}" : ""} · ${b.captured} recorded",
-                  style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                  style: AppText.bodySmallMuted,
                 ),
                 trailing: const Icon(
                   Icons.add_circle_outline,
@@ -207,11 +200,7 @@ class _CaptureSheetState extends State<_CaptureSheet> {
           children: [
             Text(
               "New family · ${widget.beat.name}",
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: AppColors.ink,
-              ),
+              style: AppText.titleMediumInk,
             ),
             const SizedBox(height: 10),
             TextField(
@@ -314,12 +303,12 @@ class _CaptureSheetState extends State<_CaptureSheet> {
               onChanged: (v) => setState(() => _consent = v ?? false),
               title: const Text(
                 "The parent agreed to be contacted by the school",
-                style: TextStyle(fontSize: 12.5),
+                style: AppText.bodySmall,
               ),
             ),
             const Text(
               "Age is kept as the parent said it — an approximate age, never turned into a date of birth.",
-              style: TextStyle(fontSize: 11, color: AppColors.muted),
+              style: AppText.labelMediumMuted,
             ),
             const SizedBox(height: 12),
             FilledButton(

@@ -81,16 +81,14 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 ),
                 title: Text(
                   "${d.label} · ${d.studentName}",
-                  style: const TextStyle(
-                    fontSize: 13.5,
+                  style: AppText.bodyMediumInk.copyWith(
                     fontWeight: FontWeight.w600,
-                    color: AppColors.ink,
                   ),
                 ),
                 subtitle: Text(
                   "${d.classLabel}${d.submittedAt.isNotEmpty ? " · ${formatDateLabel(d.submittedAt.substring(0, 10))}" : ""}"
                   "${d.status == "pending" ? "" : " · ${d.status}${d.reviewNote.isNotEmpty ? ": ${d.reviewNote}" : ""}"}",
-                  style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                  style: AppText.bodySmallMuted,
                 ),
                 trailing: const Icon(
                   Icons.chevron_right,
@@ -197,10 +195,11 @@ class _ReviewScreenState extends State<_ReviewScreen> {
       if (mounted) Navigator.pop(context);
     } on ApiException catch (e) {
       Haptics.warning();
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(e.message)));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -216,10 +215,10 @@ class _ReviewScreenState extends State<_ReviewScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(d.label, style: const TextStyle(fontSize: 15)),
+            Text(d.label, style: AppText.titleSmall),
             Text(
               "${d.studentName} · ${d.classLabel}",
-              style: const TextStyle(fontSize: 11, color: AppColors.muted),
+              style: AppText.labelMediumMuted,
             ),
           ],
         ),

@@ -291,25 +291,21 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                       children: [
                         Text(
                           _greeting(),
-                          style: const TextStyle(
+                          style: AppText.bodySmall.copyWith(
                             color: AppColors.accentSoft,
-                            fontSize: 12,
                           ),
                         ),
                         Text(
                           _name ?? "Principal",
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
+                          style: AppText.titleMedium.copyWith(
                             color: Colors.white,
-                            fontSize: 17,
-                            fontWeight: FontWeight.w600,
                           ),
                         ),
                         Text(
                           "School snapshot · ${snap.academicYearCode}",
-                          style: const TextStyle(
+                          style: AppText.bodySmall.copyWith(
                             color: Color(0xFFB8C0D4),
-                            fontSize: 12,
                           ),
                         ),
                       ],
@@ -388,10 +384,7 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                         dense: true,
                         title: const Text(
                           "No sections marked yet today.",
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            color: AppColors.muted,
-                          ),
+                          style: AppText.bodySmallMuted,
                         ),
                         subtitle: const Text("Tap to see registers by section"),
                         trailing: const Icon(Icons.chevron_right, size: 18),
@@ -703,7 +696,7 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                   const SizedBox(height: 8),
                   const Text(
                     "Figures update live from the school ERP. Pull down to refresh.",
-                    style: TextStyle(fontSize: 11, color: AppColors.muted),
+                    style: AppText.labelMediumMuted,
                   ),
                 ],
               ),
@@ -726,11 +719,7 @@ class _SectionTitle extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 8),
       child: Text(
         text,
-        style: const TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-          color: AppColors.ink,
-        ),
+        style: AppText.bodyLargeInk.copyWith(fontWeight: FontWeight.w600),
       ),
     );
   }
@@ -765,24 +754,14 @@ class _Stat extends StatelessWidget {
                   fit: BoxFit.scaleDown,
                   child: Text(
                     value,
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: color,
-                    ),
+                    style: AppText.titleLarge.copyWith(color: color),
                   ),
                 ),
                 const SizedBox(height: 2),
                 Row(
                   children: [
                     Expanded(
-                      child: Text(
-                        label,
-                        style: const TextStyle(
-                          fontSize: 10.5,
-                          color: AppColors.muted,
-                        ),
-                      ),
+                      child: Text(label, style: AppText.labelSmallMuted),
                     ),
                     if (onTap != null)
                       const Icon(
@@ -839,11 +818,7 @@ class _Action extends StatelessWidget {
                 label,
                 textAlign: TextAlign.center,
                 maxLines: 2,
-                style: const TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.ink,
-                ),
+                style: AppText.labelMediumInk,
               ),
             ],
           ),
@@ -876,10 +851,7 @@ class _AlertRow extends StatelessWidget {
               Expanded(
                 child: Text(
                   text,
-                  style: const TextStyle(
-                    fontSize: 12.5,
-                    color: Color(0xFF854F0B),
-                  ),
+                  style: AppText.bodySmall.copyWith(color: Color(0xFF854F0B)),
                 ),
               ),
               if (onTap != null)

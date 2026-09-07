@@ -54,21 +54,17 @@ class _WeekState extends State<_Week> {
       padding: const EdgeInsets.all(16),
       children: [
         if (!t.published)
-          const Padding(
+          Padding(
             padding: EdgeInsets.only(bottom: 10),
             child: Text(
               "Working draft — the office has not published this timetable yet.",
-              style: TextStyle(fontSize: 12, color: AppColors.warning),
+              style: AppText.bodySmall.copyWith(color: AppColors.warning),
             ),
           ),
         if (t.substitutions.isNotEmpty) ...[
-          const Text(
+          Text(
             "This week's arrangements",
-            style: TextStyle(
-              fontSize: 13.5,
-              fontWeight: FontWeight.w600,
-              color: AppColors.ink,
-            ),
+            style: AppText.bodyMediumInk.copyWith(fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 6),
           for (final s in t.substitutions)
@@ -88,17 +84,13 @@ class _WeekState extends State<_Week> {
                 ),
                 title: Text(
                   "${formatDateLabel(s.date)} · Period ${s.periodNo}${s.startTime.isEmpty ? "" : " · ${s.startTime}"}",
-                  style: const TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.ink,
-                  ),
+                  style: AppText.labelLargeInk,
                 ),
                 subtitle: Text(
                   s.role == "substitute"
                       ? "You cover ${s.className} ${s.sectionName} ${s.subjectName}${s.otherTeacherName.isEmpty ? "" : " for ${s.otherTeacherName}"}"
                       : "${s.className} ${s.sectionName} ${s.subjectName} — ${s.otherTeacherName.isEmpty ? "left free" : "covered by ${s.otherTeacherName}"}",
-                  style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                  style: AppText.bodySmallMuted,
                 ),
               ),
             ),
@@ -132,7 +124,7 @@ class _WeekState extends State<_Week> {
               padding: EdgeInsets.all(16),
               child: Text(
                 "No periods this day.",
-                style: TextStyle(fontSize: 12.5, color: AppColors.muted),
+                style: AppText.bodySmallMuted,
               ),
             ),
           )
@@ -153,22 +145,20 @@ class _WeekState extends State<_Week> {
                 ),
                 title: Text(
                   "${p.subjectName.isEmpty ? "Period" : p.subjectName} — ${p.className} ${p.sectionName}",
-                  style: const TextStyle(
-                    fontSize: 13,
+                  style: AppText.bodyMediumInk.copyWith(
                     fontWeight: FontWeight.w600,
-                    color: AppColors.ink,
                   ),
                 ),
                 subtitle: Text(
                   p.startTime.isEmpty ? "" : "${p.startTime} – ${p.endTime}",
-                  style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                  style: AppText.bodySmallMuted,
                 ),
               ),
             ),
         const SizedBox(height: 8),
         Text(
           "${t.periodCount} periods a week",
-          style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
+          style: AppText.labelMediumMuted,
         ),
       ],
     );

@@ -109,7 +109,7 @@ class _Board extends StatelessWidget {
               "${p.classLabel} · pass for ${p.requestedPickupTime.isEmpty ? p.date : p.requestedPickupTime}"
               "${p.reason.isEmpty ? "" : " · ${p.reason}"}"
               "${p.requestedBy.isEmpty ? "" : "\nApproved after ${p.requestedBy} raised it"}",
-              style: const TextStyle(fontSize: 12.5, color: AppColors.muted),
+              style: AppText.bodySmallMuted,
             ),
             const SizedBox(height: 12),
             TextField(
@@ -173,12 +173,11 @@ class _Board extends StatelessWidget {
                       ? "Nobody on campus right now."
                       : "${board.onCampus.length} on campus"
                             "${board.departedToday.isEmpty ? "" : " · ${board.departedToday.length} left today"}",
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
+                  style: AppText.bodyMedium.copyWith(
                     color: board.onCampus.isEmpty
                         ? ModuleTone.green.foreground
                         : ModuleTone.blue.foreground,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
@@ -236,11 +235,7 @@ class _Heading extends StatelessWidget {
     padding: const EdgeInsets.only(bottom: 6),
     child: Text(
       text,
-      style: const TextStyle(
-        fontSize: 13,
-        fontWeight: FontWeight.w600,
-        color: AppColors.ink,
-      ),
+      style: AppText.bodyMediumInk.copyWith(fontWeight: FontWeight.w600),
     ),
   );
 }
@@ -273,11 +268,7 @@ class _VisitorCard extends StatelessWidget {
         ),
         title: Text(
           v.visitorName,
-          style: const TextStyle(
-            fontSize: 13.5,
-            fontWeight: FontWeight.w600,
-            color: AppColors.ink,
-          ),
+          style: AppText.bodyMediumInk.copyWith(fontWeight: FontWeight.w600),
         ),
         subtitle: Text(
           [
@@ -286,7 +277,7 @@ class _VisitorCard extends StatelessWidget {
             if (v.personToMeet.isNotEmpty) "To meet ${v.personToMeet}",
             if (v.visitorNo.isNotEmpty) "${v.visitorNo} · ${v.mobile}",
           ].join("\n"),
-          style: const TextStyle(fontSize: 12, color: AppColors.muted),
+          style: AppText.bodySmallMuted,
         ),
         isThreeLine: true,
         trailing: onCheckOut == null
@@ -329,11 +320,7 @@ class _PassCard extends StatelessWidget {
         ),
         title: Text(
           p.studentName.isEmpty ? p.studentId : p.studentName,
-          style: const TextStyle(
-            fontSize: 13.5,
-            fontWeight: FontWeight.w600,
-            color: AppColors.ink,
-          ),
+          style: AppText.bodyMediumInk.copyWith(fontWeight: FontWeight.w600),
         ),
         subtitle: Text(
           [
@@ -347,14 +334,11 @@ class _PassCard extends StatelessWidget {
               "Collected by ${p.pickedUpByName}"
                   "${p.actualPickupTime.isEmpty ? "" : " at ${formatTimeLabel(p.actualPickupTime)}"}",
           ].join("\n"),
-          style: const TextStyle(fontSize: 12, color: AppColors.muted),
+          style: AppText.bodySmallMuted,
         ),
         isThreeLine: true,
         trailing: canRelease && p.releasable
-            ? FilledButton(
-                onPressed: onRelease,
-                child: const Text("Hand over"),
-              )
+            ? FilledButton(onPressed: onRelease, child: const Text("Hand over"))
             : null,
       ),
     );
@@ -410,7 +394,9 @@ class _CheckInSheetState extends State<_CheckInSheet> {
       _error = null;
     });
     try {
-      final hit = await widget.api.lookupGateVisitor(m.substring(m.length - 10));
+      final hit = await widget.api.lookupGateVisitor(
+        m.substring(m.length - 10),
+      );
       if (!mounted) return;
       setState(() {
         _lookup = hit;
@@ -509,12 +495,10 @@ class _CheckInSheetState extends State<_CheckInSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
+            Text(
               "Check a visitor in",
-              style: TextStyle(
-                fontSize: 15,
+              style: AppText.titleSmallInk.copyWith(
                 fontWeight: FontWeight.w700,
-                color: AppColors.ink,
               ),
             ),
             const SizedBox(height: 12),
@@ -556,9 +540,7 @@ class _CheckInSheetState extends State<_CheckInSheet> {
                     children: [
                       Text(
                         "${open.visitorName} is already on campus since ${formatTimeLabel(open.inTime)}.",
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
+                        style: AppText.labelLarge.copyWith(
                           color: ModuleTone.amber.foreground,
                         ),
                       ),
@@ -576,11 +558,7 @@ class _CheckInSheetState extends State<_CheckInSheet> {
               const SizedBox(height: 10),
               Text(
                 _linkedTo,
-                style: const TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.primary,
-                ),
+                style: AppText.labelLarge.copyWith(color: AppColors.primary),
               ),
             ],
             const SizedBox(height: 10),
@@ -592,7 +570,9 @@ class _CheckInSheetState extends State<_CheckInSheet> {
             const SizedBox(height: 10),
             DropdownButtonFormField<String>(
               initialValue: _purpose.isEmpty ? null : _purpose,
-              decoration: const InputDecoration(labelText: "Why are they here?"),
+              decoration: const InputDecoration(
+                labelText: "Why are they here?",
+              ),
               items: [
                 for (final p in widget.purposes)
                   DropdownMenuItem(value: p.value, child: Text(p.label)),
@@ -619,7 +599,7 @@ class _CheckInSheetState extends State<_CheckInSheet> {
               const SizedBox(height: 10),
               Text(
                 _error!,
-                style: const TextStyle(fontSize: 12.5, color: AppColors.danger),
+                style: AppText.bodySmall.copyWith(color: AppColors.danger),
               ),
             ],
             const SizedBox(height: 16),

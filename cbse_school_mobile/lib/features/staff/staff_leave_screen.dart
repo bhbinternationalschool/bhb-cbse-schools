@@ -33,13 +33,9 @@ class StaffLeaveScreen extends StatelessWidget {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
         children: [
-          const Text(
+          Text(
             "Balance this year",
-            style: TextStyle(
-              fontSize: 13.5,
-              fontWeight: FontWeight.w600,
-              color: AppColors.ink,
-            ),
+            style: AppText.bodyMediumInk.copyWith(fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 8),
           Wrap(
@@ -61,45 +57,31 @@ class StaffLeaveScreen extends StatelessWidget {
                     children: [
                       Text(
                         "${b.typeName} (${b.typeCode})",
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppColors.muted,
-                        ),
+                        style: AppText.bodySmallMuted,
                       ),
                       const SizedBox(height: 2),
                       Text(
                         b.unlimited
                             ? "No cap"
                             : "${_n(b.remaining)} left of ${_n(b.allotted)}",
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
+                        style: AppText.titleSmall.copyWith(
                           color: b.paid
                               ? ModuleTone.teal.foreground
                               : ModuleTone.gray.foreground,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                       if (!b.paid)
-                        const Text(
-                          "Unpaid",
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: AppColors.muted,
-                          ),
-                        ),
+                        const Text("Unpaid", style: AppText.labelMediumMuted),
                     ],
                   ),
                 ),
             ],
           ),
           const SizedBox(height: 18),
-          const Text(
+          Text(
             "My requests",
-            style: TextStyle(
-              fontSize: 13.5,
-              fontWeight: FontWeight.w600,
-              color: AppColors.ink,
-            ),
+            style: AppText.bodyMediumInk.copyWith(fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 8),
           if (info.requests.isEmpty)
@@ -108,7 +90,7 @@ class StaffLeaveScreen extends StatelessWidget {
                 padding: EdgeInsets.all(14),
                 child: Text(
                   "No leave applied yet this year.",
-                  style: TextStyle(fontSize: 12.5, color: AppColors.muted),
+                  style: AppText.bodySmallMuted,
                 ),
               ),
             ),
@@ -126,10 +108,8 @@ class StaffLeaveScreen extends StatelessWidget {
                             r.fromDate == r.toDate
                                 ? "${formatDateLabel(r.fromDate)}${r.halfDay ? " · half day" : ""}"
                                 : "${formatDateLabel(r.fromDate)} – ${formatDateLabel(r.toDate)}",
-                            style: const TextStyle(
-                              fontSize: 13.5,
+                            style: AppText.bodyMediumInk.copyWith(
                               fontWeight: FontWeight.w600,
-                              color: AppColors.ink,
                             ),
                           ),
                         ),
@@ -139,29 +119,18 @@ class StaffLeaveScreen extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(
                       "${r.typeName} · ${_n(r.days)} day${r.days == 1 ? "" : "s"}",
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.muted,
-                      ),
+                      style: AppText.bodySmallMuted,
                     ),
                     const SizedBox(height: 6),
                     Text(
                       r.reason,
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        color: AppColors.ink,
-                        height: 1.4,
-                      ),
+                      style: AppText.bodySmallInk.copyWith(height: 1.4),
                     ),
                     if (r.decisionNote.isNotEmpty) ...[
                       const SizedBox(height: 6),
                       Text(
                         "${r.decidedBy.isEmpty ? "School" : r.decidedBy}: ${r.decisionNote}",
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppColors.muted,
-                          height: 1.4,
-                        ),
+                        style: AppText.bodySmallMuted.copyWith(height: 1.4),
                       ),
                     ],
                     if (r.isPending)
@@ -262,11 +231,7 @@ class LeaveStatusChip extends StatelessWidget {
       ),
       child: Text(
         label ?? status,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-          color: tone.foreground,
-        ),
+        style: AppText.labelMedium.copyWith(color: tone.foreground),
       ),
     );
   }
@@ -364,14 +329,7 @@ class _ApplyLeaveSheetState extends State<_ApplyLeaveSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
-              "Apply for leave",
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: AppColors.ink,
-              ),
-            ),
+            const Text("Apply for leave", style: AppText.titleMediumInk),
             const SizedBox(height: 12),
             Wrap(
               spacing: 8,
@@ -389,7 +347,7 @@ class _ApplyLeaveSheetState extends State<_ApplyLeaveSheet> {
                 padding: const EdgeInsets.only(top: 6),
                 child: Text(
                   "${bal.typeName}${bal.unlimited ? "" : " · ${_n(bal.remaining)} day${bal.remaining == 1 ? "" : "s"} left"}${bal.maxDaysPerRequest > 0 ? " · max ${_n(bal.maxDaysPerRequest)} per application" : ""}${bal.paid ? "" : " · unpaid"}",
-                  style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                  style: AppText.bodySmallMuted,
                 ),
               ),
             const SizedBox(height: 12),
@@ -422,7 +380,7 @@ class _ApplyLeaveSheetState extends State<_ApplyLeaveSheet> {
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               dense: true,
-              title: const Text("Half day", style: TextStyle(fontSize: 13)),
+              title: const Text("Half day", style: AppText.bodyMedium),
               value: _halfDay,
               onChanged: (v) => setState(() => _halfDay = v),
             ),
@@ -441,10 +399,7 @@ class _ApplyLeaveSheetState extends State<_ApplyLeaveSheet> {
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(
                   _error!,
-                  style: const TextStyle(
-                    color: AppColors.danger,
-                    fontSize: 12.5,
-                  ),
+                  style: AppText.bodySmall.copyWith(color: AppColors.danger),
                 ),
               ),
             const SizedBox(height: 14),

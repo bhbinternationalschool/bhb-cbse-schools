@@ -96,10 +96,8 @@ class _RequestCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     "${r.studentName} · ${r.classLabel}",
-                    style: const TextStyle(
-                      fontSize: 14,
+                    style: AppText.bodyLargeInk.copyWith(
                       fontWeight: FontWeight.w600,
-                      color: AppColors.ink,
                     ),
                   ),
                 ),
@@ -114,10 +112,9 @@ class _RequestCard extends StatelessWidget {
                   ),
                   child: Text(
                     chip,
-                    style: TextStyle(
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w700,
+                    style: AppText.labelSmall.copyWith(
                       color: tone.foreground,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
@@ -126,25 +123,21 @@ class _RequestCard extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               "${formatDateLabel(r.createdAt.split("T").first)} · ${r.contactName}",
-              style: const TextStyle(fontSize: 12, color: AppColors.muted),
+              style: AppText.bodySmallMuted,
             ),
             const SizedBox(height: 8),
             Text(
               "Pickup: ${[r.pickupAddress, r.locality, r.landmark].where((x) => x.isNotEmpty).join(", ")}"
               "${r.preferredStop.isNotEmpty ? "\nPrefers stop: ${r.preferredStop}" : ""}"
               "${r.note.isNotEmpty ? "\n“${r.note}”" : ""}",
-              style: const TextStyle(
-                fontSize: 13,
-                color: AppColors.ink,
-                height: 1.4,
-              ),
+              style: AppText.bodyMediumInk.copyWith(height: 1.4),
             ),
             if (r.handlingNote.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 6),
                 child: Text(
                   "Office: ${r.handlingNote} — ${r.handledBy}",
-                  style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                  style: AppText.bodySmallMuted,
                 ),
               ),
             const SizedBox(height: 8),

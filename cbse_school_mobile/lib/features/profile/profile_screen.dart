@@ -75,8 +75,7 @@ class ProfileScreen extends StatelessWidget {
                 leading: _Avatar(child: child),
                 title: Text(
                   child.fullName,
-                  style: const TextStyle(
-                    fontSize: 14,
+                  style: AppText.bodyLarge.copyWith(
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -84,12 +83,11 @@ class ProfileScreen extends StatelessWidget {
                   "${child.classLabel} · Adm. ${child.admissionNo}\n"
                   "${child.requiredMissing == 0 ? "All required documents in" : "${child.requiredMissing} required document${child.requiredMissing == 1 ? "" : "s"} to upload"}"
                   " · profile ${child.completeness}% complete",
-                  style: TextStyle(
-                    fontSize: 11.5,
+                  style: AppText.labelMedium.copyWith(
+                    height: 1.4,
                     color: child.requiredMissing == 0
                         ? AppColors.muted
                         : AppColors.warning,
-                    height: 1.4,
                   ),
                 ),
                 isThreeLine: true,
@@ -198,19 +196,12 @@ class _HouseholdFormState extends State<_HouseholdForm> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
-              "Update family details",
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: AppColors.ink,
-              ),
-            ),
+            const Text("Update family details", style: AppText.titleMediumInk),
             const SizedBox(height: 4),
             Text(
               "Registered mobile ${widget.profile.household["mobile"]} is your sign-in and "
               "can only be changed at the office.",
-              style: const TextStyle(fontSize: 12, color: AppColors.muted),
+              style: AppText.bodySmallMuted,
             ),
             const SizedBox(height: 12),
             for (final k in widget.profile.editableHouseholdFields) ...[
@@ -287,16 +278,12 @@ class _Row extends StatelessWidget {
         children: [
           SizedBox(
             width: 128,
-            child: Text(
-              label,
-              style: const TextStyle(fontSize: 12, color: AppColors.muted),
-            ),
+            child: Text(label, style: AppText.bodySmallMuted),
           ),
           Expanded(
             child: Text(
               value.isEmpty ? "—" : value,
-              style: TextStyle(
-                fontSize: 13,
+              style: AppText.bodyMedium.copyWith(
                 color: value.isEmpty ? AppColors.muted : AppColors.ink,
               ),
             ),
@@ -318,11 +305,7 @@ class _SectionTitle extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
       child: Text(
         text,
-        style: const TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-          color: AppColors.ink,
-        ),
+        style: AppText.bodyLargeInk.copyWith(fontWeight: FontWeight.w600),
       ),
     );
   }

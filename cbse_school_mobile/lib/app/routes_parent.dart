@@ -16,30 +16,24 @@ List<RouteBase> parentRoutes(
   ApiClient api,
   AppConfig config,
   Future<void> Function() onSignedIn,
-) =>
-    [
-      GoRoute(
-        path: "/login",
-        builder: (context, state) => LoginScreen(
-          config: config,
-          api: api,
-          onSignedIn: onSignedIn,
-        ),
-      ),
-      GoRoute(
-        path: "/home",
-        builder: (context, state) => HomeScreen(
-          config: config,
-          api: api,
-          onLogout: () => context.go("/login"),
-          openRoute: state.uri.queryParameters["open"],
-        ),
-      ),
-      GoRoute(
-        path: "/wrong-app",
-        builder: (context, state) => WrongAppScreen(
-          audience: AppAudience.parent,
-          api: api,
-        ),
-      ),
-    ];
+) => [
+  GoRoute(
+    path: "/login",
+    builder: (context, state) =>
+        LoginScreen(config: config, api: api, onSignedIn: onSignedIn),
+  ),
+  GoRoute(
+    path: "/home",
+    builder: (context, state) => HomeScreen(
+      config: config,
+      api: api,
+      onLogout: () => context.go("/login"),
+      openRoute: state.uri.queryParameters["open"],
+    ),
+  ),
+  GoRoute(
+    path: "/wrong-app",
+    builder: (context, state) =>
+        WrongAppScreen(audience: AppAudience.parent, api: api),
+  ),
+];

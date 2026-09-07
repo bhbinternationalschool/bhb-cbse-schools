@@ -71,10 +71,8 @@ class AppCrossfade extends StatelessWidget {
       duration: duration,
       switchInCurve: AppMotion.enter,
       switchOutCurve: AppMotion.exit,
-      layoutBuilder: (current, previous) => Stack(
-        alignment: alignment,
-        children: [...previous, ?current],
-      ),
+      layoutBuilder: (current, previous) =>
+          Stack(alignment: alignment, children: [...previous, ?current]),
       transitionBuilder: (child, animation) => FadeTransition(
         opacity: animation,
         child: SlideTransition(
