@@ -1203,7 +1203,74 @@ export function noteCommandUse(
   return { allowed: true, history: recent };
 }
 
+// ─── Answering a list with a number ────────────────────────────────────
+
+/**
+ * One row of a list the desk printed, and what typing its number does.
+ *
+ * Every list the desk shows ends in the same question — "and now which
+ * one?" — and until now every list answered it differently: the student
+ * matches wanted a full name, the section options wanted the label typed
+ * back, the PTM slots wanted a time, the defaulters list wanted a name.
+ * A number is the one answer that works for all of them and cannot be
+ * mistyped into meaning something else.
+ *
+ * `n` is the number the reader actually SEES on that row, which is not
+ * always its position: a class list is already numbered by roll, and
+ * making a teacher count rows when the roll is printed right there would
+ * be worse than not numbering it at all.
+ */
+export type PickOption = {
+  n: number;
+  label: string;
+  /** The command to run for this row. */
+  commandId: string;
+  /** Resolution pins — set, the desk skips matching entirely. */
+  studentId?: string;
+  /** The whole match, so the re-run needs no second lookup to rebuild it. */
+  section?: SectionMatch;
+  sectionId?: string;
+  classId?: string;
+  routeId?: string;
+  /** A PTM slot's start time, e.g. "10:30". */
+  slotAt?: string;
+  /** Re-runs against this text instead of the original message. */
+  rerunText?: string;
+  /** Help only: describe the command rather than run it. */
+  describe?: boolean;
+};
+
+/**
+ * The numbers a list of students will be answered by.
+ *
+ * Their roll numbers when every row has one and they do not repeat —
+ * which is the case for any single section, and is the number already
+ * printed on the row. Otherwise a plain 1..n, because a list spanning
+ * sections has two children on roll 4.
+ */
+export function studentPickNumbers(rows: { rollNo?: string }[]): number[] {
+  const rolls = rows.map((r) => parseInt(String(r.rollNo ?? ""), 10));
+  const usable =
+    rolls.length > 0 &&
+    rolls.every((n) => Number.isFinite(n) && n > 0) &&
+    new Set(rolls).size === rolls.length;
+  return usable ? rolls : rows.map((_, i) => i + 1);
+}
+
+/** The line that tells the reader a number will work. */
+export function pickHint(options: PickOption[], what: string): string {
+  if (!options.length) return "";
+  const ns = options.map((o) => o.n);
+  const lo = Math.min(...ns);
+  const hi = Math.max(...ns);
+  return lo === hi
+    ? `Reply *${lo}* for ${what}.`
+    : `Reply with a number (*${lo}*–*${hi}*) for ${what}.`;
+}
+
 // ─── Reply formatting ──────────────────────────────────────────────────
+
+export type AbsentListRow = { rollNo: string; fullName: string; id?: string };
 
 export type AbsentListInput = {
   sectionLabel: string;
@@ -1211,10 +1278,10 @@ export type AbsentListInput = {
   todayIso: string;
   marked: boolean;
   total: number;
-  absent: { rollNo: string; fullName: string }[];
-  leave: { rollNo: string; fullName: string }[];
-  late: { rollNo: string; fullName: string }[];
-  halfDay: { rollNo: string; fullName: string }[];
+  absent: AbsentListRow[];
+  leave: AbsentListRow[];
+  late: AbsentListRow[];
+  halfDay: AbsentListRow[];
 };
 
 function fmtDate(iso: string, todayIso: string): string {
@@ -1222,12 +1289,50 @@ function fmtDate(iso: string, todayIso: string): string {
   return shortDate(iso);
 }
 
-function nameList(rows: { rollNo: string; fullName: string }[]): string {
+/**
+ * The order an absent list is printed in — by roll, as a register reads.
+ *
+ * Exported through the two functions below rather than duplicated: the
+ * text the teacher sees and the numbers the desk will accept are derived
+ * from this one ordering, so they cannot drift apart. A list that offers
+ * "reply 7" and then resolves 7 to somebody else is worse than a list
+ * that offers nothing.
+ */
+function absentRowsInOrder(rows: AbsentListRow[]): AbsentListRow[] {
   return rows
     .slice()
-    .sort((a, b) => (parseInt(a.rollNo, 10) || 9999) - (parseInt(b.rollNo, 10) || 9999))
+    .sort((a, b) => (parseInt(a.rollNo, 10) || 9999) - (parseInt(b.rollNo, 10) || 9999));
+}
+
+function nameList(rows: AbsentListRow[]): string {
+  return absentRowsInOrder(rows)
     .map((r) => (r.rollNo ? `${r.rollNo}. ${r.fullName}` : r.fullName))
     .join("\n");
+}
+
+/** Every child named in an absent list, and the number that picks them. */
+export function absentListPicks(input: AbsentListInput): PickOption[] {
+  const all = [
+    ...absentRowsInOrder(input.absent),
+    ...absentRowsInOrder(input.leave),
+    ...absentRowsInOrder(input.late),
+    ...absentRowsInOrder(input.halfDay),
+  ];
+  // Only when the printed roll is the number: no roll, or a roll that
+  // repeats across the groups, and there is nothing unambiguous to type.
+  const rolls = all.map((r) => parseInt(r.rollNo, 10));
+  const usable =
+    all.length > 0 &&
+    rolls.every((n) => Number.isFinite(n) && n > 0) &&
+    new Set(rolls).size === rolls.length;
+  if (!usable) return [];
+  return all.map((r, i) => ({
+    n: rolls[i]!,
+    label: r.fullName,
+    commandId: "student_details",
+    studentId: r.id,
+    rerunText: r.fullName,
+  }));
 }
 
 export function formatAbsentListReply(input: AbsentListInput): string {
@@ -1258,7 +1363,35 @@ export function formatAbsentListReply(input: AbsentListInput): string {
   if (input.leave.length) parts.push(`\n*On leave*\n${nameList(input.leave)}`);
   if (input.late.length) parts.push(`\n*Late*\n${nameList(input.late)}`);
   if (input.halfDay.length) parts.push(`\n*Half day*\n${nameList(input.halfDay)}`);
+  const picks = absentListPicks(input);
+  if (picks.length) {
+    parts.push("", pickHint(picks, "that child's details") + " Or send a name.");
+  }
   return parts.join("\n");
+}
+
+/** The sections offered by a "which section?" reply, numbered as printed. */
+export function sectionProblemPicks(
+  reason: "no_class" | "no_section" | "ambiguous" | "not_allowed",
+  options: SectionMatch[],
+  commandId: string,
+): PickOption[] {
+  // "not_allowed" lists the sections you DO hold, as information. Offering
+  // a number there would answer a question nobody asked — the command was
+  // about a different class.
+  if (reason === "not_allowed" || reason === "no_class") return [];
+  return options.map((o, i) => ({
+    n: i + 1,
+    label: o.label,
+    commandId,
+    section: o,
+    sectionId: o.sectionId,
+    classId: o.classId,
+  }));
+}
+
+function numberedLabels(options: SectionMatch[]): string {
+  return options.map((o, i) => `*${i + 1}.* ${o.label}`).join("\n");
 }
 
 export function formatSectionProblem(
@@ -1271,10 +1404,10 @@ export function formatSectionProblem(
       return `I couldn't find a class matching "${asked}". Try the class as it appears in the ERP, e.g. 5A or VIII B.`;
     case "no_section":
       return options.length
-        ? `Which section? ${options.map((o) => o.label).join(", ")}`
+        ? `Which section?\n${numberedLabels(options)}\n\nReply with the number, or the section — e.g. _${options[0]!.label}_.`
         : `No active section found for "${asked}".`;
     case "ambiguous":
-      return `Which one did you mean? ${options.map((o) => o.label).join(", ")}`;
+      return `Which one did you mean?\n${numberedLabels(options)}\n\nReply with the number, or the section — e.g. _${options[0]!.label}_.`;
     case "not_allowed":
       return `You can ask about your own sections only${options.length ? `: ${options.map((o) => o.label).join(", ")}` : ""}. Ask the office or principal for other classes.`;
   }
@@ -1300,6 +1433,39 @@ const HELP_GROUPS: { modules: string[]; label: string }[] = [
   { modules: ["home", "settings"], label: "School overview" },
 ];
 
+/**
+ * Every command the person holds, grouped by the part of the ERP it
+ * touches and numbered straight through.
+ *
+ * Grouped because a flat list of two dozen is a wall you read three lines
+ * of and abandon. Numbered straight through rather than restarting in
+ * each group, because "3" has to mean one thing.
+ */
+export function helpMenuCommands(commands: ErpCommandDef[]): ErpCommandDef[] {
+  const seen = new Set<string>();
+  const out: ErpCommandDef[] = [];
+  for (const g of HELP_GROUPS) {
+    for (const c of commands.filter((x) => g.modules.includes(x.module))) {
+      seen.add(c.id);
+      out.push(c);
+    }
+  }
+  // A command whose module nobody grouped still appears. A new command
+  // must never go missing from help because somebody forgot a label.
+  for (const c of commands) if (!seen.has(c.id)) out.push(c);
+  return out;
+}
+
+/** The help list's numbers, each one describing that command. */
+export function helpPicks(commands: ErpCommandDef[]): PickOption[] {
+  return helpMenuCommands(commands).map((c, i) => ({
+    n: i + 1,
+    label: c.title,
+    commandId: c.id,
+    describe: true,
+  }));
+}
+
 export function formatHelpReply(
   commands: ErpCommandDef[],
   displayName: string,
@@ -1308,26 +1474,25 @@ export function formatHelpReply(
   if (!commands.length) {
     return `${name}your role doesn't include any desk commands yet. Ask the office to check your role in Settings → Roles.`;
   }
-  const seen = new Set<string>();
-  const blocks: string[] = [];
+  const ordered = helpMenuCommands(commands);
+  const numberOf = new Map(ordered.map((c, i) => [c.id, i + 1]));
   const render = (c: ErpCommandDef): string => {
-    seen.add(c.id);
     // A write is flagged because it can reach a family. App-only is
     // flagged because typing it here would look like the desk ignored you.
     const tags = [
-      c.kind === "write" ? "✍️" : "",
+      c.kind === "write" ? " ✍️" : "",
       c.channels && !c.channels.includes("whatsapp") ? " _(app only)_" : "",
     ].join("");
-    return `${tags ? `${tags.trim()} ` : ""}${c.title}\n   _${c.examples[0]}_`;
+    return `*${numberOf.get(c.id)}.* ${c.title}${tags}\n   _${c.examples[0]}_`;
   };
+  const blocks: string[] = [];
+  const seen = new Set<string>();
   for (const g of HELP_GROUPS) {
     const mine = commands.filter((c) => g.modules.includes(c.module));
     if (!mine.length) continue;
+    for (const c of mine) seen.add(c.id);
     blocks.push(`*${g.label}*\n${mine.map(render).join("\n")}`);
   }
-  // Anything whose module is not in the list above still gets shown. A new
-  // command must never go missing from help just because nobody added it
-  // to a group.
   const rest = commands.filter((c) => !seen.has(c.id));
   if (rest.length) blocks.push(`*More*\n${rest.map(render).join("\n")}`);
   return [
@@ -1335,9 +1500,37 @@ export function formatHelpReply(
     "",
     blocks.join("\n\n"),
     "",
+    `Reply with a number (*1*–*${ordered.length}*) to see how that one works.`,
     "✍️ = sends something or changes a record. You always see a confirm card first, and nothing happens until you tap *Confirm*.",
-    "Type it the way you'd say it — Hindi, English or mixed. A small spelling mistake is fine.",
+    "Or just type it the way you'd say it — Hindi, English or mixed. A small spelling mistake is fine.",
   ].join("\n");
+}
+
+/**
+ * One command, explained — what a number typed at the help list gets you.
+ *
+ * All the examples rather than one, because the whole difficulty with a
+ * plain-language desk is knowing what phrasing it will accept, and a
+ * single example reads like the only accepted form.
+ */
+export function formatCommandHelpDetail(c: ErpCommandDef): string {
+  const lines = [`*${c.title}*`, c.description, "", "*Say it like this*"];
+  for (const ex of c.examples) lines.push(`_${ex}_`);
+  const needs = c.fields.filter((f) => f.required).map((f) => f.name);
+  if (needs.length) {
+    lines.push("", `Needs: ${needs.join(", ")}. I'll ask if you leave one out.`);
+  }
+  if (c.kind === "write") {
+    lines.push(
+      "",
+      "✍️ This one changes a record or sends a message. You see a confirm card first with exactly who is affected, and nothing happens until you tap *Confirm*.",
+    );
+  }
+  if (c.channels && !c.channels.includes("whatsapp")) {
+    lines.push("", "_This one works in the ERP app only, not on WhatsApp._");
+  }
+  lines.push("", "Send *help* for the full list.");
+  return lines.join("\n");
 }
 
 /** Owner-only pause switch: "commands off" / "commands on". */
@@ -2208,6 +2401,7 @@ export type DefaulterRow = {
   overdueDays: number;
   earliestDueOn: string;
   onPlan: boolean;
+  studentId?: string;
 };
 
 export type ClassDefaultersInput = {
@@ -2220,6 +2414,43 @@ export type ClassDefaultersInput = {
   formatInr: (paise: number) => string;
 };
 
+const DEFAULTERS_SHOWN = 30;
+
+/**
+ * The order a defaulters list prints in: biggest debt first, and grouped
+ * by section for a whole class. Both the text and the numbers come from
+ * here, so the number offered is always the number resolved.
+ */
+function defaultersInOrder(input: ClassDefaultersInput): DefaulterRow[] {
+  const sorted = [...input.rows].sort(
+    (a, b) => b.overdueAmountPaise - a.overdueAmountPaise || b.overdueDays - a.overdueDays,
+  );
+  if (!input.wholeClass) return sorted.slice(0, DEFAULTERS_SHOWN);
+  const bySection = new Map<string, DefaulterRow[]>();
+  for (const r of sorted) bySection.set(r.sectionLabel, [...(bySection.get(r.sectionLabel) ?? []), r]);
+  const out: DefaulterRow[] = [];
+  for (const [, rows] of [...bySection.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    for (const r of rows) {
+      if (out.length >= DEFAULTERS_SHOWN) break;
+      out.push(r);
+    }
+  }
+  return out;
+}
+
+/** The children on a defaulters list, and the number that picks them. */
+export function classDefaultersPicks(input: ClassDefaultersInput): PickOption[] {
+  const shown = defaultersInOrder(input);
+  const ns = studentPickNumbers(shown);
+  return shown.map((r, i) => ({
+    n: ns[i]!,
+    label: r.fullName,
+    commandId: "student_fees",
+    studentId: r.studentId,
+    rerunText: r.fullName,
+  }));
+}
+
 export function formatClassDefaultersReply(input: ClassDefaultersInput): string {
   const inr = input.formatInr;
   const lines: string[] = [`*${input.title}* · defaulters · ${input.todayIso === input.todayIso ? "today" : input.todayIso}`];
@@ -2230,34 +2461,44 @@ export function formatClassDefaultersReply(input: ClassDefaultersInput): string 
   }
   const total = input.rows.reduce((s, r) => s + r.overdueAmountPaise, 0);
   lines.push(`${input.rows.length} student${input.rows.length === 1 ? "" : "s"} · *${inr(total)}* overdue`);
-  const sorted = [...input.rows].sort(
-    (a, b) => b.overdueAmountPaise - a.overdueAmountPaise || b.overdueDays - a.overdueDays,
-  );
-  const cap = 30;
-  const row = (r: DefaulterRow) => {
+  const shown = defaultersInOrder(input);
+  const ns = studentPickNumbers(shown);
+  // The number is printed once, at the front. Where it is not the roll —
+  // a whole class, where roll 4 exists in every section — the roll moves
+  // into the detail rather than sitting next to a different number and
+  // inviting the wrong one to be typed.
+  const asRoll = shown.every((r, i) => parseInt(r.rollNo, 10) === ns[i]);
+  const row = (r: DefaulterRow, i: number) => {
     const since = r.earliestDueOn ? shortDate(r.earliestDueOn) : "";
-    return `${r.rollNo ? `${r.rollNo}. ` : ""}${r.fullName}  ${inr(r.overdueAmountPaise)} · ${r.overdueDays}d${since ? ` (${since})` : ""}${r.onPlan ? " · plan" : ""}`;
+    const name = asRoll || !r.rollNo ? r.fullName : `${r.fullName} (roll ${r.rollNo})`;
+    return `*${ns[i]}.* ${name}  ${inr(r.overdueAmountPaise)} · ${r.overdueDays}d${since ? ` (${since})` : ""}${r.onPlan ? " · plan" : ""}`;
   };
   if (input.wholeClass) {
+    let i = 0;
     const bySection = new Map<string, DefaulterRow[]>();
-    for (const r of sorted) bySection.set(r.sectionLabel, [...(bySection.get(r.sectionLabel) ?? []), r]);
-    let shown = 0;
+    for (const r of shown) bySection.set(r.sectionLabel, [...(bySection.get(r.sectionLabel) ?? []), r]);
     for (const [label, rows] of [...bySection.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
       const sub = rows.reduce((s, r) => s + r.overdueAmountPaise, 0);
       lines.push("", `*${label}* · ${rows.length} · ${inr(sub)}`);
       for (const r of rows) {
-        if (shown >= cap) break;
-        lines.push(row(r));
-        shown++;
+        lines.push(row(r, i));
+        i += 1;
       }
     }
-    if (sorted.length > cap) lines.push(`+${sorted.length - cap} more — open Fees → Defaulters for the full list.`);
   } else {
     lines.push("");
-    for (const r of sorted.slice(0, cap)) lines.push(row(r));
-    if (sorted.length > cap) lines.push(`+${sorted.length - cap} more — open Fees → Defaulters for the full list.`);
+    shown.forEach((r, idx) => lines.push(row(r, idx)));
   }
-  lines.push("", "Reply with a name for the full ledger.");
+  if (input.rows.length > shown.length) {
+    lines.push(`+${input.rows.length - shown.length} more — open Fees → Defaulters for the full list.`);
+  }
+  const picks = classDefaultersPicks(input);
+  lines.push(
+    "",
+    picks.length
+      ? `${pickHint(picks, "that child's ledger")} Or send a name.`
+      : "Reply with a name for the full ledger.",
+  );
   return lines.join("\n");
 }
 
@@ -2612,6 +2853,7 @@ export type PendingLeaveRow = {
   reason: string;
   requestedAt: string; // ISO
   approver: string;
+  studentId?: string;
 };
 
 export type PendingLeavesInput = {
@@ -2631,6 +2873,31 @@ function agoLabel(iso: string, todayIso: string): string {
   return `${days}d ago`;
 }
 
+/** Oldest first, and capped — the order the reply prints and numbers by. */
+const PENDING_LEAVES_SHOWN = 15;
+
+function pendingLeavesInOrder(input: PendingLeavesInput): PendingLeaveRow[] {
+  return [...input.rows]
+    .sort((a, b) => a.requestedAt.localeCompare(b.requestedAt))
+    .slice(0, PENDING_LEAVES_SHOWN);
+}
+
+/**
+ * The children on a pending-leave list, and the number that picks them.
+ *
+ * Position, not roll: this list spans classes, so two children on roll 4
+ * is the normal case rather than the exception.
+ */
+export function pendingLeavesPicks(input: PendingLeavesInput): PickOption[] {
+  return pendingLeavesInOrder(input).map((r, i) => ({
+    n: i + 1,
+    label: r.studentName,
+    commandId: "student_details",
+    studentId: r.studentId,
+    rerunText: r.studentName,
+  }));
+}
+
 export function formatPendingLeavesReply(input: PendingLeavesInput): string {
   const where =
     input.scope === "school" ? "school" : input.scope === "section" ? input.scopeLabel || "section" : "your sections";
@@ -2639,8 +2906,8 @@ export function formatPendingLeavesReply(input: PendingLeavesInput): string {
     lines.push("Nothing waiting for approval. ✅");
   } else {
     lines.push(`${input.rows.length} waiting · oldest first`);
-    const sorted = [...input.rows].sort((a, b) => a.requestedAt.localeCompare(b.requestedAt));
-    for (const r of sorted.slice(0, 15)) {
+    const shown = pendingLeavesInOrder(input);
+    shown.forEach((r, i) => {
       const span =
         r.fromDate === r.toDate
           ? shortDate(r.fromDate)
@@ -2648,12 +2915,16 @@ export function formatPendingLeavesReply(input: PendingLeavesInput): string {
       const reason = r.reason.trim();
       lines.push(
         "",
-        `*${r.studentName}* · ${r.classLabel}${r.rollNo ? ` · roll ${r.rollNo}` : ""}`,
+        `*${i + 1}.* *${r.studentName}* · ${r.classLabel}${r.rollNo ? ` · roll ${r.rollNo}` : ""}`,
         `${span} · ${r.typeLabel}${reason ? ` · ${reason.length > 60 ? `${reason.slice(0, 57).trimEnd()}…` : reason}` : ""}`,
         `asked ${agoLabel(r.requestedAt, input.todayIso)} · approver: ${r.approver}`,
       );
+    });
+    if (input.rows.length > PENDING_LEAVES_SHOWN) {
+      lines.push("", `+${input.rows.length - PENDING_LEAVES_SHOWN} more`);
     }
-    if (sorted.length > 15) lines.push("", `+${sorted.length - 15} more`);
+    const picks = pendingLeavesPicks(input);
+    if (picks.length) lines.push("", pickHint(picks, "that child's details"));
   }
   if (input.approvedToday) {
     lines.push("", `${input.approvedToday} student${input.approvedToday === 1 ? "" : "s"} on approved leave today.`);
@@ -2785,7 +3056,26 @@ export function formatBusManifestReply(input: BusManifestInput): string {
 
 export function formatRouteNotFound(asked: string, options: string[]): string {
   if (!options.length) return `No active bus route matches "${asked}".`;
-  return `Which route? ${options.join(", ")}`;
+  const rows = options.map((o, i) => `*${i + 1}.* ${o}`).join("\n");
+  return `Which route?\n${rows}\n\nReply with the number, or the route name.`;
+}
+
+/** The routes offered by a "which route?" reply, numbered as printed. */
+export function routePicks(
+  options: { id: string; label: string }[],
+  commandId: string,
+  originalText: string,
+): PickOption[] {
+  return options.map((o, i) => ({
+    n: i + 1,
+    label: o.label,
+    commandId,
+    // A delay notice carries its minutes in the original wording, so the
+    // re-run keeps that text and only swaps the route in — picking the
+    // route must not quietly turn "20 minute late" into no minutes.
+    rerunText: originalText,
+    routeId: o.id,
+  }));
 }
 
 // ─── Student details ───────────────────────────────────────────────────
@@ -3938,12 +4228,32 @@ export function formatPtmSlotPicker(input: {
       : `${input.eventName} · ${shortDate(input.eventDate)} — open times for ${input.studentName}:`,
   ];
   if (input.askedTime) lines.push(`Open times for ${input.studentName}:`);
-  for (const s of input.slots.slice(0, 12)) {
-    lines.push(`${s.startAt} · ${s.teacherName}${s.free > 1 ? ` (${s.free} places)` : ""}`);
+  const shown = input.slots.slice(0, PTM_SLOTS_SHOWN);
+  shown.forEach((s, i) => {
+    lines.push(`*${i + 1}.* ${s.startAt} · ${s.teacherName}${s.free > 1 ? ` (${s.free} places)` : ""}`);
+  });
+  if (input.slots.length > PTM_SLOTS_SHOWN) {
+    lines.push(`…and ${input.slots.length - PTM_SLOTS_SHOWN} more.`);
   }
-  if (input.slots.length > 12) lines.push(`…and ${input.slots.length - 12} more.`);
-  lines.push("", `Send the time, e.g. _book PTM for ${input.studentName} ${input.slots[0]!.startAt}_.`);
+  lines.push("", `Reply with the number, or the time — e.g. _${shown[0]!.startAt}_.`);
   return lines.join("\n");
+}
+
+const PTM_SLOTS_SHOWN = 12;
+
+/** The open PTM times, and the number that books each one. */
+export function ptmSlotPicks(
+  slots: { startAt: string }[],
+  studentName: string,
+): PickOption[] {
+  return slots.slice(0, PTM_SLOTS_SHOWN).map((s, i) => ({
+    n: i + 1,
+    label: s.startAt,
+    commandId: "book_ptm",
+    slotAt: s.startAt,
+    // The student is already decided; the number only chooses the time.
+    rerunText: `book PTM for ${studentName} ${s.startAt}`,
+  }));
 }
 
 export function formatBookPtmCard(input: {

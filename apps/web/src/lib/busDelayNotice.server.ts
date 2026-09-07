@@ -64,20 +64,35 @@ export function routeLabelOf(route: TransportRoute): string {
 export async function planBusDelayNotice(opts: {
   routeAsked: string;
   academicYearCode: string;
+  /** Set when a numbered pick already chose the route. */
+  routeId?: string;
 }): Promise<
   | { ok: true; plan: BusDelayPlan }
-  | { ok: false; error: "no_match" | "ambiguous"; options: string[] }
+  | {
+      ok: false;
+      error: "no_match" | "ambiguous";
+      options: string[];
+      /** The same routes with their ids, so a numbered pick is exact. */
+      optionRoutes: { id: string; label: string }[];
+    }
 > {
   await ensureSchoolMirrorHydrated();
   await ensureTransportHydratedServer();
   const state = loadTransport();
   const routes = (state.routes ?? []).filter((r) => r.isActive !== false);
-  const matches = matchTransportRoutes(routes, opts.routeAsked);
+  // An id means a number already answered "which route?" — matching on the
+  // label again would only reintroduce the ambiguity the number settled.
+  const pickedById = opts.routeId ? routes.filter((r) => r.id === opts.routeId) : [];
+  const matches = pickedById.length
+    ? pickedById
+    : matchTransportRoutes(routes, opts.routeAsked);
   if (matches.length !== 1) {
+    const offered = (matches.length ? matches : routes).slice(0, 10);
     return {
       ok: false,
       error: matches.length ? "ambiguous" : "no_match",
-      options: (matches.length ? matches : routes).slice(0, 10).map(routeLabelOf),
+      options: offered.map(routeLabelOf),
+      optionRoutes: offered.map((r) => ({ id: r.id, label: routeLabelOf(r) })),
     };
   }
   const route = matches[0]!;

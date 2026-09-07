@@ -15,7 +15,9 @@ import {
   ERP_COMMANDS,
   FOLLOW_UP_WINDOW_MINUTES,
   PICK_WINDOW_MINUTES,
+  absentListPicks,
   buildErpCommandSystemPrompt,
+  classDefaultersPicks,
   classKey,
   commandActorAllowed,
   complaintSubjectFrom,
@@ -38,6 +40,7 @@ import {
   formatCollectionReply,
   formatCommandDigest,
   formatCommandDigestOneLine,
+  formatCommandHelpDetail,
   formatDecideLeaveCard,
   formatFeeReminderCard,
   formatFreeTeachersReply,
@@ -60,6 +63,8 @@ import {
   formatTemplateMixLabel,
   fuzzyWordMatch,
   guessComplaintCategory,
+  helpMenuCommands,
+  helpPicks,
   homeworkTitleFrom,
   inFeeReminderQuietHours,
   isCorrectingAttendance,
@@ -97,13 +102,17 @@ import {
   parseStaffBroadcastQuery,
   parseStudentDetailsQuery,
   parseStudentFeesQuery,
+  pendingLeavesPicks,
   periodAtTime,
   pickIsFresh,
+  ptmSlotPicks,
   ptmTimeCandidates,
   renderTemplateBody,
   resolveClassOrSectionRef,
   resolveCommandDate,
   resolveSectionRef,
+  routePicks,
+  sectionProblemPicks,
   splitPostHomeworkRest,
   summarizeCommandAudit,
   templateForFamily,
@@ -492,7 +501,8 @@ const masters = {
         { classId: "c5", sectionId: "s5b", className: "V", sectionName: "B", label: "V B" },
       ],
       "5",
-    ).includes("V A, V B"),
+      // Numbered now, one per line, so a reply of "2" is unambiguous.
+    ).includes("*1.* V A\n*2.* V B"),
   );
   assert.ok(formatSectionProblem("not_allowed", [], "V A").includes("own sections"));
 }
@@ -798,12 +808,15 @@ const masters = {
   const whole = formatClassDefaultersReply({ title: "Class V", todayIso: "2026-09-05", wholeClass: true, rows, formatInr: inr });
   assert.ok(whole.startsWith("*Class V* · defaulters · today"), whole);
   assert.ok(whole.includes("3 students · *₹24,400* overdue"), whole);
-  assert.ok(whole.includes("*V A* · 2 · ₹12,400\n4. Aarav Sharma  ₹8,400 · 45d (22 Jul)\n11. Riya Verma  ₹4,000 · 26d (10 Aug)"), whole);
-  assert.ok(whole.includes("*V B* · 1 · ₹12,000\n9. Kabir Ali  ₹12,000 · 12d (24 Aug) · plan"), whole);
-  assert.ok(whole.endsWith("Reply with a name for the full ledger."));
+  // These three rolls happen not to collide across the sections, so the
+  // roll is still the number you reply with.
+  assert.ok(whole.includes("*V A* · 2 · ₹12,400\n*4.* Aarav Sharma  ₹8,400 · 45d (22 Jul)\n*11.* Riya Verma  ₹4,000 · 26d (10 Aug)"), whole);
+  assert.ok(whole.includes("*V B* · 1 · ₹12,000\n*9.* Kabir Ali  ₹12,000 · 12d (24 Aug) · plan"), whole);
+  assert.ok(whole.endsWith("Or send a name."), whole);
+  assert.match(whole, /Reply with a number/);
 
   const section = formatClassDefaultersReply({ title: "V A", todayIso: "2026-09-05", wholeClass: false, rows: rows.filter((r) => r.sectionLabel === "V A"), formatInr: inr });
-  assert.ok(section.includes("2 students · *₹12,400* overdue\n\n4. Aarav Sharma"), section);
+  assert.ok(section.includes("2 students · *₹12,400* overdue\n\n*4.* Aarav Sharma"), section);
   assert.ok(!section.includes("*V A* · 2"), "no per-section header for a single section");
 
   const limited = formatClassDefaultersReply({ title: "Class V", todayIso: "2026-09-05", wholeClass: true, rows: [], limitedTo: ["V A"], formatInr: inr });
@@ -1007,7 +1020,7 @@ const masters = {
   assert.ok(empty.includes("No students assigned to this route."), empty);
 
   assert.ok(formatRouteNotFound("7", []).includes('"7"'));
-  assert.ok(formatRouteNotFound("civil", ["Bus 3 · Civil Lines", "Bus 4 · Civil Court"]).includes("Bus 3 · Civil Lines, Bus 4 · Civil Court"));
+  assert.ok(formatRouteNotFound("civil", ["Bus 3 · Civil Lines", "Bus 4 · Civil Court"]).includes("*1.* Bus 3 · Civil Lines\n*2.* Bus 4 · Civil Court"));
 }
 
 // ─── student details reply ─────────────────────────────────────────────
@@ -1672,7 +1685,9 @@ const masters = {
   });
   assert.ok(picker.includes("Term PTM · 12 Sep — open times for Riya Verma:"), picker);
   assert.ok(picker.includes("10:30 · Sunita Sharma (2 places)"), picker);
-  assert.ok(picker.includes("book PTM for Riya Verma 10:00"), picker);
+  // The tail used to spell out a whole command to retype. The number is
+  // the shorter answer and the time still works.
+  assert.ok(picker.includes("Reply with the number, or the time — e.g. _10:00_."), picker);
 
   const taken = formatPtmSlotPicker({
     studentName: "Riya Verma", eventName: "Term PTM", eventDate: "2026-09-12",
@@ -2111,6 +2126,202 @@ const masters = {
     "",
   );
   assert.ok(odd.includes(all[0]!.title), "an ungrouped command must not vanish from help");
+}
+
+// ── The number printed is the number resolved ─────────────────────────
+//
+// This is the whole risk of numbering a list: the text and the pick list
+// are produced by two different functions, and if they ever disagree the
+// desk offers "reply 7" and hands back somebody else's child. So every
+// list is checked BOTH ways — the numbers the formatter printed are
+// exactly the numbers the picks accept, in the same order.
+{
+  const printedNumbers = (text: string): number[] =>
+    [...text.matchAll(/(?:^|\n)\*?(\d{1,3})\.\*?\s/g)].map((m) => Number(m[1]));
+
+  const agree = (text: string, picks: { n: number; label: string }[], what: string) => {
+    assert.deepEqual(
+      printedNumbers(text),
+      picks.map((p) => p.n),
+      `${what}: the numbers printed must be the numbers accepted\n${text}`,
+    );
+  };
+
+  // Absent list — numbered by roll, because the roll is already printed
+  // and making a teacher count rows past a visible number is worse than
+  // not numbering at all.
+  const absentInput = {
+    sectionLabel: "V A",
+    date: "2026-09-07",
+    todayIso: "2026-09-07",
+    marked: true,
+    total: 30,
+    absent: [
+      { id: "s2", rollNo: "11", fullName: "Ishita Rao" },
+      { id: "s1", rollNo: "4", fullName: "Aarav Sharma" },
+    ],
+    leave: [{ id: "s3", rollNo: "19", fullName: "Kabir Nath" }],
+    late: [],
+    halfDay: [],
+  };
+  const absentText = formatAbsentListReply(absentInput);
+  const absentPicks = absentListPicks(absentInput);
+  agree(absentText, absentPicks, "absent list");
+  assert.deepEqual(absentPicks.map((p) => p.n), [4, 11, 19], "the roll is the number");
+  assert.equal(absentPicks[0]!.studentId, "s1");
+  assert.equal(absentPicks[0]!.label, "Aarav Sharma");
+  assert.match(absentText, /Reply with a number/);
+
+  // No roll on a row, or a roll that repeats: there is nothing
+  // unambiguous to type, so nothing is offered rather than something
+  // wrong being accepted.
+  assert.deepEqual(
+    absentListPicks({ ...absentInput, absent: [{ id: "x", rollNo: "", fullName: "No roll" }], leave: [], late: [], halfDay: [] }),
+    [],
+    "a row with no roll offers no number",
+  );
+  assert.deepEqual(
+    absentListPicks({
+      ...absentInput,
+      absent: [{ id: "a", rollNo: "4", fullName: "One" }],
+      leave: [{ id: "b", rollNo: "4", fullName: "Two" }],
+      late: [],
+      halfDay: [],
+    }),
+    [],
+    "a repeated roll offers no number",
+  );
+  assert.equal(
+    formatAbsentListReply({ ...absentInput, absent: [{ id: "x", rollNo: "", fullName: "No roll" }], leave: [], late: [], halfDay: [] })
+      .includes("Reply with a number"),
+    false,
+    "and the reply must not offer one either",
+  );
+
+  // Defaulters — one section keeps the roll; a whole class cannot, since
+  // roll 4 exists in every section, so it falls back to 1..n and moves
+  // the roll into the detail rather than printing two rival numbers.
+  const dRow = (name: string, roll: string, sec: string, paise: number, id: string) => ({
+    sectionLabel: sec,
+    rollNo: roll,
+    fullName: name,
+    overdueAmountPaise: paise,
+    overdueDays: 20,
+    earliestDueOn: "2026-08-10",
+    onPlan: false,
+    studentId: id,
+  });
+  const oneSection = {
+    title: "V A",
+    todayIso: "2026-09-07",
+    wholeClass: false,
+    rows: [dRow("Aarav", "4", "V A", 500000, "s1"), dRow("Ishita", "11", "V A", 300000, "s2")],
+    formatInr: (p: number) => `₹${Math.round(p / 100)}`,
+  };
+  agree(formatClassDefaultersReply(oneSection), classDefaultersPicks(oneSection), "defaulters, one section");
+  assert.deepEqual(classDefaultersPicks(oneSection).map((p) => p.n), [4, 11]);
+  assert.equal(formatClassDefaultersReply(oneSection).includes("(roll 4)"), false, "the roll IS the number here");
+
+  const wholeClass = {
+    ...oneSection,
+    title: "Class V",
+    wholeClass: true,
+    rows: [dRow("Aarav", "4", "V A", 500000, "s1"), dRow("Bhavya", "4", "V B", 400000, "s3")],
+  };
+  const wcText = formatClassDefaultersReply(wholeClass);
+  agree(wcText, classDefaultersPicks(wholeClass), "defaulters, whole class");
+  assert.deepEqual(classDefaultersPicks(wholeClass).map((p) => p.n), [1, 2]);
+  assert.ok(wcText.includes("(roll 4)"), "the roll still shows, just not as the number");
+  assert.equal(classDefaultersPicks(wholeClass)[0]!.commandId, "student_fees", "money list → money");
+
+  // Pending leaves — spans classes, so position, never roll.
+  const leaves = {
+    todayIso: "2026-09-07",
+    scope: "school" as const,
+    rows: [
+      { studentName: "Late Ask", classLabel: "V A", rollNo: "4", fromDate: "2026-09-08", toDate: "2026-09-08", days: 1, typeLabel: "Sick", reason: "fever", requestedAt: "2026-09-07T09:00:00Z", approver: "Class teacher", studentId: "s9" },
+      { studentName: "Early Ask", classLabel: "VI B", rollNo: "4", fromDate: "2026-09-09", toDate: "2026-09-09", days: 1, typeLabel: "Sick", reason: "", requestedAt: "2026-09-06T09:00:00Z", approver: "Principal", studentId: "s8" },
+    ],
+    approvedToday: 0,
+  };
+  agree(formatPendingLeavesReply(leaves), pendingLeavesPicks(leaves), "pending leaves");
+  // Oldest first — and the picks must follow the print order, not the
+  // order the rows arrived in.
+  assert.equal(pendingLeavesPicks(leaves)[0]!.label, "Early Ask");
+  assert.equal(pendingLeavesPicks(leaves)[0]!.studentId, "s8");
+
+  // Which section? — numbered, and picking one re-runs the same command.
+  const opts = [
+    { classId: "c5", sectionId: "s5a", className: "V", sectionName: "A", label: "V A" },
+    { classId: "c5", sectionId: "s5b", className: "V", sectionName: "B", label: "V B" },
+  ];
+  const secText = formatSectionProblem("ambiguous", opts, "5");
+  const secPicks = sectionProblemPicks("ambiguous", opts, "absent_list");
+  agree(secText, secPicks, "section options");
+  assert.equal(secPicks[1]!.section?.sectionId, "s5b");
+  assert.equal(secPicks[1]!.commandId, "absent_list", "the number re-runs what you asked");
+  // "You can only ask about your own sections" lists them as information.
+  // A number there would answer a question nobody asked.
+  assert.deepEqual(sectionProblemPicks("not_allowed", opts, "absent_list"), []);
+  assert.deepEqual(sectionProblemPicks("no_class", [], "absent_list"), []);
+
+  // Which route? — the id is carried, so the pick is exact, and the
+  // original wording is replayed so the minutes are not lost.
+  const routes = [
+    { id: "r1", label: "Bus 3 · Sarnath" },
+    { id: "r2", label: "Bus 30 · Ramnagar" },
+  ];
+  agree(
+    formatRouteNotFound("3", routes.map((r) => r.label)),
+    routePicks(routes, "bus_delay", "bus 3 ko batao 20 minute late"),
+    "route options",
+  );
+  const rp = routePicks(routes, "bus_delay", "bus 3 ko batao 20 minute late");
+  assert.equal(rp[0]!.routeId, "r1");
+  assert.match(
+    String(rp[0]!.rerunText),
+    /20 minute late/,
+    "picking the bus must not lose how late it is",
+  );
+
+  // PTM open times.
+  const slots = [
+    { startAt: "10:00", teacherName: "Meera", free: 2 },
+    { startAt: "10:30", teacherName: "Rakesh", free: 1 },
+  ];
+  const ptmText = formatPtmSlotPicker({
+    studentName: "Riya Verma",
+    eventName: "Term 1 PTM",
+    eventDate: "2026-09-12",
+    slots,
+  });
+  agree(ptmText, ptmSlotPicks(slots, "Riya Verma"), "PTM slots");
+  assert.equal(ptmSlotPicks(slots, "Riya Verma")[1]!.slotAt, "10:30");
+  assert.match(String(ptmSlotPicks(slots, "Riya Verma")[1]!.rerunText), /Riya Verma 10:30/);
+
+  // Help — numbered straight through the groups, because "3" has to mean
+  // one thing, and every number DESCRIBES rather than runs.
+  const menu = ERP_COMMANDS.filter((c) => c.id !== "help");
+  const helpText = formatHelpReply(menu, "Ashish");
+  const hp = helpPicks(menu);
+  agree(helpText, hp, "help menu");
+  assert.deepEqual(hp.map((p) => p.n), menu.map((_, i) => i + 1), "1..n straight through");
+  assert.ok(hp.every((p) => p.describe), "a help number never runs a command");
+  assert.equal(hp.length, menu.length, "every command is reachable by number");
+  assert.match(helpText, /Reply with a number \(\*1\*–\*\d+\*\)/);
+  // Grouped by module, and the numbering follows the printed order.
+  assert.ok(helpText.includes("*Attendance*") && helpText.includes("*Fees*"));
+  assert.equal(hp[0]!.commandId, helpMenuCommands(menu)[0]!.id);
+
+  // And the detail a number gets you.
+  const detail = formatCommandHelpDetail(ERP_COMMANDS.find((c) => c.id === "pay_link")!);
+  assert.ok(detail.includes("Send a payment link to a family"));
+  for (const ex of ERP_COMMANDS.find((c) => c.id === "pay_link")!.examples) {
+    assert.ok(detail.includes(ex), "every accepted phrasing is shown, not just one");
+  }
+  assert.match(detail, /confirm card/, "a write says so plainly");
+  const appOnly = formatCommandHelpDetail(ERP_COMMANDS.find((c) => c.id === "post_homework")!);
+  assert.match(appOnly, /app only/i);
 }
 
 // ── No server file may ask the browser for the templates ──────────────

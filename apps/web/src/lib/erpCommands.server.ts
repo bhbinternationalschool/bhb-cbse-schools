@@ -143,6 +143,15 @@ import {
   followUpIsFresh,
   parsePickNumber,
   pickIsFresh,
+  type PickOption,
+  absentListPicks,
+  classDefaultersPicks,
+  pendingLeavesPicks,
+  sectionProblemPicks,
+  routePicks,
+  ptmSlotPicks,
+  helpPicks,
+  formatCommandHelpDetail,
   templatesByLanguage,
   templateForFamily,
   formatTemplateMixLabel,
@@ -226,7 +235,7 @@ type CommandStore = {
    */
   pick?: Record<
     string,
-    { at: string; commandId: string; originalText: string; studentIds: string[] }
+    { at: string; commandId: string; originalText: string; options: PickOption[] }
   >;
 };
 
@@ -325,6 +334,39 @@ function parseTemplatesByLang(
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Remember the list just printed, so its numbers mean something.
+ *
+ * Every list the desk shows is registered here in the order it was
+ * printed, by the number shown on each row — so a teacher reading "7.
+ * Aarav Sharma" and replying "7" gets Aarav, and never the seventh row of
+ * some other list. Replacing rather than merging: a new list retires the
+ * old one, because a number that could answer either question answers
+ * neither.
+ */
+async function rememberPick(
+  actor: string,
+  commandId: string,
+  originalText: string,
+  options: PickOption[],
+): Promise<void> {
+  const st = await readStore();
+  const next = { ...(st.pick ?? {}) };
+  if (options.length) {
+    next[actor] = {
+      at: new Date().toISOString(),
+      commandId,
+      originalText,
+      options,
+    };
+  } else {
+    // Nothing to pick from. Leaving the previous list armed would let a
+    // number answer a question that is two replies old.
+    delete next[actor];
+  }
+  await writeStore({ ...st, pick: next });
 }
 
 /** Mobiles bucketed by family language, as frozen onto the confirm card. */
@@ -511,9 +553,11 @@ export async function handleErpStaffCommand(
   // Set when a bare name was resolved against a list the desk just showed;
   // the student lookup below searches those sections instead of the school.
   let resolvedFollowUpSections: string[] | null = null;
-  // Set when a bare number answered a numbered "which one?" list; the
-  // student lookup below skips matching entirely and uses this id.
+  // Set when a bare number answered a numbered list the desk printed. The
+  // lookups below skip matching entirely and use these ids.
   let pinnedStudentId: string | null = null;
+  let pinnedSection: SectionMatch | null = null;
+  let pinnedRouteId: string | null = null;
 
   // Paused: answer anything command-shaped without spending a model call,
   // and leave everything else to the bots that were going to answer it.
@@ -564,20 +608,47 @@ export async function handleErpStaffCommand(
   // still falls through untouched.
   if (!parsed) {
     const pk = (store.pick ?? {})[actor];
-    if (pk && pickIsFresh(pk.at, nowMs) && pk.studentIds.length) {
-      const n = parsePickNumber(text, pk.studentIds.length);
-      if (n) {
-        pinnedStudentId = pk.studentIds[n - 1]!;
-        parsed = {
-          commandId: pk.commandId,
-          fields: { student: "", section: "" },
-          source: "local",
-        };
+    if (pk && pickIsFresh(pk.at, nowMs) && pk.options.length) {
+      const highest = Math.max(...pk.options.map((o) => o.n));
+      const n = parsePickNumber(text, highest);
+      const opt = n === null ? undefined : pk.options.find((o) => o.n === n);
+      if (opt) {
         // Spent. A second "2" is a new message, not the same choice again.
         const cleared = { ...(store.pick ?? {}) };
         delete cleared[actor];
         store = { ...store, pick: cleared };
         await writeStore(store);
+
+        // A number typed at the help list explains a command; it does not
+        // run one. Running "mark attendance" because somebody was reading
+        // the menu would be the worst possible reading of a keystroke.
+        if (opt.describe) {
+          const def = findErpCommand(opt.commandId);
+          if (def) {
+            return {
+              handled: true,
+              audience: "erp_command_help",
+              text: formatCommandHelpDetail(def),
+            };
+          }
+        }
+        pinnedStudentId = opt.studentId || null;
+        pinnedSection = opt.section || null;
+        pinnedRouteId = opt.routeId || null;
+        // The original wording carries the date, the minutes, the message
+        // body — everything the number did not choose. Re-running against
+        // the bare digit would silently drop all of it.
+        text = opt.rerunText || pk.originalText || text;
+        parsed =
+          parseErpCommandLocal(text) ?? {
+            commandId: opt.commandId,
+            fields: { student: opt.rerunText || "", section: "" },
+            source: "local",
+          };
+        // The pins decide, not whatever the re-parse found in the text.
+        if (parsed.commandId !== opt.commandId) {
+          parsed = { ...parsed, commandId: opt.commandId };
+        }
       }
     }
   }
@@ -656,11 +727,16 @@ export async function handleErpStaffCommand(
   }
 
   if (command.id === "help") {
+    const menu = allowed.filter((c) => c.id !== "help");
+    // The menu's numbers describe a command; they never run one. Somebody
+    // reading the list and typing "11" must not find they have marked a
+    // register.
+    await rememberPick(actor, "help", text, helpPicks(menu));
     return {
       handled: true,
       audience: "erp_command_help",
       text: formatHelpReply(
-        allowed.filter((c) => c.id !== "help"),
+        menu,
         inbound.staff.fullName.split(" ")[0] || inbound.displayName,
       ),
     };
@@ -766,17 +842,29 @@ export async function handleErpStaffCommand(
     resolved.sectionIds = sections.map((s) => s.sectionId).join(",");
     if (limitedTo) resolved.limitedTo = limitedTo.join("|");
   } else if (command.fields.some((f) => f.type === "section")) {
+    // A number already answered "which section?" — nothing left to match.
     const askedRaw = parsed.fields.section || "";
-    const refs = extractSectionRefs(askedRaw || text);
-    if (!refs.length) {
+    const refs = pinnedSection ? [] : extractSectionRefs(askedRaw || text);
+    if (!pinnedSection && !refs.length) {
       return {
         handled: true,
         audience: "erp_command_ask",
         text: "Which class and section? e.g. _5A_ or _VIII B_.",
       };
     }
-    const res = resolveSectionRef(refs[0]!, masters);
+    const res = pinnedSection
+      ? ({ ok: true, match: pinnedSection } as const)
+      : resolveSectionRef(refs[0]!, masters);
     if (!res.ok) {
+      // The options are numbered as printed, so "2" picks the second one
+      // and re-runs THIS command against it — keeping the date, the
+      // message body and everything else the number did not choose.
+      await rememberPick(
+        actor,
+        command.id,
+        text,
+        sectionProblemPicks(res.reason, res.options, command.id),
+      );
       return {
         handled: true,
         audience: "erp_command_ask",
@@ -849,23 +937,21 @@ export async function handleErpStaffCommand(
       ? [{ student: pinned, score: 3 }]
       : matchStudents(q, pool, { academicYearCode: ay, sectionId });
     if (matches.length !== 1) {
-      // Remember the list so a bare number answers it. Ids in the order
-      // they were printed — the numbering IS the list.
-      if (matches.length > 1) {
-        const st = await readStore();
-        await writeStore({
-          ...st,
-          pick: {
-            ...(st.pick ?? {}),
-            [actor]: {
-              at: new Date(nowMs).toISOString(),
+      // Remember the list so a bare number answers it, in the order it is
+      // about to be printed — the numbering IS the list.
+      await rememberPick(
+        actor,
+        command.id,
+        text,
+        matches.length > 1
+          ? matches.map((m, i) => ({
+              n: i + 1,
+              label: m.student.fullName,
               commandId: command.id,
-              originalText: text,
-              studentIds: matches.map((m) => m.student.id),
-            },
-          },
-        });
-      }
+              studentId: m.student.id,
+            }))
+          : [],
+      );
       return {
         handled: true,
         audience: "erp_command_ask",
@@ -1271,9 +1357,20 @@ export async function handleErpStaffCommand(
     const { planBusDelayNotice } = await import("@/lib/busDelayNotice.server");
     const plan = await planBusDelayNotice({
       routeAsked,
+      // A number already answered "which route?" — its id is exact, and
+      // the wording still carries the minutes.
+      routeId: pinnedRouteId || undefined,
       academicYearCode: session.academicYearCode,
     });
     if (!plan.ok) {
+      // The routes are numbered as printed; picking one re-runs the same
+      // message, so "20 minute late" survives choosing the bus.
+      await rememberPick(
+        actor,
+        command.id,
+        text,
+        routePicks(plan.optionRoutes, command.id, text),
+      );
       return {
         handled: true,
         audience: "erp_command_ask",
@@ -1376,6 +1473,14 @@ export async function handleErpStaffCommand(
       ? free.find((sl) => wanted.includes(sl.startAt)) ?? null
       : null;
     if (!picked) {
+      // The open times are numbered as printed; picking one re-runs the
+      // booking for the same child at that time.
+      await rememberPick(
+        actor,
+        command.id,
+        text,
+        ptmSlotPicks(free, o.student.fullName),
+      );
       return {
         handled: true,
         audience: "erp_command_ask",
@@ -1930,48 +2035,65 @@ export async function handleErpStaffCommand(
       });
     }
   }
+  // …and what its numbers mean. A list with no usable numbering clears
+  // the previous one rather than leaving it armed.
+  await rememberPick(actor, command.id, text, reply.picks);
   void audit(session, command, parsed.fields, text, "ok", {
     ...resolved,
     source: parsed.source,
     voice: fromVoice,
     channel: inbound.channel,
   });
-  return { handled: true, audience: `erp_command_${command.id}`, text: reply };
+  return { handled: true, audience: `erp_command_${command.id}`, text: reply.text };
 }
+
+/**
+ * A read's reply, and the numbers its list can be answered by.
+ *
+ * Only the three commands whose reply is a list of children carry picks;
+ * the rest are a single reading or a school-wide summary, with nothing to
+ * point into.
+ */
+type ReadReply = { text: string; picks: PickOption[] };
+
+const plain = async (text: Promise<string> | string): Promise<ReadReply> => ({
+  text: await text,
+  picks: [],
+});
 
 async function runReadCommand(
   command: ErpCommandDef,
   resolved: Record<string, string>,
   session: DemoSession,
   todayIso: string,
-): Promise<string> {
+): Promise<ReadReply> {
   switch (command.id) {
     case "absent_list":
       return absentList(resolved, session, todayIso);
     case "student_fees":
-      return studentFees(resolved, session, todayIso);
+      return plain(studentFees(resolved, session, todayIso));
     case "attendance_summary":
-      return attendanceSummary(resolved, session, todayIso);
+      return plain(attendanceSummary(resolved, session, todayIso));
     case "class_defaulters":
       return classDefaulters(resolved, session, todayIso);
     case "collection_today":
-      return collectionToday(resolved, session, todayIso);
+      return plain(collectionToday(resolved, session, todayIso));
     case "free_teachers":
-      return freeTeachers(resolved, resolved.period || "now", session, todayIso);
+      return plain(freeTeachers(resolved, resolved.period || "now", session, todayIso));
     case "pending_leaves":
       return pendingLeaves(resolved, session, todayIso);
     case "homework_posted":
-      return homeworkPosted(resolved, session, todayIso);
+      return plain(homeworkPosted(resolved, session, todayIso));
     case "bus_manifest":
-      return busManifest(resolved, session, todayIso);
+      return plain(busManifest(resolved, session, todayIso));
     case "student_details":
-      return studentDetails(resolved, session);
+      return plain(studentDetails(resolved, session));
     case "school_snapshot":
-      return schoolSnapshot(session, todayIso);
+      return plain(schoolSnapshot(session, todayIso));
     case "admissions_week":
-      return admissionsPeriod(resolved.period || "week", session, todayIso);
+      return plain(admissionsPeriod(resolved.period || "week", session, todayIso));
     default:
-      return "That command isn't wired up yet.";
+      return plain("That command isn't wired up yet.");
   }
 }
 
@@ -1979,7 +2101,7 @@ async function absentList(
   resolved: Record<string, string>,
   session: DemoSession,
   todayIso: string,
-): Promise<string> {
+): Promise<ReadReply> {
   await ensureAttendanceHydratedServer();
   const ay = session.academicYearCode;
   const sis = loadSis();
@@ -1996,10 +2118,11 @@ async function absentList(
     (register?.marks ?? [])
       .filter((m) => m.status === status && byId.has(m.studentId))
       .map((m) => ({
+        id: m.studentId,
         rollNo: byId.get(m.studentId)!.rollNo,
         fullName: byId.get(m.studentId)!.fullName,
       }));
-  return formatAbsentListReply({
+  const absentInput = {
     sectionLabel: resolved.sectionLabel || "",
     date: resolved.date!,
     todayIso,
@@ -2009,7 +2132,11 @@ async function absentList(
     leave: pick("LE"),
     late: pick("L"),
     halfDay: pick("HD"),
-  });
+  };
+  return {
+    text: formatAbsentListReply(absentInput),
+    picks: absentListPicks(absentInput),
+  };
 }
 
 async function attendanceSummary(
@@ -2428,7 +2555,7 @@ async function pendingLeaves(
   resolved: Record<string, string>,
   session: DemoSession,
   todayIso: string,
-): Promise<string> {
+): Promise<ReadReply> {
   // Same reset-then-hydrate the app's leave list does, so the answer is what
   // the database holds rather than what an earlier request left cached.
   writeStudentLeaveLocalRaw(emptyStudentLeaveState());
@@ -2461,18 +2588,23 @@ async function pendingLeaves(
         reason: r.reason || "",
         requestedAt: r.createdAt,
         approver: pendingApproverHint(r).replace(/\s*\(.*\)$/, ""),
+        studentId: r.studentId,
       };
     });
   const approvedToday = all.filter(
     (r) => r.status === "approved" && r.fromDate <= todayIso && (r.toDate || r.fromDate) >= todayIso,
   ).length;
-  return formatPendingLeavesReply({
+  const leavesInput = {
     todayIso,
     scope: (resolved.scope as "school" | "mine" | "section") || "school",
     scopeLabel: resolved.scopeLabel,
     rows,
     approvedToday,
-  });
+  };
+  return {
+    text: formatPendingLeavesReply(leavesInput),
+    picks: pendingLeavesPicks(leavesInput),
+  };
 }
 
 function istHhmm(now = new Date()): string {
@@ -2670,7 +2802,7 @@ async function classDefaulters(
   resolved: Record<string, string>,
   session: DemoSession,
   todayIso: string,
-): Promise<string> {
+): Promise<ReadReply> {
   await ensureFeesHydratedServer();
   const sis = loadSis();
   const masters = loadMasters();
@@ -2690,15 +2822,20 @@ async function classDefaulters(
       overdueDays: d.overdueDays,
       earliestDueOn: d.earliestDueOn,
       onPlan: !!d.planCode,
+      studentId: d.student.id,
     }));
-  return formatClassDefaultersReply({
+  const input = {
     title: resolved.title || "Class",
     todayIso,
     wholeClass: resolved.wholeClass === "1",
     rows,
     limitedTo: resolved.limitedTo ? resolved.limitedTo.split("|") : undefined,
     formatInr,
-  });
+  };
+  return {
+    text: formatClassDefaultersReply(input),
+    picks: classDefaultersPicks(input),
+  };
 }
 
 async function studentFees(
