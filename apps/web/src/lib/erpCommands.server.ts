@@ -75,6 +75,7 @@ import { publicOrigin } from "@/lib/birthday.server";
 import { ensureFeesHydratedServer } from "@/lib/feesPersistence.server";
 import { formatInr, loadMasters } from "@/lib/masters";
 import { classLabel } from "@/lib/homework";
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { isOfficeLike } from "@/lib/erpChatAccess";
 import { writeAudit } from "@/lib/audit.server";
 import { istDateOf } from "@/lib/teaching";
@@ -140,6 +141,11 @@ import {
   looksLikeBareName,
   followUpCommandFor,
   followUpIsFresh,
+  parsePickNumber,
+  pickIsFresh,
+  templatesByLanguage,
+  templateForFamily,
+  formatTemplateMixLabel,
   parseCommandAllowList,
   commandActorAllowed,
   parseConfirmReply,
@@ -211,6 +217,16 @@ type CommandStore = {
   followUp?: Record<
     string,
     { at: string; commandId: string; sectionIds: string[]; label: string }
+  >;
+  /**
+   * The numbered "which one did you mean?" list each person last saw, so
+   * a reply of "2" resolves to a student. Ids only — the names were on
+   * the message that asked, and this slice is shared with every other
+   * bot's state.
+   */
+  pick?: Record<
+    string,
+    { at: string; commandId: string; originalText: string; studentIds: string[] }
   >;
 };
 
@@ -290,6 +306,53 @@ export function staffSessionFor(
     tenantSlug: TENANT.slug,
     academicYearCode: currentAcademicYearCode(masters),
   };
+}
+
+/**
+ * The per-language template set as frozen onto the confirm card.
+ *
+ * Undefined rather than an empty object when the card predates this, so
+ * the send falls back to the single template it was built with instead of
+ * finding nothing for every language.
+ */
+function parseTemplatesByLang(
+  raw: string | undefined,
+): Record<string, import("@/lib/erpCommands").PickedTemplate | null> | undefined {
+  if (!raw) return undefined;
+  try {
+    const j = JSON.parse(raw) as Record<string, import("@/lib/erpCommands").PickedTemplate | null>;
+    return j && typeof j === "object" ? j : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Mobiles bucketed by family language, as frozen onto the confirm card. */
+function parseMobilesByLang(
+  raw: string | undefined,
+): Record<string, string[]> | undefined {
+  if (!raw) return undefined;
+  try {
+    const j = JSON.parse(raw) as Record<string, string[]>;
+    if (!j || typeof j !== "object") return undefined;
+    const out: Record<string, string[]> = {};
+    for (const [k, v] of Object.entries(j)) {
+      if (Array.isArray(v)) out[k] = v.filter((x) => typeof x === "string" && x);
+    }
+    return Object.keys(out).length ? out : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** How many recipients read each language, for the confirm card. */
+function countByLanguage(rows: { language?: string }[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const r of rows) {
+    const k = r.language || "hi";
+    out[k] = (out[k] ?? 0) + 1;
+  }
+  return out;
 }
 
 function allowedCommandsFor(
@@ -448,6 +511,9 @@ export async function handleErpStaffCommand(
   // Set when a bare name was resolved against a list the desk just showed;
   // the student lookup below searches those sections instead of the school.
   let resolvedFollowUpSections: string[] | null = null;
+  // Set when a bare number answered a numbered "which one?" list; the
+  // student lookup below skips matching entirely and uses this id.
+  let pinnedStudentId: string | null = null;
 
   // Paused: answer anything command-shaped without spending a model call,
   // and leave everything else to the bots that were going to answer it.
@@ -489,6 +555,33 @@ export async function handleErpStaffCommand(
       };
     }
   }
+  // 4a2. A bare number in reply to the desk's own numbered list.
+  //
+  // Runs before the parse so that "2" is read as an answer rather than as
+  // a fragment of nothing. Nothing else in the desk answers a bare digit,
+  // and it only means anything for five minutes after THIS desk asked
+  // THIS person to choose — so a "2" typed into any other conversation
+  // still falls through untouched.
+  if (!parsed) {
+    const pk = (store.pick ?? {})[actor];
+    if (pk && pickIsFresh(pk.at, nowMs) && pk.studentIds.length) {
+      const n = parsePickNumber(text, pk.studentIds.length);
+      if (n) {
+        pinnedStudentId = pk.studentIds[n - 1]!;
+        parsed = {
+          commandId: pk.commandId,
+          fields: { student: "", section: "" },
+          source: "local",
+        };
+        // Spent. A second "2" is a new message, not the same choice again.
+        const cleared = { ...(store.pick ?? {}) };
+        delete cleared[actor];
+        store = { ...store, pick: cleared };
+        await writeStore(store);
+      }
+    }
+  }
+
   // 4b. A bare name in reply to a list the desk just showed.
   //
   // The desk answers command-shaped text and stays quiet otherwise, which
@@ -746,9 +839,33 @@ export async function handleErpStaffCommand(
     const pool = resolvedFollowUpSections
       ? sis.students.filter((st) => resolvedFollowUpSections!.includes(st.sectionId))
       : sis.students;
-    const matches = matchStudents(q, pool, { academicYearCode: ay, sectionId });
     const label = (st: SisStudent) => classLabel(masters, st.classId, st.sectionId);
+    // A number already answered this question — the choice was made from a
+    // list this desk printed, so there is nothing left to match.
+    const pinned = pinnedStudentId
+      ? sis.students.find((st) => st.id === pinnedStudentId)
+      : undefined;
+    const matches = pinned
+      ? [{ student: pinned, score: 3 }]
+      : matchStudents(q, pool, { academicYearCode: ay, sectionId });
     if (matches.length !== 1) {
+      // Remember the list so a bare number answers it. Ids in the order
+      // they were printed — the numbering IS the list.
+      if (matches.length > 1) {
+        const st = await readStore();
+        await writeStore({
+          ...st,
+          pick: {
+            ...(st.pick ?? {}),
+            [actor]: {
+              at: new Date(nowMs).toISOString(),
+              commandId: command.id,
+              originalText: text,
+              studentIds: matches.map((m) => m.student.id),
+            },
+          },
+        });
+      }
       return {
         handled: true,
         audience: "erp_command_ask",
@@ -757,6 +874,8 @@ export async function handleErpStaffCommand(
             fullName: m.student.fullName,
             classLabel: label(m.student),
             rollNo: m.student.rollNo,
+            fatherName: m.student.fatherName,
+            admissionNo: m.student.admissionNo,
           })),
           asked,
         ),
@@ -962,14 +1081,13 @@ export async function handleErpStaffCommand(
         text: "Couldn't read the school's WhatsApp templates just now, so I can't set up the pay link. Nothing was sent. Please try again in a minute.",
       };
     }
-    const feeTemplates = readFeeTemplates.templates;
-    const tpl =
-      feeTemplates.find((x) => x.familyKey === "fees_pay_link" && x.language === "en") ??
-      feeTemplates.find((x) => x.familyKey === "fees_pay_link") ??
-      null;
-    resolved.templateMetaName = tpl ? tpl.metaName || tpl.name : "";
-    resolved.templateLanguage = tpl ? tpl.metaLanguage || tpl.language : "";
+    // One family, so one language: theirs.
+    const payLinkTpls = templatesByLanguage(readFeeTemplates.templates, ["fees_pay_link"]);
+    const tpl = payLinkTpls.byLang[due.language] ?? payLinkTpls.any;
+    resolved.templateMetaName = tpl?.metaName || "";
+    resolved.templateLanguage = tpl?.language || "";
     resolved.templateVariables = (tpl?.variables ?? []).join(",");
+    resolved.familyLanguage = due.language;
     resolved.totalPaise = String(due.totalPaise);
     resolved.expiresInDays = "7";
     resolved.cardSummary = formatPayLinkCard({
@@ -1030,13 +1148,11 @@ export async function handleErpStaffCommand(
         text: "Couldn't read the school's WhatsApp templates just now, so I can't set up the fee reminder. Nothing was sent. Please try again in a minute.",
       };
     }
-    const feeTemplates = readFeeTemplates.templates;
-    const tpl =
-      feeTemplates.find((x) => x.familyKey === "fees_stage_reminder" && x.language === "en") ??
-      feeTemplates.find((x) => x.familyKey === "fees_stage_reminder") ??
-      feeTemplates.find((x) => x.familyKey === "fees_soft_reminder" && x.language === "en") ??
-      feeTemplates.find((x) => x.familyKey === "fees_soft_reminder") ??
-      null;
+    const reminderTpls = templatesByLanguage(readFeeTemplates.templates, [
+      "fees_stage_reminder",
+      "fees_soft_reminder",
+    ]);
+    const tpl = reminderTpls.any;
     if (!tpl) {
       return {
         handled: true,
@@ -1067,6 +1183,7 @@ export async function handleErpStaffCommand(
           householdId: d.householdId,
           mobile: hh ? householdWhatsApp(hh) || hh.mobile : "",
           guardianName: hh?.guardianName || "",
+          language: waTemplateLanguageFor(hh ?? {}),
           studentName: d.fullName,
           classLabel: classLabel(masters, d.student.classId, d.student.sectionId).replace(" · ", " "),
           amountPaise: d.overdueAmountPaise,
@@ -1090,13 +1207,17 @@ export async function handleErpStaffCommand(
       };
     }
     resolved.title = res.wholeClass ? `Class ${res.className}` : res.sections[0]!.label;
-    resolved.templateMetaName = tpl.metaName || tpl.name;
-    resolved.templateLanguage = tpl.metaLanguage || tpl.language;
+    resolved.templateMetaName = tpl.metaName;
+    resolved.templateLanguage = tpl.language;
     resolved.templateVariables = (tpl.variables ?? []).join(",");
+    resolved.templatesByLang = JSON.stringify(reminderTpls.byLang);
     resolved.recipients = JSON.stringify(plan.send);
     resolved.cardSummary = formatFeeReminderCard({
       title: resolved.title,
-      templateLabel: `${tpl.name} (${tpl.language.toUpperCase()})`,
+      templateLabel: formatTemplateMixLabel(
+        reminderTpls.byLang,
+        countByLanguage(plan.send),
+      ),
       send: plan.send.map((x) => ({
         studentName: x.studentName,
         classLabel: x.classLabel,
@@ -1186,12 +1307,9 @@ export async function handleErpStaffCommand(
         text: "Couldn't read the school's WhatsApp templates just now, so I can't set up the bus delay notice. Nothing was sent. Please try again in a minute.",
       };
     }
-    const transportTemplates = readTransportTemplates.templates;
-    const wantLang = messageScriptLanguage(text);
-    const tpl =
-      transportTemplates.find((x) => x.familyKey === "transport_delay" && x.language === wantLang) ??
-      transportTemplates.find((x) => x.familyKey === "transport_delay") ??
-      null;
+    // Not the script the staff member typed in — each family's own.
+    const delayTpls = templatesByLanguage(readTransportTemplates.templates, ["transport_delay"]);
+    const tpl = delayTpls.any;
     if (!tpl) {
       return {
         handled: true,
@@ -1207,9 +1325,10 @@ export async function handleErpStaffCommand(
     resolved.routeLabel = p.routeLabel;
     resolved.busNo = p.route.busNo || p.route.code || "";
     resolved.minutesLate = String(minutes);
-    resolved.templateMetaName = tpl.metaName || tpl.name;
-    resolved.templateLanguage = tpl.metaLanguage || tpl.language;
+    resolved.templateMetaName = tpl.metaName;
+    resolved.templateLanguage = tpl.language;
     resolved.templateVariables = (tpl.variables ?? []).join(",");
+    resolved.templatesByLang = JSON.stringify(delayTpls.byLang);
     resolved.recipients = JSON.stringify(p.send);
     resolved.cardSummary = formatBusDelayCard({
       routeLabel: p.routeLabel,
@@ -1222,7 +1341,7 @@ export async function handleErpStaffCommand(
       optedOut: p.optedOut,
       suspended: p.suspended,
       noMobile: p.noMobile,
-      templateLabel: `${tpl.name} (${tpl.language.toUpperCase()})`,
+      templateLabel: formatTemplateMixLabel(delayTpls.byLang, countByLanguage(p.send)),
       lastNoticeMinutesAgo:
         minutesAgo !== undefined && minutesAgo >= 0 && minutesAgo <= 60 ? minutesAgo : undefined,
     });
@@ -1283,11 +1402,12 @@ export async function handleErpStaffCommand(
         text: "Couldn't read the school's WhatsApp templates just now, so I can't set up the PTM booking. Nothing was sent. Please try again in a minute.",
       };
     }
-    const approved = readApproved.templates;
-    const notice =
-      approved.find((tpl) => tpl.familyKey === "comms_notice" && tpl.language === "en") ??
-      approved.find((tpl) => tpl.familyKey === "comms_notice") ??
-      null;
+    // One family, so one language: theirs.
+    const ptmSis = loadSis();
+    const ptmHh = ptmSis.households.find((h) => h.id === o.householdId);
+    const ptmLang = waTemplateLanguageFor(ptmHh ?? {});
+    const ptmTpls = templatesByLanguage(readApproved.templates, ["comms_notice"]);
+    const notice = ptmTpls.byLang[ptmLang] ?? ptmTpls.any;
     const { modeLabel } = await import("@/lib/ptm");
     const noticeBody = [
       `PTM booked for ${o.student.fullName}.`,
@@ -1307,13 +1427,13 @@ export async function handleErpStaffCommand(
     resolved.startAt = picked.startAt;
     resolved.householdId = o.householdId;
     resolved.guardianName = o.guardianName;
-    resolved.templateId = notice?.id || "";
-    resolved.templateMetaName = notice ? notice.metaName || notice.name : "";
-    resolved.templateLanguage = notice ? notice.metaLanguage || notice.language : "";
+    resolved.templateMetaName = notice?.metaName || "";
+    resolved.templateLanguage = notice?.language || "";
     // Frozen here rather than looked up again on confirm: Meta positions
     // template parameters, so the order the card was built from is the
     // order the send has to use.
     resolved.templateVariables = (notice?.variables ?? []).join(",");
+    resolved.familyLanguage = ptmLang;
     resolved.vars = JSON.stringify(vars);
     resolved.cardSummary = formatBookPtmCard({
       studentName: o.student.fullName,
@@ -1328,7 +1448,9 @@ export async function handleErpStaffCommand(
       guardianName: o.guardianName,
       mobileMasked: o.mobile ? maskMobile10(o.mobile) : "",
       familyLinked: !!o.householdId,
-      templateLabel: notice ? `${notice.name} (${notice.language.toUpperCase()})` : "",
+      templateLabel: notice
+        ? `${ptmTpls.rawAny?.name || notice.metaName} (${notice.language.toUpperCase()})`
+        : "",
     });
   }
   if (command.id === "decide_leave" && resolved.studentId) {
@@ -1540,12 +1662,10 @@ export async function handleErpStaffCommand(
         text: "Couldn't read the school's WhatsApp templates just now, so I can't set up the class message. Nothing was sent. Please try again in a minute.",
       };
     }
-    const approved = readApproved.templates;
-    const wantLang = messageScriptLanguage(message);
-    const notice =
-      approved.find((tpl) => tpl.familyKey === "comms_notice" && tpl.language === wantLang) ??
-      approved.find((tpl) => tpl.familyKey === "comms_notice") ??
-      null;
+    // Each family in their own language, not in the script the teacher
+    // happened to type the notice in.
+    const noticeTpls = templatesByLanguage(readApproved.templates, ["comms_notice"]);
+    const notice = noticeTpls.any;
     if (!notice) {
       return {
         handled: true,
@@ -1553,7 +1673,8 @@ export async function handleErpStaffCommand(
         text: "There's no approved WhatsApp notice template yet, and free text can't be sent to parents outside the 24-hour window. Ask the office to get *School notice broadcast* approved in Masters → WhatsApp templates.",
       };
     }
-    const contacts = listSectionParentContacts(resolved.sectionId, session.academicYearCode, loadSis());
+    const classSis = loadSis();
+    const contacts = listSectionParentContacts(resolved.sectionId, session.academicYearCode, classSis);
     if (!contacts.length) {
       return {
         handled: true,
@@ -1568,18 +1689,33 @@ export async function handleErpStaffCommand(
       guardianName: "Parent",
       childName: "your child",
     };
-    resolved.templateId = notice.id;
-    resolved.templateMetaName = notice.metaName || notice.name;
-    resolved.templateLanguage = notice.metaLanguage || notice.language;
-    resolved.templateLabel = `${notice.name} (${notice.language.toUpperCase()})`;
+    // Mobiles bucketed by the language each family reads, so the confirm
+    // step can send one broadcast per language instead of one message.
+    const byLangMobiles: Record<string, string[]> = {};
+    for (const c of contacts) {
+      if (!c.mobile) continue;
+      const hh = classSis.households.find((h) => h.id === c.householdId);
+      const lang = waTemplateLanguageFor(hh ?? {});
+      (byLangMobiles[lang] ??= []).push(c.mobile);
+    }
+    resolved.templateMetaName = notice.metaName;
+    resolved.templateLanguage = notice.language;
     resolved.templateVariables = (notice.variables ?? []).join(",");
+    resolved.templatesByLang = JSON.stringify(noticeTpls.byLang);
+    resolved.mobilesByLang = JSON.stringify(byLangMobiles);
+    resolved.templateLabel = formatTemplateMixLabel(
+      noticeTpls.byLang,
+      Object.fromEntries(
+        Object.entries(byLangMobiles).map(([k, v]) => [k, v.length]),
+      ),
+    );
     resolved.message = message;
     resolved.vars = JSON.stringify(vars);
     resolved.mobiles = contacts.map((c) => c.mobile).filter(Boolean).join(",");
     resolved.cardSummary = formatClassMessageCard({
       sectionLabel: (resolved.sectionLabel || "").replace(" · ", " "),
       templateLabel: resolved.templateLabel,
-      rendered: renderTemplateBody(notice.body, vars),
+      rendered: renderTemplateBody(noticeTpls.rawAny?.body || "", vars),
       familyCount: contacts.length,
       optedOut: 0,
     });
@@ -2846,6 +2982,7 @@ async function runConfirmedWrite(
         language: r.templateLanguage || "en",
         variables: (r.templateVariables || "").split(",").filter(Boolean),
       },
+      templatesByLang: parseTemplatesByLang(r.templatesByLang),
       todayIso: today,
     });
     // Record who was reminded so the weekly cap holds across channels.
@@ -2907,6 +3044,7 @@ async function runConfirmedWrite(
         language: r.templateLanguage || "en",
         variables: (r.templateVariables || "").split(",").filter(Boolean),
       },
+      templatesByLang: parseTemplatesByLang(r.templatesByLang),
       // The minutes are part of the key so a second notice on the same
       // route is a new message, not a de-duplicated repeat of the first.
       noticeKey: `${r.routeId || ""}_${minutes}_${sentAt.slice(0, 16)}`,
@@ -3209,22 +3347,41 @@ async function runConfirmedWrite(
     }
     const { buildWaTemplateBodyComponent } = await import("@/lib/waSend");
     const { broadcastTemplateToMobiles } = await import("@/lib/waBroadcast.server");
-    const res = await broadcastTemplateToMobiles({
-      mobiles,
-      template: {
-        name: r.templateMetaName,
-        language: r.templateLanguage || "en",
-        components: [
-          buildWaTemplateBodyComponent(await templateVariableOrder(r), vars),
-        ],
-      },
-      module: "notices",
-      originUrl: publicOrigin(),
-    });
+    const order = await templateVariableOrder(r);
+    const fallbackTpl = {
+      metaName: r.templateMetaName,
+      language: r.templateLanguage || "en",
+      variables: order,
+    };
+    const byLang = parseTemplatesByLang(r.templatesByLang);
+    // One broadcast per language the section's families read. A single
+    // send would have written to all of them in whichever language the
+    // teacher happened to type the notice in.
+    const groups = parseMobilesByLang(r.mobilesByLang) ?? { "": mobiles };
+    const res = { recipientCount: 0, skippedOptOut: 0, sent: 0, failed: 0 };
+    for (const [lang, groupMobiles] of Object.entries(groups)) {
+      if (!groupMobiles.length) continue;
+      const tpl = templateForFamily(byLang ?? null, lang, fallbackTpl) ?? fallbackTpl;
+      const one = await broadcastTemplateToMobiles({
+        mobiles: groupMobiles,
+        template: {
+          name: tpl.metaName,
+          language: tpl.language,
+          components: [buildWaTemplateBodyComponent(tpl.variables, vars)],
+        },
+        module: "notices",
+        originUrl: publicOrigin(),
+      });
+      res.recipientCount += one.recipientCount;
+      res.skippedOptOut += one.skippedOptOut;
+      res.sent += one.sent;
+      res.failed += one.failed;
+    }
     void audit(session, command, pending.fields, pending.originalText, "ok", {
       channel: inbound.channel,
       sectionId: r.sectionId,
       template: r.templateMetaName,
+      languages: Object.keys(groups).filter((k) => groups[k]!.length).join(","),
       recipients: res.recipientCount,
       sent: res.sent,
       failed: res.failed,

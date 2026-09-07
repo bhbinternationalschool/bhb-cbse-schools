@@ -589,7 +589,13 @@ export async function handleWaUnifiedInbound(opts: {
     return { replied: ok, escalate: false, audience: gate.audience, stub: !ok };
   }
 
-  if (isUnifiedMenuCommand(text)) {
+  // A staff member's "help" is a question for the command desk, not a
+  // request for the visitor menu — so it is allowed past this branch and
+  // reaches delegateActiveFlow below.
+  const staffAsksDesk =
+    identity.isKnown &&
+    identity.roles.some((role) => ["teacher", "staff", "owner"].includes(flowKindFromRole(role)));
+  if (isUnifiedMenuCommand(text, { staffAsksDesk })) {
     session = sessionFor(mobile10, identity, opts.profileName);
     if (identity.isKnown && identity.roles.length === 1) {
       session.phase = "active";

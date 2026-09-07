@@ -33,9 +33,31 @@ export const VISITOR_PURPOSE_OPTIONS: {
   { id: "other", label: "Something else", keyword: "OTHER" },
 ];
 
-export function isUnifiedMenuCommand(text: string): boolean {
+/**
+ * A greeting that should reset to the top menu.
+ *
+ * `staffAsksDesk` exists because "help" means two different things
+ * depending on who typed it. To a parent or a visitor it means "show me
+ * the menu", which is what this whole branch is for. To a staff member it
+ * means "what can the command desk do?" — and because this check runs
+ * BEFORE the desk gets the message, their "help" was answered with the
+ * visitor menu and the desk was never asked. That is what a director saw
+ * on the first day of the pilot: a list, but the wrong list, and no sign
+ * the desk existed.
+ *
+ * Only "help" and its Hindi equivalents are handed over. "hi", "menu",
+ * "start" still reset the menu for everybody, staff included — those are
+ * how you get out of a flow.
+ */
+export function isUnifiedMenuCommand(
+  text: string,
+  opts?: { staffAsksDesk?: boolean },
+): boolean {
   const t = (text || "").trim();
   if (!t) return true;
+  if (opts?.staffAsksDesk && /^(help|madad|madat|sahayta|sahayata|मदद|सहायता)$/i.test(t)) {
+    return false;
+  }
   return /^(hi|hello|namaste|hey|start|menu|main|help)$/i.test(t);
 }
 

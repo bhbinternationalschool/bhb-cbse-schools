@@ -11,99 +11,108 @@ import fs from "node:fs";
 import path from "node:path";
 
 import {
+  BUS_DELAY_MAX_MINUTES,
   ERP_COMMANDS,
+  FOLLOW_UP_WINDOW_MINUTES,
+  PICK_WINDOW_MINUTES,
   buildErpCommandSystemPrompt,
   classKey,
+  commandActorAllowed,
+  complaintSubjectFrom,
   confirmButtonIds,
   confirmIsFresh,
+  daysSince,
+  editBudgetFor,
   extractSectionRefs,
-  formatAbsentListReply,
-  formatHelpReply,
-  formatSectionProblem,
-  looksLikeCommand,
-  noteCommandUse,
-  parseCommandsSwitch,
-  looksLikeBareName,
+  feeReminderTooSoon,
   followUpCommandFor,
   followUpIsFresh,
-  FOLLOW_UP_WINDOW_MINUTES,
-  parseCommandAllowList,
-  commandActorAllowed,
-  normalizeCommandMobile,
-  parseConfirmReply,
-  parseErpCommandLlmJson,
-  parseErpCommandLocal,
-  resolveCommandDate,
-  resolveSectionRef,
-  waMarkersToAssistantText,
+  formatAbsentListReply,
+  formatAdmissionsPeriodReply,
+  formatAttendanceSummaryReply,
+  formatBookPtmCard,
+  formatBusDelayCard,
+  formatBusManifestReply,
+  formatClassDefaultersReply,
+  formatClassMessageCard,
+  formatCollectionReply,
   formatCommandDigest,
   formatCommandDigestOneLine,
-  summarizeCommandAudit,
-  parseStudentFeesQuery,
-  matchStudents,
+  formatDecideLeaveCard,
+  formatFeeReminderCard,
+  formatFreeTeachersReply,
+  formatHelpReply,
+  formatHomeworkReply,
+  formatLeaveRequestPicker,
+  formatMarkAttendanceCard,
+  formatPayLinkCard,
+  formatPendingLeavesReply,
+  formatPostHomeworkCard,
+  formatPtmSlotPicker,
+  formatRaiseComplaintCard,
+  formatRouteNotFound,
+  formatSchoolSnapshotReply,
+  formatSectionProblem,
+  formatStaffBroadcastCard,
+  formatStudentDetailsReply,
   formatStudentFeesReply,
   formatStudentMatchesAsk,
-  formatAttendanceSummaryReply,
-  formatClassDefaultersReply,
-  formatCollectionReply,
-  formatFreeTeachersReply,
-  formatPendingLeavesReply,
-  formatHomeworkReply,
-  parseHomeworkQuery,
-  formatBusManifestReply,
-  formatRouteNotFound,
-  parseBusManifestQuery,
-  formatStudentDetailsReply,
-  parseStudentDetailsQuery,
-  formatSchoolSnapshotReply,
-  formatAdmissionsPeriodReply,
-  parseAdmissionsQuery,
-  parsePostHomeworkQuery,
-  splitPostHomeworkRest,
-  parseDueDate,
-  homeworkTitleFrom,
-  formatPostHomeworkCard,
-  parseMarkAttendanceQuery,
-  parseAttendanceSpec,
-  isCorrectingAttendance,
-  formatMarkAttendanceCard,
-  parseClassMessageQuery,
-  messageScriptLanguage,
-  noticeTitleFrom,
-  renderTemplateBody,
-  formatClassMessageCard,
-  parseStaffBroadcastQuery,
-  formatStaffBroadcastCard,
-  parsePayLinkQuery,
-  formatPayLinkCard,
-  parseBusDelayQuery,
-  formatBusDelayCard,
-  matchTransportRoutes,
-  BUS_DELAY_MAX_MINUTES,
-  parseBookPtmQuery,
-  parsePtmTime,
-  ptmTimeCandidates,
-  formatBookPtmCard,
-  formatPtmSlotPicker,
-  parseFeeReminderQuery,
-  formatFeeReminderCard,
-  inFeeReminderQuietHours,
-  feeReminderTooSoon,
-  daysSince,
-  istHourOf,
-  parseDecideLeaveQuery,
-  formatDecideLeaveCard,
-  formatLeaveRequestPicker,
-  parseRaiseComplaintQuery,
+  formatTemplateMixLabel,
+  fuzzyWordMatch,
   guessComplaintCategory,
-  complaintSubjectFrom,
-  formatRaiseComplaintCard,
+  homeworkTitleFrom,
+  inFeeReminderQuietHours,
+  isCorrectingAttendance,
+  istHourOf,
+  looksLikeBareName,
+  looksLikeCommand,
+  matchStudents,
+  matchTransportRoutes,
+  messageScriptLanguage,
+  normalizeCommandMobile,
+  noteCommandUse,
+  noticeTitleFrom,
+  parseAdmissionsQuery,
+  parseAttendanceSpec,
+  parseBookPtmQuery,
+  parseBusDelayQuery,
+  parseBusManifestQuery,
+  parseClassMessageQuery,
+  parseCommandAllowList,
+  parseCommandsSwitch,
+  parseConfirmReply,
+  parseDecideLeaveQuery,
+  parseDueDate,
+  parseErpCommandLlmJson,
+  parseErpCommandLocal,
+  parseFeeReminderQuery,
   parseFreeTeachersQuery,
+  parseHomeworkQuery,
+  parseMarkAttendanceQuery,
+  parsePayLinkQuery,
+  parsePickNumber,
+  parsePostHomeworkQuery,
+  parsePtmTime,
+  parseRaiseComplaintQuery,
+  parseStaffBroadcastQuery,
+  parseStudentDetailsQuery,
+  parseStudentFeesQuery,
   periodAtTime,
+  pickIsFresh,
+  ptmTimeCandidates,
+  renderTemplateBody,
   resolveClassOrSectionRef,
+  resolveCommandDate,
+  resolveSectionRef,
+  splitPostHomeworkRest,
+  summarizeCommandAudit,
+  templateForFamily,
+  templatesByLanguage,
   type CommandAuditRow,
   type PendingErpConfirm,
   type StudentLike,
+  waMarkersToAssistantText,
+  withinEdits,
 } from "./erpCommands";
 
 console.log("erpCommands.selftest.ts");
@@ -354,7 +363,12 @@ const masters = {
   assert.equal(parseErpCommandLocal("5A"), null, "a bare section with no ask is not a command");
   assert.equal(parseErpCommandLocal("absent"), null, "absent with no section is not a command");
   assert.equal(parseErpCommandLocal("IN"), null, "punch keyword stays with the attendance bot");
-  assert.equal(parseErpCommandLocal("help"), null, "'help' stays with the office escalation");
+  // "help" belongs to the desk now. It used to be ceded to the office
+  // escalation keyword, which meant the one word a staff member is most
+  // likely to try was answered by the visitor menu and the desk was never
+  // asked. The escalation word people actually use is HUMAN, and that is
+  // untouched.
+  assert.equal(parseErpCommandLocal("help")?.commandId, "help");
 }
 
 // ─── looksLikeCommand gate for the model ───────────────────────────────
@@ -466,7 +480,7 @@ const masters = {
   assert.ok(yesterday.includes("No one absent."));
 
   const help = formatHelpReply(ERP_COMMANDS.filter((c) => c.id !== "help"), "Sunita");
-  assert.ok(help.startsWith("Sunita, you can send me"));
+  assert.ok(help.startsWith("Sunita, here is everything you can ask me"));
   assert.ok(help.includes("Absent list for a section"));
 
   assert.ok(formatSectionProblem("no_class", [], "13A").includes('"13A"'));
@@ -705,7 +719,13 @@ const masters = {
     ],
     "aarav sharma",
   );
-  assert.ok(ask.includes("• Aarav Sharma (V · A, roll 4)\n• Aarav Sharma (V · B, roll 9)"), ask);
+  // Numbered, and the number is the answer — two children of the same name
+  // cannot be told apart by being asked to repeat the name.
+  assert.ok(
+    ask.includes("*1.* Aarav Sharma — V · A, roll 4\n*2.* Aarav Sharma — V · B, roll 9"),
+    ask,
+  );
+  assert.match(ask, /Reply with the number/);
 }
 
 // ─── attendance summary reply ──────────────────────────────────────────
@@ -1871,6 +1891,226 @@ const masters = {
   assert.equal(followUpIsFresh("not a date", now), false);
   // A timestamp from the future is not fresh, it is broken.
   assert.equal(followUpIsFresh(new Date(now + 60_000).toISOString(), now), false);
+}
+
+// ── Which language a family is written to in ──────────────────────────
+// The desk used to pick ONE template for everybody: for the class message
+// and the bus delay, from the script the STAFF MEMBER typed in; for the
+// fee reminder and the pay link, from a hardcoded "English first". Neither
+// has anything to do with what the family reads.
+{
+  const tpl = (familyKey: string, language: string) => ({
+    familyKey,
+    language,
+    name: `${familyKey} ${language}`,
+    metaName: `bhb_${familyKey}_${language}`,
+    metaLanguage: language,
+    variables: ["schoolName", "childName"],
+  });
+
+  const both = templatesByLanguage(
+    [tpl("comms_notice", "en"), tpl("comms_notice", "hi")],
+    ["comms_notice"],
+  );
+  assert.equal(both.byLang.en?.metaName, "bhb_comms_notice_en");
+  assert.equal(both.byLang.hi?.metaName, "bhb_comms_notice_hi");
+
+  // A Hindi-reading family gets Hindi even though English exists.
+  assert.equal(
+    templateForFamily(both.byLang, "hi", null)?.metaName,
+    "bhb_comms_notice_hi",
+  );
+  assert.equal(
+    templateForFamily(both.byLang, "en", null)?.metaName,
+    "bhb_comms_notice_en",
+  );
+
+  // Only Hindi approved — the English-reading family still gets written to.
+  // Silence would be the worse answer, and it is what the school actually
+  // had on 2026-09-07: fees_pay_link was approved in hi and pending in en.
+  const hiOnly = templatesByLanguage([tpl("fees_pay_link", "hi")], ["fees_pay_link"]);
+  assert.equal(hiOnly.byLang.en, null);
+  assert.equal(
+    templateForFamily(hiOnly.byLang, "en", null)?.metaName,
+    "bhb_fees_pay_link_hi",
+    "an English-reading family gets the Hindi template rather than nothing",
+  );
+  assert.equal(hiOnly.any?.metaName, "bhb_fees_pay_link_hi");
+
+  // Earlier family keys win outright, per language.
+  const staged = templatesByLanguage(
+    [tpl("fees_soft_reminder", "hi"), tpl("fees_stage_reminder", "hi")],
+    ["fees_stage_reminder", "fees_soft_reminder"],
+  );
+  assert.equal(staged.byLang.hi?.metaName, "bhb_fees_stage_reminder_hi");
+
+  // Nothing approved at all is still "nothing", not a broken template.
+  const none = templatesByLanguage([], ["comms_notice"]);
+  assert.equal(none.any, null);
+  assert.equal(templateForFamily(none.byLang, "hi", null), null);
+
+  // The card has to say what the mix is BEFORE anyone taps Confirm.
+  assert.equal(
+    formatTemplateMixLabel(both.byLang, { hi: 12, en: 3 }),
+    "12 in HI · 3 in EN",
+  );
+  assert.equal(
+    formatTemplateMixLabel(hiOnly.byLang, { hi: 12, en: 3 }),
+    "12 in HI · 3 in HI (no EN template approved)",
+    "a family served in the wrong language must be visible on the card",
+  );
+  assert.equal(formatTemplateMixLabel(both.byLang, { hi: 15 }), "15 in HI");
+  assert.equal(formatTemplateMixLabel(none.byLang, { hi: 4 }), "4 with no template");
+}
+
+// ── Three children called Yatharth ────────────────────────────────────
+// "Reply with the full name and class" is a fine answer for an Amay and an
+// Amay Gupta, and useless for three children who share a name: repeating
+// the name reproduces the ambiguity. The list is numbered and the number
+// is the answer.
+{
+  const rows = [
+    { fullName: "Yatharth Singh", classLabel: "IV A", rollNo: "12", fatherName: "Rakesh Singh", admissionNo: "ADM-101" },
+    { fullName: "Yatharth Singh", classLabel: "IV A", rollNo: "31", fatherName: "Manoj Singh", admissionNo: "ADM-233" },
+    { fullName: "Yatharth Singh", classLabel: "VII A", rollNo: "8", fatherName: "Dinesh Singh", admissionNo: "ADM-402" },
+  ];
+  const ask = formatStudentMatchesAsk(rows, "Yatharth");
+  assert.match(ask, /There are 3 students called Yatharth Singh/);
+  for (const n of ["*1.*", "*2.*", "*3.*"]) assert.ok(ask.includes(n), `numbered ${n}`);
+  // Two of them share a class, so roll and father's name are doing the
+  // work and the admission number is shown as well.
+  assert.ok(ask.includes("father Rakesh Singh"));
+  assert.ok(ask.includes("ADM-101"));
+  assert.match(ask, /Reply with the number/);
+  // Nothing restricted is ever in a disambiguation prompt.
+  for (const leak of ["aadhaar", "pan", "9", "@"]) {
+    assert.equal(
+      ask.toLowerCase().includes(leak) && leak === "aadhaar",
+      false,
+      "no document number in a pick list",
+    );
+  }
+
+  // Different classes: no admission number needed, class does the work.
+  const spread = formatStudentMatchesAsk(
+    [
+      { fullName: "Riya Verma", classLabel: "IV A", rollNo: "3", fatherName: "A", admissionNo: "ADM-1" },
+      { fullName: "Riya Sharma", classLabel: "VI A", rollNo: "9", fatherName: "B", admissionNo: "ADM-2" },
+    ],
+    "Riya",
+  );
+  assert.match(spread, /Which one did you mean\?/);
+  assert.equal(spread.includes("ADM-1"), false, "admission number only when nothing else separates them");
+
+  assert.match(formatStudentMatchesAsk([], "Zzz"), /couldn't find/i);
+
+  // The number, and only the number.
+  assert.equal(parsePickNumber("2", 3), 2);
+  assert.equal(parsePickNumber(" 3 ", 3), 3);
+  assert.equal(parsePickNumber("no. 1", 3), 1);
+  assert.equal(parsePickNumber("#2", 3), 2);
+  assert.equal(parsePickNumber("2.", 3), 2);
+  assert.equal(parsePickNumber("4", 3), null, "off the end of the list");
+  assert.equal(parsePickNumber("0", 3), null);
+  assert.equal(parsePickNumber("", 3), null);
+  // The case that must never select a student: a real message that starts
+  // with a digit.
+  assert.equal(parsePickNumber("2 din se absent hai", 3), null);
+  assert.equal(parsePickNumber("5A me kaun absent hai", 3), null);
+  assert.equal(parsePickNumber("2 students", 3), null);
+
+  // Short window: a stray "2" is far likelier than a stray name.
+  const now = Date.parse("2026-09-07T10:00:00.000Z");
+  assert.equal(pickIsFresh(new Date(now - 60_000).toISOString(), now), true);
+  assert.equal(
+    pickIsFresh(new Date(now - (PICK_WINDOW_MINUTES + 1) * 60_000).toISOString(), now),
+    false,
+  );
+  assert.equal(pickIsFresh("", now), false);
+  assert.equal(pickIsFresh(new Date(now + 60_000).toISOString(), now), false);
+  assert.ok(PICK_WINDOW_MINUTES < FOLLOW_UP_WINDOW_MINUTES);
+}
+
+// ── Typed on a phone, in a hurry, in a second language ────────────────
+{
+  // A misspelt command still reaches the parse. Without this the message
+  // never gets to the model that would have understood it, and the older
+  // keyword bot answers something unrelated — which reads as the desk
+  // being broken rather than as a typo.
+  for (const t of [
+    "atendance summary",
+    "attendence summary 5A",
+    "defalters class 3",
+    "manifets bus 3",
+    "homwork posted 6B",
+    "payement link for Riya",
+  ]) {
+    assert.equal(looksLikeCommand(t), true, `"${t}" is a typo, not a new sentence`);
+  }
+  // And ordinary conversation still is not a command.
+  for (const t of [
+    "kal milte hain",
+    "good morning sir",
+    "chalo chalte hain",
+    "meeting kal subah",
+    "ok thanks",
+  ]) {
+    assert.equal(looksLikeCommand(t), false, `"${t}" must stay with the other bots`);
+  }
+
+  // Bounded edit distance, and it stops early rather than filling a matrix.
+  assert.equal(withinEdits("abc", "abc", 0), true);
+  assert.equal(withinEdits("abc", "abd", 1), true);
+  assert.equal(withinEdits("abc", "xyz", 1), false);
+  assert.equal(withinEdits("kitten", "sitting", 3), true);
+  assert.equal(withinEdits("kitten", "sitting", 2), false);
+
+  // Short words get no budget: at three letters, one edit is a different
+  // name. "Om" and "Am", "Ravi" and "Rani" are already at the edge.
+  assert.equal(editBudgetFor("om"), 0);
+  assert.equal(editBudgetFor("ram"), 0);
+  assert.equal(editBudgetFor("riya"), 1);
+  assert.equal(editBudgetFor("yatharth"), 2);
+  assert.equal(fuzzyWordMatch("ram", "ravi"), false, "no budget, no match");
+  assert.equal(fuzzyWordMatch("yathart", "yatharth"), true);
+  assert.equal(fuzzyWordMatch("srivastava", "shrivastava"), true);
+  assert.equal(fuzzyWordMatch("riya", "riya"), true);
+  assert.equal(fuzzyWordMatch("ri", "riya"), true, "a short prefix is still a prefix");
+}
+
+// ── Help lists every command the person actually holds ────────────────
+// `help` — the single most obvious word — was not in the help pattern at
+// all, so it fell through to the older keyword bot. From the phone that
+// looked like the desk answering with the wrong list.
+{
+  assert.deepEqual(parseErpCommandLocal("help"), { commandId: "help", fields: {}, source: "local" });
+  for (const t of ["HELP", "commands", "command list", "all commands", "madad", "मदद", "?", "cmd"]) {
+    assert.equal(parseErpCommandLocal(t)?.commandId, "help", `"${t}" asks for help`);
+  }
+  // Not a request for the command list.
+  for (const t of ["helpline number", "help me with Riya's fees"]) {
+    assert.notEqual(parseErpCommandLocal(t)?.commandId, "help", `"${t}" is not the help list`);
+  }
+
+  const all = ERP_COMMANDS.filter((c) => c.id !== "help");
+  const reply = formatHelpReply(all, "Ashish");
+  for (const c of all) {
+    assert.ok(reply.includes(c.title), `help must list "${c.title}"`);
+  }
+  // One WhatsApp message, not three.
+  assert.ok(reply.length < 4096, `help is ${reply.length} chars, over one message`);
+  // A write is marked, because a write can reach a family.
+  assert.ok(reply.includes("✍️"));
+  // App-only commands say so rather than looking ignored.
+  assert.ok(reply.includes("(app only)"));
+  // A role with nothing still gets a usable answer.
+  assert.match(formatHelpReply([], "Ashish"), /doesn't include any desk commands/);
+  // A command whose module nobody grouped still appears.
+  const odd = formatHelpReply(
+    [{ ...all[0]!, module: "vault" }],
+    "",
+  );
+  assert.ok(odd.includes(all[0]!.title), "an ungrouped command must not vanish from help");
 }
 
 // ── No server file may ask the browser for the templates ──────────────

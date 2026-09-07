@@ -21,11 +21,12 @@ import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureTransportHydratedServer } from "@/lib/transportPersistence";
 import { loadTransport, type TransportRoute } from "@/lib/transport";
 import { householdWhatsApp, loadSis } from "@/lib/sis";
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { loadMasters } from "@/lib/masters";
 import { classLabel } from "@/lib/homework";
 import { listOptedOutSet, toE164India } from "@/lib/waContactState.server";
 import { sendWaWithFailover, buildWaTemplateBodyComponent } from "@/lib/waSend";
-import { matchTransportRoutes } from "@/lib/erpCommands";
+import { matchTransportRoutes, templateForFamily } from "@/lib/erpCommands";
 
 export type BusDelayRecipient = {
   householdId: string;
@@ -35,6 +36,8 @@ export type BusDelayRecipient = {
   stopName: string;
   guardianName: string;
   mobile: string;
+  /** The family's own WhatsApp template language, "en" or "hi". */
+  language?: string;
 };
 
 export type BusDelayPlan = {
@@ -113,6 +116,7 @@ export async function planBusDelayNotice(opts: {
       classLabel: classLabel(masters, st.classId, st.sectionId).replace(" · ", " "),
       stopName: stopName.get(a.stopId) || "",
       guardianName: hh.guardianName || "",
+      language: waTemplateLanguageFor(hh),
       mobile,
     });
   }
@@ -147,6 +151,8 @@ export async function sendBusDelayNotices(opts: {
   busNo: string;
   minutesLate: number;
   template: { metaName: string; language: string; variables: string[] };
+  /** Same notice per language, so each family is written to in theirs. */
+  templatesByLang?: Record<string, { metaName: string; language: string; variables: string[] } | null>;
   /** Distinguishes a second notice on the same route from a retry of the first. */
   noticeKey: string;
 }): Promise<BusDelaySendResult> {
@@ -159,12 +165,14 @@ export async function sendBusDelayNotices(opts: {
       stopName: r.stopName || "the stop",
       minutesLate: String(opts.minutesLate),
     };
+    const tpl = templateForFamily(opts.templatesByLang ?? null, r.language, opts.template)
+      ?? opts.template;
     const res = await sendWaWithFailover({
       primaryMobile: r.mobile,
       template: {
-        name: opts.template.metaName,
-        language: opts.template.language,
-        components: [buildWaTemplateBodyComponent(opts.template.variables, vars)],
+        name: tpl.metaName,
+        language: tpl.language,
+        components: [buildWaTemplateBodyComponent(tpl.variables, vars)],
       },
       clientMessageId: `busdelay_${opts.noticeKey}_${r.householdId}`,
     });

@@ -816,7 +816,17 @@ export function resolveCommandDate(text: string, todayIso: string): string {
 const ABSENT_WORDS =
   /(?<![\p{L}\p{M}\p{N}])(absent|absentee|absentees|gair\s*hazir|gairhazir|गैर\s*हाज़िर|गैरहाजिर|अनुपस्थित|nahi\s+aaya|nahi\s+aaye|नहीं\s+आया|नहीं\s+आए|hazri|haziri|हाज़िरी|हाजिरी|attendance|upasthiti|उपस्थिति|(?:on|pe|par)\s+leave|leave\s+(?:pe|par)|chutti\s+(?:pe|par)|छुट्टी\s+पर)(?![\p{L}\p{M}\p{N}])/iu;
 
-const HELP_WORDS = /^\s*(commands?|command\s+help|cmd|कमांड|\?)\s*$/i;
+/**
+ * "What can you do?"
+ *
+ * `help` itself was missing here until 2026-09-07, so a staff member who
+ * typed the single most obvious word got the OLD keyword bot's menu
+ * instead of the desk — which is exactly what it looked like from the
+ * phone: a list, but the wrong list, and no sign the desk existed.
+ * The desk gets first refusal on a staff message, so it claims the word.
+ */
+const HELP_WORDS =
+  /^\s*(commands?|command\s+(?:help|list)|all\s+commands?|cmd|help|halp|hlep|helo\s+desk|madad|madat|sahayta|sahayata|कमांड|मदद|सहायता|help\s+me|what\s+can\s+you\s+do|kya\s+kya\s+(?:kar|ho)\s*(?:sakte|sakta)\s*(?:ho|hai|hain)?|\?)\s*$/i;
 
 /**
  * The day's takings: "aaj ka collection", "today's collection", "collection
@@ -1015,14 +1025,45 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
  * each of those would be cost with no upside. A command looks like a
  * question or an instruction about school data.
  */
+/**
+ * The words that make a message worth an LLM parse, spelled correctly.
+ * The fuzzy pass below forgives the rest.
+ */
+const COMMAND_HINT_WORDS = [
+  "attendance", "absent", "present", "hazri", "defaulter", "defaulters",
+  "pending", "collection", "manifest", "roster", "homework", "timetable",
+  "leave", "complaint", "reminder", "broadcast", "payment", "receipt",
+  "admission", "admissions", "snapshot", "summary", "report", "details",
+  "dikhao", "batao", "kitna", "kitne", "kitni", "kaun", "bhejo",
+];
+
 export function looksLikeCommand(text: string): boolean {
   const t = (text || "").trim();
   if (t.length < 4 || t.length > 300) return false;
   if (/\?$/.test(t)) return true;
   // `\b` is ASCII-only, so a Devanagari word listed behind it would never
   // match; Unicode lookarounds make the Hindi half of this list real.
-  return /(?<![\p{L}\p{M}\p{N}])(kaun|kon|kitna|kitne|kya|batao|bata|dikhao|dikha|list|show|status|kitni|how many|who|which|pending|due|dues|defaulter|fees?|absent|present|attendance|roster|manifest|leave|homework|कौन|कितना|कितने|बताओ|दिखाओ|फीस|बकाया)(?![\p{L}\p{M}\p{N}])/iu.test(
-    t,
+  if (
+    /(?<![\p{L}\p{M}\p{N}])(kaun|kon|kitna|kitne|kya|batao|bata|dikhao|dikha|list|show|status|kitni|how many|who|which|pending|due|dues|defaulter|fees?|absent|present|attendance|roster|manifest|leave|homework|कौन|कितना|कितने|बताओ|दिखाओ|फीस|बकाया)(?![\p{L}\p{M}\p{N}])/iu.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  // Spelled wrong. "atendance summary", "defalters class 3", "manifets" —
+  // typed on a phone, in a hurry, in a second language. Without this the
+  // message never even reaches the model that could have understood it,
+  // and the older keyword bot answers something unrelated, which reads as
+  // the desk being broken rather than as a typo.
+  const words = t
+    .toLowerCase()
+    .replace(/[^\p{L}\p{M}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 5);
+  return words.some((w) =>
+    COMMAND_HINT_WORDS.some(
+      (k) => Math.abs(k.length - w.length) <= 2 && withinEdits(w, k, editBudgetFor(w)),
+    ),
   );
 }
 
@@ -1239,13 +1280,64 @@ export function formatSectionProblem(
   }
 }
 
+/**
+ * The order the groups are shown in, and what to call them.
+ *
+ * A flat alphabetical list of two dozen commands is a wall — you read the
+ * first three and stop. Grouped by what you were trying to do, it is
+ * scannable, and the write commands are visibly separated from the reads,
+ * because those are the ones that can reach a family.
+ */
+const HELP_GROUPS: { modules: string[]; label: string }[] = [
+  { modules: ["attendance"], label: "Attendance" },
+  { modules: ["fees"], label: "Fees" },
+  { modules: ["students"], label: "Students" },
+  { modules: ["homework", "timetable"], label: "Homework & timetable" },
+  { modules: ["notices", "notifications"], label: "Messages" },
+  { modules: ["student_leave", "complaints", "ptm"], label: "Leave, PTM & complaints" },
+  { modules: ["transport"], label: "Transport" },
+  { modules: ["admissions"], label: "Admissions" },
+  { modules: ["home", "settings"], label: "School overview" },
+];
+
 export function formatHelpReply(
   commands: ErpCommandDef[],
   displayName: string,
 ): string {
-  const lines = commands.map((c) => `• ${c.title}\n   e.g. _${c.examples[0]}_`);
   const name = displayName ? `${displayName}, ` : "";
-  return `${name}you can send me these commands:\n\n${lines.join("\n")}\n\nJust type it the way you'd say it — Hindi or English.`;
+  if (!commands.length) {
+    return `${name}your role doesn't include any desk commands yet. Ask the office to check your role in Settings → Roles.`;
+  }
+  const seen = new Set<string>();
+  const blocks: string[] = [];
+  const render = (c: ErpCommandDef): string => {
+    seen.add(c.id);
+    // A write is flagged because it can reach a family. App-only is
+    // flagged because typing it here would look like the desk ignored you.
+    const tags = [
+      c.kind === "write" ? "✍️" : "",
+      c.channels && !c.channels.includes("whatsapp") ? " _(app only)_" : "",
+    ].join("");
+    return `${tags ? `${tags.trim()} ` : ""}${c.title}\n   _${c.examples[0]}_`;
+  };
+  for (const g of HELP_GROUPS) {
+    const mine = commands.filter((c) => g.modules.includes(c.module));
+    if (!mine.length) continue;
+    blocks.push(`*${g.label}*\n${mine.map(render).join("\n")}`);
+  }
+  // Anything whose module is not in the list above still gets shown. A new
+  // command must never go missing from help just because nobody added it
+  // to a group.
+  const rest = commands.filter((c) => !seen.has(c.id));
+  if (rest.length) blocks.push(`*More*\n${rest.map(render).join("\n")}`);
+  return [
+    `${name}here is everything you can ask me — *${commands.length}* command${commands.length === 1 ? "" : "s"}, all of them:`,
+    "",
+    blocks.join("\n\n"),
+    "",
+    "✍️ = sends something or changes a record. You always see a confirm card first, and nothing happens until you tap *Confirm*.",
+    "Type it the way you'd say it — Hindi, English or mixed. A small spelling mistake is fine.",
+  ].join("\n");
 }
 
 /** Owner-only pause switch: "commands off" / "commands on". */
@@ -1510,6 +1602,56 @@ export type StudentMatch<T extends StudentLike = StudentLike> = {
   score: number;
 };
 
+/**
+ * Levenshtein distance, but it stops as soon as it exceeds `max`.
+ *
+ * Only ever asked "is this within 1 or 2 edits", so the full matrix is
+ * waste; the early exit also keeps a roster-wide fuzzy pass cheap.
+ */
+export function withinEdits(a: string, b: string, max: number): boolean {
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > max) return false;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    const row = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      const v = Math.min(row[j - 1]! + 1, prev[j]! + 1, prev[j - 1]! + cost);
+      row.push(v);
+      if (v < best) best = v;
+    }
+    if (best > max) return false;
+    prev = row;
+  }
+  return prev[b.length]! <= max;
+}
+
+/**
+ * How much misspelling to forgive in one word.
+ *
+ * Nothing under 4 letters: at three letters an edit away is a different
+ * word ("Om" and "Am", "Ravi" and "Rani" are already at the edge). One
+ * edit up to seven letters, two from eight — which covers the way long
+ * Indian names actually get typed on a phone: "Yatharth" as "Yathartha"
+ * or "Yathart", "Shrivastava" as "Srivastava".
+ */
+export function editBudgetFor(word: string): number {
+  if (word.length < 4) return 0;
+  return word.length >= 8 ? 2 : 1;
+}
+
+/** Does `typed` name this word, allowing for a phone-keyboard slip? */
+export function fuzzyWordMatch(typed: string, target: string): boolean {
+  if (target.startsWith(typed)) return true;
+  const budget = editBudgetFor(typed);
+  if (!budget) return false;
+  // Compare against the same number of letters the typist gave us, so a
+  // short prefix is not punished for the rest of a long surname.
+  const head = target.slice(0, Math.max(typed.length, 1));
+  return withinEdits(typed, head, budget) || withinEdits(typed, target, budget);
+}
+
 function nameTokens(s: string): string[] {
   return (s || "")
     .toLowerCase()
@@ -1546,6 +1688,7 @@ export function matchStudents<T extends StudentLike>(
     return (query.rollNo && opts.sectionId ? pool : []).map((student) => ({ student, score: 2 }));
   }
   const out: StudentMatch<T>[] = [];
+  const fuzzy: StudentMatch<T>[] = [];
   for (const s of pool) {
     if (s.admissionNo && q.length === 1 && s.admissionNo.toLowerCase() === q[0]) {
       out.push({ student: s, score: 3 });
@@ -1553,10 +1696,19 @@ export function matchStudents<T extends StudentLike>(
     }
     const nt = nameTokens(s.fullName);
     const every = q.every((w) => nt.some((n) => n.startsWith(w)));
-    if (!every) continue;
+    if (!every) {
+      // Held back, not returned yet: a spelling that is exactly right for
+      // one child must never be beaten by a near miss on another.
+      if (q.every((w) => nt.some((n) => fuzzyWordMatch(w, n)))) {
+        fuzzy.push({ student: s, score: 0 });
+      }
+      continue;
+    }
     const exact = q.length === nt.length && q.every((w, i) => nt[i] === w);
     out.push({ student: s, score: exact ? 3 : q.length > 1 ? 2 : 1 });
   }
+  // Only when nothing spelled correctly matched at all.
+  if (!out.length && fuzzy.length) out.push(...fuzzy);
   out.sort(
     (a, b) =>
       b.score - a.score ||
@@ -1689,17 +1841,209 @@ export function formatStudentFeesReply(input: StudentFeesInput): string {
   return lines.join("\n");
 }
 
+/** A template as the send path needs it: name, language, variable order. */
+export type PickedTemplate = {
+  metaName: string;
+  language: string;
+  variables: string[];
+};
+
+export type TemplateLike = {
+  familyKey: string;
+  language: string;
+  name: string;
+  metaName?: string;
+  metaLanguage?: string;
+  variables?: string[];
+};
+
+/**
+ * The same message in each language the school can send it in.
+ *
+ * The desk used to pick ONE template and send it to every family — chosen,
+ * for the class message and the bus delay, from the script the STAFF
+ * MEMBER happened to type in, and for the fee reminder and the pay link
+ * from a hardcoded "English first". Neither has anything to do with the
+ * language the family reads. A teacher typing in English got Hindi-reading
+ * parents an English message; the same teacher typing the same notice in
+ * Devanagari got the English-reading ones Hindi.
+ *
+ * So resolve both, and let each family's own preference choose at send
+ * time. `familyKeys` is a list because some messages have a preferred
+ * template and a fallback (the fee reminder's stage reminder, then its
+ * soft reminder) — earlier keys win outright.
+ */
+export function templatesByLanguage<T extends TemplateLike>(
+  approved: T[],
+  familyKeys: string[],
+): {
+  byLang: Record<"en" | "hi", PickedTemplate | null>;
+  any: PickedTemplate | null;
+  /** The same pick, unreduced — the confirm card previews its body. */
+  rawAny: T | null;
+} {
+  const pick = (t: T): PickedTemplate => ({
+    metaName: t.metaName || t.name,
+    language: t.metaLanguage || t.language,
+    variables: t.variables ?? [],
+  });
+  const find = (lang: "en" | "hi"): PickedTemplate | null => {
+    for (const key of familyKeys) {
+      const hit = approved.find((t) => t.familyKey === key && t.language === lang);
+      if (hit) return pick(hit);
+    }
+    return null;
+  };
+  const byLang = { en: find("en"), hi: find("hi") };
+  // Something approved in neither listed language still beats sending
+  // nothing — a school with only a Bhojpuri template should still be able
+  // to use it.
+  const anyKey = familyKeys
+    .map((key) => approved.find((t) => t.familyKey === key))
+    .find(Boolean);
+  const any = byLang.hi ?? byLang.en ?? (anyKey ? pick(anyKey) : null);
+  const rawAny =
+    approved.find((t) => (t.metaName || t.name) === any?.metaName && (t.metaLanguage || t.language) === any?.language) ??
+    anyKey ??
+    null;
+  return { byLang, any, rawAny };
+}
+
+/**
+ * The template for one family, by the language they asked for.
+ *
+ * Falls back rather than refusing: a family who reads Hindi is far better
+ * served by the English template that exists than by silence.
+ */
+export function templateForFamily(
+  byLang: Record<string, PickedTemplate | null> | null,
+  language: string | undefined,
+  fallback: PickedTemplate | null,
+): PickedTemplate | null {
+  if (!byLang) return fallback;
+  return byLang[language || ""] ?? byLang.hi ?? byLang.en ?? fallback;
+}
+
+/**
+ * What the confirm card says about language, when one command writes to
+ * families who read different ones.
+ *
+ * The card has to be honest about this: "12 families in Hindi, 3 in
+ * English" is a fact the sender can act on, and "3 in Hindi because no
+ * English template is approved" is one they need to know BEFORE they tap
+ * Confirm, not afterwards.
+ */
+export function formatTemplateMixLabel(
+  byLang: Record<string, PickedTemplate | null>,
+  counts: Record<string, number>,
+): string {
+  const langs = Object.keys(counts).filter((l) => counts[l]! > 0);
+  if (!langs.length) return "";
+  const served = langs.filter((l) => byLang[l]);
+  const unserved = langs.filter((l) => !byLang[l]);
+  const parts = served
+    .sort((a, b) => counts[b]! - counts[a]!)
+    .map((l) => `${counts[l]} in ${l.toUpperCase()}`);
+  if (unserved.length) {
+    const fallback = byLang.hi ? "HI" : byLang.en ? "EN" : "";
+    const n = unserved.reduce((sum, l) => sum + counts[l]!, 0);
+    parts.push(
+      fallback
+        ? `${n} in ${fallback} (no ${unserved.map((l) => l.toUpperCase()).join("/")} template approved)`
+        : `${n} with no template`,
+    );
+  }
+  return parts.join(" · ");
+}
+
+export type StudentPickRow = {
+  fullName: string;
+  classLabel: string;
+  rollNo: string;
+  fatherName?: string;
+  admissionNo?: string;
+};
+
+/**
+ * How long a numbered "which one?" list stays answerable.
+ *
+ * Shorter than the bare-name window: a stray "2" is a far more likely
+ * thing to type into an unrelated conversation than somebody's name.
+ */
+export const PICK_WINDOW_MINUTES = 5;
+
+/**
+ * The line that tells two children of the same name apart.
+ *
+ * The school has three Yatharths. Class and roll separate them when they
+ * are in different sections; inside one section only the father's name
+ * does, which is the same thing the office asks on the phone. Admission
+ * number is the last resort and is shown only when nothing else differs.
+ *
+ * Nothing here is restricted: class, roll, father's name and admission
+ * number are what a class list already shows. No mobile, no address, no
+ * document number — a disambiguation prompt is not a student record.
+ */
+function pickRowDetail(m: StudentPickRow, ambiguous: boolean): string {
+  const bits = [m.classLabel, m.rollNo ? `roll ${m.rollNo}` : ""].filter(Boolean);
+  if (m.fatherName) bits.push(`father ${m.fatherName}`);
+  if (ambiguous && m.admissionNo) bits.push(m.admissionNo);
+  return bits.join(", ");
+}
+
+/**
+ * "Which one did you mean?" — numbered, and answerable with the number.
+ *
+ * It used to end "Reply with the full name and class", which is fine for
+ * an Amay and an Amay Gupta and useless for three children actually
+ * called Yatharth: repeating the name reproduces the ambiguity. A number
+ * is unambiguous by construction, and it is one keystroke.
+ */
 export function formatStudentMatchesAsk(
-  matches: { fullName: string; classLabel: string; rollNo: string }[],
+  matches: StudentPickRow[],
   asked: string,
 ): string {
   if (!matches.length) {
-    return `I couldn't find an active student matching "${asked}". Try the full name, or add the class, e.g. _Amay Gupta 4B_.`;
+    return `I couldn't find an active student matching "${asked}". Check the spelling, try the full name, or add the class — e.g. _Amay Gupta 4B_.`;
   }
+  // Same name AND same class: roll and father's name are carrying the
+  // distinction on their own, so show the admission number too.
+  const ambiguous = new Set(
+    matches.map((m) => `${m.fullName.toLowerCase()}|${m.classLabel}`),
+  ).size < matches.length;
   const rows = matches.map(
-    (m) => `• ${m.fullName} (${m.classLabel}${m.rollNo ? `, roll ${m.rollNo}` : ""})`,
+    (m, i) => `*${i + 1}.* ${m.fullName} — ${pickRowDetail(m, ambiguous)}`,
   );
-  return `Which one did you mean?\n${rows.join("\n")}\nReply with the full name and class.`;
+  const same = matches.every(
+    (m) => m.fullName.toLowerCase() === matches[0]!.fullName.toLowerCase(),
+  );
+  const head = same
+    ? `There are ${matches.length} students called ${matches[0]!.fullName}.`
+    : `Which one did you mean?`;
+  return `${head}\n${rows.join("\n")}\n\nReply with the number — *1*${matches.length > 1 ? ` to *${matches.length}*` : ""}.`;
+}
+
+/**
+ * A reply that is nothing but a number, answering a numbered list.
+ *
+ * Deliberately strict: bare digits only, optionally "no. 2" or "2." as
+ * people type. Anything with other words in it is a fresh message, not a
+ * pick — "2 din se absent hai" must never select the second student.
+ */
+export function parsePickNumber(text: string, max: number): number | null {
+  const t = (text || "").trim();
+  const m = /^(?:no\.?\s*|#|option\s+)?([0-9]{1,2})[.)]?$/i.exec(t);
+  if (!m) return null;
+  const n = parseInt(m[1]!, 10);
+  return n >= 1 && n <= max ? n : null;
+}
+
+/** Is a stored pick list still answerable? */
+export function pickIsFresh(at: string, nowMs: number): boolean {
+  const t = Date.parse(at || "");
+  if (!Number.isFinite(t)) return false;
+  const age = nowMs - t;
+  return age >= 0 && age <= PICK_WINDOW_MINUTES * 60_000;
 }
 
 // ─── Attendance summary ────────────────────────────────────────────────

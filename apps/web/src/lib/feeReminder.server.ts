@@ -21,7 +21,7 @@ import { sendWaWithFailover, buildWaTemplateBodyComponent } from "@/lib/waSend";
 import { listOptedOutSet, toE164India } from "@/lib/waContactState.server";
 import { formatInr } from "@/lib/masters";
 import { TENANT } from "@/lib/types";
-import { feeReminderTooSoon, istHourOf } from "@/lib/erpCommands";
+import { feeReminderTooSoon, istHourOf, templateForFamily } from "@/lib/erpCommands";
 
 // The guards themselves are pure and live with the rest of the command
 // desk's testable logic; a second copy here would be a second set of rules.
@@ -45,6 +45,8 @@ export type FeeReminderRecipient = {
   amountPaise: number;
   overdueDays: number;
   payLink?: string;
+  /** The family's own WhatsApp template language, "en" or "hi". */
+  language?: string;
 };
 
 export type FeeReminderPlan = {
@@ -93,6 +95,8 @@ export type FeeReminderSendResult = {
 export async function sendFeeReminders(opts: {
   recipients: FeeReminderRecipient[];
   template: { metaName: string; language: string; variables: string[] };
+  /** Same message per language, so each family is written to in theirs. */
+  templatesByLang?: Record<string, { metaName: string; language: string; variables: string[] } | null>;
   todayIso: string;
 }): Promise<FeeReminderSendResult> {
   const out: FeeReminderSendResult = { sent: 0, failed: 0, remindedOn: {}, errors: [] };
@@ -107,12 +111,14 @@ export async function sendFeeReminders(opts: {
       overdueDays: String(Math.max(0, r.overdueDays)),
       payLink: r.payLink || `${TENANT.publicPortal || "bhbinternational.school"}/parent`,
     };
+    const tpl = templateForFamily(opts.templatesByLang ?? null, r.language, opts.template)
+      ?? opts.template;
     const res = await sendWaWithFailover({
       primaryMobile: r.mobile,
       template: {
-        name: opts.template.metaName,
-        language: opts.template.language,
-        components: [buildWaTemplateBodyComponent(opts.template.variables, vars)],
+        name: tpl.metaName,
+        language: tpl.language,
+        components: [buildWaTemplateBodyComponent(tpl.variables, vars)],
       },
       clientMessageId: `feerem_${opts.todayIso}_${r.householdId}`,
     });
