@@ -401,34 +401,50 @@ export async function pushFeeVouchersToDb(
     };
   }
 
-  if (headers.length) {
-    const { error: hErr } = await sb
-      .from("fee_desk_vouchers")
-      .upsert(headers, { onConflict: "id" });
-    if (hErr) return { ok: false, count: 0, error: hErr.message };
-  }
-
-  // Delete-then-insert, in ONE transaction.
+  // Headers, lines and tenders in ONE transaction.
   //
   // These used to be four statements over PostgREST with nothing tying them
   // together, so an insert that failed left the deletes committed and the
-  // receipts blank. That emptied the entire book on 2026-09-06 — 1,913 lines
-  // over 435 receipts, ₹20.8 lakh with no student, head or month — and took
-  // 134 receipts the same way on 2026-09-01. The function rolls the delete
-  // back with the insert, so a failed push changes nothing at all.
-  if (idsWithLines.length > 0 || idsWithTenders.length > 0) {
+  // receipts blank — 1,913 lines over 435 receipts on 2026-09-06, 134
+  // receipts on 2026-09-01.
+  //
+  // The first fix put the lines in a transaction but left the HEADER upsert
+  // outside it, running first. On 2026-09-07 that produced the same damage in
+  // a new shape: seven counter receipts (RCV-00503..00509, ₹34,500) committed
+  // as headers with an amount and no student, head, month or payment mode,
+  // because the line write behind them failed and the header had already
+  // landed. A receipt with no breakdown is worse than no receipt: the money
+  // reads collected, the months it paid read unpaid, and the counter is
+  // invited to take them again. A receipt that never reached the server is
+  // still in the browser and pushes on the next sync.
+  //
+  // So the header goes in with its lines, and a failed push changes nothing.
+  if (headers.length || idsWithLines.length > 0 || idsWithTenders.length > 0) {
     const { error: rpcErr } = await sb.rpc("replace_fee_desk_voucher_lines", {
       p_tenant_id: tenantId,
       p_line_voucher_ids: idsWithLines,
       p_tender_voucher_ids: idsWithTenders,
       p_lines: allLines,
       p_tenders: allTenders,
+      p_headers: headers,
     });
     if (rpcErr) {
+      // Logged, not only returned. On 2026-09-07 every push failed with a 502
+      // and the reason existed nowhere a person could read it — the body went
+      // to the browser and the server said nothing, so diagnosing it meant
+      // guessing at constraints. Never again: the message names itself.
+      console.error(
+        `[fees-desk] push REFUSED — nothing was written. ` +
+          `${headers.length} header(s), ${allLines.length} line(s) over ` +
+          `${idsWithLines.length} voucher(s), ${allTenders.length} tender(s). ` +
+          `Postgres said: ${rpcErr.message}` +
+          (rpcErr.details ? ` | details: ${rpcErr.details}` : "") +
+          (rpcErr.hint ? ` | hint: ${rpcErr.hint}` : ""),
+      );
       return {
         ok: false,
         count: 0,
-        error: `Fee lines not written (nothing was changed): ${rpcErr.message}`,
+        error: `Fee desk not written (nothing was changed): ${rpcErr.message}`,
       };
     }
   }
