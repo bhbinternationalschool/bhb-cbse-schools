@@ -134,16 +134,13 @@ class _StaffCommandBarState extends State<StaffCommandBar> {
           children: [
             Row(
               children: [
-                const Icon(Icons.bolt_outlined, size: 16, color: AppColors.accent),
-                const SizedBox(width: 6),
-                const Text(
-                  "Ask the ERP",
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.ink,
-                  ),
+                const Icon(
+                  Icons.bolt_outlined,
+                  size: 16,
+                  color: AppColors.accent,
                 ),
+                const SizedBox(width: 6),
+                const Text("Ask the ERP", style: AppText.labelLargeInk),
                 const Spacer(),
                 if (_busy)
                   const SizedBox(
@@ -165,13 +162,12 @@ class _StaffCommandBarState extends State<StaffCommandBar> {
                     enabled: !_busy,
                     textInputAction: TextInputAction.send,
                     onSubmitted: _send,
-                    style: const TextStyle(fontSize: 13.5),
+                    style: AppText.bodyMedium,
                     decoration: InputDecoration(
                       hintText: _listening
                           ? "Listening…"
                           : "e.g. 5A me aaj kaun absent hai",
-                      hintStyle: TextStyle(
-                        fontSize: 12.5,
+                      hintStyle: AppText.bodySmall.copyWith(
                         color: _listening ? AppColors.danger : AppColors.muted,
                       ),
                       isDense: true,
@@ -194,7 +190,10 @@ class _StaffCommandBarState extends State<StaffCommandBar> {
                 IconButton(
                   tooltip: "Send",
                   onPressed: _busy ? null : () => _send(_controller.text),
-                  icon: const Icon(Icons.send_rounded, color: AppColors.primary),
+                  icon: const Icon(
+                    Icons.send_rounded,
+                    color: AppColors.primary,
+                  ),
                 ),
               ],
             ),
@@ -206,7 +205,7 @@ class _StaffCommandBarState extends State<StaffCommandBar> {
                 children: [
                   for (final s in widget.suggestions)
                     ActionChip(
-                      label: Text(s, style: const TextStyle(fontSize: 11.5)),
+                      label: Text(s, style: AppText.labelMedium),
                       visualDensity: VisualDensity.compact,
                       onPressed: _busy ? null : () => _send(s),
                     ),
@@ -217,7 +216,7 @@ class _StaffCommandBarState extends State<StaffCommandBar> {
               const SizedBox(height: 8),
               Text(
                 _error!,
-                style: const TextStyle(fontSize: 12, color: AppColors.danger),
+                style: AppText.bodySmall.copyWith(color: AppColors.danger),
               ),
             ],
             if (result != null) ...[
@@ -255,8 +254,8 @@ class _ReplyBubble extends StatelessWidget {
     final tone = confirm != null
         ? ModuleTone.amber
         : result.handled
-            ? ModuleTone.teal
-            : ModuleTone.gray;
+        ? ModuleTone.teal
+        : ModuleTone.gray;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
@@ -270,8 +269,7 @@ class _ReplyBubble extends StatelessWidget {
           if (asked.isNotEmpty)
             Text(
               asked,
-              style: TextStyle(
-                fontSize: 11,
+              style: AppText.labelMedium.copyWith(
                 fontStyle: FontStyle.italic,
                 color: tone.foreground.withValues(alpha: 0.75),
               ),
@@ -279,7 +277,10 @@ class _ReplyBubble extends StatelessWidget {
           const SizedBox(height: 4),
           SelectableText.rich(
             _rich(result.text, tone.foreground),
-            style: TextStyle(fontSize: 13, height: 1.4, color: tone.foreground),
+            style: AppText.bodyMedium.copyWith(
+              height: 1.4,
+              color: tone.foreground,
+            ),
           ),
           if (confirm != null) ...[
             const SizedBox(height: 10),
@@ -296,8 +297,9 @@ class _ReplyBubble extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: OutlinedButton(
-                    onPressed:
-                        busy ? null : () => onDecision(confirm.noId, "Cancel"),
+                    onPressed: busy
+                        ? null
+                        : () => onDecision(confirm.noId, "Cancel"),
                     child: const Text("Cancel"),
                   ),
                 ),
@@ -306,8 +308,7 @@ class _ReplyBubble extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               "Expires in 5 minutes",
-              style: TextStyle(
-                fontSize: 10.5,
+              style: AppText.labelSmall.copyWith(
                 color: tone.foreground.withValues(alpha: 0.7),
               ),
             ),
@@ -324,7 +325,9 @@ TextSpan _rich(String text, Color color) {
   final re = RegExp(r"\*([^*\n]+)\*|_([^_\n]+)_");
   var last = 0;
   for (final m in re.allMatches(text)) {
-    if (m.start > last) spans.add(TextSpan(text: text.substring(last, m.start)));
+    if (m.start > last) {
+      spans.add(TextSpan(text: text.substring(last, m.start)));
+    }
     if (m.group(1) != null) {
       spans.add(
         TextSpan(
@@ -343,5 +346,8 @@ TextSpan _rich(String text, Color color) {
     last = m.end;
   }
   if (last < text.length) spans.add(TextSpan(text: text.substring(last)));
-  return TextSpan(children: spans, style: TextStyle(color: color));
+  return TextSpan(
+    children: spans,
+    style: TextStyle(color: color),
+  );
 }
