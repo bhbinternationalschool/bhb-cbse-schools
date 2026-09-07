@@ -95,6 +95,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:fee-integrity
 
+      - name: Test — a fee receipt goes out as the receipt template, filled
+        working-directory: apps/web
+        run: npm run test:wa-receipt-template
+
       - name: Test — optimistic-locking token survives normalization
         working-directory: apps/web
         run: npm run test:sis-revision

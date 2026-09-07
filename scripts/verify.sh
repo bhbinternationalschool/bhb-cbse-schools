@@ -105,6 +105,7 @@ SELFTESTS=(
   test:fee-push-line-safety
   test:prod-write-guard
   test:fee-integrity
+  test:wa-receipt-template
   test:receipt-repair
   test:projection-double-post
   test:holiday-import

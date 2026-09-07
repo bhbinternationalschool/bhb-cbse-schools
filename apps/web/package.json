@@ -138,6 +138,7 @@
     "test:fee-push-line-safety": "npx tsx src/lib/feePushLineSafety.selftest.ts",
     "test:prod-write-guard": "npx tsx src/lib/prodWriteGuard.selftest.ts",
     "test:fee-integrity": "npx tsx src/lib/feeIntegrityAlert.selftest.ts",
+    "test:wa-receipt-template": "npx tsx src/lib/waReceiptTemplate.selftest.ts",
     "test:receipt-repair": "npx tsx src/lib/receiptRepair.selftest.ts",
     "test:projection-double-post": "npx tsx src/lib/ledger/projectionDoublePost.selftest.ts",
     "test:holiday-import": "npx tsx src/lib/holidayImport.selftest.ts",
