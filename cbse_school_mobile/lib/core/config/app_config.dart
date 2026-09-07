@@ -40,4 +40,13 @@ class AppConfig {
   /// Dev-only: show the demo-household login button. Works only against a
   /// server with demo auth enabled (local dev), never production.
   static const bool devLogin = bool.fromEnvironment("DEV_LOGIN");
+
+  /// True in the build distributed through Google Play.
+  ///
+  /// Play requires its own billing for digital content consumed inside the
+  /// app, so the tutor pass is bought through Play there. The sideloaded APK
+  /// keeps the Cashfree checkout — Play's rules do not reach an app Play did
+  /// not deliver — and school FEES stay on Cashfree in both, because paying
+  /// for a real-world education service is exempt.
+  static const bool playBilling = bool.fromEnvironment("PLAY_BILLING");
 }

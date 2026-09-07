@@ -10,6 +10,8 @@ import "../../core/ui/motion.dart";
 import "../../core/ui/spacing.dart";
 import "video_player_screen.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../../core/billing/play_billing.dart";
+import "../../core/config/app_config.dart";
 
 /// What the tutor is told about the child and, when opened from a
 /// homework item, the assignment.
@@ -973,9 +975,89 @@ class _PassSheet extends StatefulWidget {
 class _PassSheetState extends State<_PassSheet> {
   String? _buying;
 
+  /// Play's own product records, when this is the Play build. Null until the
+  /// store answers; empty when it cannot.
+  Map<String, ProductDetails>? _playProducts;
+  PlayBilling? _play;
+
+  @override
+  void initState() {
+    super.initState();
+    if (AppConfig.playBilling) _initPlay();
+  }
+
+  @override
+  void dispose() {
+    _play?.dispose();
+    super.dispose();
+  }
+
+  Future<void> _initPlay() async {
+    final play = PlayBilling(widget.api);
+    _play = play;
+    // Listen before anything is bought: Play delivers purchases left over
+    // from a previous run on this stream, and a listener attached only around
+    // a tap would drop them after the parent had paid.
+    play.listen(
+      studentId: widget.child.id,
+      onGranted: (planCode, endsAt) {
+        Haptics.success();
+        if (mounted) Navigator.pop(context, true);
+      },
+      onFailed: (message) {
+        Haptics.warning();
+        if (mounted) {
+          setState(() => _buying = null);
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(message)));
+        }
+      },
+    );
+    final found = await play.products(
+      widget.status.plans.map((p) => p.code).toSet(),
+    );
+    if (mounted) setState(() => _playProducts = found);
+  }
+
   Future<void> _buy(TutorPlanInfo plan) async {
     if (_buying != null) return;
     setState(() => _buying = plan.code);
+
+    if (AppConfig.playBilling) {
+      // Play build: the store takes the money and the outcome arrives on the
+      // purchase stream, not from this call.
+      final product = _playProducts?[plan.code];
+      if (product == null) {
+        Haptics.warning();
+        if (mounted) {
+          setState(() => _buying = null);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                "Google Play is not ready on this phone. Please try again in a moment.",
+              ),
+            ),
+          );
+        }
+        return;
+      }
+      try {
+        await _play!.buy(product);
+      } catch (_) {
+        Haptics.warning();
+        if (mounted) {
+          setState(() => _buying = null);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Google Play could not start the payment."),
+            ),
+          );
+        }
+      }
+      return;
+    }
+
     try {
       final r = await widget.api.buyTutorPass(
         planCode: plan.code,

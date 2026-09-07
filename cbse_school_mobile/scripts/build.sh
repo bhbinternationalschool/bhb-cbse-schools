@@ -45,7 +45,18 @@ esac
 # stale file in place and look like success).
 AAB="build/app/outputs/bundle/${FLAVOR}Release/app-$FLAVOR-release.aab"
 [ "$KIND" = appbundle ] && rm -f "$AAB"
-if ! flutter build "$KIND" --release --flavor "$FLAVOR" -t "lib/main_$FLAVOR.dart"; then
+# Google Play requires ITS billing for digital content consumed in an app it
+# distributes, so the tutor pass is bought through Play in the appbundle that
+# goes to Play. The sideloaded APK keeps the Cashfree checkout — Play's rules
+# do not reach an app Play did not deliver — and school FEES stay on Cashfree
+# in both, because paying for a real-world education service is exempt.
+DEFINES=()
+if [ "$FLAVOR" = parent ] && [ "$KIND" = appbundle ]; then
+  DEFINES+=(--dart-define=PLAY_BILLING=true)
+  echo "Play Billing ON (tutor pass buys through Google Play in this build)"
+fi
+
+if ! flutter build "$KIND" --release --flavor "$FLAVOR" -t "lib/main_$FLAVOR.dart" "${DEFINES[@]+"${DEFINES[@]}"}"; then
   # Known false negative on this Mac: after a successful bundle, flutter runs
   # apkanalyzer (from cmdline-tools, not installed here) to confirm the debug
   # symbols were stripped, cannot find it, and exits 1 with "failed to strip
