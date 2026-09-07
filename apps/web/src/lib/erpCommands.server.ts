@@ -953,10 +953,16 @@ export async function handleErpStaffCommand(
         text: `No parent WhatsApp number on record for ${due.studentName}. Add it in the ERP first.`,
       };
     }
-    const { ensureWaTemplatesHydrated } = await import("@/lib/waTemplatesPersistence");
-    const { listApprovedTemplates, loadWaTemplates } = await import("@/lib/waTemplates");
-    await ensureWaTemplatesHydrated();
-    const feeTemplates = listApprovedTemplates(loadWaTemplates(), { module: "fees" });
+    const { approvedTemplatesServer } = await import("@/lib/waTemplatesRead.server");
+    const readFeeTemplates = await approvedTemplatesServer("fees");
+    if (!readFeeTemplates.ok) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: "Couldn't read the school's WhatsApp templates just now, so I can't set up the pay link. Nothing was sent. Please try again in a minute.",
+      };
+    }
+    const feeTemplates = readFeeTemplates.templates;
     const tpl =
       feeTemplates.find((x) => x.familyKey === "fees_pay_link" && x.language === "en") ??
       feeTemplates.find((x) => x.familyKey === "fees_pay_link") ??
@@ -1015,10 +1021,16 @@ export async function handleErpStaffCommand(
     if (!res.ok) {
       return { handled: true, audience: "erp_command_ask", text: formatSectionProblem(res.reason, res.options, askedRaw || text) };
     }
-    const { ensureWaTemplatesHydrated } = await import("@/lib/waTemplatesPersistence");
-    const { listApprovedTemplates, loadWaTemplates } = await import("@/lib/waTemplates");
-    await ensureWaTemplatesHydrated();
-    const feeTemplates = listApprovedTemplates(loadWaTemplates(), { module: "fees" });
+    const { approvedTemplatesServer } = await import("@/lib/waTemplatesRead.server");
+    const readFeeTemplates = await approvedTemplatesServer("fees");
+    if (!readFeeTemplates.ok) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: "Couldn't read the school's WhatsApp templates just now, so I can't set up the fee reminder. Nothing was sent. Please try again in a minute.",
+      };
+    }
+    const feeTemplates = readFeeTemplates.templates;
     const tpl =
       feeTemplates.find((x) => x.familyKey === "fees_stage_reminder" && x.language === "en") ??
       feeTemplates.find((x) => x.familyKey === "fees_stage_reminder") ??
@@ -1165,10 +1177,16 @@ export async function handleErpStaffCommand(
         text: `No family on ${p.routeLabel} can be messaged right now${why}. Nothing was sent.`,
       };
     }
-    const { ensureWaTemplatesHydrated } = await import("@/lib/waTemplatesPersistence");
-    const { listApprovedTemplates, loadWaTemplates } = await import("@/lib/waTemplates");
-    await ensureWaTemplatesHydrated();
-    const transportTemplates = listApprovedTemplates(loadWaTemplates(), { module: "transport" });
+    const { approvedTemplatesServer } = await import("@/lib/waTemplatesRead.server");
+    const readTransportTemplates = await approvedTemplatesServer("transport");
+    if (!readTransportTemplates.ok) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: "Couldn't read the school's WhatsApp templates just now, so I can't set up the bus delay notice. Nothing was sent. Please try again in a minute.",
+      };
+    }
+    const transportTemplates = readTransportTemplates.templates;
     const wantLang = messageScriptLanguage(text);
     const tpl =
       transportTemplates.find((x) => x.familyKey === "transport_delay" && x.language === wantLang) ??
@@ -1256,10 +1274,16 @@ export async function handleErpStaffCommand(
     // The family is told on the app either way; WhatsApp needs an approved
     // notice template, because free text cannot reach a parent outside the
     // 24-hour window.
-    const { ensureWaTemplatesHydrated } = await import("@/lib/waTemplatesPersistence");
-    const { listApprovedTemplates, loadWaTemplates } = await import("@/lib/waTemplates");
-    await ensureWaTemplatesHydrated();
-    const approved = listApprovedTemplates(loadWaTemplates(), { module: "comms" });
+    const { approvedTemplatesServer } = await import("@/lib/waTemplatesRead.server");
+    const readApproved = await approvedTemplatesServer("comms");
+    if (!readApproved.ok) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: "Couldn't read the school's WhatsApp templates just now, so I can't set up the PTM booking. Nothing was sent. Please try again in a minute.",
+      };
+    }
+    const approved = readApproved.templates;
     const notice =
       approved.find((tpl) => tpl.familyKey === "comms_notice" && tpl.language === "en") ??
       approved.find((tpl) => tpl.familyKey === "comms_notice") ??
@@ -1286,6 +1310,10 @@ export async function handleErpStaffCommand(
     resolved.templateId = notice?.id || "";
     resolved.templateMetaName = notice ? notice.metaName || notice.name : "";
     resolved.templateLanguage = notice ? notice.metaLanguage || notice.language : "";
+    // Frozen here rather than looked up again on confirm: Meta positions
+    // template parameters, so the order the card was built from is the
+    // order the send has to use.
+    resolved.templateVariables = (notice?.variables ?? []).join(",");
     resolved.vars = JSON.stringify(vars);
     resolved.cardSummary = formatBookPtmCard({
       studentName: o.student.fullName,
@@ -1451,10 +1479,16 @@ export async function handleErpStaffCommand(
       };
     }
     const activeStaff = (masters.staff ?? []).filter((st) => st.status === "active");
-    const { ensureWaTemplatesHydrated } = await import("@/lib/waTemplatesPersistence");
-    const { listApprovedTemplates, loadWaTemplates } = await import("@/lib/waTemplates");
-    await ensureWaTemplatesHydrated();
-    const approved = listApprovedTemplates(loadWaTemplates(), { module: "comms" });
+    const { approvedTemplatesServer } = await import("@/lib/waTemplatesRead.server");
+    const readApproved = await approvedTemplatesServer("comms");
+    if (!readApproved.ok) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: "Couldn't read the school's WhatsApp templates just now, so I can't set up the staff broadcast. Nothing was sent. Please try again in a minute.",
+      };
+    }
+    const approved = readApproved.templates;
     const wantLang = messageScriptLanguage(message);
     const notice =
       approved.find((tpl) => tpl.familyKey === "comms_notice" && tpl.language === wantLang) ??
@@ -1472,6 +1506,7 @@ export async function handleErpStaffCommand(
     resolved.templateMetaName = notice ? notice.metaName || notice.name : "";
     resolved.templateLanguage = notice ? notice.metaLanguage || notice.language : "";
     resolved.templateLabel = notice ? `${notice.name} (${notice.language.toUpperCase()})` : "";
+    resolved.templateVariables = (notice?.variables ?? []).join(",");
     resolved.vars = JSON.stringify(vars);
     resolved.cardSummary = formatStaffBroadcastCard({
       message,
@@ -1496,10 +1531,16 @@ export async function handleErpStaffCommand(
         text: "That message is too long for one WhatsApp notice. Please shorten it to about 700 characters.",
       };
     }
-    const { ensureWaTemplatesHydrated } = await import("@/lib/waTemplatesPersistence");
-    const { listApprovedTemplates, loadWaTemplates } = await import("@/lib/waTemplates");
-    await ensureWaTemplatesHydrated();
-    const approved = listApprovedTemplates(loadWaTemplates(), { module: "comms" });
+    const { approvedTemplatesServer } = await import("@/lib/waTemplatesRead.server");
+    const readApproved = await approvedTemplatesServer("comms");
+    if (!readApproved.ok) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: "Couldn't read the school's WhatsApp templates just now, so I can't set up the class message. Nothing was sent. Please try again in a minute.",
+      };
+    }
+    const approved = readApproved.templates;
     const wantLang = messageScriptLanguage(message);
     const notice =
       approved.find((tpl) => tpl.familyKey === "comms_notice" && tpl.language === wantLang) ??
@@ -1531,6 +1572,7 @@ export async function handleErpStaffCommand(
     resolved.templateMetaName = notice.metaName || notice.name;
     resolved.templateLanguage = notice.metaLanguage || notice.language;
     resolved.templateLabel = `${notice.name} (${notice.language.toUpperCase()})`;
+    resolved.templateVariables = (notice.variables ?? []).join(",");
     resolved.message = message;
     resolved.vars = JSON.stringify(vars);
     resolved.mobiles = contacts.map((c) => c.mobile).filter(Boolean).join(",");
@@ -2604,6 +2646,27 @@ async function studentFees(
  * Phase 2 commands plug into: resolve nothing again (IDs were frozen on
  * the card), run the same server function the app calls, audit, reply.
  */
+/**
+ * The order to fill a template's parameters in.
+ *
+ * Meta positions body parameters — {{1}}, {{2}} — so the order the confirm
+ * card was built from is the order the send has to use. It is frozen onto
+ * the card for exactly that reason; the lookup by id is only for a card
+ * that was raised before this was stored, and returns an empty list rather
+ * than throwing, which is what the old browser-path lookup did on every
+ * single send.
+ */
+async function templateVariableOrder(
+  r: Record<string, string>,
+): Promise<string[]> {
+  const frozen = (r.templateVariables || "").split(",").filter(Boolean);
+  if (frozen.length) return frozen;
+  if (!r.templateId) return [];
+  const { getTemplateByIdServer } = await import("@/lib/waTemplatesRead.server");
+  const tpl = await getTemplateByIdServer(r.templateId);
+  return tpl?.variables ?? [];
+}
+
 async function runConfirmedWrite(
   inbound: ErpCommandInbound,
   pending: PendingErpConfirm,
@@ -2906,8 +2969,7 @@ async function runConfirmedWrite(
     } catch {
       vars = {};
     }
-    const { getTemplateById, loadWaTemplates } = await import("@/lib/waTemplates");
-    const tpl = r.templateId ? getTemplateById(loadWaTemplates(), r.templateId) : null;
+    const ptmVars = await templateVariableOrder(r);
     const { bookPtmSlotServer } = await import("@/lib/ptmBook.server");
     const res = await bookPtmSlotServer({
       studentId: r.studentId,
@@ -2922,7 +2984,7 @@ async function runConfirmedWrite(
         ? {
             metaName: r.templateMetaName,
             language: r.templateLanguage || "en",
-            variables: tpl?.variables ?? [],
+            variables: ptmVars,
             vars,
           }
         : null,
@@ -3081,15 +3143,15 @@ async function runConfirmedWrite(
         vars = {};
       }
       const { buildWaTemplateBodyComponent } = await import("@/lib/waSend");
-      const { getTemplateById, loadWaTemplates } = await import("@/lib/waTemplates");
-      const tpl = getTemplateById(loadWaTemplates(), r.templateId || "");
       const { broadcastTemplateToMobiles } = await import("@/lib/waBroadcast.server");
       wa = await broadcastTemplateToMobiles({
         mobiles,
         template: {
           name: r.templateMetaName,
           language: r.templateLanguage || "en",
-          components: [buildWaTemplateBodyComponent(tpl?.variables ?? [], vars)],
+          components: [
+            buildWaTemplateBodyComponent(await templateVariableOrder(r), vars),
+          ],
         },
         module: "notices",
         originUrl: publicOrigin(),
@@ -3146,15 +3208,15 @@ async function runConfirmedWrite(
       vars = {};
     }
     const { buildWaTemplateBodyComponent } = await import("@/lib/waSend");
-    const { getTemplateById, loadWaTemplates } = await import("@/lib/waTemplates");
-    const tpl = getTemplateById(loadWaTemplates(), r.templateId || "");
     const { broadcastTemplateToMobiles } = await import("@/lib/waBroadcast.server");
     const res = await broadcastTemplateToMobiles({
       mobiles,
       template: {
         name: r.templateMetaName,
         language: r.templateLanguage || "en",
-        components: [buildWaTemplateBodyComponent(tpl?.variables ?? [], vars)],
+        components: [
+          buildWaTemplateBodyComponent(await templateVariableOrder(r), vars),
+        ],
       },
       module: "notices",
       originUrl: publicOrigin(),

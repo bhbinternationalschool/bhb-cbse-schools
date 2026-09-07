@@ -7,6 +7,8 @@
  * half (RBAC, data, audit, WhatsApp) is exercised live via the webhook.
  */
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 
 import {
   ERP_COMMANDS,
@@ -1869,6 +1871,47 @@ const masters = {
   assert.equal(followUpIsFresh("not a date", now), false);
   // A timestamp from the future is not fresh, it is broken.
   assert.equal(followUpIsFresh(new Date(now + 60_000).toISOString(), now), false);
+}
+
+// ── No server file may ask the browser for the templates ──────────────
+// `ensureWaTemplatesHydrated` fetches the relative URL
+// `/api/school-data/desk-slice/wa_templates`. In a browser that resolves
+// against the page. Under Node it throws, the throw is caught, and
+// `loadWaTemplates()` quietly returns the built-in defaults — in which
+// NOTHING is approved. So every parent-facing command reported "no
+// approved template" no matter what the school had approved with Meta:
+// the pay link, the fee reminder, the class message, the bus delay, the
+// PTM notice, the staff broadcast, and the held teacher messages.
+//
+// It failed silently and identically in all seven places, which is why a
+// grep is the test. Server code reads templates through
+// `waTemplatesRead.server.ts`.
+{
+  const dir = path.join(import.meta.dirname, ".");
+  const offenders: string[] = [];
+  const walk = (d: string) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const full = path.join(d, e.name);
+      if (e.isDirectory()) {
+        walk(full);
+        continue;
+      }
+      if (!e.name.endsWith(".server.ts")) continue;
+      // The reader itself names both, in the comment explaining why.
+      if (e.name === "waTemplatesRead.server.ts") continue;
+      const src = fs.readFileSync(full, "utf8");
+      // Import specifiers, not prose: a comment about the bug is fine.
+      if (/from "@\/lib\/waTemplatesPersistence"|import\("@\/lib\/waTemplatesPersistence"\)|\bloadWaTemplates\(\)/.test(src)) {
+        offenders.push(path.relative(dir, full));
+      }
+    }
+  };
+  walk(dir);
+  assert.deepEqual(
+    offenders,
+    [],
+    `server code must read templates via waTemplatesRead.server.ts, not the browser hydrate path: ${offenders.join(", ")}`,
+  );
 }
 
 console.log("erpCommands.selftest.ts OK");
