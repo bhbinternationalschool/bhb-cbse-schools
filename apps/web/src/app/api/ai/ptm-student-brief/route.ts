@@ -69,7 +69,7 @@ export async function POST(req: Request) {
 
   const preferred = normalizeHouseholdLanguage(body.language);
   const prefs = { preferredLanguage: preferred };
-  const draftLanguage = waTemplateLanguageFor(prefs, "en");
+  const draftLanguage = waTemplateLanguageFor(prefs);
   const sarvamTarget = sarvamTargetFor(prefs);
 
   const r = await generatePtmBriefJson({

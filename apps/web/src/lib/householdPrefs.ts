@@ -88,9 +88,25 @@ export function householdLanguage(
 }
 
 /** WhatsApp template language for this family (en/hi only exist). */
+/**
+ * The language the school writes in when a family has not said otherwise.
+ *
+ * Hindi, decided 2026-09-07. It was "en", hardcoded at each call site, and
+ * every one of the school's 198 households had a blank preferred_language —
+ * so in practice EVERY parent received English, in a school where most
+ * families read Hindi far more comfortably. The language flow that was meant
+ * to fix that per family had never once saved a choice.
+ *
+ * A family that picks a language still overrides this; the default only
+ * decides what happens before they ever say. One constant, so the school's
+ * language is a decision in one place rather than a literal repeated at
+ * every call.
+ */
+export const SCHOOL_DEFAULT_WA_LANGUAGE: "en" | "hi" = "hi";
+
 export function waTemplateLanguageFor(
   hh: HouseholdPrefsLike,
-  schoolDefault: "en" | "hi" = "en",
+  schoolDefault: "en" | "hi" = SCHOOL_DEFAULT_WA_LANGUAGE,
 ): "en" | "hi" {
   const pref = normalizeHouseholdLanguage(hh?.preferredLanguage);
   if (!pref) return schoolDefault;
