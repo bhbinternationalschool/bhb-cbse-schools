@@ -154,6 +154,7 @@ import {
   formatCommandHelpDetail,
   templatesByLanguage,
   templateForFamily,
+  missingLanguagesLabel,
   formatTemplateMixLabel,
   parseCommandAllowList,
   commandActorAllowed,
@@ -1169,7 +1170,14 @@ export async function handleErpStaffCommand(
     }
     // One family, so one language: theirs.
     const payLinkTpls = templatesByLanguage(readFeeTemplates.templates, ["fees_pay_link"]);
-    const tpl = payLinkTpls.byLang[due.language] ?? payLinkTpls.any;
+    if (payLinkTpls.missing.length) {
+      return {
+        handled: true,
+        audience: "erp_command_denied",
+        text: `The pay-link template isn't approved in ${missingLanguagesLabel(payLinkTpls.missing)} yet, so a family who reads it would get the wrong language. Ask the office to finish it in Masters → WhatsApp templates. Nothing was sent.`,
+      };
+    }
+    const tpl = payLinkTpls.byLang[due.language]!;
     resolved.templateMetaName = tpl?.metaName || "";
     resolved.templateLanguage = tpl?.language || "";
     resolved.templateVariables = (tpl?.variables ?? []).join(",");
@@ -1238,12 +1246,12 @@ export async function handleErpStaffCommand(
       "fees_stage_reminder",
       "fees_soft_reminder",
     ]);
-    const tpl = reminderTpls.any;
+    const tpl = reminderTpls.ready;
     if (!tpl) {
       return {
         handled: true,
         audience: "erp_command_denied",
-        text: "No approved fee reminder template yet, and free text can't reach parents outside the 24-hour window. Ask the office to get *Fee overdue stage reminder* approved in Masters → WhatsApp templates.",
+        text: `The fee reminder template isn't approved in ${missingLanguagesLabel(reminderTpls.missing) || "either language"} yet, and free text can't reach parents outside the 24-hour window. Ask the office to finish *Fee overdue stage reminder* in Masters → WhatsApp templates. Nothing was sent.`,
       };
     }
     await ensureFeesHydratedServer();
@@ -1406,12 +1414,12 @@ export async function handleErpStaffCommand(
     }
     // Not the script the staff member typed in — each family's own.
     const delayTpls = templatesByLanguage(readTransportTemplates.templates, ["transport_delay"]);
-    const tpl = delayTpls.any;
+    const tpl = delayTpls.ready;
     if (!tpl) {
       return {
         handled: true,
         audience: "erp_command_denied",
-        text: "No approved bus delay template yet, and free text can't reach parents outside the 24-hour window. Ask the office to get *Bus running late* approved in Masters → WhatsApp templates.",
+        text: `The bus delay template isn't approved in ${missingLanguagesLabel(delayTpls.missing) || "either language"} yet, and free text can't reach parents outside the 24-hour window. Ask the office to finish *Bus running late* in Masters → WhatsApp templates. Nothing was sent.`,
       };
     }
     const lastAt = (store.busDelayedAt ?? {})[p.route.id];
@@ -1512,7 +1520,9 @@ export async function handleErpStaffCommand(
     const ptmHh = ptmSis.households.find((h) => h.id === o.householdId);
     const ptmLang = waTemplateLanguageFor(ptmHh ?? {});
     const ptmTpls = templatesByLanguage(readApproved.templates, ["comms_notice"]);
-    const notice = ptmTpls.byLang[ptmLang] ?? ptmTpls.any;
+    // Half-approved means no WhatsApp for this family — the app
+    // notification below still goes, so the booking is not lost.
+    const notice = ptmTpls.missing.length ? null : ptmTpls.byLang[ptmLang];
     const { modeLabel } = await import("@/lib/ptm");
     const noticeBody = [
       `PTM booked for ${o.student.fullName}.`,
@@ -1554,7 +1564,7 @@ export async function handleErpStaffCommand(
       mobileMasked: o.mobile ? maskMobile10(o.mobile) : "",
       familyLinked: !!o.householdId,
       templateLabel: notice
-        ? `${ptmTpls.rawAny?.name || notice.metaName} (${notice.language.toUpperCase()})`
+        ? `${ptmTpls.rawReady?.name || notice.metaName} (${notice.language.toUpperCase()})`
         : "",
     });
   }
@@ -1770,12 +1780,12 @@ export async function handleErpStaffCommand(
     // Each family in their own language, not in the script the teacher
     // happened to type the notice in.
     const noticeTpls = templatesByLanguage(readApproved.templates, ["comms_notice"]);
-    const notice = noticeTpls.any;
+    const notice = noticeTpls.ready;
     if (!notice) {
       return {
         handled: true,
         audience: "erp_command_denied",
-        text: "There's no approved WhatsApp notice template yet, and free text can't be sent to parents outside the 24-hour window. Ask the office to get *School notice broadcast* approved in Masters → WhatsApp templates.",
+        text: `The notice template isn't approved in ${missingLanguagesLabel(noticeTpls.missing) || "either language"} yet, and free text can't be sent to parents outside the 24-hour window. Ask the office to finish *School notice broadcast* in Masters → WhatsApp templates. Nothing was sent.`,
       };
     }
     const classSis = loadSis();
@@ -1820,7 +1830,7 @@ export async function handleErpStaffCommand(
     resolved.cardSummary = formatClassMessageCard({
       sectionLabel: (resolved.sectionLabel || "").replace(" · ", " "),
       templateLabel: resolved.templateLabel,
-      rendered: renderTemplateBody(noticeTpls.rawAny?.body || "", vars),
+      rendered: renderTemplateBody(noticeTpls.rawReady?.body || "", vars),
       familyCount: contacts.length,
       optedOut: 0,
     });

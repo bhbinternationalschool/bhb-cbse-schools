@@ -39,7 +39,19 @@ export async function loadWaTemplatesServer(): Promise<WaTemplatesState> {
   const templates = Array.isArray(read.bundle.templates)
     ? (read.bundle.templates as WaTemplate[])
     : [];
-  return { version: 1, templates, audit: [], lastMetaSyncAt: "" };
+  // `senders` / `moduleSenders` came with multi-number routing on main. The
+  // desk only ever asks this state which templates are approved, and the
+  // slice does not carry them, so an empty routing table is the honest
+  // value: it means "the default sending number", which is what the desk
+  // has always used.
+  return {
+    version: 1,
+    templates,
+    audit: [],
+    lastMetaSyncAt: "",
+    senders: [],
+    moduleSenders: {},
+  };
 }
 
 /**

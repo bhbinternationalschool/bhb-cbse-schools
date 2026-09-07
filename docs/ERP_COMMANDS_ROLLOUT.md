@@ -315,6 +315,17 @@ families are outside Meta's 24-hour window.
 | `raise_complaint` | **nothing** — the card says plainly that the family is not messaged |
 | `staff_broadcast` | staff only, never families |
 
+**A template family must be approved in BOTH Hindi and English, or the
+command refuses.** Not "send whichever half exists" — that writes to a
+parent in a language they did not choose, and the concrete case was a
+family who had just paid at the counter being told, in the wrong
+language, to pay a link (see `templateFamilyReady`, PR #101). The refusal
+names the missing language so the office knows what to chase.
+
+At BHB on 2026-09-07 only `fees_pay_link` was approved at all, and only in
+Hindi — so **every** parent-facing write refuses today, the pay link
+included, until Meta approves the English halves.
+
 Where no approved template exists, the command says so rather than sending
 nothing silently or implying it sent.
 

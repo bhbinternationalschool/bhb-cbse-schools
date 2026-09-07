@@ -2070,56 +2070,85 @@ export type TemplateLike = {
  * time. `familyKeys` is a list because some messages have a preferred
  * template and a fallback (the fee reminder's stage reminder, then its
  * soft reminder) — earlier keys win outright.
+ *
+ * A HALF-APPROVED FAMILY IS REFUSED, not half-used. This function will not
+ * hand back a Hindi template for an English-reading household even when
+ * Hindi is all that exists, because that writes to a family in a language
+ * they did not choose — the rule `templateFamilyReady` states in
+ * waTemplates.ts, arrived at from the same live fact this code was written
+ * against (bhb_fee_pay_link approved in hi, pending in en, on 2026-09-07).
+ * Silence with an explanation the office can act on beats a message the
+ * parent cannot read.
  */
 export function templatesByLanguage<T extends TemplateLike>(
   approved: T[],
   familyKeys: string[],
 ): {
   byLang: Record<"en" | "hi", PickedTemplate | null>;
-  any: PickedTemplate | null;
-  /** The same pick, unreduced — the confirm card previews its body. */
-  rawAny: T | null;
+  /** Both languages present. Null when the family is half-approved. */
+  ready: PickedTemplate | null;
+  /** Which languages are missing, for the message that says so. */
+  missing: ("en" | "hi")[];
+  /** The unreduced pick, for the confirm card's body preview. */
+  rawReady: T | null;
 } {
   const pick = (t: T): PickedTemplate => ({
     metaName: t.metaName || t.name,
     language: t.metaLanguage || t.language,
     variables: t.variables ?? [],
   });
-  const find = (lang: "en" | "hi"): PickedTemplate | null => {
-    for (const key of familyKeys) {
-      const hit = approved.find((t) => t.familyKey === key && t.language === lang);
-      if (hit) return pick(hit);
+  const inLang = (key: string, lang: "en" | "hi") =>
+    approved.find((t) => t.familyKey === key && t.language === lang) ?? null;
+
+  // One key at a time, whole. Resolving each language independently would
+  // let Hindi families get the stage reminder and English families the
+  // soft reminder — two different messages sent as if they were one.
+  let byLang: Record<"en" | "hi", PickedTemplate | null> = { en: null, hi: null };
+  let rawReady: T | null = null;
+  let missing: ("en" | "hi")[] = ["en", "hi"];
+  for (const key of familyKeys) {
+    const en = inLang(key, "en");
+    const hi = inLang(key, "hi");
+    const gap = (["en", "hi"] as const).filter((l) => (l === "en" ? !en : !hi));
+    if (!gap.length) {
+      byLang = { en: pick(en!), hi: pick(hi!) };
+      rawReady = hi ?? en;
+      missing = [];
+      break;
     }
-    return null;
+    // Remember the best partial, so the refusal can name what is missing
+    // from the key the school got furthest with.
+    if (gap.length < missing.length) {
+      byLang = { en: en ? pick(en) : null, hi: hi ? pick(hi) : null };
+      missing = [...gap];
+    }
+  }
+  return {
+    byLang,
+    ready: missing.length ? null : byLang.hi,
+    missing,
+    rawReady,
   };
-  const byLang = { en: find("en"), hi: find("hi") };
-  // Something approved in neither listed language still beats sending
-  // nothing — a school with only a Bhojpuri template should still be able
-  // to use it.
-  const anyKey = familyKeys
-    .map((key) => approved.find((t) => t.familyKey === key))
-    .find(Boolean);
-  const any = byLang.hi ?? byLang.en ?? (anyKey ? pick(anyKey) : null);
-  const rawAny =
-    approved.find((t) => (t.metaName || t.name) === any?.metaName && (t.metaLanguage || t.language) === any?.language) ??
-    anyKey ??
-    null;
-  return { byLang, any, rawAny };
 }
 
-/**
- * The template for one family, by the language they asked for.
- *
- * Falls back rather than refusing: a family who reads Hindi is far better
- * served by the English template that exists than by silence.
- */
+/** "…in Hindi and English" / "…in English" — for the refusal message. */
+export function missingLanguagesLabel(missing: ("en" | "hi")[]): string {
+  const names = missing.map((l) => (l === "en" ? "English" : "Hindi"));
+  return names.length === 2 ? "Hindi and English" : names[0] || "";
+}
+
 export function templateForFamily(
   byLang: Record<string, PickedTemplate | null> | null,
   language: string | undefined,
   fallback: PickedTemplate | null,
 ): PickedTemplate | null {
   if (!byLang) return fallback;
-  return byLang[language || ""] ?? byLang.hi ?? byLang.en ?? fallback;
+  // No cross-language fallback. `templatesByLanguage` only hands out a set
+  // when BOTH languages are approved, so by the time a send reaches here
+  // the family's own language exists. `fallback` is the single template
+  // frozen onto a card raised before this existed — never a substitute for
+  // the language the family chose.
+  return byLang[language || ""] ?? fallback;
 }
 
 /**
@@ -2135,23 +2164,15 @@ export function formatTemplateMixLabel(
   byLang: Record<string, PickedTemplate | null>,
   counts: Record<string, number>,
 ): string {
-  const langs = Object.keys(counts).filter((l) => counts[l]! > 0);
+  // Only languages that are actually served. A half-approved family never
+  // reaches a confirm card — it is refused where the card would be built —
+  // so there is no "and these 3 get the wrong language" line any more.
+  const langs = Object.keys(counts).filter((l) => counts[l]! > 0 && byLang[l]);
   if (!langs.length) return "";
-  const served = langs.filter((l) => byLang[l]);
-  const unserved = langs.filter((l) => !byLang[l]);
-  const parts = served
+  return langs
     .sort((a, b) => counts[b]! - counts[a]!)
-    .map((l) => `${counts[l]} in ${l.toUpperCase()}`);
-  if (unserved.length) {
-    const fallback = byLang.hi ? "HI" : byLang.en ? "EN" : "";
-    const n = unserved.reduce((sum, l) => sum + counts[l]!, 0);
-    parts.push(
-      fallback
-        ? `${n} in ${fallback} (no ${unserved.map((l) => l.toUpperCase()).join("/")} template approved)`
-        : `${n} with no template`,
-    );
-  }
-  return parts.join(" · ");
+    .map((l) => `${counts[l]} in ${l.toUpperCase()}`)
+    .join(" · ");
 }
 
 export type StudentPickRow = {

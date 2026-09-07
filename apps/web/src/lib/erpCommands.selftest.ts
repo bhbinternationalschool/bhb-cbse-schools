@@ -117,6 +117,7 @@ import {
   summarizeCommandAudit,
   templateForFamily,
   templatesByLanguage,
+  missingLanguagesLabel,
   type CommandAuditRow,
   type PendingErpConfirm,
   type StudentLike,
@@ -1940,42 +1941,69 @@ const masters = {
     "bhb_comms_notice_en",
   );
 
-  // Only Hindi approved — the English-reading family still gets written to.
-  // Silence would be the worse answer, and it is what the school actually
-  // had on 2026-09-07: fees_pay_link was approved in hi and pending in en.
+  // Only Hindi approved — the family is REFUSED, not half-served.
+  //
+  // This test used to assert the opposite: that an English-reading family
+  // got the Hindi template because silence was the worse answer. #101
+  // settled it the other way, and it is right — sending a parent a
+  // language they did not choose is not "reaching" them, and the concrete
+  // case was a family who had just paid at the counter being told in the
+  // wrong language to pay a link. The school actually had this shape on
+  // 2026-09-07: fees_pay_link approved in hi, pending in en.
   const hiOnly = templatesByLanguage([tpl("fees_pay_link", "hi")], ["fees_pay_link"]);
+  assert.equal(hiOnly.byLang.hi?.metaName, "bhb_fees_pay_link_hi");
   assert.equal(hiOnly.byLang.en, null);
+  assert.equal(hiOnly.ready, null, "a half-approved family is not usable");
+  assert.deepEqual(hiOnly.missing, ["en"]);
+  assert.equal(hiOnly.rawReady, null);
   assert.equal(
-    templateForFamily(hiOnly.byLang, "en", null)?.metaName,
-    "bhb_fees_pay_link_hi",
-    "an English-reading family gets the Hindi template rather than nothing",
+    templateForFamily(hiOnly.byLang, "en", null),
+    null,
+    "no cross-language fallback: an English reader is never handed Hindi",
   );
-  assert.equal(hiOnly.any?.metaName, "bhb_fees_pay_link_hi");
+  assert.equal(missingLanguagesLabel(hiOnly.missing), "English");
+  assert.equal(missingLanguagesLabel(["en", "hi"]), "Hindi and English");
 
   // Earlier family keys win outright, per language.
   const staged = templatesByLanguage(
-    [tpl("fees_soft_reminder", "hi"), tpl("fees_stage_reminder", "hi")],
+    [
+      tpl("fees_soft_reminder", "hi"),
+      tpl("fees_soft_reminder", "en"),
+      tpl("fees_stage_reminder", "hi"),
+      tpl("fees_stage_reminder", "en"),
+    ],
     ["fees_stage_reminder", "fees_soft_reminder"],
   );
   assert.equal(staged.byLang.hi?.metaName, "bhb_fees_stage_reminder_hi");
+  assert.equal(staged.byLang.en?.metaName, "bhb_fees_stage_reminder_en");
+  assert.ok(staged.ready, "both languages present, so it is usable");
+
+  // A family half-approved on the PREFERRED key does not silently drop to
+  // the fallback key's other language. Both must be whole.
+  const halfStaged = templatesByLanguage(
+    [tpl("fees_stage_reminder", "hi"), tpl("fees_soft_reminder", "en")],
+    ["fees_stage_reminder", "fees_soft_reminder"],
+  );
+  assert.equal(halfStaged.ready, null);
 
   // Nothing approved at all is still "nothing", not a broken template.
   const none = templatesByLanguage([], ["comms_notice"]);
-  assert.equal(none.any, null);
+  assert.equal(none.ready, null);
+  assert.deepEqual(none.missing, ["en", "hi"]);
   assert.equal(templateForFamily(none.byLang, "hi", null), null);
 
-  // The card has to say what the mix is BEFORE anyone taps Confirm.
+  // The card has to say what the mix is BEFORE anyone taps Confirm — and
+  // it can only ever name languages that are actually served now.
   assert.equal(
     formatTemplateMixLabel(both.byLang, { hi: 12, en: 3 }),
     "12 in HI · 3 in EN",
   );
-  assert.equal(
-    formatTemplateMixLabel(hiOnly.byLang, { hi: 12, en: 3 }),
-    "12 in HI · 3 in HI (no EN template approved)",
-    "a family served in the wrong language must be visible on the card",
-  );
   assert.equal(formatTemplateMixLabel(both.byLang, { hi: 15 }), "15 in HI");
-  assert.equal(formatTemplateMixLabel(none.byLang, { hi: 4 }), "4 with no template");
+  assert.equal(
+    formatTemplateMixLabel(none.byLang, { hi: 4 }),
+    "",
+    "nothing approved means no card is built at all, so no label",
+  );
 }
 
 // ── Three children called Yatharth ────────────────────────────────────
