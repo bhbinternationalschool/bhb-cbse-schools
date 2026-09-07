@@ -28,6 +28,16 @@ export type FeeIntegrityReport = {
   /** Live receipts whose lines exist but do not sum to the receipt total. */
   mismatchedReceipts: { receiptNo: string; paise: number; linePaise: number }[];
   blankPaise: number;
+  /**
+   * Receipts exist for the running session, but the dues cache says almost
+   * nothing has been paid against it — the signature of a dues table that was
+   * never rebuilt after the receipts changed.
+   */
+  staleDues: null | {
+    academicYearCode: string;
+    receiptsPaise: number;
+    impliedPaidPaise: number;
+  };
   alerted: boolean;
   alertError?: string;
 };
@@ -60,6 +70,78 @@ function alertMobiles(): string[] {
  * must read as mismatched rather than blank, which is why this keys on
  * `has()` and never on falsiness.
  */
+/**
+ * Has the dues cache fallen behind the receipts for the RUNNING session?
+ *
+ * `billed - concession - balance` is what the cache believes has been paid.
+ * When receipts exist for the same year and that figure is near zero, the
+ * cache was built from a state the receipts have since left behind — and
+ * every family reads as owing their whole year while their money sits in the
+ * book. Rebuild with POST /api/fees/rebuild-open-dues.
+ *
+ * The threshold is deliberately blunt: this catches "the derivation never
+ * ran", not "the derivation is slightly out". A cache that is merely a few
+ * receipts behind corrects itself on the next push; one that says nothing has
+ * been paid never will.
+ */
+async function detectStaleDues(
+  sb: NonNullable<ReturnType<typeof createServiceSupabase>>,
+): Promise<FeeIntegrityReport["staleDues"]> {
+  const { data: ayRows } = await sb
+    .from("fee_desk_open_dues")
+    .select("academic_year_code")
+    .order("academic_year_code", { ascending: false })
+    .limit(1);
+  const ay = String(ayRows?.[0]?.academic_year_code ?? "");
+  if (!ay) return null;
+
+  let billed = 0;
+  let concession = 0;
+  let balance = 0;
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await sb
+      .from("fee_desk_open_dues")
+      .select("billed_paise, concession_paise, balance_paise")
+      .eq("academic_year_code", ay)
+      .order("due_key", { ascending: true })
+      .range(from, from + 999);
+    if (error) return null;
+    for (const r of data ?? []) {
+      billed += Number((r as { billed_paise: number }).billed_paise) || 0;
+      concession += Number((r as { concession_paise: number }).concession_paise) || 0;
+      balance += Number((r as { balance_paise: number }).balance_paise) || 0;
+    }
+    if (!data || data.length < 1000) break;
+  }
+  const impliedPaid = billed - concession - balance;
+
+  let receipts = 0;
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await sb
+      .from("fee_desk_vouchers")
+      .select("total_paise")
+      .eq("academic_year_code", ay)
+      .is("voided_at", null)
+      .order("id", { ascending: true })
+      .range(from, from + 999);
+    if (error) return null;
+    for (const r of data ?? []) {
+      receipts += Number((r as { total_paise: number }).total_paise) || 0;
+    }
+    if (!data || data.length < 1000) break;
+  }
+
+  // Receipts worth something, and the cache crediting under a hundredth of it.
+  if (receipts > 100_000 && impliedPaid < receipts / 100) {
+    return {
+      academicYearCode: ay,
+      receiptsPaise: receipts,
+      impliedPaidPaise: impliedPaid,
+    };
+  }
+  return null;
+}
+
 export function classifyReceipts(
   vouchers: { id: string; receipt_no: string; total_paise: number }[],
   lineTotals: Map<string, number>,
@@ -98,6 +180,7 @@ export async function checkFeeIntegrity(opts?: {
       blankReceipts: [],
       mismatchedReceipts: [],
       blankPaise: 0,
+      staleDues: null,
       alerted: false,
       alertError: "Supabase not configured",
     };
@@ -122,6 +205,7 @@ export async function checkFeeIntegrity(opts?: {
         blankReceipts: [],
         mismatchedReceipts: [],
         blankPaise: 0,
+        staleDues: null,
         alerted: false,
         alertError: `receipt read failed: ${error.message}`,
       };
@@ -144,6 +228,7 @@ export async function checkFeeIntegrity(opts?: {
         blankReceipts: [],
         mismatchedReceipts: [],
         blankPaise: 0,
+        staleDues: null,
         alerted: false,
         alertError: `line read failed: ${error.message}`,
       };
@@ -161,6 +246,15 @@ export async function checkFeeIntegrity(opts?: {
     lineTotals,
   );
 
+  // A due is cleared BY the lines of the receipt that paid it, so the dues
+  // cache is derived and can silently fall behind the receipts. On
+  // 2026-09-06 the wipe left it rebuilt from emptiness, the lines were
+  // restored the next day, and nothing recomputed the dues — so for two days
+  // the school read ₹1 collected against a ₹36.7 lakh session while ₹21.2
+  // lakh of receipts sat in the same database. Blank receipts were not the
+  // symptom that time; a stale derivation was.
+  const staleDues = await detectStaleDues(sb);
+
   const blankPaise = blankReceipts.reduce((s, r) => s + r.paise, 0);
   const report: FeeIntegrityReport = {
     checkedAt,
@@ -168,10 +262,20 @@ export async function checkFeeIntegrity(opts?: {
     blankReceipts,
     mismatchedReceipts,
     blankPaise,
+    staleDues,
     alerted: false,
   };
 
-  if (blankReceipts.length === 0) return report;
+  if (staleDues) {
+    console.error(
+      `[fee-integrity] dues for ${staleDues.academicYearCode} say ` +
+        `${rupees(staleDues.impliedPaidPaise)} paid, but receipts total ` +
+        `${rupees(staleDues.receiptsPaise)} — the dues cache needs rebuilding ` +
+        `(POST /api/fees/rebuild-open-dues)`,
+    );
+  }
+
+  if (blankReceipts.length === 0 && !staleDues) return report;
 
   console.error(
     `[fee-integrity] ${blankReceipts.length} live receipt(s) worth ${rupees(blankPaise)} have NO lines`,
