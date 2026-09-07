@@ -238,6 +238,27 @@ export function voucherIdsCarryingLines(
     .map((v) => v.id);
 }
 
+/**
+ * The first id that appears twice, or null.
+ *
+ * A line id is `${voucherId}:${dueKey}`, so a repeat means one receipt has two
+ * lines settling the same due. That is not a duplicate to be deduped — it is
+ * either a real split the id scheme cannot express, or a corrupt payload. The
+ * push refuses either way rather than picking one of the two amounts.
+ */
+export function firstDuplicateId(
+  rows: { id?: unknown }[],
+): string | null {
+  const seen = new Set<string>();
+  for (const r of rows) {
+    const id = typeof r.id === "string" ? r.id : String(r.id ?? "");
+    if (!id) continue;
+    if (seen.has(id)) return id;
+    seen.add(id);
+  }
+  return null;
+}
+
 /** The same rule for tenders — a push without them must not erase them. */
 export function voucherIdsCarryingTenders(
   vouchers: Pick<CollectionVoucher, "id" | "tenders">[],
@@ -354,27 +375,6 @@ export async function pushFeeVouchersToDb(
     );
   }
 
-  if (idsWithLines.length > 0) {
-    const { error: delLines } = await sb
-      .from("fee_desk_voucher_lines")
-      .delete()
-      .eq("tenant_id", tenantId)
-      .in("voucher_id", idsWithLines);
-    if (delLines) {
-      return { ok: false, count: 0, error: delLines.message };
-    }
-  }
-  if (idsWithTenders.length > 0) {
-    const { error: delTenders } = await sb
-      .from("fee_desk_voucher_tenders")
-      .delete()
-      .eq("tenant_id", tenantId)
-      .in("voucher_id", idsWithTenders);
-    if (delTenders) {
-      return { ok: false, count: 0, error: delTenders.message };
-    }
-  }
-
   const allLines: Record<string, unknown>[] = [];
   const allTenders: Record<string, unknown>[] = [];
   const headers: Record<string, unknown>[] = [];
@@ -386,6 +386,21 @@ export async function pushFeeVouchersToDb(
     allTenders.push(...tenders);
   }
 
+  // Two lines claiming the same id means two lines claiming the same
+  // (receipt, due) — real money detail that must not be collapsed into one
+  // row. Caught here so the message names the receipt; the RPC would raise a
+  // duplicate-key error that says only which id.
+  const dupLineId = firstDuplicateId(allLines);
+  if (dupLineId) {
+    return {
+      ok: false,
+      count: 0,
+      error:
+        `Receipt line ${dupLineId} appears twice in this push — two lines settle the same due. ` +
+        `Nothing was written; open that receipt and re-enter its breakdown.`,
+    };
+  }
+
   if (headers.length) {
     const { error: hErr } = await sb
       .from("fee_desk_vouchers")
@@ -393,18 +408,29 @@ export async function pushFeeVouchersToDb(
     if (hErr) return { ok: false, count: 0, error: hErr.message };
   }
 
-  if (allLines.length) {
-    const { error: lErr } = await sb
-      .from("fee_desk_voucher_lines")
-      .upsert(allLines, { onConflict: "id" });
-    if (lErr) return { ok: false, count: 0, error: lErr.message };
-  }
-
-  if (allTenders.length) {
-    const { error: tErr } = await sb
-      .from("fee_desk_voucher_tenders")
-      .upsert(allTenders, { onConflict: "id" });
-    if (tErr) return { ok: false, count: 0, error: tErr.message };
+  // Delete-then-insert, in ONE transaction.
+  //
+  // These used to be four statements over PostgREST with nothing tying them
+  // together, so an insert that failed left the deletes committed and the
+  // receipts blank. That emptied the entire book on 2026-09-06 — 1,913 lines
+  // over 435 receipts, ₹20.8 lakh with no student, head or month — and took
+  // 134 receipts the same way on 2026-09-01. The function rolls the delete
+  // back with the insert, so a failed push changes nothing at all.
+  if (idsWithLines.length > 0 || idsWithTenders.length > 0) {
+    const { error: rpcErr } = await sb.rpc("replace_fee_desk_voucher_lines", {
+      p_tenant_id: tenantId,
+      p_line_voucher_ids: idsWithLines,
+      p_tender_voucher_ids: idsWithTenders,
+      p_lines: allLines,
+      p_tenders: allTenders,
+    });
+    if (rpcErr) {
+      return {
+        ok: false,
+        count: 0,
+        error: `Fee lines not written (nothing was changed): ${rpcErr.message}`,
+      };
+    }
   }
 
   const lastCollected = active

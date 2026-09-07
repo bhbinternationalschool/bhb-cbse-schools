@@ -103,6 +103,7 @@ SELFTESTS=(
   test:vehicle-fuel
   test:expense-voucher-draft
   test:fee-push-line-safety
+  test:prod-write-guard
   test:receipt-repair
   test:projection-double-post
   test:holiday-import

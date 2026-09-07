@@ -81,3 +81,54 @@ const v = (id: string, lines: unknown[], tenders: unknown[] = [{ mode: "cash" }]
 }
 
 console.log("  ok — a push replaces only what it brings, and erases nothing it omits");
+
+/* ------------------------------------------------------------------ *
+ * 2026-09-06: the same damage again, by a different route.
+ *
+ * The guard above governs WHICH vouchers get their lines deleted. It says
+ * nothing about whether the delete survives an insert that dies behind it —
+ * and the push ran delete and insert as separate PostgREST statements with
+ * no transaction. When the insert failed, the deletes stayed committed: 0
+ * rows in fee_desk_voucher_lines against 502 receipt headers, ₹20.8 lakh of
+ * collections with no breakdown at all.
+ *
+ * The delete and the insert now happen inside one plpgsql function, so a
+ * failure rolls both back. What is testable here without a database is the
+ * check that runs BEFORE it: a payload with two lines claiming the same id
+ * is refused outright, because that id is `${voucherId}:${dueKey}` and a
+ * repeat means two lines settling the same due. Collapsing them would lose
+ * money detail; the push declines and writes nothing.
+ * ------------------------------------------------------------------ */
+
+import { firstDuplicateId } from "./feesNormalized.server";
+
+{
+  assert.equal(
+    firstDuplicateId([{ id: "rcv_a:acad:1" }, { id: "rcv_a:acad:2" }]),
+    null,
+    "two different dues on one receipt are ordinary",
+  );
+
+  assert.equal(
+    firstDuplicateId([
+      { id: "rcv_a:acad:1" },
+      { id: "rcv_b:acad:1" },
+      { id: "rcv_a:acad:1" },
+    ]),
+    "rcv_a:acad:1",
+    "the same due twice on the same receipt must be refused, not deduped",
+  );
+
+  // The same due on two DIFFERENT receipts is a part payment — ₹1,350 then
+  // ₹300 against one ₹1,650 tuition due. The 2026-09-01 analysis mistook 13
+  // of these for duplicates and nearly excluded them from the restore.
+  assert.equal(
+    firstDuplicateId([{ id: "rcv_a:acad:1" }, { id: "rcv_b:acad:1" }]),
+    null,
+    "a due settled across two receipts is a part payment, never a duplicate",
+  );
+
+  assert.equal(firstDuplicateId([]), null, "an empty push has nothing to refuse");
+}
+
+console.log("feePushLineSafety.selftest.ts OK");

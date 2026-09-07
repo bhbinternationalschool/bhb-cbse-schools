@@ -87,6 +87,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:hydrate-failure-safety
 
+      - name: Test — a laptop cannot write to the production database
+        working-directory: apps/web
+        run: npm run test:prod-write-guard
+
       - name: Test — optimistic-locking token survives normalization
         working-directory: apps/web
         run: npm run test:sis-revision
