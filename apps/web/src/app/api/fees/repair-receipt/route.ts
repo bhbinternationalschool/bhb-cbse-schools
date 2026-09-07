@@ -84,20 +84,31 @@ export async function POST(req: Request) {
 
   const lines = buildRepairLines({ voucherId, tenantId, allocations });
 
-  // Replace this receipt's lines only. Delete-then-insert is safe at this
-  // scope because the whole set is being supplied and has just been proved to
-  // tie to the receipt total.
-  const { error: delErr } = await sb
-    .from("fee_desk_voucher_lines")
-    .delete()
-    .eq("tenant_id", tenantId)
-    .eq("voucher_id", voucherId);
-  if (delErr) {
-    return NextResponse.json({ ok: false, error: delErr.message }, { status: 502 });
-  }
-  const { error: insErr } = await sb.from("fee_desk_voucher_lines").insert(lines);
-  if (insErr) {
-    return NextResponse.json({ ok: false, error: insErr.message }, { status: 502 });
+  // Replace this receipt's lines in ONE transaction.
+  //
+  // This used to be a delete followed by an insert, with a comment claiming
+  // that was safe "at this scope because the whole set is being supplied".
+  // It was not. If the insert failed the delete had already committed, and
+  // the receipt was left blank — by the identical mechanism that emptied the
+  // entire fee book on 2026-09-06, one receipt at a time instead of 502. It
+  // mattered more here than anywhere: this is the screen the office uses to
+  // REPAIR a blank receipt, so its failure mode was to blank the thing it was
+  // asked to mend.
+  const { error: rpcErr } = await sb.rpc("replace_fee_desk_voucher_lines", {
+    p_tenant_id: tenantId,
+    p_line_voucher_ids: [voucherId],
+    p_tender_voucher_ids: null,
+    p_lines: lines,
+    p_tenders: null,
+  });
+  if (rpcErr) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: `Lines not written — the receipt is unchanged: ${rpcErr.message}`,
+      },
+      { status: 502 },
+    );
   }
 
   return NextResponse.json({

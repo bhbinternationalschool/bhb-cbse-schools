@@ -27,6 +27,7 @@ import {
 } from "@/lib/staffAttendanceDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { fetchAllPages, fetchByIds } from "@/lib/supabase/pageAll";
+import { replaceChildRows } from "./replaceChildRows.server";
 
 export type StaffAttendanceDeskSyncMeta = {
   registerCount: number;
@@ -443,17 +444,14 @@ export async function pushStaffAttendanceRegisterToDb(
     .upsert(header);
   if (hErr) return { ok: false, error: hErr.message };
 
-  await sb
-    .from("staff_attendance_desk_marks")
-    .delete()
-    .eq("register_id", register.id);
-
-  if (marks.length) {
-    const { error: mErr } = await sb
-      .from("staff_attendance_desk_marks")
-      .upsert(marks);
-    if (mErr) return { ok: false, error: mErr.message };
-  }
+  // One transaction — see attendanceNormalized.server.ts for why.
+  const marksWrite = await replaceChildRows(sb, {
+    table: "staff_attendance_desk_marks",
+    tenantId,
+    match: { register_id: register.id },
+    rows: marks,
+  });
+  if (!marksWrite.ok) return { ok: false, error: marksWrite.error };
 
   const now = new Date().toISOString();
   await sb.from("staff_attendance_desk_sync_meta").upsert(

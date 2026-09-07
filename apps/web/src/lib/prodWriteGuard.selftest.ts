@@ -25,7 +25,7 @@ const LOCAL = "http://127.0.0.1:54321";
 // The case that actually happened: `next dev` on a laptop, prod URL in
 // .env.local, nobody having asked for write access.
 assert.equal(
-  shouldBeReadOnly(PROD, { nodeEnv: "development", override: false }),
+  shouldBeReadOnly(PROD, { deployed: false, override: false }),
   true,
   "a dev process pointed at production must be read-only",
 );
@@ -33,7 +33,7 @@ assert.equal(
 // The deployed app. Cloud Run runs `next start`, where NODE_ENV is production.
 // If this ever returns true the school's own site stops being able to write.
 assert.equal(
-  shouldBeReadOnly(PROD, { nodeEnv: "production", override: false }),
+  shouldBeReadOnly(PROD, { deployed: true, override: false }),
   false,
   "the deployed app must keep full write access to production",
 );
@@ -41,7 +41,7 @@ assert.equal(
 // A local Supabase, or any other project, is a developer's own sandbox.
 for (const url of [LOCAL, OTHER]) {
   assert.equal(
-    shouldBeReadOnly(url, { nodeEnv: "development", override: false }),
+    shouldBeReadOnly(url, { deployed: false, override: false }),
     false,
     `local dev against ${url} must not be restricted`,
   );
@@ -50,17 +50,26 @@ for (const url of [LOCAL, OTHER]) {
 // The escape hatch has to work, or a genuine repair from a laptop becomes
 // impossible and someone disables the guard instead.
 assert.equal(
-  shouldBeReadOnly(PROD, { nodeEnv: "development", override: true }),
+  shouldBeReadOnly(PROD, { deployed: false, override: true }),
   false,
   "ALLOW_LOCAL_PROD_WRITES=1 must lift the block",
 );
 
-// "test" is not "production". A test runner holding the prod URL is exactly
-// as dangerous as a dev server, and this is the reading that makes it so.
+// A test runner, a repair script, a `next start` on a laptop — none of them is
+// the deployed app, and each is exactly as dangerous as a dev server. The
+// guard keys on K_SERVICE (Cloud Run sets it; laptops do not) rather than on
+// NODE_ENV, which `NODE_ENV=production npm run dev` defeats in one word.
 assert.equal(
-  shouldBeReadOnly(PROD, { nodeEnv: "test", override: false }),
+  shouldBeReadOnly(PROD, { deployed: false, override: false }),
   true,
-  "a test process pointed at production must be read-only too",
+  "any non-deployed process pointed at production must be read-only",
+);
+
+// The deployed app is never restricted, whatever else is set.
+assert.equal(
+  shouldBeReadOnly(PROD, { deployed: true, override: false }),
+  false,
+  "the deployed app keeps write access",
 );
 
 console.log("prod-write-guard selftest OK");

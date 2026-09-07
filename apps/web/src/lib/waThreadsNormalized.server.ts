@@ -1,3 +1,5 @@
+/* ratchet-allow: unguarded_replace — prune of stale slice keys only; see the note
+   in mastersNormalized.server.ts. */
 /**
  * WhatsApp bot threads desk — Supabase slice rows (wa_desk_bot_slices).
  */

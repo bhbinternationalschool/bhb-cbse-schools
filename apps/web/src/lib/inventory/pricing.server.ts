@@ -1,3 +1,6 @@
+/* ratchet-allow: unguarded_replace — clearPrice() is a PURE delete: the caller
+   asked for that price to be removed, and there is no insert behind it. The
+   write the scanner pairs it with belongs to a later function. */
 /**
  * Inventory — price lists and kits.
  *
@@ -27,6 +30,7 @@ import {
   type InvPriceList,
   type InvPriceListItem,
 } from "@/lib/inventory/types";
+import { replaceChildRows } from "@/lib/replaceChildRows.server";
 
 /* ─── Price lists ──────────────────────────────────────────── */
 
@@ -370,11 +374,6 @@ export async function saveKit(input: {
   const kit = rowToKit(saved);
 
   if (Array.isArray(input.items)) {
-    await sb
-      .from("inv_kit_items")
-      .delete()
-      .eq("tenant_id", tenantId)
-      .eq("kit_id", kit.id);
     const lines = input.items
       .filter((l) => l && l.itemId)
       .map((l, i) => ({
@@ -385,28 +384,33 @@ export async function saveKit(input: {
         is_optional: !!l.isOptional,
         sort_order: i + 1,
       }));
-    if (lines.length) {
-      const { error } = await sb.from("inv_kit_items").insert(lines);
-      if (error) throw new InvError(`Save kit items: ${error.message}`, 500);
-    }
+    // One transaction: a kit emptied of its items still sells, for a price
+    // covering nothing.
+    const write = await replaceChildRows(sb, {
+      table: "inv_kit_items",
+      tenantId,
+      match: { kit_id: kit.id },
+      rows: lines,
+    });
+    if (!write.ok) throw new InvError(`Save kit items: ${write.error}`, 500);
   }
 
   if (Array.isArray(input.classIds)) {
-    await sb
-      .from("inv_kit_classes")
-      .delete()
-      .eq("tenant_id", tenantId)
-      .eq("kit_id", kit.id);
     const classRows = [...new Set(input.classIds.filter(Boolean))].map((c) => ({
       tenant_id: tenantId,
       kit_id: kit.id,
       class_id: String(c),
       section_id: "",
     }));
-    if (classRows.length) {
-      const { error } = await sb.from("inv_kit_classes").insert(classRows);
-      if (error) throw new InvError(`Save kit classes: ${error.message}`, 500);
-    }
+    // One transaction: a kit that loses its class links stops being offered
+    // to anyone, silently.
+    const write = await replaceChildRows(sb, {
+      table: "inv_kit_classes",
+      tenantId,
+      match: { kit_id: kit.id },
+      rows: classRows,
+    });
+    if (!write.ok) throw new InvError(`Save kit classes: ${write.error}`, 500);
   }
 
   return kit;
