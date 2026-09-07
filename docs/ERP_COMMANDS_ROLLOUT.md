@@ -113,14 +113,27 @@ Everyone else sees exactly the WhatsApp they saw before the desk existed: no
 reply, no hint that a feature exists, other bots answering as usual. Empty or
 unset means everyone, which is the shipped behaviour.
 
-```
-ERP_WA_COMMANDS_ALLOW=<the director's mobile>
-```
+**Where it lives: `deploy/desk-cutover-runtime.env`, committed.** Not on the
+Cloud Run service by hand, and not as a cloudbuild substitution fed from
+`.env.local` the way the notify mobiles are. Both of those fail the same
+way here, and the failure is the dangerous direction:
 
-The live pilot value is the director's own number. It is deliberately not
-written down here: this file is in the repository forever, and the value has
-no effect from a document anyway. Cloud Run holds the only copy that does
-anything, and it is the source of truth.
+- Set by hand with `gcloud run services update`, it is erased by the next
+  deploy, because `--set-env-vars` replaces the whole environment.
+- As a substitution defaulting to `""`, the build trigger — which has no
+  `.env.local` — would supply an empty allowlist. **Empty means everyone.**
+  So the first push that happened to deploy would hand all 28 staff with
+  mobiles a desk that can message parents, silently.
+
+This variable fails OPEN. Every other way of setting it has a path to
+"empty", and empty is school-wide. So the number is in git. That is a real
+cost — the director's own mobile is in the repository history now — and it
+was weighed against handing 28 people a live parent-messaging desk by
+accident. If that trade stops being worth it, the fix is not to move the
+value somewhere emptier; it is to put `ERP_WA_COMMANDS=off` back so the
+failure direction reverses.
+
+Current value: the director's mobile, one number.
 
 Commas, spaces, newlines, `+91` and a leading `0` are all tolerated, because
 this gets pasted out of a phone book. A person is matched on any number the
@@ -133,9 +146,11 @@ of the `commands off` brake, so somebody who is not on the list cannot pause
 the desk either.
 
 A typo that empties the variable opens the desk to everyone rather than
-closing it to nobody. That is the safer failure of the two — a school locked
-out of its own ERP by a stray character would be worse — but it does mean the
-value is worth reading back after you set it.
+closing it to nobody. That is the safer failure for a school that already
+trusts the desk — being locked out of your own ERP by a stray character is
+worse — but during a one-number pilot it is the wrong way round, which is
+the whole reason the value is committed rather than supplied at deploy
+time. Read it back after any edit.
 
 ---
 
@@ -154,12 +169,13 @@ wrongly — described as the default.
 
 ### Stage B — a real pilot, one number
 
-1. Set `ERP_WA_COMMANDS_ALLOW` to the director's own mobile. That number was
-   checked against the roster before the pilot: active staff record, login
-   enabled, designation Director, and a protected super-admin email, so every
-   gate from the allowlist through to RBAC passes for it. Leave
-   `ERP_WA_COMMANDS` unset (or anything but `off`).
-2. Redeploy.
+1. Already done in `deploy/desk-cutover-runtime.env`:
+   `ERP_WA_COMMANDS_ALLOW=<the director's mobile>`. That number was checked
+   against the roster before the pilot: active staff record, login enabled,
+   designation Director, and a protected super-admin email, so every gate
+   from the allowlist through to RBAC passes for it. `ERP_WA_COMMANDS` stays
+   unset.
+2. Deploy. Nothing to set by hand — that is the point.
 3. The desk answers **you and nobody else**. Every other staff member's
    WhatsApp is unchanged and they are told nothing.
 4. Run Stage C below.
@@ -317,7 +333,8 @@ At 50 staff × 10 commands a day that is roughly **₹60/day** from October.
 
 ## 8. Before you go live — checklist
 
-- [ ] `ERP_WA_COMMANDS_ALLOW` set to the director's mobile on the Cloud Run service, and read back after saving
+- [ ] `ERP_WA_COMMANDS_ALLOW` present in `deploy/desk-cutover-runtime.env`
+      (NOT set by hand on the service — the next deploy erases that)
 - [ ] The director's own number is on that list, or the `commands off` brake is out of reach — it is, for the value above
 - [ ] Approved WhatsApp templates exist for the writes you intend to use
       (fee reminder, pay link, notice, bus delay) — Masters → WhatsApp templates
