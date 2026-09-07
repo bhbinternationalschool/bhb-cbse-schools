@@ -10,7 +10,8 @@
     "build": "npm run build -w web",
     "lint": "npm run lint -w web",
     "typecheck": "npm run typecheck -w @bhb/time && npm run typecheck -w web",
-    "verify": "bash scripts/verify.sh"
+    "verify": "bash scripts/verify.sh",
+    "reclaim": "bash scripts/reclaim-space.sh"
   },
   "engines": {
     "node": ">=20"
