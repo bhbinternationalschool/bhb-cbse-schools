@@ -243,6 +243,41 @@ resolves to an active staff record.
 The teacher class channel (homework to parents) and the staff attendance
 punch bot both run BEFORE this gate and are unaffected.
 
+## 5c. An outsider who messages the school number
+
+Unchanged in principle — a vendor, a job seeker or a stranger has nothing
+but the bots, so they are still greeted, asked their name, and asked what
+they need. Three things changed on 2026-09-07, all of them from one live
+thread that had been looping since 18 August.
+
+| They send | Before | Now |
+|---|---|---|
+| a forwarded link, or a photo with no caption | full purpose menu, every time | **logged, no reply** |
+| something that is not a usable name | accepted as their name | refused, re-asked |
+| a third unusable reply | asked again, forever | **parked** — one "the office will reply", thread flagged |
+| anything naming a real purpose, after parking | — | picked straight back up |
+| `menu` | restarts | restarts (unchanged) |
+
+**What the office sees.** A parked thread is escalated once and sits in
+Comms → WhatsApp inbox with its full history. Nothing is deleted and no
+message is hidden — the bot simply stops talking, and a person decides
+whether it is worth answering.
+
+**A name is now refused** if it carries a URL, runs past 60 characters or
+six words, or is not mostly letters. The thread that prompted this had
+`https://www.facebook.com/share/r/1BkJUpZ93g/good morning have a glorious
+day` recorded as a visitor's name and read back to them, in bold, on every
+reply for three weeks.
+
+**Purpose detection now checks job before admission.** "Apply" belongs to
+both and admission held it, so "I want to apply for a teacher vacancy"
+was creating an admission lead with an enquiry number for the office to
+chase.
+
+**What is still true:** who they are and why they are writing is entirely
+self-declared. Nobody verifies it. For an admission enquiry there is a
+real lead record; for everything else it is a labelled thread for a human.
+
 ---
 
 ## 6. What reaches a parent, and when
@@ -293,6 +328,8 @@ At 50 staff × 10 commands a day that is roughly **₹60/day** from October.
 - [ ] Someone is watching Comms → WhatsApp inbox for the first hour
 - [ ] The pilot numbers know that anything which is not a command gets no
       reply now, and that `school bot` brings the old menu back
+- [ ] Whoever watches Comms knows that a *parked* outsider thread is one
+      the bot gave up on and a person has to answer
 
 ---
 
