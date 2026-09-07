@@ -24,9 +24,9 @@ import {
   isValidMobile,
   loadSis,
 } from "@/lib/sis";
-import { whatsAppPaymentLinkUrl } from "@/lib/payments";
 import { TENANT } from "@/lib/types";
 import type { LiveDefaulter } from "@/lib/playbook";
+import { openWaMe } from "@/lib/waMe";
 
 export function InstallmentPlanDialog({
   row,
@@ -135,7 +135,7 @@ function CreatePlanPanel({
         plan: result.plan,
       });
       if (mobile && isValidMobile(mobile)) {
-        window.open(whatsAppPaymentLinkUrl(mobile, msg), "_blank", "noopener");
+        openWaMe(mobile, msg, undefined, { module: "fees" });
       } else {
         void navigator.clipboard.writeText(msg);
       }
@@ -353,7 +353,7 @@ function ActivePlanPanel({
       plan,
     });
     if (mobile && isValidMobile(mobile)) {
-      window.open(whatsAppPaymentLinkUrl(mobile, msg), "_blank", "noopener");
+      openWaMe(mobile, msg, undefined, { module: "fees" });
       onSaved(`Plan ${plan.code} sent on WhatsApp`);
     } else {
       void navigator.clipboard.writeText(msg).then(

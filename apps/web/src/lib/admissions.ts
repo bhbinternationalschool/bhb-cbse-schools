@@ -4450,6 +4450,9 @@ export function composeRegistrationReceiptWhatsApp(
 export function whatsAppUrl(mobile: string, message: string): string {
   const digits = mobile.replace(/\D/g, "");
   const phone = digits.length === 10 ? `91${digits}` : digits;
+  // personal-whatsapp-allow: the one caller is the PUBLIC /register form,
+  // where this runs on the parent's own device to hand them their own
+  // receipt. No staff account is involved and /api/wa/dispatch would 401.
   return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
 }
 

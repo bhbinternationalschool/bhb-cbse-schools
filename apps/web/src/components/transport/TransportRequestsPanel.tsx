@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
+import { openWaMe } from "@/lib/waMe";
 
 type Req = {
   id: string;
@@ -119,7 +120,20 @@ export function TransportRequestsPanel({ onFlash }: { onFlash?: (msg: string) =>
                 {" · "}
                 <a className="text-blue-700 underline" href={`tel:${r.contactMobile}`}>{r.contactMobile}</a>
                 {" · "}
-                <a className="text-blue-700 underline" href={`https://wa.me/91${r.contactMobile.replace(/\D/g, "").slice(-10)}`} target="_blank" rel="noreferrer">WhatsApp</a>
+                <button
+                  type="button"
+                  className="text-blue-700 underline"
+                  onClick={() =>
+                    openWaMe(
+                      r.contactMobile,
+                      `Namaste — about your transport request for ${r.studentName || "your child"}.`,
+                      undefined,
+                      { module: "transport" },
+                    )
+                  }
+                >
+                  WhatsApp
+                </button>
               </>
             ) : null}
           </p>

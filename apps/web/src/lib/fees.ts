@@ -9,6 +9,7 @@ import {
 } from "@/lib/feeDiscountRuntime";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { waTemplateLanguageFor } from "@/lib/householdPrefs";
+import { sendFromSchoolWhatsApp } from "@/lib/waMe";
 import {
   getSchoolMirrorSync,
   scheduleClientSchoolMirrorSync,
@@ -3721,14 +3722,6 @@ export function composeWhatsAppFeeReceipt(
   return lines.join("\n");
 }
 
-export function whatsAppFeeReceiptUrl(
-  mobile: string,
-  message: string,
-): string | null {
-  const e164 = toWhatsAppE164(mobile);
-  if (!e164) return null;
-  return `https://wa.me/${e164}?text=${encodeURIComponent(message)}`;
-}
 
 export function markWhatsAppReceiptSent(voucherId: string): boolean {
   const fees = loadFees();
@@ -3978,12 +3971,26 @@ export async function deliverWhatsAppFeeReceipt(input: {
     pdfDownloaded = true;
   }
 
-  const url = whatsAppFeeReceiptUrl(mobile, message);
-  if (!url) {
-    return { ok: false, error: "Could not build WhatsApp link" };
-  }
-  if (typeof window !== "undefined") {
-    window.open(url, "_blank", "noopener,noreferrer");
+  // The school sends the receipt, or nobody does.
+  //
+  // This used to open the cashier's own WhatsApp whenever the API path had
+  // not fired — silently, so a receipt the office believed came from the
+  // school had actually gone from whoever was at the counter, and the school
+  // held no record of it. Today that fallback was firing on EVERY receipt,
+  // because the template was not recognised as approved.
+  const sent = await sendFromSchoolWhatsApp({
+    mobile,
+    text: message,
+    module: "fees",
+  });
+  if (!sent.ok) {
+    return {
+      ok: false,
+      error:
+        `The school's WhatsApp could not send this receipt: ${sent.error}. ` +
+        `Nothing was sent from your own WhatsApp. The PDF is downloaded — ` +
+        `attach it by hand if the family needs it now.`,
+    };
   }
   if (input.markSent !== false) {
     markWhatsAppReceiptSent(input.voucher.id);
@@ -3999,45 +4006,6 @@ export async function deliverWhatsAppFeeReceipt(input: {
 }
 
 /** @deprecated Prefer deliverWhatsAppFeeReceipt — text-only open */
-export function openWhatsAppFeeReceipt(input: {
-  voucher: CollectionVoucher;
-  mobile?: string;
-  sis?: SisState | null;
-  masters?: MastersState | null;
-  markSent?: boolean;
-}):
-  | { ok: true; url: string; mobile: string }
-  | { ok: false; error: string } {
-  if (input.voucher.voidedAt) {
-    return { ok: false, error: "Cannot send a voided receipt" };
-  }
-  const s = input.sis ?? loadSis();
-  const hh = householdOf(s, input.voucher.householdId);
-  const mobile =
-    normalizeMobile(input.mobile ?? "") || householdWhatsApp(hh);
-  if (!isValidMobile(mobile)) {
-    return {
-      ok: false,
-      error: "Add a valid 10-digit WhatsApp number for this household",
-    };
-  }
-  const message = composeWhatsAppFeeReceipt(
-    input.voucher,
-    s,
-    input.masters,
-  );
-  const url = whatsAppFeeReceiptUrl(mobile, message);
-  if (!url) {
-    return { ok: false, error: "Could not build WhatsApp link" };
-  }
-  if (typeof window !== "undefined") {
-    window.open(url, "_blank", "noopener,noreferrer");
-  }
-  if (input.markSent !== false) {
-    markWhatsAppReceiptSent(input.voucher.id);
-  }
-  return { ok: true, url, mobile };
-}
 
 function syncVoucherTenderRealisation(
   voucher: CollectionVoucher,

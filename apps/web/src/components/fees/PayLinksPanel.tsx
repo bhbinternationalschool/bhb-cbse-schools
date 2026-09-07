@@ -11,7 +11,6 @@ import {
   listPaymentLinks,
   loadPayments,
   openPaymentLinkCount,
-  whatsAppPaymentLinkUrl,
   type PaymentLink,
 } from "@/lib/payments";
 import { attachGatewayCheckout } from "@/lib/paymentGatewayClient";
@@ -22,6 +21,7 @@ import {
   getPaymentGatewayConfig,
   paymentGatewayModeLabel,
 } from "@/lib/paymentGateway";
+import { openWaMe } from "@/lib/waMe";
 
 export function PayLinksPanel({
   tick,
@@ -97,7 +97,7 @@ export function PayLinksPanel({
       TENANT.nameDisplay,
       !!link.gatewayCheckoutUrl,
     );
-    window.open(whatsAppPaymentLinkUrl(mobile, msg), "_blank", "noopener");
+    openWaMe(mobile, msg, undefined, { module: "fees" });
     flash(`WhatsApp opened for ${mobile}`);
   }
 
