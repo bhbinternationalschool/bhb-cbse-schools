@@ -419,7 +419,19 @@ export async function pushFeeVouchersToDb(
     };
   }
 
-  // Headers, lines and tenders in ONE transaction.
+  // Headers in one transaction with lines and tenders — and the receipt's
+  // breakdown is APPEND-ONLY on the server (20260907130000).
+  //
+  // The push may add the lines of a receipt that has none; it can no longer
+  // rewrite or empty one that has them, whatever state this browser is in.
+  // That is the fix for the cause rather than the symptom: four incidents
+  // this week were one shape — two copies of the truth and a full-snapshot
+  // sync that could overwrite in either direction — and the ledger, which
+  // refuses UPDATE and DELETE outright, lost nothing in the same week.
+  //
+  // `keptLineVouchers` in the result counts receipts the server declined to
+  // let this push touch. That is normal and expected on every resync; it is
+  // only worth reading when a receipt is unexpectedly still blank.
   //
   // These used to be four statements over PostgREST with nothing tying them
   // together, so an insert that failed left the deletes committed and the
