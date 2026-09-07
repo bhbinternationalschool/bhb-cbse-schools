@@ -53,6 +53,14 @@ type DispatchItem = {
   body?: string;
   template?: DispatchTemplate;
   /**
+   * Which of the school's WhatsApp numbers to send FROM.
+   *
+   * Resolved by the caller from Masters (per template, else per module, else
+   * the school default). Absent means the single env-configured number, so a
+   * school that has never opened the Numbers screen is unaffected.
+   */
+  fromPhoneNumberId?: string;
+  /**
    * Skip the household's quiet-hours window? Attendance, transport, health
    * and safety messages are urgent by module; anything else can set this
    * explicitly (e.g. an OTP). Default false → fee reminders, campaigns and
@@ -217,6 +225,7 @@ export async function POST(req: Request) {
         );
       }
       const r = await sendWaWithFailover({
+        fromPhoneNumberId: item.fromPhoneNumberId,
         primaryMobile: mobile,
         fallbackMobile,
         template: {
