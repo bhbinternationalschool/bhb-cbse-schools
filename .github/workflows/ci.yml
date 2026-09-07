@@ -254,6 +254,7 @@ jobs:
           npm run test:birthday-cards
           npm run test:collections-ai
           npm run test:concession-per-due
+          npm run test:concession-ground
           npm run test:desk-sync-status
           npm run test:duty-roster
           npm run test:email
@@ -289,6 +290,8 @@ jobs:
           npm run test:rbac-scope
           npm run test:rbac-user-grants
           npm run test:visitor-gate
+          npm run test:play-billing
+          npm run test:parent-dues-fallback
           npm run test:school-whatsapp
           npm run test:upload-validation
           npm run test:receipt-lookup

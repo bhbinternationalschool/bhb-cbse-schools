@@ -2721,6 +2721,22 @@ class ApiClient {
   /// Starts buying a pass for one child; the returned checkout URL opens
   /// in the browser and the pass switches on by itself once the bank
   /// confirms.
+  /// Hand Play's purchase token to the server, which verifies it with Google
+  /// and grants the pass. Returns the new end date. The token alone proves
+  /// nothing — this call is the only thing that opens the tutor.
+  Future<String> grantTutorPassFromPlay({
+    required String productId,
+    required String purchaseToken,
+    required String studentId,
+  }) async {
+    final data = await _postData("/api/v1/tutor/play-purchase", {
+      "productId": productId,
+      "purchaseToken": purchaseToken,
+      "studentId": studentId,
+    });
+    return _s(data, "endsAt");
+  }
+
   Future<TutorBuyResult> buyTutorPass({
     required String planCode,
     required String studentId,
@@ -2904,6 +2920,54 @@ class ApiClient {
     if (res.statusCode != 200) _throwFrom(res);
     return BroadcastResult.fromJson(
       jsonDecode(res.body) as Map<String, dynamic>,
+    );
+  }
+
+  /// Message a family from the SCHOOL's WhatsApp number.
+  ///
+  /// Until 2026-09-07 five screens opened `https://wa.me/…` instead, so a
+  /// parent heard from whichever teacher was holding a phone, on a number the
+  /// school does not control and keeps no record of.
+  ///
+  /// The app deliberately sends only the number, a family key and the values.
+  /// The LANGUAGE (the family's own choice), the TEMPLATE and the sending
+  /// NUMBER are all decided by the server, so they cannot drift from the web
+  /// and cannot be got wrong here. Throws with the server's reason when the
+  /// school's WhatsApp declines — there is no personal-WhatsApp fallback, on
+  /// purpose.
+  Future<({bool sent, bool deferred, String reason})> sendSchoolWhatsApp({
+    required String mobile,
+    String familyKey = "",
+    String text = "",
+    Map<String, String> variables = const {},
+    bool urgent = false,
+  }) async {
+    final envelope = await postJson("/api/v1/staff/wa/send", {
+      "mobile": mobile,
+      if (familyKey.isNotEmpty) "familyKey": familyKey,
+      if (text.isNotEmpty) "text": text,
+      if (variables.isNotEmpty) "variables": variables,
+      if (urgent) "urgent": true,
+    });
+
+    // postJson only throws on 5xx and hands back the raw envelope, so a 400 —
+    // "that template is approved in one language only", "you do not hold that
+    // permission" — would otherwise read as a quiet "not sent" with no reason.
+    // A staff member who is told nothing reaches for their own WhatsApp, which
+    // is the whole thing this replaces.
+    if (envelope["ok"] != true) {
+      final err = envelope["error"];
+      final message = err is Map ? (err["message"] ?? "").toString() : "";
+      throw Exception(
+        message.isEmpty ? "The school's WhatsApp could not send this" : message,
+      );
+    }
+
+    final data = (envelope["data"] as Map?) ?? const {};
+    return (
+      sent: data["sent"] == true,
+      deferred: data["deferred"] == true,
+      reason: (data["reason"] ?? "").toString(),
     );
   }
 

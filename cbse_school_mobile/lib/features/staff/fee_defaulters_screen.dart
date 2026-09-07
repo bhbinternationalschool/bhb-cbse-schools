@@ -8,6 +8,7 @@ import "../modules/module_shell.dart";
 import "fee_counter_screen.dart";
 import "../../core/i18n/locale_controller.dart";
 import "../modules/dictate_field.dart";
+import "../../core/api/school_whatsapp.dart";
 
 /// Families with money outstanding — biggest first, with the guardian one tap
 /// away on a call or WhatsApp, and a place to record what they promised.
@@ -254,9 +255,12 @@ class _HouseholdCard extends StatelessWidget {
                   ),
                   IconButton(
                     tooltip: context.l10n.whatsapp,
-                    onPressed: () => launchUrl(
-                      Uri.parse("https://wa.me/91$_digits?text=${_waText()}"),
-                      mode: LaunchMode.externalApplication,
+                    onPressed: () => sendSchoolWhatsApp(
+                      context,
+                      api,
+                      mobile: _digits,
+                      familyKey: "fees_soft_reminder",
+                      text: _waText(),
                     ),
                     icon: const Icon(
                       Icons.chat_outlined,

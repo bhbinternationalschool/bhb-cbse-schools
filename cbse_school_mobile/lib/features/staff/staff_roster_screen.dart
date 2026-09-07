@@ -7,6 +7,7 @@ import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../../core/api/school_whatsapp.dart";
 
 /// The active roster for leadership and the office. Staff with no mobile
 /// on record sit at the top — they cannot sign in to this app until a
@@ -97,9 +98,12 @@ class StaffRosterScreen extends StatelessWidget {
                           ),
                           IconButton(
                             tooltip: context.l10n.whatsapp,
-                            onPressed: () => launchUrl(
-                              Uri.parse("https://wa.me/91${s.mobile}"),
-                              mode: LaunchMode.externalApplication,
+                            onPressed: () => sendSchoolWhatsApp(
+                              context,
+                              api,
+                              mobile: s.mobile,
+                              text:
+                                  "Namaste ${s.fullName} — a message from the school office.",
                             ),
                             icon: const Icon(
                               Icons.chat_outlined,

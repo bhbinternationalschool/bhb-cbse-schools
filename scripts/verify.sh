@@ -164,6 +164,7 @@ SELFTESTS=(
   test:birthday-cards
   test:collections-ai
   test:concession-per-due
+  test:concession-ground
   test:desk-sync-status
   test:duty-roster
   test:email
@@ -202,6 +203,8 @@ SELFTESTS=(
   test:rbac-scope
   test:rbac-user-grants
   test:visitor-gate
+  test:play-billing
+  test:parent-dues-fallback
   test:receipt-lookup
   test:referrals
   test:report-export

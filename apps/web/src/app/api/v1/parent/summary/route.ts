@@ -80,30 +80,52 @@ export async function GET(request: Request) {
     const ay = ctx.session.academicYearCode;
     const useDb = feesReadFromDbEnabled();
 
-    // Fall back to computed dues only when the cache has nothing for anyone —
-    // same order as the fees ledger route.
-    const computedRows = useDb
-      ? null
-      : computeHouseholdDues(householdId, sis, masters, loadFees(), {
-          includeFuture: false,
-        });
-
-    const childSummaries = await Promise.all(
-      children.map(async (child) => {
-        let balancePaise = 0;
-        if (useDb) {
+    // The DB path reads fee_desk_open_dues, which is a CACHE: it is rebuilt
+    // only when somebody in the office pushes from the Fees desk. A child
+    // admitted since the last push has no rows there, and "no rows" is
+    // indistinguishable from "owes nothing" — so the parent was shown an
+    // authoritative ₹0 for fees that had in fact been billed.
+    //
+    // Zero rows therefore means "unknown", not "zero", and we compute for
+    // real. A child who genuinely owes nothing computes to zero anyway, so
+    // the only cost is one household computation for a fully-paid family.
+    const cachedByChild = new Map<string, number | null>();
+    if (useDb) {
+      await Promise.all(
+        children.map(async (child) => {
           const dues = await fetchStudentOpenDuesFromCache(
             child.id,
             ay || child.academicYearCode,
           );
-          balancePaise = dues.reduce((s, d) => s + d.balancePaise, 0);
-        } else {
-          const row = computedRows?.find((r) => r.student.id === child.id);
-          const open = openFeeDues(row?.dues ?? []).filter(
-            (d) => d.balancePaise > 0,
+          cachedByChild.set(
+            child.id,
+            dues.length === 0
+              ? null
+              : dues.reduce((s, d) => s + d.balancePaise, 0),
           );
-          balancePaise = open.reduce((s, d) => s + d.balancePaise, 0);
-        }
+        }),
+      );
+    }
+    const needsCompute =
+      !useDb || [...cachedByChild.values()].some((v) => v === null);
+
+    const computedRows = needsCompute
+      ? computeHouseholdDues(householdId, sis, masters, loadFees(), {
+          includeFuture: false,
+        })
+      : null;
+
+    const computedFor = (studentId: string) => {
+      const row = computedRows?.find((r) => r.student.id === studentId);
+      return openFeeDues(row?.dues ?? [])
+        .filter((d) => d.balancePaise > 0)
+        .reduce((s, d) => s + d.balancePaise, 0);
+    };
+
+    const childSummaries = await Promise.all(
+      children.map(async (child) => {
+        const cached = useDb ? cachedByChild.get(child.id) ?? null : null;
+        const balancePaise = cached ?? computedFor(child.id);
         return {
           id: child.id,
           fullName: child.fullName,

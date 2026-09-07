@@ -9,6 +9,7 @@ import {
 } from "@/lib/feeDiscountRuntime";
 import { canonicalAdmissionNo } from "@/lib/feeDiscountExcelImport";
 import {
+  concessionGroundLabel,
   grantsForConcessionPolicy,
   normalizeAcademicYearCode,
   ordinalChildLabel,
@@ -29,6 +30,14 @@ export type ConcessionStudentListRow = {
   status: string;
   effectiveFrom: string;
   reason: string;
+  /**
+   * WHY the family qualifies, in words, or "Not recorded".
+   *
+   * Kept beside `reason` rather than replacing it: the reason says where the
+   * discount was applied and is often the only trace of the receipt it came
+   * from, while this says whether anybody knows why it was owed.
+   */
+  groundLabel: string;
   siblingNote: string;
   /** Which policy this row is for — the list can span several. */
   concessionCode: string;
@@ -118,6 +127,7 @@ function grantToRow(
     status: grant.status,
     effectiveFrom: grant.effectiveFrom || "—",
     reason: grant.reason || "—",
+    groundLabel: concessionGroundLabel(grant.ground),
     siblingNote: grant.siblingChildNo
       ? ordinalChildLabel(grant.siblingChildNo)
       : "—",
@@ -195,6 +205,9 @@ export function buildConcessionStudentList(
       status: "approved",
       effectiveFrom: seed.importedAt.slice(0, 10),
       reason: seedGrant.reason || "Excel import",
+      // The bundled Excel seed carries no ground and never did — the
+      // spreadsheet had a column for the amount, not for why.
+      groundLabel: concessionGroundLabel(""),
       siblingNote: seedGrant.siblingChildNo
         ? ordinalChildLabel(seedGrant.siblingChildNo)
         : "—",

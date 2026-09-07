@@ -7,6 +7,7 @@ import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
 import "../../core/i18n/locale_controller.dart";
 import "../modules/dictate_field.dart";
+import "../../core/api/school_whatsapp.dart";
 
 /// The office's queue of transport requests from parents — the same rows
 /// the web desk's Transport → Requests tab shows. Owner, admin, principal
@@ -153,11 +154,12 @@ class _RequestCard extends StatelessWidget {
                     label: Text(context.l10n.call),
                   ),
                   OutlinedButton.icon(
-                    onPressed: () => launchUrl(
-                      Uri.parse(
-                        "https://wa.me/${digits.length == 10 ? "91$digits" : digits}",
-                      ),
-                      mode: LaunchMode.externalApplication,
+                    onPressed: () => sendSchoolWhatsApp(
+                      context,
+                      api,
+                      mobile: digits,
+                      text:
+                          "Namaste — about your transport request at the school.",
                     ),
                     icon: const Icon(Icons.chat_outlined, size: 16),
                     label: Text(context.l10n.whatsapp),
