@@ -21,6 +21,9 @@ import {
   looksLikeCommand,
   noteCommandUse,
   parseCommandsSwitch,
+  parseCommandAllowList,
+  commandActorAllowed,
+  normalizeCommandMobile,
   parseConfirmReply,
   parseErpCommandLlmJson,
   parseErpCommandLocal,
@@ -1755,6 +1758,67 @@ const masters = {
   assert.equal(BUS_DELAY_MAX_MINUTES, 180);
   const def = ERP_COMMANDS.find((c) => c.id === "bus_delay");
   assert.ok(def && def.kind === "write" && def.module === "transport" && def.action === "edit");
+}
+
+// ─── pilot allowlist ───────────────────────────────────────────────────
+{
+  // Ten digits or nothing. An id full of digits must never be truncated
+  // into something that looks like a phone number.
+  assert.equal(normalizeCommandMobile("9876543210"), "9876543210");
+  assert.equal(normalizeCommandMobile("+91 98765 43210"), "9876543210");
+  assert.equal(normalizeCommandMobile("919876543210"), "9876543210");
+  assert.equal(normalizeCommandMobile("09876543210"), "9876543210");
+  assert.equal(normalizeCommandMobile("98765-43210"), "9876543210");
+  assert.equal(normalizeCommandMobile("staff:stf_9a8b7c"), "", "an actor key is not a mobile");
+  assert.equal(normalizeCommandMobile("staff:12345678901234"), "", "nor is a long digit run");
+  assert.equal(normalizeCommandMobile("12345"), "");
+  assert.equal(normalizeCommandMobile(""), "");
+  assert.equal(normalizeCommandMobile(undefined), "");
+
+  // Pasted out of a phone book, in whatever shape.
+  assert.deepEqual(parseCommandAllowList("9876543210"), ["9876543210"]);
+  assert.deepEqual(
+    parseCommandAllowList("+91 98765 43210, 09123456789\n9000000000"),
+    ["9876543210", "9123456789", "9000000000"],
+  );
+  assert.deepEqual(parseCommandAllowList("9876543210, 919876543210"), ["9876543210"], "deduped");
+  // Spaces inside a number, and spaces between numbers, in the same string.
+  assert.deepEqual(
+    parseCommandAllowList("9876543210 9000000000"),
+    ["9876543210", "9000000000"],
+    "space-separated list",
+  );
+  assert.deepEqual(
+    parseCommandAllowList("+91 98765 43210"),
+    ["9876543210"],
+    "spaces inside one number are not a separator",
+  );
+  assert.deepEqual(parseCommandAllowList(""), []);
+  assert.deepEqual(parseCommandAllowList(undefined), []);
+  assert.deepEqual(parseCommandAllowList("not a number"), []);
+
+  // Empty list = everyone. This is how the desk shipped, and a typo that
+  // empties the variable must not lock the whole school out.
+  assert.equal(commandActorAllowed([], ["9876543210"]), true);
+  assert.equal(commandActorAllowed([], [undefined, null]), true);
+
+  const list = parseCommandAllowList("9876543210, 9000000000");
+  assert.equal(commandActorAllowed(list, ["9876543210"]), true, "the number they messaged from");
+  assert.equal(commandActorAllowed(list, ["9111111111"]), false);
+  // Any number we know them by counts — a director on the list messaging
+  // from their second phone still reaches their own brake.
+  assert.equal(
+    commandActorAllowed(list, ["staff:stf_1", "9111111111", "9000000000"]),
+    true,
+    "matched on the alternate mobile",
+  );
+  assert.equal(
+    commandActorAllowed(list, ["staff:stf_1", undefined, ""]),
+    false,
+    "an app actor with no known mobile is not on the list",
+  );
+  // An id must never match by accident.
+  assert.equal(commandActorAllowed(["9876543210"], ["staff:9876543210x"]), false);
 }
 
 console.log("erpCommands.selftest.ts OK");
