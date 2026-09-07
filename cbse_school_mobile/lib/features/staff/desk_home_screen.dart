@@ -8,6 +8,7 @@ import "admission_leads_screen.dart";
 import "documents_screen.dart";
 import "fee_counter_screen.dart";
 import "fee_defaulters_screen.dart";
+import "visitor_gate_screen.dart";
 import "my_collections_screen.dart";
 import "survey_screen.dart";
 import "leave_approvals_screen.dart";
@@ -160,6 +161,14 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
       ModuleTone.amber,
       "field_survey",
       (api) => SurveyScreen(api: api),
+    ),
+    _Tile(
+      "Visitor gate",
+      "आगंतुक",
+      Icons.meeting_room_outlined,
+      ModuleTone.purple,
+      "visitor_gate",
+      (api) => VisitorGateScreen(api: api),
     ),
     _Tile(
       "Complaints",

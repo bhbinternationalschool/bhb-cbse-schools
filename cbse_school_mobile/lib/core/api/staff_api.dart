@@ -989,6 +989,136 @@ class SurveySetup {
   final List<({String id, String name})> classes;
 }
 
+// -------------------------------------------------------------------- gate
+
+class GateVisitor {
+  GateVisitor.fromJson(Map<String, dynamic> j)
+    : id = _s(j, "id"),
+      visitorNo = _s(j, "visitorNo"),
+      visitorName = _s(j, "visitorName"),
+      mobile = _s(j, "mobile"),
+      purpose = _s(j, "purpose"),
+      purposeLabel = _s(j, "purposeLabel"),
+      personToMeet = _s(j, "personToMeet"),
+      linkedTo = _s(j, "linkedTo"),
+      source = _s(j, "source"),
+      idProofNote = _s(j, "idProofNote"),
+      inTime = _s(j, "inTime"),
+      outTime = _s(j, "outTime"),
+      onCampus = _b(j, "onCampus"),
+      createdBy = _s(j, "createdBy");
+
+  final String id;
+  final String visitorNo;
+  final String visitorName;
+  final String mobile;
+  final String purpose;
+  final String purposeLabel;
+  final String personToMeet;
+  final String linkedTo;
+  final String source;
+  final String idProofNote;
+  final String inTime;
+  final String outTime;
+  final bool onCampus;
+  final String createdBy;
+}
+
+class GatePassRow {
+  GatePassRow.fromJson(Map<String, dynamic> j)
+    : id = _s(j, "id"),
+      studentId = _s(j, "studentId"),
+      studentName = _s(j, "studentName"),
+      classLabel = _s(j, "classLabel"),
+      date = _s(j, "date"),
+      requestedPickupTime = _s(j, "requestedPickupTime"),
+      reason = _s(j, "reason"),
+      status = _s(j, "status"),
+      statusLabel = _s(j, "statusLabel"),
+      requestedBy = _s(j, "requestedBy"),
+      pickedUpByName = _s(j, "pickedUpByName"),
+      actualPickupTime = _s(j, "actualPickupTime"),
+      releasable = _b(j, "releasable");
+
+  final String id;
+  final String studentId;
+  final String studentName;
+  final String classLabel;
+  final String date;
+  final String requestedPickupTime;
+  final String reason;
+  final String status;
+  final String statusLabel;
+  final String requestedBy;
+  final String pickedUpByName;
+  final String actualPickupTime;
+  final bool releasable;
+}
+
+class GateBoard {
+  GateBoard.fromJson(Map<String, dynamic> j)
+    : date = _s(j, "date"),
+      canRelease = _b(j, "canRelease"),
+      onCampus = _list(j, "onCampus").map(GateVisitor.fromJson).toList(),
+      departedToday = _list(
+        j,
+        "departedToday",
+      ).map(GateVisitor.fromJson).toList(),
+      gatePasses = _list(j, "gatePasses").map(GatePassRow.fromJson).toList(),
+      purposes = _list(
+        j,
+        "purposes",
+      ).map((p) => (value: _s(p, "value"), label: _s(p, "label"))).toList();
+
+  final String date;
+  final bool canRelease;
+  final List<GateVisitor> onCampus;
+  final List<GateVisitor> departedToday;
+  final List<GatePassRow> gatePasses;
+  final List<({String value, String label})> purposes;
+}
+
+/// What the school already knows about this mobile number, so the guard
+/// writes "father of Aarav, IV-A" instead of whatever was said at the gate.
+class GateLookup {
+  GateLookup.fromJson(Map<String, dynamic> j)
+    : mobile = _s(j, "mobile"),
+      suggestedName = _s(j, "suggestedName"),
+      linkedTo = _s(j, "linkedTo"),
+      parentOf = _list(j, "parentOf")
+          .map(
+            (p) => (
+              studentName: _s(p, "studentName"),
+              classLabel: _s(p, "classLabel"),
+              admissionNo: _s(p, "admissionNo"),
+            ),
+          )
+          .toList(),
+      leads = _list(j, "leads")
+          .map(
+            (l) => (
+              childName: _s(l, "childName"),
+              classSought: _s(l, "classSought"),
+              stage: _s(l, "stage"),
+            ),
+          )
+          .toList(),
+      openVisit = j["openVisit"] is Map<String, dynamic>
+          ? GateVisitor.fromJson(j["openVisit"] as Map<String, dynamic>)
+          : null;
+
+  final String mobile;
+  final String suggestedName;
+  final String linkedTo;
+  final List<({String studentName, String classLabel, String admissionNo})>
+  parentOf;
+  final List<({String childName, String classSought, String stage})> leads;
+
+  /// Set when this number is already on campus — the app offers Check out
+  /// rather than opening a second visit.
+  final GateVisitor? openVisit;
+}
+
 // ------------------------------------------------------------------ approvals
 
 class StaffApprovals {
@@ -1397,6 +1527,64 @@ extension StaffApi on ApiClient {
       "parentConsent": true,
     });
     return _s(data, "enquiryNo");
+  }
+
+  // ------------------------------------------------------------------ gate
+
+  Future<GateBoard> fetchGateBoard({String date = ""}) async =>
+      GateBoard.fromJson(
+        await _getData(
+          "/api/v1/staff/visitors${date.isEmpty ? "" : "?date=$date"}",
+        ),
+      );
+
+  Future<GateLookup> lookupGateVisitor(String mobile) async =>
+      GateLookup.fromJson(
+        await _getData("/api/v1/staff/visitors/lookup?mobile=$mobile"),
+      );
+
+  /// Returns (visitor, alreadyIn). `alreadyIn` means this mobile was already
+  /// on campus and the OPEN visit came back — not a second check-in.
+  Future<(GateVisitor, bool)> gateCheckIn({
+    required String visitorName,
+    required String mobile,
+    required String purpose,
+    String personToMeet = "",
+    String idProofNote = "",
+    String linkedTo = "",
+  }) async {
+    final data = await _postData("/api/v1/staff/visitors/checkin", {
+      "visitorName": visitorName,
+      "mobile": mobile,
+      "purpose": purpose,
+      "personToMeet": personToMeet,
+      "idProofNote": idProofNote,
+      "linkedTo": linkedTo,
+    });
+    return (
+      GateVisitor.fromJson(data["visitor"] as Map<String, dynamic>),
+      _b(data, "alreadyIn"),
+    );
+  }
+
+  /// Returns (visitor, alreadyOut) — an already-closed visit keeps its
+  /// original out-time rather than being re-stamped to now.
+  Future<(GateVisitor, bool)> gateCheckOut(String id) async {
+    final data = await _postData("/api/v1/staff/visitors/checkout", {"id": id});
+    return (
+      GateVisitor.fromJson(data["visitor"] as Map<String, dynamic>),
+      _b(data, "alreadyOut"),
+    );
+  }
+
+  Future<void> releaseGatePass({
+    required String id,
+    required String pickedUpByName,
+  }) async {
+    await _postData("/api/v1/staff/visitors/gate-pass", {
+      "id": id,
+      "pickedUpByName": pickedUpByName,
+    });
   }
 
   /// A file behind the ERP's authenticated proxy (student documents),

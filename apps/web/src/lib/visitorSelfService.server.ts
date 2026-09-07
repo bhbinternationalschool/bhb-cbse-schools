@@ -40,7 +40,10 @@ export type VisitorLookup = {
   openVisit: VisitorEntry | null;
 };
 
-async function readState(): Promise<{ state: VisitorState; updatedAt: string } | null> {
+export async function readVisitorState(): Promise<{
+  state: VisitorState;
+  updatedAt: string;
+} | null> {
   const ctx = await getServerTenantContext();
   if (!ctx) return null;
   const { data, error } = await ctx.sb
@@ -60,7 +63,7 @@ async function readState(): Promise<{ state: VisitorState; updatedAt: string } |
 export async function mergeWriteVisitorState(next: VisitorState): Promise<VisitorState | null> {
   const ctx = await getServerTenantContext();
   if (!ctx) return null;
-  const cur = await readState();
+  const cur = await readVisitorState();
   const merged = mergeVisitorStates(cur?.state ?? emptyVisitorState(), next);
   const { error } = await ctx.sb.from("module_local_state").upsert(
     { tenant_id: ctx.tenantId, module_key: MODULE_KEY, state: merged, updated_at: new Date().toISOString() },
@@ -73,11 +76,15 @@ export async function mergeWriteVisitorState(next: VisitorState): Promise<Visito
   return merged;
 }
 
-function todayIstKey(d = new Date()): string {
+export function todayIstKey(d = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
 }
 
-function openVisitFor(state: VisitorState, mobile10: string): VisitorEntry | null {
+/** An open (not checked-out) visit for this mobile today, if any. */
+export function openVisitFor(
+  state: VisitorState,
+  mobile10: string,
+): VisitorEntry | null {
   const today = todayIstKey();
   return (
     state.visitorLog.find(
@@ -114,7 +121,7 @@ export async function lookupVisitorMobile(raw: string): Promise<VisitorLookup | 
       .like("mobile", like)
       .limit(10),
     sb.from("masters_desk_classes").select("id, name").eq("tenant_id", tenantId),
-    readState(),
+    readVisitorState(),
   ]);
 
   const className = new Map((classes.data || []).map((c) => [String(c.id), String(c.name)]));
@@ -183,7 +190,7 @@ export async function selfServiceCheckIn(input: {
   if (mobile.length !== 10) return { ok: false, error: "Enter a valid 10-digit mobile number" };
   const name = String(input.visitorName || "").trim();
   if (!name) return { ok: false, error: "Enter your name" };
-  const cur = await readState();
+  const cur = await readVisitorState();
   if (!cur) return { ok: false, error: "Server unavailable" };
   const existing = openVisitFor(cur.state, mobile);
   if (existing) return { ok: true, entry: existing, alreadyIn: true };
@@ -215,7 +222,7 @@ export async function selfServiceCheckOut(input: {
   id?: string;
   mobile?: string;
 }): Promise<{ ok: true; entry: VisitorEntry } | { ok: false; error: string }> {
-  const cur = await readState();
+  const cur = await readVisitorState();
   if (!cur) return { ok: false, error: "Server unavailable" };
   let entry: VisitorEntry | undefined;
   if (input.id) entry = cur.state.visitorLog.find((v) => v.id === input.id && !v.outTime);
@@ -228,6 +235,6 @@ export async function selfServiceCheckOut(input: {
 }
 
 export async function visitStatus(id: string): Promise<VisitorEntry | null> {
-  const cur = await readState();
+  const cur = await readVisitorState();
   return cur?.state.visitorLog.find((v) => v.id === id) ?? null;
 }

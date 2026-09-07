@@ -46,6 +46,9 @@ export type MobileFeatureId =
   | "staff_roster"
   | "broadcast"
   | "transport_requests"
+  // gate
+  | "visitor_gate"
+  | "gate_pass_release"
   // transport crew
   | "route_manifest"
   // self service
@@ -59,7 +62,15 @@ export type MobileFeature = {
   id: MobileFeatureId;
   label: string;
   /** Shown under this heading in the RBAC admin panel. */
-  group: "Fees" | "Admissions" | "Teaching" | "Students" | "Leadership" | "Transport" | "Self service";
+  group:
+    | "Fees"
+    | "Admissions"
+    | "Teaching"
+    | "Students"
+    | "Leadership"
+    | "Gate"
+    | "Transport"
+    | "Self service";
   module: RbacModule;
   action: RbacAction;
   /** One line the office reads before switching it on. */
@@ -244,6 +255,22 @@ export const MOBILE_FEATURES: MobileFeature[] = [
     note: "The queue of parents asking for bus service.",
   },
   {
+    id: "visitor_gate",
+    label: "Visitor gate",
+    group: "Gate",
+    module: "visitors",
+    action: "create",
+    note: "Check visitors in and out at the gate. The mobile lookup says whose parent they are before they are let in.",
+  },
+  {
+    id: "gate_pass_release",
+    label: "Release on a gate pass",
+    group: "Gate",
+    module: "visitors",
+    action: "edit",
+    note: "Hand a child over for an early pickup against an approved pass, and record who collected them.",
+  },
+  {
     id: "route_manifest",
     label: "Route & boarding",
     group: "Transport",
@@ -375,6 +402,9 @@ export function defaultMobileAccess(): MobileAccessState {
         "staff_roster",
         "transport_requests",
         "messages",
+        // Reception IS the gate desk on a small campus.
+        "visitor_gate",
+        "gate_pass_release",
       ],
       accounts: [...SELF_SERVICE, ...FEES, "students_view"],
       auditor: [...SELF_SERVICE, "fee_defaulters", "fee_collections", "students_view"],
