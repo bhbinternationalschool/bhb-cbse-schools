@@ -46,7 +46,7 @@ export function invalidateServerRbacCache(): void {
   rbacCache = null;
 }
 
-async function loadServerRbac(): Promise<RbacState> {
+export async function loadServerRbac(): Promise<RbacState> {
   const now = Date.now();
   if (rbacCache && now - rbacCache.at < RBAC_CACHE_TTL_MS) {
     return rbacCache.state;

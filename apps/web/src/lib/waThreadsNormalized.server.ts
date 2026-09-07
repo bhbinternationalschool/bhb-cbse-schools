@@ -19,6 +19,7 @@ export type WaBotSliceKey = keyof Pick<
   | "hub"
   | "staffAtt"
   | "complaints"
+  | "commands"
 >;
 
 export const WA_BOT_SLICE_KEYS: WaBotSliceKey[] = [
@@ -30,6 +31,7 @@ export const WA_BOT_SLICE_KEYS: WaBotSliceKey[] = [
   "hub",
   "staffAtt",
   "complaints",
+  "commands",
 ];
 
 export type WaThreadsDeskSyncMeta = {
@@ -66,6 +68,7 @@ function emptyBundle(): WaBotPersistBundle {
     hub: null,
     staffAtt: null,
     complaints: null,
+    commands: null,
   };
 }
 

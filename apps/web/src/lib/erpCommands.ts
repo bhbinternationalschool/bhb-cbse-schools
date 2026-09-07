@@ -1,0 +1,3757 @@
+/**
+ * ERP command desk — the pure half.
+ *
+ * A staff member sends one line ("5A me aaj kaun absent hai") over
+ * WhatsApp, voice or the in-app assistant, and the ERP answers or acts.
+ * Everything here is deterministic and runs without a network: the
+ * command catalogue, the local parser, section/date resolution, the
+ * confirm-token rules, the rate limiter and the reply formatters. The
+ * server half (`erpCommands.server.ts`) adds the LLM fallback, RBAC,
+ * data access and audit.
+ *
+ * Design rule: a command can only ever call a server function the app
+ * already exposes. The catalogue is the complete list of what a message
+ * can do, so the list of commands and the list of things a message can
+ * break stay the same list.
+ */
+
+import type { MastersState } from "@/lib/masters";
+import type { RbacAction, RbacModule } from "@/lib/rbac";
+
+export type ErpCommandKind = "read" | "write";
+
+export type ErpCommandFieldType = "section" | "date" | "text" | "student";
+
+export type ErpCommandField = {
+  name: string;
+  type: ErpCommandFieldType;
+  required: boolean;
+  description: string;
+};
+
+export type ErpCommandDef = {
+  id: string;
+  title: string;
+  kind: ErpCommandKind;
+  /** RBAC gate — the same module/action the ERP screen checks. */
+  module: RbacModule;
+  action: RbacAction;
+  /** One line for the LLM and for COMMANDS help. */
+  description: string;
+  /** What staff actually type — Hindi, English and mixed. */
+  examples: string[];
+  fields: ErpCommandField[];
+  /**
+   * `own_sections`: a teacher may only address sections they teach or
+   * class-teach; office-like roles may address any. `any`: no section
+   * scope applies.
+   */
+  scope: "own_sections" | "any";
+  /**
+   * Channels this command answers on. Omitted means every channel.
+   * `post_homework` is app-only: on WhatsApp the class-channel bot has
+   * owned teacher homework posts since before this desk existed, and it
+   * broadcasts to parents as well, so the desk must not intercept them.
+   */
+  channels?: ("whatsapp" | "app")[];
+};
+
+/** Fields as extracted from the message, before ID resolution. */
+export type ErpCommandFields = {
+  section?: string;
+  date?: string;
+  text?: string;
+  /** Student as written — a name, optionally with a class-section or roll. */
+  student?: string;
+};
+
+export type ParsedErpCommand = {
+  commandId: string;
+  fields: ErpCommandFields;
+  source: "local" | "llm";
+};
+
+export const ERP_COMMANDS: ErpCommandDef[] = [
+  {
+    id: "absent_list",
+    title: "Absent list for a section",
+    kind: "read",
+    module: "attendance",
+    action: "view",
+    description:
+      "Who is absent (or on leave / late) in one class-section on a date. Also says whether attendance has been marked at all.",
+    examples: [
+      "5A me aaj kaun absent hai",
+      "absent list 7B",
+      "class 3 A attendance today",
+      "kal 10A me kaun nahi aaya",
+      "8B hazri",
+    ],
+    fields: [
+      {
+        name: "section",
+        type: "section",
+        required: true,
+        description: "Class and section, e.g. 5A, VIII B, class 3 section A, LKG A",
+      },
+      {
+        name: "date",
+        type: "date",
+        required: false,
+        description: "YYYY-MM-DD; today when not said. 'kal' / 'yesterday' means yesterday.",
+      },
+    ],
+    scope: "own_sections",
+  },
+  {
+    id: "attendance_summary",
+    title: "Today's attendance summary",
+    kind: "read",
+    module: "attendance",
+    action: "view",
+    description:
+      "School-wide attendance for a date: present percentage by class, sections not yet marked, and staff present / absent / not punched in. Teachers get their own sections only. No section in the message — a section means the absent list instead.",
+    examples: [
+      "attendance summary",
+      "aaj ki attendance",
+      "today's attendance",
+      "kal ki attendance report",
+      "school attendance status",
+    ],
+    fields: [
+      {
+        name: "date",
+        type: "date",
+        required: false,
+        description: "YYYY-MM-DD; today when not said. 'kal' / 'yesterday' means yesterday.",
+      },
+    ],
+    scope: "any",
+  },
+  {
+    id: "pay_link",
+    title: "Send a payment link to a family",
+    kind: "write",
+    module: "fees",
+    action: "edit",
+    description:
+      "Raise a Cashfree payment link for everything one student currently owes and send it to the parent on WhatsApp. Future months are not included. The receipt posts itself when the payment goes through.",
+    examples: [
+      "Payment link for Riya Verma",
+      "send pay link to Aarav Sharma",
+      "Amay Gupta 4B ko payment link bhejo",
+      "fee link for Riya Verma",
+    ],
+    fields: [
+      { name: "student", type: "student", required: true, description: "The student whose dues the link covers" },
+    ],
+    scope: "any",
+  },
+  {
+    id: "fee_reminder",
+    title: "Send fee reminders to a class's defaulters",
+    kind: "write",
+    module: "fees",
+    action: "edit",
+    description:
+      "Send each defaulting family in a class their own fee reminder — their child, their amount, their overdue days — as the approved reminder template. Skips families reminded in the last week, and refuses during quiet hours.",
+    examples: [
+      "Send fee reminder to class 3 defaulters",
+      "fee reminder 5A defaulters",
+      "remind class 3 defaulters",
+      "class 5 ke bakayedar ko fee reminder bhejo",
+    ],
+    fields: [
+      { name: "section", type: "section", required: true, description: "Class, or class and section" },
+    ],
+    scope: "any",
+  },
+  {
+    id: "bus_delay",
+    title: "Tell a route's families the bus is late",
+    kind: "write",
+    module: "transport",
+    action: "edit",
+    description:
+      "Send the approved bus-delay notice to every family with a child on one route. Each family gets their own child's name and their own stop. Needs the bus or route and how many minutes late — a duration without a unit is not read as minutes, because the bus number is a bare number too.",
+    examples: [
+      "Bus 3 ko batao: 20 minute late",
+      "bus 5 is running 15 mins late",
+      "route A 20 minute late",
+      "bus 2 aadha ghanta late hai",
+    ],
+    fields: [
+      { name: "text", type: "text", required: true, description: "The bus or route, and the delay in minutes" },
+    ],
+    scope: "any",
+  },
+  {
+    id: "book_ptm",
+    title: "Book a PTM slot for a family",
+    kind: "write",
+    module: "ptm",
+    action: "edit",
+    description:
+      "Book a parent-teacher meeting slot on a family's behalf — for the parent who rings the office or catches you at the gate instead of using the app. Names the student and, optionally, the time; without a time it offers the open ones.",
+    examples: [
+      "Book PTM slot for Riya Verma, 10:30",
+      "book ptm for Aarav Sharma 11 am",
+      "Amay Gupta 4B ka PTM 10:30 book karo",
+      "fix ptm appointment for Kabir Ali",
+    ],
+    fields: [
+      { name: "student", type: "student", required: true, description: "The child whose parent is coming" },
+      { name: "text", type: "text", required: false, description: "Slot time as written, e.g. 10:30 or 11 am" },
+    ],
+    scope: "own_sections",
+  },
+  {
+    id: "decide_leave",
+    title: "Approve or reject a leave request",
+    kind: "write",
+    module: "student_leave",
+    action: "edit",
+    description:
+      "Decide a student's pending leave request. Names the student; if they have more than one pending request, it asks which. Approving marks the leave on registers that exist and tells the family.",
+    examples: [
+      "Approve Aarav's leave",
+      "approve leave for Riya Verma",
+      "reject Kabir Ali leave: no medical certificate",
+      "Aarav Sharma ki chutti manjoor karo",
+    ],
+    fields: [
+      { name: "student", type: "student", required: true, description: "The student whose leave is being decided" },
+      { name: "text", type: "text", required: false, description: "Optional note, after a colon" },
+    ],
+    scope: "own_sections",
+  },
+  {
+    id: "raise_complaint",
+    title: "Log a family's complaint",
+    kind: "write",
+    module: "complaints",
+    action: "edit",
+    description:
+      "Log a complaint a family made by phone or in person, against their child's record, so it enters the same queue as complaints raised from the parent app. Needs the student and the complaint after a colon.",
+    examples: [
+      "Raise complaint for Riya Verma: bus did not come today",
+      "log complaint for Aarav Sharma: canteen food quality",
+      "complaint for Amay Gupta 4B: fee receipt not received",
+    ],
+    fields: [
+      { name: "student", type: "student", required: true, description: "The child the complaint is about" },
+      { name: "text", type: "text", required: true, description: "The complaint, after a colon" },
+    ],
+    scope: "own_sections",
+  },
+  {
+    id: "staff_broadcast",
+    title: "Broadcast to staff",
+    kind: "write",
+    module: "notifications",
+    action: "edit",
+    description:
+      "Send one message to every active staff member — a phone notification to everyone, and WhatsApp as an approved notice template where one is approved. Office and leadership only.",
+    examples: [
+      "Staff broadcast: meeting 3 pm in library",
+      "tell all staff: staff meeting at 3pm",
+      "sabhi staff ko bhejo: kal 8 baje aana hai",
+      "broadcast to staff: submit marks by Friday",
+    ],
+    fields: [
+      { name: "text", type: "text", required: true, description: "The message, after a colon" },
+    ],
+    scope: "any",
+  },
+  {
+    id: "class_message",
+    title: "Message a class's parents",
+    kind: "write",
+    module: "notices",
+    action: "edit",
+    description:
+      "Send one message to every parent of a class-section, as an approved WhatsApp notice template with your words in it. Free text is never sent raw. The confirm card shows the message exactly as parents will receive it.",
+    examples: [
+      "Class 4 parents ko bhejo: kal PTM 9 baje",
+      "message 5A parents: bring sports uniform tomorrow",
+      "send 6B parents: fee counter closed on Friday",
+      "5A ke parents ko batao: kal chutti hai",
+    ],
+    fields: [
+      { name: "section", type: "section", required: true, description: "Class-section whose parents get it, e.g. 5A" },
+      { name: "text", type: "text", required: true, description: "The message, after a colon" },
+    ],
+    scope: "own_sections",
+  },
+  {
+    id: "mark_attendance",
+    title: "Mark attendance",
+    kind: "write",
+    module: "attendance",
+    action: "edit",
+    description:
+      "Mark a section's register: name the absentees by roll number or name, and everyone else is marked present. Optionally leave and late. Refuses when the register is already marked unless the message says to correct it.",
+    examples: [
+      "Mark 5A attendance: absent roll 4, 11, 19",
+      "5A attendance absent 4, 11 baaki present",
+      "mark 6B attendance all present",
+      "Mark 5A attendance: absent Riya Verma, late 7",
+      "correct 5A attendance: absent 4",
+    ],
+    fields: [
+      { name: "section", type: "section", required: true, description: "Class-section, e.g. 5A" },
+      {
+        name: "text",
+        type: "text",
+        required: true,
+        description: "Who is absent — roll numbers or names — and optionally leave / late; or 'all present'",
+      },
+      { name: "date", type: "date", required: false, description: "YYYY-MM-DD; today when not said" },
+    ],
+    scope: "own_sections",
+  },
+  {
+    id: "post_homework",
+    title: "Post homework",
+    kind: "write",
+    module: "homework",
+    action: "edit",
+    description:
+      "Publish homework for one section and subject. Needs a posting verb, the section, the subject and the text after a colon; a due date is optional. App and ERP assistant only — on WhatsApp the class channel already does this.",
+    examples: [
+      "Post homework 6B maths: exercise 4.2, due Monday",
+      "post homework for 5A english: read chapter 3",
+      "add homework 6B science: diagram of a plant cell, due tomorrow",
+      "6B hindi homework post karo: paath 3 ke prashn",
+    ],
+    fields: [
+      { name: "section", type: "section", required: true, description: "Class-section, e.g. 6B" },
+      {
+        name: "text",
+        type: "text",
+        required: true,
+        description: "Subject, then a colon, then the homework text; optionally 'due <day/date>'",
+      },
+    ],
+    scope: "own_sections",
+    channels: ["app"],
+  },
+  {
+    id: "admissions_week",
+    title: "Admissions this week",
+    kind: "read",
+    module: "admissions",
+    action: "view",
+    description:
+      "New enquiries in a period with where they came from, how many applied, verified, enrolled and lost, the classes most in demand, follow-ups overdue or due today, and the open pipeline. Defaults to the last 7 days; 'this month' or 'today' also work.",
+    examples: [
+      "admissions this week",
+      "admissions report",
+      "is hafte ke admission",
+      "admissions this month",
+      "new enquiries today",
+    ],
+    fields: [
+      {
+        name: "text",
+        type: "text",
+        required: false,
+        description: "Period: 'week' (default), 'month', or 'today'",
+      },
+    ],
+    scope: "any",
+  },
+  {
+    id: "school_snapshot",
+    title: "School snapshot",
+    kind: "read",
+    module: "home",
+    action: "view",
+    description:
+      "The whole school in one message: today's and this month's collection, open dues and defaulter households, attendance with registers pending, staff present, the admissions pipeline with follow-ups due, and alerts (expiring documents, low stock, failed WhatsApp sends). Office and leadership only.",
+    examples: [
+      "school snapshot",
+      "school status",
+      "aaj ka school report",
+      "how is the school doing",
+      "daily summary",
+    ],
+    fields: [],
+    scope: "any",
+  },
+  {
+    id: "student_details",
+    title: "A student's details",
+    kind: "read",
+    module: "students",
+    action: "view",
+    description:
+      "One student's basics: class, section, roll, admission number, guardian and parent mobiles, transport route and stop, blood group, siblings in school. Never documents, Aadhaar or medical text.",
+    examples: [
+      "Riya Verma details",
+      "student details Aarav Sharma",
+      "Amay Gupta 4B info",
+      "Riya Verma ki jankari",
+      "who is Kabir Ali",
+    ],
+    fields: [
+      {
+        name: "student",
+        type: "student",
+        required: true,
+        description: "Student name as written, plus class-section or roll if given",
+      },
+    ],
+    scope: "any",
+  },
+  {
+    id: "bus_manifest",
+    title: "Bus route manifest",
+    kind: "read",
+    module: "transport",
+    action: "view",
+    description:
+      "One bus route: stops in boarding order with the children due at each (class and roll), the driver and vehicle, today's boarding marks when any, and suspended riders. Named by bus number, route code or route name.",
+    examples: [
+      "Bus 3 manifest",
+      "bus 3 ka manifest",
+      "route A students",
+      "bus 5 list",
+      "which children are on bus 2",
+    ],
+    fields: [
+      {
+        name: "text",
+        type: "text",
+        required: true,
+        description: "The bus or route as written: 'Bus 3', 'route A', a route code or name",
+      },
+      { name: "date", type: "date", required: false, description: "YYYY-MM-DD; today when not said" },
+    ],
+    scope: "any",
+  },
+  {
+    id: "homework_posted",
+    title: "Homework posted",
+    kind: "read",
+    module: "homework",
+    action: "view",
+    description:
+      "Homework published on a date: for one section, each post by subject with teacher and due date, or 'none yet' with the subject teachers named; with no section, a per-section count and the sections with nothing posted. Teachers get their sections; office and leadership the school. Not for posting homework.",
+    examples: [
+      "homework posted today for 6B",
+      "6B homework",
+      "aaj 6B ka homework",
+      "homework status",
+      "kal kis class me homework nahi hua",
+    ],
+    fields: [
+      { name: "section", type: "section", required: false, description: "Optional class-section, e.g. 6B" },
+      {
+        name: "date",
+        type: "date",
+        required: false,
+        description: "YYYY-MM-DD; today when not said. 'kal' / 'yesterday' means yesterday.",
+      },
+    ],
+    scope: "any",
+  },
+  {
+    id: "pending_leaves",
+    title: "Pending student leave requests",
+    kind: "read",
+    module: "student_leave",
+    action: "view",
+    description:
+      "Student leave requests awaiting approval — oldest first, with student, class, dates, type, reason and who approves. Optionally one class-section. Teachers see their own sections; office and leadership the whole school.",
+    examples: [
+      "pending leaves",
+      "leave requests",
+      "5A leave requests",
+      "kitni chutti pending hai",
+      "leave approvals",
+    ],
+    fields: [
+      {
+        name: "section",
+        type: "section",
+        required: false,
+        description: "Optional class-section to narrow to, e.g. 5A",
+      },
+    ],
+    scope: "any",
+  },
+  {
+    id: "free_teachers",
+    title: "Free teachers in a period",
+    kind: "read",
+    module: "timetable",
+    action: "view",
+    description:
+      "Teachers with no class in a given period on a date (or right now / next period): not on the grid, not substituting, not blocked, not absent — with each one's load that day. Also lists that period's uncovered classes when a teacher is absent.",
+    examples: [
+      "who is free in period 3",
+      "period 3 me kaun free hai",
+      "abhi kaun free hai",
+      "free teachers next period",
+      "kal 5th period kaun khali hai",
+    ],
+    fields: [
+      {
+        name: "text",
+        type: "text",
+        required: true,
+        description: "The period: a number ('period 3', '3rd period'), 'now', or 'next'",
+      },
+      {
+        name: "date",
+        type: "date",
+        required: false,
+        description: "YYYY-MM-DD; today when not said. 'kal' here means tomorrow only if 'tomorrow' is said; otherwise yesterday.",
+      },
+    ],
+    scope: "any",
+  },
+  {
+    id: "collection_today",
+    title: "Today's fee collection",
+    kind: "read",
+    module: "fees",
+    action: "view",
+    description:
+      "Fees collected on a date: total and receipt count, by payment mode (cash, UPI, card, cheque, online links), cheques awaiting clearance, by counter / paper book / online, top cashiers, day-close status, month so far. Office and leadership only.",
+    examples: [
+      "aaj ka collection",
+      "today's collection",
+      "kal ka collection",
+      "collection report",
+      "aaj kitna cash aaya",
+    ],
+    fields: [
+      {
+        name: "date",
+        type: "date",
+        required: false,
+        description: "YYYY-MM-DD; today when not said. 'kal' / 'yesterday' means yesterday.",
+      },
+    ],
+    scope: "any",
+  },
+  {
+    id: "class_defaulters",
+    title: "Fee defaulters in a class or section",
+    kind: "read",
+    module: "fees",
+    action: "view",
+    description:
+      "Students with overdue fees in one class (all sections) or one section: count, total outstanding, each student with amount and days overdue. Not a single student — that is the pending-fees command.",
+    examples: [
+      "Class 3 defaulters",
+      "5A defaulters",
+      "class 5 ke bakayedar",
+      "fees pending list 7B",
+      "class 3 me kisne fees nahi di",
+    ],
+    fields: [
+      {
+        name: "section",
+        type: "section",
+        required: true,
+        description: "Class, or class and section, e.g. 'class 3' (all sections) or '5A'",
+      },
+    ],
+    scope: "own_sections",
+  },
+  {
+    id: "student_fees",
+    title: "A student's pending fees",
+    kind: "read",
+    module: "fees",
+    action: "view",
+    description:
+      "What one student owes: total due now, by month, by fee head, pay-ahead months, last receipt and the parent's mobile. Asks back when two students share the name.",
+    examples: [
+      "Amay ki fees pending",
+      "show me all dues of Aarav Sharma",
+      "Riya Verma dues",
+      "fees Amay Gupta 4B",
+      "Aarav ka kitna baki hai",
+    ],
+    fields: [
+      {
+        name: "student",
+        type: "student",
+        required: true,
+        description: "Student name as written, plus class-section or roll if given, e.g. 'Amay Gupta 4B'",
+      },
+    ],
+    scope: "own_sections",
+  },
+  {
+    id: "commands_digest",
+    title: "Today's command desk report (director)",
+    kind: "read",
+    module: "settings",
+    action: "view",
+    description:
+      "Director only: what staff asked the ERP today over WhatsApp, the app and the assistant — counts by command, channel and person, plus anything denied.",
+    examples: ["commands report", "commands digest", "aaj ke commands"],
+    fields: [],
+    scope: "any",
+  },
+  {
+    id: "help",
+    title: "List available commands",
+    kind: "read",
+    module: "attendance",
+    action: "view",
+    description: "Show the commands this staff member can use.",
+    examples: ["commands", "command help", "?"],
+    fields: [],
+    scope: "any",
+  },
+];
+
+export function findErpCommand(
+  id: string,
+  commands: ErpCommandDef[] = ERP_COMMANDS,
+): ErpCommandDef | null {
+  return commands.find((c) => c.id === id) ?? null;
+}
+
+// ─── Section resolution ────────────────────────────────────────────────
+
+export type SectionMatch = {
+  classId: string;
+  sectionId: string;
+  className: string;
+  sectionName: string;
+  label: string;
+};
+
+const ROMAN: Record<string, number> = {
+  i: 1,
+  ii: 2,
+  iii: 3,
+  iv: 4,
+  v: 5,
+  vi: 6,
+  vii: 7,
+  viii: 8,
+  ix: 9,
+  x: 10,
+  xi: 11,
+  xii: 12,
+};
+
+const PRE_PRIMARY: Record<string, string> = {
+  nursery: "nursery",
+  nur: "nursery",
+  "pre nursery": "prenursery",
+  "pre-nursery": "prenursery",
+  prenursery: "prenursery",
+  pg: "playgroup",
+  playgroup: "playgroup",
+  "play group": "playgroup",
+  lkg: "lkg",
+  ukg: "ukg",
+  kg: "kg",
+  "kg1": "lkg",
+  "kg2": "ukg",
+  "kg 1": "lkg",
+  "kg 2": "ukg",
+  prep: "ukg",
+};
+
+/**
+ * Normalise a class name from Masters ("VIII", "Class 8", "8th", "Grade 8",
+ * "LKG", "Nursery") to a comparable key ("8", "lkg", "nursery"). Returns
+ * null when the name carries no recognisable class.
+ */
+export function classKey(name: string): string | null {
+  const raw = (name || "").trim().toLowerCase();
+  if (!raw) return null;
+  const stripped = raw
+    .replace(/^(class|grade|std|standard|kaksha|कक्षा)\s*/i, "")
+    .replace(/\s*(th|st|nd|rd)$/i, "")
+    .trim();
+  if (PRE_PRIMARY[stripped]) return PRE_PRIMARY[stripped];
+  if (/^\d{1,2}$/.test(stripped)) return String(parseInt(stripped, 10));
+  if (ROMAN[stripped]) return String(ROMAN[stripped]);
+  // "Class 5 A" style names carry the section too — take the class part.
+  const m = /^(\d{1,2}|[ivx]{1,4}|nursery|lkg|ukg|kg|pg)\b/.exec(stripped);
+  if (m) return classKey(m[1]!);
+  return null;
+}
+
+/**
+ * Pull "class + section" references out of free text: "5A", "5 A", "5-A",
+ * "class 5 section A", "5th A", "VIII B", "viii-b", "LKG A", "nursery b".
+ * Returns every distinct reference found, in order. A class without a
+ * section letter is returned with sectionName "".
+ */
+export function extractSectionRefs(
+  text: string,
+): { classKey: string; sectionName: string }[] {
+  const low = ` ${(text || "").toLowerCase()} `;
+  const out: { classKey: string; sectionName: string }[] = [];
+  const seen = new Set<string>();
+  const push = (ck: string | null, sec: string) => {
+    if (!ck) return;
+    const key = `${ck}|${sec}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ classKey: ck, sectionName: sec });
+  };
+
+  // class <n> section <x> / class <n> <x> / class <n>
+  // \b is ASCII-only, so the Hindi "कक्षा" needs letter lookarounds.
+  const classRe =
+    /(?<![\p{L}\p{M}\p{N}])(?:class|grade|std|kaksha|कक्षा)\s*(\d{1,2}|[ivx]{1,4}|nursery|lkg|ukg|kg|pg)(?:st|nd|rd|th)?\s*(?:-|\s)?\s*(?:section|sec|sec\.)?\s*([a-h])?(?![\p{L}\p{M}\p{N}])/gu;
+  let m: RegExpExecArray | null;
+  while ((m = classRe.exec(low))) {
+    push(classKey(m[1]!), (m[2] || "").toUpperCase());
+  }
+
+  // bare "5A", "5 A", "5-A", "5th A", "viii b", "lkg a", "ukg-b"
+  const bareRe =
+    /(?<![a-z0-9])(\d{1,2}|[ivx]{1,4}|nursery|lkg|ukg|kg|pg)(?:st|nd|rd|th)?\s*-?\s*([a-h])(?![a-z0-9])/g;
+  while ((m = bareRe.exec(low))) {
+    const ck = classKey(m[1]!);
+    if (!ck) continue;
+    // Roman "i a" / "x a" false positives: require the class token to be
+    // digits, a known word, or a roman numeral of 2+ letters, unless the
+    // text has no other candidate — "v a" alone is too ambiguous.
+    if (/^[ivx]$/.test(m[1]!) && out.length) continue;
+    push(ck, m[2]!.toUpperCase());
+  }
+
+  return out;
+}
+
+/**
+ * Resolve a section reference against Masters. Class names in Masters are
+ * whatever the school typed ("VIII", "Class 8", "8"); the match goes
+ * through classKey() on both sides. A class with exactly one active
+ * section resolves even when no letter was given.
+ */
+export function resolveSectionRef(
+  ref: { classKey: string; sectionName: string },
+  masters: Pick<MastersState, "classes" | "sections">,
+): { ok: true; match: SectionMatch } | { ok: false; reason: "no_class" | "no_section" | "ambiguous"; options: SectionMatch[] } {
+  const classes = (masters.classes ?? []).filter(
+    (c) => c.isActive !== false && classKey(c.name) === ref.classKey,
+  );
+  if (!classes.length) return { ok: false, reason: "no_class", options: [] };
+  const options: SectionMatch[] = [];
+  for (const c of classes) {
+    for (const s of (masters.sections ?? []).filter(
+      (x) => x.classId === c.id && x.isActive !== false,
+    )) {
+      options.push({
+        classId: c.id,
+        sectionId: s.id,
+        className: c.name,
+        sectionName: s.name,
+        label: `${c.name} ${s.name}`.trim(),
+      });
+    }
+  }
+  if (!options.length) return { ok: false, reason: "no_section", options: [] };
+  if (ref.sectionName) {
+    const want = ref.sectionName.toLowerCase();
+    const hit = options.filter((o) => {
+      const n = o.sectionName.toLowerCase().replace(/^(section|sec\.?)\s*/, "");
+      return n === want;
+    });
+    if (hit.length === 1) return { ok: true, match: hit[0]! };
+    if (hit.length > 1) return { ok: false, reason: "ambiguous", options: hit };
+    return { ok: false, reason: "no_section", options };
+  }
+  if (options.length === 1) return { ok: true, match: options[0]! };
+  return { ok: false, reason: "ambiguous", options };
+}
+
+// ─── Date resolution ───────────────────────────────────────────────────
+
+function shiftIso(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Date the message refers to. Relative words first (today / kal /
+ * yesterday / parso), then dd/mm or dd-mm (current year, or last year when
+ * that would land in the future), then an explicit YYYY-MM-DD. Defaults
+ * to today. "kal" is ambiguous in Hindi (yesterday or tomorrow); for
+ * attendance it can only mean yesterday, and the reply says the date.
+ */
+export function resolveCommandDate(text: string, todayIso: string): string {
+  const low = (text || "").toLowerCase();
+  const iso = /\b(20\d{2}-\d{2}-\d{2})\b/.exec(low);
+  if (iso) return iso[1]!;
+  if (/\b(day before|parso|परसों)\b/.test(low)) return shiftIso(todayIso, -2);
+  if (/\b(yesterday|kal|कल|beete kal)\b/.test(low)) return shiftIso(todayIso, -1);
+  const dm = /\b(\d{1,2})[/-](\d{1,2})(?:[/-](20\d{2}))?\b/.exec(low);
+  if (dm) {
+    const d = parseInt(dm[1]!, 10);
+    const mo = parseInt(dm[2]!, 10);
+    if (d >= 1 && d <= 31 && mo >= 1 && mo <= 12) {
+      let y = dm[3] ? parseInt(dm[3]!, 10) : parseInt(todayIso.slice(0, 4), 10);
+      let candidate = `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      if (!dm[3] && candidate > todayIso) {
+        y -= 1;
+        candidate = `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      }
+      return candidate;
+    }
+  }
+  return todayIso;
+}
+
+// ─── Local parser ──────────────────────────────────────────────────────
+
+// \b is ASCII-only in JS, so Hindi words need explicit letter lookarounds.
+const ABSENT_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(absent|absentee|absentees|gair\s*hazir|gairhazir|गैर\s*हाज़िर|गैरहाजिर|अनुपस्थित|nahi\s+aaya|nahi\s+aaye|नहीं\s+आया|नहीं\s+आए|hazri|haziri|हाज़िरी|हाजिरी|attendance|upasthiti|उपस्थिति|(?:on|pe|par)\s+leave|leave\s+(?:pe|par)|chutti\s+(?:pe|par)|छुट्टी\s+पर)(?![\p{L}\p{M}\p{N}])/iu;
+
+const HELP_WORDS = /^\s*(commands?|command\s+help|cmd|कमांड|\?)\s*$/i;
+
+/**
+ * The day's takings: "aaj ka collection", "today's collection", "collection
+ * report", "aaj kitna cash aaya", "कलेक्शन". Not with a class (a class plus
+ * fee words is the defaulters list) and not a student's name.
+ */
+const COLLECTION_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(collections?|कलेक्शन|वसूली|vasooli|vasuli|(?:kitna|kitni|how\s+much)\s+(?:cash|paisa|paise|fees?|money)\s+(?:aaya|aayi|aya|mila|mili|collected|came)|day\s*close|cash\s+(?:in\s+hand|today|aaj))(?![\p{L}\p{M}\p{N}])/iu;
+
+/** A class or section plus one of these is the defaulters list. */
+const DEFAULTER_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(defaulters?|bakayedar|bakaayedar|बकायेदार|(?:fees?|dues?)\s+(?:pending|due|baki|bakaya)(?:\s+list)?|(?:fee|fees|dues?)\s+(?:list|report)|(?:kisne|kis\s*kis\s*ne|kaun\s*kaun)\s+fees?\s+nahi|fees?\s+nahi\s+(?:di|diya|diye|bhari)|overdue)(?![\p{L}\p{M}\p{N}])/iu;
+
+/**
+ * Attendance without a section is the school (or the teacher's sections):
+ * "attendance summary", "aaj ki attendance", "today's attendance", "kitne
+ * present". Requires an attendance word; "absent" alone is not enough,
+ * because "absent" with no section is a half-typed absent-list ask.
+ */
+const ATTENDANCE_SUMMARY_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(attendance|hazri|haziri|हाज़िरी|हाजिरी|upasthiti|उपस्थिति|kitne\s+present|present\s+percent(age)?)(?![\p{L}\p{M}\p{N}])/iu;
+
+const DIGEST_WORDS =
+  /^\s*(commands?\s+(report|digest|summary|log)|(aaj|today)\s*(ke|ka|'s)?\s*commands?|ai\s+(report|digest))\s*$/i;
+
+/**
+ * Regex fast path — no model call for the commands staff send all day.
+ * Returns null when nothing matched with confidence; the server then
+ * decides whether the message is worth an LLM parse.
+ */
+export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
+  const t = (text || "").trim();
+  if (!t) return null;
+  if (HELP_WORDS.test(t)) {
+    return { commandId: "help", fields: {}, source: "local" };
+  }
+  if (DIGEST_WORDS.test(t)) {
+    return { commandId: "commands_digest", fields: {}, source: "local" };
+  }
+  const freeQ = parseFreeTeachersQuery(t);
+  if (freeQ) {
+    return { commandId: "free_teachers", fields: { text: freeQ, date: "" }, source: "local" };
+  }
+  if (COLLECTION_WORDS.test(t) && !extractSectionRefs(t).length) {
+    return { commandId: "collection_today", fields: { date: "" }, source: "local" };
+  }
+  const payLink = parsePayLinkQuery(t);
+  if (payLink) {
+    return { commandId: "pay_link", fields: { student: payLink }, source: "local" };
+  }
+  const feeRem = parseFeeReminderQuery(t);
+  if (feeRem) {
+    return { commandId: "fee_reminder", fields: { section: feeRem }, source: "local" };
+  }
+  const leaveDecision = parseDecideLeaveQuery(t);
+  if (leaveDecision) {
+    return {
+      commandId: "decide_leave",
+      fields: {
+        student: leaveDecision.student,
+        text: leaveDecision.note,
+        // The verb rides in `date`, which decide_leave does not otherwise
+        // use, so the pure parse stays a plain field map.
+        date: leaveDecision.approve ? "approve" : "reject",
+      },
+      source: "local",
+    };
+  }
+  const complaint = parseRaiseComplaintQuery(t);
+  if (complaint) {
+    return {
+      commandId: "raise_complaint",
+      fields: { student: complaint.student, text: complaint.body },
+      source: "local",
+    };
+  }
+  const staffMsg = parseStaffBroadcastQuery(t);
+  if (staffMsg) {
+    return { commandId: "staff_broadcast", fields: { text: staffMsg }, source: "local" };
+  }
+  const classMsg = parseClassMessageQuery(t);
+  if (classMsg) {
+    return {
+      commandId: "class_message",
+      fields: { section: classMsg.section, text: classMsg.message },
+      source: "local",
+    };
+  }
+  const attMark = parseMarkAttendanceQuery(t);
+  if (attMark) {
+    return {
+      commandId: "mark_attendance",
+      fields: { section: attMark.section, text: attMark.spec, date: "" },
+      source: "local",
+    };
+  }
+  const post = parsePostHomeworkQuery(t);
+  if (post) {
+    return {
+      commandId: "post_homework",
+      fields: { section: post.section, text: post.rest },
+      source: "local",
+    };
+  }
+  const ptmBooking = parseBookPtmQuery(t);
+  if (ptmBooking) {
+    return {
+      commandId: "book_ptm",
+      fields: { student: ptmBooking.student, text: ptmBooking.time },
+      source: "local",
+    };
+  }
+  const admPeriod = parseAdmissionsQuery(t);
+  if (admPeriod) {
+    return { commandId: "admissions_week", fields: { text: admPeriod }, source: "local" };
+  }
+  if (SNAPSHOT_WORDS.test(t)) {
+    return { commandId: "school_snapshot", fields: {}, source: "local" };
+  }
+  const detailsQ = parseStudentDetailsQuery(t);
+  if (detailsQ) {
+    return { commandId: "student_details", fields: { student: detailsQ }, source: "local" };
+  }
+  const busDelay = parseBusDelayQuery(t);
+  if (busDelay) {
+    return {
+      commandId: "bus_delay",
+      // The minutes ride in `date`, which this command does not otherwise
+      // use, so the pure parse stays a plain field map.
+      fields: { text: busDelay.route, date: String(busDelay.minutes) },
+      source: "local",
+    };
+  }
+  const busQ = parseBusManifestQuery(t);
+  if (busQ) {
+    return { commandId: "bus_manifest", fields: { text: busQ, date: "" }, source: "local" };
+  }
+  const hwQ = parseHomeworkQuery(t);
+  if (hwQ) {
+    return { commandId: "homework_posted", fields: { section: hwQ.section, date: "" }, source: "local" };
+  }
+  // Leave queue before any fee reading: "pending" and "baki" are fee words
+  // too, but "chutti pending" is about leave.
+  if (LEAVE_WORDS.test(t) && !ABSENT_WORDS.test(t) && !/(?<![\p{L}\p{M}])(fees?|dues?|फीस|बकाया)(?![\p{L}\p{M}])/iu.test(t)) {
+    const lr = extractSectionRefs(t)[0];
+    return {
+      commandId: "pending_leaves",
+      fields: { section: lr ? `${lr.classKey}${lr.sectionName}` : "" },
+      source: "local",
+    };
+  }
+  const refs = extractSectionRefs(t);
+  const feesQ = parseStudentFeesQuery(t);
+  // A class plus a defaulter word is the class list — unless a name is also
+  // there ("Amay Gupta 4B fees pending" is one student).
+  if (refs.length && DEFAULTER_WORDS.test(t) && !feesQ?.name) {
+    const r = refs[0]!;
+    return {
+      commandId: "class_defaulters",
+      fields: { section: r.sectionName ? `${r.classKey}${r.sectionName}` : r.classKey },
+      source: "local",
+    };
+  }
+  if (feesQ) {
+    return {
+      commandId: "student_fees",
+      fields: {
+        student: [feesQ.name, feesQ.section ? `${feesQ.section.classKey}${feesQ.section.sectionName}` : "", feesQ.rollNo ? `roll ${feesQ.rollNo}` : ""]
+          .filter(Boolean)
+          .join(" "),
+      },
+      source: "local",
+    };
+  }
+  if (!refs.length && ATTENDANCE_SUMMARY_WORDS.test(t) && !FEE_WORDS.test(t)) {
+    return { commandId: "attendance_summary", fields: { date: "" }, source: "local" };
+  }
+  if (refs.length && ABSENT_WORDS.test(t)) {
+    const r = refs[0]!;
+    return {
+      commandId: "absent_list",
+      fields: {
+        section: r.sectionName ? `${r.classKey}${r.sectionName}` : r.classKey,
+        date: "",
+      },
+      source: "local",
+    };
+  }
+  return null;
+}
+
+/**
+ * Whether an unmatched message deserves a model parse. Kept narrow on
+ * purpose: for teachers every free-text message is otherwise a class
+ * channel post, and for owners it is a general question — a model call on
+ * each of those would be cost with no upside. A command looks like a
+ * question or an instruction about school data.
+ */
+export function looksLikeCommand(text: string): boolean {
+  const t = (text || "").trim();
+  if (t.length < 4 || t.length > 300) return false;
+  if (/\?$/.test(t)) return true;
+  // `\b` is ASCII-only, so a Devanagari word listed behind it would never
+  // match; Unicode lookarounds make the Hindi half of this list real.
+  return /(?<![\p{L}\p{M}\p{N}])(kaun|kon|kitna|kitne|kya|batao|bata|dikhao|dikha|list|show|status|kitni|how many|who|which|pending|due|dues|defaulter|fees?|absent|present|attendance|roster|manifest|leave|homework|कौन|कितना|कितने|बताओ|दिखाओ|फीस|बकाया)(?![\p{L}\p{M}\p{N}])/iu.test(
+    t,
+  );
+}
+
+// ─── LLM parse contract ────────────────────────────────────────────────
+
+export type ErpCommandLlmParse = {
+  command: string; // command id or "none"
+  section?: string;
+  date?: string;
+  text?: string;
+  student?: string;
+  confidence: number; // 0..1
+};
+
+/** Strict validation of the model's JSON — anything odd becomes null. */
+export function parseErpCommandLlmJson(
+  raw: string,
+  commands: ErpCommandDef[] = ERP_COMMANDS,
+): ErpCommandLlmParse | null {
+  let obj: unknown;
+  try {
+    obj = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!obj || typeof obj !== "object") return null;
+  const o = obj as Record<string, unknown>;
+  const command = typeof o.command === "string" ? o.command.trim() : "";
+  if (!command) return null;
+  if (command !== "none" && !commands.some((c) => c.id === command)) return null;
+  const confidence =
+    typeof o.confidence === "number" && Number.isFinite(o.confidence)
+      ? Math.max(0, Math.min(1, o.confidence))
+      : 0;
+  const str = (k: string) =>
+    typeof o[k] === "string" ? (o[k] as string).trim().slice(0, 120) : undefined;
+  return {
+    command,
+    section: str("section"),
+    date: str("date"),
+    text: str("text"),
+    student: str("student"),
+    confidence,
+  };
+}
+
+export const ERP_COMMAND_LLM_MIN_CONFIDENCE = 0.7;
+
+export function buildErpCommandSystemPrompt(opts: {
+  commands: ErpCommandDef[];
+  todayIso: string;
+}): string {
+  const lines = opts.commands.map((c) => {
+    const fields = c.fields
+      .map((f) => `${f.name}${f.required ? "" : "?"}: ${f.description}`)
+      .join("; ");
+    return `- ${c.id}: ${c.description}${fields ? ` Fields — ${fields}.` : ""} Examples: ${c.examples.map((e) => `"${e}"`).join(", ")}`;
+  });
+  return [
+    "You map one WhatsApp message from a school staff member (Hindi, English or mixed Hinglish) to exactly one ERP command, or to none.",
+    `Today is ${opts.todayIso} (India).`,
+    "Commands:",
+    ...lines,
+    "",
+    'Respond with JSON only: {"command": "<id or none>", "section": "<as written, e.g. 5A>", "date": "<YYYY-MM-DD or empty>", "student": "<student name as written, with class/roll if said>", "text": "<free text if a command needs it>", "confidence": <0..1>}.',
+    "A student's name is a name, not a section: 'Amay ki fees' has student=Amay and no section.",
+    'If the message is a greeting, a chat, a question about something not in the list, or you are unsure, answer {"command":"none","confidence":0}.',
+    "Never invent a section or date that the message does not say. Leave date empty for today.",
+  ].join("\n");
+}
+
+// ─── Confirm tokens (write commands) ───────────────────────────────────
+
+export const ERP_CONFIRM_TTL_MS = 5 * 60 * 1000;
+
+export type PendingErpConfirm = {
+  token: string;
+  commandId: string;
+  fields: ErpCommandFields;
+  /** Resolved IDs the confirm card was shown for — re-resolution is not allowed. */
+  resolved: Record<string, string>;
+  summary: string;
+  createdAt: string;
+  originalText: string;
+};
+
+export function confirmButtonIds(token: string): { yes: string; no: string } {
+  return { yes: `cmd_yes_${token}`, no: `cmd_no_${token}` };
+}
+
+/** "yes" / "haan" / button id → decision, or null when the text is unrelated. */
+export function parseConfirmReply(
+  text: string,
+  pending: PendingErpConfirm | null | undefined,
+  opts?: { allowPlainWords?: boolean },
+): { decision: "yes" | "no"; token: string } | null {
+  const t = (text || "").trim();
+  const btn = /^cmd_(yes|no)_([A-Za-z0-9_-]{6,})$/.exec(t);
+  if (btn) return { decision: btn[1] as "yes" | "no", token: btn[2]! };
+  if (!pending || opts?.allowPlainWords === false) return null;
+  if (/^(yes|y|haan|ha|han|ok|okay|confirm|हाँ|हां|ठीक)$/i.test(t)) {
+    return { decision: "yes", token: pending.token };
+  }
+  if (/^(no|n|nahi|nahin|cancel|रद्द|नहीं)$/i.test(t)) {
+    return { decision: "no", token: pending.token };
+  }
+  return null;
+}
+
+export function confirmIsFresh(
+  pending: PendingErpConfirm,
+  nowMs: number,
+  ttlMs = ERP_CONFIRM_TTL_MS,
+): boolean {
+  const created = Date.parse(pending.createdAt);
+  if (!Number.isFinite(created)) return false;
+  return nowMs - created <= ttlMs;
+}
+
+// ─── Rate limit ────────────────────────────────────────────────────────
+
+export const ERP_COMMANDS_PER_HOUR = 30;
+
+/**
+ * Per-staff sliding hour. Pure over a timestamp list so it can live in the
+ * persisted bot store (multi-instance safe enough) and be unit-tested.
+ */
+export function noteCommandUse(
+  history: number[] | undefined,
+  nowMs: number,
+  limit = ERP_COMMANDS_PER_HOUR,
+): { allowed: boolean; history: number[] } {
+  const hour = 60 * 60 * 1000;
+  const recent = (history ?? []).filter((t) => nowMs - t < hour);
+  if (recent.length >= limit) return { allowed: false, history: recent };
+  recent.push(nowMs);
+  return { allowed: true, history: recent };
+}
+
+// ─── Reply formatting ──────────────────────────────────────────────────
+
+export type AbsentListInput = {
+  sectionLabel: string;
+  date: string;
+  todayIso: string;
+  marked: boolean;
+  total: number;
+  absent: { rollNo: string; fullName: string }[];
+  leave: { rollNo: string; fullName: string }[];
+  late: { rollNo: string; fullName: string }[];
+  halfDay: { rollNo: string; fullName: string }[];
+};
+
+function fmtDate(iso: string, todayIso: string): string {
+  if (iso === todayIso) return "today";
+  return shortDate(iso);
+}
+
+function nameList(rows: { rollNo: string; fullName: string }[]): string {
+  return rows
+    .slice()
+    .sort((a, b) => (parseInt(a.rollNo, 10) || 9999) - (parseInt(b.rollNo, 10) || 9999))
+    .map((r) => (r.rollNo ? `${r.rollNo}. ${r.fullName}` : r.fullName))
+    .join("\n");
+}
+
+export function formatAbsentListReply(input: AbsentListInput): string {
+  const when = fmtDate(input.date, input.todayIso);
+  const head = `*${input.sectionLabel}* · ${when}`;
+  if (input.total === 0) {
+    return `${head}\nNo active students found in this section.`;
+  }
+  if (!input.marked) {
+    return `${head}\nAttendance not marked yet (${input.total} students).`;
+  }
+  const present =
+    input.total -
+    input.absent.length -
+    input.leave.length -
+    input.late.length -
+    input.halfDay.length;
+  const parts: string[] = [
+    head,
+    `Present ${present} / ${input.total}` +
+      (input.absent.length ? ` · Absent ${input.absent.length}` : "") +
+      (input.leave.length ? ` · Leave ${input.leave.length}` : "") +
+      (input.late.length ? ` · Late ${input.late.length}` : "") +
+      (input.halfDay.length ? ` · Half day ${input.halfDay.length}` : ""),
+  ];
+  if (input.absent.length) parts.push(`\n*Absent*\n${nameList(input.absent)}`);
+  else parts.push("\nNo one absent.");
+  if (input.leave.length) parts.push(`\n*On leave*\n${nameList(input.leave)}`);
+  if (input.late.length) parts.push(`\n*Late*\n${nameList(input.late)}`);
+  if (input.halfDay.length) parts.push(`\n*Half day*\n${nameList(input.halfDay)}`);
+  return parts.join("\n");
+}
+
+export function formatSectionProblem(
+  reason: "no_class" | "no_section" | "ambiguous" | "not_allowed",
+  options: SectionMatch[],
+  asked: string,
+): string {
+  switch (reason) {
+    case "no_class":
+      return `I couldn't find a class matching "${asked}". Try the class as it appears in the ERP, e.g. 5A or VIII B.`;
+    case "no_section":
+      return options.length
+        ? `Which section? ${options.map((o) => o.label).join(", ")}`
+        : `No active section found for "${asked}".`;
+    case "ambiguous":
+      return `Which one did you mean? ${options.map((o) => o.label).join(", ")}`;
+    case "not_allowed":
+      return `You can ask about your own sections only${options.length ? `: ${options.map((o) => o.label).join(", ")}` : ""}. Ask the office or principal for other classes.`;
+  }
+}
+
+export function formatHelpReply(
+  commands: ErpCommandDef[],
+  displayName: string,
+): string {
+  const lines = commands.map((c) => `• ${c.title}\n   e.g. _${c.examples[0]}_`);
+  const name = displayName ? `${displayName}, ` : "";
+  return `${name}you can send me these commands:\n\n${lines.join("\n")}\n\nJust type it the way you'd say it — Hindi or English.`;
+}
+
+/** Owner-only pause switch: "commands off" / "commands on". */
+export function parseCommandsSwitch(text: string): "on" | "off" | null {
+  const t = (text || "").trim().toLowerCase();
+  if (/^commands?\s+(off|pause|stop|band)$/.test(t)) return "off";
+  if (/^commands?\s+(on|resume|start|chalu|chalu karo)$/.test(t)) return "on";
+  return null;
+}
+
+/**
+ * The engine writes WhatsApp markers (*bold*, _italic_). The in-ERP
+ * assistant renders **bold** only, so bold is doubled and italics are
+ * dropped to plain text. Button ids (cmd_yes_…) never pass through here.
+ */
+export function waMarkersToAssistantText(text: string): string {
+  return (text || "")
+    .replace(/(^|[^*])\*(\S(?:[^*\n]*\S)?)\*(?!\*)/g, "$1**$2**")
+    .replace(/(^|[\s(])_([^_\n]+)_(?=$|[\s).,!?])/g, "$1$2");
+}
+
+// ─── Daily digest for the director ─────────────────────────────────────
+
+/** One audit row from module `erp_commands`, as the digest reads it. */
+export type CommandAuditRow = {
+  actorName: string;
+  actorEmail: string | null;
+  action: string;
+  entityId: string;
+  summary: string;
+  after: Record<string, unknown> | null;
+  createdAt: string;
+};
+
+export type CommandDigestStats = {
+  total: number;
+  ok: number;
+  denied: number;
+  errors: number;
+  writes: number;
+  voice: number;
+  byChannel: { channel: string; count: number }[];
+  byCommand: { commandId: string; count: number }[];
+  byActor: { name: string; count: number; denied: number }[];
+  deniedRows: { name: string; text: string; reason: string; at: string }[];
+  writeRows: { name: string; text: string; at: string }[];
+};
+
+function str(v: unknown): string {
+  return typeof v === "string" ? v : "";
+}
+
+function stripSummaryPrefix(summary: string): string {
+  return summary.replace(/^(WhatsApp|App) command \((ok|denied|error)\): /, "");
+}
+
+function countBy<T>(rows: T[], key: (r: T) => string): { k: string; count: number }[] {
+  const m = new Map<string, number>();
+  for (const r of rows) m.set(key(r), (m.get(key(r)) ?? 0) + 1);
+  return [...m.entries()]
+    .map(([k, count]) => ({ k, count }))
+    .sort((a, b) => b.count - a.count || a.k.localeCompare(b.k));
+}
+
+export function summarizeCommandAudit(rows: CommandAuditRow[]): CommandDigestStats {
+  const outcome = (r: CommandAuditRow) => str(r.after?.outcome) || "ok";
+  const denied = rows.filter((r) => outcome(r) === "denied");
+  const errors = rows.filter((r) => outcome(r) === "error");
+  const writes = rows.filter((r) => r.action === "edit" && outcome(r) === "ok");
+  const actorStats = new Map<string, { count: number; denied: number }>();
+  for (const r of rows) {
+    const name = r.actorName || r.actorEmail || "Unknown";
+    const cur = actorStats.get(name) ?? { count: 0, denied: 0 };
+    cur.count += 1;
+    if (outcome(r) === "denied") cur.denied += 1;
+    actorStats.set(name, cur);
+  }
+  const fmtTime = (iso: string) => {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleTimeString("en-IN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+      timeZone: "Asia/Kolkata",
+    });
+  };
+  return {
+    total: rows.length,
+    ok: rows.filter((r) => outcome(r) === "ok").length,
+    denied: denied.length,
+    errors: errors.length,
+    writes: writes.length,
+    voice: rows.filter((r) => r.after?.voice === true).length,
+    byChannel: countBy(rows, (r) => str(r.after?.channel) || "whatsapp").map((x) => ({
+      channel: x.k,
+      count: x.count,
+    })),
+    byCommand: countBy(rows, (r) => r.entityId || str(r.after?.command) || "?").map((x) => ({
+      commandId: x.k,
+      count: x.count,
+    })),
+    byActor: [...actorStats.entries()]
+      .map(([name, v]) => ({ name, ...v }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
+    deniedRows: denied.map((r) => ({
+      name: r.actorName || r.actorEmail || "Unknown",
+      text: stripSummaryPrefix(r.summary),
+      reason: str(r.after?.reason) || "denied",
+      at: fmtTime(r.createdAt),
+    })),
+    writeRows: writes.map((r) => ({
+      name: r.actorName || r.actorEmail || "Unknown",
+      text: stripSummaryPrefix(r.summary),
+      at: fmtTime(r.createdAt),
+    })),
+  };
+}
+
+const CHANNEL_LABEL: Record<string, string> = {
+  whatsapp: "WhatsApp",
+  app: "App / assistant",
+};
+
+/**
+ * The director's end-of-day line on the command desk. Short enough to read
+ * on a phone: totals, who used it, what was denied, every write. WhatsApp
+ * markers; the assistant path converts them.
+ */
+export function formatCommandDigest(
+  stats: CommandDigestStats,
+  opts: { date: string; paused: boolean; pausedBy?: string; commands?: ErpCommandDef[] },
+): string {
+  const d = new Date(`${opts.date}T00:00:00Z`);
+  const dateLabel = Number.isNaN(d.getTime())
+    ? opts.date
+    : d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" });
+  const lines: string[] = [`*ERP commands · ${dateLabel}*`];
+  if (opts.paused) {
+    lines.push(`⏸ Commands are paused${opts.pausedBy ? ` by ${opts.pausedBy}` : ""}.`);
+  }
+  if (stats.total === 0) {
+    lines.push("No commands today.");
+    return lines.join("\n");
+  }
+  const head = [`${stats.total} command${stats.total === 1 ? "" : "s"}`];
+  if (stats.writes) head.push(`${stats.writes} write${stats.writes === 1 ? "" : "s"}`);
+  if (stats.denied) head.push(`${stats.denied} denied`);
+  if (stats.errors) head.push(`${stats.errors} failed`);
+  if (stats.voice) head.push(`${stats.voice} by voice`);
+  lines.push(head.join(" · "));
+  lines.push(
+    stats.byChannel.map((c) => `${CHANNEL_LABEL[c.channel] || c.channel} ${c.count}`).join(" · "),
+  );
+  const title = (id: string) =>
+    (opts.commands ?? ERP_COMMANDS).find((c) => c.id === id)?.title || id;
+  lines.push("", "*By command*");
+  for (const c of stats.byCommand.slice(0, 6)) lines.push(`${c.count} × ${title(c.commandId)}`);
+  lines.push("", "*Who*");
+  for (const a of stats.byActor.slice(0, 6)) {
+    lines.push(`${a.name} ${a.count}${a.denied ? ` (${a.denied} denied)` : ""}`);
+  }
+  if (stats.byActor.length > 6) lines.push(`+${stats.byActor.length - 6} more`);
+  if (stats.writeRows.length) {
+    lines.push("", "*Writes*");
+    for (const w of stats.writeRows.slice(0, 10)) lines.push(`${w.at} ${w.name}: ${w.text}`);
+    if (stats.writeRows.length > 10) lines.push(`+${stats.writeRows.length - 10} more`);
+  }
+  if (stats.deniedRows.length) {
+    lines.push("", "*Denied*");
+    for (const r of stats.deniedRows.slice(0, 5)) {
+      lines.push(`${r.at} ${r.name}: ${r.text} (${r.reason === "scope" ? "not their section" : r.reason === "rbac" ? "no permission" : r.reason})`);
+    }
+    if (stats.deniedRows.length > 5) lines.push(`+${stats.deniedRows.length - 5} more`);
+  }
+  return lines.join("\n");
+}
+
+/** One line, no newlines — for a WhatsApp template parameter or a push body. */
+export function formatCommandDigestOneLine(stats: CommandDigestStats, date: string): string {
+  if (stats.total === 0) return `ERP commands ${date}: none.`;
+  const parts = [`${stats.total} commands`];
+  if (stats.writes) parts.push(`${stats.writes} writes`);
+  if (stats.denied) parts.push(`${stats.denied} denied`);
+  const top = stats.byActor[0];
+  if (top) parts.push(`most by ${top.name} (${top.count})`);
+  return `ERP commands ${date}: ${parts.join(", ")}.`;
+}
+
+// ─── Student fees: query parsing, matching, formatting ─────────────────
+
+export type StudentFeesQuery = {
+  /** Name words as typed, lower-cased, without the fee words. */
+  name: string;
+  section?: { classKey: string; sectionName: string };
+  rollNo?: string;
+};
+
+const FEE_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(fees?|dues?|pending|baki|bakaya|bakaaya|balance|outstanding|ledger|बकाया|फीस|बाकी)(?![\p{L}\p{M}\p{N}])/iu;
+
+const FEE_STOP_WORDS = new Set([
+  "show", "me", "all", "the", "of", "for", "please", "pls", "plz", "student", "students",
+  "ki", "ka", "ke", "ko", "kitni", "kitna", "kitne", "hai", "h", "hain", "kya", "batao", "bata",
+  "dikhao", "dikha", "do", "dena", "check", "what", "is", "are", "how", "much", "today", "aaj",
+  "total", "pending", "fee", "fees", "due", "dues", "baki", "bakaya", "bakaaya", "balance",
+  "outstanding", "ledger", "amount", "paisa", "paise", "rupees", "rs",
+  "kisne", "kis", "kaun", "nahi", "nahin", "di", "diya", "diye", "bhari", "list", "report",
+  "defaulter", "defaulters", "bakayedar", "bakaayedar", "overdue", "mein", "wale", "walo",
+  "बकाया", "फीस", "बाकी", "की", "का", "के", "कितनी", "कितना", "है", "दिखाओ", "बताओ",
+]);
+
+/**
+ * "Amay ki fees pending", "show me all dues of Aarav Sharma", "fees Amay
+ * Gupta 4B", "roll 12 4B fees". Null unless a fee word is present and at
+ * least one name word survives — a section on its own ("class 3 fees") is a
+ * class question, not a student one.
+ */
+export function parseStudentFeesQuery(text: string): StudentFeesQuery | null {
+  const t = (text || "").trim();
+  if (!t || !FEE_WORDS.test(t)) return null;
+  let rest = t.toLowerCase();
+  let rollNo: string | undefined;
+  const roll = /\broll\s*(?:no\.?|number)?\s*(\d{1,3})\b/.exec(rest);
+  if (roll) {
+    rollNo = roll[1]!;
+    rest = rest.replace(roll[0], " ");
+  }
+  const refs = extractSectionRefs(rest);
+  const section = refs[0];
+  if (section) {
+    rest = rest
+      .replace(/\b(?:class|grade|std|kaksha|कक्षा)\s*[a-z0-9]+(?:st|nd|rd|th)?\s*(?:-|\s)?\s*(?:section|sec\.?)?\s*[a-h]?\b/g, " ")
+      .replace(/(?<![a-z0-9])(\d{1,2}|[ivx]{1,4}|nursery|lkg|ukg|kg|pg)(?:st|nd|rd|th)?\s*-?\s*[a-h](?![a-z0-9])/g, " ");
+  }
+  const words = rest
+    .replace(/[^\p{L}\p{M}\p{N}\s'.-]/gu, " ")
+    .split(/\s+/)
+    .map((w) => w.replace(/^[.'-]+|[.'-]+$/g, ""))
+    .filter((w) => w && !FEE_STOP_WORDS.has(w) && !/^\d+$/.test(w));
+  const name = words.join(" ").trim();
+  if (!name || !/[\p{L}\p{M}]{2,}/u.test(name)) {
+    return rollNo && section ? { name: "", section, rollNo } : null;
+  }
+  return { name, ...(section ? { section } : {}), ...(rollNo ? { rollNo } : {}) };
+}
+
+export type StudentLike = {
+  id: string;
+  fullName: string;
+  admissionNo?: string;
+  rollNo: string;
+  classId: string;
+  sectionId: string;
+  status: string;
+  academicYearCode: string;
+};
+
+export type StudentMatch<T extends StudentLike = StudentLike> = {
+  student: T;
+  /** 3 exact full name · 2 every word matched · 1 first-name only */
+  score: number;
+};
+
+function nameTokens(s: string): string[] {
+  return (s || "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{M}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+/**
+ * Rank active students of the year against a typed name. Every typed word
+ * must start some word of the student's name (so "Aarav Sh" finds Aarav
+ * Sharma, and "Sharma" finds every Sharma). A section or roll in the query
+ * narrows first. Admission number matches exactly.
+ */
+export function matchStudents<T extends StudentLike>(
+  query: StudentFeesQuery,
+  students: T[],
+  opts: {
+    academicYearCode: string;
+    /** Resolved from the query's section ref, when it resolved. */
+    sectionId?: string | null;
+    limit?: number;
+  },
+): StudentMatch<T>[] {
+  const q = nameTokens(query.name);
+  const pool = students.filter(
+    (s) =>
+      s.status === "active" &&
+      s.academicYearCode === opts.academicYearCode &&
+      (!opts.sectionId || s.sectionId === opts.sectionId) &&
+      (!query.rollNo || String(parseInt(s.rollNo, 10)) === String(parseInt(query.rollNo, 10))),
+  );
+  if (!q.length) {
+    return (query.rollNo && opts.sectionId ? pool : []).map((student) => ({ student, score: 2 }));
+  }
+  const out: StudentMatch<T>[] = [];
+  for (const s of pool) {
+    if (s.admissionNo && q.length === 1 && s.admissionNo.toLowerCase() === q[0]) {
+      out.push({ student: s, score: 3 });
+      continue;
+    }
+    const nt = nameTokens(s.fullName);
+    const every = q.every((w) => nt.some((n) => n.startsWith(w)));
+    if (!every) continue;
+    const exact = q.length === nt.length && q.every((w, i) => nt[i] === w);
+    out.push({ student: s, score: exact ? 3 : q.length > 1 ? 2 : 1 });
+  }
+  out.sort(
+    (a, b) =>
+      b.score - a.score ||
+      a.student.fullName.localeCompare(b.student.fullName),
+  );
+  // One exact full-name match beats any number of prefix matches.
+  if (out.length > 1 && out[0]!.score === 3 && out[1]!.score < 3) return out.slice(0, 1);
+  return out.slice(0, opts.limit ?? 6);
+}
+
+export type StudentFeesDue = {
+  label: string; // installment / month label
+  headName: string;
+  kind: string;
+  dueOn: string;
+  balancePaise: number;
+  billedPaise: number;
+  concessionPaise: number;
+  concessionNames: string[];
+  future: boolean;
+};
+
+export type StudentFeesInput = {
+  studentName: string;
+  classLabel: string;
+  rollNo: string;
+  todayIso: string;
+  dues: StudentFeesDue[];
+  lastReceipt: { receiptNo: string; date: string; amountPaise: number; modes: string[] } | null;
+  parentMobile: string;
+  siblings: { name: string; classLabel: string; duePaise: number }[];
+  /** full: fee desk / leadership — concession names and sibling line. */
+  detail: "full" | "basic";
+  formatInr: (paise: number) => string;
+};
+
+function maskMobile(m: string): string {
+  const d = (m || "").replace(/\D/g, "");
+  if (d.length < 6) return d;
+  return `${d.slice(0, 2)}xxxxxx${d.slice(-2)}`;
+}
+
+const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "2026-09-04" → "4 Sep". Fixed table: Node's en-IN says "Sept", browsers say "Sep". */
+function shortDate(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || "");
+  if (!m) return iso;
+  const month = MONTH_SHORT[parseInt(m[2]!, 10) - 1];
+  return month ? `${parseInt(m[3]!, 10)} ${month}` : iso;
+}
+
+export function formatStudentFeesReply(input: StudentFeesInput): string {
+  const inr = input.formatInr;
+  const head = `*${input.studentName}* · ${input.classLabel}${input.rollNo ? ` · Roll ${input.rollNo}` : ""}`;
+  const now = input.dues.filter((d) => !d.future && d.balancePaise > 0);
+  const ahead = input.dues.filter((d) => d.future && d.balancePaise > 0);
+  const total = now.reduce((s, d) => s + d.balancePaise, 0);
+  const lines: string[] = [head];
+
+  if (!now.length) {
+    lines.push("No dues pending today. ✅");
+  } else {
+    const overdue = now.filter((d) => d.dueOn && d.dueOn < input.todayIso).map((d) => d.dueOn).sort()[0];
+    lines.push(
+      `Total due today: *${inr(total)}*${overdue ? `   (overdue since ${shortDate(overdue)})` : ""}`,
+    );
+    // By month / installment, in due-date order.
+    const byMonth = new Map<string, { paise: number; dueOn: string }>();
+    for (const d of now) {
+      const cur = byMonth.get(d.label) ?? { paise: 0, dueOn: d.dueOn };
+      cur.paise += d.balancePaise;
+      if (d.dueOn < cur.dueOn) cur.dueOn = d.dueOn;
+      byMonth.set(d.label, cur);
+    }
+    const months = [...byMonth.entries()].sort((a, b) => a[1].dueOn.localeCompare(b[1].dueOn));
+    if (months.length > 1 || months[0]?.[0]) {
+      lines.push("", "*By month*");
+      for (const [label, v] of months) lines.push(`${label}   ${inr(v.paise)}`);
+    }
+    // By head, largest first, with the concession applied where allowed.
+    const byHead = new Map<string, { paise: number; concession: number; names: Set<string>; labels: Set<string> }>();
+    for (const d of now) {
+      const cur = byHead.get(d.headName) ?? { paise: 0, concession: 0, names: new Set(), labels: new Set() };
+      cur.paise += d.balancePaise;
+      cur.concession += d.concessionPaise;
+      for (const n of d.concessionNames) cur.names.add(n);
+      cur.labels.add(d.label);
+      byHead.set(d.headName, cur);
+    }
+    lines.push("", "*By head*");
+    for (const [name, v] of [...byHead.entries()].sort((a, b) => b[1].paise - a[1].paise)) {
+      let note = "";
+      if (v.concession > 0) {
+        note =
+          input.detail === "full" && v.names.size
+            ? `  (${inr(v.concession)} ${[...v.names].join(", ")} concession applied)`
+            : `  (${inr(v.concession)} concession applied)`;
+      }
+      lines.push(`${name}   ${inr(v.paise)}${note}`);
+    }
+  }
+
+  if (ahead.length) {
+    const aheadTotal = ahead.reduce((s, d) => s + d.balancePaise, 0);
+    const labels = [...new Set(ahead.map((d) => d.label))];
+    const span = labels.length > 2 ? `${labels[0]} to ${labels[labels.length - 1]}` : labels.join(", ");
+    lines.push("", `Pay-ahead, not yet due: ${span}, ${inr(aheadTotal)}`);
+  }
+
+  if (input.lastReceipt) {
+    const r = input.lastReceipt;
+    lines.push(
+      `Last receipt: ${inr(r.amountPaise)} on ${shortDate(r.date)}${r.modes.length ? `, ${r.modes.join(" + ")}` : ""} (${r.receiptNo})`,
+    );
+  } else {
+    lines.push("No receipt on record this session.");
+  }
+  if (input.parentMobile) lines.push(`Parent: ${maskMobile(input.parentMobile)}`);
+
+  if (input.detail === "full" && input.siblings.length) {
+    for (const sib of input.siblings) {
+      lines.push(
+        sib.duePaise > 0
+          ? `Sibling ${sib.name}, ${sib.classLabel}: ${inr(sib.duePaise)} due`
+          : `Sibling ${sib.name}, ${sib.classLabel}: no dues`,
+      );
+    }
+  }
+  return lines.join("\n");
+}
+
+export function formatStudentMatchesAsk(
+  matches: { fullName: string; classLabel: string; rollNo: string }[],
+  asked: string,
+): string {
+  if (!matches.length) {
+    return `I couldn't find an active student matching "${asked}". Try the full name, or add the class, e.g. _Amay Gupta 4B_.`;
+  }
+  const rows = matches.map(
+    (m) => `• ${m.fullName} (${m.classLabel}${m.rollNo ? `, roll ${m.rollNo}` : ""})`,
+  );
+  return `Which one did you mean?\n${rows.join("\n")}\nReply with the full name and class.`;
+}
+
+// ─── Attendance summary ────────────────────────────────────────────────
+
+export type AttendanceSummarySection = {
+  label: string; // "V A"
+  total: number;
+  marked: boolean;
+  holiday: boolean;
+  present: number;
+  absent: number;
+  leave: number;
+  late: number;
+  halfDay: number;
+};
+
+export type AttendanceSummaryClass = {
+  className: string;
+  sections: AttendanceSummarySection[];
+};
+
+export type AttendanceSummaryStaff = {
+  activeStaff: number;
+  registerMarked: boolean;
+  present: number;
+  absent: number;
+  leave: number;
+  /** Active staff with no mark at all on the register. */
+  notPunched: string[];
+};
+
+export type AttendanceSummaryInput = {
+  date: string;
+  todayIso: string;
+  scope: "school" | "mine";
+  classes: AttendanceSummaryClass[];
+  staff: AttendanceSummaryStaff | null;
+};
+
+function pct(n: number, d: number): string {
+  return d > 0 ? `${Math.round((n / d) * 100)}%` : "—";
+}
+
+export function formatAttendanceSummaryReply(input: AttendanceSummaryInput): string {
+  const when = input.date === input.todayIso ? "today" : shortDate(input.date);
+  const lines: string[] = [
+    `*${input.scope === "school" ? "School attendance" : "Your sections"}* · ${when}`,
+  ];
+  const all = input.classes.flatMap((c) => c.sections);
+  if (!all.length) {
+    lines.push("No active sections found.");
+    return lines.join("\n");
+  }
+  const marked = all.filter((s) => s.marked);
+  const pending = all.filter((s) => !s.marked && !s.holiday);
+  const holidays = all.filter((s) => !s.marked && s.holiday);
+  const total = marked.reduce((n, s) => n + s.total, 0);
+  const present = marked.reduce((n, s) => n + s.present, 0);
+  const absent = marked.reduce((n, s) => n + s.absent, 0);
+  const leave = marked.reduce((n, s) => n + s.leave, 0);
+  const late = marked.reduce((n, s) => n + s.late, 0);
+  if (!marked.length) {
+    lines.push(
+      holidays.length === all.length
+        ? "Holiday for every section."
+        : `No section marked yet (${pending.length} pending).`,
+    );
+  } else {
+    const head = [`Present *${pct(present, total)}* (${present} / ${total})`];
+    if (absent) head.push(`Absent ${absent}`);
+    if (leave) head.push(`Leave ${leave}`);
+    if (late) head.push(`Late ${late}`);
+    lines.push(head.join(" · "));
+    lines.push(`${marked.length} of ${all.length - holidays.length} sections marked`);
+  }
+  if (pending.length) {
+    lines.push(`*Not marked:* ${pending.map((s) => s.label).join(", ")}`);
+  }
+  if (marked.length) {
+    lines.push("", "*By class*");
+    for (const c of input.classes) {
+      const secs = c.sections.filter((s) => s.marked);
+      if (!secs.length) continue;
+      const t = secs.reduce((n, s) => n + s.total, 0);
+      const p = secs.reduce((n, s) => n + s.present, 0);
+      const parts = secs.map((s) => {
+        const name = s.label.replace(new RegExp(`^${c.className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*`), "");
+        return `${name || s.label} ${s.present}/${s.total}`;
+      });
+      lines.push(`${c.className}  ${pct(p, t)}  (${parts.join(", ")})`);
+    }
+  }
+  if (input.staff) {
+    const st = input.staff;
+    lines.push("");
+    if (!st.registerMarked) {
+      lines.push(`*Staff:* no punches yet (${st.activeStaff} active).`);
+    } else {
+      const parts = [`Present ${st.present}`];
+      if (st.absent) parts.push(`Absent ${st.absent}`);
+      if (st.leave) parts.push(`Leave ${st.leave}`);
+      lines.push(`*Staff:* ${parts.join(" · ")} of ${st.activeStaff}`);
+      if (st.notPunched.length) {
+        const shown = st.notPunched.slice(0, 8).join(", ");
+        const more = st.notPunched.length > 8 ? ` +${st.notPunched.length - 8} more` : "";
+        lines.push(`Not punched in: ${shown}${more}`);
+      }
+    }
+  }
+  return lines.join("\n");
+}
+
+// ─── Class / section resolution for class-wide asks ────────────────────
+
+/**
+ * Like resolveSectionRef, but a class with no letter means the whole class:
+ * every active section is returned. Used by class-wide lists.
+ */
+export function resolveClassOrSectionRef(
+  ref: { classKey: string; sectionName: string },
+  masters: Pick<MastersState, "classes" | "sections">,
+):
+  | { ok: true; className: string; classId: string; sections: SectionMatch[]; wholeClass: boolean }
+  | { ok: false; reason: "no_class" | "no_section"; options: SectionMatch[] } {
+  if (ref.sectionName) {
+    const r = resolveSectionRef(ref, masters);
+    if (r.ok) {
+      return { ok: true, className: r.match.className, classId: r.match.classId, sections: [r.match], wholeClass: false };
+    }
+    if (r.reason === "ambiguous") {
+      return { ok: true, className: r.options[0]!.className, classId: r.options[0]!.classId, sections: r.options, wholeClass: false };
+    }
+    return { ok: false, reason: r.reason, options: r.options };
+  }
+  const classes = (masters.classes ?? []).filter(
+    (c) => c.isActive !== false && classKey(c.name) === ref.classKey,
+  );
+  if (!classes.length) return { ok: false, reason: "no_class", options: [] };
+  const sections: SectionMatch[] = [];
+  for (const c of classes) {
+    for (const sct of (masters.sections ?? []).filter((x) => x.classId === c.id && x.isActive !== false)) {
+      sections.push({
+        classId: c.id,
+        sectionId: sct.id,
+        className: c.name,
+        sectionName: sct.name,
+        label: `${c.name} ${sct.name}`.trim(),
+      });
+    }
+  }
+  if (!sections.length) return { ok: false, reason: "no_section", options: [] };
+  return { ok: true, className: classes[0]!.name, classId: classes[0]!.id, sections, wholeClass: true };
+}
+
+// ─── Class defaulters ──────────────────────────────────────────────────
+
+export type DefaulterRow = {
+  sectionLabel: string;
+  rollNo: string;
+  fullName: string;
+  overdueAmountPaise: number;
+  overdueDays: number;
+  earliestDueOn: string;
+  onPlan: boolean;
+};
+
+export type ClassDefaultersInput = {
+  title: string; // "Class V" or "V A"
+  todayIso: string;
+  wholeClass: boolean;
+  rows: DefaulterRow[];
+  /** Sections the reply covers — named when a teacher asked for a whole class but only teaches some of it. */
+  limitedTo?: string[];
+  formatInr: (paise: number) => string;
+};
+
+export function formatClassDefaultersReply(input: ClassDefaultersInput): string {
+  const inr = input.formatInr;
+  const lines: string[] = [`*${input.title}* · defaulters · ${input.todayIso === input.todayIso ? "today" : input.todayIso}`];
+  if (input.limitedTo?.length) lines.push(`(your sections only: ${input.limitedTo.join(", ")})`);
+  if (!input.rows.length) {
+    lines.push("No overdue fees. ✅");
+    return lines.join("\n");
+  }
+  const total = input.rows.reduce((s, r) => s + r.overdueAmountPaise, 0);
+  lines.push(`${input.rows.length} student${input.rows.length === 1 ? "" : "s"} · *${inr(total)}* overdue`);
+  const sorted = [...input.rows].sort(
+    (a, b) => b.overdueAmountPaise - a.overdueAmountPaise || b.overdueDays - a.overdueDays,
+  );
+  const cap = 30;
+  const row = (r: DefaulterRow) => {
+    const since = r.earliestDueOn ? shortDate(r.earliestDueOn) : "";
+    return `${r.rollNo ? `${r.rollNo}. ` : ""}${r.fullName}  ${inr(r.overdueAmountPaise)} · ${r.overdueDays}d${since ? ` (${since})` : ""}${r.onPlan ? " · plan" : ""}`;
+  };
+  if (input.wholeClass) {
+    const bySection = new Map<string, DefaulterRow[]>();
+    for (const r of sorted) bySection.set(r.sectionLabel, [...(bySection.get(r.sectionLabel) ?? []), r]);
+    let shown = 0;
+    for (const [label, rows] of [...bySection.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      const sub = rows.reduce((s, r) => s + r.overdueAmountPaise, 0);
+      lines.push("", `*${label}* · ${rows.length} · ${inr(sub)}`);
+      for (const r of rows) {
+        if (shown >= cap) break;
+        lines.push(row(r));
+        shown++;
+      }
+    }
+    if (sorted.length > cap) lines.push(`+${sorted.length - cap} more — open Fees → Defaulters for the full list.`);
+  } else {
+    lines.push("");
+    for (const r of sorted.slice(0, cap)) lines.push(row(r));
+    if (sorted.length > cap) lines.push(`+${sorted.length - cap} more — open Fees → Defaulters for the full list.`);
+  }
+  lines.push("", "Reply with a name for the full ledger.");
+  return lines.join("\n");
+}
+
+// ─── Today's collection ────────────────────────────────────────────────
+
+export type CollectionModeTotal = { label: string; paise: number; count: number };
+
+export type CollectionInput = {
+  date: string;
+  todayIso: string;
+  receiptCount: number;
+  totalPaise: number;
+  /** Largest first, as the formatter expects. */
+  byMode: CollectionModeTotal[];
+  chequesPending: { count: number; paise: number };
+  bySource: { counter: number; manualBook: number; paymentLink: number };
+  cashiers: { name: string; paise: number; count: number }[];
+  dayClose: { status: string; cashierName: string; physicalCashPaise: number | null; systemCashPaise: number | null } | null;
+  monthToDatePaise: number;
+  monthLabel: string;
+  formatInr: (paise: number) => string;
+};
+
+export function formatCollectionReply(input: CollectionInput): string {
+  const inr = input.formatInr;
+  const when = input.date === input.todayIso ? "today" : shortDate(input.date);
+  const lines: string[] = [`*Fee collection* · ${when}`];
+  if (input.receiptCount === 0) {
+    lines.push("No receipts yet.");
+  } else {
+    lines.push(`*${inr(input.totalPaise)}* · ${input.receiptCount} receipt${input.receiptCount === 1 ? "" : "s"}`);
+    lines.push("", "*By mode*");
+    for (const m of input.byMode) lines.push(`${m.label}   ${inr(m.paise)}  (${m.count})`);
+    if (input.chequesPending.count) {
+      lines.push(`Cheques awaiting clearance: ${input.chequesPending.count} · ${inr(input.chequesPending.paise)}`);
+    }
+    const src: string[] = [];
+    if (input.bySource.counter) src.push(`counter ${input.bySource.counter}`);
+    if (input.bySource.manualBook) src.push(`paper book ${input.bySource.manualBook}`);
+    if (input.bySource.paymentLink) src.push(`online link ${input.bySource.paymentLink}`);
+    if (src.length > 1) lines.push(`Receipts: ${src.join(" · ")}`);
+    if (input.cashiers.length > 1) {
+      lines.push("", "*By cashier*");
+      for (const c of input.cashiers.slice(0, 4)) lines.push(`${c.name}   ${inr(c.paise)}  (${c.count})`);
+    }
+  }
+  lines.push("");
+  if (!input.dayClose) {
+    lines.push(input.receiptCount ? "Day close: not started." : "Day close: —");
+  } else {
+    const dc = input.dayClose;
+    const status =
+      dc.status === "approved"
+        ? "approved ✅"
+        : dc.status === "submitted"
+          ? "submitted, awaiting approval"
+          : dc.status === "rejected"
+            ? "rejected ⚠️"
+            : "draft";
+    let diff = "";
+    if (dc.physicalCashPaise != null && dc.systemCashPaise != null && dc.physicalCashPaise !== dc.systemCashPaise) {
+      const d = dc.physicalCashPaise - dc.systemCashPaise;
+      diff = ` · cash ${d > 0 ? "over" : "short"} by ${inr(Math.abs(d))}`;
+    }
+    lines.push(`Day close: ${status}${dc.cashierName ? ` (${dc.cashierName})` : ""}${diff}`);
+  }
+  lines.push(`${input.monthLabel} so far: ${inr(input.monthToDatePaise)}`);
+  return lines.join("\n");
+}
+
+export const TENDER_MODE_LABEL: Record<string, string> = {
+  cash: "Cash",
+  upi: "UPI",
+  card: "Card",
+  cheque: "Cheque / DD",
+  rtgs: "RTGS",
+  neft: "NEFT",
+  imps: "IMPS",
+  bank: "Bank transfer",
+};
+
+// ─── Free teachers in a period ─────────────────────────────────────────
+
+const ADMISSION_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(admissions?|enquir(?:y|ies)|inquir(?:y|ies)|leads?|daakhil[ae]|dakhil[ae]|दाखिल(?:ा|े|ों)?|प्रवेश|पूछताछ)(?![\p{L}\p{M}\p{N}])/iu;
+
+/**
+ * "admissions this week", "admissions report", "is hafte ke admission",
+ * "admissions this month", "new enquiries today". Returns the period —
+ * "week" (the default), "month" or "today" — or null when the message is
+ * not an admissions ask. A named person ("Amay ka admission form") is not
+ * this: the reply is a count, not a record.
+ */
+export function parseAdmissionsQuery(text: string): "week" | "month" | "today" | null {
+  const t = (text || "").trim();
+  if (!t || !ADMISSION_WORDS.test(t)) return null;
+  if (t.length > 60) return null;
+  const low = t.toLowerCase();
+  if (/(?<![\p{L}\p{M}])(month|mahine|mahina|महीने|महीना)(?![\p{L}\p{M}])/iu.test(low)) return "month";
+  if (/(?<![\p{L}\p{M}])(today|aaj|आज)(?![\p{L}\p{M}])/iu.test(low)) return "today";
+  if (
+    /(?<![\p{L}\p{M}])(week|hafte|hafta|saptah|सप्ताह|हफ्ते|report|summary|status|list|count|kitne|कितने|new|naye|नए)(?![\p{L}\p{M}])/iu.test(low)
+  ) {
+    return "week";
+  }
+  return null;
+}
+
+/**
+ * The whole-school one-pager: "school snapshot", "school status", "aaj ka
+ * school report", "daily summary", "how is the school doing". Deliberately
+ * narrow — every other command answers one question, and this one answers
+ * all of them at once, so it must not swallow "5A attendance status".
+ */
+const SNAPSHOT_WORDS =
+  /^(?:\s*(?:aaj\s*ka|today'?s?|daily|आज\s*का)\s*)?(?:school|schools|स्कूल|विद्यालय)?\s*(?:snapshot|status|report|summary|dashboard|overview|haal|हाल|रिपोर्ट|सारांश)\s*(?:of\s+(?:the\s+)?school)?\s*$|^\s*how\s+is\s+(?:the\s+)?school\s+doing\s*\??\s*$|^\s*(?:school|स्कूल)\s+(?:snapshot|status|report|summary|kaisa\s+chal\s+raha)\s*\??\s*$/iu;
+
+const DETAILS_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(details?|detail|info|information|profile|jankari|jaankari|जानकारी|विवरण|record)(?![\p{L}\p{M}\p{N}])/iu;
+
+const DETAILS_STOP_WORDS = new Set([
+  "details", "detail", "info", "information", "profile", "jankari", "jaankari", "record", "records",
+  "student", "students", "child", "about", "show", "me", "the", "of", "for", "please", "pls",
+  "ki", "ka", "ke", "ko", "batao", "bata", "dikhao", "dikha", "who", "is", "kaun", "kon", "hai",
+  "जानकारी", "विवरण", "छात्र", "की", "का", "के", "दिखाओ", "बताओ", "कौन", "है",
+]);
+
+/**
+ * "Riya Verma details", "student details Aarav Sharma", "Amay Gupta 4B
+ * info", "Riya Verma ki jankari", "who is Kabir Ali". Returns the student
+ * as written (name plus any class / roll), or null. A details word alone,
+ * or with no name left over, is not this ask.
+ */
+export function parseStudentDetailsQuery(text: string): string | null {
+  const t = (text || "").trim();
+  if (!t) return null;
+  const isWhoIs = /^\s*who\s+is\s+\S/i.test(t);
+  if (!isWhoIs && !DETAILS_WORDS.test(t)) return null;
+  if (FEE_WORDS.test(t) || HOMEWORK_WORDS.test(t) || BUS_WORDS.test(t)) return null;
+  const refs = extractSectionRefs(t);
+  let rest = t.toLowerCase();
+  const roll = /(?<![\p{L}\p{M}\p{N}])roll\s*(?:no\.?|number)?\s*(\d{1,3})(?![\p{L}\p{M}\p{N}])/iu.exec(rest);
+  if (roll) rest = rest.replace(roll[0], " ");
+  if (refs.length) {
+    rest = rest
+      .replace(/(?<![\p{L}\p{M}\p{N}])(?:class|grade|std|kaksha|कक्षा)\s*[a-z0-9]+(?:st|nd|rd|th)?\s*(?:-|\s)?\s*(?:section|sec\.?)?\s*[a-h]?(?![\p{L}\p{M}\p{N}])/giu, " ")
+      .replace(/(?<![a-z0-9])(\d{1,2}|[ivx]{1,4}|nursery|lkg|ukg|kg|pg)(?:st|nd|rd|th)?\s*-?\s*[a-h](?![a-z0-9])/g, " ");
+  }
+  const words = rest
+    .replace(/[^\p{L}\p{M}\p{N}\s'.-]/gu, " ")
+    .split(/\s+/)
+    .map((w) => w.replace(/^[.'-]+|[.'-]+$/g, ""))
+    .filter((w) => w && !DETAILS_STOP_WORDS.has(w) && !/^\d+$/.test(w));
+  const name = words.join(" ").trim();
+  if (!name || !/[\p{L}\p{M}]{2,}/u.test(name)) return null;
+  const sec = refs[0];
+  return [name, sec ? `${sec.classKey}${sec.sectionName}` : "", roll ? `roll ${roll[1]}` : ""]
+    .filter(Boolean)
+    .join(" ");
+}
+
+const BUS_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(bus|buses|route|routes|van|manifest|बस|रूट)(?![\p{L}\p{M}\p{N}])/iu;
+
+const BUS_ASK_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(manifest|list|students?|children|riders?|kaun|kon|who|which|sawari|बच्चे|सूची|छात्र|details?|stops?)(?![\p{L}\p{M}\p{N}])/iu;
+
+/**
+ * "Bus 3 manifest", "bus 3 ka manifest", "route A students", "bus 5 list",
+ * "which children are on bus 2". Returns the bus / route as written, for
+ * the server to match against route code, bus number and route name.
+ * A bus word alone ("bus is late") is not this ask.
+ */
+export function parseBusManifestQuery(text: string): string | null {
+  const t = (text || "").trim();
+  if (!t || !BUS_WORDS.test(t)) return null;
+  if (!BUS_ASK_WORDS.test(t)) return null;
+  const m =
+    /(?<![\p{L}\p{M}\p{N}])(?:bus|route|van|बस|रूट)\s*(?:no\.?|number|#)?\s*([\p{L}\p{N}][\p{L}\p{N}-]{0,15})(?![\p{L}\p{M}\p{N}])/iu.exec(t);
+  if (m && !/^(no|number|list|students?|children|manifest|ka|ki|ke|me|mein|details?)$/i.test(m[1]!)) {
+    return m[1]!;
+  }
+  return null;
+}
+
+const HOMEWORK_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(homework|home\s*work|hw|गृहकार्य|grihkarya|grih\s*karya|assignments?|diary)(?![\p{L}\p{M}\p{N}])/iu;
+
+const HOMEWORK_QUERY_FILLER = new Set([
+  "homework", "home", "work", "hw", "गृहकार्य", "grihkarya", "grih", "karya", "assignment", "assignments", "diary",
+  "posted", "post", "status", "list", "check", "kaun", "kon", "kis", "kya", "kitne", "kitna", "hua", "hui", "diya", "diye", "di",
+  "gaya", "gayi", "nahi", "nahin", "aaj", "today", "kal", "yesterday", "parso", "dikhao", "show", "batao", "bata", "me", "mein",
+  "ka", "ki", "ke", "ko", "for", "of", "in", "the", "class", "classes", "section", "sections", "school", "all", "sab", "sabhi",
+  "hai", "h", "hain", "tha", "the", "thi", "any", "koi", "given", "done", "which", "what", "todays", "today's",
+  "आज", "कल", "किस", "कौन", "क्या", "हुआ", "दिया", "नहीं", "में", "का", "की", "के", "है", "दिखाओ", "बताओ",
+]);
+
+/**
+ * A question about homework — "homework posted today for 6B", "6B
+ * homework", "aaj 6B ka homework", "homework status", "kal kis class me
+ * homework nahi hua". A teacher's class-channel post ("Homework: page 42
+ * ex 4.2", "6B homework maths ch 3 q1-10") carries content words beyond
+ * the question, so anything with leftover words is NOT a query and goes to
+ * the class channel untouched.
+ */
+export function parseHomeworkQuery(text: string): { section: string } | null {
+  const t = (text || "").trim();
+  if (!t || !HOMEWORK_WORDS.test(t)) return null;
+  if (/[:\n]/.test(t)) return null; // "Homework: ..." is a post
+  const refs = extractSectionRefs(t);
+  let rest = t.toLowerCase();
+  rest = rest
+    .replace(/(?<![\p{L}\p{M}\p{N}])(?:class|grade|std|kaksha|कक्षा)\s*[a-z0-9]+(?:st|nd|rd|th)?\s*(?:-|\s)?\s*(?:section|sec\.?)?\s*[a-h]?(?![\p{L}\p{M}\p{N}])/giu, " ")
+    .replace(/(?<![a-z0-9])(\d{1,2}|[ivx]{1,4}|nursery|lkg|ukg|kg|pg)(?:st|nd|rd|th)?\s*-?\s*[a-h](?![a-z0-9])/g, " ")
+    .replace(/\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/g, " ");
+  const leftover = rest
+    .replace(/[^\p{L}\p{M}\p{N}\s']/gu, " ")
+    .split(/\s+/)
+    .map((w) => w.replace(/^'+|'+$/g, ""))
+    .filter((w) => w && !HOMEWORK_QUERY_FILLER.has(w) && !/^\d+$/.test(w));
+  if (leftover.length) return null;
+  const r = refs[0];
+  return { section: r ? `${r.classKey}${r.sectionName}` : "" };
+}
+
+/**
+ * Student leave queue: "pending leaves", "leave requests", "5A leave
+ * requests", "kitni chutti pending hai", "leave approvals". A leave word
+ * plus a queue word; "leave" alone could be a teacher's own leave, which
+ * the staff bot handles.
+ */
+const LEAVE_WORDS =
+  /(?=.*(?<![\p{L}\p{M}\p{N}])(leaves?|chutti|chhutti|छुट्टी|छुट्टियां|avkash|avakash|अवकाश)(?![\p{L}\p{M}\p{N}]))(?=.*(?<![\p{L}\p{M}\p{N}])(pending|requests?|approvals?|approve|queue|list|applications?|kitni|kitne|कितनी|बाकी|baki)(?![\p{L}\p{M}\p{N}]))/iu;
+
+const FREE_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(free|khali|khaali|खाली|available|vacant|substitute|substitution|kaun\s+aa\s+sakta)(?![\p{L}\p{M}\p{N}])/iu;
+
+/**
+ * "who is free in period 3", "period 3 me kaun free hai", "abhi kaun free
+ * hai", "free teachers next period", "3rd period khali kaun". Returns the
+ * period as "3", "now" or "next", or null when the message is not this ask.
+ */
+export function parseFreeTeachersQuery(text: string): string | null {
+  const t = (text || "").trim();
+  if (!t || !FREE_WORDS.test(t)) return null;
+  // "fees" / "seat" mentions are other things; a teacher-ish or period-ish
+  // word must be present.
+  if (FEE_WORDS.test(t) && !/period|pd\b|lecture/i.test(t)) return null;
+  const low = t.toLowerCase();
+  const num =
+    /(?:period|pd|lecture|kalansh|कालांश|p)\s*-?\s*(\d{1,2})(?![\d])/i.exec(low) ||
+    /(\d{1,2})\s*(?:st|nd|rd|th|va|wa|वां|वीं)?\s*(?:period|pd|lecture|kalansh|कालांश)/i.exec(low);
+  if (num) return String(parseInt(num[1]!, 10));
+  if (/(?<![\p{L}])(next|agla|agle|अगला|अगले)(?![\p{L}])/iu.test(low)) return "next";
+  if (/(?<![\p{L}])(now|abhi|is\s+waqt|is\s+time|current|अभी|इस\s+समय)(?![\p{L}])/iu.test(low)) return "now";
+  // "kaun free hai" with a teacher word and nothing else → now.
+  if (/teacher|staff|kaun|kon|who|कौन/i.test(low)) return "now";
+  return null;
+}
+
+export type FreeTeacherRow = {
+  name: string;
+  /** Regular periods on this weekday. */
+  dayLoad: number;
+  /** Substitutions already given this date. */
+  subLoad: number;
+  designation: string;
+};
+
+export type FreeTeachersInput = {
+  date: string;
+  todayIso: string;
+  periodNo: number;
+  periodLabel: string;
+  timeLabel: string; // "10:40–11:20"
+  weekdayLabel: string;
+  free: FreeTeacherRow[];
+  absentCount: number;
+  uncovered: { classLabel: string; subject: string; absentTeacher: string }[];
+  covered: { classLabel: string; subject: string; substitute: string }[];
+};
+
+export function formatFreeTeachersReply(input: FreeTeachersInput): string {
+  const when = input.date === input.todayIso ? "today" : `${input.weekdayLabel} ${shortDate(input.date)}`;
+  const lines: string[] = [
+    `*Free in ${input.periodLabel}* · ${when}${input.timeLabel ? ` · ${input.timeLabel}` : ""}`,
+  ];
+  if (!input.free.length) {
+    lines.push("No teacher is free this period.");
+  } else {
+    lines.push(`${input.free.length} free`);
+    const sorted = [...input.free].sort(
+      (a, b) => a.dayLoad + a.subLoad * 2 - (b.dayLoad + b.subLoad * 2) || a.name.localeCompare(b.name),
+    );
+    for (const f of sorted.slice(0, 15)) {
+      const load = [`${f.dayLoad} pd today`];
+      if (f.subLoad) load.push(`${f.subLoad} sub${f.subLoad === 1 ? "" : "s"}`);
+      lines.push(`${f.name}${f.designation ? ` (${f.designation})` : ""}  · ${load.join(", ")}`);
+    }
+    if (sorted.length > 15) lines.push(`+${sorted.length - 15} more`);
+  }
+  if (input.uncovered.length) {
+    lines.push("", `*Uncovered this period* (${input.absentCount} absent today)`);
+    for (const u of input.uncovered) lines.push(`${u.classLabel} ${u.subject} — ${u.absentTeacher} absent`);
+  } else if (input.absentCount) {
+    lines.push("", `${input.absentCount} teacher${input.absentCount === 1 ? "" : "s"} absent today; this period is covered.`);
+  }
+  if (input.covered.length) {
+    lines.push("", "*Substitutions this period*");
+    for (const c of input.covered) lines.push(`${c.classLabel} ${c.subject} → ${c.substitute}`);
+  }
+  return lines.join("\n");
+}
+
+/** Which teaching period contains `hhmm` ("10:45"), or the next one after it. */
+export function periodAtTime(
+  periods: { no: number; startTime: string; endTime: string }[],
+  hhmm: string,
+  mode: "now" | "next",
+): { no: number } | { before: true } | { after: true } | null {
+  const toMin = (v: string) => {
+    const m = /^(\d{1,2}):(\d{2})/.exec(v);
+    return m ? parseInt(m[1]!, 10) * 60 + parseInt(m[2]!, 10) : NaN;
+  };
+  const t = toMin(hhmm);
+  if (!Number.isFinite(t) || !periods.length) return null;
+  const sorted = [...periods].sort((a, b) => toMin(a.startTime) - toMin(b.startTime));
+  if (mode === "now") {
+    const cur = sorted.find((p) => t >= toMin(p.startTime) && t < toMin(p.endTime));
+    if (cur) return { no: cur.no };
+    // Between periods (a break) counts as the period about to start.
+    const next = sorted.find((p) => toMin(p.startTime) > t);
+    if (!next) return { after: true };
+    if (t < toMin(sorted[0]!.startTime)) return { before: true };
+    return { no: next.no };
+  }
+  const next = sorted.find((p) => toMin(p.startTime) > t);
+  if (!next) return { after: true };
+  return { no: next.no };
+}
+
+// ─── Pending student leaves ────────────────────────────────────────────
+
+export type PendingLeaveRow = {
+  studentName: string;
+  classLabel: string;
+  rollNo: string;
+  fromDate: string;
+  toDate: string;
+  days: number;
+  typeLabel: string;
+  reason: string;
+  requestedAt: string; // ISO
+  approver: string;
+};
+
+export type PendingLeavesInput = {
+  todayIso: string;
+  scope: "school" | "mine" | "section";
+  scopeLabel?: string;
+  rows: PendingLeaveRow[];
+  approvedToday: number;
+};
+
+function agoLabel(iso: string, todayIso: string): string {
+  const d = iso.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return "";
+  const days = Math.round((Date.parse(`${todayIso}T00:00:00Z`) - Date.parse(`${d}T00:00:00Z`)) / 86_400_000);
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  return `${days}d ago`;
+}
+
+export function formatPendingLeavesReply(input: PendingLeavesInput): string {
+  const where =
+    input.scope === "school" ? "school" : input.scope === "section" ? input.scopeLabel || "section" : "your sections";
+  const lines: string[] = [`*Pending leave requests* · ${where}`];
+  if (!input.rows.length) {
+    lines.push("Nothing waiting for approval. ✅");
+  } else {
+    lines.push(`${input.rows.length} waiting · oldest first`);
+    const sorted = [...input.rows].sort((a, b) => a.requestedAt.localeCompare(b.requestedAt));
+    for (const r of sorted.slice(0, 15)) {
+      const span =
+        r.fromDate === r.toDate
+          ? shortDate(r.fromDate)
+          : `${shortDate(r.fromDate)}–${shortDate(r.toDate)} (${r.days}d)`;
+      const reason = r.reason.trim();
+      lines.push(
+        "",
+        `*${r.studentName}* · ${r.classLabel}${r.rollNo ? ` · roll ${r.rollNo}` : ""}`,
+        `${span} · ${r.typeLabel}${reason ? ` · ${reason.length > 60 ? `${reason.slice(0, 57).trimEnd()}…` : reason}` : ""}`,
+        `asked ${agoLabel(r.requestedAt, input.todayIso)} · approver: ${r.approver}`,
+      );
+    }
+    if (sorted.length > 15) lines.push("", `+${sorted.length - 15} more`);
+  }
+  if (input.approvedToday) {
+    lines.push("", `${input.approvedToday} student${input.approvedToday === 1 ? "" : "s"} on approved leave today.`);
+  }
+  lines.push("", "Approve or reject in the ERP: Attendance → Leave.");
+  return lines.join("\n");
+}
+
+// ─── Homework posted ───────────────────────────────────────────────────
+
+export type HomeworkPostRow = {
+  subject: string;
+  title: string;
+  teacher: string;
+  dueAt: string; // ISO date or ""
+  requiresSubmit: boolean;
+};
+
+export type HomeworkSectionInput = {
+  kind: "section";
+  sectionLabel: string;
+  date: string;
+  todayIso: string;
+  posts: HomeworkPostRow[];
+  /** Subject teachers of the section, for "none yet". */
+  subjectTeachers: { subject: string; teacher: string }[];
+};
+
+export type HomeworkOverviewInput = {
+  kind: "overview";
+  scope: "school" | "mine";
+  date: string;
+  todayIso: string;
+  sections: { label: string; count: number; subjects: string[] }[];
+};
+
+export function formatHomeworkReply(input: HomeworkSectionInput | HomeworkOverviewInput): string {
+  const when = input.date === input.todayIso ? "today" : shortDate(input.date);
+  if (input.kind === "section") {
+    const lines = [`*Homework ${input.sectionLabel}* · ${when}`];
+    if (!input.posts.length) {
+      lines.push("None posted yet.");
+      if (input.subjectTeachers.length) {
+        lines.push("", "*Subject teachers*");
+        for (const st of input.subjectTeachers.slice(0, 10)) lines.push(`${st.subject} — ${st.teacher}`);
+      }
+      return lines.join("\n");
+    }
+    lines.push(`${input.posts.length} post${input.posts.length === 1 ? "" : "s"}`);
+    for (const p of input.posts) {
+      const due = p.dueAt ? ` · due ${shortDate(p.dueAt.slice(0, 10))}` : "";
+      lines.push("", `*${p.subject}* — ${p.teacher}`, `${p.title || "(no title)"}${due}${p.requiresSubmit ? " · submit" : ""}`);
+    }
+    return lines.join("\n");
+  }
+  const lines = [`*Homework* · ${input.scope === "school" ? "school" : "your sections"} · ${when}`];
+  if (!input.sections.length) {
+    lines.push("No active sections found.");
+    return lines.join("\n");
+  }
+  const posted = input.sections.filter((s) => s.count > 0);
+  const none = input.sections.filter((s) => s.count === 0);
+  const total = posted.reduce((n, s) => n + s.count, 0);
+  lines.push(`${total} post${total === 1 ? "" : "s"} across ${posted.length} of ${input.sections.length} sections`);
+  if (posted.length) {
+    lines.push("", "*Posted*");
+    for (const s of posted) lines.push(`${s.label}  ${s.count} (${s.subjects.slice(0, 4).join(", ")}${s.subjects.length > 4 ? ", …" : ""})`);
+  }
+  if (none.length) {
+    lines.push("", `*Nothing yet:* ${none.map((s) => s.label).join(", ")}`);
+  }
+  lines.push("", "Ask a section for details, e.g. _6B homework_.");
+  return lines.join("\n");
+}
+
+// ─── Bus manifest ──────────────────────────────────────────────────────
+
+export type ManifestStopRow = {
+  name: string;
+  /** Distance from school, e.g. "3.2 km" — stops carry no pickup time. */
+  distanceLabel: string;
+  riders: { fullName: string; classLabel: string; rollNo: string; suspended: boolean; mark: string }[];
+};
+
+export type BusManifestInput = {
+  routeLabel: string; // "Bus 3 · Civil Lines"
+  vehicleReg: string;
+  driver: { name: string; mobile: string };
+  date: string;
+  todayIso: string;
+  stops: ManifestStopRow[];
+  markedCount: number;
+  formatMobile?: (m: string) => string;
+};
+
+export function formatBusManifestReply(input: BusManifestInput): string {
+  const when = input.date === input.todayIso ? "today" : shortDate(input.date);
+  const mob = input.formatMobile ?? ((m: string) => m);
+  const active = input.stops.flatMap((s) => s.riders.filter((r) => !r.suspended));
+  const suspended = input.stops.flatMap((s) => s.riders.filter((r) => r.suspended));
+  const lines = [`*${input.routeLabel}* · ${when}`];
+  const head = [`${active.length} rider${active.length === 1 ? "" : "s"}`, `${input.stops.length} stops`];
+  lines.push(head.join(" · "));
+  if (input.driver.name || input.vehicleReg) {
+    lines.push(
+      `Driver: ${input.driver.name || "—"}${input.driver.mobile ? ` ${mob(input.driver.mobile)}` : ""}${input.vehicleReg ? ` · ${input.vehicleReg}` : ""}`,
+    );
+  }
+  if (!active.length && !suspended.length) {
+    lines.push("", "No students assigned to this route.");
+    return lines.join("\n");
+  }
+  for (const st of input.stops) {
+    const riders = st.riders.filter((r) => !r.suspended);
+    if (!riders.length) continue;
+    lines.push("", `*${st.name}*${st.distanceLabel ? ` · ${st.distanceLabel}` : ""} · ${riders.length}`);
+    for (const r of riders) {
+      lines.push(`${r.fullName} (${r.classLabel}${r.rollNo ? `, ${r.rollNo}` : ""})${r.mark ? ` · ${r.mark}` : ""}`);
+    }
+  }
+  if (input.markedCount) {
+    lines.push("", `${input.markedCount} of ${active.length} marked ${when === "today" ? "today" : "that day"}.`);
+  }
+  if (suspended.length) {
+    lines.push("", `*Boarding suspended:* ${suspended.map((r) => r.fullName).join(", ")}`);
+  }
+  return lines.join("\n");
+}
+
+export function formatRouteNotFound(asked: string, options: string[]): string {
+  if (!options.length) return `No active bus route matches "${asked}".`;
+  return `Which route? ${options.join(", ")}`;
+}
+
+// ─── Student details ───────────────────────────────────────────────────
+
+export type StudentDetailsInput = {
+  fullName: string;
+  classLabel: string;
+  rollNo: string;
+  admissionNo: string;
+  status: string;
+  gender: string;
+  dob: string;
+  bloodGroup: string;
+  guardianName: string;
+  fatherName: string;
+  motherName: string;
+  fatherMobile: string;
+  motherMobile: string;
+  householdMobile: string;
+  locality: string;
+  transport: { routeLabel: string; stopName: string } | null;
+  siblings: { fullName: string; classLabel: string }[];
+  hasMedicalNote: boolean;
+  isCwsn: boolean;
+  /** full: office / leadership / this student's own teacher — real mobiles. */
+  detail: "full" | "basic";
+};
+
+export function formatStudentDetailsReply(input: StudentDetailsInput): string {
+  const show = (m: string) => {
+    const d = (m || "").replace(/\D/g, "");
+    if (!d) return "";
+    if (input.detail === "full") return d;
+    return d.length < 6 ? d : `${d.slice(0, 2)}xxxxxx${d.slice(-2)}`;
+  };
+  const lines = [
+    `*${input.fullName}* · ${input.classLabel}${input.rollNo ? ` · Roll ${input.rollNo}` : ""}`,
+  ];
+  const idBits = [
+    input.admissionNo ? `Adm ${input.admissionNo}` : "",
+    input.gender === "M" ? "Boy" : input.gender === "F" ? "Girl" : "",
+    input.dob ? `DOB ${shortDate(input.dob)}` : "",
+    input.bloodGroup ? `Blood ${input.bloodGroup}` : "",
+  ].filter(Boolean);
+  if (idBits.length) lines.push(idBits.join(" · "));
+  if (input.status && input.status !== "active") lines.push(`⚠️ Status: ${input.status}`);
+
+  const contacts: string[] = [];
+  if (input.fatherName || input.fatherMobile) {
+    contacts.push(`Father: ${input.fatherName || "—"}${input.fatherMobile ? ` ${show(input.fatherMobile)}` : ""}`);
+  }
+  if (input.motherName || input.motherMobile) {
+    contacts.push(`Mother: ${input.motherName || "—"}${input.motherMobile ? ` ${show(input.motherMobile)}` : ""}`);
+  }
+  const hh = show(input.householdMobile);
+  if (hh && hh !== show(input.fatherMobile) && hh !== show(input.motherMobile)) {
+    contacts.push(`Family WhatsApp: ${hh}`);
+  }
+  if (contacts.length) {
+    lines.push("", "*Contacts*", ...contacts);
+    if (input.guardianName && input.guardianName !== input.fatherName && input.guardianName !== input.motherName) {
+      lines.push(`Guardian: ${input.guardianName}`);
+    }
+  }
+  if (input.locality) lines.push(`Address: ${input.locality}`);
+
+  if (input.transport) {
+    lines.push(
+      "",
+      `*Transport:* ${input.transport.routeLabel}${input.transport.stopName ? ` · ${input.transport.stopName}` : ""}`,
+    );
+  }
+  if (input.siblings.length) {
+    lines.push("", `*Siblings:* ${input.siblings.map((s) => `${s.fullName} (${s.classLabel})`).join(", ")}`);
+  }
+  const flags: string[] = [];
+  if (input.hasMedicalNote) flags.push("medical note on file");
+  if (input.isCwsn) flags.push("CWSN");
+  if (flags.length) lines.push("", `⚠️ ${flags.join(" · ")} — open the student profile in the ERP.`);
+  if (input.detail === "basic") lines.push("", "_Mobiles are masked; the office can share them._");
+  return lines.join("\n");
+}
+
+// ─── School snapshot ───────────────────────────────────────────────────
+
+export type SchoolSnapshotInput = {
+  date: string;
+  todayIso: string;
+  academicYearCode: string;
+  fees: { todayPaise: number; mtdPaise: number; openDuesPaise: number; defaulterHouseholds: number };
+  attendance: { present: number; absent: number; leave: number; markedPct: number; sectionsMarked: number; registersPending: number };
+  staff: { active: number; present: number; absent: number };
+  admissions: { pipeline: number; enrolled: number; followUpsDue: number };
+  alerts: { vaultExpiring30d: number; lowStockSkus: number; waFailures24h: number };
+  formatInr: (paise: number) => string;
+};
+
+export function formatSchoolSnapshotReply(input: SchoolSnapshotInput): string {
+  const inr = input.formatInr;
+  const when = input.date === input.todayIso ? "today" : shortDate(input.date);
+  const a = input.attendance;
+  const marked = a.present + a.absent + a.leave;
+  const lines = [
+    `*School snapshot* · ${when} · ${input.academicYearCode}`,
+    "",
+    "*Fees*",
+    `Collected ${when === "today" ? "today" : "that day"}: ${inr(input.fees.todayPaise)} · month ${inr(input.fees.mtdPaise)}`,
+    `Open dues: ${inr(input.fees.openDuesPaise)} across ${input.fees.defaulterHouseholds} student${input.fees.defaulterHouseholds === 1 ? "" : "s"}`,
+    "",
+    "*Attendance*",
+    marked
+      ? `Present ${a.markedPct}% (${a.present} / ${marked}) · ${a.sectionsMarked} section${a.sectionsMarked === 1 ? "" : "s"} marked`
+      : "No section marked yet.",
+  ];
+  if (a.registersPending) lines.push(`⚠️ ${a.registersPending} register${a.registersPending === 1 ? "" : "s"} still pending`);
+  lines.push(
+    "",
+    "*Staff*",
+    input.staff.present || input.staff.absent
+      ? `Present ${input.staff.present} · Absent ${input.staff.absent} of ${input.staff.active}`
+      : `No punches yet (${input.staff.active} active)`,
+    "",
+    "*Admissions*",
+    `Pipeline ${input.admissions.pipeline} · enrolled ${input.admissions.enrolled}${input.admissions.followUpsDue ? ` · ${input.admissions.followUpsDue} follow-up${input.admissions.followUpsDue === 1 ? "" : "s"} due` : ""}`,
+  );
+  const alerts: string[] = [];
+  if (input.alerts.vaultExpiring30d) alerts.push(`${input.alerts.vaultExpiring30d} document${input.alerts.vaultExpiring30d === 1 ? "" : "s"} expiring in 30 days`);
+  if (input.alerts.lowStockSkus) alerts.push(`${input.alerts.lowStockSkus} item${input.alerts.lowStockSkus === 1 ? "" : "s"} low on stock`);
+  if (input.alerts.waFailures24h) alerts.push(`${input.alerts.waFailures24h} WhatsApp send${input.alerts.waFailures24h === 1 ? "" : "s"} failed in 24h`);
+  if (alerts.length) {
+    lines.push("", "*Needs attention*");
+    for (const al of alerts) lines.push(`• ${al}`);
+  }
+  return lines.join("\n");
+}
+
+// ─── Admissions in a period ────────────────────────────────────────────
+
+export type AdmissionsPeriodInput = {
+  periodLabel: string; // "last 7 days"
+  fromDate: string;
+  toDate: string;
+  todayIso: string;
+  newEnquiries: number;
+  bySource: { label: string; count: number }[];
+  byClass: { label: string; count: number }[];
+  moved: { applied: number; verified: number; enrolled: number; lost: number };
+  lostReasons: { reason: string; count: number }[];
+  followUps: { overdue: number; dueToday: number };
+  pipelineOpen: number;
+};
+
+export function formatAdmissionsPeriodReply(input: AdmissionsPeriodInput): string {
+  const lines = [`*Admissions* · ${input.periodLabel}`];
+  lines.push(
+    `${input.newEnquiries} new enquir${input.newEnquiries === 1 ? "y" : "ies"}` +
+      (input.bySource.length
+        ? ` · ${input.bySource.slice(0, 4).map((s) => `${s.label} ${s.count}`).join(", ")}`
+        : ""),
+  );
+  const m = input.moved;
+  if (m.applied || m.verified || m.enrolled || m.lost) {
+    const bits: string[] = [];
+    if (m.applied) bits.push(`${m.applied} applied`);
+    if (m.verified) bits.push(`${m.verified} verified`);
+    if (m.enrolled) bits.push(`${m.enrolled} enrolled`);
+    if (m.lost) bits.push(`${m.lost} lost`);
+    lines.push(bits.join(" · "));
+  } else if (input.newEnquiries) {
+    lines.push("None moved stage in this period.");
+  }
+  if (input.byClass.length) {
+    lines.push("", "*Classes asked for*");
+    for (const c of input.byClass.slice(0, 6)) lines.push(`${c.label}  ${c.count}`);
+  }
+  if (input.lostReasons.length) {
+    lines.push("", `*Lost because:* ${input.lostReasons.slice(0, 3).map((r) => `${r.reason} (${r.count})`).join(", ")}`);
+  }
+  lines.push("");
+  const f = input.followUps;
+  if (f.overdue || f.dueToday) {
+    const bits: string[] = [];
+    if (f.overdue) bits.push(`⚠️ ${f.overdue} follow-up${f.overdue === 1 ? "" : "s"} overdue`);
+    if (f.dueToday) bits.push(`${f.dueToday} due today`);
+    lines.push(bits.join(" · "));
+  } else {
+    lines.push("No follow-up is overdue.");
+  }
+  lines.push(`Open pipeline: ${input.pipelineOpen} lead${input.pipelineOpen === 1 ? "" : "s"}.`);
+  return lines.join("\n");
+}
+
+// ─── Post homework (write) ─────────────────────────────────────────────
+
+const POST_VERB =
+  /(?<![\p{L}\p{M}\p{N}])(post|add|create|set|publish|upload|lagao|laga\s*do|daalo|daal\s*do|de\s*do|likh\s*do|karo|kar\s*do)(?![\p{L}\p{M}\p{N}])/iu;
+
+export type PostHomeworkParse = {
+  section: string;
+  /** Everything after the section: "maths: exercise 4.2, due Monday". */
+  rest: string;
+};
+
+/**
+ * "Post homework 6B maths: exercise 4.2, due Monday". Requires a posting
+ * verb AND a homework word, so a question ("6B homework") and a plain
+ * class-channel post ("HW 6B maths: …") both stay out of it. The subject,
+ * body and due date are pulled apart by `splitPostHomeworkRest`, which the
+ * server calls once Masters is loaded.
+ */
+export function parsePostHomeworkQuery(text: string): PostHomeworkParse | null {
+  const t = (text || "").trim();
+  if (!t || !HOMEWORK_WORDS.test(t) || !POST_VERB.test(t)) return null;
+  const refs = extractSectionRefs(t);
+  if (!refs.length) return null;
+  const r = refs[0]!;
+
+  // Everything after the first colon is the teacher's own words and is kept
+  // byte for byte — stripping filler across the whole message turned
+  // "paath 3 ke prashn" into "paath 3 prashn", i.e. the desk quietly
+  // rewrote what the parents were about to receive.
+  const colon = t.search(/[:：]/);
+  const head = colon > 0 ? t.slice(0, colon) : t;
+  const body = colon > 0 ? t.slice(colon + 1) : "";
+
+  const cleanedHead = head
+    .replace(new RegExp(POST_VERB.source, "giu"), " ")
+    .replace(new RegExp(HOMEWORK_WORDS.source, "giu"), " ")
+    .replace(/(?<![\p{L}\p{M}\p{N}])(?:class|grade|std|kaksha|कक्षा)\s*[a-z0-9]+(?:st|nd|rd|th)?\s*(?:-|\s)?\s*(?:section|sec\.?)?\s*[a-h]?(?![\p{L}\p{M}\p{N}])/giu, " ")
+    .replace(/(?<![a-zA-Z0-9])(\d{1,2}|[ivxIVX]{1,4}|nursery|lkg|ukg|kg|pg)(?:st|nd|rd|th)?\s*-?\s*[a-hA-H](?![a-zA-Z0-9])/g, " ")
+    .replace(/(?<![\p{L}\p{M}\p{N}])(for|ke\s*liye|ka|ki|ke|me|mein)(?![\p{L}\p{M}\p{N}])/giu, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[:\-–—,.\s]+|[\-–—,.\s]+$/g, "")
+    .trim();
+
+  return {
+    section: r.sectionName ? `${r.classKey}${r.sectionName}` : r.classKey,
+    rest: colon > 0 ? `${cleanedHead}:${body}` : cleanedHead,
+  };
+}
+
+export type PostHomeworkParts = {
+  subjectHint: string;
+  body: string;
+  dueHint: string;
+};
+
+/**
+ * "maths: exercise 4.2, due Monday" → subject "maths", body "exercise
+ * 4.2", due "Monday". Without a colon the subject cannot be told from the
+ * body ("science diagram of a cell" — two words or three?), so the caller
+ * asks for the colon rather than guessing at what parents will receive.
+ */
+export function splitPostHomeworkRest(rest: string): PostHomeworkParts | null {
+  const t = (rest || "").trim();
+  const colon = t.search(/[:：]/);
+  if (colon <= 0) return null;
+  const subjectHint = t.slice(0, colon).trim().replace(/[,.\-–—]+$/, "").trim();
+  let body = t.slice(colon + 1).trim();
+  let dueHint = "";
+  const due = /(?<![\p{L}\p{M}\p{N}])(?:due|by|tak|dedline|deadline|submit\s+by)\s+([^,;.]+)/iu.exec(body);
+  if (due) {
+    dueHint = due[1]!.trim();
+    body = (body.slice(0, due.index) + body.slice(due.index + due[0].length)).trim();
+  }
+  body = body.replace(/[,;\s]+$/, "").replace(/^[,;\s]+/, "").trim();
+  if (!subjectHint || !body) return null;
+  return { subjectHint, body, dueHint };
+}
+
+const WEEKDAY_NAMES: Record<string, number> = {
+  sunday: 0, sun: 0, ravivar: 0, itwar: 0, रविवार: 0,
+  monday: 1, mon: 1, somvar: 1, somwar: 1, सोमवार: 1,
+  tuesday: 2, tue: 2, tues: 2, mangalvar: 2, mangalwar: 2, मंगलवार: 2,
+  wednesday: 3, wed: 3, budhvar: 3, budhwar: 3, बुधवार: 3,
+  thursday: 4, thu: 4, thurs: 4, guruvar: 4, guruwar: 4, गुरुवार: 4,
+  friday: 5, fri: 5, shukravar: 5, shukrawar: 5, शुक्रवार: 5,
+  saturday: 6, sat: 6, shanivar: 6, shaniwar: 6, शनिवार: 6,
+};
+
+/**
+ * A due date always points forward — the opposite of `resolveCommandDate`,
+ * where "kal" means yesterday because you are asking about what happened.
+ * Here "kal" means tomorrow, "Monday" the coming Monday, and a day/month
+ * already past rolls into next year (which is what "due 5 Jan" means in
+ * September). Returns "" when nothing date-like was said.
+ */
+export function parseDueDate(hint: string, todayIso: string): string {
+  const t = (hint || "").trim().toLowerCase();
+  if (!t) return "";
+  const shift = (days: number) => {
+    const d = new Date(`${todayIso}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  };
+  const iso = /(20\d{2}-\d{2}-\d{2})/.exec(t);
+  if (iso) return iso[1]!;
+  if (/(?<![\p{L}\p{M}])(today|aaj|आज)(?![\p{L}\p{M}])/iu.test(t)) return todayIso;
+  if (/(?<![\p{L}\p{M}])(day\s+after|parso|परसों)(?![\p{L}\p{M}])/iu.test(t)) return shift(2);
+  if (/(?<![\p{L}\p{M}])(tomorrow|kal|कल)(?![\p{L}\p{M}])/iu.test(t)) return shift(1);
+  if (/(?<![\p{L}\p{M}])next\s+week(?![\p{L}\p{M}])/iu.test(t)) return shift(7);
+  for (const [name, wd] of Object.entries(WEEKDAY_NAMES)) {
+    const re = new RegExp(`(?<![\\p{L}\\p{M}])${name}(?![\\p{L}\\p{M}])`, "iu");
+    if (!re.test(t)) continue;
+    const todayWd = new Date(`${todayIso}T00:00:00Z`).getUTCDay();
+    const ahead = (wd - todayWd + 7) % 7;
+    // "due Monday" said on a Monday means today, not a week away.
+    return shift(ahead);
+  }
+  const dm = /(?<![\d])(\d{1,2})[/-](\d{1,2})(?:[/-](20\d{2}))?(?![\d])/.exec(t);
+  if (dm) {
+    const day = parseInt(dm[1]!, 10);
+    const mon = parseInt(dm[2]!, 10);
+    if (day >= 1 && day <= 31 && mon >= 1 && mon <= 12) {
+      let year = dm[3] ? parseInt(dm[3]!, 10) : parseInt(todayIso.slice(0, 4), 10);
+      let candidate = `${year}-${String(mon).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      if (!dm[3] && candidate < todayIso) {
+        year += 1;
+        candidate = `${year}-${String(mon).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      }
+      return candidate;
+    }
+  }
+  return "";
+}
+
+/**
+ * First line of the body becomes the post title; the whole text is the
+ * body. Sentences end at a newline, a semicolon, or a full stop followed
+ * by a space — never mid-number, or "exercise 4.2" becomes "exercise 4".
+ */
+export function homeworkTitleFrom(body: string): string {
+  const first = (body || "").split(/\n|;|\.(?=\s|$)/)[0]!.trim();
+  const t = first || (body || "").trim();
+  return t.length > 80 ? `${t.slice(0, 77).trimEnd()}…` : t;
+}
+
+export function formatPostHomeworkCard(input: {
+  sectionLabel: string;
+  subjectName: string;
+  title: string;
+  body: string;
+  dueAt: string;
+  dateIso: string;
+  todayIso: string;
+  parentCount: number;
+}): string {
+  const lines = [
+    `*Post homework* · ${input.sectionLabel} · ${input.subjectName}`,
+    input.body,
+  ];
+  const when = input.dateIso === input.todayIso ? "today" : shortDate(input.dateIso);
+  lines.push(
+    `Dated ${when}${input.dueAt ? ` · due ${shortDate(input.dueAt)}` : " · no due date"}`,
+  );
+  if (input.parentCount) {
+    lines.push(`${input.parentCount} famil${input.parentCount === 1 ? "y" : "ies"} will be notified.`);
+  }
+  return lines.join("\n");
+}
+
+// ─── Mark attendance (write) ───────────────────────────────────────────
+
+const MARK_VERB =
+  /(?<![\p{L}\p{M}\p{N}])(mark|marking|lagao|laga\s*do|le\s*lo|lelo|bhar\s*do|update|correct|banao)(?![\p{L}\p{M}\p{N}])/iu;
+
+const ABSENT_LIST_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(absent|gair\s*hazir|gairhazir|गैरहाजिर|अनुपस्थित|nahi\s+aaye?|नहीं\s+आए)(?![\p{L}\p{M}\p{N}])/iu;
+
+const ALL_PRESENT =
+  /(?<![\p{L}\p{M}\p{N}])(all\s+present|sab\s+present|sabhi\s+present|full\s+attendance|poori\s+hazri|सब\s+उपस्थित)(?![\p{L}\p{M}\p{N}])/iu;
+
+export type MarkAttendanceParse = {
+  section: string;
+  /** The part naming who is absent / on leave / late, for parsing next. */
+  spec: string;
+};
+
+/**
+ * "Mark 5A attendance: absent roll 4, 11, 19", "5A attendance absent 4, 11
+ * baaki present", "mark 6B attendance all present". Needs an attendance
+ * word, a section, and either an absent list or "all present" — a bare
+ * "5A attendance" is the read command and must stay that way.
+ */
+export function parseMarkAttendanceQuery(text: string): MarkAttendanceParse | null {
+  const t = (text || "").trim();
+  if (!t || !ATTENDANCE_SUMMARY_WORDS.test(t)) return null;
+  const hasList = ABSENT_LIST_WORD.test(t) || ALL_PRESENT.test(t);
+  if (!hasList) return null;
+  // "5A me aaj kaun absent hai" asks a question; it must never mark.
+  if (/[?？]|(?<![\p{L}\p{M}\p{N}])(kaun|kon|who|which|kitne|kitna|list|batao|dikhao|कौन|कितने|दिखाओ|बताओ)(?![\p{L}\p{M}\p{N}])/iu.test(t)) {
+    return null;
+  }
+  if (!MARK_VERB.test(t) && !ALL_PRESENT.test(t) && !/[:：]/.test(t)) {
+    // Without a verb or a colon, require the absent list to look deliberate
+    // ("5A attendance absent 4, 11" is fine; "5A attendance absent" is not).
+    if (!/(?:absent|hazir|हाजिर)[^\n]*?\d/iu.test(t)) return null;
+  }
+  const refs = extractSectionRefs(t);
+  if (!refs.length) return null;
+  const r = refs[0]!;
+  const colon = t.search(/[:：]/);
+  const spec = (colon > 0 ? t.slice(colon + 1) : t).trim();
+  return { section: r.sectionName ? `${r.classKey}${r.sectionName}` : r.classKey, spec };
+}
+
+/**
+ * Whether the message asks to replace a register that already exists.
+ * Checked against the WHOLE message, not just the list: "correct 5A
+ * attendance: absent 4" carries the word before the colon.
+ */
+export function isCorrectingAttendance(text: string): boolean {
+  return /(?<![\p{L}\p{M}\p{N}])(correct|correction|update|again|phir\s*se|dobara|badlo|change|re\s*mark|remark\s+attendance)(?![\p{L}\p{M}\p{N}])/iu.test(
+    text || "",
+  );
+}
+
+export type AttendanceSpec = {
+  allPresent: boolean;
+  /** Roll numbers and/or names, per status. */
+  absent: string[];
+  leave: string[];
+  late: string[];
+  halfDay: string[];
+  /** The message asked to overwrite a register that already exists. */
+  correcting: boolean;
+};
+
+function splitList(raw: string): string[] {
+  return (raw || "")
+    .split(/[,;/]|\band\b|\baur\b|&/i)
+    .map((x) =>
+      x
+        .replace(/(?<![\p{L}\p{M}\p{N}])(roll|rolls|no\.?|number|nos\.?|baaki|baki|rest|others?|present|hain?|hai|और)(?![\p{L}\p{M}\p{N}])/giu, " ")
+        .replace(/[.:]+$/g, "")
+        .replace(/\s+/g, " ")
+        .trim(),
+    )
+    .filter(Boolean);
+}
+
+/**
+ * Pull the per-status lists out of "absent roll 4, 11, 19, late 7". Each
+ * status word starts a list that runs to the next status word. Everyone
+ * not named is present — that is the whole point of the command, and it is
+ * why the confirm card names the absentees back.
+ */
+export function parseAttendanceSpec(spec: string): AttendanceSpec {
+  const t = (spec || "").trim();
+  const out: AttendanceSpec = {
+    allPresent: ALL_PRESENT.test(t),
+    absent: [],
+    leave: [],
+    late: [],
+    halfDay: [],
+    correcting: isCorrectingAttendance(t),
+  };
+  const markers: { key: "absent" | "leave" | "late" | "halfDay"; re: RegExp }[] = [
+    { key: "absent", re: ABSENT_LIST_WORD },
+    { key: "leave", re: /(?<![\p{L}\p{M}\p{N}])(on\s+leave|leave|chutti|छुट्टी)(?![\p{L}\p{M}\p{N}])/iu },
+    { key: "late", re: /(?<![\p{L}\p{M}\p{N}])(late|der\s*se|देर)(?![\p{L}\p{M}\p{N}])/iu },
+    { key: "halfDay", re: /(?<![\p{L}\p{M}\p{N}])(half\s*day|aadha\s*din|आधा\s*दिन)(?![\p{L}\p{M}\p{N}])/iu },
+  ];
+  const hits: { key: "absent" | "leave" | "late" | "halfDay"; start: number; end: number }[] = [];
+  for (const m of markers) {
+    const re = new RegExp(m.re.source, "giu");
+    let hit: RegExpExecArray | null;
+    while ((hit = re.exec(t))) {
+      hits.push({ key: m.key, start: hit.index, end: hit.index + hit[0].length });
+    }
+  }
+  hits.sort((a, b) => a.start - b.start);
+  for (let i = 0; i < hits.length; i++) {
+    const h = hits[i]!;
+    const stop = hits[i + 1]?.start ?? t.length;
+    out[h.key].push(...splitList(t.slice(h.end, stop)));
+  }
+  return out;
+}
+
+export type MarkAttendanceCardRow = { rollNo: string; fullName: string };
+
+export type MarkAttendanceCardInput = {
+  sectionLabel: string;
+  date: string;
+  todayIso: string;
+  total: number;
+  absent: MarkAttendanceCardRow[];
+  leave: MarkAttendanceCardRow[];
+  late: MarkAttendanceCardRow[];
+  halfDay: MarkAttendanceCardRow[];
+  correcting: boolean;
+};
+
+export function formatMarkAttendanceCard(input: MarkAttendanceCardInput): string {
+  const when = input.date === input.todayIso ? "today" : shortDate(input.date);
+  const named = input.absent.length + input.leave.length + input.late.length + input.halfDay.length;
+  const present = input.total - named;
+  const lines = [
+    `*${input.correcting ? "Correct" : "Mark"} attendance* · ${input.sectionLabel} · ${when}`,
+    `${present} present of ${input.total}`,
+  ];
+  const block = (label: string, rows: MarkAttendanceCardRow[]) => {
+    if (!rows.length) return;
+    lines.push(
+      "",
+      `*${label}* (${rows.length})`,
+      ...rows.map((r) => (r.rollNo ? `${r.rollNo}. ${r.fullName}` : r.fullName)),
+    );
+  };
+  block("Absent", input.absent);
+  block("On leave", input.leave);
+  block("Late", input.late);
+  block("Half day", input.halfDay);
+  if (!named) lines.push("", "Everyone present.");
+  if (input.correcting) lines.push("", "⚠️ This replaces the register already marked for this date.");
+  return lines.join("\n");
+}
+
+// ─── Message a class's parents (write) ─────────────────────────────────
+
+const SEND_VERB =
+  /(?<![\p{L}\p{M}\p{N}])(send|message|msg|inform|tell|announce|bhejo|bhej\s*do|batao|bata\s*do|bol\s*do|inform\s*karo|सूचित|भेजो|बताओ)(?![\p{L}\p{M}\p{N}])/iu;
+
+const PARENT_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(parents?|guardians?|families|abhibhavak|अभिभावक|माता-पिता|घरवालon?)(?![\p{L}\p{M}\p{N}])/iu;
+
+export type ClassMessageParse = { section: string; message: string };
+
+/**
+ * "Class 4 parents ko bhejo: kal PTM 9 baje". Needs a sending verb, the
+ * word parents, a section, and the message after a colon — the colon is
+ * what separates the instruction from the words that will reach families,
+ * so it is required rather than guessed at.
+ */
+export function parseClassMessageQuery(text: string): ClassMessageParse | null {
+  const t = (text || "").trim();
+  if (!t || !SEND_VERB.test(t) || !PARENT_WORD.test(t)) return null;
+  const colon = t.search(/[:：]/);
+  if (colon <= 0) return null;
+  const refs = extractSectionRefs(t.slice(0, colon));
+  if (!refs.length) return null;
+  const message = t.slice(colon + 1).trim();
+  if (message.length < 3) return null;
+  const r = refs[0]!;
+  return {
+    section: r.sectionName ? `${r.classKey}${r.sectionName}` : r.classKey,
+    message,
+  };
+}
+
+/** Devanagari in the message means the Hindi template, when one is approved. */
+export function messageScriptLanguage(text: string): "hi" | "en" {
+  return /[\u0900-\u097F]/.test(text || "") ? "hi" : "en";
+}
+
+/**
+ * A notice needs a short title and a body. Staff write one line, so the
+ * title is derived from it and the body stays whole — parents see both.
+ */
+export function noticeTitleFrom(message: string): string {
+  const first = (message || "").split(/\n|;|\.(?=\s|$)/)[0]!.trim() || (message || "").trim();
+  return first.length > 60 ? `${first.slice(0, 57).trimEnd()}…` : first;
+}
+
+/** Fill {{name}} placeholders from a template body. */
+export function renderTemplateBody(body: string, vars: Record<string, string>): string {
+  return (body || "").replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_m, key: string) =>
+    vars[key] !== undefined ? vars[key] : `{{${key}}}`,
+  );
+}
+
+export function formatClassMessageCard(input: {
+  sectionLabel: string;
+  templateLabel: string;
+  rendered: string;
+  familyCount: number;
+  optedOut: number;
+}): string {
+  const lines = [
+    `*Message ${input.sectionLabel} parents*`,
+    `Template: ${input.templateLabel}`,
+    "",
+    input.rendered,
+    "",
+    `Goes to ${input.familyCount} famil${input.familyCount === 1 ? "y" : "ies"}.`,
+  ];
+  if (input.optedOut) {
+    lines.push(`${input.optedOut} opted out of WhatsApp and will not receive it.`);
+  }
+  return lines.join("\n");
+}
+
+// ─── Staff broadcast (write) ───────────────────────────────────────────
+
+const STAFF_AUDIENCE_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(staff|teachers?|faculty|employees?|karmchari|कर्मचारी|शिक्षकों|स्टाफ)(?![\p{L}\p{M}\p{N}])/iu;
+
+/**
+ * "Staff broadcast: meeting 3 pm in library", "tell all staff: …",
+ * "sabhi staff ko bhejo: …". Needs a staff audience word, a sending verb
+ * or the word broadcast, and the message after a colon. A section in the
+ * message means it is about a class, not the whole staff, so it is left
+ * to the class-message command.
+ */
+export function parseStaffBroadcastQuery(text: string): string | null {
+  const t = (text || "").trim();
+  if (!t || !STAFF_AUDIENCE_WORD.test(t)) return null;
+  const colon = t.search(/[:：]/);
+  if (colon <= 0) return null;
+  const head = t.slice(0, colon);
+  if (!SEND_VERB.test(head) && !/(?<![\p{L}\p{M}\p{N}])broadcast(?![\p{L}\p{M}\p{N}])/iu.test(head)) {
+    return null;
+  }
+  if (PARENT_WORD.test(head)) return null;
+  if (extractSectionRefs(head).length) return null;
+  const message = t.slice(colon + 1).trim();
+  return message.length >= 3 ? message : null;
+}
+
+export function formatStaffBroadcastCard(input: {
+  message: string;
+  staffCount: number;
+  templateLabel: string;
+  rendered: string;
+}): string {
+  const lines = [`*Broadcast to staff*`, "", input.rendered || input.message, ""];
+  lines.push(`Goes to ${input.staffCount} staff member${input.staffCount === 1 ? "" : "s"}.`);
+  lines.push(
+    input.templateLabel
+      ? `Phone notification to everyone · WhatsApp via ${input.templateLabel}.`
+      : "Phone notification only — no approved WhatsApp notice template, so WhatsApp is skipped.",
+  );
+  return lines.join("\n");
+}
+
+// ─── Log a family's complaint (write) ──────────────────────────────────
+
+const COMPLAINT_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(complaints?|shikayat|शिकायत|grievance|issue\s+raised)(?![\p{L}\p{M}\p{N}])/iu;
+
+const COMPLAINT_HEAD_FILLER = new Set([
+  "raise", "raised", "log", "logged", "record", "add", "note", "file", "register", "enter",
+  "complaint", "complaints", "shikayat", "शिकायत", "grievance", "for", "from", "of", "about",
+  "ki", "ka", "ke", "student", "child", "parent", "parents", "please", "pls", "darj", "karo", "kar", "do",
+  "दर्ज", "की", "का", "के", "करो",
+]);
+
+export type RaiseComplaintParse = { student: string; body: string };
+
+/**
+ * "Raise complaint for Riya Verma: bus did not come today". Needs a
+ * complaint word, a name before the colon and the complaint after it. The
+ * words after the colon are the family's own, so they are kept verbatim.
+ */
+export function parseRaiseComplaintQuery(text: string): RaiseComplaintParse | null {
+  const t = (text || "").trim();
+  if (!t || !COMPLAINT_WORD.test(t)) return null;
+  const colon = t.search(/[:：]/);
+  if (colon <= 0) return null;
+  const head = t.slice(0, colon);
+  const body = t.slice(colon + 1).trim();
+  if (body.length < 3) return null;
+  const refs = extractSectionRefs(head);
+  let rest = head.toLowerCase();
+  if (refs.length) {
+    rest = rest
+      .replace(/(?<![\p{L}\p{M}\p{N}])(?:class|grade|std|kaksha|कक्षा)\s*[a-z0-9]+(?:st|nd|rd|th)?\s*(?:-|\s)?\s*(?:section|sec\.?)?\s*[a-h]?(?![\p{L}\p{M}\p{N}])/giu, " ")
+      .replace(/(?<![a-z0-9])(\d{1,2}|[ivx]{1,4}|nursery|lkg|ukg|kg|pg)(?:st|nd|rd|th)?\s*-?\s*[a-h](?![a-z0-9])/g, " ");
+  }
+  const words = rest
+    .replace(/[^\p{L}\p{M}\p{N}\s'.-]/gu, " ")
+    .split(/\s+/)
+    .map((w) => w.replace(/^[.'-]+|[.'-]+$/g, ""))
+    .filter((w) => w && !COMPLAINT_HEAD_FILLER.has(w) && !/^\d+$/.test(w));
+  const name = words.join(" ").trim();
+  if (!name || !/[\p{L}\p{M}]{2,}/u.test(name)) return null;
+  const sec = refs[0];
+  return {
+    student: [name, sec ? `${sec.classKey}${sec.sectionName}` : ""].filter(Boolean).join(" "),
+    body,
+  };
+}
+
+/**
+ * A first guess at the category from the family's words, shown on the card
+ * so the office can see it before it is filed — and changed afterwards in
+ * the complaints workspace, which is the system of record for it.
+ */
+export function guessComplaintCategory(body: string): string {
+  const t = (body || "").toLowerCase();
+  if (/(?<![\p{L}])(bus|van|driver|route|stop|conductor|transport|बस)(?![\p{L}])/iu.test(t)) return "transport";
+  if (/(?<![\p{L}])(fee|fees|receipt|refund|payment|फीस)(?![\p{L}])/iu.test(t)) return "fees";
+  if (/(?<![\p{L}])(teacher|madam|sir|staff|behaviour|behavior|rude|शिक्षक)(?![\p{L}])/iu.test(t)) return "staff_behavior";
+  if (/(?<![\p{L}])(safety|unsafe|injury|hurt|bully|bullying|accident|सुरक्षा)(?![\p{L}])/iu.test(t)) return "safety";
+  if (/(?<![\p{L}])(toilet|washroom|water|fan|light|projector|classroom|canteen|food|building|repair|मरम्मत)(?![\p{L}])/iu.test(t)) return "facilities";
+  if (/(?<![\p{L}])(homework|marks|exam|syllabus|class|study|padhai|पढ़ाई)(?![\p{L}])/iu.test(t)) return "academic";
+  return "other";
+}
+
+export function complaintSubjectFrom(body: string): string {
+  const first = (body || "").split(/\n|;|\.(?=\s|$)/)[0]!.trim() || (body || "").trim();
+  return first.length > 110 ? `${first.slice(0, 107).trimEnd()}…` : first;
+}
+
+export function formatRaiseComplaintCard(input: {
+  studentName: string;
+  classLabel: string;
+  guardianName: string;
+  categoryLabel: string;
+  subject: string;
+  body: string;
+}): string {
+  return [
+    `*Log complaint* · ${input.studentName} · ${input.classLabel}`,
+    `Category: ${input.categoryLabel}`,
+    "",
+    input.body,
+    "",
+    `Filed against ${input.guardianName || "the family"}'s record, as taken by the office.`,
+    "The family is not messaged; it goes to the complaints queue.",
+  ].join("\n");
+}
+
+// ─── Approve / reject leave (write) ────────────────────────────────────
+
+const APPROVE_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(approve|approved|accept|grant|sanction|manjoor|manzoor|मंजूर|स्वीकृत|allow)(?![\p{L}\p{M}\p{N}])/iu;
+
+const REJECT_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(reject|rejected|decline|deny|refuse|namanjoor|na\s*manjoor|अस्वीकृत|मना)(?![\p{L}\p{M}\p{N}])/iu;
+
+const LEAVE_NOUN =
+  /(?<![\p{L}\p{M}\p{N}])(leave|chutti|chhutti|छुट्टी|avkash|अवकाश)(?![\p{L}\p{M}\p{N}])/iu;
+
+const LEAVE_DECIDE_FILLER = new Set([
+  "approve", "approved", "accept", "grant", "sanction", "manjoor", "manzoor", "allow", "karo", "kar", "do",
+  "reject", "rejected", "decline", "deny", "refuse", "namanjoor", "na",
+  "leave", "leaves", "chutti", "chhutti", "avkash", "request", "requests", "application",
+  "for", "of", "the", "please", "pls", "ki", "ka", "ke", "ko", "s",
+  "मंजूर", "स्वीकृत", "अस्वीकृत", "मना", "छुट्टी", "अवकाश", "की", "का", "के", "करो",
+]);
+
+export type DecideLeaveParse = { student: string; approve: boolean; note: string };
+
+/**
+ * "Approve Aarav's leave", "reject Kabir Ali leave: no medical
+ * certificate", "Aarav Sharma ki chutti manjoor karo". Needs a decision
+ * verb, the word leave, and a name — the pending-leaves *list* command
+ * must not be caught, so a message with no name is not this.
+ */
+export function parseDecideLeaveQuery(text: string): DecideLeaveParse | null {
+  const t = (text || "").trim();
+  if (!t || !LEAVE_NOUN.test(t)) return null;
+  const approve = APPROVE_WORD.test(t);
+  const reject = REJECT_WORD.test(t);
+  if (approve === reject) return null; // neither, or contradictory
+  const colon = t.search(/[:：]/);
+  const head = colon > 0 ? t.slice(0, colon) : t;
+  const note = colon > 0 ? t.slice(colon + 1).trim() : "";
+  const refs = extractSectionRefs(head);
+  let rest = head.toLowerCase();
+  if (refs.length) {
+    rest = rest
+      .replace(/(?<![\p{L}\p{M}\p{N}])(?:class|grade|std|kaksha|कक्षा)\s*[a-z0-9]+(?:st|nd|rd|th)?\s*(?:-|\s)?\s*(?:section|sec\.?)?\s*[a-h]?(?![\p{L}\p{M}\p{N}])/giu, " ")
+      .replace(/(?<![a-z0-9])(\d{1,2}|[ivx]{1,4}|nursery|lkg|ukg|kg|pg)(?:st|nd|rd|th)?\s*-?\s*[a-h](?![a-z0-9])/g, " ");
+  }
+  const words = rest
+    .replace(/[’']s(?![\p{L}])/giu, " ")
+    .replace(/[^\p{L}\p{M}\p{N}\s'.-]/gu, " ")
+    .split(/\s+/)
+    .map((w) => w.replace(/^[.'-]+|[.'-]+$/g, ""))
+    .filter((w) => w && !LEAVE_DECIDE_FILLER.has(w) && !/^\d+$/.test(w));
+  const name = words.join(" ").trim();
+  if (!name || !/[\p{L}\p{M}]{2,}/u.test(name)) return null;
+  const sec = refs[0];
+  return {
+    student: [name, sec ? `${sec.classKey}${sec.sectionName}` : ""].filter(Boolean).join(" "),
+    approve,
+    note,
+  };
+}
+
+export type PendingLeaveOption = {
+  id: string;
+  fromDate: string;
+  toDate: string;
+  typeLabel: string;
+  reason: string;
+};
+
+export function formatLeaveRequestPicker(
+  studentName: string,
+  options: PendingLeaveOption[],
+): string {
+  const lines = [`${studentName} has ${options.length} pending leave requests:`];
+  options.forEach((o, i) => {
+    const span = o.fromDate === o.toDate ? shortDate(o.fromDate) : `${shortDate(o.fromDate)}–${shortDate(o.toDate)}`;
+    lines.push(`${i + 1}. ${span} · ${o.typeLabel}${o.reason ? ` · ${o.reason}` : ""}`);
+  });
+  lines.push("Say the dates to pick one, e.g. _approve Aarav leave 8 Sep_.");
+  return lines.join("\n");
+}
+
+export function formatDecideLeaveCard(input: {
+  approve: boolean;
+  studentName: string;
+  classLabel: string;
+  fromDate: string;
+  toDate: string;
+  days: number;
+  typeLabel: string;
+  reason: string;
+  note: string;
+  approverHint: string;
+  applyDates: number;
+  futureDates: number;
+}): string {
+  const span =
+    input.fromDate === input.toDate
+      ? shortDate(input.fromDate)
+      : `${shortDate(input.fromDate)}–${shortDate(input.toDate)} (${input.days}d)`;
+  const lines = [
+    `*${input.approve ? "Approve" : "Reject"} leave* · ${input.studentName} · ${input.classLabel}`,
+    `${span} · ${input.typeLabel}${input.reason ? ` · ${input.reason}` : ""}`,
+  ];
+  if (input.note) lines.push(`Note: ${input.note}`);
+  lines.push("", `Normally decided by: ${input.approverHint}`);
+  if (input.approve) {
+    if (input.applyDates) {
+      lines.push(`Marks leave on ${input.applyDates} day${input.applyDates === 1 ? "" : "s"} already registered.`);
+    }
+    if (input.futureDates) {
+      lines.push(
+        `${input.futureDates} day${input.futureDates === 1 ? "" : "s"} not yet marked — mark those as usual; the class is not pre-marked.`,
+      );
+    }
+  }
+  lines.push("The family is told either way.");
+  return lines.join("\n");
+}
+
+// ─── Fee reminders to a class's defaulters (write) ─────────────────────
+
+const REMIND_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(reminders?|remind|yaad\s*dilao|अनुस्मारक|स्मरण|nudge|chase)(?![\p{L}\p{M}\p{N}])/iu;
+
+/**
+ * "Send fee reminder to class 3 defaulters", "fee reminder 5A defaulters",
+ * "class 5 ke bakayedar ko fee reminder bhejo". Needs a reminder word, a
+ * fee word and a class — asking to *see* the defaulters is a different
+ * command and must not start messaging families.
+ */
+export function parseFeeReminderQuery(text: string): string | null {
+  const t = (text || "").trim();
+  if (!t || !REMIND_WORD.test(t)) return null;
+  if (!FEE_WORDS.test(t) && !DEFAULTER_WORDS.test(t)) return null;
+  const refs = extractSectionRefs(t);
+  if (!refs.length) return null;
+  const r = refs[0]!;
+  return r.sectionName ? `${r.classKey}${r.sectionName}` : r.classKey;
+}
+
+export type FeeReminderCardRow = {
+  studentName: string;
+  classLabel: string;
+  amountPaise: number;
+  overdueDays: number;
+};
+
+export function formatFeeReminderCard(input: {
+  title: string;
+  templateLabel: string;
+  send: FeeReminderCardRow[];
+  tooSoon: { studentName: string; daysAgo: number }[];
+  optedOut: number;
+  formatInr: (paise: number) => string;
+}): string {
+  const inr = input.formatInr;
+  const total = input.send.reduce((n, r) => n + r.amountPaise, 0);
+  const lines = [
+    `*Fee reminder* · ${input.title}`,
+    `Template: ${input.templateLabel}`,
+  ];
+  if (!input.send.length) {
+    lines.push("", "Nobody to remind right now.");
+  } else {
+    lines.push(
+      "",
+      `${input.send.length} famil${input.send.length === 1 ? "y" : "ies"} · ${inr(total)} overdue`,
+      "",
+      "*Each family gets their own amount*",
+    );
+    for (const r of input.send.slice(0, 15)) {
+      lines.push(`${r.studentName} (${r.classLabel})  ${inr(r.amountPaise)} · ${r.overdueDays}d`);
+    }
+    if (input.send.length > 15) lines.push(`+${input.send.length - 15} more`);
+  }
+  if (input.tooSoon.length) {
+    lines.push(
+      "",
+      `*Skipped — reminded this week:* ${input.tooSoon
+        .slice(0, 8)
+        .map((t) => `${t.studentName} (${t.daysAgo}d ago)`)
+        .join(", ")}${input.tooSoon.length > 8 ? ` +${input.tooSoon.length - 8} more` : ""}`,
+    );
+  }
+  if (input.optedOut) {
+    lines.push(`${input.optedOut} opted out of WhatsApp and will not receive it.`);
+  }
+  return lines.join("\n");
+}
+
+// ─── Fee reminder guards (pure) ────────────────────────────────────────
+
+/** The school's automation default: nothing goes out 20:00–08:00 IST. */
+export const FEE_REMINDER_QUIET_START = 20;
+export const FEE_REMINDER_QUIET_END = 8;
+export const FEE_REMINDER_MIN_DAYS_BETWEEN = 7;
+
+export function istHourOf(now: Date): number {
+  return new Date(now.getTime() + 330 * 60_000).getUTCHours();
+}
+
+export function inFeeReminderQuietHours(hour: number): boolean {
+  return hour >= FEE_REMINDER_QUIET_START || hour < FEE_REMINDER_QUIET_END;
+}
+
+/** Whole days between two ISO dates; null when the first is missing. */
+export function daysSince(lastIso: string | undefined, todayIso: string): number | null {
+  if (!lastIso) return null;
+  const a = Date.parse(`${lastIso.slice(0, 10)}T00:00:00Z`);
+  const b = Date.parse(`${todayIso}T00:00:00Z`);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  return Math.round((b - a) / 86_400_000);
+}
+
+/** Reminded within the cap → skip, and say how long ago. */
+export function feeReminderTooSoon(
+  lastIso: string | undefined,
+  todayIso: string,
+): { skip: boolean; daysAgo: number | null } {
+  const ago = daysSince(lastIso, todayIso);
+  return { skip: ago !== null && ago < FEE_REMINDER_MIN_DAYS_BETWEEN, daysAgo: ago };
+}
+
+// ─── Payment link for one family (write) ───────────────────────────────
+
+const PAY_LINK_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(pay(?:ment)?\s*link|fee\s*link|payment\s*url|bhugtan\s*link|भुगतान\s*लिंक)(?![\p{L}\p{M}\p{N}])/iu;
+
+const PAY_LINK_FILLER = new Set([
+  "payment", "pay", "link", "links", "fee", "fees", "url", "send", "raise", "create", "generate",
+  "make", "bhejo", "bhej", "do", "banao", "karo", "for", "to", "of", "the", "please", "pls",
+  "ki", "ka", "ke", "ko", "bhugtan", "भुगतान", "लिंक", "भेजो", "की", "का", "के", "को",
+]);
+
+/**
+ * "Payment link for Riya Verma", "send pay link to Aarav Sharma", "Amay
+ * Gupta 4B ko payment link bhejo". Needs the words *payment link* and a
+ * name — a class-wide ask is the fee-reminder command, not one link.
+ */
+export function parsePayLinkQuery(text: string): string | null {
+  const t = (text || "").trim();
+  if (!t || !PAY_LINK_WORD.test(t)) return null;
+  const refs = extractSectionRefs(t);
+  let rest = t.toLowerCase();
+  if (refs.length) {
+    rest = rest
+      .replace(/(?<![\p{L}\p{M}\p{N}])(?:class|grade|std|kaksha|कक्षा)\s*[a-z0-9]+(?:st|nd|rd|th)?\s*(?:-|\s)?\s*(?:section|sec\.?)?\s*[a-h]?(?![\p{L}\p{M}\p{N}])/giu, " ")
+      .replace(/(?<![a-z0-9])(\d{1,2}|[ivx]{1,4}|nursery|lkg|ukg|kg|pg)(?:st|nd|rd|th)?\s*-?\s*[a-h](?![a-z0-9])/g, " ");
+  }
+  const words = rest
+    .replace(/[^\p{L}\p{M}\p{N}\s'.-]/gu, " ")
+    .split(/\s+/)
+    .map((w) => w.replace(/^[.'-]+|[.'-]+$/g, ""))
+    .filter((w) => w && !PAY_LINK_FILLER.has(w) && !/^\d+$/.test(w));
+  const name = words.join(" ").trim();
+  if (!name || !/[\p{L}\p{M}]{2,}/u.test(name)) return null;
+  const sec = refs[0];
+  return [name, sec ? `${sec.classKey}${sec.sectionName}` : ""].filter(Boolean).join(" ");
+}
+
+export function formatPayLinkCard(input: {
+  studentName: string;
+  classLabel: string;
+  guardianName: string;
+  mobileMasked: string;
+  rows: { label: string; headName: string; amountPaise: number }[];
+  totalPaise: number;
+  expiresInDays: number;
+  templateReady: boolean;
+  formatInr: (paise: number) => string;
+}): string {
+  const inr = input.formatInr;
+  const lines = [
+    `*Payment link* · ${input.studentName} · ${input.classLabel}`,
+    `Amount: *${inr(input.totalPaise)}*`,
+    "",
+    "*Covers*",
+  ];
+  const byLabel = new Map<string, number>();
+  for (const r of input.rows) {
+    const key = `${r.label} · ${r.headName}`.replace(/^ · /, "");
+    byLabel.set(key, (byLabel.get(key) ?? 0) + r.amountPaise);
+  }
+  for (const [key, paise] of byLabel) lines.push(`${key}  ${inr(paise)}`);
+  lines.push(
+    "",
+    `Goes to ${input.guardianName || "the parent"} ${input.mobileMasked}`.trim(),
+    `Valid ${input.expiresInDays} days. Future months are not included.`,
+  );
+  lines.push(
+    input.templateReady
+      ? "The receipt is sent automatically once they pay."
+      : "⚠️ No approved pay-link template — the link will be created but not sent; share it yourself.",
+  );
+  return lines.join("\n");
+}
+
+// ─── Book a PTM slot for a family (write) ──────────────────────────────
+
+const PTM_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(ptm|parent[\s-]*teacher\s*meeting|पीटीएम)(?![\p{L}\p{M}\p{N}])/iu;
+
+/**
+ * Booking words. Without one of these "PTM kab hai" — a question about the
+ * date — would be read as an instruction to book something.
+ */
+const PTM_BOOK_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(book(?:ing)?|slot|schedule|appointment|fix|reserve|बुक|स्लॉट)(?![\p{L}\p{M}\p{N}])/iu;
+
+/**
+ * "Riya ka PTM slot kab hai" carries both words but is a question about
+ * the timetable, not an instruction; booking against it would put a
+ * question word into the student's name.
+ */
+const PTM_QUESTION_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(kab|kaun|kon|kya|kitne|kitna|when|what|which|who|available|khali|khaali)(?![\p{L}\p{M}\p{N}])/iu;
+
+const PTM_FILLER = new Set([
+  "ptm", "book", "booking", "slot", "slots", "schedule", "appointment", "fix", "reserve",
+  "parent", "parents", "teacher", "teachers", "meeting", "for", "to", "of", "at", "on", "the",
+  "with", "please", "pls", "karo", "kar", "do", "dijiye", "ka", "ki", "ke", "ko", "liye",
+  "am", "pm", "baje", "bje", "time", "पीटीएम", "बुक", "स्लॉट", "समय", "बजे", "का", "की", "के", "को", "लिए",
+]);
+
+/**
+ * A time in a booking message: "10:30", "10.30 am", "2 pm", "11 baje".
+ * A bare number is never a time — "4B" and "roll 4" are far commoner in
+ * these messages than an hour written alone.
+ */
+export function parsePtmTime(
+  text: string,
+): { hh: number; mm: number; meridiem: "am" | "pm" | null } | null {
+  const t = (text || "").trim();
+  const withMinutes =
+    /(?<![\p{L}\p{M}\p{N}])(\d{1,2})[:.](\d{2})\s*(a\.?m\.?|p\.?m\.?)?(?![\p{L}\p{M}\p{N}])/iu.exec(t);
+  if (withMinutes) {
+    const hh = parseInt(withMinutes[1]!, 10);
+    const mm = parseInt(withMinutes[2]!, 10);
+    if (hh <= 23 && mm <= 59) {
+      const mer = (withMinutes[3] || "").toLowerCase().startsWith("p")
+        ? "pm"
+        : withMinutes[3]
+          ? "am"
+          : null;
+      return { hh, mm, meridiem: mer };
+    }
+  }
+  const hourOnly =
+    /(?<![\p{L}\p{M}\p{N}])(\d{1,2})\s*(a\.?m\.?|p\.?m\.?|baje|bje|बजे)(?![\p{L}\p{M}\p{N}])/iu.exec(t);
+  if (hourOnly) {
+    const hh = parseInt(hourOnly[1]!, 10);
+    if (hh <= 23) {
+      const w = (hourOnly[2] || "").toLowerCase();
+      return { hh, mm: 0, meridiem: w.startsWith("p") ? "pm" : w.startsWith("a") ? "am" : null };
+    }
+  }
+  return null;
+}
+
+/**
+ * The "HH:MM" values a written time could mean, best first.
+ *
+ * "10:30" is 10:30 in a school day; "2:30" almost certainly means the
+ * afternoon. Rather than guess, both readings are returned and the caller
+ * matches them against the slots that actually exist — an hour nobody is
+ * sitting for is never chosen.
+ */
+export function ptmTimeCandidates(t: { hh: number; mm: number; meridiem: "am" | "pm" | null }): string[] {
+  const pad = (h: number, m: number) => `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  if (t.meridiem === "pm") return [pad(t.hh === 12 ? 12 : (t.hh % 12) + 12, t.mm)];
+  if (t.meridiem === "am") return [pad(t.hh === 12 ? 0 : t.hh, t.mm)];
+  const out = [pad(t.hh, t.mm)];
+  if (t.hh >= 1 && t.hh <= 7) out.push(pad(t.hh + 12, t.mm));
+  return out;
+}
+
+/**
+ * "Book PTM slot for Riya Verma, 10:30", "Riya Verma ka PTM 10:30 book
+ * karo". Needs the PTM word, a booking word and a name; the time is
+ * optional — without it the desk offers the open times.
+ */
+export function parseBookPtmQuery(
+  text: string,
+): { student: string; time: string } | null {
+  const t = (text || "").trim();
+  if (!t || !PTM_WORD.test(t) || !PTM_BOOK_WORD.test(t)) return null;
+  if (/[?？]\s*$/.test(t) || PTM_QUESTION_WORD.test(t)) return null;
+  const time = parsePtmTime(t);
+  const refs = extractSectionRefs(t);
+  let rest = t.toLowerCase();
+  // Strip the time before the name is read, so "10:30" cannot become part
+  // of it, and the section, which is carried separately.
+  rest = rest.replace(/(?<![\p{L}\p{M}\p{N}])\d{1,2}[:.]\d{2}(?![\p{L}\p{M}\p{N}])/gu, " ");
+  if (refs.length) {
+    rest = rest
+      .replace(/(?<![\p{L}\p{M}\p{N}])(?:class|grade|std|kaksha|कक्षा)\s*[a-z0-9]+(?:st|nd|rd|th)?\s*(?:-|\s)?\s*(?:section|sec\.?)?\s*[a-h]?(?![\p{L}\p{M}\p{N}])/giu, " ")
+      .replace(/(?<![a-z0-9])(\d{1,2}|[ivx]{1,4}|nursery|lkg|ukg|kg|pg)(?:st|nd|rd|th)?\s*-?\s*[a-h](?![a-z0-9])/g, " ");
+  }
+  const words = rest
+    .replace(/[^\p{L}\p{M}\p{N}\s'.-]/gu, " ")
+    .split(/\s+/)
+    .map((w) => w.replace(/^[.'-]+|[.'-]+$/g, ""))
+    .filter((w) => w && !PTM_FILLER.has(w) && !/^\d+$/.test(w));
+  const name = words.join(" ").trim();
+  if (!name || !/[\p{L}\p{M}]{2,}/u.test(name)) return null;
+  const sec = refs[0];
+  return {
+    student: [name, sec ? `${sec.classKey}${sec.sectionName}` : ""].filter(Boolean).join(" "),
+    time: time ? `${String(time.hh).padStart(2, "0")}:${String(time.mm).padStart(2, "0")}${time.meridiem ?? ""}` : "",
+  };
+}
+
+/** The open times, when the message named none or named one that is taken. */
+export function formatPtmSlotPicker(input: {
+  studentName: string;
+  eventName: string;
+  eventDate: string;
+  slots: { startAt: string; teacherName: string; free: number }[];
+  askedTime?: string;
+}): string {
+  if (!input.slots.length) {
+    return `Every slot in ${input.eventName} (${shortDate(input.eventDate)}) is full. Add slots in the ERP: PTM → slots.`;
+  }
+  const lines = [
+    input.askedTime
+      ? `No free slot at ${input.askedTime} in ${input.eventName} (${shortDate(input.eventDate)}).`
+      : `${input.eventName} · ${shortDate(input.eventDate)} — open times for ${input.studentName}:`,
+  ];
+  if (input.askedTime) lines.push(`Open times for ${input.studentName}:`);
+  for (const s of input.slots.slice(0, 12)) {
+    lines.push(`${s.startAt} · ${s.teacherName}${s.free > 1 ? ` (${s.free} places)` : ""}`);
+  }
+  if (input.slots.length > 12) lines.push(`…and ${input.slots.length - 12} more.`);
+  lines.push("", `Send the time, e.g. _book PTM for ${input.studentName} ${input.slots[0]!.startAt}_.`);
+  return lines.join("\n");
+}
+
+export function formatBookPtmCard(input: {
+  studentName: string;
+  classLabel: string;
+  eventName: string;
+  eventDate: string;
+  modeLabel: string;
+  startAt: string;
+  endAt: string;
+  teacherName: string;
+  roomOrLink: string;
+  guardianName: string;
+  mobileMasked: string;
+  /** False when no household is linked — then nobody can be told. */
+  familyLinked: boolean;
+  templateLabel: string;
+}): string {
+  const lines = [
+    `*Book PTM* · ${input.studentName} · ${input.classLabel}`,
+    `${input.eventName} · ${shortDate(input.eventDate)} · ${input.startAt}–${input.endAt}`,
+    `With: ${input.teacherName}`,
+  ];
+  if (input.roomOrLink) lines.push(`Where: ${input.roomOrLink} (${input.modeLabel})`);
+  else lines.push(`Mode: ${input.modeLabel}`);
+  lines.push("");
+  if (!input.familyLinked) {
+    lines.push(
+      "⚠️ No family record is linked to this child, so nobody can be told — the slot is only held in the ERP.",
+    );
+    return lines.join("\n");
+  }
+  lines.push(
+    `Booked for ${input.guardianName || "the parent"}${input.mobileMasked ? ` ${input.mobileMasked}` : ""}, who is told on the parent app.`,
+  );
+  lines.push(
+    input.templateLabel
+      ? `WhatsApp: ${input.templateLabel}`
+      : "⚠️ No approved notice template — the family is told on the app only.",
+  );
+  return lines.join("\n");
+}
+
+// ─── Bus delay notice to a route's families (write) ────────────────────
+
+/**
+ * Match a bus or route as staff wrote it against the fleet: exact on bus
+ * number, route code or name first, then a contained match. Shared by the
+ * manifest reading and the delay notice, so a name that resolves for one
+ * resolves identically for the other.
+ */
+export function matchTransportRoutes<T extends { code: string; name: string; busNo: string }>(
+  routes: T[],
+  asked: string,
+): T[] {
+  const norm = (v: string) => (v || "").trim().toLowerCase().replace(/\s+/g, "");
+  const want = norm(asked);
+  if (!want) return [];
+  const exact = routes.filter(
+    (r) => norm(r.busNo) === want || norm(r.code) === want || norm(r.name) === want,
+  );
+  if (exact.length) return exact;
+  return routes.filter(
+    (r) => norm(r.name).includes(want) || norm(r.code).includes(want) || norm(r.busNo).includes(want),
+  );
+}
+
+const BUS_DELAY_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(late|delay(?:ed)?|deri|der|देरी|देर|लेट|vilamb|विलंब)(?![\p{L}\p{M}\p{N}])/iu;
+
+/**
+ * Minutes must carry a unit. The bus number and the delay are both bare
+ * numbers in "bus 3, 20 minute late", and telling a route's families the
+ * wrong one of the two is worse than asking again.
+ */
+const BUS_DELAY_MINUTES =
+  /(?<![\p{L}\p{M}\p{N}])(\d{1,3})\s*(?:-|\s)?\s*(mins?\.?|minutes?|minat|min|मिनट|मि\.?)(?![\p{L}\p{M}\p{N}])/iu;
+
+/** "half an hour late", "aadha ghanta late" — the one worded delay staff use. */
+const BUS_DELAY_HALF_HOUR =
+  /(?<![\p{L}\p{M}\p{N}])(half\s*(?:an?\s*)?hour|aadha\s*ghanta|आधा\s*घंटा)(?![\p{L}\p{M}\p{N}])/iu;
+
+const BUS_DELAY_HOUR =
+  /(?<![\p{L}\p{M}\p{N}])(\d{1,2})\s*(hours?|hrs?\.?|ghante?|घंटे?)(?![\p{L}\p{M}\p{N}])/iu;
+
+/**
+ * "Bus 3 ko batao: 20 minute late", "bus 5 is running 15 mins late",
+ * "route A 20 minute late", "बस 3 आधा घंटा लेट". Returns the route as
+ * written — the server matches it against bus number, code and name, the
+ * same way the manifest command does — and the delay in minutes.
+ *
+ * A delay with no readable duration returns the route and 0, so the desk
+ * can ask "how late?" rather than guessing a number that reaches families.
+ */
+export function parseBusDelayQuery(
+  text: string,
+): { route: string; minutes: number } | null {
+  const t = (text || "").trim();
+  if (!t || !BUS_WORDS.test(t) || !BUS_DELAY_WORD.test(t)) return null;
+  const m =
+    /(?<![\p{L}\p{M}\p{N}])(?:bus|route|van|बस|रूट)\s*(?:no\.?|number|#)?\s*([\p{L}\p{N}][\p{L}\p{N}-]{0,15})(?![\p{L}\p{M}\p{N}])/iu.exec(t);
+  if (!m) return null;
+  const route = m[1]!;
+  if (/^(no|number|is|ko|ka|ki|ke|me|mein|late|delayed|deri|running|chal)$/i.test(route)) return null;
+  let minutes = 0;
+  const mins = BUS_DELAY_MINUTES.exec(t);
+  const hours = BUS_DELAY_HOUR.exec(t);
+  if (mins) minutes = parseInt(mins[1]!, 10);
+  else if (BUS_DELAY_HALF_HOUR.test(t)) minutes = 30;
+  else if (hours) minutes = parseInt(hours[1]!, 10) * 60;
+  return { route, minutes };
+}
+
+/** A delay nobody would send on purpose is a typo, not an instruction. */
+export const BUS_DELAY_MAX_MINUTES = 180;
+
+export function formatBusDelayCard(input: {
+  routeLabel: string;
+  minutesLate: number;
+  /** Families with a rider on the route who can be messaged now. */
+  send: { studentName: string; classLabel: string; stopName: string }[];
+  optedOut: number;
+  suspended: number;
+  noMobile: number;
+  templateLabel: string;
+  /** Minutes since this route's families were last told, if recently. */
+  lastNoticeMinutesAgo?: number;
+}): string {
+  const lines = [
+    `*Bus delay* · ${input.routeLabel}`,
+    `Running *${input.minutesLate} minutes late*`,
+    `Template: ${input.templateLabel}`,
+  ];
+  if (input.lastNoticeMinutesAgo !== undefined) {
+    lines.push(
+      `⚠️ This route's families were told ${input.lastNoticeMinutesAgo} minute${input.lastNoticeMinutesAgo === 1 ? "" : "s"} ago. Send again only if the delay has changed.`,
+    );
+  }
+  lines.push("", `*Goes to ${input.send.length} famil${input.send.length === 1 ? "y" : "ies"}*`);
+  const byStop = new Map<string, string[]>();
+  for (const r of input.send) {
+    const key = r.stopName || "Stop not set";
+    byStop.set(key, [...(byStop.get(key) ?? []), `${r.studentName} (${r.classLabel})`]);
+  }
+  for (const [stop, kids] of byStop) {
+    lines.push(`${stop} — ${kids.length <= 3 ? kids.join(", ") : `${kids.slice(0, 3).join(", ")} +${kids.length - 3}`}`);
+  }
+  const skipped: string[] = [];
+  if (input.suspended) skipped.push(`${input.suspended} suspended from boarding`);
+  if (input.noMobile) skipped.push(`${input.noMobile} with no WhatsApp number`);
+  if (input.optedOut) skipped.push(`${input.optedOut} opted out`);
+  if (skipped.length) lines.push("", `Not messaged: ${skipped.join(", ")}.`);
+  lines.push("", "Each family gets their own child's name and stop.");
+  return lines.join("\n");
+}

@@ -75,6 +75,7 @@ export async function POST(req: Request) {
       ok: true,
       draft: r.draft,
       broadcast: r.broadcast,
+      erp: r.erp,
     });
   }
 

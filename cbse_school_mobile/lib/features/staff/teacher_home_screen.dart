@@ -10,6 +10,7 @@ import "presence_screen.dart";
 import "../modules/teaching_screen.dart";
 import "attendance_screen.dart";
 import "admission_leads_screen.dart";
+import "command_bar.dart";
 import "documents_screen.dart";
 import "fee_counter_screen.dart";
 import "fee_defaulters_screen.dart";
@@ -556,6 +557,14 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  StaffCommandBar(
+                    api: widget.api,
+                    suggestions: [
+                      if (ct != null)
+                        "${ct.className}${ct.sectionName} absent today",
+                      "COMMANDS",
+                    ],
+                  ),
                   Card(
                     margin: const EdgeInsets.only(bottom: 16),
                     child: ListTile(

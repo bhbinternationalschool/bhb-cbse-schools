@@ -212,6 +212,8 @@ SELFTESTS=(
   test:wa-delivery-log
   test:wa-sequences
   test:wa-staff-att-bot
+  test:erp-commands
+  test:class-channel-apply
 )
 
 bold "Verifying $(git rev-parse --short HEAD 2>/dev/null || echo 'working tree') on $(git branch --show-current 2>/dev/null || echo '?')"

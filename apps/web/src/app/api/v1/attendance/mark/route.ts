@@ -1,18 +1,14 @@
 import { writeAudit } from "@/lib/audit.server";
-import { apiErr, apiOk } from "@/lib/api/v1/errors";
+import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import {
   assertPermission,
   requestMeta,
   resolveApiAuth,
 } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { ensureAttendanceHydratedServer } from "@/lib/attendancePersistence";
-import { upsertRegister, type AttendanceMark, type AttendanceStatus } from "@/lib/attendance";
-import { ensureSisHydratedServer } from "@/lib/sisPersistence";
-import { loadSis } from "@/lib/sis";
-import { classLabel } from "@/lib/homework";
-import { sendPushToSubject } from "@/lib/webPush.server";
 import { assertSectionScope } from "@/lib/api/v1/staffScope";
+import { markAttendanceServer } from "@/lib/attendanceMark.server";
+import type { AttendanceMark, AttendanceStatus } from "@/lib/attendance";
 
 export const runtime = "nodejs";
 
@@ -33,15 +29,18 @@ export async function POST(request: Request) {
 
     const body = (await request.json()) as MarkBody;
     if (!body.sectionId || !body.classId || !body.date || !body.marks?.length) {
-      const { ApiError } = await import("@/lib/api/v1/errors");
-      throw new ApiError("bad_request", "classId, sectionId, date, marks required", 400);
+      throw new ApiError(
+        "bad_request",
+        "classId, sectionId, date, marks required",
+        400,
+      );
     }
 
     await ensureSchoolMirrorHydrated();
     // Class teacher, a subject teacher on the section's timetable, or the
     // office — the module permission alone let any staff login mark any class.
+    // This is the route's own guard; the command desk checks its own scope.
     await assertSectionScope(ctx, body.classId, body.sectionId);
-    await ensureAttendanceHydratedServer();
 
     const marks: AttendanceMark[] = body.marks.map((m) => ({
       studentId: m.studentId,
@@ -49,60 +48,19 @@ export async function POST(request: Request) {
       note: m.note || "",
     }));
 
-    const result = upsertRegister({
-      academicYearCode: body.academicYearCode || ctx.session.academicYearCode,
-      campusId: "",
+    // Upsert + persist + alert live in one server-side helper, shared with
+    // the ERP command desk so both cannot drift apart.
+    const result = await markAttendanceServer({
+      session: ctx.session,
+      masters: ctx.masters,
+      academicYearCode: body.academicYearCode,
       classId: body.classId,
       sectionId: body.sectionId,
       date: body.date,
       marks,
-      markedBy: ctx.session.fullName,
-      remark: body.remark || "",
-      skipLockCheck: true,
+      remark: body.remark,
     });
-
-    if (!result.ok) {
-      const { ApiError } = await import("@/lib/api/v1/errors");
-      throw new ApiError("bad_request", result.error, 400);
-    }
-
-    const { pushAttendanceRegisterToDb } = await import(
-      "@/lib/attendanceNormalized.server"
-    );
-    const dbPush = await pushAttendanceRegisterToDb(result.register);
-    if (!dbPush.ok) {
-      console.warn("[attendance-v1] db push failed", dbPush.error);
-    }
-
-    // Absent alert to each absent child's household — only for the marks
-    // in THIS request that are absent, so re-saving a register doesn't
-    // re-alert everyone. Best-effort.
-    let push = { sent: 0, expired: 0, failed: 0 };
-    try {
-      const absent = marks.filter((m) => m.status === "A");
-      if (absent.length) {
-        await ensureSisHydratedServer();
-        const sis = loadSis();
-        const label = classLabel(ctx.masters, body.classId, body.sectionId);
-        for (const m of absent) {
-          const stu = sis.students.find((s) => s.id === m.studentId);
-          if (!stu?.householdId) continue;
-          const r = await sendPushToSubject("parent", stu.householdId, {
-            title: `${stu.fullName} marked absent`,
-            body: `${label} · ${body.date}. If this is unexpected, please contact the class teacher.`,
-            url: `/attendance?studentId=${encodeURIComponent(stu.id)}`,
-            data: { kind: "attendance", studentId: stu.id, date: body.date },
-          });
-          push = {
-            sent: push.sent + r.sent,
-            expired: push.expired + r.expired,
-            failed: push.failed + r.failed,
-          };
-        }
-      }
-    } catch (e) {
-      console.warn("[attendance-v1] push failed", (e as Error)?.message);
-    }
+    if (!result.ok) throw new ApiError("bad_request", result.error, 400);
 
     const meta = requestMeta(request);
     await writeAudit({
@@ -121,7 +79,7 @@ export async function POST(request: Request) {
       registerId: result.register.id,
       date: body.date,
       markCount: marks.length,
-      push,
+      push: result.push,
     });
   } catch (e) {
     return apiErr(e);
