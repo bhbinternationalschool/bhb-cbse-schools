@@ -652,6 +652,26 @@ export function defaultBuiltInRoles(): RbacRole[] {
       ],
     },
     {
+      id: "role_gate",
+      code: "gate",
+      name: "Gate",
+      isBuiltIn: true,
+      isActive: true,
+      makerChecker: false,
+      note: "Guard / gateman — the visitor log at the gate, and own attendance, leave and payslip",
+      permissions: [
+        grant("home", ["view"]),
+        grant("notices", ["view"]),
+        grant("notifications", ["view"]),
+        // view + create is the whole gate: see who is on campus, log someone
+        // in and out. Deliberately NOT `edit` — releasing a child on a gate
+        // pass needs `visitors.edit`, and letting somebody log visitors is
+        // not letting them hand over a child. The office grants that by name
+        // to the person who is trusted with it.
+        grant("visitors", ["view", "create"]),
+      ],
+    },
+    {
       id: "role_support",
       code: "support",
       name: "Support staff",
@@ -1264,6 +1284,9 @@ export function inferRoleCodes(
   if (/transport|fleet/.test(rc)) matched.push("transport");
   if (/teacher|tgt|pgt|prt|faculty|lecturer/.test(rc)) matched.push("teacher");
   if (/driver/.test(rc)) matched.push("driver");
+  if (/^gate$|guard|gate.?man|watch.?man|security|chowkidar/.test(rc)) {
+    matched.push("gate");
+  }
   if (/parent|guardian/.test(rc)) matched.push("parent");
 
   let onRoster = false;
@@ -1280,6 +1303,13 @@ export function inferRoleCodes(
       if (/office|clerk/.test(blob)) matched.push("office");
       if (/accounts|accountant|cashier/.test(blob)) matched.push("accounts");
       if (/driver|conductor|attend[ae]nt/.test(blob)) matched.push("driver");
+      // A guard on the roster gets the gate and nothing else. Before this
+      // they matched nothing and fell through to `support`, which holds no
+      // visitors grant, so the gate could not be put on their phone without
+      // two by-name grants.
+      if (/guard|gate.?man|watch.?man|security|chowkidar/.test(blob)) {
+        matched.push("gate");
+      }
       if (/teacher|tgt|pgt|prt|faculty/.test(blob)) matched.push("teacher");
       if (self.stream === "teaching" && matched.length === 0) {
         matched.push("teacher");
