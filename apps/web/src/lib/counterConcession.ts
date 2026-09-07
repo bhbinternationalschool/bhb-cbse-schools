@@ -17,6 +17,7 @@ import {
   newId,
   saveMasters,
   type ConcessionGrant,
+  type ConcessionGround,
   type ConcessionRule,
   type MastersState,
 } from "@/lib/masters";
@@ -389,6 +390,16 @@ export function applyFutureConcessionsFromCounter(input: {
    * collecting gets a grant that must be approved.
    */
   canApprove?: boolean;
+  /**
+   * WHY this family qualifies — sibling, staff ward, hardship, RTE, and so on.
+   *
+   * The reason line records the MECHANISM ("Fee Take · Counter concession ·
+   * from Tuition Fee"), which is where the discount was applied, not why it
+   * was owed. 108 of 149 live grants say only that, so for 99 of the 120
+   * children on a concession nobody can now say on what ground. This is the
+   * field that stops the hole getting deeper.
+   */
+  ground?: ConcessionGround | "";
 }):
   | {
       ok: true;
@@ -464,6 +475,7 @@ export function applyFutureConcessionsFromCounter(input: {
       id: newId("cg"),
       concessionId: rule.id,
       studentId: item.studentId,
+      ground: input.ground ?? "",
       status: needsPrincipal ? "pending" : "approved",
       reason:
         `Fee Take · ${reason} · from ${item.dueLabel}` +
@@ -525,6 +537,16 @@ export function changeStandingDiscount(input: {
   academicYearCode: string;
   reason: string;
   by: string;
+  /**
+   * WHY this family qualifies — sibling, staff ward, hardship, RTE, and so on.
+   *
+   * The reason line records the MECHANISM ("Fee Take · Counter concession ·
+   * from Tuition Fee"), which is where the discount was applied, not why it
+   * was owed. 108 of 149 live grants say only that, so for 99 of the 120
+   * children on a concession nobody can now say on what ground. This is the
+   * field that stops the hole getting deeper.
+   */
+  ground?: ConcessionGround | "";
 }):
   | { ok: true; endedGrantId: string | null; newGrantId: string | null }
   | { ok: false; error: string } {
@@ -610,6 +632,7 @@ export function changeStandingDiscount(input: {
     id: newId("cg"),
     concessionId: ensured.rule.id,
     studentId: input.studentId,
+    ground: input.ground ?? "",
     status: "approved",
     reason:
       `Fee Take · discount changed to ${formatInr(input.newDiscountPaise)} ` +

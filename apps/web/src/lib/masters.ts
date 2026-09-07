@@ -327,11 +327,66 @@ export type ConcessionRule = {
 };
 
 /** Demo / pending student grants until Fee Take owns this */
+/**
+ * WHY a family gets a discount — the thing the school could not answer.
+ *
+ * On 2026-09-08 all 149 approved grants had a `reason` filled in, so the field
+ * looked complete. 108 of them read "Fee Take · Counter concession · from
+ * Tuition Fee · April · receipt RCV-00096": that is WHERE the discount was
+ * applied, not why the family qualifies. For 99 of the 120 children receiving
+ * one, nobody had written down the ground.
+ *
+ * A free-text box did not fail because people are careless; it failed because
+ * a blank one still saves. This is a short list, it is required, and it is a
+ * column rather than prose so the school can finally ask "how many staff wards
+ * do we support?" and get an answer.
+ *
+ * `other` is deliberately present and deliberately last. Forcing a wrong
+ * category is worse than recording an honest "something else" with a note.
+ */
+export const CONCESSION_GROUNDS = [
+  { id: "sibling", label: "Sibling already studying here" },
+  { id: "staff_ward", label: "Staff ward" },
+  { id: "hardship", label: "Family hardship" },
+  { id: "merit", label: "Merit / scholarship" },
+  { id: "rte_ews", label: "RTE / EWS" },
+  { id: "director", label: "Director's discretion" },
+  { id: "correction", label: "Correcting a billing error" },
+  { id: "other", label: "Other (say what in the note)" },
+] as const;
+
+export type ConcessionGround = (typeof CONCESSION_GROUNDS)[number]["id"];
+
+export function concessionGroundLabel(id: string): string {
+  return CONCESSION_GROUNDS.find((g) => g.id === id)?.label ?? "Not recorded";
+}
+
+/**
+ * The ground a concession RULE already declares, if it declares one.
+ *
+ * A rule of kind `sibling` grants a sibling discount — reading the ground off
+ * it is not a guess, it is the rule speaking. But only for an exact match:
+ * `transport` and any custom kind the school invented say nothing about why a
+ * family qualifies, so they come back empty and the person granting must say.
+ */
+export function concessionGroundFromKind(kind: string): ConcessionGround | "" {
+  const k = (kind || "").trim().toLowerCase();
+  return CONCESSION_GROUNDS.some((g) => g.id === k)
+    ? (k as ConcessionGround)
+    : "";
+}
+
 export type ConcessionGrant = {
   id: string;
   concessionId: string;
   studentId: string;
   status: "pending" | "approved" | "rejected";
+  /**
+   * The ground. Empty on every grant made before 2026-09-08 — that absence is
+   * a real finding and must stay visible, so it is NOT back-filled with a
+   * guess.
+   */
+  ground: ConcessionGround | "";
   reason: string;
   effectiveFrom: string;
   effectiveTo: string | null;
@@ -2826,6 +2881,11 @@ export function normalizeConcessionGrant(
     id: g.id,
     concessionId: g.concessionId ?? "",
     studentId: g.studentId ?? "",
+    // Not back-filled. A grant made before grounds were recorded reads
+    // "Not recorded", and that is the honest answer.
+    ground: CONCESSION_GROUNDS.some((x) => x.id === g.ground)
+      ? (g.ground as ConcessionGround)
+      : "",
     status:
       g.status === "approved" || g.status === "rejected"
         ? g.status

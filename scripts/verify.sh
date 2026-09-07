@@ -162,6 +162,7 @@ SELFTESTS=(
   test:birthday-cards
   test:collections-ai
   test:concession-per-due
+  test:concession-ground
   test:desk-sync-status
   test:duty-roster
   test:email
