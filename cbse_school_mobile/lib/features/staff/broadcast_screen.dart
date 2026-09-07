@@ -3,6 +3,7 @@ import "package:flutter/material.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../modules/dictate_field.dart";
 
 /// School-wide WhatsApp + app-push broadcast for principal/owner roles —
 /// the same choices as the web owner dashboard's Broadcast modal:
@@ -373,20 +374,15 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
                 ),
             ],
           ] else ...[
-            TextField(
+            DictateField(
+              label: context.l10n.message,
               controller: _body,
               enabled: !_busy,
               minLines: 4,
               maxLines: 10,
-              maxLength: 1000,
               textCapitalization: TextCapitalization.sentences,
-              decoration: InputDecoration(
-                labelText: context.l10n.message,
-                hintText: context.l10n.eGSchoolWillRemainClosed,
-                alignLabelWithHint: true,
-                border: OutlineInputBorder(),
-              ),
               onChanged: (_) => _resetOutcome(),
+              hint: context.l10n.eGSchoolWillRemainClosed,
             ),
             Text(
               context.l10n.freeTextOnlyReachesRecipientsWho,

@@ -2016,6 +2016,30 @@ abstract class L {
   /// In en, this message translates to:
   /// **'Ask the ERP'**
   String get askTheErp;
+
+  /// No description provided for @speak.
+  ///
+  /// In en, this message translates to:
+  /// **'Speak'**
+  String get speak;
+
+  /// No description provided for @listening.
+  ///
+  /// In en, this message translates to:
+  /// **'Listening…'**
+  String get listening;
+
+  /// No description provided for @couldNotHearYou.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not hear you'**
+  String get couldNotHearYou;
+
+  /// No description provided for @dictationNotAvailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Dictation is not available on this phone'**
+  String get dictationNotAvailable;
 }
 
 class _LDelegate extends LocalizationsDelegate<L> {

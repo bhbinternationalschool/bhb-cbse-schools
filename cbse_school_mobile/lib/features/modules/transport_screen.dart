@@ -7,6 +7,7 @@ import "../../core/ui/haptics.dart";
 import "bus_routes_screen.dart";
 import "module_shell.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../modules/dictate_field.dart";
 
 /// The family's school transport: for each child, the bus they ride —
 /// route, stop, vehicle, driver with a call button — or, if they do not,
@@ -349,13 +350,11 @@ class _RequestFormState extends State<_RequestForm> {
               style: AppText.bodySmallMuted.copyWith(height: 1.4),
             ),
             const SizedBox(height: 12),
-            TextField(
+            DictateField(
+              label: context.l10n.pickupAddress,
               controller: _address,
               maxLines: 2,
               textCapitalization: TextCapitalization.sentences,
-              decoration: InputDecoration(
-                labelText: context.l10n.pickupAddress,
-              ),
             ),
             const SizedBox(height: 10),
             TextField(
@@ -380,12 +379,11 @@ class _RequestFormState extends State<_RequestForm> {
               ),
             ),
             const SizedBox(height: 10),
-            TextField(
+            DictateField(
+              label: context.l10n.anythingElse,
               controller: _note,
               maxLines: 2,
-              maxLength: 500,
               textCapitalization: TextCapitalization.sentences,
-              decoration: InputDecoration(labelText: context.l10n.anythingElse),
             ),
             const SizedBox(height: 4),
             FilledButton(

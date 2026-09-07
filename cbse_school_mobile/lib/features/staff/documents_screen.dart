@@ -8,6 +8,7 @@ import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../modules/dictate_field.dart";
 
 /// Parent-uploaded documents waiting for verification — the class
 /// teacher's queue (everything for the office). Open the file, then verify
@@ -157,14 +158,12 @@ class _ReviewScreenState extends State<_ReviewScreen> {
         context: context,
         builder: (context) => AlertDialog(
           title: Text(context.l10n.rejectDocument),
-          content: TextField(
+          content: DictateField(
+            label: context.l10n.whyTheParentReadsThis,
             controller: ctl,
             autofocus: true,
             maxLines: 2,
-            decoration: InputDecoration(
-              labelText: context.l10n.whyTheParentReadsThis,
-              hintText: context.l10n.eGBlurredWrongChildExpired,
-            ),
+            hint: context.l10n.eGBlurredWrongChildExpired,
           ),
           actions: [
             TextButton(

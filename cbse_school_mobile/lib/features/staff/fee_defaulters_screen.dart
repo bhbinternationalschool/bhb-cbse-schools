@@ -7,6 +7,7 @@ import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
 import "fee_counter_screen.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../modules/dictate_field.dart";
 
 /// Families with money outstanding — biggest first, with the guardian one tap
 /// away on a call or WhatsApp, and a place to record what they promised.
@@ -428,11 +429,11 @@ class _FollowupSheetState extends State<_FollowupSheet> {
                 ),
               ),
             const SizedBox(height: 8),
-            TextField(
+            DictateField(
+              label: context.l10n.noteOptional,
               controller: _note,
               maxLines: 2,
               textCapitalization: TextCapitalization.sentences,
-              decoration: InputDecoration(labelText: context.l10n.noteOptional),
             ),
             const SizedBox(height: 14),
             FilledButton(

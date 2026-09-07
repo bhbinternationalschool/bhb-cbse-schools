@@ -1062,4 +1062,16 @@ class LHi extends L {
 
   @override
   String get askTheErp => 'ईआरपी से पूछें';
+
+  @override
+  String get speak => 'बोलें';
+
+  @override
+  String get listening => 'सुन रहे हैं…';
+
+  @override
+  String get couldNotHearYou => 'सुनाई नहीं दिया';
+
+  @override
+  String get dictationNotAvailable => 'इस फ़ोन में बोलकर लिखना उपलब्ध नहीं है';
 }
