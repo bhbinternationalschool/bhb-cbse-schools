@@ -7,6 +7,7 @@ import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
 import "../../core/i18n/locale_controller.dart";
 import "../modules/dictate_field.dart";
+import "../../core/api/school_whatsapp.dart";
 
 /// The counsellor's call list. Overdue first, because that is the order the
 /// day gets worked through: call, say what happened, set the next date.
@@ -203,9 +204,12 @@ class _LeadCard extends StatelessWidget {
                 if (wa.length >= 10)
                   IconButton(
                     tooltip: context.l10n.whatsapp,
-                    onPressed: () => launchUrl(
-                      Uri.parse("https://wa.me/91$wa?text=$text"),
-                      mode: LaunchMode.externalApplication,
+                    onPressed: () => sendSchoolWhatsApp(
+                      context,
+                      api,
+                      mobile: wa,
+                      familyKey: "admissions_followup",
+                      text: text,
                     ),
                     icon: const Icon(
                       Icons.chat_outlined,

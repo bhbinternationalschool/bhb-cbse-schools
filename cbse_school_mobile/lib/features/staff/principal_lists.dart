@@ -6,6 +6,7 @@ import "../../core/theme/app_theme.dart";
 import "../modules/module_shell.dart";
 import "attendance_screen.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../../core/api/school_whatsapp.dart";
 
 /* ─── Shared bits ────────────────────────────────────────────────── */
 
@@ -20,27 +21,18 @@ Future<void> _call(BuildContext context, String mobile) async {
   }
 }
 
-Future<void> _whatsapp(
-  BuildContext context,
-  String mobile, {
-  String text = "",
-}) async {
-  var m = mobile.replaceAll(RegExp(r"\D"), "");
-  if (m.isEmpty) return;
-  if (m.length == 10) m = "91$m";
-  final uri = Uri.parse(
-    "https://wa.me/$m${text.isEmpty ? "" : "?text=${Uri.encodeComponent(text)}"}",
-  );
-  final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-  if (!ok && context.mounted) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(context.l10n.whatsappIsNotAvailableOnThis)),
-    );
-  }
-}
+
 
 class _ContactButtons extends StatelessWidget {
-  const _ContactButtons({required this.mobile, this.waText = ""});
+  const _ContactButtons({
+    required this.api,
+    required this.mobile,
+    this.waText = "",
+  });
+
+  /// Needed because WhatsApp goes out from the SCHOOL's number now, through
+  /// the server — not from whichever phone the principal happens to hold.
+  final ApiClient api;
   final String mobile;
   final String waText;
 
@@ -64,7 +56,14 @@ class _ContactButtons extends StatelessWidget {
           visualDensity: VisualDensity.compact,
           icon: const Icon(Icons.chat_outlined, size: 20),
           color: AppColors.success,
-          onPressed: () => _whatsapp(context, mobile, text: waText),
+          onPressed: () => sendSchoolWhatsApp(
+            context,
+            api,
+            mobile: mobile,
+            text: waText.isEmpty
+                ? "Namaste — a message from the school office."
+                : waText,
+          ),
         ),
       ],
     );
@@ -235,7 +234,8 @@ class StaffAttendanceTodayScreen extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       _Pill(_label(s.status).$1, tone: _label(s.status).$2),
-                      if (s.status != "P") _ContactButtons(mobile: s.mobile),
+                      if (s.status != "P")
+                        _ContactButtons(api: api, mobile: s.mobile),
                     ],
                   ),
                 ),
@@ -323,7 +323,7 @@ class FollowUpsScreen extends StatelessWidget {
                           ),
                         ),
                       ),
-                      _ContactButtons(mobile: l.mobile, waText: wa),
+                      _ContactButtons(api: api, mobile: l.mobile, waText: wa),
                     ],
                   ),
                 ],

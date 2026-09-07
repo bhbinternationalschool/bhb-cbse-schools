@@ -30,8 +30,11 @@ export async function POST(req: Request) {
   const dryRun = new URL(req.url).searchParams.get("dryRun") === "1";
   const report = await checkFeeIntegrity({ dryRun });
 
-  // A blank receipt is a live money problem, so the tick FAILS while one
-  // exists. A scheduler that only ever sees 200 teaches everyone to ignore it.
-  const status = report.blankReceipts.length > 0 ? 500 : 200;
+  // A blank receipt is a live money problem, and so is a dues cache that has
+  // fallen behind the receipts — both mean a family reads as owing money the
+  // school already has. The tick FAILS while either is true. A scheduler that
+  // only ever sees 200 teaches everyone to ignore it.
+  const status =
+    report.blankReceipts.length > 0 || report.staleDues ? 500 : 200;
   return NextResponse.json({ ok: status === 200, ...report }, { status });
 }

@@ -80,6 +80,7 @@
     "test:rbac-user-grants": "npx tsx src/lib/rbacUserGrants.selftest.ts",
     "test:visitor-gate": "npx tsx src/lib/visitorGate.selftest.ts",
     "test:play-billing": "npx tsx src/lib/playBilling.selftest.ts",
+    "test:parent-dues-fallback": "npx tsx src/lib/parentDuesFallback.selftest.ts",
     "test:rbac-infer": "npx tsx src/lib/rbacInfer.selftest.ts",
     "test:session-cookie-edge": "npx tsx src/lib/sessionCookieEdge.selftest.ts",
     "test:exam-invigilation": "npx tsx src/lib/examInvigilation.selftest.ts",
