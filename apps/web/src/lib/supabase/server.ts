@@ -12,14 +12,37 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 const PRODUCTION_PROJECT_REF = "ymamhlcrjsuilzdonkzl";
 
 /**
- * Whether this process is a developer's machine rather than the deployed app.
+ * Whether this process is the deployed app rather than somebody's laptop.
  *
- * `next dev` sets NODE_ENV to "development"; the Cloud Run image runs
- * `next start`, where it is "production". Nothing else distinguishes them —
- * both read the same .env.local and the same service-role key.
+ * NODE_ENV is not the answer, and was the weak half of the first version of
+ * this guard: `NODE_ENV=production npm run dev`, or a local `next start`,
+ * turns it off — and someone simulating production locally does exactly that.
+ *
+ * K_SERVICE is a positive signal instead of the absence of a negative one.
+ * Cloud Run sets it (with K_REVISION and K_CONFIGURATION) on every container
+ * it starts, and nothing on a laptop sets it by accident.
+ *
+ * NODE_ENV survives only as a FALLBACK, and only in the permissive direction,
+ * because the cost of the two mistakes is wildly different: a false "laptop"
+ * verdict takes the school's live app offline for writes, while a false
+ * "deployed" verdict leaves the narrow hole this comment describes. It logs
+ * loudly when it fires. Delete the fallback once K_SERVICE has been confirmed
+ * present on a live revision:
+ *
+ *   gcloud run services describe school-erp-web --region=asia-southeast1 \
+ *     --project=school-erp-prod-493619 --format='value(spec.template.spec.containers[0].env)'
  */
-function isLocalDevProcess(): boolean {
-  return process.env.NODE_ENV !== "production";
+function isDeployedProcess(): boolean {
+  if (process.env.K_SERVICE) return true;
+  if (process.env.NODE_ENV === "production") {
+    console.warn(
+      "[supabase] no K_SERVICE, but NODE_ENV=production — treating this as the " +
+        "deployed app and ALLOWING writes. If this is a laptop, stop it: it can " +
+        "write to the school's live books.",
+    );
+    return true;
+  }
+  return false;
 }
 
 function pointsAtProduction(url: string): boolean {
@@ -144,13 +167,11 @@ export function readOnlyProductionClient(sb: SupabaseClient): SupabaseClient {
  */
 export function shouldBeReadOnly(
   url: string,
-  opts?: { nodeEnv?: string; override?: boolean },
+  opts?: { deployed?: boolean; override?: boolean },
 ): boolean {
-  const dev = opts?.nodeEnv !== undefined
-    ? opts.nodeEnv !== "production"
-    : isLocalDevProcess();
+  const deployed = opts?.deployed ?? isDeployedProcess();
   const override = opts?.override ?? overrideEnabled();
-  return dev && pointsAtProduction(url) && !override;
+  return !deployed && pointsAtProduction(url) && !override;
 }
 
 export function createServiceSupabase(): SupabaseClient | null {

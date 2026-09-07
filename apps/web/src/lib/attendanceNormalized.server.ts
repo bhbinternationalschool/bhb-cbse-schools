@@ -22,6 +22,7 @@ import {
 } from "@/lib/attendanceDeskAncillary.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { fetchAllPages, fetchByIds } from "@/lib/supabase/pageAll";
+import { replaceChildRows } from "./replaceChildRows.server";
 
 export type AttendanceDeskSyncMeta = {
   registerCount: number;
@@ -460,15 +461,16 @@ export async function pushAttendanceRegisterToDb(
     .upsert(header);
   if (hErr) return { ok: false, error: hErr.message };
 
-  await sb
-    .from("attendance_desk_marks")
-    .delete()
-    .eq("register_id", register.id);
-
-  if (marks.length) {
-    const { error: mErr } = await sb.from("attendance_desk_marks").upsert(marks);
-    if (mErr) return { ok: false, error: mErr.message };
-  }
+  // One transaction: a failed insert rolls the delete back, so a register
+  // cannot end up with its whole day's attendance deleted and nothing put
+  // back. Two statements is how the fee book lost every line on 2026-09-06.
+  const marksWrite = await replaceChildRows(sb, {
+    table: "attendance_desk_marks",
+    tenantId,
+    match: { register_id: register.id },
+    rows: marks,
+  });
+  if (!marksWrite.ok) return { ok: false, error: marksWrite.error };
 
   const now = new Date().toISOString();
   await sb.from("attendance_desk_sync_meta").upsert(

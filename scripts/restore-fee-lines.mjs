@@ -59,6 +59,22 @@ const APPLY = process.argv.includes("--apply");
 const lines = JSON.parse(readFileSync(`${DIR}/restore_lines.json`, "utf8"));
 const tenders = JSON.parse(readFileSync(`${DIR}/restore_tenders.json`, "utf8"));
 
+/**
+ * A standalone script builds its own client, so it never passes through the
+ * app's write guard in apps/web/src/lib/supabase/server.ts. That is exactly
+ * the bypass that made 2026-09-06 possible, so the demand is made here
+ * instead: writing needs the same env var, typed on purpose, per run.
+ */
+if (APPLY && process.env.ALLOW_LOCAL_PROD_WRITES !== "1") {
+  console.error(
+    "Refusing to write: this script talks straight to the production database " +
+      "and bypasses the app's write guard.\n" +
+      "Re-run it as:\n\n" +
+      "  ALLOW_LOCAL_PROD_WRITES=1 node scripts/restore-fee-lines.mjs --dir=… --apply\n",
+  );
+  process.exit(1);
+}
+
 const sb = createClient(url, key, { auth: { persistSession: false } });
 
 /** BigQuery mirrors everything as STRING; the columns here are bigint/jsonb. */

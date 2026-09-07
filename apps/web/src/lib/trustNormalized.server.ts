@@ -1,3 +1,5 @@
+/* ratchet-allow: unguarded_replace — prune of stale slice keys only; see the note
+   in mastersNormalized.server.ts. */
 /**
  * Trust desk — Supabase slice rows (trust_desk_slices).
  */

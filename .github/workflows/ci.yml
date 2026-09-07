@@ -91,6 +91,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:prod-write-guard
 
+      - name: Test — money with no fee lines raises an alarm
+        working-directory: apps/web
+        run: npm run test:fee-integrity
+
       - name: Test — optimistic-locking token survives normalization
         working-directory: apps/web
         run: npm run test:sis-revision

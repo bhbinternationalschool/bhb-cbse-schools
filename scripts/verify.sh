@@ -104,6 +104,7 @@ SELFTESTS=(
   test:expense-voucher-draft
   test:fee-push-line-safety
   test:prod-write-guard
+  test:fee-integrity
   test:receipt-repair
   test:projection-double-post
   test:holiday-import

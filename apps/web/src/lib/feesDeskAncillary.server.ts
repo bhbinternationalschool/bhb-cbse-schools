@@ -14,6 +14,7 @@ import type { InstallmentPlan, PlanAllocation } from "@/lib/installmentPlans";
 import type { FeeDeskAncillary } from "@/lib/feesDeskAncillary.types";
 import { feesDualWriteDbEnabled } from "@/lib/feesDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { replaceChildRows } from "./replaceChildRows.server";
 
 export type { FeeDeskAncillary };
 
@@ -204,16 +205,15 @@ export async function pushFeeDeskAncillaryToDb(
     if (error) return { ok: false, error: error.message };
   }
   if (chargeLineRows.length) {
-    const cvIds = charges.map((c) => c.id);
-    await sb
-      .from("fee_desk_charge_voucher_lines")
-      .delete()
-      .eq("tenant_id", tenantId)
-      .in("charge_voucher_id", cvIds);
-    const { error } = await sb
-      .from("fee_desk_charge_voucher_lines")
-      .upsert(chargeLineRows, { onConflict: "id" });
-    if (error) return { ok: false, error: error.message };
+    // One transaction. A charge voucher stripped of its lines is a charge
+    // with an amount and nothing saying what was charged for.
+    const write = await replaceChildRows(sb, {
+      table: "fee_desk_charge_voucher_lines",
+      tenantId,
+      match: { charge_voucher_id: charges.map((c) => c.id) },
+      rows: chargeLineRows,
+    });
+    if (!write.ok) return { ok: false, error: write.error };
   }
 
   const plans = ancillary.installmentPlans ?? [];
