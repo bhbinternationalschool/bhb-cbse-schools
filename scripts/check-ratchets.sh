@@ -68,6 +68,21 @@ count_metric() {
       # sweeps each screen; the design-token themselves are dark-mode
       # aware, arbitrary hex is not.
       code_grep '(bg|text|border|ring|from|to|via)-\[#[0-9a-fA-F]{3,8}\]' "$SRC" ;;
+    personal_whatsapp)
+      # Code that messages a parent, lead, vendor or staff member from the
+      # STAFF MEMBER'S own WhatsApp instead of the school's Business number.
+      #
+      # Until 2026-09-07 thirteen web screens did, and the shared helper
+      # openWaMe() was worse than the raw ones: it POSTed to /api/wa/dispatch
+      # AND opened wa.me, so a family could get the same fee reminder twice,
+      # from two senders, with only one of them on the school's record.
+      #
+      # Use openWaMe()/sendFromSchoolWhatsApp() from lib/waMe.ts. Not counted:
+      # `wa.me/?text=` with no number (the share sheet), and links pointed AT
+      # the school's own number (gate QR, visitor poster, "message a teacher"),
+      # which are how a parent STARTS a conversation that then arrives through
+      # the API. Mark a genuine exception with `personal-whatsapp-allow:`.
+      python3 scripts/find-personal-whatsapp.py "$SRC" --count ;;
     unguarded_replace)
       # `.from("t").delete()` filtered by a PARENT id, followed by an insert or
       # upsert into the same table — two statements with nothing tying them

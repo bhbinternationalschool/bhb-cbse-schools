@@ -708,6 +708,9 @@ export function whatsAppPaymentLinkUrl(
       }),
     }).catch(() => null);
   }
+  // personal-whatsapp-allow: builder only — every staff caller now goes
+  // through openWaMe(). Kept because the parent-facing pay page composes
+  // the same link for the PARENT to forward from their own phone.
   return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
 }
 

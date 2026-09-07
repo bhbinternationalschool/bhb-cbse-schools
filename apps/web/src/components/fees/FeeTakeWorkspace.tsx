@@ -94,7 +94,6 @@ import {
   composeWhatsAppPaymentLinkMessage,
   createPaymentLink,
   openPaymentLinkCount,
-  whatsAppPaymentLinkUrl,
 } from "@/lib/payments";
 import { attachGatewayCheckout } from "@/lib/paymentGatewayClient";
 import { StoreSellInline } from "@/components/fees/StoreSellInline";
@@ -118,6 +117,7 @@ import { FeeAdjustmentsPanel } from "@/components/fees/FeeAdjustmentsPanel";
 import { FeeReportsPanel } from "@/components/fees/FeeFinancePanels";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { TransportRiderChip } from "@/components/transport/TransportRiderChip";
+import { openWaMe } from "@/lib/waMe";
 import { ReceiptRepairDialog } from "@/components/fees/ReceiptRepairDialog";
 
 /**
@@ -1592,7 +1592,7 @@ export function FeeTakeWorkspace() {
         TENANT.nameDisplay,
         attached.attached,
       );
-      window.open(whatsAppPaymentLinkUrl(mobile, msg), "_blank", "noopener");
+      openWaMe(mobile, msg, undefined, { module: "fees" });
       flash(
         `${attached.attached ? "Checkout" : "UPI"} link ${link.code} · ${formatInr(link.amountPaise)} — WhatsApp opened`,
       );

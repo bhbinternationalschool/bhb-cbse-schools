@@ -32,6 +32,7 @@ import {
 import { invApi, useAsync, useDebounced, useSaver } from "@/lib/inventory/client";
 import type { InvVendor } from "@/lib/inventory/types";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { openWaMe } from "@/lib/waMe";
 
 const EMPTY: Partial<InvVendor> = {
   name: "",
@@ -212,7 +213,7 @@ export function VendorsTab({ onChanged }: { onChanged?: () => void }) {
                           label: "Send WhatsApp",
                           disabled: (r) => !r.phone,
                           onSelect: (r) => {
-                            window.open(`https://wa.me/${String(r.phone ?? "").replace(/\D/g, "")}`, "_blank", "noopener");
+                            openWaMe(String(String(r.phone ?? "").replace(/\D/g, "")), "", undefined, { module: "store" });
                           },
                         },
                       ]}

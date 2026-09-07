@@ -737,9 +737,17 @@ export function renderCampaignBody(
     .replace(/\{\{schoolName\}\}/g, vars.schoolName || TENANT.nameDisplay);
 }
 
+/**
+ * personal-whatsapp-allow: this fills the row's `waMeUrl` field for export and
+ * for the message log. Since 2026-09-07 nothing in the UI opens it — the
+ * campaign panel sends through the school's Business number via openWaMe() —
+ * so it is a record of the link, not a way to message a family from a
+ * personal account.
+ */
 function waMe(mobile: string, text: string): string {
   const digits = mobile.replace(/\D/g, "");
   const phone = digits.length === 10 ? `91${digits}` : digits;
+  // personal-whatsapp-allow: recorded on the row, never opened — see above.
   return `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
 }
 

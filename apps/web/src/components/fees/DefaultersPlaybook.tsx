@@ -18,7 +18,6 @@ import {
   buildPaymentShareUrl,
   composeWhatsAppPaymentLinkMessage,
   createPaymentLink,
-  whatsAppPaymentLinkUrl,
 } from "@/lib/payments";
 import { attachGatewayCheckout } from "@/lib/paymentGatewayClient";
 import { loadMasters, type MastersState } from "@/lib/masters";
@@ -48,10 +47,10 @@ import {
   scheduleParentMeeting,
   type FeeRecoveryMeeting,
 } from "@/lib/feeRecoveryTasks";
-import { openWaMe } from "@/lib/waMe";
 import type { HoldCode } from "@/lib/types";
 import { paymentLikelihood } from "@/lib/collectionsAi";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
+import { openWaMe } from "@/lib/waMe";
 
 const STAGE_FILTERS: { value: "" | OverdueStage; label: string }[] = [
   { value: "", label: "All stages" },
@@ -289,7 +288,7 @@ export function DefaultersPlaybook() {
         TENANT.nameDisplay,
         attached.attached,
       );
-      window.open(whatsAppPaymentLinkUrl(mobile, msg), "_blank", "noopener");
+      openWaMe(mobile, msg, undefined, { module: "fees" });
       flash(`${attached.attached ? "Checkout" : "UPI"} link ${link.code} — WhatsApp opened`);
     } else {
       void navigator.clipboard.writeText(url).then(
@@ -326,7 +325,7 @@ export function DefaultersPlaybook() {
       payUrl: payUrl || undefined,
     });
     if (mobile && isValidMobile(mobile)) {
-      window.open(whatsAppPaymentLinkUrl(mobile, msg), "_blank", "noopener");
+      openWaMe(mobile, msg, undefined, { module: "fees" });
       flash(`Reminder sent via WhatsApp (${mobile})`);
     } else {
       void navigator.clipboard.writeText(msg).then(

@@ -52,12 +52,7 @@ import {
   ErpTableShell,
 } from "@/components/ui/erp-roster";
 import { BulkActionBar, RowActionMenu, RowCheckbox, useRowSelection } from "@/components/ui/erp-grid";
-
-function waUrl(mobile: string, message: string): string {
-  const digits = mobile.replace(/\D/g, "");
-  const phone = digits.length === 10 ? `91${digits}` : digits;
-  return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
-}
+import { openWaMe } from "@/lib/waMe";
 
 const inp =
   "w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm";
@@ -482,11 +477,9 @@ export function AdmissionRegistrationPanel({
       url,
       TENANT.nameDisplay,
     );
-    window.open(
-      waUrl(payment.mobile || selected?.mobile || "", msg),
-      "_blank",
-      "noopener",
-    );
+    openWaMe(payment.mobile || selected?.mobile || "", msg, undefined, {
+      module: "admissions",
+    });
   }
 
   function onCapture() {
@@ -521,11 +514,9 @@ export function AdmissionRegistrationPanel({
       TENANT.nameDisplay,
       by,
     );
-    window.open(
-      waUrl(r.payment.mobile || selected?.mobile || "", receipt),
-      "_blank",
-      "noopener",
-    );
+    openWaMe(r.payment.mobile || selected?.mobile || "", receipt, undefined, {
+      module: "admissions",
+    });
   }
 
   function onWaive() {
@@ -921,7 +912,7 @@ export function AdmissionRegistrationPanel({
                   const mob = student.fatherMobile || student.motherMobile || "";
                   if (!picked.has(student.id) || !mob || seen.has(mob) || opened >= 12) continue;
                   seen.add(mob);
-                  window.open(waUrl(mob, text), "_blank", "noopener");
+                  openWaMe(mob, text, undefined, { module: "admissions" });
                   opened += 1;
                 }
                 admSel.clear();
@@ -1041,7 +1032,7 @@ export function AdmissionRegistrationPanel({
                                   label: "WhatsApp the family",
                                   disabled: (l) => !l.mobile,
                                   onSelect: (l) =>
-                                    window.open(`https://wa.me/${String(l.mobile ?? "").replace(/\D/g, "")}`, "_blank", "noopener"),
+                                    openWaMe(String(String(l.mobile ?? "").replace(/\D/g, "")), "", undefined, { module: "admissions" }),
                                 },
                               ]}
                             />

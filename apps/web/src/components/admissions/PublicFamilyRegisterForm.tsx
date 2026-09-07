@@ -378,6 +378,10 @@ export function PublicFamilyRegisterForm({
       payeeName || TENANT.nameDisplay,
       "Online registration",
     );
+    // personal-whatsapp-allow: /register is a PUBLIC page and this is the
+    // parent's own device sending themselves a copy of their own receipt.
+    // There is no staff account involved, and /api/wa/dispatch would 401
+    // here anyway — it requires a signed-in staff session by design.
     window.open(whatsAppUrl(mobile || r.payment.mobile, receipt), "_blank");
 
     const nextUnpaid = leadIds

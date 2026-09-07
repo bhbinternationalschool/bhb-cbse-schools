@@ -55,6 +55,7 @@ import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import type { CampaignMessage } from "@/lib/waCampaigns";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 import { SequencesPanel } from "@/components/admissions/SequencesPanel";
+import { openWaMe } from "@/lib/waMe";
 
 const inp =
   "w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm";
@@ -75,15 +76,14 @@ const CAMPAIGN_MESSAGE_COLUMNS: DataTableColumn<CampaignMessage>[] = [
     key: "open",
     header: "Open",
     render: (m) =>
-      m.waMeUrl ? (
-        <a
-          href={m.waMeUrl}
-          target="_blank"
-          rel="noreferrer"
+      m.mobile ? (
+        <button
+          type="button"
           className="font-semibold underline"
+          onClick={() => openWaMe(m.mobile, m.body, undefined, { module: "admissions" })}
         >
           WhatsApp
-        </a>
+        </button>
       ) : (
         m.error || "—"
       ),
@@ -1000,8 +1000,9 @@ export function AdmissionCampaignsPanel({
                   {
                     id: "wa",
                     label: "Open in WhatsApp",
-                    disabled: (m) => !m.waMeUrl,
-                    onSelect: (m) => window.open(m.waMeUrl, "_blank", "noopener"),
+                    disabled: (m) => !m.mobile,
+                    onSelect: (m) =>
+                      openWaMe(m.mobile, m.body, undefined, { module: "admissions" }),
                   },
                   {
                     id: "copy",
