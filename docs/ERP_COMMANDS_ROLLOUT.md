@@ -76,6 +76,29 @@ designation or the person's name matching
 (`lib/waRoleResolver.ts`). At BHB that is **4 people** — 3 Directors and the
 Principal.
 
+**What each of them can actually run** is a separate question, decided by
+RBAC rather than by the WhatsApp flow. The two resolvers do not agree, and
+the difference matters:
+
+| Person | How the role is resolved | Commands |
+|---|---|---|
+| Director (the pilot number) | protected super-admin **email** → `owner` | 24 / 24 |
+| Principal | designation "Principal" matches → `principal` | 24 / 24 |
+| Beena Singh, Kanchan Singh | **explicit assignment** to `office`, 2026-09-07 | 22 / 24 |
+
+`office` cannot run **`staff_broadcast`** (needs `notifications.edit`; office
+holds `view`) or **`post_homework`** (needs `homework.edit`, and that command
+is app-only anyway, because the class channel owns teacher homework posts).
+
+Those two assignments were needed: `rbac.inferRoleCodes` has designation
+patterns for principal, admin, office, accounts, driver, teacher and gate,
+but **none for "director"** — so a Director without a super-admin email fell
+through to `support` (3 modules, effectively no commands). That is deliberate:
+a comment dated 2026-09-06 records that unmatched staff used to sign in as
+principal, which was tightened on purpose, and elevation is meant to come
+from an explicit assignment where a human decides it. If a future Director
+joins, they need the same assignment.
+
 **What a command can do to a family:** nothing without a confirm card first.
 Every write shows the card, and permission *and* section scope are re-checked
 when you tap Confirm, not trusted from the card.
@@ -91,8 +114,13 @@ reply, no hint that a feature exists, other bots answering as usual. Empty or
 unset means everyone, which is the shipped behaviour.
 
 ```
-ERP_WA_COMMANDS_ALLOW=9876543210, +91 90000 00000
+ERP_WA_COMMANDS_ALLOW=<the director's mobile>
 ```
+
+The live pilot value is the director's own number. It is deliberately not
+written down here: this file is in the repository forever, and the value has
+no effect from a document anyway. Cloud Run holds the only copy that does
+anything, and it is the source of truth.
 
 Commas, spaces, newlines, `+91` and a leading `0` are all tolerated, because
 this gets pasted out of a phone book. A person is matched on any number the
@@ -126,8 +154,11 @@ wrongly — described as the default.
 
 ### Stage B — a real pilot, one number
 
-1. Set `ERP_WA_COMMANDS_ALLOW` to your own mobile. Leave `ERP_WA_COMMANDS`
-   unset (or anything but `off`).
+1. Set `ERP_WA_COMMANDS_ALLOW` to the director's own mobile. That number was
+   checked against the roster before the pilot: active staff record, login
+   enabled, designation Director, and a protected super-admin email, so every
+   gate from the allowlist through to RBAC passes for it. Leave
+   `ERP_WA_COMMANDS` unset (or anything but `off`).
 2. Redeploy.
 3. The desk answers **you and nobody else**. Every other staff member's
    WhatsApp is unchanged and they are told nothing.
@@ -135,9 +166,17 @@ wrongly — described as the default.
 
 ### Stage B2 — widen it
 
-Add numbers to `ERP_WA_COMMANDS_ALLOW` and redeploy — the office, then a
-couple of class teachers, then the fee desk. When you are ready for everyone,
-remove the variable entirely.
+Add numbers to `ERP_WA_COMMANDS_ALLOW` and redeploy. The obvious second step
+is the Principal and the two Directors now assigned `office` — all three hold
+enough permission for the desk to be useful to them. Then a couple of class
+teachers, then the fee desk. When you are ready for everyone, remove the
+variable entirely.
+
+Before adding anyone, check what their role actually resolves to. A teacher
+resolves by designation and will get their own sections; anybody whose
+designation matches no pattern lands on `support` and will be refused every
+command, which reads as "the desk is broken" rather than "you lack the
+permission".
 
 That last step is the one with no undo short of another deploy, so it is
 worth doing on a quiet morning with somebody watching Comms → WhatsApp
@@ -210,8 +249,8 @@ At 50 staff × 10 commands a day that is roughly **₹60/day** from October.
 
 ## 8. Before you go live — checklist
 
-- [ ] `ERP_WA_COMMANDS_ALLOW` set to the pilot numbers, and read back after saving
-- [ ] The director's own number is on that list, or the `commands off` brake is out of reach
+- [ ] `ERP_WA_COMMANDS_ALLOW` set to the director's mobile on the Cloud Run service, and read back after saving
+- [ ] The director's own number is on that list, or the `commands off` brake is out of reach — it is, for the value above
 - [ ] Approved WhatsApp templates exist for the writes you intend to use
       (fee reminder, pay link, notice, bus delay) — Masters → WhatsApp templates
 - [ ] `ERP_COMMANDS_DIGEST_HOUR` set if you want the director's nightly digest
