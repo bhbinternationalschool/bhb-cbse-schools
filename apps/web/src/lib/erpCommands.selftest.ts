@@ -21,6 +21,10 @@ import {
   looksLikeCommand,
   noteCommandUse,
   parseCommandsSwitch,
+  looksLikeBareName,
+  followUpCommandFor,
+  followUpIsFresh,
+  FOLLOW_UP_WINDOW_MINUTES,
   parseCommandAllowList,
   commandActorAllowed,
   normalizeCommandMobile,
@@ -1819,6 +1823,52 @@ const masters = {
   );
   // An id must never match by accident.
   assert.equal(commandActorAllowed(["9876543210"], ["staff:9876543210x"]), false);
+}
+
+// ─── follow-up: a bare name after a list ───────────────────────────────
+{
+  // The case this exists for: the desk prints a class list, somebody types
+  // the name they see.
+  assert.equal(looksLikeBareName("Manvi Singh"), true);
+  assert.equal(looksLikeBareName("Aarav"), true);
+  assert.equal(looksLikeBareName("रिया वर्मा"), true, "Devanagari names count");
+  assert.equal(looksLikeBareName("Mary D'Souza"), true);
+  assert.equal(looksLikeBareName("Anne-Marie Fernandes"), true);
+
+  // Anything carrying a question is a command, and goes down the normal
+  // path where it can be parsed properly.
+  assert.equal(looksLikeBareName("Manvi Singh details"), true, "still a name-shape; the parser gets first refusal");
+  assert.equal(looksLikeBareName("5A me kaun absent hai"), false, "digits");
+  assert.equal(looksLikeBareName("attendance summary"), false, "two stop words");
+  assert.equal(looksLikeBareName("roll 4"), false);
+
+  // The keyword vocabulary the older bots own must never be swallowed.
+  for (const kw of ["MENU", "menu", "STAFF", "FEE", "ADMISSIONS", "HUMAN", "help", "YES", "no"]) {
+    assert.equal(looksLikeBareName(kw), false, `"${kw}" belongs to another bot`);
+  }
+  assert.equal(looksLikeBareName(""), false);
+  assert.equal(looksLikeBareName("ok"), false, "too short to be a name");
+  assert.equal(looksLikeBareName("a very long sentence about five words"), false, "too many words");
+  assert.equal(looksLikeBareName("x".repeat(61)), false, "too long");
+
+  // What a name means depends on the list it answers.
+  assert.equal(followUpCommandFor("class_defaulters"), "student_fees", "after money, money");
+  assert.equal(followUpCommandFor("collection_today"), "student_fees");
+  assert.equal(followUpCommandFor("absent_list"), "student_details");
+  assert.equal(followUpCommandFor("pending_leaves"), "student_details");
+  assert.equal(followUpCommandFor("anything_else"), "student_details", "details is the safe default");
+
+  // The window: long enough to read a list, short enough that a name typed
+  // into an unrelated conversation later is not swallowed.
+  const now = Date.parse("2026-09-07T10:00:00.000Z");
+  const ago = (min: number) => new Date(now - min * 60_000).toISOString();
+  assert.equal(followUpIsFresh(ago(0), now), true);
+  assert.equal(followUpIsFresh(ago(FOLLOW_UP_WINDOW_MINUTES - 1), now), true);
+  assert.equal(followUpIsFresh(ago(FOLLOW_UP_WINDOW_MINUTES + 1), now), false);
+  assert.equal(followUpIsFresh("", now), false);
+  assert.equal(followUpIsFresh("not a date", now), false);
+  // A timestamp from the future is not fresh, it is broken.
+  assert.equal(followUpIsFresh(new Date(now + 60_000).toISOString(), now), false);
 }
 
 console.log("erpCommands.selftest.ts OK");

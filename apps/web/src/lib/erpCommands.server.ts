@@ -137,6 +137,9 @@ import {
   parseStudentFeesQuery,
   noteCommandUse,
   parseCommandsSwitch,
+  looksLikeBareName,
+  followUpCommandFor,
+  followUpIsFresh,
   parseCommandAllowList,
   commandActorAllowed,
   parseConfirmReply,
@@ -199,6 +202,16 @@ type CommandStore = {
    * confirm card can warn that these families were just told.
    */
   busDelayedAt?: Record<string, string>;
+  /**
+   * The last list the desk showed each person, so a bare name typed in
+   * reply resolves inside it. Scope, not names: a section id list is a
+   * fraction of the size of the roster it stands for, and this slice is
+   * shared with every other bot's state.
+   */
+  followUp?: Record<
+    string,
+    { at: string; commandId: string; sectionIds: string[]; label: string }
+  >;
 };
 
 let memoryStore: CommandStore = {
@@ -316,6 +329,17 @@ function random(): string {
 /**
  * Entry point. See the file header for the order of checks.
  */
+/**
+ * Commands whose reply is a list of children, and so can be followed by a
+ * bare name. A reading about one student already names that student, and a
+ * school-wide summary has no list to point into.
+ */
+const FOLLOW_UP_LIST_COMMANDS = new Set([
+  "absent_list",
+  "class_defaulters",
+  "pending_leaves",
+]);
+
 export async function handleErpStaffCommand(
   inbound: ErpCommandInbound,
 ): Promise<ErpCommandResult> {
@@ -421,6 +445,9 @@ export async function handleErpStaffCommand(
 
   // 4. Parse — regex first, then the model, only for command-shaped text.
   let parsed: ParsedErpCommand | null = parseErpCommandLocal(text);
+  // Set when a bare name was resolved against a list the desk just showed;
+  // the student lookup below searches those sections instead of the school.
+  let resolvedFollowUpSections: string[] | null = null;
 
   // Paused: answer anything command-shaped without spending a model call,
   // and leave everything else to the bots that were going to answer it.
@@ -462,6 +489,27 @@ export async function handleErpStaffCommand(
       };
     }
   }
+  // 4b. A bare name in reply to a list the desk just showed.
+  //
+  // The desk answers command-shaped text and stays quiet otherwise, which
+  // is what keeps it out of ordinary staff conversation. The one bad case
+  // is the most natural reply there is: it prints a class list, somebody
+  // types a name, and that falls through to the older bots. Answered only
+  // when THIS desk showed THIS person a list in the last few minutes, and
+  // only for a name found inside it — anything else still falls through
+  // untouched.
+  if (!parsed && looksLikeBareName(text)) {
+    const fu = (store.followUp ?? {})[actor];
+    if (fu && followUpIsFresh(fu.at, nowMs) && fu.sectionIds.length) {
+      parsed = {
+        commandId: followUpCommandFor(fu.commandId),
+        fields: { student: text.trim(), section: "" },
+        source: "local",
+      };
+      resolvedFollowUpSections = fu.sectionIds;
+    }
+  }
+
   if (!parsed) return { handled: false };
 
   // 2b. Hourly cap per staff member.
@@ -691,7 +739,14 @@ export async function handleErpStaffCommand(
     const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
     const mine = staffAllowedSections(inbound.staff, masters, ay, roleCodes);
     const mineIds = new Set(mine.map((s) => s.sectionId));
-    const matches = matchStudents(q, sis.students, { academicYearCode: ay, sectionId });
+    // A bare name is only ever looked for inside the list it replied to.
+    // Searching the whole school here would let "Manvi" after a IV-A list
+    // land on a Manvi in IX-B, which is a wrong answer wearing the clothes
+    // of a right one.
+    const pool = resolvedFollowUpSections
+      ? sis.students.filter((st) => resolvedFollowUpSections!.includes(st.sectionId))
+      : sis.students;
+    const matches = matchStudents(q, pool, { academicYearCode: ay, sectionId });
     const label = (st: SisStudent) => classLabel(masters, st.classId, st.sectionId);
     if (matches.length !== 1) {
       return {
@@ -1673,6 +1728,30 @@ export async function handleErpStaffCommand(
 
   // 8. Read commands run at once.
   const reply = await runReadCommand(command, resolved, session, todayIso);
+
+  // Remember what was just listed, so a bare name in reply resolves inside
+  // it. Only the commands that actually print students qualify.
+  if (FOLLOW_UP_LIST_COMMANDS.has(command.id)) {
+    const sections = [
+      ...(resolved.sectionId ? [resolved.sectionId] : []),
+      ...(resolved.sectionIds ? resolved.sectionIds.split(",").filter(Boolean) : []),
+    ];
+    if (sections.length) {
+      const st = await readStore();
+      await writeStore({
+        ...st,
+        followUp: {
+          ...(st.followUp ?? {}),
+          [actor]: {
+            at: new Date().toISOString(),
+            commandId: command.id,
+            sectionIds: [...new Set(sections)],
+            label: (resolved.sectionLabel || resolved.title || "").replace(" · ", " "),
+          },
+        },
+      });
+    }
+  }
   void audit(session, command, parsed.fields, text, "ok", {
     ...resolved,
     source: parsed.source,

@@ -3828,3 +3828,73 @@ export function commandActorAllowed(
     return !!m && set.has(m);
   });
 }
+
+// ─── Follow-up: a bare name after a list ───────────────────────────────
+
+/**
+ * How long a list stays answerable. Long enough to read a class list and
+ * type a name, short enough that a name typed into an unrelated
+ * conversation half an hour later is not swallowed by the desk.
+ */
+export const FOLLOW_UP_WINDOW_MINUTES = 10;
+
+/** Words that are never a person, however name-shaped they look. */
+const FOLLOW_UP_STOP_WORDS = new Set([
+  "menu", "help", "staff", "fee", "fees", "admissions", "admission", "human",
+  "yes", "no", "ok", "okay", "thanks", "thank you", "hi", "hello", "hey",
+  "start", "stop", "cancel", "back", "director", "teacher", "parent",
+  "commands", "list", "details", "info", "dues", "absent", "present",
+  // Ordinary ERP nouns. A message made only of these is a half-typed
+  // command, not a child — and while the parser gets first refusal on
+  // every message, a phrasing it misses should not become a name lookup.
+  "attendance", "summary", "collection", "defaulters", "homework", "leave",
+  "timetable", "report", "manifest", "bus", "class", "section", "student",
+]);
+
+/**
+ * Is this a bare person's name — nothing but the name itself?
+ *
+ * The desk answers command-shaped messages and stays quiet otherwise, which
+ * is what keeps it out of ordinary staff conversation. That silence has one
+ * bad case: after the desk itself prints a class list, the most natural
+ * thing a person types next is a name, and it falls through to the older
+ * bots. This recognises that reply — and only that: one to four words, no
+ * digits, no punctuation beyond what names carry, and nothing from the
+ * keyword vocabulary the other bots own.
+ */
+export function looksLikeBareName(text: string): boolean {
+  const t = (text || "").trim();
+  if (!t || t.length > 60) return false;
+  if (/[0-9]/.test(t)) return false;
+  if (!/^[\p{L}\p{M}][\p{L}\p{M}\s'.-]*$/u.test(t)) return false;
+  const words = t.split(/\s+/).filter(Boolean);
+  if (words.length < 1 || words.length > 4) return false;
+  if (FOLLOW_UP_STOP_WORDS.has(t.toLowerCase())) return false;
+  if (words.every((w) => FOLLOW_UP_STOP_WORDS.has(w.toLowerCase()))) return false;
+  // A single word has to look like a name rather than an interjection.
+  if (words.length === 1 && t.length < 3) return false;
+  return true;
+}
+
+/**
+ * What a bare name means, given what the desk was just asked.
+ *
+ * After a list about money, a name is a question about that family's money.
+ * After anything else it is "who is this child" — the general reading, and
+ * the safe one, since student details mask what the asker may not see.
+ */
+export function followUpCommandFor(originCommandId: string): "student_fees" | "student_details" {
+  return originCommandId === "class_defaulters" ||
+    originCommandId === "student_fees" ||
+    originCommandId === "collection_today"
+    ? "student_fees"
+    : "student_details";
+}
+
+/** Whether a stored list is still young enough to answer a bare name. */
+export function followUpIsFresh(atIso: string, nowMs: number): boolean {
+  const at = Date.parse(atIso || "");
+  if (!Number.isFinite(at)) return false;
+  const age = nowMs - at;
+  return age >= 0 && age <= FOLLOW_UP_WINDOW_MINUTES * 60 * 1000;
+}
