@@ -5,6 +5,7 @@ import "package:url_launcher/url_launcher.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// The school's e-book shelf for a signed-in parent.
 ///
@@ -24,9 +25,7 @@ class EbookShelfScreen extends StatelessWidget {
       subtitle: "E-books",
       load: api.fetchEbookShelf,
       emptyIcon: Icons.local_library_outlined,
-      emptyText:
-          "The school's e-book shelf is not switched on yet. Books appear here "
-          "as soon as the library sets it up.",
+      emptyText: context.l10n.theSchoolSEBookShelf,
       isEmpty: (shelf) => !shelf.configured,
       builder: (context, shelf, _) {
         final bySubject = <String, List<LibraryEbook>>{};
@@ -46,7 +45,7 @@ class EbookShelfScreen extends StatelessWidget {
                   onTap: () => _open(context, shelf.shelfUrl),
                   leading: const Icon(Icons.auto_stories, color: Colors.white),
                   title: Text(
-                    "Open the whole shelf",
+                    context.l10n.openTheWholeShelf,
                     style: AppText.bodyLarge.copyWith(
                       color: Colors.white,
                       fontWeight: FontWeight.w600,
@@ -67,11 +66,10 @@ class EbookShelfScreen extends StatelessWidget {
                 ),
               ),
             if (shelf.books.isEmpty)
-              const Padding(
+              Padding(
                 padding: EdgeInsets.symmetric(vertical: 24),
                 child: Text(
-                  "No individual books catalogued yet — the shelf link above "
-                  "has everything the library has published.",
+                  context.l10n.noIndividualBooksCataloguedYetThe,
                   textAlign: TextAlign.center,
                   style: AppText.bodySmallMuted,
                 ),
@@ -161,7 +159,7 @@ class EbookShelfScreen extends StatelessWidget {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!ok && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Could not open this book.")),
+        SnackBar(content: Text(context.l10n.couldNotOpenThisBook)),
       );
     }
   }

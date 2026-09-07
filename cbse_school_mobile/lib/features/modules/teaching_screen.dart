@@ -6,6 +6,7 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "lesson_plan_editor_screen.dart";
 import "module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// Sentinel returned by the plan picker to mean "write a new one".
 const _newPlanSentinel = "__new__";
@@ -113,9 +114,7 @@ class TeachingScreen extends StatelessWidget {
   ) async {
     if (period.chapters.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("No syllabus plan set for this subject yet."),
-        ),
+        SnackBar(content: Text(context.l10n.noSyllabusPlanSetForThis)),
       );
       return;
     }
@@ -129,7 +128,7 @@ class TeachingScreen extends StatelessWidget {
             Padding(
               padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Text(
-                "What did you cover?",
+                context.l10n.whatDidYouCover,
                 style: AppText.bodyLargeInk.copyWith(
                   fontWeight: FontWeight.w600,
                 ),
@@ -194,17 +193,17 @@ class TeachingScreen extends StatelessWidget {
             Padding(
               padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Text(
-                "Which lesson plan?",
+                context.l10n.whichLessonPlan,
                 style: AppText.bodyLargeInk.copyWith(
                   fontWeight: FontWeight.w600,
                 ),
               ),
             ),
             if (period.lessonPlans.isEmpty)
-              const Padding(
+              Padding(
                 padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
                 child: Text(
-                  "No lesson plans for this subject yet.",
+                  context.l10n.noLessonPlansForThisSubject,
                   style: AppText.bodySmallMuted,
                 ),
               ),
@@ -230,7 +229,7 @@ class TeachingScreen extends StatelessWidget {
               dense: true,
               leading: const Icon(Icons.add, size: 20, color: AppColors.info),
               title: Text(
-                "Write a new lesson plan",
+                context.l10n.writeANewLessonPlan,
                 style: AppText.bodyMedium.copyWith(color: AppColors.info),
               ),
               onTap: () => Navigator.pop(context, _newPlanSentinel),
@@ -271,7 +270,7 @@ class TeachingScreen extends StatelessWidget {
       subtitle: "Today's teaching",
       load: () => api.fetchTeachingDay(),
       emptyIcon: Icons.menu_book_outlined,
-      emptyText: "No periods on your timetable today.",
+      emptyText: context.l10n.noPeriodsOnYourTimetableToday,
       // A day the school could not resolve is NOT empty — it needs its
       // own explanation, handled in the builder below.
       isEmpty: (day) => day.scheduleAvailable && day.periods.isEmpty,
@@ -363,8 +362,8 @@ class _ScheduleUnavailable extends StatelessWidget {
           color: AppColors.muted,
         ),
         const SizedBox(height: 14),
-        const Text(
-          "Nothing to log",
+        Text(
+          context.l10n.nothingToLog,
           textAlign: TextAlign.center,
           style: AppText.titleSmallInk,
         ),
@@ -401,9 +400,9 @@ Future<void> _openResource(
   // The server only ever stores http(s), but a malformed row must fail
   // visibly here rather than silently doing nothing on tap.
   if (uri == null || !(uri.isScheme("http") || uri.isScheme("https"))) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("That link is not a valid web address.")),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(context.l10n.thatLinkIsNotAValid)));
     return;
   }
   final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -554,7 +553,10 @@ class _PeriodCard extends StatelessWidget {
                   child: OutlinedButton.icon(
                     onPressed: onNotTaught,
                     icon: const Icon(Icons.close, size: 17),
-                    label: const Text("Not taught", style: AppText.bodySmall),
+                    label: Text(
+                      context.l10n.notTaught,
+                      style: AppText.bodySmall,
+                    ),
                   ),
                 ),
               ],
@@ -579,7 +581,7 @@ class _PeriodCard extends StatelessWidget {
               const Divider(height: 1),
               const SizedBox(height: 8),
               Text(
-                "CONTENT",
+                context.l10n.content,
                 style: AppText.labelSmallMuted.copyWith(
                   letterSpacing: 0.6,
                   fontWeight: FontWeight.w700,

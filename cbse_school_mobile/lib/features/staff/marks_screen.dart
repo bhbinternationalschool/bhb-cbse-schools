@@ -6,6 +6,7 @@ import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
 import "section_picker.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// Marks entry from the phone: pick the exam, then a section you teach,
 /// then a subject — the roster appears with one box per student. Saves one
@@ -24,9 +25,7 @@ class MarksScreen extends StatelessWidget {
       subtitle: "Choose the exam",
       load: api.fetchExamTerms,
       emptyIcon: Icons.grading_outlined,
-      emptyText:
-          "No exam is set up for this year yet. The exams desk creates terms "
-          "(unit tests, half-yearly, annual) and mark entry opens here.",
+      emptyText: context.l10n.noExamIsSetUpFor,
       isEmpty: (t) => t.isEmpty,
       builder: (context, terms, _) => ListView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -71,7 +70,7 @@ class MarksScreen extends StatelessWidget {
               MaterialPageRoute(builder: (_) => DateSheetScreen(api: api)),
             ),
             icon: const Icon(Icons.event_note_outlined, size: 18),
-            label: const Text("Exam date sheet"),
+            label: Text(context.l10n.examDateSheet),
           ),
         ],
       ),
@@ -281,18 +280,18 @@ class _MarkEntryScreenState extends State<MarkEntryScreen> {
                           const SizedBox(height: 12),
                           FilledButton(
                             onPressed: _load,
-                            child: const Text("Retry"),
+                            child: Text(context.l10n.retry),
                           ),
                         ],
                       ),
                     ),
             )
           : s.subjects.isEmpty
-          ? const Center(
+          ? Center(
               child: Padding(
                 padding: EdgeInsets.all(24),
                 child: Text(
-                  "No exam subjects are linked to this class yet. The exams desk links subjects from Masters.",
+                  context.l10n.noExamSubjectsAreLinkedTo,
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -319,16 +318,18 @@ class _MarkEntryScreenState extends State<MarkEntryScreen> {
                                 final go = await showDialog<bool>(
                                   context: context,
                                   builder: (c) => AlertDialog(
-                                    title: const Text("Discard unsaved marks?"),
+                                    title: Text(
+                                      context.l10n.discardUnsavedMarks,
+                                    ),
                                     actions: [
                                       TextButton(
                                         onPressed: () =>
                                             Navigator.pop(c, false),
-                                        child: const Text("Stay"),
+                                        child: Text(context.l10n.stay),
                                       ),
                                       FilledButton(
                                         onPressed: () => Navigator.pop(c, true),
-                                        child: const Text("Discard"),
+                                        child: Text(context.l10n.discard),
                                       ),
                                     ],
                                   ),
@@ -447,7 +448,7 @@ class DateSheetScreen extends StatelessWidget {
       title: "Exam date sheet",
       load: () => api.fetchDateSheet(),
       emptyIcon: Icons.event_note_outlined,
-      emptyText: "No date sheet has been published for this year yet.",
+      emptyText: context.l10n.noDateSheetHasBeenPublished,
       isEmpty: (r) => r.isEmpty,
       builder: (context, rows, _) {
         final byDate = <String, List<DateSheetRow>>{};

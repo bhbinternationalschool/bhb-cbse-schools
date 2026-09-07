@@ -4,6 +4,7 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// The staff member's own leave: this year's balances and their requests,
 /// with a form to apply. A request goes to the principal (unless HR has
@@ -27,14 +28,14 @@ class StaffLeaveScreen extends StatelessWidget {
             backgroundColor: AppColors.primary,
             foregroundColor: Colors.white,
             icon: const Icon(Icons.add),
-            label: const Text("Apply for leave"),
+            label: Text(context.l10n.applyForLeave),
           ),
       builder: (context, info, reload) => ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
         children: [
           Text(
-            "Balance this year",
+            context.l10n.balanceThisYear,
             style: AppText.bodyMediumInk.copyWith(fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 8),
@@ -72,7 +73,10 @@ class StaffLeaveScreen extends StatelessWidget {
                         ),
                       ),
                       if (!b.paid)
-                        const Text("Unpaid", style: AppText.labelMediumMuted),
+                        Text(
+                          context.l10n.unpaid,
+                          style: AppText.labelMediumMuted,
+                        ),
                     ],
                   ),
                 ),
@@ -80,16 +84,16 @@ class StaffLeaveScreen extends StatelessWidget {
           ),
           const SizedBox(height: 18),
           Text(
-            "My requests",
+            context.l10n.myRequests,
             style: AppText.bodyMediumInk.copyWith(fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 8),
           if (info.requests.isEmpty)
-            const Card(
+            Card(
               child: Padding(
                 padding: EdgeInsets.all(14),
                 child: Text(
-                  "No leave applied yet this year.",
+                  context.l10n.noLeaveAppliedYetThisYear,
                   style: AppText.bodySmallMuted,
                 ),
               ),
@@ -138,7 +142,7 @@ class StaffLeaveScreen extends StatelessWidget {
                         alignment: Alignment.centerRight,
                         child: TextButton(
                           onPressed: () => _withdraw(context, r, reload),
-                          child: const Text("Withdraw"),
+                          child: Text(context.l10n.withdraw),
                         ),
                       ),
                   ],
@@ -158,18 +162,18 @@ class StaffLeaveScreen extends StatelessWidget {
     final sure = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text("Withdraw this request?"),
+        title: Text(context.l10n.withdrawThisRequest),
         content: Text(
           "${r.typeName} from ${formatDateLabel(r.fromDate)} will be removed.",
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text("Keep"),
+            child: Text(context.l10n.keep),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text("Withdraw"),
+            child: Text(context.l10n.withdraw),
           ),
         ],
       ),
@@ -329,7 +333,7 @@ class _ApplyLeaveSheetState extends State<_ApplyLeaveSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text("Apply for leave", style: AppText.titleMediumInk),
+            Text(context.l10n.applyForLeave, style: AppText.titleMediumInk),
             const SizedBox(height: 12),
             Wrap(
               spacing: 8,
@@ -361,9 +365,9 @@ class _ApplyLeaveSheetState extends State<_ApplyLeaveSheet> {
                   ),
                 ),
                 if (!_halfDay) ...[
-                  const Padding(
+                  Padding(
                     padding: EdgeInsets.symmetric(horizontal: 6),
-                    child: Text("to"),
+                    child: Text(context.l10n.to),
                   ),
                   Expanded(
                     child: OutlinedButton.icon(
@@ -380,7 +384,7 @@ class _ApplyLeaveSheetState extends State<_ApplyLeaveSheet> {
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               dense: true,
-              title: const Text("Half day", style: AppText.bodyMedium),
+              title: Text(context.l10n.halfDay, style: AppText.bodyMedium),
               value: _halfDay,
               onChanged: (v) => setState(() => _halfDay = v),
             ),
@@ -389,9 +393,9 @@ class _ApplyLeaveSheetState extends State<_ApplyLeaveSheet> {
               minLines: 2,
               maxLines: 4,
               textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(
-                labelText: "Reason",
-                hintText: "Short and clear — the principal reads this",
+              decoration: InputDecoration(
+                labelText: context.l10n.reason,
+                hintText: context.l10n.shortAndClearThePrincipalReads,
               ),
             ),
             if (_error != null)

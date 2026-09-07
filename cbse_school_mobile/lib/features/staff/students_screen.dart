@@ -4,6 +4,7 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../modules/module_shell.dart";
 import "student_note_sheet.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// Read-only section roster for teachers — names, rolls, and today's
 /// attendance status when the register is marked.
@@ -33,7 +34,7 @@ class StudentsScreen extends StatelessWidget {
         date: date,
       ),
       emptyIcon: Icons.school_outlined,
-      emptyText: "No active students in this section.",
+      emptyText: context.l10n.noActiveStudentsInThisSection,
       isEmpty: (roster) => roster.students.isEmpty,
       builder: (context, roster, _) => ListView(
         physics: const AlwaysScrollableScrollPhysics(),

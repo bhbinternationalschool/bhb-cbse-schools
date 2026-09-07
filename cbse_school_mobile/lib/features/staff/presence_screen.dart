@@ -14,6 +14,7 @@ import "package:http/http.dart" as http;
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "presence_service.dart";
+import "../../core/i18n/locale_controller.dart";
 
 class PresenceScreen extends StatefulWidget {
   const PresenceScreen({super.key, required this.api});
@@ -134,7 +135,7 @@ class _PresenceScreenState extends State<PresenceScreen> {
     final window = (_cfg?["window"] as String?) ?? "school hours";
     final enabled = _cfg?["enabled"] != false;
     return Scaffold(
-      appBar: AppBar(title: const Text("School presence")),
+      appBar: AppBar(title: Text(context.l10n.schoolPresence)),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -172,17 +173,15 @@ class _PresenceScreenState extends State<PresenceScreen> {
                     ),
                   const SizedBox(height: 12),
                   if (!enabled)
-                    const Text(
-                      "The school has not enabled presence tracking yet.",
-                    )
+                    Text(context.l10n.theSchoolHasNotEnabledPresence)
                   else if (!_running) ...[
                     Text(
-                      "By starting, you agree that the school receives your phone's location during school timing on working days to confirm presence on campus, and may alert the management when you are off campus or your location is unavailable. Only your latest position and incidents are kept — not a movement trail. You can stop any time (stopping during school timing is flagged).",
+                      context.l10n.byStartingYouAgreeThatThe,
                       style: AppText.bodySmall,
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      "Android will ask for location access — choose “Allow all the time” so sharing continues with the app closed. A permanent notification shows while sharing.",
+                      context.l10n.androidWillAskForLocationAccess,
                       style: AppText.bodySmall.copyWith(
                         fontStyle: FontStyle.italic,
                       ),
@@ -199,7 +198,7 @@ class _PresenceScreenState extends State<PresenceScreen> {
                     OutlinedButton.icon(
                       onPressed: _stop,
                       icon: const Icon(Icons.stop),
-                      label: const Text("Stop sharing"),
+                      label: Text(context.l10n.stopSharing),
                     ),
                   if (_error != null)
                     Padding(

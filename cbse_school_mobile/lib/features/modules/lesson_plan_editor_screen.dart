@@ -3,6 +3,7 @@ import "package:flutter/material.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "dictate_field.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// Write a lesson plan on the phone, dictating the long fields.
 ///
@@ -88,7 +89,7 @@ class _LessonPlanEditorScreenState extends State<LessonPlanEditorScreen> {
     final p = widget.period;
     return Scaffold(
       appBar: AppBar(
-        title: const Text("New lesson plan", style: AppText.titleMedium),
+        title: Text(context.l10n.newLessonPlan, style: AppText.titleMedium),
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
@@ -98,16 +99,16 @@ class _LessonPlanEditorScreenState extends State<LessonPlanEditorScreen> {
             style: AppText.bodyMediumInk.copyWith(fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 4),
-          const Text(
-            "Tap Speak on any box to dictate instead of typing.",
+          Text(
+            context.l10n.tapSpeakOnAnyBoxTo,
             style: AppText.labelMediumMuted,
           ),
           const SizedBox(height: 14),
           TextField(
             controller: _title,
             style: AppText.bodyMedium,
-            decoration: const InputDecoration(
-              labelText: "Lesson title",
+            decoration: InputDecoration(
+              labelText: context.l10n.lessonTitle,
               border: OutlineInputBorder(),
               isDense: true,
             ),
@@ -115,7 +116,7 @@ class _LessonPlanEditorScreenState extends State<LessonPlanEditorScreen> {
           const SizedBox(height: 14),
           if (p.chapters.isNotEmpty) ...[
             Text(
-              "COVERS",
+              context.l10n.covers,
               style: AppText.labelSmallMuted.copyWith(
                 letterSpacing: 0.6,
                 fontWeight: FontWeight.w700,

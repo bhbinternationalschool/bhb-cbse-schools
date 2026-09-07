@@ -4,6 +4,7 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// One child's leave requests, and a form to make a new one.
 ///
@@ -24,9 +25,7 @@ class LeaveScreen extends StatelessWidget {
       subtitle: child.fullName,
       load: () => api.fetchLeaveList(studentId: child.id),
       emptyIcon: Icons.event_busy_outlined,
-      emptyText:
-          "No leave requested yet. Use the button below to tell the school "
-          "when ${child.fullName.split(" ").first} will be away.",
+      emptyText: context.l10n.leaveEmptyHint(child.fullName.split(" ").first),
       isEmpty: (list) => list.requests.isEmpty,
       floatingActionButton: (context, list, reload) =>
           FloatingActionButton.extended(
@@ -34,7 +33,7 @@ class LeaveScreen extends StatelessWidget {
             backgroundColor: AppColors.primary,
             foregroundColor: Colors.white,
             icon: const Icon(Icons.add),
-            label: const Text("Request leave"),
+            label: Text(context.l10n.requestLeave),
           ),
       builder: (context, list, reload) => ListView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -84,7 +83,7 @@ class LeaveScreen extends StatelessWidget {
                         alignment: Alignment.centerRight,
                         child: TextButton(
                           onPressed: () => _cancel(context, r, reload),
-                          child: const Text("Withdraw request"),
+                          child: Text(context.l10n.withdrawRequest),
                         ),
                       ),
                   ],
@@ -104,19 +103,18 @@ class LeaveScreen extends StatelessWidget {
     final sure = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text("Withdraw this request?"),
+        title: Text(context.l10n.withdrawThisRequest),
         content: Text(
-          "The school will no longer see the leave request for "
-          "${formatDateLabel(r.fromDate)}.",
+          context.l10n.withdrawLeaveBody(formatDateLabel(r.fromDate)),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text("Keep"),
+            child: Text(context.l10n.keep),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text("Withdraw"),
+            child: Text(context.l10n.withdraw),
           ),
         ],
       ),
@@ -242,7 +240,7 @@ class _LeaveFormState extends State<_LeaveForm> {
       Haptics.warning();
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text("Please give a reason.")));
+      ).showSnackBar(SnackBar(content: Text(context.l10n.pleaseGiveAReason)));
       return;
     }
     setState(() => _busy = true);
@@ -264,7 +262,7 @@ class _LeaveFormState extends State<_LeaveForm> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Could not reach the school server.")),
+          SnackBar(content: Text(context.l10n.couldNotReachTheSchoolServer)),
         );
       }
     } finally {
@@ -289,7 +287,7 @@ class _LeaveFormState extends State<_LeaveForm> {
             const SizedBox(height: 14),
             DropdownButtonFormField<LeaveTypeInfo>(
               initialValue: _type,
-              decoration: const InputDecoration(labelText: "Type of leave"),
+              decoration: InputDecoration(labelText: context.l10n.typeOfLeave),
               items: [
                 for (final t in widget.types)
                   DropdownMenuItem(value: t, child: Text(t.label)),
@@ -326,9 +324,9 @@ class _LeaveFormState extends State<_LeaveForm> {
               maxLines: 3,
               maxLength: 500,
               textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(
-                labelText: "Reason",
-                hintText: "e.g. Fever — doctor advised rest",
+              decoration: InputDecoration(
+                labelText: context.l10n.reason,
+                hintText: context.l10n.eGFeverDoctorAdvisedRest,
               ),
             ),
             const SizedBox(height: 8),

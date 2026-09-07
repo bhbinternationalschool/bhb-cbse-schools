@@ -8,6 +8,7 @@ import "../../core/ui/haptics.dart";
 import "../../core/ui/spacing.dart";
 import "chat_thread_screen.dart";
 import "module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// A child's teachers and how to reach them: the in-app chat for the
 /// class teacher (always open — messages wait for the morning), and
@@ -26,9 +27,7 @@ class TeachersScreen extends StatelessWidget {
     final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!ok && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("WhatsApp is not installed on this phone."),
-        ),
+        SnackBar(content: Text(context.l10n.whatsappIsNotInstalledOnThis)),
       );
     }
   }
@@ -40,8 +39,7 @@ class TeachersScreen extends StatelessWidget {
       subtitle: child.fullName,
       load: () => api.fetchTeacherContacts(studentId: child.id),
       emptyIcon: Icons.school_outlined,
-      emptyText:
-          "No teachers are linked to this class yet. The school office assigns the class teacher and publishes the timetable.",
+      emptyText: context.l10n.noTeachersAreLinkedToThis,
       isEmpty: (d) => d.teachers.isEmpty,
       builder: (context, d, _) => ListView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -220,7 +218,7 @@ class _TeacherCard extends StatelessWidget {
                     child: OutlinedButton.icon(
                       onPressed: onChat,
                       icon: const Icon(Icons.chat_bubble_outline, size: 17),
-                      label: const Text("Chat in app"),
+                      label: Text(context.l10n.chatInApp),
                     ),
                   ),
                   const SizedBox(width: Space.sm),

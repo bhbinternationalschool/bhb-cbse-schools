@@ -9,6 +9,7 @@ import "../../core/ui/haptics.dart";
 import "../../core/ui/motion.dart";
 import "../../core/ui/spacing.dart";
 import "video_player_screen.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// What the tutor is told about the child and, when opened from a
 /// homework item, the assignment.
@@ -327,7 +328,7 @@ class _TutorScreenState extends State<TutorScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text("AI tutor", style: AppText.titleMedium),
+            Text(context.l10n.aiTutor, style: AppText.titleMedium),
             Text(
               widget.context.homeworkTitle.isNotEmpty
                   ? widget.context.homeworkTitle
@@ -340,7 +341,7 @@ class _TutorScreenState extends State<TutorScreen> {
         ),
         actions: [
           IconButton(
-            tooltip: "How to use the tutor",
+            tooltip: context.l10n.howToUseTheTutor,
             onPressed: () {
               Haptics.tap();
               _showGuide();
@@ -381,7 +382,7 @@ class _TutorScreenState extends State<TutorScreen> {
                             const SizedBox(height: Space.md),
                             FilledButton(
                               onPressed: _load,
-                              child: const Text("Retry"),
+                              child: Text(context.l10n.retry),
                             ),
                           ],
                         ),
@@ -392,8 +393,8 @@ class _TutorScreenState extends State<TutorScreen> {
                 key: const ValueKey("off"),
                 child: Padding(
                   padding: Insets.state,
-                  child: const Text(
-                    "The tutor is not switched on yet. Please check back later.",
+                  child: Text(
+                    context.l10n.theTutorIsNotSwitchedOn,
                     textAlign: TextAlign.center,
                   ),
                 ),
@@ -652,15 +653,13 @@ class _Welcome extends StatelessWidget {
           OutlinedButton.icon(
             onPressed: onGuide,
             icon: const Icon(Icons.menu_book_outlined, size: 18),
-            label: const Text(
-              "How to use the tutor as daily tuition · रोज़ की ट्यूशन कैसे करें",
-            ),
+            label: Text(context.l10n.howToUseTheTutorAs),
           ),
         const SizedBox(height: Space.lg),
         Text(note, style: AppText.bodySmallMuted.copyWith(height: 1.45)),
         const SizedBox(height: Space.sm),
         Text(
-          "Replies are written by an AI and can be wrong. Check anything that matters with the class teacher.",
+          context.l10n.repliesAreWrittenByAnAi,
           style: AppText.bodySmallMuted.copyWith(height: 1.45),
         ),
       ],
@@ -836,11 +835,7 @@ class _ComposerState extends State<_Composer> {
     if (!_ready) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              "Voice input is not available on this phone. Please type your question.",
-            ),
-          ),
+          SnackBar(content: Text(context.l10n.voiceInputIsNotAvailableOn)),
         );
       }
       return;
@@ -1006,7 +1001,7 @@ class _PassSheetState extends State<_PassSheet> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Could not reach the school server.")),
+          SnackBar(content: Text(context.l10n.couldNotReachTheSchoolServer)),
         );
       }
     } finally {

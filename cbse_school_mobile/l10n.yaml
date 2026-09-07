@@ -1,0 +1,11 @@
+# English / Hindi for the whole app.
+#
+# The staff who most need this app — the gateman, the driver, the attendant —
+# do not read English. Hindi is therefore a first-class locale, not a
+# courtesy: every user-facing string lives in these ARB files and nowhere
+# else, so a screen cannot quietly ship English-only again.
+arb-dir: lib/l10n
+template-arb-file: app_en.arb
+output-localization-file: app_localizations.dart
+output-class: L
+nullable-getter: false

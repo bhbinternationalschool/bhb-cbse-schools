@@ -4,6 +4,7 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "module_shell.dart";
 import "tutor_screen.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// Homework feed for one section. Parents pass [studentId]; teachers pass
 /// [classId]+[sectionId] and get a compose button.
@@ -70,7 +71,7 @@ class HomeworkScreen extends StatelessWidget {
                 if (posted == true) reload();
               },
               icon: const Icon(Icons.add),
-              label: const Text("Post homework"),
+              label: Text(context.l10n.postHomework),
             ),
       builder: (context, feed, _) => ListView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -164,8 +165,8 @@ class HomeworkScreen extends StatelessWidget {
                               ),
                             ),
                             icon: const Icon(Icons.school_outlined, size: 16),
-                            label: const Text(
-                              "Ask tutor",
+                            label: Text(
+                              context.l10n.askTutor,
                               style: AppText.bodySmall,
                             ),
                           ),
@@ -257,12 +258,12 @@ class _ComposeSheetState extends State<_ComposeSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text("Post homework", style: AppText.titleMediumInk),
+          Text(context.l10n.postHomework, style: AppText.titleMediumInk),
           const SizedBox(height: 14),
           DropdownButtonFormField<String>(
             initialValue: _subjectId,
             isExpanded: true,
-            decoration: const InputDecoration(hintText: "Subject"),
+            decoration: InputDecoration(hintText: context.l10n.subject),
             items: [
               for (final s in widget.subjects)
                 DropdownMenuItem(value: s.id, child: Text(s.name)),
@@ -273,15 +274,15 @@ class _ComposeSheetState extends State<_ComposeSheet> {
           TextField(
             controller: _title,
             textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(hintText: "Title"),
+            decoration: InputDecoration(hintText: context.l10n.title),
           ),
           const SizedBox(height: 10),
           TextField(
             controller: _body,
             maxLines: 4,
             textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(
-              hintText: "Homework details for parents…",
+            decoration: InputDecoration(
+              hintText: context.l10n.homeworkDetailsForParents,
             ),
           ),
           if (_error != null) ...[
@@ -300,7 +301,7 @@ class _ComposeSheetState extends State<_ComposeSheet> {
                     width: 20,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Text("Publish"),
+                : Text(context.l10n.publish),
           ),
         ],
       ),

@@ -5,6 +5,7 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../modules/module_shell.dart";
 import "attendance_screen.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /* ─── Shared bits ────────────────────────────────────────────────── */
 
@@ -15,7 +16,7 @@ Future<void> _call(BuildContext context, String mobile) async {
   if (!ok && context.mounted) {
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(const SnackBar(content: Text("Could not open the dialer.")));
+    ).showSnackBar(SnackBar(content: Text(context.l10n.couldNotOpenTheDialer)));
   }
 }
 
@@ -33,7 +34,7 @@ Future<void> _whatsapp(
   final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
   if (!ok && context.mounted) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("WhatsApp is not available on this phone.")),
+      SnackBar(content: Text(context.l10n.whatsappIsNotAvailableOnThis)),
     );
   }
 }
@@ -46,20 +47,20 @@ class _ContactButtons extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (mobile.isEmpty) {
-      return const Text("No mobile on file", style: AppText.labelMediumMuted);
+      return Text(context.l10n.noMobileOnFile, style: AppText.labelMediumMuted);
     }
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         IconButton(
-          tooltip: "Call",
+          tooltip: context.l10n.call,
           visualDensity: VisualDensity.compact,
           icon: const Icon(Icons.call_outlined, size: 20),
           color: AppColors.primary,
           onPressed: () => _call(context, mobile),
         ),
         IconButton(
-          tooltip: "WhatsApp",
+          tooltip: context.l10n.whatsapp,
           visualDensity: VisualDensity.compact,
           icon: const Icon(Icons.chat_outlined, size: 20),
           color: AppColors.success,
@@ -104,7 +105,7 @@ class RegistersScreen extends StatelessWidget {
       title: "Today's attendance registers",
       load: api.fetchRegistersToday,
       emptyIcon: Icons.school_outlined,
-      emptyText: "No active sections configured.",
+      emptyText: context.l10n.noActiveSectionsConfigured,
       isEmpty: (d) => d.sections.isEmpty,
       builder: (context, d, reload) {
         final pending = d.sections.where((s) => !s.marked && !s.holiday).length;
@@ -118,8 +119,8 @@ class RegistersScreen extends StatelessWidget {
               style: AppText.bodySmallMuted,
             ),
             const SizedBox(height: 4),
-            const Text(
-              "Tap a section to view or mark its register.",
+            Text(
+              context.l10n.tapASectionToViewOr,
               style: AppText.labelMediumMuted,
             ),
             const SizedBox(height: 10),
@@ -195,7 +196,7 @@ class StaffAttendanceTodayScreen extends StatelessWidget {
       title: "Staff attendance today",
       load: api.fetchStaffAttendanceToday,
       emptyIcon: Icons.badge_outlined,
-      emptyText: "No active staff on the roster.",
+      emptyText: context.l10n.noActiveStaffOnTheRoster,
       isEmpty: (d) => d.staff.isEmpty,
       builder: (context, d, _) {
         final present = d.staff.where((s) => s.status == "P").length;
@@ -258,7 +259,7 @@ class FollowUpsScreen extends StatelessWidget {
       title: "Admission follow-ups due",
       load: api.fetchFollowUpsDue,
       emptyIcon: Icons.task_alt_outlined,
-      emptyText: "No follow-ups are due. Nice.",
+      emptyText: context.l10n.noFollowUpsAreDueNice,
       isEmpty: (l) => l.isEmpty,
       builder: (context, leads, _) => ListView.builder(
         physics: const AlwaysScrollableScrollPhysics(),

@@ -3,6 +3,7 @@ import "package:flutter/material.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../modules/module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// What this cashier has taken today, receipt by receipt — the sheet they
 /// hand over with the cash box.
@@ -17,7 +18,7 @@ class MyCollectionsScreen extends StatelessWidget {
       title: "My collections",
       load: () => api.fetchMyCollections(),
       emptyIcon: Icons.account_balance_wallet_outlined,
-      emptyText: "You have not collected anything today.",
+      emptyText: context.l10n.youHaveNotCollectedAnythingToday,
       isEmpty: (d) => d.receipts.isEmpty,
       builder: (context, d, _) => ListView(
         physics: const AlwaysScrollableScrollPhysics(),

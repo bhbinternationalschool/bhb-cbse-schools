@@ -6,6 +6,7 @@ import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "bus_routes_screen.dart";
 import "module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// The family's school transport: for each child, the bus they ride —
 /// route, stop, vehicle, driver with a call button — or, if they do not,
@@ -32,7 +33,7 @@ class TransportScreen extends StatelessWidget {
               MaterialPageRoute(builder: (_) => BusRoutesScreen(api: api)),
             ),
             icon: const Icon(Icons.map_outlined, size: 18),
-            label: const Text("See all bus routes and stops"),
+            label: Text(context.l10n.seeAllBusRoutesAndStops),
           ),
         ],
       ),
@@ -93,7 +94,7 @@ class _ChildCard extends StatelessWidget {
                 Padding(
                   padding: EdgeInsets.only(top: 6),
                   child: Text(
-                    "Boarding is paused by the office at the moment.",
+                    context.l10n.boardingIsPausedByTheOffice,
                     style: AppText.bodySmall.copyWith(color: AppColors.warning),
                   ),
                 ),
@@ -117,26 +118,26 @@ class _ChildCard extends StatelessWidget {
                       FilledButton.icon(
                         onPressed: () => _call(context, t.driverMobile),
                         icon: const Icon(Icons.call, size: 18),
-                        label: const Text("Call"),
+                        label: Text(context.l10n.call),
                       ),
                   ],
                 )
               else
-                const Text(
-                  "Driver's number is not on the school's record yet.",
+                Text(
+                  context.l10n.driverSNumberIsNotOn,
                   style: AppText.bodySmallMuted,
                 ),
             ] else ...[
-              const Text(
-                "Not using school transport.",
+              Text(
+                context.l10n.notUsingSchoolTransport,
                 style: AppText.bodyMediumInk,
               ),
               const SizedBox(height: 8),
               if (r != null && r.isActive) ...[
                 _StatusLine(r),
                 const SizedBox(height: 4),
-                const Text(
-                  "The transport in-charge will call you about the stop and the fee.",
+                Text(
+                  context.l10n.theTransportInChargeWillCall,
                   style: AppText.bodySmallMuted,
                 ),
               ] else ...[
@@ -186,9 +187,7 @@ class _ChildCard extends StatelessWidget {
       await reload();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Request sent. The school will get in touch."),
-          ),
+          SnackBar(content: Text(context.l10n.requestSentTheSchoolWillGet)),
         );
       }
     }
@@ -298,7 +297,7 @@ class _RequestFormState extends State<_RequestForm> {
     if (_address.text.trim().isEmpty) {
       Haptics.warning();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please give the pickup address.")),
+        SnackBar(content: Text(context.l10n.pleaseGiveThePickupAddress)),
       );
       return;
     }
@@ -322,7 +321,7 @@ class _RequestFormState extends State<_RequestForm> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Could not reach the school server.")),
+          SnackBar(content: Text(context.l10n.couldNotReachTheSchoolServer)),
         );
       }
     } finally {
@@ -346,8 +345,7 @@ class _RequestFormState extends State<_RequestForm> {
             ),
             const SizedBox(height: 4),
             Text(
-              "Tell the school where to pick up from. The transport in-charge "
-              "will call to confirm the stop and the monthly fee.",
+              context.l10n.tellTheSchoolWhereToPick,
               style: AppText.bodySmallMuted.copyWith(height: 1.4),
             ),
             const SizedBox(height: 12),
@@ -355,28 +353,30 @@ class _RequestFormState extends State<_RequestForm> {
               controller: _address,
               maxLines: 2,
               textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(labelText: "Pickup address"),
+              decoration: InputDecoration(
+                labelText: context.l10n.pickupAddress,
+              ),
             ),
             const SizedBox(height: 10),
             TextField(
               controller: _locality,
               textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(
-                labelText: "Locality / village",
+              decoration: InputDecoration(
+                labelText: context.l10n.localityVillage,
               ),
             ),
             const SizedBox(height: 10),
             TextField(
               controller: _landmark,
               textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(labelText: "Landmark"),
+              decoration: InputDecoration(labelText: context.l10n.landmark),
             ),
             const SizedBox(height: 10),
             TextField(
               controller: _stop,
               textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(
-                labelText: "Preferred stop (if you know one)",
+              decoration: InputDecoration(
+                labelText: context.l10n.preferredStopIfYouKnowOne,
               ),
             ),
             const SizedBox(height: 10),
@@ -385,7 +385,7 @@ class _RequestFormState extends State<_RequestForm> {
               maxLines: 2,
               maxLength: 500,
               textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(labelText: "Anything else"),
+              decoration: InputDecoration(labelText: context.l10n.anythingElse),
             ),
             const SizedBox(height: 4),
             FilledButton(

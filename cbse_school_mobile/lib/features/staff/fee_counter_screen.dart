@@ -8,6 +8,7 @@ import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
 import "payslips_screen.dart" show rupees;
+import "../../core/i18n/locale_controller.dart";
 
 /// Fee counter on a phone: find the child, tick what is being paid, take the
 /// money, hand over a receipt number.
@@ -68,7 +69,7 @@ class _FeeCounterScreenState extends State<FeeCounterScreen> {
     final hits = _hits;
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Collect fees", style: AppText.titleMedium),
+        title: Text(context.l10n.collectFees, style: AppText.titleMedium),
       ),
       body: Column(
         children: [
@@ -82,8 +83,8 @@ class _FeeCounterScreenState extends State<FeeCounterScreen> {
                     autofocus: true,
                     textInputAction: TextInputAction.search,
                     onSubmitted: (_) => _search(),
-                    decoration: const InputDecoration(
-                      hintText: "Name, admission no. or mobile",
+                    decoration: InputDecoration(
+                      hintText: context.l10n.nameAdmissionNoOrMobile,
                       prefixIcon: Icon(Icons.search),
                       isDense: true,
                     ),
@@ -109,11 +110,11 @@ class _FeeCounterScreenState extends State<FeeCounterScreen> {
             child: hits == null
                 ? const _Hint()
                 : hits.isEmpty
-                ? const Center(
+                ? Center(
                     child: Padding(
                       padding: EdgeInsets.all(24),
                       child: Text(
-                        "Nobody matched. Try the admission number, or the parent's mobile.",
+                        context.l10n.nobodyMatchedTryTheAdmissionNumber,
                         textAlign: TextAlign.center,
                         style: AppText.bodyMediumMuted,
                       ),
@@ -291,10 +292,9 @@ class _CounterScreenState extends State<CounterScreen> {
               autofocus: true,
               keyboardType: TextInputType.number,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: const InputDecoration(
-                labelText: "Paying now (₹)",
-                helperText:
-                    "Part payment is allowed; more than the balance is not",
+              decoration: InputDecoration(
+                labelText: context.l10n.payingNow,
+                helperText: context.l10n.partPaymentIsAllowedMoreThan,
               ),
             ),
           ],
@@ -302,11 +302,11 @@ class _CounterScreenState extends State<CounterScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text("Cancel"),
+            child: Text(context.l10n.cancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text("Set"),
+            child: Text(context.l10n.setLabel),
           ),
         ],
       ),
@@ -356,8 +356,8 @@ class _CounterScreenState extends State<CounterScreen> {
             Text("From ${c.guardianName}", style: AppText.bodyMedium),
             Text("By ${mode.label}", style: AppText.bodyMedium),
             const SizedBox(height: 8),
-            const Text(
-              "A receipt is issued at once and the parent is notified.",
+            Text(
+              context.l10n.aReceiptIsIssuedAtOnce,
               style: AppText.bodySmallMuted,
             ),
           ],
@@ -365,11 +365,11 @@ class _CounterScreenState extends State<CounterScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text("Back"),
+            child: Text(context.l10n.back),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text("Take money"),
+            child: Text(context.l10n.takeMoney),
           ),
         ],
       ),
@@ -453,7 +453,7 @@ class _CounterScreenState extends State<CounterScreen> {
                           const SizedBox(height: 12),
                           FilledButton(
                             onPressed: _load,
-                            child: const Text("Retry"),
+                            child: Text(context.l10n.retry),
                           ),
                         ],
                       ),
@@ -477,7 +477,7 @@ class _CounterScreenState extends State<CounterScreen> {
                       child: Padding(
                         padding: EdgeInsets.all(12),
                         child: Text(
-                          "Nothing outstanding.",
+                          context.l10n.nothingOutstanding,
                           style: AppText.bodySmall.copyWith(
                             color: AppColors.success,
                           ),
@@ -632,8 +632,8 @@ class _ReceiptDialog extends StatelessWidget {
               style: AppText.bodySmallMuted,
             ),
           const SizedBox(height: 10),
-          const Text(
-            "The parent has been notified in their app.",
+          Text(
+            context.l10n.theParentHasBeenNotifiedIn,
             style: AppText.bodySmallMuted,
           ),
         ],
@@ -641,7 +641,7 @@ class _ReceiptDialog extends StatelessWidget {
       actions: [
         FilledButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text("Done"),
+          child: Text(context.l10n.done),
         ),
       ],
     );

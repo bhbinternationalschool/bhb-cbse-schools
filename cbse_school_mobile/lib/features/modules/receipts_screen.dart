@@ -6,6 +6,7 @@ import "package:pdfx/pdfx.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// Every fee receipt the family has been issued, newest first, each one
 /// openable as the same PDF the school keeps in its archive.
@@ -20,8 +21,7 @@ class ReceiptsScreen extends StatelessWidget {
       title: "Fee receipts",
       load: api.fetchReceipts,
       emptyIcon: Icons.receipt_long_outlined,
-      emptyText:
-          "No receipts yet. Every payment made at the counter or online appears here.",
+      emptyText: context.l10n.noReceiptsYetEveryPaymentMade,
       isEmpty: (list) => list.isEmpty,
       builder: (context, list, _) => ListView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -90,7 +90,7 @@ class ReceiptsScreen extends StatelessWidget {
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const AlertDialog(
+      builder: (_) => AlertDialog(
         content: Row(
           children: [
             SizedBox(
@@ -99,7 +99,7 @@ class ReceiptsScreen extends StatelessWidget {
               child: CircularProgressIndicator(strokeWidth: 2),
             ),
             SizedBox(width: 16),
-            Expanded(child: Text("Fetching receipt…")),
+            Expanded(child: Text(context.l10n.fetchingReceipt)),
           ],
         ),
       ),
@@ -126,9 +126,7 @@ class ReceiptsScreen extends StatelessWidget {
       if (!context.mounted) return;
       Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Could not fetch the receipt. Check your connection."),
-        ),
+        SnackBar(content: Text(context.l10n.couldNotFetchTheReceiptCheck)),
       );
     }
   }

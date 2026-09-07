@@ -3,6 +3,7 @@ import "package:flutter/material.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// The school's published photo albums.
 ///
@@ -25,8 +26,7 @@ class GalleryScreen extends StatelessWidget {
       subtitle: "School photos",
       load: api.fetchGalleryAlbums,
       emptyIcon: Icons.photo_library_outlined,
-      emptyText:
-          "No albums published yet. Photos from school events appear here.",
+      emptyText: context.l10n.noAlbumsPublishedYetPhotosFrom,
       isEmpty: (albums) => albums.isEmpty,
       builder: (context, albums, _) {
         return ListView.builder(

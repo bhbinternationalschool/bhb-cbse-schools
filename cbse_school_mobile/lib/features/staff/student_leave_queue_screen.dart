@@ -5,6 +5,7 @@ import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
 import "staff_leave_screen.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// Parents' leave requests for the teacher's sections (every section for
 /// leadership). A class teacher decides short leave; over 3 days, medical or
@@ -82,10 +83,10 @@ class _Card extends StatelessWidget {
               style: AppText.bodyMedium,
             ),
             if (approve)
-              const Padding(
+              Padding(
                 padding: EdgeInsets.only(top: 6),
                 child: Text(
-                  "The attendance register will show leave for these days.",
+                  context.l10n.theAttendanceRegisterWillShowLeave,
                   style: AppText.bodySmallMuted,
                 ),
               ),
@@ -104,7 +105,7 @@ class _Card extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text("Back"),
+            child: Text(context.l10n.back),
           ),
           FilledButton(
             style: approve
@@ -186,19 +187,19 @@ class _Card extends StatelessWidget {
                           style: TextButton.styleFrom(
                             foregroundColor: AppColors.danger,
                           ),
-                          child: const Text("Decline"),
+                          child: Text(context.l10n.decline),
                         ),
                         const SizedBox(width: 4),
                         FilledButton(
                           onPressed: () => _decide(context, true),
-                          child: const Text("Approve"),
+                          child: Text(context.l10n.approve),
                         ),
                       ],
                     )
                   : Padding(
                       padding: EdgeInsets.only(top: 6),
                       child: Text(
-                        "Waiting for the principal.",
+                        context.l10n.waitingForThePrincipal,
                         style: AppText.bodySmall.copyWith(
                           color: AppColors.warning,
                         ),

@@ -7,6 +7,7 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// Parent-uploaded documents waiting for verification — the class
 /// teacher's queue (everything for the office). Open the file, then verify
@@ -155,25 +156,25 @@ class _ReviewScreenState extends State<_ReviewScreen> {
       final ok = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text("Reject document"),
+          title: Text(context.l10n.rejectDocument),
           content: TextField(
             controller: ctl,
             autofocus: true,
             maxLines: 2,
-            decoration: const InputDecoration(
-              labelText: "Why — the parent reads this",
-              hintText: "e.g. blurred, wrong child, expired",
+            decoration: InputDecoration(
+              labelText: context.l10n.whyTheParentReadsThis,
+              hintText: context.l10n.eGBlurredWrongChildExpired,
             ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text("Back"),
+              child: Text(context.l10n.back),
             ),
             FilledButton(
               style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
               onPressed: () => Navigator.pop(context, true),
-              child: const Text("Reject"),
+              child: Text(context.l10n.reject),
             ),
           ],
         ),
@@ -259,7 +260,7 @@ class _ReviewScreenState extends State<_ReviewScreen> {
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppColors.danger,
                         ),
-                        child: const Text("Reject"),
+                        child: Text(context.l10n.reject),
                       ),
                     ),
                     const SizedBox(width: 10),

@@ -75,8 +75,10 @@ class StaffCommandResult {
   /// False when the engine did not recognise the text as a command.
   final bool handled;
   final String audience;
+
   /// WhatsApp-style text: *bold*, _italic_, newlines.
   final String text;
+
   /// Present when a write command is waiting for Confirm / Cancel.
   final StaffCommandConfirm? confirm;
 }

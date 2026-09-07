@@ -6,6 +6,7 @@ import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "module_shell.dart";
 import "receipts_screen.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// One child's open dues, with online payment.
 ///
@@ -59,11 +60,8 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
     _reload?.call();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            "Checking for your payment. Paid dues disappear from this list "
-            "once the bank confirms — usually within a minute.",
-          ),
+        SnackBar(
+          content: Text(context.l10n.checkingForYourPaymentPaidDues),
           duration: Duration(seconds: 5),
         ),
       );
@@ -158,7 +156,7 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
       subtitle: widget.child.fullName,
       load: () => widget.api.fetchFeeLedger(widget.child.id),
       emptyIcon: Icons.task_alt,
-      emptyText: "No pending fees — all dues are cleared. Thank you!",
+      emptyText: context.l10n.noPendingFeesAllDuesAre,
       isEmpty: (ledger) => ledger.isEmpty,
       bottomBar: (context, ledger, reload) {
         _reload = reload;
@@ -208,7 +206,7 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
                   children: [
                     Expanded(
                       child: Text(
-                        "Total due",
+                        context.l10n.totalDue,
                         style: AppText.bodyMedium.copyWith(
                           color: Color(0xFFB8C0D4),
                         ),
@@ -225,10 +223,10 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
               ),
             ),
             const SizedBox(height: 8),
-            const Padding(
+            Padding(
               padding: EdgeInsets.fromLTRB(4, 4, 4, 6),
               child: Text(
-                "Tick the fees you want to pay now.",
+                context.l10n.tickTheFeesYouWantTo,
                 style: AppText.bodySmallMuted,
               ),
             ),
@@ -244,10 +242,10 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
                   ),
                 ),
               ),
-              const Padding(
+              Padding(
                 padding: EdgeInsets.fromLTRB(4, 0, 4, 6),
                 child: Text(
-                  "Not due yet. Tick any you would like to clear now.",
+                  context.l10n.notDueYetTickAnyYou,
                   style: AppText.bodySmallMuted,
                 ),
               ),
@@ -266,13 +264,13 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
                   color: AppColors.primary,
                 ),
                 title: Text(
-                  "Previous receipts",
+                  context.l10n.previousReceipts,
                   style: AppText.bodyMedium.copyWith(
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                subtitle: const Text(
-                  "Every payment so far, as a PDF",
+                subtitle: Text(
+                  context.l10n.everyPaymentSoFarAsA,
                   style: AppText.labelMediumMuted,
                 ),
                 trailing: const Icon(

@@ -2,6 +2,7 @@ import "package:flutter/material.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// Bottom sheet listing every class with its sections as chips; pops a
 /// `(classId, sectionId, "Class Section")` record.
@@ -20,8 +21,8 @@ class SectionPicker extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                "Choose class & section",
+              Text(
+                context.l10n.chooseClassSection,
                 style: AppText.titleMediumInk,
               ),
               const SizedBox(height: 12),

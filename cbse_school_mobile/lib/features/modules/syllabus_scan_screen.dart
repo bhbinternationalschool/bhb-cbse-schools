@@ -5,6 +5,7 @@ import "package:image_picker/image_picker.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// Photograph a textbook contents page and add the chapters to a plan.
 ///
@@ -139,20 +140,20 @@ class _SyllabusScanScreenState extends State<SyllabusScanScreen> {
     final scan = _scan;
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Scan syllabus", style: AppText.titleMedium),
+        title: Text(context.l10n.scanSyllabus, style: AppText.titleMedium),
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          const Text(
-            "Photograph the contents page of the textbook. Chapters and topics are detected for you to check before they are added.",
+          Text(
+            context.l10n.photographTheContentsPageOfThe,
             style: AppText.bodySmallMuted,
           ),
           const SizedBox(height: 14),
           DropdownButtonFormField<PlanTargetClass>(
             initialValue: _class,
-            decoration: const InputDecoration(
-              labelText: "Class",
+            decoration: InputDecoration(
+              labelText: context.l10n.classLabel,
               border: OutlineInputBorder(),
               isDense: true,
             ),
@@ -168,8 +169,8 @@ class _SyllabusScanScreenState extends State<SyllabusScanScreen> {
           const SizedBox(height: 10),
           DropdownButtonFormField<PlanTargetSubject>(
             initialValue: _subject,
-            decoration: const InputDecoration(
-              labelText: "Subject",
+            decoration: InputDecoration(
+              labelText: context.l10n.subject,
               border: OutlineInputBorder(),
               isDense: true,
             ),
@@ -188,7 +189,7 @@ class _SyllabusScanScreenState extends State<SyllabusScanScreen> {
                       ? () => _scanFrom(ImageSource.camera)
                       : null,
                   icon: const Icon(Icons.photo_camera_outlined, size: 18),
-                  label: const Text("Camera", style: AppText.bodyMedium),
+                  label: Text(context.l10n.camera, style: AppText.bodyMedium),
                 ),
               ),
               const SizedBox(width: 8),
@@ -198,16 +199,16 @@ class _SyllabusScanScreenState extends State<SyllabusScanScreen> {
                       ? () => _scanFrom(ImageSource.gallery)
                       : null,
                   icon: const Icon(Icons.photo_library_outlined, size: 18),
-                  label: const Text("Gallery", style: AppText.bodyMedium),
+                  label: Text(context.l10n.gallery, style: AppText.bodyMedium),
                 ),
               ),
             ],
           ),
           if (!_canScan)
-            const Padding(
+            Padding(
               padding: EdgeInsets.only(top: 8),
               child: Text(
-                "Pick the class and subject first.",
+                context.l10n.pickTheClassAndSubjectFirst,
                 style: AppText.labelMediumMuted,
               ),
             ),
@@ -241,11 +242,11 @@ class _SyllabusScanScreenState extends State<SyllabusScanScreen> {
             const SizedBox(height: 14),
             FilledButton(
               onPressed: _busy ? null : _save,
-              child: const Text("Add to plan"),
+              child: Text(context.l10n.addToPlan),
             ),
             TextButton(
               onPressed: () => setState(() => _scan = null),
-              child: const Text("Discard"),
+              child: Text(context.l10n.discard),
             ),
           ],
         ],
@@ -336,7 +337,7 @@ class _ChapterTile extends StatelessWidget {
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
-                      "guess",
+                      context.l10n.guess,
                       style: AppText.labelSmall.copyWith(
                         color: AppColors.warning,
                       ),

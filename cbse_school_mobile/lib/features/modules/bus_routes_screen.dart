@@ -3,6 +3,7 @@ import "package:flutter/material.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// Parent-facing bus routes list — same data drivers see (routes, stops,
 /// vehicle), since no per-student route assignment exists yet to narrow it
@@ -18,17 +19,16 @@ class BusRoutesScreen extends StatelessWidget {
       title: "All bus routes",
       load: api.fetchTransportRoutes,
       emptyIcon: Icons.directions_bus_outlined,
-      emptyText:
-          "No bus routes published yet. Contact the school office to find your child's route.",
+      emptyText: context.l10n.noBusRoutesPublishedYetContact,
       isEmpty: (routes) => routes.isEmpty,
       builder: (context, routes, _) => ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),
         children: [
-          const Padding(
+          Padding(
             padding: EdgeInsets.only(bottom: 10),
             child: Text(
-              "All published school bus routes. Ask the office which one your child is on.",
+              context.l10n.allPublishedSchoolBusRoutesAsk,
               style: AppText.bodySmallMuted,
             ),
           ),

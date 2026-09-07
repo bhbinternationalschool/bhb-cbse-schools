@@ -5,6 +5,7 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// The counsellor's call list. Overdue first, because that is the order the
 /// day gets worked through: call, say what happened, set the next date.
@@ -41,7 +42,7 @@ class _AdmissionLeadsScreenState extends State<AdmissionLeadsScreen> {
       },
       load: () => widget.api.fetchAdmissionLeads(filter: _filter, q: _query),
       emptyIcon: Icons.how_to_reg_outlined,
-      emptyText: "Nothing to call right now.",
+      emptyText: context.l10n.nothingToCallRightNow,
       isEmpty: (l) => l.leads.isEmpty,
       builder: (context, list, reload) => ListView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -53,7 +54,7 @@ class _AdmissionLeadsScreenState extends State<AdmissionLeadsScreen> {
             onSubmitted: (v) => setState(() => _query = v.trim()),
             decoration: InputDecoration(
               isDense: true,
-              hintText: "Search child, parent or mobile",
+              hintText: context.l10n.searchChildParentOrMobile,
               prefixIcon: const Icon(Icons.search),
               suffixIcon: _query.isEmpty
                   ? null
@@ -188,7 +189,7 @@ class _LeadCard extends StatelessWidget {
               children: [
                 if (digits.length >= 10)
                   IconButton(
-                    tooltip: "Call",
+                    tooltip: context.l10n.call,
                     onPressed: () {
                       Haptics.tap();
                       launchUrl(Uri.parse("tel:$digits"));
@@ -200,7 +201,7 @@ class _LeadCard extends StatelessWidget {
                   ),
                 if (wa.length >= 10)
                   IconButton(
-                    tooltip: "WhatsApp",
+                    tooltip: context.l10n.whatsapp,
                     onPressed: () => launchUrl(
                       Uri.parse("https://wa.me/91$wa?text=$text"),
                       mode: LaunchMode.externalApplication,
@@ -212,7 +213,7 @@ class _LeadCard extends StatelessWidget {
                   ),
                 FilledButton.tonal(
                   onPressed: () => _log(context),
-                  child: const Text("Log call", style: AppText.bodySmall),
+                  child: Text(context.l10n.logCall, style: AppText.bodySmall),
                 ),
               ],
             ),
@@ -363,7 +364,7 @@ class _LeadFollowupSheetState extends State<_LeadFollowupSheet> {
               controller: _note,
               maxLines: 2,
               textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(labelText: "What was said"),
+              decoration: InputDecoration(labelText: context.l10n.whatWasSaid),
             ),
             const SizedBox(height: 14),
             FilledButton(

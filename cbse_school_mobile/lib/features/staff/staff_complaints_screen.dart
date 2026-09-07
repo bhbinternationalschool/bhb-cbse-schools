@@ -5,6 +5,7 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// Parents' complaints this staff member should act on — everything for
 /// leadership and the office, else the ones assigned to them or about a
@@ -89,25 +90,25 @@ class _Card extends StatelessWidget {
       final ok = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text("Resolve complaint"),
+          title: Text(context.l10n.resolveComplaint),
           content: TextField(
             controller: ctl,
             maxLines: 3,
             autofocus: true,
             textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(
-              labelText: "What was done",
-              hintText: "The parent reads this in their app",
+            decoration: InputDecoration(
+              labelText: context.l10n.whatWasDone,
+              hintText: context.l10n.theParentReadsThisInTheir,
             ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text("Back"),
+              child: Text(context.l10n.back),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text("Resolve"),
+              child: Text(context.l10n.resolve),
             ),
           ],
         ),
@@ -209,7 +210,7 @@ class _Card extends StatelessWidget {
               children: [
                 if (digits.length >= 10)
                   IconButton(
-                    tooltip: "Call parent",
+                    tooltip: context.l10n.callParent,
                     onPressed: () => launchUrl(Uri.parse("tel:$digits")),
                     icon: const Icon(
                       Icons.call_outlined,
@@ -220,22 +221,22 @@ class _Card extends StatelessWidget {
                 if (t.isOpen && !t.assignedToMe)
                   OutlinedButton(
                     onPressed: () => _update(context, takeUp: true),
-                    child: const Text("Take up"),
+                    child: Text(context.l10n.takeUp),
                   ),
                 if (t.isOpen && t.status != "in_progress")
                   OutlinedButton(
                     onPressed: () => _update(context, status: "in_progress"),
-                    child: const Text("In progress"),
+                    child: Text(context.l10n.inProgress),
                   ),
                 if (t.isOpen)
                   FilledButton(
                     onPressed: () => _update(context, status: "resolved"),
-                    child: const Text("Resolve"),
+                    child: Text(context.l10n.resolve),
                   ),
                 if (t.status == "resolved" && canClose)
                   TextButton(
                     onPressed: () => _update(context, status: "closed"),
-                    child: const Text("Close"),
+                    child: Text(context.l10n.close),
                   ),
               ],
             ),

@@ -21,6 +21,7 @@ import "staff_roster_screen.dart";
 import "student_leave_queue_screen.dart";
 import "transport_requests_screen.dart";
 import "waiting_card.dart";
+import "../../core/i18n/locale_controller.dart";
 
 String _greeting() {
   final h = DateTime.now().hour;
@@ -359,7 +360,7 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
                     ),
                   ),
                   IconButton(
-                    tooltip: "Sign out",
+                    tooltip: context.l10n.signOut,
                     onPressed: _signOut,
                     icon: const Icon(Icons.logout, color: Colors.white),
                   ),
@@ -394,13 +395,13 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
                         ),
                       ),
                       title: Text(
-                        "Mark my attendance · हाज़िरी लगाएँ",
+                        context.l10n.markMyAttendance,
                         style: AppText.bodyMediumInk.copyWith(
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      subtitle: const Text(
-                        "GPS punch in and out at school",
+                      subtitle: Text(
+                        context.l10n.gpsPunchInAndOutAt,
                         style: AppText.bodySmallMuted,
                       ),
                       trailing: const Icon(

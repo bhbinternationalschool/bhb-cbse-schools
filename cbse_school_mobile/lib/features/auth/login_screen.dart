@@ -3,6 +3,7 @@ import "package:flutter/material.dart";
 import "../../core/api/api_client.dart";
 import "../../core/config/app_config.dart";
 import "../../core/theme/app_theme.dart";
+import "../../core/i18n/locale_controller.dart";
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({
@@ -125,6 +126,12 @@ class _LoginScreenState extends State<LoginScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  // First thing on the page, before the crest: somebody who
+                  // cannot read this screen has to be able to change it.
+                  const Align(
+                    alignment: Alignment.centerRight,
+                    child: LanguageToggle(),
+                  ),
                   Image.asset(
                     "assets/images/logo-crest.png",
                     height: 96,
@@ -139,17 +146,17 @@ class _LoginScreenState extends State<LoginScreen> {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  SizedBox(height: 16),
                   SegmentedButton<bool>(
-                    segments: const [
+                    segments: [
                       ButtonSegment(
                         value: false,
-                        label: Text("Parent"),
+                        label: Text(context.l10n.parent),
                         icon: Icon(Icons.family_restroom_outlined),
                       ),
                       ButtonSegment(
                         value: true,
-                        label: Text("Staff"),
+                        label: Text(context.l10n.staff),
                         icon: Icon(Icons.badge_outlined),
                       ),
                     ],
@@ -194,9 +201,9 @@ class _LoginScreenState extends State<LoginScreen> {
                       enabled: !_otpSent,
                       keyboardType: TextInputType.phone,
                       autofillHints: const [AutofillHints.telephoneNumber],
-                      decoration: const InputDecoration(
-                        labelText: "Mobile number",
-                        hintText: "10-digit WhatsApp number",
+                      decoration: InputDecoration(
+                        labelText: context.l10n.mobileNumber,
+                        hintText: context.l10n.digitWhatsappNumber,
                       ),
                     ),
                     if (_otpSent) ...[
@@ -207,8 +214,8 @@ class _LoginScreenState extends State<LoginScreen> {
                         maxLength: 6,
                         autofillHints: const [AutofillHints.oneTimeCode],
                         decoration: InputDecoration(
-                          labelText: "OTP",
-                          hintText: "6-digit code from WhatsApp",
+                          labelText: context.l10n.otp,
+                          hintText: context.l10n.digitCodeFromWhatsapp,
                           counterText: "",
                           helperText: _maskedMobile == null
                               ? null
@@ -221,8 +228,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       controller: _email,
                       keyboardType: TextInputType.emailAddress,
                       autofillHints: const [AutofillHints.username],
-                      decoration: const InputDecoration(
-                        labelText: "School email",
+                      decoration: InputDecoration(
+                        labelText: context.l10n.schoolEmail,
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -230,7 +237,9 @@ class _LoginScreenState extends State<LoginScreen> {
                       controller: _password,
                       obscureText: true,
                       autofillHints: const [AutofillHints.password],
-                      decoration: const InputDecoration(labelText: "Password"),
+                      decoration: InputDecoration(
+                        labelText: context.l10n.password,
+                      ),
                     ),
                   ],
                   if (_error != null) ...[
@@ -281,7 +290,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               _info = null;
                               _error = null;
                             }),
-                      child: const Text("Change mobile number"),
+                      child: Text(context.l10n.changeMobileNumber),
                     ),
                   ],
                   if (AppConfig.devLogin) ...[

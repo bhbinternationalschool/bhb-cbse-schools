@@ -5,6 +5,7 @@ import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
 import "staff_leave_screen.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// The principal's staff-leave queue — approve or reject each request with
 /// an optional note; the applicant is pushed the decision.
@@ -95,7 +96,7 @@ class _Card extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text("Back"),
+            child: Text(context.l10n.back),
           ),
           FilledButton(
             style: approve
@@ -182,12 +183,12 @@ class _Card extends StatelessWidget {
                     style: TextButton.styleFrom(
                       foregroundColor: AppColors.danger,
                     ),
-                    child: const Text("Reject"),
+                    child: Text(context.l10n.reject),
                   ),
                   const SizedBox(width: 4),
                   FilledButton(
                     onPressed: () => _decide(context, true),
-                    child: const Text("Approve"),
+                    child: Text(context.l10n.approve),
                   ),
                 ],
               ),
