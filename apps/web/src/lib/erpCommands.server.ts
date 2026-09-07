@@ -100,6 +100,10 @@ import {
   formatDecideLeaveCard,
   formatFeeReminderCard,
   formatPayLinkCard,
+  formatBusDelayCard,
+  matchTransportRoutes,
+  BUS_DELAY_MAX_MINUTES,
+  parseBusDelayQuery,
   formatBookPtmCard,
   formatPtmSlotPicker,
   parsePtmTime,
@@ -187,6 +191,12 @@ type CommandStore = {
   digestSentFor?: string;
   /** householdId → IST date of the last fee reminder, for the weekly cap. */
   feeRemindedOn?: Record<string, string>;
+  /**
+   * routeId → ISO timestamp of the last delay notice. Not a cap — a bus
+   * that slips from 20 to 40 minutes must be able to say so — only so the
+   * confirm card can warn that these families were just told.
+   */
+  busDelayedAt?: Record<string, string>;
 };
 
 let memoryStore: CommandStore = {
@@ -1005,6 +1015,119 @@ export async function handleErpStaffCommand(
       formatInr,
     });
   }
+  if (command.id === "bus_delay") {
+    const roleCodes = resolveSessionRoles(rbac, session, masters).map((x) => x.code);
+    if (!isOfficeLike(roleCodes) && !roleCodes.includes("transport")) {
+      void audit(session, command, parsed.fields, text, "denied", {
+        reason: "scope",
+        channel: inbound.channel,
+      });
+      return {
+        handled: true,
+        audience: "erp_command_denied",
+        text: "Sending a bus delay notice is for the transport desk, office and leadership.",
+      };
+    }
+    // Re-read the raw message: the model may have filled `text` with a
+    // phrasing of its own, and the numbers in it are what reach families.
+    const asked = parseBusDelayQuery(text) ?? parseBusDelayQuery(parsed.fields.text || "");
+    const routeAsked = (asked?.route || parsed.fields.text || "").trim();
+    const minutes = asked?.minutes || parseInt(parsed.fields.date || "0", 10) || 0;
+    if (!routeAsked) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: "Which bus? e.g. _Bus 3 ko batao: 20 minute late_.",
+      };
+    }
+    if (!minutes) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: "How late is it? Say the minutes with the unit, e.g. _bus 3 20 minute late_ — a bare number would be read as the bus.",
+      };
+    }
+    if (minutes > BUS_DELAY_MAX_MINUTES) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: `${minutes} minutes is more than ${BUS_DELAY_MAX_MINUTES / 60} hours — if that is right, ring the families instead of sending a delay notice. Nothing was sent.`,
+      };
+    }
+    const { planBusDelayNotice } = await import("@/lib/busDelayNotice.server");
+    const plan = await planBusDelayNotice({
+      routeAsked,
+      academicYearCode: session.academicYearCode,
+    });
+    if (!plan.ok) {
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: formatRouteNotFound(routeAsked, plan.options),
+      };
+    }
+    const p = plan.plan;
+    if (!p.send.length) {
+      const why =
+        p.suspended || p.noMobile || p.optedOut
+          ? ` (${[
+              p.suspended ? `${p.suspended} suspended from boarding` : "",
+              p.noMobile ? `${p.noMobile} with no WhatsApp number` : "",
+              p.optedOut ? `${p.optedOut} opted out` : "",
+            ]
+              .filter(Boolean)
+              .join(", ")})`
+          : "";
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: `No family on ${p.routeLabel} can be messaged right now${why}. Nothing was sent.`,
+      };
+    }
+    const { ensureWaTemplatesHydrated } = await import("@/lib/waTemplatesPersistence");
+    const { listApprovedTemplates, loadWaTemplates } = await import("@/lib/waTemplates");
+    await ensureWaTemplatesHydrated();
+    const transportTemplates = listApprovedTemplates(loadWaTemplates(), { module: "transport" });
+    const wantLang = messageScriptLanguage(text);
+    const tpl =
+      transportTemplates.find((x) => x.familyKey === "transport_delay" && x.language === wantLang) ??
+      transportTemplates.find((x) => x.familyKey === "transport_delay") ??
+      null;
+    if (!tpl) {
+      return {
+        handled: true,
+        audience: "erp_command_denied",
+        text: "No approved bus delay template yet, and free text can't reach parents outside the 24-hour window. Ask the office to get *Bus running late* approved in Masters → WhatsApp templates.",
+      };
+    }
+    const lastAt = (store.busDelayedAt ?? {})[p.route.id];
+    const minutesAgo = lastAt
+      ? Math.floor((nowMs - new Date(lastAt).getTime()) / 60000)
+      : undefined;
+    resolved.routeId = p.route.id;
+    resolved.routeLabel = p.routeLabel;
+    resolved.busNo = p.route.busNo || p.route.code || "";
+    resolved.minutesLate = String(minutes);
+    resolved.templateMetaName = tpl.metaName || tpl.name;
+    resolved.templateLanguage = tpl.metaLanguage || tpl.language;
+    resolved.templateVariables = (tpl.variables ?? []).join(",");
+    resolved.recipients = JSON.stringify(p.send);
+    resolved.cardSummary = formatBusDelayCard({
+      routeLabel: p.routeLabel,
+      minutesLate: minutes,
+      send: p.send.map((x) => ({
+        studentName: x.studentName,
+        classLabel: x.classLabel,
+        stopName: x.stopName,
+      })),
+      optedOut: p.optedOut,
+      suspended: p.suspended,
+      noMobile: p.noMobile,
+      templateLabel: `${tpl.name} (${tpl.language.toUpperCase()})`,
+      lastNoticeMinutesAgo:
+        minutesAgo !== undefined && minutesAgo >= 0 && minutesAgo <= 60 ? minutesAgo : undefined,
+    });
+  }
   if (command.id === "book_ptm" && resolved.studentId) {
     const { ptmOptionsForStudent } = await import("@/lib/ptmBook.server");
     const opts = await ptmOptionsForStudent({
@@ -1451,7 +1574,9 @@ export async function handleErpStaffCommand(
   if (command.kind === "write") {
     const token = random();
     const summary =
-      command.id === "book_ptm"
+      command.id === "bus_delay"
+        ? resolved.cardSummary || command.title
+        : command.id === "book_ptm"
         ? resolved.cardSummary || command.title
         : command.id === "pay_link"
         ? resolved.cardSummary || command.title
@@ -1879,23 +2004,9 @@ async function busManifest(
   const masters = loadMasters();
   const sis = loadSis();
   const date = resolved.date || todayIso;
-  const asked = (resolved.route || "").trim().toLowerCase();
+  const asked = (resolved.route || "").trim();
   const routes = (state.routes ?? []).filter((r) => r.isActive !== false);
-  const norm = (v: string) => (v || "").trim().toLowerCase().replace(/\s+/g, "");
-  const exact = routes.filter(
-    (r) =>
-      norm(r.busNo) === norm(asked) ||
-      norm(r.code) === norm(asked) ||
-      norm(r.name) === norm(asked),
-  );
-  const matches = exact.length
-    ? exact
-    : routes.filter(
-        (r) =>
-          norm(r.name).includes(norm(asked)) ||
-          norm(r.code).includes(norm(asked)) ||
-          norm(r.busNo).includes(norm(asked)),
-      );
+  const matches = matchTransportRoutes(routes, asked);
   if (matches.length !== 1) {
     return formatRouteNotFound(
       resolved.route || "",
@@ -2587,6 +2698,74 @@ async function runConfirmedWrite(
     return {
       handled: true,
       audience: "erp_command_fee_reminder",
+      text: `${bits.join(" · ")}.${res.errors.length ? `\nFirst error: ${res.errors[0]}` : ""}\nReplies land in Comms → WhatsApp inbox.`,
+    };
+  }
+  if (command.id === "bus_delay") {
+    const roleCodes = resolveSessionRoles(rbac, session, masters).map((x) => x.code);
+    if (!isOfficeLike(roleCodes) && !roleCodes.includes("transport")) {
+      void audit(session, command, pending.fields, pending.originalText, "denied", {
+        reason: "scope_at_confirm",
+        channel: inbound.channel,
+      });
+      return {
+        handled: true,
+        audience: "erp_command_denied",
+        text: "Your role no longer allows sending transport notices, so nothing was sent.",
+      };
+    }
+    let recipients: import("@/lib/busDelayNotice.server").BusDelayRecipient[];
+    try {
+      recipients = JSON.parse(r.recipients || "[]") as typeof recipients;
+    } catch {
+      recipients = [];
+    }
+    const minutes = parseInt(r.minutesLate || "0", 10) || 0;
+    if (!recipients.length || !r.templateMetaName || !minutes) {
+      return {
+        handled: true,
+        audience: "erp_command_error",
+        text: "That delay notice is no longer valid. Send the command again.",
+      };
+    }
+    const { sendBusDelayNotices } = await import("@/lib/busDelayNotice.server");
+    const sentAt = new Date().toISOString();
+    const res = await sendBusDelayNotices({
+      recipients,
+      busNo: r.busNo || "",
+      minutesLate: minutes,
+      template: {
+        metaName: r.templateMetaName,
+        language: r.templateLanguage || "en",
+        variables: (r.templateVariables || "").split(",").filter(Boolean),
+      },
+      // The minutes are part of the key so a second notice on the same
+      // route is a new message, not a de-duplicated repeat of the first.
+      noticeKey: `${r.routeId || ""}_${minutes}_${sentAt.slice(0, 16)}`,
+    });
+    if (r.routeId) {
+      const st = await readStore();
+      await writeStore({
+        ...st,
+        busDelayedAt: { ...(st.busDelayedAt ?? {}), [r.routeId]: sentAt },
+      });
+    }
+    void audit(session, command, pending.fields, pending.originalText, "ok", {
+      channel: inbound.channel,
+      routeId: r.routeId,
+      routeLabel: r.routeLabel,
+      minutesLate: minutes,
+      template: r.templateMetaName,
+      sent: res.sent,
+      failed: res.failed,
+    });
+    const bits = [
+      `Told ${res.sent} famil${res.sent === 1 ? "y" : "ies"} on ${r.routeLabel || "that route"} — ${minutes} minutes late`,
+    ];
+    if (res.failed) bits.push(`${res.failed} failed`);
+    return {
+      handled: true,
+      audience: "erp_command_bus_delay",
       text: `${bits.join(" · ")}.${res.errors.length ? `\nFirst error: ${res.errors[0]}` : ""}\nReplies land in Comms → WhatsApp inbox.`,
     };
   }

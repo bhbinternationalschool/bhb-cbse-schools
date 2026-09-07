@@ -67,6 +67,10 @@ import {
   formatStaffBroadcastCard,
   parsePayLinkQuery,
   formatPayLinkCard,
+  parseBusDelayQuery,
+  formatBusDelayCard,
+  matchTransportRoutes,
+  BUS_DELAY_MAX_MINUTES,
   parseBookPtmQuery,
   parsePtmTime,
   ptmTimeCandidates,
@@ -1667,6 +1671,90 @@ const masters = {
   const def = ERP_COMMANDS.find((c) => c.id === "book_ptm");
   assert.ok(def && def.kind === "write" && def.module === "ptm" && def.action === "edit");
   assert.equal(def!.scope, "own_sections", "a teacher books only for their own children");
+}
+
+// ─── bus delay notice ──────────────────────────────────────────────────
+{
+  assert.deepEqual(parseBusDelayQuery("Bus 3 ko batao: 20 minute late"), { route: "3", minutes: 20 });
+  assert.deepEqual(parseBusDelayQuery("bus 5 is running 15 mins late"), { route: "5", minutes: 15 });
+  assert.deepEqual(parseBusDelayQuery("route A 20 minute late"), { route: "A", minutes: 20 });
+  assert.deepEqual(parseBusDelayQuery("bus 2 aadha ghanta late hai"), { route: "2", minutes: 30 });
+  assert.deepEqual(parseBusDelayQuery("bus 2 half an hour late"), { route: "2", minutes: 30 });
+  assert.deepEqual(parseBusDelayQuery("bus 4 1 hour late"), { route: "4", minutes: 60 });
+  assert.deepEqual(parseBusDelayQuery("बस 3 आधा घंटा लेट"), { route: "3", minutes: 30 });
+
+  // The bus number and the delay are both bare numbers, so a duration
+  // without a unit is never guessed at — the desk asks instead.
+  assert.deepEqual(parseBusDelayQuery("bus 3 20 late"), { route: "3", minutes: 0 });
+  assert.deepEqual(parseBusDelayQuery("bus 3 is late"), { route: "3", minutes: 0 });
+
+  assert.equal(parseBusDelayQuery("Bus 3 manifest"), null, "the manifest reading is not a notice");
+  assert.equal(parseBusDelayQuery("Riya is late today"), null, "no bus word, no notice");
+
+  // A delay message must not be read as a class notice or a manifest.
+  const delay = parseErpCommandLocal("Bus 3 ko batao: 20 minute late");
+  assert.equal(delay?.commandId, "bus_delay", JSON.stringify(delay));
+  assert.equal(delay?.fields.text, "3");
+  assert.equal(delay?.fields.date, "20");
+  const manifest = parseErpCommandLocal("Bus 3 manifest");
+  assert.equal(manifest?.commandId, "bus_manifest", JSON.stringify(manifest));
+  const parentsDelay = parseErpCommandLocal("bus 3 ke parents ko batao: 20 minute late");
+  assert.equal(
+    parentsDelay?.commandId,
+    "bus_delay",
+    `a bus delay addressed to "parents" is still the route's notice, not a class message: ${JSON.stringify(parentsDelay)}`,
+  );
+
+  // One matcher for both bus commands: exact on bus number, code or name
+  // before any contained match.
+  const routes = [
+    { code: "R1", name: "Civil Lines", busNo: "3" },
+    { code: "R2", name: "Civil Lines Extension", busNo: "13" },
+  ];
+  assert.deepEqual(matchTransportRoutes(routes, "3").map((r) => r.code), ["R1"], "exact bus number wins over 13");
+  assert.deepEqual(matchTransportRoutes(routes, "civil lines").map((r) => r.code), ["R1"]);
+  assert.deepEqual(matchTransportRoutes(routes, "civil").map((r) => r.code), ["R1", "R2"], "an ambiguous ask returns both");
+  assert.deepEqual(matchTransportRoutes(routes, "R2").map((r) => r.code), ["R2"]);
+  assert.deepEqual(matchTransportRoutes(routes, ""), []);
+
+  const card = formatBusDelayCard({
+    routeLabel: "Bus 3 · Civil Lines",
+    minutesLate: 20,
+    send: [
+      { studentName: "Riya Verma", classLabel: "V A", stopName: "Gandhi Chowk" },
+      { studentName: "Aarav Sharma", classLabel: "III B", stopName: "Gandhi Chowk" },
+      { studentName: "Kabir Ali", classLabel: "VIII A", stopName: "Station Road" },
+    ],
+    optedOut: 1,
+    suspended: 2,
+    noMobile: 1,
+    templateLabel: "Bus running late (EN)",
+  });
+  assert.ok(card.startsWith("*Bus delay* · Bus 3 · Civil Lines\nRunning *20 minutes late*"), card);
+  assert.ok(card.includes("*Goes to 3 families*"), card);
+  assert.ok(card.includes("Gandhi Chowk — Riya Verma (V A), Aarav Sharma (III B)"), card);
+  assert.ok(card.includes("Station Road — Kabir Ali (VIII A)"), card);
+  assert.ok(
+    card.includes("Not messaged: 2 suspended from boarding, 1 with no WhatsApp number, 1 opted out."),
+    "every skipped family is accounted for on the card",
+  );
+  assert.ok(!card.includes("⚠️"), "no repeat warning when the route was not just told");
+
+  const repeat = formatBusDelayCard({
+    routeLabel: "Bus 3", minutesLate: 40,
+    send: [{ studentName: "R", classLabel: "V A", stopName: "" }],
+    optedOut: 0, suspended: 0, noMobile: 0, templateLabel: "Bus running late (EN)",
+    lastNoticeMinutesAgo: 6,
+  });
+  assert.ok(
+    repeat.includes("⚠️ This route's families were told 6 minutes ago."),
+    "a second notice within the hour says so, rather than quietly resending",
+  );
+  assert.ok(repeat.includes("Stop not set — R (V A)"), repeat);
+
+  assert.equal(BUS_DELAY_MAX_MINUTES, 180);
+  const def = ERP_COMMANDS.find((c) => c.id === "bus_delay");
+  assert.ok(def && def.kind === "write" && def.module === "transport" && def.action === "edit");
 }
 
 console.log("erpCommands.selftest.ts OK");

@@ -167,6 +167,25 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
     scope: "any",
   },
   {
+    id: "bus_delay",
+    title: "Tell a route's families the bus is late",
+    kind: "write",
+    module: "transport",
+    action: "edit",
+    description:
+      "Send the approved bus-delay notice to every family with a child on one route. Each family gets their own child's name and their own stop. Needs the bus or route and how many minutes late — a duration without a unit is not read as minutes, because the bus number is a bare number too.",
+    examples: [
+      "Bus 3 ko batao: 20 minute late",
+      "bus 5 is running 15 mins late",
+      "route A 20 minute late",
+      "bus 2 aadha ghanta late hai",
+    ],
+    fields: [
+      { name: "text", type: "text", required: true, description: "The bus or route, and the delay in minutes" },
+    ],
+    scope: "any",
+  },
+  {
     id: "book_ptm",
     title: "Book a PTM slot for a family",
     kind: "write",
@@ -920,6 +939,16 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
   const detailsQ = parseStudentDetailsQuery(t);
   if (detailsQ) {
     return { commandId: "student_details", fields: { student: detailsQ }, source: "local" };
+  }
+  const busDelay = parseBusDelayQuery(t);
+  if (busDelay) {
+    return {
+      commandId: "bus_delay",
+      // The minutes ride in `date`, which this command does not otherwise
+      // use, so the pure parse stays a plain field map.
+      fields: { text: busDelay.route, date: String(busDelay.minutes) },
+      source: "local",
+    };
   }
   const busQ = parseBusManifestQuery(t);
   if (busQ) {
@@ -3611,5 +3640,118 @@ export function formatBookPtmCard(input: {
       ? `WhatsApp: ${input.templateLabel}`
       : "⚠️ No approved notice template — the family is told on the app only.",
   );
+  return lines.join("\n");
+}
+
+// ─── Bus delay notice to a route's families (write) ────────────────────
+
+/**
+ * Match a bus or route as staff wrote it against the fleet: exact on bus
+ * number, route code or name first, then a contained match. Shared by the
+ * manifest reading and the delay notice, so a name that resolves for one
+ * resolves identically for the other.
+ */
+export function matchTransportRoutes<T extends { code: string; name: string; busNo: string }>(
+  routes: T[],
+  asked: string,
+): T[] {
+  const norm = (v: string) => (v || "").trim().toLowerCase().replace(/\s+/g, "");
+  const want = norm(asked);
+  if (!want) return [];
+  const exact = routes.filter(
+    (r) => norm(r.busNo) === want || norm(r.code) === want || norm(r.name) === want,
+  );
+  if (exact.length) return exact;
+  return routes.filter(
+    (r) => norm(r.name).includes(want) || norm(r.code).includes(want) || norm(r.busNo).includes(want),
+  );
+}
+
+const BUS_DELAY_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(late|delay(?:ed)?|deri|der|देरी|देर|लेट|vilamb|विलंब)(?![\p{L}\p{M}\p{N}])/iu;
+
+/**
+ * Minutes must carry a unit. The bus number and the delay are both bare
+ * numbers in "bus 3, 20 minute late", and telling a route's families the
+ * wrong one of the two is worse than asking again.
+ */
+const BUS_DELAY_MINUTES =
+  /(?<![\p{L}\p{M}\p{N}])(\d{1,3})\s*(?:-|\s)?\s*(mins?\.?|minutes?|minat|min|मिनट|मि\.?)(?![\p{L}\p{M}\p{N}])/iu;
+
+/** "half an hour late", "aadha ghanta late" — the one worded delay staff use. */
+const BUS_DELAY_HALF_HOUR =
+  /(?<![\p{L}\p{M}\p{N}])(half\s*(?:an?\s*)?hour|aadha\s*ghanta|आधा\s*घंटा)(?![\p{L}\p{M}\p{N}])/iu;
+
+const BUS_DELAY_HOUR =
+  /(?<![\p{L}\p{M}\p{N}])(\d{1,2})\s*(hours?|hrs?\.?|ghante?|घंटे?)(?![\p{L}\p{M}\p{N}])/iu;
+
+/**
+ * "Bus 3 ko batao: 20 minute late", "bus 5 is running 15 mins late",
+ * "route A 20 minute late", "बस 3 आधा घंटा लेट". Returns the route as
+ * written — the server matches it against bus number, code and name, the
+ * same way the manifest command does — and the delay in minutes.
+ *
+ * A delay with no readable duration returns the route and 0, so the desk
+ * can ask "how late?" rather than guessing a number that reaches families.
+ */
+export function parseBusDelayQuery(
+  text: string,
+): { route: string; minutes: number } | null {
+  const t = (text || "").trim();
+  if (!t || !BUS_WORDS.test(t) || !BUS_DELAY_WORD.test(t)) return null;
+  const m =
+    /(?<![\p{L}\p{M}\p{N}])(?:bus|route|van|बस|रूट)\s*(?:no\.?|number|#)?\s*([\p{L}\p{N}][\p{L}\p{N}-]{0,15})(?![\p{L}\p{M}\p{N}])/iu.exec(t);
+  if (!m) return null;
+  const route = m[1]!;
+  if (/^(no|number|is|ko|ka|ki|ke|me|mein|late|delayed|deri|running|chal)$/i.test(route)) return null;
+  let minutes = 0;
+  const mins = BUS_DELAY_MINUTES.exec(t);
+  const hours = BUS_DELAY_HOUR.exec(t);
+  if (mins) minutes = parseInt(mins[1]!, 10);
+  else if (BUS_DELAY_HALF_HOUR.test(t)) minutes = 30;
+  else if (hours) minutes = parseInt(hours[1]!, 10) * 60;
+  return { route, minutes };
+}
+
+/** A delay nobody would send on purpose is a typo, not an instruction. */
+export const BUS_DELAY_MAX_MINUTES = 180;
+
+export function formatBusDelayCard(input: {
+  routeLabel: string;
+  minutesLate: number;
+  /** Families with a rider on the route who can be messaged now. */
+  send: { studentName: string; classLabel: string; stopName: string }[];
+  optedOut: number;
+  suspended: number;
+  noMobile: number;
+  templateLabel: string;
+  /** Minutes since this route's families were last told, if recently. */
+  lastNoticeMinutesAgo?: number;
+}): string {
+  const lines = [
+    `*Bus delay* · ${input.routeLabel}`,
+    `Running *${input.minutesLate} minutes late*`,
+    `Template: ${input.templateLabel}`,
+  ];
+  if (input.lastNoticeMinutesAgo !== undefined) {
+    lines.push(
+      `⚠️ This route's families were told ${input.lastNoticeMinutesAgo} minute${input.lastNoticeMinutesAgo === 1 ? "" : "s"} ago. Send again only if the delay has changed.`,
+    );
+  }
+  lines.push("", `*Goes to ${input.send.length} famil${input.send.length === 1 ? "y" : "ies"}*`);
+  const byStop = new Map<string, string[]>();
+  for (const r of input.send) {
+    const key = r.stopName || "Stop not set";
+    byStop.set(key, [...(byStop.get(key) ?? []), `${r.studentName} (${r.classLabel})`]);
+  }
+  for (const [stop, kids] of byStop) {
+    lines.push(`${stop} — ${kids.length <= 3 ? kids.join(", ") : `${kids.slice(0, 3).join(", ")} +${kids.length - 3}`}`);
+  }
+  const skipped: string[] = [];
+  if (input.suspended) skipped.push(`${input.suspended} suspended from boarding`);
+  if (input.noMobile) skipped.push(`${input.noMobile} with no WhatsApp number`);
+  if (input.optedOut) skipped.push(`${input.optedOut} opted out`);
+  if (skipped.length) lines.push("", `Not messaged: ${skipped.join(", ")}.`);
+  lines.push("", "Each family gets their own child's name and stop.");
   return lines.join("\n");
 }
