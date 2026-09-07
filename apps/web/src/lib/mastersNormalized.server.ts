@@ -1,3 +1,8 @@
+/* ratchet-allow: unguarded_replace — this deletes only the STALE slice keys (the
+   complement of what is about to be written) and then upserts the live set over
+   rows that already exist. A failed upsert therefore loses nothing: the slices
+   it would have rewritten are still there, unchanged. That is a prune, not the
+   wipe-then-refill shape that emptied the fee book. */
 /**
  * Masters desk — Supabase slice rows (masters_desk_slices).
  */

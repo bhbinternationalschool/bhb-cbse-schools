@@ -1,3 +1,5 @@
+/* ratchet-allow: unguarded_replace — prune of stale slice keys only, and this one
+   additionally refuses to delete PROTECTED keys. See mastersNormalized.server.ts. */
 /**
  * Transport desk — Supabase slice rows (transport_desk_slices).
  */

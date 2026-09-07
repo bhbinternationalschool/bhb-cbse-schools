@@ -10,7 +10,13 @@ import "../modules/bus_routes_screen.dart";
 import "transport_requests_screen.dart";
 import "attendance_screen.dart";
 import "broadcast_screen.dart";
+import "admission_leads_screen.dart";
 import "documents_screen.dart";
+import "fee_counter_screen.dart";
+import "fee_defaulters_screen.dart";
+import "my_collections_screen.dart";
+import "survey_screen.dart";
+import "visitor_gate_screen.dart";
 import "leave_approvals_screen.dart";
 import "marks_screen.dart";
 import "staff_complaints_screen.dart";
@@ -61,6 +67,7 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
   String? _error;
   int _refresh = 0;
   bool _deepLinkDone = false;
+  StaffFeatureSet _features = const StaffFeatureSet.empty();
 
   Future<void> _push(Widget screen) async {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
@@ -203,6 +210,12 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _consumeDeepLink();
       });
+      try {
+        final f = await widget.api.fetchStaffFeatures();
+        if (mounted) setState(() => _features = f);
+      } catch (_) {
+        /* keep whatever we had */
+      }
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
@@ -349,14 +362,24 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                         label: "Open dues",
                         value: formatInrPaise(snap.openDuesPaise),
                         color: AppColors.warning,
-                        onTap: () => _push(DefaultersScreen(api: widget.api)),
+                        onTap: () => _push(
+                          FeeDefaultersScreen(
+                            api: widget.api,
+                            canCollect: _features.has("fee_take"),
+                          ),
+                        ),
                       ),
                       const SizedBox(width: 8),
                       _Stat(
                         label: "Students with dues",
                         value: "${snap.defaulterHouseholds}",
                         color: AppColors.danger,
-                        onTap: () => _push(DefaultersScreen(api: widget.api)),
+                        onTap: () => _push(
+                          FeeDefaultersScreen(
+                            api: widget.api,
+                            canCollect: _features.has("fee_take"),
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -563,6 +586,44 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                         tone: ModuleTone.teal,
                         onTap: () => _push(ChatInboxScreen(api: widget.api)),
                       ),
+                      if (_features.has("fee_take"))
+                        _Action(
+                          icon: Icons.point_of_sale_outlined,
+                          label: "Collect fees",
+                          tone: ModuleTone.green,
+                          onTap: () => _push(FeeCounterScreen(api: widget.api)),
+                        ),
+                      if (_features.has("fee_collections"))
+                        _Action(
+                          icon: Icons.account_balance_wallet_outlined,
+                          label: "My collections",
+                          tone: ModuleTone.teal,
+                          onTap: () =>
+                              _push(MyCollectionsScreen(api: widget.api)),
+                        ),
+                      if (_features.has("admission_leads"))
+                        _Action(
+                          icon: Icons.how_to_reg_outlined,
+                          label: "Admission leads",
+                          tone: ModuleTone.blue,
+                          onTap: () =>
+                              _push(AdmissionLeadsScreen(api: widget.api)),
+                        ),
+                      if (_features.has("field_survey"))
+                        _Action(
+                          icon: Icons.map_outlined,
+                          label: "Field survey",
+                          tone: ModuleTone.amber,
+                          onTap: () => _push(SurveyScreen(api: widget.api)),
+                        ),
+                      if (_features.has("visitor_gate"))
+                        _Action(
+                          icon: Icons.meeting_room_outlined,
+                          label: "Visitor gate",
+                          tone: ModuleTone.purple,
+                          onTap: () =>
+                              _push(VisitorGateScreen(api: widget.api)),
+                        ),
                       _Action(
                         icon: Icons.contact_phone_outlined,
                         label: "Staff contacts",
@@ -597,7 +658,12 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                         icon: Icons.currency_rupee,
                         label: "Fee defaulters",
                         tone: ModuleTone.coral,
-                        onTap: () => _push(DefaultersScreen(api: widget.api)),
+                        onTap: () => _push(
+                          FeeDefaultersScreen(
+                            api: widget.api,
+                            canCollect: _features.has("fee_take"),
+                          ),
+                        ),
                       ),
                       _Action(
                         icon: Icons.badge_outlined,

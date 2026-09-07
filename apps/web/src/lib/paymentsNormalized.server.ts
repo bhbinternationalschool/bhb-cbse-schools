@@ -12,6 +12,7 @@ import type {
 import { paymentsDualWriteDbEnabled } from "@/lib/paymentsDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
+import { replaceChildRows } from "./replaceChildRows.server";
 
 export type PaymentGatewayProvider = "razorpay" | "cashfree" | "demo" | "manual";
 
@@ -415,15 +416,15 @@ export async function pushPaymentLinkToDb(
   const { error: hErr } = await sb.from("payment_desk_links").upsert(header);
   if (hErr) return { ok: false, error: hErr.message };
 
-  await sb
-    .from("payment_desk_link_lines")
-    .delete()
-    .eq("payment_link_id", link.id);
-
-  if (lines.length) {
-    const { error: lErr } = await sb.from("payment_desk_link_lines").upsert(lines);
-    if (lErr) return { ok: false, error: lErr.message };
-  }
+  // One transaction: a payment link that loses its lines is a link for an
+  // amount nobody can attribute to a due.
+  const lineWrite = await replaceChildRows(sb, {
+    table: "payment_desk_link_lines",
+    tenantId,
+    match: { payment_link_id: link.id },
+    rows: lines,
+  });
+  if (!lineWrite.ok) return { ok: false, error: lineWrite.error };
 
   const now = new Date().toISOString();
   await sb.from("payment_desk_sync_meta").upsert(

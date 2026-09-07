@@ -3050,7 +3050,12 @@ export function nextReceiptNo(
   ayCode = DEFAULT_AY,
   series: FeeReceiptSeries = "F",
 ): string {
-  if (typeof window !== "undefined") {
+  // The school's own RECEIPT series in Masters wins wherever we are. This
+  // used to be browser-only, so a receipt issued by a server route (the
+  // mobile fee counter) started a second, parallel "F/<ay>/0001" series
+  // beside the desk's RCV-##### book. Two series over one cash box is how a
+  // day's collection stops reconciling.
+  try {
     const masters = loadMasters();
     const fromSeries = suggestFromSeriesCode(
       masters.numberSeries,
@@ -3059,6 +3064,8 @@ export function nextReceiptNo(
       fees.vouchers.map((v) => v.receiptNo),
     );
     if (fromSeries) return fromSeries;
+  } catch {
+    /* no masters yet — fall through to the built-in series below */
   }
 
   const prefixes =

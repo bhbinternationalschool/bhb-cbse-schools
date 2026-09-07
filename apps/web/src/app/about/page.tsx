@@ -9,6 +9,7 @@ import {
   PARENT_BODY_LEGAL_NAME,
   POSTAL_ADDRESS,
   REGISTERED_OFFICE_ADDRESS,
+  PARENT_BODY_DEED_SPELLING,
   REGISTRATION_DETAILS,
   SETTLEMENT_ACCOUNT_NAME,
   TRADING_NAME,
@@ -59,6 +60,22 @@ export default function AboutPage() {
             </>
           ) : null}
         </p>
+        {PARENT_BODY_DEED_SPELLING &&
+        PARENT_BODY_DEED_SPELLING !== displayLegalName() ? (
+          <p className="mt-3">
+            The trust&rsquo;s deed of declaration spells the name{" "}
+            <strong className="text-slate-900">
+              {PARENT_BODY_DEED_SPELLING}
+            </strong>
+            , and the trust&rsquo;s PAN spells it{" "}
+            <strong className="text-slate-900">{displayLegalName()}</strong>.
+            They are the same trust. This site uses the spelling on the PAN,
+            because that is the record banks and payment processors verify
+            against; the deed&rsquo;s spelling is the one you will see where an
+            entity is identified from its registration papers instead.
+          </p>
+        ) : null}
+
         <p className="mt-3">
           Fees paid through this website are collected by {displayLegalName()}
           {SETTLEMENT_ACCOUNT_NAME !== displayLegalName() ? (

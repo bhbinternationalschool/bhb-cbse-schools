@@ -34,6 +34,7 @@ import {
   type InvPurchaseReturn,
   type InvVendorBill,
 } from "@/lib/inventory/types";
+import { replaceChildRows } from "@/lib/replaceChildRows.server";
 
 type Row = Record<string, unknown>;
 
@@ -220,14 +221,13 @@ export async function saveIndent(
   );
   const indentId = str(saved.id);
 
-  await sb
-    .from("inv_indent_lines")
-    .delete()
-    .eq("tenant_id", tenantId)
-    .eq("indent_id", indentId);
-
-  const { error: lineError } = await sb.from("inv_indent_lines").insert(
-    lines.map((l, i) => ({
+  // One transaction: an indent stripped of its lines is a request for
+  // nothing, still awaiting approval.
+  const indentWrite = await replaceChildRows(sb, {
+    table: "inv_indent_lines",
+    tenantId,
+    match: { indent_id: indentId },
+    rows: lines.map((l, i) => ({
       tenant_id: tenantId,
       indent_id: indentId,
       item_id: nullable(l.itemId),
@@ -237,7 +237,8 @@ export async function saveIndent(
       est_rate_paise: Math.max(0, int(l.estRatePaise)),
       sort_order: i + 1,
     })),
-  );
+  });
+  const lineError = indentWrite.ok ? null : { message: indentWrite.error };
   if (lineError) throw new InvError(`Save indent lines: ${lineError.message}`, 500);
 
   const fresh = await listIndents({});
@@ -520,9 +521,13 @@ export async function savePurchaseOrder(
   );
   const poId = str(saved.id);
 
-  await sb.from("inv_po_lines").delete().eq("tenant_id", tenantId).eq("po_id", poId);
-  const { error: lineError } = await sb.from("inv_po_lines").insert(
-    priced.map((l, i) => ({
+  // One transaction: a purchase order with no lines is an order to a vendor
+  // for an amount with nothing itemised against it.
+  const poWrite = await replaceChildRows(sb, {
+    table: "inv_po_lines",
+    tenantId,
+    match: { po_id: poId },
+    rows: priced.map((l, i) => ({
       tenant_id: tenantId,
       po_id: poId,
       item_id: l.itemId,
@@ -536,7 +541,8 @@ export async function savePurchaseOrder(
       tax_paise: l.taxPaise,
       sort_order: i + 1,
     })),
-  );
+  });
+  const lineError = poWrite.ok ? null : { message: poWrite.error };
   if (lineError) throw new InvError(`Save order lines: ${lineError.message}`, 500);
 
   // Ordering against an approved indent closes it out.

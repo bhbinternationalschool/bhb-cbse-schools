@@ -68,6 +68,23 @@ count_metric() {
       # sweeps each screen; the design-token themselves are dark-mode
       # aware, arbitrary hex is not.
       code_grep '(bg|text|border|ring|from|to|via)-\[#[0-9a-fA-F]{3,8}\]' "$SRC" ;;
+    unguarded_replace)
+      # `.from("t").delete()` filtered by a PARENT id, followed by an insert or
+      # upsert into the same table — two statements with nothing tying them
+      # together. When the insert fails, the delete has already committed and
+      # the parent is left with no children: a mark sheet with no marks, a
+      # register with no attendance, a receipt with no fee lines.
+      #
+      # That is not a hypothetical. It emptied the whole fee book on
+      # 2026-09-06 — 1,913 lines over 435 receipts, ₹20.8 lakh of collections
+      # with no student, head or month — and took 134 receipts the same way on
+      # 2026-09-01. Use lib/replaceChildRows.server.ts, which does both inside
+      # one plpgsql function so a failed insert rolls the delete back.
+      #
+      # NOT counted: `delete().in("id", staleIds)` followed by an upsert of the
+      # live set. That is a prune — it removes rows that are meant to go and
+      # rewrites rows that already exist, so a failure loses nothing.
+      python3 scripts/find-unguarded-replace.py "$SRC" --count ;;
     dynamic_public_env)
       # `process.env[expr]` with a NEXT_PUBLIC key is never inlined by Next
       # and reads undefined in the browser. On 2026-08-18 every

@@ -1,3 +1,7 @@
+/* ratchet-allow: unguarded_replace — the delete drops ONE expired cache row and
+   returns; the write the scanner pairs it with is a different branch (a hit
+   counter). Nothing is being replaced, and a lost cache row costs one
+   regeneration. */
 /**
  * Response cache for deterministic AI drafts — see migration
  * 20260819120000_ai_response_cache. Key = sha256 of everything that

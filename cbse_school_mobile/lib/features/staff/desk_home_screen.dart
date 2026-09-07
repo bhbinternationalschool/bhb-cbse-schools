@@ -4,7 +4,13 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../modules/chat_inbox_screen.dart";
 import "../modules/notices_screen.dart";
+import "admission_leads_screen.dart";
 import "documents_screen.dart";
+import "fee_counter_screen.dart";
+import "fee_defaulters_screen.dart";
+import "visitor_gate_screen.dart";
+import "my_collections_screen.dart";
+import "survey_screen.dart";
 import "leave_approvals_screen.dart";
 import "payslips_screen.dart";
 import "presence_screen.dart";
@@ -24,12 +30,22 @@ String _greeting() {
 }
 
 class _Tile {
-  const _Tile(this.label, this.hindi, this.icon, this.tone, this.open);
+  const _Tile(
+    this.label,
+    this.hindi,
+    this.icon,
+    this.tone,
+    this.feature,
+    this.open,
+  );
 
   final String label;
   final String hindi;
   final IconData icon;
   final ModuleTone tone;
+
+  /// Mobile feature id from the ERP — the tile is hidden without it.
+  final String feature;
   final Widget Function(ApiClient api) open;
 }
 
@@ -60,6 +76,7 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
   String _name = "";
   String _kind = "support";
   int _refresh = 0;
+  StaffFeatureSet _features = const StaffFeatureSet.empty();
 
   static final _common = <_Tile>[
     _Tile(
@@ -67,6 +84,7 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
       "हाज़िरी",
       Icons.where_to_vote_outlined,
       ModuleTone.teal,
+      "gps_punch",
       (api) => SelfAttendanceScreen(api: api),
     ),
     _Tile(
@@ -74,6 +92,7 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
       "उपस्थिति",
       Icons.my_location,
       ModuleTone.green,
+      "gps_punch",
       (api) => PresenceScreen(api: api),
     ),
     _Tile(
@@ -81,6 +100,7 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
       "सूचनाएँ",
       Icons.campaign_outlined,
       ModuleTone.pink,
+      "notices",
       (api) => NoticesScreen(api: api),
     ),
     _Tile(
@@ -88,6 +108,7 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
       "छुट्टी",
       Icons.event_outlined,
       ModuleTone.coral,
+      "my_leave",
       (api) => StaffLeaveScreen(api: api),
     ),
     _Tile(
@@ -95,16 +116,66 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
       "वेतन पर्ची",
       Icons.receipt_long_outlined,
       ModuleTone.gray,
+      "my_payslips",
       (api) => PayslipsScreen(api: api),
     ),
   ];
 
-  static final _office = <_Tile>[
+  static final _work = <_Tile>[
+    _Tile(
+      "Collect fees",
+      "फ़ीस लें",
+      Icons.point_of_sale_outlined,
+      ModuleTone.green,
+      "fee_take",
+      (api) => FeeCounterScreen(api: api),
+    ),
+    _Tile(
+      "Defaulters",
+      "बकाया",
+      Icons.currency_rupee,
+      ModuleTone.coral,
+      "fee_defaulters",
+      (api) => FeeDefaultersScreen(api: api, canCollect: true),
+    ),
+    _Tile(
+      "My collections",
+      "आज का संग्रह",
+      Icons.account_balance_wallet_outlined,
+      ModuleTone.teal,
+      "fee_collections",
+      (api) => MyCollectionsScreen(api: api),
+    ),
+    _Tile(
+      "Admission leads",
+      "प्रवेश",
+      Icons.how_to_reg_outlined,
+      ModuleTone.blue,
+      "admission_leads",
+      (api) => AdmissionLeadsScreen(api: api),
+    ),
+    _Tile(
+      "Field survey",
+      "सर्वे",
+      Icons.map_outlined,
+      ModuleTone.amber,
+      "field_survey",
+      (api) => SurveyScreen(api: api),
+    ),
+    _Tile(
+      "Visitor gate",
+      "आगंतुक",
+      Icons.meeting_room_outlined,
+      ModuleTone.purple,
+      "visitor_gate",
+      (api) => VisitorGateScreen(api: api),
+    ),
     _Tile(
       "Complaints",
       "शिकायतें",
       Icons.report_problem_outlined,
       ModuleTone.amber,
+      "complaints_handle",
       (api) => StaffComplaintsScreen(api: api),
     ),
     _Tile(
@@ -112,6 +183,7 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
       "छात्र अवकाश",
       Icons.event_busy_outlined,
       ModuleTone.blue,
+      "student_leave_decide",
       (api) => StudentLeaveQueueScreen(api: api),
     ),
     _Tile(
@@ -119,6 +191,7 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
       "दस्तावेज़",
       Icons.folder_open_outlined,
       ModuleTone.purple,
+      "documents_verify",
       (api) => DocumentsScreen(api: api),
     ),
     _Tile(
@@ -126,6 +199,7 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
       "परिवहन",
       Icons.directions_bus_outlined,
       ModuleTone.blue,
+      "transport_requests",
       (api) => TransportRequestsScreen(api: api),
     ),
     _Tile(
@@ -133,6 +207,7 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
       "संदेश",
       Icons.chat_bubble_outline,
       ModuleTone.teal,
+      "messages",
       (api) => ChatInboxScreen(api: api),
     ),
     _Tile(
@@ -140,6 +215,7 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
       "कर्मचारी",
       Icons.contact_phone_outlined,
       ModuleTone.green,
+      "staff_roster",
       (api) => StaffRosterScreen(api: api),
     ),
   ];
@@ -169,6 +245,12 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
           _kind = kind ?? "support";
         });
       }
+    }
+    try {
+      final f = await widget.api.fetchStaffFeatures();
+      if (mounted) setState(() => _features = f);
+    } catch (_) {
+      /* keep whatever we had */
     }
     if (widget.openRoute != null && mounted) {
       WidgetsBinding.instance.addPostFrameCallback(
@@ -220,8 +302,13 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final office = _kind == "office";
-    final tiles = [..._common, if (office) ..._office];
+    // What appears is the ERP's answer, not a guess from the role name: an
+    // accountant gets the fee counter, a sweeper gets punch and payslips.
+    final office = _kind == "office" || _kind == "leadership";
+    final tiles = [
+      ..._common,
+      ..._work,
+    ].where((t) => _features.has(t.feature)).toList();
     return Scaffold(
       body: RefreshIndicator(
         onRefresh: _load,

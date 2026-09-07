@@ -87,6 +87,14 @@ jobs:
         working-directory: apps/web
         run: npm run test:hydrate-failure-safety
 
+      - name: Test — a laptop cannot write to the production database
+        working-directory: apps/web
+        run: npm run test:prod-write-guard
+
+      - name: Test — money with no fee lines raises an alarm
+        working-directory: apps/web
+        run: npm run test:fee-integrity
+
       - name: Test — optimistic-locking token survives normalization
         working-directory: apps/web
         run: npm run test:sis-revision
@@ -250,6 +258,7 @@ jobs:
           npm run test:ai-stream
           npm run test:tutor-plans
           npm run test:staff-home-kind
+          npm run test:mobile-features
           npm run test:cashfree-checkout
           npm run test:teacher-contact
           npm run test:parent-profile
@@ -259,6 +268,8 @@ jobs:
           npm run test:question-bank
           npm run test:rbac-infer
           npm run test:rbac-scope
+          npm run test:rbac-user-grants
+          npm run test:visitor-gate
           npm run test:school-whatsapp
           npm run test:upload-validation
           npm run test:receipt-lookup

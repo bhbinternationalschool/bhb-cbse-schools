@@ -16,8 +16,24 @@ export const metadata: Metadata = {
 // limit. The bucket (school-erp-prod-493619-public-downloads) is
 // dedicated to this — not the shared "assets" bucket — so granting public
 // read here doesn't expose anything else.
-const APK_URL =
-  "https://storage.googleapis.com/school-erp-prod-493619-public-downloads/bhb-school-app.apk";
+const BUCKET =
+  "https://storage.googleapis.com/school-erp-prod-493619-public-downloads";
+
+/**
+ * Two apps, deliberately.
+ *
+ * The parent app was split out in September 2026 under its own package id
+ * (school.bhbinternational.parent). A different package id is a different
+ * app to Android: installing it does NOT replace the combined app anyone is
+ * already carrying, and the old one keeps working. So both are offered and
+ * the difference is spelled out, rather than quietly swapping the link and
+ * leaving families with two identical-looking icons and no explanation.
+ *
+ * The parent build is the one under active development; the combined build
+ * stays until every family has moved across.
+ */
+const PARENT_APK_URL = `${BUCKET}/bhb-parent-app.apk`;
+const SCHOOL_APK_URL = `${BUCKET}/bhb-school-app.apk`;
 
 /**
  * Public test-distribution page — pre-store-launch. Linked directly (not
@@ -52,12 +68,31 @@ export default function DownloadPage() {
           </span>
           <span className="text-xs text-slate-400">Ready to install</span>
         </div>
+
         <a
-          href={APK_URL}
+          href={PARENT_APK_URL}
           className="block w-full rounded-xl bg-[var(--brand-deep)] px-4 py-3.5 text-center text-sm font-semibold text-white hover:opacity-90"
         >
-          Download for Android
+          Parents — download the app
         </a>
+        <p className="mt-2 text-left text-xs leading-relaxed text-slate-500">
+          Fees and online payment, attendance, homework, notices, report
+          cards, bus tracking, leave, the photo gallery and the e-book shelf.
+          This is the app to install if you are a parent.
+        </p>
+
+        <a
+          href={SCHOOL_APK_URL}
+          className="mt-5 block w-full rounded-xl border border-[var(--brand-deep)] px-4 py-3.5 text-center text-sm font-semibold text-[var(--brand-deep)] hover:bg-slate-50"
+        >
+          Teachers &amp; staff — download the app
+        </a>
+        <p className="mt-2 text-left text-xs leading-relaxed text-slate-500">
+          For teachers, office staff, the principal and transport drivers.
+          Parents already using this app can keep it — it still works. The
+          two are separate apps, so installing the parent app above does not
+          replace it and nothing is lost either way.
+        </p>
         <p className="mt-3 text-left text-xs leading-relaxed text-slate-500">
           After downloading, open the file. Android will warn about
           &ldquo;installing from unknown sources&rdquo; — this is normal for

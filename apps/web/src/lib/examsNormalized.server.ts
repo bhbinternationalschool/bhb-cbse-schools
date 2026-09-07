@@ -23,6 +23,7 @@ import {
 import { examsDualWriteDbEnabled } from "@/lib/examsDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { fetchAllPages, fetchByIds } from "@/lib/supabase/pageAll";
+import { replaceChildRows } from "./replaceChildRows.server";
 
 export type ExamDeskSyncMeta = {
   termCount: number;
@@ -809,27 +810,29 @@ export async function pushExamSheetToDb(
   const { error: hErr } = await sb.from("exam_desk_sheets").upsert(header);
   if (hErr) return { ok: false, error: hErr.message };
 
-  await sb.from("exam_desk_marks").delete().eq("mark_sheet_id", sheet.id);
-  if (marks.length) {
-    const { error: mErr } = await sb.from("exam_desk_marks").upsert(marks);
-    if (mErr) return { ok: false, error: mErr.message };
-  }
-  await sb.from("exam_desk_coscholastic").delete().eq("mark_sheet_id", sheet.id);
-  if (coScholastic.length) {
-    const { error: cErr } = await sb.from("exam_desk_coscholastic").upsert(coScholastic);
-    if (cErr) return { ok: false, error: cErr.message };
-  }
-  await sb.from("exam_desk_remarks").delete().eq("mark_sheet_id", sheet.id);
-  if (remarks.length) {
-    const { error: rErr } = await sb.from("exam_desk_remarks").upsert(remarks);
-    if (rErr) return { ok: false, error: rErr.message };
-  }
-  await sb.from("exam_desk_item_scores").delete().eq("mark_sheet_id", sheet.id);
-  for (let i = 0; i < itemScores.length; i += 500) {
-    const { error: iErr } = await sb
-      .from("exam_desk_item_scores")
-      .upsert(itemScores.slice(i, i + 500));
-    if (iErr) return { ok: false, error: iErr.message };
+  // Each of these four was a delete followed by an insert, with nothing tying
+  // them together. A failed insert left the deletes committed — a mark sheet
+  // with no marks, which is a term's assessment gone. Same shape that emptied
+  // every fee receipt on 2026-09-06; each is now one transaction that rolls
+  // its own delete back.
+  //
+  // The four are still four calls, not one. They are independent tables and a
+  // failure in the third must not silently undo the first two's *successful*
+  // work — it returns, and the sheet is re-pushed. What matters is that no
+  // single table is ever left emptied.
+  for (const part of [
+    { table: "exam_desk_marks", rows: marks },
+    { table: "exam_desk_coscholastic", rows: coScholastic },
+    { table: "exam_desk_remarks", rows: remarks },
+    { table: "exam_desk_item_scores", rows: itemScores },
+  ] as const) {
+    const write = await replaceChildRows(sb, {
+      table: part.table,
+      tenantId,
+      match: { mark_sheet_id: sheet.id },
+      rows: part.rows as Record<string, unknown>[],
+    });
+    if (!write.ok) return { ok: false, error: write.error };
   }
 
   await sb.from("exam_desk_sync_meta").upsert(

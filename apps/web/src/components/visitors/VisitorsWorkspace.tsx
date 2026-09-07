@@ -316,6 +316,25 @@ export function VisitorsWorkspace() {
     flash(`Parent notified for ${studentName(pass.studentId)}.`);
   }
 
+  /**
+   * Approve a requested pass.
+   *
+   * "approved" existed in the status list from the start but nothing ever
+   * set it, so every pass sat at "requested" until somebody marked it picked
+   * up. That is fine while one person does both on one desk; it is not fine
+   * once a guard can release a child from a phone. The office approves here,
+   * the gate hands over there.
+   */
+  function onApproveGatePass(pass: GatePass) {
+    const { state: next } = upsertGatePass(state, {
+      ...pass,
+      status: "approved",
+      updatedAt: new Date().toISOString(),
+    });
+    setState(saveVisitors(next));
+    flash(`Gate pass approved for ${studentName(pass.studentId)}.`);
+  }
+
   function onMarkPickedUp(pass: GatePass) {
     const name = window.prompt("Name of person picking up the student:", pass.pickedUpByName || "");
     if (name == null) return;
@@ -574,6 +593,15 @@ export function VisitorsWorkspace() {
                         onClick={() => onNotifyGatePass(g)}
                       >
                         {g.notifiedParentAt ? "Notified" : "Notify parent"}
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs font-semibold disabled:opacity-50"
+                        disabled={readOnly || g.status !== "requested"}
+                        onClick={() => onApproveGatePass(g)}
+                        title="Only an approved pass can be released at the gate"
+                      >
+                        {g.status === "requested" ? "Approve" : "Approved"}
                       </button>
                       <button
                         type="button"

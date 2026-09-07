@@ -29,6 +29,13 @@
          prompt, not a Play declaration form, asked only when the mic is tapped. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.CAMERA" tools:node="remove"/>
+    <!-- Kept as a guard, not a fix. The DUMP string that shows up in a built
+         artifact is androidx.profileinstaller's ProfileInstallReceiver saying
+         "only callers holding DUMP may invoke me" (android:permission on the
+         receiver). That is a restriction, not a request, and it is not in the
+         merged uses-permission list. This line stays so that a plugin which
+         one day genuinely asks for DUMP is dropped before it reaches Play. -->
+    <uses-permission android:name="android.permission.DUMP" tools:node="remove"/>
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" tools:node="remove"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove"/>
 

@@ -103,6 +103,8 @@ SELFTESTS=(
   test:vehicle-fuel
   test:expense-voucher-draft
   test:fee-push-line-safety
+  test:prod-write-guard
+  test:fee-integrity
   test:receipt-repair
   test:projection-double-post
   test:holiday-import
@@ -187,11 +189,14 @@ SELFTESTS=(
   test:ai-stream
   test:tutor-plans
   test:staff-home-kind
+  test:mobile-features
   test:cashfree-checkout
   test:teacher-contact
   test:question-bank
   test:rbac-infer
   test:rbac-scope
+  test:rbac-user-grants
+  test:visitor-gate
   test:receipt-lookup
   test:referrals
   test:report-export

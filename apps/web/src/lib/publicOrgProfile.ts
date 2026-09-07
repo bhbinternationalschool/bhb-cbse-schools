@@ -38,6 +38,28 @@ export const PARENT_BODY_LEGAL_NAME: string | null =
   "Babu Harbans Bahadur Singh Smriti Vidya Nyas";
 
 /**
+ * The same name as the trust deed spells it, when that differs from the PAN.
+ *
+ * Set this only when two records of the entity genuinely disagree, and never
+ * as a second name to publish for its own sake. Here the deed and its Hindi
+ * endorsement read HARBANSH; the PAN drops the "h"; and the D-U-N-S number
+ * obtained for the Google Play organisation account was allotted against the
+ * deed spelling. So the Play Store prints one spelling as the developer name
+ * and this site prints the other, and a parent comparing them has no way to
+ * tell whether they are looking at the same trust.
+ *
+ * Naming both, once, on the About page is what closes that gap without
+ * touching `PARENT_BODY_LEGAL_NAME` — which must keep matching the PAN,
+ * because the payment gateway verifies the merchant against the Income Tax
+ * database and re-verification would fail on any other spelling.
+ *
+ * Set to null the day the PAN is corrected to the deed's spelling. That is
+ * the real fix; this is the disclosure that holds until it happens.
+ */
+export const PARENT_BODY_DEED_SPELLING: string | null =
+  "Babu Harbansh Bahadur Singh Smriti Vidya Nyas";
+
+/**
  * How the entity is constituted. The 4th character of the trust's PAN is "T",
  * which is the Income Tax Department's code for a trust, and the instrument is
  * a Deed of Declaration of Trust dated 27 November 2008 registered with the

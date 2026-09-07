@@ -1,3 +1,5 @@
+/* ratchet-allow: unguarded_replace — prune of stale slice keys only; see the note
+   in mastersNormalized.server.ts. A failed upsert loses nothing. */
 /**
  * Timetable desk — Supabase slice rows (timetable_desk_slices).
  */
