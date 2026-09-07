@@ -94,6 +94,99 @@ export function isUnifiedMenuCommand(
   return /^(hi|hello|namaste|hey|start|menu|main|help)$/i.test(t);
 }
 
+/**
+ * How many times the bot re-asks an unknown caller before it stops.
+ *
+ * Found on 2026-09-07: one number had been sent the purpose menu on every
+ * message since 18 August — twenty-one messages, ten-plus replies, each
+ * addressed to a Facebook URL that had been taken as the person's name.
+ * The bot had no notion of giving up, so it never did.
+ */
+export const VISITOR_ASK_LIMIT = 3;
+
+/** Longest a name may be. Anything past this is a message, not a name. */
+export const VISITOR_NAME_MAX = 60;
+
+const URL_LIKE =
+  /(https?:\/\/|www\.|\b[a-z0-9-]+\.(com|in|org|net|co|me|io|ly|app|share)\b\/?)/i;
+
+/**
+ * A forwarded link, broadcast or media drop — the single most common
+ * thing an outsider sends a school's number, and never a question.
+ *
+ * The school's WhatsApp should log it and say nothing. Answering it is
+ * how a "good morning" chain turns into a three-week correspondence with
+ * a bot, which is exactly what it did.
+ */
+export function looksLikeForward(text: string): boolean {
+  const t = (text || "").trim();
+  if (!t) return true;
+  if (!URL_LIKE.test(t)) return false;
+  // A link with a real question around it is still a question. Strip the
+  // links and count what was actually said.
+  const said = t
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/\bwww\.\S+/gi, " ")
+    .replace(/[^\p{L}\p{M}\s]/gu, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+  // Opening with the link is the tell. Nobody asking a school a question
+  // leads with a bare URL, and a forward that carries a caption tends to
+  // carry it AFTER the link — which is how "…/1BkJUpZ93g/good morning
+  // have a glorious day" arrived. So a message that starts with a link
+  // gets a wider benefit of the doubt before it counts as a question.
+  const opensWithLink = /^\s*(https?:\/\/|www\.)/i.test(t);
+  return said < (opensWithLink ? 8 : 5);
+}
+
+export type VisitorNameRead =
+  | { ok: true; name: string }
+  | { ok: false; reason: "empty" | "too_short" | "too_long" | "link" | "not_a_name" };
+
+/**
+ * Read a reply as somebody's name, or refuse it.
+ *
+ * It used to accept anything of two characters or more, so a forwarded
+ * Facebook link plus "good morning have a glorious day" became a
+ * visitor's name and was then read back to them, in bold, on every reply
+ * for three weeks. A name the office cannot use is worse than no name:
+ * it looks like a record and is not one.
+ */
+export function readVisitorName(text: string): VisitorNameRead {
+  const t = (text || "").replace(/\s+/g, " ").trim();
+  if (!t) return { ok: false, reason: "empty" };
+  if (URL_LIKE.test(t)) return { ok: false, reason: "link" };
+  if (t.length < 2) return { ok: false, reason: "too_short" };
+  if (t.length > VISITOR_NAME_MAX) return { ok: false, reason: "too_long" };
+  const words = t.split(" ").filter(Boolean);
+  // Nobody's name is eight words long; that is a sentence about something.
+  if (words.length > 6) return { ok: false, reason: "too_long" };
+  // Mostly letters, or it is a phone number, an emoji or a price list.
+  // Marks count as letters: Devanagari carries its vowels as combining
+  // marks, so counting only \p{L} makes सुनीता शर्मा half punctuation and
+  // rejects a perfectly ordinary name.
+  const letters = (t.match(/[\p{L}\p{M}]/gu) || []).length;
+  if (letters < 2 || letters / t.length < 0.6) {
+    return { ok: false, reason: "not_a_name" };
+  }
+  return { ok: true, name: t };
+}
+
+/** What to say when a reply could not be read as a name. */
+export function visitorNameRetryText(
+  reason: Exclude<VisitorNameRead, { ok: true }>["reason"],
+): string {
+  switch (reason) {
+    case "link":
+      return "Please send your *name* first (e.g. Rajesh Kumar), then tell us what you need.";
+    case "too_long":
+      return "Please send just your *full name* (e.g. Rajesh Kumar) — you can tell us the rest next.";
+    default:
+      return "Please reply with your *full name* (e.g. Rajesh Kumar).";
+  }
+}
+
 export function detectVisitorPurpose(text: string): WaVisitorPurpose | null {
   const upper = (text || "").trim().toUpperCase();
   for (const p of VISITOR_PURPOSE_OPTIONS) {
@@ -102,8 +195,14 @@ export function detectVisitorPurpose(text: string): WaVisitorPurpose | null {
     }
   }
   const low = (text || "").toLowerCase();
+  // Job before admission, because "apply" belongs to both and admission
+  // held it. "I want to apply for a teacher vacancy" was being read as an
+  // admission enquiry — which does not merely answer the wrong thing, it
+  // writes a fake lead with an enquiry number into the admissions
+  // pipeline for the office to chase. The job words here are specific;
+  // none of them appears in an ordinary admission enquiry.
+  if (/job|career|vacancy|resume|cv\b|hiring|recruit/.test(low)) return "job";
   if (/admission|enquiry|register|apply|seat/.test(low)) return "admission";
-  if (/job|career|vacancy|resume|hiring|teacher job/.test(low)) return "job";
   if (/vendor|supplier|purchase|quotation|bill|gst/.test(low)) return "vendor";
   if (/transport|bus|route|pickup|drop|driver|fleet/.test(low)) return "transport";
   if (/fee|pay|dues|payment|receipt/.test(low)) return "fee";

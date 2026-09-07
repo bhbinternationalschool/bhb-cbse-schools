@@ -102,9 +102,9 @@ jobs:
       - name: Test — a parent is asked their language once, and it is remembered
         working-directory: apps/web
         run: npm run test:wa-language-gate
-      - name: Self-test — staff bot summon switch
+      - name: Self-test — when the WhatsApp bots speak, and when they stay quiet
         working-directory: apps/web
-        run: npm run test:staff-bot-switch
+        run: npm run test:wa-bot-silence
 
       - name: Test — optimistic-locking token survives normalization
         working-directory: apps/web

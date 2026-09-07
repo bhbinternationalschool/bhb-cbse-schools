@@ -12,6 +12,10 @@ import {
   flowKindFromRole,
   flowKindFromVisitorPurpose,
   isUnifiedMenuCommand,
+  looksLikeForward,
+  readVisitorName,
+  visitorNameRetryText,
+  VISITOR_ASK_LIMIT,
   parseStaffBotSwitch,
   staffBotAwake,
   STAFF_BOT_WINDOW_MINUTES,
@@ -60,7 +64,7 @@ export type WaUnifiedSession = {
   mobile: string;
   displayName: string;
   visitorName: string;
-  phase: "menu" | "pick_role" | "collect_name" | "collect_purpose" | "active";
+  phase: "menu" | "pick_role" | "collect_name" | "collect_purpose" | "active" | "parked";
   activeFlow: WaUnifiedFlow | null;
   updatedAt: string;
   /** Pending gate check-in (VISIT keyword / poster WhatsApp QR). */
@@ -72,6 +76,12 @@ export type WaUnifiedSession = {
    * school, a bot that replies to everything is an interruption.
    */
   staffBotUntil?: string;
+  /**
+   * How many times we have re-asked this unknown caller for a name or a
+   * purpose. At VISITOR_ASK_LIMIT the bot stops asking and parks the
+   * thread for a person, rather than sending the same menu forever.
+   */
+  visitorAsks?: number;
 };
 
 type WaUnifiedStore = {
@@ -691,7 +701,12 @@ export async function handleWaUnifiedInbound(opts: {
   const isStaff =
     identity.isKnown &&
     identity.roles.some((role) => ["teacher", "staff", "owner"].includes(flowKindFromRole(role)));
-  if (isUnifiedMenuCommand(text, { staff: isStaff })) {
+  // An unknown caller already in a conversation who forwards a link or
+  // drops a photo with no caption is not asking for the welcome menu.
+  // Empty text reads as a menu command, so without this a bare photo
+  // re-sent the whole welcome every time one arrived.
+  const visitorForward = !identity.isKnown && !!session && looksLikeForward(text);
+  if (!visitorForward && isUnifiedMenuCommand(text, { staff: isStaff })) {
     session = sessionFor(mobile10, identity, opts.profileName);
     if (identity.isKnown && identity.roles.length === 1) {
       session.phase = "active";
@@ -740,21 +755,74 @@ export async function handleWaUnifiedInbound(opts: {
     }
   }
 
+  // ── An unknown caller who has been asked enough ───────────────────
+  // The bot gave up and handed the thread to a person. Everything is
+  // still logged; nothing more is sent. They get out by saying "hi" or
+  // "menu" (handled above), or by finally naming what they want.
+  if (!identity.isKnown && session.phase === "parked") {
+    const purpose = detectVisitorPurpose(text);
+    if (!purpose) {
+      await sendBotReply({
+        mobile10,
+        displayName: session.visitorName || identity.displayName,
+        category: "general",
+        audience: "visitor_parked",
+        inbound: inboundLog,
+      });
+      return { replied: false, escalate: false, audience: "visitor_parked", stub: false };
+    }
+    // They said something real after all. Pick them back up.
+    session.phase = "collect_purpose";
+    session.visitorAsks = 0;
+  }
+
   if (!identity.isKnown && session.phase === "collect_name") {
-    const name = text.trim();
-    if (name.length < 2) {
+    // A forwarded link or a bare media drop is a broadcast, not an
+    // answer. Log it and say nothing — replying is how a "good morning"
+    // chain became a three-week correspondence with a bot.
+    if (looksLikeForward(text)) {
       await sendBotReply({
         mobile10,
         displayName: identity.displayName,
         category: "general",
-        audience: "visitor",
-        text: "Please send your full name (at least 2 characters).",
+        audience: "visitor_forward",
         inbound: inboundLog,
       });
-      return { replied: true, escalate: false, audience: "visitor", stub: false };
+      return { replied: false, escalate: false, audience: "visitor_forward", stub: false };
     }
+    const read = readVisitorName(text);
+    if (!read.ok) {
+      const asks = (session.visitorAsks ?? 0) + 1;
+      session.visitorAsks = asks;
+      const giveUp = asks >= VISITOR_ASK_LIMIT;
+      if (giveUp) session.phase = "parked";
+      store = {
+        ...store,
+        sessions: { ...store.sessions, [mobile10]: { ...session, updatedAt: nowIso() } },
+      };
+      await writeStore(store);
+      await sendBotReply({
+        mobile10,
+        displayName: identity.displayName,
+        category: "general",
+        audience: giveUp ? "visitor_parked" : "visitor",
+        text: giveUp
+          ? "I'll pass this to the school office and someone will reply. Send *menu* any time to start again."
+          : visitorNameRetryText(read.reason),
+        inbound: inboundLog,
+      });
+      return {
+        replied: true,
+        // Parking is the point at which a person has to look at it.
+        escalate: giveUp,
+        audience: giveUp ? "visitor_parked" : "visitor",
+        stub: false,
+      };
+    }
+    const name = read.name;
     session.visitorName = name;
     session.displayName = name;
+    session.visitorAsks = 0;
     session.phase = "collect_purpose";
     store = {
       ...store,
@@ -776,6 +844,37 @@ export async function handleWaUnifiedInbound(opts: {
   if (!identity.isKnown && session.phase === "collect_purpose") {
     const purpose = detectVisitorPurpose(text);
     if (!purpose) {
+      // Same rule as the name step: a forward is logged, never answered.
+      if (looksLikeForward(text)) {
+        await sendBotReply({
+          mobile10,
+          displayName: session.visitorName || session.displayName,
+          category: "general",
+          audience: "visitor_forward",
+          inbound: inboundLog,
+        });
+        return { replied: false, escalate: false, audience: "visitor_forward", stub: false };
+      }
+      const asks = (session.visitorAsks ?? 0) + 1;
+      session.visitorAsks = asks;
+      const giveUp = asks >= VISITOR_ASK_LIMIT;
+      if (giveUp) session.phase = "parked";
+      store = {
+        ...store,
+        sessions: { ...store.sessions, [mobile10]: { ...session, updatedAt: nowIso() } },
+      };
+      await writeStore(store);
+      if (giveUp) {
+        await sendBotReply({
+          mobile10,
+          displayName: session.visitorName || session.displayName,
+          category: "general",
+          audience: "visitor_parked",
+          text: "I'll pass this to the school office and someone will reply. Send *menu* any time to start again.",
+          inbound: inboundLog,
+        });
+        return { replied: true, escalate: true, audience: "visitor_parked", stub: false };
+      }
       const purposePack = menuVisitorPurpose(session.visitorName || "there");
       await sendBotReply({
         mobile10,
@@ -787,6 +886,7 @@ export async function handleWaUnifiedInbound(opts: {
       });
       return { replied: true, escalate: false, audience: "visitor", stub: false };
     }
+    session.visitorAsks = 0;
     const flow = flowKindFromVisitorPurpose(purpose);
     session.activeFlow = flow;
     session.phase = "active";
