@@ -12,6 +12,7 @@
  */
 import assert from "node:assert/strict";
 
+import { defaultMobileAccess } from "./mobileFeatures";
 import { emptyMastersShell } from "./masters";
 import {
   hasPermission,
@@ -75,6 +76,8 @@ function stateWithAssignment(scope: UserRoleAssignment["scope"]): RbacState {
       },
     ],
     audit: [],
+    userGrants: [],
+    mobile: defaultMobileAccess(),
   };
 }
 
@@ -170,6 +173,8 @@ function stateWithAssignment(scope: UserRoleAssignment["scope"]): RbacState {
     roles: [teacherRole],
     assignments: [],
     audit: [],
+    userGrants: [],
+    mobile: defaultMobileAccess(),
   };
   assert.equal(
     hasScopedPermission(session, masters, "students", "view", rbac, {

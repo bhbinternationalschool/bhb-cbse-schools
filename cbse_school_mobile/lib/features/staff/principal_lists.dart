@@ -13,14 +13,17 @@ Future<void> _call(BuildContext context, String mobile) async {
   if (m.isEmpty) return;
   final ok = await launchUrl(Uri.parse("tel:$m"));
   if (!ok && context.mounted) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Could not open the dialer.")),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text("Could not open the dialer.")));
   }
 }
 
-Future<void> _whatsapp(BuildContext context, String mobile,
-    {String text = ""}) async {
+Future<void> _whatsapp(
+  BuildContext context,
+  String mobile, {
+  String text = "",
+}) async {
   var m = mobile.replaceAll(RegExp(r"\D"), "");
   if (m.isEmpty) return;
   if (m.length == 10) m = "91$m";
@@ -77,144 +80,23 @@ class _Pill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(
-          color: tone.background,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Text(
-          text,
-          style: TextStyle(
-            fontSize: 10.5,
-            fontWeight: FontWeight.w700,
-            color: tone.foreground,
-          ),
-        ),
-      );
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: tone.background,
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Text(
+      text,
+      style: TextStyle(
+        fontSize: 10.5,
+        fontWeight: FontWeight.w700,
+        color: tone.foreground,
+      ),
+    ),
+  );
 }
 
 /* ─── Fee defaulters ─────────────────────────────────────────────── */
-
-class DefaultersScreen extends StatelessWidget {
-  const DefaultersScreen({super.key, required this.api});
-  final ApiClient api;
-
-  @override
-  Widget build(BuildContext context) {
-    return ModuleShell<DefaultersList>(
-      title: "Fee defaulters",
-      load: api.fetchDefaulters,
-      emptyIcon: Icons.verified_outlined,
-      emptyText: "No family has open dues right now.",
-      isEmpty: (d) => d.households.isEmpty,
-      builder: (context, d, _) => ListView.builder(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(16),
-        itemCount: d.households.length + 1,
-        itemBuilder: (context, i) {
-          if (i == 0) {
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Card(
-                color: AppColors.primary,
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          "${d.households.length} families · as of ${formatDateLabel(d.asOf)}",
-                          style: const TextStyle(
-                              color: Colors.white, fontSize: 12.5),
-                        ),
-                      ),
-                      Text(
-                        formatInrPaise(d.totalOpenPaise),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          }
-          final h = d.households[i - 1];
-          final wa =
-              "Namaste ${h.guardianName}, this is BHB International School. "
-              "Fee dues of ${formatInrPaise(h.openPaise)} are pending for "
-              "${h.children.map((c) => c.fullName).join(", ")}. "
-              "Kindly clear them at the school office. Thank you.";
-          return Card(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 12, 6, 10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          h.guardianName,
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.ink,
-                          ),
-                        ),
-                      ),
-                      Text(
-                        formatInrPaise(h.openPaise),
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.danger,
-                        ),
-                      ),
-                      _ContactButtons(mobile: h.mobile, waText: wa),
-                    ],
-                  ),
-                  for (final c in h.children)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              "${c.fullName} · ${c.classLabel}",
-                              style: const TextStyle(
-                                  fontSize: 12, color: AppColors.muted),
-                            ),
-                          ),
-                          Text(
-                            formatInrPaise(c.openPaise),
-                            style: const TextStyle(
-                                fontSize: 12, color: AppColors.muted),
-                          ),
-                          const SizedBox(width: 8),
-                        ],
-                      ),
-                    ),
-                  if (h.mobile.isNotEmpty)
-                    Text(
-                      h.mobile,
-                      style: const TextStyle(
-                          fontSize: 11, color: AppColors.muted),
-                    ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-/* ─── Today's registers ──────────────────────────────────────────── */
 
 class RegistersScreen extends StatelessWidget {
   const RegistersScreen({super.key, required this.api});
@@ -229,8 +111,7 @@ class RegistersScreen extends StatelessWidget {
       emptyText: "No active sections configured.",
       isEmpty: (d) => d.sections.isEmpty,
       builder: (context, d, reload) {
-        final pending =
-            d.sections.where((s) => !s.marked && !s.holiday).length;
+        final pending = d.sections.where((s) => !s.marked && !s.holiday).length;
         return ListView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.all(16),
@@ -253,37 +134,39 @@ class RegistersScreen extends StatelessWidget {
                   title: Text(
                     s.label,
                     style: const TextStyle(
-                        fontWeight: FontWeight.w600, color: AppColors.ink),
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.ink,
+                    ),
                   ),
                   subtitle: Text(
                     s.holiday
                         ? "Holiday for this class"
                         : s.marked
-                            ? "P ${s.present} · A ${s.absent} · L ${s.leave}"
-                                "${s.markedBy.isNotEmpty ? " · by ${s.markedBy}" : ""}"
-                            : "Not marked yet",
+                        ? "P ${s.present} · A ${s.absent} · L ${s.leave}"
+                              "${s.markedBy.isNotEmpty ? " · by ${s.markedBy}" : ""}"
+                        : "Not marked yet",
                     style: const TextStyle(fontSize: 11.5),
                   ),
                   trailing: s.holiday
                       ? _Pill("Holiday", tone: ModuleTone.blue)
                       : s.marked
-                          ? _Pill("Marked", tone: ModuleTone.teal)
-                          : _Pill("Pending", tone: ModuleTone.coral),
+                      ? _Pill("Marked", tone: ModuleTone.teal)
+                      : _Pill("Pending", tone: ModuleTone.coral),
                   onTap: s.holiday
                       ? null
                       : () async {
-                          final changed =
-                              await Navigator.of(context).push<bool>(
-                            MaterialPageRoute(
-                              builder: (_) => AttendanceScreen(
-                                api: api,
-                                classId: s.classId,
-                                sectionId: s.sectionId,
-                                date: d.date,
-                                title: s.label,
-                              ),
-                            ),
-                          );
+                          final changed = await Navigator.of(context)
+                              .push<bool>(
+                                MaterialPageRoute(
+                                  builder: (_) => AttendanceScreen(
+                                    api: api,
+                                    classId: s.classId,
+                                    sectionId: s.sectionId,
+                                    date: d.date,
+                                    title: s.label,
+                                  ),
+                                ),
+                              );
                           if (changed == true) await reload();
                         },
                 ),
@@ -302,13 +185,13 @@ class StaffAttendanceTodayScreen extends StatelessWidget {
   final ApiClient api;
 
   static (String, ModuleTone) _label(String status) => switch (status) {
-        "P" => ("Present", ModuleTone.teal),
-        "A" => ("Absent", ModuleTone.coral),
-        "L" => ("Leave", ModuleTone.blue),
-        "HD" => ("Half day", ModuleTone.blue),
-        "LE" => ("Late", ModuleTone.blue),
-        _ => ("Not marked", ModuleTone.coral),
-      };
+    "P" => ("Present", ModuleTone.teal),
+    "A" => ("Absent", ModuleTone.coral),
+    "L" => ("Leave", ModuleTone.blue),
+    "HD" => ("Half day", ModuleTone.blue),
+    "LE" => ("Late", ModuleTone.blue),
+    _ => ("Not marked", ModuleTone.coral),
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -339,7 +222,9 @@ class StaffAttendanceTodayScreen extends StatelessWidget {
                   title: Text(
                     s.fullName,
                     style: const TextStyle(
-                        fontWeight: FontWeight.w600, color: AppColors.ink),
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.ink,
+                    ),
                   ),
                   subtitle: Text(
                     [
@@ -353,8 +238,7 @@ class StaffAttendanceTodayScreen extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       _Pill(_label(s.status).$1, tone: _label(s.status).$2),
-                      if (s.status != "P")
-                        _ContactButtons(mobile: s.mobile),
+                      if (s.status != "P") _ContactButtons(mobile: s.mobile),
                     ],
                   ),
                 ),
@@ -429,7 +313,10 @@ class FollowUpsScreen extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     "${l.guardianName} · ${l.enquiryNo}",
-                    style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.muted,
+                    ),
                   ),
                   Row(
                     children: [

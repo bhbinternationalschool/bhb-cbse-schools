@@ -103,3 +103,39 @@ for (const title of [
 }
 
 console.log("OK — rbacInfer.selftest.ts");
+
+// --- Support staff must NOT inherit the blank-login principal fallback ----
+// A sweeper / gardener / peon is on the roster but matches no designation
+// pattern. Until 2026-09-06 they fell through to "principal", so every one
+// of them signed in with the run of the school.
+{
+  const masters = mastersWithDesignation("Sweeper");
+  const codes = inferRoleCodes(
+    {
+      roleCode: "",
+      fullName: "Test Staff",
+      persona: "staff",
+      staffId: "stf_test",
+    } as SessionLike,
+    masters,
+  );
+  if (codes.includes("principal") || codes.includes("owner")) {
+    console.error(`FAIL roster staff with an unmatched designation inferred ${codes.join(",")}`);
+    process.exitCode = 1;
+  } else if (!codes.includes("support")) {
+    console.error(`FAIL expected the support role, got ${codes.join(",")}`);
+    process.exitCode = 1;
+  }
+}
+
+// A blank staff login with nobody on the roster keeps the demo behaviour.
+{
+  const codes = inferRoleCodes(
+    { roleCode: "", fullName: "", persona: "staff" } as SessionLike,
+    null,
+  );
+  if (!codes.includes("principal")) {
+    console.error(`FAIL blank demo login should stay principal, got ${codes.join(",")}`);
+    process.exitCode = 1;
+  }
+}

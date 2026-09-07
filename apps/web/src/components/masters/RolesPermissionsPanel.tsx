@@ -27,6 +27,7 @@ import {
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { isSuperAdminSession } from "@/lib/superAdmin";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { MobileAccessPanel } from "@/components/masters/MobileAccessPanel";
 import {
   ErpTable,
   ErpTableBody,
@@ -40,7 +41,7 @@ import {
 } from "@/components/masters/MastersLayout";
 import { RowActionMenu } from "@/components/ui/erp-grid";
 
-type RbacTab = "matrix" | "roles" | "assignments" | "summary" | "audit";
+type RbacTab = "matrix" | "mobile" | "roles" | "assignments" | "summary" | "audit";
 
 function emptyScope() {
   return {
@@ -115,6 +116,27 @@ export function RolesPermissionsPanel() {
     () => (state && masters ? staffAccessOverview(state, masters) : []),
     [state, masters],
   );
+
+  /**
+   * Every permission somebody holds outside their role. A personal grant is a
+   * deliberate exception, so it has to be readable in one place — otherwise it
+   * is exactly the quiet back door RBAC exists to prevent.
+   */
+  const grantRows = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return (state?.userGrants ?? []).map((g) => ({
+      id: g.id,
+      staffName:
+        (masters?.staff ?? []).find((s) => s.id === g.staffId)?.fullName ||
+        g.staffId,
+      module: g.module,
+      actions: g.actions.join(", "),
+      note: g.note,
+      grantedBy: g.grantedBy,
+      expiresOn: g.expiresOn,
+      expired: !!g.expiresOn && g.expiresOn < today,
+    }));
+  }, [state?.userGrants, masters]);
 
   function commit(next: RbacState, msg?: string) {
     setState(next);
@@ -330,6 +352,7 @@ export function RolesPermissionsPanel() {
         onChange={(id) => setTab(id as RbacTab)}
         items={[
           { id: "matrix", label: "Permission matrix", tone: "navy" },
+          { id: "mobile", label: "Mobile app", tone: "sky" },
           { id: "roles", label: "Roles", tone: "teal" },
           { id: "assignments", label: "Assignments", tone: "violet" },
           { id: "summary", label: "Access summary", tone: "amber" },
@@ -425,6 +448,15 @@ export function RolesPermissionsPanel() {
             </div>
           ) : null}
         </MastersWorkCard>
+      ) : null}
+
+      {tab === "mobile" && state ? (
+        <MobileAccessPanel
+          state={state}
+          masters={masters}
+          commit={commit}
+          actorName={session.fullName}
+        />
       ) : null}
 
       {tab === "roles" ? (
@@ -744,6 +776,45 @@ export function RolesPermissionsPanel() {
                       </td>
                       <td className="px-3 py-2 text-[12px] text-[var(--muted)]">
                         {r.roles.join(", ")}
+                      </td>
+                    </tr>
+                  ))}
+                </ErpTableBody>
+              </ErpTable>
+            )}
+          </MastersTableCard>
+          <MastersTableCard title="Permissions given to one person">
+            {grantRows.length === 0 ? (
+              <div className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+                Nobody holds a permission outside their role.
+              </div>
+            ) : (
+              <ErpTable>
+                <ErpTableHead>
+                  <tr>
+                    <th className="px-3 py-2">Staff</th>
+                    <th className="px-3 py-2">Permission</th>
+                    <th className="px-3 py-2">Why</th>
+                  </tr>
+                </ErpTableHead>
+                <ErpTableBody>
+                  {grantRows.map((g) => (
+                    <tr key={g.id}>
+                      <td className="px-3 py-2">
+                        {g.staffName}
+                        {g.expired ? (
+                          <span className="ml-2 text-[10px] font-semibold text-[var(--danger)]">
+                            expired
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="px-3 py-2 font-mono text-[12px]">
+                        {g.module} · {g.actions}
+                      </td>
+                      <td className="px-3 py-2 text-[12px] text-[var(--muted)]">
+                        {g.note || "No note"}
+                        {g.grantedBy ? ` · by ${g.grantedBy}` : ""}
+                        {g.expiresOn ? ` · until ${g.expiresOn}` : ""}
                       </td>
                     </tr>
                   ))}

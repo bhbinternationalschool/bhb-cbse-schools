@@ -62,12 +62,14 @@ async function loadServerRbac(): Promise<RbacState> {
     const { bundle } = await fetchDeskSliceFromDb("rbac");
     const roles = Array.isArray(bundle.roles) ? bundle.roles : [];
     if (roles.length > 0) {
-      state = {
+      state = normalizeRbacState({
         version: 1,
         roles,
         assignments: Array.isArray(bundle.assignments) ? bundle.assignments : [],
         audit: Array.isArray(bundle.audit) ? bundle.audit : [],
-      } as RbacState;
+        userGrants: Array.isArray(bundle.userGrants) ? bundle.userGrants : [],
+        mobile: bundle.mobile,
+      } as Partial<RbacState>);
     }
   } catch (e) {
     console.warn("[apiAuth] rbac desk read failed", e);
