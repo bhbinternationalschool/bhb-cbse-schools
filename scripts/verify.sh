@@ -194,6 +194,7 @@ SELFTESTS=(
   test:rbac-infer
   test:rbac-scope
   test:rbac-user-grants
+  test:visitor-gate
   test:receipt-lookup
   test:referrals
   test:report-export
