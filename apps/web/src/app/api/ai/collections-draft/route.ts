@@ -59,7 +59,7 @@ export async function POST(req: Request) {
   // through Sarvam so the family reads it in their own language.
   const preferred = normalizeHouseholdLanguage(body.language);
   const prefs = { preferredLanguage: preferred };
-  const draftLanguage = waTemplateLanguageFor(prefs, "en");
+  const draftLanguage = waTemplateLanguageFor(prefs);
   const sarvamTarget = sarvamTargetFor(prefs);
 
   const result = await generateCollectionsDraftJson({

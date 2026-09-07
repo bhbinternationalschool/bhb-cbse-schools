@@ -3877,7 +3877,7 @@ export async function deliverWhatsAppFeeReceipt(input: {
       // had paid at the counter. Falling back across template FAMILIES is
       // never right: the fallback for "no Hindi receipt" is the English
       // receipt, never a different message.
-      const wantLang = waTemplateLanguageFor(hh, "en");
+      const wantLang = waTemplateLanguageFor(hh);
       const feeTpl = pickTemplateForFamily(
         approvedFees,
         "fees_receipt",

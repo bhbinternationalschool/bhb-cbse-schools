@@ -106,6 +106,7 @@ SELFTESTS=(
   test:prod-write-guard
   test:fee-integrity
   test:wa-receipt-template
+  test:wa-language-gate
   test:receipt-repair
   test:projection-double-post
   test:holiday-import

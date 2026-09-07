@@ -88,9 +88,25 @@ export function householdLanguage(
 }
 
 /** WhatsApp template language for this family (en/hi only exist). */
+/**
+ * The language the school writes in when a family has not said otherwise.
+ *
+ * Hindi, decided 2026-09-07. It was "en", hardcoded at each call site, and
+ * every one of the school's 198 households had a blank preferred_language —
+ * so in practice EVERY parent received English, in a school where most
+ * families read Hindi far more comfortably. The language flow that was meant
+ * to fix that per family had never once saved a choice.
+ *
+ * A family that picks a language still overrides this; the default only
+ * decides what happens before they ever say. One constant, so the school's
+ * language is a decision in one place rather than a literal repeated at
+ * every call.
+ */
+export const SCHOOL_DEFAULT_WA_LANGUAGE: "en" | "hi" = "hi";
+
 export function waTemplateLanguageFor(
   hh: HouseholdPrefsLike,
-  schoolDefault: "en" | "hi" = "en",
+  schoolDefault: "en" | "hi" = SCHOOL_DEFAULT_WA_LANGUAGE,
 ): "en" | "hi" {
   const pref = normalizeHouseholdLanguage(hh?.preferredLanguage);
   if (!pref) return schoolDefault;
@@ -151,6 +167,74 @@ export function languageMenuText(): string {
   ].join("\n");
 }
 
+/**
+ * What to do about a parent's message when we may not know their language.
+ *
+ * The old rule asked "was the LAST BOT MESSAGE the language menu?" — which
+ * read the SIS bot's thread. That thread is never persisted (only the
+ * classChannel, hub, staffAtt and unified slices reach
+ * `wa_desk_bot_slices`), so on any fresh instance the thread is empty, the
+ * question is never recognised as pending, and a bare "2" falls through to
+ * intent detection. Every one of the school's 198 households still had a
+ * blank preferred_language on 2026-09-07: the choice had NEVER once been
+ * saved, and every parent silently got English.
+ *
+ * So the decision is taken from the HOUSEHOLD instead, which does persist:
+ *
+ *   language already known  → never ask again, and a bare number means
+ *                             whatever it normally means;
+ *   not known, message is a choice → save it;
+ *   not known, asked for the menu  → show it;
+ *   not known, anything else       → ask, once, on this reply.
+ *
+ * Asking on the parent's own reply is also what makes it FREE. Meta's
+ * 24-hour service window opens when the CUSTOMER messages the business —
+ * sending them a template does not open it. So the menu cannot be pushed out
+ * behind a receipt; it rides on the parent's first reply, when the window is
+ * already open, and it is asked at most once because the answer is stored.
+ */
+export type LanguageGate =
+  | { action: "save"; choice: HouseholdLanguage }
+  | { action: "ask" }
+  | { action: "pass" };
+
+export function languageGateDecision(input: {
+  /** The household's stored preference; "" when never set. */
+  known: string | null | undefined;
+  text: string;
+}): LanguageGate {
+  const text = (input.text || "").trim();
+  const known = (input.known || "").trim();
+  const upper = text.toUpperCase();
+  const askedForMenu = LANGUAGE_MENU_KEYWORDS.some(
+    (k) => upper === k || upper.startsWith(`${k} `),
+  );
+
+  // "LANG hindi" in one line, from anyone, at any time — an explicit change.
+  if (askedForMenu) {
+    const inline = parseLanguageChoice(text.replace(/^\S+\s*/, ""));
+    return inline ? { action: "save", choice: inline } : { action: "ask" };
+  }
+
+  // Known already: never interpret a stray number as a language again. "2"
+  // now belongs to whatever menu the parent is actually looking at.
+  if (known) return { action: "pass" };
+
+  // STRICT parse for an unprompted message. The two-letter codes collide with
+  // ordinary words a parent actually types — "hi" is both the Hindi code and
+  // the commonest English greeting in these chats, and "en"/"ur"/"bn" are no
+  // safer. Reading "hi" as a language choice would silently set half the
+  // school to Hindi the first time they said hello. Only an unambiguous
+  // answer counts here: a menu number, or the language's name in either
+  // script. After an explicit LANG the codes are fine, because the parent is
+  // answering a question we just asked.
+  const choice = parseLanguageChoiceStrict(text);
+  if (choice) return { action: "save", choice };
+
+  // Unknown, and they have just written to us: the window is open, so ask.
+  return { action: "ask" };
+}
+
 /** Interpret a parent's reply to the menu: "2", "hindi", "हिंदी", "urdu"… → code, or null. */
 export function parseLanguageChoice(text: string): HouseholdLanguage | null {
   const t = (text || "").trim().toLowerCase().replace(/[.)\]]+$/, "");
@@ -168,6 +252,19 @@ export function parseLanguageChoice(text: string): HouseholdLanguage | null {
     bengali: "bn", bangla: "bn", "বাংলা": "bn", "बंगाली": "bn",
   };
   return alias[t] ?? null;
+}
+
+/**
+ * `parseLanguageChoice` without the bare two-letter codes.
+ *
+ * Used for messages the parent sent unprompted, where "hi" is overwhelmingly
+ * a greeting rather than a request for Hindi. Numbers and full names stay.
+ */
+export function parseLanguageChoiceStrict(text: string): HouseholdLanguage | null {
+  const t = (text || "").trim().toLowerCase().replace(/[.)\]]+$/, "");
+  if (!t) return null;
+  if (HOUSEHOLD_LANGUAGES.some((l) => t === l.id)) return null;
+  return parseLanguageChoice(t);
 }
 
 /** Confirmation in the chosen language (static — never sent through a model). */

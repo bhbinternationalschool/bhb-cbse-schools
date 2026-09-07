@@ -99,6 +99,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:wa-receipt-template
 
+      - name: Test — a parent is asked their language once, and it is remembered
+        working-directory: apps/web
+        run: npm run test:wa-language-gate
+
       - name: Test — optimistic-locking token survives normalization
         working-directory: apps/web
         run: npm run test:sis-revision

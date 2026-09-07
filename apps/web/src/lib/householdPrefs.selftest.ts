@@ -11,6 +11,7 @@ import {
   normalizeQuietTime,
   quietHoursLabel,
   sarvamTargetFor,
+  SCHOOL_DEFAULT_WA_LANGUAGE,
   waTemplateLanguageFor,
 } from "./householdPrefs";
 
@@ -35,7 +36,19 @@ assert.deepEqual(householdLanguage({ preferredLanguage: "bho" }), { language: "b
 assert.equal(waTemplateLanguageFor({ preferredLanguage: "mai" }), "hi");
 assert.equal(waTemplateLanguageFor({ preferredLanguage: "en" }, "hi"), "en");
 assert.equal(waTemplateLanguageFor({ preferredLanguage: "" }, "hi"), "hi");
-assert.equal(waTemplateLanguageFor(undefined), "en");
+// A family we know nothing about gets the SCHOOL's language, not English.
+// Hindi since 2026-09-07: all 198 households had a blank preference, so the
+// old hardcoded "en" meant every parent was written to in English. Asserted
+// against the constant rather than the literal, so the school can change its
+// mind in one place without this test having to be edited to agree.
+assert.equal(waTemplateLanguageFor(undefined), SCHOOL_DEFAULT_WA_LANGUAGE);
+assert.equal(
+  waTemplateLanguageFor({ preferredLanguage: "" }),
+  SCHOOL_DEFAULT_WA_LANGUAGE,
+  "a blank preference is not a preference for English",
+);
+// A family that HAS chosen still overrides the school default, both ways.
+assert.equal(waTemplateLanguageFor({ preferredLanguage: "en" }), "en");
 
 // Sarvam only for languages beyond en/hi that it can actually produce.
 assert.equal(sarvamTargetFor({ preferredLanguage: "en" }), null);

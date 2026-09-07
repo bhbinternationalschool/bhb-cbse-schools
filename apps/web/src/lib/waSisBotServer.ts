@@ -61,8 +61,7 @@ import {
   languageChoiceConfirmation,
   languageLabel,
   languageMenuText,
-  LANGUAGE_MENU_KEYWORDS,
-  parseLanguageChoice,
+  languageGateDecision,
   sarvamTargetFor,
 } from "@/lib/householdPrefs";
 import { patchMirrorHousehold } from "@/lib/parentHousehold.server";
@@ -663,29 +662,53 @@ export async function handleWaSisBotInbound(opts: {
     !opts.fromUnified &&
     (!text || /^(hi|hello|namaste|hey|start|menu)$/i.test(text));
 
-  // ── Language preference flow: "LANG" → numbered menu; a number / name
-  // right after the menu (last bot message) → save on the household. ──
-  const upper = text.toUpperCase();
-  const askedForMenu = LANGUAGE_MENU_KEYWORDS.some((k) => upper === k || upper.startsWith(`${k} `));
-  const lastBot = [...thread.messages].reverse().find((m) => m.role === "bot");
-  const awaitingChoice = !!lastBot && lastBot.text.startsWith("Which language should the school message you in?");
-  const inlineChoice = askedForMenu ? parseLanguageChoice(text.replace(/^\S+\s*/, "")) : null;
-  const choice = inlineChoice ?? (awaitingChoice ? parseLanguageChoice(text) : null);
-  if (askedForMenu && !choice) {
+  // ── Language preference: decided from the HOUSEHOLD, not from the thread.
+  //
+  // This used to ask "was the last bot message the menu?", which reads the
+  // SIS bot's thread — and that thread is never persisted (only classChannel,
+  // hub, staffAtt and unified reach wa_desk_bot_slices). On any fresh
+  // instance the thread is empty, so a bare "2" was never recognised as an
+  // answer. All 198 households still had a blank preferred_language on
+  // 2026-09-07: the choice had never once been saved, and every parent
+  // silently got English.
+  //
+  // Asked at most once, on the parent's OWN reply — which is also what makes
+  // it free. Meta's 24-hour window opens when the customer writes to us;
+  // sending them a template does not open it, so the menu cannot ride out
+  // behind a receipt. It rides on the reply the receipt provokes.
+  const gate = languageGateDecision({ known: hh.preferredLanguage, text });
+  if (gate.action === "ask") {
     return finishLanguageFlow(store, thread, parentMsg, languageMenuText());
   }
-  if (choice) {
+  if (gate.action === "save") {
+    const choice = gate.choice;
     const updated: Household = { ...hh, preferredLanguage: choice };
     const kids = childrenOf(hh);
+    let saved = false;
     try {
       const { pushSisToDb } = await import("@/lib/sisNormalized.server");
       const r = await pushSisToDb({ households: [updated], students: [] });
-      if (!r.ok) console.warn("[wa-sis-bot] language pref push failed", r.error);
-      patchMirrorHousehold(updated, kids);
+      saved = !!r.ok;
+      if (!r.ok) {
+        console.error("[wa-sis-bot] language pref push FAILED", r.error);
+      } else {
+        patchMirrorHousehold(updated, kids);
+      }
     } catch (e) {
-      console.warn("[wa-sis-bot] language pref save failed", e);
+      console.error("[wa-sis-bot] language pref save FAILED", e);
     }
-    return finishLanguageFlow(store, thread, parentMsg, languageChoiceConfirmation(choice));
+    // Never confirm a save that did not happen. The old code logged a warning
+    // and thanked the parent anyway, so a failed write looked exactly like a
+    // successful one — and the next message still arrived in English with
+    // nobody any the wiser. If it did not store, say so and let them retry.
+    return finishLanguageFlow(
+      store,
+      thread,
+      parentMsg,
+      saved
+        ? languageChoiceConfirmation(choice)
+        : "Sorry — we could not save that just now. Please reply LANG and choose again in a few minutes.",
+    );
   }
 
   const intent = isGreeting ? ("unknown" as const) : detectSisBotIntent(text);
