@@ -19,6 +19,7 @@ import assert from "node:assert/strict";
 import {
   detectVisitorPurpose,
   isUnifiedMenuCommand,
+  shouldShowUnifiedMenu,
   looksLikeForward,
   parseStaffBotSwitch,
   readVisitorName,
@@ -206,3 +207,56 @@ for (const [t, want] of [
 assert.equal(detectVisitorPurpose("https://www.threads.com/share/_vLabZ3cD/"), null);
 
 console.log("OK");
+
+// ── A voice note is not a request for the menu ────────────────────────
+// isUnifiedMenuCommand("") is true — no text reads as "show me the menu"
+// — and a voice note carries no text. So every voice note a staff member
+// sent was answered with the greeting and never reached the command desk,
+// where the transcription lives. Voice commands could not work: they were
+// swallowed one step before the code that handles them.
+{
+  const staffVoice = {
+    text: "", staff: true, known: true, hasSession: true, hasAudio: true,
+  };
+  assert.equal(shouldShowUnifiedMenu(staffVoice), false, "staff voice note goes to the desk");
+  // Same message with no audio is still a menu request — that is what an
+  // empty text has always meant, and only the voice path is being fixed.
+  assert.equal(
+    shouldShowUnifiedMenu({ ...staffVoice, hasAudio: false }),
+    true,
+    "empty text with no audio still opens the menu",
+  );
+  // A staff member's bare photo is unchanged: audio only.
+  assert.equal(
+    shouldShowUnifiedMenu({ text: "", staff: true, known: true, hasSession: true, hasAudio: false }),
+    true,
+  );
+  // A staff member's spoken-then-typed command is a command either way.
+  assert.equal(
+    shouldShowUnifiedMenu({ text: "5A me aaj kaun absent hai", staff: true, known: true, hasSession: true, hasAudio: false }),
+    false,
+  );
+  // Staff keep the explicit way back to the old bot.
+  for (const t of ["menu", "main", "start"]) {
+    assert.equal(
+      shouldShowUnifiedMenu({ text: t, staff: true, known: true, hasSession: true, hasAudio: false }),
+      true,
+      `staff still get the menu for "${t}"`,
+    );
+  }
+  // A visitor forwarding a link is still not asking for the welcome.
+  assert.equal(
+    shouldShowUnifiedMenu({
+      text: "https://fb.me/1BkJUpZ93g good morning have a glorious day",
+      staff: false, known: false, hasSession: true, hasAudio: false,
+    }),
+    false,
+  );
+  // But a visitor's first "hi" still opens it.
+  assert.equal(
+    shouldShowUnifiedMenu({ text: "hi", staff: false, known: false, hasSession: false, hasAudio: false }),
+    true,
+  );
+}
+
+console.log("OK — a staff voice note reaches the desk, not the menu");
