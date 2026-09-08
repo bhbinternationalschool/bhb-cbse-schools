@@ -4,7 +4,7 @@ import {
   WaDeliveryTicks,
   type WaTickStage,
 } from "@/components/comms/WaDeliveryTicks";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { field } from "@/components/ui/erp-ui";
 
 type LogEntry = {
@@ -30,12 +30,58 @@ const CHANNEL_LABEL: Record<LogEntry["channel"], string> = {
   app_chat: "In-app chat",
 };
 
-export function HouseholdMessageLogPanel() {
+/**
+ * One family's message history.
+ *
+ * Two ways in. From Comms you search a mobile; from a student's profile the
+ * household is already known, so `forHouseholdId` loads it straight away and
+ * the search box disappears — asking the office to look up a number for the
+ * family whose record is open would be a strange thing to do, and it would
+ * also miss a household whose registered number changed after the messages
+ * went out.
+ */
+export function HouseholdMessageLogPanel({
+  forHouseholdId = "",
+  showIntro = true,
+}: {
+  forHouseholdId?: string;
+  showIntro?: boolean;
+} = {}) {
   const [mobile, setMobile] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [householdId, setHouseholdId] = useState<string | null>(null);
   const [entries, setEntries] = useState<LogEntry[] | null>(null);
+
+  const load = useCallback(async (query: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/comms/household-log?${query}`);
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        householdId?: string | null;
+        entries?: LogEntry[];
+      };
+      if (!res.ok || !json.ok) {
+        setError(json.error || "Could not read the message history");
+        setEntries(null);
+        return;
+      }
+      setHouseholdId(json.householdId ?? null);
+      setEntries(json.entries || []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not read the message history");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!forHouseholdId) return;
+    void load(`householdId=${encodeURIComponent(forHouseholdId)}`);
+  }, [forHouseholdId, load]);
 
   async function search() {
     const m = mobile.replace(/\D/g, "");
@@ -71,6 +117,7 @@ export function HouseholdMessageLogPanel() {
 
   return (
     <div className="space-y-4">
+      {showIntro ? (
       <p className="text-[12px] text-[var(--muted)]">
         One household&apos;s cross-channel message history — &ldquo;what did we
         send this family?&rdquo; Covers WhatsApp (fee reminders, duty/
@@ -79,7 +126,9 @@ export function HouseholdMessageLogPanel() {
         are not tracked yet</span> — IVRS has no call history stored anywhere
         in this system today, and email has no provider configured.
       </p>
+      ) : null}
 
+      {forHouseholdId ? null : (
       <div className="flex flex-wrap items-center gap-2">
         <input
           className={`${field} max-w-xs`}
@@ -110,8 +159,12 @@ export function HouseholdMessageLogPanel() {
           </span>
         ) : null}
       </div>
+      )}
 
       {error ? <p className="text-[12px] text-[var(--danger)]">{error}</p> : null}
+      {forHouseholdId && loading ? (
+        <p className="text-[12px] text-[var(--muted)]">Reading message history…</p>
+      ) : null}
 
       {entries ? (
         entries.length === 0 ? (

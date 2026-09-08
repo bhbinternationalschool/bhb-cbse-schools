@@ -5,9 +5,18 @@ import { getHouseholdMessageTimeline } from "@/lib/householdMessageLog.server";
 
 export const runtime = "nodejs";
 
-/** GET ?mobile=98xxxxxxxx — merged WA + in-app timeline for the household
- * that mobile resolves to (IVRS and email are not tracked yet — see
- * lib/householdMessageLog.server.ts header for why). */
+/**
+ * GET ?mobile=98xxxxxxxx or ?householdId=hh_xxx — the merged WhatsApp +
+ * in-app timeline for one household, with each message's delivery ticks.
+ *
+ * `householdId` exists because the caller usually already knows the family:
+ * the student profile opens straight onto their history. Requiring a mobile
+ * there would mean looking one up to ask about a household we are already
+ * looking at, and would miss a family whose registered number has changed
+ * since the messages were sent.
+ *
+ * IVRS and email are not tracked yet — see lib/householdMessageLog.server.ts.
+ */
 export async function GET(req: Request) {
   const auth = await requireWaStaffApi(req);
   if (!auth.ok) return auth.response;
@@ -15,10 +24,16 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url);
   const mobile = (url.searchParams.get("mobile") || "").trim();
-  if (!mobile) {
-    return NextResponse.json({ error: "mobile required" }, { status: 400 });
+  const householdIdParam = (url.searchParams.get("householdId") || "").trim();
+  if (!mobile && !householdIdParam) {
+    return NextResponse.json(
+      { error: "mobile or householdId required" },
+      { status: 400 },
+    );
   }
 
-  const { householdId, entries } = await getHouseholdMessageTimeline({ mobile });
+  const { householdId, entries } = await getHouseholdMessageTimeline(
+    householdIdParam ? { householdId: householdIdParam } : { mobile },
+  );
   return NextResponse.json({ ok: true, householdId, entries });
 }
