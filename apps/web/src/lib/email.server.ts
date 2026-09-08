@@ -50,8 +50,16 @@ function saKey(): SaKey | null {
   }
 }
 
+/**
+ * Is email sendable at all?
+ *
+ * True with a key file, and true on Cloud Run without one — there the
+ * assertion is signed by IAM Credentials and no key exists by design. Tying
+ * this to the key alone would leave every "Send email" button disabled on a
+ * deployment that can send perfectly well.
+ */
 export function emailConfigured(): boolean {
-  return !!saKey();
+  return !!saKey() || !!process.env.K_SERVICE;
 }
 
 /* ─── Settings ─────────────────────────────────────────────────────── */
@@ -103,20 +111,125 @@ function b64url(s: string | Buffer): string {
   return Buffer.from(s).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+/**
+ * The mailer identity when there is no key file.
+ *
+ * `constraints/iam.disableServiceAccountKeyCreation` is enforced on this
+ * organisation, so `gcloud iam service-accounts keys create` is refused —
+ * correctly. A downloadable key that can send mail as any mailbox in the
+ * domain is exactly the thing that policy exists to prevent, and the honest
+ * response is to stop needing one rather than to switch the policy off.
+ */
+function impersonatedSenderSa(): string {
+  return (
+    process.env.GMAIL_SENDER_SA?.trim() ||
+    "erp-mail-sender@school-erp-prod-493619.iam.gserviceaccount.com"
+  );
+}
+
+/** The runtime's own token, from the metadata server. Null when not on GCP. */
+async function runtimeAccessToken(): Promise<string | null> {
+  try {
+    const res = await fetch(
+      "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
+      { headers: { "Metadata-Flavor": "Google" }, signal: AbortSignal.timeout(3000) },
+    );
+    if (!res.ok) return null;
+    const j = (await res.json()) as { access_token?: string };
+    return j.access_token || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Have Google sign the assertion instead of holding the private key.
+ *
+ * The Cloud Run service asks IAM Credentials to sign a JWT *as* the mailer
+ * service account — permitted because the runtime identity holds
+ * `roles/iam.serviceAccountTokenCreator` on it. The signing key never leaves
+ * Google, so there is nothing to download, rotate, leak, or delete from a
+ * laptop. Domain-wide delegation is still required and unchanged: it is the
+ * mailer account's client id that Workspace authorises.
+ */
+async function signJwtAsMailer(
+  claims: Record<string, unknown>,
+): Promise<{ ok: true; jwt: string } | { ok: false; error: string }> {
+  const runtime = await runtimeAccessToken();
+  if (!runtime) {
+    return {
+      ok: false,
+      error:
+        "Email is keyless on Cloud Run and there is no metadata server here — " +
+        "set GMAIL_SA_KEY_JSON for local use, or run it deployed",
+    };
+  }
+  const sa = encodeURIComponent(impersonatedSenderSa());
+  try {
+    const res = await fetch(
+      `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${sa}:signJwt`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${runtime}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ payload: JSON.stringify(claims) }),
+      },
+    );
+    const j = (await res.json().catch(() => ({}))) as {
+      signedJwt?: string;
+      error?: { message?: string; status?: string };
+    };
+    if (!res.ok || !j.signedJwt) {
+      const msg = j.error?.message || `HTTP ${res.status}`;
+      const hint = /permission|forbidden|PERMISSION_DENIED/i.test(
+        `${msg} ${j.error?.status ?? ""}`,
+      )
+        ? " — the Cloud Run service account needs roles/iam.serviceAccountTokenCreator on the mailer service account"
+        : "";
+      return { ok: false, error: `signJwt failed: ${msg}${hint}` };
+    }
+    return { ok: true, jwt: j.signedJwt };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "signJwt request failed",
+    };
+  }
+}
+
 async function accessTokenFor(impersonate: string): Promise<{ ok: true; token: string } | { ok: false; error: string }> {
   const key = saKey();
-  if (!key) return { ok: false, error: "Email not configured — GMAIL_SA_KEY_JSON missing" };
   const cached = tokenCache.get(impersonate);
   if (cached && cached.exp > Date.now() + 60_000) return { ok: true, token: cached.token };
   const now = Math.floor(Date.now() / 1000);
-  const header = b64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
-  const claims = b64url(JSON.stringify({ iss: key.client_email, sub: impersonate, scope: SCOPE, aud: key.token_uri || "https://oauth2.googleapis.com/token", iat: now, exp: now + 3600 }));
-  const signer = createSign("RSA-SHA256");
-  signer.update(`${header}.${claims}`);
-  const sig = b64url(signer.sign(key.private_key));
-  const assertion = `${header}.${claims}.${sig}`;
+  const tokenUri = key?.token_uri || "https://oauth2.googleapis.com/token";
+
+  let assertion: string;
+  if (key) {
+    // A key file, when one exists — local development, or a project where
+    // the policy allows keys.
+    const header = b64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+    const claims = b64url(JSON.stringify({ iss: key.client_email, sub: impersonate, scope: SCOPE, aud: tokenUri, iat: now, exp: now + 3600 }));
+    const signer = createSign("RSA-SHA256");
+    signer.update(`${header}.${claims}`);
+    assertion = `${header}.${claims}.${b64url(signer.sign(key.private_key))}`;
+  } else {
+    const signed = await signJwtAsMailer({
+      iss: impersonatedSenderSa(),
+      sub: impersonate,
+      scope: SCOPE,
+      aud: tokenUri,
+      iat: now,
+      exp: now + 3600,
+    });
+    if (!signed.ok) return { ok: false, error: signed.error };
+    assertion = signed.jwt;
+  }
+
   try {
-    const res = await fetch(key.token_uri || "https://oauth2.googleapis.com/token", {
+    const res = await fetch(tokenUri, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion }).toString(),
