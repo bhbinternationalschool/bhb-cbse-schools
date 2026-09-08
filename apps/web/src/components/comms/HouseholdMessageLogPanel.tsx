@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  WaDeliveryTicks,
+  type WaTickStage,
+} from "@/components/comms/WaDeliveryTicks";
 import { useState } from "react";
 import { field } from "@/components/ui/erp-ui";
 
@@ -12,6 +16,10 @@ type LogEntry = {
   templateName: string;
   preview: string;
   status: "sent" | "failed";
+  /** How far WhatsApp got. Absent on in-app chat, which has no ticks. */
+  deliveryStage?: WaTickStage;
+  deliveredAt?: string | null;
+  readAt?: string | null;
   error: string | null;
   by: string;
   at: string;
@@ -126,6 +134,12 @@ export function HouseholdMessageLogPanel() {
                   <span className="text-[10px] text-[var(--muted)]">
                     {e.at.slice(0, 16).replace("T", " ")}
                   </span>
+                  {e.channel === "wa" && e.direction === "out" ? (
+                    <WaDeliveryTicks
+                      stage={e.deliveryStage}
+                      at={e.readAt || e.deliveredAt}
+                    />
+                  ) : null}
                 </div>
                 <p className="mt-1 whitespace-pre-wrap text-[12px] text-[var(--ink)]">
                   {e.preview || (e.templateName ? `Template: ${e.templateName}` : "—")}

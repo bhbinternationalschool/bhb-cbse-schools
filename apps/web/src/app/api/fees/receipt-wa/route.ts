@@ -2,8 +2,43 @@ import { NextResponse } from "next/server";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { loadFeeContext, householdContact } from "@/lib/api/v1/staffFees";
 import { sendFeeReceiptWhatsApp } from "@/lib/feeReceiptAutoWa.server";
+import { receiptSendStatuses } from "@/lib/waDeliveryStatus.server";
 
 export const runtime = "nodejs";
+
+/**
+ * GET — what happened to the receipts the school messaged.
+ *
+ * `?voucherId=` for one receipt (the ticks beside a receipt on screen),
+ * `?since=YYYY-MM-DD` for a day's worth (the desk view of who has opened
+ * theirs). Meta's status webhook has been recording sent / delivered / read
+ * for months and nothing in the ERP ever showed it, so "did that parent get
+ * their receipt" had no answer short of asking them.
+ */
+export async function GET(req: Request) {
+  const auth = await requireStaffPermission(req, "fees", "view");
+  if (!auth.ok) return auth.response;
+
+  const url = new URL(req.url);
+  const voucherId = (url.searchParams.get("voucherId") || "").trim();
+  const since = (url.searchParams.get("since") || "").trim();
+
+  const rows = await receiptSendStatuses({
+    voucherIds: voucherId ? [voucherId] : undefined,
+    // A bare date means midnight IST, which is the day the office means.
+    sinceIso: since ? new Date(`${since}T00:00:00+05:30`).toISOString() : undefined,
+    limit: voucherId ? 1 : 500,
+  });
+
+  return NextResponse.json({
+    ok: true,
+    receipts: rows,
+    counts: rows.reduce<Record<string, number>>((acc, r) => {
+      acc[r.stage] = (acc[r.stage] ?? 0) + 1;
+      return acc;
+    }, {}),
+  });
+}
 
 /**
  * Message a family their receipt, by voucher id.
