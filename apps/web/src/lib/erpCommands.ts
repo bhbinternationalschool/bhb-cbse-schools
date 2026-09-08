@@ -15,6 +15,7 @@
  * break stay the same list.
  */
 
+import { namesPeriodBeyondDay } from "@/lib/erpAsk";
 import type { WaTemplateButton } from "@/lib/waTemplates";
 import type { MastersState } from "@/lib/masters";
 import type { RbacAction, RbacModule } from "@/lib/rbac";
@@ -871,7 +872,10 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
   if (freeQ) {
     return { commandId: "free_teachers", fields: { text: freeQ, date: "" }, source: "local" };
   }
-  if (COLLECTION_WORDS.test(t) && !extractSectionRefs(t).length) {
+  // "fee collected this week" is a question for the answering layer, not the
+  // day command: until 2026-09-09 it answered with today's figure and the
+  // week was silently dropped.
+  if (COLLECTION_WORDS.test(t) && !extractSectionRefs(t).length && !namesPeriodBeyondDay(t)) {
     return { commandId: "collection_today", fields: { date: "" }, source: "local" };
   }
   const payLink = parsePayLinkQuery(t);
@@ -1749,6 +1753,12 @@ const FEE_STOP_WORDS = new Set([
   "kisne", "kis", "kaun", "nahi", "nahin", "di", "diya", "diye", "bhari", "list", "report",
   "defaulter", "defaulters", "bakayedar", "bakaayedar", "overdue", "mein", "wale", "walo",
   "बकाया", "फीस", "बाकी", "की", "का", "के", "कितनी", "कितना", "है", "दिखाओ", "बताओ",
+  // Period and collection words: "fees collected this week" is a question
+  // about the school's collections, not a child called "Collected This Week".
+  "collected", "collection", "collections", "came", "received", "aaya", "aayi", "aya", "mila", "mili",
+  "this", "last", "previous", "week", "hafte", "hafta", "month", "mahine", "mahina", "maheene",
+  "session", "year", "saal", "today", "yesterday", "aaj", "kal", "is", "iss", "pichle", "pichhle",
+  "इस", "पिछले", "हफ्ते", "हफ़्ते", "महीने", "सप्ताह", "आज", "कल", "आया", "आई",
 ]);
 
 /**

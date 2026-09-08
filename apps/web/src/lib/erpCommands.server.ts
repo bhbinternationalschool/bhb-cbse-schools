@@ -249,6 +249,12 @@ type CommandStore = {
    * back-reference to something said an hour ago is a guess, not memory.
    */
   lastStudent?: Record<string, { at: string; studentId: string; name: string }>;
+  /**
+   * The last question the answering layer answered, per staff member, so
+   * "aur pichle hafte?" can follow "is hafte kitna aaya?". Question and
+   * answer text only, on the same short window as the lists.
+   */
+  lastAsk?: Record<string, { at: string; question: string; answer: string }>;
 };
 
 let memoryStore: CommandStore = {
@@ -701,7 +707,12 @@ export async function handleErpStaffCommand(
     }
   }
 
-  if (!parsed) return { handled: false };
+  if (!parsed) {
+    // Not a command. If it reads as a question about the school's data,
+    // answer it from the records; otherwise stay quiet as before.
+    const asked = await tryAnswerQuestion(inbound, text, actor, store, nowMs, todayIso);
+    return asked ?? { handled: false };
+  }
 
   // 2b. Hourly cap per staff member.
   const use = noteCommandUse(store.usage[actor], nowMs);
@@ -3718,6 +3729,93 @@ function countSectionFamilies(sectionId: string, academicYearCode: string): numb
       .map((st) => st.householdId),
   );
   return households.size;
+}
+
+/** The answering layer's stand-in command, for RBAC-free audit rows and the hourly cap. */
+const ASK_COMMAND: ErpCommandDef = {
+  id: "ask",
+  title: "Ask the ERP",
+  kind: "read",
+  module: "home",
+  action: "view",
+  description: "An information question answered from the school's records.",
+  examples: ["fee collected this week", "kitne bachche 90 din se baaki hain", "class 5 me kitne students"],
+  fields: [],
+  scope: "any",
+};
+
+/**
+ * Ask the ERP: the conversational answer for a question the catalogue does
+ * not know. Runs only for a linked staff member, only for question-shaped
+ * text, under the same hourly cap as commands. Every tool checks the asker's
+ * RBAC; the model sees computed facts and its numbers are checked against
+ * them (erpAsk.ts). Returns null to leave the message to the older bots.
+ */
+async function tryAnswerQuestion(
+  inbound: ErpCommandInbound,
+  text: string,
+  actor: string,
+  store: CommandStore,
+  nowMs: number,
+  todayIso: string,
+): Promise<ErpCommandResult | null> {
+  if (!inbound.staff) return null;
+  const { looksLikeQuestion } = await import("@/lib/erpAsk");
+  if (!looksLikeQuestion(text)) return null;
+
+  const use = noteCommandUse(store.usage[actor], nowMs);
+  store = { ...store, usage: { ...store.usage, [actor]: use.history } };
+  await writeStore(store);
+  if (!use.allowed) {
+    return {
+      handled: true,
+      audience: "erp_command_limited",
+      text: "That's a lot of questions this hour. Please try again a little later, or open the ERP.",
+    };
+  }
+
+  const [masters, rbac] = await Promise.all([loadServerMasters(), loadServerRbac()]);
+  const session = staffSessionFor(inbound.staff, masters);
+  const prev = (store.lastAsk ?? {})[actor];
+  const previous = prev && followUpIsFresh(prev.at, nowMs) ? { question: prev.question, answer: prev.answer } : null;
+
+  const { answerErpAsk } = await import("@/lib/erpAsk.server");
+  let outcome: Awaited<ReturnType<typeof answerErpAsk>> = null;
+  try {
+    outcome = await answerErpAsk({
+      text,
+      session,
+      masters,
+      rbac,
+      flow: inbound.flow,
+      firstName: inbound.staff.fullName.split(" ")[0] || inbound.displayName,
+      schoolName: TENANT.nameDisplay,
+      todayIso,
+      previous,
+      readers: {
+        attendance: (dateIso) => attendanceSummary({ date: dateIso, scope: "school" }, session, todayIso),
+        admissions: (label) => admissionsPeriod(label, session, todayIso),
+      },
+    });
+  } catch (e) {
+    void audit(session, ASK_COMMAND, {}, text, "error", { channel: inbound.channel, reason: e instanceof Error ? e.message : String(e) });
+    return null;
+  }
+  if (!outcome) return null;
+
+  const fresh = await readStore();
+  await writeStore({
+    ...fresh,
+    lastAsk: { ...(fresh.lastAsk ?? {}), [actor]: { at: new Date(nowMs).toISOString(), question: text.slice(0, 300), answer: outcome.text.slice(0, 600) } },
+  });
+  void audit(session, ASK_COMMAND, {}, text, "ok", {
+    channel: inbound.channel,
+    tools: outcome.toolsUsed,
+    planSource: outcome.planSource,
+    answerSource: outcome.answerSource,
+    generationIds: outcome.generationIds,
+  });
+  return { handled: true, audience: "erp_ask", text: outcome.text };
 }
 
 async function audit(

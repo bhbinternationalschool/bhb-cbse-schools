@@ -1753,6 +1753,61 @@ export async function generateAdmissionsAnswerJson(opts: {
  * Strict JSON contract, validated in `parseErpCommandLlmJson`; anything the
  * model invents outside the catalogue comes back as a failed parse.
  */
+/** Ask the ERP — which fact tools answer this question. No data is shown to the model. */
+export async function generateErpAskPlanJson(opts: { text: string; todayIso: string }): Promise<
+  | { ok: true; plan: import("@/lib/erpAsk").ErpAskPlan; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const { buildErpAskPlanSystemPrompt, parseErpAskPlanJson, ERP_ASK_TOOLS, ERP_ASK_PROMPT_VERSION } = await import("@/lib/erpAsk");
+  const r = await callLlmJson(
+    {
+      system: buildErpAskPlanSystemPrompt({ tools: ERP_ASK_TOOLS, todayIso: opts.todayIso }),
+      userMessage: opts.text.slice(0, 500),
+      maxTokens: 250,
+      temperature: 0,
+      geminiMaxTokens: 1024,
+      meta: { route: "erp-ask-plan", promptVersion: ERP_ASK_PROMPT_VERSION },
+    },
+    parseErpAskPlanJson,
+  );
+  if (r.ok) return { ok: true, plan: r.data, engine: r.engine, generationId: r.generationId };
+  return { ok: false, error: r.error, engine: r.engine };
+}
+
+/**
+ * Ask the ERP — the conversational answer over computed facts. The parser
+ * refuses an answer whose numbers are not all in the facts; the caller then
+ * sends the facts themselves.
+ */
+export async function generateErpAskAnswerJson(opts: {
+  question: string;
+  facts: import("@/lib/erpAsk").ErpAskFact[];
+  notes: string[];
+  factsText: string;
+  language: "en" | "hi" | "hinglish";
+  schoolName: string;
+  firstName: string;
+  previous: { question: string; answer: string } | null;
+}): Promise<
+  | { ok: true; answer: string; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const { buildErpAskAnswerSystemPrompt, buildErpAskAnswerUserPrompt, parseErpAskAnswerJson, ERP_ASK_PROMPT_VERSION } = await import("@/lib/erpAsk");
+  const r = await callLlmJson(
+    {
+      system: buildErpAskAnswerSystemPrompt({ language: opts.language, schoolName: opts.schoolName, firstName: opts.firstName }),
+      userMessage: buildErpAskAnswerUserPrompt({ question: opts.question, facts: opts.facts, notes: opts.notes, previous: opts.previous }),
+      maxTokens: opts.language === "en" ? 500 : 800,
+      temperature: 0.3,
+      geminiMaxTokens: 2048,
+      meta: { route: "erp-ask-answer", promptVersion: ERP_ASK_PROMPT_VERSION },
+    },
+    (text) => parseErpAskAnswerJson(text, opts.factsText),
+  );
+  if (r.ok) return { ok: true, answer: r.data, engine: r.engine, generationId: r.generationId };
+  return { ok: false, error: r.error, engine: r.engine };
+}
+
 export async function generateErpCommandJson(opts: {
   text: string;
   commands: import("@/lib/erpCommands").ErpCommandDef[];
