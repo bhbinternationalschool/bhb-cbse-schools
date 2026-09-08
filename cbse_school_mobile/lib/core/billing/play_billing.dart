@@ -6,6 +6,43 @@ import "package:in_app_purchase/in_app_purchase.dart";
 
 import "../api/api_client.dart";
 
+/// What the store knew about the products we asked for.
+class PlayProducts {
+  const PlayProducts({
+    required this.found,
+    required this.notFound,
+    required this.storeUnavailable,
+    required this.error,
+  });
+
+  final Map<String, ProductDetails> found;
+
+  /// Ids Play does not recognise. Almost always a product that exists in Play
+  /// Console but has never been set Active, or one whose id is misspelled —
+  /// and, for hours after a first upload, one Play simply has not published
+  /// to its billing service yet.
+  final List<String> notFound;
+
+  /// The Play Store itself could not be reached: no Play services, a build
+  /// Play did not deliver, or no signed-in account.
+  final bool storeUnavailable;
+  final String? error;
+
+  /// What to tell the parent, naming the actual fault.
+  String get problem {
+    if (storeUnavailable) {
+      return "Google Play is not available on this phone. The app must be "
+          "installed from Play, with a Google account signed in.";
+    }
+    if (error != null) return "Google Play returned an error: $error";
+    if (notFound.isNotEmpty) {
+      return "Google Play does not have these passes yet: "
+          "${notFound.join(", ")}. They may still be publishing.";
+    }
+    return "Google Play has no passes to sell right now.";
+  }
+}
+
 /// Buying a tutor pass through Google Play.
 ///
 /// Play requires its own billing for digital content consumed inside an app it
@@ -37,10 +74,28 @@ class PlayBilling {
   /// Prices as the STORE states them — "₹49.00", localised, including any
   /// tax Play adds. Never show the app's own price here: what Play charges is
   /// what the parent must see, and the two can differ by country.
-  Future<Map<String, ProductDetails>> products(Set<String> ids) async {
-    if (!await available()) return {};
+  ///
+  /// Returns WHY as well as what. The first version threw away
+  /// `notFoundIDs`, so a store that answered "I have never heard of
+  /// tutor_day" and a store that could not be reached at all produced the
+  /// same shrug — "not ready, try again" — and there was no way to tell a
+  /// propagation delay from a product that was never activated.
+  Future<PlayProducts> products(Set<String> ids) async {
+    if (!await available()) {
+      return const PlayProducts(
+        found: {},
+        notFound: [],
+        storeUnavailable: true,
+        error: null,
+      );
+    }
     final res = await _iap.queryProductDetails(ids);
-    return {for (final p in res.productDetails) p.id: p};
+    return PlayProducts(
+      found: {for (final p in res.productDetails) p.id: p},
+      notFound: res.notFoundIDs,
+      storeUnavailable: false,
+      error: res.error?.message,
+    );
   }
 
   /// Start listening BEFORE any purchase is launched.
