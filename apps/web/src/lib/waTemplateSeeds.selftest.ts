@@ -22,7 +22,7 @@
  */
 import assert from "node:assert/strict";
 
-import { buildPayGoToken, parsePayGoToken, payGoRedirectPath } from "./payGoToken";
+import { buildPayGoToken, parsePayGoToken, payGoRedirectPath, resolvePublicOrigin } from "./payGoToken";
 import {
   buildMetaTemplateCreatePayload,
   buttonUrlVariable,
@@ -265,6 +265,13 @@ assert.equal(parsePayGoToken("pl_8f3k2x9a"), null, "no code → not a token");
 assert.equal(parsePayGoToken("pl_8f3k2x9a.XYZ"), null, "malformed code → not a token");
 assert.equal(parsePayGoToken("../etc.PL-7K2M"), null);
 assert.equal(payGoRedirectPath({ linkId: "pl_8f3k2x9a", code: "PL-7K2M" }), "/pay/share?linkId=pl_8f3k2x9a&code=PL-7K2M");
+// The redirect origin comes from the public host, never the container's bind address.
+const H = (o: Record<string, string>) => ({ get: (k: string) => o[k.toLowerCase()] ?? null });
+assert.equal(resolvePublicOrigin(H({ host: "bhbinternational.school" }), "https://x.example"), "https://bhbinternational.school");
+assert.equal(resolvePublicOrigin(H({ host: "0.0.0.0:3000" }), "https://bhbinternational.school/"), "https://bhbinternational.school", "0.0.0.0 is the container, not a host");
+assert.equal(resolvePublicOrigin(H({}), "https://bhbinternational.school"), "https://bhbinternational.school");
+assert.equal(resolvePublicOrigin(H({ host: "localhost:3000" }), "https://x"), "http://localhost:3000", "dev keeps working");
+assert.equal(resolvePublicOrigin(H({ "x-forwarded-host": "bhbinternational.school", "x-forwarded-proto": "https", host: "0.0.0.0:3000" }), "https://x"), "https://bhbinternational.school");
 
 const withToken = templateButtonComponents(payLinkEn, { payToken: token });
 assert.deepEqual(withToken.missing, []);

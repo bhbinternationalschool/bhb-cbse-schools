@@ -7,7 +7,8 @@
  * every open due can still be paid, rather than to an error page.
  */
 import { NextResponse } from "next/server";
-import { parsePayGoToken, payGoRedirectPath } from "@/lib/payGoToken";
+import { publicPortalOrigin } from "@/lib/admissions";
+import { parsePayGoToken, payGoRedirectPath, resolvePublicOrigin } from "@/lib/payGoToken";
 
 export const runtime = "nodejs";
 
@@ -17,6 +18,8 @@ export async function GET(
 ) {
   const { token } = await ctx.params;
   const parsed = parsePayGoToken(token);
-  const url = new URL(parsed ? payGoRedirectPath(parsed) : "/parent", req.url);
-  return NextResponse.redirect(url, 302);
+  // Never `new URL(path, req.url)`: behind Cloud Run that is the container's
+  // bind address, and the first live redirect went to 0.0.0.0:3000.
+  const origin = resolvePublicOrigin(req.headers, publicPortalOrigin());
+  return NextResponse.redirect(`${origin}${parsed ? payGoRedirectPath(parsed) : "/parent"}`, 302);
 }
