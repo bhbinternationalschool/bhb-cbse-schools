@@ -12,13 +12,27 @@
  * template Meta has not approved fails loudly at Meta, which is the correct
  * outcome: better a logged failure than a parent who was never told and a
  * school that believes they were.
+ *
+ * The template is resolved through the registry like every other sender —
+ * the family's language, the school's own routing of which number sends,
+ * and the template's OWN variable order. Until 2026-09-08 this file posted
+ * three positional parameters against a template whose registered text takes
+ * five; Meta would have refused every send the day the template was approved.
  */
 
+import { fetchServerBlob } from "@/lib/serverBlob";
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { householdWhatsApp } from "@/lib/sis";
 import type { SisState } from "@/lib/sis";
 import type { TransportState } from "@/lib/transport";
 import { buildTransportMessage } from "@/lib/transportParentMessages";
 import { sendWhatsAppTemplate } from "@/lib/waSend";
+import {
+  normalizeWaTemplatesState,
+  resolveTemplateForSend,
+  templateVariablePositions,
+  type WaTemplatesState,
+} from "@/lib/waTemplates";
 
 export type NotifyOutcome = {
   sent: boolean;
@@ -60,28 +74,58 @@ export async function notifyNotBoarded(input: {
 
   const route = input.transport.routes.find((r) => r.id === input.routeId);
   const stop = route?.stops.find((s) => s.id === input.stopId);
+  const vehicle = route?.vehicleId
+    ? (input.transport.vehicles ?? []).find((v) => v.id === route.vehicleId)
+    : undefined;
 
-  const built = buildTransportMessage("not_boarded", {
-    "child name": student.fullName,
-    // A stop whose link is broken has no name. Rather than send "did not
-    // board at" with a hole, the message is skipped and the reason recorded —
-    // repairing the link is what fixes it.
-    "stop name": stop?.name ?? "",
-    time: input.at.slice(11, 16),
-  });
+  // The family's language, never the sender's; both languages must be
+  // approved before the family gets either (resolveTemplateForSend enforces
+  // it) so a Hindi household is never quietly sent English.
+  const language = waTemplateLanguageFor(household ?? undefined);
+
+  const built = buildTransportMessage(
+    "not_boarded",
+    {
+      guardianName: household?.guardianName?.trim() || "Parent",
+      childName: student.fullName,
+      busNo:
+        route?.busNo?.trim() ||
+        vehicle?.registrationNo?.trim() ||
+        vehicle?.name?.trim() ||
+        route?.name?.trim() ||
+        "",
+      // A stop whose link is broken has no name. Rather than send "did not
+      // board at" with a hole, the message is skipped and the reason recorded —
+      // repairing the link is what fixes it.
+      stopName: stop?.name ?? "",
+      time: input.at.slice(11, 16),
+    },
+    language,
+  );
   if (!built.ok) return { sent: false, skipped: built.error };
+
+  const { state: raw } = await fetchServerBlob<WaTemplatesState>("wa_templates_state");
+  const resolved = resolveTemplateForSend({
+    state: normalizeWaTemplatesState(raw),
+    familyKey: built.message.familyKey,
+    language,
+  });
+  if (!resolved.ok) {
+    return { sent: false, skipped: resolved.reason, templateName: built.message.templateName };
+  }
+  const positions = templateVariablePositions(resolved.template, built.message.values);
 
   const res = await sendWhatsAppTemplate({
     toMobile: to,
-    name: built.message.templateName,
-    language: built.message.language,
+    name: resolved.template.metaName,
+    language: resolved.template.metaLanguage || resolved.template.language,
+    fromPhoneNumberId: resolved.sender?.phoneNumberId,
     components: [
       {
         type: "body",
-        parameters: built.message.variables.map((text) => ({
-          type: "text",
-          text,
-        })),
+        parameters: Object.keys(positions)
+          .sort((a, b) => Number(a) - Number(b))
+          .map((k) => ({ type: "text", text: positions[k]! })),
       },
     ],
     clientMessageId: `notboarded:${input.studentId}:${input.at.slice(0, 10)}`,
@@ -90,7 +134,7 @@ export async function notifyNotBoarded(input: {
   return {
     sent: res.ok,
     error: res.ok ? undefined : res.error,
-    templateName: built.message.templateName,
+    templateName: resolved.template.metaName,
     toMasked: maskMobile(to),
   };
 }

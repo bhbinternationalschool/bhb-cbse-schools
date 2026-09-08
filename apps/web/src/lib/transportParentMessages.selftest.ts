@@ -118,7 +118,10 @@ assert.equal(mixed.find((e) => e.stopId === "bad")!.expectedAt, null);
 
 /* ── messages are templates, never free text ────────────────── */
 
+// The words and the variable ORDER come from the registry seed, so a change
+// to the seed cannot leave this file sending the wrong number of parameters.
 const eta = buildTransportMessage("eta", {
+  "guardian name": "Priya Sharma",
   "child name": "AARAV",
   "stop name": "Ayar Mod",
   "expected time": "07:10",
@@ -127,18 +130,55 @@ const eta = buildTransportMessage("eta", {
 assert.equal(eta.ok, true);
 if (!eta.ok) throw new Error("unreachable");
 assert.equal(eta.message.templateName, "bhb_transport_eta");
-assert.equal(eta.message.variables.length, 4, "ordered body variables");
-assert.deepEqual(eta.message.variables, ["AARAV", "Ayar Mod", "07:10", "MAGIC 1"]);
+assert.equal(eta.message.familyKey, "transport_eta");
+assert.equal(
+  eta.message.variables.length,
+  TRANSPORT_TEMPLATES.eta.keys.length,
+  "one positional value per declared variable",
+);
+assert.deepEqual(
+  eta.message.variables,
+  TRANSPORT_TEMPLATES.eta.keys.map((k) => eta.message.values[k]),
+  "positional order is the template's own order",
+);
 assert.ok(/AARAV/.test(eta.message.preview));
+assert.ok(/Priya Sharma/.test(eta.message.preview), "the parent is greeted by name");
 assert.ok(
-  /not a live position/.test(eta.message.preview),
+  /not the bus's live position/.test(eta.message.preview),
   "the parent is told this is a schedule, not a live fix",
 );
 assert.ok(!/\{\{/.test(eta.message.preview), "no placeholder survives into the preview");
 
+// Registry keys are accepted too — the server notifier supplies those.
+const byKey = buildTransportMessage("not_boarded", {
+  guardianName: "Priya Sharma",
+  childName: "AARAV",
+  busNo: "MAGIC 1",
+  stopName: "Ayar Mod",
+  time: "07:12",
+});
+assert.equal(byKey.ok, true);
+if (!byKey.ok) throw new Error("unreachable");
+assert.deepEqual(byKey.message.values, {
+  guardianName: "Priya Sharma",
+  childName: "AARAV",
+  busNo: "MAGIC 1",
+  stopName: "Ayar Mod",
+  time: "07:12",
+});
+
+// Hindi is the same message in the family's language.
+const hi = buildTransportMessage("eta", eta.message.values, "hi");
+assert.equal(hi.ok, true);
+if (!hi.ok) throw new Error("unreachable");
+assert.equal(hi.message.language, "hi");
+assert.ok(/नमस्ते/.test(hi.message.preview));
+assert.deepEqual(hi.message.variables.slice().sort(), eta.message.variables.slice().sort(), "same values, Hindi order");
+
 /* ── a hole in the sentence means nothing is sent ───────────── */
 
 const missing = buildTransportMessage("eta", {
+  "guardian name": "Priya Sharma",
   "child name": "AARAV",
   "stop name": "Ayar Mod",
   "expected time": "",
@@ -151,6 +191,7 @@ assert.ok(/expected time/.test(missing.error), "names the variable that is missi
 // Whitespace is not a value either.
 assert.equal(
   buildTransportMessage("eta", {
+    "guardian name": "Priya Sharma",
     "child name": "  ",
     "stop name": "Ayar Mod",
     "expected time": "07:10",
@@ -174,6 +215,12 @@ for (const [kind, def] of Object.entries(TRANSPORT_TEMPLATES)) {
   for (let i = 1; i <= def.variables.length; i += 1) {
     assert.ok(placeholders.includes(i), `${kind}: {{${i}}} is declared but never used`);
   }
+  // Every registry variable has a desk label; a bare key would otherwise be
+  // the label the transport desk is asked to fill in.
+  def.keys.forEach((k, i) => {
+    assert.notEqual(def.variables[i], k, `${kind}: variable ${k} has no desk label`);
+  });
+  assert.ok(!/\{\{[a-zA-Z]/.test(def.body), `${kind}: a named variable survived positionalising`);
 }
 
 console.log("  ok");
