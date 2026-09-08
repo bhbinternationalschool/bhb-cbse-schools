@@ -92,6 +92,7 @@ SELFTESTS=(
   test:playbook
   test:erp-chat
   test:wa-templates-automation
+  test:wa-template-seeds
   test:fee-student-search
   test:household-dues-ay
   test:refreshment-chart

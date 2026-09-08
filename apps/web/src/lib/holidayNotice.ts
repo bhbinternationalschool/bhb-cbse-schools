@@ -121,8 +121,8 @@ export function buildHolidayNotice(input: HolidayNoticeInput, now = new Date()):
       family: "holiday_emergency",
       variables,
       variablesHi,
-      textEn: `⚠️ *${input.schoolName}* — school CLOSED due to ${reason.en}, as ordered by ${orderedBy}.\n📅 ${common.holidayFrom} to ${common.holidayTo}\n🏫 Reopens ${common.reopenDate}\n🚌 Buses will not run.\n📝 ${noteEn}\nPlease keep your child safe at home. 🙏`,
-      textHi: `⚠️ *${input.schoolName}* — ${reason.hi} के कारण, ${orderedByHi} के आदेश पर विद्यालय बंद रहेगा।\n📅 ${commonHi.holidayFrom} से ${commonHi.holidayTo} तक\n🏫 फिर खुलेगा ${commonHi.reopenDate}\n🚌 बसें नहीं चलेंगी।\n📝 ${noteHi}\nकृपया बच्चे को घर पर सुरक्षित रखें। 🙏`,
+      textEn: `Namaste 🙏 An important notice from *${input.schoolName}*:\n\n⚠️ School will remain *CLOSED* due to *${reason.en}*, as ordered by ${orderedBy}.\n\n📅 Closed from: *${common.holidayFrom}*\n📅 Closed till: *${common.holidayTo}*\n🏫 School reopens: *${common.reopenDate}*\n🚌 Buses will not run on these days.\n\n📝 ${noteEn}\n\nPlease keep your child safe at home. We will message you if the dates change. Thank you! 🙏`,
+      textHi: `नमस्ते 🙏 *${input.schoolName}* की ओर से महत्वपूर्ण सूचना:\n\n⚠️ *${reason.hi}* के कारण, ${orderedByHi} के आदेश पर विद्यालय *बंद* रहेगा।\n\n📅 बंद: *${commonHi.holidayFrom}* से\n📅 तक: *${commonHi.holidayTo}*\n🏫 विद्यालय फिर खुलेगा: *${commonHi.reopenDate}*\n🚌 इन दिनों स्कूल बसें नहीं चलेंगी।\n\n📝 ${noteHi}\n\nकृपया बच्चे को घर पर सुरक्षित रखें। तारीखों में बदलाव हुआ तो हम संदेश भेजेंगे। धन्यवाद! 🙏`,
     };
   }
   const variables = { ...common, holidayTitle: input.title };
@@ -131,7 +131,7 @@ export function buildHolidayNotice(input: HolidayNoticeInput, now = new Date()):
     family: "holiday_notice",
     variables,
     variablesHi,
-    textEn: `🎉 *${input.schoolName}* — holiday: *${input.title}*\n📅 ${common.holidayFrom} to ${common.holidayTo}\n🏫 School reopens ${common.reopenDate}\n📝 ${noteEn}\nEnjoy the break! 🌼`,
-    textHi: `🎉 *${input.schoolName}* — अवकाश: *${input.title}*\n📅 ${commonHi.holidayFrom} से ${commonHi.holidayTo} तक\n🏫 विद्यालय फिर खुलेगा ${commonHi.reopenDate}\n📝 ${noteHi}\nअवकाश का आनंद लें! 🌼`,
+    textEn: `Namaste 🙏 A holiday notice from *${input.schoolName}*:\n\n🎉 *${input.title}*\n📅 From: *${common.holidayFrom}*\n📅 To: *${common.holidayTo}*\n🏫 School reopens: *${common.reopenDate}*\n\n📝 ${noteEn}\n\nEnjoy the break with your family, and see you back at school! 🌼`,
+    textHi: `नमस्ते 🙏 *${input.schoolName}* की ओर से अवकाश सूचना:\n\n🎉 अवकाश: *${input.title}*\n📅 से: *${commonHi.holidayFrom}*\n📅 तक: *${commonHi.holidayTo}*\n🏫 विद्यालय फिर खुलेगा: *${commonHi.reopenDate}*\n\n📝 ${noteHi}\n\nपरिवार के साथ अवकाश का आनंद लें, फिर मिलते हैं विद्यालय में! 🌼`,
   };
 }

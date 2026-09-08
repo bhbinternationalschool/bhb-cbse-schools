@@ -14,6 +14,8 @@
  * existing paths — this only creates the link and hands it over.
  */
 
+import { templateButtonComponents, type WaTemplateButton } from "@/lib/waTemplates";
+import { buildPayGoToken } from "@/lib/payGoToken";
 import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import type { DemoSession } from "@/lib/auth";
 import type { MastersState } from "@/lib/masters";
@@ -117,7 +119,13 @@ export async function createAndSendPayLink(opts: {
   studentId: string;
   todayIso: string;
   /** Approved pay-link template, when the school has one. */
-  template?: { metaName: string; language: string; variables: string[] } | null;
+  template?: {
+    metaName: string;
+    language: string;
+    variables: string[];
+    /** The template's buttons — a "Pay now" URL button needs this link's token. */
+    buttons?: WaTemplateButton[];
+  } | null;
   expiresInDays?: number;
 }): Promise<CreatePayLinkResult> {
   const due = await openDuesForPayLink({
@@ -183,17 +191,35 @@ export async function createAndSendPayLink(opts: {
       feeDue: formatInr(attached.link.amountPaise),
       amount: formatInr(attached.link.amountPaise),
       payLink: attached.checkoutUrl,
+      // The "Pay now" button: this link's id and code as one token, which
+      // /pay/go unpacks. Never a URL — Meta allows one variable at the end
+      // of a fixed base, and Cashfree's checkout URL is not fixed.
+      payToken: buildPayGoToken(attached.link),
     };
-    const sent = await sendWaWithFailover({
-      primaryMobile: due.mobile,
-      template: {
-        name: opts.template.metaName,
-        language: opts.template.language,
-        components: [buildWaTemplateBodyComponent(opts.template.variables, vars)],
-      },
-      clientMessageId: `paylink_${attached.link.id}`,
-    });
-    whatsapp = sent.ok ? { sent: true } : { sent: false, error: sent.error };
+    const buttons = templateButtonComponents(
+      { buttons: opts.template.buttons ?? [] },
+      vars,
+    );
+    if (buttons.missing.length) {
+      whatsapp = {
+        sent: false,
+        error: `Template button needs ${buttons.missing.join(", ")} — nothing sent`,
+      };
+    } else {
+      const sent = await sendWaWithFailover({
+        primaryMobile: due.mobile,
+        template: {
+          name: opts.template.metaName,
+          language: opts.template.language,
+          components: [
+            buildWaTemplateBodyComponent(opts.template.variables, vars),
+            ...buttons.components,
+          ],
+        },
+        clientMessageId: `paylink_${attached.link.id}`,
+      });
+      whatsapp = sent.ok ? { sent: true } : { sent: false, error: sent.error };
+    }
   }
 
   return {

@@ -21,7 +21,7 @@ export function WaTemplateContentHelper({
   module: WaTemplateModule;
   language: WaTemplateLanguage;
   layoutKind: WaTemplateLayoutKind;
-  onApply: (body: string, footer: string) => void;
+  onApply: (body: string, footer: string, header?: string) => void;
 }) {
   const [purpose, setPurpose] = useState("");
   const [generating, setGenerating] = useState(false);
@@ -90,7 +90,7 @@ export function WaTemplateContentHelper({
             type="button"
             disabled={readOnly}
             className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 text-[10px] font-semibold text-[var(--brand-deep)] hover:border-[var(--tone-teal)] disabled:opacity-50"
-            onClick={() => onApply(s.body, s.footer)}
+            onClick={() => onApply(s.body, s.footer, s.header)}
           >
             {s.label}
           </button>

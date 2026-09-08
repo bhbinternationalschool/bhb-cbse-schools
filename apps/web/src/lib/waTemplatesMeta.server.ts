@@ -225,6 +225,68 @@ export async function submitWaTemplateToMeta(
   }
 }
 
+/**
+ * Edit a template that already exists on Meta, in place.
+ *
+ * POST /{template-id} with the new components. Meta puts the template back
+ * into review (PENDING) and keeps sending the previously approved wording
+ * until the new one is approved, so a live template can be improved without
+ * a gap in delivery and without a second name the senders would have to be
+ * re-pointed at. Meta allows an approved template to be edited ten times in
+ * thirty days; a rejected or paused one can be edited freely.
+ *
+ * The daily absence alert was the first use: approved in 2026-08 with the
+ * old "Dear parent" wording, sent every school day, and the only template a
+ * parent actually receives that the 2026-09 rewrite could not reach by
+ * submitting drafts.
+ */
+export async function updateWaTemplateOnMeta(
+  template: import("@/lib/waTemplates").WaTemplate,
+): Promise<{ ok: boolean; error?: string; warnings?: string[] }> {
+  const { buildMetaTemplateEditPayload } = await import("@/lib/waTemplates");
+  const payload = buildMetaTemplateEditPayload(template);
+  const id = (template.metaTemplateId || "").trim();
+  if (!id) {
+    return { ok: false, error: "Template has no Meta id to edit", warnings: payload.warnings };
+  }
+  if (!payload.components.some((c) => c.type === "BODY")) {
+    return { ok: false, error: "Template body is required", warnings: payload.warnings };
+  }
+  const token = metaAccessToken();
+  if (!token) {
+    return { ok: false, error: "Set WHATSAPP_TOKEN (whatsapp_business_management).", warnings: payload.warnings };
+  }
+  const url = `https://graph.facebook.com/${metaGraphVersion()}/${id}`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ components: payload.components }),
+    });
+    const json = (await res.json().catch(() => ({}))) as {
+      success?: boolean;
+      error?: { message?: string; error_user_msg?: string };
+    };
+    if (!res.ok || json.success === false) {
+      return {
+        ok: false,
+        error: json.error?.error_user_msg || json.error?.message || `Meta HTTP ${res.status}`,
+        warnings: payload.warnings,
+      };
+    }
+    return { ok: true, warnings: payload.warnings };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Meta template edit failed",
+      warnings: payload.warnings,
+    };
+  }
+}
+
 export async function fetchMetaMessageTemplates(): Promise<{
   ok: boolean;
   rows: MetaTemplateSyncRow[];

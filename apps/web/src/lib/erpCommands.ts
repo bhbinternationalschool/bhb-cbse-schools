@@ -15,6 +15,7 @@
  * break stay the same list.
  */
 
+import type { WaTemplateButton } from "@/lib/waTemplates";
 import type { MastersState } from "@/lib/masters";
 import type { RbacAction, RbacModule } from "@/lib/rbac";
 
@@ -2044,6 +2045,8 @@ export type PickedTemplate = {
   metaName: string;
   language: string;
   variables: string[];
+  /** The template's buttons — a "Pay now" URL button needs a value per send. */
+  buttons?: WaTemplateButton[];
 };
 
 export type TemplateLike = {
@@ -2053,6 +2056,7 @@ export type TemplateLike = {
   metaName?: string;
   metaLanguage?: string;
   variables?: string[];
+  buttons?: WaTemplateButton[];
 };
 
 /**
@@ -2096,6 +2100,7 @@ export function templatesByLanguage<T extends TemplateLike>(
     metaName: t.metaName || t.name,
     language: t.metaLanguage || t.language,
     variables: t.variables ?? [],
+    buttons: t.buttons ?? [],
   });
   const inLang = (key: string, lang: "en" | "hi") =>
     approved.find((t) => t.familyKey === key && t.language === lang) ?? null;
