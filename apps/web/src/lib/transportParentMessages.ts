@@ -19,9 +19,19 @@
  *    a route whose round trip was never measured produces no ETA at all
  *    rather than a plausible guess — a parent standing at a stop on the
  *    strength of an invented time is the failure this avoids.
+ *
+ * 3. ONE COPY OF THE WORDS. The text and the variable ORDER come from the
+ *    template registry's seed for the family, never from a second copy kept
+ *    here. Until 2026-09-08 this file carried its own four-variable wording
+ *    of `bhb_transport_eta` while the registry's seed — the text actually
+ *    submitted to Meta — took five in a different order. The moment Meta
+ *    approved the seed, every send built here would have been refused for a
+ *    parameter-count mismatch, or worse, accepted with the bus number where
+ *    the child's name should be.
  */
 
 import type { TransportRoute, TransportStop } from "@/lib/transport";
+import { seedTemplateText } from "@/lib/waTemplates";
 
 export type TransportMessageKind =
   | "eta"
@@ -132,54 +142,87 @@ export function buildStopEtas(
 
 export type TransportTemplateMessage = {
   kind: TransportMessageKind;
+  /** Registry family — what a sender resolves through resolveTemplateForSend. */
+  familyKey: string;
   /** Meta template name. Must be APPROVED on the WABA before it will send. */
   templateName: string;
   language: string;
-  /** Ordered body variables ({{1}}, {{2}}, …). */
+  /** Ordered body variables ({{1}}, {{2}}, …) in the template's own order. */
   variables: string[];
+  /** The same values by registry key, for templateVariablePositions. */
+  values: Record<string, string>;
   /** What the parent will read, for the confirm screen. Never sent as text. */
   preview: string;
 };
 
+/** Registry family behind each message kind. */
+export const TRANSPORT_FAMILIES: Record<TransportMessageKind, string> = {
+  eta: "transport_eta",
+  delay: "transport_delay",
+  breakdown: "transport_breakdown",
+  route_change: "transport_route_change",
+  not_boarded: "transport_not_boarded",
+};
+
 /**
- * The message set. Names match templates that must exist and be APPROVED on
- * the WABA; nothing here can invent one, and sending against an unapproved
- * name fails at Meta rather than silently going nowhere.
+ * The plain-English label the transport desk fills in for each registry
+ * variable. Labels are what the desk sees; keys are what the template
+ * declares. A variable the seed uses that has no label here is a bug the
+ * self-test catches, not a hole a parent discovers.
  */
-export const TRANSPORT_TEMPLATES: Record<
-  TransportMessageKind,
-  { name: string; language: string; variables: string[]; body: string }
-> = {
-  eta: {
-    name: "bhb_transport_eta",
-    language: "en",
-    variables: ["child name", "stop name", "expected time", "bus"],
-    body: "Namaste. {{1}}'s school bus {{4}} is expected at {{2}} at about {{3}}. This is the scheduled time, not a live position.",
-  },
-  delay: {
-    name: "bhb_transport_delay",
-    language: "en",
-    variables: ["child name", "stop name", "minutes late", "bus"],
-    body: "Namaste. Bus {{4}} is running about {{3}} minutes late for {{2}}. {{1}} will be picked up as soon as it arrives.",
-  },
-  breakdown: {
-    name: "bhb_transport_breakdown",
-    language: "en",
-    variables: ["child name", "bus", "what the school is doing"],
-    body: "Namaste. Bus {{2}} has broken down. {{1}} is safe with the attendant. {{3}}",
-  },
-  route_change: {
-    name: "bhb_transport_route_change",
-    language: "en",
-    variables: ["child name", "new stop", "from date", "bus"],
-    body: "Namaste. From {{3}}, {{1}} will be picked up at {{2}} by bus {{4}}. Please contact the school office if this does not suit.",
-  },
-  not_boarded: {
-    name: "bhb_transport_not_boarded",
-    language: "en",
-    variables: ["child name", "stop name", "time"],
-    body: "Namaste. {{1}} did not board the bus at {{2}} at {{3}}. Please let the school know if they are travelling separately today.",
-  },
+export const TRANSPORT_VARIABLE_LABELS: Record<string, string> = {
+  guardianName: "guardian name",
+  childName: "child name",
+  stopName: "stop name",
+  expectedTime: "expected time",
+  busNo: "bus",
+  minutesLate: "minutes late",
+  actionTaken: "what the school is doing",
+  effectiveFrom: "from date",
+  time: "time at stop",
+};
+
+export type TransportTemplateDef = {
+  name: string;
+  language: string;
+  /** Desk-facing labels, in the template's own variable order. */
+  variables: string[];
+  /** Registry keys, same order. */
+  keys: string[];
+  /** Seed body, with {{1}}, {{2}}, … in place of the named variables. */
+  body: string;
+};
+
+function defFor(kind: TransportMessageKind, language: "en" | "hi"): TransportTemplateDef {
+  const seed = seedTemplateText(TRANSPORT_FAMILIES[kind], language);
+  if (!seed) {
+    throw new Error(`No seed template for ${TRANSPORT_FAMILIES[kind]}`);
+  }
+  let body = seed.body;
+  seed.variables.forEach((key, i) => {
+    body = body.split(`{{${key}}}`).join(`{{${i + 1}}}`);
+  });
+  return {
+    name: seed.metaName,
+    language,
+    keys: seed.variables,
+    variables: seed.variables.map((k) => TRANSPORT_VARIABLE_LABELS[k] ?? k),
+    body,
+  };
+}
+
+/**
+ * The message set, derived from the registry seeds. Names match templates
+ * that must exist and be APPROVED on the WABA; nothing here can invent one,
+ * and sending against an unapproved name fails at Meta rather than silently
+ * going nowhere.
+ */
+export const TRANSPORT_TEMPLATES: Record<TransportMessageKind, TransportTemplateDef> = {
+  eta: defFor("eta", "en"),
+  delay: defFor("delay", "en"),
+  breakdown: defFor("breakdown", "en"),
+  route_change: defFor("route_change", "en"),
+  not_boarded: defFor("not_boarded", "en"),
 };
 
 /**
@@ -192,17 +235,23 @@ export const TRANSPORT_TEMPLATES: Record<
 export function buildTransportMessage(
   kind: TransportMessageKind,
   values: Record<string, string>,
+  language: "en" | "hi" = "en",
 ): { ok: true; message: TransportTemplateMessage } | { ok: false; error: string } {
-  const def = TRANSPORT_TEMPLATES[kind];
+  const def = language === "en" ? TRANSPORT_TEMPLATES[kind] : defFor(kind, language);
   if (!def) return { ok: false, error: `Unknown message kind ${kind}` };
 
   const variables: string[] = [];
-  for (const label of def.variables) {
-    const v = (values[label] ?? "").trim();
-    if (!v) {
-      return { ok: false, error: `Missing “${label}” — nothing sent` };
-    }
+  const byKey: Record<string, string> = {};
+  def.keys.forEach((key, i) => {
+    const label = def.variables[i]!;
+    // Accept the desk label or the registry key; the desk types labels.
+    const v = (values[label] ?? values[key] ?? "").trim();
     variables.push(v);
+    byKey[key] = v;
+  });
+  const missing = def.variables.filter((_, i) => !variables[i]);
+  if (missing.length) {
+    return { ok: false, error: `Missing “${missing[0]}” — nothing sent` };
   }
 
   let preview = def.body;
@@ -214,9 +263,11 @@ export function buildTransportMessage(
     ok: true,
     message: {
       kind,
+      familyKey: TRANSPORT_FAMILIES[kind],
       templateName: def.name,
       language: def.language,
       variables,
+      values: byKey,
       preview,
     },
   };

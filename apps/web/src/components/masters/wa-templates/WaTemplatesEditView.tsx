@@ -140,9 +140,12 @@ function TemplateEditor({
     );
   }
 
+  // An approved template is edited IN PLACE on Meta (it goes back to review
+  // while the old wording keeps sending), so approval no longer locks the
+  // button — it changes what the button says.
+  const onMeta = !!template.metaTemplateId && template.status !== "draft";
   const canSubmit =
     !readOnly &&
-    template.status !== "approved" &&
     body.trim().length > 0 &&
     metaName.trim().length > 0;
 
@@ -389,9 +392,11 @@ function TemplateEditor({
             >
               {submitting
                 ? "Submitting…"
-                : template.status === "pending"
-                  ? "Re-submit to Meta"
-                  : "Submit to Meta"}
+                : onMeta
+                  ? "Update on Meta (re-review)"
+                  : template.status === "pending"
+                    ? "Re-submit to Meta"
+                    : "Submit to Meta"}
             </button>
             <button
               type="button"

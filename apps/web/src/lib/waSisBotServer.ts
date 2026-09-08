@@ -1,4 +1,5 @@
 import { parseTeacherWaText, teacherRelayAck } from "@/lib/teacherContact";
+import { matchSeedQuickReply, quickReplyAcknowledgement } from "@/lib/waTemplates";
 /**
  * Server WhatsApp bot for SIS parents (enrolled households).
  */
@@ -711,8 +712,18 @@ export async function handleWaSisBotInbound(opts: {
     );
   }
 
-  const intent = isGreeting ? ("unknown" as const) : detectSisBotIntent(text);
-  const bot = await buildBotReply(hh, intent, text);
+  // A tap on one of the school's own template buttons ("Already paid",
+  // "Child is unwell") is an answer to a question the school asked, not a
+  // keyword to guess at — acknowledge it and put a person on it.
+  const quickReply = matchSeedQuickReply(text);
+  const intent = quickReply
+    ? ("human" as const)
+    : isGreeting
+      ? ("unknown" as const)
+      : detectSisBotIntent(text);
+  const bot = quickReply
+    ? { escalate: true, text: quickReplyAcknowledgement(quickReply) }
+    : await buildBotReply(hh, intent, text);
   let replyText = bot.text;
   if (opts.fromUnified && intent === "unknown") {
     replyText =

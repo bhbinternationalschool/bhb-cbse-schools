@@ -1,6 +1,7 @@
 "use client";
 // ratchet-allow: grids_without_row_menu — detail tables inside the pupil's profile dialog
 
+import { HouseholdMessageLogPanel } from "@/components/comms/HouseholdMessageLogPanel";
 import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import { useEffect, useMemo, useState } from "react";
 import { HOUSEHOLD_CHANNELS, languageLabel, quietHoursLabel } from "@/lib/householdPrefs";
@@ -50,6 +51,7 @@ import {
 
 type ProfileTab =
   | "profile"
+  | "messages"
   | "fees"
   | "exams"
   | "attendance"
@@ -63,6 +65,7 @@ const TABS: { id: ProfileTab; label: string }[] = [
   { id: "attendance", label: "Attendance" },
   { id: "documents", label: "Documents" },
   { id: "siblings", label: "Siblings" },
+  { id: "messages", label: "Messages" },
 ];
 
 function inr(paise: number): string {
@@ -646,6 +649,24 @@ export function StudentProfileModal({
                 </ul>
               </div>
             </div>
+          ) : null}
+
+          {tab === "messages" ? (
+            student.householdId ? (
+              /*
+                The family's whole message history, in the record the office
+                already has open. It is keyed on the HOUSEHOLD, not the
+                child: the school writes to a guardian, so a message about a
+                sibling belongs in this history too — that is the question
+                being asked ("what have we sent this family?").
+              */
+              <HouseholdMessageLogPanel
+                forHouseholdId={student.householdId}
+                showIntro={false}
+              />
+            ) : (
+              <Empty text="This student has no household on file, so there is no message history to show." />
+            )
           ) : null}
 
           {tab === "siblings" ? (

@@ -41,6 +41,7 @@ import {
   FeeGroupsPanel,
   InstallmentsPanel,
   LateFeePanel,
+  FeeBackdatePolicyPanel,
   MidYearFeePolicyPanel,
 } from "@/components/masters/FeeSetupPanels";
 import { FeeStructurePanel } from "@/components/masters/FeeStructureBoard";
@@ -149,7 +150,7 @@ const TAB_GROUPS: ModuleTabGroup[] = [
       { id: "concessions", label: "Concessions", tone: "teal" },
       { id: "installments", label: "Due dates", tone: "amber" },
       { id: "late-fee", label: "Late fee", tone: "rose" },
-      { id: "mid-year", label: "Mid-year", tone: "rose" },
+      { id: "mid-year", label: "Fee rules", tone: "rose" },
     ],
   },
   {
@@ -363,7 +364,10 @@ export function MastersWorkspace() {
           <LateFeePanel state={state} commit={commit} />
         ) : null}
         {tab === "mid-year" ? (
-          <MidYearFeePolicyPanel state={state} commit={commit} />
+          <div className="space-y-4">
+            <MidYearFeePolicyPanel state={state} commit={commit} />
+            <FeeBackdatePolicyPanel state={state} commit={commit} />
+          </div>
         ) : null}
         {tab === "wa-templates" ? (
           canAccessMastersTab(session, state, "wa-templates", rbac ?? undefined) ? (
@@ -452,7 +456,7 @@ function Overview({
     { label: "Special fees", value: specialCount, tab: "special-fees" as Tab },
     { label: "Concessions", value: concessionCount, tab: "concessions" as Tab },
     { label: "Due dates", value: installments, tab: "installments" as Tab },
-    { label: "Mid-year rules", value: "Edit", tab: "mid-year" as Tab },
+    { label: "Mid-year & back-dating", value: "Edit", tab: "mid-year" as Tab },
     { label: "WA templates", value: "EN+HI", tab: "wa-templates" as Tab },
     { label: "Automation", value: "Rules", tab: "automation" as Tab },
     { label: "WA chatbot", value: "Flows", tab: "wa-chatbot" as Tab },

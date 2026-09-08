@@ -55,6 +55,31 @@ export async function POST(req: Request) {
   // path documents, and the reason it skips the rebuild rather than assume.
   const ay = new URL(req.url).searchParams.get("ay")?.trim() || "";
 
+  // Only the running year is rebuilt. A closed year's dues are not derivable
+  // here: 2025-26 had zero receipts in this ERP (they lived in the old one),
+  // so a recompute produced 3,310 "open dues" worth ₹35.8 lakh that nobody
+  // owed, and the parent app added them to this year's book. Those rows were
+  // cleared on 2026-09-08 (scripts/clear-closed-year-open-dues.mts); this
+  // guard is what keeps them from coming back.
+  if (ay) {
+    const { ensureSchoolMirrorHydrated } = await import("@/lib/schoolDataMirror.server");
+    await ensureSchoolMirrorHydrated();
+    const { loadMasters, currentAcademicYearCode } = await import("@/lib/masters");
+    const current = currentAcademicYearCode(loadMasters());
+    if (ay !== current) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            `${ay} is not the running year (${current}). A closed year is not rebuilt: ` +
+            "its carry-forward lives in this year's arrears, and its cache rows are " +
+            "cleared with scripts/clear-closed-year-open-dues.mts, never recomputed.",
+        },
+        { status: 400 },
+      );
+    }
+  }
+
   const before = Date.now();
   const r = await rebuildFeeOpenDuesCache(ay);
   if (!r.ok) {

@@ -1012,6 +1012,76 @@ function Field({
   );
 }
 
+/**
+ * Who may date a receipt earlier than today.
+ *
+ * Lives beside the mid-year rules because it is the same kind of thing: a
+ * decision about money that belongs to the school, not to whoever wrote the
+ * counter. Before this, the web counter accepted ANY date — including next
+ * year — and the mobile app accepted none at all.
+ */
+export function FeeBackdatePolicyPanel({
+  state,
+  commit,
+}: {
+  state: MastersState;
+  commit: Commit;
+}) {
+  const policy = state.feeBackdatePolicy;
+  const on = policy.allowForAllStaff;
+
+  return (
+    <div className="mx-auto max-w-2xl space-y-4">
+      <ListCard title="Back-dated receipts · who may enter one">
+        <div className="space-y-4 px-4 py-4">
+          <p className="text-[12px] leading-snug text-[var(--muted)]">
+            Applies to the fee counter, the manual receipt book and the staff
+            mobile app alike. Owner, admin and principal can always enter a
+            past date — this decides whether everyone else can too.
+          </p>
+          <li className="flex list-none items-start justify-between gap-3 rounded-xl border border-[var(--border)] px-3 py-2.5">
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-[var(--brand-deep)]">
+                Let counter staff enter a past date
+              </div>
+              <p className="mt-0.5 text-[11px] leading-snug text-[var(--muted)]">
+                {on
+                  ? "On — anyone taking fees may date a receipt back to 1 April of this session."
+                  : "Off — everyone except owner, admin and principal must use today's date."}
+              </p>
+            </div>
+            <label className="flex shrink-0 items-center gap-2 text-xs font-semibold text-[var(--brand-deep)]">
+              <input
+                type="checkbox"
+                className="h-4 w-4"
+                checked={on}
+                onChange={(e) =>
+                  commit(
+                    {
+                      ...state,
+                      feeBackdatePolicy: { allowForAllStaff: e.target.checked },
+                    },
+                    e.target.checked
+                      ? "Counter staff may now enter back-dated receipts"
+                      : "Back-dated receipts restricted to owner, admin and principal",
+                  )
+                }
+              />
+              {on ? "On" : "Off"}
+            </label>
+          </li>
+          <p className="border-t border-[var(--border)] pt-3 text-[11px] leading-snug text-[var(--muted)]">
+            Never allowed either way, whoever is logged in: a future date, a
+            day that has already been day-closed, or any date before this
+            session began — a receipt in a closed book will not reconcile
+            against it.
+          </p>
+        </div>
+      </ListCard>
+    </div>
+  );
+}
+
 export function MidYearFeePolicyPanel({
   state,
   commit,

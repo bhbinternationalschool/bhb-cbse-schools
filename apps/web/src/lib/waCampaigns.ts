@@ -637,57 +637,70 @@ export const CAMPAIGN_TEMPLATES: {
   label: string;
   body: string;
 }[] = [
+  // The same shape as every parent template: a greeting by name, the facts
+  // on their own lines, one clear thing to do, a warm sign-off. A campaign
+  // is often the FIRST message a family ever gets from the school.
   {
     key: "registration_invite",
     label: "Registration invite",
-    body: `*{{schoolName}}*
-Namaste {{guardianName}},
+    body: `Namaste {{guardianName}} ji 🙏
 
-Please complete registration for *{{childName}}*.
+Thank you for your interest in *{{schoolName}}* for {{childName}}. 🎒
 
-Register & pay online:
-{{registerLink}}
+The next step is a short online registration — it takes about 5 minutes:
+🔗 {{registerLink}}
 
-Thank you.`,
+Once done, our admissions team will call you to fix a campus visit. We look forward to welcoming your family! 🌼
+
+— Admissions desk, {{schoolName}}`,
   },
   {
     key: "fee_reminder",
     label: "Registration fee reminder",
-    body: `*{{schoolName}}*
-Dear {{guardianName}},
+    body: `Namaste {{guardianName}} ji 🙏
 
-Registration fee for *{{childName}}* is due: *{{feeDue}}*.
+A gentle reminder — the registration fee for {{childName}} is pending:
 
-Pay here:
-{{payLink}}
+💰 Amount: *{{feeDue}}*
 
-Or register siblings:
-{{registerLink}}
+Pay securely in a minute (UPI, card or net banking):
+🔗 {{payLink}}
 
-— Admissions desk`,
+Registering a brother or sister too? Use the same link:
+🔗 {{registerLink}}
+
+Your seat is confirmed as soon as the payment goes through. Thank you! 🙏
+
+— Admissions desk, {{schoolName}}`,
   },
   {
     key: "open_day",
     label: "Open day / visit",
-    body: `*{{schoolName}}*
-Dear {{guardianName}},
+    body: `Namaste {{guardianName}} ji 🙏
 
-You are invited to visit campus for *{{childName}}* admission counselling.
+You are warmly invited to visit *{{schoolName}}* with {{childName}}! 🏫
 
-Register online:
-{{registerLink}}
+Walk through our classrooms, meet the teachers, and get a one-to-one counselling session on the right class and the way we teach.
 
-We look forward to meeting you.`,
+Book your visit here:
+🔗 {{registerLink}}
+
+We would love to show you around. 🌼
+
+— Admissions desk, {{schoolName}}`,
   },
   {
     key: "custom",
     label: "Custom",
-    body: `*{{schoolName}}*
-Dear {{guardianName}},
+    body: `Namaste {{guardianName}} ji 🙏
 
-{{childName}}
+A message from *{{schoolName}}* about {{childName}}:
 
-{{registerLink}}`,
+(write your message here)
+
+🔗 {{registerLink}}
+
+Reply to this message if you have a question — we are happy to help. 🙏`,
   },
 ];
 

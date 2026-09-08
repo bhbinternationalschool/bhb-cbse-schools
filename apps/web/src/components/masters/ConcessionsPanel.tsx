@@ -60,6 +60,8 @@ import {
   type ConcessionStudentListRow,
 } from "@/lib/concessionStudentList";
 import { EditControl } from "@/components/masters/EditControl";
+import { ConcessionPolicyDraftCard } from "@/components/masters/ConcessionPolicyDraftCard";
+import { ConcessionCaseFileInline } from "@/components/masters/ConcessionCaseFileInline";
 import { RemoveControl } from "@/components/masters/RemoveControl";
 import { useDemoSessionOptional } from "@/components/shell/SessionContext";
 
@@ -971,6 +973,8 @@ export function ConcessionsPanel({
         </div>
       </div>
 
+      <ConcessionPolicyDraftCard />
+
       {listRule ? (
         <ConcessionStudentListDrawer
           rule={listRule}
@@ -1860,6 +1864,10 @@ function GrantStudentsCard({
                 >
                   Remove
                 </button>
+                <ConcessionCaseFileInline
+                  studentId={g.studentId}
+                  studentName={st?.fullName ?? "Student"}
+                />
               </div>
             </li>
           );

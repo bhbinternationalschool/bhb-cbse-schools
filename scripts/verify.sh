@@ -92,6 +92,9 @@ SELFTESTS=(
   test:playbook
   test:erp-chat
   test:wa-templates-automation
+  test:wa-template-seeds
+  test:concession-review-ai
+  test:collections-weekly-ai
   test:fee-student-search
   test:household-dues-ay
   test:refreshment-chart
@@ -165,6 +168,8 @@ SELFTESTS=(
   test:collections-ai
   test:concession-per-due
   test:concession-ground
+  test:fee-backdate
+  test:receipt-auto-wa
   test:desk-sync-status
   test:duty-roster
   test:email

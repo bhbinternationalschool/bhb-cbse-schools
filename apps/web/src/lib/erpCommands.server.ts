@@ -24,6 +24,7 @@
  * unless the message clearly asks the ERP for something.
  */
 
+import type { WaTemplateButton } from "@/lib/waTemplates";
 import type { DemoSession } from "@/lib/auth";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import { currentAcademicYearCode, type MastersState } from "@/lib/masters";
@@ -1181,6 +1182,7 @@ export async function handleErpStaffCommand(
     resolved.templateMetaName = tpl?.metaName || "";
     resolved.templateLanguage = tpl?.language || "";
     resolved.templateVariables = (tpl?.variables ?? []).join(",");
+    resolved.templateButtons = JSON.stringify(tpl?.buttons ?? []);
     resolved.familyLanguage = due.language;
     resolved.totalPaise = String(due.totalPaise);
     resolved.expiresInDays = "7";
@@ -3045,6 +3047,16 @@ async function runConfirmedWrite(
     };
   }
   if (command.id === "pay_link") {
+    // Buttons were stored as JSON when the command was resolved; a stale or
+    // hand-edited record must not crash the send, it just sends without them.
+    const parseTemplateButtons = (raw: string | undefined): WaTemplateButton[] => {
+      try {
+        const v = JSON.parse(raw || "[]") as unknown;
+        return Array.isArray(v) ? (v as WaTemplateButton[]) : [];
+      } catch {
+        return [];
+      }
+    };
     if (!r.studentId) {
       return {
         handled: true,
@@ -3063,6 +3075,7 @@ async function runConfirmedWrite(
             metaName: r.templateMetaName,
             language: r.templateLanguage || "en",
             variables: (r.templateVariables || "").split(",").filter(Boolean),
+            buttons: parseTemplateButtons(r.templateButtons),
           }
         : null,
       expiresInDays: 7,
