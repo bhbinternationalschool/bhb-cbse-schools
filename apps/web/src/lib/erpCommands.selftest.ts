@@ -81,6 +81,7 @@ import {
   parseAttendanceSpec,
   parseBookPtmQuery,
   parseBusDelayQuery,
+  isFollowUpPronoun,
   parseBusManifestQuery,
   parseClassMessageQuery,
   parseCommandAllowList,
@@ -2391,6 +2392,84 @@ const masters = {
     [],
     `server code must read templates via waTemplatesRead.server.ts, not the browser hydrate path: ${offenders.join(", ")}`,
   );
+}
+
+// ── Transport ─────────────────────────────────────────────────────────
+// The desk answered almost nothing about buses. "route 2" — the single
+// most obvious thing to type — returned null because an explicit ask word
+// was required; "transport" was not a bus word at all; Devanagari कौन was
+// missing from the ask list; and "bus route 2" came back as a route
+// literally named "route".
+{
+  const busId = (t: string) => parseErpCommandLocal(t)?.commandId ?? null;
+  const busRoute = (t: string) =>
+    (parseErpCommandLocal(t)?.fields.text ?? null) as string | null;
+
+  // A route named, however it is phrased.
+  for (const t of [
+    "bus 2",
+    "route 2",
+    "Route 2 ka manifest",
+    "route 2 me kaun kaun hai",
+    "bus 2 ki list",
+    "who is on bus 2",
+    "bus route 2 details",
+    "बस 2 में कौन है",
+    "रूट 2 की सूची",
+  ]) {
+    assert.equal(busId(t), "bus_manifest", `manifest: ${t}`);
+    assert.equal(busRoute(t), "2", `route 2 from: ${t}`);
+  }
+
+  // Transport asked, no route named — the desk lists the routes with
+  // numbers rather than going quiet.
+  for (const t of ["transport", "Transport", "transport list", "bus manifest", "buses"]) {
+    assert.equal(busId(t), "bus_manifest", `manifest: ${t}`);
+    assert.equal(busRoute(t), "", `no route named: ${t}`);
+  }
+
+  // Delays keep their minutes.
+  assert.equal(parseBusDelayQuery("bus 2 is late by 15 minutes")?.minutes, 15);
+  assert.deepEqual(parseBusDelayQuery("route 2 15 minute late"), { route: "2", minutes: 15 });
+  assert.equal(parseBusDelayQuery("बस 2 देरी")?.route, "2");
+
+  // Staff talking about a bus is not a command, and must still fall
+  // through to the rest of WhatsApp untouched.
+  for (const t of [
+    "bus 2 abhi tak nahi aayi, driver ko phone karo",
+    "bus me AC nahi chal raha",
+    "route ke liye naya driver chahiye",
+    "kal bus kharab thi",
+    "Business meeting at 4",
+  ]) {
+    assert.equal(parseBusManifestQuery(t), null, `not a command: ${t}`);
+    assert.equal(busId(t), null, `falls through: ${t}`);
+  }
+}
+
+// ── Following on from the last answer ─────────────────────────────────
+// "uska payment link bhejo" parses to the right command already; what was
+// missing is that "uska" is not a child's name, so it matched nobody.
+{
+  for (const t of [
+    "uska", "uski", "iska", "inka", "usko", "same student",
+    "his", "her", "that student", "same student ka",
+    "उसका", "इसकी", "उनके", "वही",
+  ]) {
+    assert.equal(isFollowUpPronoun(t), true, `back-reference: ${t}`);
+  }
+  // A real name is never a back-reference — answering about the wrong
+  // child is worse than asking which one.
+  for (const t of [
+    "Yatharth", "Kavya mishra", "Uzair", "Ishan", "Vihaan",
+    "", "5A", "Aarav uska bhai",
+  ]) {
+    assert.equal(isFollowUpPronoun(t), false, `a name, not a pronoun: ${t}`);
+  }
+  // And the follow-ups still parse to the command they always did.
+  assert.equal(parseErpCommandLocal("uska bakaya")?.commandId, "student_fees");
+  assert.equal(parseErpCommandLocal("iska detail")?.commandId, "student_details");
+  assert.equal(parseErpCommandLocal("uska payment link")?.commandId, "pay_link");
 }
 
 console.log("erpCommands.selftest.ts OK");
