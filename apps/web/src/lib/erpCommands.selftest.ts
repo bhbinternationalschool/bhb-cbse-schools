@@ -2466,10 +2466,38 @@ const masters = {
   ]) {
     assert.equal(isFollowUpPronoun(t), false, `a name, not a pronoun: ${t}`);
   }
-  // And the follow-ups still parse to the command they always did.
-  assert.equal(parseErpCommandLocal("uska bakaya")?.commandId, "student_fees");
-  assert.equal(parseErpCommandLocal("iska detail")?.commandId, "student_details");
-  assert.equal(parseErpCommandLocal("uska payment link")?.commandId, "pay_link");
+  // And the follow-ups still parse to the command they always did —
+  // "uska" and "iska" alike, in both scripts.
+  for (const [t, want] of [
+    ["uska bakaya", "student_fees"],
+    ["iska bakaya", "student_fees"],
+    ["uski fees", "student_fees"],
+    ["iski fees", "student_fees"],
+    ["uska detail", "student_details"],
+    ["iska detail", "student_details"],
+    ["usko payment link bhejo", "pay_link"],
+    ["isko payment link bhejo", "pay_link"],
+    ["उसका बकाया", "student_fees"],
+    ["इसका बकाया", "student_fees"],
+    ["उसका पेमेंट लिंक", "pay_link"],
+    ["इसका पेमेंट लिंक", "pay_link"],
+  ] as const) {
+    const p = parseErpCommandLocal(t);
+    assert.equal(p?.commandId, want, `follow-up command: ${t}`);
+    assert.equal(isFollowUpPronoun(String(p?.fields.student ?? "")), true, `back-ref: ${t}`);
+  }
+}
+
+// पेमेंट is what people type; भुगतान is the dictionary word. Only the
+// second was accepted, so "उसका पेमेंट लिंक" parsed as nothing at all.
+{
+  assert.equal(parsePayLinkQuery("यतार्थ का पेमेंट लिंक भेजो"), "यतार्थ");
+  assert.equal(parsePayLinkQuery("रिया वर्मा की फीस लिंक"), "रिया वर्मा");
+  assert.equal(parsePayLinkQuery("Kavya Mishra ko पेमेंट लिंक"), "kavya mishra");
+  // A payment being discussed is not a payment link being asked for.
+  for (const t of ["payment aa gaya kya", "link bhejo", "पेमेंट हो गया"]) {
+    assert.equal(parsePayLinkQuery(t), null, `not a pay link: ${t}`);
+  }
 }
 
 console.log("erpCommands.selftest.ts OK");

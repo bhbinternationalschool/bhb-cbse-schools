@@ -4144,13 +4144,17 @@ export function feeReminderTooSoon(
 
 // ─── Payment link for one family (write) ───────────────────────────────
 
+// भुगतान is the dictionary word; पेमेंट is what people actually type,
+// and it was the one form this did not accept — so "उसका पेमेंट लिंक"
+// parsed as nothing at all.
 const PAY_LINK_WORD =
-  /(?<![\p{L}\p{M}\p{N}])(pay(?:ment)?\s*link|fee\s*link|payment\s*url|bhugtan\s*link|भुगतान\s*लिंक)(?![\p{L}\p{M}\p{N}])/iu;
+  /(?<![\p{L}\p{M}\p{N}])(pay(?:ment)?\s*link|fee\s*link|payment\s*url|bhugtan\s*link|(?:भुगतान|पेमेंट|पेमेण्ट|फीस|फ़ीस)\s*(?:लिंक|लिङ्क))(?![\p{L}\p{M}\p{N}])/iu;
 
 const PAY_LINK_FILLER = new Set([
   "payment", "pay", "link", "links", "fee", "fees", "url", "send", "raise", "create", "generate",
   "make", "bhejo", "bhej", "do", "banao", "karo", "for", "to", "of", "the", "please", "pls",
-  "ki", "ka", "ke", "ko", "bhugtan", "भुगतान", "लिंक", "भेजो", "की", "का", "के", "को",
+  "ki", "ka", "ke", "ko", "bhugtan", "भुगतान", "पेमेंट", "पेमेण्ट", "फीस", "फ़ीस",
+  "लिंक", "लिङ्क", "भेजो", "भेज", "बनाओ", "की", "का", "के", "को",
 ]);
 
 /**
