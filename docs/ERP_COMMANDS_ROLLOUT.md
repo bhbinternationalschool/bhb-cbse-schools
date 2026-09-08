@@ -38,7 +38,7 @@ order matters more than any single check.
 | # | Check | Fails → |
 |---|---|---|
 | 1 | **Env kill switch** `ERP_WA_COMMANDS` | branch does nothing; other bots answer as before |
-| 1½ | **Pilot list** `ERP_WA_COMMANDS_ALLOW` | silent for anyone not on it, exactly like the kill switch |
+| 1½ | **Allowlist** `ERP_WA_COMMANDS_ALLOW` — absent since 2026-09-08, so this check passes for everyone | silent for anyone not on it, exactly like the kill switch |
 | 2 | Voice note transcribed to text | asks you to type it |
 | 3 | **Director pause switch** — `commands off` / `commands on` | non-director is told only the director may |
 | 4 | Pending confirm card (`YES` / `NO`) | expired after 5 minutes |
@@ -105,7 +105,7 @@ when you tap Confirm, not trusted from the card.
 
 ---
 
-## 4. The pilot list
+## 4. Who the desk answers
 
 `ERP_WA_COMMANDS_ALLOW` limits the desk to named mobiles. When it is set,
 **only those numbers** may use it — on WhatsApp and in the app alike.
@@ -113,27 +113,24 @@ Everyone else sees exactly the WhatsApp they saw before the desk existed: no
 reply, no hint that a feature exists, other bots answering as usual. Empty or
 unset means everyone, which is the shipped behaviour.
 
-**Where it lives: `deploy/desk-cutover-runtime.env`, committed.** Not on the
-Cloud Run service by hand, and not as a cloudbuild substitution fed from
-`.env.local` the way the notify mobiles are. Both of those fail the same
-way here, and the failure is the dangerous direction:
+**Current state: SCHOOL-WIDE.** As of 2026-09-08 there is no
+`ERP_WA_COMMANDS_ALLOW` line in `deploy/desk-cutover-runtime.env`, and an
+absent allowlist means every staff member whose mobile is on an active
+staff record — 28 people at BHB.
+
+**Where it lives when you want one: `deploy/desk-cutover-runtime.env`,
+committed.** Not on the Cloud Run service by hand, and not as a cloudbuild
+substitution fed from `.env.local` the way the notify mobiles are. Both of
+those fail the same way, and the failure is the dangerous direction:
 
 - Set by hand with `gcloud run services update`, it is erased by the next
   deploy, because `--set-env-vars` replaces the whole environment.
 - As a substitution defaulting to `""`, the build trigger — which has no
   `.env.local` — would supply an empty allowlist. **Empty means everyone.**
-  So the first push that happened to deploy would hand all 28 staff with
-  mobiles a desk that can message parents, silently.
 
-This variable fails OPEN. Every other way of setting it has a path to
-"empty", and empty is school-wide. So the number is in git. That is a real
-cost — the director's own mobile is in the repository history now — and it
-was weighed against handing 28 people a live parent-messaging desk by
-accident. If that trade stops being worth it, the fix is not to move the
-value somewhere emptier; it is to put `ERP_WA_COMMANDS=off` back so the
-failure direction reverses.
-
-Current value: the director's mobile, one number.
+That is why the pilot value was committed while a pilot was the intent.
+Now that school-wide IS the intent, the same failure direction is the
+harmless one, and there is no value to keep anywhere.
 
 Commas, spaces, newlines, `+91` and a leading `0` are all tolerated, because
 this gets pasted out of a phone book. A person is matched on any number the
@@ -141,62 +138,57 @@ school knows them by — the number they messaged from, plus the mobile and
 alternate mobile on their staff record — so a director on the list messaging
 from their second phone still reaches their own brake.
 
-**Put the director's number on the list.** The check sits at step 1½, ahead
-of the `commands off` brake, so somebody who is not on the list cannot pause
-the desk either.
+**If you ever set a list again, put the director's number on it.** The
+check sits at step 1½, ahead of the `commands off` brake, so somebody who
+is not on the list cannot pause the desk either — a school could be locked
+out of its own brake by an allowlist that forgot the person holding it.
 
-A typo that empties the variable opens the desk to everyone rather than
-closing it to nobody. That is the safer failure for a school that already
-trusts the desk — being locked out of your own ERP by a stray character is
-worse — but during a one-number pilot it is the wrong way round, which is
-the whole reason the value is committed rather than supplied at deploy
-time. Read it back after any edit.
+### What school-wide actually reaches, at BHB today
+
+28 staff have a mobile on an active record, and they do NOT all get a
+usable desk — RBAC decides that separately, from the designation:
+
+| Resolves to | Staff with mobiles | Gets |
+|---|---|---|
+| `teacher` (Teacher, TGT, PPRT, Sports Teacher) | 16 | their own sections |
+| `owner` (super-admin email) | 1 | everything |
+| `principal` | 1 | everything |
+| `accounts` (Accountant) | 1 | fees |
+| `driver` | 3 | route manifest |
+| **`support` — refused every command** | **6** | nothing |
+
+Those 6 are the ones to fix before anyone complains: **two Directors**,
+a Counsellor, a Computer Operator, a Peon, and one staff member with no
+designation at all. `rbac.inferRoleCodes` has no pattern for "director",
+"counsellor" or "operator", so they fall through to `support` and are told
+"your role doesn't include …" on everything — which reads as the desk
+being broken rather than as a permission they lack.
+
+There were **zero explicit role assignments** in `rbac_state` when this was
+checked on 2026-09-08, so nothing is compensating for that today. The fix
+is one assignment each in the ERP: Settings → Roles.
 
 ---
 
-## 5. Recommended sequence
+## 5. Where the rollout got to
 
-### Stage A — ship the code without shipping the behaviour
+Stages A and B are history now; this records what happened rather than
+what to do.
 
-1. Set `ERP_WA_COMMANDS=off` on the Cloud Run service.
-2. Deploy `main`.
-3. Confirm the rest of the release is healthy. Staff WhatsApp behaves exactly
-   as it did before: class channel, attendance bot, leadership snapshots all
-   unchanged.
+- **Stage A — ship the code, not the behaviour.** Done and passed.
+- **Stage B — one-number pilot.** `ERP_WA_COMMANDS_ALLOW` was pinned to
+  the director's mobile in `deploy/desk-cutover-runtime.env`, committed so
+  a redeploy could not silently widen it. The reads were verified against
+  live data from that number.
+- **Stage B2 — school-wide.** Decided 2026-09-08: the allowlist line was
+  removed. All 28 staff with a mobile on an active record can reach the
+  desk from the deploy that carries this change.
 
-Nothing about the desk is live. This is the state I previously — and
-wrongly — described as the default.
-
-### Stage B — a real pilot, one number
-
-1. Already done in `deploy/desk-cutover-runtime.env`:
-   `ERP_WA_COMMANDS_ALLOW=<the director's mobile>`. That number was checked
-   against the roster before the pilot: active staff record, login enabled,
-   designation Director, and a protected super-admin email, so every gate
-   from the allowlist through to RBAC passes for it. `ERP_WA_COMMANDS` stays
-   unset.
-2. Deploy. Nothing to set by hand — that is the point.
-3. The desk answers **you and nobody else**. Every other staff member's
-   WhatsApp is unchanged and they are told nothing.
-4. Run Stage C below.
-
-### Stage B2 — widen it
-
-Add numbers to `ERP_WA_COMMANDS_ALLOW` and redeploy. The obvious second step
-is the Principal and the two Directors now assigned `office` — all three hold
-enough permission for the desk to be useful to them. Then a couple of class
-teachers, then the fee desk. When you are ready for everyone, remove the
-variable entirely.
-
-Before adding anyone, check what their role actually resolves to. A teacher
-resolves by designation and will get their own sections; anybody whose
-designation matches no pattern lands on `support` and will be refused every
-command, which reads as "the desk is broken" rather than "you lack the
-permission".
-
-That last step is the one with no undo short of another deploy, so it is
-worth doing on a quiet morning with somebody watching Comms → WhatsApp
-inbox.
+**This step has no undo short of another deploy**, so it is worth doing on
+a quiet morning with somebody watching Comms → WhatsApp inbox. What each
+person can actually run is decided by RBAC, not by this switch — see §4
+for the six people at BHB who will be refused everything until somebody
+gives them a role.
 
 ### Stage C — the first real test, from your own number
 
@@ -344,18 +336,25 @@ At 50 staff × 10 commands a day that is roughly **₹60/day** from October.
 
 ## 8. Before you go live — checklist
 
-- [ ] `ERP_WA_COMMANDS_ALLOW` present in `deploy/desk-cutover-runtime.env`
-      (NOT set by hand on the service — the next deploy erases that)
-- [ ] The director's own number is on that list, or the `commands off` brake is out of reach — it is, for the value above
-- [ ] Approved WhatsApp templates exist for the writes you intend to use
-      (fee reminder, pay link, notice, bus delay) — Masters → WhatsApp templates
+- [ ] `ERP_WA_COMMANDS_ALLOW` absent from `deploy/desk-cutover-runtime.env`
+      — that absence IS school-wide. Nothing to set by hand on the service;
+      the next deploy would erase it anyway
+- [ ] The six staff who resolve to `support` have been given a role, or
+      they will be refused every command (§4) — two Directors among them
+- [ ] Approved WhatsApp templates exist for the writes you intend to use.
+      **Both languages, or the command refuses.** Today only
+      `attendance_absent` and `fees_receipt` are approved in en AND hi, so
+      `mark_attendance` is the one write that reaches a family; the pay
+      link, fee reminder, class message and bus delay all refuse until
+      their second halves are approved — Masters → WhatsApp templates
 - [ ] `ERP_COMMANDS_DIGEST_HOUR` set if you want the director's nightly digest
 - [ ] Cloud Scheduler job for the digest tick created from
       `scripts/setup-cloud-scheduler.sh`
 - [ ] The 4 director/principal numbers know that `commands off` is the brake
 - [ ] Someone is watching Comms → WhatsApp inbox for the first hour
-- [ ] The pilot numbers know that anything which is not a command gets no
-      reply now, and that `school bot` brings the old menu back
+- [ ] **All 28 staff** know that anything which is not a command gets no
+      reply now, and that `school bot` brings the old menu back — with the
+      pilot over, this is the change most of them will notice first
 - [ ] Whoever watches Comms knows that a *parked* outsider thread is one
       the bot gave up on and a person has to answer
 
