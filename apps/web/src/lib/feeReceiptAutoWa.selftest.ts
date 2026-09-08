@@ -185,4 +185,42 @@ assert.ok(url && url.startsWith("https://bhbinternational.school/api/fees/receip
 assert.match(url!, /[?&]exp=\d+/);
 assert.match(url!, /[?&]sig=/);
 
+// 8. THE SILENT ONE. A registry saved before a template joined the catalogue
+//    does not contain it, and reading that blob RAW makes the family look
+//    unapproved — so the PDF receipt would have fallen back to text forever
+//    while `bhb_fee_receipt_pdf` sat approved at Meta in both languages, with
+//    nothing anywhere reporting a problem. Normalising merges the catalogue
+//    back in, and that is the only thing standing between "attached" and a
+//    fallback nobody would have noticed.
+const savedBeforeTheCatalogueGrew = {
+  version: 1 as const,
+  templates: [tpl("en", "approved"), tpl("hi", "approved")],
+  lastMetaSyncAt: "",
+  audit: [],
+  senders: [],
+  moduleSenders: {},
+};
+assert.equal(
+  savedBeforeTheCatalogueGrew.templates.some(
+    (t) => t.familyKey === "fees_receipt_doc",
+  ),
+  false,
+  "fixture must not already contain the newer family",
+);
+const merged = normalizeWaTemplatesState(
+  savedBeforeTheCatalogueGrew as unknown as WaTemplatesState,
+);
+assert.ok(
+  merged.templates.some((t) => t.familyKey === "fees_receipt_doc"),
+  "normalize must merge a catalogue family the saved blob predates",
+);
+for (const lang of ["en", "hi"]) {
+  assert.ok(
+    merged.templates.some(
+      (t) => t.familyKey === "fees_receipt_doc" && t.language === lang,
+    ),
+    `normalize must merge fees_receipt_doc in ${lang}`,
+  );
+}
+
 console.log("  ok — the family is whole, the variables keep their order, and the PDF link is narrow");
