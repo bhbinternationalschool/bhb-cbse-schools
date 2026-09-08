@@ -191,6 +191,7 @@ export const WA_TEMPLATE_VARIABLES: WaTemplateVariableDef[] = [
   { key: "amount", label: "Amount", group: "Fees", sample: "₹5,000" },
   { key: "dueDate", label: "Due date", group: "Fees", sample: "15 Aug 2026" },
   { key: "payLink", label: "Payment link", group: "Fees", sample: "https://school.example/pay" },
+  { key: "payToken", label: "Pay-now button token (link id + code)", group: "Fees", sample: "pl_8f3k2x9a.PL-7K2M", hint: "Fills the Pay now button's URL; the sender supplies it from the payment link." },
   { key: "receiptNo", label: "Receipt number", group: "Fees", sample: "RCP-1042" },
   { key: "paidOn", label: "Paid on date", group: "Fees", sample: "4 Aug 2026" },
   { key: "stage", label: "Reminder stage", group: "Fees", sample: "2" },
@@ -328,6 +329,17 @@ const CALL_ME_EN: WaTemplateButton = { type: "QUICK_REPLY", text: "Call me back"
 const CALL_ME_HI: WaTemplateButton = { type: "QUICK_REPLY", text: "मुझे फ़ोन करें" };
 const PAID_EN: WaTemplateButton = { type: "QUICK_REPLY", text: "Already paid" };
 const PAID_HI: WaTemplateButton = { type: "QUICK_REPLY", text: "भुगतान हो गया" };
+/**
+ * "Pay now" that opens THIS family's payment link. Meta allows one variable
+ * in a button URL, at the end; /pay/go unpacks link id + code from it and
+ * lands on the school's pay page, which hands off to Cashfree.
+ */
+export const WA_PAY_NOW_URL = "https://bhbinternational.school/pay/go/{{payToken}}";
+const PAY_NOW_EN: WaTemplateButton = { type: "URL", text: "Pay now", url: WA_PAY_NOW_URL };
+const PAY_NOW_HI: WaTemplateButton = { type: "URL", text: "अभी भुगतान करें", url: WA_PAY_NOW_URL };
+/** "Pay now" for reminders that carry no link of their own: the parent portal's fee page. */
+const PAY_PORTAL_EN: WaTemplateButton = { type: "URL", text: "Pay now", url: WA_PARENT_APP_URL };
+const PAY_PORTAL_HI: WaTemplateButton = { type: "URL", text: "अभी भुगतान करें", url: WA_PARENT_APP_URL };
 
 const SEED_DEFS: SeedDef[] = [
   // Every template reads the same way on a parent's phone: a warm greeting,
@@ -516,8 +528,8 @@ const SEED_DEFS: SeedDef[] = [
     headerFormat: "TEXT",
     headerTextEn: "Fee reminder",
     headerTextHi: "शुल्क स्मरण",
-    buttons: [PAID_EN],
-    buttonsHi: [PAID_HI],
+    buttons: [PAY_PORTAL_EN, PAID_EN],
+    buttonsHi: [PAY_PORTAL_HI, PAID_HI],
     bodyEn:
       "Namaste {{guardianName}} ji 🙏\n\nA friendly reminder that {{childName}}'s school fee ({{classLabel}}) is due soon:\n\n💰 Amount: *{{feeDue}}*\n\nPay in a minute from your phone — UPI, card or net banking:\n🔗 {{payLink}}\n\nYour receipt arrives on WhatsApp the moment the payment goes through. Thank you! 🙏",
     bodyHi:
@@ -535,8 +547,8 @@ const SEED_DEFS: SeedDef[] = [
     headerFormat: "TEXT",
     headerTextEn: "Fee overdue",
     headerTextHi: "शुल्क बकाया",
-    buttons: [PAID_EN, { type: "QUICK_REPLY", text: "Need more time" }],
-    buttonsHi: [PAID_HI, { type: "QUICK_REPLY", text: "थोड़ा समय चाहिए" }],
+    buttons: [PAY_PORTAL_EN, PAID_EN, { type: "QUICK_REPLY", text: "Need more time" }],
+    buttonsHi: [PAY_PORTAL_HI, PAID_HI, { type: "QUICK_REPLY", text: "थोड़ा समय चाहिए" }],
     bodyEn:
       "Namaste {{guardianName}} ji 🙏\n\n{{childName}}'s school fee is *overdue* (reminder {{stage}}):\n\n💰 Amount pending: *{{feeDue}}*\n\nPlease clear it at your earliest — it takes a minute:\n🔗 {{payLink}}\n\nIf you have already paid or need a little more time, just reply to this message and the fee counter will help. Thank you! 🙏",
     bodyHi:
@@ -552,9 +564,11 @@ const SEED_DEFS: SeedDef[] = [
     category: "UTILITY",
     metaName: "bhb_fee_pay_link",
     bodyEn:
-      "Namaste 🙏 Here is the fee payment link from *{{schoolName}}* for {{childName}}:\n\n💰 Amount: *{{feeDue}}*\n🔗 {{payLink}}\n\nPay with UPI, card or net banking — the receipt comes to you on WhatsApp right after. Thank you! 🙏",
+      "Namaste 🙏 Your fee payment link from *{{schoolName}}* for {{childName}} is ready:\n\n💰 Amount: *{{feeDue}}*\n\nTap *Pay now* below to pay securely with UPI, card or net banking — the receipt comes to you on WhatsApp right after.\n\nIf the button does not open, use this link:\n🔗 {{payLink}}\n\nThank you! 🙏",
     bodyHi:
-      "नमस्ते 🙏 *{{schoolName}}* की ओर से {{childName}} के शुल्क भुगतान का लिंक:\n\n💰 राशि: *{{feeDue}}*\n🔗 {{payLink}}\n\nUPI, कार्ड या नेट बैंकिंग से भुगतान करें — रसीद तुरंत व्हाट्सऐप पर मिलेगी। धन्यवाद! 🙏",
+      "नमस्ते 🙏 *{{schoolName}}* की ओर से {{childName}} के शुल्क भुगतान का लिंक तैयार है:\n\n💰 राशि: *{{feeDue}}*\n\nUPI, कार्ड या नेट बैंकिंग से सुरक्षित भुगतान के लिए नीचे *अभी भुगतान करें* दबाएँ — रसीद तुरंत व्हाट्सऐप पर मिलेगी।\n\nयदि बटन न खुले, तो यह लिंक इस्तेमाल करें:\n🔗 {{payLink}}\n\nधन्यवाद! 🙏",
+    buttons: [PAY_NOW_EN],
+    buttonsHi: [PAY_NOW_HI],
     footerEn: "Fee counter · Reply to this message for help",
     footerHi: "शुल्क काउंटर · सहायता के लिए इसी संदेश का उत्तर दें",
   },
@@ -787,8 +801,8 @@ const SEED_DEFS: SeedDef[] = [
     headerFormat: "TEXT",
     headerTextEn: "Transport fee",
     headerTextHi: "परिवहन शुल्क",
-    buttons: [PAID_EN],
-    buttonsHi: [PAID_HI],
+    buttons: [PAY_PORTAL_EN, PAID_EN],
+    buttonsHi: [PAY_PORTAL_HI, PAID_HI],
     bodyEn:
       "Namaste 🙏 A reminder that the transport fee for {{childName}} is due:\n\n🚌 Route: {{routeName}}\n💰 Amount: *{{feeDue}}*\n\nPay in a minute from your phone:\n🔗 {{payLink}}\n\nThe receipt comes to you on WhatsApp right after. Thank you! 🙏",
     bodyHi:
@@ -1729,18 +1743,19 @@ export function buildMetaTemplateCreatePayload(template: WaTemplate): {
         return { type: "QUICK_REPLY", text: b.text.slice(0, 25) };
       }
       if (b.type === "URL") {
-        const url = (b.url || "https://bhbinternational.school").slice(0, 2000);
-        const hasVar = /\{\{/.test(url);
+        const raw = (b.url || "https://bhbinternational.school").slice(0, 2000);
+        // Meta numbers a button's single variable {{1}} and wants an example
+        // that looks like a real value — never the variable's name.
+        const urlVars = extractVariables(raw);
+        const url = urlVars.length
+          ? raw.replace(/\{\{\s*[a-zA-Z][a-zA-Z0-9_]*\s*\}\}/, "{{1}}")
+          : raw;
         return {
           type: "URL",
           text: b.text.slice(0, 25),
           url,
-          ...(hasVar
-            ? {
-                example: [
-                  url.replace(/\{\{[^}]+\}\}/g, "sample"),
-                ],
-              }
+          ...(urlVars.length
+            ? { example: [url.replace("{{1}}", sampleValueForWaVar(urlVars[0]!))] }
             : {}),
         };
       }
@@ -2222,6 +2237,50 @@ export function applyMetaTemplateQualityUpdate(
   });
   if (!touched) return state;
   return { ...state, templates };
+}
+
+/** The variable a URL button carries, if any (Meta allows one, at the end). */
+export function buttonUrlVariable(b: WaTemplateButton): string | null {
+  if (b.type !== "URL" || !b.url) return null;
+  return extractVariables(b.url)[0] ?? null;
+}
+
+/**
+ * Button components for a template send — one per URL button whose target
+ * carries a variable. Meta refuses a send that omits them, and a "Pay now"
+ * that opens the wrong family's link is worse than one that fails, so a
+ * button whose value the sender did not supply is reported, not defaulted.
+ */
+export function templateButtonComponents(
+  tpl: Pick<WaTemplate, "buttons">,
+  vars: Record<string, string>,
+): {
+  components: {
+    type: "button";
+    sub_type: "url";
+    index: number;
+    parameters: { type: "text"; text: string }[];
+  }[];
+  missing: string[];
+} {
+  const components: ReturnType<typeof templateButtonComponents>["components"] = [];
+  const missing: string[] = [];
+  (tpl.buttons ?? []).slice(0, 3).forEach((b, index) => {
+    const key = buttonUrlVariable(b);
+    if (!key) return;
+    const value = (vars[key] ?? "").trim();
+    if (!value) {
+      missing.push(key);
+      return;
+    }
+    components.push({
+      type: "button",
+      sub_type: "url",
+      index,
+      parameters: [{ type: "text", text: value.slice(0, 2000) }],
+    });
+  });
+  return { components, missing };
 }
 
 /** Map named {{vars}} to Meta positional body parameters in declaration order. */

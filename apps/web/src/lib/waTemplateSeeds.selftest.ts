@@ -22,8 +22,12 @@
  */
 import assert from "node:assert/strict";
 
+import { buildPayGoToken, parsePayGoToken, payGoRedirectPath } from "./payGoToken";
 import {
   buildMetaTemplateCreatePayload,
+  buttonUrlVariable,
+  templateButtonComponents,
+  WA_PAY_NOW_URL,
   matchSeedQuickReply,
   quickReplyAcknowledgement,
   buildMetaTemplateEditPayload,
@@ -49,6 +53,7 @@ function checkPlainLine(text: string, max: number, what: string) {
   assert.ok(!/\n/.test(text), `${what} must be one line: ${text}`);
 }
 
+const extractAll = (t: string) => [...t.matchAll(VAR)].map((m) => m[1]!);
 const seeds = seedWaTemplates();
 assert.ok(seeds.length >= 60, `expected the full EN+HI catalogue, got ${seeds.length}`);
 
@@ -93,6 +98,12 @@ for (const t of seeds) {
     assert.ok(b.text.length <= 25, `${label}: button "${b.text}" is ${b.text.length} chars`);
     if (b.type === "URL") {
       assert.ok(/^https:\/\/\S+$/.test(b.url ?? ""), `${label}: URL button needs an https URL`);
+      const v = buttonUrlVariable(b);
+      if (v) {
+        assert.ok(WA_TEMPLATE_VARIABLES.some((d) => d.key === v), `${label}: button variable {{${v}}} not in catalogue`);
+        assert.ok((b.url ?? "").endsWith(`{{${v}}}`), `${label}: Meta allows a button variable only at the END of the URL`);
+        assert.equal(extractAll(b.url ?? "").length, 1, `${label}: one variable per button URL`);
+      }
     }
   }
 
@@ -232,6 +243,40 @@ const keptHeader = normalizeWaTemplatesState({ version: 1, templates: [ownHeader
 )!;
 assert.equal(keptHeader.headerText, "Our title");
 assert.deepEqual(keptHeader.buttons, attendanceEn.buttons);
+
+/* ── "Pay now" opens THIS family's link ─────────────────────── */
+
+const payLinkEn = seeds.find((t) => t.familyKey === "fees_pay_link" && t.language === "en")!;
+const payBtn = payLinkEn.buttons.find((b) => b.type === "URL")!;
+assert.equal(payBtn.url, WA_PAY_NOW_URL);
+assert.equal(buttonUrlVariable(payBtn), "payToken");
+const payPayload = buildMetaTemplateCreatePayload(payLinkEn);
+const payButtons = payPayload.components.find((c) => c.type === "BUTTONS") as { buttons: { type: string; url?: string; example?: string[] }[] };
+const metaUrl = payButtons.buttons.find((b) => b.type === "URL")!;
+assert.equal(metaUrl.url, "https://bhbinternational.school/pay/go/{{1}}", "Meta numbers the button variable {{1}}");
+assert.ok(metaUrl.example?.[0]?.includes("pl_"), "the example is a real-looking token, not the variable's name");
+assert.ok(!payLinkEn.variables.includes("payToken"), "a button variable is not a body variable — body positions stay unchanged");
+
+const token = buildPayGoToken({ id: "pl_8f3k2x9a", code: "PL-7K2M" });
+assert.equal(token, "pl_8f3k2x9a.PL-7K2M");
+assert.deepEqual(parsePayGoToken(token), { linkId: "pl_8f3k2x9a", code: "PL-7K2M" });
+assert.deepEqual(parsePayGoToken("pl_8f3k2x9a.pl-7k2m"), { linkId: "pl_8f3k2x9a", code: "PL-7K2M" }, "code is case-insensitive");
+assert.equal(parsePayGoToken("pl_8f3k2x9a"), null, "no code → not a token");
+assert.equal(parsePayGoToken("pl_8f3k2x9a.XYZ"), null, "malformed code → not a token");
+assert.equal(parsePayGoToken("../etc.PL-7K2M"), null);
+assert.equal(payGoRedirectPath({ linkId: "pl_8f3k2x9a", code: "PL-7K2M" }), "/pay/share?linkId=pl_8f3k2x9a&code=PL-7K2M");
+
+const withToken = templateButtonComponents(payLinkEn, { payToken: token });
+assert.deepEqual(withToken.missing, []);
+assert.deepEqual(withToken.components, [
+  { type: "button", sub_type: "url", index: 0, parameters: [{ type: "text", text: token }] },
+]);
+const withoutToken = templateButtonComponents(payLinkEn, { payLink: "https://x" });
+assert.deepEqual(withoutToken.missing, ["payToken"], "a missing button value is reported, never defaulted");
+assert.equal(withoutToken.components.length, 0);
+// Static buttons and quick replies need no parameters at all.
+const soft = seeds.find((t) => t.familyKey === "fees_soft_reminder" && t.language === "en")!;
+assert.deepEqual(templateButtonComponents(soft, {}), { components: [], missing: [] });
 
 /* ── a tap on a template button is recognised in either language ── */
 
