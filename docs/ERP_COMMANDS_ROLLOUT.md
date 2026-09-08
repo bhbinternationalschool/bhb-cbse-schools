@@ -84,20 +84,34 @@ the difference matters:
 |---|---|---|
 | Director (the pilot number) | protected super-admin **email** → `owner` | 24 / 24 |
 | Principal | designation "Principal" matches → `principal` | 24 / 24 |
-| Beena Singh, Kanchan Singh | **explicit assignment** to `office`, 2026-09-07 | 22 / 24 |
+| Beena Singh, Kanchan Singh | **explicit assignment** to `owner`, 2026-09-08 | 24 / 24 |
 
-`office` cannot run **`staff_broadcast`** (needs `notifications.edit`; office
-holds `view`) or **`post_homework`** (needs `homework.edit`, and that command
-is app-only anyway, because the class channel owns teacher homework posts).
+An earlier version of this table claimed those two held `office` from
+2026-09-07. They did not: `rbac_state` in the live database held **zero
+assignments** when it was read on 2026-09-08, so whatever was done on the
+7th never reached the server. Both now hold `owner` — written into the live
+`rbac_state` row on 2026-09-08 at the director's instruction, `role_owner`,
+primary, unrestricted scope, no expiry, with an audit entry each.
 
-Those two assignments were needed: `rbac.inferRoleCodes` has designation
-patterns for principal, admin, office, accounts, driver, teacher and gate,
-but **none for "director"** — so a Director without a super-admin email fell
-through to `support` (3 modules, effectively no commands). That is deliberate:
-a comment dated 2026-09-06 records that unmatched staff used to sign in as
-principal, which was tightened on purpose, and elevation is meant to come
-from an explicit assignment where a human decides it. If a future Director
-joins, they need the same assignment.
+`owner` is the widest role in the system: every module, every action,
+including billing, policy override and **audited impersonation**.
+`principal` would have given the same 24 / 24 command coverage without
+impersonation; `owner` was asked for deliberately.
+
+The assignments were needed at all because `rbac.inferRoleCodes` has
+designation patterns for principal, admin, office, accounts, driver,
+teacher and gate, but **none for "director"** — so a Director without a
+super-admin email falls through to `support` (3 modules, effectively no
+commands). That is deliberate: a comment dated 2026-09-06 records that
+unmatched staff used to sign in as principal, which was tightened on
+purpose, and elevation is meant to come from an explicit assignment where a
+human decides it. A future Director needs the same assignment.
+
+Note what an explicit assignment does to the fallback: once someone has one
+active assignment, `resolveSessionRoleScopes` stops inferring from their
+designation entirely. For `owner` that is harmless — it is a superset of
+anything the designation would have given — but for a narrow role it is a
+replacement, not an addition.
 
 **What a command can do to a family:** nothing without a confirm card first.
 Every write shows the card, and permission *and* section scope are re-checked
@@ -155,18 +169,20 @@ usable desk — RBAC decides that separately, from the designation:
 | `principal` | 1 | everything |
 | `accounts` (Accountant) | 1 | fees |
 | `driver` | 3 | route manifest |
-| **`support` — refused every command** | **6** | nothing |
+| `owner` (explicit assignment, the 2 Directors) | 2 | everything |
+| **`support` — refused every command** | **4** | nothing |
 
-Those 6 are the ones to fix before anyone complains: **two Directors**,
-a Counsellor, a Computer Operator, a Peon, and one staff member with no
-designation at all. `rbac.inferRoleCodes` has no pattern for "director",
+The two Directors were in that `support` row until 2026-09-08; they now
+hold `owner` by explicit assignment (§3). **Four** are still refused
+everything: a Counsellor, a Computer Operator, a Peon, and one staff member
+with no designation at all. `rbac.inferRoleCodes` has no pattern for
 "counsellor" or "operator", so they fall through to `support` and are told
-"your role doesn't include …" on everything — which reads as the desk
-being broken rather than as a permission they lack.
+"your role doesn't include …" on everything — which reads as the desk being
+broken rather than as a permission they lack.
 
-There were **zero explicit role assignments** in `rbac_state` when this was
-checked on 2026-09-08, so nothing is compensating for that today. The fix
-is one assignment each in the ERP: Settings → Roles.
+Fix each with one assignment in the ERP: Settings → Roles. `office` is the
+right size for the Counsellor and the Computer Operator; the Peon needs
+`gate` or nothing at all.
 
 ---
 
@@ -339,8 +355,10 @@ At 50 staff × 10 commands a day that is roughly **₹60/day** from October.
 - [ ] `ERP_WA_COMMANDS_ALLOW` absent from `deploy/desk-cutover-runtime.env`
       — that absence IS school-wide. Nothing to set by hand on the service;
       the next deploy would erase it anyway
-- [ ] The six staff who resolve to `support` have been given a role, or
-      they will be refused every command (§4) — two Directors among them
+- [x] The two Directors hold `owner` by explicit assignment (2026-09-08)
+- [ ] The **four** staff still resolving to `support` have been given a role,
+      or they will be refused every command (§4) — a Counsellor, a Computer
+      Operator, a Peon, and one with no designation
 - [ ] Approved WhatsApp templates exist for the writes you intend to use.
       **Both languages, or the command refuses.** Today only
       `attendance_absent` and `fees_receipt` are approved in en AND hi, so
