@@ -43,6 +43,13 @@ export type TutorAskDone = {
   mode: TutorMode;
   charge: "free" | "pass";
   allowance: TutorAllowance;
+  /**
+   * The ai_generations row behind this reply, so a parent reporting it can
+   * point at the exact generation rather than at some text we would have to
+   * match by hand. Empty when the router could not record one — a report
+   * without it is still filed, never refused.
+   */
+  generationId?: string;
 };
 
 /** Validate the body the way both routes need it; an empty message = 400 upstream. */
@@ -146,7 +153,15 @@ export async function answerParentTutor(opts: {
     return aiStreamResponse<TutorAskDone>(async (send) => {
       const r = await run((text) => send({ type: "delta", text }));
       return r.ok
-        ? { type: "done", engine: r.engine, reply: r.text, mode: ask.mode, charge: verdict.charge, allowance: after }
+        ? {
+            type: "done",
+            engine: r.engine,
+            reply: r.text,
+            mode: ask.mode,
+            charge: verdict.charge,
+            allowance: after,
+            generationId: r.generationId ?? "",
+          }
         : { type: "error", error: r.error };
     });
   }
@@ -157,7 +172,14 @@ export async function answerParentTutor(opts: {
   }
   return Response.json({
     ok: true,
-    data: { engine: r.engine, reply: r.text, mode: ask.mode, charge: verdict.charge, allowance: after },
+    data: {
+      engine: r.engine,
+      reply: r.text,
+      mode: ask.mode,
+      charge: verdict.charge,
+      allowance: after,
+      generationId: r.generationId ?? "",
+    },
   });
 }
 

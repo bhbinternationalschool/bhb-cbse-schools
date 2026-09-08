@@ -29,12 +29,16 @@ import {
   type ComplaintTicket,
 } from "@/lib/complaints";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
+import { AiReportsPanel } from "@/components/complaints/AiReportsPanel";
 
-type Tab = "all" | "mine";
+type Tab = "all" | "mine" | "ai";
 
 const TABS: ModuleTabItem[] = [
   { id: "all", label: "All tickets", tone: "violet" },
   { id: "mine", label: "My tickets", tone: "amber" },
+  // AI replies a parent objected to. They live in a table rather than the
+  // complaints slice, so the tab renders its own panel.
+  { id: "ai", label: "AI reports", tone: "rose" },
 ];
 
 function TicketCard({
@@ -242,6 +246,8 @@ export function ComplaintsWorkspace() {
       <ModuleTabs value={tab} onChange={(id) => setTab(id as Tab)} items={TABS} />
 
       <div className="mt-5 space-y-4">
+        {tab === "ai" ? <AiReportsPanel readOnly={readOnly} /> : null}
+
         {tab === "all" ? (
           <div className="flex flex-wrap items-end gap-3">
             <label className="block text-sm">
@@ -273,7 +279,7 @@ export function ComplaintsWorkspace() {
           </div>
         ) : null}
 
-        {rows.length === 0 ? (
+        {tab === "ai" ? null : rows.length === 0 ? (
           <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-8 text-center text-sm text-[var(--muted)]">
             {tab === "all" ? "No complaints match this filter." : "No tickets assigned to you."}
           </p>

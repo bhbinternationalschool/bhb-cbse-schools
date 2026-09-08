@@ -70,6 +70,14 @@ class _Msg {
   /// For an assistant reply: the question it answered — the video topic.
   final String topic;
   String charge = "";
+
+  /// The server's id for this generation, so reporting it names the exact
+  /// reply. Empty when the server did not send one; reporting still works.
+  String generationId = "";
+
+  /// Set once the parent has reported this reply, so the button reads back
+  /// what they did instead of inviting a second identical report.
+  bool reported = false;
 }
 
 /// The few UI strings a Hindi-first parent must be able to read.
@@ -85,6 +93,18 @@ const _hi = <String, String>{
   "score_prompt": "प्रश्न और बच्चे के उत्तर यहाँ लिखें",
   "homework_prompt": "जैसे: आज के गणित के होमवर्क में मदद",
   "exam_prompt": "जैसे: कक्षा 3 की EVS यूनिट टेस्ट की तैयारी",
+  "report": "शिकायत करें",
+  "reported": "भेज दिया",
+  "reportTitle": "इस उत्तर की शिकायत करें",
+  "reportBody": "स्कूल इसे पढ़ेगा। बताइए क्या गलत था।",
+  "reportWrong": "उत्तर गलत है",
+  "reportInappropriate": "अनुचित या असुरक्षित",
+  "reportConfusing": "समझ नहीं आया",
+  "reportOther": "कुछ और",
+  "reportNote": "आप कुछ लिखना चाहें तो (वैकल्पिक)",
+  "reportSend": "भेजें",
+  "reportCancel": "रहने दें",
+  "reportThanks": "धन्यवाद — स्कूल इसे देखेगा।",
 };
 
 class _TutorScreenState extends State<TutorScreen> {
@@ -230,10 +250,16 @@ class _TutorScreenState extends State<TutorScreen> {
           case TutorDelta(:final text):
             setState(() => reply.text += text);
             _scrollToEnd();
-          case TutorDone(reply: final full, :final charge, :final allowance):
+          case TutorDone(
+            reply: final full,
+            :final charge,
+            :final allowance,
+            :final generationId,
+          ):
             setState(() {
               if (full.isNotEmpty) reply.text = full;
               reply.charge = charge;
+              reply.generationId = generationId;
               if (allowance != null) {
                 _status = _withAllowance(status, allowance);
               }
@@ -299,6 +325,106 @@ class _TutorScreenState extends State<TutorScreen> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// Report one AI reply to the school.
+  ///
+  /// The category is a tap, the words optional — a parent who is upset
+  /// should be able to flag an answer in two taps without composing a
+  /// sentence. Only a confirmed write flips the button to "Reported": if
+  /// the server refuses, the parent is told and can try again, because a
+  /// safety complaint silently dropped is worse than no button at all.
+  Future<void> _reportReply(_Msg msg) async {
+    if (msg.role != "assistant" || msg.text.trim().isEmpty) return;
+    final hindi = _language != "en";
+    String t(String key, String en) => hindi ? _hi[key]! : en;
+
+    final note = TextEditingController();
+    final chosen = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheet) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          16,
+          16,
+          16,
+          16 + MediaQuery.viewInsetsOf(sheet).bottom,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              t("reportTitle", "Report this reply"),
+              style: AppText.titleMedium,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              t("reportBody", "The school will read this. Tell us what was wrong."),
+              style: AppText.bodySmallMuted,
+            ),
+            const SizedBox(height: 12),
+            for (final c in const [
+              ("wrong", "reportWrong", "The answer is wrong"),
+              ("inappropriate", "reportInappropriate", "Inappropriate or unsafe"),
+              ("confusing", "reportConfusing", "Confusing"),
+              ("other", "reportOther", "Something else"),
+            ])
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                title: Text(t(c.$2, c.$3), style: AppText.bodyMedium),
+                onTap: () => Navigator.pop(sheet, c.$1),
+              ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: note,
+              maxLines: 2,
+              maxLength: 500,
+              decoration: InputDecoration(
+                labelText: t("reportNote", "Anything to add (optional)"),
+                border: const OutlineInputBorder(),
+              ),
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => Navigator.pop(sheet),
+                child: Text(t("reportCancel", "Cancel")),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (chosen == null || !mounted) return;
+
+    // The question this reply answered, so the school sees the exchange
+    // rather than an answer with no context.
+    final i = _messages.indexOf(msg);
+    final asked = i > 0 && _messages[i - 1].role == "user"
+        ? _messages[i - 1].text
+        : "";
+
+    try {
+      await widget.api.reportTutorReply(
+        reply: msg.text,
+        generationId: msg.generationId,
+        question: asked,
+        studentId: widget.context.child.id,
+        category: chosen,
+        reason: note.text.trim(),
+      );
+      if (!mounted) return;
+      setState(() => msg.reported = true);
+      _toast(t("reportThanks", "Thank you — the school will look at this."));
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      _toast(e.message);
+    } catch (_) {
+      if (!mounted) return;
+      _toast("Could not send the report. Please try again.");
+    }
   }
 
   Future<void> _showPasses({String? reason}) async {
@@ -469,6 +595,7 @@ class _TutorScreenState extends State<TutorScreen> {
                               onVideos: _messages[i].topic.isEmpty
                                   ? null
                                   : () => _showVideos(_messages[i].topic),
+                              onReport: () => _reportReply(_messages[i]),
                             ),
                           ),
                   ),
@@ -675,12 +802,14 @@ class _Bubble extends StatelessWidget {
     required this.busy,
     required this.hindi,
     this.onVideos,
+    this.onReport,
   });
 
   final _Msg msg;
   final bool busy;
   final bool hindi;
   final VoidCallback? onVideos;
+  final VoidCallback? onReport;
 
   @override
   Widget build(BuildContext context) {
@@ -770,6 +899,42 @@ class _Bubble extends StatelessWidget {
                               ),
                             ),
                           ),
+                        // Every AI reply can be reported. Play requires a way
+                        // to flag offensive AI output, and a parent whose
+                        // child was given a bad answer needs somewhere to say
+                        // so — on the reply itself, not buried in a menu.
+                        if (onReport != null) ...[
+                          const SizedBox(width: 4),
+                          InkWell(
+                            onTap: msg.reported ? null : onReport,
+                            borderRadius: BorderRadius.circular(12),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    msg.reported
+                                        ? Icons.check_circle_outline
+                                        : Icons.flag_outlined,
+                                    size: 15,
+                                    color: AppColors.muted,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    msg.reported
+                                        ? (hindi ? _hi["reported"]! : "Reported")
+                                        : (hindi ? _hi["report"]! : "Report"),
+                                    style: AppText.labelMediumMuted,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ],

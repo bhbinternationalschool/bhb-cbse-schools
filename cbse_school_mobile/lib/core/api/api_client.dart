@@ -2747,6 +2747,30 @@ class ApiClient {
     }),
   );
 
+  /// Reports an AI reply as wrong, unsafe or offensive.
+  ///
+  /// The reply text is sent back because the server keeps only a hash of
+  /// what the model wrote — a report has to carry the words, or nobody at
+  /// the school can judge it. Throws [ApiException] if it was not stored,
+  /// so the screen never tells a parent "sent" when it was not.
+  Future<void> reportTutorReply({
+    required String reply,
+    String generationId = "",
+    String question = "",
+    String studentId = "",
+    String category = "other",
+    String reason = "",
+  }) async {
+    await _postData("/api/v1/tutor/report", {
+      "reply": reply,
+      "generationId": generationId,
+      "question": question,
+      "studentId": studentId,
+      "category": category,
+      "reason": reason,
+    });
+  }
+
   /// Asks the tutor and yields the reply as it is written: [TutorDelta]s
   /// carry text slices, one [TutorDone] closes the reply. A refusal (the
   /// allowance is spent) surfaces as a [TutorRefused] exception so the
@@ -2847,6 +2871,7 @@ class ApiClient {
             yield TutorDone(
               reply: (j["reply"] as String?) ?? "",
               charge: (j["charge"] as String?) ?? "",
+              generationId: (j["generationId"] as String?) ?? "",
               allowance: j["allowance"] is Map
                   ? TutorAllowance.fromJson(
                       Map<String, dynamic>.from(j["allowance"] as Map),
@@ -3519,11 +3544,16 @@ class TutorDone extends TutorEvent {
     required this.reply,
     required this.charge,
     required this.allowance,
+    this.generationId = "",
   });
 
   final String reply;
   final String charge; // free | pass
   final TutorAllowance? allowance;
+
+  /// The server's record of this generation, carried so a report names the
+  /// exact reply. Empty is normal and never blocks reporting.
+  final String generationId;
 }
 
 /// The server said no — the free hints are used up, or the mode needs a
