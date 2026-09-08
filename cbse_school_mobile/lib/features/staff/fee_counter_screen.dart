@@ -220,6 +220,14 @@ class _CounterScreenState extends State<CounterScreen> {
   final _ref = TextEditingController();
   final _note = TextEditingController();
 
+  /// The day the money was handed over. Empty = today.
+  ///
+  /// The screen used to have no date at all and the server hard-coded today,
+  /// so cash taken on Saturday could not be recorded as Saturday. The picker
+  /// only appears when the SERVER says this person may back-date — offering
+  /// one it would then refuse is worse than not offering it.
+  String _collectionDate = "";
+
   /// Minted once per counter session so a retry cannot double-charge.
   late String _clientRef = _mintRef();
 
@@ -392,6 +400,7 @@ class _CounterScreenState extends State<CounterScreen> {
         lines: lines,
         tenders: [(mode: _mode, paise: _total, ref: _ref.text.trim())],
         note: _note.text.trim(),
+        collectionDate: _collectionDate,
       );
       Haptics.success();
       if (!mounted) return;
@@ -405,6 +414,7 @@ class _CounterScreenState extends State<CounterScreen> {
         _clientRef = _mintRef();
         _ref.clear();
         _note.clear();
+        _collectionDate = "";
       });
       await _load();
     } on ApiException catch (e) {
@@ -563,6 +573,50 @@ class _CounterScreenState extends State<CounterScreen> {
                           labelText: c.tenderModes
                               .firstWhere((m) => m.value == _mode)
                               .refLabel,
+                        ),
+                      ),
+                    ),
+                  if (c.mayBackdate)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: InkWell(
+                        onTap: () async {
+                          final first = DateTime.tryParse(
+                            c.earliestCollectionDate,
+                          );
+                          final last = DateTime.tryParse(c.collectionDate);
+                          if (first == null || last == null) return;
+                          final chosen = await showDatePicker(
+                            context: context,
+                            initialDate:
+                                DateTime.tryParse(
+                                  _collectionDate.isEmpty
+                                      ? c.collectionDate
+                                      : _collectionDate,
+                                ) ??
+                                last,
+                            firstDate: first,
+                            lastDate: last,
+                          );
+                          if (chosen != null) {
+                            setState(
+                              () => _collectionDate = chosen
+                                  .toIso8601String()
+                                  .substring(0, 10),
+                            );
+                          }
+                        },
+                        child: InputDecorator(
+                          decoration: const InputDecoration(
+                            isDense: true,
+                            labelText: "Date money was taken",
+                          ),
+                          child: Text(
+                            _collectionDate.isEmpty
+                                ? "${c.collectionDate} (today)"
+                                : _collectionDate,
+                            style: AppText.bodyMedium,
+                          ),
                         ),
                       ),
                     ),

@@ -5,7 +5,12 @@ import Link from "next/link";
 import { IndianRupee } from "lucide-react";
 import { PaymentChannelSelect } from "@/components/accounts/PaymentChannelSelect";
 import type { AccountsState } from "@/lib/accountsTypes";
-import { canApproveConcession } from "@/lib/rbac";
+import { canApproveConcession, canBackdateReceipt } from "@/lib/rbac";
+import {
+  DEFAULT_FEE_BACKDATE_POLICY,
+  earliestCollectionDate,
+  feeBackdateVerdict,
+} from "@/lib/feeBackdate";
 import {
   decodeTenderChannel,
   encodeTenderChannel,
@@ -44,6 +49,7 @@ import {
 } from "@/lib/fees";
 import {
   loadMasters,
+  academicYearStartOn,
   currentAcademicYearCode,
   CONCESSION_GROUNDS,
   type ConcessionGround,
@@ -270,6 +276,21 @@ export function FeeTakeWorkspace() {
     () => (session ? canApproveConcession(session, masters) : false),
     [session, masters],
   );
+  /**
+   * Same authority as approving a concession: owner, admin, principal. It
+   * lets them date a receipt earlier than today even when the school has
+   * back-dating switched off, so a genuine mistake is corrected rather than
+   * voided and re-issued.
+   */
+  const mayBackdate = useMemo(
+    () => (session ? canBackdateReceipt(session, masters) : false),
+    [session, masters],
+  );
+  /**
+   * The floor the date box offers. Showing the limit is the point — the old
+   * box accepted any date at all and said nothing, so a typo in the year was
+   * indistinguishable from a decision.
+   */
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
   const [hits, setHits] = useState<StudentSearchHit[]>([]);
@@ -354,6 +375,27 @@ export function FeeTakeWorkspace() {
   const [tenderLines, setTenderLines] = useState<TenderLine[]>([]);
   const [composer, setComposer] = useState<TenderComposer>(emptyComposer);
   const [collectionDate, setCollectionDate] = useState(todayIso);
+  const earliestDate = useMemo(
+    () =>
+      earliestCollectionDate({
+        today: todayIso(),
+        sessionStartOn: academicYearStartOn(ay) ?? "",
+        policy: masters?.feeBackdatePolicy ?? DEFAULT_FEE_BACKDATE_POLICY,
+        mayOverride: mayBackdate,
+      }),
+    [ay, masters, mayBackdate],
+  );
+  const collectionDateProblem = useMemo(() => {
+    const v = feeBackdateVerdict({
+      collectionDate,
+      today: todayIso(),
+      sessionStartOn: academicYearStartOn(ay) ?? "",
+      policy: masters?.feeBackdatePolicy ?? DEFAULT_FEE_BACKDATE_POLICY,
+      mayOverride: mayBackdate,
+      dayClosed: isCollectionDateLocked(collectionDate),
+    });
+    return v.ok ? "" : v.reason;
+  }, [collectionDate, ay, masters, mayBackdate]);
   /**
    * Accounts desk state, HYDRATED here rather than assumed. The payment-mode
    * dropdown is built from the bank accounts, and this browser only has them
@@ -1489,6 +1531,8 @@ export function FeeTakeWorkspace() {
       transactionId: primaryTxn,
       schoolReceiptNo,
       note: [note.trim(), discountNote, chequeNote].filter(Boolean).join(" · "),
+      backdatePolicy: masters?.feeBackdatePolicy,
+      mayBackdate,
     });
     if (!result.ok) {
       flash(result.error);
@@ -2172,6 +2216,9 @@ export function FeeTakeWorkspace() {
               tenderSum={tenderSum}
               remainingPaise={remainingPaise}
               collectionDate={collectionDate}
+              earliestDate={earliestDate}
+              maxCollectionDate={todayIso()}
+              collectionDateProblem={collectionDateProblem}
               schoolReceiptNo={schoolReceiptNo}
               note={note}
               onPatchComposer={patchComposer}
@@ -2434,6 +2481,9 @@ function CollectPanel({
   onAddTender,
   onRemoveTender,
   onFillRemaining,
+  earliestDate,
+  maxCollectionDate,
+  collectionDateProblem,
   onCollectionDate,
   onSchoolReceiptNo,
   onNote,
@@ -2498,6 +2548,11 @@ function CollectPanel({
   tenderSum: number;
   remainingPaise: number;
   collectionDate: string;
+  /** Floor of the date box — today, or 1 April when back-dating is allowed. */
+  earliestDate: string;
+  maxCollectionDate: string;
+  /** Why this date is refused, in words, or "" when it is fine. */
+  collectionDateProblem: string;
   schoolReceiptNo: string;
   note: string;
   onPatchComposer: (patch: Partial<TenderComposer>) => void;
@@ -3150,13 +3205,14 @@ function CollectPanel({
                     className={COLLECT_FIELD}
                     type="date"
                     value={collectionDate}
+                    min={earliestDate}
+                    max={maxCollectionDate}
                     onChange={(e) => onCollectionDate(e.target.value)}
                     required
                   />
-                  {isCollectionDateLocked(collectionDate) ? (
+                  {collectionDateProblem ? (
                     <span className="mt-1 block text-[11px] font-semibold leading-snug text-[#fca5a5]">
-                      This date is day-closed — pick another date or reject
-                      handover
+                      {collectionDateProblem}
                     </span>
                   ) : null}
                 </label>

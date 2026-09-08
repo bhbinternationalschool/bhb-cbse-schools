@@ -764,6 +764,7 @@ class FeeCounter {
       guardianName = _s(j, "guardianName"),
       mobile = _s(j, "mobile"),
       collectionDate = _s(j, "collectionDate"),
+      earliestCollectionDate = _s(j, "earliestCollectionDate"),
       totalLabel = _s(j, "totalLabel"),
       children = _list(j, "children").map(FeeChild.fromJson).toList(),
       tenderModes = _list(
@@ -775,6 +776,19 @@ class FeeCounter {
   final String guardianName;
   final String mobile;
   final String collectionDate;
+
+  /// Oldest date this person may put on a receipt, from the server.
+  ///
+  /// Equal to [collectionDate] means same-day only — the school has
+  /// back-dating switched off and this person cannot overrule it. Empty when
+  /// talking to a server too old to say, which is read the same cautious way.
+  final String earliestCollectionDate;
+
+  /// Whether to offer a date picker at all.
+  bool get mayBackdate =>
+      earliestCollectionDate.isNotEmpty &&
+      earliestCollectionDate.compareTo(collectionDate) < 0;
+
   final String totalLabel;
   final List<FeeChild> children;
   final List<TenderModeInfo> tenderModes;
@@ -1416,11 +1430,17 @@ extension StaffApi on ApiClient {
     required List<({String studentId, String dueKey, int paise})> lines,
     required List<({String mode, int paise, String ref})> tenders,
     String note = "",
+    /// The day the money was handed over, YYYY-MM-DD. Empty means today.
+    ///
+    /// Whether a past date is accepted is the school's Masters setting and
+    /// is decided by the server — the app only reports what the person said.
+    String collectionDate = "",
   }) async => FeeReceipt.fromJson(
     await _postData("/api/v1/staff/fees/collect", {
       "studentId": studentId,
       "clientRef": clientRef,
       "note": note,
+      if (collectionDate.isNotEmpty) "collectionDate": collectionDate,
       "lines": [
         for (final l in lines)
           {

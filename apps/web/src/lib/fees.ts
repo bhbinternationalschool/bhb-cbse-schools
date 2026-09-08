@@ -17,6 +17,7 @@ import {
 } from "@/lib/schoolDataMirror";
 import {
   DEFAULT_AY,
+  academicYearStartOn,
   currentAcademicYearCode,
   dueOnForSessionMonth,
   formatInr,
@@ -60,6 +61,12 @@ import {
   computeTransportPeriodDues,
   loadTransport,
 } from "@/lib/transport";
+import {
+  DEFAULT_FEE_BACKDATE_POLICY,
+  backdatePolicyApplies,
+  feeBackdateVerdict,
+  type FeeBackdatePolicy,
+} from "@/lib/feeBackdate";
 import { TENANT } from "@/lib/types";
 import {
   activePlanForStudent,
@@ -3144,15 +3151,34 @@ export function collectPayment(input: {
   receiptSeries?: FeeReceiptSeries;
   manualBookSeries?: string;
   manualBookLeaf?: string;
-  /** Skip backdate / duplicate soft checks when already confirmed by UI */
+  /** Skip the manual-book paper-age soft check when confirmed by the UI. */
   allowBackdate?: boolean;
+  /**
+   * The school's back-dating setting, and whether THIS person may overrule
+   * it (owner / admin / principal). Both are passed in rather than read here
+   * so the rule stays testable and the caller cannot forget which session it
+   * is acting for.
+   *
+   * Omitted, the strict reading applies: same-day only. A caller that does
+   * not say who is collecting does not get to back-date.
+   */
+  backdatePolicy?: FeeBackdatePolicy;
+  mayBackdate?: boolean;
+  /** Today in the school's timezone; defaults to the server's own clock. */
+  todayIsoOverride?: string;
   allowDuplicate?: boolean;
 }):
   | { ok: true; voucher: CollectionVoucher }
   | {
       ok: false;
       error: string;
-      code?: "backdate" | "duplicate" | "manual_no" | "day_closed" | "rbac";
+      code?:
+        | "backdate"
+        | "backdate_blocked"
+        | "duplicate"
+        | "manual_no"
+        | "day_closed"
+        | "rbac";
     } {
   if (!assertModulePermission("fees", "create", "collectPayment")) {
     return {
@@ -3214,6 +3240,35 @@ export function collectPayment(input: {
       error: `Day ${input.collectionDate} is closed — reopen day-close (reject) or choose another date`,
       code: "day_closed",
     };
+  }
+
+  // The date rule, enforced HERE and not only in the two user interfaces.
+  // The web counter had a free date box and the app had none; both now ask
+  // the same question, and this is the answer that actually binds — a
+  // request posted straight to the API gets the same refusal the counter
+  // would have shown.
+  //
+  // Machine-recorded money is exempt: a payment-link receipt carries the
+  // date the gateway says the parent paid, which is legitimately days old
+  // when a webhook is replayed or a settlement reconciled late.
+  if (backdatePolicyApplies(source)) {
+    const verdict = feeBackdateVerdict({
+      collectionDate: input.collectionDate,
+      today:
+        input.todayIsoOverride ||
+        new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }),
+      sessionStartOn:
+        academicYearStartOn(input.academicYearCode || currentAcademicYearCode()) ?? "",
+      policy: input.backdatePolicy ?? DEFAULT_FEE_BACKDATE_POLICY,
+      mayOverride: input.mayBackdate === true,
+    });
+    if (!verdict.ok) {
+      // NOT "backdate": that code means the manual-book paper-age warning,
+      // which the panel offers to waive on a confirm. This one is the
+      // school's setting and there is nothing to confirm — waiving it would
+      // hand every clerk the override the setting exists to withhold.
+      return { ok: false, error: verdict.reason, code: "backdate_blocked" };
+    }
   }
 
   if (
