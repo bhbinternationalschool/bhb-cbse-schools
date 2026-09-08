@@ -209,6 +209,7 @@ SELFTESTS=(
   test:rbac-user-grants
   test:visitor-gate
   test:play-billing
+  test:ai-content-report
   test:parent-dues-fallback
   test:receipt-lookup
   test:referrals
