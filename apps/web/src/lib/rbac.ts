@@ -1674,6 +1674,26 @@ export function canApproveConcession(
 }
 
 /**
+ * May this person date a receipt earlier than today, whatever the school's
+ * back-dating setting says?
+ *
+ * Deliberately the SAME authority as approving a concession: owner, admin,
+ * principal, or an explicit `fees:approve`. Both are "this person may
+ * overrule the counter's normal limits on money", and having two different
+ * answers to that question is how one of them quietly becomes wrong.
+ *
+ * When the school's setting allows back-dating for everybody this is not
+ * consulted — it is the override for when the setting is OFF.
+ */
+export function canBackdateReceipt(
+  session: SessionLike,
+  masters?: MastersState | null,
+  rbac?: RbacState,
+): boolean {
+  return canApproveConcession(session, masters, rbac);
+}
+
+/**
  * May this person record a concession at all?
  *
  * Anyone who can approve one can obviously record one. Beyond that it takes

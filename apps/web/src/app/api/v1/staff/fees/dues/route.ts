@@ -8,6 +8,12 @@ import {
   openDuesFor,
 } from "@/lib/api/v1/staffFees";
 import { TENDER_MODES, formatInr } from "@/lib/fees";
+import { academicYearStartOn } from "@/lib/masters";
+import { canBackdateReceipt } from "@/lib/rbac";
+import {
+  DEFAULT_FEE_BACKDATE_POLICY,
+  earliestCollectionDate,
+} from "@/lib/feeBackdate";
 
 export const runtime = "nodejs";
 
@@ -28,6 +34,9 @@ export async function GET(request: Request) {
     if (!student) throw new ApiError("not_found", "Student not found", 404);
 
     const ay = ctx.session.academicYearCode;
+    const today = new Date().toLocaleDateString("en-CA", {
+      timeZone: "Asia/Kolkata",
+    });
     const siblings = sis.students.filter(
       (s) =>
         s.householdId === student.householdId &&
@@ -57,7 +66,21 @@ export async function GET(request: Request) {
       guardianName: contact.guardianName,
       mobile: contact.mobile,
       academicYearCode: ay,
-      collectionDate: new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }),
+      collectionDate: today,
+      /**
+       * The oldest date this person may put on a receipt.
+       *
+       * Equal to `collectionDate` means same-day only, and the app pins the
+       * field instead of offering a picker. The school's setting and this
+       * person's authority are resolved here so the app cannot offer a date
+       * the server would then refuse.
+       */
+      earliestCollectionDate: earliestCollectionDate({
+        today,
+        sessionStartOn: academicYearStartOn(ay) ?? "",
+        policy: masters?.feeBackdatePolicy ?? DEFAULT_FEE_BACKDATE_POLICY,
+        mayOverride: canBackdateReceipt(ctx.session, masters),
+      }),
       children,
       totalPaise,
       totalLabel: formatInr(totalPaise),

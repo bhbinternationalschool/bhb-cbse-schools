@@ -11,6 +11,7 @@
     "test:standing-discount-change": "npx tsx src/lib/standingDiscountChange.selftest.ts",
     "test:concession-per-due": "npx tsx src/lib/concessionPerDue.selftest.ts",
     "test:concession-ground": "npx tsx src/lib/concessionGround.selftest.ts",
+    "test:fee-backdate": "npx tsx src/lib/feeBackdate.selftest.ts",
     "test:cash-pool-orphans": "npx tsx src/lib/cashPoolOrphans.selftest.ts",
     "test:receipt-lookup": "npx tsx src/lib/receiptLookup.selftest.ts",
     "test:school-receipt-no": "npx tsx src/lib/schoolReceiptNo.selftest.ts",

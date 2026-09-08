@@ -1,6 +1,7 @@
 import { writeAudit } from "@/lib/audit.server";
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { assertPermission, requestMeta, resolveApiAuth } from "@/lib/api/v1/auth";
+import { canBackdateReceipt } from "@/lib/rbac";
 import { assertMobileFeature } from "@/lib/api/v1/mobileAccess.server";
 import {
   assertFeeBookComplete,
@@ -35,6 +36,15 @@ type Body = {
     bankName?: string;
   }[];
   note?: string;
+  /**
+   * The day the money was actually handed over, YYYY-MM-DD.
+   *
+   * Absent means today, which is what this route used to hard-code with no
+   * way to say otherwise — so cash taken on Saturday could not be recorded
+   * as Saturday. Whether a past date is accepted is the school's Masters
+   * setting, decided by the server, never by the app.
+   */
+  collectionDate?: string;
   /** Idempotency key minted by the app; a retry with the same one is a no-op. */
   clientRef?: string;
 };
@@ -177,6 +187,13 @@ export async function POST(request: Request) {
     }
 
     const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+    const collectionDate = (body.collectionDate || "").trim() || today;
+
+    // The school's setting and this person's authority are resolved HERE.
+    // The app sends a date and nothing else; it cannot tell the server that
+    // it is allowed to use it.
+    const mayBackdate = canBackdateReceipt(ctx.session, masters);
+
     const result = collectPayment({
       householdId,
       lines,
@@ -184,8 +201,11 @@ export async function POST(request: Request) {
       cashierName: ctx.session.fullName || "Staff",
       note: (body.note || "").trim().slice(0, 200),
       academicYearCode: ay,
-      collectionDate: today,
-      transactionDate: today,
+      collectionDate,
+      transactionDate: collectionDate,
+      backdatePolicy: masters?.feeBackdatePolicy,
+      mayBackdate,
+      todayIsoOverride: today,
       transactionId: clientRef,
       source: "counter",
       receiptSeries: "F",

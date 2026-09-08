@@ -6,6 +6,11 @@ import {
   normalizeMastersStaffRoster,
 } from "@/lib/foundationMasters";
 import { ensureFoundationFeeStructure202627 } from "@/lib/feeStructureFoundation202627";
+import {
+  DEFAULT_FEE_BACKDATE_POLICY,
+  normalizeFeeBackdatePolicy,
+  type FeeBackdatePolicy,
+} from "@/lib/feeBackdate";
 import { ensurePrimaryFeeStructure202627 } from "@/lib/feeStructurePrimary202627";
 import { ensureMiddleFeeStructure202627 } from "@/lib/feeStructureMiddle202627";
 import { ensureSecondaryFeeStructure202627 } from "@/lib/feeStructureSecondary202627";
@@ -412,6 +417,8 @@ export type MastersState = {
   lateFeeRules: LateFeeRule[];
   /** School rules for mid-year join billing */
   midYearFeePolicy: MidYearFeePolicy;
+  /** May counter staff date a receipt earlier than today? See lib/feeBackdate. */
+  feeBackdatePolicy: FeeBackdatePolicy;
   students: DemoStudent[];
   specialFees: SpecialFee[];
   specialFeeAssignments: SpecialFeeAssignment[];
@@ -1367,6 +1374,7 @@ export function defaultMasters(): MastersState {
     installments,
     lateFeeRules,
     midYearFeePolicy: DEFAULT_MID_YEAR_FEE_POLICY,
+    feeBackdatePolicy: DEFAULT_FEE_BACKDATE_POLICY,
     students,
     specialFees,
     specialFeeAssignments: [],
@@ -1403,6 +1411,7 @@ export function emptyMastersShell(): MastersState {
     installments: [],
     lateFeeRules: [],
     midYearFeePolicy: DEFAULT_MID_YEAR_FEE_POLICY,
+    feeBackdatePolicy: DEFAULT_FEE_BACKDATE_POLICY,
     students: [],
     specialFees: [],
     specialFeeAssignments: [],
@@ -1883,6 +1892,7 @@ function ensureFeeSetup(state: MastersState): MastersState {
   next = {
     ...next,
     midYearFeePolicy: normalizeMidYearFeePolicy(next.midYearFeePolicy),
+    feeBackdatePolicy: normalizeFeeBackdatePolicy(next.feeBackdatePolicy),
   };
   next = {
     ...next,
@@ -2961,6 +2971,22 @@ export function normalizeAcademicYearCode(code: string): string {
  * wrong date here either cuts a family's discount off early or extends it,
  * and both are worse than leaving the grant as it was.
  */
+/**
+ * 1 April of a session — the mirror of `academicYearEndOn`.
+ *
+ * Used as the floor for back-dating a receipt: a payment dated before its own
+ * session lands in a book that has already been closed and reported, and will
+ * never reconcile against it.
+ */
+export function academicYearStartOn(code: string): string | null {
+  const norm = normalizeAcademicYearCode(code);
+  const m = norm.match(/^(20\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const startYear = Number(m[1]);
+  if (Number(m[2]) !== (startYear + 1) % 100) return null;
+  return `${startYear}-04-01`;
+}
+
 export function academicYearEndOn(code: string): string | null {
   const norm = normalizeAcademicYearCode(code);
   const m = norm.match(/^(20\d{2})-(\d{2})$/);
