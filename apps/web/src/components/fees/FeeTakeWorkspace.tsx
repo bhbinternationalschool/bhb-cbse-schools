@@ -126,6 +126,8 @@ import { FeeReportsPanel } from "@/components/fees/FeeFinancePanels";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { TransportRiderChip } from "@/components/transport/TransportRiderChip";
 import { openWaMe } from "@/lib/waMe";
+import { ReceiptWaStatus } from "@/components/fees/ReceiptWaStatus";
+import { ReceiptDeliveryPanel } from "@/components/fees/ReceiptDeliveryPanel";
 import { ReceiptRepairDialog } from "@/components/fees/ReceiptRepairDialog";
 
 /**
@@ -205,6 +207,7 @@ function FeeAgreementPdfLogo({ className = "" }: { className?: string }) {
 type Tab =
   | "collect"
   | "receipts"
+  | "delivery"
   | "cheques"
   | "manual"
   | "paylinks"
@@ -529,6 +532,7 @@ export function FeeTakeWorkspace() {
     const allowed: Tab[] = [
       "collect",
       "receipts",
+      "delivery",
       "cheques",
       "manual",
       "paylinks",
@@ -1575,6 +1579,24 @@ export function FeeTakeWorkspace() {
           : `Collected ${result.voucher.receiptNo}`) + futureConcessionMsg,
     );
     setPreviewReceiptId(result.voucher.id);
+
+    // Tell the family, without the cashier having to remember.
+    //
+    // Fired after the receipt is on screen and deliberately NOT awaited: the
+    // counter must not wait on Meta to serve the next parent. The server is
+    // idempotent per receipt, so a retry cannot message a family twice, and
+    // a failure is recorded there rather than thrown at the desk — the money
+    // is already collected and the receipt already printed.
+    void fetch("/api/fees/receipt-wa", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ voucherId: result.voucher.id }),
+    })
+      .then((r) => r.json())
+      .then((r: { sent?: boolean; reason?: string }) => {
+        if (!r?.sent && r?.reason) flash(`Receipt made · WhatsApp: ${r.reason}`);
+      })
+      .catch(() => undefined);
   }
 
   async function onSendUpiLink() {
@@ -1729,6 +1751,14 @@ export function FeeTakeWorkspace() {
             size="md"
           >
             Receipts
+          </ModuleTabButton>
+          <ModuleTabButton
+            active={tab === "delivery"}
+            onClick={() => setTab("delivery")}
+            tone="teal"
+            size="md"
+          >
+            Delivered
           </ModuleTabButton>
           <ModuleTabButton
             active={tab === "cheques"}
@@ -2258,6 +2288,8 @@ export function FeeTakeWorkspace() {
             />
           )}
         </div>
+      ) : tab === "delivery" ? (
+        <ReceiptDeliveryPanel onOpenReceipt={setPreviewReceiptId} />
       ) : tab === "receipts" ? (
         <ReceiptsPanel
           receipts={receipts}
@@ -4156,6 +4188,14 @@ function ReceiptPreviewModal({
               {waError}
             </p>
           ) : null}
+          {/*
+            The receipt now goes out on its own, so the question at this
+            point is no longer "shall I send it" but "did they get it".
+          */}
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-[var(--muted)]">WhatsApp:</span>
+            <ReceiptWaStatus voucherId={voucher.id} />
+          </div>
           {waNotice ? (
             <p className="text-xs font-semibold text-[#128C7E]">{waNotice}</p>
           ) : null}

@@ -587,6 +587,35 @@ const SEED_DEFS: SeedDef[] = [
     footerHi: "शुल्क काउंटर · इसे अपने रिकॉर्ड के लिए रखें",
   },
   {
+    /**
+     * The receipt WITH the PDF attached.
+     *
+     * A separate family rather than a header added to `fees_receipt`, and
+     * that is the whole point: editing an approved template sends it back to
+     * PENDING at Meta, and `fees_receipt` is the one template that finally
+     * works. So this is submitted alongside, and the sender prefers it only
+     * once Meta has approved it in BOTH languages — until then receipts keep
+     * going out as text, and nothing regresses.
+     *
+     * The body also fixes a line that was never true: `fees_receipt` says
+     * "your receipt PDF is attached above" while declaring no header, so it
+     * promised parents an attachment it could not carry.
+     */
+    familyKey: "fees_receipt_doc",
+    nameEn: "Fee receipt with PDF",
+    nameHi: "शुल्क रसीद (PDF सहित)",
+    module: "fees",
+    category: "UTILITY",
+    metaName: "bhb_fee_receipt_pdf",
+    headerFormat: "DOCUMENT",
+    bodyEn:
+      "Namaste 🙏 Thank you for your payment!\n\n✅ Receipt no: *{{receiptNo}}*\n👧 Student: {{childName}}\n💰 Paid: *{{feeDue}}*\n📅 On: {{paidOn}}\n\nThe signed receipt is attached above as a PDF, and is also saved in the parent app under Receipts.\n\nWith thanks, *{{schoolName}}* 🌼",
+    bodyHi:
+      "नमस्ते 🙏 भुगतान के लिए धन्यवाद!\n\n✅ रसीद संख्या: *{{receiptNo}}*\n👧 छात्र: {{childName}}\n💰 भुगतान: *{{feeDue}}*\n📅 दिनांक: {{paidOn}}\n\nहस्ताक्षरित रसीद ऊपर PDF के रूप में संलग्न है, और पैरेंट ऐप में \"Receipts\" में भी सुरक्षित है।\n\nसधन्यवाद, *{{schoolName}}* 🌼",
+    footerEn: "Fee counter · Keep this for your records",
+    footerHi: "शुल्क काउंटर · इसे अपने रिकॉर्ड के लिए रखें",
+  },
+  {
     familyKey: "fees_marketing_carousel",
     nameEn: "Fee offer carousel",
     nameHi: "शुल्क ऑफर कैरोसेल",

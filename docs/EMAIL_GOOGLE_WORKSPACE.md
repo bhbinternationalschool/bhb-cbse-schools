@@ -1,6 +1,42 @@
 # Email channel — Google Workspace (Gmail API)
 
-**Status 2026-08-19:** code shipped; **not connected** until the one-time steps below are done. Until then every "Send email" button is disabled and the UI falls back to Copy.
+**Status 2026-09-08:** code shipped and now **keyless**; still **not connected** until the two steps below are done. Until then every "Send email" button is disabled and the UI falls back to Copy.
+
+**No service-account key is used, or can be.** This organisation enforces
+`constraints/iam.disableServiceAccountKeyCreation`, so `gcloud iam
+service-accounts keys create` is refused — correctly: a downloadable key that
+can send mail as any mailbox in the domain is exactly what that policy exists
+to prevent. Instead Cloud Run asks IAM Credentials to sign the JWT *as*
+`erp-mail-sender`, which it may do because the runtime service account holds
+`roles/iam.serviceAccountTokenCreator` on it. The signing key never leaves
+Google: nothing to download, rotate, leak, or delete from a laptop.
+`GMAIL_SA_KEY_JSON` is still honoured when present, for local development or a
+project whose policy allows keys.
+
+**What is left (both are one-time):**
+
+1. **Grant the runtime permission to sign as the mailer** — GCP owner:
+   ```bash
+   gcloud iam service-accounts add-iam-policy-binding \
+     erp-mail-sender@school-erp-prod-493619.iam.gserviceaccount.com \
+     --member="serviceAccount:287837565122-compute@developer.gserviceaccount.com" \
+     --role="roles/iam.serviceAccountTokenCreator" \
+     --project=school-erp-prod-493619
+   ```
+2. **Domain-wide delegation** — Workspace super-admin, at **admin.google.com**
+   (NOT the Cloud console): Security → Access and data control → API controls →
+   Manage Domain-wide Delegation → Add new. Client ID
+   **`111598348268367566988`** (the service account's numeric uniqueId — its
+   email address will not work here), scope
+   `https://www.googleapis.com/auth/gmail.send`.
+
+Already done: the `erp-mail-sender` service account exists, the Gmail API is
+enabled, and `GMAIL_SA_KEY_JSON` is bound to Cloud Run (holding `{}`, which the
+keyless path ignores).
+
+---
+
+### The original key-based instructions, kept for reference
 
 **How it works:** the ERP sends *as* a Workspace mailbox chosen per purpose (Comms → **Email**): Admissions (default `admissions@`), Fees & receipts (`accounts@`), Reports & leadership (`principal@`), General office (`office@`). A Google service account with domain-wide delegation impersonates that mailbox and calls `gmail.users.messages.send`; sent mail appears in the mailbox's Sent folder, replies land in its inbox, DKIM/SPF are Google's. No third-party provider, no cost. Every send is logged (Comms → Email → Recent emails).
 

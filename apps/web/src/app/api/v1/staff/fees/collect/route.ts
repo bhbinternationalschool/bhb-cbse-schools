@@ -2,6 +2,7 @@ import { writeAudit } from "@/lib/audit.server";
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { assertPermission, requestMeta, resolveApiAuth } from "@/lib/api/v1/auth";
 import { canBackdateReceipt } from "@/lib/rbac";
+import { sendFeeReceiptWhatsApp } from "@/lib/feeReceiptAutoWa.server";
 import { assertMobileFeature } from "@/lib/api/v1/mobileAccess.server";
 import {
   assertFeeBookComplete,
@@ -222,6 +223,19 @@ export async function POST(request: Request) {
       );
     }
 
+    // The family hears about it now, without anybody pressing anything.
+    // AFTER the push, so the receipt is durable before the parent is told it
+    // exists; awaited, so a failure is recorded rather than lost when the
+    // request ends; and it never throws — the money is already recorded and
+    // a WhatsApp outage must not turn a good receipt into an error.
+    const autoWa = await sendFeeReceiptWhatsApp({
+      voucher: result.voucher,
+      mobile: householdContact(sis, householdId).mobile,
+      studentNames: [...new Set(lines.map((l) => l.studentId))]
+        .map((id) => sis.students.find((s) => s.id === id)?.fullName || "")
+        .filter(Boolean),
+    });
+
     const meta = requestMeta(request);
     await writeAudit({
       session: ctx.session,
@@ -255,6 +269,14 @@ export async function POST(request: Request) {
       totalPaise: total,
       totalLabel: formatInr(total),
       guardianName: householdContact(sis, householdId).guardianName,
+      /**
+       * So the counter can SEE whether the family was told, instead of
+       * assuming. A receipt that could not be messaged is still a valid
+       * receipt — the app shows the reason rather than an error.
+       */
+      whatsapp: autoWa.sent
+        ? { sent: true as const }
+        : { sent: false as const, reason: autoWa.reason },
       lines: lines.map((l) => ({
         label: l.label,
         studentName: l.studentName,

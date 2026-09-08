@@ -13,6 +13,12 @@
  * rows. OTP sends are deliberately not logged here (one-time codes have
  * no business being stored in a searchable table).
  */
+import {
+  deliveryLaddersFor,
+  ladderStage,
+  stageLabel,
+  type WaDeliveryStage,
+} from "@/lib/waDeliveryStatus.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { findHouseholdByWaMobile } from "@/lib/waSisBotServer";
 import { waNormalizeLocal10 } from "@/lib/waSend";
@@ -28,6 +34,18 @@ export type HouseholdLogEntry = {
   templateName: string;
   preview: string;
   status: "sent" | "failed";
+  /**
+   * How far WhatsApp actually got — the tick.
+   *
+   * `status` above only records whether the school handed the message to
+   * Meta. Whether it reached the phone, and whether anybody opened it, lives
+   * in `wa_message_delivery` and was never shown anywhere. "sent" and "read"
+   * are very different answers to "did they get the receipt".
+   */
+  deliveryStage?: WaDeliveryStage;
+  deliveryLabel?: string;
+  deliveredAt?: string | null;
+  readAt?: string | null;
   error: string | null;
   by: string;
   at: string;
@@ -128,7 +146,14 @@ export async function getHouseholdMessageTimeline(opts: {
     if (error) {
       console.warn("[householdMessageLog] wa fetch failed", error.message);
     } else {
-      for (const r of data || []) {
+      const waRows = data || [];
+      const ladders = await deliveryLaddersFor(
+        waRows.map((r) => String(r.wa_message_id || "")),
+      );
+      for (const r of waRows) {
+        const ladder = ladders.get(String(r.wa_message_id || ""));
+        const stage: WaDeliveryStage =
+          r.status === "failed" ? "failed" : ladderStage(ladder);
         entries.push({
           id: String(r.id),
           channel: "wa",
@@ -138,7 +163,11 @@ export async function getHouseholdMessageTimeline(opts: {
           templateName: String(r.template_name || ""),
           preview: String(r.preview || ""),
           status: r.status === "failed" ? "failed" : "sent",
-          error: r.error ? String(r.error) : null,
+          deliveryStage: stage,
+          deliveryLabel: stageLabel(stage),
+          deliveredAt: ladder?.deliveredAt ?? null,
+          readAt: ladder?.readAt ?? null,
+          error: r.error ? String(r.error) : (ladder?.error ?? null),
           by: "School",
           at: String(r.created_at),
         });
