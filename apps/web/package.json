@@ -80,6 +80,8 @@
     "test:ledger": "npx tsx src/lib/ledger/ledger.selftest.ts",
     "test:wa-templates-automation": "npx tsx src/lib/waTemplatesAutomation.selftest.ts",
     "test:wa-template-seeds": "npx tsx src/lib/waTemplateSeeds.selftest.ts",
+    "test:concession-review-ai": "npx tsx src/lib/concessionReviewAi.selftest.ts",
+    "test:collections-weekly-ai": "npx tsx src/lib/collectionsWeeklyAi.selftest.ts",
     "test:rbac-scope": "npx tsx src/lib/rbacScope.selftest.ts",
     "test:rbac-user-grants": "npx tsx src/lib/rbacUserGrants.selftest.ts",
     "test:visitor-gate": "npx tsx src/lib/visitorGate.selftest.ts",

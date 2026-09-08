@@ -49,6 +49,8 @@ import {
 } from "@/lib/feeRecoveryTasks";
 import type { HoldCode } from "@/lib/types";
 import { paymentLikelihood } from "@/lib/collectionsAi";
+import { AGEING_BAND_LABEL, type AgeingBand } from "@/lib/collectionsWeeklyAi";
+import { CollectionsWeeklyNoteCard } from "@/components/fees/CollectionsWeeklyNoteCard";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 import { openWaMe } from "@/lib/waMe";
 
@@ -61,6 +63,14 @@ const STAGE_FILTERS: { value: "" | OverdueStage; label: string }[] = [
   { value: "S0", label: "S0 Upcoming" },
 ];
 
+/** Which ageing band a family's oldest overdue due sits in. */
+function ageingBandOf(r: { overdueDays: number }): AgeingBand {
+  if (r.overdueDays < 0) return "notDue";
+  if (r.overdueDays > 90) return "over90";
+  if (r.overdueDays > 30) return "d31to90";
+  return "d0to30";
+}
+
 export function DefaultersPlaybook() {
   const session = useDemoSession();
   const ay = session.academicYearCode;
@@ -71,6 +81,10 @@ export function DefaultersPlaybook() {
   const [query, setQuery] = useState("");
   const [classId, setClassId] = useState("");
   const [stageFilter, setStageFilter] = useState<"" | OverdueStage>("");
+  // The ageing view: three quarters of what the school was owed on 2026-09-08
+  // sat past ninety days, and nothing showed it. A band is a filter, so the
+  // headline number becomes the list of families behind it.
+  const [bandFilter, setBandFilter] = useState<"" | AgeingBand>("");
   const [includeUpcoming, setIncludeUpcoming] = useState(false);
   const [rosterMode, setRosterMode] = useState<"active" | "inactive">(
     "active",
@@ -138,6 +152,7 @@ export function DefaultersPlaybook() {
     const q = query.trim().toLowerCase();
     return rows.filter((r) => {
       if (stageFilter && r.stage !== stageFilter) return false;
+      if (bandFilter && ageingBandOf(r) !== bandFilter) return false;
       if (classId && r.student.classId !== classId) return false;
       if (!q) return true;
       return (
@@ -146,7 +161,7 @@ export function DefaultersPlaybook() {
         r.classLabel.toLowerCase().includes(q)
       );
     });
-  }, [rows, query, classId, stageFilter]);
+  }, [rows, query, classId, stageFilter, bandFilter]);
 
   const selected =
     filtered.find((r) => r.studentId === selectedId) ??
@@ -243,6 +258,23 @@ export function DefaultersPlaybook() {
     }
     return { count: filtered.length, amount, byStage };
   }, [filtered]);
+
+  // Ageing over the UNFILTERED roster, so the chips read as the school's
+  // position and a click narrows the list rather than the chips.
+  const ageing = useMemo(() => {
+    const acc: Record<AgeingBand, { amount: number; children: number }> = {
+      over90: { amount: 0, children: 0 },
+      d31to90: { amount: 0, children: 0 },
+      d0to30: { amount: 0, children: 0 },
+      notDue: { amount: 0, children: 0 },
+    };
+    for (const r of rows) {
+      const b = ageingBandOf(r);
+      acc[b].amount += r.overdueAmountPaise || r.openAmountPaise;
+      acc[b].children += 1;
+    }
+    return acc;
+  }, [rows]);
 
   function flash(msg: string) {
     setNotice(msg);
@@ -497,6 +529,34 @@ export function DefaultersPlaybook() {
           {notice}
         </p>
       ) : null}
+
+      <CollectionsWeeklyNoteCard />
+
+      <div className="mt-4 flex flex-wrap items-center gap-2 text-[12px]">
+        <span className="text-[var(--muted)]">Ageing</span>
+        {(["over90", "d31to90", "d0to30", "notDue"] as AgeingBand[]).map((b) => {
+          const on = bandFilter === b;
+          const v = ageing[b];
+          if (!v.children && !on) return null;
+          return (
+            <button
+              key={b}
+              type="button"
+              onClick={() => setBandFilter(on ? "" : b)}
+              className={`rounded-full border px-3 py-1 tabular-nums ${
+                on
+                  ? "border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]"
+                  : b === "over90"
+                    ? "border-[rgba(180,35,24,0.35)] bg-[rgba(180,35,24,0.06)] text-[var(--brand-deep)]"
+                    : "border-[var(--border)] bg-[var(--card)] text-[var(--brand-deep)]"
+              }`}
+              title={on ? "Show all" : `Only families with dues ${AGEING_BAND_LABEL[b].toLowerCase()}`}
+            >
+              {AGEING_BAND_LABEL[b]} · <span className="font-semibold">{formatInrFromPaise(v.amount)}</span> · {v.children}
+            </button>
+          );
+        })}
+      </div>
 
       <div className="mt-4 flex flex-wrap gap-3 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3 text-sm">
         <div>
@@ -928,7 +988,15 @@ export function DefaultersPlaybook() {
                             void navigator.clipboard
                               .writeText(aiDraft.callScript)
                               .then(
-                                () => flash("Call script copied"),
+                                () => {
+                                  flash("Call script copied");
+                                  // Copying the script is accepting the draft
+                                  // just as copying the message is.
+                                  if (aiDraft.generationId) {
+                                    reportAiOutcome({ ids: [aiDraft.generationId], outcome: "accepted", targetType: "fee_defaulter", targetId: selectedId ?? "" });
+                                    setAiDraft({ ...aiDraft, generationId: undefined });
+                                  }
+                                },
                                 () => setError("Could not copy"),
                               )
                           }

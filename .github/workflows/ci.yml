@@ -215,6 +215,8 @@ jobs:
           npm run test:erp-chat
           npm run test:wa-templates-automation
           npm run test:wa-template-seeds
+          npm run test:concession-review-ai
+          npm run test:collections-weekly-ai
           npm run test:fee-student-search
 
       - name: Test — admissions village market
