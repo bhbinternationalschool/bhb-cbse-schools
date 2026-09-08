@@ -977,7 +977,7 @@ class _PassSheetState extends State<_PassSheet> {
 
   /// Play's own product records, when this is the Play build. Null until the
   /// store answers; empty when it cannot.
-  Map<String, ProductDetails>? _playProducts;
+  PlayProducts? _playProducts;
   PlayBilling? _play;
 
   @override
@@ -1027,15 +1027,21 @@ class _PassSheetState extends State<_PassSheet> {
     if (AppConfig.playBilling) {
       // Play build: the store takes the money and the outcome arrives on the
       // purchase stream, not from this call.
-      final product = _playProducts?[plan.code];
+      final catalogue = _playProducts;
+      final product = catalogue?.found[plan.code];
       if (product == null) {
         Haptics.warning();
         if (mounted) {
           setState(() => _buying = null);
+          // Name the actual fault. "Not ready, try again" sent somebody
+          // hunting a phone problem when the answer was a product that had
+          // never been set Active in Play Console.
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
+            SnackBar(
+              duration: const Duration(seconds: 8),
               content: Text(
-                "Google Play is not ready on this phone. Please try again in a moment.",
+                catalogue?.problem ??
+                    "Still asking Google Play about the passes. Try again in a moment.",
               ),
             ),
           );
