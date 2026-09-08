@@ -89,9 +89,19 @@ else
   # string literals are plain UTF-8, so grepping is enough for a gate. It is
   # slightly over-inclusive (it also sees permissions named on components),
   # which errs on the side of failing — build the apk variant to see exactly.
-  RAW=$(unzip -p "$OUT" base/manifest/AndroidManifest.xml)
-  PKG=$(echo "$RAW" | grep -a -o -E 'school\.bhbinternational\.[a-z_]+' | head -1)
-  PERMS=$(echo "$RAW" | grep -a -o -E 'android\.permission\.[A-Z_]+' | sort -u)
+  # Read the manifest straight from the archive each time. Holding it in a
+  # shell variable looked simpler and was wrong: this is protobuf, command
+  # substitution truncates at the first NUL, and the gate then reports a
+  # DIFFERENT permission list depending on where the bytes fall. A safety
+  # check that is not deterministic is not a safety check.
+  MF() { unzip -p "$OUT" base/manifest/AndroidManifest.xml; }
+  PKG=$(MF | grep -a -o -E 'school\.bhbinternational\.[a-z_]+' | head -1)
+  # Every permission namespace, not just android.permission.*: in_app_purchase
+  # adds `com.android.vending.BILLING` and Firebase adds two under
+  # com.google.android.c2dm, none of which a pattern anchored on
+  # `android.permission.` can see. A gate blind to a namespace is not a gate.
+  PERMS=$( { MF | grep -a -o -E '[a-z][a-z0-9_.]*\.permission\.[A-Z_]+';
+             MF | grep -a -o -E 'com\.android\.vending\.[A-Z_]+'; } | sort -u)
 fi
 
 echo
