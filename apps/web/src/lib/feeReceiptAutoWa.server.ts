@@ -30,6 +30,7 @@ import { resolveHouseholdByMobileServer } from "@/lib/parentHousehold.server";
 import { logHouseholdWaSend } from "@/lib/householdMessageLog.server";
 import { sendWaWithFailover, type WaTemplateComponent } from "@/lib/waSend";
 import {
+  normalizeWaTemplatesState,
   resolveTemplateForSend,
   templateFamilyReady,
   templateVariablePositions,
@@ -158,10 +159,23 @@ export async function sendFeeReceiptWhatsApp(input: {
       return { sent: false, reason: "Already sent", alreadySent: true };
     }
 
-    const { state } = await fetchServerBlob<WaTemplatesState>("wa_templates_state");
-    if (!state) {
+    const { state: rawState } = await fetchServerBlob<WaTemplatesState>(
+      "wa_templates_state",
+    );
+    if (!rawState) {
       return { sent: false, reason: "Template registry unavailable" };
     }
+    /*
+      NORMALISE, do not read the blob raw.
+
+      The stored registry is whatever was last saved, and a template added to
+      the catalogue since then is simply not in it — `normalizeWaTemplatesState`
+      is what merges the catalogue back in. Reading raw is why the PDF receipt
+      would never have attached: `fees_receipt_doc` is approved at Meta in both
+      languages, and absent from the saved blob, so the family read as not
+      ready and every receipt quietly fell back to the text-only template.
+    */
+    const state = normalizeWaTemplatesState(rawState);
 
     const found = await resolveHouseholdByMobileServer(mobile);
     const household = found?.household ?? null;

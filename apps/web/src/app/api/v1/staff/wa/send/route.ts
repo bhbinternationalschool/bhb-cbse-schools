@@ -8,6 +8,7 @@ import { resolveHouseholdByMobileServer } from "@/lib/parentHousehold.server";
 import { logHouseholdWaSend } from "@/lib/householdMessageLog.server";
 import { sendWaWithFailover } from "@/lib/waSend";
 import {
+  normalizeWaTemplatesState,
   resolveTemplateForSend,
   templateVariablePositions,
   type WaTemplatesState,
@@ -113,10 +114,16 @@ export async function POST(request: Request) {
     let variables: Record<string, string> | undefined;
 
     if (familyKey) {
-      const { state } = await fetchServerBlob<WaTemplatesState>("wa_templates_state");
-      if (!state) {
+      const { state: rawState } = await fetchServerBlob<WaTemplatesState>(
+        "wa_templates_state",
+      );
+      if (!rawState) {
         throw new ApiError("server_error", "WhatsApp templates unavailable", 503);
       }
+      // Same reason as the receipt sender: the saved blob does not contain a
+      // template added to the catalogue since it was written, and normalising
+      // is what merges the catalogue back in.
+      const state = normalizeWaTemplatesState(rawState);
       // The FAMILY's language. There is deliberately no way for the app to
       // ask for a different one.
       const language = waTemplateLanguageFor(household ?? undefined);
