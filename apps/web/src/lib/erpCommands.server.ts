@@ -142,6 +142,7 @@ import {
   looksLikeBareName,
   followUpCommandFor,
   followUpIsFresh,
+  isFollowUpPronoun,
   parsePickNumber,
   pickIsFresh,
   type PickOption,
@@ -239,6 +240,15 @@ type CommandStore = {
     string,
     { at: string; commandId: string; originalText: string; options: PickOption[] }
   >;
+  /**
+   * The last single child the desk answered about, per staff member, so
+   * "uska payment link bhejo" straight after knows who "uska" is.
+   *
+   * An id and a name, nothing else — the reading itself is never kept.
+   * It expires on the same short window as the numbered lists, because a
+   * back-reference to something said an hour ago is a guess, not memory.
+   */
+  lastStudent?: Record<string, { at: string; studentId: string; name: string }>;
 };
 
 let memoryStore: CommandStore = {
@@ -348,6 +358,19 @@ function parseTemplatesByLang(
  * old one, because a number that could answer either question answers
  * neither.
  */
+/**
+ * Say whose record this is when the child came from the previous answer
+ * rather than from what was just typed.
+ *
+ * A carried-over name is the one thing here a reader cannot check by
+ * looking at their own message, and on a write it decides which family
+ * gets messaged. It is never left implicit.
+ */
+function withCarriedNote(carriedFrom: string, body: string): string {
+  if (!carriedFrom) return body;
+  return `_Using ${carriedFrom}, from your last question._\n\n${body}`;
+}
+
 async function rememberPick(
   actor: string,
   commandId: string,
@@ -560,6 +583,8 @@ export async function handleErpStaffCommand(
   let pinnedStudentId: string | null = null;
   let pinnedSection: SectionMatch | null = null;
   let pinnedRouteId: string | null = null;
+  /** Set when the child came from the previous answer, not from this text. */
+  let carriedFrom = "";
 
   // Paused: answer anything command-shaped without spending a model call,
   // and leave everything else to the bots that were going to answer it.
@@ -913,6 +938,24 @@ export async function handleErpStaffCommand(
     const asked = (parsed.fields.student || text).trim();
     const q = parseStudentFeesQuery(`${asked} fees`) ?? { name: asked };
     const sis = loadSis();
+    // "uska payment link bhejo" — a follow-up that points back instead of
+    // naming the child. Only when the desk answered about exactly one
+    // child recently, and only when the whole reference is pronouns: a
+    // real name is never taken as a back-reference.
+    if (!pinnedStudentId && isFollowUpPronoun(asked)) {
+      const last = (store.lastStudent ?? {})[actor];
+      if (last && pickIsFresh(last.at, nowMs)) {
+        const still = sis.students.find((st) => st.id === last.studentId);
+        if (still) {
+          pinnedStudentId = still.id;
+          // Never silent about whose record this is. The confirm card for
+          // a write names the child too, but a reading would otherwise
+          // just appear, and the reader has to be able to catch a wrong
+          // carry-over before acting on it.
+          carriedFrom = still.fullName;
+        }
+      }
+    }
     const ay = session.academicYearCode;
     let sectionId: string | null = null;
     if (q.section) {
@@ -984,6 +1027,21 @@ export async function handleErpStaffCommand(
     }
     resolved.studentId = student.id;
     resolved.studentName = student.fullName;
+    // So the next message can say "uska" and mean this child.
+    {
+      const st = await readStore();
+      await writeStore({
+        ...st,
+        lastStudent: {
+          ...(st.lastStudent ?? {}),
+          [actor]: {
+            at: new Date().toISOString(),
+            studentId: student.id,
+            name: student.fullName,
+          },
+        },
+      });
+    }
     // Fees detail (concession policy names, sibling line) is a fee-desk
     // reading. Student details unmask the parents' mobiles for the office
     // and for the child's own class teacher, who has to be able to call.
@@ -2000,7 +2058,7 @@ export async function handleErpStaffCommand(
     };
     await writeStore(store);
     const ids = confirmButtonIds(token);
-    const body = `${summary}\n\nRun this?`;
+    const body = withCarriedNote(carriedFrom, `${summary}\n\nRun this?`);
     return {
       handled: true,
       audience: "erp_command_confirm",
@@ -2056,7 +2114,11 @@ export async function handleErpStaffCommand(
     voice: fromVoice,
     channel: inbound.channel,
   });
-  return { handled: true, audience: `erp_command_${command.id}`, text: reply.text };
+  return {
+    handled: true,
+    audience: `erp_command_${command.id}`,
+    text: withCarriedNote(carriedFrom, reply.text),
+  };
 }
 
 /**
@@ -2097,7 +2159,7 @@ async function runReadCommand(
     case "homework_posted":
       return plain(homeworkPosted(resolved, session, todayIso));
     case "bus_manifest":
-      return plain(busManifest(resolved, session, todayIso));
+      return busManifest(resolved, session, todayIso);
     case "student_details":
       return plain(studentDetails(resolved, session));
     case "school_snapshot":
@@ -2420,7 +2482,7 @@ async function busManifest(
   resolved: Record<string, string>,
   session: DemoSession,
   todayIso: string,
-): Promise<string> {
+): Promise<ReadReply> {
   await ensureTransportHydratedServer();
   const state = loadTransport();
   const masters = loadMasters();
@@ -2430,12 +2492,26 @@ async function busManifest(
   const routes = (state.routes ?? []).filter((r) => r.isActive !== false);
   const matches = matchTransportRoutes(routes, asked);
   if (matches.length !== 1) {
-    return formatRouteNotFound(
-      resolved.route || "",
-      (matches.length ? matches : routes)
-        .slice(0, 10)
-        .map((r) => [r.busNo ? `Bus ${r.busNo}` : "", r.code, r.name].filter(Boolean).join(" · ")),
-    );
+    // "transport" names no route at all, and that is a normal thing to
+    // type. Numbering the routes turns a dead end into one tap — the same
+    // numbering every other list in the desk uses.
+    const options = (matches.length ? matches : routes).slice(0, 10);
+    return {
+      text: formatRouteNotFound(
+        resolved.route || "",
+        options.map((r) =>
+          [r.busNo ? `Bus ${r.busNo}` : "", r.code, r.name].filter(Boolean).join(" · "),
+        ),
+      ),
+      picks: routePicks(
+        options.map((r) => ({
+          id: r.id,
+          label: [r.busNo ? `Bus ${r.busNo}` : "", r.code, r.name].filter(Boolean).join(" · "),
+        })),
+        "bus_manifest",
+        resolved.route || "",
+      ),
+    };
   }
   const route = matches[0]!;
   const live = (state.assignments ?? []).filter(
@@ -2476,7 +2552,7 @@ async function busManifest(
   const driverStaff = vehicle?.driverStaffId
     ? (masters.staff ?? []).find((st) => st.id === vehicle.driverStaffId)
     : undefined;
-  return formatBusManifestReply({
+  return plain(formatBusManifestReply({
     routeLabel: [route.busNo ? `Bus ${route.busNo}` : route.code, route.name].filter(Boolean).join(" · "),
     vehicleReg: route.vehicleReg || vehicle?.registrationNo || "",
     driver: {
@@ -2488,7 +2564,7 @@ async function busManifest(
     stops,
     markedCount: riders.filter((a) => marks.has(a.studentId)).length,
     formatMobile: maskMobile10,
-  });
+  }));
 }
 
 async function homeworkPosted(

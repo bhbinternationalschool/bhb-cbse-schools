@@ -961,8 +961,10 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
       source: "local",
     };
   }
+  // "" is a real answer here — a transport question with no route named.
+  // The desk lists the routes with numbers instead of going quiet.
   const busQ = parseBusManifestQuery(t);
-  if (busQ) {
+  if (busQ !== null) {
     return { commandId: "bus_manifest", fields: { text: busQ, date: "" }, source: "local" };
   }
   const hwQ = parseHomeworkQuery(t);
@@ -2692,10 +2694,70 @@ export function parseStudentDetailsQuery(text: string): string | null {
 }
 
 const BUS_WORDS =
-  /(?<![\p{L}\p{M}\p{N}])(bus|buses|route|routes|van|manifest|बस|रूट)(?![\p{L}\p{M}\p{N}])/iu;
+  /(?<![\p{L}\p{M}\p{N}])(bus|buses|route|routes|van|manifest|transport|बस|बसें|रूट|वैन|ट्रांसपोर्ट|परिवहन)(?![\p{L}\p{M}\p{N}])/iu;
 
+// The Hindi half of this list used to hold only बच्चे / सूची / छात्र, so
+// "बस 2 में कौन है" — the most natural way to ask — matched nothing.
 const BUS_ASK_WORDS =
-  /(?<![\p{L}\p{M}\p{N}])(manifest|list|students?|children|riders?|kaun|kon|who|which|sawari|बच्चे|सूची|छात्र|details?|stops?)(?![\p{L}\p{M}\p{N}])/iu;
+  /(?<![\p{L}\p{M}\p{N}])(manifest|list|students?|children|riders?|kaun|kon|who|which|sawari|बच्चे|बच्चों|सूची|लिस्ट|छात्र|छात्रों|कौन|सवारी|विवरण|details?|stops?)(?![\p{L}\p{M}\p{N}])/iu;
+
+/**
+ * The route someone named: "route 2", "bus no 3", "बस 2", "van 1".
+ *
+ * Returns "" when a transport question names no route at all — the caller
+ * then asks which one, with the routes numbered, rather than saying it did
+ * not understand. Null means "not about a route".
+ *
+ * Skips a captured word that is itself a bus word, which is how
+ * "bus route 2 details" used to come back as the route *"route"*.
+ */
+function extractRouteRef(t: string): string | null {
+  // "bus route 2" names one route, not a route called "route". Collapsing
+  // a run of bus words to the last one makes the single match below see
+  // "route 2"; matching left to right instead returned *"route"*.
+  const collapsed = t.replace(
+    /(?<![\p{L}\p{M}\p{N}])(?:(?:bus|buses|route|routes|van|transport|बस|बसें|रूट|वैन|ट्रांसपोर्ट|परिवहन)(?![\p{L}\p{M}\p{N}])\s+)+(?=(?:bus|route|van|बस|रूट|वैन)(?![\p{L}\p{M}\p{N}]))/giu,
+    "",
+  );
+  // The keyword needs its own right-hand boundary, or "buses" reads as
+  // bus + route "es".
+  const re =
+    /(?<![\p{L}\p{M}\p{N}])(?:bus|route|van|बस|रूट|वैन)(?![\p{L}\p{M}\p{N}])\s*(?:no\.?|number|#|नंबर)?\s*([\p{L}\p{N}][\p{L}\p{N}-]{0,15})(?![\p{L}\p{M}\p{N}])/giu;
+  for (const m of collapsed.matchAll(re)) {
+    const ref = m[1]!;
+    if (BUS_WORDS.test(ref)) continue;
+    if (ROUTE_REF_FILLER.test(ref)) continue;
+    return ref;
+  }
+  return null;
+}
+
+/**
+ * Nothing here but a word for the whole service — "transport", "buses",
+ * "bus manifest" — and filler.
+ *
+ * A lone "bus", "route" or "van" does NOT count. Those are ordinary words
+ * in a sentence about a bus and almost always want a number after them;
+ * treating one as a command would have the desk answering staff who were
+ * talking to each other.
+ */
+function isBareTransportWord(t: string): boolean {
+  const words = t.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  if (words.length === 1 && /^(bus|route|van|बस|रूट|वैन)$/i.test(words[0]!)) {
+    return false;
+  }
+  const left = t
+    .replace(
+      /(?<![\p{L}\p{M}\p{N}])(bus|buses|route|routes|van|transport|manifest|बस|बसें|रूट|वैन|ट्रांसपोर्ट|परिवहन|list|details?|ka|ki|ke|का|की|के|show|dikhao|batao|सूची|लिस्ट|विवरण|दिखाओ|बताओ)(?![\p{L}\p{M}\p{N}])/giu,
+      " ",
+    )
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+  return !left;
+}
+
+const ROUTE_REF_FILLER =
+  /^(no|number|is|list|students?|children|manifest|riders?|details?|stops?|ka|ki|ke|ko|me|mein|par|late|delayed|deri|der|running|chal|aaj|today|kaun|kon|who|which|का|की|के|में|कौन|आज|पर|देरी|देर)$/i;
 
 /**
  * "Bus 3 manifest", "bus 3 ka manifest", "route A students", "bus 5 list",
@@ -2703,16 +2765,43 @@ const BUS_ASK_WORDS =
  * the server to match against route code, bus number and route name.
  * A bus word alone ("bus is late") is not this ask.
  */
+/**
+ * A question about who is on a bus.
+ *
+ * Returns the route as written, or "" when the question is about
+ * transport but names no route — the desk then lists the routes with
+ * numbers to pick from, which is a far better answer than silence.
+ * Null means the text is not a transport question at all.
+ *
+ * Two shapes count. An ASK about a route ("route 2 me kaun hai", "bus 2
+ * ki list", "transport list"), and a BARE route reference — "route 2",
+ * "bus 3" — with nothing else in it. The bare form used to return null,
+ * so the single most obvious thing to type got no reply. It stays narrow
+ * on purpose: "bus 2 abhi tak nahi aayi, driver ko phone karo" is staff
+ * talking to each other, not a command, and must still fall through.
+ */
 export function parseBusManifestQuery(text: string): string | null {
   const t = (text || "").trim();
   if (!t || !BUS_WORDS.test(t)) return null;
-  if (!BUS_ASK_WORDS.test(t)) return null;
-  const m =
-    /(?<![\p{L}\p{M}\p{N}])(?:bus|route|van|बस|रूट)\s*(?:no\.?|number|#)?\s*([\p{L}\p{N}][\p{L}\p{N}-]{0,15})(?![\p{L}\p{M}\p{N}])/iu.exec(t);
-  if (m && !/^(no|number|list|students?|children|manifest|ka|ki|ke|me|mein|details?)$/i.test(m[1]!)) {
-    return m[1]!;
-  }
-  return null;
+  const ref = extractRouteRef(t);
+  if (BUS_ASK_WORDS.test(t)) return ref ?? "";
+  // A bare "transport" or "buses" is a question the desk can answer by
+  // listing the routes; it just has no route in it yet.
+  if (isBareTransportWord(t)) return ref ?? "";
+  if (ref === null) return null;
+  // Bare reference: only when the whole message IS the reference.
+  const leftover = t
+    .replace(
+      /(?<![\p{L}\p{M}\p{N}])(bus|buses|route|routes|van|transport|बस|बसें|रूट|वैन|ट्रांसपोर्ट|परिवहन|no\.?|number|#|नंबर)(?![\p{L}\p{M}\p{N}])/giu,
+      " ",
+    )
+    .replace(
+      new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])${ref.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{M}\\p{N}])`, "giu"),
+      " ",
+    )
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+  return leftover ? null : ref;
 }
 
 const HOMEWORK_WORDS =
@@ -4384,11 +4473,8 @@ export function parseBusDelayQuery(
 ): { route: string; minutes: number } | null {
   const t = (text || "").trim();
   if (!t || !BUS_WORDS.test(t) || !BUS_DELAY_WORD.test(t)) return null;
-  const m =
-    /(?<![\p{L}\p{M}\p{N}])(?:bus|route|van|बस|रूट)\s*(?:no\.?|number|#)?\s*([\p{L}\p{N}][\p{L}\p{N}-]{0,15})(?![\p{L}\p{M}\p{N}])/iu.exec(t);
-  if (!m) return null;
-  const route = m[1]!;
-  if (/^(no|number|is|ko|ka|ki|ke|me|mein|late|delayed|deri|running|chal)$/i.test(route)) return null;
+  const route = extractRouteRef(t);
+  if (!route) return null;
   let minutes = 0;
   const mins = BUS_DELAY_MINUTES.exec(t);
   const hours = BUS_DELAY_HOUR.exec(t);
@@ -4574,6 +4660,65 @@ export function followUpCommandFor(originCommandId: string): "student_fees" | "s
     originCommandId === "collection_today"
     ? "student_fees"
     : "student_details";
+}
+
+/**
+ * "uska", "iski", "his", "her", "same student" — a follow-up that points
+ * back at whoever the desk just answered about instead of naming them.
+ *
+ * The parser already routes "uska bakaya" to student_fees; it just leaves
+ * "uska" sitting in the student field, where it matches no child on the
+ * roster and the desk says it cannot find them. Recognising the word is
+ * what lets the previous answer supply the name.
+ *
+ * Deliberately a closed list of pronouns, not "any short word": a real
+ * name must never be mistaken for a back-reference and answered about
+ * the wrong child.
+ */
+const FOLLOW_UP_PRONOUNS = new Set([
+  "uska", "uski", "uske", "usko", "us", "usi", "usika", "uska-hi",
+  "iska", "iski", "iske", "isko", "is", "isi", "isika",
+  "inka", "inki", "inke", "unka", "unki", "unke",
+  "wahi", "vahi", "yahi", "wo", "vo", "ye", "yeh", "woh",
+  "his", "her", "hers", "him", "its", "their", "theirs", "them",
+  "same", "that", "this", "it",
+  "उसका", "उसकी", "उसके", "उसको", "उस", "उसी",
+  "इसका", "इसकी", "इसके", "इसको", "इस", "इसी",
+  "इनका", "इनकी", "इनके", "उनका", "उनकी", "उनके",
+  "वही", "यही", "वह", "यह", "वो",
+]);
+
+const FOLLOW_UP_PRONOUN_FILLER = new Set([
+  "student", "child", "bachche", "bachcha", "baccha", "ka", "ki", "ke", "ko",
+  "hi", "wala", "wali", "same", "student's", "छात्र", "बच्चे", "बच्चा",
+  "का", "की", "के", "को", "ही", "वाला", "वाली",
+]);
+
+/**
+ * Does this name a child, or point back at the last one?
+ *
+ * True only when every word is a pronoun or filler — "uska", "uski hi",
+ * "same student ka". A single real name anywhere makes it false.
+ */
+export function isFollowUpPronoun(text: string): boolean {
+  // \p{M} matters: Devanagari matras are marks, not letters, so splitting
+  // on [^\p{L}\p{N}] alone cuts "उसका" into "उसक" and drops the ा — the
+  // same ASCII-shaped assumption that makes \b useless in Hindi.
+  const words = (text || "")
+    .toLowerCase()
+    .split(/[^\p{L}\p{M}\p{N}']+/u)
+    .filter(Boolean);
+  if (!words.length) return false;
+  let sawPronoun = false;
+  for (const w of words) {
+    if (FOLLOW_UP_PRONOUNS.has(w)) {
+      sawPronoun = true;
+      continue;
+    }
+    if (FOLLOW_UP_PRONOUN_FILLER.has(w)) continue;
+    return false;
+  }
+  return sawPronoun;
 }
 
 /** Whether a stored list is still young enough to answer a bare name. */
