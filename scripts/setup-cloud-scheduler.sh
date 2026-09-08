@@ -153,6 +153,16 @@ create_job "bhb-fee-integrity-tick" "35 * * * *" \
   "${APP_URL}/api/fees/integrity/tick" \
   "Asia/Kolkata" "120s"
 
+# Ledger projection: the server book is derived from the desks (a fee receipt
+# → receipt voucher, a void → reversal). It used to run only when somebody
+# pressed "Project" in Accounts → Server book; over 69 voided receipts the
+# reversal lagged the void by a median 3.3 h and up to 67 h. Hourly through the
+# school day, Mon–Sat, at :50 so it follows the :35 integrity tick. Idempotent
+# by source id; 300s because it scans every desk record.
+create_job "bhb-ledger-project-tick" "50 8-15 * * 1-6" \
+  "${APP_URL}/api/ledger/project/tick" \
+  "Asia/Kolkata" "300s"
+
 # ERP command desk: the director's end-of-day digest of what staff asked the
 # ERP over WhatsApp / app / assistant. Sends once after ERP_COMMANDS_DIGEST_HOUR
 # (default 19:00 IST), only on days with commands; idempotent per date, so the
