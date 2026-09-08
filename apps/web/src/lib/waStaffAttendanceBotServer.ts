@@ -46,6 +46,14 @@ export type WaStaffAttBotThread = {
   pending: WaStaffAttPending | null;
   /** "" until the staff picks — first contact asks once, LANG changes it */
   language?: StaffAttLang | "";
+  /**
+   * When the language menu was last put in front of this person. Asking is
+   * capped at once per thread: the menu used to REPLACE the reply, so a
+   * staff member who answered with anything other than 1 or 2 — a command,
+   * another IN — was asked again, and again. Live threads show that loop
+   * running for days without a single punch being taken.
+   */
+  languageAskedAt?: string;
   status: "bot" | "needs_staff" | "closed";
   messages: { id: string; role: string; text: string; at: string }[];
   updatedAt: string;
@@ -156,14 +164,33 @@ function earlyOutWindow(): { early: boolean; now: string; end: string } {
   return { early: now < win.end, now, end: win.end };
 }
 
+/**
+ * Does this turn belong to the attendance bot?
+ *
+ * It runs before the ERP command desk, so a "yes" here takes the message
+ * away from every command. Two rules keep that honest: the keyword test is
+ * whole-message (see detectStaffAttBotIntent), and a pending punch no
+ * longer claims everything.
+ *
+ * A pending punch waits for a location pin, not for the rest of the day.
+ * `if (hasPending) return true` meant one IN with no pin following it took
+ * the command desk away from that person entirely, until they thought to
+ * send CANCEL. The pending still survives — it just stops eating messages
+ * that are not aimed at it.
+ */
 export function shouldRouteStaffAttendance(opts: {
   text: string;
   location?: { lat: number; lng: number } | null;
   hasPending?: boolean;
 }): boolean {
-  if (opts.hasPending) return true;
   if (opts.location) return true;
-  return detectStaffAttBotIntent(opts.text) !== "unknown";
+  if (detectStaffAttBotIntent(opts.text) !== "unknown") return true;
+  if (opts.hasPending) {
+    // YES/CANCEL for an early checkout, and a 1/2 answering the language
+    // menu that rode along with the punch reply.
+    return isEarlyOutConfirm(opts.text) || parseStaffAttLanguage(opts.text) !== null;
+  }
+  return false;
 }
 
 export async function handleWaStaffAttendanceInbound(opts: {
@@ -237,6 +264,10 @@ export async function handleWaStaffAttendanceInbound(opts: {
   let escalate = false;
   let pending = thread.pending;
   let language: StaffAttLang | "" = thread.language || "";
+  // Appended to whatever the bot was going to say, never sent instead of
+  // it. A first punch must still punch.
+  let languageAsk = "";
+  let languageAskedAt = thread.languageAskedAt || "";
 
   // One-time language choice (remembered on the thread; LANG re-asks).
   if (!language) {
@@ -244,9 +275,12 @@ export async function handleWaStaffAttendanceInbound(opts: {
     if (picked) {
       language = picked;
       replyText = `${staffAttLanguageConfirmText(picked)}\n\n${staffAttBotWelcomeText(staff.fullName, picked)}`;
-    } else {
-      replyText = staffAttLanguageMenuText(staff.fullName);
+    } else if (!languageAskedAt) {
+      languageAsk = staffAttLanguageMenuText(staff.fullName);
+      languageAskedAt = nowIso();
     }
+    // Asked already and still no pick: English, and stop asking. They can
+    // send LANG whenever they want to choose.
   } else if (intent === "lang") {
     const picked = parseStaffAttLanguage(text.replace(/^lang\s*/i, ""));
     if (picked) {
@@ -337,10 +371,15 @@ export async function handleWaStaffAttendanceInbound(opts: {
     replyText = staffAttBotWelcomeText(staff.fullName, lang);
   }
 
+  if (languageAsk) {
+    replyText = replyText ? `${replyText}\n\n${languageAsk}` : languageAsk;
+  }
+
   thread = {
     ...thread,
     pending,
     language,
+    languageAskedAt,
     status: escalate ? "needs_staff" : "bot",
     updatedAt: nowIso(),
     messages: [

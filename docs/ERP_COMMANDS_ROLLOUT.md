@@ -37,6 +37,7 @@ order matters more than any single check.
 
 | # | Check | Fails → |
 |---|---|---|
+| 0 | **The attendance bot goes first** — it claims the turn only for a whole-message punch keyword (`IN`, `OUT`, `STATUS`, `ATTEND`, `CANCEL`, `LANG`, `HUMAN`, `HR`, and their Hindi aliases), a location pin, or a `YES`/`CANCEL`/`1`/`2` answering a punch it already started | the desk never sees the message |
 | 1 | **Env kill switch** `ERP_WA_COMMANDS` | branch does nothing; other bots answer as before |
 | 1½ | **Allowlist** `ERP_WA_COMMANDS_ALLOW` — absent since 2026-09-08, so this check passes for everyone | silent for anyone not on it, exactly like the kill switch |
 | 2 | Voice note transcribed to text | asks you to type it |
@@ -47,6 +48,26 @@ order matters more than any single check.
 | 7 | Hourly cap — **30 per staff member per hour** | "that's a lot of commands this hour" |
 | 8 | Mobile must match a staff record | "your number isn't linked to a staff record" |
 | 9 | RBAC module + action for that command | "your role doesn't include …" |
+
+### Check 0 is where the desk broke once — worth knowing why
+
+Those keyword patterns were unanchored substrings until 2026-09-08, so the
+attendance bot claimed anything *containing* them. `/hr/` matched inside
+**Mishra**; `/help/` took the desk's own help command; `/आज/` and `/today/`
+took every Hindi command and "Today's collection"; `/attendance/` took
+"attendance summary 5A". And on a thread with no saved language the bot
+answered with its language menu *instead of* handling the intent — so the
+same "Choose your language" came back to every message, forever, and no
+command ever ran. Live threads show that loop running for two days.
+
+Two rules now keep check 0 honest, and both have tests:
+
+- a keyword is the **whole message**, not a substring of it;
+- the language menu is **appended once** to a real reply, never sent in
+  place of one, so a first `IN` still punches.
+
+If a command ever goes quiet again, check 0 is the first place to look:
+the message will be sitting in the staff-attendance thread, not the desk's.
 
 ### The consequence that matters
 

@@ -131,6 +131,27 @@ export function staffAttEarlyOutWarningText(opts: { now: string; end: string; la
   ].join("\n");
 }
 
+/**
+ * Which attendance keyword is this — if any.
+ *
+ * Every alias below matches the WHOLE message, deliberately. They used to
+ * be unanchored substrings, and the damage was not subtle. This bot runs
+ * BEFORE the ERP command desk, so anything it claims, the desk never
+ * sees; and on a thread with no saved language it answers with the
+ * language menu and drops the intent. Between them, on live traffic:
+ *
+ *   /hr/       matched inside "Mishra" — "Kavya mishra ki fees pending"
+ *              was read as a request for HR
+ *   /help/     took the desk's own help command, so `help` printed a
+ *              language menu instead of the list of commands
+ *   /आज/ /today/  took every Hindi command and "Today's collection"
+ *   /attendance/  took "attendance summary 5A"
+ *   /office/   took anything mentioning the office
+ *
+ * A punch keyword is one word. Anything longer is somebody talking, and
+ * belongs to the desk. When in doubt this must return "unknown": the desk
+ * hands back what it cannot parse, and this bot does not.
+ */
 export function detectStaffAttBotIntent(text: string): StaffAttBotQuickId | "unknown" {
   const t = (text || "").trim();
   const upper = t.toUpperCase();
@@ -139,14 +160,14 @@ export function detectStaffAttBotIntent(text: string): StaffAttBotQuickId | "unk
       return q.id;
     }
   }
-  const low = t.toLowerCase();
-  if (/^punch\s*in|check\s*in|clock\s*in|^in$|^हाज़िरी|^haziri|^पंच इन/.test(low)) return "in";
-  if (/^punch\s*out|check\s*out|clock\s*out|^out$|^छुट्टी|^chutti|^पंच आउट/.test(low)) return "out";
-  if (/status|my attendance|today|आज|स्थिति/.test(low)) return "status";
-  if (/attend|attendance|उपस्थिति/.test(low)) return "attend";
-  if (/^cancel|abort|रद्द/.test(low)) return "cancel";
-  if (/^lang|language|भाषा|bhasha/.test(low)) return "lang";
-  if (/human|hr|office|help|मदद/.test(low)) return "human";
+  const low = t.toLowerCase().replace(/[.!?\u0964]+$/, "");
+  if (/^(punch\s*in|check\s*in|clock\s*in|haziri|hazri|हाज़िरी|हाजिरी|पंच\s*इन)$/.test(low)) return "in";
+  if (/^(punch\s*out|check\s*out|clock\s*out|chutti|छुट्टी|पंच\s*आउट)$/.test(low)) return "out";
+  if (/^(my attendance|meri attendance|meri hazri|मेरी उपस्थिति|मेरी हाज़िरी|स्थिति)$/.test(low)) return "status";
+  if (/^(attendance|उपस्थिति)$/.test(low)) return "attend";
+  if (/^(abort|रद्द)$/.test(low)) return "cancel";
+  if (/^(language|भाषा|bhasha)$/.test(low)) return "lang";
+  if (/^hr$/.test(low)) return "human";
   return "unknown";
 }
 
