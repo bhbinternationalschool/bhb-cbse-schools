@@ -143,6 +143,11 @@ import {
   followUpCommandFor,
   followUpIsFresh,
   isFollowUpPronoun,
+  matchStaffContacts,
+  staffContactPicks,
+  staffContactIsOpen,
+  formatStaffContactAsk,
+  formatStaffContactReply,
   parsePickNumber,
   pickIsFresh,
   type PickOption,
@@ -583,6 +588,7 @@ export async function handleErpStaffCommand(
   let pinnedStudentId: string | null = null;
   let pinnedSection: SectionMatch | null = null;
   let pinnedRouteId: string | null = null;
+  let pinnedStaffId: string | null = null;
   /** Set when the child came from the previous answer, not from this text. */
   let carriedFrom = "";
 
@@ -662,6 +668,7 @@ export async function handleErpStaffCommand(
         pinnedStudentId = opt.studentId || null;
         pinnedSection = opt.section || null;
         pinnedRouteId = opt.routeId || null;
+        pinnedStaffId = opt.staffId || null;
         // The original wording carries the date, the minutes, the message
         // body — everything the number did not choose. Re-running against
         // the bare digit would silently drop all of it.
@@ -1093,6 +1100,62 @@ export async function handleErpStaffCommand(
   }
   if (command.id === "bus_manifest") {
     resolved.route = (parsed.fields.text || "").trim();
+  }
+  if (command.id === "staff_contact") {
+    const asked = (parsed.fields.text || "").trim();
+    const roster = (masters.staff ?? []).filter((st) => st.status === "active");
+    const desigOf = (st: (typeof roster)[number]) =>
+      (masters.designations ?? []).find((d) => d.id === st.designationId)?.name || "";
+    const deptOf = (st: (typeof roster)[number]) =>
+      (masters.departments ?? []).find((d) => d.id === st.departmentId)?.name || "";
+    const candidates = roster.map((st) => ({
+      id: st.id,
+      fullName: st.fullName,
+      empCode: st.empCode || "",
+      designation: desigOf(st),
+      department: deptOf(st),
+      mobile: (st.mobile || st.altMobile || "").replace(/\D/g, "").slice(-10),
+    }));
+    // A number already answered this — no second lookup.
+    const pinned = pinnedStaffId
+      ? candidates.find((c) => c.id === pinnedStaffId)
+      : undefined;
+    const matches = pinned ? [pinned] : matchStaffContacts(asked, candidates);
+    if (matches.length !== 1) {
+      const shown = matches.slice(0, 10);
+      const picks = staffContactPicks(shown, command.id);
+      await rememberPick(actor, command.id, text, picks);
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text: formatStaffContactAsk(shown, asked, picks),
+      };
+    }
+    const who = matches[0]!;
+    const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
+    // Everyone may reach the principal or the office. A colleague's
+    // personal mobile is shown whole only to the office — the same
+    // asymmetry student_details uses for a parent's number.
+    const unmasked = isOfficeLike(roleCodes) || staffContactIsOpen(who.designation);
+    void audit(session, command, parsed.fields, text, "ok", {
+      staffId: who.id,
+      unmasked: String(unmasked),
+      channel: inbound.channel,
+    });
+    return {
+      handled: true,
+      audience: "erp_command_staff_contact",
+      text: withCarriedNote(
+        carriedFrom,
+        formatStaffContactReply({
+          fullName: who.fullName,
+          designation: who.designation,
+          department: who.department,
+          mobile: who.mobile ? (unmasked ? formatMobile10(who.mobile) : maskMobile10(who.mobile)) : "",
+          unmasked,
+        }),
+      ),
+    };
   }
   if (command.id === "homework_posted") {
     const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
@@ -2476,6 +2539,12 @@ async function studentDetails(
 function maskMobile10(m: string): string {
   const d = (m || "").replace(/\D/g, "");
   return d.length < 6 ? d : `${d.slice(0, 2)}xxxxxx${d.slice(-2)}`;
+}
+
+/** 98765 43210 — spaced so it is readable, and still tappable to call. */
+function formatMobile10(m: string): string {
+  const d = (m || "").replace(/\D/g, "");
+  return d.length === 10 ? `${d.slice(0, 5)} ${d.slice(5)}` : d;
 }
 
 async function busManifest(

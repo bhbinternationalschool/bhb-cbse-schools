@@ -406,6 +406,31 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
     scope: "any",
   },
   {
+    id: "staff_contact",
+    title: "Reach a colleague",
+    kind: "read",
+    module: "staff",
+    action: "view",
+    description:
+      "One staff member's post and mobile, by name or by post — principal, accountant, a teacher. Name, designation, department and number only; nothing else off the staff record.",
+    examples: [
+      "Sujata ko phone karo",
+      "principal ka number",
+      "call the accountant",
+      "प्रिंसिपल से बात करनी है",
+      "Kanchan Singh ka contact",
+    ],
+    fields: [
+      {
+        name: "text",
+        type: "text",
+        required: true,
+        description: "The colleague as written: a name, or a post like 'principal'",
+      },
+    ],
+    scope: "any",
+  },
+  {
     id: "bus_manifest",
     title: "Bus route manifest",
     kind: "read",
@@ -951,6 +976,10 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
   if (detailsQ) {
     return { commandId: "student_details", fields: { student: detailsQ }, source: "local" };
   }
+  const whoToCall = parseStaffContactQuery(t);
+  if (whoToCall) {
+    return { commandId: "staff_contact", fields: { text: whoToCall }, source: "local" };
+  }
   const busDelay = parseBusDelayQuery(t);
   if (busDelay) {
     return {
@@ -1235,6 +1264,8 @@ export type PickOption = {
   sectionId?: string;
   classId?: string;
   routeId?: string;
+  /** A colleague chosen from a "which one did you mean?" staff list. */
+  staffId?: string;
   /** A PTM slot's start time, e.g. "10:30". */
   slotAt?: string;
   /** Re-runs against this text instead of the original message. */
@@ -1433,6 +1464,7 @@ const HELP_GROUPS: { modules: string[]; label: string }[] = [
   { modules: ["student_leave", "complaints", "ptm"], label: "Leave, PTM & complaints" },
   { modules: ["transport"], label: "Transport" },
   { modules: ["admissions"], label: "Admissions" },
+  { modules: ["staff"], label: "Staff" },
   { modules: ["home", "settings"], label: "School overview" },
 ];
 
@@ -4181,6 +4213,209 @@ export function parsePayLinkQuery(text: string): string | null {
   if (!name || !/[\p{L}\p{M}]{2,}/u.test(name)) return null;
   const sec = refs[0];
   return [name, sec ? `${sec.classKey}${sec.sectionName}` : ""].filter(Boolean).join(" ");
+}
+
+// ─── Reaching a colleague ──────────────────────────────────────────────
+
+const STAFF_CONTACT_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(phone|call|contact|mobile|number|numbers)(?![\p{L}\p{M}\p{N}])|(?:फ़ोन|फोन|नंबर|नम्बर|संपर्क|मोबाइल|कॉल)|(?<![\p{L}\p{M}\p{N}])baat\s*kar|बात\s*कर/iu;
+
+/** A parent's number is the student command's business, not this one's. */
+const STAFF_CONTACT_NOT_STAFF =
+  /(?<![\p{L}\p{M}\p{N}])(parent|parents|guardian|father|mother|papa|mummy|abhibhavak)(?![\p{L}\p{M}\p{N}])|(?:अभिभावक|माता|पिता|माँ)/iu;
+
+const STAFF_CONTACT_FILLER = new Set([
+  "phone", "call", "contact", "mobile", "number", "numbers", "no", "ka", "ki", "ke", "ko", "se",
+  "kar", "karo", "karna", "karni", "kro", "hai", "he", "chahiye", "do", "dijiye", "de", "den",
+  "batao", "bata", "bataiye", "dikhao", "please", "pls", "the", "me", "mujhe", "mera", "meri",
+  "is", "what", "whats", "give", "send", "share", "tell", "get", "find", "want", "need", "to",
+  "for", "of", "with", "speak", "talk", "reach", "sir", "madam", "mam", "ma'am", "ji",
+  "sampark", "baat", "karne", "krna", "krni", "chahta", "chahti", "hu", "hoon",
+  "फ़ोन", "फोन", "नंबर", "नम्बर", "संपर्क", "मोबाइल", "कॉल", "बात", "कर", "करो", "करना", "करनी",
+  "का", "की", "के", "को", "से", "है", "चाहिए", "दो", "बताओ", "दिखाओ", "मुझे", "जी", "सर", "मैडम",
+]);
+
+/**
+ * "Sujata ko phone karo", "principal ka number", "call the accountant",
+ * "प्रिंसिपल से बात करनी है" — who on the staff do I need to reach.
+ *
+ * Returns the person or the post as written, for the caller to resolve
+ * against the staff roster. Null when this is not that question.
+ *
+ * Deliberately narrow at both ends. A parent's number belongs to the
+ * student commands, and anything naming a bus belongs to transport, which
+ * already prints the driver — so both step aside here rather than racing.
+ */
+export function parseStaffContactQuery(text: string): string | null {
+  const t = (text || "").trim();
+  if (!t || !STAFF_CONTACT_WORD.test(t)) return null;
+  if (STAFF_CONTACT_NOT_STAFF.test(t)) return null;
+  if (BUS_WORDS.test(t)) return null;
+  const words = t
+    .toLowerCase()
+    .replace(/[^\p{L}\p{M}\p{N}\s'.-]/gu, " ")
+    .split(/\s+/)
+    .map((w) => w.replace(/^[.'-]+|[.'-]+$/g, ""))
+    .filter((w) => w && !STAFF_CONTACT_FILLER.has(w) && !/^\d+$/.test(w));
+  const who = words.join(" ").trim();
+  // "phone karo" with nobody named is not a lookup, it is half a thought.
+  if (!who || !/[\p{L}\p{M}]{3,}/u.test(who)) return null;
+  return who;
+}
+
+/** Hindi for a post → the English word the designation is stored under. */
+const STAFF_POST_ALIASES = new Map<string, string>([
+  ["प्रिंसिपल", "principal"],
+  ["प्राचार्य", "principal"],
+  ["प्रधानाचार्य", "principal"],
+  ["निदेशक", "director"],
+  ["डायरेक्टर", "director"],
+  ["लेखाकार", "accountant"],
+  ["अकाउंटेंट", "accountant"],
+  ["एकाउंटेंट", "accountant"],
+  ["शिक्षक", "teacher"],
+  ["अध्यापक", "teacher"],
+  ["अध्यापिका", "teacher"],
+  ["टीचर", "teacher"],
+  ["काउंसलर", "counsellor"],
+  ["परामर्शदाता", "counsellor"],
+  ["चपरासी", "peon"],
+  ["चालक", "driver"],
+  ["ड्राइवर", "driver"],
+  ["माली", "gardner"],
+  ["कार्यालय", "office"],
+  ["ऑफिस", "office"],
+  ["ऑपरेटर", "operator"],
+]);
+
+export type StaffContactCandidate = {
+  id: string;
+  fullName: string;
+  empCode: string;
+  designation: string;
+  department: string;
+  mobile: string;
+};
+
+/**
+ * Who on the roster does this name or post mean?
+ *
+ * Matches a name the way the student search does — whole words, then a
+ * spelling budget — and a post ("principal", "accountant") against the
+ * designation. Returns every candidate, in a stable order; one match is
+ * an answer, several are a numbered question.
+ */
+export function matchStaffContacts(
+  query: string,
+  list: StaffContactCandidate[],
+): StaffContactCandidate[] {
+  const q = (query || "").trim().toLowerCase();
+  if (!q) return [];
+  const qWords = q
+    .split(/[^\p{L}\p{M}\p{N}]+/u)
+    .filter(Boolean)
+    // Designations are stored in English, so a post asked for in Hindi
+    // matched nothing at all: "प्रिंसिपल से बात करनी है" found no one,
+    // in a school where most people would type exactly that.
+    .map((w) => STAFF_POST_ALIASES.get(w) ?? w);
+  if (!qWords.length) return [];
+
+  const scored: { c: StaffContactCandidate; score: number }[] = [];
+  for (const c of list) {
+    const name = c.fullName.toLowerCase();
+    const desig = c.designation.toLowerCase();
+    const dept = c.department.toLowerCase();
+    const nameWords = name.split(/[^\p{L}\p{M}\p{N}]+/u).filter(Boolean);
+    const desigWords = desig.split(/[^\p{L}\p{M}\p{N}]+/u).filter(Boolean);
+
+    let score = 0;
+    if (name === q) score = 100;
+    else if (c.empCode.toLowerCase() === q) score = 95;
+    else if (desig === q) score = 80;
+    else if (qWords.every((w) => desigWords.some((d) => d === w))) score = 70;
+    else if (qWords.every((w) => nameWords.some((n) => n === w))) score = 60;
+    else if (qWords.every((w) => nameWords.some((n) => fuzzyWordMatch(w, n)))) score = 40;
+    else if (qWords.every((w) => desigWords.some((d) => fuzzyWordMatch(w, d)))) score = 30;
+    else if (dept && qWords.every((w) => dept.includes(w))) score = 20;
+
+    if (score) scored.push({ c, score });
+  }
+  const best = Math.max(0, ...scored.map((x) => x.score));
+  return scored
+    .filter((x) => x.score === best)
+    .sort((a, b) => a.c.fullName.localeCompare(b.c.fullName))
+    .map((x) => x.c);
+}
+
+/**
+ * Posts anyone on the staff is entitled to reach directly.
+ *
+ * Everyone needs to be able to ring the principal or the office. A
+ * colleague's personal mobile is not the same thing, so for everyone else
+ * the number is masked unless the person asking works in the office —
+ * the same asymmetry student_details already uses for parents' numbers.
+ */
+const STAFF_CONTACT_OPEN_POSTS =
+  /(principal|director|owner|trustee|chairman|founder|head|coordinator|incharge|in-charge|accountant|account|office|admin|clerk|counsell?or|operator|receptionist)/i;
+
+export function staffContactIsOpen(designation: string): boolean {
+  return STAFF_CONTACT_OPEN_POSTS.test(designation || "");
+}
+
+export function formatStaffContactReply(input: {
+  fullName: string;
+  designation: string;
+  department: string;
+  mobile: string;
+  /** False when the number is masked and the office must be asked. */
+  unmasked: boolean;
+}): string {
+  const head = [input.fullName, input.designation].filter(Boolean).join(" · ");
+  const lines = [`*${head}*`];
+  if (input.department) lines.push(input.department);
+  if (!input.mobile) {
+    lines.push("", "No mobile on their staff record. The office can reach them.");
+    return lines.join("\n");
+  }
+  lines.push("", `📞 ${input.mobile}`);
+  lines.push(
+    "",
+    input.unmasked
+      ? "_Tap the number to call. The desk does not place calls itself._"
+      : "_Personal numbers are shown to the office only. Ask the office if you need to reach them._",
+  );
+  return lines.join("\n");
+}
+
+export function staffContactPicks(
+  options: { id: string; fullName: string; designation: string }[],
+  commandId: string,
+): PickOption[] {
+  return options.map((o, i) => ({
+    n: i + 1,
+    label: [o.fullName, o.designation].filter(Boolean).join(" — "),
+    commandId,
+    staffId: o.id,
+  }));
+}
+
+export function formatStaffContactAsk(
+  options: { fullName: string; designation: string; empCode: string }[],
+  asked: string,
+  picks: PickOption[],
+): string {
+  if (!options.length) {
+    return `No one on the staff list matches "${asked}". Try their full name, or the post — _principal_, _accountant_.`;
+  }
+  const lines = ["Which one did you mean?", ""];
+  options.forEach((o, i) => {
+    lines.push(
+      `*${i + 1}.* ${o.fullName}${o.designation ? ` — ${o.designation}` : ""}${o.empCode ? ` · ${o.empCode}` : ""}`,
+    );
+  });
+  const hint = pickHint(picks, "their number");
+  if (hint) lines.push("", hint);
+  return lines.join("\n");
 }
 
 export function formatPayLinkCard(input: {

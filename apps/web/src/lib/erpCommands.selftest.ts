@@ -96,6 +96,11 @@ import {
   parseHomeworkQuery,
   parseMarkAttendanceQuery,
   parsePayLinkQuery,
+  parseStaffContactQuery,
+  matchStaffContacts,
+  staffContactIsOpen,
+  formatStaffContactReply,
+  type StaffContactCandidate,
   parsePickNumber,
   parsePostHomeworkQuery,
   parsePtmTime,
@@ -2498,6 +2503,78 @@ const masters = {
   for (const t of ["payment aa gaya kya", "link bhejo", "पेमेंट हो गया"]) {
     assert.equal(parsePayLinkQuery(t), null, `not a pay link: ${t}`);
   }
+}
+
+// ── Reaching a colleague ──────────────────────────────────────────────
+// "Sujata ko phone karo" and "Principal ko phone karo" were sent to the
+// live desk and answered with nothing at all: there was no command for
+// reaching a colleague, so the desk stayed silent, correctly and
+// uselessly.
+{
+  const roster: StaffContactCandidate[] = [
+    ["stf_cc4dngi", "Sujata Bajpayee", "STF-003", "Principal", "9198761534"],
+    ["stf_rkiozpd", "Ashish Singh", "EMP-0001", "Director", "9919101755"],
+    ["stf_n95e15t", "Kanchan Singh", "STF-010", "Director", "9198756050"],
+    ["stf_tc3dwg6", "NIHAL RAJAK", "STF-032", "Accountant", "9198760001"],
+    ["stf_ot5fh2x", "RASHMI YADAV", "STF-021", "Counsellor", "9198760002"],
+    ["stf_szzis9t", "Sikha Singh", "STF-004", "Peon", "9198760006"],
+  ].map(([id, fullName, empCode, designation, mobile]) => ({
+    id: id!, fullName: fullName!, empCode: empCode!, designation: designation!,
+    department: "", mobile: mobile!,
+  }));
+  const only = (ask: string) => {
+    const p = parseErpCommandLocal(ask);
+    assert.equal(p?.commandId, "staff_contact", `staff lookup: ${ask}`);
+    const m = matchStaffContacts(String(p!.fields.text ?? ""), roster);
+    assert.equal(m.length, 1, `exactly one match: ${ask} (got ${m.length})`);
+    return m[0]!.fullName;
+  };
+  // By name, by post, in either script, and through a typo.
+  assert.equal(only("Sujata ko phone karo"), "Sujata Bajpayee");
+  assert.equal(only("Principal ko phone karo"), "Sujata Bajpayee");
+  assert.equal(only("Principal se baat karni hai"), "Sujata Bajpayee");
+  assert.equal(only("प्रिंसिपल से बात करनी है"), "Sujata Bajpayee");
+  assert.equal(only("sujata ka number"), "Sujata Bajpayee");
+  assert.equal(only("Sujta ko phone karo"), "Sujata Bajpayee", "a typo still lands");
+  assert.equal(only("STF-003 ka number"), "Sujata Bajpayee");
+  assert.equal(only("call the accountant"), "NIHAL RAJAK");
+  assert.equal(only("counsellor ka number"), "RASHMI YADAV");
+
+  // A surname three people share is a numbered question, not a guess.
+  {
+    const p = parseErpCommandLocal("Singh ka number");
+    assert.equal(p?.commandId, "staff_contact");
+    assert.ok(matchStaffContacts(String(p!.fields.text ?? ""), roster).length > 1);
+  }
+
+  // Not this command's business.
+  for (const t of ["Yatharth ke parent ka number", "bus 2 driver ka number", "father ka contact"]) {
+    assert.notEqual(parseErpCommandLocal(t)?.commandId, "staff_contact", `not a staff lookup: ${t}`);
+  }
+  // Half a thought is not a lookup.
+  assert.equal(parseStaffContactQuery("phone karo"), null);
+  assert.equal(parseStaffContactQuery("call"), null);
+
+  // Everyone may reach the principal or the office; a peon's personal
+  // number is the office's to give out.
+  assert.equal(staffContactIsOpen("Principal"), true);
+  assert.equal(staffContactIsOpen("Director"), true);
+  assert.equal(staffContactIsOpen("Accountant"), true);
+  assert.equal(staffContactIsOpen("Peon"), false);
+  assert.equal(staffContactIsOpen("Teacher"), false);
+
+  // The reply carries the number and nothing else off the staff record.
+  const reply = formatStaffContactReply({
+    fullName: "Sujata Bajpayee", designation: "Principal", department: "",
+    mobile: "91987 61534", unmasked: true,
+  });
+  assert.match(reply, /Sujata Bajpayee · Principal/);
+  assert.match(reply, /91987 61534/);
+  const masked = formatStaffContactReply({
+    fullName: "Sikha Singh", designation: "Peon", department: "",
+    mobile: "91xxxxxx06", unmasked: false,
+  });
+  assert.match(masked, /Ask the office/);
 }
 
 console.log("erpCommands.selftest.ts OK");
