@@ -85,6 +85,15 @@ the difference matters:
 | Director (the pilot number) | protected super-admin **email** → `owner` | 24 / 24 |
 | Principal | designation "Principal" matches → `principal` | 24 / 24 |
 | Beena Singh, Kanchan Singh | **explicit assignment** to `owner`, 2026-09-08 | 24 / 24 |
+| Rashmi Yadav (Counsellor), Shreya Sharma (Computer Operator) | **explicit assignment** to `office`, 2026-09-08 | 22 / 24 |
+
+`office` cannot run **`staff_broadcast`** (needs `notifications.edit`;
+office holds `view`) or **`post_homework`** (needs `homework.edit`, and that
+command is app-only anyway, because the class channel owns teacher homework
+posts). It does reach the fee commands — `pay_link`, `fee_reminder`,
+`collection_today`, `student_fees` — which is right for a Computer Operator
+on the front desk and is worth a second thought for a Counsellor. Narrow
+either one by **replacing** their assignment rather than adding a second.
 
 An earlier version of this table claimed those two held `office` from
 2026-09-07. They did not: `rbac_state` in the live database held **zero
@@ -170,19 +179,25 @@ usable desk — RBAC decides that separately, from the designation:
 | `accounts` (Accountant) | 1 | fees |
 | `driver` | 3 | route manifest |
 | `owner` (explicit assignment, the 2 Directors) | 2 | everything |
-| **`support` — refused every command** | **4** | nothing |
+| `office` (explicit assignment, Counsellor + Computer Operator) | 2 | 22 of 24 |
+| **`support` — one command, `school_snapshot`** | **2** | next to nothing |
 
-The two Directors were in that `support` row until 2026-09-08; they now
-hold `owner` by explicit assignment (§3). **Four** are still refused
-everything: a Counsellor, a Computer Operator, a Peon, and one staff member
-with no designation at all. `rbac.inferRoleCodes` has no pattern for
-"counsellor" or "operator", so they fall through to `support` and are told
-"your role doesn't include …" on everything — which reads as the desk being
-broken rather than as a permission they lack.
+Six people were in that `support` row on the morning of 2026-09-08. Four
+were given explicit assignments the same day — the two Directors `owner`,
+the Counsellor and the Computer Operator `office` (§3).
 
-Fix each with one assignment in the ERP: Settings → Roles. `office` is the
-right size for the Counsellor and the Computer Operator; the Peon needs
-`gate` or nothing at all.
+**Two remain**: a Peon and one staff member with no designation at all.
+`support` is not literally nothing — it carries `school_snapshot` — but
+every other command answers "your role doesn't include …", which reads as
+the desk being broken rather than as a permission they lack. Decide what
+each should have and assign it in the ERP: Settings → Roles. `gate` (also
+1 of 24) is the honest size for a Peon; the undesignated record probably
+wants a designation first.
+
+Note what an assignment does to inference, before adding one: the moment
+somebody has a single active assignment, `resolveSessionRoleScopes` stops
+inferring from their designation entirely. An assignment **replaces** what
+the designation gave; it does not add to it.
 
 ---
 
@@ -355,10 +370,11 @@ At 50 staff × 10 commands a day that is roughly **₹60/day** from October.
 - [ ] `ERP_WA_COMMANDS_ALLOW` absent from `deploy/desk-cutover-runtime.env`
       — that absence IS school-wide. Nothing to set by hand on the service;
       the next deploy would erase it anyway
-- [x] The two Directors hold `owner` by explicit assignment (2026-09-08)
-- [ ] The **four** staff still resolving to `support` have been given a role,
-      or they will be refused every command (§4) — a Counsellor, a Computer
-      Operator, a Peon, and one with no designation
+- [x] The two Directors hold `owner`, and the Counsellor and Computer
+      Operator hold `office`, by explicit assignment (2026-09-08)
+- [ ] The **two** staff still resolving to `support` have been given a role,
+      or they get one command out of 24 (§4) — a Peon, and one staff member
+      with no designation
 - [ ] Approved WhatsApp templates exist for the writes you intend to use.
       **Both languages, or the command refuses.** Today only
       `attendance_absent` and `fees_receipt` are approved in en AND hi, so
