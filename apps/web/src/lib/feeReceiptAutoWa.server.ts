@@ -28,18 +28,47 @@ import { formatInr, type CollectionVoucher } from "@/lib/fees";
 import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { resolveHouseholdByMobileServer } from "@/lib/parentHousehold.server";
 import { logHouseholdWaSend } from "@/lib/householdMessageLog.server";
-import { sendWaWithFailover } from "@/lib/waSend";
+import { sendWaWithFailover, type WaTemplateComponent } from "@/lib/waSend";
 import {
   resolveTemplateForSend,
+  templateFamilyReady,
   templateVariablePositions,
   type WaTemplatesState,
 } from "@/lib/waTemplates";
 import { TENANT } from "@/lib/types";
+import { receiptPdfPublicUrl } from "@/lib/receiptLinkToken.server";
+import { publicOrigin } from "@/lib/birthday.server";
 
+/** Text-only. Approved and working — the floor we never fall below. */
 export const FEE_RECEIPT_FAMILY = "fees_receipt";
+/** Same message with the signed PDF attached. Preferred once Meta approves. */
+export const FEE_RECEIPT_DOC_FAMILY = "fees_receipt_doc";
+
+/**
+ * Which receipt template to use.
+ *
+ * The PDF version is preferred, but only when it is approved in BOTH
+ * languages — a half-approved family would send Hindi families an English
+ * receipt. Falling back to the text-only family means Meta's approval queue
+ * can take as long as it likes without a single receipt going undelivered.
+ */
+function chooseReceiptFamily(
+  state: WaTemplatesState,
+): { familyKey: string; withPdf: boolean } {
+  return templateFamilyReady(state, FEE_RECEIPT_DOC_FAMILY).ready
+    ? { familyKey: FEE_RECEIPT_DOC_FAMILY, withPdf: true }
+    : { familyKey: FEE_RECEIPT_FAMILY, withPdf: false };
+}
 
 export type ReceiptAutoWaOutcome =
-  | { sent: true; mobile: string; templateName: string; language: string }
+  | {
+      sent: true;
+      mobile: string;
+      templateName: string;
+      language: string;
+      /** Whether the PDF actually rode along, rather than whether we hoped. */
+      withPdf: boolean;
+    }
   | { sent: false; reason: string; alreadySent?: boolean };
 
 /**
@@ -139,9 +168,10 @@ export async function sendFeeReceiptWhatsApp(input: {
     // The FAMILY's language, never the cashier's.
     const language = waTemplateLanguageFor(household ?? undefined);
 
+    const choice = chooseReceiptFamily(state);
     const resolved = resolveTemplateForSend({
       state,
-      familyKey: FEE_RECEIPT_FAMILY,
+      familyKey: choice.familyKey,
       language,
     });
     if (!resolved.ok) {
@@ -175,6 +205,30 @@ export async function sendFeeReceiptWhatsApp(input: {
     // Quiet hours are deliberately NOT consulted. A receipt is the family's
     // proof that money they just handed over was recorded, and it is sent
     // because they paid, not because the school decided to write to them.
+    // The attachment. Meta fetches this itself, seconds from now, so the
+    // link is signed against this one receipt and expires in minutes — the
+    // alternative, a receipt sitting in a public bucket behind a guessable
+    // URL forever, is not one worth taking for an attachment.
+    const pdfUrl = choice.withPdf
+      ? receiptPdfPublicUrl(voucher.id, publicOrigin())
+      : null;
+
+    const components: WaTemplateComponent[] = [];
+    if (pdfUrl) {
+      components.push({
+        type: "header",
+        parameters: [
+          {
+            type: "document",
+            document: {
+              link: pdfUrl,
+              filename: `Receipt-${voucher.receiptNo}.pdf`,
+            },
+          },
+        ],
+      });
+    }
+
     const r = await sendWaWithFailover({
       primaryMobile: mobile,
       fallbackMobile: household?.altMobile || undefined,
@@ -182,6 +236,7 @@ export async function sendFeeReceiptWhatsApp(input: {
         name: templateName,
         language: templateLanguage,
         components: [
+          ...components,
           {
             type: "body",
             parameters: Object.keys(values)
@@ -219,7 +274,7 @@ export async function sendFeeReceiptWhatsApp(input: {
     }
 
     return r.ok
-      ? { sent: true, mobile, templateName, language: templateLanguage }
+      ? { sent: true, mobile, templateName, language: templateLanguage, withPdf: !!pdfUrl }
       : { sent: false, reason: r.error || "WhatsApp send failed" };
   } catch (e) {
     // The receipt stands. A crash here must never reach the collection path.

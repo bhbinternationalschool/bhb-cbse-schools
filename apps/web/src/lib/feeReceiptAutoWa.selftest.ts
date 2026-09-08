@@ -27,6 +27,11 @@ import {
   templateVariablePositions,
   type WaTemplatesState,
 } from "./waTemplates";
+import {
+  receiptPdfPublicUrl,
+  signReceiptLinkToken,
+  verifyReceiptLinkToken,
+} from "./receiptLinkToken.server";
 
 console.log("feeReceiptAutoWa.selftest.ts");
 
@@ -106,4 +111,78 @@ for (const k of ["2", "3", "4", "5"]) {
   assert.ok((gaps[k] ?? "").length > 0, `variable ${k} must never be empty`);
 }
 
-console.log("  ok — the family is whole, and the five variables keep their order");
+// 6. THE ATTACHMENT, and the rule that keeps it from breaking what works.
+//
+//    The PDF rides on a SECOND template (`fees_receipt_doc`), because adding
+//    a document header to the approved `fees_receipt` would send it back to
+//    PENDING at Meta and stop every receipt again. So the doc family is used
+//    only when it is approved in BOTH languages, and the text-only family is
+//    the floor underneath it however long Meta's queue takes.
+const docTpl = (language: "en" | "hi", status: string) => ({
+  ...tpl(language, status),
+  id: `doc_${language}`,
+  familyKey: "fees_receipt_doc",
+  metaName: "bhb_fee_receipt_pdf",
+});
+
+const awaitingApproval = state([
+  tpl("en", "approved"),
+  tpl("hi", "approved"),
+  docTpl("en", "pending"),
+  docTpl("hi", "pending"),
+]);
+assert.equal(templateFamilyReady(awaitingApproval, "fees_receipt").ready, true);
+assert.equal(
+  templateFamilyReady(awaitingApproval, "fees_receipt_doc").ready,
+  false,
+  "an unapproved PDF template must not be chosen",
+);
+
+const halfApprovedDoc = state([
+  tpl("en", "approved"),
+  tpl("hi", "approved"),
+  docTpl("en", "approved"),
+  docTpl("hi", "pending"),
+]);
+assert.equal(
+  templateFamilyReady(halfApprovedDoc, "fees_receipt_doc").ready,
+  false,
+  "half-approved must fall back, not send Hindi families an English receipt",
+);
+
+const bothApproved = state([
+  tpl("en", "approved"),
+  tpl("hi", "approved"),
+  docTpl("en", "approved"),
+  docTpl("hi", "approved"),
+]);
+assert.equal(templateFamilyReady(bothApproved, "fees_receipt_doc").ready, true);
+
+// 7. The signed link Meta fetches. It is the ONLY unauthenticated way to a
+//    receipt, so each of these is a way in that must stay shut.
+const A = "cv_receipt_a";
+const B = "cv_receipt_b";
+const t = signReceiptLinkToken(A);
+assert.ok(t, "a link must be signable in dev");
+assert.deepEqual(verifyReceiptLinkToken(A, t!.exp, t!.sig), { ok: true });
+
+//    Another receipt's id with this signature — the obvious attack, and the
+//    reason the voucher id is inside the signed payload rather than beside it.
+assert.equal(verifyReceiptLinkToken(B, t!.exp, t!.sig).ok, false);
+//    A longer expiry than was signed for.
+assert.equal(verifyReceiptLinkToken(A, t!.exp + 86400, t!.sig).ok, false);
+//    A tampered signature, and a missing one.
+assert.equal(verifyReceiptLinkToken(A, t!.exp, `${t!.sig}x`).ok, false);
+assert.equal(verifyReceiptLinkToken(A, t!.exp, null).ok, false);
+//    Expired, checked at a clock past the expiry.
+const expired = verifyReceiptLinkToken(A, t!.exp, t!.sig, (t!.exp + 5) * 1000);
+assert.equal(expired.ok, false);
+assert.equal(expired.ok === false ? expired.reason : "", "expired");
+
+//    The URL carries the id, the expiry and the signature, and nothing else.
+const url = receiptPdfPublicUrl(A, "https://bhbinternational.school");
+assert.ok(url && url.startsWith("https://bhbinternational.school/api/fees/receipt-pdf/"));
+assert.match(url!, /[?&]exp=\d+/);
+assert.match(url!, /[?&]sig=/);
+
+console.log("  ok — the family is whole, the variables keep their order, and the PDF link is narrow");
