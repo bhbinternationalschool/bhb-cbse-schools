@@ -256,6 +256,7 @@ jobs:
           npm run test:concession-per-due
           npm run test:concession-ground
           npm run test:fee-backdate
+          npm run test:receipt-auto-wa
           npm run test:desk-sync-status
           npm run test:duty-roster
           npm run test:email

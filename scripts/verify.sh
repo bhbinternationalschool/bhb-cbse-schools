@@ -166,6 +166,7 @@ SELFTESTS=(
   test:concession-per-due
   test:concession-ground
   test:fee-backdate
+  test:receipt-auto-wa
   test:desk-sync-status
   test:duty-roster
   test:email

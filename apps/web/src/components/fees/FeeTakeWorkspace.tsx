@@ -1575,6 +1575,24 @@ export function FeeTakeWorkspace() {
           : `Collected ${result.voucher.receiptNo}`) + futureConcessionMsg,
     );
     setPreviewReceiptId(result.voucher.id);
+
+    // Tell the family, without the cashier having to remember.
+    //
+    // Fired after the receipt is on screen and deliberately NOT awaited: the
+    // counter must not wait on Meta to serve the next parent. The server is
+    // idempotent per receipt, so a retry cannot message a family twice, and
+    // a failure is recorded there rather than thrown at the desk — the money
+    // is already collected and the receipt already printed.
+    void fetch("/api/fees/receipt-wa", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ voucherId: result.voucher.id }),
+    })
+      .then((r) => r.json())
+      .then((r: { sent?: boolean; reason?: string }) => {
+        if (!r?.sent && r?.reason) flash(`Receipt made · WhatsApp: ${r.reason}`);
+      })
+      .catch(() => undefined);
   }
 
   async function onSendUpiLink() {

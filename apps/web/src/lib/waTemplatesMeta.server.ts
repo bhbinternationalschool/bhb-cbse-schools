@@ -1,20 +1,24 @@
 /**
  * Server-only Meta WABA message template list / status helpers.
+ *
+ * The pending-event store used to be two JSON files under
+ * `process.cwd()/.data`. On Cloud Run that is a container-local disk, wiped
+ * on every deploy, every new instance and every scale to zero — so Meta's
+ * "your template was approved" webhook was written to a machine that would
+ * not exist by the time anybody looked. `bhb_fee_receipt` sat APPROVED at
+ * Meta for days while the ERP still called it pending, refused to use it,
+ * fell back to plain text, and had every fee receipt rejected as outside the
+ * 24-hour window.
+ *
+ * They live in `wa_template_events` now, which survives a deploy.
  */
 
-import { mkdir, readFile, writeFile } from "fs/promises";
-import path from "path";
 import type { MetaTemplateSyncRow } from "@/lib/waTemplates";
+import { getServerTenantContext } from "@/lib/serverTenant";
 import {
   metaWabaIdFromEnv,
   resolveWhatsAppWabaId,
 } from "@/lib/waMeta.server";
-
-const STATUS_EVENTS_PATH = path.join(
-  process.cwd(),
-  ".data",
-  "wa_template_status_events.json",
-);
 
 export type MetaTemplateStatusEvent = {
   message_template_name?: string;
@@ -22,54 +26,6 @@ export type MetaTemplateStatusEvent = {
   event?: string;
   reason?: string;
 };
-
-export async function readPendingTemplateStatusEvents(): Promise<
-  MetaTemplateStatusEvent[]
-> {
-  try {
-    const raw = await readFile(STATUS_EVENTS_PATH, "utf8");
-    const parsed = JSON.parse(raw) as { events?: MetaTemplateStatusEvent[] };
-    return Array.isArray(parsed.events) ? parsed.events : [];
-  } catch {
-    return [];
-  }
-}
-
-export async function appendTemplateStatusEvents(
-  events: MetaTemplateStatusEvent[],
-): Promise<void> {
-  if (!events.length) return;
-  const existing = await readPendingTemplateStatusEvents();
-  await mkdir(path.dirname(STATUS_EVENTS_PATH), { recursive: true });
-  await writeFile(
-    STATUS_EVENTS_PATH,
-    JSON.stringify(
-      { events: [...existing, ...events].slice(-500) },
-      null,
-      2,
-    ),
-    "utf8",
-  );
-}
-
-export async function clearPendingTemplateStatusEvents(): Promise<void> {
-  try {
-    await mkdir(path.dirname(STATUS_EVENTS_PATH), { recursive: true });
-    await writeFile(
-      STATUS_EVENTS_PATH,
-      JSON.stringify({ events: [] }, null, 2),
-      "utf8",
-    );
-  } catch {
-    /* ignore */
-  }
-}
-
-const QUALITY_EVENTS_PATH = path.join(
-  process.cwd(),
-  ".data",
-  "wa_template_quality_events.json",
-);
 
 export type MetaTemplateQualityEvent = {
   message_template_id?: string;
@@ -79,46 +35,83 @@ export type MetaTemplateQualityEvent = {
   new_quality_score?: string;
 };
 
+async function readEvents<T>(kind: "status" | "quality"): Promise<T[]> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return [];
+  const { data, error } = await ctx.sb
+    .from("wa_template_events")
+    .select("payload")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("kind", kind)
+    .is("applied_at", null)
+    .order("received_at", { ascending: true })
+    .limit(500);
+  if (error || !data) {
+    if (error) console.warn("[waTemplatesMeta] read events failed", error.message);
+    return [];
+  }
+  return data.map((r) => r.payload as T);
+}
+
+async function appendEvents(
+  kind: "status" | "quality",
+  events: unknown[],
+): Promise<void> {
+  if (!events.length) return;
+  const ctx = await getServerTenantContext();
+  if (!ctx) return;
+  const { error } = await ctx.sb.from("wa_template_events").insert(
+    events.map((payload) => ({ tenant_id: ctx.tenantId, kind, payload })),
+  );
+  if (error) console.warn("[waTemplatesMeta] append events failed", error.message);
+}
+
+/**
+ * Marked applied rather than deleted, so a template that flips status twice
+ * leaves a trail somebody can read when the ERP and Meta disagree again.
+ */
+async function markApplied(kind: "status" | "quality"): Promise<void> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return;
+  const { error } = await ctx.sb
+    .from("wa_template_events")
+    .update({ applied_at: new Date().toISOString() })
+    .eq("tenant_id", ctx.tenantId)
+    .eq("kind", kind)
+    .is("applied_at", null);
+  if (error) console.warn("[waTemplatesMeta] mark applied failed", error.message);
+}
+
+export async function readPendingTemplateStatusEvents(): Promise<
+  MetaTemplateStatusEvent[]
+> {
+  return readEvents<MetaTemplateStatusEvent>("status");
+}
+
+export async function appendTemplateStatusEvents(
+  events: MetaTemplateStatusEvent[],
+): Promise<void> {
+  await appendEvents("status", events);
+}
+
+export async function clearPendingTemplateStatusEvents(): Promise<void> {
+  await markApplied("status");
+}
+
 export async function readPendingTemplateQualityEvents(): Promise<
   MetaTemplateQualityEvent[]
 > {
-  try {
-    const raw = await readFile(QUALITY_EVENTS_PATH, "utf8");
-    const parsed = JSON.parse(raw) as { events?: MetaTemplateQualityEvent[] };
-    return Array.isArray(parsed.events) ? parsed.events : [];
-  } catch {
-    return [];
-  }
+  return readEvents<MetaTemplateQualityEvent>("quality");
 }
 
 export async function appendTemplateQualityEvents(
   events: MetaTemplateQualityEvent[],
 ): Promise<void> {
-  if (!events.length) return;
-  const existing = await readPendingTemplateQualityEvents();
-  await mkdir(path.dirname(QUALITY_EVENTS_PATH), { recursive: true });
-  await writeFile(
-    QUALITY_EVENTS_PATH,
-    JSON.stringify(
-      { events: [...existing, ...events].slice(-500) },
-      null,
-      2,
-    ),
-    "utf8",
-  );
+  await appendEvents("quality", events);
 }
 
 export async function clearPendingTemplateQualityEvents(): Promise<void> {
-  try {
-    await mkdir(path.dirname(QUALITY_EVENTS_PATH), { recursive: true });
-    await writeFile(
-      QUALITY_EVENTS_PATH,
-      JSON.stringify({ events: [] }, null, 2),
-      "utf8",
-    );
-  } catch {
-    /* ignore */
-  }
+  await markApplied("quality");
 }
 
 function metaAccessToken(): string {
