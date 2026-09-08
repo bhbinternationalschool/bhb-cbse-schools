@@ -163,6 +163,14 @@ create_job "bhb-ledger-project-tick" "50 8-15 * * 1-6" \
   "${APP_URL}/api/ledger/project/tick" \
   "Asia/Kolkata" "300s"
 
+# The director's Monday note on fee collections: last week's receipts against
+# the week before, the ageing of what is still owed, parent meetings — figures
+# computed by code, a few sentences by the model with no digit in them. Goes
+# to every owner on the roster (same recipients as the command digest).
+create_job "bhb-collections-weekly-note" "15 8 * * 1" \
+  "${APP_URL}/api/ai/collections-weekly-note?send=1" \
+  "Asia/Kolkata" "300s"
+
 # ERP command desk: the director's end-of-day digest of what staff asked the
 # ERP over WhatsApp / app / assistant. Sends once after ERP_COMMANDS_DIGEST_HOUR
 # (default 19:00 IST), only on days with commands; idempotent per date, so the

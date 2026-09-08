@@ -70,6 +70,30 @@ import {
   type LedgerBriefLanguage,
 } from "@/lib/ledgerBriefAi";
 import {
+  buildConcessionCaseSystemPrompt,
+  buildConcessionCaseUserPrompt,
+  buildConcessionPolicySystemPrompt,
+  buildConcessionPolicyUserPrompt,
+  CONCESSION_CASE_PROMPT_VERSION,
+  CONCESSION_POLICY_PROMPT_VERSION,
+  parseConcessionCaseJson,
+  parseConcessionPolicyJson,
+  type ConcessionCaseDraft,
+  type ConcessionCaseFacts,
+  type ConcessionPolicyDraft,
+  type ConcessionPolicyFacts,
+  type ConcessionReviewLanguage,
+} from "@/lib/concessionReviewAi";
+import {
+  buildCollectionsWeeklySystemPrompt,
+  buildCollectionsWeeklyUserPrompt,
+  COLLECTIONS_WEEKLY_PROMPT_VERSION,
+  parseCollectionsWeeklyJson,
+  type CollectionsWeeklyDraft,
+  type CollectionsWeeklyFacts,
+  type CollectionsWeeklyLanguage,
+} from "@/lib/collectionsWeeklyAi";
+import {
   buildPtmBriefSystemPrompt,
   buildPtmBriefUserPrompt,
   parsePtmBriefJson,
@@ -1414,6 +1438,80 @@ export async function generateLedgerBriefJson(opts: {
     error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for the morning brief",
     engine: r.engine,
   };
+}
+
+/**
+ * Concession policy consolidation. Draft only — nothing merges.
+ * Cluster ids are the allow-list; digits in the model's words discard the draft.
+ */
+export async function generateConcessionPolicyDraftJson(opts: {
+  facts: ConcessionPolicyFacts;
+  language: ConcessionReviewLanguage;
+}): Promise<
+  | { ok: true; draft: ConcessionPolicyDraft; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const ids = opts.facts.clusters.map((c) => c.id);
+  const r = await callLlmJson(
+    {
+      system: buildConcessionPolicySystemPrompt({ language: opts.language, schoolName: opts.facts.schoolName }),
+      userMessage: buildConcessionPolicyUserPrompt(opts.facts),
+      maxTokens: opts.language === "hi" ? 1600 : 1100,
+      temperature: 0.3,
+      geminiMaxTokens: 4096,
+      meta: { route: "concession-policy-draft", promptVersion: CONCESSION_POLICY_PROMPT_VERSION },
+    },
+    (text) => parseConcessionPolicyJson(text, ids),
+  );
+  if (r.ok) return { ok: true, draft: r.data, engine: r.engine, generationId: r.generationId };
+  return { ok: false, error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for the policy draft", engine: r.engine };
+}
+
+/** One child's concession case file: the reviewer's question, by flag code. */
+export async function generateConcessionCaseJson(opts: {
+  facts: ConcessionCaseFacts;
+  language: ConcessionReviewLanguage;
+}): Promise<
+  | { ok: true; draft: ConcessionCaseDraft; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const codes = opts.facts.flags.map((f) => f.code);
+  const r = await callLlmJson(
+    {
+      system: buildConcessionCaseSystemPrompt({ language: opts.language, schoolName: opts.facts.schoolName }),
+      userMessage: buildConcessionCaseUserPrompt(opts.facts),
+      maxTokens: opts.language === "hi" ? 700 : 450,
+      temperature: 0.3,
+      geminiMaxTokens: 2048,
+      meta: { route: "concession-case-file", promptVersion: CONCESSION_CASE_PROMPT_VERSION },
+    },
+    (text) => parseConcessionCaseJson(text, codes),
+  );
+  if (r.ok) return { ok: true, draft: r.data, engine: r.engine, generationId: r.generationId };
+  return { ok: false, error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for the case file", engine: r.engine };
+}
+
+/** The director's Monday collections note. Figures travel beside it; the note carries none. */
+export async function generateCollectionsWeeklyNoteJson(opts: {
+  facts: CollectionsWeeklyFacts;
+  language: CollectionsWeeklyLanguage;
+}): Promise<
+  | { ok: true; draft: CollectionsWeeklyDraft; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const r = await callLlmJson(
+    {
+      system: buildCollectionsWeeklySystemPrompt({ language: opts.language, schoolName: opts.facts.schoolName }),
+      userMessage: buildCollectionsWeeklyUserPrompt(opts.facts),
+      maxTokens: opts.language === "hi" ? 900 : 600,
+      temperature: 0.35,
+      geminiMaxTokens: 2048,
+      meta: { route: "collections-weekly-note", promptVersion: COLLECTIONS_WEEKLY_PROMPT_VERSION },
+    },
+    parseCollectionsWeeklyJson,
+  );
+  if (r.ok) return { ok: true, draft: r.data, engine: r.engine, generationId: r.generationId };
+  return { ok: false, error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for the weekly note", engine: r.engine };
 }
 
 /** Teaching moves from item-score roll-ups. Draft only. */
