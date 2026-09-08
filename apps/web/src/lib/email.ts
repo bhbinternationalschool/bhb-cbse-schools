@@ -8,13 +8,14 @@
  * module_local_state ("email_settings") and are edited via /api/email/settings.
  */
 
-export type EmailPurpose = "admissions" | "fees" | "reports" | "general";
+export type EmailPurpose = "admissions" | "fees" | "reports" | "general" | "careers";
 
-export const EMAIL_PURPOSES: { id: EmailPurpose; label: string; hint: string; rbac: "admissions" | "fees" | "notices" }[] = [
+export const EMAIL_PURPOSES: { id: EmailPurpose; label: string; hint: string; rbac: "admissions" | "fees" | "notices" | "staff" }[] = [
   { id: "admissions", label: "Admissions", hint: "Follow-ups, offer / deficiency letters, marketing to prospects", rbac: "admissions" },
   { id: "fees", label: "Fees & receipts", hint: "Receipts, fee reminders, statements", rbac: "fees" },
   { id: "reports", label: "Reports & leadership", hint: "Scheduled reports, digests to management", rbac: "notices" },
   { id: "general", label: "General office", hint: "Notices, circulars, anything else", rbac: "notices" },
+  { id: "careers", label: "Careers", hint: "Acknowledging applications, interview calls", rbac: "staff" },
 ];
 
 export type EmailSender = { address: string; name: string };
@@ -56,11 +57,24 @@ export function defaultEmailSettings(domain = "bhbinternational.school"): EmailS
   return {
     version: 1,
     enabled: true,
+    /*
+      These are the mailboxes that ACTUALLY exist in the school's Workspace,
+      checked on 2026-09-08. They are defaults, not rules — the office can
+      repoint any of them in Comms → Email — but a default naming a mailbox
+      that does not exist fails at send time as `unauthorized_client`, which
+      reads like a delegation problem and is not one.
+
+      `admission@` is singular because that is how the school created it.
+      `accounts@` was created on 2026-09-08 for exactly this, so fee receipts
+      and reminders come from the book rather than the general office, and a
+      parent's reply lands with whoever keeps it.
+    */
     senders: {
-      admissions: { address: `admissions@${domain}`, name: "Admissions" },
+      admissions: { address: `admission@${domain}`, name: "Admissions" },
       fees: { address: `accounts@${domain}`, name: "Accounts" },
       reports: { address: `principal@${domain}`, name: "Principal's office" },
       general: { address: `office@${domain}`, name: "School office" },
+      careers: { address: `job@${domain}`, name: "Careers" },
     },
     replyTo: "",
     footer: "",

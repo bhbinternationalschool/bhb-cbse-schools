@@ -1,15 +1,37 @@
 import assert from "node:assert/strict";
-import { buildMimeMessage, defaultEmailSettings, isEmailAddress, normalizeEmailSettings, senderFor, textToHtml } from "./email";
+import { EMAIL_PURPOSES, buildMimeMessage, defaultEmailSettings, isEmailAddress, normalizeEmailSettings, senderFor, textToHtml } from "./email";
 
 console.log("email.selftest.ts");
 assert.equal(isEmailAddress("a@b.co"), true);
 assert.equal(isEmailAddress("nope"), false);
 const d = defaultEmailSettings("bhbinternational.school");
-assert.equal(senderFor(d, "admissions").address, "admissions@bhbinternational.school");
-assert.equal(senderFor(d, "fees").address, "accounts@bhbinternational.school");
+
+/*
+  EVERY purpose must have a usable default on the school's own domain.
+  Pinning the exact strings here was worse than useless: it pinned
+  `admissions@` and `accounts@`, neither of which exists in the school's
+  Workspace, so the test passed happily while both would have failed at send
+  time with `unauthorized_client` — an error that reads like a delegation
+  fault and is not one. What matters is that a purpose cannot ship with a
+  blank or off-domain sender, and that a new purpose cannot be added without
+  one.
+*/
+for (const p of EMAIL_PURPOSES) {
+  const from = senderFor(d, p.id).address;
+  assert.ok(isEmailAddress(from), `${p.id} has no valid default sender`);
+  assert.ok(
+    from.endsWith("@bhbinternational.school"),
+    `${p.id} default sender is off-domain: ${from}`,
+  );
+  assert.ok(senderFor(d, p.id).name.trim().length > 0, `${p.id} has no display name`);
+}
 const n = normalizeEmailSettings({ senders: { admissions: { address: "Enquiry@BHBinternational.school", name: "Admissions desk" }, fees: { address: "not-an-email" } }, replyTo: "bad", footer: "x" }, "bhbinternational.school");
 assert.equal(n.senders.admissions.address, "enquiry@bhbinternational.school");
-assert.equal(n.senders.fees.address, "accounts@bhbinternational.school", "invalid address falls back to default");
+assert.equal(
+  n.senders.fees.address,
+  d.senders.fees.address,
+  "invalid address falls back to the default, whatever the default is",
+);
 assert.equal(n.replyTo, "");
 assert.equal(n.enabled, true);
 
