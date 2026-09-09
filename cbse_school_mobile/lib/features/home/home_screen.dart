@@ -12,6 +12,7 @@ import "../modules/attendance_history_screen.dart";
 import "../modules/chat_thread_screen.dart";
 import "../modules/complaints_screen.dart";
 import "../modules/ebook_shelf_screen.dart";
+import "../modules/online_classes_screen.dart";
 import "../modules/gallery_screen.dart";
 import "../modules/fees_screen.dart";
 import "../modules/homework_screen.dart";
@@ -46,6 +47,7 @@ const _modules = [
   // that opened a "coming soon" sheet, and Google Play rejects placeholder
   // features under Minimum Functionality. Put it back the same day the exams
   // endpoint returns real published results — not before.
+  _Module("Online class", Icons.videocam_outlined, ModuleTone.blue),
   _Module("Library", Icons.local_library_outlined, ModuleTone.green),
   _Module("PTM", Icons.groups_outlined, ModuleTone.gray),
   _Module("Leave", Icons.event_busy_outlined, ModuleTone.purple),
@@ -144,6 +146,8 @@ class _HomeScreenState extends State<HomeScreen> {
         _openModule("Transport", child);
       case "/leave":
         _openModule("Leave", child);
+      case "/online-classes":
+        _openModule("Online class", child);
       case "/complaints":
         _openModule("Complaints", child);
       case "/profile":
@@ -261,6 +265,8 @@ class _HomeScreenState extends State<HomeScreen> {
         screen = TransportScreen(api: api);
       case "Library":
         screen = EbookShelfScreen(api: api);
+      case "Online class":
+        screen = OnlineClassesScreen(api: api, child: child);
       case "Gallery":
         screen = GalleryScreen(api: api);
       case "Leave":

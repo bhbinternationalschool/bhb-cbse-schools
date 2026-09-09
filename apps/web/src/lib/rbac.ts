@@ -30,6 +30,7 @@ export type RbacModule =
   | "attendance"
   | "homework"
   | "timetable"
+  | "online_classes"
   | "teaching"
   | "ptm"
   | "events"
@@ -184,6 +185,7 @@ export const RBAC_MODULES: {
   { id: "attendance", label: "Attendance", href: "/attendance" },
   { id: "homework", label: "Homework & Diary", href: "/homework" },
   { id: "timetable", label: "Timetable", href: "/timetable" },
+  { id: "online_classes", label: "Online classes", href: "/online-classes" },
   { id: "teaching", label: "Teaching & syllabus", href: "/teaching" },
   { id: "ptm", label: "PTM", href: "/ptm" },
   { id: "events", label: "Events & calendar", href: "/events" },
@@ -420,6 +422,7 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("attendance", ops),
         grant("homework", ops),
         grant("timetable", ops),
+        grant("online_classes", ops),
         grant("teaching", [...ops, "approve"]),
         grant("ptm", ops),
         grant("events", ops),
@@ -474,6 +477,7 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("attendance", ["view", "edit", "approve", "export"]),
         grant("homework", ["view", "export"]),
         grant("timetable", ["view", "create", "edit", "approve", "export"]),
+        grant("online_classes", ["view", "create", "edit", "export"]),
         grant("teaching", ["view", "create", "edit", "export"]),
         grant("ptm", ["view", "create", "edit", "export"]),
         grant("events", ["view", "create", "edit", "delete", "export"]),
@@ -596,6 +600,8 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("attendance", teachOps),
         grant("homework", [...teachOps, "export"]),
         grant("timetable", ["view"]),
+        // Teachers schedule and run their own sections' online classes.
+        grant("online_classes", teachOps),
         // Teachers log their own periods and read their own coverage;
         // they cannot delete a log once written (audit trail) or edit
         // the syllabus plan the school set.
@@ -1197,6 +1203,7 @@ export function moduleForHref(href: string): RbacModule | null {
   if (path.startsWith("/attendance")) return "attendance";
   if (path.startsWith("/homework")) return "homework";
   if (path.startsWith("/timetable")) return "timetable";
+  if (path.startsWith("/online-classes")) return "online_classes";
   if (path.startsWith("/teaching")) return "teaching";
   if (path.startsWith("/ptm")) return "ptm";
   if (path.startsWith("/events")) return "events";

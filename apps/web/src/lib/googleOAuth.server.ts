@@ -4,13 +4,32 @@
 
 import { randomBytes } from "crypto";
 
+/** Google Meet REST API v2 — create a space, and read who was in it. */
+export const GOOGLE_MEET_SCOPE_CREATE =
+  "https://www.googleapis.com/auth/meetings.space.created";
+export const GOOGLE_MEET_SCOPE_READ =
+  "https://www.googleapis.com/auth/meetings.space.readonly";
+
+/**
+ * One grant per staff member covers both Classroom (read) and Meet (create
+ * a room, read its participants). A teacher connects Google once, from
+ * either Homework → Classroom or Online classes, and both work.
+ */
 export const GOOGLE_CLASSROOM_SCOPES = [
   "openid",
   "email",
   "profile",
   "https://www.googleapis.com/auth/classroom.courses.readonly",
   "https://www.googleapis.com/auth/classroom.coursework.students.readonly",
+  GOOGLE_MEET_SCOPE_CREATE,
+  GOOGLE_MEET_SCOPE_READ,
 ].join(" ");
+
+/** Does a granted scope string include what Meet room creation needs? */
+export function scopesAllowMeet(scopes: string): boolean {
+  const set = new Set((scopes || "").split(/\s+/).filter(Boolean));
+  return set.has(GOOGLE_MEET_SCOPE_CREATE);
+}
 
 // drive.file only — restricted to files this app creates itself, not the
 // connected account's whole Drive. See docs/GOOGLE_DRIVE_DOCUMENTS_PLAN.md §3.

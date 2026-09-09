@@ -56,7 +56,12 @@ export type ClassroomHomeworkDraft = {
   attachments: { label: string; url: string }[];
 };
 
-async function ensureAccessToken(
+/**
+ * A usable access token for a staff member's Google grant, refreshing (and
+ * persisting the refresh) when the stored one is within a minute of expiry.
+ * Shared by Classroom and Meet — one grant, two APIs.
+ */
+export async function ensureAccessToken(
   conn: ClassroomStaffConnection,
 ): Promise<
   | { ok: true; accessToken: string; connection: ClassroomStaffConnection }
@@ -83,6 +88,7 @@ async function ensureAccessToken(
     refreshToken: conn.refreshToken,
     expiresAt,
     connectedAt: conn.connectedAt,
+    scopes: conn.scopes,
   });
   return { ok: true, accessToken: refreshed.accessToken, connection: next };
 }

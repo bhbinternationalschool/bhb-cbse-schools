@@ -110,6 +110,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:job-applications
 
+      - name: Self-test — an online class opens on the clock, and a link goes only where a class can be
+        working-directory: apps/web
+        run: npm run test:online-classes
+
       - name: Test — which number sends which template, and both languages
         working-directory: apps/web
         run: npm run test:wa-sender-routing

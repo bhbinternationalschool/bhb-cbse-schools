@@ -5,6 +5,7 @@ import {
   BookOpen,
   Bus,
   CalendarClock,
+  Video,
   CalendarHeart,
   ClipboardCheck,
   DoorOpen,
@@ -260,6 +261,14 @@ export const HUB_GROUPS: HubGroup[] = [
         detail: "Bell periods, weekly grids, and auto-assign from subject loads + teacher duties.",
         icon: CalendarClock,
         tone: "violet",
+      },
+      {
+        href: "/online-classes",
+        title: "Online classes",
+        blurb: "Live over Meet",
+        detail: "Schedule a live class for a section, announce it to parents' phones, and see who joined.",
+        icon: Video,
+        tone: "sky",
       },
       {
         href: "/teaching",

@@ -26,6 +26,7 @@ import "staff_leave_screen.dart";
 import "student_leave_queue_screen.dart";
 import "students_screen.dart";
 import "timetable_screen.dart";
+import "online_classes_teacher_screen.dart";
 import "waiting_card.dart";
 import "../../core/i18n/locale_controller.dart";
 
@@ -78,6 +79,12 @@ const _staffModules = [
     Icons.calendar_view_week_outlined,
     ModuleTone.blue,
     "timetable_view",
+  ),
+  _StaffModule(
+    "Online classes",
+    Icons.videocam_outlined,
+    ModuleTone.blue,
+    "online_class_host",
   ),
   _StaffModule(
     "Students",
@@ -388,6 +395,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         await _pushScreen(StaffLeaveScreen(api: widget.api));
       case "Timetable":
         await _pushScreen(TimetableScreen(api: widget.api));
+      case "Online classes":
+        await _pushScreen(OnlineClassesTeacherScreen(api: widget.api));
       case "Payslips":
         await _pushScreen(PayslipsScreen(api: widget.api));
       case "Leave requests":
