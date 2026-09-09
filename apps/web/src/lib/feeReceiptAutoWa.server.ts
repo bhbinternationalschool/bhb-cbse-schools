@@ -138,6 +138,15 @@ export async function sendFeeReceiptWhatsApp(input: {
   > & { voidedAt?: string | null };
   mobile: string;
   studentNames: string[];
+  /**
+   * A person asked for this one, on purpose.
+   *
+   * The already-sent guard stops a retry or a replayed request messaging a
+   * family twice about the same money. It must not stop the office
+   * re-sending when a parent says the receipt never arrived, so a human
+   * pressing the button on the receipt passes force.
+   */
+  force?: boolean;
 }): Promise<ReceiptAutoWaOutcome> {
   const { voucher } = input;
   try {
@@ -155,7 +164,7 @@ export async function sendFeeReceiptWhatsApp(input: {
       });
       return { sent: false, reason: "No WhatsApp number on the household" };
     }
-    if (await alreadySent(voucher.id)) {
+    if (!input.force && (await alreadySent(voucher.id))) {
       return { sent: false, reason: "Already sent", alreadySent: true };
     }
 

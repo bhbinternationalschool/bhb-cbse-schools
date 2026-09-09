@@ -1593,10 +1593,22 @@ export function FeeTakeWorkspace() {
       body: JSON.stringify({ voucherId: result.voucher.id }),
     })
       .then((r) => r.json())
-      .then((r: { sent?: boolean; reason?: string }) => {
-        if (!r?.sent && r?.reason) flash(`Receipt made · WhatsApp: ${r.reason}`);
+      .then((r: { sent?: boolean; reason?: string; error?: string }) => {
+        // Say something whatever happens EXCEPT a clean send. The first
+        // version only spoke when `reason` was present, so a 404 body — which
+        // carries `error` — said nothing at all, and two real receipts on
+        // 2026-09-09 were never messaged with no sign of it anywhere.
+        if (!r?.sent) {
+          flash(
+            `Receipt made · WhatsApp not sent: ${r?.reason || r?.error || "no reply from the server"}`,
+          );
+        }
       })
-      .catch(() => undefined);
+      .catch((e: unknown) =>
+        flash(
+          `Receipt made · WhatsApp not sent: ${e instanceof Error ? e.message : "request failed"}`,
+        ),
+      );
   }
 
   async function onSendUpiLink() {
