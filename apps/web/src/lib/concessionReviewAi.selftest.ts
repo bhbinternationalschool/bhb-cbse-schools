@@ -3,13 +3,16 @@
  * Run: npx tsx src/lib/concessionReviewAi.selftest.ts
  */
 import assert from "node:assert/strict";
-import type { ConcessionGrant, ConcessionRule } from "./masters";
+import type { ConcessionGrant, ConcessionRule, MastersState } from "./masters";
+import type { ConcessionCluster } from "./concessionReviewAi";
 import {
+  applyConcessionMerge,
   buildConcessionCaseFlags,
   buildConcessionCaseUserPrompt,
   buildConcessionClusters,
   buildConcessionPolicyUserPrompt,
   concessionGrantRoute,
+  matchClusterProposals,
   mobileKey,
   parseConcessionCaseJson,
   parseConcessionPolicyJson,
@@ -90,6 +93,149 @@ const grant = (concessionId: string, studentId: string, extra: Partial<Concessio
   });
   assert.match(prompt, /c1: ₹150 off on all heads/);
   assert.match(prompt, /without a ground: 1/);
+}
+
+/* ── the merge: one discount, no change to any bill ───────────── */
+{
+  const rules = [
+    rule("keep", "Tuition Fee · ₹150 off", 15000, { code: "CTR-TUITION-15000" }),
+    rule("dup1", "Tuition Fee · ₹150 off", 15000, { code: "CTR-TUITION-15000" }),
+    rule("imp", "Discount150", 15000, { code: "IMP_TUIT_FLAT_150" }),
+    rule("other", "₹200 off", 20000, { code: "CTR-TUITION-20000" }),
+  ];
+  const grants = [
+    grant("keep", "s1"),
+    grant("dup1", "s2"),
+    grant("imp", "s3", { ground: "sibling" }),
+    grant("imp", "s4"),
+    grant("other", "s5"),
+  ];
+  const state = { concessions: rules, concessionGrants: grants } as unknown as MastersState;
+  const { clusters } = buildConcessionClusters({ rules, grants });
+  const c150 = clusters.find((c) => c.valueLabel === "₹150 off")!;
+  assert.deepEqual([...c150.ruleIds].sort(), ["dup1", "imp", "keep"], "the group carries its definitions");
+
+  const merged = applyConcessionMerge(state, {
+    keeperRuleId: "keep",
+    name: "Sibling tuition discount",
+    code: "SIB-TUITION",
+    ruleIds: c150.ruleIds,
+    grantIds: c150.ruleIds.flatMap((id) => grants.filter((g) => g.concessionId === id).map((g) => g.id)),
+    ground: "sibling",
+    protectedCodes: ["IMP_TUIT_FLAT_150"],
+    today: "2026-09-09",
+  });
+  assert.ok(merged.ok, merged.ok ? "" : merged.reason);
+  const o = merged.outcome;
+  assert.equal(o.movedGrants, 3, "every grant but the keeper's own moves");
+  assert.equal(o.groundsRecorded, 3, "the three grants with no ground get one; the fourth already had one");
+  assert.equal(
+    o.state.concessionGrants.find((g) => g.id === "g_imp_s3")!.ground,
+    "sibling",
+    "a ground already recorded is left alone",
+  );
+  assert.deepEqual(o.removedDefinitions, ["Tuition Fee · ₹150 off"], "the emptied counter duplicate goes");
+  assert.deepEqual(
+    o.keptDefinitions,
+    [{ name: "Discount150", why: "used by the import" }],
+    "the import's own definition stays put",
+  );
+  const keeper = o.state.concessions.find((c) => c.id === "keep")!;
+  assert.equal(keeper.name, "Sibling tuition discount");
+  assert.equal(keeper.code, "SIB-TUITION");
+  assert.match(keeper.notes, /Merged 2 definition\(s\) into one on 2026-09-09/);
+  assert.equal(keeper.value, 15000, "the amount is never touched");
+  assert.equal(
+    o.state.concessionGrants.filter((g) => g.concessionId === "keep").length,
+    4,
+  );
+  assert.equal(
+    o.state.concessionGrants.find((g) => g.id === "g_other_s5")!.concessionId,
+    "other",
+    "a grant outside the group is untouched",
+  );
+
+  // A child left unticked keeps the definition they are on alive.
+  const partial = applyConcessionMerge(state, {
+    keeperRuleId: "keep",
+    name: "Sibling tuition discount",
+    ruleIds: c150.ruleIds,
+    grantIds: ["g_keep_s1"],
+    protectedCodes: [],
+    today: "2026-09-09",
+  });
+  assert.ok(partial.ok);
+  assert.deepEqual(partial.outcome.removedDefinitions, []);
+  assert.equal(partial.outcome.keptDefinitions.length, 2);
+  assert.ok(partial.outcome.keptDefinitions.every((k) => k.why === "still granted"));
+
+  // Money-neutrality, enforced rather than assumed.
+  const wrong = applyConcessionMerge(state, {
+    keeperRuleId: "keep",
+    name: "Anything",
+    ruleIds: ["keep", "other"],
+    grantIds: ["g_other_s5"],
+    today: "2026-09-09",
+  });
+  assert.equal(wrong.ok, false);
+  assert.match(wrong.ok ? "" : wrong.reason, /same amount off the same heads/);
+
+  // A code the import owns cannot be renamed — it would come straight back.
+  const renamedImport = applyConcessionMerge(state, {
+    keeperRuleId: "imp",
+    name: "Sibling tuition discount",
+    code: "SIB-TUITION",
+    ruleIds: c150.ruleIds,
+    grantIds: [],
+    protectedCodes: ["IMP_TUIT_FLAT_150"],
+    today: "2026-09-09",
+  });
+  assert.equal(renamedImport.ok, false);
+  assert.match(renamedImport.ok ? "" : renamedImport.reason, /discount import/);
+
+  // A code already in use elsewhere is refused.
+  const clash = applyConcessionMerge(state, {
+    keeperRuleId: "keep",
+    name: "Sibling tuition discount",
+    code: "CTR-TUITION-20000",
+    ruleIds: c150.ruleIds,
+    grantIds: [],
+    today: "2026-09-09",
+  });
+  assert.equal(clash.ok, false);
+  assert.match(clash.ok ? "" : clash.reason, /already belongs to/);
+
+  assert.equal(
+    applyConcessionMerge(state, { keeperRuleId: "keep", name: "  ", ruleIds: ["keep"], grantIds: [], today: "2026-09-09" }).ok,
+    false,
+    "an unnamed discount is not a discount",
+  );
+}
+
+/* ── a proposal lands on the group it was written about ───────── */
+{
+  const source = [
+    { id: "c1", ruleIds: ["a", "b"] },
+    { id: "c2", ruleIds: ["c"] },
+  ] as unknown as ConcessionCluster[];
+  // The browser rebuilt the list and the order flipped.
+  const live = [
+    { id: "c1", ruleIds: ["c"] },
+    { id: "c2", ruleIds: ["a", "b"] },
+  ] as unknown as ConcessionCluster[];
+  const matched = matchClusterProposals(live, source, [
+    { clusterId: "c1", name: "Tuition" },
+    { clusterId: "c2", name: "Transport" },
+  ]);
+  assert.equal(matched.get("c1")!.name, "Transport", "matched on shared definitions, not position");
+  assert.equal(matched.get("c2")!.name, "Tuition");
+  assert.equal(
+    matchClusterProposals([{ id: "c1", ruleIds: ["z"] }] as unknown as ConcessionCluster[], source, [
+      { clusterId: "c1", name: "Tuition" },
+    ]).size,
+    0,
+    "a group with nothing in common gets no name",
+  );
 }
 
 /* ── policy parser: allow-listed ids, catalogue grounds, no digits ── */

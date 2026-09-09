@@ -29,7 +29,12 @@
  * The LLM call lives in aiLlm.server.ts; the data gathering in the routes.
  */
 
-import type { ConcessionGrant, ConcessionRule } from "@/lib/masters";
+import type {
+  ConcessionGrant,
+  ConcessionGround,
+  ConcessionRule,
+  MastersState,
+} from "@/lib/masters";
 import { CONCESSION_GROUNDS, formatInr } from "@/lib/masters";
 
 export type ConcessionReviewLanguage = "en" | "hi";
@@ -47,6 +52,15 @@ function stripFence(text: string): string {
 export type ConcessionCluster = {
   /** Stable id the model must refer to: `c1`, `c2`, … in size order. */
   id: string;
+  /**
+   * The definitions themselves, most-granted first.
+   *
+   * The group is useless as a finding alone — the office cannot act on "these
+   * thirty-six are the same discount" without the ids of the thirty-six. This
+   * is what the merge works on, and what lets a proposal be matched back to a
+   * group after the list is rebuilt from a different copy of masters.
+   */
+  ruleIds: string[];
   /** What the definitions have in common, rendered ("₹150 off", "10%", "sibling tiers …"). */
   valueLabel: string;
   /** Fee heads the discount applies to; "all heads" when unrestricted. */
@@ -164,6 +178,13 @@ export function buildConcessionClusters(input: {
     }
     const heads = [...new Set(sample.feeHeadIds ?? [])];
     raw.push({
+      ruleIds: [...rules]
+        .sort(
+          (a, b) =>
+            (grantsByRule.get(b.id)?.length ?? 0) -
+            (grantsByRule.get(a.id)?.length ?? 0),
+        )
+        .map((r) => r.id),
       valueLabel: ruleValueLabel(sample),
       headsLabel: heads.length
         ? heads.map((h) => (input.feeHeadName ? input.feeHeadName(h) : h)).join(", ")
@@ -184,6 +205,212 @@ export function buildConcessionClusters(input: {
     clusters: raw.map((c, i) => ({ id: `c${i + 1}`, ...c })),
     unusedDefinitions: unusedDefinitions.sort(),
   };
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+ * A2. Making the group real
+ * ──────────────────────────────────────────────────────────────────────── */
+
+/**
+ * What the office asked for after seeing the groups: not a paragraph about
+ * thirty-six definitions of "₹150 off tuition", but one discount with a name
+ * and the children under it.
+ *
+ * The merge keeps ONE definition (the keeper), points the chosen grants at
+ * it, and drops the definitions that are then empty. Two things it must never
+ * do, both enforced below rather than trusted to the caller:
+ *
+ *   - change what anybody is charged. Every definition folded in must take
+ *     the same amount off the same heads as the keeper, and the keeper's
+ *     value and heads are not touched. A merge that cannot prove that is
+ *     refused, not "mostly applied";
+ *   - remove a definition something still points at. A definition still
+ *     holding a grant stays; so does one the bundled discount import refers
+ *     to by code, because that import re-materialises the rule at read time
+ *     and a child with no persisted grant depends on it being there.
+ */
+export type ConcessionMergePlan = {
+  /** The definition that survives and gets the name. */
+  keeperRuleId: string;
+  /** The policy name the office decides on. */
+  name: string;
+  /** New code for the keeper. Omit to keep the one it has. */
+  code?: string;
+  /** Every definition in the group, keeper included. */
+  ruleIds: string[];
+  /** Grants to move onto the keeper. */
+  grantIds: string[];
+  /** Recorded on moved grants that have NO ground. Never overwrites one. */
+  ground?: ConcessionGround | "";
+  /** Codes the bundled discount import still refers to — never removed. */
+  protectedCodes?: string[];
+  /** ISO date for the audit line on the keeper. */
+  today: string;
+};
+
+export type ConcessionMergeOutcome = {
+  state: MastersState;
+  keeperName: string;
+  keeperCode: string;
+  movedGrants: number;
+  groundsRecorded: number;
+  /** Definition names removed from masters. */
+  removedDefinitions: string[];
+  /** Definitions left standing, with why. */
+  keptDefinitions: { name: string; why: "still granted" | "used by the import" }[];
+};
+
+function sameDiscount(a: ConcessionRule, b: ConcessionRule): boolean {
+  return (
+    ruleValueKey(a) === ruleValueKey(b) && headsKey(a) === headsKey(b)
+  );
+}
+
+export function applyConcessionMerge(
+  state: MastersState,
+  plan: ConcessionMergePlan,
+): { ok: true; outcome: ConcessionMergeOutcome } | { ok: false; reason: string } {
+  const rules = state.concessions ?? [];
+  const keeper = rules.find((r) => r.id === plan.keeperRuleId);
+  if (!keeper) return { ok: false, reason: "The definition to keep no longer exists — reload and try again." };
+  const name = plan.name.trim();
+  if (!name) return { ok: false, reason: "Give the discount a name first." };
+
+  const groupIds = new Set(plan.ruleIds);
+  groupIds.add(keeper.id);
+  const group = rules.filter((r) => groupIds.has(r.id));
+  const odd = group.find((r) => !sameDiscount(r, keeper));
+  if (odd) {
+    return {
+      ok: false,
+      reason: `“${odd.name || odd.code}” does not take the same amount off the same heads as “${keeper.name || keeper.code}”. Merging it would change what a family is charged.`,
+    };
+  }
+
+  const code = (plan.code ?? keeper.code).trim().toUpperCase();
+  if (!code) return { ok: false, reason: "A discount needs a code." };
+  const protectedCodes = new Set(
+    (plan.protectedCodes ?? []).map((c) => c.trim().toUpperCase()),
+  );
+  // Renaming the code of a definition the import points at does not free the
+  // code: the import re-creates the missing rule the next time anything reads
+  // masters, and the office is back to two definitions instead of one.
+  if (
+    code !== keeper.code.trim().toUpperCase() &&
+    protectedCodes.has(keeper.code.trim().toUpperCase())
+  ) {
+    return {
+      ok: false,
+      reason: `Code ${keeper.code.toUpperCase()} comes from the discount import and cannot be changed — the import would recreate it. Keep this code, or merge into one of the other definitions instead.`,
+    };
+  }
+  const clash = rules.find(
+    (r) => !groupIds.has(r.id) && r.code.trim().toUpperCase() === code,
+  );
+  if (clash) {
+    return {
+      ok: false,
+      reason: `Code ${code} already belongs to “${clash.name || clash.code}”. Pick another.`,
+    };
+  }
+
+  const moveIds = new Set(plan.grantIds);
+  const ground = plan.ground || "";
+  let movedGrants = 0;
+  let groundsRecorded = 0;
+  const grants = (state.concessionGrants ?? []).map((g) => {
+    if (!moveIds.has(g.id) || !groupIds.has(g.concessionId)) return g;
+    const next: ConcessionGrant = { ...g };
+    if (next.concessionId !== keeper.id) {
+      next.concessionId = keeper.id;
+      movedGrants += 1;
+    }
+    if (ground && !next.ground) {
+      next.ground = ground;
+      groundsRecorded += 1;
+    }
+    return next;
+  });
+
+  // Which definitions may now go. A grant of ANY status still pointing at one
+  // holds it back — a pending grant is not a spare row.
+  const stillGranted = new Set(grants.map((g) => g.concessionId));
+  const removedDefinitions: string[] = [];
+  const keptDefinitions: ConcessionMergeOutcome["keptDefinitions"] = [];
+  const removeIds = new Set<string>();
+  for (const r of group) {
+    if (r.id === keeper.id) continue;
+    const label = r.name || r.code;
+    if (stillGranted.has(r.id)) {
+      keptDefinitions.push({ name: label, why: "still granted" });
+      continue;
+    }
+    if (protectedCodes.has(r.code.trim().toUpperCase())) {
+      keptDefinitions.push({ name: label, why: "used by the import" });
+      continue;
+    }
+    removeIds.add(r.id);
+    removedDefinitions.push(label);
+  }
+
+  const auditLine = `Merged ${removedDefinitions.length + 1} definition(s) into one on ${plan.today}`;
+  const nextRules = rules
+    .filter((r) => !removeIds.has(r.id))
+    .map((r) =>
+      r.id === keeper.id
+        ? {
+            ...r,
+            name,
+            code,
+            notes: r.notes.includes(auditLine)
+              ? r.notes
+              : [r.notes.trim(), auditLine].filter(Boolean).join(" · "),
+          }
+        : r,
+    );
+
+  return {
+    ok: true,
+    outcome: {
+      state: { ...state, concessions: nextRules, concessionGrants: grants },
+      keeperName: name,
+      keeperCode: code,
+      movedGrants,
+      groundsRecorded,
+      removedDefinitions,
+      keptDefinitions,
+    },
+  };
+}
+
+/**
+ * Which live group a model proposal belongs to.
+ *
+ * Proposals come back keyed by `c1`, `c2` — positions in the list the server
+ * built. The browser rebuilds the same list from its own copy of masters, and
+ * one extra grant between the two is enough to reorder it. Matching on shared
+ * definition ids instead of position means a name can only ever land on the
+ * group it was written about, and lands nowhere if that group is gone.
+ */
+export function matchClusterProposals<T extends { clusterId: string }>(
+  liveClusters: readonly ConcessionCluster[],
+  sourceClusters: readonly ConcessionCluster[],
+  proposals: readonly T[],
+): Map<string, T> {
+  const byId = new Map(sourceClusters.map((c) => [c.id, c]));
+  const out = new Map<string, T>();
+  for (const live of liveClusters) {
+    const mine = new Set(live.ruleIds);
+    let best: { p: T; overlap: number } | null = null;
+    for (const p of proposals) {
+      const source = byId.get(p.clusterId);
+      if (!source) continue;
+      const overlap = source.ruleIds.filter((id) => mine.has(id)).length;
+      if (overlap > 0 && (!best || overlap > best.overlap)) best = { p, overlap };
+    }
+    if (best) out.set(live.id, best.p);
+  }
+  return out;
 }
 
 export function buildConcessionPolicySystemPrompt(opts: {

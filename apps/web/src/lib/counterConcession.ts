@@ -13,6 +13,7 @@ import type { FeeDueLine } from "@/lib/fees";
 import {
   academicYearEndOn,
   formatInr,
+  isAllSessionsConcession,
   loadMasters,
   newId,
   saveMasters,
@@ -297,10 +298,22 @@ function findMatchingCounterRule(
   feeHeadCode: string,
 ): ConcessionRule | undefined {
   const code = counterRuleCode(feeHeadCode, discountPaise);
+  /**
+   * Session scope, matched the way it is STORED.
+   *
+   * normalizeConcessionRule stamps every rule `*` (all sessions) on the way
+   * in, so an equality test against the live session code — "2026-27" — never
+   * matched anything and the counter minted a fresh rule for every receipt:
+   * 35 identical `CTR-TUITION-15000` definitions in production on 2026-09-09,
+   * one discount wearing thirty-five faces. An all-sessions rule applies to
+   * this session by definition, so it matches.
+   */
+  const inScope = (c: ConcessionRule) =>
+    isAllSessionsConcession(c) || c.academicYearCode === academicYearCode;
   return masters.concessions.find(
     (c) =>
       c.isActive &&
-      c.academicYearCode === academicYearCode &&
+      inScope(c) &&
       (c.code === code ||
         (c.mode === "fixed" &&
           c.value === discountPaise &&

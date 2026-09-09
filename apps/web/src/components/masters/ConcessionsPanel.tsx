@@ -973,7 +973,7 @@ export function ConcessionsPanel({
         </div>
       </div>
 
-      <ConcessionPolicyDraftCard />
+      <ConcessionPolicyDraftCard state={state} commit={commit} />
 
       {listRule ? (
         <ConcessionStudentListDrawer

@@ -150,3 +150,19 @@ export function resolvedConcessionGrantsForStudent(
 export function bundledFeeDiscountSeed(): FeeDiscountImportSeed {
   return bundledSeed;
 }
+
+/**
+ * Codes the bundled discount import still owns.
+ *
+ * `mergeDiscountRulesFromSeed` re-creates any of these that is missing from
+ * masters, and `resolvedConcessionGrantsForStudent` falls back to the seed for
+ * a child with no persisted grant — so deleting or renaming one of these rules
+ * either achieves nothing or quietly drops a discount. Anything that tidies
+ * concession definitions has to know which ones are not its to tidy.
+ */
+export function bundledSeedConcessionCodes(): string[] {
+  const codes = new Set<string>();
+  for (const r of bundledSeed.rules) codes.add(r.code.trim().toUpperCase());
+  for (const g of bundledSeed.grants) codes.add(g.concessionCode.trim().toUpperCase());
+  return [...codes].filter(Boolean);
+}
