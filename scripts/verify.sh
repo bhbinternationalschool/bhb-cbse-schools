@@ -95,6 +95,7 @@ SELFTESTS=(
   test:wa-template-seeds
   test:concession-review-ai
   test:collections-weekly-ai
+  test:erp-ask
   test:fee-student-search
   test:household-dues-ay
   test:refreshment-chart
