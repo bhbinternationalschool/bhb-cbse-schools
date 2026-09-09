@@ -27,6 +27,7 @@ export type RegistryModuleId =
   | "attendance"
   | "homework"
   | "timetable"
+  | "online_classes"
   | "teaching"
   | "ptm"
   | "events"
@@ -195,6 +196,14 @@ export const REGISTRY_MODULES: RegistryModuleDef[] = [
     label: "Timetable",
     blurb: "Weekly grids and AI auto-assign from subject loads",
     href: "/timetable",
+    group: "academics",
+    defaultEnabled: true,
+  },
+  {
+    id: "online_classes",
+    label: "Online classes",
+    blurb: "Live classes over Google Meet or a pasted link, announced to the section",
+    href: "/online-classes",
     group: "academics",
     defaultEnabled: true,
   },
@@ -615,6 +624,8 @@ export function registryModuleForHref(href: string): RegistryModuleId | null {
     return "student_leave";
   if (path === "/homework" || path.startsWith("/homework/")) return "homework";
   if (path === "/timetable" || path.startsWith("/timetable/")) return "timetable";
+  if (path === "/online-classes" || path.startsWith("/online-classes/"))
+    return "online_classes";
   if (path === "/teaching" || path.startsWith("/teaching/")) return "teaching";
   if (path === "/ptm" || path.startsWith("/ptm/")) return "ptm";
   if (path === "/events" || path.startsWith("/events/")) return "events";

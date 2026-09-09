@@ -31,6 +31,7 @@ export type MobileFeatureId =
   | "homework_post"
   | "marks_entry"
   | "timetable_view"
+  | "online_class_host"
   | "period_log"
   | "syllabus_scan"
   | "students_view"
@@ -149,6 +150,14 @@ export const MOBILE_FEATURES: MobileFeature[] = [
     module: "timetable",
     action: "view",
     note: "The week's periods and this week's arrangements.",
+  },
+  {
+    id: "online_class_host",
+    label: "Online classes",
+    group: "Teaching",
+    module: "online_classes",
+    action: "create",
+    note: "Schedule and start a live class for a section from the phone; see who joined.",
   },
   {
     id: "period_log",
@@ -362,6 +371,7 @@ const TEACHING: MobileFeatureId[] = [
   "homework_post",
   "marks_entry",
   "timetable_view",
+  "online_class_host",
   "period_log",
   "syllabus_scan",
   "students_view",

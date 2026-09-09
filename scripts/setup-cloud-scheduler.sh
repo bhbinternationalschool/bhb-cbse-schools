@@ -209,6 +209,14 @@ create_job "bhb-staff-geo-tick" "*/5 7-15 * * 1-6" \
   "${APP_URL}/api/staff-geo/tick" \
   "Asia/Kolkata" "300s" "paused"
 
+# Online classes: the "starting soon" push 15 minutes before a scheduled
+# class, and closing any class still marked live half an hour after its end
+# time. School hours plus an evening margin — teachers do hold revision
+# classes after dinner — and never on Sunday.
+create_job "bhb-online-classes-tick" "*/5 7-21 * * 1-6" \
+  "${APP_URL}/api/online-classes/tick" \
+  "Asia/Kolkata" "120s"
+
 # Cashfree settlement sweep: pulls what the gateway actually paid into the
 # bank, with its event-level breakdown, and posts it to the ledger.
 #

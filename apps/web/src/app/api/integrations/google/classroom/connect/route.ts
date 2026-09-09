@@ -12,9 +12,16 @@ export const runtime = "nodejs";
 
 const STATE_COOKIE = "bhb_google_oauth_state";
 const STAFF_COOKIE = "bhb_google_oauth_staff";
+const RETURN_COOKIE = "bhb_google_oauth_return";
+
+/** Where the callback sends the browser afterwards. Only known pages. */
+const RETURN_TARGETS: Record<string, string> = {
+  classroom: "/homework?tab=classroom",
+  "online-classes": "/online-classes",
+};
 
 /** Start Google OAuth — redirects to Google consent */
-export async function GET() {
+export async function GET(req: Request) {
   const session = await getDemoSession();
   if (!session || session.persona !== "staff") {
     return NextResponse.json({ error: "Staff login required" }, { status: 401 });
@@ -45,6 +52,15 @@ export async function GET() {
     maxAge: 600,
   });
   jar.set(STAFF_COOKIE, staffKey, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: 600,
+  });
+
+  const wanted = new URL(req.url).searchParams.get("returnTo") || "classroom";
+  jar.set(RETURN_COOKIE, RETURN_TARGETS[wanted] ? wanted : "classroom", {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
