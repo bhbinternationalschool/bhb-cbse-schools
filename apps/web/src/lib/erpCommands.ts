@@ -15,6 +15,7 @@
  * break stay the same list.
  */
 
+import { parseReportQuery } from "@/lib/erpReports";
 import { namesPeriodBeyondDay } from "@/lib/erpAsk";
 import type { WaTemplateButton } from "@/lib/waTemplates";
 import type { MastersState } from "@/lib/masters";
@@ -74,6 +75,22 @@ export type ParsedErpCommand = {
 };
 
 export const ERP_COMMANDS: ErpCommandDef[] = [
+  {
+    id: "report",
+    title: "PDF report",
+    kind: "read",
+    module: "home",
+    action: "view",
+    description:
+      "A PDF report sent to you: fee defaulters (school or a class), fee collection (a day or a period), an attendance register (a section and date), a student list (school or a class), or admissions enquiries (a period). Each report checks its own module's rights.",
+    examples: ["defaulters report pdf", "aaj ka collection pdf", "5A attendance register pdf", "class 5 student list", "admissions report pdf"],
+    fields: [
+      { name: "text", type: "text", required: true, description: "which report: defaulters | collection | attendance register | student list | admissions" },
+      { name: "section", type: "section", required: false, description: "class or section, e.g. 5A or class 5" },
+      { name: "date", type: "date", required: false, description: "a day for a register or a day's collection; leave empty for today" },
+    ],
+    scope: "any",
+  },
   {
     id: "absent_list",
     title: "Absent list for a section",
@@ -885,6 +902,14 @@ const DIGEST_WORDS =
  * decides whether the message is worth an LLM parse.
  */
 export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
+  // A report request first: "class 5 defaulters report pdf" must not be read
+  // as the class_defaulters reading, nor "5A attendance register" as the
+  // absent list. The kind travels in `text`; class and date are resolved by
+  // the desk from the whole message.
+  const report = parseReportQuery(text);
+  if (report) {
+    return { commandId: "report", fields: { text: report.kind, section: "", date: "" }, source: "local" };
+  }
   const t = (text || "").trim();
   if (!t) return null;
   if (HELP_WORDS.test(t)) {

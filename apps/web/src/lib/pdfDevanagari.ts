@@ -6,7 +6,7 @@ import type { jsPDF } from "jspdf";
 
 const DEVANAGARI_RE = /[\u0900-\u097F]/;
 const FONT_VFS = "NotoSansDevanagari-Regular.ttf";
-const FONT_FAMILY = "NotoSansDevanagari";
+export const FONT_FAMILY = "NotoSansDevanagari";
 const FONT_URL = "/fonts/NotoSansDevanagari-Regular.ttf";
 
 let fontBase64Cache: string | null = null;

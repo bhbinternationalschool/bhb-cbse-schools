@@ -218,6 +218,7 @@ jobs:
           npm run test:concession-review-ai
           npm run test:collections-weekly-ai
           npm run test:erp-ask
+          npm run test:erp-reports
           npm run test:fee-student-search
 
       - name: Test — admissions village market
