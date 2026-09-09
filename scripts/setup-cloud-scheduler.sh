@@ -217,6 +217,32 @@ create_job "bhb-online-classes-tick" "*/5 7-21 * * 1-6" \
   "${APP_URL}/api/online-classes/tick" \
   "Asia/Kolkata" "120s"
 
+# WhatsApp template status: what Meta has approved since we last looked.
+#
+# A template approved at Meta but still stored as `pending` here is REFUSED by
+# the sender, which falls back to plain text, which Meta rejects outside the
+# 24-hour window. On 2026-09-08 `bhb_fee_receipt` had been approved in both
+# languages for days while every fee receipt failed, and the error said
+# "outside the 24 hour window" — pointing at the parent's silence rather than
+# at a status two steps upstream. The registry had drifted to 5 approved rows
+# against Meta's 64.
+#
+# Nothing self-corrected because there were only two paths in, and both needed
+# luck: Meta's webhook wrote to a JSON file on the container disk, which Cloud
+# Run wipes on every deploy and scale-to-zero, and the Masters button hands the
+# merged registry to the BROWSER to save, so it cannot run unattended.
+#
+# School hours, because that is when an approval can be acted on and when the
+# office would notice a family key that is still not sendable. Every two hours
+# 08:00-16:00 Mon-Sat (5 ticks a day): approvals arrive a handful of times a
+# month, so the interval is about bounding how long a silent refusal can last,
+# not about catching one quickly. Idempotent — it merges Meta's statuses and
+# refuses outright if the stored registry cannot be read, rather than writing
+# from an empty one and erasing 67 configured templates.
+create_job "bhb-wa-template-refresh" "0 8-16/2 * * 1-6" \
+  "${APP_URL}/api/wa/templates/refresh" \
+  "Asia/Kolkata" "120s"
+
 # Cashfree settlement sweep: pulls what the gateway actually paid into the
 # bank, with its event-level breakdown, and posts it to the ledger.
 #
