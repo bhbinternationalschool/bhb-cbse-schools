@@ -143,8 +143,89 @@ export function waTemplatesMetaConfigured(): boolean {
 }
 
 /** Create a message template on Meta WABA and submit for approval (no Meta UI). */
+/**
+ * Upload an EXAMPLE file for a media header and return Meta's handle.
+ *
+ * Meta refuses an IMAGE/VIDEO/DOCUMENT header without one, which is why
+ * media templates could not be submitted from the ERP at all. It is a
+ * two-step resumable upload against the APP (not the WABA), and the app id
+ * is read from the token itself rather than configured — one less value to
+ * keep in step, and it is always the app the token belongs to.
+ *
+ * The file is a sample for Meta's reviewer only. Every real send supplies
+ * its own document or image.
+ */
+export async function uploadTemplateHeaderSample(
+  bytes: Uint8Array,
+  mimeType: string,
+): Promise<{ ok: true; handle: string } | { ok: false; error: string }> {
+  const token = metaAccessToken();
+  if (!token) return { ok: false, error: "WHATSAPP_TOKEN is not set" };
+  const version = metaGraphVersion();
+
+  try {
+    const dbg = await fetch(
+      `https://graph.facebook.com/${version}/debug_token?input_token=${encodeURIComponent(token)}&access_token=${encodeURIComponent(token)}`,
+    );
+    const dbgJson = (await dbg.json().catch(() => ({}))) as {
+      data?: { app_id?: string };
+    };
+    const appId = dbgJson.data?.app_id;
+    if (!appId) {
+      return { ok: false, error: "Could not read the app id from the token" };
+    }
+
+    const start = await fetch(
+      `https://graph.facebook.com/${version}/${appId}/uploads` +
+        `?file_length=${bytes.byteLength}&file_type=${encodeURIComponent(mimeType)}` +
+        `&access_token=${encodeURIComponent(token)}`,
+      { method: "POST" },
+    );
+    const startJson = (await start.json().catch(() => ({}))) as {
+      id?: string;
+      error?: { message?: string };
+    };
+    if (!startJson.id) {
+      return {
+        ok: false,
+        error: startJson.error?.message || `upload session failed (${start.status})`,
+      };
+    }
+
+    const put = await fetch(`https://graph.facebook.com/${version}/${startJson.id}`, {
+      method: "POST",
+      headers: {
+        // NOT `Bearer` here — the resumable upload endpoint wants `OAuth`,
+        // and rejects the bearer form the rest of the Graph API expects.
+        Authorization: `OAuth ${token}`,
+        "file_offset": "0",
+        "Content-Type": "application/octet-stream",
+      },
+      body: bytes as unknown as BodyInit,
+    });
+    const putJson = (await put.json().catch(() => ({}))) as {
+      h?: string;
+      error?: { message?: string };
+    };
+    if (!putJson.h) {
+      return {
+        ok: false,
+        error: putJson.error?.message || `upload failed (${put.status})`,
+      };
+    }
+    return { ok: true, handle: putJson.h };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "upload request failed",
+    };
+  }
+}
+
 export async function submitWaTemplateToMeta(
   template: import("@/lib/waTemplates").WaTemplate,
+  /** Handle from `uploadTemplateHeaderSample`, for a media-header template. */
+  opts?: { headerHandle?: string },
 ): Promise<{
   ok: boolean;
   metaTemplateId?: string;
@@ -153,7 +234,7 @@ export async function submitWaTemplateToMeta(
   warnings?: string[];
 }> {
   const { buildMetaTemplateCreatePayload } = await import("@/lib/waTemplates");
-  const payload = buildMetaTemplateCreatePayload(template);
+  const payload = buildMetaTemplateCreatePayload(template, opts);
   if (!payload.name) {
     return { ok: false, error: "Missing meta template name", warnings: payload.warnings };
   }

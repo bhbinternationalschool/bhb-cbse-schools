@@ -1690,7 +1690,21 @@ function escapeRegExp(s: string): string {
 }
 
 /** Build Meta Graph API payload to create + submit a message template. */
-export function buildMetaTemplateCreatePayload(template: WaTemplate): {
+export function buildMetaTemplateCreatePayload(
+  template: WaTemplate,
+  /**
+   * A handle from Meta's resumable upload API, standing in for the media a
+   * real send will attach.
+   *
+   * Meta will not accept an IMAGE/VIDEO/DOCUMENT header without an EXAMPLE
+   * file, which is why media templates could not be submitted from here at
+   * all: the builder warned and dropped the header, so `bhb_exam_datesheet`
+   * and `bhb_open_day_invite` were never submitted and datesheets simply
+   * could not be sent. The handle is only ever a sample for review — every
+   * send supplies its own document or image.
+   */
+  opts?: { headerHandle?: string },
+): {
   name: string;
   language: string;
   category: WaTemplateCategory;
@@ -1742,9 +1756,17 @@ export function buildMetaTemplateCreatePayload(template: WaTemplate): {
     template.headerFormat !== "NONE" &&
     template.headerFormat !== "TEXT"
   ) {
-    warnings.push(
-      `Media header (${template.headerFormat}) — create in ERP as draft, then add image/video in Meta once approved, or use a TEXT header for auto-submit.`,
-    );
+    if (opts?.headerHandle) {
+      components.push({
+        type: "HEADER",
+        format: template.headerFormat,
+        example: { header_handle: [opts.headerHandle] },
+      });
+    } else {
+      warnings.push(
+        `Media header (${template.headerFormat}) needs an example file — upload one through Meta's resumable upload API and pass its handle, or submit with a TEXT header.`,
+      );
+    }
   }
 
   const bodyVars = extractVariables(template.body);
