@@ -11,7 +11,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Video, RefreshCw, Plus, Copy, Users, Play, Square, Ban, RotateCcw, Megaphone, ExternalLink, ClipboardCheck } from "lucide-react";
+import { Video, RefreshCw, Plus, Copy, Users, Play, Square, Ban, RotateCcw, Megaphone, ExternalLink, ClipboardCheck, MessageSquareText, FileText, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
@@ -155,6 +155,8 @@ export function OnlineClassesWorkspace() {
   const [search, setSearch] = useState("");
   const [scheduling, setScheduling] = useState(false);
   const [attendanceFor, setAttendanceFor] = useState<Row | null>(null);
+  const [qaFor, setQaFor] = useState<Row | null>(null);
+  const [summaryFor, setSummaryFor] = useState<Row | null>(null);
   const [confirm, setConfirm] = useState<{ row: Row; action: "cancel" | "end" } | null>(null);
 
   const load = useCallback(async () => {
@@ -348,6 +350,20 @@ export function OnlineClassesWorkspace() {
       onSelect: (r) => setAttendanceFor(r),
     },
     {
+      id: "qa",
+      label: "Questions & answers",
+      icon: <MessageSquareText className="size-4" aria-hidden />,
+      onSelect: (r) => setQaFor(r),
+      hidden: (r) => r.status === "cancelled",
+    },
+    {
+      id: "summary",
+      label: "Class summary & homework",
+      icon: <FileText className="size-4" aria-hidden />,
+      onSelect: (r) => setSummaryFor(r),
+      hidden: (r) => r.status === "cancelled",
+    },
+    {
       id: "announce",
       label: "Announce to parents",
       icon: <Megaphone className="size-4" aria-hidden />,
@@ -498,6 +514,12 @@ export function OnlineClassesWorkspace() {
 
       {attendanceFor ? (
         <AttendanceDialog row={attendanceFor} onClose={() => setAttendanceFor(null)} onChanged={() => void load()} />
+      ) : null}
+
+      {qaFor ? <QaDialog row={qaFor} onClose={() => setQaFor(null)} /> : null}
+
+      {summaryFor ? (
+        <SummaryDialog row={summaryFor} onClose={() => setSummaryFor(null)} onNotice={setNotice} />
       ) : null}
 
       <ConfirmDialog
@@ -1002,6 +1024,449 @@ function AttendanceDialog({
           ) : (
             <Button variant="outline" onClick={onClose}>Close</Button>
           )}
+        </DialogFooter>
+      </DialogPopup>
+    </Dialog>
+  );
+}
+
+// ─── Questions & answers ─────────────────────────────────────────────
+
+type WallAnswer = {
+  id: string;
+  studentId: string;
+  fullName: string;
+  rollNo: string;
+  submittedAt: string;
+  text: string;
+  verdict: "" | "right" | "wrong" | "partial";
+  verdictBy: string;
+  photoUrl: string;
+};
+
+type WallQuestion = {
+  id: string;
+  orderNo: number;
+  text: string;
+  askedAt: string;
+  closedAt: string;
+  tally: { answered: number; right: number; wrong: number; partial: number; unchecked: number };
+  answers: WallAnswer[];
+  notAnswered: { studentId: string; fullName: string; rollNo: string }[];
+};
+
+type Wall = { sessionId: string; status: string; rosterCount: number; questions: WallQuestion[] };
+
+function QaDialog({ row, onClose }: { row: Row; onClose: () => void }) {
+  const [wall, setWall] = useState<Wall | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [openQ, setOpenQ] = useState<string>("");
+  const [zoom, setZoom] = useState<WallAnswer | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const w = await api<Wall>(`/api/v1/staff/online-classes/${row.id}/questions`);
+      setWall(w);
+      setOpenQ((cur) => cur || w.questions[w.questions.length - 1]?.id || "");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not load");
+    }
+  }, [row.id]);
+
+  // Answers arrive while the class runs; poll while it is live.
+  useEffect(() => {
+    void load();
+    if (row.status !== "live" && row.status !== "scheduled") return;
+    const t = setInterval(() => void load(), 8000);
+    return () => clearInterval(t);
+  }, [load, row.status]);
+
+  const ask = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await api<{ question: { id: string }; pushed: number }>(
+        `/api/v1/staff/online-classes/${row.id}/questions`,
+        { method: "POST", body: JSON.stringify({ text }) },
+      );
+      setText("");
+      setOpenQ(r.question.id);
+      await load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not send the question");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const mark = async (a: WallAnswer, verdict: WallAnswer["verdict"]) => {
+    setErr(null);
+    // Optimistic: the wall is a live thing and a round trip per tap is slow.
+    setWall((w) =>
+      w
+        ? {
+            ...w,
+            questions: w.questions.map((q) => ({
+              ...q,
+              answers: q.answers.map((x) => (x.id === a.id ? { ...x, verdict } : x)),
+            })),
+          }
+        : w,
+    );
+    try {
+      await api(`/api/v1/staff/online-classes/${row.id}/questions`, {
+        method: "PATCH",
+        body: JSON.stringify({ answerId: a.id, verdict }),
+      });
+      await load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not save the mark");
+      await load();
+    }
+  };
+
+  const close = async (q: WallQuestion, closed: boolean) => {
+    try {
+      await api(`/api/v1/staff/online-classes/${row.id}/questions`, {
+        method: "PATCH",
+        body: JSON.stringify({ questionId: q.id, closed }),
+      });
+      await load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not update");
+    }
+  };
+
+  const canAsk = row.status === "live" || row.status === "scheduled";
+  const verdictClass = (v: WallAnswer["verdict"], code: WallAnswer["verdict"]) =>
+    v === code
+      ? code === "right"
+        ? "border-[var(--success)] bg-[var(--success-soft)] text-[var(--success)]"
+        : code === "wrong"
+          ? "border-[var(--danger)] bg-[var(--danger-soft)] text-[var(--danger)]"
+          : "border-[var(--warning)] bg-[var(--warning-soft)] text-[var(--warning)]"
+      : "border-[var(--border)] text-muted-foreground hover:bg-muted";
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogPopup size="lg" className="max-h-[92vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>
+            Questions & answers · {row.className} {row.sectionName} · {fmtDate(row.date)} {fmt12(row.startTime)}
+          </DialogTitle>
+        </DialogHeader>
+        {err ? <p className="text-sm text-[var(--danger)]">{err}</p> : null}
+        {canAsk ? (
+          <div className="flex gap-2">
+            <input
+              className={`${field} flex-1`}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && text.trim().length >= 2 && !busy) void ask();
+              }}
+              placeholder="Type a question for the class — it goes to every child's phone"
+              maxLength={600}
+            />
+            <Button onClick={() => void ask()} disabled={busy || text.trim().length < 2}>
+              <Send className="size-4" aria-hidden /> {busy ? "Sending…" : "Ask"}
+            </Button>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">The class is over. Questions can only be asked during a class.</p>
+        )}
+        {wall && wall.questions.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No questions asked yet.</p>
+        ) : null}
+        {wall?.questions
+          .slice()
+          .reverse()
+          .map((q) => {
+            const open = openQ === q.id;
+            return (
+              <div key={q.id} className="rounded-xl border border-[var(--border)]">
+                <button
+                  type="button"
+                  className="flex w-full items-start justify-between gap-3 px-3 py-2 text-left"
+                  onClick={() => setOpenQ(open ? "" : q.id)}
+                >
+                  <span>
+                    <span className="mr-2 text-xs font-semibold text-muted-foreground">Q{q.orderNo}</span>
+                    <span className="text-sm">{q.text}</span>
+                  </span>
+                  <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                    {q.tally.answered}/{wall.rosterCount} answered · {q.tally.right} ✓ · {q.tally.wrong} ✗
+                    {q.tally.unchecked ? ` · ${q.tally.unchecked} to check` : ""}
+                    {q.closedAt ? " · closed" : ""}
+                  </span>
+                </button>
+                {open ? (
+                  <div className="border-t border-[var(--border)] px-3 py-2">
+                    <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <span>
+                        Not answered:{" "}
+                        {q.notAnswered.length === 0
+                          ? "nobody"
+                          : q.notAnswered.map((n) => n.fullName.split(" ")[0]).join(", ")}
+                      </span>
+                      {canAsk ? (
+                        <Button size="sm" variant="ghost" className="ml-auto" onClick={() => void close(q, !q.closedAt)}>
+                          {q.closedAt ? "Reopen for answers" : "Close question"}
+                        </Button>
+                      ) : null}
+                    </div>
+                    {q.answers.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">Waiting for answers…</p>
+                    ) : (
+                      <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                        {q.answers.map((a) => (
+                          <li key={a.id} className="rounded-lg border border-[var(--border)] p-2">
+                            <div className="flex items-center justify-between gap-2 text-sm">
+                              <span className="truncate font-medium">
+                                {a.rollNo ? <span className="mr-1 text-xs text-muted-foreground">{a.rollNo}</span> : null}
+                                {a.fullName}
+                              </span>
+                              <span className="shrink-0 text-xs text-muted-foreground">
+                                {new Date(a.submittedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" })}
+                              </span>
+                            </div>
+                            {a.photoUrl ? (
+                              <button type="button" className="mt-1 block w-full" onClick={() => setZoom(a)}>
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={a.photoUrl}
+                                  alt={`${a.fullName}'s answer`}
+                                  className="h-40 w-full rounded-md object-cover"
+                                  loading="lazy"
+                                />
+                              </button>
+                            ) : null}
+                            {a.text ? <p className="mt-1 text-xs">{a.text}</p> : null}
+                            <div className="mt-2 flex gap-1" role="radiogroup" aria-label={`${a.fullName} verdict`}>
+                              {(["right", "wrong", "partial"] as const).map((code) => (
+                                <button
+                                  key={code}
+                                  type="button"
+                                  role="radio"
+                                  aria-checked={a.verdict === code}
+                                  className={`h-7 flex-1 rounded-md border text-xs font-medium ${verdictClass(a.verdict, code)}`}
+                                  onClick={() => void mark(a, a.verdict === code ? "" : code)}
+                                >
+                                  {code === "right" ? "✓ Right" : code === "wrong" ? "✗ Wrong" : "Partly"}
+                                </button>
+                              ))}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Close</Button>
+        </DialogFooter>
+      </DialogPopup>
+      {zoom ? (
+        <Dialog open onOpenChange={(o) => !o && setZoom(null)}>
+          <DialogPopup size="lg" className="max-h-[92vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>{zoom.fullName}</DialogTitle>
+            </DialogHeader>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={zoom.photoUrl} alt={`${zoom.fullName}'s answer`} className="max-h-[75vh] w-full object-contain" />
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setZoom(null)}>Close</Button>
+            </DialogFooter>
+          </DialogPopup>
+        </Dialog>
+      ) : null}
+    </Dialog>
+  );
+}
+
+// ─── Summary & homework ──────────────────────────────────────────────
+
+type Summary = {
+  sessionId: string;
+  taughtNote: string;
+  topic: string;
+  summaryEn: string;
+  homeworkTitle: string;
+  homeworkBody: string;
+  homeworkDue: string;
+  generatedAt: string;
+  homeworkPostId: string;
+  homeworkPostedAt: string;
+};
+
+function SummaryDialog({
+  row,
+  onClose,
+  onNotice,
+}: {
+  row: Row;
+  onClose: () => void;
+  onNotice: (msg: string) => void;
+}) {
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [canPost, setCanPost] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState<"" | "generate" | "save" | "post">("");
+  const [taughtNote, setTaughtNote] = useState("");
+  const [draft, setDraft] = useState<Pick<Summary, "topic" | "summaryEn" | "homeworkTitle" | "homeworkBody" | "homeworkDue">>({
+    topic: "", summaryEn: "", homeworkTitle: "", homeworkBody: "", homeworkDue: "",
+  });
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const r = await api<{ summary: Summary | null; canPostHomework: boolean }>(
+          `/api/v1/staff/online-classes/${row.id}/summary`,
+        );
+        setCanPost(r.canPostHomework);
+        if (r.summary) {
+          setSummary(r.summary);
+          setTaughtNote(r.summary.taughtNote);
+          setDraft({
+            topic: r.summary.topic, summaryEn: r.summary.summaryEn, homeworkTitle: r.summary.homeworkTitle,
+            homeworkBody: r.summary.homeworkBody, homeworkDue: r.summary.homeworkDue,
+          });
+        }
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : "Could not load");
+      } finally {
+        setLoaded(true);
+      }
+    })();
+  }, [row.id]);
+
+  const generate = async () => {
+    setBusy("generate");
+    setErr(null);
+    try {
+      const r = await api<{ summary: Summary }>(`/api/v1/staff/online-classes/${row.id}/summary`, {
+        method: "POST",
+        body: JSON.stringify({ taughtNote }),
+      });
+      setSummary(r.summary);
+      setDraft({
+        topic: r.summary.topic, summaryEn: r.summary.summaryEn, homeworkTitle: r.summary.homeworkTitle,
+        homeworkBody: r.summary.homeworkBody, homeworkDue: r.summary.homeworkDue,
+      });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not draft the note");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const save = async (): Promise<boolean> => {
+    setBusy("save");
+    setErr(null);
+    try {
+      const r = await api<{ summary: Summary }>(`/api/v1/staff/online-classes/${row.id}/summary`, {
+        method: "PATCH",
+        body: JSON.stringify({ patch: { taughtNote, ...draft } }),
+      });
+      setSummary(r.summary);
+      return true;
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not save");
+      return false;
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const post = async () => {
+    if (!(await save())) return;
+    setBusy("post");
+    try {
+      const r = await api<{ summary: Summary }>(`/api/v1/staff/online-classes/${row.id}/summary`, {
+        method: "PATCH",
+        body: JSON.stringify({ post: true }),
+      });
+      setSummary(r.summary);
+      onNotice(`Homework "${r.summary.homeworkTitle}" posted to ${row.className} ${row.sectionName}'s diary.`);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not post the homework");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const posted = !!summary?.homeworkPostId;
+  const label = "block text-xs font-medium text-muted-foreground";
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogPopup size="md" className="max-h-[92vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>
+            Class summary · {row.className} {row.sectionName} · {row.subjectName || row.title} · {fmtDate(row.date)}
+          </DialogTitle>
+        </DialogHeader>
+        {err ? <p className="text-sm text-[var(--danger)]">{err}</p> : null}
+        {!loaded ? <p className="text-sm text-muted-foreground">Loading…</p> : null}
+        <div>
+          <label className={label}>What was taught (your words — the note is written from this)</label>
+          <textarea
+            className={`${field} mt-1 h-20`}
+            value={taughtNote}
+            onChange={(e) => setTaughtNote(e.target.value)}
+            placeholder="e.g. Adding fractions with different denominators; LCM method; three worked examples"
+            maxLength={1200}
+          />
+          <div className="mt-2 flex justify-end">
+            <Button size="sm" onClick={() => void generate()} disabled={busy !== "" || taughtNote.trim().length < 3}>
+              {busy === "generate" ? "Writing…" : summary?.generatedAt ? "Write again" : "Write the note & suggest homework"}
+            </Button>
+          </div>
+        </div>
+        {summary?.generatedAt || draft.summaryEn ? (
+          <div className="grid gap-3">
+            <div>
+              <label className={label}>Topic</label>
+              <input className={`${field} mt-1`} value={draft.topic} onChange={(e) => setDraft({ ...draft, topic: e.target.value })} maxLength={80} />
+            </div>
+            <div>
+              <label className={label}>Summary (goes to the class record)</label>
+              <textarea className={`${field} mt-1 h-28`} value={draft.summaryEn} onChange={(e) => setDraft({ ...draft, summaryEn: e.target.value })} maxLength={2000} />
+            </div>
+            <div className="rounded-xl border border-[var(--border)] p-3">
+              <div className="mb-2 text-sm font-medium">Suggested homework {posted ? <Badge variant="secondary">posted</Badge> : null}</div>
+              <label className={label}>Title</label>
+              <input className={`${field} mt-1`} value={draft.homeworkTitle} onChange={(e) => setDraft({ ...draft, homeworkTitle: e.target.value })} maxLength={60} disabled={posted} />
+              <label className={`${label} mt-2`}>Task</label>
+              <textarea className={`${field} mt-1 h-28`} value={draft.homeworkBody} onChange={(e) => setDraft({ ...draft, homeworkBody: e.target.value })} maxLength={1200} disabled={posted} />
+              <label className={`${label} mt-2`}>Due</label>
+              <input type="date" className={`${field} mt-1 w-44`} value={draft.homeworkDue} onChange={(e) => setDraft({ ...draft, homeworkDue: e.target.value })} disabled={posted} />
+              <p className="mt-2 text-xs text-muted-foreground">
+                Posting puts it in the section&apos;s homework diary and notifies the parents, exactly as a post from the Homework screen would.
+              </p>
+            </div>
+          </div>
+        ) : null}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={busy !== ""}>Close</Button>
+          {summary?.generatedAt || draft.summaryEn ? (
+            <>
+              <Button variant="outline" onClick={() => void save()} disabled={busy !== ""}>
+                {busy === "save" ? "Saving…" : "Save"}
+              </Button>
+              {canPost && !posted ? (
+                <Button onClick={() => void post()} disabled={busy !== "" || !draft.homeworkTitle.trim() || !draft.homeworkBody.trim()}>
+                  {busy === "post" ? "Posting…" : "Post homework to diary"}
+                </Button>
+              ) : null}
+            </>
+          ) : null}
         </DialogFooter>
       </DialogPopup>
     </Dialog>

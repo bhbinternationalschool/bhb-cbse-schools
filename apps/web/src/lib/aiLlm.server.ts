@@ -102,6 +102,13 @@ import {
   type PtmBriefLanguage,
 } from "@/lib/ptmBriefAi";
 import {
+  buildClassSummarySystemPrompt,
+  buildClassSummaryUserPrompt,
+  parseClassSummaryJson,
+  type ClassSummaryDraft,
+  type ClassSummaryFacts,
+} from "@/lib/onlineClassQa";
+import {
   buildRiskNoteSystemPrompt,
   buildRiskNoteUserPrompt,
   parseRiskNotesJson,
@@ -1832,4 +1839,34 @@ export async function generateErpCommandJson(opts: {
   );
   if (r.ok) return { ok: true, parse: r.data, engine: r.engine, generationId: r.generationId };
   return { ok: false, error: r.error, engine: r.engine };
+}
+
+/**
+ * After-class note + homework suggestion for an online class. Draft only;
+ * the online-classes summary route saves what the teacher keeps.
+ */
+export async function generateOnlineClassSummaryJson(opts: {
+  facts: ClassSummaryFacts;
+  schoolName: string;
+}): Promise<
+  | { ok: true; draft: ClassSummaryDraft; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const r = await callLlmJson(
+    {
+      system: buildClassSummarySystemPrompt(opts.schoolName),
+      userMessage: buildClassSummaryUserPrompt(opts.facts),
+      maxTokens: 900,
+      temperature: 0.4,
+      geminiMaxTokens: 4096,
+      meta: { route: "online-class-summary", promptVersion: "v1" },
+    },
+    parseClassSummaryJson,
+  );
+  if (r.ok) return { ok: true, draft: r.data, engine: r.engine, generationId: r.generationId };
+  return {
+    ok: false,
+    error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for class summaries",
+    engine: r.engine,
+  };
 }

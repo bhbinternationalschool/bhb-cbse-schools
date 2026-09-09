@@ -70,9 +70,45 @@ screen: register upsert, DB push, absent alerts to families, audit row.
 4. Teachers need `@bhbinternational.school` accounts to host Meet rooms; a
    teacher without one pastes a link made on their phone.
 
+## In-class questions, photographed answers, the after-class note
+
+Added the same day (migration `20260909150000_online_class_qa.sql`; pure
+rules in `lib/onlineClassQa.ts` + self-test; persistence in
+`onlineClassQa.server.ts`).
+
+- **Ask.** During a live class the teacher types a question (desk drawer
+  "Questions & answers", or the app's Q&A screen). It is stored and pushed
+  to every household in the section with a deep link to the answer screen.
+- **Answer.** The child writes in the copy; the parent app photographs it
+  and posts `multipart` to `/api/v1/parent/online-classes/answer`. Bytes
+  are sniffed (JPG/PNG/WebP only, ≥200px, ≤8 MB) and stored privately at
+  `school-files/online-classes/<session>/<question>/<student>.<ext>`. A
+  second send replaces the first and clears the verdict. Photos are
+  served by `/api/v1/online-classes/answer-photo/:answerId` to the family
+  that sent it or staff in the section's scope — never `/api/file`, which
+  is staff-only.
+- **Check.** The teacher's wall lists answers by name and roll number as
+  they arrive (polls every 8 s while the class is on), with right / wrong /
+  partly buttons. The mark is always a person's; the family is pushed the
+  result at once. A question can be closed to stop late answers.
+- **Summary.** After the class the teacher writes one line on what was
+  taught; `generateOnlineClassSummaryJson` (router route
+  `online-class-summary`) expands it into a topic, a paragraph for the
+  record and a homework task, using only the teacher's line and the class's
+  own numbers (joined count, per-question tallies). The draft is saved to
+  `online_class_summaries`; the teacher edits it; **Post homework** goes
+  through `postHomeworkServer` behind `homework.edit`, exactly as the
+  Homework screen would, and records the post id so it cannot be posted
+  twice.
+- Not read from the Meet audio: the API gives no transcript, and a
+  recording needs a Workspace tier plus consent. The teacher's line is the
+  truth of the lesson.
+
 ## Not built (deliberately, for now)
 
 - WhatsApp announcements. Meta has 9 approved templates and none fits; the
   push notification is what parents get. Add a template when there is one.
 - Recording / material attachments. Homework already carries links.
+- AI reading of the handwritten answer as a hint. The teacher checks; a
+  guess on a child's work is worse than a slower teacher.
 - Web parent portal tab. The app is where parents are.

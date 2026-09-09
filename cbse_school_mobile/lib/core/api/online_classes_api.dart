@@ -335,3 +335,197 @@ extension OnlineClassesApi on ApiClient {
         "${unmatched.isEmpty ? "" : " · not matched: $unmatched"}";
   }
 }
+
+// ---------------------------------------------------------------- Q&A
+
+class ParentClassQuestion {
+  ParentClassQuestion.fromJson(Map<String, dynamic> j)
+    : id = _s(j, "id"),
+      orderNo = _i(j, "orderNo"),
+      text = _s(j, "text"),
+      askedAt = _s(j, "askedAt"),
+      closed = _b(j, "closed"),
+      answerId = j["answer"] is Map ? _s(Map<String, dynamic>.from(j["answer"] as Map), "id") : "",
+      answerPhotoUrl = j["answer"] is Map ? _s(Map<String, dynamic>.from(j["answer"] as Map), "photoUrl") : "",
+      verdict = j["answer"] is Map ? _s(Map<String, dynamic>.from(j["answer"] as Map), "verdict") : "";
+  final String id;
+  final int orderNo;
+  final String text;
+  final String askedAt;
+  final bool closed;
+  final String answerId;
+  final String answerPhotoUrl;
+
+  /// '' (not checked yet) | right | wrong | partial
+  final String verdict;
+  bool get answered => answerId.isNotEmpty;
+}
+
+class WallAnswer {
+  WallAnswer.fromJson(Map<String, dynamic> j)
+    : id = _s(j, "id"),
+      studentId = _s(j, "studentId"),
+      fullName = _s(j, "fullName"),
+      rollNo = _s(j, "rollNo"),
+      submittedAt = _s(j, "submittedAt"),
+      text = _s(j, "text"),
+      verdict = _s(j, "verdict"),
+      photoUrl = _s(j, "photoUrl");
+  final String id;
+  final String studentId;
+  final String fullName;
+  final String rollNo;
+  final String submittedAt;
+  final String text;
+  String verdict;
+  final String photoUrl;
+}
+
+class WallQuestion {
+  WallQuestion.fromJson(Map<String, dynamic> j)
+    : id = _s(j, "id"),
+      orderNo = _i(j, "orderNo"),
+      text = _s(j, "text"),
+      closed = _s(j, "closedAt").isNotEmpty,
+      answered = _i(Map<String, dynamic>.from((j["tally"] as Map?) ?? const {}), "answered"),
+      right = _i(Map<String, dynamic>.from((j["tally"] as Map?) ?? const {}), "right"),
+      wrong = _i(Map<String, dynamic>.from((j["tally"] as Map?) ?? const {}), "wrong"),
+      unchecked = _i(Map<String, dynamic>.from((j["tally"] as Map?) ?? const {}), "unchecked"),
+      answers = _list(j, "answers").map(WallAnswer.fromJson).toList(),
+      notAnswered = _list(j, "notAnswered").map((n) => _s(n, "fullName")).toList();
+  final String id;
+  final int orderNo;
+  final String text;
+  final bool closed;
+  final int answered;
+  final int right;
+  final int wrong;
+  final int unchecked;
+  final List<WallAnswer> answers;
+  final List<String> notAnswered;
+}
+
+class AnswerWall {
+  AnswerWall.fromJson(Map<String, dynamic> j)
+    : status = _s(j, "status"),
+      rosterCount = _i(j, "rosterCount"),
+      questions = _list(j, "questions").map(WallQuestion.fromJson).toList();
+  final String status;
+  final int rosterCount;
+  final List<WallQuestion> questions;
+}
+
+class ClassSummaryInfo {
+  ClassSummaryInfo.fromJson(Map<String, dynamic> j)
+    : taughtNote = _s(j, "taughtNote"),
+      topic = _s(j, "topic"),
+      summaryEn = _s(j, "summaryEn"),
+      homeworkTitle = _s(j, "homeworkTitle"),
+      homeworkBody = _s(j, "homeworkBody"),
+      homeworkDue = _s(j, "homeworkDue"),
+      generatedAt = _s(j, "generatedAt"),
+      homeworkPostId = _s(j, "homeworkPostId");
+  final String taughtNote;
+  final String topic;
+  final String summaryEn;
+  final String homeworkTitle;
+  final String homeworkBody;
+  final String homeworkDue;
+  final String generatedAt;
+  final String homeworkPostId;
+  bool get posted => homeworkPostId.isNotEmpty;
+}
+
+extension OnlineClassQaApi on ApiClient {
+  Future<List<ParentClassQuestion>> fetchOnlineClassQuestions({
+    required String sessionId,
+    required String studentId,
+  }) async {
+    final d = await _getData(
+      "/api/v1/parent/online-classes/questions?sessionId=${Uri.encodeQueryComponent(sessionId)}&studentId=${Uri.encodeQueryComponent(studentId)}",
+    );
+    return _list(d, "questions").map(ParentClassQuestion.fromJson).toList();
+  }
+
+  Future<void> submitOnlineClassAnswer({
+    required String sessionId,
+    required String questionId,
+    required String studentId,
+    required String filePath,
+    required String mimeType,
+  }) async {
+    final req = http.MultipartRequest("POST", _uri("/api/v1/parent/online-classes/answer"));
+    final headers = await _authHeaders();
+    headers.remove("Content-Type");
+    req.headers.addAll(headers);
+    req.fields["sessionId"] = sessionId;
+    req.fields["questionId"] = questionId;
+    req.fields["studentId"] = studentId;
+    req.files.add(
+      await http.MultipartFile.fromPath(
+        "file",
+        filePath,
+        filename: "answer.jpg",
+        contentType: MediaType.parse(mimeType),
+      ),
+    );
+    final res = await http.Response.fromStream(await req.send());
+    if (res.statusCode != 200) _throwFrom(res);
+  }
+
+  Future<AnswerWall> fetchOnlineClassWall(String sessionId) async =>
+      AnswerWall.fromJson(await _getData("/api/v1/staff/online-classes/$sessionId/questions"));
+
+  Future<int> askOnlineClassQuestion(String sessionId, String text) async {
+    final d = await _postData("/api/v1/staff/online-classes/$sessionId/questions", {"text": text});
+    return _i(d, "pushed");
+  }
+
+  Future<void> _patchQa(String sessionId, Map<String, dynamic> body) async {
+    final res = await http.patch(
+      _uri("/api/v1/staff/online-classes/$sessionId/questions"),
+      headers: await _authHeaders(),
+      body: jsonEncode(body),
+    );
+    if (res.statusCode != 200) _throwFrom(res);
+  }
+
+  Future<void> markOnlineClassAnswer(String sessionId, String answerId, String verdict) =>
+      _patchQa(sessionId, {"answerId": answerId, "verdict": verdict});
+
+  Future<void> closeOnlineClassQuestion(String sessionId, String questionId, bool closed) =>
+      _patchQa(sessionId, {"questionId": questionId, "closed": closed});
+
+  Future<({ClassSummaryInfo? summary, bool canPost})> fetchOnlineClassSummary(String sessionId) async {
+    final d = await _getData("/api/v1/staff/online-classes/$sessionId/summary");
+    return (
+      summary: d["summary"] is Map
+          ? ClassSummaryInfo.fromJson(Map<String, dynamic>.from(d["summary"] as Map))
+          : null,
+      canPost: _b(d, "canPostHomework"),
+    );
+  }
+
+  Future<ClassSummaryInfo> generateOnlineClassSummary(String sessionId, String taughtNote) async {
+    final d = await _postData("/api/v1/staff/online-classes/$sessionId/summary", {"taughtNote": taughtNote});
+    return ClassSummaryInfo.fromJson(Map<String, dynamic>.from(d["summary"] as Map));
+  }
+
+  Future<ClassSummaryInfo> _patchSummary(String sessionId, Map<String, dynamic> body) async {
+    final res = await http.patch(
+      _uri("/api/v1/staff/online-classes/$sessionId/summary"),
+      headers: await _authHeaders(),
+      body: jsonEncode(body),
+    );
+    if (res.statusCode != 200) _throwFrom(res);
+    final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+    final d = Map<String, dynamic>.from(decoded["data"] as Map);
+    return ClassSummaryInfo.fromJson(Map<String, dynamic>.from(d["summary"] as Map));
+  }
+
+  Future<ClassSummaryInfo> saveOnlineClassSummary(String sessionId, Map<String, String> patch) =>
+      _patchSummary(sessionId, {"patch": patch});
+
+  Future<ClassSummaryInfo> postOnlineClassHomework(String sessionId) =>
+      _patchSummary(sessionId, {"post": true});
+}

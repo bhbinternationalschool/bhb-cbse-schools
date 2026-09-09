@@ -5,16 +5,48 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "module_shell.dart";
+import "online_class_qa_screen.dart";
 
 /// The child's online classes: today's and the coming ones with a Join
 /// button that only lights up inside the class window, and last week's for
 /// the record. Join opens the room in the Meet / Zoom app and tells the
 /// school the child went in.
-class OnlineClassesScreen extends StatelessWidget {
-  const OnlineClassesScreen({super.key, required this.api, required this.child});
+class OnlineClassesScreen extends StatefulWidget {
+  const OnlineClassesScreen({
+    super.key,
+    required this.api,
+    required this.child,
+    this.openQaSessionId,
+  });
 
   final ApiClient api;
   final ParentChild child;
+
+  /// From a "question from the teacher" notification: open that class's
+  /// Q&A straight away.
+  final String? openQaSessionId;
+
+  @override
+  State<OnlineClassesScreen> createState() => _OnlineClassesScreenState();
+}
+
+class _OnlineClassesScreenState extends State<OnlineClassesScreen> {
+  ApiClient get api => widget.api;
+  ParentChild get child => widget.child;
+  bool _autoOpened = false;
+
+  void _openQa(OnlineClassInfo c) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => OnlineClassQaScreen(
+          api: api,
+          child: child,
+          sessionId: c.id,
+          title: c.title,
+        ),
+      ),
+    );
+  }
 
   Future<void> _join(
     BuildContext context,
@@ -48,6 +80,14 @@ class OnlineClassesScreen extends StatelessWidget {
           "No online class is scheduled for ${child.fullName}'s section. You will get a notification when the teacher schedules one.",
       isEmpty: (d) => d.sessions.isEmpty,
       builder: (context, data, reload) {
+        final wanted = widget.openQaSessionId;
+        if (wanted != null && !_autoOpened) {
+          final match = data.sessions.where((s) => s.id == wanted).firstOrNull;
+          if (match != null) {
+            _autoOpened = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) => _openQa(match));
+          }
+        }
         final upcoming = data.sessions.where((s) => !s.isOver && !s.isCancelled).toList();
         final past = data.sessions.where((s) => s.isOver || s.isCancelled).toList().reversed.toList();
         return ListView(
@@ -58,7 +98,12 @@ class OnlineClassesScreen extends StatelessWidget {
               Text("Coming up", style: AppText.labelMediumMuted),
               const SizedBox(height: 8),
               for (final c in upcoming) ...[
-                _ClassCard(c: c, today: data.today, onJoin: () => _join(context, c, reload)),
+                _ClassCard(
+                  c: c,
+                  today: data.today,
+                  onJoin: () => _join(context, c, reload),
+                  onQa: c.phase == "upcoming" ? null : () => _openQa(c),
+                ),
                 const SizedBox(height: 10),
               ],
             ],
@@ -67,7 +112,7 @@ class OnlineClassesScreen extends StatelessWidget {
               Text("Earlier", style: AppText.labelMediumMuted),
               const SizedBox(height: 8),
               for (final c in past) ...[
-                _ClassCard(c: c, today: data.today, onJoin: null),
+                _ClassCard(c: c, today: data.today, onJoin: null, onQa: c.isCancelled ? null : () => _openQa(c)),
                 const SizedBox(height: 10),
               ],
             ],
@@ -102,11 +147,12 @@ String _dayLabel(String date, String today) {
 }
 
 class _ClassCard extends StatelessWidget {
-  const _ClassCard({required this.c, required this.today, required this.onJoin});
+  const _ClassCard({required this.c, required this.today, required this.onJoin, this.onQa});
 
   final OnlineClassInfo c;
   final String today;
   final VoidCallback? onJoin;
+  final VoidCallback? onQa;
 
   @override
   Widget build(BuildContext context) {
@@ -168,6 +214,17 @@ class _ClassCard extends StatelessWidget {
                         ? (live ? "Join now" : "Join")
                         : "Opens at ${_fmt12(c.startTime)}",
                   ),
+                ),
+              ),
+            ],
+            if (onQa != null) ...[
+              const SizedBox(height: 6),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: onQa,
+                  icon: const Icon(Icons.quiz_outlined),
+                  label: const Text("Teacher's questions & my answers"),
                 ),
               ),
             ],
