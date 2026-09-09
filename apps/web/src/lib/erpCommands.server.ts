@@ -24,6 +24,7 @@
  * unless the message clearly asks the ERP for something.
  */
 
+import type { ChatSectionRef } from "@/lib/erpChatAccess";
 import type { WaTemplateButton } from "@/lib/waTemplates";
 import type { DemoSession } from "@/lib/auth";
 import type { StaffRecord } from "@/lib/foundationMasters";
@@ -790,6 +791,10 @@ export async function handleErpStaffCommand(
       audience: "erp_command_denied",
       text: `Your role doesn't include *${command.module} · ${command.action}* in the ERP, so I can't run that. Ask the office or principal if you need it.`,
     };
+  }
+
+  if (command.id === "report") {
+    return runReportCommand(inbound, text, parsed, session, masters, rbac, todayIso);
   }
 
   // 6. Resolve fields.
@@ -3729,6 +3734,128 @@ function countSectionFamilies(sectionId: string, academicYearCode: string): numb
       .map((st) => st.householdId),
   );
   return households.size;
+}
+
+/**
+ * A PDF report, rendered on the server and handed over on the channel the
+ * request came from: a WhatsApp document (the asker has just written, so the
+ * session is open), or a staff-only download link in the app.
+ *
+ * The report command sits under home·view so anyone with a desk can ask;
+ * each KIND then checks its own module — a teacher gets their sections'
+ * register and list, not the school's defaulters. Every page is stamped with
+ * who asked and when.
+ */
+async function runReportCommand(
+  inbound: ErpCommandInbound,
+  text: string,
+  parsed: ParsedErpCommand,
+  session: DemoSession,
+  masters: MastersState,
+  rbac: RbacState,
+  todayIso: string,
+): Promise<ErpCommandResult> {
+  const { ERP_REPORT_KINDS, reportKindDef } = await import("@/lib/erpReports");
+  const { detectAskPeriod } = await import("@/lib/erpAsk");
+  const kindId = (parsed.fields.text || "").trim() as import("@/lib/erpReports").ErpReportKind;
+  const def = ERP_REPORT_KINDS.find((k) => k.id === kindId);
+  const audience = "erp_command_report";
+  if (!def) {
+    return { handled: true, audience, text: "Which report? I can send: defaulters, collection, attendance register, student list, admissions." };
+  }
+  const kind = reportKindDef(def.id);
+  if (!hasPermission(session, masters, kind.module, kind.action, rbac)) {
+    void audit(session, command_report(), parsed.fields, text, "denied", { reason: "rbac", channel: inbound.channel, report: kind.id });
+    return { handled: true, audience: "erp_command_denied", text: `Your role doesn't include *${kind.module} · ${kind.action}* in the ERP, so I can't send the ${kind.title.toLowerCase()} report.` };
+  }
+
+  // Scope: the sections named, within what this person may see.
+  const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
+  const mine = staffAllowedSections(inbound.staff, masters, session.academicYearCode, roleCodes);
+  const office = isOfficeLike(roleCodes);
+  const refs = extractSectionRefs(text);
+  let sections: ChatSectionRef[] = [];
+  let scopeLabel = "whole school";
+  if (refs.length) {
+    const res = resolveSectionRef(refs[0]!, masters);
+    const matches = res.ok ? [res.match] : res.reason === "ambiguous" ? res.options : [];
+    if (!matches.length) {
+      return { handled: true, audience, text: `I couldn't find a class called "${refs[0]!.classKey}${refs[0]!.sectionName ? " " + refs[0]!.sectionName : ""}". Try _5A_ or _class 5_.` };
+    }
+    sections = matches.map((m) => ({ classId: m.classId, sectionId: m.sectionId, className: m.className, sectionName: m.sectionName, label: m.label }));
+    scopeLabel = matches.length === 1 ? matches[0]!.label : `class ${matches[0]!.className}`;
+    if (kind.ownSectionsForTeachers && !office) {
+      const mineIds = new Set(mine.map((s) => s.sectionId));
+      const allowed = sections.filter((s) => mineIds.has(s.sectionId));
+      if (!allowed.length) {
+        void audit(session, command_report(), parsed.fields, text, "denied", { reason: "scope", channel: inbound.channel, report: kind.id });
+        return { handled: true, audience: "erp_command_denied", text: `${scopeLabel} isn't one of your sections, so I can't send that report. Ask the office.` };
+      }
+      sections = allowed;
+    }
+  } else if (kind.section === "required") {
+    return { handled: true, audience, text: `Which class? e.g. _${kind.examples[0]}_.` };
+  } else if (kind.ownSectionsForTeachers && !office) {
+    if (!mine.length) {
+      return { handled: true, audience: "erp_command_denied", text: "No sections are assigned to you in the timetable, so there is nothing to report. Ask the office." };
+    }
+    sections = mine;
+    scopeLabel = mine.length === 1 ? mine[0]!.label : `your ${mine.length} sections`;
+  }
+
+  const date = resolveCommandDate(text, todayIso);
+  const period = detectAskPeriod(text);
+  const { buildErpReport, storeReportPdf } = await import("@/lib/erpReports.server");
+  const { renderTableReportPdf } = await import("@/lib/reportPdf.server");
+  const atIso = new Date().toISOString();
+  let table: import("@/lib/erpReports").ReportTable;
+  let bytes: Buffer;
+  try {
+    table = await buildErpReport({
+      kind: kind.id,
+      session,
+      masters,
+      todayIso,
+      scope: { sections, label: scopeLabel },
+      date: kind.when === "date" || (kind.id === "collection" && !period) ? date : undefined,
+      period: kind.when === "period" && period && period !== "today" && period !== "yesterday" ? period : kind.id === "admissions" ? (period ?? "this_week") : undefined,
+    });
+    bytes = await renderTableReportPdf(table, { requestedBy: inbound.staff?.fullName || inbound.displayName, channel: inbound.channel, atIso }, masters);
+  } catch (e) {
+    void audit(session, command_report(), parsed.fields, text, "error", { channel: inbound.channel, report: kind.id, reason: e instanceof Error ? e.message : String(e) });
+    return { handled: true, audience, text: `Sorry — the ${kind.title.toLowerCase()} report could not be built just now. Try again in a minute or open the ERP.` };
+  }
+
+  const caption = `${table.title} · ${table.subtitle}\n${table.summary}`;
+  if (inbound.channel === "whatsapp") {
+    const { sendWhatsAppDocument } = await import("@/lib/waSend");
+    const toMobile = /^\d{10}$/.test(inbound.actorKey) ? inbound.actorKey : (inbound.staff?.mobile || "");
+    const sent = await sendWhatsAppDocument({ toMobile, bytes, filename: table.filename, caption });
+    void audit(session, command_report(), parsed.fields, text, sent.ok ? "ok" : "error", { channel: "whatsapp", report: kind.id, rows: table.rows.length, scope: scopeLabel, sent: sent.ok, error: sent.error });
+    if (!sent.ok) {
+      const stored = await storeReportPdf(bytes, table.filename, atIso);
+      return {
+        handled: true,
+        audience,
+        text: stored.ok
+          ? `The PDF could not be sent here (${sent.error}). Open it in the ERP: ${stored.url}`
+          : `The PDF could not be sent here (${sent.error}), and could not be stored either. Open the report in the ERP.`,
+      };
+    }
+    // The document is the reply; the text is a one-line receipt of it.
+    return { handled: true, audience, text: `📄 Sent: *${table.title}* — ${table.summary}` };
+  }
+
+  const stored = await storeReportPdf(bytes, table.filename, atIso);
+  void audit(session, command_report(), parsed.fields, text, stored.ok ? "ok" : "error", { channel: "app", report: kind.id, rows: table.rows.length, scope: scopeLabel, stored: stored.ok, error: stored.ok ? undefined : stored.error });
+  if (!stored.ok) {
+    return { handled: true, audience, text: `The ${kind.title.toLowerCase()} report was built (${table.summary}) but could not be stored: ${stored.error}.` };
+  }
+  return { handled: true, audience, text: `📄 *${table.title}* — ${table.summary}\nDownload: ${stored.url}` };
+}
+
+function command_report(): ErpCommandDef {
+  return findErpCommand("report")!;
 }
 
 /** The answering layer's stand-in command, for RBAC-free audit rows and the hourly cap. */

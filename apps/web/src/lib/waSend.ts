@@ -182,6 +182,68 @@ export async function sendWhatsAppText(opts: {
 
 /** Send a WhatsApp Flow (interactive multi-step in-chat form). Meta-only —
  * Flows are a Cloud API feature, no generic-BSP fallback makes sense here. */
+/**
+ * Send a file as a WhatsApp document inside the 24-hour session window.
+ *
+ * Two calls: upload the bytes to Meta's media store (private, no public URL
+ * needed) and send a document message by media id. Used for reports a staff
+ * member asked the command desk for — they have just written to the school,
+ * so the window is open. Meta's document limit is 100 MB; ours is far lower
+ * (a report is a few hundred KB).
+ */
+export async function sendWhatsAppDocument(opts: {
+  toMobile: string;
+  bytes: Buffer;
+  filename: string;
+  mimeType?: string;
+  caption?: string;
+  fromPhoneNumberId?: string;
+}): Promise<{ ok: boolean; providerId?: string; mediaId?: string; error?: string; mode: string }> {
+  const to = waDigitsToE164India(opts.toMobile);
+  if (!to || to.length < 10) return { ok: false, error: "Invalid destination", mode: "none" };
+  if (await isOptedOut(to)) return { ok: false, error: "Contact has opted out (STOP)", mode: "none" };
+  if (!(await isWithin24HourWindow(to))) {
+    return { ok: false, error: "Outside Meta's 24h session window — a document needs an open conversation", mode: "none" };
+  }
+  const phoneNumberId = resolvePhoneNumberId(opts.fromPhoneNumberId);
+  const metaToken = metaAccessToken();
+  if (!phoneNumberId || !metaToken) return { ok: false, error: "WhatsApp (Meta) is not configured for documents", mode: "none" };
+  if (opts.bytes.length > 16 * 1024 * 1024) return { ok: false, error: "Document is larger than 16 MB", mode: "meta" };
+  const version = metaGraphVersion();
+  const mimeType = opts.mimeType || "application/pdf";
+  try {
+    const form = new FormData();
+    form.append("messaging_product", "whatsapp");
+    form.append("type", mimeType);
+    form.append("file", new Blob([new Uint8Array(opts.bytes)], { type: mimeType }), opts.filename);
+    const up = await fetch(`https://graph.facebook.com/${version}/${phoneNumberId}/media`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${metaToken}` },
+      body: form,
+    });
+    const upJson = (await up.json().catch(() => ({}))) as { id?: string; error?: { message?: string } };
+    if (!up.ok || !upJson.id) {
+      return { ok: false, error: upJson.error?.message || `Meta media upload HTTP ${up.status}`, mode: "meta" };
+    }
+    const res = await fetch(`https://graph.facebook.com/${version}/${phoneNumberId}/messages`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${metaToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to,
+        type: "document",
+        document: { id: upJson.id, filename: opts.filename.slice(0, 240), ...(opts.caption ? { caption: opts.caption.slice(0, 1024) } : {}) },
+      }),
+    });
+    const json = (await res.json().catch(() => ({}))) as { messages?: { id?: string }[]; error?: { message?: string } };
+    if (!res.ok) return { ok: false, error: json.error?.message || `Meta HTTP ${res.status}`, mediaId: upJson.id, mode: "meta" };
+    return { ok: true, providerId: json.messages?.[0]?.id || "ok", mediaId: upJson.id, mode: "meta" };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Document send failed", mode: "meta" };
+  }
+}
+
 export async function sendWaFlowMessage(opts: {
   toMobile: string;
   flowId: string;
