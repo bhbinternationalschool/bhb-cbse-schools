@@ -58,7 +58,16 @@ export async function POST(req: Request) {
   const auth = await requireStaffPermission(req, "fees", "create");
   if (!auth.ok) return auth.response;
 
-  const body = (await req.json().catch(() => ({}))) as { voucherId?: string };
+  const body = (await req.json().catch(() => ({}))) as {
+    voucherId?: string;
+    /**
+     * A person pressing "Send WhatsApp" on the receipt, deliberately, after
+     * the automatic one failed or the family says it never came. Skips the
+     * already-sent guard — that guard exists to stop machines repeating
+     * themselves, not to stop the office answering a parent.
+     */
+    force?: boolean;
+  };
   const voucherId = (body.voucherId || "").trim();
   if (!voucherId) {
     return NextResponse.json(
@@ -67,14 +76,39 @@ export async function POST(req: Request) {
     );
   }
 
-  const { sis, fees } = await loadFeeContext();
-  const voucher = fees.vouchers.find((v) => v.id === voucherId);
-  if (!voucher) {
-    // The push that carries the receipt may not have landed yet. Saying so
-    // plainly beats a silent success the counter would read as "sent".
+  /*
+    WAIT for the receipt to arrive, do not just miss it.
+
+    The counter writes the receipt to localStorage and pushes on a DEBOUNCE,
+    then calls this immediately — so on 2026-09-09 the server looked for two
+    real receipts that had not been pushed yet, returned 404, and no send was
+    ever attempted or recorded. Nothing was wrong with the money and nothing
+    told anybody: `wa_receipt_sends` was simply empty.
+
+    Polling here rather than retrying from the browser, because the tab can
+    be closed or navigated away while the push is still in flight, and the
+    family should still get their receipt.
+  */
+  let voucher: Awaited<ReturnType<typeof loadFeeContext>>["fees"]["vouchers"][number] | undefined;
+  let sis: Awaited<ReturnType<typeof loadFeeContext>>["sis"] | undefined;
+  const deadline = Date.now() + 20_000;
+  for (let attempt = 0; ; attempt += 1) {
+    const ctx = await loadFeeContext();
+    sis = ctx.sis;
+    voucher = ctx.fees.vouchers.find((v) => v.id === voucherId);
+    if (voucher || Date.now() > deadline) break;
+    await new Promise((r) => setTimeout(r, attempt === 0 ? 1500 : 3000));
+  }
+  if (!voucher || !sis) {
     return NextResponse.json(
-      { ok: false, error: "Receipt not found on the server yet" },
-      { status: 404 },
+      {
+        ok: true,
+        sent: false,
+        reason:
+          "The receipt has not reached the server yet, so it was not sent. " +
+          "Open the receipt and press Send WhatsApp once it has synced.",
+      },
+      { status: 200 },
     );
   }
 
@@ -88,6 +122,7 @@ export async function POST(req: Request) {
     voucher,
     mobile: householdContact(sis, voucher.householdId).mobile,
     studentNames,
+    force: body.force === true,
   });
 
   return NextResponse.json(

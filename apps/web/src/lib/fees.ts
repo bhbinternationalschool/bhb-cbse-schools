@@ -4034,23 +4034,36 @@ export async function deliverWhatsAppFeeReceipt(input: {
     pdfDownloaded = true;
   }
 
-  // The school sends the receipt, or nobody does.
+  // The school sends the receipt, as the APPROVED TEMPLATE, or nobody does.
   //
-  // This used to open the cashier's own WhatsApp whenever the API path had
-  // not fired — silently, so a receipt the office believed came from the
-  // school had actually gone from whoever was at the counter, and the school
-  // held no record of it. Today that fallback was firing on EVERY receipt,
-  // because the template was not recognised as approved.
-  const sent = await sendFromSchoolWhatsApp({
-    mobile,
-    text: message,
-    module: "fees",
-  });
-  if (!sent.ok) {
+  // This used to send `text`, and plain text is deliverable only inside
+  // Meta's 24-hour window — so pressing "Send WhatsApp" on a receipt for a
+  // parent who had not messaged the school that day always failed with
+  // "outside Meta's 24 hour window", however healthy the template registry
+  // was. The automatic send was moved onto the template on 2026-09-08 and
+  // this button was left behind, so the button kept failing after the
+  // automatic path was fixed.
+  //
+  // Going through the same server endpoint as the automatic send means one
+  // implementation of "message a family their receipt": the family's own
+  // language, the PDF attached, the send recorded in `wa_receipt_sends`, and
+  // the delivery ticks flowing to the same place. `force` because a person
+  // pressed the button — the already-sent guard is there to stop machines
+  // repeating themselves, not to stop the office answering a parent.
+  const res = await fetch("/api/fees/receipt-wa", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ voucherId: input.voucher.id, force: true }),
+  }).catch(() => null);
+  const sent = (await res?.json().catch(() => null)) as
+    | { sent?: boolean; reason?: string; error?: string }
+    | null;
+  if (!res?.ok || !sent?.sent) {
     return {
       ok: false,
       error:
-        `The school's WhatsApp could not send this receipt: ${sent.error}. ` +
+        `The school's WhatsApp could not send this receipt: ` +
+        `${sent?.reason || sent?.error || "no reply from the server"}. ` +
         `Nothing was sent from your own WhatsApp. The PDF is downloaded — ` +
         `attach it by hand if the family needs it now.`,
     };
