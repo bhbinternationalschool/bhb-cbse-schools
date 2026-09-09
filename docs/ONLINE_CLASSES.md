@@ -41,12 +41,21 @@ nobody ended is closed **30 minutes after** its end time by the tick; the
 person said (scheduled / live / ended / cancelled); `phase` is what the
 clock says on top of it (upcoming / joinable / live / over / cancelled).
 
-## "Joined" is not the register
+## "Joined" is not the register — but it can propose one
 
 `online_class_joins` records a family tapping Join inside the window, or a
 Meet participant whose display name matched exactly one child on the
-roster. It is a record of presence for the teacher, not an attendance
-mark. Nothing here writes to `attendance_desk_*`.
+roster. It is a record of presence, not an attendance mark.
+
+**Mark register from this class** (desk drawer and the app's Who-joined
+sheet) turns it into one, with the teacher as author: the roster is
+pre-filled — a register already marked for that date wins, otherwise
+joined → P and everyone else → A (`proposeRegisterStatus`, self-tested) —
+the teacher corrects, then saves. The save goes through
+`POST /api/v1/staff/online-classes/:id/mark-register`, which needs
+`attendance.edit` (the register's own permission, not the online-class
+one) and calls `markAttendanceServer`, the same path as the Attendance
+screen: register upsert, DB push, absent alerts to families, audit row.
 
 ## One-time setup still needed (not code)
 
@@ -66,5 +75,4 @@ mark. Nothing here writes to `attendance_desk_*`.
 - WhatsApp announcements. Meta has 9 approved templates and none fits; the
   push notification is what parents get. Add a template when there is one.
 - Recording / material attachments. Homework already carries links.
-- Writing to the attendance register from joins.
 - Web parent portal tab. The app is where parents are.

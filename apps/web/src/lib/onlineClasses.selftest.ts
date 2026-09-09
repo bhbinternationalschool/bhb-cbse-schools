@@ -28,6 +28,7 @@ import {
   normalizeJoinUrl,
   onlineClassPhase,
   readOnlineClassInput,
+  proposeRegisterStatus,
   reminderDue,
 } from "./onlineClasses";
 
@@ -120,5 +121,12 @@ assert.equal(matchParticipantToRoster("Priya Sh", roster), "c");
 assert.equal(matchParticipantToRoster("Rohan Verma", roster), "d", "roster has no surname to disagree");
 assert.equal(matchParticipantToRoster("Sunita Devi", roster), null);
 assert.equal(matchParticipantToRoster("", roster), null);
+
+// 4. Register proposal: an existing mark is a decision, a join is a suggestion.
+assert.equal(proposeRegisterStatus(true, null), "P");
+assert.equal(proposeRegisterStatus(false, null), "A");
+assert.equal(proposeRegisterStatus(true, "A"), "A", "the class teacher already said absent");
+assert.equal(proposeRegisterStatus(false, "L"), "L");
+assert.equal(proposeRegisterStatus(false, "garbage"), "A", "an unknown code is no mark");
 
 console.log("ok");

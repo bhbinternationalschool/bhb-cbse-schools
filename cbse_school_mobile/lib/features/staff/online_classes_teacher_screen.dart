@@ -557,6 +557,8 @@ class _AttendanceSheetState extends State<_AttendanceSheet> {
   String? _error;
   String? _note;
   bool _busy = false;
+  bool _marking = false;
+  final Map<String, String> _marks = {};
 
   @override
   void initState() {
@@ -589,31 +591,94 @@ class _AttendanceSheetState extends State<_AttendanceSheet> {
     }
   }
 
+  void _startMarking() {
+    final d = _data;
+    if (d == null) return;
+    setState(() {
+      _marks
+        ..clear()
+        ..addEntries(d.rows.map((r) => MapEntry(r.studentId, r.proposedStatus)));
+      _marking = true;
+      _note = null;
+      _error = null;
+    });
+  }
+
+  Future<void> _save() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final summary = await widget.api.markRegisterFromOnlineClass(
+        widget.c.id,
+        marks: Map.of(_marks),
+      );
+      Haptics.success();
+      if (!mounted) return;
+      setState(() {
+        _marking = false;
+        _note = "Register saved: $summary";
+      });
+      await _load();
+    } on ApiException catch (e) {
+      Haptics.warning();
+      if (mounted) setState(() => _error = e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final d = _data;
+    final present = _marks.values.where((v) => v == "P").length;
     return DraggableScrollableSheet(
       expand: false,
-      initialChildSize: 0.7,
+      initialChildSize: 0.75,
       builder: (context, controller) => Padding(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text("Who joined · ${widget.c.sectionLabel}", style: AppText.titleMedium),
+            Text(
+              "${_marking ? "Mark register" : "Who joined"} · ${widget.c.sectionLabel}",
+              style: AppText.titleMedium,
+            ),
             const SizedBox(height: 4),
             Text(
-              d == null ? "${widget.c.date} ${_fmt12(widget.c.startTime)}" : "${d.joined} of ${d.total} joined",
+              d == null
+                  ? "${widget.c.date} ${_fmt12(widget.c.startTime)}"
+                  : _marking
+                      ? "$present present · ${_marks.length - present} absent. Tap a child to change, then save."
+                      : "${d.joined} of ${d.total} joined",
               style: AppText.bodyMedium,
             ),
-            if (d != null && d.canSync)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: _busy ? null : _sync,
-                  icon: const Icon(Icons.sync, size: 18),
-                  label: Text(_busy ? "Reading Meet…" : "Sync from Meet"),
+            if (d != null && !_marking && d.register != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  "Register for ${formatDateLabel(d.date)} already marked by ${d.register!.markedBy.isEmpty ? "someone" : d.register!.markedBy}: ${d.register!.present} present of ${d.register!.count}. Marking again replaces it.",
+                  style: AppText.labelMediumMuted,
                 ),
+              ),
+            if (d != null && !_marking)
+              Wrap(
+                spacing: 8,
+                children: [
+                  if (d.canSync)
+                    TextButton.icon(
+                      onPressed: _busy ? null : _sync,
+                      icon: const Icon(Icons.sync, size: 18),
+                      label: Text(_busy ? "Reading Meet…" : "Sync from Meet"),
+                    ),
+                  if (d.canMarkRegister && widget.c.status != "cancelled")
+                    FilledButton.tonalIcon(
+                      onPressed: _busy ? null : _startMarking,
+                      icon: const Icon(Icons.fact_check_outlined, size: 18),
+                      label: const Text("Mark register from this class"),
+                    ),
+                ],
               ),
             if (_note != null) Text(_note!, style: AppText.labelMediumMuted),
             if (_error != null) Text(_error!, style: TextStyle(color: AppColors.warning)),
@@ -627,6 +692,40 @@ class _AttendanceSheetState extends State<_AttendanceSheet> {
                       separatorBuilder: (_, _) => const Divider(height: 1),
                       itemBuilder: (context, i) {
                         final r = d.rows[i];
+                        if (_marking) {
+                          final code = _marks[r.studentId] ?? "A";
+                          final isP = code == "P";
+                          return ListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            onTap: () => setState(() => _marks[r.studentId] = isP ? "A" : "P"),
+                            leading: SizedBox(
+                              width: 28,
+                              child: Text(r.rollNo, style: AppText.labelMediumMuted, textAlign: TextAlign.right),
+                            ),
+                            title: Text(r.fullName, style: AppText.bodyMedium),
+                            subtitle: Text(
+                              r.joined ? "joined" : "did not join",
+                              style: AppText.labelMediumMuted,
+                            ),
+                            trailing: Container(
+                              width: 40,
+                              height: 32,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: (isP ? AppColors.success : AppColors.warning).withValues(alpha: 0.14),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                code,
+                                style: AppText.bodyMedium.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  color: isP ? AppColors.success : AppColors.warning,
+                                ),
+                              ),
+                            ),
+                          );
+                        }
                         return ListTile(
                           dense: true,
                           contentPadding: EdgeInsets.zero,
@@ -635,6 +734,9 @@ class _AttendanceSheetState extends State<_AttendanceSheet> {
                             child: Text(r.rollNo, style: AppText.labelMediumMuted, textAlign: TextAlign.right),
                           ),
                           title: Text(r.fullName, style: AppText.bodyMedium),
+                          subtitle: r.registerStatus.isEmpty
+                              ? null
+                              : Text("register: ${r.registerStatus}", style: AppText.labelMediumMuted),
                           trailing: r.joined
                               ? Text(
                                   "Joined${r.minutes > 0 ? " · ${r.minutes} min" : ""}",
@@ -645,6 +747,26 @@ class _AttendanceSheetState extends State<_AttendanceSheet> {
                       },
                     ),
             ),
+            if (_marking) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _busy ? null : () => setState(() => _marking = false),
+                      child: const Text("Back"),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _busy ? null : _save,
+                      child: Text(_busy ? "Saving…" : "Save register"),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
       ),

@@ -353,3 +353,22 @@ export function matchParticipantToRoster(
   });
   return partial.length === 1 ? partial[0].studentId : null;
 }
+
+// ─── Register proposal ───────────────────────────────────────────────
+
+/**
+ * What the register should be pre-filled with from an online class. The
+ * register already marked for that date wins outright — an online join is a
+ * suggestion, and a class teacher's earlier mark is a decision. Otherwise a
+ * child who joined is proposed present and everyone else absent, and the
+ * teacher corrects before saving. Nothing here saves.
+ */
+export function proposeRegisterStatus(
+  joined: boolean,
+  existingStatus: string | null | undefined,
+): "P" | "A" | "L" | "HD" | "LE" {
+  if (existingStatus === "P" || existingStatus === "A" || existingStatus === "L" || existingStatus === "HD" || existingStatus === "LE") {
+    return existingStatus;
+  }
+  return joined ? "P" : "A";
+}

@@ -179,24 +179,52 @@ class OnlineClassAttendanceRow {
       rollNo = _s(j, "rollNo"),
       joined = _b(j, "joined"),
       source = _s(j, "source"),
-      minutes = _i(j, "minutes");
+      minutes = _i(j, "minutes"),
+      registerStatus = _s(j, "registerStatus"),
+      proposedStatus = _s(j, "proposedStatus");
   final String studentId;
   final String fullName;
   final String rollNo;
   final bool joined;
   final String source;
   final int minutes;
+
+  /// What the register already says for this date ('' when unmarked).
+  final String registerStatus;
+
+  /// P / A proposal for "Mark register from this class".
+  final String proposedStatus;
+}
+
+class OnlineClassRegisterInfo {
+  OnlineClassRegisterInfo.fromJson(Map<String, dynamic> j)
+    : markedBy = _s(j, "markedBy"),
+      present = _i(j, "present"),
+      count = _i(j, "count");
+  final String markedBy;
+  final int present;
+  final int count;
 }
 
 class OnlineClassAttendance {
   OnlineClassAttendance.fromJson(Map<String, dynamic> j)
-    : total = _i(j, "total"),
+    : date = _s(j, "date"),
+      total = _i(j, "total"),
       joined = _i(j, "joined"),
       canSync = _b(j, "canSync"),
+      canMarkRegister = _b(j, "canMarkRegister"),
+      register = j["register"] is Map
+          ? OnlineClassRegisterInfo.fromJson(
+              Map<String, dynamic>.from(j["register"] as Map),
+            )
+          : null,
       rows = _list(j, "rows").map(OnlineClassAttendanceRow.fromJson).toList();
+  final String date;
   final int total;
   final int joined;
   final bool canSync;
+  final bool canMarkRegister;
+  final OnlineClassRegisterInfo? register;
   final List<OnlineClassAttendanceRow> rows;
 }
 
@@ -281,6 +309,24 @@ extension OnlineClassesApi on ApiClient {
       OnlineClassAttendance.fromJson(
         await _getData("/api/v1/staff/online-classes/$id/attendance"),
       );
+
+  /// Write the section's register for the class's date. Returns a one-line
+  /// summary ("22 present of 30 · 8 absent alerts sent").
+  Future<String> markRegisterFromOnlineClass(
+    String id, {
+    required Map<String, String> marks,
+    String remark = "",
+  }) async {
+    final data = await _postData("/api/v1/staff/online-classes/$id/mark-register", {
+      "marks": [
+        for (final e in marks.entries) {"studentId": e.key, "status": e.value},
+      ],
+      "remark": remark,
+    });
+    final alerts = _i(data, "absentAlerts");
+    return "${_i(data, "present")} present of ${_i(data, "markCount")}"
+        "${alerts > 0 ? " · $alerts absent alerts sent" : ""}";
+  }
 
   Future<String> syncOnlineClassAttendance(String id) async {
     final data = await _postData("/api/v1/staff/online-classes/$id/attendance", {});

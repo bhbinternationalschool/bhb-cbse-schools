@@ -11,7 +11,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Video, RefreshCw, Plus, Copy, Users, Play, Square, Ban, RotateCcw, Megaphone, ExternalLink } from "lucide-react";
+import { Video, RefreshCw, Plus, Copy, Users, Play, Square, Ban, RotateCcw, Megaphone, ExternalLink, ClipboardCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
@@ -59,6 +59,8 @@ type Listing = {
   google: { oauthConfigured: boolean; connected: boolean; email: string; canMeet: boolean; connectUrl: string };
 };
 
+type RegisterCode = "P" | "A" | "L" | "HD" | "LE";
+
 type AttendanceRow = {
   studentId: string;
   fullName: string;
@@ -67,18 +69,29 @@ type AttendanceRow = {
   source: string;
   firstJoinedAt: string;
   minutes: number;
+  registerStatus: string;
+  proposedStatus: RegisterCode;
 };
 
 type Attendance = {
   sessionId: string;
+  date: string;
   status: string;
   provider: string;
   canSync: boolean;
   attendanceSyncedAt: string;
   total: number;
   joined: number;
+  register: { markedBy: string; markedAt: string; present: number; count: number } | null;
+  canMarkRegister: boolean;
   rows: AttendanceRow[];
 };
+
+const REGISTER_CODES: { code: RegisterCode; label: string }[] = [
+  { code: "P", label: "Present" },
+  { code: "A", label: "Absent" },
+  { code: "L", label: "Late" },
+];
 
 const RANGES = [
   { id: "today", label: "Today" },
@@ -737,6 +750,11 @@ function AttendanceDialog({
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [syncNote, setSyncNote] = useState<string | null>(null);
+  // Register mode: the proposal, edited by the teacher, then saved.
+  const [marking, setMarking] = useState(false);
+  const [marks, setMarks] = useState<Record<string, RegisterCode>>({});
+  const [remark, setRemark] = useState("");
+  const [saved, setSaved] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -772,16 +790,74 @@ function AttendanceDialog({
     }
   };
 
+  const startMarking = () => {
+    if (!data) return;
+    const next: Record<string, RegisterCode> = {};
+    for (const r of data.rows) next[r.studentId] = r.proposedStatus;
+    setMarks(next);
+    setSaved(null);
+    setMarking(true);
+  };
+
+  const setAll = (code: RegisterCode) => {
+    if (!data) return;
+    const next: Record<string, RegisterCode> = {};
+    for (const r of data.rows) next[r.studentId] = code;
+    setMarks(next);
+  };
+
+  const saveRegister = async () => {
+    if (!data) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await api<{ markCount: number; present: number; absentAlerts: number }>(
+        `/api/v1/staff/online-classes/${row.id}/mark-register`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            marks: data.rows.map((x) => ({ studentId: x.studentId, status: marks[x.studentId] || "A" })),
+            remark,
+          }),
+        },
+      );
+      setSaved(
+        `Register saved for ${fmtDate(data.date)}: ${r.present} present of ${r.markCount}` +
+          (r.absentAlerts ? `; ${r.absentAlerts} absent alerts sent to phones` : "") +
+          ".",
+      );
+      setMarking(false);
+      await load();
+      onChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not save the register");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const counts = data
+    ? data.rows.reduce(
+        (acc, r) => {
+          const c = marks[r.studentId] || "A";
+          acc[c] = (acc[c] || 0) + 1;
+          return acc;
+        },
+        {} as Record<string, number>,
+      )
+    : {};
+
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogPopup size="md" className="max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            Who joined · {row.className} {row.sectionName} · {fmtDate(row.date)} {fmt12(row.startTime)}
+            {marking ? "Mark register" : "Who joined"} · {row.className} {row.sectionName} · {fmtDate(row.date)} {fmt12(row.startTime)}
           </DialogTitle>
         </DialogHeader>
         {err ? <p className="text-sm text-[var(--danger)]">{err}</p> : null}
-        {data ? (
+        {saved ? <p className="text-sm text-[var(--success)]">{saved}</p> : null}
+        {data && !marking ? (
           <>
             <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
               <span>
@@ -790,13 +866,26 @@ function AttendanceDialog({
                   <span className="text-xs text-muted-foreground"> · Meet list synced</span>
                 ) : null}
               </span>
-              {data.canSync ? (
-                <Button size="sm" variant="outline" onClick={() => void sync()} disabled={busy}>
-                  <RefreshCw className={`size-4 ${busy ? "animate-spin" : ""}`} aria-hidden />{" "}
-                  {busy ? "Reading Meet…" : "Sync from Meet"}
-                </Button>
-              ) : null}
+              <span className="flex gap-2">
+                {data.canSync ? (
+                  <Button size="sm" variant="outline" onClick={() => void sync()} disabled={busy}>
+                    <RefreshCw className={`size-4 ${busy ? "animate-spin" : ""}`} aria-hidden />{" "}
+                    {busy ? "Reading Meet…" : "Sync from Meet"}
+                  </Button>
+                ) : null}
+                {data.canMarkRegister && row.status !== "cancelled" ? (
+                  <Button size="sm" onClick={startMarking} disabled={busy}>
+                    <ClipboardCheck className="size-4" aria-hidden /> Mark register from this class
+                  </Button>
+                ) : null}
+              </span>
             </div>
+            {data.register ? (
+              <p className="text-xs text-muted-foreground">
+                The register for {fmtDate(data.date)} is already marked by {data.register.markedBy || "someone"}:{" "}
+                {data.register.present} present of {data.register.count}. Marking again replaces it.
+              </p>
+            ) : null}
             {syncNote ? <p className="text-xs text-muted-foreground">{syncNote}</p> : null}
             <ul className="mt-2 divide-y divide-[var(--border)] text-sm">
               {data.rows.map((r) => (
@@ -806,6 +895,9 @@ function AttendanceDialog({
                       {r.rollNo || ""}
                     </span>
                     {r.fullName}
+                    {r.registerStatus ? (
+                      <span className="ml-2 text-xs text-muted-foreground">register: {r.registerStatus}</span>
+                    ) : null}
                   </span>
                   <span className={r.joined ? "text-[var(--success)]" : "text-muted-foreground"}>
                     {r.joined
@@ -817,14 +909,85 @@ function AttendanceDialog({
             </ul>
             <p className="mt-2 text-xs text-muted-foreground">
               &ldquo;Joined&rdquo; means the family tapped Join in the app inside the class window, or Google Meet
-              listed the child by name. It is a record of presence, not the attendance register.
+              listed the child by name. It is a record of presence, not the attendance register — use
+              &ldquo;Mark register&rdquo; to turn it into one, after checking it.
             </p>
           </>
-        ) : !err ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
         ) : null}
+        {data && marking ? (
+          <>
+            <p className="text-sm">
+              Pre-filled from who joined{data.register ? " and the register already marked for this date" : ""}.
+              Correct anything that is wrong, then save. Absent marks send the usual absent alert to the family.
+            </p>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span>
+                {counts.P || 0} present · {counts.A || 0} absent{counts.L ? ` · ${counts.L} late` : ""}
+              </span>
+              <span className="ml-auto flex gap-1">
+                <Button size="sm" variant="ghost" onClick={() => setAll("P")}>All present</Button>
+                <Button size="sm" variant="ghost" onClick={() => setAll("A")}>All absent</Button>
+              </span>
+            </div>
+            <ul className="mt-1 divide-y divide-[var(--border)] text-sm">
+              {data.rows.map((r) => (
+                <li key={r.studentId} className="flex items-center justify-between gap-2 py-1.5">
+                  <span className="min-w-0 flex-1 truncate">
+                    <span className="mr-2 inline-block w-6 text-right text-xs text-muted-foreground tabular-nums">
+                      {r.rollNo || ""}
+                    </span>
+                    {r.fullName}
+                    <span className="ml-2 text-xs text-muted-foreground">{r.joined ? "joined" : "did not join"}</span>
+                  </span>
+                  <span className="flex gap-1" role="radiogroup" aria-label={`${r.fullName} status`}>
+                    {REGISTER_CODES.map((c) => {
+                      const on = (marks[r.studentId] || "A") === c.code;
+                      return (
+                        <button
+                          key={c.code}
+                          type="button"
+                          role="radio"
+                          aria-checked={on}
+                          title={c.label}
+                          className={`h-7 min-w-8 rounded-md border px-2 text-xs font-medium ${
+                            on
+                              ? c.code === "P"
+                                ? "border-[var(--success)] bg-[var(--success-soft)] text-[var(--success)]"
+                                : c.code === "A"
+                                  ? "border-[var(--danger)] bg-[var(--danger-soft)] text-[var(--danger)]"
+                                  : "border-[var(--warning)] bg-[var(--warning-soft)] text-[var(--warning)]"
+                              : "border-[var(--border)] text-muted-foreground"
+                          }`}
+                          onClick={() => setMarks((m) => ({ ...m, [r.studentId]: c.code }))}
+                        >
+                          {c.code}
+                        </button>
+                      );
+                    })}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <input
+              className={`${field} mt-2`}
+              value={remark}
+              onChange={(e) => setRemark(e.target.value)}
+              placeholder={`Register remark (optional) — defaults to "Online class ${fmt12(row.startTime)}"`}
+            />
+          </>
+        ) : null}
+        {!data && !err ? <p className="text-sm text-muted-foreground">Loading…</p> : null}
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Close</Button>
+          {marking ? (
+            <>
+              <Button variant="outline" onClick={() => setMarking(false)} disabled={busy}>Back</Button>
+              <Button onClick={() => void saveRegister()} disabled={busy}>
+                {busy ? "Saving…" : "Save register"}
+              </Button>
+            </>
+          ) : (
+            <Button variant="outline" onClick={onClose}>Close</Button>
+          )}
         </DialogFooter>
       </DialogPopup>
     </Dialog>
