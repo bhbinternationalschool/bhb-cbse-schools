@@ -397,7 +397,21 @@ export function OnlineClassesWorkspace() {
             google.connected ? (
               <span className="text-xs text-muted-foreground">
                 Google: {google.email}
-                {google.canMeet ? "" : " (reconnect for Meet)"}
+                {google.canMeet ? (
+                  <>
+                    {" · "}
+                    <a className="underline" href={google.connectUrl}>
+                      reconnect
+                    </a>
+                  </>
+                ) : (
+                  <>
+                    {" · "}
+                    <a className="underline text-[var(--warning)]" href={google.connectUrl}>
+                      Reconnect Google for Meet
+                    </a>
+                  </>
+                )}
               </span>
             ) : google.oauthConfigured ? (
               <a className="text-xs underline" href={google.connectUrl}>
