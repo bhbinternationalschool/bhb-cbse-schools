@@ -114,6 +114,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:online-classes
 
+      - name: Self-test — an in-class answer is a child's work, and the note only says what the teacher said
+        working-directory: apps/web
+        run: npm run test:online-class-qa
+
       - name: Test — which number sends which template, and both languages
         working-directory: apps/web
         run: npm run test:wa-sender-routing

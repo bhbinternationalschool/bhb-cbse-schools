@@ -5,6 +5,8 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
+import "online_class_qa_teacher_screen.dart";
+import "online_class_summary_screen.dart";
 
 /// A teacher's online classes: what is on this week, Start / End / who
 /// joined, and a schedule sheet that fills the time from the bell.
@@ -149,6 +151,16 @@ class _OnlineClassesTeacherScreenState extends State<OnlineClassesTeacherScreen>
                   ? () => _confirmThen("Cancel this class?", "${c.sectionLabel} · ${c.date} ${c.startTime}. Parents will see it as cancelled.", () => _act(c, "cancel", reload))
                   : null,
               onAttendance: () => _attendance(c),
+              onQa: c.status == "cancelled"
+                  ? null
+                  : () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => OnlineClassQaTeacherScreen(api: widget.api, c: c)),
+                      ),
+              onSummary: c.status == "cancelled"
+                  ? null
+                  : () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => OnlineClassSummaryScreen(api: widget.api, c: c)),
+                      ),
             ),
             const SizedBox(height: 10),
           ],
@@ -184,6 +196,8 @@ class _TeacherClassCard extends StatelessWidget {
     required this.onEnd,
     required this.onCancel,
     required this.onAttendance,
+    required this.onQa,
+    required this.onSummary,
   });
 
   final StaffOnlineClass c;
@@ -193,6 +207,8 @@ class _TeacherClassCard extends StatelessWidget {
   final VoidCallback? onEnd;
   final VoidCallback? onCancel;
   final VoidCallback onAttendance;
+  final VoidCallback? onQa;
+  final VoidCallback? onSummary;
 
   @override
   Widget build(BuildContext context) {
@@ -269,6 +285,18 @@ class _TeacherClassCard extends StatelessWidget {
                   icon: const Icon(Icons.people_outline),
                   label: const Text("Who joined"),
                 ),
+                if (onQa != null)
+                  OutlinedButton.icon(
+                    onPressed: onQa,
+                    icon: const Icon(Icons.quiz_outlined),
+                    label: const Text("Q&A"),
+                  ),
+                if (onSummary != null)
+                  OutlinedButton.icon(
+                    onPressed: onSummary,
+                    icon: const Icon(Icons.summarize_outlined),
+                    label: const Text("Summary"),
+                  ),
                 if (onCancel != null)
                   TextButton(
                     onPressed: onCancel,

@@ -147,7 +147,16 @@ class _HomeScreenState extends State<HomeScreen> {
       case "/leave":
         _openModule("Leave", child);
       case "/online-classes":
-        _openModule("Online class", child);
+        final qaSession = uri.queryParameters["qa"] == "1" ? uri.queryParameters["sessionId"] : null;
+        if (qaSession != null && qaSession.isNotEmpty) {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => OnlineClassesScreen(api: widget.api, child: child, openQaSessionId: qaSession),
+            ),
+          );
+        } else {
+          _openModule("Online class", child);
+        }
       case "/complaints":
         _openModule("Complaints", child);
       case "/profile":

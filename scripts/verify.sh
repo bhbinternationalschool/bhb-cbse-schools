@@ -115,6 +115,7 @@ SELFTESTS=(
   test:wa-bot-silence
   test:job-applications
   test:online-classes
+  test:online-class-qa
   test:wa-sender-routing
   test:receipt-repair
   test:projection-double-post
