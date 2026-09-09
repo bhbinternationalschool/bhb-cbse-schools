@@ -11,7 +11,7 @@ import {
   detectVisitorPurpose,
   flowKindFromRole,
   flowKindFromVisitorPurpose,
-  isUnifiedMenuCommand,
+  shouldShowUnifiedMenu,
   looksLikeForward,
   readVisitorName,
   visitorNameRetryText,
@@ -745,8 +745,15 @@ export async function handleWaUnifiedInbound(opts: {
   // drops a photo with no caption is not asking for the welcome menu.
   // Empty text reads as a menu command, so without this a bare photo
   // re-sent the whole welcome every time one arrived.
-  const visitorForward = !identity.isKnown && !!session && looksLikeForward(text);
-  if (!visitorForward && isUnifiedMenuCommand(text, { staff: isStaff })) {
+  if (
+    shouldShowUnifiedMenu({
+      text,
+      staff: isStaff,
+      known: identity.isKnown,
+      hasSession: !!session,
+      hasAudio: !!opts.audio,
+    })
+  ) {
     session = sessionFor(mobile10, identity, opts.profileName);
     if (identity.isKnown && identity.roles.length === 1) {
       session.phase = "active";

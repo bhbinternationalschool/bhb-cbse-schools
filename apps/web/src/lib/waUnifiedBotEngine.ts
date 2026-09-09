@@ -95,6 +95,36 @@ export function isUnifiedMenuCommand(
 }
 
 /**
+ * Should this message be answered with the welcome / greeting menu,
+ * instead of being passed to whatever flow the sender is in?
+ *
+ * Pulled out of the server because the decision has bitten twice, both
+ * times through the same door: `isUnifiedMenuCommand("")` is true, so a
+ * message with NO TEXT reads as "show me the menu".
+ *
+ * - A visitor forwarding a link or dropping a photo used to be sent the
+ *   whole welcome again on every one.
+ * - A staff member's VOICE NOTE carries no text either, so every one was
+ *   answered with the greeting and returned there — never reaching the
+ *   command desk, where the transcription lives. Voice commands could
+ *   not work: they were swallowed one step before the code for them.
+ *
+ * Audio only for staff. A bare photo from a staff member still gets the
+ * menu, exactly as before.
+ */
+export function shouldShowUnifiedMenu(opts: {
+  text: string;
+  staff: boolean;
+  known: boolean;
+  hasSession: boolean;
+  hasAudio: boolean;
+}): boolean {
+  if (!opts.known && opts.hasSession && looksLikeForward(opts.text)) return false;
+  if (opts.staff && !opts.text.trim() && opts.hasAudio) return false;
+  return isUnifiedMenuCommand(opts.text, { staff: opts.staff });
+}
+
+/**
  * How many times the bot re-asks an unknown caller before it stops.
  *
  * Found on 2026-09-07: one number had been sent the purpose menu on every
