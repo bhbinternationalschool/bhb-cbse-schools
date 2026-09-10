@@ -16,10 +16,14 @@ import {
   rateRupees,
   ratesAreDefaults,
   repriceWaUsage,
+  repriceWaUsageByStudent,
   rupees,
   summariseAiUsage,
   summariseWaUsage,
+  summariseWaUsageByStudent,
+  type WaUsageAttributedMessage,
   type WaUsageMessage,
+  type WaUsageStudentRef,
 } from "./waUsageCost";
 
 console.log("waUsageCost.selftest.ts");
@@ -264,6 +268,211 @@ function msg(p: Partial<WaUsageMessage>): WaUsageMessage {
   assert.equal(projectedMonthlyPaise(700, 7), 3000, "₹7 a week is ₹30 a month");
   assert.equal(projectedMonthlyPaise(700, 0), 0, "no window, no projection");
   assert.equal(billCategoryLabel("unknown"), "Not in the template list");
+}
+
+// --- per student: one message about three children is ONE charge --------
+{
+  const roster: Record<string, WaUsageStudentRef> = {
+    s1: { id: "s1", name: "Asha", admissionNo: "A1", classId: "c5", className: "Class 5" },
+    s2: { id: "s2", name: "Bimal", admissionNo: "A2", classId: "c5", className: "Class 5" },
+    s3: { id: "s3", name: "Chand", admissionNo: "A3", classId: "c8", className: "Class 8" },
+  };
+  const am = (p: Partial<WaUsageAttributedMessage>): WaUsageAttributedMessage => ({
+    category: "utility",
+    outcome: "delivered",
+    studentIds: ["s1"],
+    ...p,
+  });
+
+  // One reminder about three siblings: 30 paise total, not 90.
+  const shared = summariseWaUsageByStudent(
+    [am({ category: "marketing", studentIds: ["s1", "s2", "s3"] })],
+    { ...rates, marketing: 30 },
+    roster,
+  );
+  const total = shared.students.reduce((n, r) => n + r.costPaise, 0);
+  assert.equal(total, 30, "a family message is one charge, split — never multiplied");
+  assert.equal(shared.students.length, 3);
+  assert.equal(shared.students[0].costPaise, 10);
+  assert.equal(
+    shared.classes.reduce((n, c) => n + c.costPaise, 0),
+    30,
+    "class totals must tie back to the school's bill",
+  );
+  const c5 = shared.classes.find((c) => c.classId === "c5");
+  assert.equal(c5?.students, 2);
+  assert.equal(c5?.costPaise, 20, "two of the three siblings are in Class 5");
+  assert.equal(c5?.perStudentPaise, 10);
+}
+
+// --- unattributed is shown, not silently dropped ------------------------
+{
+  const roster: Record<string, WaUsageStudentRef> = {
+    s1: { id: "s1", name: "Asha", admissionNo: "A1", classId: "c5", className: "Class 5" },
+  };
+  const r = summariseWaUsageByStudent(
+    [
+      { category: "utility", outcome: "delivered", studentIds: [] },
+      // A left student, or one on a household the roster no longer has: the
+      // cost is real and must appear somewhere, just not under a name we
+      // cannot print.
+      { category: "utility", outcome: "delivered", studentIds: ["gone"] },
+      { category: "utility", outcome: "delivered", studentIds: ["s1"] },
+    ],
+    rates,
+    roster,
+  );
+  assert.equal(r.unattributed.messages, 2);
+  assert.equal(r.unattributed.costPaise, 20);
+  assert.equal(
+    r.unattributed.costPaise + r.students[0].costPaise,
+    30,
+    "nothing may go missing between the two tables",
+  );
+}
+
+// --- only delivered messages are charged here too -----------------------
+{
+  const roster: Record<string, WaUsageStudentRef> = {
+    s1: { id: "s1", name: "Asha", admissionNo: "A1", classId: "c5", className: "Class 5" },
+  };
+  const r = summariseWaUsageByStudent(
+    [
+      { category: "utility", outcome: "failed", studentIds: ["s1"] },
+      { category: "utility", outcome: "pending", studentIds: ["s1"] },
+      { category: "utility", outcome: "delivered", studentIds: ["s1"] },
+    ],
+    rates,
+    roster,
+  );
+  assert.equal(r.students[0].messages, 3, "all three were about this child");
+  assert.equal(r.students[0].delivered, 1);
+  assert.equal(
+    r.students[0].costPaise,
+    10,
+    "the same rule as the headline: a failed template costs nothing",
+  );
+}
+
+// --- the per-student total ties to the message total --------------------
+{
+  // If these two ever drift, the office is looking at two different bills.
+  const roster: Record<string, WaUsageStudentRef> = {
+    s1: { id: "s1", name: "Asha", admissionNo: "A1", classId: "c5", className: "Class 5" },
+    s2: { id: "s2", name: "Bimal", admissionNo: "A2", classId: "c8", className: "Class 8" },
+  };
+  const flat = { ...rates, marketing: 60, utility: 12 };
+  const plain: WaUsageMessage[] = [
+    msg({ category: "utility" }),
+    msg({ category: "utility" }),
+    msg({ category: "marketing", templateName: "x" }),
+    msg({ category: "utility", outcome: "failed" }),
+  ];
+  const attributed: WaUsageAttributedMessage[] = [
+    { category: "utility", outcome: "delivered", studentIds: ["s1"] },
+    { category: "utility", outcome: "delivered", studentIds: ["s1", "s2"] },
+    { category: "marketing", outcome: "delivered", studentIds: ["s2"] },
+    { category: "utility", outcome: "failed", studentIds: ["s1"] },
+  ];
+  const head = summariseWaUsage(plain, flat);
+  const split = summariseWaUsageByStudent(attributed, flat, roster);
+  assert.equal(
+    split.students.reduce((n, r) => n + r.costPaise, 0) +
+      split.unattributed.costPaise,
+    head.messageCostPaise,
+  );
+}
+
+// --- a duplicated id on one message is still one charge -----------------
+{
+  const roster: Record<string, WaUsageStudentRef> = {
+    s1: { id: "s1", name: "Asha", admissionNo: "A1", classId: "c5", className: "Class 5" },
+  };
+  const r = summariseWaUsageByStudent(
+    [{ category: "utility", outcome: "delivered", studentIds: ["s1", "s1"] }],
+    rates,
+    roster,
+  );
+  assert.equal(r.students[0].messages, 1);
+  assert.equal(r.students[0].costPaise, 10, "not 20, and not 5");
+}
+
+// --- a child with no class still shows, under a plain label -------------
+{
+  const roster: Record<string, WaUsageStudentRef> = {
+    s1: { id: "s1", name: "Asha", admissionNo: "A1", classId: "", className: "" },
+  };
+  const r = summariseWaUsageByStudent(
+    [{ category: "utility", outcome: "delivered", studentIds: ["s1"] }],
+    rates,
+    roster,
+  );
+  assert.equal(r.classes[0].className, "No class on record");
+  assert.equal(r.classes[0].costPaise, 10);
+}
+
+// --- re-pricing the per-child tables is exact, not scaled ---------------
+{
+  // The editor re-prices these tables as a rate is typed. If that drifted
+  // from a fresh count, a class's figure would jump on Save.
+  const roster: Record<string, WaUsageStudentRef> = {
+    s1: { id: "s1", name: "Asha", admissionNo: "A1", classId: "c5", className: "Class 5" },
+    s2: { id: "s2", name: "Bimal", admissionNo: "A2", classId: "c5", className: "Class 5" },
+    s3: { id: "s3", name: "Chand", admissionNo: "A3", classId: "c8", className: "Class 8" },
+  };
+  const attributed: WaUsageAttributedMessage[] = [
+    // A marketing note about all three, so every row carries a fraction.
+    { category: "marketing", outcome: "delivered", studentIds: ["s1", "s2", "s3"] },
+    { category: "utility", outcome: "delivered", studentIds: ["s1"] },
+    { category: "utility", outcome: "delivered", studentIds: ["s2", "s3"] },
+    { category: "authentication", outcome: "delivered", studentIds: ["s3"] },
+    { category: "utility", outcome: "failed", studentIds: ["s1"] },
+    { category: "utility", outcome: "delivered", studentIds: [] },
+  ];
+  const other = {
+    ...rates,
+    marketing: 91,
+    utility: 7,
+    authentication: 3,
+    service: 0,
+  };
+  const repriced = repriceWaUsageByStudent(
+    summariseWaUsageByStudent(attributed, rates, roster),
+    other,
+  );
+  const fresh = summariseWaUsageByStudent(attributed, other, roster);
+  assert.deepEqual(
+    repriced.students.map((s) => [s.studentId, s.costPaise]),
+    fresh.students.map((s) => [s.studentId, s.costPaise]),
+  );
+  assert.deepEqual(
+    repriced.classes.map((c) => [c.classId, c.costPaise, c.perStudentPaise]),
+    fresh.classes.map((c) => [c.classId, c.costPaise, c.perStudentPaise]),
+  );
+  assert.equal(repriced.unattributed.costPaise, fresh.unattributed.costPaise);
+  // s1 and s3 tie on cost here — the order must still be the same both
+  // ways, or rows swap places as a rate is typed.
+  assert.deepEqual(
+    repriced.students.map((s) => s.studentId),
+    fresh.students.map((s) => s.studentId),
+  );
+  // And it still ties to the headline at the new rates.
+  const plain: WaUsageMessage[] = attributed.map((a) =>
+    msg({ category: a.category, outcome: a.outcome, templateName: a.category }),
+  );
+  assert.equal(
+    fresh.students.reduce((n, s) => n + s.costPaise, 0) +
+      fresh.unattributed.costPaise,
+    summariseWaUsage(plain, other).messageCostPaise,
+  );
+}
+
+// --- an empty window is empty, not a crash ------------------------------
+{
+  const r = summariseWaUsageByStudent([], rates, {});
+  assert.deepEqual(r.classes, []);
+  assert.deepEqual(r.students, []);
+  assert.equal(r.unattributed.costPaise, 0);
 }
 
 console.log("  ok");

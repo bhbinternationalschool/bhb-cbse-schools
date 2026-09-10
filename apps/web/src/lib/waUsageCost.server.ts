@@ -18,20 +18,37 @@
 import "server-only";
 
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
+import { getSchoolMirrorSync } from "@/lib/schoolDataMirror";
+import { loadMasters, type MastersState } from "@/lib/masters";
+import { loadSis, type SisState } from "@/lib/sis";
+import { householdCandidateNumbers } from "@/lib/waHouseholdNumbers";
 import { deliveryLaddersFor, ladderStage } from "@/lib/waDeliveryStatus.server";
 import { loadWaCostRates } from "@/lib/waCostRates.server";
 import { loadWaTemplatesServer } from "@/lib/waTemplatesRead.server";
 import {
   summariseAiUsage,
   summariseWaUsage,
+  summariseWaUsageByStudent,
   type WaAiCall,
   type WaBillCategory,
   type WaCostRates,
+  type WaUsageAttributedMessage,
+  type WaUsageByStudent,
   type WaUsageMessage,
+  type WaUsageStudentRef,
   type WaUsageSummary,
 } from "@/lib/waUsageCost";
 
 const MAX_ROWS = 5000;
+
+function emptyByStudent(): WaUsageByStudent {
+  return {
+    classes: [],
+    students: [],
+    unattributed: { messages: 0, delivered: 0, costPaise: 0, sharesByCategory: {} },
+  };
+}
 const DEFAULT_WINDOW_DAYS = 30;
 
 export type WaUsageReport = {
@@ -53,7 +70,113 @@ export type WaUsageReport = {
   catalogueOk: boolean;
   /** true = the log hit the row cap, so the window is partial. */
   truncated: boolean;
+  /** The same money, per class and per child. */
+  byStudent: WaUsageByStudent;
+  /**
+   * false = the roster could not be read, so nothing could be attributed.
+   * The per-class tables say so rather than showing an empty school.
+   */
+  rosterOk: boolean;
+  /**
+   * Sends attributed only because one family owns the number — the log row
+   * had no household on it. Worth showing: it is the weakest link in the
+   * per-class figures.
+   */
+  attributedByNumber: number;
 };
+
+/**
+ * Who a message was about.
+ *
+ * The log row names a household, not a child, and a household is one to
+ * several children. So:
+ *   - household on the row  → that family's currently enrolled children
+ *   - no household          → the number, but ONLY if exactly one family
+ *     owns it. This school has a placeholder number shared by eight
+ *     families; charging one reminder to all eight families' children
+ *     would invent cost across half the school.
+ */
+type Attribution = {
+  roster: Record<string, WaUsageStudentRef>;
+  studentsOfHousehold: Map<string, string[]>;
+  householdOfNumber: Map<string, string | null>;
+  ok: boolean;
+};
+
+function classLabel(masters: MastersState, classId: string, sectionId: string): string {
+  const c = masters.classes?.find((x) => x.id === classId);
+  const sec = masters.sections?.find((x) => x.id === sectionId);
+  if (!c?.name) return "";
+  return [`Class ${c.name}`, sec?.name || ""].filter(Boolean).join(" · ");
+}
+
+async function buildAttribution(): Promise<Attribution> {
+  const empty: Attribution = {
+    roster: {},
+    studentsOfHousehold: new Map(),
+    householdOfNumber: new Map(),
+    ok: false,
+  };
+  let sis: SisState;
+  let masters: MastersState;
+  try {
+    await ensureSchoolMirrorHydrated();
+    const m = getSchoolMirrorSync();
+    sis = (m.sis as SisState | null) || loadSis();
+    masters = (m.masters as MastersState | null) || loadMasters();
+  } catch (e) {
+    console.warn(
+      "[waUsage] roster unreadable",
+      e instanceof Error ? e.message : e,
+    );
+    return empty;
+  }
+
+  const students = (sis.students ?? []).filter((s) => s.status === "active");
+  if (students.length === 0) return empty;
+
+  const roster: Record<string, WaUsageStudentRef> = {};
+  const studentsOfHousehold = new Map<string, string[]>();
+  for (const s of students) {
+    roster[s.id] = {
+      id: s.id,
+      name: s.fullName,
+      admissionNo: s.admissionNo,
+      classId: s.classId,
+      className: classLabel(masters, s.classId, s.sectionId),
+    };
+    const hh = s.householdId;
+    if (!hh) continue;
+    const list = studentsOfHousehold.get(hh);
+    if (list) list.push(s.id);
+    else studentsOfHousehold.set(hh, [s.id]);
+  }
+
+  // Reverse index over every number a family can be reached on — the same
+  // candidate list the sender uses, so attribution and sending agree about
+  // whose number this is. null marks a number more than one family claims.
+  const householdOfNumber = new Map<string, string | null>();
+  for (const hh of sis.households ?? []) {
+    const cands = householdCandidateNumbers({
+      household: hh,
+      students: students.filter((s) => s.householdId === hh.id),
+    });
+    for (const c of cands) {
+      if (!householdOfNumber.has(c.mobile10)) householdOfNumber.set(c.mobile10, hh.id);
+      else if (householdOfNumber.get(c.mobile10) !== hh.id) {
+        householdOfNumber.set(c.mobile10, null);
+      }
+    }
+  }
+
+  return { roster, studentsOfHousehold, householdOfNumber, ok: true };
+}
+
+/** 919876543210 / 09876543210 → 9876543210. */
+function last10(raw: string): string {
+  const d = (raw || "").replace(/\D/g, "");
+  return d.length > 10 ? d.slice(-10) : d;
+}
 
 function normalizeCategory(raw: string): WaBillCategory {
   switch ((raw || "").toUpperCase()) {
@@ -163,12 +286,15 @@ export async function waUsageReport(
       uncategorised: 0,
       catalogueOk: false,
       truncated: false,
+      byStudent: emptyByStudent(),
+      rosterOk: false,
+      attributedByNumber: 0,
     };
   }
 
   const { data, error } = await ctx.sb
     .from("household_message_log")
-    .select("created_at, purpose, via, template_name, status, wa_message_id")
+    .select("created_at, purpose, via, template_name, status, wa_message_id, household_id, mobile_e164")
     .eq("tenant_id", ctx.tenantId)
     .eq("channel", "wa")
     .eq("direction", "out")
@@ -190,19 +316,30 @@ export async function waUsageReport(
       uncategorised: 0,
       catalogueOk: false,
       truncated: false,
+      byStudent: emptyByStudent(),
+      rosterOk: false,
+      attributedByNumber: 0,
     };
   }
 
   const rows = data || [];
-  const [{ map, ok: catalogueOk }, ladders, aiCalls, metaOutboundMessages] =
-    await Promise.all([
-      templateCategoryMap(),
-      deliveryLaddersFor(rows.map((r) => String(r.wa_message_id || ""))),
-      loadAiCalls(sinceIso),
-      countMetaOutbound(sinceIso),
-    ]);
+  const [
+    { map, ok: catalogueOk },
+    ladders,
+    aiCalls,
+    metaOutboundMessages,
+    attribution,
+  ] = await Promise.all([
+    templateCategoryMap(),
+    deliveryLaddersFor(rows.map((r) => String(r.wa_message_id || ""))),
+    loadAiCalls(sinceIso),
+    countMetaOutbound(sinceIso),
+    buildAttribution(),
+  ]);
 
   let uncategorised = 0;
+  let attributedByNumber = 0;
+  const attributed: WaUsageAttributedMessage[] = [];
   const messages: WaUsageMessage[] = rows.map((r) => {
     const templateName = String(r.template_name || "").trim();
     const isTemplate = String(r.via || "") === "template" || !!templateName;
@@ -221,6 +358,26 @@ export async function waUsageReport(
         : stage === "delivered" || stage === "read"
           ? "delivered"
           : "pending";
+
+    // Who was this about? The household on the row, or — when the row has
+    // none — the number, but only where exactly one family owns it.
+    let householdId = String(r.household_id || "").trim();
+    if (!householdId) {
+      const owner = attribution.householdOfNumber.get(
+        last10(String(r.mobile_e164 || "")),
+      );
+      if (owner) {
+        householdId = owner;
+        attributedByNumber++;
+      }
+    }
+    attributed.push({
+      category,
+      outcome,
+      studentIds: householdId
+        ? (attribution.studentsOfHousehold.get(householdId) ?? [])
+        : [],
+    });
 
     return {
       at: String(r.created_at || ""),
@@ -243,5 +400,8 @@ export async function waUsageReport(
     uncategorised,
     catalogueOk,
     truncated: rows.length >= MAX_ROWS,
+    byStudent: summariseWaUsageByStudent(attributed, rates, attribution.roster),
+    rosterOk: attribution.ok,
+    attributedByNumber,
   };
 }

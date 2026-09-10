@@ -11,8 +11,10 @@ import {
   rateRupees,
   ratesAreDefaults,
   repriceWaUsage,
+  repriceWaUsageByStudent,
   rupees,
   type WaCostRates,
+  type WaUsageByStudent,
   type WaUsageSummary,
 } from "@/lib/waUsageCost";
 import { autoBtnOutline, autoBtnPrimary, autoInp } from "./automationUi";
@@ -32,6 +34,9 @@ type Report = {
   uncategorised: number;
   catalogueOk: boolean;
   truncated: boolean;
+  byStudent: WaUsageByStudent;
+  rosterOk: boolean;
+  attributedByNumber: number;
 };
 
 /** The rate fields the office edits, in rupees per message. */
@@ -83,6 +88,8 @@ export function AutomationUsageCost({ readOnly }: { readOnly: boolean }) {
   const [draft, setDraft] = useState<WaCostRates>({ ...DEFAULT_WA_RATES });
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [childQ, setChildQ] = useState("");
+  const [showAllChildren, setShowAllChildren] = useState(false);
 
   const sinceIso = useMemo(() => {
     const d = WINDOWS.find((w) => w.id === days)?.days ?? 30;
@@ -125,6 +132,26 @@ export function AutomationUsageCost({ readOnly }: { readOnly: boolean }) {
     if (!report) return null;
     return editing ? repriceWaUsage(report.summary, draft) : report.summary;
   }, [report, editing, draft]);
+
+  const byStudent = useMemo(() => {
+    if (!report) return null;
+    return editing
+      ? repriceWaUsageByStudent(report.byStudent, draft)
+      : report.byStudent;
+  }, [report, editing, draft]);
+
+  /** The office looks for one child by name or admission number. */
+  const children = useMemo(() => {
+    if (!byStudent) return [];
+    const needle = childQ.trim().toLowerCase();
+    if (!needle) return byStudent.students;
+    return byStudent.students.filter(
+      (s) =>
+        s.name.toLowerCase().includes(needle) ||
+        s.admissionNo.toLowerCase().includes(needle) ||
+        s.className.toLowerCase().includes(needle),
+    );
+  }, [byStudent, childQ]);
 
   const save = useCallback(async () => {
     setSaving(true);
@@ -360,6 +387,153 @@ export function AutomationUsageCost({ readOnly }: { readOnly: boolean }) {
               </table>
             )}
           </MastersTableCard>
+
+          {byStudent && !report.rosterOk ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+              The student roster could not be read, so nothing could be split
+              by class. The totals above are unaffected.
+            </div>
+          ) : null}
+
+          {byStudent && report.rosterOk ? (
+            <>
+              <MastersTableCard title="By class">
+                {byStudent.classes.length === 0 ? (
+                  <MastersEmptyRow label="Nothing in this window could be linked to a class." />
+                ) : (
+                  <table className="w-full text-[12px]">
+                    <thead className="sticky top-0 bg-[var(--surface-sunken)] text-[10px] uppercase text-[var(--muted)]">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Class</th>
+                        <th className="px-3 py-2 text-right">Children written to</th>
+                        <th className="px-3 py-2 text-right">Messages</th>
+                        <th className="px-3 py-2 text-right">Delivered</th>
+                        <th className="px-3 py-2 text-right">Per child</th>
+                        <th className="px-3 py-2 text-right">Cost</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--border)]">
+                      {byStudent.classes.map((c) => (
+                        <tr key={c.classId || "none"}>
+                          <td className="px-3 py-2 font-medium text-[var(--brand-deep)]">
+                            {c.className}
+                          </td>
+                          <td className="px-3 py-2 text-right">{c.students}</td>
+                          <td className="px-3 py-2 text-right">{c.messages}</td>
+                          <td className="px-3 py-2 text-right">{c.delivered}</td>
+                          <td className="px-3 py-2 text-right text-[var(--muted)]">
+                            {rupees(c.perStudentPaise)}
+                          </td>
+                          <td className="px-3 py-2 text-right font-semibold">
+                            {rupees(c.costPaise)}
+                          </td>
+                        </tr>
+                      ))}
+                      {byStudent.unattributed.messages > 0 ? (
+                        <tr className="bg-[var(--surface-sunken)]">
+                          <td className="px-3 py-2 text-[var(--muted)]">
+                            Not linked to a child
+                          </td>
+                          <td className="px-3 py-2 text-right">—</td>
+                          <td className="px-3 py-2 text-right">
+                            {byStudent.unattributed.messages}
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            {byStudent.unattributed.delivered}
+                          </td>
+                          <td className="px-3 py-2 text-right">—</td>
+                          <td className="px-3 py-2 text-right font-semibold">
+                            {rupees(byStudent.unattributed.costPaise)}
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                )}
+              </MastersTableCard>
+
+              <p className="text-[10px] leading-relaxed text-[var(--muted)]">
+                A message about a family with three children is{" "}
+                <strong>one</strong> charge, split three ways — so these
+                columns add up to the same total as the tables above rather
+                than counting a reminder once per sibling.
+                {report.attributedByNumber > 0
+                  ? ` ${report.attributedByNumber} send${
+                      report.attributedByNumber === 1 ? "" : "s"
+                    } had no family on the log row and were matched by phone number instead; a number more than one family uses is left under "Not linked to a child" rather than guessed.`
+                  : ""}
+              </p>
+
+              <MastersTableCard title="By child">
+                <div className="px-3 py-2">
+                  <input
+                    className={autoInp}
+                    placeholder="Find a child — name, admission number or class…"
+                    value={childQ}
+                    onChange={(e) => setChildQ(e.target.value)}
+                  />
+                </div>
+                {children.length === 0 ? (
+                  <MastersEmptyRow
+                    label={
+                      childQ.trim()
+                        ? "No child matches that."
+                        : "Nothing in this window could be linked to a child."
+                    }
+                  />
+                ) : (
+                  <table className="w-full text-[12px]">
+                    <thead className="sticky top-0 bg-[var(--surface-sunken)] text-[10px] uppercase text-[var(--muted)]">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Child</th>
+                        <th className="px-3 py-2 text-left">Class</th>
+                        <th className="px-3 py-2 text-right">Messages</th>
+                        <th className="px-3 py-2 text-right">Delivered</th>
+                        <th className="px-3 py-2 text-right">Their share</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--border)]">
+                      {(showAllChildren ? children : children.slice(0, 50)).map(
+                        (s) => (
+                          <tr key={s.studentId}>
+                            <td className="px-3 py-2">
+                              <span className="font-medium text-[var(--brand-deep)]">
+                                {s.name}
+                              </span>
+                              {s.admissionNo ? (
+                                <span className="ml-1 text-[10px] text-[var(--muted)]">
+                                  {s.admissionNo}
+                                </span>
+                              ) : null}
+                            </td>
+                            <td className="px-3 py-2 text-[var(--muted)]">
+                              {s.className || "—"}
+                            </td>
+                            <td className="px-3 py-2 text-right">{s.messages}</td>
+                            <td className="px-3 py-2 text-right">{s.delivered}</td>
+                            <td className="px-3 py-2 text-right font-semibold">
+                              {rupees(s.costPaise)}
+                            </td>
+                          </tr>
+                        ),
+                      )}
+                    </tbody>
+                  </table>
+                )}
+                {!showAllChildren && children.length > 50 ? (
+                  <div className="px-3 py-2">
+                    <button
+                      type="button"
+                      className={autoBtnOutline}
+                      onClick={() => setShowAllChildren(true)}
+                    >
+                      Show all {children.length} children
+                    </button>
+                  </div>
+                ) : null}
+              </MastersTableCard>
+            </>
+          ) : null}
 
           {summary.days.length > 0 ? (
             <MastersTableCard title="Day by day">

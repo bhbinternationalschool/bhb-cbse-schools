@@ -470,6 +470,78 @@ export function repriceWaUsage(
   };
 }
 
+/**
+ * The per-class and per-child tables at different rates.
+ *
+ * Exact, not scaled: every row carries its own fractional share of
+ * delivered messages by category, so re-pricing is the same multiplication
+ * the first pass did. That is what lets the rate-card editor show these
+ * tables moving as a rate is typed without a second read of the log.
+ */
+/**
+ * Row order, fixed.
+ *
+ * Cost first, but ties broken by name — otherwise two rows on the same
+ * figure swap places every time a rate is edited, and the reader thinks
+ * something changed. Insertion order is not an order.
+ */
+function byClassCost(a: WaUsageClassRow, b: WaUsageClassRow): number {
+  return (
+    b.costPaise - a.costPaise ||
+    b.messages - a.messages ||
+    a.className.localeCompare(b.className) ||
+    a.classId.localeCompare(b.classId)
+  );
+}
+
+function byStudentCost(a: WaUsageStudentRow, b: WaUsageStudentRow): number {
+  return (
+    b.costPaise - a.costPaise ||
+    b.messages - a.messages ||
+    a.name.localeCompare(b.name) ||
+    a.studentId.localeCompare(b.studentId)
+  );
+}
+
+function shareCost(
+  shares: Partial<Record<WaBillCategory, number>>,
+  rates: WaCostRates,
+): number {
+  let cost = 0;
+  for (const [cat, n] of Object.entries(shares)) {
+    cost += (n ?? 0) * rateFor(rates, cat as WaBillCategory);
+  }
+  return cost;
+}
+
+export function repriceWaUsageByStudent(
+  view: WaUsageByStudent,
+  rates: WaCostRates,
+): WaUsageByStudent {
+  return {
+    classes: view.classes
+      .map((c) => {
+        const cost = shareCost(c.sharesByCategory, rates);
+        return {
+          ...c,
+          costPaise: Math.round(cost),
+          perStudentPaise: c.students > 0 ? Math.round(cost / c.students) : 0,
+        };
+      })
+      .sort(byClassCost),
+    students: view.students
+      .map((s) => ({
+        ...s,
+        costPaise: Math.round(shareCost(s.sharesByCategory, rates)),
+      }))
+      .sort(byStudentCost),
+    unattributed: {
+      ...view.unattributed,
+      costPaise: Math.round(shareCost(view.unattributed.sharesByCategory, rates)),
+    },
+  };
+}
+
 /** 12346 → "₹123.46" — the office reads rupees, not paise. */
 export function rupees(paise: number): string {
   const n = Math.round(paise) / 100;
@@ -494,4 +566,207 @@ export function projectedMonthlyPaise(
 ): number {
   if (windowDays <= 0) return 0;
   return Math.round((totalPaise / windowDays) * 30);
+}
+
+/* ------------------------------------------------------------------ *
+ * Per class and per student
+ *
+ * "What does WhatsApp cost us?" has an obvious follow-up: for whom. The
+ * hard part is not the arithmetic, it is honesty about a message that
+ * belongs to more than one child.
+ *
+ * A fee reminder to a family with three children is ONE message and one
+ * charge. Showing it as a charge against each of the three would triple
+ * the school's bill on screen, and the numbers would stop adding up to the
+ * total two tables above. So a message's cost is SPLIT equally between the
+ * children it was about: three children, a third each. Class totals then
+ * sum to the message total, and a class of many siblings is not punished
+ * for being the second name on a shared reminder.
+ *
+ * Fractions are kept until the last step and rounded once per row, so a
+ * row can differ from the sum of its parts by a paisa. That is the right
+ * trade: rounding each child's share first would lose rupees on a busy
+ * month.
+ * ------------------------------------------------------------------ */
+
+/** One message, with the children it is charged to. Empty = unattributed. */
+export type WaUsageAttributedMessage = {
+  category: WaBillCategory;
+  outcome: WaUsageMessage["outcome"];
+  studentIds: string[];
+};
+
+export type WaUsageStudentRef = {
+  id: string;
+  name: string;
+  admissionNo: string;
+  classId: string;
+  className: string;
+};
+
+export type WaUsageStudentRow = {
+  studentId: string;
+  name: string;
+  admissionNo: string;
+  classId: string;
+  className: string;
+  /** Messages that were about this child (a shared one counts once here). */
+  messages: number;
+  delivered: number;
+  /** This child's share of the cost. */
+  costPaise: number;
+  /**
+   * The child's share of delivered messages, by category — fractional,
+   * because a message about three siblings is a third of one each. Kept so
+   * a rate change re-prices these tables exactly rather than by a ratio.
+   */
+  sharesByCategory: Partial<Record<WaBillCategory, number>>;
+};
+
+export type WaUsageClassRow = {
+  classId: string;
+  className: string;
+  /** Children in the class who were written about at all. */
+  students: number;
+  messages: number;
+  delivered: number;
+  costPaise: number;
+  /** Cost ÷ children written about — the comparable figure between classes. */
+  perStudentPaise: number;
+  sharesByCategory: Partial<Record<WaBillCategory, number>>;
+};
+
+export type WaUsageUnattributed = {
+  messages: number;
+  delivered: number;
+  costPaise: number;
+  sharesByCategory: Partial<Record<WaBillCategory, number>>;
+};
+
+export type WaUsageByStudent = {
+  classes: WaUsageClassRow[];
+  students: WaUsageStudentRow[];
+  unattributed: WaUsageUnattributed;
+};
+
+export function summariseWaUsageByStudent(
+  messages: WaUsageAttributedMessage[],
+  rates: WaCostRates,
+  roster: Record<string, WaUsageStudentRef>,
+): WaUsageByStudent {
+  type Acc = {
+    messages: number;
+    delivered: number;
+    cost: number;
+    shares: Partial<Record<WaBillCategory, number>>;
+  };
+  const perStudent = new Map<string, Acc>();
+  const unattributed: WaUsageUnattributed = {
+    messages: 0,
+    delivered: 0,
+    costPaise: 0,
+    sharesByCategory: {},
+  };
+  let unattributedCost = 0;
+
+  for (const m of messages) {
+    const cost = m.outcome === "delivered" ? rateFor(rates, m.category) : 0;
+    // A child the roster does not know cannot be shown in a class, so the
+    // message is unattributed rather than charged to a name we cannot print.
+    const ids = [...new Set(m.studentIds)].filter((id) => !!roster[id]);
+    if (ids.length === 0) {
+      unattributed.messages++;
+      if (m.outcome === "delivered") {
+        unattributed.delivered++;
+        unattributed.sharesByCategory[m.category] =
+          (unattributed.sharesByCategory[m.category] ?? 0) + 1;
+      }
+      unattributedCost += cost;
+      continue;
+    }
+    const share = cost / ids.length;
+    for (const id of ids) {
+      let acc = perStudent.get(id);
+      if (!acc) {
+        acc = { messages: 0, delivered: 0, cost: 0, shares: {} };
+        perStudent.set(id, acc);
+      }
+      acc.messages++;
+      if (m.outcome === "delivered") {
+        acc.delivered++;
+        acc.shares[m.category] =
+          (acc.shares[m.category] ?? 0) + 1 / ids.length;
+      }
+      acc.cost += share;
+    }
+  }
+  unattributed.costPaise = Math.round(unattributedCost);
+
+  const students: WaUsageStudentRow[] = [];
+  const classAcc = new Map<
+    string,
+    {
+      className: string;
+      students: number;
+      messages: number;
+      delivered: number;
+      cost: number;
+      shares: Partial<Record<WaBillCategory, number>>;
+    }
+  >();
+
+  for (const [id, acc] of perStudent) {
+    const ref = roster[id];
+    students.push({
+      studentId: id,
+      name: ref.name,
+      admissionNo: ref.admissionNo,
+      classId: ref.classId,
+      className: ref.className,
+      messages: acc.messages,
+      delivered: acc.delivered,
+      costPaise: Math.round(acc.cost),
+      sharesByCategory: acc.shares,
+    });
+    const key = ref.classId || "";
+    let c = classAcc.get(key);
+    if (!c) {
+      c = {
+        className: ref.className || "No class on record",
+        students: 0,
+        messages: 0,
+        delivered: 0,
+        cost: 0,
+        shares: {},
+      };
+      classAcc.set(key, c);
+    }
+    c.students++;
+    c.messages += acc.messages;
+    c.delivered += acc.delivered;
+    c.cost += acc.cost;
+    for (const [cat, n] of Object.entries(acc.shares)) {
+      const k = cat as WaBillCategory;
+      c.shares[k] = (c.shares[k] ?? 0) + (n ?? 0);
+    }
+  }
+
+  const classes: WaUsageClassRow[] = [...classAcc.entries()].map(
+    ([classId, c]) => ({
+      classId,
+      className: c.className,
+      students: c.students,
+      messages: c.messages,
+      delivered: c.delivered,
+      costPaise: Math.round(c.cost),
+      perStudentPaise: c.students > 0 ? Math.round(c.cost / c.students) : 0,
+      sharesByCategory: c.shares,
+    }),
+  );
+
+  return {
+    classes: classes.sort(byClassCost),
+    students: students.sort(byStudentCost),
+    unattributed,
+  };
 }
