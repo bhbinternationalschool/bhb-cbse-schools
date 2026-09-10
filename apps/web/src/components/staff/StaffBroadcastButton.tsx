@@ -424,7 +424,7 @@ export function StaffBroadcastButton() {
         onClick={() => setOpen((v) => !v)}
         className="flex h-9 w-9 items-center justify-center rounded-full bg-[#25D366] text-white shadow-sm transition hover:brightness-105"
         aria-label="WhatsApp"
-        title="Message class parents or leadership"
+        title="WhatsApp — message class parents or leadership"
       >
         <WhatsAppGlyph />
       </button>
@@ -446,6 +446,30 @@ export function StaffBroadcastButton() {
               ✕
             </button>
           </div>
+
+          {/*
+            This button is a teacher's quick reach: their own class's parents,
+            or leadership. That is the right scope for a header control and
+            the wrong one for the office, which needs staff by department,
+            several classes at once, a fee stage, or particular children
+            ticked — and looked for it here, because this is where the
+            WhatsApp mark is. So the header names the full desk and links to
+            it rather than leaving anyone to find it under Communications.
+          */}
+          <a
+            href="/comms?tab=whatsapp&wa=send"
+            className="block rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-[11px] leading-relaxed text-[var(--brand-deep)] transition hover:brightness-[0.98]"
+            onClick={() => setOpen(false)}
+          >
+            <span className="font-semibold">
+              Staff, several classes, a fee stage, or chosen students?
+            </span>{" "}
+            <span className="text-[var(--muted)]">
+              Open the full WhatsApp desk — also delivery ticks, numbers to
+              fix and what it costs.
+            </span>
+            <span className="ml-1 font-semibold">→</span>
+          </a>
 
           {sentResult ? (
             <div className="space-y-2 text-sm">
