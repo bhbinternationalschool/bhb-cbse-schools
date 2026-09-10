@@ -14,9 +14,11 @@
 import "server-only";
 
 import {
+  approvalIsStale,
   evaluateAutomationTick,
   markApprovalDispatched,
   pendingApprovals,
+  ruleWillEvaluate,
   undispatchedApprovals,
   type AutomationRule,
   type AutomationState,
@@ -37,6 +39,10 @@ export type AutomationTickReport = {
   sent: number;
   failed: number;
   deferred: number;
+  /** Previewed or stubbed, never handed to Meta. */
+  simulated: number;
+  /** Cards whose snapshot had gone stale and were failed rather than sent. */
+  stale: number;
   /** Rules whose audience could not be read, with the reason. */
   audienceErrors: { ruleId: string; error: string }[];
   persisted: boolean;
@@ -44,13 +50,22 @@ export type AutomationTickReport = {
   state: AutomationState;
 };
 
-/** Rules this tick will evaluate — the same test `evaluateAutomationTick` applies. */
+/**
+ * Rules worth resolving an audience for — the same test the evaluation applies.
+ *
+ * Each resolve is a roster and fee-ledger read, so asking this first matters:
+ * every enabled rule used to be resolved, including event-driven ones that a
+ * tick never fires, and rules sitting inside their own quiet hours.
+ */
 function candidateRules(
   state: AutomationState,
+  now: Date,
   forceRuleIds?: string[],
 ): AutomationRule[] {
   const forced = new Set(forceRuleIds ?? []);
-  return state.rules.filter((r) => forced.has(r.id) || r.enabled);
+  return state.rules.filter((r) =>
+    ruleWillEvaluate(r, now, forced.has(r.id)),
+  );
 }
 
 export async function runAutomationTick(opts: {
@@ -62,6 +77,7 @@ export async function runAutomationTick(opts: {
   /** Resolve and propose, but do not send. */
   dryRun?: boolean;
 }): Promise<AutomationTickReport> {
+  const now = new Date();
   const before = opts.state ?? (await loadAutomationFromDb());
 
   // Resolving is per-rule and independent, but the resolvers share hydration
@@ -69,7 +85,7 @@ export async function runAutomationTick(opts: {
   // each pull the same roster.
   const audiences: ResolvedAudiences = {};
   const audienceErrors: { ruleId: string; error: string }[] = [];
-  for (const rule of candidateRules(before, opts.forceRuleIds)) {
+  for (const rule of candidateRules(before, now, opts.forceRuleIds)) {
     const resolved = await resolveAutomationAudienceServer(rule);
     if (resolved.ok) {
       audiences[rule.id] = { ok: true, recipients: resolved.recipients, note: resolved.note };
@@ -82,6 +98,7 @@ export async function runAutomationTick(opts: {
   let after = evaluateAutomationTick(before, {
     forceRuleIds: opts.forceRuleIds,
     audiences,
+    now,
   });
 
   // Persist the cards BEFORE sending anything, and again after each one.
@@ -101,8 +118,29 @@ export async function runAutomationTick(opts: {
   let sent = 0;
   let failed = 0;
   let deferred = 0;
+  let simulated = 0;
+  let stale = 0;
 
   for (const item of undispatchedApprovals(after)) {
+    // The payload is a snapshot of a family's dues at the moment the card
+    // was raised. Too old and it is the wrong figure, so it is failed with
+    // a reason rather than sent — the next evaluation raises a fresh card.
+    if (approvalIsStale(item, now)) {
+      stale++;
+      after = markApprovalDispatched(
+        after,
+        item.id,
+        false,
+        "Not sent — this card was raised more than 12 hours ago and its amounts are out of date. The next evaluation will raise a fresh one.",
+        { sent: 0, failed: 0 },
+      );
+      persisted = await saveAutomationToDb(after);
+      if (!persisted.ok) {
+        console.error("[automation-tick] persist failed:", persisted.error);
+      }
+      continue;
+    }
+
     const rule = after.rules.find((r) => r.id === item.ruleId);
     const result = await dispatchAutomationApproval({
       item,
@@ -110,10 +148,17 @@ export async function runAutomationTick(opts: {
       originUrl: opts.originUrl,
       dryRun: opts.dryRun,
     });
-    dispatched++;
     sent += result.sent;
     failed += result.failed;
     deferred += result.deferred;
+    simulated += result.simulated;
+
+    // A dry run and an unconfigured provider both come back as "simulated".
+    // Marking those cards dispatched would retire the very messages the run
+    // was previewing, so the card is left approved for a real tick to send.
+    if (result.simulatedOnly) continue;
+
+    dispatched++;
     after = markApprovalDispatched(after, item.id, result.ok, result.error, {
       sent: result.sent,
       failed: result.failed,
@@ -132,6 +177,8 @@ export async function runAutomationTick(opts: {
     sent,
     failed,
     deferred,
+    simulated,
+    stale,
     audienceErrors,
     persisted: persisted.ok,
     persistError: persisted.ok ? undefined : persisted.error,

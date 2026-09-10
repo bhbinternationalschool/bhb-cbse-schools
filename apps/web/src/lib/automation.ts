@@ -1001,6 +1001,26 @@ export function evaluateAutomationTick(
 }
 
 /**
+ * How long an approved card may wait before its contents are too old to send.
+ *
+ * `dispatchPayload` is a SNAPSHOT — this family, this child, this amount, as
+ * they were when the card was raised. A fee reminder approved last Tuesday
+ * and sent today tells a parent they owe a figure they may have paid at the
+ * counter on Wednesday. Past this window the card is failed with a reason
+ * and the next evaluation raises a fresh one against current data.
+ */
+export const APPROVAL_STALE_AFTER_MS = 12 * 60 * 60_000;
+
+export function approvalIsStale(
+  item: AutomationApprovalItem,
+  now = new Date(),
+): boolean {
+  const created = Date.parse(item.createdAt || "");
+  if (!Number.isFinite(created)) return true;
+  return now.getTime() - created > APPROVAL_STALE_AFTER_MS;
+}
+
+/**
  * Approved items that have not gone out yet.
  *
  * Both the auto-run cards this tick just raised and anything a human
@@ -1013,6 +1033,24 @@ export function undispatchedApprovals(
   return state.approvals.filter(
     (a) => a.status === "approved" && a.dispatchPayload.length > 0,
   );
+}
+
+/**
+ * Would this rule produce anything on a tick at `now`?
+ *
+ * Exported so a caller can decide whether resolving the rule's audience is
+ * worth a roster + fee-ledger read. The tick used to resolve every enabled
+ * rule, event-driven ones included — and an event rule never fires on a
+ * tick, so those reads were pure waste on every run.
+ */
+export function ruleWillEvaluate(
+  rule: AutomationRule,
+  now = new Date(),
+  forced = false,
+): boolean {
+  if (forced) return true;
+  if (!rule.enabled) return false;
+  return ruleIsDue(rule, now);
 }
 
 export function decideApproval(

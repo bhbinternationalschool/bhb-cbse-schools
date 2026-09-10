@@ -73,6 +73,7 @@ export async function POST(req: Request) {
   let sent = 0;
   let failed = 0;
   let deferred = 0;
+  let simulated = 0;
   let error = "";
 
   if (decision === "approved") {
@@ -86,12 +87,23 @@ export async function POST(req: Request) {
     sent = result.sent;
     failed = result.failed;
     deferred = result.deferred;
+    simulated = result.simulated;
     error = result.error;
-    state = markApprovalDispatched(state, approvalId, result.ok, result.error, {
-      sent: result.sent,
-      failed: result.failed,
-      deferred: result.deferred,
-    });
+    // A dry run, or a school with no WhatsApp provider configured, must not
+    // retire the card: it stays approved so a real send can still happen.
+    if (!result.simulatedOnly) {
+      state = markApprovalDispatched(
+        state,
+        approvalId,
+        result.ok,
+        result.error,
+        {
+          sent: result.sent,
+          failed: result.failed,
+          deferred: result.deferred,
+        },
+      );
+    }
   }
 
   const persisted = await saveAutomationToDb(state);
@@ -105,6 +117,7 @@ export async function POST(req: Request) {
     sent,
     failed,
     deferred,
+    simulated,
     error: error || undefined,
     pendingApprovals: pendingApprovals(state).length,
     persisted: persisted.ok,

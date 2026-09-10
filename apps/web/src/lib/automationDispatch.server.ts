@@ -36,6 +36,19 @@ export type AutomationDispatchResult = {
   failed: number;
   /** Held by a family's own quiet hours — retried on a later tick. */
   deferred: number;
+  /**
+   * Accepted by the dispatch route but NOT handed to Meta — a dry run, or
+   * the stub it falls back to when no WhatsApp provider is configured.
+   *
+   * Counted apart from `sent` on purpose. The route answers both cases with
+   * `status: "queued_stub"`, so counting those as sent had the tick report
+   * "150 sent" for a school with no WA credentials, and — worse — a dry run
+   * marked every card dispatched, so the messages it was previewing would
+   * never actually go out.
+   */
+  simulated: number;
+  /** True when nothing really left the building. */
+  simulatedOnly: boolean;
   error: string;
 };
 
@@ -164,7 +177,15 @@ export async function dispatchAutomationApproval(opts: {
 }): Promise<AutomationDispatchResult> {
   const { item, module, originUrl } = opts;
   if (!item.dispatchPayload.length) {
-    return { ok: false, sent: 0, failed: 0, deferred: 0, error: "No recipients" };
+    return {
+      ok: false,
+      sent: 0,
+      failed: 0,
+      deferred: 0,
+      simulated: 0,
+      simulatedOnly: false,
+      error: "No recipients",
+    };
   }
 
   let templates: WaTemplatesState;
@@ -179,6 +200,8 @@ export async function dispatchAutomationApproval(opts: {
       sent: 0,
       failed: 0,
       deferred: 0,
+      simulated: 0,
+      simulatedOnly: false,
       error:
         e instanceof Error
           ? `Could not read WhatsApp templates: ${e.message}`
@@ -193,6 +216,8 @@ export async function dispatchAutomationApproval(opts: {
       sent: 0,
       failed: 0,
       deferred: 0,
+      simulated: 0,
+      simulatedOnly: false,
       error: skipped[0] || "Nothing could be sent",
     };
   }
@@ -202,6 +227,8 @@ export async function dispatchAutomationApproval(opts: {
   let sent = 0;
   let failed = 0;
   let deferred = 0;
+  let simulated = 0;
+  const modes = new Set<string>();
   const errors: string[] = [];
 
   for (let i = 0; i < messages.length; i += CHUNK_SIZE) {
@@ -221,6 +248,8 @@ export async function dispatchAutomationApproval(opts: {
     let json: {
       ok?: boolean;
       error?: string;
+      mode?: string;
+      outboundConfigured?: boolean;
       results?: { status?: string; error?: string }[];
     };
     try {
@@ -232,8 +261,10 @@ export async function dispatchAutomationApproval(opts: {
       continue;
     }
     if (json.error) errors.push(json.error);
+    if (json.mode) modes.add(json.mode);
     for (const r of json.results ?? []) {
-      if (r.status === "sent" || r.status === "queued_stub") sent++;
+      if (r.status === "sent") sent++;
+      else if (r.status === "queued_stub") simulated++;
       else if (r.status === "deferred") deferred++;
       else {
         failed++;
@@ -248,11 +279,24 @@ export async function dispatchAutomationApproval(opts: {
     );
   }
 
+  const simulatedOnly = simulated > 0 && sent === 0;
+  if (simulatedOnly) {
+    errors.unshift(
+      modes.has("dry_run")
+        ? `Dry run — ${simulated} message${simulated === 1 ? "" : "s"} previewed, nothing sent`
+        : `No WhatsApp provider configured — ${simulated} message${simulated === 1 ? "" : "s"} stubbed, nothing sent`,
+    );
+  }
+
   return {
+    // A dry run and a stub are never "ok": ok is what lets the caller mark
+    // the card dispatched, and a card marked dispatched is never retried.
     ok: sent > 0 && failed === 0,
     sent,
     failed,
     deferred,
+    simulated,
+    simulatedOnly,
     error: errors.slice(0, 3).join(" · "),
   };
 }

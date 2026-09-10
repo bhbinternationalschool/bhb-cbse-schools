@@ -13,6 +13,10 @@
  */
 
 import { getServerTenantContext } from "@/lib/serverTenant";
+import {
+  stageLabel as stageLabelText,
+  type WaDeliveryStage as Stage,
+} from "@/lib/waDeliveryStatusShape";
 
 export type WaDeliveryLadder = {
   waMessageId: string;
@@ -23,45 +27,19 @@ export type WaDeliveryLadder = {
   error: string | null;
 };
 
-/**
- * The furthest rung reached — what a tick would show.
- *
- * `read` is the double blue tick. Note that it only ever arrives if the
- * PARENT has read receipts switched on in WhatsApp; a family who has turned
- * them off stops at `delivered` forever, and that is not a fault to chase.
- */
-export type WaDeliveryStage =
-  | "failed"
-  | "read"
-  | "delivered"
-  | "sent"
-  | "unknown";
+// The vocabulary lives in waDeliveryStatusShape so a client component can
+// name a rung without pulling a Supabase client into the browser bundle.
+// Re-exported here because every existing caller imports it from this file.
+export type { WaDeliveryStage } from "@/lib/waDeliveryStatusShape";
+export { stageLabel } from "@/lib/waDeliveryStatusShape";
 
-export function ladderStage(l: WaDeliveryLadder | undefined): WaDeliveryStage {
+export function ladderStage(l: WaDeliveryLadder | undefined): Stage {
   if (!l) return "unknown";
   if (l.failedAt) return "failed";
   if (l.readAt) return "read";
   if (l.deliveredAt) return "delivered";
   if (l.sentAt) return "sent";
   return "unknown";
-}
-
-/** Plain words for the office. Never "✓✓" alone — a tick needs a label. */
-export function stageLabel(stage: WaDeliveryStage): string {
-  switch (stage) {
-    case "failed":
-      return "Failed";
-    case "read":
-      return "Read";
-    case "delivered":
-      return "Delivered";
-    case "sent":
-      return "Sent";
-    default:
-      // Not "not delivered": we genuinely do not know yet, and saying the
-      // stronger thing would have the office chasing a parent who is fine.
-      return "No update yet";
-  }
 }
 
 export async function deliveryLaddersFor(
@@ -136,7 +114,7 @@ export type ReceiptSendRow = {
   error: string;
   sentAt: string;
   waMessageId: string;
-  stage: WaDeliveryStage;
+  stage: Stage;
   stageLabel: string;
   ladder: WaDeliveryLadder | null;
 };
@@ -179,7 +157,7 @@ export async function receiptSendStatuses(opts: {
     const ladder = ladders.get(waMessageId) ?? null;
     // A send we could not even hand to Meta is `failed` here whatever the
     // ticks say, because there is no message for a tick to describe.
-    const stage: WaDeliveryStage =
+    const stage: Stage =
       String(r.status) === "sent" ? ladderStage(ladder ?? undefined) : "failed";
     return {
       voucherId: String(r.voucher_id),
@@ -190,7 +168,7 @@ export async function receiptSendStatuses(opts: {
       sentAt: String(r.sent_at || ""),
       waMessageId,
       stage,
-      stageLabel: stageLabel(stage),
+      stageLabel: stageLabelText(stage),
       ladder,
     };
   });

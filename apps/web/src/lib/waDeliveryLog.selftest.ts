@@ -6,6 +6,12 @@
  * it's excluded here and verified live against the real webhook instead.
  */
 import assert from "node:assert/strict";
+import {
+  countStage,
+  emptyTally,
+  resolveRowStage,
+} from "./waSentMessages";
+import { stageLabel } from "./waDeliveryStatusShape";
 
 import { parseMetaStatusUpdates } from "./waDeliveryLog.server";
 
@@ -110,6 +116,62 @@ console.log("waDeliveryLog.selftest.ts");
     entry: [{ changes: [{ value: { statuses: [{ status: "delivered" }, { id: "wamid.OK" }] } }] }],
   };
   assert.deepEqual(parseMetaStatusUpdates(body), []);
+}
+
+// --- the sent-message log's own rules ------------------------------------
+{
+  // A send the school never managed to hand to Meta is Failed whatever the
+  // webhooks say — there is no message for a tick to describe.
+  assert.equal(resolveRowStage("failed", "read"), "failed");
+  assert.equal(resolveRowStage("failed", "unknown"), "failed");
+
+  // Handed over: the ladder decides, and "unknown" stays unknown rather than
+  // being rounded down to "sent" (which would have the office chasing a
+  // parent over a webhook that simply has not arrived).
+  assert.equal(resolveRowStage("sent", "read"), "read");
+  assert.equal(resolveRowStage("sent", "delivered"), "delivered");
+  assert.equal(resolveRowStage("sent", "sent"), "sent");
+  assert.equal(resolveRowStage("sent", "unknown"), "unknown");
+
+  // A message Meta later reported as failed is Failed even though the
+  // handoff succeeded — 5 of this school's 23 "sent" rows are exactly this.
+  assert.equal(resolveRowStage("sent", "failed"), "failed");
+}
+
+// --- every rung is counted, and none is double-counted --------------------
+{
+  const t = emptyTally();
+  for (const stage of [
+    "read",
+    "read",
+    "delivered",
+    "sent",
+    "failed",
+    "unknown",
+  ] as const) {
+    countStage(t, stage);
+  }
+  assert.deepEqual(t, {
+    total: 6,
+    read: 2,
+    delivered: 1,
+    sent: 1,
+    failed: 1,
+    unknown: 1,
+  });
+  assert.equal(
+    t.read + t.delivered + t.sent + t.failed + t.unknown,
+    t.total,
+    "the rungs must add up to the total",
+  );
+}
+
+// --- labels never overclaim ----------------------------------------------
+{
+  assert.equal(stageLabel("unknown"), "No update yet");
+  assert.notEqual(stageLabel("unknown"), "Not delivered");
+  assert.equal(stageLabel("read"), "Read");
+  assert.equal(stageLabel("failed"), "Failed");
 }
 
 console.log("OK — waDeliveryLog.selftest.ts");
