@@ -309,6 +309,8 @@ jobs:
           npm run test:ai-content-report
           npm run test:fleet-live-position
           npm run test:parent-bus-reply
+          npm run test:voice-note
+          npm run test:wa-dedupe
           npm run test:parent-dues-fallback
           npm run test:school-whatsapp
           npm run test:upload-validation

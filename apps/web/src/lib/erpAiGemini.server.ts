@@ -337,3 +337,90 @@ export async function generateGeminiVisionJson(opts: {
     return { ok: false, error: e instanceof Error ? e.message : "Gemini request failed", model };
   }
 }
+
+/**
+ * Transcribe audio.
+ *
+ * Same inline-data shape as the vision call: the bytes ride in the request as
+ * base64 rather than being uploaded first, which keeps a voice note to one
+ * round trip. Callers must size-check before getting here — see
+ * guardVoiceNote() — because the cost of a refusal is paid on upload, not on
+ * the reply.
+ */
+export async function transcribeGeminiAudio(opts: {
+  system: string;
+  prompt: string;
+  /** Raw base64 (no data: prefix) */
+  base64: string;
+  mimeType: string;
+  maxTokens?: number;
+  model?: string;
+}): Promise<
+  | { ok: true; text: string; model: string; usage: LlmUsage }
+  | { ok: false; error: string; model: string }
+> {
+  const model = (opts.model || geminiModel()).trim();
+  const key = geminiApiKey();
+  if (!key) return { ok: false, error: "GEMINI_API_KEY not configured", model };
+  const version = process.env.GEMINI_API_VERSION || "v1beta";
+  const url = `https://generativelanguage.googleapis.com/${version}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: opts.system }] },
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { inline_data: { mime_type: opts.mimeType, data: opts.base64 } },
+              { text: opts.prompt },
+            ],
+          },
+        ],
+        // Transcription is not a creative task: the same audio should give the
+        // same words every time it is retried.
+        generationConfig: {
+          temperature: 0,
+          maxOutputTokens: opts.maxTokens ?? 2000,
+          responseMimeType: "application/json",
+        },
+        safetySettings: GEMINI_SAFETY,
+      }),
+    });
+    const json = (await res.json().catch(() => ({}))) as {
+      candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
+      usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+      error?: { message?: string };
+    };
+    if (!res.ok) {
+      return { ok: false, error: json.error?.message || `Gemini HTTP ${res.status}`, model };
+    }
+    const text = (json.candidates?.[0]?.content?.parts || [])
+      .map((p) => p.text || "")
+      .join("")
+      .trim();
+    if (!text) {
+      // A safety block here is almost always a false positive on a parent
+      // complaint; it is reported as a failure so the note reaches a human.
+      const why = json.candidates?.[0]?.finishReason || "unknown";
+      return { ok: false, error: `Empty Gemini response (${why})`, model };
+    }
+    return {
+      ok: true,
+      text,
+      model,
+      usage: {
+        promptTokens: json.usageMetadata?.promptTokenCount ?? null,
+        completionTokens: json.usageMetadata?.candidatesTokenCount ?? null,
+      },
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Gemini transcription failed",
+      model,
+    };
+  }
+}

@@ -216,6 +216,8 @@ SELFTESTS=(
   test:ai-content-report
   test:fleet-live-position
   test:parent-bus-reply
+  test:voice-note
+  test:wa-dedupe
   test:parent-dues-fallback
   test:receipt-lookup
   test:referrals
@@ -316,6 +318,11 @@ NOT_IN_SUITE=(
   # Edge feed. Needs the database, and a `server-only` stub for tsx (see the
   # script header). Run by hand when the wording or the gating changes.
   test:parent-bus-live
+  # Sends real audio to Gemini: needs GEMINI_API_KEY and a network, and costs
+  # a call per run. The decisions around it are covered by test:voice-note;
+  # this answers the one question a self-test cannot — whether the model
+  # hears words at all. Run it by hand when the prompt or model changes.
+  test:voice-note-live
 )
 
 ORPHANS=()

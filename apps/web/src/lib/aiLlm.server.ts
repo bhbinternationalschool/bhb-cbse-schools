@@ -18,6 +18,14 @@ import {
   type MarketingVariant,
 } from "@/lib/marketingContentAi";
 import {
+  VOICE_NOTE_PROMPT,
+  VOICE_NOTE_PROMPT_VERSION,
+  VOICE_NOTE_SYSTEM,
+  parseVoiceNoteTranscript,
+  voiceNoteAuditDescriptor,
+  type VoiceNoteTranscript,
+} from "@/lib/voiceNote";
+import {
   buildFollowupSystemPrompt,
   buildFollowupUserPrompt,
   parseFollowupDraft,
@@ -29,6 +37,7 @@ import {
 import {
   generateGeminiText,
   streamGeminiText,
+  transcribeGeminiAudio,
   geminiConfigured,
   geminiModel,
   type LlmUsage,
@@ -1869,4 +1878,96 @@ export async function generateOnlineClassSummaryJson(opts: {
     error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for class summaries",
     engine: r.engine,
   };
+}
+
+/**
+ * Transcribe a voice note.
+ *
+ * Gemini only, deliberately: the engine fallback above exists because two
+ * chat models produce interchangeable prose, and that is not true of speech.
+ * Sending the audio to a second provider on failure would double the cost and
+ * the privacy surface for a parent's recorded voice, to get a different guess.
+ * When Gemini cannot do it, the note goes to a human — which is what the
+ * caller does with every other failure branch anyway.
+ *
+ * The audio never reaches the audit row; a descriptor stands in for it, so
+ * ai_generations still shows the call, its cost and its latency without
+ * carrying megabytes of base64 per row.
+ */
+export async function transcribeVoiceNote(opts: {
+  base64: string;
+  mimeType: string;
+  byteLength: number;
+  waMessageId?: string;
+  requester?: string;
+}): Promise<
+  | { ok: true; result: VoiceNoteTranscript; generationId: string }
+  | { ok: false; failure: "budget" | "transcribe-failed"; error: string }
+> {
+  if (!geminiConfigured()) {
+    return {
+      ok: false,
+      failure: "transcribe-failed",
+      error: "GEMINI_API_KEY not configured",
+    };
+  }
+
+  const { requester, budget } = await startLlmPrecheck({ requester: opts.requester });
+  if (!budget.ok) return { ok: false, failure: "budget", error: budget.reason };
+
+  const descriptor = voiceNoteAuditDescriptor({
+    mimeType: opts.mimeType,
+    byteLength: opts.byteLength,
+    waMessageId: opts.waMessageId,
+  });
+
+  const t0 = Date.now();
+  const r = await transcribeGeminiAudio({
+    system: VOICE_NOTE_SYSTEM,
+    prompt: VOICE_NOTE_PROMPT,
+    base64: opts.base64,
+    mimeType: opts.mimeType,
+  });
+  const latencyMs = Date.now() - t0;
+
+  let parsed: VoiceNoteTranscript | null = null;
+  let parseError = "";
+  if (r.ok) {
+    try {
+      parsed = parseVoiceNoteTranscript(JSON.parse(stripJsonFence(r.text)));
+    } catch {
+      parseError = "Transcript was not valid JSON";
+    }
+  }
+
+  const generationId = await recordAiGeneration({
+    route: "wa/voice-note",
+    promptVersion: VOICE_NOTE_PROMPT_VERSION,
+    tier: "flash",
+    engine: "gemini",
+    model: r.model,
+    status: r.ok && !parseError ? "ok" : "error",
+    error: r.ok ? parseError : r.error,
+    // The descriptor, not the audio. See voiceNoteAuditDescriptor().
+    inputText: `${VOICE_NOTE_SYSTEM}\n---\n${descriptor}`,
+    outputText: parsed ? parsed.transcript : "",
+    promptTokens: r.ok ? r.usage.promptTokens : null,
+    completionTokens: r.ok ? r.usage.completionTokens : null,
+    latencyMs,
+    requester,
+  });
+
+  if (!r.ok) {
+    return { ok: false, failure: "transcribe-failed", error: r.error };
+  }
+  if (!parsed) {
+    return { ok: false, failure: "transcribe-failed", error: parseError };
+  }
+
+  noteAiBudgetUse(
+    requester,
+    (r.usage.promptTokens ?? 0) + (r.usage.completionTokens ?? 0),
+  );
+
+  return { ok: true, result: parsed, generationId };
 }
