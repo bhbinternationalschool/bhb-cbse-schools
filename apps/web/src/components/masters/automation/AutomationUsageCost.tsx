@@ -8,12 +8,14 @@ import {
 import {
   DEFAULT_WA_RATES,
   projectedMonthlyPaise,
+  monthLabel,
   rateRupees,
   ratesAreDefaults,
   repriceWaUsage,
   repriceWaUsageByAudience,
   repriceWaUsageByMonth,
   repriceWaUsageByStudent,
+  projectedSessionPaise,
   rupees,
   waUsageYearTotals,
   type WaCostRates,
@@ -21,6 +23,7 @@ import {
   type WaUsageByStudent,
   type WaUsageMonth,
   type WaUsageSummary,
+  type WaUsageYearWindow,
 } from "@/lib/waUsageCost";
 import { autoBtnOutline, autoBtnPrimary, autoInp } from "./automationUi";
 
@@ -28,7 +31,7 @@ const WINDOWS = [
   { id: "7", label: "7 days", days: 7 },
   { id: "30", label: "30 days", days: 30 },
   { id: "90", label: "90 days", days: 90 },
-  { id: "365", label: "12 months", days: 365 },
+  { id: "365", label: "Last 12 months", days: 365 },
 ] as const;
 
 type Report = {
@@ -44,6 +47,7 @@ type Report = {
   byAudience: WaUsageAudienceSection[];
   staffNumbersKnown: number;
   byMonth: WaUsageMonth[];
+  year: WaUsageYearWindow;
   rosterOk: boolean;
   attributedByNumber: number;
 };
@@ -157,6 +161,11 @@ export function AutomationUsageCost({ readOnly }: { readOnly: boolean }) {
   }, [report, editing, draft]);
 
   const year = useMemo(() => waUsageYearTotals(months), [months]);
+
+  const sessionPace = useMemo(
+    () => (report ? projectedSessionPaise(year, report.year) : null),
+    [year, report],
+  );
 
   const maxMonth = useMemo(
     () => Math.max(1, ...months.map((m) => m.costPaise)),
@@ -344,11 +353,15 @@ export function AutomationUsageCost({ readOnly }: { readOnly: boolean }) {
 
           {months.length > 0 ? (
             <MastersTableCard
-              title={`The year, month by month — ${rupees(year.costPaise)}`}
+              title={`Session ${report.year.label}, month by month — ${rupees(
+                year.costPaise,
+              )}`}
             >
               <div className="px-3 py-2 text-[11px] text-[var(--muted)]">
-                Last 12 months, whatever window is chosen above.{" "}
-                <strong>{rupees(year.averagePaise)}</strong> a month on average
+                {monthLabel(report.year.fromMonth)} to{" "}
+                {monthLabel(report.year.endMonth)}, whatever window is chosen
+                above. <strong>{rupees(year.averagePaise)}</strong> a month so
+                far
                 {year.dearest && year.dearest.costPaise > 0
                   ? `, dearest ${year.dearest.label} at ${rupees(
                       year.dearest.costPaise,
@@ -356,6 +369,19 @@ export function AutomationUsageCost({ readOnly }: { readOnly: boolean }) {
                   : ""}
                 . {year.delivered} delivered
                 {year.failed > 0 ? `, ${year.failed} failed` : ""}.
+                {sessionPace !== null && report.year.monthsRemaining > 0 ? (
+                  <>
+                    {" "}
+                    At this pace the whole session to{" "}
+                    {monthLabel(report.year.endMonth)} comes to{" "}
+                    <strong>{rupees(sessionPace)}</strong> —{" "}
+                    {report.year.monthsRemaining} month
+                    {report.year.monthsRemaining === 1 ? "" : "s"} still to go.
+                  </>
+                ) : null}
+                {!report.year.configured
+                  ? " No session is defined in Masters, so April to March is assumed."
+                  : ""}
                 {year.completeMonths < months.length
                   ? " Months marked ~ were only partly read, so they are a floor and are left out of the average."
                   : ""}

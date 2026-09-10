@@ -29,6 +29,8 @@ import {
   istMonthKey,
   monthLabel,
   monthRange,
+  waUsageYearWindow,
+  projectedSessionPaise,
   type WaUsageAttributedMessage,
   type WaUsageMessage,
   type WaUsageAudienceMessage,
@@ -690,6 +692,119 @@ function msg(p: Partial<WaUsageMessage>): WaUsageMessage {
   assert.equal(waUsageYearTotals(months).costPaise, 0);
   assert.equal(waUsageYearTotals(months).averagePaise, 0);
   assert.deepEqual(summariseWaUsageByMonth([], rates), []);
+}
+
+// --- the year is the school's SESSION, read from Masters ---------------
+{
+  // This school's own configuration: 2026-27, 1 Apr 2026 to 31 Mar 2027.
+  const w = waUsageYearWindow({
+    startsOn: "2026-04-01",
+    endsOn: "2027-03-31",
+    code: "2026-27",
+    todayIso: "2026-09-10T06:00:00.000Z",
+  });
+  assert.equal(w.fromMonth, "2026-04");
+  assert.equal(w.toMonth, "2026-09", "up to this month, not into the future");
+  assert.equal(w.endMonth, "2027-03");
+  assert.equal(w.monthsInYear, 12);
+  assert.equal(w.monthsRemaining, 6);
+  assert.equal(w.configured, true);
+  assert.equal(w.code, "2026-27");
+  assert.equal(monthRange(w.fromMonth, w.toMonth).length, 6);
+}
+
+// --- a finished session shows all of itself, never a future month -----
+{
+  const w = waUsageYearWindow({
+    startsOn: "2025-04-01",
+    endsOn: "2026-03-31",
+    todayIso: "2026-09-10T06:00:00.000Z",
+  });
+  assert.equal(w.toMonth, "2026-03", "the session ended; today is not in it");
+  assert.equal(w.monthsRemaining, 0);
+  assert.equal(w.code, "2025-26", "derived when Masters gives no code");
+}
+
+// --- a session not yet started clamps forward, not backwards ----------
+{
+  const w = waUsageYearWindow({
+    startsOn: "2027-04-01",
+    endsOn: "2028-03-31",
+    todayIso: "2026-09-10T06:00:00.000Z",
+  });
+  assert.equal(w.fromMonth, "2027-04");
+  assert.equal(w.toMonth, "2027-04");
+  assert.equal(w.monthsRemaining, 11);
+}
+
+// --- no session on file: April–March, and it says it is guessing -------
+{
+  const sep = waUsageYearWindow({ todayIso: "2026-09-10T06:00:00.000Z" });
+  assert.equal(sep.configured, false, "the screen must be able to say so");
+  assert.equal(sep.fromMonth, "2026-04");
+  assert.equal(sep.endMonth, "2027-03");
+
+  // January belongs to the session that began the previous April.
+  const jan = waUsageYearWindow({ todayIso: "2027-01-15T06:00:00.000Z" });
+  assert.equal(jan.fromMonth, "2026-04");
+  assert.equal(jan.toMonth, "2027-01");
+
+  // Nonsense dates fall back rather than producing a backwards range.
+  const junk = waUsageYearWindow({
+    startsOn: "not-a-date",
+    endsOn: "2027-03-31",
+    todayIso: "2026-09-10T06:00:00.000Z",
+  });
+  assert.equal(junk.configured, false);
+  assert.equal(junk.fromMonth, "2026-04");
+
+  const backwards = waUsageYearWindow({
+    startsOn: "2027-03-31",
+    endsOn: "2026-04-01",
+    todayIso: "2026-09-10T06:00:00.000Z",
+  });
+  assert.equal(backwards.configured, false, "a reversed session is not a session");
+}
+
+// --- pacing to March, not off one week -------------------------------
+{
+  const year = waUsageYearWindow({
+    startsOn: "2026-04-01",
+    endsOn: "2027-03-31",
+    todayIso: "2026-09-10T06:00:00.000Z",
+  });
+  const months = summariseWaUsageByMonth(
+    [
+      msg({ at: "2026-04-10T05:00:00.000Z", category: "utility" }),
+      msg({ at: "2026-05-10T05:00:00.000Z", category: "utility" }),
+    ],
+    rates,
+    { fromMonth: year.fromMonth, toMonth: year.toMonth },
+  );
+  const totals = waUsageYearTotals(months);
+  assert.equal(months.length, 6, "Apr to Sep");
+  assert.equal(totals.costPaise, 20);
+  // Six months on file, 20 paise, so ~3.33 a month over twelve months.
+  assert.equal(
+    projectedSessionPaise(totals, year),
+    40,
+    "paced from the unrounded cost: a 3-paise displayed average would give 36",
+  );
+
+  // Nothing to pace from yields no figure at all, not a zero.
+  assert.equal(
+    projectedSessionPaise(waUsageYearTotals([]), year),
+    null,
+    "better no projection than one off no data",
+  );
+
+  // A session already over projects to exactly what it cost.
+  const done = waUsageYearWindow({
+    startsOn: "2025-04-01",
+    endsOn: "2026-03-31",
+    todayIso: "2026-09-10T06:00:00.000Z",
+  });
+  assert.equal(projectedSessionPaise(totals, done), totals.costPaise);
 }
 
 console.log("  ok");
