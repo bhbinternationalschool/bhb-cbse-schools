@@ -19,7 +19,7 @@ import "server-only";
 
 import type { AutomationRule } from "@/lib/automation";
 import { findAudiencePresetBySummary } from "@/lib/automationAudience";
-import { householdWhatsApp, loadSis, type Household } from "@/lib/sis";
+import { loadSis, type Household } from "@/lib/sis";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { ensureFeesHydratedServer } from "@/lib/feesPersistence.server";
 import { loadServerMasters } from "@/lib/api/v1/auth";
@@ -27,14 +27,26 @@ import { listLiveDefaulters } from "@/lib/playbook";
 import { currentAcademicYearCode, formatInr } from "@/lib/masters";
 import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { listOptedOutSet, toE164India } from "@/lib/waContactState.server";
+import { listKnownNotOnWhatsApp } from "@/lib/waNumberHealth.server";
+import {
+  householdCandidateNumbers,
+  pickWaNumbers,
+  type WaCandidateNumber,
+} from "@/lib/waHouseholdNumbers";
 import { publicOrigin } from "@/lib/birthday.server";
 import { TENANT } from "@/lib/types";
 
 export type AutomationRecipient = {
   /** Bare 10-digit / E.164-ish digits; the dispatch route normalizes. */
   mobile: string;
-  /** Tried when the primary number fails synchronously (household altMobile). */
+  /** The next usable number for this family, on a synchronous failure. */
   fallbackMobile?: string;
+  /**
+   * Which of the family's numbers this is — "Father's number" when the
+   * designated one turned out not to be on WhatsApp, so the approval card
+   * and the delivery log say who was actually written to.
+   */
+  numberLabel?: string;
   /** The FAMILY's template language, never the sender's. */
   language: "en" | "hi";
   variables: Record<string, string>;
@@ -50,6 +62,8 @@ export type AutomationAudience =
       recipients: AutomationRecipient[];
       /** How many were dropped for STOP, so approvals can say so. */
       skippedOptOut: number;
+      /** Dropped because Meta says the number has no WhatsApp account. */
+      skippedNotOnWhatsApp: number;
       note: string;
     }
   | { ok: false; error: string };
@@ -101,21 +115,40 @@ function householdOf(
   return households.find((h) => h.id === householdId);
 }
 
-/** STOP is honoured on every outbound path; automation is not an exception. */
-async function dropOptedOut(
+/**
+ * Who must not be written to.
+ *
+ * Two independent reasons, both honoured on every outbound path:
+ *   * STOP — the family asked us to stop.
+ *   * Not on WhatsApp — Meta has already said the number has no WhatsApp
+ *     account, so a send would only produce another failure row. Ten of
+ *     this school's numbers are in that state.
+ */
+async function dropUnreachable(
   recipients: AutomationRecipient[],
-): Promise<{ kept: AutomationRecipient[]; skippedOptOut: number }> {
-  if (!recipients.length) return { kept: [], skippedOptOut: 0 };
-  const optedOut = await listOptedOutSet(
-    recipients.map((r) => r.mobile),
-  ).catch(() => new Set<string>());
+): Promise<{
+  kept: AutomationRecipient[];
+  skippedOptOut: number;
+  skippedNotOnWhatsApp: number;
+}> {
+  if (!recipients.length) {
+    return { kept: [], skippedOptOut: 0, skippedNotOnWhatsApp: 0 };
+  }
+  const mobiles = recipients.map((r) => r.mobile);
+  const [optedOut, notOnWa] = await Promise.all([
+    listOptedOutSet(mobiles).catch(() => new Set<string>()),
+    listKnownNotOnWhatsApp(mobiles).catch(() => new Set<string>()),
+  ]);
   const kept: AutomationRecipient[] = [];
   let skippedOptOut = 0;
+  let skippedNotOnWhatsApp = 0;
   for (const r of recipients) {
-    if (optedOut.has(toE164India(r.mobile))) skippedOptOut++;
+    const key = toE164India(r.mobile);
+    if (optedOut.has(key)) skippedOptOut++;
+    else if (notOnWa.has(key)) skippedNotOnWhatsApp++;
     else kept.push(r);
   }
-  return { kept, skippedOptOut };
+  return { kept, skippedOptOut, skippedNotOnWhatsApp };
 }
 
 /** One recipient per household — siblings must not get the same message twice. */
@@ -166,6 +199,27 @@ async function feeRecipients(
 
   const horizon = shiftIso(todayIso, 3);
   const out: AutomationRecipient[] = [];
+
+  // Every number every candidate family has, asked about in one go — the
+  // choice below needs to know which of them Meta has already refused.
+  const allCandidates = new Map<string, WaCandidateNumber[]>();
+  for (const d of rows) {
+    if (allCandidates.has(d.householdId)) continue;
+    const hh = householdOf(sis.households ?? [], d.householdId);
+    allCandidates.set(
+      d.householdId,
+      householdCandidateNumbers({
+        household: hh,
+        students: (sis.students ?? []).filter(
+          (s) => s.householdId === d.householdId && s.status === "active",
+        ),
+      }),
+    );
+  }
+  const knownBad = await listKnownNotOnWhatsApp(
+    [...allCandidates.values()].flat().map((c) => c.mobile10),
+  ).catch(() => new Set<string>());
+
   for (const d of rows) {
     if (kind === "overdue") {
       if (d.overdueDays <= 0 || d.overdueAmountPaise <= 0) continue;
@@ -182,11 +236,19 @@ async function feeRecipients(
     // counter, not a reminder that lands on a parent's phone.
     if (minAmountPaise > 0 && amountPaise < minAmountPaise) continue;
     const hh = householdOf(sis.households ?? [], d.householdId);
-    const mobile = householdWhatsApp(hh) || hh?.mobile || "";
-    if (!mobile) continue;
+    // The designated number first, then the guardian's, the father's, the
+    // mother's, the alternate — skipping any Meta has said has no WhatsApp
+    // account. A family whose first number is dead is still reached.
+    const choice = pickWaNumbers(
+      allCandidates.get(d.householdId) ?? [],
+      knownBad,
+    );
+    if (!choice.primary) continue;
+    const mobile = choice.primary.mobile10;
     out.push({
       mobile,
-      fallbackMobile: hh?.altMobile || undefined,
+      fallbackMobile: choice.fallback?.mobile10,
+      numberLabel: choice.primary.label,
       language: waTemplateLanguageFor(hh ?? {}),
       refId: d.householdId || d.studentId,
       label: `${d.fullName} · ${d.classLabel}`,
@@ -274,14 +336,34 @@ async function allParentRecipients(): Promise<AutomationRecipient[]> {
       .map((s) => s.householdId)
       .filter(Boolean),
   );
+  // Same treatment as the fee audiences: a whole-school notice should reach
+  // the father's number when the designated one is dead, not vanish.
+  const candidates = new Map<string, WaCandidateNumber[]>();
+  for (const hh of sis.households ?? []) {
+    if (!activeHouseholdIds.has(hh.id)) continue;
+    candidates.set(
+      hh.id,
+      householdCandidateNumbers({
+        household: hh,
+        students: (sis.students ?? []).filter(
+          (s) => s.householdId === hh.id && s.status === "active",
+        ),
+      }),
+    );
+  }
+  const knownBad = await listKnownNotOnWhatsApp(
+    [...candidates.values()].flat().map((c) => c.mobile10),
+  ).catch(() => new Set<string>());
+
   const out: AutomationRecipient[] = [];
   for (const hh of sis.households ?? []) {
     if (!activeHouseholdIds.has(hh.id)) continue;
-    const mobile = householdWhatsApp(hh) || hh.mobile || "";
-    if (!mobile) continue;
+    const choice = pickWaNumbers(candidates.get(hh.id) ?? [], knownBad);
+    if (!choice.primary) continue;
     out.push({
-      mobile,
-      fallbackMobile: hh.altMobile || undefined,
+      mobile: choice.primary.mobile10,
+      fallbackMobile: choice.fallback?.mobile10,
+      numberLabel: choice.primary.label,
       language: waTemplateLanguageFor(hh),
       refId: hh.id,
       label: hh.guardianName || hh.code || hh.id,
@@ -341,16 +423,26 @@ export async function resolveAutomationAudienceServer(
     }
 
     const unique = dedupeByMobile(recipients);
-    const { kept, skippedOptOut } = await dropOptedOut(unique);
+    const { kept, skippedOptOut, skippedNotOnWhatsApp } =
+      await dropUnreachable(unique);
     const capped = kept.slice(0, limit);
     const note =
       `${capped.length} recipient${capped.length === 1 ? "" : "s"} from live data` +
       (minAmountPaise > 0 ? ` · at least ${formatInr(minAmountPaise)} due` : "") +
       (skippedOptOut ? ` · ${skippedOptOut} opted out (STOP)` : "") +
+      (skippedNotOnWhatsApp
+        ? ` · ${skippedNotOnWhatsApp} not on WhatsApp (see Numbers to fix)`
+        : "") +
       (kept.length > capped.length
         ? ` · capped at ${limit} for this run, the rest go on the next tick`
         : "");
-    return { ok: true, recipients: capped, skippedOptOut, note };
+    return {
+      ok: true,
+      recipients: capped,
+      skippedOptOut,
+      skippedNotOnWhatsApp,
+      note,
+    };
   } catch (e) {
     return {
       ok: false,

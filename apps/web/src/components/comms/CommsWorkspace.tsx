@@ -14,6 +14,7 @@ import { EmailIntegrationPanel } from "@/components/comms/EmailIntegrationPanel"
 import { SocialCrossPostPrefsPanel } from "@/components/comms/SocialCrossPostPanel";
 import { WaChatHubPanel } from "@/components/comms/WaChatHubPanel";
 import { HouseholdMessageLogPanel } from "@/components/comms/HouseholdMessageLogPanel";
+import { WaSendToAudiencePanel } from "@/components/comms/WaSendToAudiencePanel";
 import {
   addGalleryPhoto,
   audienceLabel,
@@ -72,6 +73,7 @@ type CommsTab =
   | "email"
   | "inbox"
   | "channels"
+  | "wa_send"
   | "wa_hub"
   | "household_log"
   | "reports";
@@ -84,6 +86,7 @@ const TABS: ModuleTabItem[] = [
   { id: "social", label: "Social", tone: "rose" },
   { id: "email", label: "Email", tone: "sky" },
   { id: "channels", label: "Class WA", tone: "violet" },
+  { id: "wa_send", label: "Send message", tone: "teal" },
   { id: "wa_hub", label: "WhatsApp hub", tone: "teal" },
   { id: "household_log", label: "Household log", tone: "slate" },
   { id: "inbox", label: "Inbox", tone: "slate" },
@@ -103,6 +106,7 @@ function tabFromSearch(raw: string | null, path: string): CommsTab {
     raw === "inbox" ||
     raw === "notices" ||
     raw === "channels" ||
+    raw === "wa_send" ||
     raw === "wa_hub" ||
     raw === "household_log" ||
     raw === "reports"
@@ -1284,6 +1288,10 @@ export function CommsWorkspace() {
       ) : null}
 
       {tab === "channels" ? <ClassChannelsPanel /> : null}
+
+      {tab === "wa_send" ? (
+        <WaSendToAudiencePanel readOnly={readOnly} />
+      ) : null}
 
       {tab === "wa_hub" ? (
         <WaChatHubPanel by={session.fullName} canEdit={!readOnly} />

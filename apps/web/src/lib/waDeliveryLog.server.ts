@@ -6,6 +6,7 @@
  * inbound messages (see parseMetaWebhookInbound in waCrmBotServer.ts).
  */
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { classifyWaFailure } from "@/lib/waFailureReason";
 
 export type WaDeliveryStatusEvent = {
   waMessageId: string;
@@ -97,6 +98,29 @@ export async function recordDeliveryStatuses(
     }));
     const { error } = await sb.from("wa_message_delivery").insert(rows);
     if (error) console.warn("[waDeliveryLog] insert failed", error.message);
+
+    // Meta has just told us a number is not a WhatsApp user (131026). Write
+    // that down against the number, so the next fee run can skip it and the
+    // office sees it on the "Numbers to fix" list without anyone reading a
+    // per-message log. Only "not on WhatsApp" is recorded here: a delivery
+    // failure for any other reason says nothing about the number.
+    const notOnWhatsApp = events
+      .filter(
+        (e) =>
+          e.status === "failed" &&
+          !!e.mobile &&
+          classifyWaFailure(e.errorMessage).kind === "not_on_whatsapp",
+      )
+      .map((e) => ({ mobile: e.mobile as string, onWhatsApp: false }));
+    if (notOnWhatsApp.length) {
+      const { recordWaNumberVerdicts } = await import(
+        "@/lib/waNumberHealth.server"
+      );
+      const wrote = await recordWaNumberVerdicts(notOnWhatsApp, "send_failure");
+      if (!wrote.ok) {
+        console.warn("[waDeliveryLog] number verdict not saved", wrote.error);
+      }
+    }
   } catch (e) {
     console.warn("[waDeliveryLog] recordDeliveryStatuses failed", e);
   }

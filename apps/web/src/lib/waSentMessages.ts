@@ -6,6 +6,7 @@
  */
 
 import type { WaDeliveryStage } from "@/lib/waDeliveryStatusShape";
+import type { WaFailureKind } from "@/lib/waFailureReason";
 
 export type WaSentMessageRow = {
   id: string;
@@ -24,6 +25,14 @@ export type WaSentMessageRow = {
   deliveredAt: string | null;
   readAt: string | null;
   error: string | null;
+  /**
+   * Meta's reason, translated. "Message undeliverable" and "Re-engagement
+   * message" look alike and mean opposite things, so the row says which it
+   * is and what to do rather than passing Meta's wording through.
+   */
+  failureKind: WaFailureKind | null;
+  failureLabel: string | null;
+  failureAdvice: string | null;
   waMessageId: string;
 };
 
