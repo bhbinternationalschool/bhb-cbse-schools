@@ -769,6 +769,60 @@ const SEED_DEFS: SeedDef[] = [
     footerEn: "School office",
     footerHi: "विद्यालय कार्यालय",
   },
+  // ── "Here is what you can do on WhatsApp" ──────────────────────────
+  //
+  // Both of these are MARKETING, not UTILITY: nothing has happened to the
+  // recipient, the school is telling them a facility exists. Categorising
+  // an announcement as UTILITY is how a WABA gets its templates rejected
+  // wholesale, and it would be a lie to Meta besides.
+  //
+  // NEITHER carries a quick-reply button, on purpose. `matchSeedQuickReply`
+  // scans every seed's QUICK_REPLY text against ANY inbound message, and
+  // the parent bot turns a match into "escalate to the office". A button
+  // reading *TUTOR* or *IN* would therefore stop that word working as a
+  // command — for everyone, not just whoever tapped it. The body tells
+  // people what to type instead. Do not add one.
+  {
+    familyKey: "staff_wa_commands",
+    nameEn: "Staff: what you can do on WhatsApp",
+    nameHi: "स्टाफ: व्हाट्सऐप पर क्या कर सकते हैं",
+    module: "staff",
+    category: "MARKETING",
+    metaName: "bhb_staff_wa_commands",
+    headerFormat: "TEXT",
+    headerTextEn: "WhatsApp for staff",
+    headerTextHi: "स्टाफ के लिए व्हाट्सऐप",
+    // Only what EVERY staff member has is listed as keywords: attendance.
+    // The class-channel and transport commands are role-specific, so they
+    // are pointed at rather than spelled out — a template that lists a
+    // keyword the reader's role cannot use teaches them the bot is broken.
+    bodyEn:
+      "Namaste {{staffName}} 🙏\n\nYou can use WhatsApp for daily work at *{{schoolName}}* — just message this number.\n\n⏱ *Attendance*\n• *IN* — mark your arrival\n• *OUT* — mark your leaving\n• *STATUS* — what is marked for you today\n\n📚 *Class teachers* — post homework, a notice or an exam date to your class parents. Send *HELP* to see how.\n\n🚌 *Transport staff* — send *ROUTE* for today's route, or *BREAKDOWN* to report a delay.\n\nSend *MENU* any time to see what applies to you, or *HUMAN* to reach the office.",
+    bodyHi:
+      "नमस्ते {{staffName}} जी 🙏\n\n*{{schoolName}}* में रोज़ के काम अब व्हाट्सऐप से हो सकते हैं — इसी नंबर पर संदेश भेजें।\n\n⏱ *उपस्थिति*\n• *IN* — आने पर लिखें\n• *OUT* — जाते समय लिखें\n• *STATUS* — आज आपकी उपस्थिति\n\n📚 *कक्षा शिक्षक* — गृहकार्य, सूचना या परीक्षा तिथि अपनी कक्षा के अभिभावकों को भेजें। तरीका जानने के लिए *HELP* लिखें।\n\n🚌 *परिवहन स्टाफ* — आज का रूट देखने के लिए *ROUTE*, देरी बताने के लिए *BREAKDOWN* लिखें।\n\nअपने लिए विकल्प देखने के लिए कभी भी *MENU* लिखें, या कार्यालय के लिए *HUMAN*।",
+    footerEn: "Staff desk · Reply MENU for your options",
+    footerHi: "स्टाफ डेस्क · विकल्पों के लिए MENU लिखें",
+  },
+  {
+    familyKey: "study_help_intro",
+    nameEn: "Study help on WhatsApp",
+    nameHi: "व्हाट्सऐप पर पढ़ाई में मदद",
+    module: "general",
+    category: "MARKETING",
+    metaName: "bhb_study_help_intro",
+    headerFormat: "TEXT",
+    headerTextEn: "Study help",
+    headerTextHi: "पढ़ाई में मदद",
+    // Addressed to the PARENT, because the parent's number is the one the
+    // school has. A child's own number cannot be messaged first — we do
+    // not know it until the parent links it, which is what LINK is for.
+    bodyEn:
+      "Namaste {{guardianName}} 🙏\n\n*{{schoolName}}* now has study help on WhatsApp for {{childName}}. Message this number and send *TUTOR* to start.\n\n• *HINT* — a nudge for homework, free every day\n• *TEACH* a topic · *EXAMPLES* · *PRACTICE*\n• *SCORE* — check your child's answer\n\nWould your child rather use it from their own phone? Reply *LINK* and we will send you a code to give them. That number gets study help only — never fees, receipts or payments, and it cannot buy anything.\n\nReply *TUTOR* to try it now.",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\n*{{schoolName}}* में अब {{childName}} के लिए व्हाट्सऐप पर पढ़ाई में मदद उपलब्ध है। इसी नंबर पर *TUTOR* लिखकर शुरू करें।\n\n• *HINT* — गृहकार्य में इशारा, रोज़ मुफ़्त\n• *TEACH* किसी विषय पर · *EXAMPLES* · *PRACTICE*\n• *SCORE* — अपने बच्चे का उत्तर जाँचें\n\nक्या आपका बच्चा अपने फ़ोन से इसका उपयोग करना चाहेगा? *LINK* लिखें, हम आपको एक कोड भेजेंगे जो आप उन्हें दें। उस नंबर पर सिर्फ़ पढ़ाई की मदद मिलेगी — शुल्क, रसीद या भुगतान कभी नहीं, और वह कुछ ख़रीद भी नहीं सकता।\n\nअभी आज़माने के लिए *TUTOR* लिखें।",
+    footerEn: "Reply STOP to opt out",
+    footerHi: "संदेश बंद करने के लिए STOP लिखें",
+  },
   {
     familyKey: "vault_expiry",
     nameEn: "Document vault expiry",
