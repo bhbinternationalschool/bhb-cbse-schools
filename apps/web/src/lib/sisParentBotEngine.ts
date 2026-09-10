@@ -13,7 +13,8 @@ export type SisBotQuickId =
   | "receipts"
   | "info"
   | "human"
-  | "complaint";
+  | "complaint"
+  | "tutor";
 
 export const SIS_BOT_QUICK_PROMPTS: {
   id: SisBotQuickId;
@@ -27,6 +28,7 @@ export const SIS_BOT_QUICK_PROMPTS: {
   { id: "info", label: "School info", waKeyword: "INFO" },
   { id: "human", label: "Talk to office", waKeyword: "HUMAN" },
   { id: "complaint", label: "Raise a complaint", waKeyword: "COMPLAINT" },
+  { id: "tutor", label: "Study help for your child", waKeyword: "TUTOR" },
 ];
 
 export function sisBotWelcomeText(multiChild = false): string {

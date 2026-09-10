@@ -325,6 +325,25 @@ export async function POST(req: Request) {
       settlementStatus: res.ok ? (res.alreadyPaid ? "ignored" : "settled") : "failed",
       eventJson: res.ok ? event : { error: res.error, raw: event },
     });
+    // A pass bought over WhatsApp promised the parent a word back on that
+    // thread. Only on a FRESH activation — a redelivered webhook reports
+    // alreadyPaid, and must not message the family a second time. Never
+    // allowed to fail the webhook: the pass is already active, and a 400
+    // here would have Cashfree retry a payment that succeeded.
+    if (res.ok && !res.alreadyPaid) {
+      try {
+        const { notifyTutorPassActive } = await import("@/lib/waTutorBot.server");
+        const told = await notifyTutorPassActive({
+          orderId: tutorOrderId,
+          endsAt: res.endsAt,
+        });
+        if (!told.ok) {
+          console.warn("[cashfree-webhook] tutor pass notice not sent", told.error);
+        }
+      } catch (e) {
+        console.warn("[cashfree-webhook] tutor pass notice threw", e);
+      }
+    }
     return res.ok
       ? NextResponse.json({ ok: true, tutorOrderId, endsAt: res.endsAt })
       : NextResponse.json({ error: res.error }, { status: 400 });
