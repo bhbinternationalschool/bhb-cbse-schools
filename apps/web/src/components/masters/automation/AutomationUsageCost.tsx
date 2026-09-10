@@ -12,11 +12,14 @@ import {
   ratesAreDefaults,
   repriceWaUsage,
   repriceWaUsageByAudience,
+  repriceWaUsageByMonth,
   repriceWaUsageByStudent,
   rupees,
+  waUsageYearTotals,
   type WaCostRates,
   type WaUsageAudienceSection,
   type WaUsageByStudent,
+  type WaUsageMonth,
   type WaUsageSummary,
 } from "@/lib/waUsageCost";
 import { autoBtnOutline, autoBtnPrimary, autoInp } from "./automationUi";
@@ -25,6 +28,7 @@ const WINDOWS = [
   { id: "7", label: "7 days", days: 7 },
   { id: "30", label: "30 days", days: 30 },
   { id: "90", label: "90 days", days: 90 },
+  { id: "365", label: "12 months", days: 365 },
 ] as const;
 
 type Report = {
@@ -39,6 +43,7 @@ type Report = {
   byStudent: WaUsageByStudent;
   byAudience: WaUsageAudienceSection[];
   staffNumbersKnown: number;
+  byMonth: WaUsageMonth[];
   rosterOk: boolean;
   attributedByNumber: number;
 };
@@ -143,6 +148,20 @@ export function AutomationUsageCost({ readOnly }: { readOnly: boolean }) {
       ? repriceWaUsageByAudience(report.byAudience, draft)
       : report.byAudience;
   }, [report, editing, draft]);
+
+  const months = useMemo(() => {
+    if (!report) return [];
+    return editing
+      ? repriceWaUsageByMonth(report.byMonth, draft)
+      : report.byMonth;
+  }, [report, editing, draft]);
+
+  const year = useMemo(() => waUsageYearTotals(months), [months]);
+
+  const maxMonth = useMemo(
+    () => Math.max(1, ...months.map((m) => m.costPaise)),
+    [months],
+  );
 
   const byStudent = useMemo(() => {
     if (!report) return null;
@@ -321,6 +340,61 @@ export function AutomationUsageCost({ readOnly }: { readOnly: boolean }) {
               cover the most recent 5,000. Choose a shorter window for an exact
               number.
             </div>
+          ) : null}
+
+          {months.length > 0 ? (
+            <MastersTableCard
+              title={`The year, month by month — ${rupees(year.costPaise)}`}
+            >
+              <div className="px-3 py-2 text-[11px] text-[var(--muted)]">
+                Last 12 months, whatever window is chosen above.{" "}
+                <strong>{rupees(year.averagePaise)}</strong> a month on average
+                {year.dearest && year.dearest.costPaise > 0
+                  ? `, dearest ${year.dearest.label} at ${rupees(
+                      year.dearest.costPaise,
+                    )}`
+                  : ""}
+                . {year.delivered} delivered
+                {year.failed > 0 ? `, ${year.failed} failed` : ""}.
+                {year.completeMonths < months.length
+                  ? " Months marked ~ were only partly read, so they are a floor and are left out of the average."
+                  : ""}
+              </div>
+              <ul className="divide-y divide-[var(--border)]">
+                {months
+                  .slice()
+                  .reverse()
+                  .map((m) => (
+                    <li
+                      key={m.month}
+                      className="flex items-center gap-3 px-3 py-1.5 text-[11px]"
+                    >
+                      <span className="w-20 shrink-0 text-[var(--muted)]">
+                        {m.label}
+                        {m.partial ? " ~" : ""}
+                      </span>
+                      <span className="h-2 flex-1 overflow-hidden rounded bg-[var(--surface-sunken)]">
+                        <span
+                          className="block h-full rounded bg-[var(--brand-deep)]"
+                          style={{
+                            width: `${Math.round((m.costPaise / maxMonth) * 100)}%`,
+                          }}
+                        />
+                      </span>
+                      <span className="w-24 shrink-0 text-right font-semibold text-[var(--brand-deep)]">
+                        {rupees(m.costPaise)}
+                      </span>
+                      <span className="w-32 shrink-0 text-right text-[var(--muted)]">
+                        {m.sent === 0
+                          ? "nothing sent"
+                          : `${m.delivered} landed${
+                              m.failed ? ` · ${m.failed} failed` : ""
+                            }`}
+                      </span>
+                    </li>
+                  ))}
+              </ul>
+            </MastersTableCard>
           ) : null}
 
           <MastersTableCard title="By message type">

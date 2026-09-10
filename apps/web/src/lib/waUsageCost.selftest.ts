@@ -23,6 +23,12 @@ import {
   summariseWaUsageByStudent,
   splitWaUsageByAudience,
   repriceWaUsageByAudience,
+  summariseWaUsageByMonth,
+  repriceWaUsageByMonth,
+  waUsageYearTotals,
+  istMonthKey,
+  monthLabel,
+  monthRange,
   type WaUsageAttributedMessage,
   type WaUsageMessage,
   type WaUsageAudienceMessage,
@@ -572,6 +578,118 @@ function msg(p: Partial<WaUsageMessage>): WaUsageMessage {
       s.summary.pendingCostPaise,
     ]),
   );
+}
+
+// --- month keys are IST months, like the school's own accounts ---------
+{
+  assert.equal(istMonthKey("2026-09-30T19:30:00.000Z"), "2026-10", "01:00 IST on 1 Oct");
+  assert.equal(istMonthKey("2026-09-30T18:29:00.000Z"), "2026-09");
+  assert.equal(istMonthKey(""), "");
+  assert.equal(monthLabel("2026-09"), "Sep 2026");
+  assert.equal(monthLabel("garbage"), "garbage");
+  assert.deepEqual(monthRange("2026-11", "2027-02"), [
+    "2026-11",
+    "2026-12",
+    "2027-01",
+    "2027-02",
+  ]);
+  assert.deepEqual(monthRange("2026-05", "2026-05"), ["2026-05"]);
+  assert.deepEqual(monthRange("2026-06", "2026-05"), [], "backwards is empty");
+  assert.deepEqual(monthRange("", ""), []);
+}
+
+// --- a quiet month is a zero, not a gap -------------------------------
+{
+  const months = summariseWaUsageByMonth(
+    [
+      msg({ at: "2026-07-10T05:00:00.000Z", category: "utility" }),
+      msg({ at: "2026-09-02T05:00:00.000Z", category: "utility" }),
+    ],
+    rates,
+    { fromMonth: "2026-07", toMonth: "2026-09" },
+  );
+  assert.deepEqual(
+    months.map((m) => [m.month, m.sent, m.costPaise]),
+    [
+      ["2026-07", 1, 10],
+      // Nothing was sent in August. A missing row would read as missing
+      // data; a zero reads as "we sent nothing", which is the truth.
+      ["2026-08", 0, 0],
+      ["2026-09", 1, 10],
+    ],
+  );
+}
+
+// --- a month the read did not reach is marked, not averaged in --------
+{
+  const months = summariseWaUsageByMonth(
+    [
+      msg({ at: "2026-07-10T05:00:00.000Z", category: "marketing", templateName: "a" }),
+      msg({ at: "2026-08-10T05:00:00.000Z", category: "utility" }),
+      msg({ at: "2026-09-10T05:00:00.000Z", category: "utility" }),
+    ],
+    { ...rates, marketing: 100, utility: 10 },
+    { fromMonth: "2026-07", toMonth: "2026-09", partialFrom: "2026-07" },
+  );
+  assert.equal(months[0].partial, true);
+  assert.equal(months[1].partial, false);
+
+  const totals = waUsageYearTotals(months);
+  assert.equal(totals.costPaise, 120, "the partial month still counts in the total");
+  assert.equal(totals.completeMonths, 2);
+  assert.equal(
+    totals.averagePaise,
+    10,
+    "but not in the average — a half-read month would drag it down",
+  );
+  assert.equal(totals.dearest?.month, "2026-07");
+}
+
+// --- month rows re-price exactly --------------------------------------
+{
+  const messages: WaUsageMessage[] = [
+    msg({ at: "2026-08-10T05:00:00.000Z", category: "utility" }),
+    msg({ at: "2026-08-11T05:00:00.000Z", category: "marketing", templateName: "b" }),
+    msg({ at: "2026-08-12T05:00:00.000Z", category: "utility", outcome: "failed" }),
+    msg({ at: "2026-09-01T05:00:00.000Z", category: "authentication", templateName: "c" }),
+  ];
+  const opts = { fromMonth: "2026-08", toMonth: "2026-09" } as const;
+  const other = { ...rates, marketing: 5, utility: 55, authentication: 9 };
+  assert.deepEqual(
+    repriceWaUsageByMonth(summariseWaUsageByMonth(messages, rates, opts), other).map(
+      (m) => [m.month, m.costPaise],
+    ),
+    summariseWaUsageByMonth(messages, other, opts).map((m) => [m.month, m.costPaise]),
+  );
+}
+
+// --- the year total ties to the same messages counted once ------------
+{
+  const messages: WaUsageMessage[] = [
+    msg({ at: "2026-08-10T05:00:00.000Z", category: "utility" }),
+    msg({ at: "2026-09-01T05:00:00.000Z", category: "marketing", templateName: "b" }),
+    msg({ at: "2026-09-02T05:00:00.000Z", category: "utility", outcome: "pending" }),
+  ];
+  const months = summariseWaUsageByMonth(messages, rates, {
+    fromMonth: "2026-08",
+    toMonth: "2026-09",
+  });
+  assert.equal(
+    waUsageYearTotals(months).costPaise,
+    summariseWaUsage(messages, rates).messageCostPaise,
+  );
+}
+
+// --- an empty year is twelve zeros, not a crash -----------------------
+{
+  const months = summariseWaUsageByMonth([], rates, {
+    fromMonth: "2025-10",
+    toMonth: "2026-09",
+  });
+  assert.equal(months.length, 12);
+  assert.equal(waUsageYearTotals(months).costPaise, 0);
+  assert.equal(waUsageYearTotals(months).averagePaise, 0);
+  assert.deepEqual(summariseWaUsageByMonth([], rates), []);
 }
 
 console.log("  ok");
