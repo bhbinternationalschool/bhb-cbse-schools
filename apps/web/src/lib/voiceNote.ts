@@ -1,10 +1,12 @@
 /**
  * Parent voice notes — the pure half.
  *
- * A parent who cannot type sends a WhatsApp voice note instead. Until now the
- * inbound parser turned that into the literal string "MEDIA audio" and threw
- * the media id away, so the message reached the bot as noise and the parent
- * got a "didn't understand" reply for something they had actually said.
+ * A parent who cannot type sends a WhatsApp voice note instead. The inbound
+ * parser has always captured the media id, but only the staff ERP command
+ * desk ever used it (via Google STT, behind a pilot allow-list). For every
+ * other flow the message arrived as the literal string "[voice note]", which
+ * matches no intent — so a parent who spoke was answered as though they had
+ * said nothing useful.
  *
  * This module holds everything that can be decided without the network: what
  * audio we accept, the transcription prompt, how a raw model reply becomes a
@@ -167,7 +169,8 @@ export type VoiceNoteUnusableReason =
   | "inaudible"
   | "download-failed"
   | "transcribe-failed"
-  | "budget";
+  | "budget"
+  | "disabled";
 
 /**
  * What a human reading the thread should see when we could not turn the audio
@@ -182,6 +185,7 @@ export const VOICE_NOTE_STAFF_NOTE: Record<VoiceNoteUnusableReason, string> = {
   "download-failed": "Voice note could not be downloaded from WhatsApp — play it in WhatsApp.",
   "transcribe-failed": "Voice note transcription failed — play it in WhatsApp.",
   budget: "Voice note not transcribed (AI budget reached) — play it in WhatsApp.",
+  disabled: "Voice note transcription is switched off — play it in WhatsApp.",
 };
 
 /**
@@ -231,4 +235,32 @@ export function voiceNoteAuditDescriptor(opts: {
   const kb = Math.round(opts.byteLength / 1024);
   const id = opts.waMessageId ? ` wa=${opts.waMessageId}` : "";
   return `[audio ${opts.mimeType} ${kb}KB${id}]`;
+}
+
+/**
+ * What the parent is told when we could not turn their voice note into words.
+ *
+ * The one thing it must not do is imply they were misunderstood — they were
+ * not understood at all, because nobody has listened yet. So it confirms the
+ * message arrived and promises a person, and it asks for nothing: telling a
+ * parent who cannot type to "please type your question" is how this failed
+ * before.
+ *
+ * Hindi first: a parent who sends voice rather than text is the parent least
+ * likely to read English comfortably.
+ */
+export const VOICE_NOTE_PARENT_ACK = [
+  "आपका वॉइस मैसेज मिल गया है 🎙️ स्कूल कार्यालय से कोई इसे सुनकर आपसे संपर्क करेगा।",
+  "",
+  "We have received your voice message. Someone from the school office will listen to it and get back to you.",
+].join("\n");
+
+/**
+ * The line a human sees in the WhatsApp hub. It names the reason so the
+ * office knows whether to expect a playable note (most cases) or a broken
+ * one, and it is prefixed so the thread reads as a handoff rather than as
+ * something the parent typed.
+ */
+export function voiceNoteHubNote(reason: VoiceNoteUnusableReason): string {
+  return `[VOICE NOTE] ${VOICE_NOTE_STAFF_NOTE[reason]}`;
 }

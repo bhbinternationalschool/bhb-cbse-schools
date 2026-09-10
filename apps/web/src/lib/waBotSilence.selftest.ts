@@ -259,4 +259,36 @@ console.log("OK");
   );
 }
 
+// A parent's voice note is not a request for the welcome menu either.
+//
+// It used to be: the audio suppression was staff-only and empty text reads as
+// a menu command, so every voice note a parent sent bounced the welcome menu
+// back at them. Their words are transcribed now, and a failure is handed to a
+// person — the menu is the wrong answer in both cases.
+{
+  const parentVoice = {
+    text: "",
+    staff: false,
+    known: true,
+    hasSession: true,
+    hasAudio: true,
+  };
+  assert.equal(shouldShowUnifiedMenu(parentVoice), false, "a parent voice note is not a menu command");
+  assert.equal(
+    shouldShowUnifiedMenu({ ...parentVoice, known: false }),
+    false,
+    "nor is one from a number the school does not know",
+  );
+  assert.equal(
+    shouldShowUnifiedMenu({ ...parentVoice, hasAudio: false }),
+    true,
+    "empty text with no audio still resets to the menu, as before",
+  );
+  assert.equal(
+    shouldShowUnifiedMenu({ ...parentVoice, text: "menu" }),
+    true,
+    "a caption that asks for the menu still gets it",
+  );
+}
+
 console.log("OK — a staff voice note reaches the desk, not the menu");

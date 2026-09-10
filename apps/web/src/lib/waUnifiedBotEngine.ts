@@ -109,8 +109,11 @@ export function isUnifiedMenuCommand(
  *   command desk, where the transcription lives. Voice commands could
  *   not work: they were swallowed one step before the code for them.
  *
- * Audio only for staff. A bare photo from a staff member still gets the
- * menu, exactly as before.
+ * A voice note never asks for the menu. This used to hold for staff only,
+ * so a parent who sent one got the welcome menu re-sent — every time, since
+ * empty text reads as a menu command. Their words are transcribed now, and
+ * when that fails the thread is handed to a person; either way the menu is
+ * the wrong answer. A bare photo still gets the menu, exactly as before.
  */
 export function shouldShowUnifiedMenu(opts: {
   text: string;
@@ -120,7 +123,7 @@ export function shouldShowUnifiedMenu(opts: {
   hasAudio: boolean;
 }): boolean {
   if (!opts.known && opts.hasSession && looksLikeForward(opts.text)) return false;
-  if (opts.staff && !opts.text.trim() && opts.hasAudio) return false;
+  if (!opts.text.trim() && opts.hasAudio) return false;
   return isUnifiedMenuCommand(opts.text, { staff: opts.staff });
 }
 

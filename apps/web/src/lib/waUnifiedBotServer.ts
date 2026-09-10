@@ -43,6 +43,11 @@ import { handleWaSurveyBotInbound } from "@/lib/waSurveyBotServer";
 import { handleWaStaffAttendanceInbound } from "@/lib/waStaffAttendanceBotServer";
 import { handleErpStaffCommand } from "@/lib/erpCommands.server";
 import { transcribeInboundVoiceNote, voiceNoteTranscriptionEnabled } from "@/lib/voiceNote.server";
+import {
+  VOICE_NOTE_PARENT_ACK,
+  voiceNoteHubNote,
+  type VoiceNoteUnusableReason,
+} from "@/lib/voiceNote";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { sendWhatsAppText, waNormalizeLocal10 } from "@/lib/waSend";
 import { sendWhatsAppInteractive } from "@/lib/waInteractive";
@@ -210,6 +215,13 @@ async function delegateActiveFlow(
     };
     audio?: { mediaId: string; mimeType?: string } | null;
     document?: { mediaId: string; mimeType?: string; fileName?: string } | null;
+    /**
+     * Set by handleWaUnifiedInbound when a voice note arrived but could not
+     * be turned into words. Carried down here because the decision it drives
+     * — hand this to a human — belongs with flow routing, not with the
+     * transcription call.
+     */
+    voiceNoteFailure?: VoiceNoteUnusableReason | null;
   },
   identity: WaResolvedIdentity,
   session: WaUnifiedSession,
@@ -269,6 +281,44 @@ async function delegateActiveFlow(
       });
       return { replied: ok, escalate: false, audience: cmd.audience, stub: !ok };
     }
+  }
+
+  // A voice note nobody could turn into words goes to a person.
+  //
+  // Reached only after the ERP command desk has had its turn, so a staff
+  // command spoken aloud is still handled there (and its own reply covers
+  // its own failure). Everyone else — parents above all — would otherwise
+  // fall through to a keyword bot that cannot match "[voice note]" and
+  // would answer as though nothing had been said.
+  //
+  // The reply promises a human and asks for nothing: telling a parent who
+  // cannot type to type is the failure this whole path exists to remove.
+  if (opts.voiceNoteFailure && !opts.text.trim()) {
+    const name = session.visitorName || session.displayName || identity.displayName;
+    await handleWaCrmBotInbound({
+      ...inbound,
+      text: voiceNoteHubNote(opts.voiceNoteFailure),
+      visitorName: name,
+      forceEscalate: true,
+    });
+    const ok = await sendBotReply({
+      mobile10,
+      displayName: name,
+      category: categoryForUnifiedAudience(flow, flow),
+      audience: "voice_note_handoff",
+      flow,
+      text: VOICE_NOTE_PARENT_ACK,
+      inbound: {
+        text: `[voice note] ${opts.voiceNoteFailure}`,
+        waMessageId: opts.waMessageId,
+      },
+    });
+    return {
+      replied: ok,
+      escalate: true,
+      audience: "voice_note_handoff",
+      stub: !ok,
+    };
   }
 
   if (flow === "owner" || flow === "staff") {
@@ -653,6 +703,11 @@ export async function handleWaUnifiedInbound(opts: {
    * it did before, so a parent sending a photo is unaffected.
    */
   document?: { mediaId: string; mimeType?: string; fileName?: string } | null;
+  /**
+   * Internal. Set by this function after a voice note fails to transcribe and
+   * read by delegateActiveFlow; callers pass audio, not this.
+   */
+  voiceNoteFailure?: VoiceNoteUnusableReason | null;
 }): Promise<{
   replied: boolean;
   escalate: boolean;
@@ -669,6 +724,14 @@ export async function handleWaUnifiedInbound(opts: {
   // because the sender typed it deliberately. On failure `opts` is left
   // untouched, so the ERP command handler's own Google STT path still runs
   // for staff and every other flow behaves exactly as it did before.
+  if (opts.audio?.mediaId && !(opts.text || "").trim()) {
+    // The kill switch turns off the model call, not the handoff. A parent who
+    // spoke still reaches a person — silently dropping them is the behaviour
+    // this path exists to remove, and it should not come back with a flag.
+    if (!voiceNoteTranscriptionEnabled()) {
+      opts = { ...opts, voiceNoteFailure: "disabled" };
+    }
+  }
   if (opts.audio?.mediaId && !(opts.text || "").trim() && voiceNoteTranscriptionEnabled()) {
     const heard = await transcribeInboundVoiceNote({
       mediaId: opts.audio.mediaId,
@@ -677,6 +740,10 @@ export async function handleWaUnifiedInbound(opts: {
     });
     if (heard.kind === "transcribed") {
       opts = { ...opts, text: heard.text };
+    } else {
+      // Carried on opts so it survives the flow routing below and reaches
+      // delegateActiveFlow, which decides to hand it to a human.
+      opts = { ...opts, voiceNoteFailure: heard.reason };
     }
   }
 

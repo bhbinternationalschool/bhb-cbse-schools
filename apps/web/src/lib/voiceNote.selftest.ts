@@ -23,7 +23,9 @@ import {
   labelledTranscript,
   parseVoiceNoteTranscript,
   transcriptIsUsable,
+  VOICE_NOTE_PARENT_ACK,
   voiceNoteAuditDescriptor,
+  voiceNoteHubNote,
   voiceNoteOutcome,
   type VoiceNoteUnusableReason,
 } from "./voiceNote";
@@ -204,4 +206,42 @@ console.log("voiceNote.selftest.ts");
   );
 }
 
-console.log("OK");
+// The parent is told the truth: the message arrived, a person will listen.
+{
+  assert.ok(VOICE_NOTE_PARENT_ACK.includes("वॉइस"), "Hindi first — this parent may not read English");
+  assert.ok(
+    /voice message/i.test(VOICE_NOTE_PARENT_ACK),
+    "and English underneath, for the households that prefer it",
+  );
+  // The failure being replaced is a parent being asked to do it again in a
+  // way they cannot. Nothing here may ask them to type.
+  assert.ok(
+    !/\btype\b|\blikh|टाइप|लिख/i.test(VOICE_NOTE_PARENT_ACK),
+    "never ask a parent who cannot type to type",
+  );
+  assert.ok(
+    !/understand|समझ/i.test(VOICE_NOTE_PARENT_ACK),
+    "we did not misunderstand them — nobody has listened yet",
+  );
+}
+
+// Every failure reason produces a hub line a human can act on.
+{
+  const reasons: VoiceNoteUnusableReason[] = [
+    "empty",
+    "too-large",
+    "unsupported-type",
+    "inaudible",
+    "download-failed",
+    "transcribe-failed",
+    "budget",
+    "disabled",
+  ];
+  for (const r of reasons) {
+    const note = voiceNoteHubNote(r);
+    assert.ok(note.startsWith("[VOICE NOTE] "), `${r} is marked as a handoff, not parent text`);
+    assert.ok(note.length > "[VOICE NOTE] ".length + 5, `${r} says something`);
+  }
+}
+
+console.log("OK (escalation)");
