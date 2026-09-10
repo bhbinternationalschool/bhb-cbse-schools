@@ -247,27 +247,29 @@ const closed = (t: string) => parseWaTutorCommand(t, false);
   );
 }
 
-// --- a refusal always carries the next step ---------------------------
+// --- a refusal always carries the next step, and the RIGHT one --------
 {
-  const withBuy = composeNeedsPassText({
-    mode: "teach",
+  const base = {
+    mode: "teach" as const,
     reason: "Today's free hints are used up.",
     childName: "Asha",
-    canBuy: true,
-  });
-  assert.match(withBuy, /Today's free hints are used up\./);
-  assert.match(withBuy, /Reply \*PASS\*/);
+  };
 
-  // With no online payment, do not tell them to reply PASS — it would
-  // dead-end. Point at the office instead.
-  const noBuy = composeNeedsPassText({
-    mode: "teach",
-    reason: "Today's free hints are used up.",
-    childName: "Asha",
-    canBuy: false,
-  });
-  assert.doesNotMatch(noBuy, /Reply \*PASS\*/);
-  assert.match(noBuy, /school office/);
+  const self = composeNeedsPassText({ ...base, buy: "self" });
+  assert.match(self, /Today's free hints are used up\./);
+  assert.match(self, /Reply \*PASS\*/);
+
+  // A student's own number: point at the parent. Never "reply PASS" (it
+  // would dead-end) and never the office (the parent can fix it today).
+  const parent = composeNeedsPassText({ ...base, buy: "parent" });
+  assert.match(parent, /Ask a parent to reply \*PASS\* on their own WhatsApp/);
+  assert.doesNotMatch(parent, /^Reply \*PASS\*/m);
+  assert.doesNotMatch(parent, /school office/);
+
+  // No gateway at all: the office is the only honest route.
+  const off = composeNeedsPassText({ ...base, buy: "off" });
+  assert.match(off, /school office/);
+  assert.doesNotMatch(off, /Reply \*PASS\*/);
 }
 
 console.log("OK — waTutorBotEngine.selftest.ts");

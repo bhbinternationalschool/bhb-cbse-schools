@@ -128,8 +128,16 @@ export async function handleWaTutorInbound(opts: {
   children: SisStudent[];
   mobile10: string;
   text: string;
+  /**
+   * May this conversation buy a pass? False from a student's own number —
+   * money is a parent's decision, and the refusal then points at the
+   * parent's number instead of offering a payment link to a child.
+   */
+  canBuy?: boolean;
 }): Promise<WaTutorReply> {
   const kids = opts.children.filter((s) => s.status === "active");
+  // Buying needs both a working gateway AND a conversation allowed to spend.
+  const canBuy = opts.canBuy !== false && shouldUseCashfreeCheckout();
   const sessions = await readSessions();
   const stored = sessions.sessions.find((s) => s.mobile10 === opts.mobile10) || null;
   const session = tutorSessionExpired(stored) ? null : stored;
@@ -225,6 +233,19 @@ export async function handleWaTutorInbound(opts: {
 
   const child = childRefs[activeIndex] || childRefs[0]!;
 
+  if ((cmd.kind === "plans" || cmd.kind === "buy") && !canBuy) {
+    return {
+      handled: true,
+      replyText: shouldUseCashfreeCheckout()
+        ? [
+            "Study passes are bought by a parent, not from here.",
+            "",
+            "Ask a parent to reply *PASS* on their own WhatsApp — the one the school messages about fees.",
+          ].join("\n")
+        : "Online payment is not switched on yet — please ask the school office about a study pass.",
+    };
+  }
+
   if (cmd.kind === "plans") {
     const plans = tutorPlans();
     let pass = null;
@@ -255,13 +276,6 @@ export async function handleWaTutorInbound(opts: {
           childName: child.name,
           hasPass: false,
         }),
-      };
-    }
-    if (!shouldUseCashfreeCheckout()) {
-      return {
-        handled: true,
-        replyText:
-          "Online payment is not switched on yet — please ask the school office about a study pass.",
       };
     }
     const orderId = newTutorOrderId();
@@ -378,7 +392,11 @@ export async function handleWaTutorInbound(opts: {
           mode,
           reason: answer.reason,
           childName: child.name,
-          canBuy: shouldUseCashfreeCheckout(),
+          buy: canBuy
+            ? "self"
+            : shouldUseCashfreeCheckout()
+              ? "parent"
+              : "off",
         })
       : answer.reason,
   };

@@ -693,6 +693,50 @@ export async function handleWaUnifiedInbound(opts: {
     };
   }
 
+  // ── A student's own number ──
+  //
+  // An early return, for the same reason the RSVP tap above is one: a
+  // contact never has its flow re-selected per message, so a naive "eighth
+  // flow" would be swallowed by whatever bot the number is already in.
+  //
+  // Safe to sit ahead of identity resolution because a linked student
+  // number can never be a parent or staff number — issueStudentLinkCode
+  // refuses a number that is already on the family record — so this
+  // cannot shadow anyone. A number that is not a student's, and carries no
+  // link code, is not claimed and routing continues untouched.
+  try {
+    const { handleWaStudentInbound } = await import(
+      "@/lib/waStudentLink.server"
+    );
+    const student = await handleWaStudentInbound({
+      fromWaId: opts.fromWaId,
+      text,
+    });
+    if (student.handled) {
+      await sendBotReply({
+        mobile10,
+        displayName: opts.profileName?.trim() || "Student",
+        // The family's own category: a student's study help belongs on the
+        // parent thread as far as the desk is concerned, not in a new
+        // bucket nobody looks at.
+        category: "parent",
+        audience: "student_tutor",
+        flow: "parent",
+        text: student.replyText,
+      });
+      return {
+        replied: true,
+        escalate: false,
+        audience: "student_tutor",
+        stub: false,
+      };
+    }
+  } catch (e) {
+    // Study help for students failing must never take the whole bot with
+    // it — every parent, teacher and lead message comes through here.
+    console.error("[wa-unified] student study help failed", e);
+  }
+
   const identity = await resolveWaIdentityServer(opts.fromWaId);
   if (opts.profileName?.trim() && !identity.displayName) {
     identity.displayName = opts.profileName.trim();

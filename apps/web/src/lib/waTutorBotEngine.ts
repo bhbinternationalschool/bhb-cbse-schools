@@ -264,14 +264,24 @@ export function composeNeedsPassText(opts: {
   mode: TutorMode;
   reason: string;
   childName: string;
-  canBuy: boolean;
+  /**
+   * Who can fix this, which is a different sentence in each case:
+   *   self   — this conversation can buy. Offer PASS.
+   *   parent — a student's own number. Point at the parent, never at the
+   *            office, and never at PASS here: it would dead-end.
+   *   off    — no payment gateway configured. The office is the only route.
+   */
+  buy: "self" | "parent" | "off";
 }): string {
-  const lines = [opts.reason];
-  if (opts.canBuy) {
-    lines.push("", `Reply *PASS* to see study passes for ${opts.childName}.`);
+  const lines = [opts.reason, ""];
+  if (opts.buy === "self") {
+    lines.push(`Reply *PASS* to see study passes for ${opts.childName}.`);
+  } else if (opts.buy === "parent") {
+    lines.push(
+      "Ask a parent to reply *PASS* on their own WhatsApp — the one the school messages about fees.",
+    );
   } else {
     lines.push(
-      "",
       "Online payment is not switched on yet — please ask the school office about a study pass.",
     );
   }
