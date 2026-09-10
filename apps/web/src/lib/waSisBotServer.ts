@@ -597,6 +597,16 @@ async function buildBotReply(
   }
 }
 
+/**
+ * Is this a tap on one of the school's own template buttons?
+ *
+ * Those are answers to a question the school asked ("Already paid"), and
+ * study help must not intercept one.
+ */
+function quickReplyGate(text: string): boolean {
+  return !!matchSeedQuickReply(text);
+}
+
 export async function handleWaSisBotInbound(opts: {
   fromWaId: string;
   text: string;
@@ -710,6 +720,32 @@ export async function handleWaSisBotInbound(opts: {
         ? languageChoiceConfirmation(choice)
         : "Sorry — we could not save that just now. Please reply LANG and choose again in a few minutes.",
     );
+  }
+
+  // ── Study help (the app's tutor, on WhatsApp) ──
+  //
+  // Asked BEFORE the keyword matcher only so that an open session can claim
+  // free text — a parent typing "explain fractions" mid-session means the
+  // tutor, and the keyword matcher would read "class" in that sentence as
+  // KIDS. It never claims the school's own keywords (PAY, DUES, HUMAN…),
+  // so fees keep working mid-session; see RESERVED in waTutorBotEngine.
+  if (!quickReplyGate(text)) {
+    try {
+      const { handleWaTutorInbound } = await import("@/lib/waTutorBot.server");
+      const tutor = await handleWaTutorInbound({
+        household: hh,
+        children: childrenOf(hh),
+        mobile10,
+        text,
+      });
+      if (tutor.handled) {
+        return finishLanguageFlow(store, thread, parentMsg, tutor.replyText);
+      }
+    } catch (e) {
+      // Study help failing must never take the fee and receipt bot with
+      // it — fall through to the normal keyword flow.
+      console.error("[wa-sis-bot] study help failed", e);
+    }
   }
 
   // A tap on one of the school's own template buttons ("Already paid",

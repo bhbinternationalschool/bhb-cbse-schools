@@ -52,6 +52,7 @@ export async function POST(req: Request) {
     staffAtt: body.staffAtt ?? null,
     complaints: body.complaints ?? null,
     commands: body.commands ?? null,
+    tutor: body.tutor ?? null,
   });
   if (!result.ok) {
     return NextResponse.json({ ok: false, error: result.error }, { status: 502 });
