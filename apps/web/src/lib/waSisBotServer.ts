@@ -589,11 +589,29 @@ async function buildBotReply(
       return { escalate: true, text: composeSisHumanReply() };
     case "complaint":
       return { escalate: false, text: "Opening the complaint form…" };
-    default:
+    case "bus": {
+      const { busLocationReplyForHousehold } = await import(
+        "@/lib/parentBusLocation.server"
+      );
+      return busLocationReplyForHousehold({
+        children: kids.map((s) => ({ id: s.id, name: s.fullName })),
+        rawText,
+      });
+    }
+    default: {
+      const { householdRidesTheBus } = await import(
+        "@/lib/parentBusLocation.server"
+      );
       return {
         escalate: false,
-        text: sisBotWelcomeText(kids.length > 1),
+        // BUS is offered only to households that ride, so the 130-odd
+        // families without transport are not shown a keyword that can only
+        // tell them they have no bus.
+        text: sisBotWelcomeText(kids.length > 1, await householdRidesTheBus(
+          kids.map((s) => ({ id: s.id, name: s.fullName })),
+        )),
       };
+    }
   }
 }
 

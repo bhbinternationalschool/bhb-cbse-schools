@@ -215,6 +215,7 @@ SELFTESTS=(
   test:play-billing
   test:ai-content-report
   test:fleet-live-position
+  test:parent-bus-reply
   test:parent-dues-fallback
   test:receipt-lookup
   test:referrals
@@ -311,6 +312,10 @@ NOT_IN_SUITE=(
   # Drives a real HTTP endpoint, so it needs the dev server listening. This
   # suite must pass on a clean checkout with nothing running.
   test:wa-webhook
+  # Walks real children through the real transport desk and the real Fleet
+  # Edge feed. Needs the database, and a `server-only` stub for tsx (see the
+  # script header). Run by hand when the wording or the gating changes.
+  test:parent-bus-live
 )
 
 ORPHANS=()

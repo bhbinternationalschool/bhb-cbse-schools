@@ -4,6 +4,7 @@
  */
 
 import { formatInr } from "@/lib/masters";
+import { detectBusLocationIntent } from "@/lib/parentBusReply";
 import { TENANT } from "@/lib/types";
 
 export type SisBotQuickId =
@@ -14,7 +15,8 @@ export type SisBotQuickId =
   | "info"
   | "human"
   | "complaint"
-  | "tutor";
+  | "tutor"
+  | "bus";
 
 export const SIS_BOT_QUICK_PROMPTS: {
   id: SisBotQuickId;
@@ -29,9 +31,13 @@ export const SIS_BOT_QUICK_PROMPTS: {
   { id: "human", label: "Talk to office", waKeyword: "HUMAN" },
   { id: "complaint", label: "Raise a complaint", waKeyword: "COMPLAINT" },
   { id: "tutor", label: "Study help for your child", waKeyword: "TUTOR" },
+  { id: "bus", label: "Where is the bus", waKeyword: "BUS" },
 ];
 
-export function sisBotWelcomeText(multiChild = false): string {
+export function sisBotWelcomeText(
+  multiChild = false,
+  hasTransport = false,
+): string {
   const payHint = multiChild
     ? "• *PAY* — all children · *PAY 1* / *PAY 2* — one child (GPay / UPI)"
     : "• *PAY* — GPay / UPI pay link";
@@ -42,9 +48,9 @@ export function sisBotWelcomeText(multiChild = false): string {
     "Admission / enquiry parents: use the admissions WhatsApp separately.",
     "",
     "Reply with a keyword:",
-    ...SIS_BOT_QUICK_PROMPTS.filter((q) => q.id !== "pay").map(
-      (q) => `• *${q.waKeyword}* — ${q.label}`,
-    ),
+    ...SIS_BOT_QUICK_PROMPTS.filter(
+      (q) => q.id !== "pay" && (q.id !== "bus" || hasTransport),
+    ).map((q) => `• *${q.waKeyword}* — ${q.label}`),
     payHint,
   ].join("\n");
 }
@@ -61,6 +67,7 @@ export function detectSisBotIntent(text: string): SisBotQuickId | "unknown" {
   if (SIS_BOT_QUICK_PROMPTS.some((q) => q.id === asId)) return asId;
 
   const low = t.toLowerCase();
+  if (detectBusLocationIntent(low)) return "bus";
   if (/complain|complaint|grievance|shikayat/.test(low)) return "complaint";
   if (/^pay\b|upi|payment link|clear due/.test(low)) return "pay";
   if (/due|outstanding|balance|arrear|fee/.test(low)) return "dues";
