@@ -307,6 +307,7 @@ jobs:
           npm run test:visitor-gate
           npm run test:play-billing
           npm run test:ai-content-report
+          npm run test:fleet-live-position
           npm run test:parent-dues-fallback
           npm run test:school-whatsapp
           npm run test:upload-validation

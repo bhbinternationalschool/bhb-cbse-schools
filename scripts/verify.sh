@@ -214,6 +214,7 @@ SELFTESTS=(
   test:visitor-gate
   test:play-billing
   test:ai-content-report
+  test:fleet-live-position
   test:parent-dues-fallback
   test:receipt-lookup
   test:referrals

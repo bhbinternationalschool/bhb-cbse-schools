@@ -28,6 +28,7 @@ import {
   type RiderAction,
 } from "@/components/transport/FleetRosterPanel";
 import { ClassTransportPanel } from "@/components/transport/ClassTransportPanel";
+import { LivePositionsPanel } from "@/components/transport/LivePositionsPanel";
 import { FleetEdgeStatusStrip } from "@/components/transport/FleetEdgeStatusStrip";
 import { StaffRiderPanel } from "@/components/transport/StaffRiderPanel";
 import { StopLinkRepairPanel } from "@/components/transport/StopLinkRepairPanel";
@@ -778,6 +779,7 @@ export function TransportWorkspace() {
               <div className="mt-4">
                 <FleetEdgeStatusStrip vehicles={state.vehicles} variant="live" />
               </div>
+              <LivePositionsPanel state={state} />
               <LiveMapPanel
                 state={state}
                 sis={sis}
