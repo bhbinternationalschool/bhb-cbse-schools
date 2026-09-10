@@ -227,6 +227,8 @@ export const WA_TEMPLATE_VARIABLES: WaTemplateVariableDef[] = [
   { key: "minutesLate", label: "Minutes late", group: "Transport", sample: "20" },
   { key: "effectiveFrom", label: "Change effective from", group: "Transport", sample: "1 Sep 2026" },
   { key: "actionTaken", label: "What the school is doing", group: "Transport", sample: "A replacement bus is on the way." },
+  { key: "alertTitle", label: "Fleet alert title", group: "Transport", sample: "Bus moving outside school hours" },
+  { key: "detail", label: "Alert detail", group: "Transport", sample: "Moving at 38 km/h at 21:40 IST, outside the transport day." },
   { key: "certType", label: "Certificate type", group: "Certificates", sample: "Bonafide" },
   { key: "date", label: "Date", group: "General", sample: "4 Aug 2026" },
   { key: "time", label: "Time", group: "General", sample: "10:30 AM" },
@@ -442,6 +444,29 @@ const SEED_DEFS: SeedDef[] = [
       "नमस्ते {{guardianName}} जी 🙏\n\n❗ {{childName}} आज *{{time}}* बजे {{stopName}} पर बस *{{busNo}}* में *नहीं चढ़े*।\n\nयदि वे आज अलग से आ रहे हैं, तो कृपया *OK* लिखकर उत्तर दें ताकि हमें पता रहे कि सब ठीक है। यदि नहीं, तो कृपया तुरंत विद्यालय कार्यालय में फ़ोन करें।\n\nहम बस यह सुनिश्चित करना चाहते हैं कि आपका बच्चा सुरक्षित है। 🙏",
     footerEn: "Transport desk · Reply to this message for help",
     footerHi: "परिवहन कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
+  },
+
+  // Owner alerts from the fleet tick (fleetLive.server.ts): a bus moving
+  // outside the transport day, low fuel, a service or a paper falling due.
+  // Sent to the owners on the roster; the template exists because an owner
+  // who has not written to the school number for a day is outside Meta's
+  // 24h window, exactly when a night-time movement alert matters most.
+  {
+    familyKey: "fleet_owner_alert",
+    nameEn: "Fleet alert to owner",
+    nameHi: "वाहन चेतावनी (मालिक)",
+    module: "transport",
+    category: "UTILITY",
+    metaName: "bhb_fleet_owner_alert",
+    headerFormat: "TEXT",
+    headerTextEn: "Fleet alert",
+    headerTextHi: "वाहन चेतावनी",
+    bodyEn:
+      "🚨 *{{alertTitle}}*\n\n🚌 Vehicle: *{{busNo}}*\n🕒 {{time}}\n\n{{detail}}\n\nOpen Transport → Live in the ERP for the map. — {{schoolName}} 🙏",
+    bodyHi:
+      "🚨 *{{alertTitle}}*\n\n🚌 वाहन: *{{busNo}}*\n🕒 {{time}}\n\n{{detail}}\n\nनक़्शे के लिए ERP में Transport → Live खोलें। — {{schoolName}} 🙏",
+    footerEn: "Transport desk · automatic alert",
+    footerHi: "परिवहन कार्यालय · स्वचालित चेतावनी",
   },
 
   // ── Admissions ───────────────────────────────────────────────

@@ -1111,6 +1111,117 @@ class ChildTransportInfo {
   final TransportRequestState? request;
 }
 
+class GeoPoint {
+  const GeoPoint(this.lat, this.lng, {this.name = ""});
+  factory GeoPoint.fromJson(Map<String, dynamic> j) => GeoPoint(
+    (j["lat"] as num?)?.toDouble() ?? 0,
+    (j["lng"] as num?)?.toDouble() ?? 0,
+    name: (j["name"] as String?) ?? "",
+  );
+  final double lat;
+  final double lng;
+  final String name;
+}
+
+/// The bus's last reported position, as the server allows the family to see it.
+class BusPosition {
+  const BusPosition({
+    required this.lat,
+    required this.lng,
+    required this.speedKmh,
+    required this.courseDeg,
+    required this.recordedAt,
+    required this.ageSec,
+    required this.freshness,
+  });
+  factory BusPosition.fromJson(Map<String, dynamic> j) => BusPosition(
+    lat: (j["lat"] as num?)?.toDouble() ?? 0,
+    lng: (j["lng"] as num?)?.toDouble() ?? 0,
+    speedKmh: (j["speedKmh"] as num?)?.toDouble(),
+    courseDeg: (j["courseDeg"] as num?)?.toDouble(),
+    recordedAt: (j["recordedAt"] as String?) ?? "",
+    ageSec: (j["ageSec"] as num?)?.toInt() ?? 0,
+    freshness: (j["freshness"] as String?) ?? "stale",
+  );
+  final double lat;
+  final double lng;
+  final double? speedKmh;
+  final double? courseDeg;
+  final String recordedAt;
+  final int ageSec;
+  /// live · recent · stale
+  final String freshness;
+}
+
+class ChildBusLive {
+  const ChildBusLive({
+    required this.studentId,
+    required this.fullName,
+    required this.routeName,
+    required this.busNo,
+    required this.vehicleName,
+    required this.tracked,
+    required this.phase,
+    required this.bus,
+    required this.stop,
+    required this.school,
+    required this.path,
+    required this.etaMinutes,
+    required this.distanceKm,
+  });
+  factory ChildBusLive.fromJson(Map<String, dynamic> j) => ChildBusLive(
+    studentId: (j["studentId"] as String?) ?? "",
+    fullName: (j["fullName"] as String?) ?? "",
+    routeName: (j["routeName"] as String?) ?? "",
+    busNo: (j["busNo"] as String?) ?? "",
+    vehicleName: (j["vehicleName"] as String?) ?? "",
+    tracked: j["tracked"] == true,
+    phase: (j["phase"] as String?) ?? "off",
+    bus: j["bus"] is Map<String, dynamic>
+        ? BusPosition.fromJson(j["bus"] as Map<String, dynamic>)
+        : null,
+    stop: j["stop"] is Map<String, dynamic>
+        ? GeoPoint.fromJson(j["stop"] as Map<String, dynamic>)
+        : null,
+    school: j["school"] is Map<String, dynamic>
+        ? GeoPoint.fromJson(j["school"] as Map<String, dynamic>)
+        : const GeoPoint(0, 0),
+    path: ((j["path"] as List?) ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map(GeoPoint.fromJson)
+        .toList(),
+    etaMinutes: (j["etaMinutes"] as num?)?.toInt(),
+    distanceKm: (j["distanceKm"] as num?)?.toDouble(),
+  );
+  final String studentId;
+  final String fullName;
+  final String routeName;
+  final String busNo;
+  final String vehicleName;
+  final bool tracked;
+  /// morning · afternoon · off
+  final String phase;
+  final BusPosition? bus;
+  final GeoPoint? stop;
+  final GeoPoint school;
+  final List<GeoPoint> path;
+  final int? etaMinutes;
+  final double? distanceKm;
+}
+
+class BusLive {
+  const BusLive({required this.at, required this.children});
+  factory BusLive.fromJson(Map<String, dynamic> j) => BusLive(
+    at: (j["at"] as String?) ?? "",
+    children: ((j["children"] as List?) ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map(ChildBusLive.fromJson)
+        .toList(),
+  );
+  final String at;
+  final List<ChildBusLive> children;
+}
+
 class MyTransport {
   const MyTransport({
     required this.children,
@@ -3099,6 +3210,11 @@ class ApiClient {
 
   Future<MyTransport> fetchMyTransport() async =>
       MyTransport.fromJson(await _getData("/api/v1/transport/mine"));
+
+  /// Where each child's bus is right now — only during the transport day,
+  /// only while the tracker reports; an untracked van says so.
+  Future<BusLive> fetchBusLive() async =>
+      BusLive.fromJson(await _getData("/api/v1/transport/live"));
 
   Future<String> requestTransport({
     required String studentId,

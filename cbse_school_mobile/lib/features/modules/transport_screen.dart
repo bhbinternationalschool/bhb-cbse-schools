@@ -4,6 +4,7 @@ import "package:url_launcher/url_launcher.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
+import "bus_live_map_screen.dart";
 import "bus_routes_screen.dart";
 import "module_shell.dart";
 import "../../core/i18n/locale_controller.dart";
@@ -128,6 +129,29 @@ class _ChildCard extends StatelessWidget {
                   context.l10n.driverSNumberIsNotOn,
                   style: AppText.bodySmallMuted,
                 ),
+              const SizedBox(height: 10),
+              // The bus on a real map — the tracked buses report a position
+              // every minute; an untracked van says so on the map screen
+              // rather than hiding the button.
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.tonalIcon(
+                  onPressed: () {
+                    Haptics.tap();
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => BusLiveMapScreen(
+                          api: api,
+                          studentId: child.id,
+                          childName: child.fullName,
+                        ),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.location_on_outlined, size: 18),
+                  label: const Text("Live bus location"),
+                ),
+              ),
             ] else ...[
               Text(
                 context.l10n.notUsingSchoolTransport,

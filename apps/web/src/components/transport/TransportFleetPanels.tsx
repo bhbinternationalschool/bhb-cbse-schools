@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import Link from "next/link";
 import {
   formatInr,
@@ -928,6 +928,16 @@ export function CompliancePanel({
   );
 }
 
+type LiveBusRow = {
+  vehicleId: string;
+  name: string;
+  registrationNo: string;
+  routeName: string | null;
+  busNo: string | null;
+  tracked: boolean;
+  position: { lat: number; lng: number; recordedAt: string; ageSec: number; freshness: "live" | "recent" | "stale"; speedKmh: number | null; fuelPercent: number | null } | null;
+};
+
 export function LiveMapPanel({
   state,
   sis,
@@ -949,7 +959,47 @@ export function LiveMapPanel({
   const [lat, setLat] = useState(String(TENANT.schoolLat));
   const [lng, setLng] = useState(String(TENANT.schoolLng));
   const [layers, setLayers] = useState<TransportMapLayers>(DEFAULT_MAP_LAYERS);
-  const last = lastGpsPingByVehicle(state);
+  // Fleet Edge positions, polled every 30 s and plotted as the freshest bus
+  // pings. Telemetry lands in fleet_vehicle_positions on the server; nothing
+  // writes it into this browser's gpsPings slice, so the map reads it here.
+  const [liveBuses, setLiveBuses] = useState<LiveBusRow[]>([]);
+  const [liveAt, setLiveAt] = useState<string>("");
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const res = await fetch("/api/transport/live", { cache: "no-store" });
+        const json = (await res.json()) as { ok?: boolean; buses?: LiveBusRow[]; at?: string };
+        if (alive && json.ok && Array.isArray(json.buses)) {
+          setLiveBuses(json.buses);
+          setLiveAt(json.at || new Date().toISOString());
+        }
+      } catch {
+        /* the manual pings still plot */
+      }
+    };
+    void load();
+    const t = setInterval(() => void load(), 30_000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, []);
+  const liveState = useMemo<TransportState>(() => {
+    const pings = liveBuses
+      .filter((b) => b.position)
+      .map((b) => ({
+        id: `live_${b.vehicleId}`,
+        vehicleId: b.vehicleId,
+        lat: b.position!.lat,
+        lng: b.position!.lng,
+        recordedAt: b.position!.recordedAt,
+        source: "device" as const,
+        note: `Fleet Edge · ${b.position!.freshness}${b.position!.speedKmh != null ? ` · ${Math.round(b.position!.speedKmh)} km/h` : ""}`,
+      }));
+    return { ...state, gpsPings: [...pings, ...state.gpsPings] };
+  }, [state, liveBuses]);
+  const last = lastGpsPingByVehicle(liveState);
   const onRoad = state.vehicles.filter(
     (v) => v.isActive && v.status === "active",
   );
@@ -964,7 +1014,7 @@ export function LiveMapPanel({
     });
     const countKind = (key: keyof TransportMapLayers) =>
       buildTransportMapMarkers({
-        transport: state,
+        transport: liveState,
         sis: sis ?? null,
         masters: masters ?? null,
         academicYearCode,
@@ -1001,9 +1051,43 @@ export function LiveMapPanel({
             counts={layerCounts}
           />
         </div>
+        {liveBuses.length ? (
+          <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {liveBuses.map((b) => (
+              <li key={b.vehicleId} className="rounded-lg border border-[var(--border)] bg-[var(--surface-sunken,rgba(32,48,80,0.04))] px-3 py-2 text-[12px]">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-[var(--brand-deep)]">{b.busNo || b.name}</span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                      !b.tracked
+                        ? "bg-[rgba(32,48,80,0.08)] text-[var(--muted)]"
+                        : b.position?.freshness === "live"
+                          ? "bg-[rgba(31,122,77,0.14)] text-[var(--success,#1f7a4d)]"
+                          : b.position?.freshness === "recent"
+                            ? "bg-[rgba(197,160,40,0.18)] text-[var(--brand-deep)]"
+                            : "bg-[rgba(180,35,24,0.1)] text-[var(--danger,#b42318)]"
+                    }`}
+                  >
+                    {!b.tracked ? "no tracker" : b.position?.freshness === "live" ? "live" : b.position?.freshness === "recent" ? "recent" : "not reporting"}
+                  </span>
+                </div>
+                <div className="mt-0.5 text-[var(--muted)]">
+                  {b.registrationNo}
+                  {b.routeName ? ` · ${b.routeName}` : ""}
+                  {b.position
+                    ? ` · ${b.position.ageSec < 60 ? `${b.position.ageSec}s` : `${Math.round(b.position.ageSec / 60)} min`} ago${b.position.speedKmh != null ? ` · ${Math.round(b.position.speedKmh)} km/h` : ""}${b.position.fuelPercent != null ? ` · fuel ${Math.round(b.position.fuelPercent)}%` : ""}`
+                    : b.tracked
+                      ? ""
+                      : " · this vehicle has no GPS tracker"}
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {liveAt ? <p className="mt-1 text-[10px] text-[var(--muted)]">Positions refreshed {new Date(liveAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })} · every 30 s</p> : null}
         <div className="mt-3">
           <TransportGoogleMap
-            transport={state}
+            transport={liveState}
             sis={sis ?? null}
             masters={masters ?? null}
             academicYearCode={academicYearCode}
