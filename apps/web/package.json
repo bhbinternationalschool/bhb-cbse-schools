@@ -134,6 +134,7 @@
     "test:wa-audience-spec": "npx tsx src/lib/waAudienceSpec.selftest.ts",
     "test:wa-tutor-bot": "npx tsx src/lib/waTutorBotEngine.selftest.ts",
     "test:wa-student-link": "npx tsx src/lib/waStudentLinkEngine.selftest.ts",
+    "test:automation-approvals": "npx tsx src/lib/automationApprovals.selftest.ts",
     "test:wa-transport-track": "npx tsx src/lib/waTransportTrack.selftest.ts",
     "test:wa-usage-cost": "npx tsx src/lib/waUsageCost.selftest.ts",
     "test:wa-command-templates": "npx tsx src/lib/waCommandTemplates.selftest.ts",

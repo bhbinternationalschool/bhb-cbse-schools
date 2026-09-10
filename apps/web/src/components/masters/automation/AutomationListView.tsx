@@ -6,6 +6,7 @@ import {
   pendingApprovals,
   type AutomationModule,
   type AutomationRule,
+  type AutomationRun,
   type AutomationState,
 } from "@/lib/automation";
 import { describeCronExpr, describeIntervalMinutes } from "@/lib/automationSchedule";
@@ -23,6 +24,30 @@ import {
 } from "./automationUi";
 
 type ListTab = "active" | "paused" | "approvals" | "runs";
+
+/**
+ * What a run's numbers mean, in words.
+ *
+ * "proposed 146 · dispatched 0" is exactly right and reads as a failure.
+ * Nothing on the row said the run was simply waiting for someone to press
+ * Approve & send, so a queue of ordinary pending work looked like a broken
+ * automation. The status word carries the meaning now and the counts follow
+ * it.
+ */
+function runStateLabel(r: AutomationRun): string {
+  switch (r.status) {
+    case "proposed":
+      return "waiting for approval";
+    case "running":
+      return "approved, sending";
+    case "completed":
+      return "sent";
+    case "cancelled":
+      return "rejected";
+    default:
+      return "failed";
+  }
+}
 
 function scheduleLabel(r: AutomationRule): string {
   if (r.triggerType === "schedule" && r.cronExpr) {
@@ -326,8 +351,11 @@ export function AutomationListView({
                     <span className="font-semibold text-[var(--brand-deep)]">
                       {rule?.name || r.ruleId}
                     </span>{" "}
-                    · {r.status} · proposed {r.stats.proposed} · dispatched{" "}
-                    {r.stats.dispatched}
+                    · {runStateLabel(r)} · {r.stats.proposed} proposed
+                    {r.status === "proposed" || r.status === "cancelled"
+                      ? ""
+                      : ` · ${r.stats.dispatched} sent`}
+                    {r.stats.failed ? ` · ${r.stats.failed} failed` : ""}
                     {r.error ? (
                       <span className="text-rose-700"> — {r.error}</span>
                     ) : null}
