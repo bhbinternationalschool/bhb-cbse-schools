@@ -8,7 +8,11 @@
  */
 import assert from "node:assert/strict";
 import {
+  BRIEF_TEMPLATE_VARIABLES,
   absencesNeedingAttention,
+  briefTemplateProblems,
+  briefTemplateValueProblem,
+  composeBriefTemplateVariables,
   attendancePercent,
   briefFilename,
   briefTitle,
@@ -216,6 +220,77 @@ function brief(over: Partial<DailyBrief> = {}): DailyBrief {
   assert.equal(briefTitle("2026-09-10"), "Daily brief · 10 Sep 2026");
   assert.equal(briefTitle("rubbish"), "Daily brief · rubbish");
   assert.equal(briefFilename("2026-09-10"), "daily-brief-2026-09-10.pdf");
+}
+
+// --- template parameters: Meta refuses newlines, tabs, wide spaces ----
+{
+  // A refused template is a 6 PM message that never arrives and leaves no
+  // trace on the phone, so this is checked here rather than at Meta.
+  const busy = brief({
+    collection: {
+      recorded: true, totalPaise: 4_85_000, receipts: 7,
+      byMode: [
+        { key: "cash", label: "Cash", paise: 3_00_000, count: 5 },
+        { key: "upi", label: "UPI", paise: 1_85_000, count: 2 },
+      ],
+    },
+    expenses: { recorded: true, totalPaise: 1_20_000, vouchers: 3, byHead: [] },
+    students: {
+      classes: [], present: 210, absent: 30, strength: 256,
+      classesMarked: 15, classesUnmarked: 1,
+    },
+    staff: {
+      marked: true, present: 30, absent: 5, strength: 35,
+      absentRows: [
+        { staffId: "s1", name: "A", empCode: "", reason: "unexplained", leaveTypeLabel: "", requestId: "", fromDate: "", toDate: "", days: 0 },
+      ],
+      pending: [
+        { staffId: "s2", name: "B", empCode: "", reason: "leave_pending", leaveTypeLabel: "Casual", requestId: "lr1", fromDate: "2026-09-11", toDate: "2026-09-11", days: 1 },
+      ],
+    },
+    defaulters: { rows: [], totalPaise: 0, noMobile: 0 },
+  });
+
+  const vars = composeBriefTemplateVariables(busy);
+  assert.deepEqual(
+    Object.keys(vars).sort(),
+    [...BRIEF_TEMPLATE_VARIABLES].sort(),
+    "the template declares exactly these variables",
+  );
+  assert.deepEqual(briefTemplateProblems(vars), [], "every value must be sendable");
+  for (const [key, value] of Object.entries(vars)) {
+    assert.ok(value.length > 0, `${key} must not be empty — Meta refuses a blank parameter`);
+    assert.doesNotMatch(value, /[\n\r\t]/, `${key} must be one line`);
+    assert.doesNotMatch(value, / {5,}/, `${key} must not have five spaces in a row`);
+  }
+  assert.match(vars.collection, /Cash ₹3,000, UPI ₹1,850/);
+  assert.match(vars.leavePending, /1 waiting — reply LEAVE to decide/);
+  assert.match(vars.students, /1 section not marked/);
+  assert.match(vars.staff, /1 absent without approved leave/);
+
+  // A quiet day still fills every parameter: "nothing recorded" is a value,
+  // and an empty one would be refused.
+  const quiet = composeBriefTemplateVariables(brief());
+  assert.deepEqual(briefTemplateProblems(quiet), []);
+  assert.match(quiet.collection, /nothing recorded at the desk today/);
+  assert.match(quiet.leavePending, /none waiting/);
+  assert.match(quiet.defaulters, /none overdue today/);
+}
+
+// --- the guard itself -------------------------------------------------
+{
+  assert.equal(briefTemplateValueProblem("fine"), null);
+  assert.equal(briefTemplateValueProblem(""), "empty");
+  assert.equal(briefTemplateValueProblem("a\nb"), "contains a newline");
+  assert.equal(briefTemplateValueProblem("a\tb"), "contains a tab");
+  assert.equal(briefTemplateValueProblem("a     b"), "more than four consecutive spaces");
+  assert.equal(briefTemplateValueProblem("a    b"), null, "four is allowed");
+  assert.equal(briefTemplateValueProblem("x".repeat(1025)), "longer than 1024 characters");
+  assert.deepEqual(
+    briefTemplateProblems({ collection: "a\nb" }).map((p) => p.key),
+    ["schoolName", "briefDate", "collection", "expenses", "students", "staff", "leavePending", "defaulters"],
+    "a missing variable is a problem too, not just a malformed one",
+  );
 }
 
 console.log("  ok");

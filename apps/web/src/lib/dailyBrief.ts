@@ -285,3 +285,130 @@ export function emptyBrief(date: string, schoolName = ""): DailyBrief {
     aiNote: "",
   };
 }
+
+
+/* ------------------------------------------------------------------ *
+ * The template send
+ *
+ * composeBriefSummary above is one multi-line block, which is right for a
+ * free-form reply inside the 24-hour window and WRONG for a template.
+ * Meta refuses a template PARAMETER containing a newline, a tab, or more
+ * than four consecutive spaces — so the 6 PM push cannot pass the whole
+ * brief as one {{summary}}. The template body carries the skeleton and
+ * each number goes in as its own single-line value.
+ *
+ * Every value below is therefore built to be one line, and
+ * briefTemplateValueProblem() is the guard a selftest and the sender both
+ * use: a value that would be refused is caught here rather than at Meta,
+ * where the only symptom is a 6 PM message that never arrived.
+ * ------------------------------------------------------------------ */
+
+/** The variables bhb_daily_brief declares, in the order it reads. */
+export const BRIEF_TEMPLATE_VARIABLES = [
+  "schoolName",
+  "briefDate",
+  "collection",
+  "expenses",
+  "students",
+  "staff",
+  "leavePending",
+  "defaulters",
+] as const;
+
+export type BriefTemplateVariable = (typeof BRIEF_TEMPLATE_VARIABLES)[number];
+
+/** Why Meta would refuse this parameter, or null when it is fine. */
+export function briefTemplateValueProblem(value: string): string | null {
+  if (value === "") return "empty";
+  if (/[\n\r]/.test(value)) return "contains a newline";
+  if (/\t/.test(value)) return "contains a tab";
+  if (/ {5,}/.test(value)) return "more than four consecutive spaces";
+  if (value.length > 1024) return "longer than 1024 characters";
+  return null;
+}
+
+/** One line, whatever the input did. */
+function oneLine(text: string): string {
+  return text.replace(/[\n\r\t]+/g, " ").replace(/ {2,}/g, " ").trim();
+}
+
+export function composeBriefTemplateVariables(
+  b: DailyBrief,
+): Record<BriefTemplateVariable, string> {
+  const pct = attendancePercent(b.students);
+  const spct = staffPercent(b.staff);
+  const attention = absencesNeedingAttention(b.staff);
+
+  return {
+    schoolName: oneLine(b.schoolName || "School"),
+    briefDate: oneLine(briefTitle(b.date).replace("Daily brief · ", "")),
+    collection: oneLine(
+      b.collection.recorded
+        ? `${rupees(b.collection.totalPaise)} in ${b.collection.receipts} receipt${
+            b.collection.receipts === 1 ? "" : "s"
+          }${
+            b.collection.byMode.length
+              ? ` — ${b.collection.byMode
+                  .map((m) => `${tenderModeLabel(m.key)} ${rupees(m.paise)}`)
+                  .join(", ")}`
+              : ""
+          }`
+        : "nothing recorded at the desk today",
+    ),
+    expenses: oneLine(
+      b.expenses.recorded
+        ? `${rupees(b.expenses.totalPaise)} across ${b.expenses.vouchers} voucher${
+            b.expenses.vouchers === 1 ? "" : "s"
+          }`
+        : "no voucher entered today",
+    ),
+    students: oneLine(
+      pct === null
+        ? "no register marked today"
+        : `${pct}% of those marked — ${b.students.present} in, ${b.students.absent} absent${
+            b.students.classesUnmarked
+              ? `, ${b.students.classesUnmarked} section${
+                  b.students.classesUnmarked === 1 ? "" : "s"
+                } not marked`
+              : ""
+          }`,
+    ),
+    staff: oneLine(
+      spct === null
+        ? "not marked today"
+        : `${b.staff.present} of ${b.staff.strength} present${
+            attention.length
+              ? `, ${attention.length} absent without approved leave`
+              : ""
+          }`,
+    ),
+    leavePending: oneLine(
+      b.staff.pending.length
+        ? `${b.staff.pending.length} waiting — reply LEAVE to decide`
+        : "none waiting",
+    ),
+    defaulters: oneLine(
+      b.defaulters.rows.length
+        ? `${b.defaulters.rows.length} families owe ${rupees(b.defaulters.totalPaise)} — list attached`
+        : "none overdue today",
+    ),
+  };
+}
+
+/**
+ * Every parameter Meta would refuse, keyed by variable.
+ *
+ * The sender checks this before posting and skips the send with a readable
+ * reason rather than letting Meta reject it, because a rejected template
+ * is indistinguishable from a quiet evening.
+ */
+export function briefTemplateProblems(
+  values: Record<string, string>,
+): { key: string; problem: string }[] {
+  const out: { key: string; problem: string }[] = [];
+  for (const key of BRIEF_TEMPLATE_VARIABLES) {
+    const problem = briefTemplateValueProblem(values[key] ?? "");
+    if (problem) out.push({ key, problem });
+  }
+  return out;
+}

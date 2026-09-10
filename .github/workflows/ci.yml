@@ -334,6 +334,7 @@ jobs:
           npm run test:wa-audience-spec
           npm run test:wa-tutor-bot
           npm run test:wa-student-link
+          npm run test:leave-command
           npm run test:daily-brief
           npm run test:automation-approvals
           npm run test:wa-transport-track

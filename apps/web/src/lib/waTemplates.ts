@@ -193,6 +193,13 @@ export const WA_TEMPLATE_VARIABLES: WaTemplateVariableDef[] = [
   { key: "payLink", label: "Payment link", group: "Fees", sample: "https://school.example/pay" },
   { key: "payToken", label: "Pay-now button token (link id + code)", group: "Fees", sample: "pl_8f3k2x9a.PL-7K2M", hint: "Fills the Pay now button's URL; the sender supplies it from the payment link." },
   { key: "receiptNo", label: "Receipt number", group: "Fees", sample: "RCP-1042" },
+  { key: "briefDate", label: "Brief date", group: "School", sample: "10 Sep 2026" },
+  { key: "collection", label: "Day's collection line", group: "Fees", sample: "₹4,850 in 7 receipts — Cash ₹3,000, UPI ₹1,850" },
+  { key: "expenses", label: "Day's expenses line", group: "Fees", sample: "₹1,200 across 3 vouchers" },
+  { key: "students", label: "Student attendance line", group: "Student", sample: "88% of those marked — 210 in, 30 absent" },
+  { key: "staff", label: "Staff attendance line", group: "Staff", sample: "30 of 35 present, 2 absent without approved leave" },
+  { key: "leavePending", label: "Leave requests waiting", group: "Staff", sample: "2 waiting — reply LEAVE to decide" },
+  { key: "defaulters", label: "Overdue families line", group: "Fees", sample: "146 families owe ₹1,46,000 — list attached" },
   { key: "trackToken", label: "Bus tracking button token", group: "Transport", sample: "stu_7f21.1789412400.k3Qw", hint: "Fills the Track the bus button's URL; the sender supplies it and it dies at the end of the run." },
   { key: "trackLink", label: "Bus tracking link", group: "Transport", sample: "https://school.example/track/bus/stu_7f21.1789412400.k3Qw" },
   { key: "paidOn", label: "Paid on date", group: "Fees", sample: "4 Aug 2026" },
@@ -530,6 +537,37 @@ const SEED_DEFS: SeedDef[] = [
     footerHi: "परिवहन कार्यालय · स्वचालित चेतावनी",
   },
 
+  {
+    /*
+      The 6 PM brief for whoever runs the school.
+
+      A DOCUMENT header because the detail — class by class, expenses by
+      head, tomorrow's calling list — cannot fit in a 1024-character body
+      and should not sit in a chat message anyway: it carries parents'
+      phone numbers and fee balances.
+
+      The body is a fixed skeleton with one single-line value per number,
+      NOT one {{summary}} variable. Meta refuses a parameter containing a
+      newline, so a multi-line summary would be rejected at send time and
+      the only symptom would be a 6 PM message that never arrived.
+
+      UTILITY, not MARKETING: this reports on the day's own transactions to
+      the people accountable for them.
+    */
+    familyKey: "leadership_daily_brief",
+    nameEn: "Daily brief for leadership",
+    nameHi: "दैनिक रिपोर्ट (प्रबंधन)",
+    module: "comms",
+    category: "UTILITY",
+    metaName: "bhb_daily_brief",
+    headerFormat: "DOCUMENT",
+    bodyEn:
+      "📊 *{{schoolName}}* — {{briefDate}}\n\n💰 Collection: {{collection}}\n🧾 Expenses: {{expenses}}\n🎒 Students: {{students}}\n👩‍🏫 Staff: {{staff}}\n📝 Leave: {{leavePending}}\n📞 Overdue: {{defaulters}}\n\nThe full brief is attached — class by class, expenses by head, and tomorrow's calling list.",
+    bodyHi:
+      "📊 *{{schoolName}}* — {{briefDate}}\n\n💰 वसूली: {{collection}}\n🧾 खर्च: {{expenses}}\n🎒 छात्र: {{students}}\n👩‍🏫 स्टाफ: {{staff}}\n📝 अवकाश: {{leavePending}}\n📞 बकाया: {{defaulters}}\n\nपूरी रिपोर्ट संलग्न है — कक्षावार उपस्थिति, मदवार खर्च और कल के लिए कॉलिंग सूची।",
+    footerEn: "Office · confidential",
+    footerHi: "कार्यालय · गोपनीय",
+  },
   // ── Admissions ───────────────────────────────────────────────
   {
     familyKey: "admissions_registration_invite",

@@ -134,6 +134,21 @@ create_job "bhb-wa-automation-tick" "*/30 8-19 * * 1-6" \
   "${APP_URL}/api/wa/automation/tick" \
   "Asia/Kolkata" "300s"
 
+# The 6 PM brief for owner, principal and office head: the day's collection
+# with its mode break-up, expenses by head, attendance class by class, staff
+# absences split into approved leave / awaiting a decision / nothing on file,
+# and tomorrow's calling list — headlines on WhatsApp, detail in an attached
+# PDF.
+#
+# 18:00 on school days, and once: unlike the birthday tick this is NOT
+# idempotent by clock, it is idempotent by clientMessageId
+# (dailybrief:<date>:<mobile>), so a retry after a timeout will not send a
+# second copy. Deadline 300s because the brief reads the fee ledger, the
+# registers, the leave queue and the defaulters, then renders a PDF.
+create_job "bhb-daily-brief" "0 18 * * 1-6" \
+  "${APP_URL}/api/reports/daily-brief/send" \
+  "Asia/Kolkata" "300s"
+
 create_job "bhb-bigquery-nightly-sync" "0 2 * * *" \
   "${APP_URL}/api/analytics/bigquery-sync/tick" \
   "Asia/Kolkata" "300s"

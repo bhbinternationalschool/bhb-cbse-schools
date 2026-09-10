@@ -3,6 +3,7 @@
  */
 
 import { handleWaGateVisit, type WaGateVisitPending } from "@/lib/waGateVisit.server";
+import { handleLeaveCommand } from "@/lib/leaveCommand.server";
 import {
   composeActiveFlowHint,
   composeCollectPurposePrompt,
@@ -256,6 +257,37 @@ async function delegateActiveFlow(
         stub: att.stub,
         error: att.error,
       };
+    }
+  }
+
+  // Leave decisions from the 6 PM brief — LEAVE, LEAVE OK 1, LEAVE NO 2.
+  //
+  // Ahead of the ERP command desk deliberately: that desk sends free text
+  // to a model, and "LEAVE OK 1" is a three-word instruction with a
+  // person's leave on the end of it. It must be parsed, not interpreted.
+  // parseLeaveCommand returns not_a_command for anything that is not
+  // exactly this shape — "leave application for tomorrow" and friends fall
+  // straight through to the desk as before.
+  if (flow === "teacher" || flow === "staff" || flow === "owner") {
+    const staffRole =
+      identity.roles.find((r) => r.kind === flow && r.staff) ??
+      identity.roles.find((r) => r.staff);
+    const leave = await handleLeaveCommand({
+      text: opts.text,
+      staff: staffRole?.staff ?? null,
+      by: session.displayName || identity.displayName || mobile10,
+    });
+    if (leave.handled) {
+      const ok = await sendBotReply({
+        mobile10,
+        displayName: session.displayName || identity.displayName,
+        category: categoryForUnifiedAudience(flow, flow),
+        audience: "staff_leave",
+        flow,
+        text: leave.text,
+        inbound: { text: opts.text, waMessageId: opts.waMessageId },
+      });
+      return { replied: ok, escalate: false, audience: "staff_leave", stub: !ok };
     }
   }
 
