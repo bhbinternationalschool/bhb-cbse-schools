@@ -313,6 +313,7 @@ export const BRIEF_TEMPLATE_VARIABLES = [
   "staff",
   "leavePending",
   "defaulters",
+  "stillOpen",
 ] as const;
 
 export type BriefTemplateVariable = (typeof BRIEF_TEMPLATE_VARIABLES)[number];
@@ -392,7 +393,32 @@ export function composeBriefTemplateVariables(
         ? `${b.defaulters.rows.length} families owe ${rupees(b.defaulters.totalPaise)} — list attached`
         : "none overdue today",
     ),
+    /*
+      The AI paragraph, flattened to one line and trimmed.
+
+      It goes in the MESSAGE and not only the PDF because it is the part
+      that says what to do next, and a phone at 6 PM is where that lands.
+      One line because Meta refuses a parameter with a newline; trimmed
+      because the whole body shares a 1024-character cap and the numbers
+      above it must not be pushed out by a long paragraph. The full text is
+      in the PDF, uncut.
+
+      Never empty: Meta refuses a blank parameter, so a clean day says so.
+    */
+    stillOpen: oneLine(
+      truncate(b.aiNote.trim() || composePendingFallback(b), 320) ||
+        "nothing outstanding",
+    ),
   };
+}
+
+function truncate(text: string, max: number): string {
+  const t = text.trim();
+  if (t.length <= max) return t;
+  // Cut at a word, not mid-number: "146 famil…" reads as a broken figure.
+  const cut = t.slice(0, max);
+  const lastSpace = cut.lastIndexOf(" ");
+  return `${(lastSpace > max * 0.6 ? cut.slice(0, lastSpace) : cut).replace(/[,;.\s]+$/, "")}… (full list in the PDF)`;
 }
 
 /**
@@ -411,4 +437,121 @@ export function briefTemplateProblems(
     if (problem) out.push({ key, problem });
   }
   return out;
+}
+
+
+/* ------------------------------------------------------------------ *
+ * What is still open
+ *
+ * The AI paragraph is the one part of this brief a model writes, so the
+ * facts it writes from are computed HERE and passed in. The model
+ * prioritises and phrases; it never counts. That is the same contract
+ * generateLeadershipDigestJson already states, and the reason the brief
+ * can carry a sentence about the day without risking a number nobody can
+ * reconcile.
+ *
+ * Which also means: when the model is unavailable, the facts are still
+ * true and the section still has something to say. A missing API key
+ * costs the school a nicer paragraph, not the list.
+ * ------------------------------------------------------------------ */
+
+export type PendingFact = {
+  /** Sorted on: 1 is most urgent. Ordering is ours, not the model's. */
+  rank: number;
+  text: string;
+};
+
+/**
+ * The day's loose ends, in the order somebody should care about them.
+ *
+ * Ranked rather than listed: a child unaccounted for outranks an unentered
+ * expense voucher, and handing the model an unordered pile invites it to
+ * lead with whatever sounds most dramatic.
+ */
+export function pendingFacts(b: DailyBrief): PendingFact[] {
+  const out: PendingFact[] = [];
+
+  const unexplained = b.staff.absentRows.filter((r) => r.reason === "unexplained");
+  if (unexplained.length) {
+    out.push({
+      rank: 1,
+      text: `${unexplained.length} staff absent with no leave on file: ${unexplained
+        .map((r) => r.name)
+        .slice(0, 6)
+        .join(", ")}`,
+    });
+  }
+
+  if (b.students.classesUnmarked > 0) {
+    const children = b.students.classes
+      .filter((c) => !c.marked)
+      .reduce((s, c) => s + c.strength, 0);
+    out.push({
+      rank: 2,
+      text: `${b.students.classesUnmarked} section${
+        b.students.classesUnmarked === 1 ? "" : "s"
+      } never marked attendance today, covering ${children} children`,
+    });
+  }
+
+  if (b.staff.pending.length) {
+    out.push({
+      rank: 3,
+      text: `${b.staff.pending.length} leave request${
+        b.staff.pending.length === 1 ? "" : "s"
+      } waiting for a decision, the earliest starting ${b.staff.pending[0]!.fromDate}`,
+    });
+  }
+
+  if (!b.staff.marked) {
+    out.push({ rank: 4, text: "staff attendance was never marked today" });
+  }
+
+  if (b.defaulters.rows.length) {
+    out.push({
+      rank: 5,
+      text: `${b.defaulters.rows.length} families overdue on fees, ${rupees(
+        b.defaulters.totalPaise,
+      )} in total`,
+    });
+  }
+
+  if (b.defaulters.noMobile > 0) {
+    out.push({
+      rank: 6,
+      text: `${b.defaulters.noMobile} overdue famil${
+        b.defaulters.noMobile === 1 ? "y has" : "ies have"
+      } no usable phone number on file, so nobody can ring them`,
+    });
+  }
+
+  if (!b.collection.recorded) {
+    out.push({ rank: 7, text: "no fee receipt was raised at the desk today" });
+  }
+
+  if (!b.expenses.recorded) {
+    out.push({ rank: 8, text: "no expense voucher was entered today" });
+  }
+
+  return out.sort((a, b2) => a.rank - b2.rank);
+}
+
+/** The facts as the model receives them — one per line, most urgent first. */
+export function pendingFactsBlock(b: DailyBrief): string {
+  return pendingFacts(b)
+    .map((f) => `- ${f.text}`)
+    .join("\n");
+}
+
+/**
+ * The section when no model is available, or when one fails.
+ *
+ * Reads as a list because that is what it is; the AI version reads as a
+ * sentence. Neither invents anything the other does not have.
+ */
+export function composePendingFallback(b: DailyBrief): string {
+  const facts = pendingFacts(b);
+  if (facts.length === 0) return "";
+  const head = facts.length === 1 ? "One thing is still open: " : "Still open: ";
+  return `${head}${facts.map((f) => f.text).join("; ")}.`;
 }

@@ -199,6 +199,7 @@ export const WA_TEMPLATE_VARIABLES: WaTemplateVariableDef[] = [
   { key: "students", label: "Student attendance line", group: "Student", sample: "88% of those marked — 210 in, 30 absent" },
   { key: "staff", label: "Staff attendance line", group: "Staff", sample: "30 of 35 present, 2 absent without approved leave" },
   { key: "leavePending", label: "Leave requests waiting", group: "Staff", sample: "2 waiting — reply LEAVE to decide" },
+  { key: "stillOpen", label: "What is still open (AI note)", group: "School", sample: "Two sections never marked attendance today, covering 38 children" },
   { key: "defaulters", label: "Overdue families line", group: "Fees", sample: "146 families owe ₹1,46,000 — list attached" },
   { key: "trackToken", label: "Bus tracking button token", group: "Transport", sample: "stu_7f21.1789412400.k3Qw", hint: "Fills the Track the bus button's URL; the sender supplies it and it dies at the end of the run." },
   { key: "trackLink", label: "Bus tracking link", group: "Transport", sample: "https://school.example/track/bus/stu_7f21.1789412400.k3Qw" },
@@ -562,9 +563,9 @@ const SEED_DEFS: SeedDef[] = [
     metaName: "bhb_daily_brief",
     headerFormat: "DOCUMENT",
     bodyEn:
-      "📊 *{{schoolName}}* — {{briefDate}}\n\n💰 Collection: {{collection}}\n🧾 Expenses: {{expenses}}\n🎒 Students: {{students}}\n👩‍🏫 Staff: {{staff}}\n📝 Leave: {{leavePending}}\n📞 Overdue: {{defaulters}}\n\nThe full brief is attached — class by class, expenses by head, and tomorrow's calling list.",
+      "📊 *{{schoolName}}* — {{briefDate}}\n\n💰 Collection: {{collection}}\n🧾 Expenses: {{expenses}}\n🎒 Students: {{students}}\n👩‍🏫 Staff: {{staff}}\n📝 Leave: {{leavePending}}\n📞 Overdue: {{defaulters}}\n\n🔎 Still open: {{stillOpen}}\n\nThe full brief is attached — class by class, expenses by head, and tomorrow's calling list.",
     bodyHi:
-      "📊 *{{schoolName}}* — {{briefDate}}\n\n💰 वसूली: {{collection}}\n🧾 खर्च: {{expenses}}\n🎒 छात्र: {{students}}\n👩‍🏫 स्टाफ: {{staff}}\n📝 अवकाश: {{leavePending}}\n📞 बकाया: {{defaulters}}\n\nपूरी रिपोर्ट संलग्न है — कक्षावार उपस्थिति, मदवार खर्च और कल के लिए कॉलिंग सूची।",
+      "📊 *{{schoolName}}* — {{briefDate}}\n\n💰 वसूली: {{collection}}\n🧾 खर्च: {{expenses}}\n🎒 छात्र: {{students}}\n👩‍🏫 स्टाफ: {{staff}}\n📝 अवकाश: {{leavePending}}\n📞 बकाया: {{defaulters}}\n\n🔎 अभी लंबित: {{stillOpen}}\n\nपूरी रिपोर्ट संलग्न है — कक्षावार उपस्थिति, मदवार खर्च और कल के लिए कॉलिंग सूची।",
     footerEn: "Office · confidential",
     footerHi: "कार्यालय · गोपनीय",
   },

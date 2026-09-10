@@ -36,6 +36,7 @@ import {
 } from "@/lib/dailyBrief";
 import { buildDailyBrief, istToday } from "@/lib/dailyBrief.server";
 import { signBriefLinkToken } from "@/lib/dailyBriefLinkToken.server";
+import { generateBriefPendingNote } from "@/lib/dailyBriefAi.server";
 
 const FAMILY_KEY = "leadership_daily_brief";
 
@@ -118,9 +119,15 @@ export async function sendDailyBrief(
     };
   }
 
+  // The AI paragraph is the one part allowed to fail without stopping the
+  // brief: a note about loose ends is worth having and is not worth losing
+  // the day's numbers over. generateBriefPendingNote already falls back to
+  // the deterministic list, so this catch is the belt to that braces.
   let brief: DailyBrief;
   try {
-    brief = await buildDailyBrief({ dateIso: date });
+    const base = await buildDailyBrief({ dateIso: date });
+    const aiNote = await generateBriefPendingNote(base).catch(() => "");
+    brief = { ...base, aiNote };
   } catch (e) {
     return {
       ok: false,

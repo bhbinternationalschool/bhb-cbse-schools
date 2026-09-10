@@ -13,6 +13,9 @@ import {
   briefTemplateProblems,
   briefTemplateValueProblem,
   composeBriefTemplateVariables,
+  composePendingFallback,
+  pendingFacts,
+  pendingFactsBlock,
   attendancePercent,
   briefFilename,
   briefTitle,
@@ -267,6 +270,9 @@ function brief(over: Partial<DailyBrief> = {}): DailyBrief {
   assert.match(vars.leavePending, /1 waiting — reply LEAVE to decide/);
   assert.match(vars.students, /1 section not marked/);
   assert.match(vars.staff, /1 absent without approved leave/);
+  // The AI paragraph rides in the message too, flattened and trimmed.
+  assert.ok(vars.stillOpen.length > 0);
+  assert.doesNotMatch(vars.stillOpen, /[\n\r]/);
 
   // A quiet day still fills every parameter: "nothing recorded" is a value,
   // and an empty one would be refused.
@@ -275,6 +281,10 @@ function brief(over: Partial<DailyBrief> = {}): DailyBrief {
   assert.match(quiet.collection, /nothing recorded at the desk today/);
   assert.match(quiet.leavePending, /none waiting/);
   assert.match(quiet.defaulters, /none overdue today/);
+  // A quiet day still fills stillOpen — Meta refuses a blank parameter —
+  // and on this one the honest content is the unrecorded desks.
+  assert.ok(quiet.stillOpen.length > 0);
+  assert.match(quiet.stillOpen, /no fee receipt was raised|nothing outstanding|never marked/);
 }
 
 // --- the guard itself -------------------------------------------------
@@ -288,9 +298,123 @@ function brief(over: Partial<DailyBrief> = {}): DailyBrief {
   assert.equal(briefTemplateValueProblem("x".repeat(1025)), "longer than 1024 characters");
   assert.deepEqual(
     briefTemplateProblems({ collection: "a\nb" }).map((p) => p.key),
-    ["schoolName", "briefDate", "collection", "expenses", "students", "staff", "leavePending", "defaulters"],
+    ["schoolName", "briefDate", "collection", "expenses", "students", "staff", "leavePending", "defaulters", "stillOpen"],
     "a missing variable is a problem too, not just a malformed one",
   );
+}
+
+// --- what is still open: computed here, never by the model -----------
+{
+  const messy = brief({
+    collection: { recorded: false, totalPaise: 0, receipts: 0, byMode: [] },
+    expenses: { recorded: false, totalPaise: 0, vouchers: 0, byHead: [] },
+    students: {
+      classes: [
+        { classId: "c1", sectionId: "a", label: "Class 1 · A", present: 14, absent: 2, unmarked: 0, strength: 16, marked: true },
+        { classId: "c2", sectionId: "a", label: "Class 2 · A", present: 0, absent: 0, unmarked: 18, strength: 18, marked: false },
+        { classId: "c3", sectionId: "a", label: "Class 3 · A", present: 0, absent: 0, unmarked: 20, strength: 20, marked: false },
+      ],
+      present: 14, absent: 2, strength: 54, classesMarked: 1, classesUnmarked: 2,
+    },
+    staff: {
+      marked: true, present: 30, absent: 3, strength: 35,
+      absentRows: [
+        { staffId: "s1", name: "Seema Verma", empCode: "E1", reason: "unexplained", leaveTypeLabel: "", requestId: "", fromDate: "", toDate: "", days: 0 },
+        { staffId: "s2", name: "Ravi Kumar", empCode: "E2", reason: "unexplained", leaveTypeLabel: "", requestId: "", fromDate: "", toDate: "", days: 0 },
+        { staffId: "s3", name: "Anita Singh", empCode: "E3", reason: "on_leave", leaveTypeLabel: "Sick", requestId: "", fromDate: "2026-09-09", toDate: "2026-09-12", days: 4 },
+      ],
+      pending: [
+        { staffId: "s4", name: "Ramesh", empCode: "E4", reason: "leave_pending", leaveTypeLabel: "Casual", requestId: "lr1", fromDate: "2026-09-11", toDate: "2026-09-11", days: 1 },
+      ],
+    },
+    defaulters: {
+      rows: [
+        { studentId: "st1", name: "A", fatherName: "F", classLabel: "Class 5", duePaise: 5_00_000, mobile: "9000000001", guardianName: "G" },
+      ],
+      totalPaise: 5_00_000, noMobile: 2,
+    },
+  });
+
+  const facts = pendingFacts(messy);
+  // Ranked, not piled: a child unaccounted for outranks an unentered
+  // voucher, and an unordered list invites the model to lead with whatever
+  // sounds most dramatic.
+  assert.match(facts[0]!.text, /2 staff absent with no leave on file: Seema Verma, Ravi Kumar/);
+  assert.match(facts[1]!.text, /2 sections never marked attendance today, covering 38 children/);
+  assert.match(facts[2]!.text, /1 leave request waiting for a decision, the earliest starting 2026-09-11/);
+  assert.ok(
+    facts.findIndex((f) => /no expense voucher/.test(f.text)) >
+      facts.findIndex((f) => /staff absent/.test(f.text)),
+    "money paperwork ranks below a person nobody can account for",
+  );
+  // An approved absence is not a loose end.
+  assert.ok(!facts.some((f) => /Anita Singh/.test(f.text)));
+  assert.match(pendingFactsBlock(messy), /^- 2 staff absent/);
+
+  const fallback = composePendingFallback(messy);
+  assert.match(fallback, /^Still open: 2 staff absent with no leave on file/);
+  assert.match(fallback, /no expense voucher was entered today\.$/);
+}
+
+// --- a clean day has nothing to say, and says nothing ----------------
+{
+  const clean = brief({
+    collection: { recorded: true, totalPaise: 1000, receipts: 1, byMode: [] },
+    expenses: { recorded: true, totalPaise: 500, vouchers: 1, byHead: [] },
+    students: {
+      classes: [{ classId: "c1", sectionId: "a", label: "Class 1 · A", present: 16, absent: 0, unmarked: 0, strength: 16, marked: true }],
+      present: 16, absent: 0, strength: 16, classesMarked: 1, classesUnmarked: 0,
+    },
+    staff: { marked: true, present: 35, absent: 0, strength: 35, absentRows: [], pending: [] },
+    defaulters: { rows: [], totalPaise: 0, noMobile: 0 },
+  });
+  assert.deepEqual(pendingFacts(clean), []);
+  assert.equal(
+    composePendingFallback(clean),
+    "",
+    "an empty 'still open' section must not appear at all",
+  );
+  assert.equal(pendingFactsBlock(clean), "");
+}
+
+// --- a long AI paragraph is trimmed, never allowed to push the numbers
+//     out of Meta's 1024-character body ---------------------------------
+{
+  const wordy = brief({
+    aiNote:
+      "Two sections never marked attendance today covering thirty eight children, and two staff members are absent with no leave on file at all. " +
+      "One leave request is waiting for a decision starting tomorrow. " +
+      "One hundred and forty six families are overdue on fees for a total of one lakh forty six thousand rupees, and fourteen of them have no usable telephone number on file so nobody is able to ring them at all this week. " +
+      "No expense voucher was entered today and no fee receipt was raised at the desk either.",
+  });
+  const v = composeBriefTemplateVariables(wordy);
+  assert.ok(v.stillOpen.length <= 360, `trimmed, got ${v.stillOpen.length}`);
+  assert.match(v.stillOpen, /full list in the PDF/);
+  assert.doesNotMatch(v.stillOpen, /[\n\r]/);
+  assert.deepEqual(briefTemplateProblems(v), []);
+  // Cut at a word: "146 famil…" would read as a broken figure.
+  assert.doesNotMatch(v.stillOpen, /\d…/);
+}
+
+// --- one loose end reads as one, not as a list -----------------------
+{
+  const one = brief({
+    collection: { recorded: true, totalPaise: 1000, receipts: 1, byMode: [] },
+    expenses: { recorded: true, totalPaise: 500, vouchers: 1, byHead: [] },
+    students: {
+      classes: [{ classId: "c1", sectionId: "a", label: "Class 1 · A", present: 16, absent: 0, unmarked: 0, strength: 16, marked: true }],
+      present: 16, absent: 0, strength: 16, classesMarked: 1, classesUnmarked: 0,
+    },
+    staff: {
+      marked: true, present: 34, absent: 0, strength: 35, absentRows: [],
+      pending: [
+        { staffId: "s4", name: "Ramesh", empCode: "E4", reason: "leave_pending", leaveTypeLabel: "Casual", requestId: "lr1", fromDate: "2026-09-20", toDate: "2026-09-20", days: 1 },
+      ],
+    },
+    defaulters: { rows: [], totalPaise: 0, noMobile: 0 },
+  });
+  assert.equal(pendingFacts(one).length, 1);
+  assert.match(composePendingFallback(one), /^One thing is still open: 1 leave request/);
 }
 
 console.log("  ok");
