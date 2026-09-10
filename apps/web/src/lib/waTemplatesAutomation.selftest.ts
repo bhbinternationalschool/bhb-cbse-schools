@@ -18,8 +18,10 @@ import {
   markRuleTested,
   pendingApprovals,
   setRuleEnabled,
+  normalizeAutomationState,
   setRuleExecutionMode,
   undispatchedApprovals,
+  updateAutomationRule,
 } from "./automation";
 
 function assert(cond: unknown, msg: string) {
@@ -166,6 +168,30 @@ function main() {
   assert(
     doneRun?.status === "completed" && doneRun.stats.dispatched === 1,
     "dispatch result is what the run reports",
+  );
+
+  // The fee threshold is a number the resolver reads, not a phrase in the
+  // audience label. It survives normalize and is settable per rule.
+  const feeRule = emptyAutomation().rules.find((r) => r.module === "fees")!;
+  assert(feeRule.minAmountPaise === 0, "seeded fee rule has no floor");
+  const withFloor = updateAutomationRule(emptyAutomation(), feeRule.id, {
+    minAmountPaise: 500000,
+  });
+  assert(
+    withFloor.rules.find((r) => r.id === feeRule.id)?.minAmountPaise === 500000,
+    "fee floor is set on the rule",
+  );
+  assert(
+    normalizeAutomationState(withFloor).rules.find((r) => r.id === feeRule.id)
+      ?.minAmountPaise === 500000,
+    "fee floor survives normalize",
+  );
+  assert(
+    normalizeAutomationState({
+      version: 1,
+      rules: [{ ...feeRule, minAmountPaise: -5 } as never],
+    }).rules.find((r) => r.id === feeRule.id)?.minAmountPaise === 0,
+    "a negative floor normalizes to no floor",
   );
 
   // Pressing "Run evaluation now" twice must not message the same families

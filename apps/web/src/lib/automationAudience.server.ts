@@ -150,6 +150,7 @@ function perTickRecipientCap(): number {
 async function feeRecipients(
   kind: "overdue" | "due_soon",
   todayIso: string,
+  minAmountPaise: number,
 ): Promise<AutomationRecipient[]> {
   await Promise.all([ensureSisHydratedServer(), ensureFeesHydratedServer()]);
   const sis = loadSis();
@@ -174,11 +175,15 @@ async function feeRecipients(
       if (!d.earliestDueOn || d.earliestDueOn > horizon) continue;
       if (d.openAmountPaise <= 0) continue;
     }
+    const amountPaise =
+      kind === "overdue" ? d.overdueAmountPaise : d.openAmountPaise;
+    // The rule's own floor. A family under it is not a defaulter worth
+    // chasing on WhatsApp — ₹200 outstanding is a conversation at the
+    // counter, not a reminder that lands on a parent's phone.
+    if (minAmountPaise > 0 && amountPaise < minAmountPaise) continue;
     const hh = householdOf(sis.households ?? [], d.householdId);
     const mobile = householdWhatsApp(hh) || hh?.mobile || "";
     if (!mobile) continue;
-    const amountPaise =
-      kind === "overdue" ? d.overdueAmountPaise : d.openAmountPaise;
     out.push({
       mobile,
       fallbackMobile: hh?.altMobile || undefined,
@@ -303,16 +308,17 @@ export async function resolveAutomationAudienceServer(
 ): Promise<AutomationAudience> {
   const todayIso = opts?.todayIso || new Date().toISOString().slice(0, 10);
   const limit = Math.max(1, opts?.limit ?? perTickRecipientCap());
+  const minAmountPaise = Math.max(0, Math.round(rule.minAmountPaise || 0));
   const key = automationAudienceKey(rule);
 
   try {
     let recipients: AutomationRecipient[];
     switch (key) {
       case "fee_overdue":
-        recipients = await feeRecipients("overdue", todayIso);
+        recipients = await feeRecipients("overdue", todayIso, minAmountPaise);
         break;
       case "fee_due_soon":
-        recipients = await feeRecipients("due_soon", todayIso);
+        recipients = await feeRecipients("due_soon", todayIso, minAmountPaise);
         break;
       case "admission_followup":
         recipients = await admissionRecipients("followup", todayIso);
@@ -339,6 +345,7 @@ export async function resolveAutomationAudienceServer(
     const capped = kept.slice(0, limit);
     const note =
       `${capped.length} recipient${capped.length === 1 ? "" : "s"} from live data` +
+      (minAmountPaise > 0 ? ` · at least ${formatInr(minAmountPaise)} due` : "") +
       (skippedOptOut ? ` · ${skippedOptOut} opted out (STOP)` : "") +
       (kept.length > capped.length
         ? ` · capped at ${limit} for this run, the rest go on the next tick`
