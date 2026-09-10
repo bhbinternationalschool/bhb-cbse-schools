@@ -56,7 +56,10 @@ export function AutomationEditView({
   ) => void;
   onUpdate: (
     patch: Partial<
-      Pick<AutomationRule, "name" | "description" | "audienceSummary">
+      Pick<
+        AutomationRule,
+        "name" | "description" | "audienceSummary" | "minAmountPaise"
+      >
     >,
   ) => void;
   onForceEvaluate: () => void;
@@ -68,6 +71,10 @@ export function AutomationEditView({
   const [name, setName] = useState(rule.name);
   const [description, setDescription] = useState(rule.description);
   const [audienceSummary, setAudienceSummary] = useState(rule.audienceSummary);
+  // Held in rupees because that is what the office types; stored in paise.
+  const [minAmount, setMinAmount] = useState(
+    rule.minAmountPaise ? String(Math.round(rule.minAmountPaise / 100)) : "",
+  );
 
   useEffect(() => {
     setCron(rule.cronExpr);
@@ -77,6 +84,9 @@ export function AutomationEditView({
     setName(rule.name);
     setDescription(rule.description);
     setAudienceSummary(rule.audienceSummary);
+    setMinAmount(
+      rule.minAmountPaise ? String(Math.round(rule.minAmountPaise / 100)) : "",
+    );
   }, [
     rule.id,
     rule.cronExpr,
@@ -86,6 +96,7 @@ export function AutomationEditView({
     rule.name,
     rule.description,
     rule.audienceSummary,
+    rule.minAmountPaise,
   ]);
 
   const linkedTemplate = useMemo(() => {
@@ -225,6 +236,35 @@ export function AutomationEditView({
             }}
           />
 
+          {rule.module === "fees" ? (
+            <label className="block text-[11px] font-semibold text-[var(--muted)]">
+              Only if at least (₹)
+              <input
+                className={`${autoInp} mt-1`}
+                type="number"
+                min={0}
+                step={100}
+                inputMode="numeric"
+                placeholder="0 — every overdue family"
+                value={minAmount}
+                disabled={readOnly}
+                onChange={(e) => setMinAmount(e.target.value)}
+                onBlur={() => {
+                  const rupees = Math.max(0, Math.round(Number(minAmount) || 0));
+                  const paise = rupees * 100;
+                  if (paise !== rule.minAmountPaise) {
+                    onUpdate({ minAmountPaise: paise });
+                  }
+                  setMinAmount(rupees ? String(rupees) : "");
+                }}
+              />
+              <span className="mt-1 block font-normal text-[10px]">
+                A family owing less than this is left for the fee counter, not
+                messaged. Blank or 0 means every overdue family is reminded.
+              </span>
+            </label>
+          ) : null}
+
           <p className="text-[11px] text-[var(--muted)]">
             Action: {rule.actionType}
             {rule.templateFamilyKey
@@ -241,6 +281,15 @@ export function AutomationEditView({
                   : "—"}
             <br />
             Audience: {audienceSummaryLabel(audienceSummary)}
+            {rule.module === "fees" ? (
+              <>
+                {" "}
+                ·{" "}
+                {rule.minAmountPaise
+                  ? `at least ₹${Math.round(rule.minAmountPaise / 100)} due`
+                  : "any amount due"}
+              </>
+            ) : null}
             <br />
             Tested:{" "}
             {rule.testedAt

@@ -70,6 +70,17 @@ export type AutomationRule = {
   templateFamilyKey: string;
   templateLanguage: WaTemplateLanguage;
   audienceSummary: string;
+  /**
+   * Smallest balance, in paise, that earns this message. 0 = no floor.
+   *
+   * The office used to write the threshold into `audienceSummary` — the
+   * live fee rule read "Parents with pending fee balance > ₹5,000" — where
+   * it was a label and nothing more: the tick chased every overdue family,
+   * including one owing ₹200. A number the resolver actually reads.
+   *
+   * Only the fee audiences use it; the others ignore it.
+   */
+  minAmountPaise: number;
   quietHours: QuietHours;
   executionMode: AutomationExecutionMode;
   testedAt: string;
@@ -169,6 +180,7 @@ const SEED_RULES: SeedRule[] = [
     templateFamilyKey: "fees_stage_reminder",
     templateLanguage: "en",
     audienceSummary: "Households with overdue fees (stages S1–S4)",
+    minAmountPaise: 0,
     quietHours: defaultQuietHours(),
     executionMode: "approval_first",
   },
@@ -186,6 +198,7 @@ const SEED_RULES: SeedRule[] = [
     templateFamilyKey: "fees_soft_reminder",
     templateLanguage: "en",
     audienceSummary: "Dues within next 3 days",
+    minAmountPaise: 0,
     quietHours: defaultQuietHours(),
     executionMode: "approval_first",
   },
@@ -203,6 +216,7 @@ const SEED_RULES: SeedRule[] = [
     templateFamilyKey: "admissions_followup",
     templateLanguage: "en",
     audienceSummary: "Open leads with overdue follow-up",
+    minAmountPaise: 0,
     quietHours: defaultQuietHours(),
     executionMode: "approval_first",
   },
@@ -220,6 +234,7 @@ const SEED_RULES: SeedRule[] = [
     templateFamilyKey: "admissions_fee_reminder",
     templateLanguage: "en",
     audienceSummary: "Leads with unpaid/partial registration fee",
+    minAmountPaise: 0,
     quietHours: defaultQuietHours(),
     executionMode: "approval_first",
   },
@@ -237,6 +252,7 @@ const SEED_RULES: SeedRule[] = [
     templateFamilyKey: "",
     templateLanguage: "en",
     audienceSummary: "Queued campaign messages due now",
+    minAmountPaise: 0,
     quietHours: { ...defaultQuietHours(), enabled: false },
     executionMode: "approval_first",
   },
@@ -254,6 +270,7 @@ const SEED_RULES: SeedRule[] = [
     templateFamilyKey: "attendance_absent",
     templateLanguage: "en",
     audienceSummary: "Parents of students marked absent today",
+    minAmountPaise: 0,
     quietHours: defaultQuietHours(),
     executionMode: "approval_first",
   },
@@ -271,6 +288,7 @@ const SEED_RULES: SeedRule[] = [
     templateFamilyKey: "homework_published",
     templateLanguage: "en",
     audienceSummary: "Class parents",
+    minAmountPaise: 0,
     quietHours: defaultQuietHours(),
     executionMode: "approval_first",
   },
@@ -288,6 +306,7 @@ const SEED_RULES: SeedRule[] = [
     templateFamilyKey: "exams_datesheet",
     templateLanguage: "en",
     audienceSummary: "Exam cohort parents",
+    minAmountPaise: 0,
     quietHours: defaultQuietHours(),
     executionMode: "approval_first",
   },
@@ -305,6 +324,7 @@ const SEED_RULES: SeedRule[] = [
     templateFamilyKey: "ptm_invite",
     templateLanguage: "en",
     audienceSummary: "PTM eligible parents",
+    minAmountPaise: 0,
     quietHours: defaultQuietHours(),
     executionMode: "approval_first",
   },
@@ -322,6 +342,7 @@ const SEED_RULES: SeedRule[] = [
     templateFamilyKey: "leave_student_status",
     templateLanguage: "en",
     audienceSummary: "Leave requester / guardian",
+    minAmountPaise: 0,
     quietHours: defaultQuietHours(),
     executionMode: "approval_first",
   },
@@ -339,6 +360,7 @@ const SEED_RULES: SeedRule[] = [
     templateFamilyKey: "vault_expiry",
     templateLanguage: "en",
     audienceSummary: "Document owners / office",
+    minAmountPaise: 0,
     quietHours: defaultQuietHours(),
     executionMode: "approval_first",
   },
@@ -356,6 +378,7 @@ const SEED_RULES: SeedRule[] = [
     templateFamilyKey: "comms_notice",
     templateLanguage: "en",
     audienceSummary: "Notice audience",
+    minAmountPaise: 0,
     quietHours: defaultQuietHours(),
     executionMode: "approval_first",
   },
@@ -391,6 +414,7 @@ function normalizeRule(raw: Partial<AutomationRule> | null): AutomationRule | nu
     templateFamilyKey: String(raw.templateFamilyKey || ""),
     templateLanguage: raw.templateLanguage === "hi" ? "hi" : "en",
     audienceSummary: String(raw.audienceSummary || ""),
+    minAmountPaise: Math.max(0, Math.round(Number(raw.minAmountPaise) || 0)),
     quietHours: normalizeQuiet(raw.quietHours),
     executionMode:
       raw.executionMode === "auto" && raw.testedAt
@@ -555,6 +579,7 @@ export function updateRuleSchedule(
       | "templateLanguage"
       | "quietHours"
       | "audienceSummary"
+      | "minAmountPaise"
       | "enabled"
     >
   >,
@@ -588,6 +613,7 @@ export type CreateAutomationRuleOpts = {
   templateFamilyKey?: string;
   templateLanguage?: WaTemplateLanguage;
   audienceSummary?: string;
+  minAmountPaise?: number;
   enabled?: boolean;
 };
 
@@ -611,6 +637,7 @@ export function createAutomationRule(
     templateFamilyKey: opts.templateFamilyKey || "",
     templateLanguage: opts.templateLanguage || "en",
     audienceSummary: opts.audienceSummary || "",
+    minAmountPaise: opts.minAmountPaise || 0,
     quietHours: defaultQuietHours(),
     executionMode: "approval_first",
     nextRunAt: "",
@@ -642,6 +669,7 @@ export function updateAutomationRule(
       | "templateFamilyKey"
       | "templateLanguage"
       | "audienceSummary"
+      | "minAmountPaise"
       | "quietHours"
       | "enabled"
     >
