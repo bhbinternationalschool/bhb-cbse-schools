@@ -5,7 +5,7 @@
  */
 
 import { createHmac, timingSafeEqual } from "crypto";
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import {
   parseGenericBspInbound,
   parseMetaWebhookInbound,
@@ -191,7 +191,18 @@ export async function POST(req: Request) {
         console.warn("[wa/webhook] recordInboundMedia failed", e);
       }
     }
-    const r = await handleWaUnifiedInbound({
+    // A voice note takes about six seconds to transcribe, and Meta re-delivers
+    // a webhook it did not get a prompt answer for. So it is answered now and
+    // done afterwards: after() runs once the response has been sent, which
+    // Cloud Run only keeps CPU for because cloudbuild.yaml sets
+    // --no-cpu-throttling. Read that comment before removing this.
+    //
+    // Only voice notes. Every other message is fast and stays synchronous, so
+    // its result is still reported in this response and nothing that works
+    // today changes shape.
+    const isVoiceNote =
+      msg.media?.mediaType === "audio" && !(msg.text || "").trim();
+    const dispatch = {
       fromWaId: msg.fromWaId,
       text: msg.text,
       waMessageId: msg.waMessageId,
@@ -211,7 +222,31 @@ export async function POST(req: Request) {
               fileName: msg.media.filename,
             }
           : null,
-    });
+    };
+
+    if (isVoiceNote) {
+      after(async () => {
+        try {
+          await handleWaUnifiedInbound(dispatch);
+        } catch (e) {
+          // Nothing is waiting on this any more, so a throw here would be
+          // invisible. The parent is left with no reply at all, which is the
+          // one outcome this whole path exists to prevent — say so loudly in
+          // the logs.
+          console.error("[wa/webhook] voice note processing failed", msg.waMessageId, e);
+        }
+      });
+      results.push({
+        audience: "voice_note_deferred",
+        from: msg.fromWaId,
+        escalate: false,
+        replied: false,
+        stub: false,
+      });
+      continue;
+    }
+
+    const r = await handleWaUnifiedInbound(dispatch);
     results.push({
       audience: r.audience,
       from: msg.fromWaId,

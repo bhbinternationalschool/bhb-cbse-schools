@@ -118,6 +118,19 @@ steps:
       # the next deploy put it straight back to 1.
       - --min-instances=0
       - --max-instances=20
+      # CPU stays allocated after a response is returned, so work scheduled
+      # with next/server's after() actually runs. Without it Cloud Run
+      # throttles the container the moment the response is sent and may shut
+      # it down: a voice note handed to after() would sometimes never be
+      # transcribed and never escalated, which is worse than a slow handler.
+      #
+      # It is not free. CPU is billed for the whole instance lifetime rather
+      # than for request time only, so this gives back part of what
+      # --min-instances=0 above saved — the office-hours share of it, not the
+      # around-the-clock share. Watch the Cloud Run line on the next bill; if
+      # it bites, the alternative shape is a durable queue drained by a
+      # scheduler tick, at the cost of the parent waiting for the tick.
+      - --no-cpu-throttling
       # SUPABASE_SERVICE_ROLE_KEY, CRON_SECRET, WA_DISPATCH_SECRET,
       # MIRROR_SYNC_SECRET, WHATSAPP_TOKEN, WHATSAPP_VERIFY_TOKEN,
       # GOOGLE_MAPS_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY, and
