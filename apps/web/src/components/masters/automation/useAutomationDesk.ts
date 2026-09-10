@@ -87,6 +87,7 @@ export function useAutomationDesk() {
         sent?: number;
         failed?: number;
         deferred?: number;
+        simulated?: number;
         state?: AutomationState;
       };
       if (json.state) {
@@ -100,6 +101,14 @@ export function useAutomationDesk() {
       }
       if (decision === "rejected") return flash("Rejected");
       if (decision === "snoozed") return flash("Snoozed 24h");
+      if (json.simulated && !json.sent) {
+        flash(
+          json.error ||
+            "Nothing was sent — no WhatsApp provider is configured. The card is still waiting.",
+          6000,
+        );
+        return;
+      }
       const parts = [
         `${json.sent ?? 0} sent`,
         json.failed ? `${json.failed} failed` : "",
@@ -142,6 +151,8 @@ export function useAutomationDesk() {
         error?: string;
         sent?: number;
         failed?: number;
+        simulated?: number;
+        staleCards?: number;
         pendingApprovals?: number;
         audienceErrors?: { ruleId: string; error: string }[];
         state?: AutomationState;
@@ -159,6 +170,10 @@ export function useAutomationDesk() {
         `${json.pendingApprovals ?? 0} awaiting approval`,
         json.sent ? `${json.sent} sent` : "",
         json.failed ? `${json.failed} failed` : "",
+        json.simulated && !json.sent
+          ? `${json.simulated} stubbed — no WhatsApp provider configured`
+          : "",
+        json.staleCards ? `${json.staleCards} card(s) too old to send` : "",
         json.audienceErrors?.length
           ? `${json.audienceErrors.length} rule(s) had no audience`
           : "",

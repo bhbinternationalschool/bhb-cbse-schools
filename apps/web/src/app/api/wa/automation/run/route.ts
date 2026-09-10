@@ -43,6 +43,8 @@ export async function POST(req: Request) {
     sent: report.sent,
     failed: report.failed,
     deferred: report.deferred,
+    simulated: report.simulated,
+    staleCards: report.stale,
     audienceErrors: report.audienceErrors,
     persisted: report.persisted,
     persistError: report.persistError,

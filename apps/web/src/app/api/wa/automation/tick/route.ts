@@ -61,11 +61,15 @@ export async function POST(req: Request) {
     sent: report.sent,
     failed: report.failed,
     deferred: report.deferred,
+    simulated: report.simulated,
+    staleCards: report.stale,
     audienceErrors: report.audienceErrors,
     stateSource: body.state ? "request" : "db",
     persisted: report.persisted,
     persistError: report.persistError,
     state: report.state,
-    hint: "Auto-run rules are sent by this tick. Approval-first rules wait in Masters → Automation and are sent by the next tick once approved.",
+    hint: report.simulated
+      ? "Nothing was sent — dryRun, or no WhatsApp provider is configured. The cards are still approved and a real tick will send them."
+      : "Auto-run rules are sent by this tick. Approval-first rules wait in Masters → Automation and are sent by the next tick once approved.",
   });
 }
