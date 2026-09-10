@@ -59,7 +59,7 @@ const MODULE_CATALOG: { href: string; label: string; keywords: string }[] = [
   { href: "/exams", label: "Exams", keywords: "marks results promotion" },
   { href: "/certificates", label: "Certificates", keywords: "tc bonafide character" },
   { href: "/comms", label: "Communications", keywords: "notices circulars news gallery" },
-  { href: "/comms?tab=channels", label: "Class WhatsApp", keywords: "class channel homework teacher whatsapp" },
+  { href: "/comms?tab=whatsapp&wa=classes", label: "Class WhatsApp", keywords: "class channel homework teacher whatsapp" },
   { href: "/comms?tab=notices", label: "Notices", keywords: "circular announcement" },
   { href: "/comms?tab=news", label: "News", keywords: "school news stories" },
   { href: "/comms?tab=gallery", label: "Gallery", keywords: "photos albums events" },

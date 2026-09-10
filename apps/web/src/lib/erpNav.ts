@@ -319,7 +319,7 @@ export const HUB_GROUPS: HubGroup[] = [
         tone: "navy",
       },
       {
-        href: "/comms?tab=channels",
+        href: "/comms?tab=whatsapp&wa=classes",
         title: "Class WhatsApp",
         blurb: "Teacher → ERP",
         detail: "Class channels: teachers post HW/notices on WA; ERP fills modules and notifies parents.",
