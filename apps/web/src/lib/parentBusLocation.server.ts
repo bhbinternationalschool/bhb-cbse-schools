@@ -193,3 +193,86 @@ export async function busLocationReplyForHousehold(opts: {
 
   return { text: joinBusReplies(parts), escalate };
 }
+
+
+/**
+ * One child's bus position, for the public tracking page.
+ *
+ * Separate from busLocationReplyForHousehold because that composes a
+ * WhatsApp sentence and this feeds a screen that refreshes — but it walks
+ * the same path and, crucially, applies the same parentPositionVerdict. The
+ * link's signature says who may look; this says whether there is anything
+ * they may be shown. A page that rendered the last known fix regardless
+ * would send a parent to where the bus was twenty minutes ago.
+ */
+export type BusTrackFix =
+  | {
+      ok: true;
+      busLabel: string;
+      stopName: string;
+      lat: number;
+      lng: number;
+      speedKmh: number | null;
+      motion: ReturnType<typeof vehicleMotion>;
+      ageLabel: string;
+      atIso: string;
+      mapsUrl: string;
+      freshness: string;
+    }
+  | {
+      ok: false;
+      reason: "no-vehicle" | "no-feed" | "too-old" | "off-trip" | "desk-unreadable";
+      busLabel: string;
+    };
+
+export async function busTrackFixForStudent(
+  studentId: string,
+  nowMs = Date.now(),
+): Promise<BusTrackFix> {
+  const state = await readDeskState();
+  // A failed desk read is not "no bus": telling a bus family they have no
+  // transport is the exact mistake this file was written to fix.
+  if (!state) return { ok: false, reason: "desk-unreadable", busLabel: "" };
+
+  const ay = currentAcademicYearCode(loadMasters());
+  const summary = studentTransportSummary(studentId, state, { academicYearCode: ay });
+  if (!summary.assigned) return { ok: false, reason: "no-vehicle", busLabel: "" };
+
+  const busLabel =
+    summary.busNo || summary.routeName || summary.routeCode || summary.vehicleReg;
+
+  const live = await readLiveVehiclePositions();
+  let position: LivePosition | null = null;
+  if (live.ok) {
+    const want = normalizeVehicleKey(summary.vehicleReg);
+    for (const p of live.positions) {
+      // Either key, same reason as the reply path: two of the six vehicles
+      // carry a chassis number where a plate belongs.
+      const keys = [
+        normalizeVehicleKey(p.vehicleRef),
+        normalizeVehicleKey(p.registrationNumber),
+      ];
+      if (want && keys.includes(want)) {
+        position = p.position;
+        break;
+      }
+    }
+  }
+
+  const verdict = parentPositionVerdict({ position, hasVehicle: true, nowMs });
+  if (!verdict.share) return { ok: false, reason: verdict.reason, busLabel };
+
+  return {
+    ok: true,
+    busLabel,
+    stopName: summary.stopName,
+    lat: verdict.position.lat,
+    lng: verdict.position.lng,
+    speedKmh: verdict.position.speed,
+    motion: vehicleMotion(verdict.position),
+    ageLabel: positionAgeLabel(verdict.position.at, nowMs),
+    atIso: verdict.position.at,
+    mapsUrl: mapsLink(verdict.position),
+    freshness: verdict.freshness,
+  };
+}

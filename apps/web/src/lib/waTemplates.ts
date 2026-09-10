@@ -193,6 +193,8 @@ export const WA_TEMPLATE_VARIABLES: WaTemplateVariableDef[] = [
   { key: "payLink", label: "Payment link", group: "Fees", sample: "https://school.example/pay" },
   { key: "payToken", label: "Pay-now button token (link id + code)", group: "Fees", sample: "pl_8f3k2x9a.PL-7K2M", hint: "Fills the Pay now button's URL; the sender supplies it from the payment link." },
   { key: "receiptNo", label: "Receipt number", group: "Fees", sample: "RCP-1042" },
+  { key: "trackToken", label: "Bus tracking button token", group: "Transport", sample: "stu_7f21.1789412400.k3Qw", hint: "Fills the Track the bus button's URL; the sender supplies it and it dies at the end of the run." },
+  { key: "trackLink", label: "Bus tracking link", group: "Transport", sample: "https://school.example/track/bus/stu_7f21.1789412400.k3Qw" },
   { key: "paidOn", label: "Paid on date", group: "Fees", sample: "4 Aug 2026" },
   { key: "stage", label: "Reminder stage", group: "Fees", sample: "2" },
   { key: "registerLink", label: "Registration link", group: "Admissions", sample: "https://school.example/register" },
@@ -339,6 +341,18 @@ const PAID_HI: WaTemplateButton = { type: "QUICK_REPLY", text: "भुगता�
 export const WA_PAY_NOW_URL = "https://bhbinternational.school/pay/go/{{payToken}}";
 const PAY_NOW_EN: WaTemplateButton = { type: "URL", text: "Pay now", url: WA_PAY_NOW_URL };
 const PAY_NOW_HI: WaTemplateButton = { type: "URL", text: "अभी भुगतान करें", url: WA_PAY_NOW_URL };
+/**
+ * "Track the bus" that opens THIS child's live position.
+ *
+ * One variable, at the end, same rule as the pay button. The token binds one
+ * student and expires with the run it was issued in — /track/bus checks the
+ * signature, the expiry, AND whether the bus is on a run before it shows
+ * anything, so an old link reveals nothing rather than the driver's house.
+ */
+export const WA_BUS_TRACK_URL =
+  "https://bhbinternational.school/track/bus/{{trackToken}}";
+const TRACK_BUS_EN: WaTemplateButton = { type: "URL", text: "Track the bus", url: WA_BUS_TRACK_URL };
+const TRACK_BUS_HI: WaTemplateButton = { type: "URL", text: "बस ट्रैक करें", url: WA_BUS_TRACK_URL };
 /** "Pay now" for reminders that carry no link of their own: the parent portal's fee page. */
 const PAY_PORTAL_EN: WaTemplateButton = { type: "URL", text: "Pay now", url: WA_PARENT_APP_URL };
 const PAY_PORTAL_HI: WaTemplateButton = { type: "URL", text: "अभी भुगतान करें", url: WA_PARENT_APP_URL };
@@ -446,6 +460,53 @@ const SEED_DEFS: SeedDef[] = [
     footerHi: "परिवहन कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
   },
 
+  // The two marks an attendant actually makes on every run. "Did not board"
+  // has existed since 2026-09-08 and is the alarm; these two are the ordinary
+  // days, and they are what a parent at work is waiting for.
+  //
+  // Only the pickup message carries a tracking button. Once a child is off
+  // the bus a live vehicle position tells the family nothing about their own
+  // child and everything about a vehicle full of other people's — so the
+  // drop message deliberately has no link on it. Do not "make it
+  // consistent" by adding one.
+  {
+    familyKey: "transport_boarded",
+    nameEn: "Child boarded the bus",
+    nameHi: "बच्चा बस में चढ़ गया",
+    module: "transport",
+    category: "UTILITY",
+    metaName: "bhb_transport_boarded",
+    headerFormat: "TEXT",
+    headerTextEn: "On the bus",
+    headerTextHi: "बस में",
+    buttons: [TRACK_BUS_EN],
+    buttonsHi: [TRACK_BUS_HI],
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\n🚌 {{childName}} boarded bus *{{busNo}}* at *{{stopName}}* at *{{time}}*.\n\nTap *Track the bus* below to see where it is right now. The link works while the bus is on its run.\n\nIf the button does not open, use this link:\n🔗 {{trackLink}}\n\nHave a good day! 🌼",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\n🚌 {{childName}} *{{time}}* बजे *{{stopName}}* से बस *{{busNo}}* में चढ़ गए।\n\nबस अभी कहाँ है यह देखने के लिए नीचे *बस ट्रैक करें* दबाएँ। यह लिंक बस के रास्ते में रहने तक काम करता है।\n\nयदि बटन न खुले, तो यह लिंक इस्तेमाल करें:\n🔗 {{trackLink}}\n\nआपका दिन शुभ हो! 🌼",
+    footerEn: "Transport desk · Reply to this message for help",
+    footerHi: "परिवहन कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
+  },
+  {
+    familyKey: "transport_dropped",
+    nameEn: "Child got off the bus",
+    nameHi: "बच्चा बस से उतर गया",
+    module: "transport",
+    category: "UTILITY",
+    metaName: "bhb_transport_dropped",
+    headerFormat: "TEXT",
+    headerTextEn: "Off the bus",
+    headerTextHi: "बस से उतरे",
+    buttons: [CALL_ME_EN],
+    buttonsHi: [CALL_ME_HI],
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\n✅ {{childName}} got off bus *{{busNo}}* at *{{stopName}}* at *{{time}}*.\n\nIf anything does not look right, tap below and the transport desk will call you back.",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\n✅ {{childName}} *{{time}}* बजे *{{stopName}}* पर बस *{{busNo}}* से उतर गए।\n\nयदि कुछ ठीक न लगे, तो नीचे दबाएँ — परिवहन कार्यालय आपको फ़ोन करेगा।",
+    footerEn: "Transport desk · Reply to this message for help",
+    footerHi: "परिवहन कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
+  },
   // Owner alerts from the fleet tick (fleetLive.server.ts): a bus moving
   // outside the transport day, low fuel, a service or a paper falling due.
   // Sent to the owners on the roster; the template exists because an owner

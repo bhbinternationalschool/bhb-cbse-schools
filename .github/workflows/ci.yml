@@ -334,6 +334,7 @@ jobs:
           npm run test:wa-audience-spec
           npm run test:wa-tutor-bot
           npm run test:wa-student-link
+          npm run test:wa-transport-track
           npm run test:wa-usage-cost
           npm run test:wa-command-templates
           npm run test:wa-sequences
