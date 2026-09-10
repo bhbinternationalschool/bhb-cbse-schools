@@ -28,9 +28,11 @@ import { deliveryLaddersFor, ladderStage } from "@/lib/waDeliveryStatus.server";
 import { loadWaCostRates } from "@/lib/waCostRates.server";
 import { loadWaTemplatesServer } from "@/lib/waTemplatesRead.server";
 import {
+  istMonthKey,
   splitWaUsageByAudience,
   summariseAiUsage,
   summariseWaUsage,
+  summariseWaUsageByMonth,
   summariseWaUsageByStudent,
   type WaAiCall,
   type WaBillCategory,
@@ -41,11 +43,13 @@ import {
   type WaUsageAudienceSection,
   type WaUsageByStudent,
   type WaUsageMessage,
+  type WaUsageMonth,
   type WaUsageStudentRef,
   type WaUsageSummary,
 } from "@/lib/waUsageCost";
 
 const MAX_ROWS = 5000;
+const YEAR_MONTHS = 12;
 
 function emptyByStudent(): WaUsageByStudent {
   return {
@@ -84,6 +88,11 @@ export type WaUsageReport = {
   byAudience: WaUsageAudienceSection[];
   /** Active staff numbers the classifier had to work with. 0 = it could not. */
   staffNumbersKnown: number;
+  /**
+   * The last twelve IST calendar months, whatever window is selected — a
+   * school budgets a year, and the fee-installment spikes only show here.
+   */
+  byMonth: WaUsageMonth[];
   /**
    * false = the roster could not be read, so nothing could be attributed.
    * The per-class tables say so rather than showing an empty school.
@@ -214,6 +223,13 @@ async function buildAttribution(): Promise<Attribution> {
   };
 }
 
+/** The first instant of the IST month `n` months back. */
+function monthsAgoIso(n: number): string {
+  const ist = new Date(Date.now() + 330 * 60_000);
+  const start = Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth() - n, 1) - 330 * 60_000;
+  return new Date(start).toISOString();
+}
+
 /** 919876543210 / 09876543210 → 9876543210. */
 function last10(raw: string): string {
   const d = (raw || "").replace(/\D/g, "");
@@ -331,10 +347,17 @@ export async function waUsageReport(
       byStudent: emptyByStudent(),
       byAudience: [],
       staffNumbersKnown: 0,
+      byMonth: [],
       rosterOk: false,
       attributedByNumber: 0,
     };
   }
+
+  // One read covers both the selected window and the year series: the year
+  // is a superset, and the rows come newest-first, so a read that hits its
+  // cap loses only the oldest months — the window figures stay exact.
+  const yearFloor = monthsAgoIso(YEAR_MONTHS - 1);
+  const readFloor = sinceIso < yearFloor ? sinceIso : yearFloor;
 
   const { data, error } = await ctx.sb
     .from("household_message_log")
@@ -342,7 +365,7 @@ export async function waUsageReport(
     .eq("tenant_id", ctx.tenantId)
     .eq("channel", "wa")
     .eq("direction", "out")
-    .gte("created_at", sinceIso)
+    .gte("created_at", readFloor)
     .order("created_at", { ascending: false })
     .limit(MAX_ROWS);
 
@@ -363,6 +386,7 @@ export async function waUsageReport(
       byStudent: emptyByStudent(),
       byAudience: [],
       staffNumbersKnown: 0,
+      byMonth: [],
       rosterOk: false,
       attributedByNumber: 0,
     };
@@ -383,17 +407,19 @@ export async function waUsageReport(
     buildAttribution(),
   ]);
 
+  const truncated = rows.length >= MAX_ROWS;
   let uncategorised = 0;
   let attributedByNumber = 0;
   const attributed: WaUsageAttributedMessage[] = [];
   const byAudience: WaUsageAudienceMessage[] = [];
-  const messages: WaUsageMessage[] = rows.map((r) => {
+  const yearMessages: WaUsageMessage[] = [];
+  const messages: WaUsageMessage[] = [];
+  for (const r of rows) {
     const templateName = String(r.template_name || "").trim();
     const isTemplate = String(r.via || "") === "template" || !!templateName;
     let category: WaBillCategory = "service";
     if (isTemplate) {
       category = map.get(templateName.toLowerCase()) ?? "unknown";
-      if (category === "unknown") uncategorised++;
     }
 
     const handoffFailed = String(r.status || "") === "failed";
@@ -411,6 +437,7 @@ export async function waUsageReport(
     const mobile10 = last10(String(r.mobile_e164 || ""));
     let householdId = String(r.household_id || "").trim();
     let audience: WaUsageAudience = householdId ? "parents" : "other";
+    let attributedByNumberRow = false;
     if (!householdId) {
       // Staff before the number-owner fallback, and after an explicit
       // household: a staff member who is also a parent at the school gets
@@ -422,7 +449,7 @@ export async function waUsageReport(
         if (owner) {
           householdId = owner;
           audience = "parents";
-          attributedByNumber++;
+          attributedByNumberRow = true;
         } else if (String(r.purpose || "") === "staff_message") {
           // The staff panel's own purpose, for a number not on file — a new
           // teacher whose record is not in yet.
@@ -430,6 +457,21 @@ export async function waUsageReport(
         }
       }
     }
+    const at = String(r.created_at || "");
+    const message: WaUsageMessage = {
+      at,
+      category,
+      templateName,
+      purpose: String(r.purpose || ""),
+      outcome,
+    };
+    yearMessages.push(message);
+
+    // Everything below the year series is about the SELECTED window only,
+    // so the tables and the headline always describe the same set.
+    if (at < sinceIso) continue;
+    messages.push(message);
+    byAudience.push({ ...message, audience });
     attributed.push({
       category,
       outcome,
@@ -437,17 +479,9 @@ export async function waUsageReport(
         ? (attribution.studentsOfHousehold.get(householdId) ?? [])
         : [],
     });
-
-    const message: WaUsageMessage = {
-      at: String(r.created_at || ""),
-      category,
-      templateName,
-      purpose: String(r.purpose || ""),
-      outcome,
-    };
-    byAudience.push({ ...message, audience });
-    return message;
-  });
+    if (category === "unknown") uncategorised++;
+    if (attributedByNumberRow) attributedByNumber++;
+  }
 
   const ai = summariseAiUsage(aiCalls, rates);
 
@@ -460,10 +494,18 @@ export async function waUsageReport(
     metaOutboundMessages,
     uncategorised,
     catalogueOk,
-    truncated: rows.length >= MAX_ROWS,
+    truncated,
     byStudent: summariseWaUsageByStudent(attributed, rates, attribution.roster),
     byAudience: splitWaUsageByAudience(byAudience, rates),
     staffNumbersKnown: attribution.staffNumbers.size,
+    byMonth: summariseWaUsageByMonth(yearMessages, rates, {
+      fromMonth: istMonthKey(yearFloor),
+      toMonth: istMonthKey(new Date().toISOString()),
+      // Hit the cap? The oldest month reached is a floor, not a total.
+      partialFrom: truncated
+        ? istMonthKey(String(rows[rows.length - 1]?.created_at || ""))
+        : undefined,
+    }),
     rosterOk: attribution.ok,
     attributedByNumber,
   };

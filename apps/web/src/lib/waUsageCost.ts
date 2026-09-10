@@ -860,3 +860,176 @@ export function repriceWaUsageByAudience(
     summary: repriceWaUsage(s.summary, rates),
   }));
 }
+
+
+/* ------------------------------------------------------------------ *
+ * The year, month by month
+ *
+ * The window chips answer "what are we spending now". A school budgets a
+ * year, and the shape of a school year is not flat: fee reminders spike at
+ * each installment, admissions run in one season, and a fortnight of exams
+ * is nearly silent. A monthly series is the only view in which any of that
+ * is visible, and the only one a budget line can be drawn from.
+ *
+ * Months are IST calendar months, because that is what the school's own
+ * accounts are cut on. Each month carries its fractional shares by
+ * category, so the whole year re-prices exactly when a rate is edited.
+ * ------------------------------------------------------------------ */
+
+export type WaUsageMonth = {
+  /** "2026-09" — sortable, and the key the UI uses. */
+  month: string;
+  /** "Sep 2026" — what the office reads. */
+  label: string;
+  sent: number;
+  delivered: number;
+  failed: number;
+  pending: number;
+  costPaise: number;
+  sharesByCategory: Partial<Record<WaBillCategory, number>>;
+  /**
+   * true = the log read did not reach the start of this month, so its
+   * figure is a floor, not a total. Shown, never silently averaged in.
+   */
+  partial: boolean;
+};
+
+/** IST calendar month of an instant. */
+export function istMonthKey(iso: string): string {
+  const day = istDayKey(iso);
+  return day ? day.slice(0, 7) : "";
+}
+
+const MONTH_NAMES = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+export function monthLabel(key: string): string {
+  const [y, m] = key.split("-");
+  const idx = Number(m) - 1;
+  if (!y || !(idx >= 0 && idx < 12)) return key;
+  return `${MONTH_NAMES[idx]} ${y}`;
+}
+
+/** Every month from `from` to `to` inclusive, both "YYYY-MM". */
+export function monthRange(from: string, to: string): string[] {
+  if (!from || !to || from > to) return [];
+  const out: string[] = [];
+  let [y, m] = from.split("-").map(Number);
+  const [ty, tm] = to.split("-").map(Number);
+  let guard = 0;
+  while ((y < ty || (y === ty && m <= tm)) && guard++ < 240) {
+    out.push(`${y}-${String(m).padStart(2, "0")}`);
+    m++;
+    if (m > 12) {
+      m = 1;
+      y++;
+    }
+  }
+  return out;
+}
+
+export function summariseWaUsageByMonth(
+  messages: WaUsageMessage[],
+  rates: WaCostRates,
+  opts: {
+    /** Oldest month the read covered — earlier months are simply absent. */
+    fromMonth?: string;
+    /** Newest month to show, normally the current one. */
+    toMonth?: string;
+    /** The month the read stopped inside, if it hit its row cap. */
+    partialFrom?: string;
+  } = {},
+): WaUsageMonth[] {
+  const acc = new Map<string, WaUsageMonth>();
+
+  const blank = (month: string): WaUsageMonth => ({
+    month,
+    label: monthLabel(month),
+    sent: 0,
+    delivered: 0,
+    failed: 0,
+    pending: 0,
+    costPaise: 0,
+    sharesByCategory: {},
+    partial: !!opts.partialFrom && month <= opts.partialFrom,
+  });
+
+  // Months with no sends are shown as ₹0 rather than skipped: a gap in a
+  // year series reads as missing data, and "we sent nothing in May" is a
+  // real and useful answer.
+  for (const m of monthRange(opts.fromMonth ?? "", opts.toMonth ?? "")) {
+    acc.set(m, blank(m));
+  }
+
+  for (const msg of messages) {
+    const key = istMonthKey(msg.at);
+    if (!key) continue;
+    let row = acc.get(key);
+    if (!row) {
+      row = blank(key);
+      acc.set(key, row);
+    }
+    row.sent++;
+    if (msg.outcome === "delivered") {
+      row.delivered++;
+      row.sharesByCategory[msg.category] =
+        (row.sharesByCategory[msg.category] ?? 0) + 1;
+      row.costPaise += rateFor(rates, msg.category);
+    } else if (msg.outcome === "failed") row.failed++;
+    else row.pending++;
+  }
+
+  return [...acc.values()]
+    .map((r) => ({ ...r, costPaise: Math.round(r.costPaise) }))
+    .sort((a, b) => (a.month < b.month ? -1 : a.month > b.month ? 1 : 0));
+}
+
+export function repriceWaUsageByMonth(
+  months: WaUsageMonth[],
+  rates: WaCostRates,
+): WaUsageMonth[] {
+  return months.map((m) => ({
+    ...m,
+    costPaise: Math.round(shareCost(m.sharesByCategory, rates)),
+  }));
+}
+
+export type WaUsageYearTotals = {
+  costPaise: number;
+  delivered: number;
+  failed: number;
+  /** Months with a complete read behind them — the ones worth averaging. */
+  completeMonths: number;
+  /** Average over complete months only; a partial month would drag it down. */
+  averagePaise: number;
+  dearest: WaUsageMonth | null;
+};
+
+export function waUsageYearTotals(months: WaUsageMonth[]): WaUsageYearTotals {
+  let costPaise = 0;
+  let delivered = 0;
+  let failed = 0;
+  let completeMonths = 0;
+  let completeCost = 0;
+  let dearest: WaUsageMonth | null = null;
+  for (const m of months) {
+    costPaise += m.costPaise;
+    delivered += m.delivered;
+    failed += m.failed;
+    if (!m.partial) {
+      completeMonths++;
+      completeCost += m.costPaise;
+    }
+    if (!dearest || m.costPaise > dearest.costPaise) dearest = m;
+  }
+  return {
+    costPaise,
+    delivered,
+    failed,
+    completeMonths,
+    averagePaise: completeMonths > 0 ? Math.round(completeCost / completeMonths) : 0,
+    dearest,
+  };
+}
