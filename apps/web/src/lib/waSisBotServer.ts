@@ -722,6 +722,35 @@ export async function handleWaSisBotInbound(opts: {
     );
   }
 
+  // ── Giving a child their own number (LINK / UNLINK) ──
+  //
+  // The parent's own number is the only place this can be done: the code
+  // is handed over in person, never sent to the child's phone, which is
+  // also the only workable design — Meta's window is shut for a number
+  // that has never messaged us.
+  {
+    const { parseParentLinkCommand } = await import(
+      "@/lib/waStudentLinkEngine"
+    );
+    const linkCmd = parseParentLinkCommand(text);
+    if (linkCmd.kind !== "none") {
+      try {
+        const { handleParentLinkCommand } = await import(
+          "@/lib/waStudentLinkParent.server"
+        );
+        const r = await handleParentLinkCommand({
+          household: hh,
+          children: childrenOf(hh),
+          mobile10,
+          command: linkCmd,
+        });
+        return finishLanguageFlow(store, thread, parentMsg, r.replyText);
+      } catch (e) {
+        console.error("[wa-sis-bot] student link failed", e);
+      }
+    }
+  }
+
   // ── Study help (the app's tutor, on WhatsApp) ──
   //
   // Asked BEFORE the keyword matcher only so that an open session can claim

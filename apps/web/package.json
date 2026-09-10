@@ -126,6 +126,7 @@
     "test:wa-household-numbers": "npx tsx src/lib/waHouseholdNumbers.selftest.ts",
     "test:wa-audience-spec": "npx tsx src/lib/waAudienceSpec.selftest.ts",
     "test:wa-tutor-bot": "npx tsx src/lib/waTutorBotEngine.selftest.ts",
+    "test:wa-student-link": "npx tsx src/lib/waStudentLinkEngine.selftest.ts",
     "test:collections-ai": "npx tsx src/lib/collectionsAi.selftest.ts",
     "test:admissions-ai": "npx tsx src/lib/admissionsAi.selftest.ts",
     "test:admissions-kb": "npx tsx src/lib/admissionsKb.selftest.ts",
