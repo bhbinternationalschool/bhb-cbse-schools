@@ -84,6 +84,19 @@ export async function runAutomationTick(opts: {
     audiences,
   });
 
+  // Persist the cards BEFORE sending anything, and again after each one.
+  //
+  // Cloud Run cuts a request at its 300s timeout. Saving only at the end
+  // meant a tick cut off mid-send had already delivered messages that the
+  // stored state knew nothing about — so the next tick found the same card
+  // still "approved" and sent the whole audience again. Families would be
+  // chased twice for the same fee. Writing after each approval bounds that
+  // to the one card actually in flight when the plug was pulled.
+  let persisted = await saveAutomationToDb(after);
+  if (!persisted.ok) {
+    console.error("[automation-tick] persist failed:", persisted.error);
+  }
+
   let dispatched = 0;
   let sent = 0;
   let failed = 0;
@@ -106,11 +119,10 @@ export async function runAutomationTick(opts: {
       failed: result.failed,
       deferred: result.deferred,
     });
-  }
-
-  const persisted = await saveAutomationToDb(after);
-  if (!persisted.ok) {
-    console.error("[automation-tick] persist failed:", persisted.error);
+    persisted = await saveAutomationToDb(after);
+    if (!persisted.ok) {
+      console.error("[automation-tick] persist failed:", persisted.error);
+    }
   }
 
   return {

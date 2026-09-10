@@ -113,14 +113,26 @@ create_job "bhb-comms-scheduled-publish" "*/10 6-21 * * *" \
   "${APP_URL}/api/comms/scheduled-publish/tick" \
   "Asia/Kolkata" "120s"
 
-# WhatsApp automation rules (approval-first). The automation's own quiet
-# hours default to 20:00-08:00, during which it sends nothing anyway, so
-# ticking overnight only ever found "not now". Every 30 minutes, 08:00 to
-# 19:59 (24 a day, from 96); reminders are day-granular, approvals are
-# reviewed by staff in office hours.
-create_job "bhb-wa-automation-tick" "*/30 8-19 * * *" \
+# WhatsApp automation rules. The automation's own quiet hours default to
+# 20:00-08:00, during which it sends nothing anyway, so ticking overnight
+# only ever found "not now". Every 30 minutes, 08:00 to 19:59; reminders are
+# day-granular and approvals are reviewed by staff in office hours.
+#
+# Mon-Sat, like every other school-day job here. It ran seven days a week
+# while the tick only ever PROPOSED cards for a human to look at, and a card
+# raised on Sunday simply waited for Monday. The tick now sends, so a Sunday
+# tick is a fee chase arriving on a Sunday.
+#
+# 300s, not 120s, for the same reason: the tick resolves the audience from
+# the roster, the fee ledger and the admissions pipeline, then posts each
+# message to Meta. 120s was sized for an evaluation that did no I/O beyond
+# reading and writing the rules. 300s is the ceiling worth asking for — the
+# Cloud Run service takes its default 300s request timeout (no --timeout in
+# cloudbuild.yaml), so a longer scheduler deadline would just wait on a
+# request the platform has already cut off.
+create_job "bhb-wa-automation-tick" "*/30 8-19 * * 1-6" \
   "${APP_URL}/api/wa/automation/tick" \
-  "Asia/Kolkata" "120s"
+  "Asia/Kolkata" "300s"
 
 create_job "bhb-bigquery-nightly-sync" "0 2 * * *" \
   "${APP_URL}/api/analytics/bigquery-sync/tick" \

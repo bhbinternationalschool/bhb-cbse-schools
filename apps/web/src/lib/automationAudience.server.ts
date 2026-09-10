@@ -133,6 +133,20 @@ function dedupeByMobile(recipients: AutomationRecipient[]): AutomationRecipient[
 
 const PARENT_PORTAL = `${publicOrigin()}/parent`;
 
+/**
+ * How many families one rule may be sent to in a single tick.
+ *
+ * Cloud Run cuts the tick's request at 300s, and each message is a Graph
+ * API round trip plus a household lookup — at roughly half a second each,
+ * 500 recipients does not fit and the tick is killed part-way through.
+ * 150 leaves room for two cards and the audience reads inside one request.
+ * Raise WA_AUTOMATION_TICK_LIMIT only alongside the Cloud Run timeout.
+ */
+function perTickRecipientCap(): number {
+  const raw = Number(process.env.WA_AUTOMATION_TICK_LIMIT);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 150;
+}
+
 async function feeRecipients(
   kind: "overdue" | "due_soon",
   todayIso: string,
@@ -288,7 +302,7 @@ export async function resolveAutomationAudienceServer(
   opts?: { todayIso?: string; limit?: number },
 ): Promise<AutomationAudience> {
   const todayIso = opts?.todayIso || new Date().toISOString().slice(0, 10);
-  const limit = Math.max(1, opts?.limit ?? 500);
+  const limit = Math.max(1, opts?.limit ?? perTickRecipientCap());
   const key = automationAudienceKey(rule);
 
   try {
