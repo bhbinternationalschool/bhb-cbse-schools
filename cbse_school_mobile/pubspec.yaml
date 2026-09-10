@@ -34,6 +34,8 @@ dependencies:
   pdfx: ^2.11.0
   webview_flutter: ^4.14.1
   in_app_purchase: ^3.2.0
+  flutter_map: ^8.1.1
+  latlong2: ^0.9.1
 dev_dependencies:
   flutter_test:
     sdk: flutter

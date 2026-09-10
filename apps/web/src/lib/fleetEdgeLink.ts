@@ -132,7 +132,7 @@ export function telemetryFreshness(
       vehiclesReporting: 0,
       newestAt: null,
       reason:
-        "No live telemetry has ever arrived. Fleet Edge is pushing periodic summaries and alerts, but the Basic Push (live position, odometer, fuel) feed has not been subscribed — ask Fleet Edge support to point it at /api/transport/fleet-edge/live.",
+        "No live telemetry has arrived yet. Basic Push was switched on at Tata on 10 Sep 2026; a tracker reports only when the vehicle has power, so check the vehicle before the subscription.",
     };
   }
 

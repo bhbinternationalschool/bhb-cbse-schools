@@ -97,6 +97,7 @@ SELFTESTS=(
   test:collections-weekly-ai
   test:erp-ask
   test:erp-reports
+  test:fleet-live
   test:fee-student-search
   test:household-dues-ay
   test:refreshment-chart
