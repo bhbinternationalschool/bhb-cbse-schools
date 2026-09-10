@@ -24,6 +24,7 @@ import {
   stageLabel,
   type WaDeliveryStage,
 } from "@/lib/waDeliveryStatusShape";
+import { classifyWaFailure } from "@/lib/waFailureReason";
 import {
   countStage,
   emptyTally,
@@ -135,6 +136,10 @@ export async function listWaSentMessages(
     const handoff: "sent" | "failed" =
       String(r.status) === "failed" ? "failed" : "sent";
     const stage = resolveRowStage(handoff, ladderStage(ladder));
+    const reason = r.error ? String(r.error) : (ladder?.error ?? "");
+    // Only classify an actual failure: a delivered message has no reason to
+    // explain, and inventing one would put advice on a row that is fine.
+    const verdict = stage === "failed" ? classifyWaFailure(reason) : null;
     purposes.add(String(r.purpose || ""));
     if (wantStage && stage !== wantStage) continue;
     if (rows.length >= limit) continue;
@@ -153,7 +158,10 @@ export async function listWaSentMessages(
       stageLabel: stageLabel(stage),
       deliveredAt: ladder?.deliveredAt ?? null,
       readAt: ladder?.readAt ?? null,
-      error: r.error ? String(r.error) : (ladder?.error ?? null),
+      error: reason || null,
+      failureKind: verdict?.kind ?? null,
+      failureLabel: verdict?.label ?? null,
+      failureAdvice: verdict?.advice ?? null,
       waMessageId,
     });
   }

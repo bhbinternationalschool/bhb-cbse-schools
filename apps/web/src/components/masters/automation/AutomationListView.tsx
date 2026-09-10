@@ -14,6 +14,7 @@ import {
   MastersEmptyRow,
   MastersTableCard,
 } from "@/components/masters/MastersLayout";
+import { AutomationBadNumbers } from "./AutomationBadNumbers";
 import { AutomationSentMessages } from "./AutomationSentMessages";
 import {
   autoBtnOutline,
@@ -23,7 +24,13 @@ import {
   autoInp,
 } from "./automationUi";
 
-type ListTab = "active" | "paused" | "approvals" | "runs" | "sent";
+type ListTab =
+  | "active"
+  | "paused"
+  | "approvals"
+  | "runs"
+  | "sent"
+  | "numbers";
 
 function scheduleLabel(r: AutomationRule): string {
   if (r.triggerType === "schedule" && r.cronExpr) {
@@ -140,6 +147,7 @@ export function AutomationListView({
             // No count: this one is read from the delivery log on demand, and
             // a stale number in a tab label is worse than no number.
             { id: "sent" as ListTab, label: "Sent messages" },
+            { id: "numbers" as ListTab, label: "Numbers to fix" },
           ] as const
         ).map((t) => (
           <button
@@ -307,6 +315,8 @@ export function AutomationListView({
       ) : null}
 
       {tab === "sent" ? <AutomationSentMessages /> : null}
+
+      {tab === "numbers" ? <AutomationBadNumbers readOnly={readOnly} /> : null}
 
       {tab === "runs" ? (
         <MastersTableCard title="Recent runs">

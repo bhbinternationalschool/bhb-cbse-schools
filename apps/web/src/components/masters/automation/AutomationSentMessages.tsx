@@ -190,9 +190,20 @@ export function AutomationSentMessages() {
                       {r.preview}
                     </p>
                   ) : null}
-                  {r.error ? (
+                  {r.failureLabel ? (
                     <p className="text-[11px] font-medium text-rose-700">
-                      {r.error}
+                      {r.failureLabel}
+                      {r.failureAdvice ? (
+                        <span className="font-normal opacity-80">
+                          {" — "}
+                          {r.failureAdvice}
+                        </span>
+                      ) : null}
+                    </p>
+                  ) : null}
+                  {r.error && r.error !== r.failureLabel ? (
+                    <p className="text-[10px] text-[var(--muted)]">
+                      WhatsApp said: {r.error}
                     </p>
                   ) : null}
                 </li>

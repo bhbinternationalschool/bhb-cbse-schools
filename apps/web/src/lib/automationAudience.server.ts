@@ -27,6 +27,7 @@ import { listLiveDefaulters } from "@/lib/playbook";
 import { currentAcademicYearCode, formatInr } from "@/lib/masters";
 import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { listOptedOutSet, toE164India } from "@/lib/waContactState.server";
+import { listKnownNotOnWhatsApp } from "@/lib/waNumberHealth.server";
 import { publicOrigin } from "@/lib/birthday.server";
 import { TENANT } from "@/lib/types";
 
@@ -50,6 +51,8 @@ export type AutomationAudience =
       recipients: AutomationRecipient[];
       /** How many were dropped for STOP, so approvals can say so. */
       skippedOptOut: number;
+      /** Dropped because Meta says the number has no WhatsApp account. */
+      skippedNotOnWhatsApp: number;
       note: string;
     }
   | { ok: false; error: string };
@@ -101,21 +104,40 @@ function householdOf(
   return households.find((h) => h.id === householdId);
 }
 
-/** STOP is honoured on every outbound path; automation is not an exception. */
-async function dropOptedOut(
+/**
+ * Who must not be written to.
+ *
+ * Two independent reasons, both honoured on every outbound path:
+ *   * STOP — the family asked us to stop.
+ *   * Not on WhatsApp — Meta has already said the number has no WhatsApp
+ *     account, so a send would only produce another failure row. Ten of
+ *     this school's numbers are in that state.
+ */
+async function dropUnreachable(
   recipients: AutomationRecipient[],
-): Promise<{ kept: AutomationRecipient[]; skippedOptOut: number }> {
-  if (!recipients.length) return { kept: [], skippedOptOut: 0 };
-  const optedOut = await listOptedOutSet(
-    recipients.map((r) => r.mobile),
-  ).catch(() => new Set<string>());
+): Promise<{
+  kept: AutomationRecipient[];
+  skippedOptOut: number;
+  skippedNotOnWhatsApp: number;
+}> {
+  if (!recipients.length) {
+    return { kept: [], skippedOptOut: 0, skippedNotOnWhatsApp: 0 };
+  }
+  const mobiles = recipients.map((r) => r.mobile);
+  const [optedOut, notOnWa] = await Promise.all([
+    listOptedOutSet(mobiles).catch(() => new Set<string>()),
+    listKnownNotOnWhatsApp(mobiles).catch(() => new Set<string>()),
+  ]);
   const kept: AutomationRecipient[] = [];
   let skippedOptOut = 0;
+  let skippedNotOnWhatsApp = 0;
   for (const r of recipients) {
-    if (optedOut.has(toE164India(r.mobile))) skippedOptOut++;
+    const key = toE164India(r.mobile);
+    if (optedOut.has(key)) skippedOptOut++;
+    else if (notOnWa.has(key)) skippedNotOnWhatsApp++;
     else kept.push(r);
   }
-  return { kept, skippedOptOut };
+  return { kept, skippedOptOut, skippedNotOnWhatsApp };
 }
 
 /** One recipient per household — siblings must not get the same message twice. */
@@ -341,16 +363,26 @@ export async function resolveAutomationAudienceServer(
     }
 
     const unique = dedupeByMobile(recipients);
-    const { kept, skippedOptOut } = await dropOptedOut(unique);
+    const { kept, skippedOptOut, skippedNotOnWhatsApp } =
+      await dropUnreachable(unique);
     const capped = kept.slice(0, limit);
     const note =
       `${capped.length} recipient${capped.length === 1 ? "" : "s"} from live data` +
       (minAmountPaise > 0 ? ` · at least ${formatInr(minAmountPaise)} due` : "") +
       (skippedOptOut ? ` · ${skippedOptOut} opted out (STOP)` : "") +
+      (skippedNotOnWhatsApp
+        ? ` · ${skippedNotOnWhatsApp} not on WhatsApp (see Numbers to fix)`
+        : "") +
       (kept.length > capped.length
         ? ` · capped at ${limit} for this run, the rest go on the next tick`
         : "");
-    return { ok: true, recipients: capped, skippedOptOut, note };
+    return {
+      ok: true,
+      recipients: capped,
+      skippedOptOut,
+      skippedNotOnWhatsApp,
+      note,
+    };
   } catch (e) {
     return {
       ok: false,
