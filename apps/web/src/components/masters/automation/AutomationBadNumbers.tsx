@@ -24,6 +24,9 @@ type Row = {
   onWhatsApp: boolean | null;
   checkedAt: string | null;
   checkSource: string | null;
+  numberLabel: string;
+  reach: "reachable_elsewhere" | "unreachable";
+  reachableOn: { mobile10: string; label: string } | null;
 };
 
 type RosterCheck = {
@@ -48,6 +51,7 @@ function shortDate(iso: string | null): string {
 export function AutomationBadNumbers({ readOnly }: { readOnly: boolean }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [reachableButFailing, setReachable] = useState(0);
+  const [unreachableFamilies, setUnreachable] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
@@ -63,6 +67,7 @@ export function AutomationBadNumbers({ readOnly }: { readOnly: boolean }) {
         error?: string;
         rows?: Row[];
         reachableButFailing?: number;
+        unreachableFamilies?: number;
       };
       if (!res.ok || !json.ok) {
         // Never an empty table on a failed read — that reads as "all fine".
@@ -71,6 +76,7 @@ export function AutomationBadNumbers({ readOnly }: { readOnly: boolean }) {
       }
       setRows(json.rows || []);
       setReachable(json.reachableButFailing || 0);
+      setUnreachable(json.unreachableFamilies || 0);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not read the number health");
     } finally {
@@ -112,11 +118,15 @@ export function AutomationBadNumbers({ readOnly }: { readOnly: boolean }) {
     <div className="space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <p className="max-w-2xl text-[12px] text-[var(--muted)]">
-          Numbers WhatsApp cannot deliver to, one row per family. Only
-          failures that are the <strong>number&apos;s</strong> fault are
-          listed — a message that failed because it was sent outside the
-          24-hour window says nothing about the number, so those are counted
-          below rather than listed here.
+          Numbers WhatsApp cannot deliver to, one row per number. The school
+          stores up to five per family — its WhatsApp number, the
+          guardian&apos;s, the father&apos;s, the mother&apos;s and an
+          alternate — and sending now falls through them in that order, so a
+          dead first number no longer means the family hears nothing. Rows
+          say which case each is. Only failures that are the{" "}
+          <strong>number&apos;s</strong> fault are listed; a message that
+          failed on the 24-hour window says nothing about the number and is
+          counted below instead.
         </p>
         <div className="flex flex-wrap gap-2">
           <button type="button" className={autoBtnOutline} onClick={() => void load()}>
@@ -134,6 +144,18 @@ export function AutomationBadNumbers({ readOnly }: { readOnly: boolean }) {
           ) : null}
         </div>
       </div>
+
+      {unreachableFamilies > 0 ? (
+        <div className="rounded-xl border border-rose-300 bg-rose-50 p-3 text-[12px] text-rose-900">
+          <strong>
+            {unreachableFamilies} famil
+            {unreachableFamilies === 1 ? "y has" : "ies have"} no working
+            WhatsApp number at all
+          </strong>{" "}
+          — they receive nothing the school sends. Ring them for a number;
+          correcting the record is not enough on its own.
+        </div>
+      ) : null}
 
       {check ? (
         <div
@@ -202,6 +224,21 @@ export function AutomationBadNumbers({ readOnly }: { readOnly: boolean }) {
                       {r.label}
                     </span>
                   </div>
+                  <p className="text-[11px] text-[var(--muted)]">
+                    Stored as: {r.numberLabel}
+                  </p>
+                  {r.reach === "unreachable" ? (
+                    <p className="rounded-md bg-rose-100 px-2 py-1 text-[11px] font-semibold text-rose-900">
+                      No other working number on file — this family receives
+                      nothing. Ring them.
+                    </p>
+                  ) : r.reachableOn ? (
+                    <p className="rounded-md bg-emerald-50 px-2 py-1 text-[11px] text-emerald-900">
+                      Still reached on {prettyMobile(r.reachableOn.mobile10)} (
+                      {r.reachableOn.label.toLowerCase()}) — messages already
+                      go there. Tidy this field when convenient.
+                    </p>
+                  ) : null}
                   {r.familyCount > 1 ? (
                     <p className="rounded-md bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-900">
                       {r.familyCount} families share this number — it is a

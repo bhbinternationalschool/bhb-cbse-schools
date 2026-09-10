@@ -24,6 +24,10 @@ import { toE164India } from "@/lib/waContactState.server";
 import { loadSis, householdWhatsApp, type Household } from "@/lib/sis";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { householdMobile10 } from "@/lib/parentHousehold.server";
+import {
+  householdCandidateNumbers,
+  pickWaNumbers,
+} from "@/lib/waHouseholdNumbers";
 
 export type WaBadNumberRow = {
   mobile: string;
@@ -55,12 +59,30 @@ export type WaBadNumberRow = {
   onWhatsApp: boolean | null;
   checkedAt: string | null;
   checkSource: string | null;
+  /**
+   * Which field this number sits in — "Father's number" — so the office
+   * knows what to correct rather than hunting through the family record.
+   */
+  numberLabel: string;
+  /**
+   * The distinction that decides what the office actually does:
+   *
+   *   reachable_elsewhere → another number on this family works. Messages
+   *                         already go there. Tidy the record when convenient.
+   *   unreachable         → every number this family has is dead. They are
+   *                         getting nothing at all. Ring them.
+   */
+  reach: "reachable_elsewhere" | "unreachable";
+  /** The number now carrying this family's messages, when there is one. */
+  reachableOn: { mobile10: string; label: string } | null;
 };
 
 export type WaNumberHealth = {
   rows: WaBadNumberRow[];
   /** Numbers whose failures were NOT the number's fault, for honesty. */
   reachableButFailing: number;
+  /** Families with no working number at all — the ones to ring today. */
+  unreachableFamilies: number;
   ok: boolean;
   error?: string;
 };
@@ -100,7 +122,13 @@ export async function listWaBadNumbers(opts?: {
 }): Promise<WaNumberHealth> {
   const ctx = await getServerTenantContext();
   if (!ctx) {
-    return { rows: [], reachableButFailing: 0, ok: false, error: "Tenant not configured" };
+    return {
+      rows: [],
+      reachableButFailing: 0,
+      unreachableFamilies: 0,
+      ok: false,
+      error: "Tenant not configured",
+    };
   }
   const { sb, tenantId } = ctx;
   const sinceIso =
@@ -137,6 +165,7 @@ export async function listWaBadNumbers(opts?: {
     return {
       rows: [],
       reachableButFailing: 0,
+      unreachableFamilies: 0,
       ok: false,
       error: deliveryRes.error?.message || logRes.error?.message,
     };
@@ -242,10 +271,44 @@ export async function listWaBadNumbers(opts?: {
   const households = sis.households ?? [];
   const students = sis.students ?? [];
 
+  // Everything we know is dead: the stored verdicts plus what the failures
+  // just told us. Needed to answer "does this family have anything left".
+  const deadNumbers = new Set<string>([
+    ...[...stateByMobile.entries()]
+      .filter(([, v]) => v.onWhatsApp === false)
+      .map(([m]) => m),
+    ...[...byNumber.values()]
+      .filter((a) => a.kind === "not_on_whatsapp" || a.kind === "invalid_mobile")
+      .map((a) => a.mobile),
+  ]);
+
   const rows: WaBadNumberRow[] = [...byNumber.values()].map((a) => {
     const hhs = householdsFor(households, a.mobile);
     const hhIds = new Set(hhs.map((h) => h.id));
     const state = stateByMobile.get(a.mobile);
+
+    // Is anything left for these families? Checked across every household
+    // on the number, because a shared placeholder covers several.
+    let reachableOn: { mobile10: string; label: string } | null = null;
+    let numberLabel = "Number on file";
+    for (const hh of hhs) {
+      const cands = householdCandidateNumbers({
+        household: hh,
+        students: students.filter(
+          (s) => s.householdId === hh.id && s.status === "active",
+        ),
+      });
+      const mine = cands.find((c) => c.mobile10 === a.mobile);
+      if (mine) numberLabel = mine.label;
+      const choice = pickWaNumbers(cands, deadNumbers);
+      if (choice.primary && !reachableOn) {
+        reachableOn = {
+          mobile10: choice.primary.mobile10,
+          label: choice.primary.label,
+        };
+      }
+    }
+
     return {
       mobile: `91${a.mobile}`,
       mobile10: a.mobile,
@@ -264,20 +327,31 @@ export async function listWaBadNumbers(opts?: {
       onWhatsApp: state?.onWhatsApp ?? null,
       checkedAt: state?.checkedAt ?? null,
       checkSource: state?.source ?? null,
+      numberLabel,
+      reach: reachableOn ? "reachable_elsewhere" : "unreachable",
+      reachableOn,
     };
   });
 
-  // Most enrolled children affected first. Failure count was the wrong
-  // order: a placeholder number shared by four families with eleven children
-  // between them may have fewer failed sends than one chatty test number.
+  // Families getting NOTHING come first, then by children affected. Failure
+  // count was the wrong order twice over: a placeholder shared by four
+  // families with eleven children between them may have fewer failed sends
+  // than one chatty test number, and a family still reached on the father's
+  // number is not urgent at all.
+  const rank = (r: WaBadNumberRow) => (r.reach === "unreachable" ? 0 : 1);
   rows.sort(
     (x, y) =>
+      rank(x) - rank(y) ||
       y.children.length - x.children.length ||
       y.failures - x.failures ||
       y.lastFailedAt.localeCompare(x.lastFailedAt),
   );
 
-  return { rows, reachableButFailing, ok: true };
+  const unreachableFamilies = rows.filter(
+    (r) => r.reach === "unreachable" && r.children.length > 0,
+  ).length;
+
+  return { rows, reachableButFailing, unreachableFamilies, ok: true };
 }
 
 /**

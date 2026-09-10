@@ -16,10 +16,14 @@
 import "server-only";
 
 import { checkWhatsAppContacts, waOutboundConfigured } from "@/lib/waSend";
-import { loadSis, householdWhatsApp, type Household } from "@/lib/sis";
+import { loadSis, type Household } from "@/lib/sis";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { householdMobile10 } from "@/lib/parentHousehold.server";
 import { recordWaNumberVerdicts } from "@/lib/waNumberHealth.server";
+import {
+  householdCandidateNumbers,
+  type WaCandidateNumber,
+} from "@/lib/waHouseholdNumbers";
 
 export type WaRosterCheckResult = {
   ok: boolean;
@@ -30,7 +34,13 @@ export type WaRosterCheckResult = {
   /** Meta answered, but not for these — left unchecked rather than guessed. */
   noAnswer: number;
   /** The bad ones, named, so the answer is usable without another screen. */
-  bad: { mobile: string; guardianNames: string[]; children: string[] }[];
+  bad: {
+    mobile: string;
+    /** Which field it came from: "Father's number", etc. */
+    label: string;
+    guardianNames: string[];
+    children: string[];
+  }[];
   mode: string;
   error?: string;
 };
@@ -38,7 +48,19 @@ export type WaRosterCheckResult = {
 /** Meta's contacts endpoint takes 100 at a time; `checkWhatsAppContacts` caps there too. */
 const BATCH = 100;
 
-function activeHouseholds(): { household: Household; mobile10: string }[] {
+/**
+ * EVERY number an enrolled family has, not just the designated one.
+ *
+ * Checking only the primary was the first version of this and it answered
+ * the wrong question: knowing the designated number is dead is no use
+ * unless you also know whether the father's or the mother's number works,
+ * because that is what the sender will fall to.
+ */
+function rosterCandidateNumbers(): {
+  candidates: WaCandidateNumber[];
+  /** Which families each number belongs to — a placeholder has several. */
+  householdsByMobile: Map<string, Household[]>;
+} {
   const sis = loadSis();
   const activeIds = new Set(
     (sis.students ?? [])
@@ -46,16 +68,28 @@ function activeHouseholds(): { household: Household; mobile10: string }[] {
       .map((s) => s.householdId)
       .filter(Boolean),
   );
-  const out: { household: Household; mobile10: string }[] = [];
+  const candidates: WaCandidateNumber[] = [];
+  const householdsByMobile = new Map<string, Household[]>();
   const seen = new Set<string>();
+
   for (const h of sis.households ?? []) {
     if (!activeIds.has(h.id)) continue;
-    const mobile10 = householdMobile10(householdWhatsApp(h) || h.mobile);
-    if (mobile10.length !== 10 || seen.has(mobile10)) continue;
-    seen.add(mobile10);
-    out.push({ household: h, mobile10 });
+    const forHousehold = householdCandidateNumbers({
+      household: h,
+      students: (sis.students ?? []).filter(
+        (s) => s.householdId === h.id && s.status === "active",
+      ),
+    });
+    for (const c of forHousehold) {
+      const list = householdsByMobile.get(c.mobile10) ?? [];
+      if (!list.some((x) => x.id === h.id)) list.push(h);
+      householdsByMobile.set(c.mobile10, list);
+      if (seen.has(c.mobile10)) continue;
+      seen.add(c.mobile10);
+      candidates.push(c);
+    }
   }
-  return out;
+  return { candidates, householdsByMobile };
 }
 
 export async function checkRosterOnWhatsApp(): Promise<WaRosterCheckResult> {
@@ -74,7 +108,7 @@ export async function checkRosterOnWhatsApp(): Promise<WaRosterCheckResult> {
   }
 
   await ensureSisHydratedServer().catch(() => false);
-  const roster = activeHouseholds();
+  const { candidates: roster, householdsByMobile } = rosterCandidateNumbers();
   if (!roster.length) {
     return {
       ok: false,
@@ -85,20 +119,12 @@ export async function checkRosterOnWhatsApp(): Promise<WaRosterCheckResult> {
       bad: [],
       mode: "none",
       error:
-        "No active families with a mobile number were found — the roster may not have loaded.",
+        "No active family had a usable mobile number — the roster may not have loaded, or every number stored is a placeholder.",
     };
   }
 
   const sis = loadSis();
   const students = sis.students ?? [];
-  const allByMobile = new Map<string, Household[]>();
-  for (const h of sis.households ?? []) {
-    const m10 = householdMobile10(householdWhatsApp(h) || h.mobile);
-    if (m10.length !== 10) continue;
-    const list = allByMobile.get(m10) ?? [];
-    list.push(h);
-    allByMobile.set(m10, list);
-  }
 
   let onWhatsApp = 0;
   let notOnWhatsApp = 0;
@@ -107,9 +133,10 @@ export async function checkRosterOnWhatsApp(): Promise<WaRosterCheckResult> {
   const verdicts: { mobile: string; onWhatsApp: boolean }[] = [];
   let mode = "none";
   const errors: string[] = [];
+  const byMobileLabel = new Map(roster.map((c) => [c.mobile10, c.label]));
 
   for (let i = 0; i < roster.length; i += BATCH) {
-    const slice = roster.slice(i, i + BATCH).map((r) => r.mobile10);
+    const slice = roster.slice(i, i + BATCH).map((c) => c.mobile10);
     const res = await checkWhatsAppContacts(slice);
     if (res.mode) mode = res.mode;
     if (!res.ok) {
@@ -137,10 +164,11 @@ export async function checkRosterOnWhatsApp(): Promise<WaRosterCheckResult> {
       notOnWhatsApp++;
       // Every family on the number, for the same reason as the bad-numbers
       // list: a placeholder is shared, and naming one guardian hides the rest.
-      const hhs = allByMobile.get(m10) ?? [];
+      const hhs = householdsByMobile.get(m10) ?? [];
       const hhIds = new Set(hhs.map((h) => h.id));
       bad.push({
         mobile: m10,
+        label: byMobileLabel.get(m10) || "Number on file",
         guardianNames: hhs.map((h) => h.guardianName).filter(Boolean),
         children: students
           .filter((s) => hhIds.has(s.householdId) && s.status === "active")

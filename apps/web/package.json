@@ -123,6 +123,7 @@
     "test:wa-contact-state": "npx tsx src/lib/waContactState.selftest.ts",
     "test:wa-delivery-log": "npx tsx src/lib/waDeliveryLog.selftest.ts",
     "test:wa-failure-reason": "npx tsx src/lib/waFailureReason.selftest.ts",
+    "test:wa-household-numbers": "npx tsx src/lib/waHouseholdNumbers.selftest.ts",
     "test:collections-ai": "npx tsx src/lib/collectionsAi.selftest.ts",
     "test:admissions-ai": "npx tsx src/lib/admissionsAi.selftest.ts",
     "test:admissions-kb": "npx tsx src/lib/admissionsKb.selftest.ts",

@@ -30,5 +30,6 @@ export async function GET(req: Request) {
     ok: true,
     rows: health.rows,
     reachableButFailing: health.reachableButFailing,
+    unreachableFamilies: health.unreachableFamilies,
   });
 }
