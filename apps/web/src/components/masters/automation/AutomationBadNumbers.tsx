@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { waPanelErrorText } from "@/lib/waPanelAccess";
 import {
   MastersEmptyRow,
   MastersTableCard,
@@ -71,7 +72,7 @@ export function AutomationBadNumbers({ readOnly }: { readOnly: boolean }) {
       };
       if (!res.ok || !json.ok) {
         // Never an empty table on a failed read — that reads as "all fine".
-        setError(json.error || "Could not read the number health");
+        setError(waPanelErrorText(res.status, json.error, "Could not read the number health"));
         return;
       }
       setRows(json.rows || []);

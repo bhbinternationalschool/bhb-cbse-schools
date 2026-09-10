@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { waPanelErrorText } from "@/lib/waPanelAccess";
 import {
   MastersEmptyRow,
   MastersTableCard,
@@ -120,7 +121,7 @@ export function AutomationUsageCost({ readOnly }: { readOnly: boolean }) {
       if (!res.ok || !json.ok) {
         // Never fall back to zeros: "could not read" must not reach the
         // director as "WhatsApp cost nothing".
-        setError(json.error || "Could not read the message log");
+        setError(waPanelErrorText(res.status, json.error, "Could not read the message log"));
         return;
       }
       setReport(json);

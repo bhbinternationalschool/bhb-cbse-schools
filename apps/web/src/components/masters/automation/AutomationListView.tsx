@@ -14,9 +14,6 @@ import {
   MastersEmptyRow,
   MastersTableCard,
 } from "@/components/masters/MastersLayout";
-import { AutomationBadNumbers } from "./AutomationBadNumbers";
-import { AutomationSentMessages } from "./AutomationSentMessages";
-import { AutomationUsageCost } from "./AutomationUsageCost";
 import {
   autoBtnOutline,
   autoBtnPrimary,
@@ -25,14 +22,7 @@ import {
   autoInp,
 } from "./automationUi";
 
-type ListTab =
-  | "active"
-  | "paused"
-  | "approvals"
-  | "runs"
-  | "sent"
-  | "numbers"
-  | "cost";
+type ListTab = "active" | "paused" | "approvals" | "runs";
 
 function scheduleLabel(r: AutomationRule): string {
   if (r.triggerType === "schedule" && r.cronExpr) {
@@ -109,6 +99,17 @@ export function AutomationListView({
             <strong>approval-first</strong>; enable auto-run only after Mark
             tested. Last tick: {state.lastTickAt || "never"}
           </p>
+          <p className="mt-1 max-w-2xl text-[12px] text-[var(--muted)]">
+            Looking for what actually went out — delivery ticks, numbers to
+            fix, what WhatsApp cost? Those moved to{" "}
+            <a
+              className="font-semibold text-[var(--brand-deep)] underline"
+              href="/comms?tab=whatsapp"
+            >
+              Communications → WhatsApp
+            </a>
+            , next to sending. This screen keeps the rules, approvals and runs.
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {notice ? (
@@ -146,11 +147,6 @@ export function AutomationListView({
               label: `Approvals (${pending.length})`,
             },
             { id: "runs" as ListTab, label: `Runs (${state.runs.length})` },
-            // No count: this one is read from the delivery log on demand, and
-            // a stale number in a tab label is worse than no number.
-            { id: "sent" as ListTab, label: "Sent messages" },
-            { id: "numbers" as ListTab, label: "Numbers to fix" },
-            { id: "cost" as ListTab, label: "Usage & cost" },
           ] as const
         ).map((t) => (
           <button
@@ -316,12 +312,6 @@ export function AutomationListView({
           )}
         </MastersTableCard>
       ) : null}
-
-      {tab === "sent" ? <AutomationSentMessages /> : null}
-
-      {tab === "numbers" ? <AutomationBadNumbers readOnly={readOnly} /> : null}
-
-      {tab === "cost" ? <AutomationUsageCost readOnly={readOnly} /> : null}
 
       {tab === "runs" ? (
         <MastersTableCard title="Recent runs">

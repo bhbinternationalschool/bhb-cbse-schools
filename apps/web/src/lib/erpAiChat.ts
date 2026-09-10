@@ -402,7 +402,7 @@ const KNOWLEDGE: KnowledgeEntry[] = [
       "Comms covers notices, news, gallery, and class WhatsApp channels.",
     links: [
       { label: "Comms", href: "/comms" },
-      { label: "Class WhatsApp", href: "/comms?tab=channels" },
+      { label: "Class WhatsApp", href: "/comms?tab=whatsapp&wa=classes" },
     ],
     module: "notices",
   },

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { waPanelErrorText } from "@/lib/waPanelAccess";
 import {
   MastersEmptyRow,
   MastersTableCard,
@@ -68,7 +69,7 @@ export function AutomationSentMessages() {
       if (!res.ok || !json.ok) {
         // Never fall back to an empty table: "we could not read the log"
         // must not look like "the school sent nothing".
-        setError(json.error || "Could not read the message log");
+        setError(waPanelErrorText(res.status, json.error, "Could not read the message log"));
         return;
       }
       setRows(json.rows || []);

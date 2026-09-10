@@ -8,13 +8,14 @@ import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { CommsReportsRunner } from "@/components/reports/ModuleReportRunners";
 import { ErpTableShell } from "@/components/ui/erp-roster";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
-import { ClassChannelsPanel } from "@/components/comms/ClassChannelsPanel";
 import { SocialCredentialsPanel } from "@/components/comms/SocialCredentialsPanel";
 import { EmailIntegrationPanel } from "@/components/comms/EmailIntegrationPanel";
 import { SocialCrossPostPrefsPanel } from "@/components/comms/SocialCrossPostPanel";
-import { WaChatHubPanel } from "@/components/comms/WaChatHubPanel";
-import { HouseholdMessageLogPanel } from "@/components/comms/HouseholdMessageLogPanel";
-import { WaSendToAudiencePanel } from "@/components/comms/WaSendToAudiencePanel";
+import {
+  WaWorkspacePanel,
+  waWorkspaceTabFrom,
+  type WaWorkspaceTab,
+} from "@/components/comms/WaWorkspacePanel";
 import {
   addGalleryPhoto,
   audienceLabel,
@@ -72,10 +73,7 @@ type CommsTab =
   | "social"
   | "email"
   | "inbox"
-  | "channels"
-  | "wa_send"
-  | "wa_hub"
-  | "household_log"
+  | "whatsapp"
   | "reports";
 
 const TABS: ModuleTabItem[] = [
@@ -85,13 +83,25 @@ const TABS: ModuleTabItem[] = [
   { id: "gallery", label: "Gallery", tone: "amber" },
   { id: "social", label: "Social", tone: "rose" },
   { id: "email", label: "Email", tone: "sky" },
-  { id: "channels", label: "Class WA", tone: "violet" },
-  { id: "wa_send", label: "Send message", tone: "teal" },
-  { id: "wa_hub", label: "WhatsApp hub", tone: "teal" },
-  { id: "household_log", label: "Household log", tone: "slate" },
+  { id: "whatsapp", label: "WhatsApp", tone: "teal" },
   { id: "inbox", label: "Inbox", tone: "slate" },
   { id: "reports", label: "Reports", tone: "coral" },
 ];
+
+/**
+ * The four tab names that used to be top-level Comms tabs, and the WhatsApp
+ * section each now opens.
+ *
+ * Kept because these went out in links, bookmarks and at least one training
+ * note: /comms?tab=wa_send must keep working, and land on the send screen
+ * rather than on the first WhatsApp section.
+ */
+const LEGACY_WA_TABS: Record<string, WaWorkspaceTab> = {
+  wa_send: "send",
+  wa_hub: "chats",
+  channels: "classes",
+  household_log: "log",
+};
 
 function tabFromSearch(raw: string | null, path: string): CommsTab {
   if (path.startsWith("/news")) return "news";
@@ -105,14 +115,12 @@ function tabFromSearch(raw: string | null, path: string): CommsTab {
     raw === "email" ||
     raw === "inbox" ||
     raw === "notices" ||
-    raw === "channels" ||
-    raw === "wa_send" ||
-    raw === "wa_hub" ||
-    raw === "household_log" ||
+    raw === "whatsapp" ||
     raw === "reports"
   ) {
     return raw;
   }
+  if (raw && raw in LEGACY_WA_TABS) return "whatsapp";
   return "notices";
 }
 
@@ -1287,17 +1295,16 @@ export function CommsWorkspace() {
         </div>
       ) : null}
 
-      {tab === "channels" ? <ClassChannelsPanel /> : null}
-
-      {tab === "wa_send" ? (
-        <WaSendToAudiencePanel readOnly={readOnly} />
+      {tab === "whatsapp" ? (
+        <WaWorkspacePanel
+          readOnly={readOnly}
+          by={session.fullName}
+          initialTab={waWorkspaceTabFrom(
+            LEGACY_WA_TABS[searchParams.get("tab") || ""] ??
+              searchParams.get("wa"),
+          )}
+        />
       ) : null}
-
-      {tab === "wa_hub" ? (
-        <WaChatHubPanel by={session.fullName} canEdit={!readOnly} />
-      ) : null}
-
-      {tab === "household_log" ? <HouseholdMessageLogPanel /> : null}
 
       {tab === "inbox" ? (
         <section className="space-y-3">
