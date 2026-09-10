@@ -21,8 +21,11 @@ import {
   summariseAiUsage,
   summariseWaUsage,
   summariseWaUsageByStudent,
+  splitWaUsageByAudience,
+  repriceWaUsageByAudience,
   type WaUsageAttributedMessage,
   type WaUsageMessage,
+  type WaUsageAudienceMessage,
   type WaUsageStudentRef,
 } from "./waUsageCost";
 
@@ -473,6 +476,102 @@ function msg(p: Partial<WaUsageMessage>): WaUsageMessage {
   assert.deepEqual(r.classes, []);
   assert.deepEqual(r.students, []);
   assert.equal(r.unattributed.costPaise, 0);
+}
+
+// --- parents and staff are priced apart, by the same rules -------------
+{
+  const am = (
+    audience: WaUsageAudienceMessage["audience"],
+    p: Partial<WaUsageAudienceMessage> = {},
+  ): WaUsageAudienceMessage => ({ ...msg(p), audience });
+
+  const sections = splitWaUsageByAudience(
+    [
+      am("parents", { category: "utility", templateName: "fee" }),
+      am("parents", { category: "utility", templateName: "fee" }),
+      // A duty notice outside the window needs a paid template...
+      am("staff", { category: "utility", templateName: "duty" }),
+      // ...while a reply inside it is free. The whole point of the split.
+      am("staff", { category: "service", templateName: "" }),
+      am("other", { category: "marketing", templateName: "enquiry" }),
+    ],
+    rates,
+  );
+
+  assert.deepEqual(
+    sections.map((s) => s.audience),
+    ["parents", "staff", "other"],
+    "fixed order — the reader looks in the same place every time",
+  );
+  const staff = sections.find((s) => s.audience === "staff")!;
+  assert.equal(staff.summary.templateSent, 1);
+  assert.equal(staff.summary.serviceSent, 1);
+  assert.equal(
+    staff.summary.messageCostPaise,
+    10,
+    "the free-form staff reply costs nothing; only the template does",
+  );
+  assert.deepEqual(
+    staff.summary.buckets.map((b) => b.category).sort(),
+    ["service", "utility"],
+    "cost per message type, within the staff section",
+  );
+  assert.equal(
+    sections.find((s) => s.audience === "parents")!.summary.messageCostPaise,
+    20,
+  );
+
+  // The sections must add up to the school-wide figure, or the office is
+  // reading two different bills on one screen.
+  const whole = summariseWaUsage(
+    [
+      msg({ category: "utility" }),
+      msg({ category: "utility" }),
+      msg({ category: "utility" }),
+      msg({ category: "service", templateName: "" }),
+      msg({ category: "marketing", templateName: "enquiry" }),
+    ],
+    rates,
+  );
+  assert.equal(
+    sections.reduce((n, s) => n + s.summary.messageCostPaise, 0),
+    whole.messageCostPaise,
+  );
+}
+
+// --- an audience nobody wrote to is absent, not a row of zeros ---------
+{
+  const sections = splitWaUsageByAudience(
+    [{ ...msg({}), audience: "parents" as const }],
+    rates,
+  );
+  assert.equal(sections.length, 1);
+  assert.equal(
+    sections[0].audience,
+    "parents",
+    "no staff sends yet must read as 'nothing yet', not as a broken table",
+  );
+  assert.deepEqual(splitWaUsageByAudience([], rates), []);
+}
+
+// --- re-pricing the audience sections is exact -------------------------
+{
+  const messages: WaUsageAudienceMessage[] = [
+    { ...msg({ category: "utility" }), audience: "parents" },
+    { ...msg({ category: "marketing", templateName: "b" }), audience: "staff" },
+    { ...msg({ category: "utility", outcome: "pending" }), audience: "staff" },
+  ];
+  const other = { ...rates, marketing: 3, utility: 44 };
+  assert.deepEqual(
+    repriceWaUsageByAudience(splitWaUsageByAudience(messages, rates), other).map(
+      (s) => [s.audience, s.summary.messageCostPaise, s.summary.pendingCostPaise],
+    ),
+    splitWaUsageByAudience(messages, other).map((s) => [
+      s.audience,
+      s.summary.messageCostPaise,
+      s.summary.pendingCostPaise,
+    ]),
+  );
 }
 
 console.log("  ok");

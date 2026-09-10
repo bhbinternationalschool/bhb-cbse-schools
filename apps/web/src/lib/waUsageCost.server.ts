@@ -20,13 +20,15 @@ import "server-only";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { getSchoolMirrorSync } from "@/lib/schoolDataMirror";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { loadServerMasters } from "@/lib/api/v1/auth";
+import { type MastersState } from "@/lib/masters";
 import { loadSis, type SisState } from "@/lib/sis";
 import { householdCandidateNumbers } from "@/lib/waHouseholdNumbers";
 import { deliveryLaddersFor, ladderStage } from "@/lib/waDeliveryStatus.server";
 import { loadWaCostRates } from "@/lib/waCostRates.server";
 import { loadWaTemplatesServer } from "@/lib/waTemplatesRead.server";
 import {
+  splitWaUsageByAudience,
   summariseAiUsage,
   summariseWaUsage,
   summariseWaUsageByStudent,
@@ -34,6 +36,9 @@ import {
   type WaBillCategory,
   type WaCostRates,
   type WaUsageAttributedMessage,
+  type WaUsageAudience,
+  type WaUsageAudienceMessage,
+  type WaUsageAudienceSection,
   type WaUsageByStudent,
   type WaUsageMessage,
   type WaUsageStudentRef,
@@ -73,6 +78,13 @@ export type WaUsageReport = {
   /** The same money, per class and per child. */
   byStudent: WaUsageByStudent;
   /**
+   * The same money, split parents / staff / neither — each with its own
+   * cost-per-message-type breakdown.
+   */
+  byAudience: WaUsageAudienceSection[];
+  /** Active staff numbers the classifier had to work with. 0 = it could not. */
+  staffNumbersKnown: number;
+  /**
    * false = the roster could not be read, so nothing could be attributed.
    * The per-class tables say so rather than showing an empty school.
    */
@@ -100,6 +112,8 @@ type Attribution = {
   roster: Record<string, WaUsageStudentRef>;
   studentsOfHousehold: Map<string, string[]>;
   householdOfNumber: Map<string, string | null>;
+  /** Every number an active staff member is on file with. */
+  staffNumbers: Set<string>;
   ok: boolean;
 };
 
@@ -115,15 +129,25 @@ async function buildAttribution(): Promise<Attribution> {
     roster: {},
     studentsOfHousehold: new Map(),
     householdOfNumber: new Map(),
+    staffNumbers: new Set(),
     ok: false,
   };
   let sis: SisState;
   let masters: MastersState;
   try {
-    await ensureSchoolMirrorHydrated();
-    const m = getSchoolMirrorSync();
-    sis = (m.sis as SisState | null) || loadSis();
-    masters = (m.masters as MastersState | null) || loadMasters();
+    // Masters comes from loadServerMasters, not the browser mirror: the
+    // mirror's masters carries no staff (staff live in sis_staff, pulled
+    // separately), and a staff list that is silently empty would file every
+    // duty notice under "neither". This is the same source the staff
+    // audience picker resolves against, so the split and the send agree.
+    const [mirror, serverMasters] = await Promise.all([
+      ensureSchoolMirrorHydrated()
+        .then(() => getSchoolMirrorSync())
+        .catch(() => null),
+      loadServerMasters(),
+    ]);
+    sis = ((mirror?.sis as SisState | null) ?? null) || loadSis();
+    masters = serverMasters;
   } catch (e) {
     console.warn(
       "[waUsage] roster unreadable",
@@ -132,8 +156,20 @@ async function buildAttribution(): Promise<Attribution> {
     return empty;
   }
 
+  // Staff numbers are read even when the student roster is empty: the
+  // parents/staff split is useful on its own, and a school mid-setup may
+  // have staff on file before students.
+  const staffNumbers = new Set<string>();
+  for (const st of masters.staff ?? []) {
+    if (st.status !== "active") continue;
+    for (const raw of [st.mobile, st.altMobile]) {
+      const ten = last10(String(raw || ""));
+      if (ten.length === 10 && /^[6-9]/.test(ten)) staffNumbers.add(ten);
+    }
+  }
+
   const students = (sis.students ?? []).filter((s) => s.status === "active");
-  if (students.length === 0) return empty;
+  if (students.length === 0) return { ...empty, staffNumbers };
 
   const roster: Record<string, WaUsageStudentRef> = {};
   const studentsOfHousehold = new Map<string, string[]>();
@@ -169,7 +205,13 @@ async function buildAttribution(): Promise<Attribution> {
     }
   }
 
-  return { roster, studentsOfHousehold, householdOfNumber, ok: true };
+  return {
+    roster,
+    studentsOfHousehold,
+    householdOfNumber,
+    staffNumbers,
+    ok: true,
+  };
 }
 
 /** 919876543210 / 09876543210 → 9876543210. */
@@ -287,6 +329,8 @@ export async function waUsageReport(
       catalogueOk: false,
       truncated: false,
       byStudent: emptyByStudent(),
+      byAudience: [],
+      staffNumbersKnown: 0,
       rosterOk: false,
       attributedByNumber: 0,
     };
@@ -317,6 +361,8 @@ export async function waUsageReport(
       catalogueOk: false,
       truncated: false,
       byStudent: emptyByStudent(),
+      byAudience: [],
+      staffNumbersKnown: 0,
       rosterOk: false,
       attributedByNumber: 0,
     };
@@ -340,6 +386,7 @@ export async function waUsageReport(
   let uncategorised = 0;
   let attributedByNumber = 0;
   const attributed: WaUsageAttributedMessage[] = [];
+  const byAudience: WaUsageAudienceMessage[] = [];
   const messages: WaUsageMessage[] = rows.map((r) => {
     const templateName = String(r.template_name || "").trim();
     const isTemplate = String(r.via || "") === "template" || !!templateName;
@@ -361,14 +408,26 @@ export async function waUsageReport(
 
     // Who was this about? The household on the row, or — when the row has
     // none — the number, but only where exactly one family owns it.
+    const mobile10 = last10(String(r.mobile_e164 || ""));
     let householdId = String(r.household_id || "").trim();
+    let audience: WaUsageAudience = householdId ? "parents" : "other";
     if (!householdId) {
-      const owner = attribution.householdOfNumber.get(
-        last10(String(r.mobile_e164 || "")),
-      );
-      if (owner) {
-        householdId = owner;
-        attributedByNumber++;
+      // Staff before the number-owner fallback, and after an explicit
+      // household: a staff member who is also a parent at the school gets
+      // counted as a parent only when dispatch was writing to them as one.
+      if (attribution.staffNumbers.has(mobile10)) {
+        audience = "staff";
+      } else {
+        const owner = attribution.householdOfNumber.get(mobile10);
+        if (owner) {
+          householdId = owner;
+          audience = "parents";
+          attributedByNumber++;
+        } else if (String(r.purpose || "") === "staff_message") {
+          // The staff panel's own purpose, for a number not on file — a new
+          // teacher whose record is not in yet.
+          audience = "staff";
+        }
       }
     }
     attributed.push({
@@ -379,13 +438,15 @@ export async function waUsageReport(
         : [],
     });
 
-    return {
+    const message: WaUsageMessage = {
       at: String(r.created_at || ""),
       category,
       templateName,
       purpose: String(r.purpose || ""),
       outcome,
     };
+    byAudience.push({ ...message, audience });
+    return message;
   });
 
   const ai = summariseAiUsage(aiCalls, rates);
@@ -401,6 +462,8 @@ export async function waUsageReport(
     catalogueOk,
     truncated: rows.length >= MAX_ROWS,
     byStudent: summariseWaUsageByStudent(attributed, rates, attribution.roster),
+    byAudience: splitWaUsageByAudience(byAudience, rates),
+    staffNumbersKnown: attribution.staffNumbers.size,
     rosterOk: attribution.ok,
     attributedByNumber,
   };
