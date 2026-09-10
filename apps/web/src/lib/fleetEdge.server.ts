@@ -496,7 +496,7 @@ export async function ingestFleetEdgeTelemetry(
     })();
   }
 
-  return insertEvent({
+  const inserted = await insertEvent({
     event_type: "telemetry",
     alert_name: null,
     vehicle_ref: telemetry.vehicleId || null,
@@ -507,4 +507,37 @@ export async function ingestFleetEdgeTelemetry(
     source_ip: sourceIp,
     payload: telemetry.raw,
   });
+
+  // The normalised position the map, the parent app and the owner alerts
+  // read (fleet_vehicle_positions). Only a real fix: a zero coordinate is
+  // the tracker saying "no GPS yet", not a bus in the Gulf of Guinea.
+  const lat = telemetry.gpsLatitude;
+  const lng = telemetry.gpsLongitude;
+  const demoVehicle = /X{4,}/.test(vehicleRef ?? "") || /X{4,}/.test(telemetry.registrationNumber ?? "");
+  if (inserted.ok && vehicleRef && !demoVehicle && lat != null && lng != null && Math.abs(lat) > 0.0001 && Math.abs(lng) > 0.0001 && telemetry.gpsFix !== false) {
+    try {
+      const ctx = await getServerTenantContext();
+      if (ctx) {
+        const { error } = await ctx.sb.from("fleet_vehicle_positions").insert({
+          tenant_id: ctx.tenantId,
+          vehicle_ref: vehicleRef,
+          registration_number: telemetry.registrationNumber || null,
+          recorded_at: parseableIso(telemetry.eventDateTime) ?? new Date().toISOString(),
+          lat,
+          lng,
+          speed_kmh: telemetry.speed ?? null,
+          course_deg: telemetry.gpsCourseInDegrees ?? null,
+          ignition_on: telemetry.ignitionOn ?? null,
+          fuel_percent: telemetry.fuelLevelPercent ?? null,
+          odometer_km: telemetry.odometer ?? null,
+          gps_fix: telemetry.gpsFix ?? null,
+          event_id: inserted.id ?? null,
+        });
+        if (error && !/duplicate|unique/i.test(error.message)) console.warn("[fleetEdge] position insert failed", error.message);
+      }
+    } catch (e) {
+      console.warn("[fleetEdge] position insert threw", e);
+    }
+  }
+  return inserted;
 }

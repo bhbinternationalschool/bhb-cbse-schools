@@ -183,6 +183,14 @@ create_job "bhb-collections-weekly-note" "15 8 * * 1" \
   "${APP_URL}/api/ai/collections-weekly-note?send=1" \
   "Asia/Kolkata" "300s"
 
+# Fleet owner alerts: a bus moving outside the transport day, a tank running
+# low, a service or a paper falling due. All day, every day — a bus on the
+# road at midnight is exactly what the owner wants to hear about — every 15
+# minutes, each alert on its own cooldown so nobody is messaged twice.
+create_job "bhb-fleet-alerts-tick" "*/15 * * * *" \
+  "${APP_URL}/api/transport/fleet-alerts/tick" \
+  "Asia/Kolkata" "120s"
+
 # ERP command desk: the director's end-of-day digest of what staff asked the
 # ERP over WhatsApp / app / assistant. Sends once after ERP_COMMANDS_DIGEST_HOUR
 # (default 19:00 IST), only on days with commands; idempotent per date, so the
