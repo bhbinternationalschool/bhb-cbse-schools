@@ -939,11 +939,65 @@ export function evaluateAutomationTick(
         ...runs,
       ];
     } else {
-      // Skip if pending approval already exists for this rule
-      const hasPending = approvals.some(
-        (a) => a.ruleId === rule.id && a.status === "pending",
+      /*
+        ONE open card per rule, always.
+
+        A rule with a card already waiting must not raise a second one, and
+        that has to hold for a forced evaluation too. "Run evaluation now"
+        used to bypass the check, so every press stacked another card for
+        the same rule: this school ended up with four pending cards for
+        "Fee stage reminders", two of them two seconds apart, 146 families
+        on each. Approving all four would have sent every family the same
+        reminder four times.
+
+        A forced run is not a request for a second card — it is a request
+        for CURRENT numbers on the one that is there. So it refreshes the
+        open card's payload in place and leaves its run attached, which is
+        also what makes the audience growing from 2 to 146 visible without
+        a pile of history.
+
+        A snoozed card counts as open until its snooze expires. Otherwise
+        "Snooze 24h" cleared the guard and the next tick, half an hour
+        later, raised the very card the office had just put down.
+      */
+      const openIdx = approvals.findIndex(
+        (a) =>
+          a.ruleId === rule.id &&
+          (a.status === "pending" ||
+            (a.status === "snoozed" &&
+              Date.parse(a.snoozeUntil || "") > now.getTime())),
       );
-      if (!hasPending || forced) {
+
+      if (openIdx >= 0) {
+        if (forced) {
+          const open = approvals[openIdx]!;
+          approvals = approvals.map((a, i) =>
+            i === openIdx
+              ? {
+                  ...a,
+                  // Re-evaluated, so the snooze no longer applies: the
+                  // office asked to look again.
+                  status: "pending" as const,
+                  snoozeUntil: "",
+                  templateFamilyKey: rule.templateFamilyKey,
+                  templateLanguage: rule.templateLanguage,
+                  ...preview,
+                  error: "",
+                }
+              : a,
+          );
+          runs = runs.map((r) =>
+            r.approvalId === open.id
+              ? {
+                  ...r,
+                  scheduledFor: now.toISOString(),
+                  startedAt: now.toISOString(),
+                  stats: { ...r.stats, proposed: preview.audienceCount },
+                }
+              : r,
+          );
+        }
+      } else {
         approvals = [
           {
             id: approvalId,
@@ -1073,7 +1127,34 @@ export function decideApproval(
           : "",
     };
   });
-  return { ...state, approvals };
+
+  /*
+    A rejected card's run is finished, and must say so.
+
+    It used to stay "proposed · dispatched 0" for ever, so the Runs tab
+    filled with rows that read as work still waiting to go out — this
+    school has two of them from 9 September, both rejected the same
+    afternoon. "Proposed 146, dispatched 0" is the correct thing to show
+    while a card is waiting and a lie once it has been turned down.
+
+    Approving does NOT close the run: the send has not happened yet, and
+    markApprovalDispatched closes it with the real counts.
+  */
+  if (decision !== "rejected") return { ...state, approvals };
+  return {
+    ...state,
+    approvals,
+    runs: state.runs.map((r) =>
+      r.approvalId === approvalId && r.status === "proposed"
+        ? {
+            ...r,
+            status: "cancelled" as const,
+            finishedAt: nowIso(),
+            error: r.error || `Rejected by ${by || "the office"}`,
+          }
+        : r,
+    ),
+  };
 }
 
 /**
