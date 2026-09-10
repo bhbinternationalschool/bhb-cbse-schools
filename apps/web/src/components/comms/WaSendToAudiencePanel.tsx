@@ -2,7 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { loadMasters } from "@/lib/masters";
-import { loadWaTemplates } from "@/lib/waTemplates";
+import {
+  loadWaTemplates,
+  moduleLabel,
+  type WaTemplateCategory,
+  type WaTemplateModule,
+} from "@/lib/waTemplates";
 import { ensureWaTemplatesHydrated } from "@/lib/waTemplatesPersistence";
 import { ensureMastersHydrated } from "@/lib/mastersPersistence";
 import type { WaAudienceSpec, StaffStreamFilter } from "@/lib/waAudienceSpec";
@@ -38,6 +43,10 @@ export function WaSendToAudiencePanel({ readOnly }: { readOnly: boolean }) {
   const [stages, setStages] = useState<string[]>(["S2", "S3", "S4"]);
   const [studentIds, setStudentIds] = useState<string[]>([]);
   const [familyKey, setFamilyKey] = useState("");
+  const [templateQuery, setTemplateQuery] = useState("");
+  const [moduleFilter, setModuleFilter] = useState<WaTemplateModule | "all">(
+    "all",
+  );
   const [vars, setVars] = useState<Record<string, string>>({});
 
   const [checked, setChecked] = useState<Summary | null>(null);
@@ -70,21 +79,90 @@ export function WaSendToAudiencePanel({ readOnly }: { readOnly: boolean }) {
   const families = useMemo(() => {
     if (!ready) return [];
     const all = loadWaTemplates().templates;
-    const byFamily = new Map<string, { key: string; name: string; langs: Set<string>; vars: string[] }>();
+    const byFamily = new Map<
+      string,
+      {
+        key: string;
+        name: string;
+        module: WaTemplateModule;
+        category: WaTemplateCategory;
+        langs: Set<string>;
+        vars: string[];
+      }
+    >();
     for (const t of all) {
       if (t.status !== "approved" || t.paused) continue;
       const cur =
         byFamily.get(t.familyKey) ??
-        { key: t.familyKey, name: t.name, langs: new Set<string>(), vars: t.variables };
+        {
+          key: t.familyKey,
+          name: t.name,
+          module: t.module,
+          category: t.category,
+          langs: new Set<string>(),
+          vars: t.variables,
+        };
       cur.langs.add(t.language);
       byFamily.set(t.familyKey, cur);
     }
-    return [...byFamily.values()].filter(
-      (f) => f.langs.has("en") && f.langs.has("hi"),
-    );
+    return [...byFamily.values()]
+      .filter((f) => f.langs.has("en") && f.langs.has("hi"))
+      .sort(
+        (a, b) =>
+          a.module.localeCompare(b.module) || a.name.localeCompare(b.name),
+      );
   }, [ready]);
 
+  /**
+   * Narrowing the template list.
+   *
+   * Every approved family in one flat list was fine at six templates and is
+   * not at forty: the office scrolls past bus notices to find a fee
+   * reminder. Two controls, because they answer different questions —
+   * "which part of the school is this about" (module) and "I know roughly
+   * what it is called" (search) — and the select itself is grouped by
+   * module so even an unfiltered list is scannable.
+   */
+  const modulesPresent = useMemo(() => {
+    const seen = new Map<WaTemplateModule, number>();
+    for (const f of families) seen.set(f.module, (seen.get(f.module) ?? 0) + 1);
+    return [...seen.entries()].sort((a, b) =>
+      moduleLabel(a[0]).localeCompare(moduleLabel(b[0])),
+    );
+  }, [families]);
+
+  const visibleFamilies = useMemo(() => {
+    const needle = templateQuery.trim().toLowerCase();
+    return families.filter((f) => {
+      if (moduleFilter !== "all" && f.module !== moduleFilter) return false;
+      if (!needle) return true;
+      return (
+        f.name.toLowerCase().includes(needle) ||
+        f.key.toLowerCase().includes(needle) ||
+        moduleLabel(f.module).toLowerCase().includes(needle)
+      );
+    });
+  }, [families, moduleFilter, templateQuery]);
+
+  const grouped = useMemo(() => {
+    const out = new Map<WaTemplateModule, typeof visibleFamilies>();
+    for (const f of visibleFamilies) {
+      const list = out.get(f.module);
+      if (list) list.push(f);
+      else out.set(f.module, [f]);
+    }
+    return [...out.entries()];
+  }, [visibleFamilies]);
+
   const selected = families.find((f) => f.key === familyKey) || null;
+
+  // A filter that hides the chosen template would leave the panel showing
+  // "Choose a template…" over a filled-in variable form. Clear the choice
+  // rather than leave that contradiction on screen.
+  useEffect(() => {
+    if (!familyKey) return;
+    if (!visibleFamilies.some((f) => f.key === familyKey)) setFamilyKey("");
+  }, [visibleFamilies, familyKey]);
 
   const spec = useMemo((): WaAudienceSpec => {
     if (who === "staff") {
@@ -318,18 +396,85 @@ export function WaSendToAudiencePanel({ readOnly }: { readOnly: boolean }) {
         <p className="text-[11px] font-semibold text-[var(--muted)]">
           2 · Message
         </p>
+        {families.length > 6 ? (
+          <>
+            <input
+              className={field}
+              placeholder="Find a template — name or module…"
+              value={templateQuery}
+              onChange={(e) => setTemplateQuery(e.target.value)}
+            />
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold ${
+                  moduleFilter === "all"
+                    ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                    : "bg-[var(--surface-sunken)] text-[var(--brand-deep)]"
+                }`}
+                onClick={() => setModuleFilter("all")}
+              >
+                All ({families.length})
+              </button>
+              {modulesPresent.map(([m, n]) => (
+                <button
+                  key={m}
+                  type="button"
+                  className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold ${
+                    moduleFilter === m
+                      ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                      : "bg-[var(--surface-sunken)] text-[var(--brand-deep)]"
+                  }`}
+                  onClick={() => setModuleFilter(m)}
+                >
+                  {moduleLabel(m)} ({n})
+                </button>
+              ))}
+            </div>
+          </>
+        ) : null}
         <select
           className={field}
           value={familyKey}
           onChange={(e) => setFamilyKey(e.target.value)}
         >
-          <option value="">Choose an approved template…</option>
-          {families.map((f) => (
-            <option key={f.key} value={f.key}>
-              {f.name}
-            </option>
+          <option value="">
+            {visibleFamilies.length === families.length
+              ? "Choose an approved template…"
+              : `Choose one of ${visibleFamilies.length}…`}
+          </option>
+          {grouped.map(([m, list]) => (
+            <optgroup key={m} label={moduleLabel(m)}>
+              {list.map((f) => (
+                <option key={f.key} value={f.key}>
+                  {f.name}
+                </option>
+              ))}
+            </optgroup>
           ))}
         </select>
+        {ready && families.length > 0 && visibleFamilies.length === 0 ? (
+          <p className="text-[11px] text-[var(--muted)]">
+            No approved template matches that. Clear the search or pick{" "}
+            <strong>All</strong>.
+          </p>
+        ) : null}
+        {selected ? (
+          <p className="text-[11px] text-[var(--muted)]">
+            {moduleLabel(selected.module)} ·{" "}
+            {selected.category === "MARKETING" ? (
+              <>
+                <strong>Marketing</strong> template — the dearest category.
+                Utility is roughly a seventh of the price where the message
+                is a notice rather than a promotion.
+              </>
+            ) : selected.category === "AUTHENTICATION" ? (
+              <>Authentication template</>
+            ) : (
+              <>Utility template — the cheap category</>
+            )}
+          </p>
+        ) : null}
         {ready && families.length === 0 ? (
           <p className="text-[11px] text-amber-800">
             No template is approved in both English and Hindi yet. Both are
