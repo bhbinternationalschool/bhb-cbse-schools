@@ -7,6 +7,7 @@ import { ensureWaTemplatesHydrated } from "@/lib/waTemplatesPersistence";
 import { ensureMastersHydrated } from "@/lib/mastersPersistence";
 import type { WaAudienceSpec, StaffStreamFilter } from "@/lib/waAudienceSpec";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
+import { WaStudentPicker } from "@/components/comms/WaStudentPicker";
 
 type Summary = {
   audienceLabel?: string;
@@ -35,6 +36,7 @@ export function WaSendToAudiencePanel({ readOnly }: { readOnly: boolean }) {
   const [classIds, setClassIds] = useState<string[]>([]);
   const [languageUnset, setLanguageUnset] = useState(false);
   const [stages, setStages] = useState<string[]>(["S2", "S3", "S4"]);
+  const [studentIds, setStudentIds] = useState<string[]>([]);
   const [familyKey, setFamilyKey] = useState("");
   const [vars, setVars] = useState<Record<string, string>>({});
 
@@ -93,9 +95,9 @@ export function WaSendToAudiencePanel({ readOnly }: { readOnly: boolean }) {
       };
     }
     if (who === "fee_stage") return { kind: "fee_stage", stages };
-    if (who === "students") return { kind: "students", studentIds: [] };
+    if (who === "students") return { kind: "students", studentIds };
     return { kind: "parents", classIds, languageUnset };
-  }, [who, stream, departmentId, stages, classIds, languageUnset]);
+  }, [who, stream, departmentId, stages, classIds, languageUnset, studentIds]);
 
   // Any change to the audience or the message invalidates the count the
   // office approved — otherwise "Send" could fire against a spec nobody
@@ -199,6 +201,7 @@ export function WaSendToAudiencePanel({ readOnly }: { readOnly: boolean }) {
               ["parents", "Parents"],
               ["staff", "Staff"],
               ["fee_stage", "Fee defaulters"],
+              ["students", "Pick students"],
             ] as [Who, string][]
           ).map(([id, label]) => (
             <button
@@ -286,6 +289,10 @@ export function WaSendToAudiencePanel({ readOnly }: { readOnly: boolean }) {
           </div>
         ) : null}
 
+        {who === "students" ? (
+          <WaStudentPicker selected={studentIds} onChange={setStudentIds} />
+        ) : null}
+
         {who === "fee_stage" ? (
           <div className="flex flex-wrap gap-1.5">
             {FEE_STAGES.map((s) => (
@@ -369,7 +376,11 @@ export function WaSendToAudiencePanel({ readOnly }: { readOnly: boolean }) {
           <button
             type="button"
             className={btnOutline}
-            disabled={busy || !familyKey}
+            disabled={
+              busy ||
+              !familyKey ||
+              (who === "students" && studentIds.length === 0)
+            }
             onClick={() => void check()}
           >
             {busy && !checked ? "Checking…" : "Check audience"}
