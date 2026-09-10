@@ -91,14 +91,24 @@ export type AutomationApprovalItem = {
   previewBody: string;
   audienceCount: number;
   sampleRecipients: string[];
-  dispatchPayload: {
-    mobile: string;
-    body: string;
-    templateName?: string;
-    templateLanguage?: string;
-    variables?: Record<string, string>;
-  }[];
+  dispatchPayload: AutomationDispatchEntry[];
   error: string;
+  /** How the audience was resolved ("24 recipients from live data"). */
+  audienceNote?: string;
+};
+
+export type AutomationDispatchEntry = {
+  mobile: string;
+  body: string;
+  templateName?: string;
+  templateLanguage?: string;
+  variables?: Record<string, string>;
+  /** Household altMobile — tried when the primary number fails outright. */
+  fallbackMobile?: string;
+  /** THIS family's template language, which may differ from the rule's. */
+  language?: WaTemplateLanguage;
+  /** "Aarav Sharma · V-A" — shown on the approval card, never sent. */
+  label?: string;
 };
 
 export type AutomationRun = {
@@ -698,41 +708,98 @@ function computeNextRun(rule: AutomationRule, from: Date): string {
   return new Date(from.getTime() + 24 * 60 * 60_000).toISOString();
 }
 
-function demoPreviewForRule(rule: AutomationRule): {
+/**
+ * The audience a caller resolved for one rule.
+ *
+ * There is no built-in fallback on purpose. This used to invent two demo
+ * mobiles (9876543210 / 9123456780) whenever nobody supplied an audience,
+ * which was harmless while the tick only proposed cards for a human and
+ * became a real message to two strangers the moment a rule was set to
+ * auto-run. A rule with no resolved audience now proposes nothing and says
+ * why. See lib/automationAudience.server.ts for the resolver.
+ */
+export type ResolvedAudience =
+  | {
+      ok: true;
+      recipients: {
+        mobile: string;
+        fallbackMobile?: string;
+        language?: WaTemplateLanguage;
+        variables: Record<string, string>;
+        label: string;
+      }[];
+      note: string;
+    }
+  | { ok: false; error: string };
+
+export type ResolvedAudiences = Record<string, ResolvedAudience>;
+
+function previewForRule(
+  rule: AutomationRule,
+  audience: ResolvedAudience,
+): {
   previewBody: string;
   audienceCount: number;
   sampleRecipients: string[];
-  dispatchPayload: AutomationApprovalItem["dispatchPayload"];
+  dispatchPayload: AutomationDispatchEntry[];
+  audienceNote: string;
 } {
-  const previewBody = `[Automation] ${rule.name} → template ${rule.templateFamilyKey || "(campaign)"} (${rule.templateLanguage}). Audience: ${rule.audienceSummary}`;
-  const samples = ["9876543210", "9123456780"];
+  const head = `${rule.name} → ${rule.templateFamilyKey || "(campaign)"} (${rule.templateLanguage})`;
+  if (!audience.ok) {
+    return {
+      previewBody: `${head} — not sent: ${audience.error}`,
+      audienceCount: 0,
+      sampleRecipients: [],
+      dispatchPayload: [],
+      audienceNote: audience.error,
+    };
+  }
+  const body = `${head} · ${rule.audienceSummary}`;
   return {
-    previewBody,
-    audienceCount: samples.length,
-    sampleRecipients: samples,
-    dispatchPayload: samples.map((mobile) => ({
-      mobile,
-      body: previewBody,
-      templateName: rule.templateFamilyKey
-        ? rule.templateFamilyKey.replace(/_/g, "_")
-        : undefined,
-      templateLanguage: rule.templateLanguage,
-      variables: {
-        guardianName: "Parent",
-        childName: "Student",
-        schoolName: "School",
-      },
+    previewBody: body,
+    audienceCount: audience.recipients.length,
+    sampleRecipients: audience.recipients.slice(0, 3).map((r) => r.label),
+    audienceNote: audience.note,
+    dispatchPayload: audience.recipients.map((r) => ({
+      mobile: r.mobile,
+      fallbackMobile: r.fallbackMobile,
+      body,
+      templateName: rule.templateFamilyKey || undefined,
+      templateLanguage: r.language || rule.templateLanguage,
+      language: r.language || rule.templateLanguage,
+      label: r.label,
+      variables: r.variables,
     })),
   };
 }
 
+/** How recently an auto-run rule must have sent for a re-run to be a duplicate. */
+const AUTO_RESEND_GUARD_MS = 10 * 60_000;
+
+const NO_AUDIENCE_RESOLVER: ResolvedAudience = {
+  ok: false,
+  error:
+    "Recipients are resolved on the server. Run the tick from Masters → " +
+    "Automation (or let the scheduled tick run) instead of evaluating in the browser.",
+};
+
 /**
- * Evaluate due rules and create approval items (or auto-dispatch markers).
- * Client and tick API both use this pure function.
+ * Evaluate due rules and create approval items (or auto-approved items the
+ * caller then dispatches for real).
+ *
+ * Pure, so both the API tick and any test can drive it: the caller resolves
+ * each rule's audience (`opts.audiences`, keyed by rule id) and this decides
+ * what is due and what card to raise. A rule whose audience could not be
+ * resolved records a FAILED run carrying the reason and raises no approval —
+ * an approval card with nobody behind it is a card someone will press.
  */
 export function evaluateAutomationTick(
   state: AutomationState,
-  opts?: { forceRuleIds?: string[]; now?: Date },
+  opts?: {
+    forceRuleIds?: string[];
+    now?: Date;
+    audiences?: ResolvedAudiences;
+  },
 ): AutomationState {
   const now = opts?.now || new Date();
   const rules = [...state.rules];
@@ -745,11 +812,65 @@ export function evaluateAutomationTick(
     if (!forced && !ruleIsDue(rule, now)) continue;
     if (!forced && !rule.enabled) continue;
 
-    const preview = demoPreviewForRule(rule);
+    const audience: ResolvedAudience =
+      opts?.audiences?.[rule.id] ?? NO_AUDIENCE_RESOLVER;
+    const preview = previewForRule(rule, audience);
     const runId = nid("run");
     const approvalId = nid("appr");
 
-    if (rule.executionMode === "auto" && rule.testedAt) {
+    // Nobody to write to — record the run and move on. This covers both
+    // "the audience could not be read" and the ordinary good news that no
+    // family is overdue today; neither should raise an approval card.
+    if (preview.dispatchPayload.length === 0) {
+      runs = [
+        {
+          id: runId,
+          ruleId: rule.id,
+          status: audience.ok ? "completed" : "failed",
+          scheduledFor: now.toISOString(),
+          startedAt: now.toISOString(),
+          finishedAt: now.toISOString(),
+          approvalId: "",
+          stats: { proposed: 0, approved: 0, dispatched: 0, failed: 0 },
+          error: audience.ok ? "" : audience.error,
+        },
+        ...runs,
+      ];
+      rules[i] = {
+        ...rule,
+        lastRunAt: now.toISOString(),
+        nextRunAt: computeNextRun(rule, now),
+        updatedAt: nowIso(),
+      };
+      continue;
+    }
+
+    const autoRun = rule.executionMode === "auto" && !!rule.testedAt;
+
+    // An auto-run rule really sends, so a second evaluation minutes after
+    // the first must not send the same message again — a double-clicked
+    // "Run evaluation now", or the cron landing while someone is pressing
+    // it. Approval-first rules are already protected by the pending check
+    // below; this is the same protection for the rules nobody reviews.
+    if (autoRun) {
+      const recent = approvals.find(
+        (a) =>
+          a.ruleId === rule.id &&
+          (a.status === "approved" || a.status === "dispatched") &&
+          now.getTime() - Date.parse(a.createdAt || "") < AUTO_RESEND_GUARD_MS,
+      );
+      if (recent) {
+        rules[i] = {
+          ...rule,
+          lastRunAt: now.toISOString(),
+          nextRunAt: computeNextRun(rule, now),
+          updatedAt: nowIso(),
+        };
+        continue;
+      }
+    }
+
+    if (autoRun) {
       approvals = [
         {
           id: approvalId,
@@ -771,10 +892,13 @@ export function evaluateAutomationTick(
         {
           id: runId,
           ruleId: rule.id,
-          status: "completed",
+          // "running" until the caller actually dispatches and calls
+          // markApprovalDispatched. Reporting "completed · dispatched 0"
+          // here is what made auto-run rules look like they had sent.
+          status: "running",
           scheduledFor: now.toISOString(),
           startedAt: now.toISOString(),
-          finishedAt: now.toISOString(),
+          finishedAt: "",
           approvalId,
           stats: {
             proposed: preview.audienceCount,
@@ -848,6 +972,21 @@ export function evaluateAutomationTick(
   };
 }
 
+/**
+ * Approved items that have not gone out yet.
+ *
+ * Both the auto-run cards this tick just raised and anything a human
+ * approved in Masters while the sender was misconfigured — the next tick
+ * picks those up rather than leaving them approved and unsent forever.
+ */
+export function undispatchedApprovals(
+  state: AutomationState,
+): AutomationApprovalItem[] {
+  return state.approvals.filter(
+    (a) => a.status === "approved" && a.dispatchPayload.length > 0,
+  );
+}
+
 export function decideApproval(
   state: AutomationState,
   approvalId: string,
@@ -871,11 +1010,20 @@ export function decideApproval(
   return { ...state, approvals };
 }
 
+/**
+ * Record what the send actually did.
+ *
+ * `counts` comes from the dispatcher, so a partly-delivered run reports the
+ * real split instead of "all of them" / "none of them". Without it the
+ * caller is assumed to have sent to everyone proposed, which is what the
+ * browser's own dispatch has always done.
+ */
 export function markApprovalDispatched(
   state: AutomationState,
   approvalId: string,
   ok: boolean,
   error = "",
+  counts?: { sent: number; failed: number; deferred?: number },
 ): AutomationState {
   return {
     ...state,
@@ -884,7 +1032,9 @@ export function markApprovalDispatched(
         ? {
             ...a,
             status: ok ? "dispatched" : "failed",
-            error: ok ? "" : error,
+            // A partial send is still a failure to report, but the error
+            // must not be blanked when some messages did go out.
+            error: ok && !error ? "" : error,
             decidedAt: a.decidedAt || nowIso(),
           }
         : a,
@@ -898,10 +1048,14 @@ export function markApprovalDispatched(
             stats: {
               ...r.stats,
               approved: r.stats.proposed,
-              dispatched: ok ? r.stats.proposed : 0,
-              failed: ok ? 0 : r.stats.proposed,
+              dispatched: counts
+                ? counts.sent
+                : ok
+                  ? r.stats.proposed
+                  : 0,
+              failed: counts ? counts.failed : ok ? 0 : r.stats.proposed,
             },
-            error: ok ? "" : error,
+            error: ok && !error ? "" : error,
           }
         : r,
     ),

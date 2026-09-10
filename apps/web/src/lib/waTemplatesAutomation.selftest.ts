@@ -14,10 +14,12 @@ import {
   decideApproval,
   emptyAutomation,
   evaluateAutomationTick,
+  markApprovalDispatched,
   markRuleTested,
   pendingApprovals,
   setRuleEnabled,
   setRuleExecutionMode,
+  undispatchedApprovals,
 } from "./automation";
 
 function assert(cond: unknown, msg: string) {
@@ -71,21 +73,119 @@ function main() {
 
   let auto = emptyAutomation();
   assert(auto.rules.length >= 10, "automation seed rules");
-  auto = setRuleEnabled(auto, auto.rules[0]!.id, true);
-  auto = evaluateAutomationTick(auto, { forceRuleIds: [auto.rules[0]!.id] });
-  const pending = pendingApprovals(auto);
-  assert(pending.length >= 1, "approval-first creates pending item");
+  const ruleId = auto.rules[0]!.id;
+  auto = setRuleEnabled(auto, ruleId, true);
 
-  const modeBlock = setRuleExecutionMode(auto, auto.rules[0]!.id, "auto");
+  // No resolved audience → no approval card. The tick used to invent two
+  // demo mobiles here, which an auto-run rule would have really messaged.
+  const noAudience = evaluateAutomationTick(auto, { forceRuleIds: [ruleId] });
+  assert(
+    pendingApprovals(noAudience).length === 0,
+    "no audience raises no approval",
+  );
+  assert(
+    noAudience.runs[0]?.status === "failed" && !!noAudience.runs[0]?.error,
+    "no audience records a failed run with the reason",
+  );
+
+  auto = evaluateAutomationTick(auto, {
+    forceRuleIds: [ruleId],
+    audiences: {
+      [ruleId]: {
+        ok: true,
+        note: "1 recipient from live data",
+        recipients: [
+          {
+            mobile: "9000000001",
+            language: "hi",
+            label: "Asha · V-A",
+            variables: { guardianName: "Ravi", childName: "Asha" },
+          },
+        ],
+      },
+    },
+  });
+  const pending = pendingApprovals(auto);
+  assert(pending.length === 1, "approval-first creates pending item");
+  assert(
+    pending[0]!.dispatchPayload.length === 1 &&
+      pending[0]!.dispatchPayload[0]!.mobile === "9000000001" &&
+      pending[0]!.dispatchPayload[0]!.language === "hi",
+    "approval carries the resolved recipient, in that family's language",
+  );
+
+  const modeBlock = setRuleExecutionMode(auto, ruleId, "auto");
   assert(!modeBlock.ok, "auto mode blocked before tested");
-  auto = markRuleTested(auto, auto.rules[0]!.id);
-  const modeOk = setRuleExecutionMode(auto, auto.rules[0]!.id, "auto");
+  auto = markRuleTested(auto, ruleId);
+  const modeOk = setRuleExecutionMode(auto, ruleId, "auto");
   assert(modeOk.ok, "auto mode after tested");
 
   auto = decideApproval(auto, pending[0]!.id, "approved", "selftest");
   assert(
     auto.approvals.find((a) => a.id === pending[0]!.id)?.status === "approved",
     "approval decided",
+  );
+
+  // Approved but not yet sent — the next tick picks it up rather than
+  // leaving it approved and undelivered forever.
+  assert(
+    undispatchedApprovals(auto).some((a) => a.id === pending[0]!.id),
+    "approved-but-unsent card is queued for the next tick",
+  );
+
+  // An auto-run rule stays "running" until something really dispatches it.
+  const live = setRuleExecutionMode(
+    markRuleTested(setRuleEnabled(emptyAutomation(), ruleId, true), ruleId),
+    ruleId,
+    "auto",
+  );
+  if (!live.ok) throw new Error("auto mode for the dispatch check");
+  let autoState = evaluateAutomationTick(live.state, {
+    forceRuleIds: [ruleId],
+    audiences: {
+      [ruleId]: {
+        ok: true,
+        note: "1 recipient from live data",
+        recipients: [
+          { mobile: "9000000002", label: "Kabir · VI-B", variables: {} },
+        ],
+      },
+    },
+  });
+  const autoRun = autoState.runs.find((r) => r.ruleId === ruleId);
+  assert(
+    autoRun?.status === "running" && autoRun.stats.dispatched === 0,
+    "auto-run does not report a completed send before dispatch",
+  );
+  const autoCard = autoState.approvals.find((a) => a.ruleId === ruleId)!;
+  autoState = markApprovalDispatched(autoState, autoCard.id, true, "", {
+    sent: 1,
+    failed: 0,
+  });
+  const doneRun = autoState.runs.find((r) => r.approvalId === autoCard.id);
+  assert(
+    doneRun?.status === "completed" && doneRun.stats.dispatched === 1,
+    "dispatch result is what the run reports",
+  );
+
+  // Pressing "Run evaluation now" twice must not message the same families
+  // twice — an auto-run rule that just sent is skipped.
+  const cardsBefore = autoState.approvals.length;
+  autoState = evaluateAutomationTick(autoState, {
+    forceRuleIds: [ruleId],
+    audiences: {
+      [ruleId]: {
+        ok: true,
+        note: "1 recipient from live data",
+        recipients: [
+          { mobile: "9000000002", label: "Kabir · VI-B", variables: {} },
+        ],
+      },
+    },
+  });
+  assert(
+    autoState.approvals.length === cardsBefore,
+    "auto-run does not re-send within the guard window",
   );
 
   console.log("waTemplatesAutomation.selftest: OK");

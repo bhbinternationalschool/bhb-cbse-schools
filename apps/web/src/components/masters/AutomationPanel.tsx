@@ -60,11 +60,11 @@ export function AutomationPanel() {
           notice={desk.notice}
           onCreate={() => setScreen("create")}
           onEdit={goEdit}
-          onEvaluate={() =>
-            desk.evaluateTick(
+          onEvaluate={() => {
+            void desk.evaluateTick(
               automationState.rules.filter((r) => r.enabled).map((r) => r.id),
-            )
-          }
+            );
+          }}
           onDispatchApproval={(id) => {
             const item = pendingApprovals(automationState).find((a) => a.id === id);
             if (item) void desk.dispatchApproval(item);
@@ -86,9 +86,9 @@ export function AutomationPanel() {
         onMode={(mode) => desk.setMode(selected.id, mode)}
         onSchedule={(patch) => desk.updateSchedule(selected.id, patch)}
         onUpdate={(patch) => desk.updateRule(selected.id, patch)}
-        onForceEvaluate={() =>
-          desk.evaluateTick([selected.id])
-        }
+        onForceEvaluate={() => {
+          void desk.evaluateTick([selected.id]);
+        }}
       />
     );
   }
@@ -100,11 +100,11 @@ export function AutomationPanel() {
       notice={desk.notice}
       onCreate={() => setScreen("create")}
       onEdit={goEdit}
-      onEvaluate={() =>
-        desk.evaluateTick(
+      onEvaluate={() => {
+        void desk.evaluateTick(
           automationState.rules.filter((r) => r.enabled).map((r) => r.id),
-        )
-      }
+        );
+      }}
       onDispatchApproval={(id) => {
         const item = pendingApprovals(automationState).find((a) => a.id === id);
         if (item) void desk.dispatchApproval(item);

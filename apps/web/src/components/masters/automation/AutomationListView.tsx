@@ -263,8 +263,13 @@ export function AutomationListView({
                     {a.previewBody}
                   </pre>
                   <p className="text-[10px] text-[var(--muted)]">
-                    Samples: {a.sampleRecipients.join(", ")}
+                    Samples: {a.sampleRecipients.join(", ") || "—"}
                   </p>
+                  {a.audienceNote ? (
+                    <p className="text-[10px] text-[var(--muted)]">
+                      {a.audienceNote}
+                    </p>
+                  ) : null}
                   {!readOnly ? (
                     <div className="flex flex-wrap gap-2">
                       <button
