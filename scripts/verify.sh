@@ -216,6 +216,7 @@ SELFTESTS=(
   test:ai-content-report
   test:fleet-live-position
   test:parent-bus-reply
+  test:voice-note
   test:parent-dues-fallback
   test:receipt-lookup
   test:referrals

@@ -42,6 +42,7 @@ import { handleWaSisBotInbound } from "@/lib/waSisBotServer";
 import { handleWaSurveyBotInbound } from "@/lib/waSurveyBotServer";
 import { handleWaStaffAttendanceInbound } from "@/lib/waStaffAttendanceBotServer";
 import { handleErpStaffCommand } from "@/lib/erpCommands.server";
+import { transcribeInboundVoiceNote, voiceNoteTranscriptionEnabled } from "@/lib/voiceNote.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { sendWhatsAppText, waNormalizeLocal10 } from "@/lib/waSend";
 import { sendWhatsAppInteractive } from "@/lib/waInteractive";
@@ -661,6 +662,24 @@ export async function handleWaUnifiedInbound(opts: {
 }> {
   await ensureSchoolMirrorHydrated();
   const mobile10 = waNormalizeLocal10(opts.fromWaId);
+
+  // A voice note becomes words before anything is routed.
+  //
+  // Only when the message carries no text of its own — a caption always wins,
+  // because the sender typed it deliberately. On failure `opts` is left
+  // untouched, so the ERP command handler's own Google STT path still runs
+  // for staff and every other flow behaves exactly as it did before.
+  if (opts.audio?.mediaId && !(opts.text || "").trim() && voiceNoteTranscriptionEnabled()) {
+    const heard = await transcribeInboundVoiceNote({
+      mediaId: opts.audio.mediaId,
+      mimeType: opts.audio.mimeType,
+      waMessageId: opts.waMessageId,
+    });
+    if (heard.kind === "transcribed") {
+      opts = { ...opts, text: heard.text };
+    }
+  }
+
   const rawText = (opts.text || "").trim();
 
   // Event RSVP button taps are self-describing and must be handled here,
