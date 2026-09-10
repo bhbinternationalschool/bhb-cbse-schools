@@ -21,6 +21,7 @@ import { getServerTenantContext } from "@/lib/serverTenant";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { getSchoolMirrorSync } from "@/lib/schoolDataMirror";
 import { loadServerMasters } from "@/lib/api/v1/auth";
+import { resolveAcademicYear } from "@/lib/academicYearResolve";
 import { type MastersState } from "@/lib/masters";
 import { loadSis, type SisState } from "@/lib/sis";
 import { householdCandidateNumbers } from "@/lib/waHouseholdNumbers";
@@ -34,6 +35,7 @@ import {
   summariseWaUsage,
   summariseWaUsageByMonth,
   summariseWaUsageByStudent,
+  waUsageYearWindow,
   type WaAiCall,
   type WaBillCategory,
   type WaCostRates,
@@ -45,11 +47,11 @@ import {
   type WaUsageMessage,
   type WaUsageMonth,
   type WaUsageStudentRef,
+  type WaUsageYearWindow,
   type WaUsageSummary,
 } from "@/lib/waUsageCost";
 
 const MAX_ROWS = 5000;
-const YEAR_MONTHS = 12;
 
 function emptyByStudent(): WaUsageByStudent {
   return {
@@ -89,10 +91,13 @@ export type WaUsageReport = {
   /** Active staff numbers the classifier had to work with. 0 = it could not. */
   staffNumbersKnown: number;
   /**
-   * The last twelve IST calendar months, whatever window is selected — a
-   * school budgets a year, and the fee-installment spikes only show here.
+   * The school's SESSION, month by month, whatever window is selected — a
+   * school budgets a session, its books close on 31 March, and the
+   * fee-installment spikes only show here.
    */
   byMonth: WaUsageMonth[];
+  /** Which session that is, and whether Masters actually defines it. */
+  year: WaUsageYearWindow;
   /**
    * false = the roster could not be read, so nothing could be attributed.
    * The per-class tables say so rather than showing an empty school.
@@ -223,11 +228,39 @@ async function buildAttribution(): Promise<Attribution> {
   };
 }
 
-/** The first instant of the IST month `n` months back. */
-function monthsAgoIso(n: number): string {
-  const ist = new Date(Date.now() + 330 * 60_000);
-  const start = Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth() - n, 1) - 330 * 60_000;
-  return new Date(start).toISOString();
+/**
+ * The school's own session, from Masters.
+ *
+ * April–March is the norm here and is what this school runs, but it is
+ * configuration and not a law: a school on a different calendar must not be
+ * shown someone else's year. When Masters defines no session the fallback
+ * assumes April–March and says so on screen.
+ */
+async function sessionYearWindow(): Promise<WaUsageYearWindow> {
+  const todayIso = new Date().toISOString();
+  try {
+    const masters = await loadServerMasters();
+    const years = masters.academicYears ?? [];
+    const resolved = resolveAcademicYear(years, todayIso);
+    const hit =
+      years.find((y) => y.code === resolved.code) ??
+      years.find((y) => (y.status ?? "").toLowerCase() === "current");
+    if (hit) {
+      return waUsageYearWindow({
+        startsOn: hit.startsOn,
+        endsOn: hit.endsOn,
+        code: hit.code,
+        label: hit.label || hit.code,
+        todayIso,
+      });
+    }
+  } catch (e) {
+    console.warn(
+      "[waUsage] session lookup failed",
+      e instanceof Error ? e.message : e,
+    );
+  }
+  return waUsageYearWindow({ todayIso });
 }
 
 /** 919876543210 / 09876543210 → 9876543210. */
@@ -348,15 +381,17 @@ export async function waUsageReport(
       byAudience: [],
       staffNumbersKnown: 0,
       byMonth: [],
+      year: waUsageYearWindow({ todayIso: new Date().toISOString() }),
       rosterOk: false,
       attributedByNumber: 0,
     };
   }
 
-  // One read covers both the selected window and the year series: the year
-  // is a superset, and the rows come newest-first, so a read that hits its
-  // cap loses only the oldest months — the window figures stay exact.
-  const yearFloor = monthsAgoIso(YEAR_MONTHS - 1);
+  // One read covers both the selected window and the session series: the
+  // rows come newest-first, so a read that hits its cap loses only the
+  // oldest months — the window figures stay exact.
+  const year = await sessionYearWindow();
+  const yearFloor = `${year.fromMonth}-01T00:00:00.000Z`;
   const readFloor = sinceIso < yearFloor ? sinceIso : yearFloor;
 
   const { data, error } = await ctx.sb
@@ -387,6 +422,7 @@ export async function waUsageReport(
       byAudience: [],
       staffNumbersKnown: 0,
       byMonth: [],
+      year: waUsageYearWindow({ todayIso: new Date().toISOString() }),
       rosterOk: false,
       attributedByNumber: 0,
     };
@@ -498,9 +534,10 @@ export async function waUsageReport(
     byStudent: summariseWaUsageByStudent(attributed, rates, attribution.roster),
     byAudience: splitWaUsageByAudience(byAudience, rates),
     staffNumbersKnown: attribution.staffNumbers.size,
+    year,
     byMonth: summariseWaUsageByMonth(yearMessages, rates, {
-      fromMonth: istMonthKey(yearFloor),
-      toMonth: istMonthKey(new Date().toISOString()),
+      fromMonth: year.fromMonth,
+      toMonth: year.toMonth,
       // Hit the cap? The oldest month reached is a floor, not a total.
       partialFrom: truncated
         ? istMonthKey(String(rows[rows.length - 1]?.created_at || ""))

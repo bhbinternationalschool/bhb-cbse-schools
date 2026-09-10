@@ -1004,6 +1004,15 @@ export type WaUsageYearTotals = {
   completeMonths: number;
   /** Average over complete months only; a partial month would drag it down. */
   averagePaise: number;
+  /**
+   * The unrounded cost of those complete months.
+   *
+   * Kept because projecting a session from `averagePaise` compounds its
+   * rounding: ₹0.20 over six months rounds to 3 paise a month, and 3 × 12
+   * is 36 rather than 40 — a tenth of the figure lost to a display value.
+   * Anything pacing forward divides this instead.
+   */
+  completeCostPaise: number;
   dearest: WaUsageMonth | null;
 };
 
@@ -1030,6 +1039,114 @@ export function waUsageYearTotals(months: WaUsageMonth[]): WaUsageYearTotals {
     failed,
     completeMonths,
     averagePaise: completeMonths > 0 ? Math.round(completeCost / completeMonths) : 0,
+    completeCostPaise: completeCost,
     dearest,
   };
+}
+
+
+/* ------------------------------------------------------------------ *
+ * The session, not the last twelve months
+ *
+ * A rolling year is the wrong frame for a school. The books close on
+ * 31 March, the fee structure is set per session, and "what did WhatsApp
+ * cost us this year" means the session — so the monthly series runs from
+ * the session's first month to its last.
+ *
+ * The session itself is read from Masters rather than assumed: April to
+ * March is the norm in India and it is what this school runs, but it is
+ * configuration, not a law, and a school on a different calendar must not
+ * be shown someone else's year. April–March is only the fallback for when
+ * Masters has no session defined, and the screen says when it is guessing.
+ * ------------------------------------------------------------------ */
+
+export type WaUsageYearWindow = {
+  /** "2026-27" */
+  code: string;
+  label: string;
+  /** First and last month to show — "YYYY-MM". */
+  fromMonth: string;
+  /** The current month, or the session's last if the session has ended. */
+  toMonth: string;
+  /** The session's final month, which may be in the future. */
+  endMonth: string;
+  /** Months in the whole session — 12 normally, for pacing to its end. */
+  monthsInYear: number;
+  /** Months still to come after toMonth. 0 = the session is complete. */
+  monthsRemaining: number;
+  /** false = April–March was assumed because Masters defines no session. */
+  configured: boolean;
+};
+
+function monthOf(dateish: string): string {
+  const d = (dateish || "").slice(0, 7);
+  return /^\d{4}-\d{2}$/.test(d) ? d : "";
+}
+
+function clampMonth(m: string, lo: string, hi: string): string {
+  if (m < lo) return lo;
+  if (m > hi) return hi;
+  return m;
+}
+
+/** "2026-04" + "2027-03" → "2026-27". */
+function sessionCodeFor(fromMonth: string, endMonth: string): string {
+  const a = fromMonth.slice(0, 4);
+  const b = endMonth.slice(0, 4);
+  return a === b ? a : `${a}-${b.slice(2)}`;
+}
+
+export function waUsageYearWindow(opts: {
+  startsOn?: string;
+  endsOn?: string;
+  code?: string;
+  label?: string;
+  todayIso: string;
+}): WaUsageYearWindow {
+  const today = istMonthKey(opts.todayIso) || monthOf(opts.todayIso);
+  let fromMonth = monthOf(opts.startsOn || "");
+  let endMonth = monthOf(opts.endsOn || "");
+  let configured = true;
+
+  if (!fromMonth || !endMonth || fromMonth > endMonth) {
+    // No session on file: assume the Indian school year, April to March,
+    // the one containing today.
+    configured = false;
+    const [y, m] = today.split("-").map(Number);
+    const startYear = m >= 4 ? y : y - 1;
+    fromMonth = `${startYear}-04`;
+    endMonth = `${startYear + 1}-03`;
+  }
+
+  const toMonth = clampMonth(today, fromMonth, endMonth);
+  const code = opts.code || sessionCodeFor(fromMonth, endMonth);
+  return {
+    code,
+    label: opts.label || code,
+    fromMonth,
+    toMonth,
+    endMonth,
+    monthsInYear: monthRange(fromMonth, endMonth).length,
+    monthsRemaining: Math.max(0, monthRange(toMonth, endMonth).length - 1),
+    configured,
+  };
+}
+
+/**
+ * What the whole session looks like at this pace.
+ *
+ * Built from the average COMPLETE month and the session's own length, so a
+ * six-month-old session projects to twelve and a finished one projects to
+ * exactly what it cost. Returns null when there is nothing to pace from —
+ * better no figure than a projection off one week of data.
+ */
+export function projectedSessionPaise(
+  totals: WaUsageYearTotals,
+  year: WaUsageYearWindow,
+): number | null {
+  if (totals.completeMonths === 0) return null;
+  if (year.monthsRemaining === 0) return totals.costPaise;
+  return Math.round(
+    (totals.completeCostPaise / totals.completeMonths) * year.monthsInYear,
+  );
 }
