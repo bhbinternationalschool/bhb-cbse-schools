@@ -11,9 +11,11 @@ import {
   rateRupees,
   ratesAreDefaults,
   repriceWaUsage,
+  repriceWaUsageByAudience,
   repriceWaUsageByStudent,
   rupees,
   type WaCostRates,
+  type WaUsageAudienceSection,
   type WaUsageByStudent,
   type WaUsageSummary,
 } from "@/lib/waUsageCost";
@@ -35,6 +37,8 @@ type Report = {
   catalogueOk: boolean;
   truncated: boolean;
   byStudent: WaUsageByStudent;
+  byAudience: WaUsageAudienceSection[];
+  staffNumbersKnown: number;
   rosterOk: boolean;
   attributedByNumber: number;
 };
@@ -131,6 +135,13 @@ export function AutomationUsageCost({ readOnly }: { readOnly: boolean }) {
   const summary = useMemo(() => {
     if (!report) return null;
     return editing ? repriceWaUsage(report.summary, draft) : report.summary;
+  }, [report, editing, draft]);
+
+  const audiences = useMemo(() => {
+    if (!report) return [];
+    return editing
+      ? repriceWaUsageByAudience(report.byAudience, draft)
+      : report.byAudience;
   }, [report, editing, draft]);
 
   const byStudent = useMemo(() => {
@@ -350,6 +361,79 @@ export function AutomationUsageCost({ readOnly }: { readOnly: boolean }) {
               </table>
             )}
           </MastersTableCard>
+
+          {audiences.length > 0 ? (
+            <div className="space-y-3">
+              {audiences.map((a) => (
+                <MastersTableCard
+                  key={a.audience}
+                  title={`${a.label} — ${rupees(a.summary.messageCostPaise)}`}
+                >
+                  <div className="px-3 py-2 text-[11px] text-[var(--muted)]">
+                    {a.hint}. {a.summary.templateSent} template message
+                    {a.summary.templateSent === 1 ? "" : "s"}
+                    {a.summary.serviceSent > 0
+                      ? `, ${a.summary.serviceSent} free-form repl${
+                          a.summary.serviceSent === 1 ? "y" : "ies"
+                        }`
+                      : ""}
+                    .
+                  </div>
+                  <table className="w-full text-[12px]">
+                    <thead className="bg-[var(--surface-sunken)] text-[10px] uppercase text-[var(--muted)]">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Type</th>
+                        <th className="px-3 py-2 text-right">Sent</th>
+                        <th className="px-3 py-2 text-right">Delivered</th>
+                        <th className="px-3 py-2 text-right">Failed</th>
+                        <th className="px-3 py-2 text-right">Rate</th>
+                        <th className="px-3 py-2 text-right">Cost</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--border)]">
+                      {a.summary.buckets.map((b) => (
+                        <tr key={b.category}>
+                          <td className="px-3 py-2 font-medium text-[var(--brand-deep)]">
+                            {b.label}
+                          </td>
+                          <td className="px-3 py-2 text-right">{b.sent}</td>
+                          <td className="px-3 py-2 text-right">{b.delivered}</td>
+                          <td className="px-3 py-2 text-right text-rose-700">
+                            {b.failed || ""}
+                          </td>
+                          <td className="px-3 py-2 text-right text-[var(--muted)]">
+                            ₹{rateRupees(b.ratePaise)}
+                          </td>
+                          <td className="px-3 py-2 text-right font-semibold">
+                            {rupees(b.costPaise)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {a.summary.templates.length > 0 ? (
+                    <div className="px-3 py-2 text-[10px] text-[var(--muted)]">
+                      Dearest here:{" "}
+                      {a.summary.templates
+                        .slice(0, 3)
+                        .map((t) => `${t.templateName} (${rupees(t.costPaise)})`)
+                        .join(" · ")}
+                    </div>
+                  ) : null}
+                </MastersTableCard>
+              ))}
+              <p className="text-[10px] leading-relaxed text-[var(--muted)]">
+                Split by whose number was written to — a staff number on file
+                against an active staff member, a number belonging to a family
+                on the roster, or neither. An explicit family on the log row
+                wins, so a staff member who is also a parent here counts as a
+                parent only when the message was sent to them as one.
+                {report.staffNumbersKnown === 0
+                  ? " No active staff numbers are on file, so nothing can land in a staff section yet."
+                  : ` ${report.staffNumbersKnown} staff numbers on file.`}
+              </p>
+            </div>
+          ) : null}
 
           <MastersTableCard title="Where the money went — by template">
             {summary.templates.length === 0 ? (

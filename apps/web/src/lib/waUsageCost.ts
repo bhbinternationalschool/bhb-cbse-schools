@@ -770,3 +770,93 @@ export function summariseWaUsageByStudent(
     unattributed,
   };
 }
+
+
+/* ------------------------------------------------------------------ *
+ * Parents, staff, and everyone else
+ *
+ * Staff WhatsApp — duty changes, substitution notices, the leadership
+ * broadcast — goes out through the same sender and lands in the same log
+ * as a fee reminder, with no household on the row. Until now it all sat
+ * inside one total, so "what are we spending on staff messaging" had no
+ * answer, and the answer matters: staff messages are the ones most often
+ * sent as free-form replies inside an open conversation, which cost
+ * nothing, while a notice to a teacher who has not messaged this week
+ * needs a paid template. Those two look identical on a phone and differ
+ * by the whole price of the message.
+ *
+ * Each audience is summarised with the SAME function as the school-wide
+ * figures, so the message types, rates and rules are identical and the
+ * sections add up to the total above them.
+ * ------------------------------------------------------------------ */
+
+export type WaUsageAudience = "parents" | "staff" | "other";
+
+/** Fixed order: the reader wants parents and staff in the same place every time. */
+export const WA_USAGE_AUDIENCES: WaUsageAudience[] = ["parents", "staff", "other"];
+
+export function audienceLabel(a: WaUsageAudience): string {
+  switch (a) {
+    case "parents":
+      return "Parents and families";
+    case "staff":
+      return "Staff";
+    default:
+      return "Neither — number not on file";
+  }
+}
+
+export function audienceHint(a: WaUsageAudience): string {
+  switch (a) {
+    case "parents":
+      return "Fee reminders, receipts, notices — anything to a family on the roster";
+    case "staff":
+      return "Duty and substitution notices, staff broadcasts, anything to a staff number";
+    default:
+      return "A number that matches no family and no staff member — an enquiry, a vendor, a wrong entry";
+  }
+}
+
+export type WaUsageAudienceMessage = WaUsageMessage & {
+  audience: WaUsageAudience;
+};
+
+export type WaUsageAudienceSection = {
+  audience: WaUsageAudience;
+  label: string;
+  hint: string;
+  /** The same shape as the school-wide figures, for this audience only. */
+  summary: WaUsageSummary;
+};
+
+export function splitWaUsageByAudience(
+  messages: WaUsageAudienceMessage[],
+  rates: WaCostRates,
+): WaUsageAudienceSection[] {
+  const sections: WaUsageAudienceSection[] = [];
+  for (const audience of WA_USAGE_AUDIENCES) {
+    const mine = messages.filter((m) => m.audience === audience);
+    // An audience nobody wrote to is left out rather than shown as a row of
+    // zeros — the school has no staff sends yet, and an empty Staff table
+    // reads as "this is broken" where no table reads as "nothing yet".
+    if (mine.length === 0) continue;
+    sections.push({
+      audience,
+      label: audienceLabel(audience),
+      hint: audienceHint(audience),
+      summary: summariseWaUsage(mine, rates),
+    });
+  }
+  return sections;
+}
+
+/** The audience sections at different rates — exact, via repriceWaUsage. */
+export function repriceWaUsageByAudience(
+  sections: WaUsageAudienceSection[],
+  rates: WaCostRates,
+): WaUsageAudienceSection[] {
+  return sections.map((s) => ({
+    ...s,
+    summary: repriceWaUsage(s.summary, rates),
+  }));
+}
