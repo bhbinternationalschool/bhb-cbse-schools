@@ -44,6 +44,11 @@ import { handleWaStaffAttendanceInbound } from "@/lib/waStaffAttendanceBotServer
 import { handleErpStaffCommand } from "@/lib/erpCommands.server";
 import { transcribeInboundVoiceNote, voiceNoteTranscriptionEnabled } from "@/lib/voiceNote.server";
 import {
+  isHandledMessage,
+  rememberHandledMessage,
+  type HandledMap,
+} from "@/lib/waMessageDedupe";
+import {
   VOICE_NOTE_PARENT_ACK,
   voiceNoteHubNote,
   type VoiceNoteUnusableReason,
@@ -93,6 +98,12 @@ export type WaUnifiedSession = {
 type WaUnifiedStore = {
   version: 1;
   sessions: Record<string, WaUnifiedSession>;
+  /**
+   * WhatsApp message ids already picked up, so Meta's retries do not buy a
+   * second reply and a second paid transcription. Optional: a store written
+   * before this existed loads without it.
+   */
+  handled?: HandledMap;
 };
 
 let memoryStore: WaUnifiedStore = { version: 1, sessions: {} };
@@ -717,6 +728,22 @@ export async function handleWaUnifiedInbound(opts: {
 }> {
   await ensureSchoolMirrorHydrated();
   const mobile10 = waNormalizeLocal10(opts.fromWaId);
+
+  // Meta re-delivers a webhook it did not get a prompt answer for, and a
+  // voice note takes about six seconds — long enough to invite one. The id
+  // is claimed here, before the work, so a retry that lands while the first
+  // pass is still running is dropped rather than answered twice.
+  if (opts.waMessageId) {
+    const nowMs = Date.now();
+    const seenStore = await readStore();
+    if (isHandledMessage(seenStore.handled, opts.waMessageId, nowMs)) {
+      return { replied: false, escalate: false, audience: "duplicate", stub: false };
+    }
+    await writeStore({
+      ...seenStore,
+      handled: rememberHandledMessage(seenStore.handled, opts.waMessageId, nowMs),
+    });
+  }
 
   // A voice note becomes words before anything is routed.
   //

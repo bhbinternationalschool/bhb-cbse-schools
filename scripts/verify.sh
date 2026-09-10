@@ -217,6 +217,7 @@ SELFTESTS=(
   test:fleet-live-position
   test:parent-bus-reply
   test:voice-note
+  test:wa-dedupe
   test:parent-dues-fallback
   test:receipt-lookup
   test:referrals

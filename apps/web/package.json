@@ -93,6 +93,7 @@
     "test:parent-bus-reply": "npx tsx src/lib/parentBusReply.selftest.ts",
     "test:parent-bus-live": "npx tsx --env-file=.env.local scripts/parent-bus-live-check.ts",
     "test:voice-note": "npx tsx src/lib/voiceNote.selftest.ts",
+    "test:wa-dedupe": "npx tsx src/lib/waMessageDedupe.selftest.ts",
     "test:voice-note-live": "npx tsx --env-file=.env.local scripts/voice-note-live-check.ts",
     "test:parent-dues-fallback": "npx tsx src/lib/parentDuesFallback.selftest.ts",
     "test:rbac-infer": "npx tsx src/lib/rbacInfer.selftest.ts",
