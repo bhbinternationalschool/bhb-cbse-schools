@@ -16,6 +16,7 @@ import {
 } from "@/components/masters/MastersLayout";
 import { AutomationBadNumbers } from "./AutomationBadNumbers";
 import { AutomationSentMessages } from "./AutomationSentMessages";
+import { AutomationUsageCost } from "./AutomationUsageCost";
 import {
   autoBtnOutline,
   autoBtnPrimary,
@@ -30,7 +31,8 @@ type ListTab =
   | "approvals"
   | "runs"
   | "sent"
-  | "numbers";
+  | "numbers"
+  | "cost";
 
 function scheduleLabel(r: AutomationRule): string {
   if (r.triggerType === "schedule" && r.cronExpr) {
@@ -148,6 +150,7 @@ export function AutomationListView({
             // a stale number in a tab label is worse than no number.
             { id: "sent" as ListTab, label: "Sent messages" },
             { id: "numbers" as ListTab, label: "Numbers to fix" },
+            { id: "cost" as ListTab, label: "Usage & cost" },
           ] as const
         ).map((t) => (
           <button
@@ -317,6 +320,8 @@ export function AutomationListView({
       {tab === "sent" ? <AutomationSentMessages /> : null}
 
       {tab === "numbers" ? <AutomationBadNumbers readOnly={readOnly} /> : null}
+
+      {tab === "cost" ? <AutomationUsageCost readOnly={readOnly} /> : null}
 
       {tab === "runs" ? (
         <MastersTableCard title="Recent runs">
