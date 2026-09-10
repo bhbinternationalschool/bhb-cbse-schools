@@ -83,7 +83,7 @@ const NOW = 1_760_000_000_000;
 // Pruning never evicts the id being recorded — otherwise its own retry,
 // arriving moments later, would be treated as a new message.
 {
-  let map: HandledMap = {};
+  const map: HandledMap = {};
   // Fill to the cap with entries all NEWER than the one recorded last, so a
   // naive oldest-first prune would choose exactly the id just written.
   for (let i = 0; i < HANDLED_MAX; i += 1) {
