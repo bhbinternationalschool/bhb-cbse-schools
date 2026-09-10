@@ -27,6 +27,11 @@ import {
 import { resolveAutomationAudienceServer } from "@/lib/automationAudience.server";
 import { dispatchAutomationApproval } from "@/lib/automationDispatch.server";
 import {
+  automationApprovalClaimKey,
+  claimSendOnce,
+  releaseSendClaim,
+} from "@/lib/waSendClaim.server";
+import {
   loadAutomationFromDb,
   saveAutomationToDb,
 } from "@/lib/automationState.server";
@@ -43,6 +48,8 @@ export type AutomationTickReport = {
   simulated: number;
   /** Cards whose snapshot had gone stale and were failed rather than sent. */
   stale: number;
+  /** Cards skipped because another sender held the send-once claim. */
+  blocked: number;
   /** Rules whose audience could not be read, with the reason. */
   audienceErrors: { ruleId: string; error: string }[];
   persisted: boolean;
@@ -120,6 +127,8 @@ export async function runAutomationTick(opts: {
   let deferred = 0;
   let simulated = 0;
   let stale = 0;
+  /** Cards another sender already had in hand — see claimSendOnce. */
+  let blocked = 0;
 
   for (const item of undispatchedApprovals(after)) {
     // The payload is a snapshot of a family's dues at the moment the card
@@ -141,6 +150,23 @@ export async function runAutomationTick(opts: {
       continue;
     }
 
+    // Claim this card before sending it. Two ticks can overlap — Cloud
+    // Scheduler retries a request it believes timed out, and "Run
+    // evaluation now" can land while the cron tick is mid-flight — and
+    // both would find the same approved card and send it. The claim makes
+    // the second one skip it instead.
+    const claimKey = automationApprovalClaimKey(item.id);
+    const claim = await claimSendOnce(
+      claimKey,
+      "automation tick",
+      `${item.dispatchPayload.length} recipients · rule ${item.ruleId}`,
+    );
+    if (!claim.ok) {
+      blocked++;
+      console.warn(`[automation-tick] skipped ${item.id}: ${claim.message}`);
+      continue;
+    }
+
     const rule = after.rules.find((r) => r.id === item.ruleId);
     const result = await dispatchAutomationApproval({
       item,
@@ -156,7 +182,12 @@ export async function runAutomationTick(opts: {
     // A dry run and an unconfigured provider both come back as "simulated".
     // Marking those cards dispatched would retire the very messages the run
     // was previewing, so the card is left approved for a real tick to send.
-    if (result.simulatedOnly) continue;
+    if (result.simulatedOnly) {
+      // Nothing was really sent, so the card stays sendable — and a lock
+      // is only earned by a real message.
+      await releaseSendClaim(claimKey);
+      continue;
+    }
 
     dispatched++;
     after = markApprovalDispatched(after, item.id, result.ok, result.error, {
@@ -179,6 +210,7 @@ export async function runAutomationTick(opts: {
     deferred,
     simulated,
     stale,
+    blocked,
     audienceErrors,
     persisted: persisted.ok,
     persistError: persisted.ok ? undefined : persisted.error,

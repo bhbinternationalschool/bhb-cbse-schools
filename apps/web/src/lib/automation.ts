@@ -4,6 +4,7 @@
  */
 
 import type { WaTemplateLanguage } from "@/lib/waTemplates";
+import { nextCronRunIst } from "@/lib/automationSchedule";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 const STORAGE_KEY = "bhb_automation_v1";
@@ -586,18 +587,28 @@ export function updateRuleSchedule(
 ): AutomationState {
   return {
     ...state,
-    rules: state.rules.map((r) =>
-      r.id === ruleId
-        ? {
-            ...r,
-            ...patch,
-            quietHours: patch.quietHours
-              ? normalizeQuiet(patch.quietHours)
-              : r.quietHours,
-            updatedAt: nowIso(),
-          }
-        : r,
-    ),
+    rules: state.rules.map((r) => {
+      if (r.id !== ruleId) return r;
+      const next: AutomationRule = {
+        ...r,
+        ...patch,
+        quietHours: patch.quietHours
+          ? normalizeQuiet(patch.quietHours)
+          : r.quietHours,
+        updatedAt: nowIso(),
+      };
+      // Changing the time changes when it next runs. Without this the desk
+      // kept showing (and the tick kept using) the old rule's next-run, so
+      // "moved to 8 AM" still fired at midnight.
+      const timingChanged =
+        patch.cronExpr !== undefined ||
+        patch.intervalMinutes !== undefined ||
+        patch.triggerType !== undefined;
+      if (timingChanged && patch.nextRunAt === undefined) {
+        next.nextRunAt = computeNextRun(next, new Date());
+      }
+      return next;
+    }),
   };
 }
 
@@ -722,18 +733,85 @@ function ruleIsDue(rule: AutomationRule, now: Date): boolean {
   if (rule.nextRunAt) {
     return new Date(rule.nextRunAt).getTime() <= now.getTime();
   }
-  // Never run → due on first tick so operators see a sample approval
+  /*
+    Never armed yet.
+
+    A rule with a clock on it waits for that clock. This used to return
+    true, so a fee reminder set to "8:00 AM, Mon/Wed/Fri" was due on the
+    first tick after it was created — which on 11 September 2026 meant
+    00:24 IST on a Friday, to 146 families. The tick arms such a rule
+    instead (see armRule below) and it fires at its own time.
+
+    Interval rules ("every 30 minutes") have no wall-clock anchor, so
+    starting now is exactly right for them.
+  */
+  if (rule.triggerType === "schedule" && rule.cronExpr.trim()) return false;
   return true;
 }
 
+/**
+ * When this rule should next run.
+ *
+ * `cronExpr` is read here — the whole reason the field exists. Before
+ * this, every scheduled rule was answered with "24 hours from now",
+ * so a rule tested by hand at 6:54 PM was next due at 6:54 PM, and the
+ * schedule the office had set was decoration.
+ */
 function computeNextRun(rule: AutomationRule, from: Date): string {
   if (rule.triggerType === "interval" && rule.intervalMinutes > 0) {
     return new Date(
       from.getTime() + rule.intervalMinutes * 60_000,
     ).toISOString();
   }
-  // Default: next calendar day 10:00 IST approx (+24h)
+  if (rule.triggerType === "schedule" && rule.cronExpr.trim()) {
+    const next = nextCronRunIst(rule.cronExpr, from);
+    // An unparseable cron falls through to +24h rather than never running
+    // again; the desk shows "Custom schedule (…)" for the same input.
+    if (next) return next.toISOString();
+  }
+  // No usable schedule: tomorrow, so the rule is not lost.
   return new Date(from.getTime() + 24 * 60 * 60_000).toISOString();
+}
+
+/** Is this stored next-run actually an occurrence of this cron? */
+function cronIsAligned(cronExpr: string, iso: string): boolean {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return false;
+  const next = nextCronRunIst(cronExpr, new Date(t - 60_000));
+  return !!next && next.getTime() === t;
+}
+
+/**
+ * Put a rule's `nextRunAt` where its own schedule says it should be.
+ *
+ * Two jobs, both fallout from the same fault:
+ *
+ *   - a rule that has never been armed gets its first next-run WITHOUT
+ *     being run, so the desk can say when it will fire. The old code
+ *     answered that question by firing.
+ *   - a rule carrying a next-run that is not an occurrence of its cron
+ *     is re-anchored. Every scheduled rule in this school is in that
+ *     state: they were all stamped "24 hours after the last run", so
+ *     "8:00 AM Mon/Wed/Fri" was sitting on 00:24 on a Saturday. Left
+ *     alone, each would fire once more at the wrong time after this
+ *     ships.
+ *
+ * Interval and event rules are left exactly as they are: "every 30
+ * minutes" has no wall clock to wait for, so starting now is right for it.
+ */
+function alignRule(rule: AutomationRule, now: Date): AutomationRule {
+  if (!rule.enabled) return rule;
+  if (rule.triggerType !== "schedule") return rule;
+  const cron = rule.cronExpr.trim();
+  if (!cron) return rule;
+  const needsAnchor =
+    !rule.nextRunAt || !cronIsAligned(cron, rule.nextRunAt);
+  if (!needsAnchor) return rule;
+  return {
+    ...rule,
+    nextRunAt: computeNextRun(rule, now),
+    updatedAt: nowIso(),
+  };
 }
 
 /**
@@ -835,7 +913,10 @@ export function evaluateAutomationTick(
   let runs = [...state.runs];
 
   for (let i = 0; i < rules.length; i++) {
-    const rule = rules[i]!;
+    // Read the rule's own schedule first: an unarmed or drifted next-run
+    // is corrected here, before anything is judged due.
+    const rule = alignRule(rules[i]!, now);
+    if (rule !== rules[i]) rules[i] = rule;
     const forced = opts?.forceRuleIds?.includes(rule.id);
     if (!forced && !ruleIsDue(rule, now)) continue;
     if (!forced && !rule.enabled) continue;

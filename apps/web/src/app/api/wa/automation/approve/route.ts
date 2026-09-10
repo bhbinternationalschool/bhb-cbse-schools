@@ -23,6 +23,11 @@ import {
   loadAutomationFromDb,
   saveAutomationToDb,
 } from "@/lib/automationState.server";
+import {
+  automationApprovalClaimKey,
+  claimSendOnce,
+  releaseSendClaim,
+} from "@/lib/waSendClaim.server";
 
 export const runtime = "nodejs";
 
@@ -62,6 +67,40 @@ export async function POST(req: Request) {
 
   const by =
     auth.ctx.session.fullName || auth.ctx.session.roleCode || "masters";
+
+  /*
+    Claim the send BEFORE deciding, and only for a real send.
+
+    The pending check above is a read. On 11 September 2026 seven presses
+    of "Approve & send", ~10 seconds apart, all read the same pending card
+    — the status was written only after the dispatch returned — and 146
+    families got the same fee reminder seven times. The claim is a row
+    insert, so the database refuses the second caller instead of this
+    route hoping there isn't one.
+
+    Rejecting and snoozing send nothing and need no claim.
+  */
+  const claimKey = automationApprovalClaimKey(approvalId);
+  let claimed = false;
+  if (decision === "approved") {
+    const claim = await claimSendOnce(
+      claimKey,
+      by,
+      `${item.dispatchPayload.length} recipients · rule ${item.ruleId}`,
+    );
+    if (!claim.ok) {
+      return NextResponse.json(
+        {
+          error: claim.message,
+          reason: claim.reason,
+          alreadySending: claim.reason === "held",
+        },
+        { status: claim.reason === "held" ? 409 : 503 },
+      );
+    }
+    claimed = true;
+  }
+
   let state = decideApproval(
     before,
     approvalId,
@@ -103,6 +142,18 @@ export async function POST(req: Request) {
           deferred: result.deferred,
         },
       );
+    } else if (claimed) {
+      // Nothing left the building (dry run, or no WhatsApp provider), so
+      // the card must stay pressable. A claim is only kept when a real
+      // message went out — that row is what stops a second copy.
+      await releaseSendClaim(claimKey);
+      claimed = false;
+    }
+    if (claimed && result.sent === 0 && result.failed === 0 && result.deferred === 0) {
+      // Nobody was reachable at all (every recipient skipped). Same rule:
+      // no message means no lock.
+      await releaseSendClaim(claimKey);
+      claimed = false;
     }
   }
 
@@ -120,6 +171,7 @@ export async function POST(req: Request) {
     simulated,
     error: error || undefined,
     pendingApprovals: pendingApprovals(state).length,
+    locked: claimed,
     persisted: persisted.ok,
     persistError: persisted.ok ? undefined : persisted.error,
     state,

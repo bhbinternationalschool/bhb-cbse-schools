@@ -165,3 +165,150 @@ export function parseTime24(value: string): { hour: number; minute: number } | n
   if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
   return { hour, minute };
 }
+
+/* ------------------------------------------------------------------ *
+ * When does this cron next fire?
+ *
+ * `cronExpr` was, until now, decoration. Nothing read it: the tick asked
+ * `computeNextRun`, which returned "24 hours from whenever the rule last
+ * ran". So a rule set to 8:00 AM on Mon/Wed/Fri, tested by hand at 6:54
+ * PM, was next due at 6:54 PM the following day — and a rule that had
+ * never run at all counted as due on the very next tick, whatever the
+ * clock said. That is how a fee reminder scheduled for Monday morning
+ * went out at 00:24 on a Friday.
+ *
+ * Cron fields here are IST wall-clock, which is what the desk shows and
+ * what the office means. Minute, hour, day-of-month, month and day-of-week
+ * all accept `*`, `a-b`, `a,b,c`, and `star/step` — enough for every
+ * schedule the desk can build and for hand-written ones.
+ * ------------------------------------------------------------------ */
+
+const IST_OFFSET_MIN = 330;
+
+/** Expand one cron field into the set of values it matches. */
+function cronFieldValues(
+  field: string,
+  min: number,
+  max: number,
+): Set<number> | null {
+  const out = new Set<number>();
+  const raw = (field || "").trim();
+  if (!raw) return null;
+  for (const part of raw.split(",")) {
+    const piece = part.trim();
+    if (!piece) return null;
+    const [rangePart, stepPart] = piece.split("/");
+    const step = stepPart === undefined ? 1 : Number(stepPart);
+    if (!Number.isInteger(step) || step < 1) return null;
+
+    let lo: number;
+    let hi: number;
+    if (rangePart === "*" || rangePart === "?") {
+      lo = min;
+      hi = max;
+    } else if (rangePart?.includes("-")) {
+      const [a, b] = rangePart.split("-");
+      lo = Number(a);
+      hi = Number(b);
+    } else {
+      lo = Number(rangePart);
+      hi = stepPart === undefined ? lo : max;
+    }
+    if (!Number.isInteger(lo) || !Number.isInteger(hi)) return null;
+    if (lo < min || hi > max || lo > hi) return null;
+    for (let v = lo; v <= hi; v += step) out.add(v);
+  }
+  return out.size ? out : null;
+}
+
+type CronFields = {
+  minutes: Set<number>;
+  hours: Set<number>;
+  dom: Set<number>;
+  months: Set<number>;
+  dow: Set<number>;
+  domRestricted: boolean;
+  dowRestricted: boolean;
+};
+
+export function parseCronFields(expr: string): CronFields | null {
+  const parts = (expr || "").trim().split(/\s+/);
+  if (parts.length !== 5) return null;
+  const [minF, hrF, domF, monF, dowF] = parts as [
+    string,
+    string,
+    string,
+    string,
+    string,
+  ];
+  const minutes = cronFieldValues(minF, 0, 59);
+  const hours = cronFieldValues(hrF, 0, 23);
+  const dom = cronFieldValues(domF, 1, 31);
+  const months = cronFieldValues(monF, 1, 12);
+  const dowRaw = cronFieldValues(dowF, 0, 7);
+  if (!minutes || !hours || !dom || !months || !dowRaw) return null;
+  // Cron allows 7 for Sunday.
+  const dow = new Set([...dowRaw].map((d) => (d === 7 ? 0 : d)));
+  const isStar = (f: string) => f === "*" || f === "?";
+  return {
+    minutes,
+    hours,
+    dom,
+    months,
+    dow,
+    domRestricted: !isStar(domF),
+    dowRestricted: !isStar(dowF),
+  };
+}
+
+/**
+ * The first instant strictly after `from` that matches `expr` in IST,
+ * or null if the expression is unusable (or matches nothing in a year —
+ * e.g. 30 February).
+ *
+ * Standard cron quirk, kept on purpose: when BOTH day-of-month and
+ * day-of-week are restricted, a day matching EITHER one fires.
+ */
+export function nextCronRunIst(expr: string, from: Date): Date | null {
+  const f = parseCronFields(expr);
+  if (!f) return null;
+
+  const minutesOfDay = [...f.hours]
+    .sort((a, b) => a - b)
+    .flatMap((h) => [...f.minutes].sort((a, b) => a - b).map((m) => h * 60 + m));
+  if (!minutesOfDay.length) return null;
+
+  // Work in IST wall clock by shifting into UTC and reading UTC parts.
+  const shifted = new Date(from.getTime() + IST_OFFSET_MIN * 60_000);
+  // Start of that IST day; candidates are compared as real instants, so a
+  // rule due at 08:00 asked at 08:00:31 is answered with the NEXT one.
+  const dayStart = Date.UTC(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth(),
+    shifted.getUTCDate(),
+  );
+
+  for (let dayOffset = 0; dayOffset <= 366; dayOffset++) {
+    const day = new Date(dayStart + dayOffset * 86_400_000);
+    const month = day.getUTCMonth() + 1;
+    if (!f.months.has(month)) continue;
+    const domOk = f.dom.has(day.getUTCDate());
+    const dowOk = f.dow.has(day.getUTCDay());
+    const dayMatches =
+      f.domRestricted && f.dowRestricted
+        ? domOk || dowOk
+        : f.domRestricted
+          ? domOk
+          : f.dowRestricted
+            ? dowOk
+            : true;
+    if (!dayMatches) continue;
+    for (const mod of minutesOfDay) {
+      // Back out of IST into a real instant.
+      const at = day.getTime() + mod * 60_000 - IST_OFFSET_MIN * 60_000;
+      if (at <= from.getTime()) continue;
+      return new Date(at);
+    }
+  }
+  return null;
+}

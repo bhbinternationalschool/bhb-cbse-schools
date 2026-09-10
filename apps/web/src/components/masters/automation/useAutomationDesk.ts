@@ -27,6 +27,18 @@ export function useAutomationDesk() {
     typeof window !== "undefined" ? loadAutomation() : null,
   );
   const [notice, setNotice] = useState<string | null>(null);
+  /*
+    Cards whose send is in flight, and whether a tick is running.
+
+    First line of defence for the fault of 11 September 2026: "Approve &
+    send" pressed seven times on one card, ~10s apart, sent 146 families
+    the same fee reminder seven times. The server now refuses the second
+    caller outright (wa_send_claims), and this stops the second press from
+    ever being made — a button that stays green while 146 messages are
+    going out is an invitation to press it again.
+  */
+  const [sendingIds, setSendingIds] = useState<string[]>([]);
+  const [evaluating, setEvaluating] = useState(false);
   const by = session.fullName || session.roleCode || "masters";
 
   const refresh = useCallback(() => {
@@ -75,6 +87,11 @@ export function useAutomationDesk() {
       flash("Session is closed — automation is read-only");
       return;
     }
+    if (sendingIds.includes(approvalId)) {
+      flash("This card is already being sent — please wait", 4000);
+      return;
+    }
+    setSendingIds((ids) => [...ids, approvalId]);
     try {
       const res = await fetch("/api/wa/automation/approve", {
         method: "POST",
@@ -120,6 +137,8 @@ export function useAutomationDesk() {
       );
     } catch (e) {
       flash(e instanceof Error ? e.message : "Dispatch failed", 5000);
+    } finally {
+      setSendingIds((ids) => ids.filter((id) => id !== approvalId));
     }
   }
 
@@ -140,6 +159,11 @@ export function useAutomationDesk() {
       flash("Session is closed — automation is read-only");
       return;
     }
+    if (evaluating) {
+      flash("An evaluation is already running — please wait", 4000);
+      return;
+    }
+    setEvaluating(true);
     try {
       const res = await fetch("/api/wa/automation/run", {
         method: "POST",
@@ -181,6 +205,8 @@ export function useAutomationDesk() {
       flash(`Evaluation ran — ${parts.join(" · ")}`, 5000);
     } catch (e) {
       flash(e instanceof Error ? e.message : "Evaluation failed", 5000);
+    } finally {
+      setEvaluating(false);
     }
   }
 
@@ -189,6 +215,8 @@ export function useAutomationDesk() {
     readOnly,
     state,
     notice,
+    sendingIds,
+    evaluating,
     by,
     commit,
     flash,

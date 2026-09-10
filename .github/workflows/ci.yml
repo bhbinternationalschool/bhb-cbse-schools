@@ -337,6 +337,7 @@ jobs:
           npm run test:leave-command
           npm run test:daily-brief
           npm run test:automation-approvals
+          npm run test:automation-schedule
           npm run test:wa-transport-track
           npm run test:wa-usage-cost
           npm run test:wa-command-templates
