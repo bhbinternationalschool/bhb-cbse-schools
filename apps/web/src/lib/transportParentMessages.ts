@@ -38,7 +38,9 @@ export type TransportMessageKind =
   | "delay"
   | "breakdown"
   | "route_change"
-  | "not_boarded";
+  | "not_boarded"
+  | "boarded"
+  | "dropped";
 
 export type StopEta = {
   stopId: string;
@@ -162,6 +164,8 @@ export const TRANSPORT_FAMILIES: Record<TransportMessageKind, string> = {
   breakdown: "transport_breakdown",
   route_change: "transport_route_change",
   not_boarded: "transport_not_boarded",
+  boarded: "transport_boarded",
+  dropped: "transport_dropped",
 };
 
 /**
@@ -180,6 +184,11 @@ export const TRANSPORT_VARIABLE_LABELS: Record<string, string> = {
   actionTaken: "what the school is doing",
   effectiveFrom: "from date",
   time: "time at stop",
+  // The pickup message's tracking link. Two keys for one token, the same way
+  // the fee pay link works: the button carries the token, the body carries
+  // the whole URL for a phone whose WhatsApp will not open the button.
+  trackToken: "tracking button token",
+  trackLink: "tracking link",
 };
 
 export type TransportTemplateDef = {
@@ -223,6 +232,8 @@ export const TRANSPORT_TEMPLATES: Record<TransportMessageKind, TransportTemplate
   breakdown: defFor("breakdown", "en"),
   route_change: defFor("route_change", "en"),
   not_boarded: defFor("not_boarded", "en"),
+  boarded: defFor("boarded", "en"),
+  dropped: defFor("dropped", "en"),
 };
 
 /**

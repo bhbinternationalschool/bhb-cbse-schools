@@ -5,7 +5,10 @@ import {
   fetchTransportDeskFromDb,
 } from "@/lib/transportNormalized.server";
 import { fetchSisFromDb } from "@/lib/sisNormalized.server";
-import { notifyNotBoarded } from "@/lib/transportParentNotify.server";
+import {
+  notifyBoardingMark,
+  notifyNotBoarded,
+} from "@/lib/transportParentNotify.server";
 import type { SisState } from "@/lib/sis";
 import type { TransportState } from "@/lib/transport";
 import { TENANT } from "@/lib/types";
@@ -141,35 +144,51 @@ export async function POST(request: Request) {
     // messaging failure is reported alongside the save and never replaces it —
     // an attendant must not see "failed" and re-mark a child who is already
     // recorded absent.
+    // Every mark now tells the family: aboard, off, or not there at all.
+    // "Absent" was the only one that messaged, because it was the only one
+    // with an approved template behind it — the ordinary days are what a
+    // parent at work is actually waiting for.
     let notified: Awaited<ReturnType<typeof notifyNotBoarded>> | null = null;
-    if (kind === "absent") {
-      try {
-        const [{ bundle: tBundle }, sisRes] = await Promise.all([
-          fetchTransportDeskFromDb(),
-          fetchSisFromDb(),
-        ]);
-        notified = sisRes.ok
-          ? await notifyNotBoarded({
-              studentId,
-              routeId,
-              stopId:
-                tBundle.assignments.find(
-                  (a) => a.studentId === studentId && a.effectiveTo == null,
-                )?.stopId ?? "",
-              at: new Date().toISOString(),
-              transport: tBundle as unknown as TransportState,
-              sis: sisRes.bundle as unknown as SisState,
-            })
-          : { sent: false, skipped: "student roster unavailable" };
-      } catch (e) {
-        notified = {
-          sent: false,
-          error: e instanceof Error ? e.message : "notify failed",
-        };
+    try {
+      const [{ bundle: tBundle }, sisRes] = await Promise.all([
+        fetchTransportDeskFromDb(),
+        fetchSisFromDb(),
+      ]);
+      const stopId =
+        tBundle.assignments.find(
+          (a) => a.studentId === studentId && a.effectiveTo == null,
+        )?.stopId ?? "";
+      const at = new Date().toISOString();
+      if (!sisRes.ok) {
+        notified = { sent: false, skipped: "student roster unavailable" };
+      } else if (kind === "absent") {
+        notified = await notifyNotBoarded({
+          studentId,
+          routeId,
+          stopId,
+          at,
+          transport: tBundle as unknown as TransportState,
+          sis: sisRes.bundle as unknown as SisState,
+        });
+      } else {
+        notified = await notifyBoardingMark({
+          kind: kind === "offboarded" ? "dropped" : "boarded",
+          studentId,
+          routeId,
+          stopId,
+          at,
+          transport: tBundle as unknown as TransportState,
+          sis: sisRes.bundle as unknown as SisState,
+        });
       }
-      if (notified && !notified.sent) {
-        console.warn("[transport/boarding] parent not notified", notified);
-      }
+    } catch (e) {
+      notified = {
+        sent: false,
+        error: e instanceof Error ? e.message : "notify failed",
+      };
+    }
+    if (notified && !notified.sent) {
+      console.warn("[transport/boarding] parent not notified", kind, notified);
     }
 
     return apiOk({ saved: true, date, trip, studentId, kind, notified });
