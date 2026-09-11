@@ -15,6 +15,7 @@ import {
 } from "@/lib/masters";
 import { bumpStudentSeriesUses } from "@/lib/numberSeries";
 import { StudentAttendanceCard } from "@/components/students/StudentAttendanceCard";
+import { StudentExamMarksCard } from "@/components/students/StudentExamMarksCard";
 import { StudentFeeDuesCard } from "@/components/students/StudentFeeDuesCard";
 import { HOUSEHOLD_CHANNELS, HOUSEHOLD_LANGUAGES } from "@/lib/householdPrefs";
 import { diffForAudit, recordAudit } from "@/lib/auditClient";
@@ -1132,6 +1133,7 @@ export function StudentForm({
         <>
           <StudentFeeDuesCard studentId={studentId} />
           <StudentAttendanceCard studentId={studentId} />
+          <StudentExamMarksCard studentId={studentId} />
         </>
       ) : null}
 
