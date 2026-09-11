@@ -102,6 +102,13 @@ export const AUTOMATION_AUDIENCE_PRESETS: AutomationAudiencePreset[] = [
     modules: ["transport"],
   },
   {
+    id: "udise_docs_missing",
+    label: "UDISE+ documents missing",
+    summary: "Families of students with UDISE+ gaps (Aadhaar, birth certificate, address)",
+    hint: "One message per family, listing what to send as a WhatsApp photo",
+    modules: ["rte"],
+  },
+  {
     id: "all_parents",
     label: "All active parents",
     summary: "All active parent/guardian contacts",

@@ -238,6 +238,9 @@ export const WA_TEMPLATE_VARIABLES: WaTemplateVariableDef[] = [
   { key: "effectiveFrom", label: "Change effective from", group: "Transport", sample: "1 Sep 2026" },
   { key: "actionTaken", label: "What the school is doing", group: "Transport", sample: "A replacement bus is on the way." },
   { key: "alertTitle", label: "Fleet alert title", group: "Transport", sample: "Bus moving outside school hours" },
+  { key: "missingDocs", label: "Documents still needed (UDISE+)", group: "Student", sample: "child's Aadhaar card, birth certificate" },
+  { key: "docLabel", label: "Document type received", group: "Student", sample: "Aadhaar card" },
+  { key: "changes", label: "What to change in UDISE+", group: "Student", sample: "Date of Birth → 12/05/2019" },
   { key: "detail", label: "Alert detail", group: "Transport", sample: "Moving at 38 km/h at 21:40 IST, outside the transport day." },
   { key: "certType", label: "Certificate type", group: "Certificates", sample: "Bonafide" },
   { key: "date", label: "Date", group: "General", sample: "4 Aug 2026" },
@@ -536,6 +539,52 @@ const SEED_DEFS: SeedDef[] = [
       "🚨 *{{alertTitle}}*\n\n🚌 वाहन: *{{busNo}}*\n🕒 {{time}}\n\n{{detail}}\n\nनक़्शे के लिए ERP में Transport → Live खोलें। — {{schoolName}} 🙏",
     footerEn: "Transport desk · automatic alert",
     footerHi: "परिवहन कार्यालय · स्वचालित चेतावनी",
+  },
+
+  // ── UDISE+ documents ──────────────────────────────────────────
+  //
+  // The request goes to the family; the photo they send back is read by the
+  // school's AI, filed on the child and used to correct the record (see
+  // udiseDocIntake.server.ts). The two live together so that what the parent
+  // is asked for is exactly what the intake knows how to read.
+  {
+    familyKey: "udise_docs_request",
+    nameEn: "UDISE+ documents request",
+    nameHi: "UDISE+ दस्तावेज़ अनुरोध",
+    module: "rte",
+    category: "UTILITY",
+    metaName: "bhb_udise_docs_request",
+    headerFormat: "TEXT",
+    headerTextEn: "Documents for UDISE+",
+    headerTextHi: "UDISE+ के लिए दस्तावेज़",
+    buttons: [{ type: "QUICK_REPLY", text: "Sending now" }, { type: "QUICK_REPLY", text: "Already given" }, CALL_ME_EN],
+    buttonsHi: [{ type: "QUICK_REPLY", text: "अभी भेज रहे हैं" }, { type: "QUICK_REPLY", text: "पहले दे दिया" }, CALL_ME_HI],
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\nThe Government's UDISE+ student register needs a few documents for {{childName}} ({{classLabel}}). Still to receive:\n\n📄 *{{missingDocs}}*\n\nSimply *reply to this message with a clear photo* of each document — our system reads it and files it on {{childName}}'s record the same minute. No visit to the office needed.\n\nKindly send by *{{dueDate}}* so the APAAR ID and PEN can be issued in time. Thank you! 🙏",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\nसरकार के UDISE+ छात्र रजिस्टर के लिए {{childName}} ({{classLabel}}) के कुछ दस्तावेज़ चाहिए। अभी बाकी:\n\n📄 *{{missingDocs}}*\n\nबस *इसी संदेश के उत्तर में हर दस्तावेज़ की साफ़ फ़ोटो भेज दें* — हमारा सिस्टम उसे पढ़कर उसी मिनट {{childName}} के रिकॉर्ड में जोड़ देता है। कार्यालय आने की ज़रूरत नहीं।\n\nकृपया *{{dueDate}}* तक भेजें ताकि APAAR ID और PEN समय पर बन सके। धन्यवाद! 🙏",
+    footerEn: "School office · Reply to this message with the photo",
+    footerHi: "विद्यालय कार्यालय · फ़ोटो इसी संदेश के उत्तर में भेजें",
+  },
+  // To the office, not a parent — so no greeting, and terse on purpose: it
+  // is what to type into the portal. Text goes first when the staff member's
+  // own 24h window is open; this template carries it when it is not.
+  {
+    familyKey: "udise_doc_received",
+    nameEn: "UDISE+ document received (office)",
+    nameHi: "UDISE+ दस्तावेज़ प्राप्त (कार्यालय)",
+    module: "rte",
+    category: "UTILITY",
+    metaName: "bhb_udise_doc_received",
+    headerFormat: "TEXT",
+    headerTextEn: "UDISE+ document received",
+    headerTextHi: "UDISE+ दस्तावेज़ प्राप्त",
+    bodyEn:
+      "📄 *{{docLabel}}* received for *{{childName}}* ({{classLabel}}) from {{guardianName}} on WhatsApp.\n\n✏️ Change in UDISE+: {{changes}}\n\nThe file is on the child's record in the ERP (Students → UDISE+). — {{schoolName}} office 🏫",
+    bodyHi:
+      "📄 *{{docLabel}}* प्राप्त — *{{childName}}* ({{classLabel}}), {{guardianName}} द्वारा व्हाट्सऐप पर।\n\n✏️ UDISE+ में बदलें: {{changes}}\n\nफ़ाइल ERP में बच्चे के रिकॉर्ड पर है (Students → UDISE+)। — {{schoolName}} कार्यालय 🏫",
+    footerEn: "UDISE+ desk · automatic",
+    footerHi: "UDISE+ डेस्क · स्वचालित",
   },
 
   {
