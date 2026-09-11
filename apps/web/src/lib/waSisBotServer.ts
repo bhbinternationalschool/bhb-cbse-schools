@@ -63,8 +63,7 @@ import {
   languageLabel,
   languageMenuText,
   languageGateDecision,
-  sarvamTargetFor,
-} from "@/lib/householdPrefs";
+  sarvamTargetFor, languageAskStandsAlone } from "@/lib/householdPrefs";
 import { patchMirrorHousehold } from "@/lib/parentHousehold.server";
 import { sarvamConfigured, sarvamTranslate, type SarvamLang } from "@/lib/sarvam.server";
 import { formatKbContext, retrieveRelevantKb } from "@/lib/schoolKb.server";
@@ -706,9 +705,14 @@ export async function handleWaSisBotInbound(opts: {
   // sending them a template does not open it, so the menu cannot ride out
   // behind a receipt. It rides on the reply the receipt provokes.
   const gate = languageGateDecision({ known: hh.preferredLanguage, text });
-  if (gate.action === "ask") {
+  // The question is asked on this turn either way; what changes is whether
+  // it is the whole reply or a trailer behind the real answer. A parent who
+  // tapped "Already paid" or typed DUES gets that dealt with FIRST.
+  const askLanguage = gate.action === "ask";
+  if (askLanguage && languageAskStandsAlone({ text, isGreeting })) {
     return finishLanguageFlow(store, thread, parentMsg, languageMenuText());
   }
+  const languageTrailer = askLanguage ? `\n\n${languageMenuText()}` : "";
   if (gate.action === "save") {
     const choice = gate.choice;
     const updated: Household = { ...hh, preferredLanguage: choice };
@@ -762,7 +766,7 @@ export async function handleWaSisBotInbound(opts: {
           mobile10,
           command: linkCmd,
         });
-        return finishLanguageFlow(store, thread, parentMsg, r.replyText);
+        return finishLanguageFlow(store, thread, parentMsg, r.replyText + languageTrailer);
       } catch (e) {
         console.error("[wa-sis-bot] student link failed", e);
       }
@@ -786,7 +790,7 @@ export async function handleWaSisBotInbound(opts: {
         text,
       });
       if (tutor.handled) {
-        return finishLanguageFlow(store, thread, parentMsg, tutor.replyText);
+        return finishLanguageFlow(store, thread, parentMsg, tutor.replyText + languageTrailer);
       }
     } catch (e) {
       // Study help failing must never take the fee and receipt bot with
@@ -821,6 +825,8 @@ export async function handleWaSisBotInbound(opts: {
       escalateUngrounded = !aiReply.grounded;
     }
   }
+
+  replyText += languageTrailer;
 
   const botMsg: WaSisBotMsg = {
     id: nid("wsm"),

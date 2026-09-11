@@ -235,6 +235,21 @@ export function languageGateDecision(input: {
   return { action: "ask" };
 }
 
+/**
+ * May the language question be the WHOLE reply?
+ *
+ * Only when the parent said nothing that needs an answer — a greeting, an
+ * empty message, a bare "menu". Anything else ("Already paid", "DUES",
+ * "थोड़ा समय चाहिए", a question) is answered first and the language
+ * question rides behind the answer. On 11 Sep 2026 the menu was sent
+ * INSTEAD of the answer to nine families replying to a fee reminder: three
+ * "already paid" taps, a request for time and a DUES never reached anyone.
+ */
+export function languageAskStandsAlone(input: { text: string; isGreeting: boolean }): boolean {
+  const t = (input.text || "").trim();
+  return input.isGreeting || !t || t === "(open)";
+}
+
 /** Interpret a parent's reply to the menu: "2", "hindi", "हिंदी", "urdu"… → code, or null. */
 export function parseLanguageChoice(text: string): HouseholdLanguage | null {
   const t = (text || "").trim().toLowerCase().replace(/[.)\]]+$/, "");
