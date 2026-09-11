@@ -105,7 +105,7 @@ jobs:
       - name: Test — "need time" is asked how much and by when; "already paid" gets an apology, not a menu
         working-directory: apps/web
         run: npm run test:sis-bot-fee-replies
-      - name: Test — an enrolled parent is a parent: no role-pick menu, no General tag
+      - name: "Test — an enrolled parent is a parent: no role-pick menu, no General tag"
         working-directory: apps/web
         run: npm run test:wa-known-parent-role
       - name: Self-test — when the WhatsApp bots speak, and when they stay quiet
