@@ -75,6 +75,7 @@ const RESOLVABLE = new Set([
   "admission_followup",
   "admission_reg_fee",
   "all_parents",
+  "udise_docs_missing",
 ]);
 
 /**
@@ -97,6 +98,8 @@ export function automationAudienceKey(rule: AutomationRule): string {
       return "admission_followup";
     case "admissions_fee_reminder":
       return "admission_reg_fee";
+    case "udise_docs_request":
+      return "udise_docs_missing";
     default:
       return preset?.id || "";
   }
@@ -321,6 +324,89 @@ async function admissionRecipients(
   return out;
 }
 
+/**
+ * Families with something the UDISE+ register still lacks, one message per
+ * household naming every document to send. A child whose PEN and APAAR are
+ * both issued has no gaps and is not asked; a household whose only gap is
+ * on the portal's side (verification pending) is not asked either — a parent
+ * cannot fix that with a photo.
+ */
+async function udiseRecipients(todayIso: string): Promise<AutomationRecipient[]> {
+  await ensureSisHydratedServer();
+  const sis = loadSis();
+  const masters = await loadServerMasters();
+  const academicYearCode = currentAcademicYearCode(masters);
+  const { computeStudentUdiseGaps } = await import("@/lib/udiseCompliance");
+  const { missingDocsFor } = await import("@/lib/udiseDocIntakeAi");
+
+  type Need = { student: (typeof sis.students)[number]; gaps: string[]; hasDob: boolean; hasAddress: boolean };
+  const byHousehold = new Map<string, Need[]>();
+  for (const s of sis.students ?? []) {
+    if (s.status !== "active" || !s.householdId) continue;
+    if (s.academicYearCode && s.academicYearCode !== academicYearCode) continue;
+    const hh = householdOf(sis.households ?? [], s.householdId);
+    const gaps = computeStudentUdiseGaps(s);
+    const hasDob = !!s.dob;
+    const hasAddress = !!(hh?.address && hh?.pincode) || !!s.permanentAddress;
+    const askable = gaps.some((g) => g === "student_aadhaar" || g === "parent_aadhaar") || !hasDob || !hasAddress;
+    if (!askable) continue;
+    const list = byHousehold.get(s.householdId) ?? [];
+    list.push({ student: s, gaps, hasDob, hasAddress });
+    byHousehold.set(s.householdId, list);
+  }
+
+  const candidates = new Map<string, WaCandidateNumber[]>();
+  for (const [hhId] of byHousehold) {
+    const hh = householdOf(sis.households ?? [], hhId);
+    candidates.set(hhId, householdCandidateNumbers({ household: hh, students: (sis.students ?? []).filter((s) => s.householdId === hhId && s.status === "active") }));
+  }
+  const knownBad = await listKnownNotOnWhatsApp([...candidates.values()].flat().map((c) => c.mobile10)).catch(() => new Set<string>());
+
+  const dueDate = shiftIso(todayIso, 7);
+  const out: AutomationRecipient[] = [];
+  for (const [hhId, needs] of byHousehold) {
+    const hh = householdOf(sis.households ?? [], hhId);
+    const choice = pickWaNumbers(candidates.get(hhId) ?? [], knownBad);
+    if (!choice.primary) continue;
+    const language = waTemplateLanguageFor(hh ?? {});
+    // One line per child when siblings need different things; one list when
+    // the household has one child, which is most of them.
+    const parts = needs.map((n) => {
+      const docs = missingDocsFor({ gaps: n.gaps, hasDob: n.hasDob, hasAddress: n.hasAddress, language });
+      return needs.length > 1 ? `${n.student.fullName.split(/\s+/)[0]}: ${docs}` : docs;
+    });
+    const first = needs[0]!.student;
+    out.push({
+      mobile: choice.primary.mobile10,
+      fallbackMobile: choice.fallback?.mobile10,
+      numberLabel: choice.primary.label,
+      language,
+      refId: hhId,
+      label: `${first.fullName}${needs.length > 1 ? ` +${needs.length - 1}` : ""}`,
+      variables: {
+        schoolName: TENANT.nameDisplay,
+        guardianName: hh?.guardianName || "Parent",
+        childName: needs.length > 1 ? needs.map((n) => n.student.fullName.split(/\s+/)[0]).join(", ") : first.fullName,
+        classLabel: needs.length > 1 ? "siblings" : classLabelOf(first, masters),
+        missingDocs: parts.join(" · ").slice(0, 900),
+        dueDate: formatDueDate(dueDate, language),
+      },
+    });
+  }
+  return out;
+}
+
+function classLabelOf(s: { classId: string; sectionId: string }, masters: Awaited<ReturnType<typeof loadServerMasters>>): string {
+  const c = (masters.classes ?? []).find((x) => x.id === s.classId)?.name ?? "—";
+  const sec = (masters.sections ?? []).find((x) => x.id === s.sectionId)?.name ?? "";
+  return sec ? `${c}-${sec}` : c;
+}
+
+function formatDueDate(iso: string, language: "en" | "hi"): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  return d.toLocaleDateString(language === "hi" ? "hi-IN" : "en-IN", { day: "numeric", month: "long", timeZone: "UTC" });
+}
+
 async function allParentRecipients(): Promise<AutomationRecipient[]> {
   await ensureSisHydratedServer();
   const sis = loadSis();
@@ -411,6 +497,9 @@ export async function resolveAutomationAudienceServer(
       case "all_parents":
         recipients = await allParentRecipients();
         break;
+      case "udise_docs_missing":
+        recipients = await udiseRecipients(todayIso);
+        break;
       default:
         return {
           ok: false,
@@ -418,7 +507,7 @@ export async function resolveAutomationAudienceServer(
             `No server-side audience for "${rule.audienceSummary || rule.module}". ` +
             `Event-driven rules are sent by the module that raises the event; ` +
             `for a scheduled rule pick an audience the tick can resolve ` +
-            `(fees, admissions or all parents) in Masters → Automation.`,
+            `(fees, admissions, UDISE+ documents or all parents) in Masters → Automation.`,
         };
     }
 

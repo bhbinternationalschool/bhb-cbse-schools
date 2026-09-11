@@ -383,6 +383,28 @@ const SEED_RULES: SeedRule[] = [
     quietHours: defaultQuietHours(),
     executionMode: "approval_first",
   },
+
+  {
+    // Monday, mid-morning, once the office is in: the photos come back over
+    // the day and each one is read and filed by udiseDocIntake.server.ts.
+    // Off and approval-first until the office switches it on, like the rest.
+    id: "auto_udise_docs_request",
+    name: "UDISE+ documents request",
+    description: "Ask families whose child still lacks Aadhaar, birth certificate or address proof to send a photo on WhatsApp.",
+    module: "rte",
+    enabled: false,
+    triggerType: "schedule",
+    cronExpr: "0 10 * * 1",
+    intervalMinutes: 0,
+    eventKey: "",
+    actionType: "whatsapp_template",
+    templateFamilyKey: "udise_docs_request",
+    templateLanguage: "en",
+    audienceSummary: "Families of students with UDISE+ gaps (Aadhaar, birth certificate, address)",
+    minAmountPaise: 0,
+    quietHours: defaultQuietHours(),
+    executionMode: "approval_first",
+  },
 ];
 
 function normalizeQuiet(raw: Partial<QuietHours> | null | undefined): QuietHours {

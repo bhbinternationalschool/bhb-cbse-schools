@@ -150,7 +150,7 @@ for (const [family, pair] of families) {
 
 // Parent-facing templates greet, sign off, and carry a title line and a desk
 // footer — the shape a parent recognises as the school's.
-const staffOnly = new Set(["leave_staff_status", "teacher_message", "fleet_owner_alert"]);
+const staffOnly = new Set(["leave_staff_status", "teacher_message", "fleet_owner_alert", "udise_doc_received"]);
 for (const t of seeds) {
   if (t.category !== "UTILITY" || staffOnly.has(t.familyKey)) continue;
   if (t.headerFormat === "DOCUMENT" || t.headerFormat === "IMAGE" || t.carousel.length) continue;

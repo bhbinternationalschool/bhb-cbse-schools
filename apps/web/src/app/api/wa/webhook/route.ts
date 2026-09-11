@@ -175,8 +175,9 @@ export async function POST(req: Request) {
     }
 
     if (msg.media) {
+      let household: ReturnType<typeof findHouseholdByWaMobile> = null;
       try {
-        const household = findHouseholdByWaMobile(
+        household = findHouseholdByWaMobile(
           waNormalizeLocal10(msg.fromWaId),
         );
         await recordInboundMedia({
@@ -189,6 +190,59 @@ export async function POST(req: Request) {
         });
       } catch (e) {
         console.warn("[wa/webhook] recordInboundMedia failed", e);
+      }
+      // A photo or PDF from a KNOWN family is a document for the child's
+      // record — an Aadhaar card, a birth certificate, an address proof —
+      // and is read, filed and acted on here. It used to fall through to
+      // the parent bot, which answered every photo with the keyword menu.
+      // Reading takes a few seconds, so like voice notes it runs after the
+      // response (see the after() note below); Meta re-delivers anything it
+      // does not get a prompt 200 for.
+      if (
+        household &&
+        (msg.media.mediaType === "image" || msg.media.mediaType === "document")
+      ) {
+        const media = msg.media;
+        const hh = household;
+        after(async () => {
+          try {
+            const { captureUdiseDocumentFromWhatsApp } = await import(
+              "@/lib/udiseDocIntake.server"
+            );
+            const r = await captureUdiseDocumentFromWhatsApp({
+              mediaId: media.mediaId,
+              mimeType: media.mimeType,
+              fileName: media.filename,
+              caption: msg.text || "",
+              mobile10: waNormalizeLocal10(msg.fromWaId),
+              household: hh,
+              waMessageId: msg.waMessageId,
+            });
+            if (!r.handled) {
+              // Not something the intake reads (a video, no vision model):
+              // the ordinary bot still gets its turn.
+              await handleWaUnifiedInbound({
+                fromWaId: msg.fromWaId,
+                text: msg.text,
+                waMessageId: msg.waMessageId,
+                profileName: msg.profileName,
+                location: msg.location,
+                audio: null,
+                document: { mediaId: media.mediaId, mimeType: media.mimeType, fileName: media.filename },
+              });
+            }
+          } catch (e) {
+            console.error("[wa/webhook] document intake failed", msg.waMessageId, e);
+          }
+        });
+        results.push({
+          audience: "document_intake_deferred",
+          from: msg.fromWaId,
+          escalate: false,
+          replied: false,
+          stub: false,
+        });
+        continue;
       }
     }
     // A voice note takes about six seconds to transcribe, and Meta re-delivers
