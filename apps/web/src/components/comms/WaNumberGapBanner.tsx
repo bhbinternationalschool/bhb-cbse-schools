@@ -22,10 +22,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, BadgeCheck, Loader2, MessageCircle } from "lucide-react";
 import {
   isValidMobile,
+  loadSis,
   normalizeMobile,
   updateHouseholdWhatsApp,
   type SisState,
 } from "@/lib/sis";
+import { ensureSisHydrated } from "@/lib/sisPersistence";
+import { withHydrationSlot } from "@/lib/deskHydrateGuard";
 import { classLabelForStudent } from "@/lib/parentPortal";
 import type { MastersState } from "@/lib/masters";
 import {
@@ -94,7 +97,12 @@ export function WaNumberGapBanner({
   onSaved,
   title,
 }: {
-  sis: SisState | null;
+  /**
+   * Omit it and the banner loads the roster itself — so the dashboard can
+   * mount it as one line without learning how SIS hydration works. Pass it
+   * on a screen that already holds SIS, so both show the same roster.
+   */
+  sis?: SisState | null;
   masters?: MastersState | null;
   /** Scope to these students — the fee counter passes the family at the desk. */
   studentIds?: string[];
@@ -103,6 +111,7 @@ export function WaNumberGapBanner({
   title?: string;
 }) {
   const [verdicts, setVerdicts] = useState<WaVerdictMap | null>(null);
+  const [ownSis, setOwnSis] = useState<SisState | null>(null);
   const [configured, setConfigured] = useState(true);
   const [open, setOpen] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -122,9 +131,41 @@ export function WaNumberGapBanner({
     };
   }, []);
 
+  // Nobody handed us a roster: fetch one. `undefined` means "not supplied";
+  // an explicit `null` means the caller has SIS and it is not ready yet, and
+  // must not be second-guessed.
+  const selfLoad = sis === undefined;
+  useEffect(() => {
+    if (!selfLoad) return;
+    let alive = true;
+    const read = () => {
+      if (!alive) return null;
+      const next = loadSis();
+      setOwnSis(next);
+      return next;
+    };
+    // The roster is the biggest payload this app pulls (~2.5 MB). If the
+    // browser already holds one, use it: a banner is not a reason to make
+    // the dashboard fetch the whole school. Only an empty cache hydrates,
+    // and then through the shared slot like every other desk.
+    const local = read();
+    if (!local || local.students.length === 0) {
+      void withHydrationSlot(() => ensureSisHydrated())
+        .then(() => read())
+        .catch(() => read());
+    }
+    window.addEventListener("bhb-sis-updated", read);
+    return () => {
+      alive = false;
+      window.removeEventListener("bhb-sis-updated", read);
+    };
+  }, [selfLoad]);
+
+  const roster = selfLoad ? ownSis : (sis ?? null);
+
   const rows = useMemo(() => {
     if (!verdicts) return [];
-    return studentsNeedingWaNumber(sis, verdicts, {
+    return studentsNeedingWaNumber(roster, verdicts, {
       studentIds,
       classLabel: (s) =>
         classLabelForStudent(
@@ -132,7 +173,7 @@ export function WaNumberGapBanner({
           masters ?? undefined,
         ),
     }).filter((r) => !cleared.includes(r.gap.householdId));
-  }, [verdicts, sis, studentIds, masters, cleared]);
+  }, [verdicts, roster, studentIds, masters, cleared]);
 
   const scoped = !!studentIds;
 
@@ -164,6 +205,7 @@ export function WaNumberGapBanner({
         }
         invalidateWaVerdictCache();
         setStates((s) => ({ ...s, [key]: { kind, mobile } }));
+        if (selfLoad) setOwnSis(loadSis());
         onSaved?.();
         // Let the office SEE the green tick before the row goes.
         window.setTimeout(() => {
@@ -233,7 +275,7 @@ export function WaNumberGapBanner({
         }));
       }
     },
-    [drafts, onSaved],
+    [drafts, onSaved, selfLoad],
   );
 
   // Nothing established, nothing to say. No "all good" banner either: the
