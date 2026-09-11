@@ -618,7 +618,10 @@ export function TransportWorkspace() {
             />
           ) : null}
           {tab === "planner" ? (
-            <BoardingPointAuditPanel academicYearCode={session.academicYearCode} />
+            <BoardingPointAuditPanel
+              academicYearCode={session.academicYearCode}
+              canEdit={hasPermission(session, masters, "transport", "edit")}
+            />
           ) : null}
           {tab === "riders" ? (
             <RidersPanel

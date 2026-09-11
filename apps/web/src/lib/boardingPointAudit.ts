@@ -124,8 +124,18 @@ function bandIndex(km: number | null | undefined, bands: { upToKm: number }[]): 
 
 export function auditBoardingPoints(input: {
   state: TransportState;
-  /** householdId → where that family lives. */
+  /** householdId → the village centroid for that family. */
   homes: Map<string, BoardingHome>;
+  /**
+   * studentId → a boarding point pinned for that child specifically.
+   *
+   * Takes precedence over the household's village, and is keyed per STUDENT
+   * because siblings are not always collected in the same place — an older
+   * child on the main road while the younger is picked up nearer home. That
+   * is the whole reason sis_student_transport_point is per student, and
+   * applying one child's pin to the household would undo it.
+   */
+  pins?: Map<string, BoardingHome>;
   nameOf: (studentId: string) => string;
   academicYearCode: string;
   /**
@@ -161,7 +171,7 @@ export function auditBoardingPoints(input: {
     const route = routeById.get(a.routeId);
     if (!route) continue;
 
-    const home = input.homes.get(a.householdId);
+    const home = input.pins?.get(a.studentId) ?? input.homes.get(a.householdId);
     if (!home) {
       skipped.noHome += 1;
       continue;

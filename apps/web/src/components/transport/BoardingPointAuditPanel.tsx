@@ -14,6 +14,8 @@ import { useCallback, useEffect, useState } from "react";
 type Flag = {
   studentId: string;
   fullName: string;
+  assignedStopId: string;
+  nearestStopId: string;
   homeLabel: string;
   homePrecision: "village" | "pin";
   routeLabel: string;
@@ -58,11 +60,18 @@ const chip = (tone: "warning" | "muted" | "info", text: string) => (
   </span>
 );
 
-export function BoardingPointAuditPanel({ academicYearCode }: { academicYearCode: string }) {
+export function BoardingPointAuditPanel({
+  academicYearCode,
+  canEdit,
+}: {
+  academicYearCode: string;
+  canEdit: boolean;
+}) {
   const [data, setData] = useState<Audit | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [minGapKm, setMinGapKm] = useState(1);
+  const [busy, setBusy] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -85,6 +94,58 @@ export function BoardingPointAuditPanel({ academicYearCode }: { academicYearCode
   useEffect(() => {
     void load();
   }, [load]);
+
+  /**
+   * Record where a child actually boards.
+   *
+   * This does NOT move the assignment or change the fee — it records a fact
+   * about the morning, and the office still decides the billing on Riders.
+   * So pinning the stop the desk already assigned closes the row (the child
+   * does board there), while pinning the nearer stop leaves it open, because
+   * boarding at one stop and being billed for another is exactly the thing
+   * that still needs a decision.
+   */
+  const pin = useCallback(
+    async (studentId: string, stopId: string) => {
+      setBusy(studentId);
+      try {
+        const res = await fetch("/api/transport/boarding-point", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ studentId, stopId }),
+        });
+        const body = await res.json();
+        if (!res.ok) setError(body?.error || "Could not save the boarding point");
+        else await load();
+      } catch {
+        setError("Could not save the boarding point");
+      } finally {
+        setBusy("");
+      }
+    },
+    [load],
+  );
+
+  const clearPin = useCallback(
+    async (studentId: string) => {
+      setBusy(studentId);
+      try {
+        const res = await fetch(
+          `/api/transport/boarding-point?studentId=${encodeURIComponent(studentId)}`,
+          { method: "DELETE" },
+        );
+        if (!res.ok) {
+          const body = await res.json();
+          setError(body?.error || "Could not clear the pin");
+        } else await load();
+      } catch {
+        setError("Could not clear the pin");
+      } finally {
+        setBusy("");
+      }
+    },
+    [load],
+  );
 
   return (
     <section className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
@@ -179,6 +240,36 @@ export function BoardingPointAuditPanel({ academicYearCode }: { academicYearCode
                     {f.nearestSchoolKm != null ? ` (${f.nearestSchoolKm} km from school)` : ""} ·{" "}
                     <strong className="text-[var(--ink)]">{f.gapKm} km closer</strong>
                   </div>
+                  {canEdit ? (
+                    <div className="mt-1.5 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={busy === f.studentId}
+                        onClick={() => void pin(f.studentId, f.assignedStopId)}
+                        className="rounded-lg border border-[var(--border)] px-2 py-1 text-[10px] font-semibold text-[var(--ink)] disabled:opacity-50"
+                      >
+                        Boards at {f.assignedStopName} — correct as is
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy === f.studentId}
+                        onClick={() => void pin(f.studentId, f.nearestStopId)}
+                        className="rounded-lg border border-[var(--border)] px-2 py-1 text-[10px] font-semibold text-[var(--ink)] disabled:opacity-50"
+                      >
+                        Actually boards at {f.nearestStopName}
+                      </button>
+                      {f.homePrecision === "pin" ? (
+                        <button
+                          type="button"
+                          disabled={busy === f.studentId}
+                          onClick={() => void clearPin(f.studentId)}
+                          className="rounded-lg px-2 py-1 text-[10px] font-semibold text-[var(--muted)] disabled:opacity-50"
+                        >
+                          Clear pin
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </li>
               ))}
             </ul>

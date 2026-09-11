@@ -149,6 +149,50 @@ const noBands = auditBoardingPoints({
 });
 assert.equal(noBands.flags[0]!.feeChanges, null);
 
+/* ── a pin beats the village, for that child only ───────────── */
+
+// Two siblings in one household, one pinned at the stop the desk assigned.
+const pins = new Map<string, BoardingHome>([
+  ["s_pinned", { lat: 25.3996, lng: 82.9688, label: "by the neem tree", precision: "pin" }],
+]);
+const siblings = auditBoardingPoints({
+  state: {
+    ...state,
+    assignments: [
+      asg({ studentId: "s_pinned", householdId: "hh_kakalpur" }),
+      asg({ studentId: "s_sibling", householdId: "hh_kakalpur" }),
+    ],
+  } as unknown as TransportState,
+  homes,
+  pins,
+  nameOf: (id) => id,
+  academicYearCode: AY,
+});
+assert.equal(siblings.checked, 2);
+assert.equal(
+  siblings.flags.length,
+  1,
+  "the pinned child boards where the desk says, the sibling still does not",
+);
+assert.equal(siblings.flags[0]!.studentId, "s_sibling", "a pin speaks for one child, never the household");
+assert.equal(siblings.flags[0]!.homePrecision, "village");
+
+// And a pin away from the assigned stop keeps the row open — boarding at one
+// stop while billed for another is precisely what still needs deciding.
+const pinnedElsewhere = auditBoardingPoints({
+  state: {
+    ...state,
+    assignments: [asg({ studentId: "s_pinned", householdId: "hh_kakalpur" })],
+  } as unknown as TransportState,
+  homes,
+  pins: new Map([["s_pinned", { lat: 25.4290, lng: 82.9490, label: "Kakalpur gate", precision: "pin" as const }]]),
+  nameOf: (id) => id,
+  academicYearCode: AY,
+});
+assert.equal(pinnedElsewhere.flags.length, 1);
+assert.equal(pinnedElsewhere.flags[0]!.homePrecision, "pin");
+assert.equal(pinnedElsewhere.flags[0]!.homeLabel, "Kakalpur gate");
+
 /* ── a bad default shows up as a cluster, not fifty rows ────── */
 
 const cluster = clusterByAssignedStop(

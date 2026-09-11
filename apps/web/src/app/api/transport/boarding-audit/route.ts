@@ -141,14 +141,6 @@ export async function GET(req: Request) {
       precision: "pin",
     });
   }
-  // Applied by giving that student's household the pin. One pinned child in a
-  // household does not speak for a sibling, so this keys on the assignment's
-  // student when the audit asks — done here by overriding per assignment.
-  for (const a of state.assignments) {
-    const pin = pinByStudent.get(a.studentId);
-    if (pin) homes.set(a.householdId, pin);
-  }
-
   const names = await fetchAllPages<{ id: string; full_name: string | null }>((from, to) =>
     sb
       .from("sis_students")
@@ -162,6 +154,7 @@ export async function GET(req: Request) {
   const result = auditBoardingPoints({
     state,
     homes,
+    pins: pinByStudent,
     nameOf: (id) => nameById.get(id) || id,
     academicYearCode: ay,
     minGapKm,
