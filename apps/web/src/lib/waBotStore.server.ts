@@ -123,7 +123,10 @@ async function saveBundle(bundle: WaBotPersistBundle): Promise<void> {
   );
   const desk = await pushWaThreadsDeskToDb(cache);
   if (!desk.ok) {
-    console.warn("[wa-bot-store] desk push failed", desk.error);
+    // Not a warning. This is the school's WhatsApp history not being saved;
+    // on 2026-09-11 it was logged at warn level for ninety minutes while
+    // seven families' conversations existed only in one container's memory.
+    console.error("[wa-bot-store] DESK PUSH FAILED — bot threads are NOT persisting:", desk.error);
   }
 
   const { deskSkipBlobPush } = await import("@/lib/deskCutover");
