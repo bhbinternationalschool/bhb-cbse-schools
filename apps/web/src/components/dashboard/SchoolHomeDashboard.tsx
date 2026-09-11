@@ -17,6 +17,7 @@ import { formatInr } from "@/lib/masters";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { isSuperAdminSession } from "@/lib/superAdmin";
 import { AlertBannerList } from "@/components/dashboard/AlertBannerList";
+import { WaNumberGapBanner } from "@/components/comms/WaNumberGapBanner";
 import { AnomalyGrid, type AnomalyItem } from "@/components/dashboard/AnomalyGrid";
 import {
   loadStatutoryRemit,
@@ -208,6 +209,10 @@ export function SchoolHomeDashboard() {
           ) : null}
         </div>
         <BroadcastModal open={broadcastOpen} onOpenChange={setBroadcastOpen} />
+        {/* Families no WhatsApp message can reach. Top of the owner's own
+            screen, with the number box in it: a dashboard that only counts a
+            problem hands it back to somebody else. */}
+        <WaNumberGapBanner />
         <AlertBannerList
           alerts={statutoryAlerts.map((a) => ({ text: a.text, href: a.href }))}
         />
@@ -217,5 +222,10 @@ export function SchoolHomeDashboard() {
     );
   }
 
-  return <ModuleDashboardView model={model} variant="school" />;
+  return (
+    <div className="space-y-4">
+      <WaNumberGapBanner />
+      <ModuleDashboardView model={model} variant="school" />
+    </div>
+  );
 }

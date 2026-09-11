@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { formatInr } from "@/lib/masters";
 import { AlertBannerList } from "@/components/dashboard/AlertBannerList";
+import { WaNumberGapBanner } from "@/components/comms/WaNumberGapBanner";
 import type { PrincipalSnapshot } from "@/lib/principalSnapshot.server";
 import { isProtectedSuperAdminEmail } from "@/lib/superAdmin";
 import { useDemoSession } from "@/components/shell/SessionContext";
@@ -219,6 +220,9 @@ export function PrincipalCockpit() {
         </p>
       </section>
 
+      {/* Families no WhatsApp message can reach, with the number box in it —
+          the principal can fix one on the spot instead of forwarding it. */}
+      <WaNumberGapBanner />
       <AlertBannerList alerts={alerts} />
 
       <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">
