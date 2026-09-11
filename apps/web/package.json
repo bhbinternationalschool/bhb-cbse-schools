@@ -115,6 +115,7 @@
     "test:fleet-edge-link": "npx tsx src/lib/fleetEdgeLink.selftest.ts",
     "test:fleet-edge-push": "npx tsx src/lib/fleetEdgePush.selftest.ts",
     "test:fleet-edge-fuel": "npx tsx src/lib/fleetEdgeFuel.selftest.ts",
+    "test:boarding-point-audit": "npx tsx src/lib/boardingPointAudit.selftest.ts",
     "test:transport-parent-messages": "npx tsx src/lib/transportParentMessages.selftest.ts",
     "test:ebook-access": "npx tsx src/lib/ebookAccess.selftest.ts",
     "test:village-market": "npx tsx src/lib/villageMarket.selftest.ts",

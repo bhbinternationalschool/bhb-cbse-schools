@@ -29,6 +29,7 @@ import {
 } from "@/components/transport/FleetRosterPanel";
 import { ClassTransportPanel } from "@/components/transport/ClassTransportPanel";
 import { FleetEdgeStatusStrip } from "@/components/transport/FleetEdgeStatusStrip";
+import { BoardingPointAuditPanel } from "@/components/transport/BoardingPointAuditPanel";
 import { StaffRiderPanel } from "@/components/transport/StaffRiderPanel";
 import { StopLinkRepairPanel } from "@/components/transport/StopLinkRepairPanel";
 import { TransportAmendDialog } from "@/components/transport/TransportAmendDialog";
@@ -615,6 +616,9 @@ export function TransportWorkspace() {
               onFlash={flash}
               onError={setError}
             />
+          ) : null}
+          {tab === "planner" ? (
+            <BoardingPointAuditPanel academicYearCode={session.academicYearCode} />
           ) : null}
           {tab === "riders" ? (
             <RidersPanel

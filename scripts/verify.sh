@@ -148,6 +148,7 @@ SELFTESTS=(
   test:fleet-edge-link
   test:fleet-edge-push
   test:fleet-edge-fuel
+  test:boarding-point-audit
   test:transport-parent-messages
   test:ebook-access
   test:village-market
