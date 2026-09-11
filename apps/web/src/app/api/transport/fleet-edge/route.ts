@@ -1,30 +1,32 @@
 /**
- * Tata Motors Fleet Edge "TimeBound Push (Webhook) API" — periodic details.
- * POST /(root) per Fleet Edge's own spec: a windowed (from/to) summary of
- * vehicleSafety/vehiclePerformance/vehicleEfficiency/vehicleHealth, pushed
- * on the frequency configured at subscription time.
+ * Tata Motors Fleet Edge push endpoint — the root URL.
  *
- * GET exists only so Tata's subscription-portal "CHECK" endpoint-reachability
+ * Was the TimeBound Push "periodic details" receiver. Fleet Edge accepts one
+ * endpoint per fleet, so this now dispatches on payload shape exactly like
+ * /live and /alerts: all three are the same endpoint under three names, and
+ * moving the URL in Tata's portal can no longer switch a stream off. Kept
+ * because it is what the portal held until 8 September 2026 and may hold
+ * again, and because a stream that starts arriving here must not be lost.
+ *
+ * GET exists so Tata's subscription-portal "CHECK" endpoint-reachability
  * step has something to succeed against before POST traffic ever starts.
  */
 
 import { NextResponse } from "next/server";
 import {
-  ingestFleetEdgeDetails,
+  ingestFleetEdgePush,
   isAllowedFleetEdgeSource,
-  parseFleetEdgeDetails,
   sourceIpFrom,
 } from "@/lib/fleetEdge.server";
 
 export const runtime = "nodejs";
 
 export async function GET() {
-  return NextResponse.json({ service: "fleet-edge-timebound-details", ok: true });
+  return NextResponse.json({ service: "fleet-edge-push", ok: true });
 }
 
 export async function POST(req: Request) {
   const sourceIp = sourceIpFrom(req);
-  console.log("[fleet-edge/details] request from", sourceIp);
   if (!isAllowedFleetEdgeSource(sourceIp)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
@@ -36,11 +38,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const details = parseFleetEdgeDetails(body);
-  if (!details) {
+  const result = await ingestFleetEdgePush(body, sourceIp);
+  console.log("[fleet-edge/root]", result.kind ?? "unparseable", "from", sourceIp);
+  if (!result.kind) {
     return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
   }
-
-  const result = await ingestFleetEdgeDetails(details, sourceIp);
-  return NextResponse.json({ ok: result.ok, error: result.error });
+  return NextResponse.json({ ok: result.ok, kind: result.kind, error: result.error });
 }

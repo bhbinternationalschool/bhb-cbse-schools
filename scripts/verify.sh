@@ -146,6 +146,8 @@ SELFTESTS=(
   test:transport-by-class
   test:transport-staff-riders
   test:fleet-edge-link
+  test:fleet-edge-push
+  test:fleet-edge-fuel
   test:transport-parent-messages
   test:ebook-access
   test:village-market
