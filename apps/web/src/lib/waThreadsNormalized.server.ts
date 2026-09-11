@@ -131,8 +131,21 @@ export async function pushWaThreadsDeskToDb(
   }
 
   if (rows.length > 0) {
-    const { error } = await sb.from("wa_desk_bot_slices").upsert(rows);
-    if (error) return { ok: false, error: error.message };
+    // One upsert per slice, not one for the bundle. On 2026-09-04 and again
+    // on 2026-09-11 a single slice the table would not accept (a CHECK that
+    // lagged the code) made the bundle upsert fail as a whole, and every
+    // bot conversation stopped persisting until somebody noticed. A bad
+    // slice must cost that slice, not the school's WhatsApp history.
+    const failed: string[] = [];
+    for (const row of rows) {
+      const { error } = await sb.from("wa_desk_bot_slices").upsert(row);
+      if (error) {
+        failed.push(`${String(row.slice_key)}: ${error.message}`);
+        console.error("[wa-threads] slice upsert FAILED", row.slice_key, error.message);
+      }
+    }
+    if (failed.length === rows.length) return { ok: false, error: failed.join(" · ") };
+    if (failed.length) console.error("[wa-threads] bundle saved WITHOUT", failed.join(" · "));
   } else {
     await sb.from("wa_desk_bot_slices").delete().eq("tenant_id", tenantId);
   }
