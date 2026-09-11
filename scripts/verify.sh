@@ -149,6 +149,7 @@ SELFTESTS=(
   test:fleet-edge-push
   test:fleet-edge-fuel
   test:boarding-point-audit
+  test:halt-clustering
   test:transport-parent-messages
   test:ebook-access
   test:village-market
