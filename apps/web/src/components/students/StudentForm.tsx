@@ -18,6 +18,7 @@ import { StudentAttendanceCard } from "@/components/students/StudentAttendanceCa
 import { StudentExamMarksCard } from "@/components/students/StudentExamMarksCard";
 import { StudentFeeDuesCard } from "@/components/students/StudentFeeDuesCard";
 import { StudentHomeworkCard } from "@/components/students/StudentHomeworkCard";
+import { StudentLibraryCard } from "@/components/students/StudentLibraryCard";
 import { StudentTransportCard } from "@/components/students/StudentTransportCard";
 import { HOUSEHOLD_CHANNELS, HOUSEHOLD_LANGUAGES } from "@/lib/householdPrefs";
 import { diffForAudit, recordAudit } from "@/lib/auditClient";
@@ -1138,6 +1139,7 @@ export function StudentForm({
           <StudentExamMarksCard studentId={studentId} />
           <StudentHomeworkCard studentId={studentId} />
           <StudentTransportCard studentId={studentId} />
+          <StudentLibraryCard studentId={studentId} />
         </>
       ) : null}
 
