@@ -72,6 +72,8 @@ export function AutomationListView({
   onDispatchApproval,
   onRejectApproval,
   onSnoozeApproval,
+  sendingIds = [],
+  evaluating = false,
 }: {
   state: AutomationState;
   readOnly: boolean;
@@ -82,6 +84,9 @@ export function AutomationListView({
   onDispatchApproval: (id: string) => void;
   onRejectApproval: (id: string) => void;
   onSnoozeApproval: (id: string) => void;
+  /** Cards whose send is in flight — their buttons must not be pressable. */
+  sendingIds?: string[];
+  evaluating?: boolean;
 }) {
   const [tab, setTab] = useState<ListTab>("active");
   const [moduleFilter, setModuleFilter] = useState<AutomationModule | "all">(
@@ -154,9 +159,10 @@ export function AutomationListView({
             <button
               type="button"
               className={autoBtnOutline}
+              disabled={evaluating}
               onClick={onEvaluate}
             >
-              Run evaluation now
+              {evaluating ? "Evaluating…" : "Run evaluation now"}
             </button>
           ) : null}
         </div>
@@ -307,17 +313,21 @@ export function AutomationListView({
                     </p>
                   ) : null}
                   {!readOnly ? (
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
                         className={autoBtnSuccess}
+                        disabled={sendingIds.includes(a.id)}
                         onClick={() => onDispatchApproval(a.id)}
                       >
-                        Approve & send
+                        {sendingIds.includes(a.id)
+                          ? `Sending to ${a.audienceCount}…`
+                          : "Approve & send"}
                       </button>
                       <button
                         type="button"
                         className={autoBtnDanger}
+                        disabled={sendingIds.includes(a.id)}
                         onClick={() => onRejectApproval(a.id)}
                       >
                         Reject
@@ -325,10 +335,17 @@ export function AutomationListView({
                       <button
                         type="button"
                         className={autoBtnOutline}
+                        disabled={sendingIds.includes(a.id)}
                         onClick={() => onSnoozeApproval(a.id)}
                       >
                         Snooze 24h
                       </button>
+                      {sendingIds.includes(a.id) ? (
+                        <span className="text-[10px] text-[var(--muted)]">
+                          Do not press again — one press sends to everyone on
+                          this card.
+                        </span>
+                      ) : null}
                     </div>
                   ) : null}
                 </li>

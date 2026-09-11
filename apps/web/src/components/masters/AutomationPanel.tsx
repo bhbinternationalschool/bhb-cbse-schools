@@ -71,6 +71,8 @@ export function AutomationPanel() {
           }}
           onRejectApproval={(id) => desk.decideApproval(id, "rejected")}
           onSnoozeApproval={(id) => desk.decideApproval(id, "snoozed", 24)}
+          sendingIds={desk.sendingIds}
+          evaluating={desk.evaluating}
         />
       );
     }
@@ -111,6 +113,8 @@ export function AutomationPanel() {
       }}
       onRejectApproval={(id) => desk.decideApproval(id, "rejected")}
       onSnoozeApproval={(id) => desk.decideApproval(id, "snoozed", 24)}
+      sendingIds={desk.sendingIds}
+      evaluating={desk.evaluating}
     />
   );
 }
