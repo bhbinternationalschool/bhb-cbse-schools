@@ -342,6 +342,7 @@ jobs:
           npm run test:wa-number-gap
           npm run test:student-attendance
           npm run test:student-homework
+          npm run test:student-transport
           npm run test:wa-transport-track
           npm run test:wa-usage-cost
           npm run test:wa-command-templates
