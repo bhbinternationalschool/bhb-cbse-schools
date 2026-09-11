@@ -14,6 +14,7 @@ import {
   type MastersState,
 } from "@/lib/masters";
 import { bumpStudentSeriesUses } from "@/lib/numberSeries";
+import { StudentFeeDuesCard } from "@/components/students/StudentFeeDuesCard";
 import { HOUSEHOLD_CHANNELS, HOUSEHOLD_LANGUAGES } from "@/lib/householdPrefs";
 import { diffForAudit, recordAudit } from "@/lib/auditClient";
 import { suggestSystemAdmissionForImport } from "@/lib/studentLegacyAdmission";
@@ -1123,6 +1124,12 @@ export function StudentForm({
           </span>
         ) : null}
       </div>
+
+      {/* What this child still owes. Only in edit mode: a student being
+          added has no dues, and an empty card would just be furniture. */}
+      {mode === "edit" && studentId ? (
+        <StudentFeeDuesCard studentId={studentId} />
+      ) : null}
 
       <ModuleTabs
         aria-label="Student form sections"
