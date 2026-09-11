@@ -66,6 +66,7 @@ import {
   type SisStudent,
 } from "@/lib/sis";
 import { StudentNameLabel } from "@/components/students/StudentAvatar";
+import { WaNumberGapBanner } from "@/components/comms/WaNumberGapBanner";
 import { FilterExportButtons } from "@/components/reports/FilterExportButtons";
 import { describeFilters } from "@/lib/reportExport";
 import { TENANT } from "@/lib/types";
@@ -1851,6 +1852,30 @@ export function FeeTakeWorkspace() {
     >
       {tab === "collect" ? (
         <div className="mt-6 space-y-5">
+          {/* Families with no WhatsApp number. The counter is the one place a
+              parent stands still long enough to be asked, so the reminder
+              lives here: scoped to the family at the desk when one is open,
+              and a collapsed count of the rest when none is. */}
+          <WaNumberGapBanner
+            sis={sis}
+            masters={masters}
+            studentIds={
+              selectedStudent
+                ? householdBundle.length > 0
+                  ? householdBundle.map((b) => b.student.id)
+                  : [selectedStudent.id]
+                : undefined
+            }
+            title={
+              selectedStudent
+                ? "This parent is NOT on WhatsApp — take their number now"
+                : undefined
+            }
+            onSaved={() => {
+              refresh();
+              flash("WhatsApp number saved for this family");
+            }}
+          />
           <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <div className="grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,0.7fr)_minmax(0,0.7fr)]">
               <label className="block text-sm">

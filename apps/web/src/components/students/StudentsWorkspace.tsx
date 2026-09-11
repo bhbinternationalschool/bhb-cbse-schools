@@ -56,6 +56,7 @@ import {
   type StudentStatus,
 } from "@/lib/sis";
 import { RemoveControl } from "@/components/masters/RemoveControl";
+import { WaNumberGapBanner } from "@/components/comms/WaNumberGapBanner";
 import {
   StudentAvatar,
   StudentNameLabel,
@@ -1015,6 +1016,18 @@ export function StudentsWorkspace() {
           { id: "tags", label: "Tags", tone: "slate" },
           { id: "birthdays", label: "Birthdays", tone: "coral" },
         ]}
+      />
+
+      {/* Parents the school cannot reach on WhatsApp. Sits above every tab
+          on purpose: the roster is where a clerk has the family's record
+          open and can ask for the right number. */}
+      <WaNumberGapBanner
+        sis={state}
+        masters={masters}
+        onSaved={() => {
+          setState(loadSis());
+          setPanelTick((t) => t + 1);
+        }}
       />
 
       {mainTab === "dashboard" ? (

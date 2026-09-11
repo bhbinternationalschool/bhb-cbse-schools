@@ -160,6 +160,36 @@ export async function requireStaffPermission(
   }
 }
 
+/**
+ * Staff + ANY ONE of several module grants.
+ *
+ * For work that belongs to more than one desk. Collecting a parent's
+ * WhatsApp number happens at the fee counter and on the student roster;
+ * demanding the Automation grant for it is why the school's ten unreachable
+ * families stayed unreachable — the people who meet those parents could not
+ * open the screen that knew.
+ *
+ * Still one 403 with one message, naming the desks that would do.
+ */
+export async function requireAnyStaffPermission(
+  request: Request,
+  grants: readonly { module: RbacModule; action: RbacAction }[],
+): Promise<RouteAuthResult> {
+  const base = await requireStaffApi(request);
+  if (!base.ok) return base;
+  if (base.viaMirrorSecret) return base;
+  for (const g of grants) {
+    try {
+      assertPermission(base.ctx, g.module, g.action);
+      return base;
+    } catch {
+      // Try the next desk.
+    }
+  }
+  const names = grants.map((g) => `${g.module} (${g.action})`).join(" or ");
+  return authFailure(403, `Forbidden — needs ${names}`);
+}
+
 /** School-data desk routes — staff + module RBAC (mirror secret bypasses RBAC). */
 export async function authorizeSchoolDataDesk(
   request: Request,

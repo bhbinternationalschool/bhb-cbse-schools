@@ -138,6 +138,7 @@
     "test:daily-brief": "npx tsx src/lib/dailyBrief.selftest.ts",
     "test:automation-approvals": "npx tsx src/lib/automationApprovals.selftest.ts",
     "test:automation-schedule": "npx tsx src/lib/automationSchedule.selftest.ts",
+    "test:wa-number-gap": "npx tsx src/lib/waNumberGap.selftest.ts",
     "test:wa-transport-track": "npx tsx src/lib/waTransportTrack.selftest.ts",
     "test:wa-usage-cost": "npx tsx src/lib/waUsageCost.selftest.ts",
     "test:wa-command-templates": "npx tsx src/lib/waCommandTemplates.selftest.ts",
