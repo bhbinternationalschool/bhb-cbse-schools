@@ -42,6 +42,12 @@ import {
   sisBotWelcomeText,
   type SisBotChildLine,
   type SisBotDueLine,
+  detectSisFeeReplyIntent,
+  parseSisPromiseToPay,
+  composeSisNeedTimeAsk,
+  composeSisPromiseRecorded,
+  composeSisClaimsPaidReply,
+  promiseSummaryForOffice,
 } from "@/lib/sisParentBotEngine";
 import { attachRazorpayToPaymentLink } from "@/lib/razorpay.server";
 import {
@@ -63,7 +69,7 @@ import {
   languageLabel,
   languageMenuText,
   languageGateDecision,
-  sarvamTargetFor, languageAskStandsAlone } from "@/lib/householdPrefs";
+  sarvamTargetFor, languageAskStandsAlone, waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { patchMirrorHousehold } from "@/lib/parentHousehold.server";
 import { sarvamConfigured, sarvamTranslate, type SarvamLang } from "@/lib/sarvam.server";
 import { formatKbContext, retrieveRelevantKb } from "@/lib/schoolKb.server";
@@ -96,6 +102,10 @@ export type WaSisBotThread = {
   createdAt: string;
   updatedAt: string;
   unreadStaff: number;
+  /** The bot asked a question whose answer the next message is: "ptp" = how much and by when. */
+  pendingAsk?: "ptp";
+  /** Last promise to pay the parent made on WhatsApp. */
+  lastPromise?: { amountPaise: number | null; byDate: string | null; at: string; raw: string };
 };
 
 type Store = { version: 1; threads: WaSisBotThread[] };
@@ -803,14 +813,42 @@ export async function handleWaSisBotInbound(opts: {
   // "Child is unwell") is an answer to a question the school asked, not a
   // keyword to guess at — acknowledge it and put a person on it.
   const quickReply = matchSeedQuickReply(text);
-  const intent = quickReply
-    ? ("human" as const)
-    : isGreeting
-      ? ("unknown" as const)
-      : detectSisBotIntent(text);
-  const bot = quickReply
-    ? { escalate: true, text: quickReplyAcknowledgement(quickReply) }
-    : await buildBotReply(hh, intent, text);
+  // A fee-reminder reply that is not a command: "already paid" (typed or the
+  // template's own button) and "need some time". Read BEFORE the keyword
+  // matcher, which would file "paid" under RECEIPTS and "time" under nothing.
+  const hindi = waTemplateLanguageFor(hh) === "hi";
+  const paidButton = !!quickReply && /paid|भुगतान/i.test(quickReply.label);
+  const feeReply = paidButton ? ("claims_paid" as const) : detectSisFeeReplyIntent(text);
+  const answeringPtp = thread.pendingAsk === "ptp" && !quickReply && detectSisBotIntent(text) === "unknown";
+  let nextPendingAsk: WaSisBotThread["pendingAsk"] = undefined;
+  let lastPromise = thread.lastPromise;
+  let officeNote = "";
+  let intent: ReturnType<typeof detectSisBotIntent>;
+  let bot: { text: string; escalate: boolean };
+  if (answeringPtp) {
+    const p = parseSisPromiseToPay(text, new Date().toISOString().slice(0, 10));
+    lastPromise = { amountPaise: p.amountPaise, byDate: p.byDate, at: nowIso(), raw: p.raw };
+    officeNote = promiseSummaryForOffice(p);
+    intent = "human";
+    bot = { escalate: true, text: composeSisPromiseRecorded(p, hindi) };
+  } else if (feeReply === "claims_paid") {
+    intent = "human";
+    officeNote = "Parent says the fee is already paid — re-check receipts and the counter book, then reply here.";
+    bot = { escalate: true, text: composeSisClaimsPaidReply(hindi) };
+  } else if (feeReply === "need_time") {
+    intent = "human";
+    nextPendingAsk = "ptp";
+    bot = { escalate: false, text: composeSisNeedTimeAsk(hindi) };
+  } else {
+    intent = quickReply
+      ? ("human" as const)
+      : isGreeting
+        ? ("unknown" as const)
+        : detectSisBotIntent(text);
+    bot = quickReply
+      ? { escalate: true, text: quickReplyAcknowledgement(quickReply) }
+      : await buildBotReply(hh, intent, text);
+  }
   let replyText = bot.text;
   if (opts.fromUnified && intent === "unknown") {
     replyText =
@@ -845,7 +883,11 @@ export async function handleWaSisBotInbound(opts: {
         ? "bot"
         : thread.status || "bot",
     unreadStaff: escalate ? thread.unreadStaff + 1 : thread.unreadStaff,
-    messages: [...thread.messages, parentMsg, botMsg],
+    messages: officeNote
+      ? [...thread.messages, parentMsg, botMsg, { id: nid("wsm"), role: "bot" as const, text: `📌 ${officeNote}`, at: nowIso(), by: "SIS parent WA bot · note for office" }]
+      : [...thread.messages, parentMsg, botMsg],
+    pendingAsk: nextPendingAsk,
+    lastPromise,
     updatedAt: nowIso(),
   };
   store = {

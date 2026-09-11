@@ -173,6 +173,7 @@
     "test:fee-integrity": "npx tsx src/lib/feeIntegrityAlert.selftest.ts",
     "test:wa-receipt-template": "npx tsx src/lib/waReceiptTemplate.selftest.ts",
     "test:wa-language-gate": "npx tsx src/lib/waLanguageGate.selftest.ts",
+    "test:sis-bot-fee-replies": "npx tsx src/lib/sisParentBotFeeReplies.selftest.ts",
     "test:wa-bot-silence": "npx tsx src/lib/waBotSilence.selftest.ts",
     "test:job-applications": "npx tsx src/lib/jobApplications.selftest.ts",
     "test:online-classes": "npx tsx src/lib/onlineClasses.selftest.ts",
