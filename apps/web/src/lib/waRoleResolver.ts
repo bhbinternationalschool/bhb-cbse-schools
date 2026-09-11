@@ -11,6 +11,7 @@ import { isProtectedSuperAdminEmail } from "@/lib/superAdmin";
 import { loadSis, type Household } from "@/lib/sis";
 import { loadTransport } from "@/lib/transport";
 import { waNormalizeLocal10 } from "@/lib/waSend";
+import { collapseRolesForEnrolledParent } from "@/lib/waUnifiedBotEngine";
 
 function findHouseholdByWaMobile(mobile10: string): Household | null {
   const sis = loadSis();
@@ -231,8 +232,8 @@ export function resolveWaIdentity(fromWaId: string): WaResolvedIdentity {
     /* transport optional */
   }
 
-  const deduped = roles.filter(
-    (r, i, arr) => arr.findIndex((x) => x.kind === r.kind) === i,
+  const deduped = collapseRolesForEnrolledParent(
+    roles.filter((r, i, arr) => arr.findIndex((x) => x.kind === r.kind) === i),
   );
 
   return {
