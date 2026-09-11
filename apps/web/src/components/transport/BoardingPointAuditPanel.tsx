@@ -17,7 +17,7 @@ type Flag = {
   assignedStopId: string;
   nearestStopId: string;
   homeLabel: string;
-  homePrecision: "village" | "pin";
+  homePrecision: "village" | "household" | "pin";
   routeLabel: string;
   assignedStopName: string;
   assignedHomeKm: number;
@@ -225,9 +225,14 @@ export function BoardingPointAuditPanel({
                     <span className="font-semibold text-[var(--ink)]">{f.fullName}</span>
                     {chip("muted", f.routeLabel)}
                     {chip("info", f.homeLabel)}
-                    {f.homePrecision === "village"
-                      ? chip("muted", "village centroid")
-                      : chip("info", "pinned")}
+                    {chip(
+                      f.homePrecision === "village" ? "muted" : "info",
+                      f.homePrecision === "village"
+                        ? "village centroid"
+                        : f.homePrecision === "household"
+                          ? "home address"
+                          : "pinned",
+                    )}
                     {f.feeChanges === true ? chip("warning", "fee band changes") : null}
                     {f.feeChanges === null ? chip("muted", "fee effect unknown") : null}
                   </div>
@@ -276,10 +281,11 @@ export function BoardingPointAuditPanel({
           )}
 
           <p className="mt-3 text-[10px] text-[var(--muted)]">
-            Home is the census centroid of the family&apos;s village unless a boarding point has
-            been pinned for that child — right village, not right doorstep, so treat anything under
-            a kilometre as noise. A stop&apos;s distance from school sets the fee, so a correction
-            marked &quot;fee band changes&quot; changes what the family pays.
+            Home is a pinned boarding point where one exists, otherwise the family&apos;s own
+            geocoded address, otherwise the census centroid of their village — right village, not
+            right doorstep. Each row says which, and how big a gap has to be before it counts
+            moves with it. A stop&apos;s distance from school sets the fee, so a correction marked
+            &quot;fee band changes&quot; changes what the family pays.
           </p>
         </>
       )}

@@ -193,6 +193,44 @@ assert.equal(pinnedElsewhere.flags.length, 1);
 assert.equal(pinnedElsewhere.flags[0]!.homePrecision, "pin");
 assert.equal(pinnedElsewhere.flags[0]!.homeLabel, "Kakalpur gate");
 
+/* ── how precise the location is decides what counts ───────── */
+
+// This family is 298 m from Kakalpur and 1,079 m from the Ayar Bazar stop
+// they are assigned to — a gap of 781 m. Against a census centroid that sits
+// inside the error of the location itself and must not be reported; against
+// the family's own geocode it is a real question.
+const nearby = { lat: 25.4277, lng: 82.9464 };
+const gapFor = (precision: "village" | "household" | "pin") =>
+  auditBoardingPoints({
+    state: {
+      ...state,
+      assignments: [asg({ studentId: "s7", householdId: "hh_x", stopId: "s_ayar" })],
+    } as unknown as TransportState,
+    homes: new Map([["hh_x", { ...nearby, label: "somewhere", precision }]]),
+    nameOf: () => "x",
+    academicYearCode: AY,
+  }).flags.length;
+
+assert.equal(gapFor("village"), 0, "a centroid cannot support a sub-kilometre finding");
+assert.equal(gapFor("household"), 1, "a doorstep can");
+assert.equal(gapFor("pin"), 1);
+
+// And a caller asking for a coarser view never gets a finer one by accident.
+assert.equal(
+  auditBoardingPoints({
+    state: {
+      ...state,
+      assignments: [asg({ studentId: "s7", householdId: "hh_x", stopId: "s_ayar" })],
+    } as unknown as TransportState,
+    homes: new Map([["hh_x", { ...nearby, label: "somewhere", precision: "pin" as const }]]),
+    nameOf: () => "x",
+    academicYearCode: AY,
+    minGapKm: 3,
+  }).flags.length,
+  0,
+  "an explicit floor still wins when it is higher",
+);
+
 /* ── a bad default shows up as a cluster, not fifty rows ────── */
 
 const cluster = clusterByAssignedStop(

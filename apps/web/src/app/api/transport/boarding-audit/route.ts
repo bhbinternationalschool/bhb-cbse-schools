@@ -11,10 +11,15 @@
  * census centroid of that village — right village, not right corner, which is
  * enough to catch a rider assigned four kilometres away and nothing finer.
  *
- * A per-student pin from sis_student_transport_point is preferred whenever one
- * exists. That table is empty today, so every row currently reports village
- * precision — but the moment the office pins a child, this sharpens for that
- * child with no further change.
+ * Three sources, best first: a per-student pin from
+ * sis_student_transport_point, then the household's own Google geocode, then
+ * the village centroid. Each row says which it used, and the audit's noise
+ * floor moves with it — a 400 metre gap is meaningless against a centroid and
+ * worth asking about against a doorstep.
+ *
+ * Household geocodes were computed in the browser and discarded on every save
+ * until 11 Sep 2026, which is why the centroid was the only option and why
+ * this will sharpen as families are re-geocoded rather than all at once.
  */
 
 import { NextResponse } from "next/server";
@@ -113,6 +118,38 @@ export async function GET(req: Request) {
       lng: Number(v.longitude),
       label: row.village_name?.trim() || "village",
       precision: "village",
+    });
+  }
+
+  // The family's own geocode beats their village's centroid. Only rows whose
+  // address fingerprint still matched survived normalizeHousehold, so a pin
+  // here describes the address the household has now, not one they moved from.
+  const geocoded = await fetchAllPages<{
+    id: string;
+    geo_lat: number | null;
+    geo_lng: number | null;
+    geo_formatted_address: string | null;
+    address: string | null;
+  }>((from, to) =>
+    sb
+      .from("sis_households")
+      .select("id, geo_lat, geo_lng, geo_formatted_address, address")
+      .eq("tenant_id", tenantId)
+      .not("geo_lat", "is", null)
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+  if (geocoded.error) {
+    return NextResponse.json({ error: geocoded.error }, { status: 502 });
+  }
+  for (const h of geocoded.rows) {
+    if (!Number.isFinite(h.geo_lat) || !Number.isFinite(h.geo_lng)) continue;
+    homes.set(h.id, {
+      lat: Number(h.geo_lat),
+      lng: Number(h.geo_lng),
+      label:
+        h.geo_formatted_address?.trim() || h.address?.trim() || "home address",
+      precision: "household",
     });
   }
 

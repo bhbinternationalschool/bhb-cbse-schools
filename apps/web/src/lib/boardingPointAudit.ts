@@ -41,17 +41,34 @@ import {
 /**
  * Where a child lives, and how precisely we know it.
  *
- * "village" is a census centroid: right village, not right corner. It places a
- * family within a kilometre or so, which is enough to catch a rider assigned
- * four kilometres away and useless for anything finer. "pin" is a point
- * somebody actually dropped for this student.
+ * Three tiers, best first:
+ *
+ *  - "pin"       a point somebody dropped for this child specifically.
+ *  - "household" the Google geocode of the family's address. Good to a
+ *                doorstep. Stored only since 11 Sep 2026 — it was computed
+ *                and discarded on every save before that.
+ *  - "village"   a census centroid: right village, not right corner. Places a
+ *                family within a kilometre or so, which catches a rider
+ *                assigned four kilometres away and is useless for anything
+ *                finer.
+ *
+ * The tier travels with the number, because what counts as a real finding
+ * depends on it: a 600 m gap means nothing against a centroid and is worth
+ * asking about against a doorstep.
  */
 export type BoardingHome = {
   lat: number;
   lng: number;
-  /** Village name, or whatever the pin was called. Shown to the office. */
+  /** Village name, address, or whatever the pin was called. */
   label: string;
-  precision: "village" | "pin";
+  precision: "village" | "household" | "pin";
+};
+
+/** Below this, a gap is indistinguishable from the error in the location. */
+export const NOISE_FLOOR_KM: Record<BoardingHome["precision"], number> = {
+  village: 1,
+  household: 0.3,
+  pin: 0.15,
 };
 
 export type BoardingPointFlag = {
@@ -139,12 +156,13 @@ export function auditBoardingPoints(input: {
   nameOf: (studentId: string) => string;
   academicYearCode: string;
   /**
-   * Below this, a "closer" stop is indistinguishable from centroid error.
-   * A village pin is good to roughly a kilometre, so that is the floor.
+   * Floor applied on top of the per-precision noise floor. Callers raise it
+   * to see only the big misplacements; it never lowers the floor below what
+   * the location itself can support.
    */
   minGapKm?: number;
 }): BoardingAuditResult {
-  const minGap = input.minGapKm ?? 1;
+  const askedGap = input.minGapKm ?? 0;
   const bands = input.state.feePolicy?.bands ?? [];
 
   const flags: BoardingPointFlag[] = [];
@@ -205,7 +223,11 @@ export function auditBoardingPoints(input: {
     }
 
     const gapKm = assignedHomeKm - nearestHomeKm;
-    if (nearest.id === assigned.id || gapKm < minGap) continue;
+    // A village centroid cannot support a 400 m finding; a dropped pin can.
+    // Taking the larger of the two keeps a caller from asking for more
+    // precision than the underlying location has.
+    const floor = Math.max(askedGap, NOISE_FLOOR_KM[home.precision]);
+    if (nearest.id === assigned.id || gapKm < floor) continue;
 
     const aBand = bandIndex(assigned.distanceKm, bands);
     const nBand = bandIndex(nearest.distanceKm, bands);
