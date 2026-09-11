@@ -24,7 +24,8 @@
  */
 
 import assert from "node:assert/strict";
-import { languageGateDecision } from "./householdPrefs";
+import {
+  languageAskStandsAlone, languageGateDecision } from "./householdPrefs";
 
 console.log("waLanguageGate.selftest.ts");
 
@@ -87,5 +88,14 @@ assert.deepEqual(languageGateDecision({ known: null, text: "ENGLISH" }), {
   action: "save",
   choice: "en",
 });
+
+/* The question may stand alone only when the parent said nothing to answer. */
+assert.equal(languageAskStandsAlone({ text: "hi", isGreeting: true }), true);
+assert.equal(languageAskStandsAlone({ text: "", isGreeting: false }), true);
+assert.equal(languageAskStandsAlone({ text: "(open)", isGreeting: false }), true);
+assert.equal(languageAskStandsAlone({ text: "भुगतान हो गया", isGreeting: false }), false, "an 'Already paid' tap is answered first");
+assert.equal(languageAskStandsAlone({ text: "DUES", isGreeting: false }), false);
+assert.equal(languageAskStandsAlone({ text: "थोड़ा समय चाहिए", isGreeting: false }), false);
+assert.equal(languageAskStandsAlone({ text: "Only setambar mahine ka baki h", isGreeting: false }), false);
 
 console.log("waLanguageGate.selftest.ts OK");
