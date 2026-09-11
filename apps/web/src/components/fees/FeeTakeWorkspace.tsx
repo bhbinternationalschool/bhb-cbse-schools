@@ -155,6 +155,18 @@ function FeeSearchInput({
   useEffect(() => {
     if (resetSignal > 0) setValue("");
   }, [resetSignal]);
+  /*
+    Arriving from a student's profile with ?q=<admission no>.
+
+    Read after mount rather than as the initial state: the server renders
+    this input empty, and seeding it during render would be a hydration
+    mismatch on a controlled field. Read from location instead of
+    useSearchParams so this page needs no Suspense boundary.
+  */
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get("q");
+    if (q) setValue(q);
+  }, []);
   useEffect(() => {
     const t = setTimeout(() => onDebounced(value), 200);
     return () => clearTimeout(t);
