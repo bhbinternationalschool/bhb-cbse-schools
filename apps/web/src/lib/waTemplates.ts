@@ -1557,7 +1557,7 @@ export function loadWaTemplates(): WaTemplatesState {
 
 export function writeWaTemplatesLocalRaw(state: WaTemplatesState): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(
+  writeCacheOrInvalidate(
     STORAGE_KEY,
     JSON.stringify(normalizeWaTemplatesState(state)),
   );

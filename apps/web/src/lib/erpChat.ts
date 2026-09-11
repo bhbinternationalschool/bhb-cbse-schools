@@ -301,7 +301,7 @@ export function saveErpChat(state: ErpChatState) {
 
 export function writeErpChatLocalRaw(state: ErpChatState) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(
+  writeCacheOrInvalidate(
     STORAGE_KEY,
     JSON.stringify(normalizeErpChatState(state)),
   );

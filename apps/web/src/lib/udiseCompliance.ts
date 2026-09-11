@@ -21,6 +21,7 @@ import {
 import { loadMasters, type MastersState } from "@/lib/masters";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { TENANT } from "@/lib/types";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 const SETTINGS_KEY = "bhb_udise_compliance_v1";
 
@@ -178,7 +179,7 @@ export function saveUdiseComplianceSettings(
 export function writeUdiseComplianceSettingsLocalRaw(state: { settings: UdiseComplianceSettings }): void {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(state.settings));
+    writeCacheOrInvalidate(SETTINGS_KEY, JSON.stringify(state.settings));
   } catch {
     /* quota — the server copy is the truth anyway */
   }

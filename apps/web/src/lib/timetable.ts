@@ -402,7 +402,7 @@ export function saveTimetable(state: TimetableState) {
 export function writeTimetableLocalRaw(state: TimetableState) {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(
+    writeCacheOrInvalidate(
       STORAGE_KEY,
       JSON.stringify(normalizeTimetableState(state)),
     );
