@@ -12,6 +12,12 @@
  * ledger; this card is the amount somebody has to collect. Overdue is split
  * out from not-yet-due, because "₹18,400 outstanding" and "₹18,400 overdue"
  * are two very different conversations with a parent.
+ *
+ * Siblings are on the card too, because fees are paid by a FAMILY, not by a
+ * child. A father at the counter for his younger son does not know — and is
+ * not told — that his daughter in VIII is three months behind, so he pays
+ * one bill and leaves. One receipt, one visit, both children: that only
+ * happens if the person looking at the record can see the whole family.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -23,15 +29,29 @@ import {
   formatInr,
   loadFees,
   openFeeDues,
+  paidByDueKey,
   type FeeDueLine,
   type FeesState,
 } from "@/lib/fees";
 import { loadMasters, type MastersState } from "@/lib/masters";
-import { loadSis, normalizeStudent, type SisStudent } from "@/lib/sis";
+import { classLabelForStudent } from "@/lib/parentPortal";
+import {
+  loadSis,
+  normalizeStudent,
+  siblingsOf,
+  type SisStudent,
+} from "@/lib/sis";
 
 type Load =
   | { kind: "loading" }
-  | { kind: "ready"; student: SisStudent; fees: FeesState; masters: MastersState }
+  | {
+      kind: "ready";
+      student: SisStudent;
+      /** Same household, same session — see siblingsOf. */
+      siblings: SisStudent[];
+      fees: FeesState;
+      masters: MastersState;
+    }
   | { kind: "missing" }
   | { kind: "error"; message: string };
 
@@ -52,14 +72,17 @@ export function StudentFeeDuesCard({ studentId }: { studentId: string }) {
         ]);
         await hydrateFeesStore();
         if (!alive) return;
-        const raw = loadSis().students.find((s) => s.id === studentId);
+        const sis = loadSis();
+        const raw = sis.students.find((s) => s.id === studentId);
         if (!raw) {
           setLoad({ kind: "missing" });
           return;
         }
+        const student = normalizeStudent(raw);
         setLoad({
           kind: "ready",
-          student: normalizeStudent(raw),
+          student,
+          siblings: siblingsOf(sis, student).map(normalizeStudent),
           fees: loadFees(),
           masters: loadMasters(),
         });
@@ -81,25 +104,32 @@ export function StudentFeeDuesCard({ studentId }: { studentId: string }) {
   const summary = useMemo(() => {
     if (load.kind !== "ready") return null;
     const today = istDateString();
-    const open = openFeeDues(
-      computeStudentDues(load.student, load.masters, load.fees, {
-        includePaid: false,
-        /*
-          Up to the running month only.
+    // Built once and shared: paidByDueKey scans the whole voucher history,
+    // and a family of four would otherwise scan it four times.
+    const paidMap = paidByDueKey(load.fees);
+    const openDuesFor = (s: SisStudent) =>
+      openFeeDues(
+        computeStudentDues(s, load.masters, load.fees, {
+          paidMap,
+          includePaid: false,
+          /*
+            Up to the running month only.
 
-          With the default (`includeFuture: true`) this card would add up
-          every month the session will EVER bill — the same mistake that
-          once put ₹1,38,525 on a payment QR for a ₹5,000 receipt. A clerk
-          reads a figure off a profile and says it out loud to a parent, so
-          it has to be what the family owes today, not what they will owe
-          by March.
-        */
-        includeFuture: false,
-        // A student who has left can still owe money, and this card is
-        // exactly where that is noticed.
-        includeInactive: true,
-      }),
-    );
+            With the default (`includeFuture: true`) this card would add up
+            every month the session will EVER bill — the same mistake that
+            once put ₹1,38,525 on a payment QR for a ₹5,000 receipt. A clerk
+            reads a figure off a profile and says it out loud to a parent,
+            so it has to be what the family owes today, not what they will
+            owe by March.
+          */
+          includeFuture: false,
+          // A student who has left can still owe money, and this card is
+          // exactly where that is noticed.
+          includeInactive: true,
+        }),
+      );
+
+    const open = openDuesFor(load.student);
     const overdue: FeeDueLine[] = [];
     const upcoming: FeeDueLine[] = [];
     for (const l of open) {
@@ -111,13 +141,41 @@ export function StudentFeeDuesCard({ studentId }: { studentId: string }) {
     const byDue = (a: FeeDueLine, b: FeeDueLine) =>
       (a.dueOn || "9999-12-31").localeCompare(b.dueOn || "9999-12-31") ||
       a.dueKey.localeCompare(b.dueKey);
+    // Every sibling, including the ones who owe nothing: "the others are
+    // clear" is an answer the counter needs as much as a figure.
+    const siblings = load.siblings
+      .map((s) => {
+        const rows = openDuesFor(s);
+        const late = rows.filter((l) => l.dueOn && l.dueOn <= today);
+        return {
+          id: s.id,
+          name: (s.fullName || "").trim() || "(unnamed)",
+          classLabel: classLabelForStudent(s, load.masters),
+          admissionNo: (s.admissionNo || "").trim(),
+          totalPaise: sum(rows),
+          overduePaise: sum(late),
+        };
+      })
+      .sort(
+        (a, b) =>
+          b.totalPaise - a.totalPaise ||
+          a.name.localeCompare(b.name) ||
+          a.id.localeCompare(b.id),
+      );
+
+    const selfTotal = sum(open);
     return {
       rows: [...overdue.sort(byDue), ...upcoming.sort(byDue)],
       overdueKeys: new Set(overdue.map((l) => l.dueKey)),
       overduePaise: sum(overdue),
       upcomingPaise: sum(upcoming),
-      totalPaise: sum(open),
+      totalPaise: selfTotal,
       oldest: overdue.sort(byDue)[0]?.dueOn || "",
+      siblings,
+      familyPaise:
+        selfTotal + siblings.reduce((t, s) => t + s.totalPaise, 0),
+      familyOverduePaise:
+        sum(overdue) + siblings.reduce((t, s) => t + s.overduePaise, 0),
     };
   }, [load]);
 
@@ -155,12 +213,14 @@ export function StudentFeeDuesCard({ studentId }: { studentId: string }) {
         </p>
       ) : null}
 
+      {summary && summary.totalPaise === 0 ? (
+        <p className="px-3 py-3 text-xs font-bold text-[var(--success,#16794f)]">
+          No pending dues up to this month for this student.
+        </p>
+      ) : null}
+
       {summary ? (
-        summary.totalPaise === 0 ? (
-          <p className="px-3 py-3 text-xs font-bold text-[var(--success,#16794f)]">
-            No pending dues up to this month.
-          </p>
-        ) : (
+        summary.totalPaise === 0 ? null : (
           <>
             <div className="grid grid-cols-3 divide-x divide-[var(--border)] border-b border-[var(--border)]">
               <Stat
@@ -228,6 +288,69 @@ export function StudentFeeDuesCard({ studentId }: { studentId: string }) {
             </div>
           </>
         )
+      ) : null}
+
+      {summary && summary.siblings.length > 0 ? (
+        <div className="border-t-2 border-[var(--border)]">
+          <div className="flex flex-wrap items-baseline gap-x-2 bg-[var(--surface-sunken)] px-3 py-1.5">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--brand-deep)]">
+              Siblings in this family
+            </p>
+            <p className="text-[10px] text-[var(--muted)]">
+              Fees are paid per family — one receipt can clear all of them
+            </p>
+            <p className="ml-auto text-[11px] font-bold tabular-nums text-[var(--brand-deep)]">
+              Family total {formatInr(summary.familyPaise)}
+              {summary.familyOverduePaise > 0 ? (
+                <span className="text-[var(--danger)]">
+                  {" "}
+                  · {formatInr(summary.familyOverduePaise)} overdue
+                </span>
+              ) : null}
+            </p>
+          </div>
+          <ul className="divide-y divide-[var(--border)]">
+            {summary.siblings.map((sib) => (
+              <li
+                key={sib.id}
+                className="flex flex-wrap items-center gap-x-2 px-3 py-1.5 text-[11px]"
+              >
+                <Link
+                  href={`/students/${sib.id}/edit`}
+                  className="font-bold text-[var(--brand-deep)] hover:underline"
+                >
+                  {sib.name}
+                </Link>
+                {sib.classLabel ? (
+                  <span className="rounded bg-[var(--surface-sunken)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--muted)]">
+                    {sib.classLabel}
+                  </span>
+                ) : null}
+                {sib.admissionNo ? (
+                  <span className="text-[10px] text-[var(--muted)]">
+                    {sib.admissionNo}
+                  </span>
+                ) : null}
+                {sib.totalPaise === 0 ? (
+                  <span className="ml-auto font-bold text-[var(--success,#16794f)]">
+                    Clear
+                  </span>
+                ) : (
+                  <span className="ml-auto tabular-nums">
+                    <span className="font-bold text-[var(--brand-deep)]">
+                      {formatInr(sib.totalPaise)}
+                    </span>
+                    {sib.overduePaise > 0 ? (
+                      <span className="ml-1.5 rounded bg-[var(--danger-soft)] px-1 py-0.5 text-[9px] font-bold uppercase text-[var(--danger)]">
+                        {formatInr(sib.overduePaise)} overdue
+                      </span>
+                    ) : null}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : null}
     </section>
   );
