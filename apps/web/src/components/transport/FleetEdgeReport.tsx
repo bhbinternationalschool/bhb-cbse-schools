@@ -56,6 +56,7 @@ import { averageEngineLoad, averageGsa, averageSpeed } from "@/lib/fleetEdgeAnal
 import {
   FUEL_TYPE_LABEL,
   isServiceDue,
+  tankLabels,
   usesCng,
   type FleetFuelType,
   type FleetAlertRow,
@@ -500,9 +501,9 @@ export function FleetEdgeReport({ canEdit }: { canEdit: boolean }) {
     { key: "km", header: "Distance", align: "right", sortable: true, value: (v) => v.distanceTravelledKm, render: (v) => <span className="tabular-nums">{n1(v.distanceTravelledKm, " km")}</span> },
     { key: "fuel", header: "Fuel", align: "right", sortable: true, value: (v) => v.fuelConsumed, render: (v) => {
       const t = v.lastTelemetry;
-      const cng = usesCng(v.identity?.fuelType);
-      const tank1 = t?.fuelLevelPercent != null ? `${cng && v.identity?.fuelType === "cng" ? "CNG" : "tank 1"} ${t.fuelLevelPercent}%` : null;
-      const tank2 = t?.secondaryFuelLevel1 != null ? `${cng ? "CNG" : "tank 2"} ${t.secondaryFuelLevel1}%` : null;
+      const tanks = tankLabels(v.identity?.fuelType);
+      const tank1 = t?.fuelLevelPercent != null ? `${tanks.primary} ${t.fuelLevelPercent}%` : null;
+      const tank2 = t?.secondaryFuelLevel1 != null ? `${tanks.secondary} ${t.secondaryFuelLevel1}%` : null;
       return (
         <div className="text-right tabular-nums">
           <div>{v.fuelConsumed > 0 ? `${n1(v.fuelConsumed, " L")} · ${n1(v.distanceTravelledKm / v.fuelConsumed, " km/L")}` : <span className="text-[var(--muted)]">no usage reported</span>}</div>

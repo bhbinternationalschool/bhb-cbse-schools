@@ -29,6 +29,7 @@ import {
   type VehicleFleetMetrics,
 } from "@/lib/fleetEdgeAnalytics";
 import { isSosAlert } from "@/lib/fleetEdge.server";
+import { FUEL_FIELDS, pickNumber } from "@/lib/fleetEdgePush";
 import {
   isServiceDue,
   type FleetAlertRow,
@@ -205,13 +206,9 @@ export async function buildFleetEdgeReport(
           speed: typeof p.speed === "number" ? p.speed : null,
           ignitionOn: typeof p.ignitionOn === "boolean" ? p.ignitionOn : null,
           // Real telemetry sends primaryFuelLevel; the spec PDF says
-          // fuelLevelPercent. Accept either.
-          fuelLevelPercent:
-            typeof p.primaryFuelLevel === "number"
-              ? p.primaryFuelLevel
-              : typeof p.fuelLevelPercent === "number"
-                ? p.fuelLevelPercent
-                : null,
+          // fuelLevelPercent, and capitalises it. Accept any of them —
+          // see pickNumber's header for why the casing is not academic.
+          fuelLevelPercent: pickNumber(p, FUEL_FIELDS.primaryLevel),
           odometer: typeof p.odometer === "number" ? p.odometer : null,
           at: ev.received_at,
           accelX: typeof p.accelX === "number" ? p.accelX : null,
@@ -230,10 +227,11 @@ export async function buildFleetEdgeReport(
           imei: typeof p.imei === "string" ? p.imei : null,
           noOfFuelTanks: typeof p.noOfFuelTanks === "number" ? p.noOfFuelTanks : null,
           noOfSatForFix: typeof p.noOfSatForFix === "number" ? p.noOfSatForFix : null,
-          primaryFuelTankCapacity: typeof p.primaryFuelTankCapacity === "number" ? p.primaryFuelTankCapacity : null,
-          secondaryFuelLevel1: typeof p.secondaryFuelLevel1 === "number" ? p.secondaryFuelLevel1 : null,
-          secondaryFuelTankCapacity1:
-            typeof p.secondaryFuelTankCapacity1 === "number" ? p.secondaryFuelTankCapacity1 : null,
+          primaryFuelTankCapacity: pickNumber(p, FUEL_FIELDS.primaryCapacity),
+          // The CNG readout on the Fleet Dashboard reads tank 2. This is the
+          // field the spec capitalises as SecondaryFuelLevel1.
+          secondaryFuelLevel1: pickNumber(p, FUEL_FIELDS.secondaryLevel),
+          secondaryFuelTankCapacity1: pickNumber(p, FUEL_FIELDS.secondaryCapacity),
           vehicleStatus: typeof p.vehicleStatus === "string" ? p.vehicleStatus : null,
         };
       }

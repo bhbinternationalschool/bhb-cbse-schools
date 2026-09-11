@@ -101,6 +101,54 @@ export function usesCng(t: FleetFuelType | null | undefined): boolean {
   return t === "cng" || t === "petrol_cng" || t === "diesel_cng";
 }
 
+/**
+ * What this vehicle's two tanks actually hold — primary first.
+ *
+ * Fleet Edge only ever says "primary" and "secondary". It never names the
+ * fuel, so which is which is a property of the vehicle, and getting it wrong
+ * puts a correct number under the wrong heading with nothing to flag it.
+ *
+ * Confirmed for this fleet on 10 September 2026:
+ *
+ *  - The three bi-fuel buses (TATA MAGIC EXPRESS CNG 9+D BSV and similar)
+ *    run CNG as the PRIMARY tank, with a small petrol tank as secondary.
+ *  - The Winger and the city bus run diesel primary, and their secondary
+ *    reading is not fuel at all — it is DEF (AdBlue), the emissions
+ *    consumable. Reporting it as "tank 2" invites someone to read a low
+ *    number as an empty fuel tank.
+ *
+ * This was previously assumed the other way round: tank 2 was labelled CNG
+ * and tank 1 left generic, on a guess made in August before any tank reading
+ * had ever arrived. Tata's portal shows CNG as the headline live figure
+ * ("CNG Pressure 72%"), which is the primary. Had the first real reading
+ * landed under the old assumption, a full CNG cylinder would have been
+ * displayed as petrol.
+ */
+export function tankLabels(t: FleetFuelType | null | undefined): {
+  primary: string;
+  secondary: string;
+} {
+  switch (t) {
+    case "petrol_cng":
+      return { primary: "CNG", secondary: "petrol" };
+    case "diesel_cng":
+      return { primary: "CNG", secondary: "diesel" };
+    case "cng":
+      return { primary: "CNG", secondary: "CNG" };
+    case "diesel":
+      // Not a second fuel tank. BS-VI diesel carries DEF/AdBlue, and that is
+      // what both diesel vehicles on this fleet report as their secondary.
+      return { primary: "diesel", secondary: "DEF" };
+    case "petrol":
+      return { primary: "petrol", secondary: "tank 2" };
+    case "electric":
+      return { primary: "charge", secondary: "tank 2" };
+    default:
+      // Fuel type not recorded. Say nothing we do not know.
+      return { primary: "tank 1", secondary: "tank 2" };
+  }
+}
+
 export type FleetEdgeReport = {
   ok: true;
   from: string;

@@ -285,6 +285,11 @@ jobs:
           npm run test:exams
           npm run test:household-prefs
           npm run test:item-analytics
+          npm run test:fleet-edge-link
+          npm run test:fleet-edge-push
+          npm run test:fleet-edge-fuel
+          npm run test:boarding-point-audit
+          npm run test:halt-clustering
           npm run test:item-score-import
           npm run test:lead-extract-ai
           npm run test:lead-followup-ai

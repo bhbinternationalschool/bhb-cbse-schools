@@ -13,6 +13,7 @@
 import assert from "node:assert/strict";
 
 import {
+  isPlaceholderVehicle,
   linkFleetEdgeToDesk,
   normalizeVehicleKey,
   telemetryFreshness,
@@ -150,5 +151,29 @@ const fresh = telemetryFreshness(
 assert.equal(fresh.live, true);
 assert.equal(fresh.vehiclesReporting, 1);
 assert.equal(fresh.reason, "", "nothing to explain when it works");
+
+/* ── Tata's own test vehicle is not a bus ───────────────────── */
+
+// Pushed when the Basic Push subscription was activated, 10 Sep 2026.
+assert.equal(
+  isPlaceholderVehicle(status("MATXXXXXXXX", "HRXXXXXX")),
+  true,
+  "the activation dummy is recognised",
+);
+assert.equal(
+  isPlaceholderVehicle(status("MATXXXXXXXX", null)),
+  true,
+  "VIN alone is enough",
+);
+
+// Every real vehicle on this fleet must survive it — misfiring here would
+// hide a bus from the office, which is worse than showing a fake one.
+for (const s of edge) {
+  assert.equal(
+    isPlaceholderVehicle(s),
+    false,
+    `${s.vin} / ${s.registrationNumber} is a real vehicle`,
+  );
+}
 
 console.log("  ok");

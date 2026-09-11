@@ -30,6 +30,7 @@ import {
 import { ClassTransportPanel } from "@/components/transport/ClassTransportPanel";
 import { LivePositionsPanel } from "@/components/transport/LivePositionsPanel";
 import { FleetEdgeStatusStrip } from "@/components/transport/FleetEdgeStatusStrip";
+import { BoardingPointAuditPanel } from "@/components/transport/BoardingPointAuditPanel";
 import { StaffRiderPanel } from "@/components/transport/StaffRiderPanel";
 import { StopLinkRepairPanel } from "@/components/transport/StopLinkRepairPanel";
 import { TransportAmendDialog } from "@/components/transport/TransportAmendDialog";
@@ -615,6 +616,12 @@ export function TransportWorkspace() {
               onSisRefresh={() => setSis(loadSis())}
               onFlash={flash}
               onError={setError}
+            />
+          ) : null}
+          {tab === "planner" ? (
+            <BoardingPointAuditPanel
+              academicYearCode={session.academicYearCode}
+              canEdit={hasPermission(session, masters, "transport", "edit")}
             />
           ) : null}
           {tab === "riders" ? (

@@ -28,6 +28,12 @@
  * report telemetry before its registration number is even allotted.
  */
 
+import {
+  classifyFleetEdgePush,
+  FUEL_FIELDS,
+  pickNumber,
+  type FleetEdgePushKind,
+} from "@/lib/fleetEdgePush";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { sendWaWithFailover } from "@/lib/waSend";
 
@@ -183,7 +189,9 @@ export function parseFleetEdgeTelemetry(raw: unknown): FleetEdgeTelemetryPayload
     crankOn: bool(raw.crankOn),
     speed: num(raw.speed),
     odometer: num(raw.odometer),
-    fuelLevelPercent: num(raw.fuelLevelPercent ?? raw.primaryFuelLevel),
+    // Case-insensitive: the spec capitalises PrimaryFuelLevel, the wire
+    // does not. See pickNumber's header.
+    fuelLevelPercent: pickNumber(raw, FUEL_FIELDS.primaryLevel) ?? undefined,
     vehicleStatus: str(raw.vehicleStatus),
     engineRunHour: num(raw.engineRunHour),
     currentGear: num(raw.currentGear),
@@ -219,7 +227,7 @@ export function sourceIpFrom(req: Request): string | null {
 }
 
 async function insertEvent(row: {
-  event_type: "alert" | "details" | "telemetry";
+  event_type: "alert" | "details" | "telemetry" | "unknown";
   alert_name: string | null;
   vehicle_ref: string | null;
   registration_number: string | null;
@@ -426,6 +434,74 @@ export async function ingestFleetEdgeDetails(
     source_ip: sourceIp,
     payload: details,
   });
+}
+
+/**
+ * The one endpoint. Reads the payload, decides which stream it belongs to,
+ * and hands it to that stream's ingest.
+ *
+ * Fleet Edge's portal accepts a single URL per fleet, so whichever of the
+ * three routes is configured receives ALL of the traffic — and the route
+ * cannot be told what it is holding. Every route therefore goes through
+ * here, and the endpoint the office happens to have pasted into the portal
+ * stops being load-bearing. The immediate reason is that the SOS escalation
+ * runs on the alert path alone: with the single URL on /live, a panic press
+ * reached a telemetry parser that accepted it, filed it as a GPS snapshot,
+ * and called nobody.
+ *
+ * A reachability ping is acknowledged and NOT stored. It is not the vehicle
+ * reporting anything, and 4,834 of them had already been counted as periodic
+ * summaries on the Live tab.
+ *
+ * An unrecognised shape IS stored, as `unknown`. Dropping it would lose
+ * data the vendor started sending without telling anyone; filing it under
+ * the nearest-looking stream would turn a guess into a fact.
+ */
+export async function ingestFleetEdgePush(
+  body: unknown,
+  sourceIp: string | null,
+): Promise<{ ok: boolean; kind: FleetEdgePushKind | null; error?: string }> {
+  const kind = classifyFleetEdgePush(body);
+  if (!kind) return { ok: false, kind: null, error: "Invalid payload" };
+
+  if (kind === "alert") {
+    const alert = parseFleetEdgeAlert(body);
+    if (!alert) return { ok: false, kind, error: "Invalid payload" };
+    return { ...(await ingestFleetEdgeAlert(alert, sourceIp)), kind };
+  }
+
+  if (kind === "details") {
+    const details = parseFleetEdgeDetails(body);
+    if (!details) return { ok: false, kind, error: "Invalid payload" };
+    return { ...(await ingestFleetEdgeDetails(details, sourceIp)), kind };
+  }
+
+  if (kind === "telemetry") {
+    const telemetry = parseFleetEdgeTelemetry(body);
+    if (!telemetry) return { ok: false, kind, error: "Invalid payload" };
+    return { ...(await ingestFleetEdgeTelemetry(telemetry, sourceIp)), kind };
+  }
+
+  if (kind === "heartbeat") return { ok: true, kind };
+
+  // kind === "unknown"
+  const raw = body as Record<string, unknown>;
+  console.warn(
+    "[fleetEdge] unrecognised push shape stored as unknown:",
+    Object.keys(raw).join(", "),
+  );
+  const result = await insertEvent({
+    event_type: "unknown",
+    alert_name: null,
+    vehicle_ref: str(raw.vehicleId) || null,
+    registration_number: str(raw.registrationNumber) || null,
+    event_at: parseableIso(str(raw.eventDateTime)) || parseableIso(str(raw.timestamp)),
+    window_from: null,
+    window_to: null,
+    source_ip: sourceIp,
+    payload: raw,
+  });
+  return { ok: result.ok, kind, error: result.error };
 }
 
 /**

@@ -52,6 +52,14 @@ type HouseholdRow = {
   channel_preference?: string | null;
   quiet_hours_start?: string | null;
   quiet_hours_end?: string | null;
+  geo_lat?: number | null;
+  geo_lng?: number | null;
+  geo_place_id?: string | null;
+  geo_formatted_address?: string | null;
+  geo_geocoded_at?: string | null;
+  geo_source?: string | null;
+  geo_confidence?: string | null;
+  geo_address_key?: string | null;
   updated_at: string;
 };
 
@@ -152,6 +160,21 @@ function rowToHousehold(row: HouseholdRow): Household {
     channelPreference: row.channel_preference ?? "",
     quietHoursStart: row.quiet_hours_start ?? "",
     quietHoursEnd: row.quiet_hours_end ?? "",
+    // Geo is optional throughout: a household with no pin must come back with
+    // geoLat undefined, not 0, or every un-geocoded family lands off the
+    // coast of Africa and the nearest-stop maths quietly answers for them.
+    ...(typeof row.geo_lat === "number" && typeof row.geo_lng === "number"
+      ? {
+          geoLat: row.geo_lat,
+          geoLng: row.geo_lng,
+          geoPlaceId: row.geo_place_id ?? undefined,
+          geoFormattedAddress: row.geo_formatted_address ?? undefined,
+          geoGeocodedAt: row.geo_geocoded_at ?? undefined,
+          geoSource: (row.geo_source as Household["geoSource"]) ?? undefined,
+          geoConfidence: (row.geo_confidence as Household["geoConfidence"]) ?? undefined,
+          geoAddressKey: row.geo_address_key ?? undefined,
+        }
+      : {}),
   });
 }
 
@@ -228,6 +251,18 @@ function householdToRow(h: Household, tenantId: string, now: string) {
     channel_preference: h.channelPreference,
     quiet_hours_start: h.quietHoursStart,
     quiet_hours_end: h.quietHoursEnd,
+    // normalizeHousehold has already dropped a pin whose address fingerprint
+    // no longer matches, so whatever survives to here is a pin that still
+    // describes where the family lives. Nulls when there is none — never 0,
+    // which is a real place in the Gulf of Guinea.
+    geo_lat: typeof h.geoLat === "number" ? h.geoLat : null,
+    geo_lng: typeof h.geoLng === "number" ? h.geoLng : null,
+    geo_place_id: h.geoPlaceId ?? null,
+    geo_formatted_address: h.geoFormattedAddress ?? null,
+    geo_geocoded_at: h.geoGeocodedAt ?? null,
+    geo_source: h.geoSource ?? null,
+    geo_confidence: h.geoConfidence ?? null,
+    geo_address_key: h.geoAddressKey ?? null,
     updated_at: now,
   };
 }
