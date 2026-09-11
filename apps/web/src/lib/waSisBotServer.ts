@@ -915,6 +915,10 @@ export async function sendSisFeeReceiptOnWhatsApp(opts: {
   await ensureSchoolMirrorHydrated();
   const voucher = loadFees().vouchers.find((v) => v.id === opts.voucherId);
   if (!voucher) return { ok: false, error: "Voucher not found" };
+  // Never WhatsApp a cancelled receipt. If it was voided between the
+  // payment and this send, the parent must hear it from the office, not
+  // receive a receipt for money the books no longer show.
+  if (voucher.voidedAt) return { ok: false, error: "Receipt is voided" };
   const text = composeWhatsAppFeeReceipt(voucher, loadSis(), loadMasters());
   const send = await sendWaWithFailover({
     primaryMobile: opts.mobile,

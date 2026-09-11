@@ -38,6 +38,21 @@ export async function GET(
       const { vouchers, ok } = await fetchHouseholdVouchersFromDb(ctx.session.householdId);
       if (!ok) throw new ApiError("server_error", "Receipts are unavailable right now", 503);
       voucher = vouchers.find((v) => v.id === voucherId);
+      /*
+        A cancelled receipt is not the parent's document.
+
+        The list no longer offers one, but a link already in the app — or
+        one saved, shared or bookmarked — must not still render the PDF.
+        Said plainly rather than as a bare 404: the parent is holding a
+        piece of paper and deserves to know why it no longer opens.
+      */
+      if (voucher?.voidedAt) {
+        throw new ApiError(
+          "not_found",
+          "This receipt was cancelled by the school. Please contact the school office.",
+          404,
+        );
+      }
     } else {
       assertPermission(ctx, "fees", "view");
       const { vouchers, ok } = await fetchFeeVouchersFromDb();
