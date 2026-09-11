@@ -13,6 +13,12 @@
  * out from not-yet-due, because "₹18,400 outstanding" and "₹18,400 overdue"
  * are two very different conversations with a parent.
  *
+ * Payments are on the card too. "Kitna baaki hai" is always followed by
+ * "kab jama kiya tha" — and a parent who says they paid on the 5th is
+ * answered from the record, not from memory. Voided receipts stay listed,
+ * marked VOID and excluded from the total: a cancelled receipt the parent
+ * still holds is exactly the one that gets argued about.
+ *
  * Siblings are on the card too, because fees are paid by a FAMILY, not by a
  * child. A father at the counter for his younger son does not know — and is
  * not told — that his daughter in VIII is three months behind, so he pays
@@ -30,6 +36,9 @@ import {
   loadFees,
   openFeeDues,
   paidByDueKey,
+  paperRefOf,
+  tenderModeLabel,
+  type CollectionVoucher,
   type FeeDueLine,
   type FeesState,
 } from "@/lib/fees";
@@ -55,8 +64,12 @@ type Load =
   | { kind: "missing" }
   | { kind: "error"; message: string };
 
+/** Receipts shown before the office has to ask for the rest. */
+const PAYMENT_PREVIEW = 6;
+
 export function StudentFeeDuesCard({ studentId }: { studentId: string }) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
+  const [showAllPayments, setShowAllPayments] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -179,6 +192,52 @@ export function StudentFeeDuesCard({ studentId }: { studentId: string }) {
     };
   }, [load]);
 
+  /**
+   * Receipts that carry a line for THIS child.
+   *
+   * A household receipt often pays for three children at once, so the row
+   * shows this student's share and names the receipt's own total beside it
+   * — otherwise the profile shows ₹4,000 for a ₹12,000 receipt the parent
+   * is holding, and the office is accused of losing money.
+   */
+  const payments = useMemo(() => {
+    if (load.kind !== "ready") return null;
+    const ay = (load.student.academicYearCode || "").trim();
+    const rows = (load.fees.vouchers || [])
+      .map((v: CollectionVoucher) => {
+        const mine = (v.lines || []).filter(
+          (l) => l.studentId === load.student.id,
+        );
+        if (!mine.length) return null;
+        if (ay && (v.academicYearCode || "").trim() !== ay) return null;
+        return {
+          id: v.id,
+          date: v.collectionDate || (v.collectedAt || "").slice(0, 10),
+          receiptNo: paperRefOf(v) || v.receiptNo || "—",
+          sharePaise: mine.reduce((t, l) => t + l.amountPaise, 0),
+          totalPaise: v.totalPaise,
+          heads: mine.map((l) => l.label).filter(Boolean),
+          modes: [
+            ...new Set((v.tenders || []).map((t) => tenderModeLabel(t.mode))),
+          ],
+          cashier: (v.cashierName || "").trim(),
+          voided: !!v.voidedAt,
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null)
+      .sort(
+        (a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id),
+      );
+    return {
+      rows,
+      // Voided receipts are shown but never counted.
+      paidPaise: rows
+        .filter((r) => !r.voided)
+        .reduce((t, r) => t + r.sharePaise, 0),
+      sessionLabel: ay,
+    };
+  }, [load]);
+
   if (load.kind === "missing") return null;
 
   const collectHref =
@@ -190,9 +249,7 @@ export function StudentFeeDuesCard({ studentId }: { studentId: string }) {
     <section className="mt-4 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)]">
       <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2">
         <IndianRupee className="size-4 text-[var(--brand-deep)]" aria-hidden />
-        <h2 className="text-sm font-bold text-[var(--brand-deep)]">
-          Pending fee dues
-        </h2>
+        <h2 className="text-sm font-bold text-[var(--brand-deep)]">Fees</h2>
         <Link
           href={collectHref}
           className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 text-[11px] font-bold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
@@ -211,6 +268,17 @@ export function StudentFeeDuesCard({ studentId }: { studentId: string }) {
           Dues could not be read — {load.message}. This is not a zero balance;
           check on the fee counter.
         </p>
+      ) : null}
+
+      {summary ? (
+        <div className="flex flex-wrap items-baseline gap-x-2 border-b border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-1.5">
+          <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--brand-deep)]">
+            Pending dues
+          </p>
+          <p className="text-[10px] text-[var(--muted)]">
+            Billed up to this month
+          </p>
+        </div>
       ) : null}
 
       {summary && summary.totalPaise === 0 ? (
@@ -242,8 +310,8 @@ export function StudentFeeDuesCard({ studentId }: { studentId: string }) {
               />
             </div>
             <p className="border-b border-[var(--border)] px-3 py-1 text-[10px] text-[var(--muted)]">
-              Billed up to this month. Later months of the session are not
-              counted here — the fee counter shows the full year.
+              Later months of the session are not counted here — the fee
+              counter shows the full year.
             </p>
             <div className="max-h-64 overflow-y-auto">
               <table className="w-full text-left text-[11px]">
@@ -288,6 +356,89 @@ export function StudentFeeDuesCard({ studentId }: { studentId: string }) {
             </div>
           </>
         )
+      ) : null}
+
+      {payments && payments.rows.length > 0 ? (
+        <div className="border-t-2 border-[var(--border)]">
+          <div className="flex flex-wrap items-baseline gap-x-2 bg-[var(--surface-sunken)] px-3 py-1.5">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--brand-deep)]">
+              Payment history
+            </p>
+            <p className="text-[10px] text-[var(--muted)]">
+              {payments.sessionLabel
+                ? `Receipts for ${payments.sessionLabel}`
+                : "Receipts on record"}
+            </p>
+            <p className="ml-auto text-[11px] font-bold tabular-nums text-[var(--success,#16794f)]">
+              Paid {formatInr(payments.paidPaise)}
+            </p>
+          </div>
+          <div className="max-h-64 overflow-y-auto">
+            <table className="w-full text-left text-[11px]">
+              <thead className="sticky top-0 bg-[var(--surface-sunken)] text-[10px] uppercase tracking-wide text-[var(--muted)]">
+                <tr>
+                  <th className="px-3 py-1.5 font-bold">Date</th>
+                  <th className="px-3 py-1.5 font-bold">Receipt</th>
+                  <th className="px-3 py-1.5 font-bold">Paid for</th>
+                  <th className="px-3 py-1.5 text-right font-bold">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(showAllPayments
+                  ? payments.rows
+                  : payments.rows.slice(0, PAYMENT_PREVIEW)
+                ).map((r) => (
+                  <tr key={r.id} className="border-t border-[var(--border)]">
+                    <td className="px-3 py-1.5 tabular-nums text-[var(--muted)]">
+                      {r.date || "—"}
+                    </td>
+                    <td className="px-3 py-1.5 text-[var(--brand-deep)]">
+                      {r.receiptNo}
+                      {r.voided ? (
+                        <span className="ml-1.5 rounded bg-[var(--danger-soft)] px-1 py-0.5 text-[9px] font-bold uppercase text-[var(--danger)]">
+                          void
+                        </span>
+                      ) : null}
+                      {r.modes.length ? (
+                        <span className="ml-1.5 text-[10px] text-[var(--muted)]">
+                          {r.modes.join(" + ")}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="px-3 py-1.5 text-[10px] text-[var(--muted)]">
+                      {r.heads.join(", ") || "—"}
+                    </td>
+                    <td
+                      className={`px-3 py-1.5 text-right font-bold tabular-nums ${
+                        r.voided
+                          ? "text-[var(--muted)] line-through"
+                          : "text-[var(--brand-deep)]"
+                      }`}
+                    >
+                      {formatInr(r.sharePaise)}
+                      {r.sharePaise !== r.totalPaise ? (
+                        <span className="block text-[9px] font-normal text-[var(--muted)]">
+                          of {formatInr(r.totalPaise)} receipt
+                        </span>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {payments.rows.length > PAYMENT_PREVIEW ? (
+            <button
+              type="button"
+              className="w-full border-t border-[var(--border)] px-3 py-1.5 text-[11px] font-bold text-[var(--brand-mid)] hover:bg-[var(--surface-sunken)]"
+              onClick={() => setShowAllPayments((v) => !v)}
+            >
+              {showAllPayments
+                ? "Show recent only"
+                : `Show all ${payments.rows.length} receipts`}
+            </button>
+          ) : null}
+        </div>
       ) : null}
 
       {summary && summary.siblings.length > 0 ? (
