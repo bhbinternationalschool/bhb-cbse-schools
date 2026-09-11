@@ -115,6 +115,7 @@ SELFTESTS=(
   test:wa-receipt-template
   test:wa-language-gate
   test:sis-bot-fee-replies
+  test:wa-known-parent-role
   test:wa-bot-silence
   test:job-applications
   test:online-classes

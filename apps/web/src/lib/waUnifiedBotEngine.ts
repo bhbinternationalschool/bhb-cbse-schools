@@ -432,3 +432,34 @@ export function flowKindFromVisitorPurpose(
   if (purpose === "admission") return "admission_lead";
   return purpose;
 }
+
+/**
+ * An enrolled parent is a parent. The admission enquiry that preceded the
+ * enrolment stays in the CRM for ever, so the same number resolves to
+ * parent + admission_lead and the bot used to open with "Choose an option:
+ * 1. PARENT 2. ADMISSION" — to a family replying "भुगतान हो गया" to a fee
+ * reminder (four of them on 11 Sep 2026). With the enquiry dropped, the
+ * number has one role and the parent flow answers directly. ADMISSION still
+ * works as a typed keyword for a second child.
+ */
+export function collapseRolesForEnrolledParent(roles: WaResolvedRole[]): WaResolvedRole[] {
+  if (!roles.some((r) => r.kind === "parent")) return roles;
+  return roles.filter((r) => r.kind !== "admission_lead");
+}
+
+/**
+ * The hub category for a KNOWN sender before they have chosen a flow. The
+ * greeting and the role-pick menu used to be logged as "general", which is
+ * the visitors' bucket — so an enrolled family showed in the inbox tagged
+ * General. A parent is a parent from the first message.
+ */
+export function categoryForKnownIdentity(identity: WaResolvedIdentity): "parent" | "staff" | "admission_enquiry" | "field_survey" | "vendor_enquiry" | "transport" | "general" {
+  const kinds = new Set(identity.roles.map((r) => r.kind));
+  if (kinds.has("parent")) return "parent";
+  if (kinds.has("owner") || kinds.has("staff") || kinds.has("teacher")) return "staff";
+  if (kinds.has("admission_lead")) return "admission_enquiry";
+  if (kinds.has("survey")) return "field_survey";
+  if (kinds.has("vendor")) return "vendor_enquiry";
+  if (kinds.has("transport")) return "transport";
+  return "general";
+}

@@ -21,6 +21,7 @@ import {
   staffBotAwake,
   STAFF_BOT_WINDOW_MINUTES,
   type WaVisitorPurpose,
+  categoryForKnownIdentity,
 } from "@/lib/waUnifiedBotEngine";
 import {
   pickRoleByInput,
@@ -966,7 +967,9 @@ export async function handleWaUnifiedInbound(opts: {
       mobile10,
       displayName: identity.displayName,
       category: identity.isKnown
-        ? categoryForUnifiedAudience("known_greeting", session.activeFlow)
+        ? session.activeFlow
+          ? categoryForUnifiedAudience("known_greeting", session.activeFlow)
+          : categoryForKnownIdentity(identity)
         : "general",
       audience: identity.isKnown ? "known_greeting" : "visitor_greeting",
       flow: session.activeFlow,
@@ -1171,7 +1174,7 @@ export async function handleWaUnifiedInbound(opts: {
       await sendBotReply({
         mobile10,
         displayName: identity.displayName,
-        category: "general",
+        category: categoryForKnownIdentity(identity),
         audience: "role_pick",
         menu: pack,
         inbound: inboundLog,
