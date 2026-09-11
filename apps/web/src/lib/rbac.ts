@@ -14,6 +14,7 @@ import { canAccessModuleHref } from "@/lib/moduleRegistry";
 import { getSessionActor } from "@/lib/sessionActor";
 import { assertSessionWritable } from "@/lib/sessionWriteGuard";
 import { isProtectedSuperAdminEmail } from "@/lib/superAdmin";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 export type RbacModule =
   | "home"
@@ -922,7 +923,7 @@ export function saveRbac(state: RbacState): void {
 
 export function writeRbacLocalRaw(state: RbacState): void {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(
+  writeCacheOrInvalidate(
     STORAGE_KEY,
     JSON.stringify(normalizeRbacState(state)),
   );

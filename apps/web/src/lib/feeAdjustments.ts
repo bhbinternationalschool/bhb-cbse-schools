@@ -15,6 +15,7 @@ import {
 } from "@/lib/masters";
 import { openFeeDues, type FeeDueLine } from "@/lib/fees";
 import { loadSis, saveSis, type SisStudent } from "@/lib/sis";
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 
 export type FeeAdjustmentType =
   | "waiver"
@@ -129,7 +130,7 @@ export function saveFeeAdjustments(rows: FeeAdjustment[]) {
 export function writeFeeAdjustmentsLocalRaw(state: { rows: FeeAdjustment[] }): void {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(ADJUST_KEY, JSON.stringify(state.rows));
+    writeCacheOrInvalidate(ADJUST_KEY, JSON.stringify(state.rows));
   } catch {
     /* quota — the server copy is the truth anyway */
   }

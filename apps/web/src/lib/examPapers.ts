@@ -629,7 +629,7 @@ export function saveExamPapers(state: ExamPapersState) {
 
 export function writeExamPapersLocalRaw(state: ExamPapersState) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(
+  writeCacheOrInvalidate(
     STORAGE_KEY,
     JSON.stringify(normalizeExamPapersState(state)),
   );

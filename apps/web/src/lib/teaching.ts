@@ -634,7 +634,7 @@ export function saveTeaching(state: TeachingState) {
 export function writeTeachingLocalRaw(state: TeachingState) {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(
+    writeCacheOrInvalidate(
       STORAGE_KEY,
       JSON.stringify(normalizeTeachingState(state)),
     );

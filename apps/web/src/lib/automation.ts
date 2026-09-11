@@ -515,7 +515,7 @@ export function loadAutomation(): AutomationState {
 
 export function writeAutomationLocalRaw(state: AutomationState): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(
+  writeCacheOrInvalidate(
     STORAGE_KEY,
     JSON.stringify(normalizeAutomationState(state)),
   );

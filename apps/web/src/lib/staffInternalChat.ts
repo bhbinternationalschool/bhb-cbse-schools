@@ -112,7 +112,7 @@ export function saveStaffChat(state: StaffChatState) {
 
 export function writeStaffChatLocalRaw(state: StaffChatState) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(
+  writeCacheOrInvalidate(
     STORAGE_KEY,
     JSON.stringify(normalizeStaffChatState(state)),
   );
