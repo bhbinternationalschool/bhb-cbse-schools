@@ -345,6 +345,7 @@ jobs:
           npm run test:standing-discount-change
           npm run test:syllabus-outcomes-import
           npm run test:transport-overlap-billing
+          npm run test:transport-shifts
           npm run test:wa-contact-state
           npm run test:wa-delivery-log
           npm run test:wa-failure-reason

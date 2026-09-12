@@ -11,6 +11,8 @@ import {
   type TransportState,
 } from "@/lib/transport";
 import { planTransportAmendment } from "@/lib/transportAmend";
+import { RiderShiftPicker } from "@/components/transport/RiderShiftPicker";
+import type { ClassGroupCode } from "@/lib/masters";
 import { monthLabel } from "@/lib/transportStartMonth";
 
 /**
@@ -25,6 +27,7 @@ export function TransportAmendDialog({
   assignment,
   studentName,
   academicYearCode,
+  classGroupCode,
   state,
   dues,
   onClose,
@@ -33,6 +36,12 @@ export function TransportAmendDialog({
   assignment: TransportAssignment;
   studentName: string;
   academicYearCode: string;
+  /**
+   * The child's class group, which decides their run on the new route. null
+   * when their class is not on the roster — the picker then says so instead
+   * of resolving them onto a run by default.
+   */
+  classGroupCode: ClassGroupCode | null;
   state: TransportState;
   /** The student's fee lines — the caller has the student and masters to build them. */
   dues: FeeDueLine[];
@@ -48,6 +57,10 @@ export function TransportAmendDialog({
   );
   const [reason, setReason] = useState("");
   const [requestedMonth, setRequestedMonth] = useState("");
+  const [shifts, setShifts] = useState({
+    pickupShiftId: assignment.pickupShiftId ?? "",
+    dropShiftId: assignment.dropShiftId ?? "",
+  });
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -103,6 +116,8 @@ export function TransportAmendDialog({
       academicYearCode,
       monthlyFeePaise: overridePaise > 0 ? overridePaise : undefined,
       feeOverrideReason: reason.trim(),
+      pickupShiftId: shifts.pickupShiftId,
+      dropShiftId: shifts.dropShiftId,
     });
     if (!result.ok) {
       setError(result.error);
@@ -158,6 +173,10 @@ export function TransportAmendDialog({
               onChange={(e) => {
                 setRouteId(e.target.value);
                 setStopId("");
+                // The runs belong to the bus being left. Carrying an id across
+                // would either be refused on save or, worse, match a run on the
+                // new bus by coincidence.
+                setShifts({ pickupShiftId: "", dropShiftId: "" });
               }}
             >
               {routes.map((r) => (
@@ -186,6 +205,14 @@ export function TransportAmendDialog({
               ))}
             </select>
           </label>
+
+          <RiderShiftPicker
+            route={route}
+            groupCode={classGroupCode}
+            pickupShiftId={shifts.pickupShiftId}
+            dropShiftId={shifts.dropShiftId}
+            onChange={setShifts}
+          />
 
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block text-sm">

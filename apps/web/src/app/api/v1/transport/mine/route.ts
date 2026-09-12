@@ -5,6 +5,10 @@ import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { fetchTransportDeskFromDb } from "@/lib/transportNormalized.server";
 import { listHouseholdTransportRequests } from "@/lib/transportRequests.server";
 import { loadMasters } from "@/lib/masters";
+import {
+  resolveRiderShift,
+  strictClassGroup,
+} from "@/lib/transportShifts";
 import { classLabelForStudent } from "@/lib/parentPortal";
 import { loadSis } from "@/lib/sis";
 import { formatInr } from "@/lib/fees";
@@ -58,6 +62,41 @@ export async function GET(request: Request) {
         const driverStaff = vehicle?.driverStaffId ? staffById.get(vehicle.driverStaffId) : undefined;
         const driverName = vehicle?.driverName || driverStaff?.fullName || "";
         const driverMobile = vehicle?.driverMobile || driverStaff?.mobile || "";
+        /**
+         * The times this child's bus actually runs.
+         *
+         * Only reported when a run is resolved AND has a departure time. A run
+         * with no time set returns null rather than a blank or a placeholder:
+         * a parent who reads a time on this screen stands at the roadside at
+         * that time, so a made-up one is worse than none at all.
+         */
+        const className = s.classId
+          ? masters.classes.find((c) => c.id === s.classId)?.name
+          : undefined;
+        const groupCode = className ? strictClassGroup(className) : null;
+        const runTimes =
+          assignment && route
+            ? (["pickup", "drop"] as const).map((direction) => {
+                const res = resolveRiderShift({
+                  route,
+                  direction,
+                  overrideShiftId:
+                    direction === "pickup"
+                      ? assignment.pickupShiftId
+                      : assignment.dropShiftId,
+                  groupCode,
+                });
+                return res.shift?.departTime
+                  ? {
+                      direction,
+                      name: res.shift.name,
+                      departTime: res.shift.departTime,
+                      weekdays: res.shift.weekdays,
+                    }
+                  : null;
+              })
+            : [null, null];
+
         const latestRequest = (requests ?? [])
           .filter((r) => r.studentId === s.id)
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
@@ -79,6 +118,9 @@ export async function GET(request: Request) {
                   type: vehicle?.type || "",
                 },
                 driver: driverName || driverMobile ? { name: driverName, mobile: driverMobile } : null,
+                /** null when the run has no time set — never a placeholder. */
+                pickupRun: runTimes[0],
+                dropRun: runTimes[1],
               }
             : null,
           request: latestRequest
