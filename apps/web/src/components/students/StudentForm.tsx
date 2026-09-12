@@ -870,6 +870,23 @@ export function StudentForm({
     // being saved.
 
     const payload = normalizeStudent({
+      /*
+       * Start from the record as it stands, so a field this form does not show
+       * survives the save. The 88 fields below are what the form edits; the
+       * student has 97. The nine it never mentions were therefore reset to
+       * their defaults on every save: the parents' photographs (printed on ID
+       * cards), the RFID and biometric ids the attendance devices use, the
+       * student's login, the promotion lock and its reason — a child held back
+       * because they are under-age for the class under the UDISE MBU rule,
+       * unlocked by an unrelated edit to an address — and revisionAt, the
+       * optimistic-locking token, whose absence made every form save
+       * "unversioned": two clerks on the same child, and the second silently
+       * overwrote the first with no conflict warning.
+       *
+       * It was invisible while none of those fields reached the database (see
+       * migration 20260912100000). The moment they persist, the wipe is real.
+       */
+      ...(previousStudent ?? {}),
       id: studentId ?? newSisId("stu"),
       admissionNo: nextAdm,
       legacyErpAdmissionNo: legacyErpAdmissionNo.trim(),

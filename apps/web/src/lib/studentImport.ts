@@ -1373,6 +1373,23 @@ export function applyStudentImport(
     }
 
     const patch: Partial<SisStudent> & { id: string } = {
+      /*
+       * Start from the record that already exists (or, for a new session row,
+       * the child's row in the year it was carried from) so that a field this
+       * import does not carry is KEPT, not reset.
+       *
+       * Without this the patch's 77 explicit fields were the whole student and
+       * the other 20 were silently defaulted: the full Aadhaar numbers of
+       * child, father and mother and their verification state, all six UDISE+
+       * sync flags, the promotion lock (a child held back for the MBU age
+       * rule), the student's tags, RFID / biometric id, the login, and
+       * revisionAt — which is the optimistic-locking token, so an import also
+       * wrote as "unversioned" and could not conflict with a concurrent edit.
+       * Invisible until 2026-09-12 because none of those fields were being
+       * stored at all (see migration 20260912100000); the moment they persist,
+       * the next roster import in update mode would have wiped them.
+       */
+      ...(existing ?? identitySource ?? {}),
       id: existing?.id ?? draftStudentId,
       admissionNo: adm,
       legacyErpAdmissionNo:
@@ -1399,10 +1416,14 @@ export function applyStudentImport(
       joinedOn: f.joinedOn || existing?.joinedOn || "",
       fatherName: f.fatherName ?? identitySource?.fatherName ?? "",
       motherName: f.motherName ?? identitySource?.motherName ?? "",
+      // The guardian/family number (which may have come from the MOTHER
+      // column, see guardianMobile above) belongs on the household, not in the
+      // father's field. Importing it as his is how 186 of 717 students ended
+      // up carrying one number for both parents — and the import's
+      // guardianRelation is always the literal "Father" below, because no CSV
+      // column maps to it, so it is a default and never an answer.
       fatherMobile: normalizeMobile(
-        f.fatherMobile ||
-          identitySource?.fatherMobile ||
-          guardianMobile,
+        f.fatherMobile || identitySource?.fatherMobile || "",
       ),
       motherMobile: normalizeMobile(
         f.motherMobile || identitySource?.motherMobile || "",

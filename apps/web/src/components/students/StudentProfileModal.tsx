@@ -309,6 +309,9 @@ export function StudentProfileModal({
                 <Field label="Caste" value={student.caste || "—"} />
                 <Field label="Religion" value={student.religion || "—"} />
                 <Field label="Blood group" value={student.bloodGroup || "—"} />
+                <Field label="Mother tongue" value={student.motherTongue || "—"} />
+                <Field label="Place of birth" value={student.placeOfBirth || "—"} />
+                <Field label="Nationality" value={student.nationality || "—"} />
                 <Field label="Fee group" value={feeGroupLabel} />
                 {student.heightCm || student.weightKg ? (
                   <Field
@@ -373,6 +376,19 @@ export function StudentProfileModal({
               <Section title="Parents & guardian">
                 <Field label="Father" value={student.fatherName || "—"} />
                 <Field label="Father mobile" value={student.fatherMobile || "—"} />
+                {student.fatherAadhaarNumber || student.fatherAadhaarLast4 ? (
+                  <Field
+                    label="Father Aadhaar"
+                    value={displayAadhaar({
+                      number: student.fatherAadhaarNumber,
+                      last4: student.fatherAadhaarLast4,
+                      verification: student.fatherAadhaarVerification,
+                    })}
+                  />
+                ) : null}
+                {student.fatherPan ? (
+                  <Field label="Father PAN" value={student.fatherPan} />
+                ) : null}
                 {student.fatherOccupation || student.fatherQualification ? (
                   <Field
                     label="Father work / qualification"
@@ -383,6 +399,19 @@ export function StudentProfileModal({
                 ) : null}
                 <Field label="Mother" value={student.motherName || "—"} />
                 <Field label="Mother mobile" value={student.motherMobile || "—"} />
+                {student.motherAadhaarNumber || student.motherAadhaarLast4 ? (
+                  <Field
+                    label="Mother Aadhaar"
+                    value={displayAadhaar({
+                      number: student.motherAadhaarNumber,
+                      last4: student.motherAadhaarLast4,
+                      verification: student.motherAadhaarVerification,
+                    })}
+                  />
+                ) : null}
+                {student.motherPan ? (
+                  <Field label="Mother PAN" value={student.motherPan} />
+                ) : null}
                 {student.motherOccupation || student.motherQualification ? (
                   <Field
                     label="Mother work / qualification"
@@ -396,14 +425,43 @@ export function StudentProfileModal({
                 ) : null}
                 <Field
                   label="Guardian"
-                  value={hh?.guardianName || "—"}
+                  value={
+                    [hh?.guardianName, student.guardianRelation]
+                      .filter(Boolean)
+                      .join(" · ") || "—"
+                  }
                 />
                 <Field label="Guardian mobile" value={hh?.mobile || "—"} />
                 <Field
                   label="WhatsApp"
                   value={hh?.whatsappMobile || hh?.mobile || "—"}
                 />
+                <Field label="Alternate mobile" value={hh?.altMobile || "—"} />
+                {/* Who to ring when neither parent answers. It was not on this
+                    card at all, which is the one thing a card like this exists
+                    for. */}
+                <Field
+                  label="Emergency contact"
+                  value={
+                    [student.emergencyName, student.emergencyMobile]
+                      .filter(Boolean)
+                      .join(" · ") || "—"
+                  }
+                />
                 <Field label="Email" value={hh?.email || "—"} />
+                {/* The family's own answer about photographs. Blank is a real
+                    answer — never asked — and must not read as a refusal or as
+                    permission. See lib/photoConsent.ts. */}
+                <Field
+                  label="Photos of the child"
+                  value={
+                    hh?.photoConsent === "granted"
+                      ? "May be published"
+                      : hh?.photoConsent === "refused"
+                        ? "Not to be published"
+                        : "Not asked"
+                  }
+                />
                 <Field
                   label="Preferred language"
                   value={hh?.preferredLanguage ? languageLabel(hh.preferredLanguage) : "Not asked"}
@@ -443,6 +501,14 @@ export function StudentProfileModal({
                   />
                 ) : null}
               </Section>
+
+              {student.bankName || student.bankAccountNo || student.bankIfsc ? (
+                <Section title="Bank (scholarships / DBT)">
+                  <Field label="Bank" value={student.bankName || "—"} />
+                  <Field label="Account no" value={student.bankAccountNo || "—"} />
+                  <Field label="IFSC" value={student.bankIfsc || "—"} />
+                </Section>
+              ) : null}
 
               {student.registrationNo ||
               student.admissionFormNo ||

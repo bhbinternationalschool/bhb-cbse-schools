@@ -11,6 +11,7 @@ import {
 } from "@/lib/masters";
 import {
   loadSis,
+  normalizeClassUpgrade,
   normalizeStudent,
   saveSis,
   type ClassUpgradeRecord,
@@ -30,31 +31,8 @@ function uid() {
   return `upg_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function normalizeUpgradeRecord(
-  raw: Partial<ClassUpgradeRecord> & {
-    id: string;
-    studentId: string;
-  },
-): ClassUpgradeRecord {
-  return {
-    id: raw.id,
-    studentId: raw.studentId,
-    studentName: raw.studentName ?? "",
-    admissionNo: raw.admissionNo ?? "",
-    fromClassId: raw.fromClassId ?? "",
-    fromSectionId: raw.fromSectionId ?? "",
-    toClassId: raw.toClassId ?? "",
-    toSectionId: raw.toSectionId ?? "",
-    fromFeeGroupId: raw.fromFeeGroupId ?? null,
-    toFeeGroupId: raw.toFeeGroupId ?? null,
-    fromStudentType: raw.fromStudentType ?? "",
-    toStudentType: raw.toStudentType ?? raw.fromStudentType ?? "",
-    reason: raw.reason ?? "",
-    effectiveOn: raw.effectiveOn ?? "",
-    createdAt: raw.createdAt ?? new Date().toISOString(),
-    createdBy: raw.createdBy ?? "office",
-  };
-}
+/** The normalizer moved to lib/sis.ts when the history got its own table. */
+const normalizeUpgradeRecord = normalizeClassUpgrade;
 
 export function listClassUpgrades(sis?: SisState): ClassUpgradeRecord[] {
   const state = sis ?? loadSis();

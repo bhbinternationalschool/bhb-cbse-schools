@@ -4,7 +4,7 @@
  */
 
 import { activeSessionCode } from "@/lib/sessionWriteGuard";
-import type { PhotoConsent } from "@/lib/photoConsent";
+import { normalizePhotoConsent, type PhotoConsent } from "@/lib/photoConsent";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { stripEmptyDocsList, stripEmptyList } from "@/lib/wirePayload";
@@ -223,7 +223,12 @@ export type SisStudent = {
   previousSchool: string;
   previousTcNo: string;
   previousUdise: string;
-  /** Father / mother full Aadhaar (needed for APAAR) — masked after verified */
+  /**
+   * Father / mother full Aadhaar — needed for APAAR, and kept whatever the
+   * verification state says, exactly like the student's own number above.
+   * Staff surfaces show it in full (displayAadhaar); parent-facing views mask
+   * it (maskAadhaar). Persisted in sis_students.profile.
+   */
   fatherAadhaarNumber: string;
   motherAadhaarNumber: string;
   fatherAadhaarVerification: AadhaarVerificationStatus;
@@ -778,20 +783,20 @@ export function normalizeStudent(s: Partial<SisStudent> & { id: string }): SisSt
       const full = normalizeAadhaarFull(s.motherAadhaarNumber ?? "", l4);
       return l4 || full.slice(-4);
     })(),
-    fatherAadhaarNumber:
-      String(s.fatherAadhaarVerification) === "verified_udise"
-        ? ""
-        : normalizeAadhaarFull(
-            s.fatherAadhaarNumber ?? "",
-            (s.fatherAadhaarLast4 ?? "").replace(/\D/g, "").slice(0, 4),
-          ),
-    motherAadhaarNumber:
-      String(s.motherAadhaarVerification) === "verified_udise"
-        ? ""
-        : normalizeAadhaarFull(
-            s.motherAadhaarNumber ?? "",
-            (s.motherAadhaarLast4 ?? "").replace(/\D/g, "").slice(0, 4),
-          ),
+    // Kept whatever the verification says, exactly like the student's own
+    // number above. Blanking on "verified_udise" was removed for the student
+    // on 2026-09-06 and missed here: the office typed a father's 12 digits,
+    // the UDISE+ sync marked the parent verified, and the number the school
+    // needs for APAAR was thrown away by the next normalize — with nothing
+    // anywhere to type it back from.
+    fatherAadhaarNumber: normalizeAadhaarFull(
+      s.fatherAadhaarNumber ?? "",
+      (s.fatherAadhaarLast4 ?? "").replace(/\D/g, "").slice(0, 4),
+    ),
+    motherAadhaarNumber: normalizeAadhaarFull(
+      s.motherAadhaarNumber ?? "",
+      (s.motherAadhaarLast4 ?? "").replace(/\D/g, "").slice(0, 4),
+    ),
     fatherAadhaarVerification: normalizeAadhaarVerification(
       s.fatherAadhaarVerification,
       s.fatherAadhaarNumber || s.fatherAadhaarLast4,
@@ -904,6 +909,37 @@ export function normalizeStudentTag(
   };
 }
 
+/**
+ * Normalize one class-upgrade record.
+ *
+ * Lives here rather than in classUpgrade.ts because the history now has its own
+ * table (migration 20260912130000) and the server's row reader needs the same
+ * normalizer the desk uses — importing classUpgrade.ts there would pull the
+ * whole desk, and its loadSis/saveSis, into a server module.
+ */
+export function normalizeClassUpgrade(
+  raw: Partial<ClassUpgradeRecord> & { id: string; studentId: string },
+): ClassUpgradeRecord {
+  return {
+    id: raw.id,
+    studentId: raw.studentId,
+    studentName: raw.studentName ?? "",
+    admissionNo: raw.admissionNo ?? "",
+    fromClassId: raw.fromClassId ?? "",
+    fromSectionId: raw.fromSectionId ?? "",
+    toClassId: raw.toClassId ?? "",
+    toSectionId: raw.toSectionId ?? "",
+    fromFeeGroupId: raw.fromFeeGroupId ?? null,
+    toFeeGroupId: raw.toFeeGroupId ?? null,
+    fromStudentType: raw.fromStudentType ?? "",
+    toStudentType: raw.toStudentType ?? raw.fromStudentType ?? "",
+    reason: raw.reason ?? "",
+    effectiveOn: raw.effectiveOn ?? "",
+    createdAt: raw.createdAt ?? new Date().toISOString(),
+    createdBy: raw.createdBy ?? "office",
+  };
+}
+
 function householdAddressKey(
   h: Pick<
     Household,
@@ -998,6 +1034,10 @@ export function normalizeHousehold(h: Partial<Household> & { id: string }): Hous
       typeof h.guardianPhotoUrl === "string" ? h.guardianPhotoUrl : "",
     preferredLanguage: normalizeHouseholdLanguage(h.preferredLanguage),
     channelPreference: normalizeHouseholdChannel(h.channelPreference),
+    // The family's own answer about photographs. Dropped here until
+    // 2026-09-12, which silently turned every "granted" into "never asked"
+    // the moment a lead was enrolled — the website reads this household.
+    photoConsent: normalizePhotoConsent(h.photoConsent),
     quietHoursStart: normalizeQuietTime(h.quietHoursStart),
     quietHoursEnd: normalizeQuietTime(h.quietHoursEnd),
     revisionAt: typeof h.revisionAt === "string" ? h.revisionAt : "",
@@ -1023,9 +1063,21 @@ export function householdWhatsApp(hh?: Household | null): string {
 }
 
 /**
- * Update household WhatsApp used for every communication channel.
- * When WhatsApp previously matched guardian mobile (or `alsoUpdateMobile`),
- * guardian mobile is updated too and sibling father/mother mobiles stay aligned.
+ * Set the household's WhatsApp number — the number every fee reminder,
+ * receipt and notice goes to. It changes THAT number and nothing else.
+ *
+ * It used to change three more things. When the stored WhatsApp number
+ * equalled the stored guardian mobile — which normalizeHousehold makes true
+ * for every household that never had a separate WhatsApp number, 175 of 200
+ * here — it also rewrote the guardian mobile AND the father's (or mother's)
+ * mobile on every child in the family. So a clerk at the fee counter who
+ * typed the number the parent in front of them was actually reachable on, to
+ * send that one receipt, silently replaced the father's recorded mobile for
+ * every sibling. That is the "one number pasted everywhere" the office
+ * reported on 2026-09-12.
+ *
+ * `alsoUpdateMobile: true` still does the wider update, for a caller that
+ * genuinely means "this is now the family's phone" — nothing passes it today.
  */
 export function updateHouseholdWhatsApp(
   householdId: string,
@@ -1040,14 +1092,7 @@ export function updateHouseholdWhatsApp(
   const existing = sis.households.find((h) => h.id === householdId);
   if (!existing) return { ok: false, error: "Household not found" };
 
-  const prevWa = normalizeMobile(
-    existing.whatsappMobile || existing.mobile || "",
-  );
-  const prevMobile = normalizeMobile(existing.mobile);
-  const syncMobile =
-    options?.alsoUpdateMobile === true ||
-    (options?.alsoUpdateMobile === undefined &&
-      (!prevWa || prevWa === prevMobile));
+  const syncMobile = options?.alsoUpdateMobile === true;
 
   const household: Household = {
     ...existing,
@@ -1855,9 +1900,38 @@ export function sharedFamilyContactsOf(
 }
 
 /**
- * Align guardian household mobile with the primary parent contact, and keep
- * WhatsApp linked when it previously matched the old guardian mobile.
- * Prefers the field the user actually changed (parent vs household mobile).
+ * Keep the guardian household mobile in step with the guardian parent's own
+ * number — without ever putting one parent's number in the other's field, and
+ * without touching the WhatsApp number the office typed.
+ *
+ * Both of those were happening (found 2026-09-12, reported as "we entered
+ * father, mother and WhatsApp numbers and the system put one number
+ * everywhere"):
+ *
+ *  * The old rule filled a blank father's mobile from the household mobile
+ *    whenever the relation read "Father" — and "Father" is the dropdown's
+ *    default, never an answer anyone gave. A family that had given one number,
+ *    the mother's, ended up asserting it as the father's. 186 of 717 students
+ *    carry the same number for both parents and it is the household number in
+ *    every one of those rows.
+ *  * WhatsApp was forced to the guardian mobile whenever the household's
+ *    stored WhatsApp equalled its stored mobile — which normalizeHousehold
+ *    makes true for every household that never had a separate one (175 of
+ *    200). So a different WhatsApp number could be typed, saved, and was gone
+ *    on the next open.
+ *
+ * The rules now:
+ *  - guardian parent → household: when the guardian parent's mobile is the
+ *    field that moved, or the household has no number yet, the household
+ *    takes it. This states nothing new — the household mobile IS the
+ *    guardian's phone.
+ *  - household → guardian parent: only when that parent's field held exactly
+ *    the household's previous number, i.e. the two were in step and one
+ *    correction is meant for both. A blank field stays blank; a different
+ *    number is left alone.
+ *  - the other parent is never written to at all.
+ *  - WhatsApp is whatever was typed; the household mobile fills in only when
+ *    no WhatsApp number was given.
  */
 export function alignHouseholdMobiles(input: {
   relation: string;
@@ -1878,39 +1952,29 @@ export function alignHouseholdMobiles(input: {
   let fatherMobile = normalizeMobile(input.fatherMobile);
   let motherMobile = normalizeMobile(input.motherMobile);
   let householdMobile = normalizeMobile(input.householdMobile);
-  let whatsappMobile =
-    normalizeMobile(input.whatsappMobile) || householdMobile;
 
   const prevMobile = normalizeMobile(input.previousHousehold?.mobile ?? "");
   const prevFather = normalizeMobile(input.previousFatherMobile ?? "");
   const prevMother = normalizeMobile(input.previousMotherMobile ?? "");
-  const fatherChanged = fatherMobile !== prevFather;
-  const motherChanged = motherMobile !== prevMother;
+
+  const guardianIsMother = relation === "mother";
+  const guardianMobile = guardianIsMother ? motherMobile : fatherMobile;
+  const prevGuardian = guardianIsMother ? prevMother : prevFather;
+  const guardianChanged = guardianMobile !== prevGuardian;
   const hhChanged = householdMobile !== prevMobile;
+  const guardianWasInStep = !!prevGuardian && prevGuardian === prevMobile;
 
-  if (relation === "mother") {
-    if (motherChanged && motherMobile) householdMobile = motherMobile;
-    else if (hhChanged && householdMobile) motherMobile = householdMobile;
-    else if (motherMobile) householdMobile = motherMobile;
-    else if (householdMobile) motherMobile = householdMobile;
-  } else {
-    if (fatherChanged && fatherMobile) householdMobile = fatherMobile;
-    else if (hhChanged && householdMobile) fatherMobile = householdMobile;
-    else if (fatherMobile) householdMobile = fatherMobile;
-    else if (householdMobile) fatherMobile = householdMobile;
+  if (guardianChanged && guardianMobile) {
+    householdMobile = guardianMobile;
+  } else if (hhChanged && householdMobile && guardianWasInStep) {
+    if (guardianIsMother) motherMobile = householdMobile;
+    else fatherMobile = householdMobile;
+  } else if (!householdMobile && guardianMobile) {
+    householdMobile = guardianMobile;
   }
 
-  const prevWa = normalizeMobile(
-    input.previousHousehold?.whatsappMobile ||
-      input.previousHousehold?.mobile ||
-      "",
-  );
-  const waWasLinked = !prevWa || prevWa === prevMobile;
-  if (waWasLinked) {
-    whatsappMobile = householdMobile;
-  } else if (!whatsappMobile) {
-    whatsappMobile = householdMobile;
-  }
+  const whatsappMobile =
+    normalizeMobile(input.whatsappMobile) || householdMobile;
 
   return { fatherMobile, motherMobile, householdMobile, whatsappMobile };
 }

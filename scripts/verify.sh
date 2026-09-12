@@ -80,6 +80,8 @@ SELFTESTS=(
   test:projected-lead-write
   test:hydrate-failure-safety
   test:sis-revision
+  test:sis-contacts
+  test:sis-round-trip
   test:sis-prune
   test:attendance-prune
   test:prune-floor

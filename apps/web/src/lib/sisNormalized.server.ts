@@ -16,13 +16,23 @@ import {
   type StudentDocKey,
   studentProfileExtras,
   studentProfileFromRow,
+  normalizeStudentTag,
+  normalizeClassUpgrade,
+  type StudentTag,
+  type ClassUpgradeRecord,
 } from "@/lib/sis";
 import { sisDualWriteDbEnabled } from "@/lib/sisDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { fetchAllPages } from "@/lib/supabase/pageAll";
+import { normalizePhotoConsent } from "@/lib/photoConsent";
 
 export type SisRemoteBundle = {
   households: Household[];
   students: SisStudent[];
+  /** Tag definitions and the post-admission move history — their own tables
+   *  since 2026-09-12; before that they lived in one browser. */
+  tags: StudentTag[];
+  classUpgrades: ClassUpgradeRecord[];
   householdUpdatedAt: Record<string, string>;
   studentUpdatedAt: Record<string, string>;
 };
@@ -34,7 +44,7 @@ export type SisSyncMeta = {
   updatedAt: string;
 };
 
-type HouseholdRow = {
+export type HouseholdRow = {
   id: string;
   code: string | null;
   guardian_name: string | null;
@@ -60,6 +70,8 @@ type HouseholdRow = {
   geo_source?: string | null;
   geo_confidence?: string | null;
   geo_address_key?: string | null;
+  photo_consent?: string | null;
+  guardian_photo_url?: string | null;
   updated_at: string;
 };
 
@@ -112,6 +124,109 @@ export type StudentRow = {
   updated_at: string;
 };
 
+export type StudentTagRow = {
+  id: string;
+  code: string | null;
+  name: string | null;
+  color: string | null;
+  is_active: boolean | null;
+  created_at: string | null;
+  updated_at: string;
+};
+
+export type ClassUpgradeRow = {
+  id: string;
+  student_id: string | null;
+  student_name: string | null;
+  admission_no: string | null;
+  from_class_id: string | null;
+  from_section_id: string | null;
+  to_class_id: string | null;
+  to_section_id: string | null;
+  from_fee_group_id: string | null;
+  to_fee_group_id: string | null;
+  from_student_type: string | null;
+  to_student_type: string | null;
+  reason: string | null;
+  effective_on: string | null;
+  created_at: string | null;
+  created_by: string | null;
+  updated_at: string;
+};
+
+export function rowToStudentTag(row: StudentTagRow): StudentTag {
+  return normalizeStudentTag({
+    id: row.id,
+    code: row.code ?? "",
+    name: row.name ?? "",
+    color: row.color ?? "",
+    // A retired tag must come back retired: `?? true` would revive it.
+    isActive: row.is_active !== false,
+    createdAt: row.created_at ?? "",
+  });
+}
+
+export function studentTagToRow(t: StudentTag, tenantId: string, now: string) {
+  return {
+    id: t.id,
+    tenant_id: tenantId,
+    code: t.code,
+    name: t.name,
+    color: t.color,
+    is_active: t.isActive,
+    created_at: t.createdAt,
+    updated_at: now,
+  };
+}
+
+export function rowToClassUpgrade(row: ClassUpgradeRow): ClassUpgradeRecord {
+  return normalizeClassUpgrade({
+    id: row.id,
+    studentId: row.student_id ?? "",
+    studentName: row.student_name ?? "",
+    admissionNo: row.admission_no ?? "",
+    fromClassId: row.from_class_id ?? "",
+    fromSectionId: row.from_section_id ?? "",
+    toClassId: row.to_class_id ?? "",
+    toSectionId: row.to_section_id ?? "",
+    fromFeeGroupId: row.from_fee_group_id,
+    toFeeGroupId: row.to_fee_group_id,
+    fromStudentType: row.from_student_type ?? "",
+    toStudentType: row.to_student_type ?? "",
+    reason: row.reason ?? "",
+    effectiveOn: row.effective_on ?? "",
+    createdAt: row.created_at ?? "",
+    createdBy: row.created_by ?? "",
+  });
+}
+
+export function classUpgradeToRow(
+  u: ClassUpgradeRecord,
+  tenantId: string,
+  now: string,
+) {
+  return {
+    id: u.id,
+    tenant_id: tenantId,
+    student_id: u.studentId,
+    student_name: u.studentName,
+    admission_no: u.admissionNo,
+    from_class_id: u.fromClassId,
+    from_section_id: u.fromSectionId,
+    to_class_id: u.toClassId,
+    to_section_id: u.toSectionId,
+    from_fee_group_id: u.fromFeeGroupId,
+    to_fee_group_id: u.toFeeGroupId,
+    from_student_type: u.fromStudentType,
+    to_student_type: u.toStudentType,
+    reason: u.reason,
+    effective_on: u.effectiveOn,
+    created_at: u.createdAt,
+    created_by: u.createdBy,
+    updated_at: now,
+  };
+}
+
 const DATA_URL_MAX = 8_000;
 
 async function resolveCtx(): Promise<{
@@ -139,7 +254,17 @@ function photoForRemote(photoUrl: string): string {
   return photoUrl;
 }
 
-function rowToHousehold(row: HouseholdRow): Household {
+/** The profile bag with oversized inline images left out. */
+function profileForRemote(bag: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...bag };
+  for (const key of ["fatherPhotoUrl", "motherPhotoUrl"] as const) {
+    const v = out[key];
+    if (typeof v === "string" && !photoForRemote(v)) delete out[key];
+  }
+  return out;
+}
+
+export function rowToHousehold(row: HouseholdRow): Household {
   return normalizeHousehold({
     // Optimistic-locking token: the version this record was read at.
     revisionAt: row.updated_at,
@@ -160,6 +285,8 @@ function rowToHousehold(row: HouseholdRow): Household {
     channelPreference: row.channel_preference ?? "",
     quietHoursStart: row.quiet_hours_start ?? "",
     quietHoursEnd: row.quiet_hours_end ?? "",
+    photoConsent: normalizePhotoConsent(row.photo_consent),
+    guardianPhotoUrl: row.guardian_photo_url ?? "",
     // Geo is optional throughout: a household with no pin must come back with
     // geoLat undefined, not 0, or every un-geocoded family lands off the
     // coast of Africa and the nearest-stop maths quietly answers for them.
@@ -231,7 +358,8 @@ export function rowToStudent(row: StudentRow): SisStudent {
   });
 }
 
-function householdToRow(h: Household, tenantId: string, now: string) {
+/** One household as a sis_households row. Exported for the same round-trip test. */
+export function householdToRow(h: Household, tenantId: string, now: string) {
   return {
     id: h.id,
     tenant_id: tenantId,
@@ -263,11 +391,21 @@ function householdToRow(h: Household, tenantId: string, now: string) {
     geo_source: h.geoSource ?? null,
     geo_confidence: h.geoConfidence ?? null,
     geo_address_key: h.geoAddressKey ?? null,
+    // "" is the family's real answer (never asked) and must be stored as such,
+    // not left null-and-ambiguous.
+    photo_consent: h.photoConsent ?? "",
+    guardian_photo_url: photoForRemote(h.guardianPhotoUrl ?? ""),
     updated_at: now,
   };
 }
 
-function studentToRow(s: SisStudent, tenantId: string, now: string) {
+/**
+ * One student as a sis_students row. Exported for `sisRoundTrip.selftest`,
+ * which fills every SisStudent field and asserts rowToStudent gives it back —
+ * the check that would have caught the 52 fields this function silently
+ * dropped before 2026-09-06.
+ */
+export function studentToRow(s: SisStudent, tenantId: string, now: string) {
   const joined =
     s.joinedOn && /^\d{4}-\d{2}-\d{2}/.test(s.joinedOn) ? s.joinedOn : null;
   const dob = s.dob && /^\d{4}-\d{2}-\d{2}/.test(s.dob) ? s.dob : null;
@@ -319,7 +457,11 @@ function studentToRow(s: SisStudent, tenantId: string, now: string) {
     // Everything SisStudent carries that has no column of its own — full
     // Aadhaar numbers, verification, UDISE+ flags, address, bank, health.
     // Dropped silently before 2026-09-06 (see the migration of that date).
-    profile: studentProfileExtras(s),
+    // The two parent photographs can arrive as data URLs from the bulk photo
+    // import, so they get the same size rule as photo_url: a big one is left
+    // out of the row rather than pushed into jsonb, where 700 of them would
+    // make the roster payload unmanageable.
+    profile: profileForRemote(studentProfileExtras(s)),
     updated_at: now,
   };
 }
@@ -485,6 +627,8 @@ export async function fetchSisFromDb(): Promise<{
       bundle: {
         households: [],
         students: [],
+        tags: [],
+        classUpgrades: [],
         householdUpdatedAt: {},
         studentUpdatedAt: {},
       },
@@ -494,22 +638,61 @@ export async function fetchSisFromDb(): Promise<{
   }
   const { sb, tenantId } = ctx;
 
-  const [hhRes, stuRes, metaRes] = await Promise.all([
-    sb.from("sis_households").select("*").eq("tenant_id", tenantId),
-    sb.from("sis_students").select("*").eq("tenant_id", tenantId),
+  // Paged: PostgREST caps a request at 1,000 rows and calls the cut a success.
+  // 717 student rows today (one per enrolled year, not per child), so the
+  // roster — the register, the fee counter's search, every desk that reads a
+  // child's details — is one intake away from silently loading a prefix of
+  // itself. See lib/supabase/pageAll.ts.
+  const [hhRes, stuRes, metaRes, tagRes, upgRes] = await Promise.all([
+    fetchAllPages<HouseholdRow>((from, to) =>
+      sb
+        .from("sis_households")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllPages<StudentRow>((from, to) =>
+      sb
+        .from("sis_students")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
     sb.from("sis_sync_meta").select("*").eq("tenant_id", tenantId).maybeSingle(),
+    // Tag definitions and the move history. Small tables, paged anyway: the
+    // 1,000-row cap applies to every reader, and history only grows.
+    fetchAllPages<StudentTagRow>((from, to) =>
+      sb
+        .from("sis_student_tags")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllPages<ClassUpgradeRow>((from, to) =>
+      sb
+        .from("sis_class_upgrades")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
   ]);
 
   if (hhRes.error || stuRes.error) {
     console.warn(
       "[sis-db] fetch failed",
-      hhRes.error?.message,
-      stuRes.error?.message,
+      hhRes.error ?? undefined,
+      stuRes.error ?? undefined,
     );
     return {
       bundle: {
         households: [],
         students: [],
+        tags: [],
+        classUpgrades: [],
         householdUpdatedAt: {},
         studentUpdatedAt: {},
       },
@@ -520,18 +703,39 @@ export async function fetchSisFromDb(): Promise<{
 
   const householdUpdatedAt: Record<string, string> = {};
   const studentUpdatedAt: Record<string, string> = {};
-  const households = ((hhRes.data ?? []) as HouseholdRow[]).map((row) => {
+  const households = hhRes.rows.map((row) => {
     householdUpdatedAt[row.id] = row.updated_at;
     return rowToHousehold(row);
   });
-  const students = ((stuRes.data ?? []) as StudentRow[]).map((row) => {
+  const students = stuRes.rows.map((row) => {
     studentUpdatedAt[row.id] = row.updated_at;
     return rowToStudent(row);
   });
 
+  // A read failure on either of these must not be dressed up as "the school
+  // has no tags": an empty list is what the merge treats as "nothing remote,
+  // keep what the browser holds", and that is the right answer for a failed
+  // read too — but it is worth saying out loud in the log.
+  if (tagRes.error || upgRes.error) {
+    console.warn(
+      "[sis-db] tags / class-upgrade history read failed",
+      tagRes.error ?? undefined,
+      upgRes.error ?? undefined,
+    );
+  }
+  const tags = tagRes.rows.map(rowToStudentTag);
+  const classUpgrades = upgRes.rows.map(rowToClassUpgrade);
+
   const metaRow = metaRes.data;
   return {
-    bundle: { households, students, householdUpdatedAt, studentUpdatedAt },
+    bundle: {
+      households,
+      students,
+      tags,
+      classUpgrades,
+      householdUpdatedAt,
+      studentUpdatedAt,
+    },
     meta: metaRow
       ? {
           householdCount: metaRow.household_count as number,
@@ -647,6 +851,8 @@ type IdentityRow = {
   docs: unknown;
   notes: string | null;
   photo_url: string | null;
+  /** Non-column fields — see STUDENT_PROFILE_KEYS (migration 20260912110000). */
+  profile?: unknown;
 };
 
 type EnrollmentRow = {
@@ -682,6 +888,11 @@ type EnrollmentRow = {
 function identityEnrollmentToStudent(row: EnrollmentRow): SisStudent {
   const i = row.sis_student_identities;
   return normalizeStudent({
+    // Non-column fields first; the columns below win where both exist —
+    // the same order as rowToStudent. Without this the split read blanks
+    // every profile field (full Aadhaar numbers, occupation, UDISE+ flags …)
+    // the moment SIS_IDENTITY_SPLIT is switched on.
+    ...studentProfileFromRow(i.profile),
     revisionAt: row.updated_at,
     id: row.id,
     admissionNo: i.admission_no ?? "",
@@ -750,30 +961,76 @@ export async function fetchSisFromDbViaIdentitySplit(): Promise<{
   const ctx = await resolveCtx();
   if (!ctx) {
     return {
-      bundle: { households: [], students: [], householdUpdatedAt: {}, studentUpdatedAt: {} },
+      bundle: {
+        households: [],
+        students: [],
+        tags: [],
+        classUpgrades: [],
+        householdUpdatedAt: {},
+        studentUpdatedAt: {},
+      },
       meta: null,
       ok: false,
     };
   }
   const { sb, tenantId } = ctx;
 
-  const [hhRes, enrRes, metaRes] = await Promise.all([
-    sb.from("sis_households").select("*").eq("tenant_id", tenantId),
-    sb
-      .from("sis_enrollments")
-      .select("*, sis_student_identities!inner(*)")
-      .eq("tenant_id", tenantId),
+  // Paged for the same reason as fetchSisFromDb above.
+  const [hhRes, enrRes, metaRes, tagRes, upgRes] = await Promise.all([
+    fetchAllPages<HouseholdRow>((from, to) =>
+      sb
+        .from("sis_households")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllPages<EnrollmentRow>((from, to) =>
+      sb
+        .from("sis_enrollments")
+        .select("*, sis_student_identities!inner(*)")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
     sb.from("sis_sync_meta").select("*").eq("tenant_id", tenantId).maybeSingle(),
+    // Tags and the move history are not part of the identity/enrollment split:
+    // they hang off the student id either way, so the same two tables serve
+    // both read paths. Omitting them here is how a flag flip loses data
+    // (sis_student_identities.profile, migration 20260912110000).
+    fetchAllPages<StudentTagRow>((from, to) =>
+      sb
+        .from("sis_student_tags")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllPages<ClassUpgradeRow>((from, to) =>
+      sb
+        .from("sis_class_upgrades")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
   ]);
 
   if (hhRes.error || enrRes.error) {
     console.warn(
       "[sis-db] identity-split fetch failed",
-      hhRes.error?.message,
-      enrRes.error?.message,
+      hhRes.error ?? undefined,
+      enrRes.error ?? undefined,
     );
     return {
-      bundle: { households: [], students: [], householdUpdatedAt: {}, studentUpdatedAt: {} },
+      bundle: {
+        households: [],
+        students: [],
+        tags: [],
+        classUpgrades: [],
+        householdUpdatedAt: {},
+        studentUpdatedAt: {},
+      },
       meta: null,
       ok: false,
     };
@@ -781,18 +1038,25 @@ export async function fetchSisFromDbViaIdentitySplit(): Promise<{
 
   const householdUpdatedAt: Record<string, string> = {};
   const studentUpdatedAt: Record<string, string> = {};
-  const households = ((hhRes.data ?? []) as HouseholdRow[]).map((row) => {
+  const households = hhRes.rows.map((row) => {
     householdUpdatedAt[row.id] = row.updated_at;
     return rowToHousehold(row);
   });
-  const students = ((enrRes.data ?? []) as unknown as EnrollmentRow[]).map((row) => {
+  const students = enrRes.rows.map((row) => {
     studentUpdatedAt[row.id] = row.updated_at;
     return identityEnrollmentToStudent(row);
   });
 
   const metaRow = metaRes.data;
   return {
-    bundle: { households, students, householdUpdatedAt, studentUpdatedAt },
+    bundle: {
+      households,
+      students,
+      tags: tagRes.rows.map(rowToStudentTag),
+      classUpgrades: upgRes.rows.map(rowToClassUpgrade),
+      householdUpdatedAt,
+      studentUpdatedAt,
+    },
     meta: metaRow
       ? {
           householdCount: metaRow.household_count as number,
@@ -871,6 +1135,51 @@ const RPC_ABSENT_CODES = new Set([
  *
  * So: absent → fall back. Present but failing → say so and write nothing.
  */
+/**
+ * Upsert the tag definitions. Chunked like the roster: PostgREST is asked for
+ * one request per 200 rows rather than one per school.
+ */
+async function pushSisTags(
+  sb: SupabaseClient,
+  tenantId: string,
+  tags: StudentTag[],
+  now: string,
+): Promise<{ ok: boolean; error?: string }> {
+  if (tags.length === 0) return { ok: true };
+  const rows = tags.map((tag) => studentTagToRow(tag, tenantId, now));
+  for (let i = 0; i < rows.length; i += 200) {
+    const { error } = await sb
+      .from("sis_student_tags")
+      .upsert(rows.slice(i, i + 200), { onConflict: "id" });
+    if (error) {
+      console.error("[sis-db] student tags push failed", error.message);
+      return { ok: false, error: error.message };
+    }
+  }
+  return { ok: true };
+}
+
+/** Upsert the post-admission move history. Append-only; never pruned. */
+async function pushSisClassUpgrades(
+  sb: SupabaseClient,
+  tenantId: string,
+  upgrades: ClassUpgradeRecord[],
+  now: string,
+): Promise<{ ok: boolean; error?: string }> {
+  if (upgrades.length === 0) return { ok: true };
+  const rows = upgrades.map((u) => classUpgradeToRow(u, tenantId, now));
+  for (let i = 0; i < rows.length; i += 200) {
+    const { error } = await sb
+      .from("sis_class_upgrades")
+      .upsert(rows.slice(i, i + 200), { onConflict: "id" });
+    if (error) {
+      console.error("[sis-db] class upgrade history push failed", error.message);
+      return { ok: false, error: error.message };
+    }
+  }
+  return { ok: true };
+}
+
 async function pushSisGuarded(
   sb: SupabaseClient,
   tenantId: string,
@@ -946,7 +1255,8 @@ async function pushSisGuarded(
 }
 
 export async function pushSisToDb(
-  state: Pick<SisState, "households" | "students">,
+  state: Pick<SisState, "households" | "students"> &
+    Partial<Pick<SisState, "tags" | "classUpgrades">>,
   /**
    * `pruneMissing` deletes stored records absent from this payload. Only
    * pass it when `state` is genuinely the complete roster — a partial
@@ -972,6 +1282,36 @@ export async function pushSisToDb(
 
   const households = state.households ?? [];
   const students = state.students ?? [];
+
+  // Tags and the move history first, and outside the guarded RPC: they are
+  // upsert-only (the app retires a tag with isActive rather than deleting it,
+  // and history is append-only), so there is nothing here for a version guard
+  // to protect and nothing that can be pruned by absence. Doing them first
+  // means a student's tagIds can never reach the database before the tag that
+  // names them.
+  const tagResult = await pushSisTags(sb, tenantId, state.tags ?? [], now);
+  if (!tagResult.ok) {
+    return {
+      ok: false,
+      error: tagResult.error,
+      householdCount: 0,
+      studentCount: 0,
+    };
+  }
+  const upgradeResult = await pushSisClassUpgrades(
+    sb,
+    tenantId,
+    state.classUpgrades ?? [],
+    now,
+  );
+  if (!upgradeResult.ok) {
+    return {
+      ok: false,
+      error: upgradeResult.error,
+      householdCount: 0,
+      studentCount: 0,
+    };
+  }
 
   const guarded = await pushSisGuarded(sb, tenantId, households, students, now);
   if (guarded) return guarded;
