@@ -281,3 +281,120 @@ export async function notifyBoardingMark(input: {
     toMasked: maskMobile(to),
   };
 }
+
+/**
+ * Tell a family their child's bus or stop has changed.
+ *
+ * WHY THIS ONE IS NOT AUTOMATIC
+ * The note at the top of this file says route changes stay manual, and that
+ * still holds — this is not fired by saving an amendment. It is called by an
+ * endpoint the clerk reaches by pressing "Tell the family" on the move they
+ * have just made, with the exact text in front of them.
+ *
+ * The reason has survived contact: a move is often bookkeeping. The office
+ * splits an assignment to protect paid months, corrects a stop that was typed
+ * wrong, or re-seats a child the family themselves asked to move last week.
+ * Messaging every one of those trains parents to ignore the ones that matter.
+ * What WAS wrong was having no button at all, so the real changes went untold
+ * because telling them meant leaving the screen.
+ *
+ * Unlike the delay and breakdown messages, every variable here is a fact the
+ * system holds — there is no free-text sentence to compose, which is why this
+ * can be one press rather than a trip to the WhatsApp desk.
+ */
+export async function notifyRouteChange(input: {
+  studentId: string;
+  routeId: string;
+  stopId: string;
+  /** ISO date the change takes effect. */
+  effectiveFrom: string;
+  transport: TransportState;
+  sis: SisState;
+}): Promise<NotifyOutcome> {
+  const student = input.sis.students.find((s) => s.id === input.studentId);
+  if (!student) return { sent: false, skipped: "student not found" };
+
+  const household = input.sis.households.find((h) => h.id === student.householdId);
+  const to = householdWhatsApp(household);
+  if (!to) return { sent: false, skipped: "household has no WhatsApp number" };
+
+  const route = input.transport.routes.find((r) => r.id === input.routeId);
+  if (!route) return { sent: false, skipped: "route not found" };
+  const stop = route.stops.find((s) => s.id === input.stopId);
+  const vehicle = route.vehicleId
+    ? (input.transport.vehicles ?? []).find((v) => v.id === route.vehicleId)
+    : undefined;
+
+  const language = waTemplateLanguageFor(household ?? undefined);
+
+  const built = buildTransportMessage(
+    "route_change",
+    {
+      guardianName: household?.guardianName?.trim() || "Parent",
+      childName: student.fullName,
+      effectiveFrom: input.effectiveFrom,
+      // An unnamed stop would render the message with a blank where the
+      // parent looks for the place their child stands. buildTransportMessage
+      // refuses a blank variable, which is the outcome we want.
+      stopName: stop?.name?.trim() || "",
+      busNo:
+        route.busNo?.trim() ||
+        vehicle?.registrationNo?.trim() ||
+        vehicle?.name?.trim() ||
+        route.name?.trim() ||
+        "",
+    },
+    language,
+  );
+  if (!built.ok) return { sent: false, skipped: built.error };
+
+  const { state: raw } = await fetchServerBlob<WaTemplatesState>("wa_templates_state");
+  const resolved = resolveTemplateForSend({
+    state: normalizeWaTemplatesState(raw),
+    familyKey: built.message.familyKey,
+    language,
+  });
+  if (!resolved.ok) {
+    return {
+      sent: false,
+      skipped: resolved.reason,
+      templateName: built.message.templateName,
+    };
+  }
+  const positions = templateVariablePositions(resolved.template, built.message.values);
+  const buttons = templateButtonComponents(resolved.template, {});
+  if (buttons.missing.length) {
+    return {
+      sent: false,
+      skipped: `template button needs ${buttons.missing[0]} — nothing sent`,
+      templateName: resolved.template.metaName,
+    };
+  }
+
+  const res = await sendWhatsAppTemplate({
+    toMobile: to,
+    name: resolved.template.metaName,
+    language: resolved.template.metaLanguage || resolved.template.language,
+    fromPhoneNumberId: resolved.sender?.phoneNumberId,
+    components: [
+      {
+        type: "body",
+        parameters: Object.keys(positions)
+          .sort((a, b) => Number(a) - Number(b))
+          .map((k) => ({ type: "text", text: positions[k]! })),
+      },
+      ...buttons.components,
+    ],
+    // One send per child per change. A clerk who presses the button twice,
+    // or reopens the move and presses again, must not message the family
+    // twice about the same move.
+    clientMessageId: `route_change:${input.studentId}:${input.routeId}:${input.stopId}:${input.effectiveFrom}`,
+  });
+
+  return {
+    sent: res.ok,
+    error: res.ok ? undefined : res.error,
+    templateName: resolved.template.metaName,
+    toMasked: maskMobile(to),
+  };
+}
