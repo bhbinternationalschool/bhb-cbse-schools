@@ -282,6 +282,7 @@ export function OnlineClassesWorkspace() {
       key: "where",
       header: "Where",
       value: (r) => (r.provider === "google_meet" ? "Google Meet" : "Link"),
+      sortable: true,
       render: (r) => (
         <span className="text-sm">
           {r.provider === "google_meet" ? "Google Meet" : "Link"}
