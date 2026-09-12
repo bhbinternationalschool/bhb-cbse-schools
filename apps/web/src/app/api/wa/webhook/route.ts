@@ -259,6 +259,7 @@ export async function POST(req: Request) {
     const dispatch = {
       fromWaId: msg.fromWaId,
       text: msg.text,
+      mediaNote: msg.mediaNote ?? null,
       waMessageId: msg.waMessageId,
       profileName: msg.profileName,
       location: msg.location,

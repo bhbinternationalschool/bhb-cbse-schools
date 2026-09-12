@@ -108,6 +108,9 @@ jobs:
       - name: "Test — an enrolled parent is a parent: no role-pick menu, no General tag"
         working-directory: apps/web
         run: npm run test:wa-known-parent-role
+      - name: "Test — the webhook parser never invents text a parent did not send"
+        working-directory: apps/web
+        run: npm run test:wa-inbound-parse
       - name: Self-test — when the WhatsApp bots speak, and when they stay quiet
         working-directory: apps/web
         run: npm run test:wa-bot-silence

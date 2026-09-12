@@ -741,6 +741,8 @@ export async function handleWaUnifiedInbound(opts: {
   };
   /** Voice note (audio media) — transcribed only for staff command flows. */
   audio?: { mediaId: string; mimeType?: string } | null;
+  /** What kind of media arrived ("audio", "image (image/jpeg)"…), for the thread line only. */
+  mediaNote?: string | null;
   /**
    * A document or photo. Only the job flow reads it today, where the
    * attachment IS the application; every other flow ignores it exactly as
@@ -825,7 +827,10 @@ export async function handleWaUnifiedInbound(opts: {
   const mapped = interactiveIdToText(rawText);
   const text = mapped || rawText;
   const inboundLog = {
-    text: rawText || text,
+    // A captionless photo or an unusable voice note still has to read as
+    // something in the office's thread; `mediaNote` is what arrived, not
+    // words put in the parent's mouth.
+    text: rawText || text || (opts.mediaNote ? `[${opts.mediaNote}]` : ""),
     waMessageId: opts.waMessageId,
     interactiveId: mapped && mapped !== rawText ? rawText : undefined,
   };

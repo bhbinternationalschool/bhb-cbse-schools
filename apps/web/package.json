@@ -182,6 +182,7 @@
     "test:wa-language-gate": "npx tsx src/lib/waLanguageGate.selftest.ts",
     "test:sis-bot-fee-replies": "npx tsx src/lib/sisParentBotFeeReplies.selftest.ts",
     "test:wa-known-parent-role": "npx tsx src/lib/waKnownParentRole.selftest.ts",
+    "test:wa-inbound-parse": "npx tsx src/lib/waInboundParse.selftest.ts",
     "test:wa-bot-silence": "npx tsx src/lib/waBotSilence.selftest.ts",
     "test:job-applications": "npx tsx src/lib/jobApplications.selftest.ts",
     "test:online-classes": "npx tsx src/lib/onlineClasses.selftest.ts",
