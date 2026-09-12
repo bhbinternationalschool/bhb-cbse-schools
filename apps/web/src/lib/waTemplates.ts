@@ -2369,7 +2369,41 @@ export type MetaTemplateSyncRow = {
   id?: string;
   rejected_reason?: string;
   category?: string;
+  /**
+   * The components Meta actually holds. Asked for since 2026-09-12, because
+   * without them the registry could never learn that a template's SHAPE
+   * differs from the seed — see metaHeaderFormatOf.
+   */
+  components?: { type?: string; format?: string; text?: string }[];
 };
+
+/**
+ * The header Meta really approved for a template, from its components.
+ *
+ * The seed said `bhb_daily_brief` had a DOCUMENT header, and the registry
+ * believed it for two days. Meta had no header at all: the submit path
+ * DROPS a media header when it has no example file to send with it (a media
+ * header needs a handle from the resumable upload API first), so the
+ * template was created, approved and used header-less while the ERP went on
+ * attaching a document parameter to every send. Meta answered every one with
+ * "(#132018) There's an issue with the parameters in your template", the
+ * 6 PM brief never arrived, and the scheduler log showed only a 502.
+ *
+ * A registry that disagrees with Meta about SHAPE fails exactly as silently
+ * as one that disagreed about status did in September. So the shape is read
+ * back from Meta like the status is.
+ */
+export function metaHeaderFormatOf(row: MetaTemplateSyncRow): WaHeaderFormat | null {
+  if (!Array.isArray(row.components)) return null;
+  const header = row.components.find(
+    (c) => String(c?.type || "").toUpperCase() === "HEADER",
+  );
+  if (!header) return "NONE";
+  const fmt = String(header.format || "TEXT").toUpperCase();
+  return fmt === "IMAGE" || fmt === "VIDEO" || fmt === "DOCUMENT" || fmt === "TEXT"
+    ? (fmt as WaHeaderFormat)
+    : "NONE";
+}
 
 /**
  * Merge Meta Graph message_templates list into registry by metaName + language.
@@ -2402,6 +2436,10 @@ export function applyMetaTemplateSync(
         metaTemplateId: row.id || cur.metaTemplateId,
         rejectionReason: row.rejected_reason || cur.rejectionReason,
         category: (row.category as WaTemplateCategory) || cur.category,
+        // Meta's shape wins over the seed's. Only when Meta actually told
+        // us — an older list call did not ask for components, and a missing
+        // answer must not be read as "no header".
+        headerFormat: metaHeaderFormatOf(row) ?? cur.headerFormat,
         syncedAt: now,
         updatedAt: now,
       };

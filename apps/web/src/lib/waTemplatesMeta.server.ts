@@ -380,7 +380,7 @@ export async function fetchMetaMessageTemplates(): Promise<{
   }
 
   const version = metaGraphVersion();
-  const url = `https://graph.facebook.com/${version}/${waba}/message_templates?limit=100&fields=name,language,status,id,rejected_reason,category`;
+  const url = `https://graph.facebook.com/${version}/${waba}/message_templates?limit=100&fields=name,language,status,id,rejected_reason,category,components`;
   try {
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
