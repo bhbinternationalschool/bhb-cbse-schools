@@ -135,6 +135,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:sis-revision
 
+      - name: Test — parent contacts and Aadhaar are not flattened or dropped
+        working-directory: apps/web
+        run: npm run test:sis-contacts
+
       - name: Test — a partial sync can never wipe the roster
         working-directory: apps/web
         run: npm run test:sis-prune

@@ -1399,10 +1399,14 @@ export function applyStudentImport(
       joinedOn: f.joinedOn || existing?.joinedOn || "",
       fatherName: f.fatherName ?? identitySource?.fatherName ?? "",
       motherName: f.motherName ?? identitySource?.motherName ?? "",
+      // The guardian/family number (which may have come from the MOTHER
+      // column, see guardianMobile above) belongs on the household, not in the
+      // father's field. Importing it as his is how 186 of 717 students ended
+      // up carrying one number for both parents — and the import's
+      // guardianRelation is always the literal "Father" below, because no CSV
+      // column maps to it, so it is a default and never an answer.
       fatherMobile: normalizeMobile(
-        f.fatherMobile ||
-          identitySource?.fatherMobile ||
-          guardianMobile,
+        f.fatherMobile || identitySource?.fatherMobile || "",
       ),
       motherMobile: normalizeMobile(
         f.motherMobile || identitySource?.motherMobile || "",
