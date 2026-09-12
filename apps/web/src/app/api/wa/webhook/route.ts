@@ -245,6 +245,47 @@ export async function POST(req: Request) {
         continue;
       }
     }
+    // A family we asked "where does your child wait?" answering that question.
+    //
+    // Before the ordinary bot, and gated on an OPEN request for this
+    // household — see transportPinIntake.server.ts. Without that gate an
+    // inbound location keeps the meaning it already has: the transport bot
+    // invites one when a family reports a problem, and re-reading that as a
+    // boarding point would move a child's stop because their parent reported
+    // a breakdown. Anything that is not an answer returns handled:false and
+    // falls through untouched.
+    if (msg.location || (msg.text || "").trim()) {
+      try {
+        const { tryTransportPinIntake } = await import(
+          "@/lib/transportPinIntake.server"
+        );
+        const household = findHouseholdByWaMobile(waNormalizeLocal10(msg.fromWaId));
+        const pin = await tryTransportPinIntake({
+          fromWaId: msg.fromWaId,
+          text: msg.text,
+          location: msg.location,
+          household: household
+            ? { id: household.id, preferredLanguage: household.preferredLanguage }
+            : null,
+        });
+        if (pin.handled) {
+          results.push({
+            audience: `transport_pin_${pin.outcome ?? "handled"}`,
+            from: msg.fromWaId,
+            escalate: false,
+            replied: true,
+            stub: false,
+            error: pin.error,
+          });
+          continue;
+        }
+      } catch (e) {
+        // Never swallow the message: if the intake throws, the ordinary bot
+        // still gets its turn and the family gets an answer.
+        console.error("[wa/webhook] transport pin intake failed", msg.waMessageId, e);
+      }
+    }
+
     // A voice note takes about six seconds to transcribe, and Meta re-delivers
     // a webhook it did not get a prompt answer for. So it is answered now and
     // done afterwards: after() runs once the response has been sent, which

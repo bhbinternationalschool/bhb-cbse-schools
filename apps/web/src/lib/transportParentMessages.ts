@@ -38,6 +38,8 @@ export type TransportMessageKind =
   | "delay"
   | "breakdown"
   | "route_change"
+  /** Asking the family where their child actually waits for the bus. */
+  | "pin_request"
   | "not_boarded"
   | "boarded"
   | "dropped";
@@ -163,6 +165,7 @@ export const TRANSPORT_FAMILIES: Record<TransportMessageKind, string> = {
   delay: "transport_delay",
   breakdown: "transport_breakdown",
   route_change: "transport_route_change",
+  pin_request: "transport_pin_request",
   not_boarded: "transport_not_boarded",
   boarded: "transport_boarded",
   dropped: "transport_dropped",
@@ -231,6 +234,7 @@ export const TRANSPORT_TEMPLATES: Record<TransportMessageKind, TransportTemplate
   delay: defFor("delay", "en"),
   breakdown: defFor("breakdown", "en"),
   route_change: defFor("route_change", "en"),
+  pin_request: defFor("pin_request", "en"),
   not_boarded: defFor("not_boarded", "en"),
   boarded: defFor("boarded", "en"),
   dropped: defFor("dropped", "en"),

@@ -31,6 +31,7 @@ import { ClassTransportPanel } from "@/components/transport/ClassTransportPanel"
 import { LivePositionsPanel } from "@/components/transport/LivePositionsPanel";
 import { FleetEdgeStatusStrip } from "@/components/transport/FleetEdgeStatusStrip";
 import { BoardingPointAuditPanel } from "@/components/transport/BoardingPointAuditPanel";
+import { PinRequestPanel } from "@/components/transport/PinRequestPanel";
 import { StaffRiderPanel } from "@/components/transport/StaffRiderPanel";
 import { StopLinkRepairPanel } from "@/components/transport/StopLinkRepairPanel";
 import { strictClassGroup } from "@/lib/transportShifts";
@@ -629,10 +630,21 @@ export function TransportWorkspace() {
             />
           ) : null}
           {tab === "planner" ? (
-            <BoardingPointAuditPanel
-              academicYearCode={session.academicYearCode}
-              canEdit={hasPermission(session, masters, "transport", "edit")}
-            />
+            <>
+              {/*
+                Above the audit, because the audit can only report on what it
+                can see: with no family placed better than a village centroid
+                its noise floor is a kilometre, and asking the families is
+                what moves that.
+              */}
+              <PinRequestPanel
+                canEdit={hasPermission(session, masters, "transport", "edit")}
+              />
+              <BoardingPointAuditPanel
+                academicYearCode={session.academicYearCode}
+                canEdit={hasPermission(session, masters, "transport", "edit")}
+              />
+            </>
           ) : null}
           {tab === "riders" ? (
             <RidersPanel

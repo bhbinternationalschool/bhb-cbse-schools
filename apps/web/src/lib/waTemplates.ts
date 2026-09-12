@@ -452,6 +452,50 @@ const SEED_DEFS: SeedDef[] = [
     footerHi: "परिवहन कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
+    familyKey: "transport_pin_request",
+    nameEn: "Share your child's boarding point",
+    nameHi: "बच्चे का बस स्टॉप बताइए",
+    module: "transport",
+    category: "UTILITY",
+    metaName: "bhb_transport_pin_request",
+    headerFormat: "TEXT",
+    headerTextEn: "Where does your child wait?",
+    headerTextHi: "आपका बच्चा कहाँ खड़ा होता है?",
+    /*
+      Two buttons, and the refusal is one of them.
+      A family that would rather not share a location must be able to say so
+      in one tap, in their own language, without composing a sentence — and
+      their answer is recorded so nobody asks them again next term. A request
+      whose only easy answer is yes is not a request.
+    */
+    buttons: [
+      { type: "QUICK_REPLY", text: "Share location" },
+      { type: "QUICK_REPLY", text: "Not now" },
+    ],
+    buttonsHi: [
+      { type: "QUICK_REPLY", text: "लोकेशन भेजें" },
+      { type: "QUICK_REPLY", text: "अभी नहीं" },
+    ],
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\n" +
+      "{{childName}} travels on bus *{{busNo}}*. Right now the school only knows your village, not the exact spot where {{childName}} waits — so the driver goes by memory.\n\n" +
+      "📍 *What we are asking:* open the attachment (📎) in this chat, choose *Location*, and send the spot where your child actually stands each morning. Please send it from that spot if you can.\n\n" +
+      "✅ *What it is used for:* only to place the bus stop correctly — a stop nearer your home, the driver knowing exactly where to halt, and a truer arrival time. Your fee does not change because of this.\n\n" +
+      "👀 *Who sees it:* the school transport office and your child's driver. Nobody else, and it is not shared outside the school.\n\n" +
+      "🙋 *If you would rather not:* tap *Not now*. Your child's bus and stop stay exactly as they are — nothing changes and we will not ask again.\n\n" +
+      "Thank you 🙏",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\n" +
+      "{{childName}} बस *{{busNo}}* से आते-जाते हैं। अभी विद्यालय को सिर्फ़ आपका गाँव पता है, वह सही जगह नहीं जहाँ {{childName}} रोज़ खड़े होते हैं — इसलिए चालक अंदाज़े से रोकता है।\n\n" +
+      "📍 *हमें क्या चाहिए:* इसी चैट में 📎 (अटैचमेंट) दबाइए, *Location* चुनिए, और वह जगह भेजिए जहाँ आपका बच्चा रोज़ सुबह खड़ा होता है। हो सके तो वहीं खड़े होकर भेजिए।\n\n" +
+      "✅ *इससे क्या फ़ायदा:* सिर्फ़ बस स्टॉप सही जगह लगाने के लिए — घर के पास का स्टॉप, चालक को ठीक जगह पता, और बस आने का सही समय। इससे आपकी फ़ीस में कोई बदलाव नहीं होगा।\n\n" +
+      "👀 *कौन देखेगा:* सिर्फ़ विद्यालय का परिवहन कार्यालय और आपके बच्चे के बस चालक। और कोई नहीं, विद्यालय के बाहर यह जानकारी नहीं जाती।\n\n" +
+      "🙋 *अगर नहीं भेजना चाहें:* *अभी नहीं* दबा दीजिए। आपके बच्चे की बस और स्टॉप जैसे हैं वैसे ही रहेंगे — कुछ नहीं बदलेगा और हम दोबारा नहीं पूछेंगे।\n\n" +
+      "धन्यवाद 🙏",
+    footerEn: "Transport desk · Reply to this message for help",
+    footerHi: "परिवहन कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
+  },
+  {
     familyKey: "transport_not_boarded",
     nameEn: "Child did not board",
     nameHi: "बच्चा बस में नहीं चढ़ा",
