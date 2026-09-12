@@ -148,6 +148,7 @@ SELFTESTS=(
   test:transport-shortfall
   test:transport-afternoon-waves
   test:transport-shifts
+  test:transport-seats
   test:transport-boarding
   test:transport-crew-access
   test:transport-crew

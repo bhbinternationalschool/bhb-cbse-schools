@@ -202,7 +202,11 @@ export function NearestStopPicker({
                     {r.monthlyFeePaise > 0
                       ? ` · ${formatInr(r.monthlyFeePaise)}/month`
                       : " · not priced"}
-                    {r.seatsLeft <= 0 ? " · bus full" : ` · ${r.seatsLeft} seats`}
+                    {r.seatsLeft == null
+                      ? " · seats not recorded"
+                      : r.seatsLeft <= 0
+                        ? " · bus full"
+                        : ` · ${r.seatsLeft} seats`}
                   </div>
                 </button>
               </li>
