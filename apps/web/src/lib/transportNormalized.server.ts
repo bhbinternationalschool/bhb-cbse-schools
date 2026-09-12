@@ -132,6 +132,8 @@ export async function appendBoardingEventToDb(event: {
   date: string;
   routeId: string;
   trip: "AM" | "PM";
+  /** Which timed run, when the route has them. "" = none, not "the first". */
+  shiftId?: string;
   studentId: string;
   status: "boarded" | "absent" | "unauthorized";
   note: string;

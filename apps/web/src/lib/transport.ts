@@ -485,6 +485,15 @@ export type BoardingEvent = {
   date: string;
   routeId: string;
   trip: BoardingTrip;
+  /**
+   * Which timed run this mark belongs to, when the route has runs.
+   *
+   * `trip` says morning or afternoon; it cannot say WHICH afternoon, and a
+   * bus that goes out at 13:40 and again at 15:40 produced two indistinguish-
+   * able sets of "PM" marks. "" means either the route has no runs or the
+   * mark predates them — it does NOT mean the first run.
+   */
+  shiftId?: string;
   studentId: string;
   status: BoardingStatus;
   note: string;

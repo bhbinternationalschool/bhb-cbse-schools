@@ -61,6 +61,7 @@ export async function POST(request: Request) {
       routeId?: string;
       studentId?: string;
       trip?: string;
+      shiftId?: string;
       kind?: string;
       lat?: number;
       lng?: number;
@@ -128,6 +129,10 @@ export async function POST(request: Request) {
       date,
       routeId,
       trip,
+      // Recorded exactly as the app sent it, including "". A mark from a
+      // driver's app that predates runs must not be back-filled onto a run
+      // here: the server does not know which one the bus was actually making.
+      shiftId: (body.shiftId || "").trim(),
       studentId,
       status: kind === "absent" ? "absent" : "boarded",
       note: (body.note || "").slice(0, 200),
