@@ -54,6 +54,7 @@ import {
   type SitePage,
 } from "@/lib/website";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type Filter = PageStatus | "all";
 type Tab = "pages" | "media" | "publish";
@@ -153,6 +154,19 @@ export function WebsiteWorkspace() {
         .filter((p) => filter === "all" || p.status === filter)
         .sort((a, b) => a.slug.localeCompare(b.slug)),
     [pages, filter],
+  );
+
+  // Sorting by status brings the unpublished drafts together.
+  const pageSort = useTableSort(
+    shown,
+    {
+      title: (page) => page.title || "",
+      address: (page) => publicPathFor(page.slug, page.lang),
+      menu: (page) => page.navGroup || "",
+      status: (page) => page.status,
+    },
+    "title",
+    "asc",
   );
 
   const editingPage = useMemo(
@@ -410,15 +424,15 @@ export function WebsiteWorkspace() {
               <ErpTable minWidth="min-w-[640px]">
                 <ErpTableHead>
                   <tr>
-                    <th className="px-4 py-2.5 font-semibold">Page</th>
-                    <th className="px-4 py-2.5 font-semibold">Address</th>
-                    <th className="px-4 py-2.5 font-semibold">In menu</th>
-                    <th className="px-4 py-2.5 font-semibold">Status</th>
+                    <ErpSortTh sort={pageSort} field="title" className="px-4 py-2.5 font-semibold">Page</ErpSortTh>
+                    <ErpSortTh sort={pageSort} field="address" className="px-4 py-2.5 font-semibold">Address</ErpSortTh>
+                    <ErpSortTh sort={pageSort} field="menu" className="px-4 py-2.5 font-semibold">In menu</ErpSortTh>
+                    <ErpSortTh sort={pageSort} field="status" className="px-4 py-2.5 font-semibold">Status</ErpSortTh>
                     <th className="px-4 py-2.5" />
                   </tr>
                 </ErpTableHead>
                 <ErpTableBody hoverable>
-                  {shown.map((page) => (
+                  {pageSort.rows.map((page) => (
                     <tr key={page.id}>
                       <td className="px-4 py-2.5 font-semibold text-[var(--brand-deep)]">
                         {page.title || "Untitled"}

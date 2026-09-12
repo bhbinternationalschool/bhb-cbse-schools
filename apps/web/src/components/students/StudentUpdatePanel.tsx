@@ -41,6 +41,7 @@ import {
   ErpTableShell,
 } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type UpdateTool =
   | "details"
@@ -323,6 +324,17 @@ export function StudentUpdatePanel({
         return a.fullName.localeCompare(b.fullName);
       });
   }, [sis, masters, photoClassId, photoSectionId, photoQuery, session.academicYearCode]);
+
+  // The photo columns are capture boxes, not values; name and class are the handles.
+  const photoSort = useTableSort(
+    photoRoster,
+    {
+      student: (s) => s.fullName,
+      klass: (s) => (masters ? classLabel(s, masters) : ""),
+    },
+    "student",
+    "asc",
+  );
 
   function flash(msg: string) {
     setNotice(msg);
@@ -621,14 +633,14 @@ export function StudentUpdatePanel({
                 <ErpTableHead>
                   <tr>
                     <th className="px-3 py-2 font-semibold">#</th>
-                    <th className="px-3 py-2 font-semibold">Student</th>
-                    <th className="px-3 py-2 font-semibold">Class</th>
+                    <ErpSortTh sort={photoSort} field="student" className="px-3 py-2 font-semibold">Student</ErpSortTh>
+                    <ErpSortTh sort={photoSort} field="klass" className="px-3 py-2 font-semibold">Class</ErpSortTh>
                     <th className="px-3 py-2 font-semibold">Photo</th>
                     <th className="w-10 px-2 py-2" aria-label="Actions" />
                   </tr>
                 </ErpTableHead>
                 <ErpTableBody>
-                  {photoRoster.map((s, i) => (
+                  {photoSort.rows.map((s, i) => (
                     <tr key={s.id}>
                       <td className="px-3 py-2 text-xs text-[var(--muted)]">
                         {s.rollNo || i + 1}

@@ -53,6 +53,7 @@ import {
 } from "@/components/ui/erp-roster";
 import { BulkActionBar, RowActionMenu, RowCheckbox, useRowSelection } from "@/components/ui/erp-grid";
 import { openWaMe } from "@/lib/waMe";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 const inp =
   "w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm";
@@ -92,6 +93,19 @@ export function AdmissionRegistrationPanel({
 }) {
   const sessionAy = useDemoSession().academicYearCode;
   const queue = useMemo(() => listRegistrationQueue(state), [state]);
+
+  // Sorting by Payment brings the unpaid registrations together — the list the desk works through.
+  const queueSort = useTableSort(
+    queue,
+    {
+      leadNo: (l) => l.enquiryNo,
+      child: (l) => l.childName,
+      fee: (l) => l.registrationFeeAmountPaise,
+      payment: (l) => l.registrationPaymentStatus,
+    },
+    "leadNo",
+    "asc",
+  );
 
   /**
    * Children ADMITTED this session, straight from the roster. Most walked in
@@ -287,6 +301,18 @@ export function AdmissionRegistrationPanel({
     if (!selected) return [];
     return listLeadRegistrationPayments(state, selected.id);
   }, [state, selected?.id]);
+
+  // Registration payments: amount sorts by paise, status groups the voided ones.
+  const payListSort = useTableSort(
+    leadPayments,
+    {
+      code: (p) => p.code,
+      amount: (p) => p.amountPaise,
+      status: (p) => p.status,
+    },
+    "code",
+    "asc",
+  );
 
   const modeMeta = TENDER_MODES.find((m) => m.value === collectMode);
 
@@ -1057,16 +1083,16 @@ export function AdmissionRegistrationPanel({
           <ErpTable>
             <ErpTableHead>
               <tr>
-                <th className="px-3 py-2">Lead no.</th>
-                <th className="px-3 py-2">Child</th>
+                <ErpSortTh sort={queueSort} field="leadNo" className="px-3 py-2">Lead no.</ErpSortTh>
+                <ErpSortTh sort={queueSort} field="child" className="px-3 py-2">Child</ErpSortTh>
                 <th className="px-3 py-2">Parent / mobile</th>
-                <th className="px-3 py-2">Fee</th>
-                <th className="px-3 py-2">Payment</th>
+                <ErpSortTh sort={queueSort} field="fee" align="right" className="px-3 py-2">Fee</ErpSortTh>
+                <ErpSortTh sort={queueSort} field="payment" className="px-3 py-2">Payment</ErpSortTh>
                 <th className="px-3 py-2">House / siblings</th>
               </tr>
             </ErpTableHead>
             <ErpTableBody hoverable>
-              {queue.map((l) => {
+              {queueSort.rows.map((l) => {
                 const hh = householdOf(state, l.householdId);
                 const groups = l.householdId
                   ? groupLeadsByParent(state, l.householdId)
@@ -1371,15 +1397,15 @@ export function AdmissionRegistrationPanel({
                 <ErpTable className="text-[11px]">
                   <ErpTableHead>
                     <tr>
-                      <th className="px-2 py-1.5 font-semibold">Code</th>
-                      <th className="px-2 py-1.5 font-semibold">Amount</th>
+                      <ErpSortTh sort={payListSort} field="code" className="px-2 py-1.5 font-semibold">Code</ErpSortTh>
+                      <ErpSortTh sort={payListSort} field="amount" align="right" className="px-2 py-1.5 font-semibold">Amount</ErpSortTh>
                       <th className="px-2 py-1.5 font-semibold">Mode</th>
-                      <th className="px-2 py-1.5 font-semibold">Status</th>
+                      <ErpSortTh sort={payListSort} field="status" className="px-2 py-1.5 font-semibold">Status</ErpSortTh>
                       <th className="px-2 py-1.5 font-semibold">R receipt</th>
                     </tr>
                   </ErpTableHead>
                   <ErpTableBody>
-                    {leadPayments.map((p) => (
+                    {payListSort.rows.map((p) => (
                       <tr key={p.id}>
                         <td className="px-2 py-1.5 font-mono">{p.code}</td>
                         <td className="px-2 py-1.5">{formatInr(p.amountPaise)}</td>
