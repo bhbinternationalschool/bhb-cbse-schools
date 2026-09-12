@@ -1373,6 +1373,23 @@ export function applyStudentImport(
     }
 
     const patch: Partial<SisStudent> & { id: string } = {
+      /*
+       * Start from the record that already exists (or, for a new session row,
+       * the child's row in the year it was carried from) so that a field this
+       * import does not carry is KEPT, not reset.
+       *
+       * Without this the patch's 77 explicit fields were the whole student and
+       * the other 20 were silently defaulted: the full Aadhaar numbers of
+       * child, father and mother and their verification state, all six UDISE+
+       * sync flags, the promotion lock (a child held back for the MBU age
+       * rule), the student's tags, RFID / biometric id, the login, and
+       * revisionAt — which is the optimistic-locking token, so an import also
+       * wrote as "unversioned" and could not conflict with a concurrent edit.
+       * Invisible until 2026-09-12 because none of those fields were being
+       * stored at all (see migration 20260912100000); the moment they persist,
+       * the next roster import in update mode would have wiped them.
+       */
+      ...(existing ?? identitySource ?? {}),
       id: existing?.id ?? draftStudentId,
       admissionNo: adm,
       legacyErpAdmissionNo:
