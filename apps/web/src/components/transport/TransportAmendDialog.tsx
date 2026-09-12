@@ -336,6 +336,8 @@ export function TransportAmendDialog({
             state={state}
             home={home}
             selectedStopId={stopId}
+            exceptStudentId={assignment.studentId}
+            academicYearCode={academicYearCode}
             onPick={({ routeId: r, stopId: st }) => {
               if (r !== routeId) {
                 setShifts({ pickupShiftId: "", dropShiftId: "" });
