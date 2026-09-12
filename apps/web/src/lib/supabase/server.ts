@@ -134,6 +134,31 @@ function guardStorage<T extends object>(storage: T): T {
  * functions. Some of them write — `replace_fee_desk_voucher_lines` is the one
  * that matters — and a list that has to be kept in step with every new
  * migration is a list that will be wrong on the day it counts.
+ *
+ * THE COST, AND ONE FIX THAT DOES NOT WORK
+ * Blocking every rpc means whole screens cannot be opened on a laptop at all:
+ * the transport Live map reads `fleet_latest_positions`, so
+ * /api/transport/live returns a bare 500 locally, which is very likely why
+ * nobody noticed that map was drawing dots instead of buses for months.
+ *
+ * The obvious fix is to let the database decide instead of a list — re-issue
+ * every guarded rpc as a GET, on the documented rule that PostgREST runs a
+ * function over GET only when it is STABLE or IMMUTABLE, and that Postgres
+ * forbids a non-volatile function from writing. It was built, and then tested
+ * against this project on 2026-09-12, and THE RULE DOES NOT HOLD HERE:
+ *
+ *     GET /rest/v1/rpc/replace_fee_desk_voucher_lines?... -> 200, and it ran
+ *
+ * A VOLATILE, data-replacing function executed over GET and returned its
+ * result. (The probe used a tenant id owning no rows and empty payloads, so
+ * it changed nothing — 2,236 voucher lines and 587 tenders were intact
+ * after.) Whatever this PostgREST version enforces, it is not that, so a GET
+ * is NOT evidence a function is read-only and must never be treated as a
+ * safety boundary.
+ *
+ * If local testability is worth solving, the options are a second Supabase
+ * project to point laptops at, or an explicit allowlist accepted as something
+ * somebody must maintain. Not this.
  */
 export function readOnlyProductionClient(sb: SupabaseClient): SupabaseClient {
   return new Proxy(sb, {
