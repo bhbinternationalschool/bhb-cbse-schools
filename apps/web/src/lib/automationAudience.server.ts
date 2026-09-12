@@ -20,6 +20,7 @@ import "server-only";
 import type { AutomationRule } from "@/lib/automation";
 import { findAudiencePresetBySummary } from "@/lib/automationAudience";
 import { loadSis, type Household } from "@/lib/sis";
+import { reviewDemoHouseholdIds } from "@/lib/reviewDemoRecords";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { ensureFeesHydratedServer } from "@/lib/feesPersistence.server";
 import { loadServerMasters } from "@/lib/api/v1/auth";
@@ -511,7 +512,12 @@ export async function resolveAutomationAudienceServer(
         };
     }
 
-    const unique = dedupeByMobile(recipients);
+    // The Play review family is not a family: its number has failed every
+    // send and Meta has marked it as not on WhatsApp. It never belongs in
+    // an outbound audience.
+    const demoHouseholds = reviewDemoHouseholdIds(loadSis());
+    const realOnly = recipients.filter((r) => !demoHouseholds.has(r.refId));
+    const unique = dedupeByMobile(realOnly);
     const { kept, skippedOptOut, skippedNotOnWhatsApp } =
       await dropUnreachable(unique);
     const capped = kept.slice(0, limit);

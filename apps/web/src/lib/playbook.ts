@@ -13,6 +13,7 @@ import {
   type SisState,
   type SisStudent,
 } from "@/lib/sis";
+import { isReviewDemoStudent, reviewDemoHouseholdIds } from "@/lib/reviewDemoRecords";
 
 export type PlaybookAction = {
   id: string;
@@ -223,8 +224,12 @@ export function listLiveDefaulters(options?: {
   const masters = options?.masters ?? loadMasters();
   const fees = loadFees();
   const out: LiveDefaulter[] = [];
+  // The Play review family owes nothing, because it is not a family. It
+  // must never reach a call list, a reminder, or a collections figure.
+  const demoHouseholds = reviewDemoHouseholdIds(sis);
 
   for (const student of sis.students) {
+    if (isReviewDemoStudent(student) || (student.householdId && demoHouseholds.has(student.householdId))) continue;
     if (
       options?.academicYearCode &&
       student.academicYearCode !== options.academicYearCode

@@ -478,8 +478,13 @@ export async function rebuildFeeOpenDuesCache(
   const now = new Date().toISOString();
 
   const rows: Record<string, unknown>[] = [];
+  // The Play review family's fictional dues do not belong in the school's
+  // cached figure — they were ₹25,400 of it on 2026-09-12.
+  const { isReviewDemoStudent, reviewDemoHouseholdIds } = await import("@/lib/reviewDemoRecords");
+  const demoHouseholds = reviewDemoHouseholdIds(sis);
   for (const student of sis.students) {
     if (student.status !== "active") continue;
+    if (isReviewDemoStudent(student) || (student.householdId && demoHouseholds.has(student.householdId))) continue;
     if (student.academicYearCode && student.academicYearCode !== ay) continue;
     const dues = computeStudentDues(student, masters, fees, {
       includeFuture: false,
