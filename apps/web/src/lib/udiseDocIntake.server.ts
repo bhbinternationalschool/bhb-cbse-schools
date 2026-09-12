@@ -45,6 +45,10 @@ import {
   renderParentAck,
   type UdiseCorrectionPlan,
   type UdiseDocExtract,
+  matchPaymentToReceipts,
+  renderPaymentProofAck,
+  renderPaymentProofOfficeAlert,
+  type ReceiptForMatch,
 } from "@/lib/udiseDocIntakeAi";
 import { buildWaTemplateBodyComponent, sendWaWithFailover, sendWhatsAppText } from "@/lib/waSend";
 import { normalizeWaTemplatesState, resolveTemplateForSend, templateVariablePositions, type WaTemplatesState } from "@/lib/waTemplates";
@@ -271,6 +275,58 @@ export async function alertOfficeOfUdiseDocument(input: {
  * message should go on to the ordinary bot (unsupported type, no vision
  * model) — once we have read the file, the parent hears from us here.
  */
+/** Put a file in the child's Drive folder; returns the proxy-free Drive note or null. */
+async function fileDocumentInDrive(input: { base64: string; mimeType: string; studentId: string; name: string }): Promise<string | null> {
+  const ext = input.mimeType === "application/pdf" ? "pdf" : input.mimeType === "image/png" ? "png" : input.mimeType === "image/webp" ? "webp" : "jpg";
+  const up = await uploadFileToDrive({
+    folderPath: ["students", input.studentId],
+    fileName: `${input.name}.${ext}`,
+    mimeType: input.mimeType,
+    data: Buffer.from(input.base64, "base64"),
+  });
+  if (!up.ok) {
+    console.warn("[udise-intake] drive upload failed", up.error);
+    return null;
+  }
+  return `Drive: students/${input.studentId}/${input.name}.${ext}`;
+}
+
+/**
+ * This family's receipts, flattened for matching, and what they still owe.
+ * Read-only; the fee book is never touched from here.
+ */
+async function householdReceiptsAndDues(householdId: string): Promise<{ receipts: ReceiptForMatch[]; openDuesPaise: number }> {
+  try {
+    const { ensureFeesHydratedServer } = await import("@/lib/feesPersistence.server");
+    const { loadFees, computeHouseholdDues, openFeeDues } = await import("@/lib/fees");
+    const { currentAcademicYearCode } = await import("@/lib/masters");
+    await ensureFeesHydratedServer();
+    const fees = loadFees();
+    const masters = await loadServerMasters();
+    const ay = currentAcademicYearCode(masters);
+    const receipts: ReceiptForMatch[] = (fees.vouchers ?? [])
+      .filter((v) => v.householdId === householdId && !v.voidedAt)
+      .map((v) => ({
+        receiptNo: v.receiptNo,
+        collectionDate: v.collectionDate,
+        totalPaise: v.totalPaise,
+        refs: [
+          ...(v.tenders ?? []).map((t) => t.ref).filter(Boolean),
+          v.transactionId,
+          v.receiptNo,
+          v.schoolReceiptNo,
+        ].filter(Boolean) as string[],
+      }));
+    const dues = openFeeDues(
+      computeHouseholdDues(householdId, loadSis(), masters, fees, { includeFuture: false, academicYearCode: ay }).flatMap((r) => r.dues),
+    ).filter((d) => d.balancePaise > 0);
+    return { receipts, openDuesPaise: dues.reduce((s, d) => s + d.balancePaise, 0) };
+  } catch (e) {
+    console.warn("[udise-intake] fee lookup failed", e);
+    return { receipts: [], openDuesPaise: 0 };
+  }
+}
+
 export async function captureUdiseDocumentFromWhatsApp(input: {
   mediaId: string;
   mimeType?: string;
@@ -312,11 +368,66 @@ export async function captureUdiseDocumentFromWhatsApp(input: {
     console.warn("[udise-intake] vision failed", e);
   }
   if (!extract) {
-    extract = { docType: "other", person: "unknown", nameOnDoc: "", dob: "", aadhaarNumber: "", gender: "", fatherName: "", motherName: "", address: "", pincode: "", missing: ["all"], notes: "The document could not be read." };
+    extract = { docType: "other", person: "unknown", nameOnDoc: "", dob: "", aadhaarNumber: "", gender: "", fatherName: "", motherName: "", address: "", pincode: "", payment: null, missing: ["all"], notes: "The document could not be read." };
   }
 
   const targets = resolveTargetChildren({ children, extract, caption: input.caption || "" });
   const label = DOC_TYPE_LABEL[extract.docType];
+
+  // ── A payment the parent is showing us ──
+  //
+  // Handled before the which-child question, because money is paid by a
+  // HOUSEHOLD: a UPI screenshot says nothing about which sibling it is for,
+  // and asking would be a silly reply to "I have already paid". Nothing is
+  // ever posted to the fee book from a photograph — the office is told
+  // where to look and a person decides.
+  if (extract.docType === "payment_proof" && extract.payment) {
+    const first = targets[0] ?? children[0];
+    const fileUrl = await fileDocumentInDrive({
+      base64,
+      mimeType,
+      studentId: first?.id || hh.id,
+      name: `payment-proof-${new Date().toISOString().slice(0, 10)}`,
+    });
+    const { receipts, openDuesPaise } = await householdReceiptsAndDues(hh.id);
+    const match = matchPaymentToReceipts({
+      amountPaise: extract.payment.amountPaise,
+      dateIso: extract.payment.dateIso,
+      reference: extract.payment.reference,
+      receipts,
+    });
+    const childName = first?.fullName || hh.guardianName || "your child";
+    await sendWhatsAppText({
+      toMobile: input.mobile10,
+      body: renderPaymentProofAck({ payment: extract.payment, match, childName, language }),
+      clientMessageId: `udise_ack_${refId}`,
+    }).catch((e) => console.warn("[udise-intake] payment ack failed", e));
+
+    const alert = renderPaymentProofOfficeAlert({
+      payment: extract.payment,
+      match,
+      childName,
+      classLabel: first ? classLabel(first, masters) : "—",
+      guardianName: hh.guardianName,
+      openDuesPaise,
+      fileUrl,
+    });
+    await alertOfficeOfUdiseDocument({
+      text: alert.text,
+      oneLine: alert.oneLine,
+      variables: {
+        docLabel: "Payment proof",
+        childName,
+        classLabel: first ? classLabel(first, masters) : "—",
+        changes: alert.oneLine.slice(0, 900),
+        guardianName: hh.guardianName || "Parent",
+        schoolName: TENANT.nameDisplay,
+      },
+      refId,
+      href: "/fees?tab=receipts",
+    });
+    return { handled: true, ok: true, studentIds: first ? [first.id] : [], applied: 0, held: 0 };
+  }
 
   if (!targets.length) {
     // Several children and no way to tell whose. Nothing is written; the
