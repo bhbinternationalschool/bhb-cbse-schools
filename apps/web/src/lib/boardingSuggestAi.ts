@@ -28,6 +28,21 @@
  * basis for, so the prompt forbids them outright.
  */
 
+/**
+ * Beyond this, it is not a walk and the LOCATION is the thing in doubt.
+ *
+ * Children here do walk a long way — two kilometres to a stop is ordinary and
+ * three is not unheard of. Ten is not a school run, it is a wrong pin.
+ *
+ * Found on real data, 2026-09-12: a household in "Pahriya" was matched to a
+ * census village 15 km from school, while the school's own stop list has
+ * "Paharia" two kilometres away. Every candidate came back 10–13 km on foot
+ * and the shortlist was, in its own terms, correct — the nearest pinned stop
+ * really is 9.96 km from where the record says that family lives. Recommending
+ * it would have been a confident answer to the wrong question.
+ */
+export const MAX_SENSIBLE_WALK_KM = 3;
+
 export type BoardingWalkSource = "google" | "straight";
 export type BoardingHomePrecision = "village" | "household" | "pin";
 
@@ -104,6 +119,7 @@ RULES YOU MUST NOT BREAK
 - If a distance is marked "straight line", describe it as a straight-line estimate, never as a walking distance.
 - If the child's home is located only to a village centroid AND the best options are within the stated noise floor of each other, you MUST return "" for stopId and explain in one or two sentences that the family's location is not precise enough to choose between them — say that pinning the child's actual boarding point would settle it. Do not pick anyway.
 - If one option is clearly best despite a coarse location (much shorter walk, or a sibling already aboard), you may still choose it.
+- If the SHORTEST walk on the shortlist is more than ${MAX_SENSIBLE_WALK_KM} km, do not recommend any of them. Return "" for stopId and say that no stop is within walking distance of where the school has this family placed, so the family's recorded location is the thing to check first — a wrong village match will do this. Children here walk a long way; ten kilometres is not a school run.
 
 TONE
 Plain, direct English for a school clerk. No greeting, no sign-off, no markdown, no bullet symbols.
@@ -220,6 +236,23 @@ export function parseBoardingSuggestionJson(
     reasons,
     caution: str(r.caution, 400),
   };
+}
+
+/**
+ * The shortest walk on the shortlist, or null when there are no candidates.
+ */
+export function shortestWalkKm(f: BoardingSuggestFacts): number | null {
+  if (f.candidates.length === 0) return null;
+  return Math.min(...f.candidates.map((c) => c.walkKm));
+}
+
+/**
+ * True when not one stop is within walking distance of where we think this
+ * family lives — which says more about the location than about the stops.
+ */
+export function noStopIsWalkable(f: BoardingSuggestFacts): boolean {
+  const best = shortestWalkKm(f);
+  return best != null && best > MAX_SENSIBLE_WALK_KM;
 }
 
 /**

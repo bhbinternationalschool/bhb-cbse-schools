@@ -12,11 +12,14 @@
 import assert from "node:assert/strict";
 
 import {
+  MAX_SENSIBLE_WALK_KM,
   boardingSuggestionWorthAsking,
   buildBoardingSuggestSystemPrompt,
   buildBoardingSuggestUserPrompt,
   candidatesWithinNoise,
+  noStopIsWalkable,
   parseBoardingSuggestionJson,
+  shortestWalkKm,
   type BoardingCandidateFact,
   type BoardingSuggestFacts,
 } from "./boardingSuggestAi";
@@ -255,6 +258,57 @@ function facts(p: Partial<BoardingSuggestFacts>): BoardingSuggestFacts {
   );
 
   assert.deepEqual(candidatesWithinNoise(facts({ candidates: [] })), []);
+}
+
+/* ── Ten kilometres is not a walk, it is a wrong pin ── */
+{
+  // The real case, 2026-09-12: a household in "Pahriya" matched to a census
+  // village 15 km from school, so every candidate came back 10-13 km on foot.
+  // The shortlist was correct in its own terms and the answer was still wrong.
+  const faraway = facts({
+    homePrecision: "village",
+    homeLabel: "Pahriya",
+    noiseFloorKm: 1,
+    candidates: [
+      cand({ stopId: "a", walkKm: 9.96, walkMinutes: 135 }),
+      cand({ stopId: "b", walkKm: 12.74, walkMinutes: 173 }),
+    ],
+  });
+  assert.equal(shortestWalkKm(faraway), 9.96);
+  assert.equal(noStopIsWalkable(faraway), true);
+
+  // Children here do walk a long way. The guard must not fire on an ordinary
+  // rural walk, or it would refuse to answer the question it exists for.
+  const ordinary = facts({
+    candidates: [cand({ stopId: "a", walkKm: 2.4 }), cand({ stopId: "b", walkKm: 3.6 })],
+  });
+  assert.equal(noStopIsWalkable(ordinary), false, "2.4 km is a normal walk here");
+
+  // Exactly at the threshold is still walkable.
+  assert.equal(
+    noStopIsWalkable(facts({ candidates: [cand({ walkKm: MAX_SENSIBLE_WALK_KM })] })),
+    false,
+  );
+  assert.equal(
+    noStopIsWalkable(
+      facts({ candidates: [cand({ walkKm: MAX_SENSIBLE_WALK_KM + 0.01 })] }),
+    ),
+    true,
+  );
+
+  assert.equal(shortestWalkKm(facts({ candidates: [] })), null);
+  assert.equal(
+    noStopIsWalkable(facts({ candidates: [] })),
+    false,
+    "no candidates is not the same finding as nothing walkable",
+  );
+}
+
+/* ── …and the model is told the same rule ── */
+{
+  const sys = buildBoardingSuggestSystemPrompt({ schoolName: "BHB International" });
+  assert.match(sys, new RegExp(`more than ${MAX_SENSIBLE_WALK_KM} km`));
+  assert.match(sys, /wrong village match will do this/);
 }
 
 console.log("  ✓ boarding suggestion — allow-listed stops, unknowns stay unknown");
