@@ -1551,25 +1551,40 @@ export type RouteSeats =
 /**
  * Seats on the vehicle serving a route.
  *
- * `exceptStudentId` leaves one child out of the count. Without it, changing
- * the stop of a rider already on the bus counts them against their own seat
- * and reports the bus one fuller than it is — which on a full bus refuses a
- * move that frees nothing and takes nothing.
+ * WHO COUNTS AS ABOARD
+ * The same rule `ridersOnRoute` has always used: the assignment's date window
+ * covers the day being asked about. Not "effectiveTo is null" — an amendment
+ * CLOSES the old assignment with a future end date and opens the new one with
+ * a future start, so on the day of the change both rows exist for one child.
+ * Counting open-ended rows only would lose the rider who is still on the bus
+ * until the end of the month; counting every row would seat them twice.
+ *
+ * `exceptStudentId` leaves one child out. Without it, changing the stop of a
+ * rider already on the bus counts them against their own seat and reports the
+ * bus one fuller than it is — which on a full bus refuses a move that frees
+ * nothing and takes nothing.
  */
 export function seatsOnRoute(
   state: TransportState,
   routeId: string,
-  opts?: { exceptStudentId?: string; academicYearCode?: string },
+  opts?: {
+    exceptStudentId?: string;
+    academicYearCode?: string;
+    /** The day to ask about. Defaults to today. */
+    onDate?: string;
+  },
 ): RouteSeats {
   const route = state.routes.find((r) => r.id === routeId);
   const vehicle = route?.vehicleId
     ? state.vehicles.find((v) => v.id === route.vehicleId)
     : state.vehicles.find((v) => v.primaryRouteId === routeId);
 
+  const on = opts?.onDate || todayIso();
   const used = state.assignments.filter(
     (a) =>
       a.routeId === routeId &&
-      a.effectiveTo == null &&
+      a.effectiveFrom <= on &&
+      (!a.effectiveTo || a.effectiveTo >= on) &&
       a.studentId !== opts?.exceptStudentId &&
       (!opts?.academicYearCode || a.academicYearCode === opts.academicYearCode),
   ).length;

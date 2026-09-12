@@ -13,6 +13,7 @@
 
 import assert from "node:assert/strict";
 
+import { rankStopsNearPoint } from "./transportPlanner";
 import {
   describeRouteSeats,
   normalizeVehicle,
@@ -39,6 +40,18 @@ function asg(studentId: string, routeId: string, ay = "2026-27"): TransportAssig
     feeOverrideReason: "",
     boardingSuspended: false,
     createdAt: "2026-04-01T00:00:00.000Z",
+  };
+}
+
+function pinnedStop() {
+  return {
+    id: "st1",
+    name: "Ayar Mod",
+    sequence: 1,
+    distanceKm: 4,
+    geoLat: 25.44,
+    geoLng: 82.95,
+    distanceSource: "google" as const,
   };
 }
 
@@ -148,17 +161,63 @@ function state(
   assert.equal(stranger.known && stranger.full, true);
 }
 
-/* ── Closed assignments and other years do not occupy seats ── */
+/* ── Who is aboard is a DATE WINDOW, not "effectiveTo is null" ── */
 {
-  const past = { ...asg("gone", "r1"), effectiveTo: "2026-08-31" };
+  const ON = "2026-09-12";
+  const ended = { ...asg("gone", "r1"), effectiveTo: "2026-08-31" };
+  // An amendment closes the old row with a FUTURE end date. That child is
+  // still on the bus until then, and an "effectiveTo is null" rule loses them.
+  const leavingLater = { ...asg("leaving", "r1"), effectiveTo: "2026-10-31" };
+  // …and opens the new row with a future start. That row is not a seat yet.
+  const joiningLater = { ...asg("joining", "r1"), effectiveFrom: "2026-11-01" };
   const otherYear = asg("lastyear", "r1", "2025-26");
-  const s = state([{ id: "v1", seatCapacity: 13 }], [asg("s1", "r1"), past, otherYear]);
 
-  const all = seatsOnRoute(s, "r1");
-  assert.equal(all.used, 2, "a closed assignment is off the bus; another year is not");
+  const s = state(
+    [{ id: "v1", seatCapacity: 13 }],
+    [asg("s1", "r1"), ended, leavingLater, joiningLater, otherYear],
+  );
 
-  const thisYear = seatsOnRoute(s, "r1", { academicYearCode: "2026-27" });
-  assert.equal(thisYear.used, 1);
+  const now = seatsOnRoute(s, "r1", { onDate: ON });
+  assert.equal(
+    now.used,
+    3,
+    "s1 + the child leaving in October + last year's row; the ended and the not-yet-started are not aboard",
+  );
+
+  const thisYear = seatsOnRoute(s, "r1", {
+    onDate: ON,
+    academicYearCode: "2026-27",
+  });
+  assert.equal(thisYear.used, 2);
+
+  // In November the picture reverses: the leaver is gone, the joiner aboard.
+  const later = seatsOnRoute(s, "r1", {
+    onDate: "2026-11-15",
+    academicYearCode: "2026-27",
+  });
+  assert.equal(later.used, 2, "s1 + the child who joined on 1 November");
+}
+
+/* ── Both surfaces of the move screen must agree ── */
+{
+  // The picker's rows and the seat line beneath them used to count riders by
+  // different rules, so one screen showed two numbers for the same bus.
+  const riders = Array.from({ length: 6 }, (_, i) => asg(`s${i}`, "r1"));
+  const s = state([{ id: "v1", seatCapacity: 13 }], riders);
+  const line = seatsOnRoute(s, "r1", { exceptStudentId: "s0" });
+  const { ranked } = rankStopsNearPoint(
+    { ...s, routes: [{ ...s.routes[0], stops: [pinnedStop()] }] },
+    { lat: 25.43, lng: 82.94 },
+    { exceptStudentId: "s0" },
+  );
+  assert.equal(line.known, true);
+  if (!line.known) throw new Error("unreachable");
+  assert.equal(ranked.length, 1);
+  assert.equal(
+    ranked[0].seatsLeft,
+    line.left,
+    "the ranked row and the seat line must report the same free seats",
+  );
 }
 
 /* ── A route with no vehicle linked has no capacity, not forty ── */

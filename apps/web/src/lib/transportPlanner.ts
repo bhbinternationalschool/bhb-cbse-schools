@@ -16,6 +16,7 @@ import {
   haversineKm,
   applyServiceMode,
   listActiveRoutes,
+  seatsOnRoute,
   stopHasGeo,
   type StopDistanceSource,
   type TransportServiceMode,
@@ -745,7 +746,13 @@ export type NearestStops = {
 export function rankStopsNearPoint(
   state: TransportState,
   point: { lat: number; lng: number },
-  opts?: { limit?: number; withinKm?: number },
+  opts?: {
+    limit?: number;
+    withinKm?: number;
+    /** The rider being moved, so they are not counted against their own seat. */
+    exceptStudentId?: string;
+    academicYearCode?: string;
+  },
 ): NearestStops {
   const ranked: RankedStop[] = [];
   const unpinned: NearestStops["unpinned"] = [];
@@ -753,12 +760,17 @@ export function rankStopsNearPoint(
   for (const route of listActiveRoutes(state)) {
     const routeLabel = route.busNo || route.code;
     const veh = vehicleForRoute(route, state);
+    // One seat truth. This used to subtract `ridersOnRoute` from the vehicle's
+    // capacity while the move dialog asked `seatsOnRoute`, and the two count
+    // riders differently — so the same bus showed "13 seats" in the picker and
+    // "5 free" in the line below it, on one screen.
+    const seats = seatsOnRoute(state, route.id, {
+      exceptStudentId: opts?.exceptStudentId,
+      academicYearCode: opts?.academicYearCode,
+    });
     // null = the vehicle's seats were never recorded. NOT zero seats: the
     // picker says so rather than labelling every bus "full".
-    const seatsLeft =
-      veh.seatCapacity > 0
-        ? Math.max(0, veh.seatCapacity - ridersOnRoute(state, route.id))
-        : null;
+    const seatsLeft = seats.known ? seats.left : null;
 
     for (const stop of route.stops) {
       if (!stopHasGeo(stop)) {
