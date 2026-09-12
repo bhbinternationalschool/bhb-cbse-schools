@@ -6,9 +6,11 @@
 
 import {
   normalizeStudent,
+  type ClassUpgradeRecord,
   type Household,
   type SisState,
   type SisStudent,
+  type StudentTag,
 } from "@/lib/sis";
 import { sisReadFromDbEnabled } from "@/lib/sisDbConfig";
 import {
@@ -76,7 +78,14 @@ export function mergeSisRemoteIntoState(
         curriculum: curriculumById.get(s.id) ?? s.curriculum ?? null,
       }),
     );
-    return { ...local, version: 1, households, students };
+    const merged = mergeTagsAndUpgrades(local, remote);
+    return {
+      ...local,
+      version: 1,
+      households,
+      students: remapTagIds(students, local.tags ?? [], merged.tags),
+      ...merged,
+    };
   }
 
   // ── Additive merge: local wins, remote fills gaps ──
@@ -100,12 +109,89 @@ export function mergeSisRemoteIntoState(
     }
   }
 
+  const merged = mergeTagsAndUpgrades(local, remote);
   return {
     ...local,
     version: 1,
     households: [...hhMap.values()],
-    students: [...stuMap.values()],
+    students: remapTagIds([...stuMap.values()], local.tags ?? [], merged.tags),
+    ...merged,
   };
+}
+
+/**
+ * Re-point a child's tags at the stored tag row with the same CODE.
+ *
+ * Until 2026-09-12 the tag list was seeded per browser with random ids, so two
+ * machines held different ids for the same six default tags. Now that the
+ * stored list wins, a child tagged on the machine that lost would be left
+ * holding an id nothing can name — and `assignStudentTags` drops ids it cannot
+ * name, so the next edit of that child would delete the tag silently. The code
+ * is the natural key, so remap by it rather than discarding.
+ *
+ * An id already present in the stored list is left alone, which is why this is
+ * safe to run over students that came from the database: their ids are the
+ * stored ones.
+ */
+function remapTagIds(
+  students: SisStudent[],
+  localTags: StudentTag[],
+  nextTags: StudentTag[],
+): SisStudent[] {
+  const codeByOldId = new Map(localTags.map((tag) => [tag.id, tag.code]));
+  const idByCode = new Map(nextTags.map((tag) => [tag.code, tag.id]));
+  const kept = new Set(nextTags.map((tag) => tag.id));
+
+  const rename = new Map<string, string>();
+  for (const [oldId, code] of codeByOldId) {
+    if (kept.has(oldId)) continue;
+    const replacement = idByCode.get(code);
+    if (replacement) rename.set(oldId, replacement);
+  }
+  if (rename.size === 0) return students;
+
+  return students.map((s) => {
+    const ids = s.tagIds ?? [];
+    if (!ids.some((id) => rename.has(id))) return s;
+    return {
+      ...s,
+      tagIds: [...new Set(ids.map((id) => rename.get(id) ?? id))],
+    };
+  });
+}
+
+/**
+ * Tag definitions and the move history, merged.
+ *
+ * Both got their own tables on 2026-09-12, having lived until then in the
+ * localStorage of one machine. The first hydrate after that happens against
+ * EMPTY tables, so a plain "the database is the truth" replace would erase the
+ * only copy of the office's tags before they were ever pushed — the shape of
+ * the 2026-08-21 transport wipe. Hence:
+ *
+ *  - tags: the stored list wins when there is one, otherwise keep what this
+ *    browser holds (and the next save uploads it). A tag is retired with
+ *    `isActive: false`, never deleted, so the stored list is always complete
+ *    and replacing is safe once it exists.
+ *  - classUpgrades: union by id, stored copy winning on collision. History is
+ *    append-only and must never shrink: two browsers can each hold a move the
+ *    other has not seen, and both are true.
+ */
+function mergeTagsAndUpgrades(
+  local: SisState,
+  remote: SisRemoteBundle,
+): Pick<SisState, "tags" | "classUpgrades"> {
+  const tags =
+    (remote.tags ?? []).length > 0 ? remote.tags : (local.tags ?? []);
+
+  const byId = new Map<string, ClassUpgradeRecord>();
+  for (const u of local.classUpgrades ?? []) byId.set(u.id, u);
+  for (const u of remote.classUpgrades ?? []) byId.set(u.id, u);
+  const classUpgrades = [...byId.values()].sort((a, b) =>
+    (b.createdAt || "").localeCompare(a.createdAt || ""),
+  );
+
+  return { tags, classUpgrades };
 }
 
 export async function fetchSisRemote(): Promise<SisRemoteBundle | null> {

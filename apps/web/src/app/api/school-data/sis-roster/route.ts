@@ -53,6 +53,11 @@ export async function GET(req: Request) {
             ? stripEmptyList(bundle.households as unknown as Record<string, unknown>[])
             : bundle.households,
           students: leanOn ? stripEmptyList(students) : students,
+          // Tag definitions and the post-admission move history. Not stripped:
+          // both are small, and `isActive: false` on a retired tag is exactly
+          // the kind of falsy value stripEmptyList is documented not to touch.
+          tags: bundle.tags,
+          classUpgrades: bundle.classUpgrades,
           householdCount: bundle.households.length,
           studentCount: bundle.students.length,
           // Unknown meta is reported as "", not as "now" (see desk-slice route).
@@ -70,7 +75,8 @@ export async function GET(req: Request) {
   }
 }
 
-type RosterPostBody = Pick<SisState, "households" | "students"> & {
+type RosterPostBody = Pick<SisState, "households" | "students"> &
+  Partial<Pick<SisState, "tags" | "classUpgrades">> & {
   /**
    * Ids the user explicitly removed. Deletions have to be stated, not
    * inferred from what is absent in the snapshot — inference is how a
@@ -131,6 +137,10 @@ export async function POST(req: Request) {
   const result = await pushSisToDb({
     households: Array.isArray(body.households) ? body.households : [],
     students: Array.isArray(body.students) ? body.students : [],
+    // An older browser sends neither key; an empty list is upsert-nothing, so
+    // it cannot clear what another browser has already stored.
+    tags: Array.isArray(body.tags) ? body.tags : [],
+    classUpgrades: Array.isArray(body.classUpgrades) ? body.classUpgrades : [],
   });
   if (!result.ok) {
     return NextResponse.json(

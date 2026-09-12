@@ -13,7 +13,12 @@ import {
 
 const META_KEY = "bhb_sis_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
-let pending: Pick<SisState, "households" | "students"> | null = null;
+type SisPushSlice = Pick<
+  SisState,
+  "households" | "students" | "tags" | "classUpgrades"
+>;
+
+let pending: SisPushSlice | null = null;
 
 type SisMeta = {
   updatedAt: string;
@@ -177,7 +182,7 @@ export function peekPendingSisDeletions(): {
 // latest before sending.
 let pushGeneration = 0;
 
-export function scheduleSisDeskSync(state: Pick<SisState, "households" | "students">) {
+export function scheduleSisDeskSync(state: SisPushSlice) {
   if (!sisNormalizedSyncEnabled()) return;
   if (typeof window === "undefined") return;
   pushGeneration += 1;
@@ -198,7 +203,7 @@ export async function flushSisDeskSync(): Promise<void> {
 }
 
 async function pushSisDeskApi(
-  state: Pick<SisState, "households" | "students">,
+  state: SisPushSlice,
   attempt = 1,
   generation = pushGeneration,
 ) {
@@ -210,6 +215,8 @@ async function pushSisDeskApi(
       body: JSON.stringify({
         households: state.households ?? [],
         students: state.students ?? [],
+        tags: state.tags ?? [],
+        classUpgrades: state.classUpgrades ?? [],
         // Stated deletions. Kept in the payload on retry and only cleared
         // once the server confirms — see below.
         deleteStudentIds: [...pendingDeletes.studentIds],
@@ -360,6 +367,8 @@ export async function fetchSisDeskFromApi(): Promise<{
     const body = (await res.json()) as {
       households?: SisState["households"];
       students?: SisState["students"];
+      tags?: SisState["tags"];
+      classUpgrades?: SisState["classUpgrades"];
       updatedAt?: string;
       studentCount?: number;
       householdCount?: number;
@@ -369,6 +378,13 @@ export async function fetchSisDeskFromApi(): Promise<{
       bundle: {
         households: body.households,
         students: body.students,
+        // A server built before these existed sends neither key. An empty list
+        // means "nothing remote" to the merge, which keeps what the browser
+        // holds — the right answer for an older server too.
+        tags: Array.isArray(body.tags) ? body.tags : [],
+        classUpgrades: Array.isArray(body.classUpgrades)
+          ? body.classUpgrades
+          : [],
         householdUpdatedAt: {},
         studentUpdatedAt: {},
       },
@@ -392,6 +408,8 @@ export async function hydrateSisDeskFromDb(preferDb?: boolean): Promise<{
       bundle: {
         households: [],
         students: [],
+        tags: [],
+        classUpgrades: [],
         householdUpdatedAt: {},
         studentUpdatedAt: {},
       },

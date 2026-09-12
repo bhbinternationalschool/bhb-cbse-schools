@@ -909,6 +909,37 @@ export function normalizeStudentTag(
   };
 }
 
+/**
+ * Normalize one class-upgrade record.
+ *
+ * Lives here rather than in classUpgrade.ts because the history now has its own
+ * table (migration 20260912130000) and the server's row reader needs the same
+ * normalizer the desk uses — importing classUpgrade.ts there would pull the
+ * whole desk, and its loadSis/saveSis, into a server module.
+ */
+export function normalizeClassUpgrade(
+  raw: Partial<ClassUpgradeRecord> & { id: string; studentId: string },
+): ClassUpgradeRecord {
+  return {
+    id: raw.id,
+    studentId: raw.studentId,
+    studentName: raw.studentName ?? "",
+    admissionNo: raw.admissionNo ?? "",
+    fromClassId: raw.fromClassId ?? "",
+    fromSectionId: raw.fromSectionId ?? "",
+    toClassId: raw.toClassId ?? "",
+    toSectionId: raw.toSectionId ?? "",
+    fromFeeGroupId: raw.fromFeeGroupId ?? null,
+    toFeeGroupId: raw.toFeeGroupId ?? null,
+    fromStudentType: raw.fromStudentType ?? "",
+    toStudentType: raw.toStudentType ?? raw.fromStudentType ?? "",
+    reason: raw.reason ?? "",
+    effectiveOn: raw.effectiveOn ?? "",
+    createdAt: raw.createdAt ?? new Date().toISOString(),
+    createdBy: raw.createdBy ?? "office",
+  };
+}
+
 function householdAddressKey(
   h: Pick<
     Household,
