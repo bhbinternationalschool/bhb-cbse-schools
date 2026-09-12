@@ -54,12 +54,66 @@ export function isStorageQuotaError(err: unknown): boolean {
  * navigation anyway — before giving up on one of these.
  */
 const PROTECTED_KEYS = new Set(["bhb_masters_v5"]);
+
+/**
+ * Caches that may be dropped to make room, because every one of them
+ * re-downloads from the database on the next read.
+ *
+ * An ALLOWLIST, never "the biggest bhb_* keys". Plenty of keys on this origin
+ * are not caches at all — `bhb_collections_wipe_seen_v1` is the marker whose
+ * loss replayed a one-time wipe signal and deleted nine fee receipts on
+ * 2026-08-26 — so a size-ranked sweep would eventually take one of those.
+ */
 const EVICTABLE_BULK_KEYS = [
   "bhb_admissions_v1",
   "bhb_sis_v1",
   "bhb_homework_v1",
   "bhb_school_comms_v1",
+  // Added 2026-09-13: the transport desk re-hydrates from
+  // transport_desk_slices like the rest, and at 169 assignments it is worth
+  // real space to whichever desk needs it next.
+  "bhb_transport_v2",
 ];
+
+/** Bytes this key currently occupies, 0 when absent or unreadable. */
+function cacheSize(key: string): number {
+  try {
+    return window.localStorage.getItem(key)?.length ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Drop re-hydratable caches until `write` succeeds, biggest first.
+ *
+ * Biggest first so the fewest caches are lost, and one at a time with a retry
+ * between, so freeing 2 MB does not also throw away three small desks that
+ * would have fitted. Returns true when the write got through.
+ */
+function evictUntilItFits(exceptKey: string, write: () => void): boolean {
+  const candidates = EVICTABLE_BULK_KEYS.filter(
+    (k) => k !== exceptKey && !PROTECTED_KEYS.has(k) && cacheSize(k) > 0,
+  ).sort((a, b) => cacheSize(b) - cacheSize(a));
+
+  for (const victim of candidates) {
+    try {
+      window.localStorage.removeItem(victim);
+    } catch {
+      continue;
+    }
+    try {
+      write();
+      console.warn(
+        `[storage] evicted ${victim} to make room; it re-hydrates from the database.`,
+      );
+      return true;
+    } catch {
+      // Still short. Keep going — the next one is the next biggest.
+    }
+  }
+  return false;
+}
 
 export function writeCacheOrInvalidate(key: string, value: string): boolean {
   if (typeof window === "undefined") return false;
@@ -68,28 +122,25 @@ export function writeCacheOrInvalidate(key: string, value: string): boolean {
     return true;
   } catch (err) {
     if (!isStorageQuotaError(err)) throw err;
+
+    // EVERY key gets to make room, not just masters.
+    //
+    // Until 2026-09-13 only `bhb_masters_v5` could evict; every other desk
+    // simply dropped itself. So on a full origin the transport desk could
+    // never cache: it hydrated 169 assignments from the database, failed to
+    // store them, read back an empty cache, showed zero routes and zero
+    // riders — and then pushed that emptiness, which the server guard refused
+    // eight times over. The director's desk sat empty for a day because a
+    // cache could not find 300 KB.
+    if (evictUntilItFits(key, () => window.localStorage.setItem(key, value))) {
+      return true;
+    }
+
     if (PROTECTED_KEYS.has(key)) {
-      // Make room by dropping the big re-hydratable caches, then retry once.
-      for (const bulk of EVICTABLE_BULK_KEYS) {
-        if (bulk === key) continue;
-        try {
-          window.localStorage.removeItem(bulk);
-        } catch {
-          /* ignore */
-        }
-      }
-      try {
-        window.localStorage.setItem(key, value);
-        console.warn(
-          `[storage] ${key} written after evicting bulk caches (quota); they re-hydrate from the database.`,
-        );
-        return true;
-      } catch {
-        // Still no room — leave the previous masters in place rather than
-        // dropping the one cache the whole page resolves through.
-        console.warn(`[storage] ${key} could not be written (quota); previous copy kept.`);
-        return false;
-      }
+      // Nothing left to give — keep the previous masters rather than dropping
+      // the one cache the whole page resolves through.
+      console.warn(`[storage] ${key} could not be written (quota); previous copy kept.`);
+      return false;
     }
     try {
       window.localStorage.removeItem(key);
