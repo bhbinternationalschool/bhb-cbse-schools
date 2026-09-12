@@ -1612,6 +1612,13 @@ export function assignStudentToRoute(input: {
   monthlyFeePaise?: number;
   feeOverrideReason?: string;
   serviceMode?: TransportServiceMode;
+  /**
+   * Runs chosen by hand, when the class-group rule is not what this child
+   * does. A run that is not on the new route is refused rather than stored —
+   * a stray id would leave the rider unresolved on a screen nobody revisits.
+   */
+  pickupShiftId?: string;
+  dropShiftId?: string;
 }):
   | { ok: true; assignment: TransportAssignment }
   | { ok: false; error: string } {
@@ -1625,6 +1632,21 @@ export function assignStudentToRoute(input: {
   }
   if (!input.effectiveFrom) {
     return { ok: false, error: "Effective from date is required" };
+  }
+
+  for (const [key, wanted] of [
+    ["pickup", input.pickupShiftId],
+    ["drop", input.dropShiftId],
+  ] as const) {
+    const id = (wanted || "").trim();
+    if (!id) continue;
+    const shift = route.shifts.find((sh) => sh.id === id);
+    if (!shift || !shift.isActive || shift.direction !== key) {
+      return {
+        ok: false,
+        error: `That ${key === "pickup" ? "pick-up" : "drop"} run is not on ${route.busNo || route.code}`,
+      };
+    }
   }
 
   const hold = checkHold(input.studentId, "HOLD_TRANSPORT");
@@ -1677,6 +1699,8 @@ export function assignStudentToRoute(input: {
     monthlyFeePaise: override,
     feeOverrideReason: input.feeOverrideReason ?? "",
     serviceMode: input.serviceMode ?? "both",
+    pickupShiftId: input.pickupShiftId ?? "",
+    dropShiftId: input.dropShiftId ?? "",
     createdAt: new Date().toISOString(),
   });
 

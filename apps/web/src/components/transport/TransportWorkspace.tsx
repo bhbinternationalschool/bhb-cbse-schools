@@ -56,7 +56,13 @@ import {
   type StudentSearchHit,
 } from "@/lib/fees";
 import { checkHold, type HoldCheck } from "@/lib/holds";
-import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import {
+  DEFAULT_AY,
+  classGroupCodeForName,
+  loadMasters,
+  type ClassGroupCode,
+  type MastersState,
+} from "@/lib/masters";
 import { loadSis, type SisState } from "@/lib/sis";
 import { formatRouteCrew, staffAssignedToRoute } from "@/lib/staffResolve";
 import {
@@ -186,6 +192,7 @@ export function TransportWorkspace() {
   const [rosterEditing, setRosterEditing] = useState<{
     assignment: TransportAssignment;
     studentName: string;
+    classGroupCode: ClassGroupCode | null;
     dues: FeeDueLine[];
   } | null>(null);
   const [holdCheck, setHoldCheck] = useState<HoldCheck | null>(null);
@@ -305,6 +312,7 @@ export function TransportWorkspace() {
     setRosterEditing({
       assignment: asg,
       studentName: rider.fullName,
+      classGroupCode: classGroupOf(student, masters),
       dues,
     });
   }
@@ -697,6 +705,7 @@ export function TransportWorkspace() {
             <TransportAmendDialog
               assignment={rosterEditing.assignment}
               studentName={rosterEditing.studentName}
+              classGroupCode={rosterEditing.classGroupCode}
               academicYearCode={session.academicYearCode}
               state={state}
               dues={rosterEditing.dues}
@@ -954,6 +963,7 @@ function RidersPanel(props: RidersPanelProps) {
   const [amending, setAmending] = useState<{
     assignment: (typeof riders)[number];
     studentName: string;
+    classGroupCode: ClassGroupCode | null;
     dues: FeeDueLine[];
   } | null>(null);
 
@@ -1550,6 +1560,7 @@ function RidersPanel(props: RidersPanelProps) {
                         setAmending({
                           assignment,
                           studentName: student?.fullName ?? "this student",
+                          classGroupCode: classGroupOf(student, masters),
                           dues,
                         });
                       }}
@@ -1637,6 +1648,7 @@ function RidersPanel(props: RidersPanelProps) {
         <TransportAmendDialog
           assignment={amending.assignment}
           studentName={amending.studentName}
+          classGroupCode={amending.classGroupCode}
           academicYearCode={academicYearCode}
           state={state}
           dues={amending.dues}
@@ -1892,4 +1904,21 @@ function PickerGroup({
       <ul className="mt-1 space-y-1">{children}</ul>
     </div>
   );
+}
+
+/**
+ * The class group that decides a child's bus run.
+ *
+ * Returns null when the class is not on the roster rather than falling back to
+ * a group. A guessed group would put the child on a run confidently and
+ * wrongly; null makes the run picker say the class is not known, which is the
+ * thing somebody can actually fix.
+ */
+function classGroupOf(
+  student: { classId?: string } | null | undefined,
+  masters: MastersState | null,
+): ClassGroupCode | null {
+  if (!student?.classId || !masters) return null;
+  const cls = masters.classes.find((c) => c.id === student.classId);
+  return cls?.name ? classGroupCodeForName(cls.name) : null;
 }

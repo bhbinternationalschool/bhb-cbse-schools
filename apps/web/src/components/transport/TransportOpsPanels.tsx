@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { formatInr } from "@/lib/fees";
 import { StopDistanceBackfillCard } from "@/components/transport/StopDistanceBackfillCard";
+import { ShiftCoveragePanel } from "@/components/transport/ShiftCoveragePanel";
 import {
   StopRowsEditor,
   newStopDraft,
@@ -357,6 +358,13 @@ export function RoutesPanel({
             ) : null}
           </div>
         </div>
+
+        <ShiftCoveragePanel
+          state={state}
+          sis={sis}
+          masters={masters}
+          academicYearCode={academicYearCode}
+        />
 
         <StopDistanceBackfillCard
           state={state}
