@@ -100,6 +100,7 @@ SELFTESTS=(
   test:fleet-live
   test:udise-doc-intake
   test:roster-name-case
+  test:review-demo-records
   test:fee-student-search
   test:household-dues-ay
   test:refreshment-chart

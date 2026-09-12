@@ -42,6 +42,7 @@ import {
   type BriefStudentAttendance,
   type DailyBrief,
 } from "@/lib/dailyBrief";
+import { isReviewDemoStudent, reviewDemoHouseholdIds } from "@/lib/reviewDemoRecords";
 
 /** Today in IST — the school's day, whatever the server's clock zone is. */
 export function istToday(nowMs = Date.now()): string {
@@ -237,8 +238,15 @@ async function readStudentAttendance(
   if (!ctx) return empty;
 
   const ay = currentAcademicYearCode(masters);
+  const demoHouseholds = reviewDemoHouseholdIds(sis);
   const active = (sis.students ?? []).filter(
-    (s) => s.status === "active" && (!ay || s.academicYearCode === ay),
+    (s) =>
+      s.status === "active" &&
+      (!ay || s.academicYearCode === ay) &&
+      // The 6 PM brief reports on the school, so it does not count the
+      // Play review family.
+      !isReviewDemoStudent(s) &&
+      !(s.householdId && demoHouseholds.has(s.householdId)),
   );
 
   // Every section that HAS children is a section that should have been
