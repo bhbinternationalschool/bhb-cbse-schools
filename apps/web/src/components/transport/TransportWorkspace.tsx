@@ -730,6 +730,9 @@ export function TransportWorkspace() {
             <RoutesPanel
               state={state}
               vehicles={state.vehicles}
+              masters={masters}
+              sis={sis}
+              academicYearCode={session.academicYearCode}
               {...commonPanelProps}
             />
           ) : null}

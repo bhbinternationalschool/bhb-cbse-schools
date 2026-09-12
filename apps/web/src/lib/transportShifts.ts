@@ -23,7 +23,11 @@
  * wrong village. Every caller surfaces those; none of them guesses.
  */
 
-import { CLASS_GROUPS, type ClassGroupCode } from "@/lib/masters";
+import {
+  CLASS_GROUPS,
+  classGroupCodeForName,
+  type ClassGroupCode,
+} from "@/lib/masters";
 import {
   resolveSchoolTiming,
   type SchoolTimingConfig,
@@ -556,4 +560,51 @@ export function suggestShiftsFromTiming(input: {
   });
 
   return out;
+}
+
+/* ─── Joining the desk's own data to the rules above ───────── */
+
+/**
+ * The riders of one route, in the shape the rules need.
+ *
+ * The class group comes from the student's class. A child whose class is not
+ * on the roster gets `groupCode: null` rather than a guess — the rules then
+ * report them as unresolved, which is the honest answer and the one that gets
+ * the record fixed.
+ */
+export function buildShiftRiders(input: {
+  assignments: {
+    studentId: string;
+    routeId: string;
+    academicYearCode: string;
+    effectiveTo: string | null;
+    pickupShiftId?: string;
+    dropShiftId?: string;
+  }[];
+  students: { id: string; fullName: string; classId: string }[];
+  classes: { id: string; name: string }[];
+  academicYearCode: string;
+  routeId?: string;
+}): ShiftRiderInput[] {
+  const classNameById = new Map(input.classes.map((c) => [c.id, c.name]));
+  const studentById = new Map(input.students.map((s) => [s.id, s]));
+
+  return input.assignments
+    .filter(
+      (a) =>
+        a.effectiveTo == null &&
+        a.academicYearCode === input.academicYearCode &&
+        (!input.routeId || a.routeId === input.routeId),
+    )
+    .map((a) => {
+      const st = studentById.get(a.studentId);
+      const className = st ? classNameById.get(st.classId) : undefined;
+      return {
+        studentId: a.studentId,
+        studentName: st?.fullName || a.studentId,
+        groupCode: className ? classGroupCodeForName(className) : null,
+        pickupShiftId: a.pickupShiftId,
+        dropShiftId: a.dropShiftId,
+      };
+    });
 }

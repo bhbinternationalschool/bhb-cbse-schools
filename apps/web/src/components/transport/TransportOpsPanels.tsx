@@ -8,7 +8,17 @@ import {
   newStopDraft,
   type StopDraft,
 } from "@/components/transport/StopRowsEditor";
-import type { MastersState } from "@/lib/masters";
+import {
+  RouteShiftsEditor,
+  describeRouteShifts,
+  shiftDraftsFromRoute,
+  type ShiftDraft,
+} from "@/components/transport/RouteShiftsEditor";
+import {
+  classGroupCodeForName,
+  type ClassGroupCode,
+  type MastersState,
+} from "@/lib/masters";
 import { listTransportCrew } from "@/lib/transportPlanner";
 import type { SisState } from "@/lib/sis";
 import {
@@ -20,6 +30,7 @@ import {
   recordFuelRefill,
   saveFeePolicy,
   setRouteRoundTrip,
+  setRouteShifts,
   setRouteStops,
   upsertFuelStockLocation,
   upsertTransportRoute,
@@ -34,12 +45,20 @@ import {
 export function RoutesPanel({
   state,
   vehicles,
+  masters,
+  sis,
+  academicYearCode,
   onRefresh,
   onFlash,
   onError,
 }: {
   state: TransportState;
   vehicles: FleetVehicle[];
+  /** School timings and classes — runs are drafted from the real dismissals. */
+  masters: MastersState | null;
+  /** The roster, to know which class groups are actually on each bus. */
+  sis: SisState | null;
+  academicYearCode: string;
   onRefresh: () => void;
   onFlash: (m: string) => void;
   onError: (m: string) => void;
@@ -51,6 +70,7 @@ export function RoutesPanel({
   const [vehicleId, setVehicleId] = useState("");
   const [fee, setFee] = useState("");
   const [stopRows, setStopRows] = useState<StopDraft[]>([]);
+  const [shiftRows, setShiftRows] = useState<ShiftDraft[]>([]);
   const [measuredRoundTrip, setMeasuredRoundTrip] = useState<{
     minutes: number;
     km: number;
@@ -60,6 +80,31 @@ export function RoutesPanel({
   useEffect(() => {
     setPolicy(state.feePolicy);
   }, [state.feePolicy]);
+
+  /**
+   * The class groups actually on the bus being edited.
+   *
+   * This is what runs are drafted from, so a route carrying only Primary and
+   * Middle is never handed a Pre-Primary run it will never use. A child whose
+   * class is not on the roster contributes no group rather than a guessed one.
+   */
+  const groupsOnEditedRoute = useMemo<ClassGroupCode[]>(() => {
+    if (!editId || !sis || !masters) return [];
+    const classNameById = new Map(masters.classes.map((c) => [c.id, c.name]));
+    const studentById = new Map(sis.students.map((st) => [st.id, st]));
+    const out: ClassGroupCode[] = [];
+    for (const a of state.assignments) {
+      if (a.routeId !== editId) continue;
+      if (a.effectiveTo != null) continue;
+      if (a.academicYearCode !== academicYearCode) continue;
+      const st = studentById.get(a.studentId);
+      const className = st ? classNameById.get(st.classId) : undefined;
+      if (!className) continue;
+      const code = classGroupCodeForName(className);
+      if (!out.includes(code)) out.push(code);
+    }
+    return out;
+  }, [editId, sis, masters, state.assignments, academicYearCode]);
 
   function loadRoute(r: TransportRoute) {
     setEditId(r.id);
@@ -81,6 +126,7 @@ export function RoutesPanel({
         monthlyFeePaise: s.monthlyFeePaise,
       })),
     );
+    setShiftRows(shiftDraftsFromRoute(r.shifts ?? []));
   }
 
   function clearForm() {
@@ -91,6 +137,7 @@ export function RoutesPanel({
     setVehicleId("");
     setFee("");
     setStopRows([]);
+    setShiftRows([]);
     setMeasuredRoundTrip(null);
   }
 
@@ -140,9 +187,40 @@ export function RoutesPanel({
     if (stopLines.length) {
       setRouteStops(r.route.id, stopLines);
     }
+
+    // Saved unconditionally, including as an empty list: clearing every run is
+    // a real decision ("this bus goes back to one journey each way") and must
+    // be savable. setRouteShifts reports the children who were pinned by hand
+    // to a run that has just gone, because the alternative to telling somebody
+    // is a child whose afternoon run silently stops existing.
+    const sh = setRouteShifts(
+      r.route.id,
+      shiftRows
+        .filter((row) => row.name.trim() || row.departTime)
+        .map((row) => ({
+          id: row.id || undefined,
+          name: row.name.trim(),
+          direction: row.direction,
+          departTime: row.departTime,
+          classGroups: row.classGroups,
+          weekdays: row.weekdays,
+          isActive: true,
+        })),
+    );
+    if (!sh.ok) {
+      onError(sh.error);
+      return;
+    }
+
     clearForm();
     onRefresh();
-    onFlash(editId ? "Route updated" : "Route added");
+    onFlash(
+      sh.orphanedRiders > 0
+        ? `${editId ? "Route updated" : "Route added"} — ${sh.orphanedRiders} child${sh.orphanedRiders === 1 ? " was" : "ren were"} placed by hand on a run that no longer exists. Give them a run on the Riders tab.`
+        : editId
+          ? "Route updated"
+          : "Route added",
+    );
   }
 
   return (
@@ -235,6 +313,28 @@ export function RoutesPanel({
                 bands={
                   policy.rateMode === "band_then_formula" ? policy.bands : undefined
                 }
+              />
+            </div>
+
+            <div className="text-sm sm:col-span-2">
+              <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                Runs — the same bus goes out more than once when dismissal is
+                staggered. A child rides the run that carries their class, so
+                these do not have to be set per child.
+              </span>
+              <RouteShiftsEditor
+                rows={shiftRows}
+                onChange={setShiftRows}
+                timing={masters?.schoolTiming ?? null}
+                groupsRiding={groupsOnEditedRoute}
+                roundTripMinutes={
+                  measuredRoundTrip?.minutes ??
+                  (editId
+                    ? (state.routes.find((r) => r.id === editId)
+                        ?.roundTripMinutes ?? 0)
+                    : 0)
+                }
+                onNote={onFlash}
               />
             </div>
           </div>
@@ -708,6 +808,9 @@ export function RoutesPanel({
                   <div className="text-[10px] text-[var(--muted)]">
                     {r.busNo} · {formatInr(r.monthlyFeePaise)}/mo ·{" "}
                     {r.stops.length} stops
+                  </div>
+                  <div className="text-[10px] text-[var(--muted)]">
+                    {describeRouteShifts(r.shifts ?? [])}
                   </div>
                 </div>
                 <div className="flex gap-2">

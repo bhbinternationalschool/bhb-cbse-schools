@@ -1512,6 +1512,94 @@ export function setRouteStops(
   return { ok: true, route: updated };
 }
 
+/* ─── Shifts ───────────────────────────────────────────────── */
+
+/**
+ * Replace a route's timed runs.
+ *
+ * Removing a run does NOT quietly move the children pinned to it — see
+ * `resolveRiderShift`, which reports them as unresolved rather than reverting
+ * them to the class rule. So this counts them and hands the number back, for
+ * the screen to say "3 children are placed on this run by hand" BEFORE the
+ * clerk saves rather than after.
+ */
+export function setRouteShifts(
+  routeId: string,
+  shifts: Partial<TransportShift>[],
+):
+  | { ok: true; route: TransportRoute; orphanedRiders: number }
+  | { ok: false; error: string } {
+  const state = loadTransport();
+  const route = state.routes.find((r) => r.id === routeId);
+  if (!route) return { ok: false, error: "Route not found" };
+
+  const next = shifts.map(normalizeShift);
+  const keptIds = new Set(next.map((s) => s.id));
+
+  const orphanedRiders = state.assignments.filter(
+    (a) =>
+      a.routeId === routeId &&
+      a.effectiveTo == null &&
+      ((a.pickupShiftId && !keptIds.has(a.pickupShiftId)) ||
+        (a.dropShiftId && !keptIds.has(a.dropShiftId))),
+  ).length;
+
+  const updated = { ...route, shifts: next };
+  saveTransport({
+    ...state,
+    routes: state.routes.map((r) => (r.id === routeId ? updated : r)),
+  });
+  return { ok: true, route: updated, orphanedRiders };
+}
+
+/**
+ * Pin one rider to a run by hand, or hand them back to the class rule.
+ *
+ * Pass "" to clear the override — the child then follows their class group
+ * again, which is what should happen when the reason for the exception ends.
+ * A run on a different route is refused: the rider's route decides which runs
+ * exist for them, and accepting a stray id would put a child on a bus they
+ * are not assigned to.
+ */
+export function setAssignmentShift(
+  assignmentId: string,
+  direction: TransportShiftDirection,
+  shiftId: string,
+): { ok: true } | { ok: false; error: string } {
+  const state = loadTransport();
+  const target = state.assignments.find(
+    (a) => a.id === assignmentId && a.effectiveTo == null,
+  );
+  if (!target) return { ok: false, error: "No live assignment found" };
+
+  const wanted = (shiftId || "").trim();
+  if (wanted) {
+    const route = state.routes.find((r) => r.id === target.routeId);
+    const shift = route?.shifts.find((s) => s.id === wanted);
+    if (!shift) {
+      return { ok: false, error: "That run is not on this child's route" };
+    }
+    if (!shift.isActive) {
+      return { ok: false, error: `${shift.name} is not running` };
+    }
+    if (shift.direction !== direction) {
+      return {
+        ok: false,
+        error: `${shift.name} is a ${shift.direction === "pickup" ? "pick-up" : "drop"} run`,
+      };
+    }
+  }
+
+  const key = direction === "pickup" ? "pickupShiftId" : "dropShiftId";
+  saveTransport({
+    ...state,
+    assignments: state.assignments.map((a) =>
+      a.id === assignmentId ? { ...a, [key]: wanted } : a,
+    ),
+  });
+  return { ok: true };
+}
+
 /* ─── Assignments ──────────────────────────────────────────── */
 
 export function assignStudentToRoute(input: {
