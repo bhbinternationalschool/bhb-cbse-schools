@@ -139,6 +139,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:sis-contacts
 
+      - name: Test — every student and household field survives the DB round trip
+        working-directory: apps/web
+        run: npm run test:sis-round-trip
+
       - name: Test — a partial sync can never wipe the roster
         working-directory: apps/web
         run: npm run test:sis-prune

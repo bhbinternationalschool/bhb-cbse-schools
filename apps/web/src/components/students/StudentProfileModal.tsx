@@ -373,6 +373,16 @@ export function StudentProfileModal({
               <Section title="Parents & guardian">
                 <Field label="Father" value={student.fatherName || "—"} />
                 <Field label="Father mobile" value={student.fatherMobile || "—"} />
+                {student.fatherAadhaarNumber || student.fatherAadhaarLast4 ? (
+                  <Field
+                    label="Father Aadhaar"
+                    value={displayAadhaar({
+                      number: student.fatherAadhaarNumber,
+                      last4: student.fatherAadhaarLast4,
+                      verification: student.fatherAadhaarVerification,
+                    })}
+                  />
+                ) : null}
                 {student.fatherOccupation || student.fatherQualification ? (
                   <Field
                     label="Father work / qualification"
@@ -383,6 +393,16 @@ export function StudentProfileModal({
                 ) : null}
                 <Field label="Mother" value={student.motherName || "—"} />
                 <Field label="Mother mobile" value={student.motherMobile || "—"} />
+                {student.motherAadhaarNumber || student.motherAadhaarLast4 ? (
+                  <Field
+                    label="Mother Aadhaar"
+                    value={displayAadhaar({
+                      number: student.motherAadhaarNumber,
+                      last4: student.motherAadhaarLast4,
+                      verification: student.motherAadhaarVerification,
+                    })}
+                  />
+                ) : null}
                 {student.motherOccupation || student.motherQualification ? (
                   <Field
                     label="Mother work / qualification"

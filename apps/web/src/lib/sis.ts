@@ -4,7 +4,7 @@
  */
 
 import { activeSessionCode } from "@/lib/sessionWriteGuard";
-import type { PhotoConsent } from "@/lib/photoConsent";
+import { normalizePhotoConsent, type PhotoConsent } from "@/lib/photoConsent";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { stripEmptyDocsList, stripEmptyList } from "@/lib/wirePayload";
@@ -1003,6 +1003,10 @@ export function normalizeHousehold(h: Partial<Household> & { id: string }): Hous
       typeof h.guardianPhotoUrl === "string" ? h.guardianPhotoUrl : "",
     preferredLanguage: normalizeHouseholdLanguage(h.preferredLanguage),
     channelPreference: normalizeHouseholdChannel(h.channelPreference),
+    // The family's own answer about photographs. Dropped here until
+    // 2026-09-12, which silently turned every "granted" into "never asked"
+    // the moment a lead was enrolled — the website reads this household.
+    photoConsent: normalizePhotoConsent(h.photoConsent),
     quietHoursStart: normalizeQuietTime(h.quietHoursStart),
     quietHoursEnd: normalizeQuietTime(h.quietHoursEnd),
     revisionAt: typeof h.revisionAt === "string" ? h.revisionAt : "",

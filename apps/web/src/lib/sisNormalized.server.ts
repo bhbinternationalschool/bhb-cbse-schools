@@ -20,6 +20,7 @@ import {
 import { sisDualWriteDbEnabled } from "@/lib/sisDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
+import { normalizePhotoConsent } from "@/lib/photoConsent";
 
 export type SisRemoteBundle = {
   households: Household[];
@@ -35,7 +36,7 @@ export type SisSyncMeta = {
   updatedAt: string;
 };
 
-type HouseholdRow = {
+export type HouseholdRow = {
   id: string;
   code: string | null;
   guardian_name: string | null;
@@ -61,6 +62,8 @@ type HouseholdRow = {
   geo_source?: string | null;
   geo_confidence?: string | null;
   geo_address_key?: string | null;
+  photo_consent?: string | null;
+  guardian_photo_url?: string | null;
   updated_at: string;
 };
 
@@ -140,7 +143,17 @@ function photoForRemote(photoUrl: string): string {
   return photoUrl;
 }
 
-function rowToHousehold(row: HouseholdRow): Household {
+/** The profile bag with oversized inline images left out. */
+function profileForRemote(bag: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...bag };
+  for (const key of ["fatherPhotoUrl", "motherPhotoUrl"] as const) {
+    const v = out[key];
+    if (typeof v === "string" && !photoForRemote(v)) delete out[key];
+  }
+  return out;
+}
+
+export function rowToHousehold(row: HouseholdRow): Household {
   return normalizeHousehold({
     // Optimistic-locking token: the version this record was read at.
     revisionAt: row.updated_at,
@@ -161,6 +174,8 @@ function rowToHousehold(row: HouseholdRow): Household {
     channelPreference: row.channel_preference ?? "",
     quietHoursStart: row.quiet_hours_start ?? "",
     quietHoursEnd: row.quiet_hours_end ?? "",
+    photoConsent: normalizePhotoConsent(row.photo_consent),
+    guardianPhotoUrl: row.guardian_photo_url ?? "",
     // Geo is optional throughout: a household with no pin must come back with
     // geoLat undefined, not 0, or every un-geocoded family lands off the
     // coast of Africa and the nearest-stop maths quietly answers for them.
@@ -232,7 +247,8 @@ export function rowToStudent(row: StudentRow): SisStudent {
   });
 }
 
-function householdToRow(h: Household, tenantId: string, now: string) {
+/** One household as a sis_households row. Exported for the same round-trip test. */
+export function householdToRow(h: Household, tenantId: string, now: string) {
   return {
     id: h.id,
     tenant_id: tenantId,
@@ -264,11 +280,21 @@ function householdToRow(h: Household, tenantId: string, now: string) {
     geo_source: h.geoSource ?? null,
     geo_confidence: h.geoConfidence ?? null,
     geo_address_key: h.geoAddressKey ?? null,
+    // "" is the family's real answer (never asked) and must be stored as such,
+    // not left null-and-ambiguous.
+    photo_consent: h.photoConsent ?? "",
+    guardian_photo_url: photoForRemote(h.guardianPhotoUrl ?? ""),
     updated_at: now,
   };
 }
 
-function studentToRow(s: SisStudent, tenantId: string, now: string) {
+/**
+ * One student as a sis_students row. Exported for `sisRoundTrip.selftest`,
+ * which fills every SisStudent field and asserts rowToStudent gives it back —
+ * the check that would have caught the 52 fields this function silently
+ * dropped before 2026-09-06.
+ */
+export function studentToRow(s: SisStudent, tenantId: string, now: string) {
   const joined =
     s.joinedOn && /^\d{4}-\d{2}-\d{2}/.test(s.joinedOn) ? s.joinedOn : null;
   const dob = s.dob && /^\d{4}-\d{2}-\d{2}/.test(s.dob) ? s.dob : null;
@@ -320,7 +346,11 @@ function studentToRow(s: SisStudent, tenantId: string, now: string) {
     // Everything SisStudent carries that has no column of its own — full
     // Aadhaar numbers, verification, UDISE+ flags, address, bank, health.
     // Dropped silently before 2026-09-06 (see the migration of that date).
-    profile: studentProfileExtras(s),
+    // The two parent photographs can arrive as data URLs from the bulk photo
+    // import, so they get the same size rule as photo_url: a big one is left
+    // out of the row rather than pushed into jsonb, where 700 of them would
+    // make the roster payload unmanageable.
+    profile: profileForRemote(studentProfileExtras(s)),
     updated_at: now,
   };
 }
