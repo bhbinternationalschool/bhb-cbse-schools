@@ -29,6 +29,7 @@ import type { MastersState } from "@/lib/masters";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type Mode = "policy" | "ops" | "full";
 
@@ -262,6 +263,20 @@ export function IncrementPanel({ mode = "full" }: { mode?: Mode }) {
       );
     return selected.lines.filter((l) => l.status === "skipped");
   }, [selected, filter]);
+
+  // Mode and Value hold inputs while the run is a draft, so they are not sort handles.
+  const incSort = useTableSort(
+    visibleLines,
+    {
+      staff: (l) => l.empCode,
+      stream: (l) => l.stream,
+      oldBasic: (l) => l.oldBasic,
+      newBasic: (l) => l.newBasic,
+      status: (l) => l.status,
+    },
+    "staff",
+    "asc",
+  );
 
   const tally = useMemo(() => {
     if (!selected) return null;
@@ -769,17 +784,17 @@ export function IncrementPanel({ mode = "full" }: { mode?: Mode }) {
                     <ErpTable className="text-xs">
                       <ErpTableHead>
                         <tr>
-                          <th className="py-2 pr-2 font-semibold">Staff</th>
-                          <th className="py-2 pr-2 font-semibold">Stream</th>
-                          <th className="py-2 pr-2 font-semibold">Old basic</th>
+                          <ErpSortTh sort={incSort} field="staff" className="py-2 pr-2 font-semibold">Staff</ErpSortTh>
+                          <ErpSortTh sort={incSort} field="stream" className="py-2 pr-2 font-semibold">Stream</ErpSortTh>
+                          <ErpSortTh sort={incSort} field="oldBasic" align="right" className="py-2 pr-2 font-semibold">Old basic</ErpSortTh>
                           <th className="py-2 pr-2 font-semibold">Mode</th>
                           <th className="py-2 pr-2 font-semibold">Value</th>
-                          <th className="py-2 pr-2 font-semibold">New basic</th>
-                          <th className="py-2 font-semibold">Status</th>
+                          <ErpSortTh sort={incSort} field="newBasic" align="right" className="py-2 pr-2 font-semibold">New basic</ErpSortTh>
+                          <ErpSortTh sort={incSort} field="status" className="py-2 font-semibold">Status</ErpSortTh>
                         </tr>
                       </ErpTableHead>
                       <ErpTableBody>
-                        {visibleLines.map((l) => (
+                        {incSort.rows.map((l) => (
                           <tr key={l.staffId}>
                             <td className="py-2 pr-2">
                               <span className="font-semibold text-[var(--brand-deep)]">

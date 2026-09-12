@@ -45,6 +45,7 @@ import {
   ErpTableShell,
 } from "@/components/ui/erp-roster";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type FilterGap = "all" | UdiseGapCode | "due" | "call" | "unregistered";
 type ViewMode = "worklist" | "call" | "unregistered" | "facts";
@@ -290,6 +291,17 @@ export function UdiseComplianceWorkspace({
     return list.filter((r) => matchesUdiseQuery(r.student, query));
   }, [rows, filter, query]);
 
+  // The gap columns hold lists and call buttons; name and class are the handles.
+  const udiseSort = useTableSort(
+    visible,
+    {
+      student: (row) => row.student.fullName,
+      klass: (row) => row.classLabel,
+    },
+    "student",
+    "asc",
+  );
+
   const callList = useMemo(() => {
     const base =
       filter === "due"
@@ -305,6 +317,18 @@ export function UdiseComplianceWorkspace({
   const visibleUnregistered = useMemo(
     () => unregistered.filter((r) => matchesUdiseQuery(r.student, query)),
     [unregistered, query],
+  );
+
+  // Sorting by Reason groups the children blocked for the same cause.
+  const unregSort = useTableSort(
+    visibleUnregistered,
+    {
+      student: (row) => row.student.fullName,
+      klass: (row) => row.classLabel,
+      reason: (row) => row.reason,
+    },
+    "student",
+    "asc",
   );
 
   function flash(msg: string) {
@@ -989,16 +1013,16 @@ export function UdiseComplianceWorkspace({
                 <ErpTableHead>
                   <tr>
                     <th className="px-2 py-2 font-medium">#</th>
-                    <th className="px-2 py-2 font-medium">Student</th>
-                    <th className="px-2 py-2 font-medium">Class</th>
+                    <ErpSortTh sort={udiseSort} field="student" className="px-2 py-2 font-medium">Student</ErpSortTh>
+                    <ErpSortTh sort={unregSort} field="klass" className="px-2 py-2 font-medium">Class</ErpSortTh>
                     <th className="px-2 py-2 font-medium">Aadhaar</th>
-                    <th className="px-2 py-2 font-medium">Reason</th>
+                    <ErpSortTh sort={unregSort} field="reason" className="px-2 py-2 font-medium">Reason</ErpSortTh>
                     <th className="px-2 py-2 font-medium">Parents</th>
                     <th className="px-2 py-2 font-medium">Call</th>
                   </tr>
                 </ErpTableHead>
                 <ErpTableBody hoverable>
-                  {visibleUnregistered.map((row, i) => (
+                  {unregSort.rows.map((row, i) => (
                     <tr key={row.student.id} className="align-top">
                       <td className="px-2 py-2 text-[var(--muted)]">{i + 1}</td>
                       <td className="px-2 py-2">
@@ -1173,8 +1197,8 @@ export function UdiseComplianceWorkspace({
             <ErpTableHead>
               <tr>
                 <th className="px-2 py-2 font-medium">Priority</th>
-                <th className="px-2 py-2 font-medium">Student</th>
-                <th className="px-2 py-2 font-medium">Class / UDISE+</th>
+                <ErpSortTh sort={unregSort} field="student" className="px-2 py-2 font-medium">Student</ErpSortTh>
+                <ErpSortTh sort={udiseSort} field="klass" className="px-2 py-2 font-medium">Class / UDISE+</ErpSortTh>
                 <th className="px-2 py-2 font-medium">Missing</th>
                 <th className="px-2 py-2 font-medium">Aadhaar / validation</th>
                 <th className="px-2 py-2 font-medium">Parents</th>
@@ -1183,7 +1207,7 @@ export function UdiseComplianceWorkspace({
               </tr>
             </ErpTableHead>
             <ErpTableBody hoverable>
-              {visible.map((row) => {
+              {udiseSort.rows.map((row) => {
                 const mbuAlert = row.missing.includes("mbu_age_below_class");
                 return (
                 <tr

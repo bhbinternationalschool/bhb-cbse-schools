@@ -26,6 +26,7 @@ import {
   ErpTableShell,
 } from "@/components/ui/erp-roster";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 export function TallySyncPanel({
   academicYearCode,
@@ -65,6 +66,20 @@ export function TallySyncPanel({
     void tick;
     return listTallySync(25);
   }, [tick]);
+
+  // Export history, newest first; the Dr/Cr column carries two figures so it is not a sort handle.
+  const exportSort = useTableSort(
+    history,
+    {
+      when: (r) => r.exportedAt,
+      month: (r) => r.month,
+      voucher: (r) => r.voucherNo,
+      format: (r) => r.format,
+      by: (r) => r.exportedBy,
+    },
+    "when",
+    "desc",
+  );
 
   function flash(msg: string, isErr = false) {
     if (isErr) {
@@ -328,16 +343,16 @@ export function TallySyncPanel({
           <ErpTable className="text-xs">
             <ErpTableHead>
               <tr>
-                <th className="py-2 pr-2 font-semibold">When</th>
-                <th className="py-2 pr-2 font-semibold">Month</th>
-                <th className="py-2 pr-2 font-semibold">Voucher</th>
-                <th className="py-2 pr-2 font-semibold">Format</th>
+                <ErpSortTh sort={exportSort} field="when" className="py-2 pr-2 font-semibold">When</ErpSortTh>
+                <ErpSortTh sort={exportSort} field="month" className="py-2 pr-2 font-semibold">Month</ErpSortTh>
+                <ErpSortTh sort={exportSort} field="voucher" className="py-2 pr-2 font-semibold">Voucher</ErpSortTh>
+                <ErpSortTh sort={exportSort} field="format" className="py-2 pr-2 font-semibold">Format</ErpSortTh>
                 <th className="py-2 pr-2 font-semibold">Dr / Cr</th>
-                <th className="py-2 font-semibold">By</th>
+                <ErpSortTh sort={exportSort} field="by" className="py-2 font-semibold">By</ErpSortTh>
               </tr>
             </ErpTableHead>
             <ErpTableBody>
-              {history.map((r) => (
+              {exportSort.rows.map((r) => (
                 <tr key={r.id}>
                   <td className="py-2 pr-2 text-[var(--muted)]">
                     {new Date(r.exportedAt).toLocaleString()}

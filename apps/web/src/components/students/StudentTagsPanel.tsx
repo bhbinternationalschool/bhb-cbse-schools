@@ -18,6 +18,7 @@ import {
   ErpTableShell,
 } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 export function StudentTagsPanel({
   tick = 0,
@@ -74,6 +75,17 @@ export function StudentTagsPanel({
       .sort((a, b) => a.fullName.localeCompare(b.fullName))
       .slice(0, 80);
   }, [sis, masters, classId, query]);
+
+  // Tag assignment is a control, not a value, so only name and class sort.
+  const tagSort = useTableSort(
+    students,
+    {
+      student: (s) => s.fullName,
+      klass: (s) => masters?.classes.find((c) => c.id === s.classId)?.name ?? "",
+    },
+    "student",
+    "asc",
+  );
 
   function flash(msg: string) {
     setNotice(msg);
@@ -246,14 +258,14 @@ export function StudentTagsPanel({
         <ErpTable>
           <ErpTableHead>
             <tr>
-              <th className="px-3 py-2 font-semibold">Student</th>
-              <th className="px-3 py-2 font-semibold">Class</th>
+              <ErpSortTh sort={tagSort} field="student" className="px-3 py-2 font-semibold">Student</ErpSortTh>
+              <ErpSortTh sort={tagSort} field="klass" className="px-3 py-2 font-semibold">Class</ErpSortTh>
               <th className="px-3 py-2 font-semibold">Assign tags</th>
               <th className="w-10 px-2 py-2" aria-label="Actions" />
             </tr>
           </ErpTableHead>
           <ErpTableBody>
-            {students.map((s) => {
+            {tagSort.rows.map((s) => {
               const cls =
                 masters.classes.find((c) => c.id === s.classId)?.name ?? "—";
               const sec =
