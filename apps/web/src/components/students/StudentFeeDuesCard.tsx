@@ -1,5 +1,12 @@
 "use client";
 
+// ratchet-allow: raw_table — a detail table inside one child's record, see
+// StudentAttendanceCard: two compact card tables, not a roster.
+// ratchet-allow: grids_without_row_menu — what this child still owes, head by
+// head, so the clerk at the gate can answer "kitna baaki hai?" without leaving
+// the record. Collecting is the fee counter's job and the card links to it;
+// a menu on a due line would offer an action this screen must not take.
+
 /**
  * What this child still owes, on the child's own page.
  *

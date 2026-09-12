@@ -1,5 +1,9 @@
 "use client";
 
+// ratchet-allow: raw_table — cost projection inside MastersTableCard, which is
+// the masters desk's own card shell: rows are computed totals per month and per
+// template, not records. Nesting ErpTableShell inside it would double the card.
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { waPanelErrorText } from "@/lib/waPanelAccess";
 import {

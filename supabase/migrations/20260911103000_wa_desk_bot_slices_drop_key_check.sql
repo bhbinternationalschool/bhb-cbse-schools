@@ -1,3 +1,11 @@
+-- Renamed 2026-09-12 from 20260911100000: that prefix was already taken by
+-- 20260911100000_sis_households_geo.sql, and the prefix IS the migration
+-- version — Supabase keys schema_migrations on it, so on a fresh apply one of
+-- the pair can be recorded as already-run and skipped, and the order between
+-- them is arbitrary either way. The two are independent (household geocodes vs
+-- the bot's slice table), so moving this one changes nothing about what either
+-- does. Both are already applied to production under their own generated
+-- versions; the filename is what a fresh apply and the local rehearsal read.
 -- The bot store's slice table enumerated its allowed keys in a CHECK. The
 -- list lives in code (WA_BOT_SLICE_KEYS) and the check lagged it twice:
 -- 'complaints' on 2026-09-04 and 'tutor' on 2026-09-11. Each time the
