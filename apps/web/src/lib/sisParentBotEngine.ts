@@ -443,6 +443,30 @@ export function composeSisClaimsPaidReply(hindi: boolean): string {
     : "Sorry 🙏 If you have already paid, please excuse this reminder.\n\nWe will *re-check our records* and get back to you. To help us find it quickly, please share the *receipt number* or the *payment date / a screenshot*.";
 }
 
+/**
+ * Did the parent actually answer "how much and by when"?
+ *
+ * On 11 Sep 2026 two families answered the question with something else —
+ * "Hindi" (they were answering the language menu appended below it) and
+ * "Aanjli mam ko" (they wanted a person). Both were recorded as promises
+ * reading "amount not given, date not given", which tells the office
+ * nothing, and worse: recording them closed the question, so when one
+ * parent sent the real answer thirty seconds later ("1500 dina") the bot
+ * had stopped listening and replied "I don't have that information here".
+ *
+ * A promise with no amount, no "full" and no date is not an answer.
+ */
+export function promiseIsEmpty(p: SisPromiseToPay): boolean {
+  return p.amountPaise == null && !p.full && !p.byDate;
+}
+
+/** Ask again, shorter, when the reply carried neither a figure nor a date. */
+export function composeSisPromiseUnclear(hindi: boolean): string {
+  return hindi
+    ? "माफ़ कीजिए, समझ नहीं पाया 🙏\n\nकृपया केवल *राशि* और *तारीख* लिखें — जैसे _2000 15 तारीख तक_ या _पूरा अगले सोमवार_।\n\nकिसी से बात करनी हो तो *HUMAN* लिखें।"
+    : "Sorry, I did not catch that 🙏\n\nPlease reply with just the *amount* and the *date* — for example _2000 by the 15th_ or _full amount next Monday_.\n\nTo speak to someone, reply *HUMAN*.";
+}
+
 /** One line for the office thread: what was promised, machine-readable enough to act on. */
 export function promiseSummaryForOffice(p: SisPromiseToPay): string {
   const parts = [p.amountPaise != null ? formatInr(p.amountPaise) : p.full ? "full amount" : "amount not given", p.byDate ? `by ${p.byDate}` : "date not given"];

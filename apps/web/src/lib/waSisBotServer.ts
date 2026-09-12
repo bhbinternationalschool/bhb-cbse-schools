@@ -48,6 +48,8 @@ import {
   composeSisPromiseRecorded,
   composeSisClaimsPaidReply,
   promiseSummaryForOffice,
+  promiseIsEmpty,
+  composeSisPromiseUnclear,
 } from "@/lib/sisParentBotEngine";
 import { attachRazorpayToPaymentLink } from "@/lib/razorpay.server";
 import {
@@ -104,6 +106,8 @@ export type WaSisBotThread = {
   unreadStaff: number;
   /** The bot asked a question whose answer the next message is: "ptp" = how much and by when. */
   pendingAsk?: "ptp";
+  /** How many times the ptp question has been put without a usable answer. */
+  ptpAsks?: number;
   /** Last promise to pay the parent made on WhatsApp. */
   lastPromise?: { amountPaise: number | null; byDate: string | null; at: string; raw: string };
 };
@@ -821,16 +825,35 @@ export async function handleWaSisBotInbound(opts: {
   const feeReply = paidButton ? ("claims_paid" as const) : detectSisFeeReplyIntent(text);
   const answeringPtp = thread.pendingAsk === "ptp" && !quickReply && detectSisBotIntent(text) === "unknown";
   let nextPendingAsk: WaSisBotThread["pendingAsk"] = undefined;
+  let nextPtpAsks: number | undefined;
   let lastPromise = thread.lastPromise;
   let officeNote = "";
   let intent: ReturnType<typeof detectSisBotIntent>;
   let bot: { text: string; escalate: boolean };
   if (answeringPtp) {
     const p = parseSisPromiseToPay(text, new Date().toISOString().slice(0, 10));
-    lastPromise = { amountPaise: p.amountPaise, byDate: p.byDate, at: nowIso(), raw: p.raw };
-    officeNote = promiseSummaryForOffice(p);
-    intent = "human";
-    bot = { escalate: true, text: composeSisPromiseRecorded(p, hindi) };
+    if (promiseIsEmpty(p)) {
+      // Not an answer. Keep listening rather than filing an empty promise:
+      // the real figure often arrives in the very next message. Asked twice
+      // at most — after that a person takes it, because a parent who has
+      // not answered twice is not going to answer a third machine.
+      const asks = (thread.ptpAsks ?? 1) + 1;
+      if (asks > 2) {
+        intent = "human";
+        officeNote = `Parent asked for time but did not give an amount or a date after two asks. Last message: "${text.slice(0, 120)}"`;
+        bot = { escalate: true, text: composeSisHumanReply() };
+      } else {
+        nextPendingAsk = "ptp";
+        nextPtpAsks = asks;
+        intent = "unknown";
+        bot = { escalate: false, text: composeSisPromiseUnclear(hindi) };
+      }
+    } else {
+      lastPromise = { amountPaise: p.amountPaise, byDate: p.byDate, at: nowIso(), raw: p.raw };
+      officeNote = promiseSummaryForOffice(p);
+      intent = "human";
+      bot = { escalate: true, text: composeSisPromiseRecorded(p, hindi) };
+    }
   } else if (feeReply === "claims_paid") {
     intent = "human";
     officeNote = "Parent says the fee is already paid — re-check receipts and the counter book, then reply here.";
@@ -838,6 +861,7 @@ export async function handleWaSisBotInbound(opts: {
   } else if (feeReply === "need_time") {
     intent = "human";
     nextPendingAsk = "ptp";
+    nextPtpAsks = 1;
     bot = { escalate: false, text: composeSisNeedTimeAsk(hindi) };
   } else {
     intent = quickReply
@@ -887,6 +911,7 @@ export async function handleWaSisBotInbound(opts: {
       ? [...thread.messages, parentMsg, botMsg, { id: nid("wsm"), role: "bot" as const, text: `📌 ${officeNote}`, at: nowIso(), by: "SIS parent WA bot · note for office" }]
       : [...thread.messages, parentMsg, botMsg],
     pendingAsk: nextPendingAsk,
+    ptpAsks: nextPtpAsks,
     lastPromise,
     updatedAt: nowIso(),
   };
