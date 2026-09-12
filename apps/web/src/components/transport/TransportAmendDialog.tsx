@@ -15,6 +15,7 @@ import {
 import { planTransportAmendment } from "@/lib/transportAmend";
 import { RiderShiftPicker } from "@/components/transport/RiderShiftPicker";
 import { NearestStopPicker } from "@/components/transport/NearestStopPicker";
+import { BoardingSuggestionCard } from "@/components/transport/BoardingSuggestionCard";
 import type { ClassGroupCode } from "@/lib/masters";
 import { monthLabel } from "@/lib/transportStartMonth";
 
@@ -324,6 +325,29 @@ export function TransportAmendDialog({
               {check.error}
             </p>
           )}
+
+          {/*
+            The suggestion sits above the picker, not inside it. The picker
+            ranks by straight line from whatever point the clerk chose; this
+            measures the actual walk and weighs seats, siblings and observed
+            halts. Different questions, and the cheap one stays available when
+            the paid one is not worth asking.
+          */}
+          <BoardingSuggestionCard
+            studentId={assignment.studentId}
+            academicYearCode={academicYearCode}
+            stopRouteId={(id) =>
+              routes.find((r) => r.stops.some((st) => st.id === id))?.id ?? ""
+            }
+            onUseStop={({ routeId: r, stopId: st }) => {
+              if (r !== routeId) {
+                setShifts({ pickupShiftId: "", dropShiftId: "" });
+                setOverCapacityReason("");
+              }
+              setRouteId(r);
+              setStopId(st);
+            }}
+          />
 
           {/*
             The same picker the new-assignment flow uses. It was missing here,

@@ -25,11 +25,10 @@
 import { NextResponse } from "next/server";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
-import { fetchAllPages } from "@/lib/supabase/pageAll";
+import { fetchBoardingHomes } from "@/lib/boardingHomes.server";
 import {
   auditBoardingPoints,
   clusterByAssignedStop,
-  type BoardingHome,
 } from "@/lib/boardingPointAudit";
 import {
   deskBundleToTransportState,
@@ -72,121 +71,14 @@ export async function GET(req: Request) {
   }
   const state = deskBundleToTransportState(desk.bundle);
 
-  // Village centroids, one per household. Two plain reads and a join in
-  // TypeScript rather than a PostgREST embed — the embed returns the parent
-  // as an array or an object depending on how the relationship is inferred,
-  // and a silently-empty join here would read as "no household has a home".
-  const villages = await fetchAllPages<{
-    household_id: string;
-    village_id: string | null;
-    village_name: string | null;
-  }>((from, to) =>
-    sb
-      .from("sis_household_village")
-      .select("household_id, village_id, village_name")
-      .eq("tenant_id", tenantId)
-      .order("household_id", { ascending: true })
-      .range(from, to),
-  );
-  if (villages.error) {
-    return NextResponse.json({ error: villages.error }, { status: 502 });
+  // Village centroid, the family's geocode, then a per-student pin — one
+  // reader, shared with the AI boarding-point suggestion so the two screens
+  // cannot disagree about where a child lives.
+  const located = await fetchBoardingHomes(sb, tenantId);
+  if (!located.ok) {
+    return NextResponse.json({ error: located.error }, { status: 502 });
   }
-
-  const geo = await fetchAllPages<{
-    id: string;
-    latitude: number | null;
-    longitude: number | null;
-  }>((from, to) =>
-    sb
-      .from("village_demographics")
-      .select("id, latitude, longitude")
-      .eq("tenant_id", tenantId)
-      .order("id", { ascending: true })
-      .range(from, to),
-  );
-  if (geo.error) {
-    return NextResponse.json({ error: geo.error }, { status: 502 });
-  }
-  const geoById = new Map(geo.rows.map((v) => [v.id, v]));
-
-  const homes = new Map<string, BoardingHome>();
-  for (const row of villages.rows) {
-    const v = row.village_id ? geoById.get(row.village_id) : null;
-    if (!v || !Number.isFinite(v.latitude) || !Number.isFinite(v.longitude)) continue;
-    homes.set(row.household_id, {
-      lat: Number(v.latitude),
-      lng: Number(v.longitude),
-      label: row.village_name?.trim() || "village",
-      precision: "village",
-    });
-  }
-
-  // The family's own geocode beats their village's centroid. Only rows whose
-  // address fingerprint still matched survived normalizeHousehold, so a pin
-  // here describes the address the household has now, not one they moved from.
-  const geocoded = await fetchAllPages<{
-    id: string;
-    geo_lat: number | null;
-    geo_lng: number | null;
-    geo_formatted_address: string | null;
-    address: string | null;
-  }>((from, to) =>
-    sb
-      .from("sis_households")
-      .select("id, geo_lat, geo_lng, geo_formatted_address, address")
-      .eq("tenant_id", tenantId)
-      .not("geo_lat", "is", null)
-      .order("id", { ascending: true })
-      .range(from, to),
-  );
-  if (geocoded.error) {
-    return NextResponse.json({ error: geocoded.error }, { status: 502 });
-  }
-  for (const h of geocoded.rows) {
-    if (!Number.isFinite(h.geo_lat) || !Number.isFinite(h.geo_lng)) continue;
-    homes.set(h.id, {
-      lat: Number(h.geo_lat),
-      lng: Number(h.geo_lng),
-      label:
-        h.geo_formatted_address?.trim() || h.address?.trim() || "home address",
-      precision: "household",
-    });
-  }
-
-  // A pin beats a centroid. Per student, so it has to be applied against the
-  // household each assignment names — see the loop below.
-  const pins = await fetchAllPages<{
-    student_id: string;
-    latitude: number | null;
-    longitude: number | null;
-    point_name: string | null;
-  }>((from, to) =>
-    sb
-      .from("sis_student_transport_point")
-      .select("student_id, latitude, longitude, point_name")
-      .eq("tenant_id", tenantId)
-      .order("student_id", { ascending: true })
-      .range(from, to),
-  );
-  const pinByStudent = new Map<string, BoardingHome>();
-  for (const p of pins.rows) {
-    if (!Number.isFinite(p.latitude) || !Number.isFinite(p.longitude)) continue;
-    pinByStudent.set(p.student_id, {
-      lat: Number(p.latitude),
-      lng: Number(p.longitude),
-      label: p.point_name?.trim() || "pinned point",
-      precision: "pin",
-    });
-  }
-  const names = await fetchAllPages<{ id: string; full_name: string | null }>((from, to) =>
-    sb
-      .from("sis_students")
-      .select("id, full_name")
-      .eq("tenant_id", tenantId)
-      .order("id", { ascending: true })
-      .range(from, to),
-  );
-  const nameById = new Map(names.rows.map((r) => [r.id, r.full_name || r.id]));
+  const { homes, pins: pinByStudent, names: nameById } = located;
 
   const result = auditBoardingPoints({
     state,
