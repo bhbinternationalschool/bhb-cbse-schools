@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { formatInr } from "@/lib/fees";
 import { StopDistanceBackfillCard } from "@/components/transport/StopDistanceBackfillCard";
 import { ShiftCoveragePanel } from "@/components/transport/ShiftCoveragePanel";
+import { strictClassGroup } from "@/lib/transportShifts";
 import {
   StopRowsEditor,
   newStopDraft,
@@ -15,11 +16,7 @@ import {
   shiftDraftsFromRoute,
   type ShiftDraft,
 } from "@/components/transport/RouteShiftsEditor";
-import {
-  classGroupCodeForName,
-  type ClassGroupCode,
-  type MastersState,
-} from "@/lib/masters";
+import { type ClassGroupCode, type MastersState } from "@/lib/masters";
 import { listTransportCrew } from "@/lib/transportPlanner";
 import type { SisState } from "@/lib/sis";
 import {
@@ -101,7 +98,8 @@ export function RoutesPanel({
       const st = studentById.get(a.studentId);
       const className = st ? classNameById.get(st.classId) : undefined;
       if (!className) continue;
-      const code = classGroupCodeForName(className);
+      const code = strictClassGroup(className);
+      if (!code) continue;
       if (!out.includes(code)) out.push(code);
     }
     return out;

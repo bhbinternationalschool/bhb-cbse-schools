@@ -4,8 +4,11 @@ import { requireParentHousehold } from "@/lib/api/v1/household";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { fetchTransportDeskFromDb } from "@/lib/transportNormalized.server";
 import { listHouseholdTransportRequests } from "@/lib/transportRequests.server";
-import { classGroupCodeForName, loadMasters } from "@/lib/masters";
-import { resolveRiderShift } from "@/lib/transportShifts";
+import { loadMasters } from "@/lib/masters";
+import {
+  resolveRiderShift,
+  strictClassGroup,
+} from "@/lib/transportShifts";
 import { classLabelForStudent } from "@/lib/parentPortal";
 import { loadSis } from "@/lib/sis";
 import { formatInr } from "@/lib/fees";
@@ -70,7 +73,7 @@ export async function GET(request: Request) {
         const className = s.classId
           ? masters.classes.find((c) => c.id === s.classId)?.name
           : undefined;
-        const groupCode = className ? classGroupCodeForName(className) : null;
+        const groupCode = className ? strictClassGroup(className) : null;
         const runTimes =
           assignment && route
             ? (["pickup", "drop"] as const).map((direction) => {

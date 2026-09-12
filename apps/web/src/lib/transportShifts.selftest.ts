@@ -8,11 +8,13 @@ import assert from "node:assert/strict";
 import { defaultSchoolTimingConfig } from "./schoolTiming";
 import { normalizeShift, type TransportRoute, type TransportShift } from "./transport";
 import {
+  buildShiftRiders,
   checkRouteShiftFeasibility,
   listRouteShifts,
   resolveRiderShift,
   routeShiftCoverage,
   shiftRunsOn,
+  strictClassGroup,
   suggestShiftsFromTiming,
 } from "./transportShifts";
 
@@ -378,6 +380,66 @@ function route(shifts: TransportShift[], roundTripMinutes = 0): TransportRoute {
   assert.deepEqual(pickups[0].classGroups.sort(), ["MIDDLE", "PRE_PRIMARY", "PRIMARY"]);
 
   assert.deepEqual(suggestShiftsFromTiming({ timing: cfg, groupsRiding: [] }), []);
+}
+
+/* ── strictClassGroup: an unknown class must NOT become Primary ── */
+{
+  assert.equal(strictClassGroup("Nursery"), "PRE_PRIMARY");
+  assert.equal(strictClassGroup("ukg"), "PRE_PRIMARY");
+  assert.equal(strictClassGroup("V"), "PRIMARY");
+  assert.equal(strictClassGroup("VIII"), "MIDDLE");
+
+  // masters.classGroupCodeForName answers PRIMARY for all of these, which is
+  // fine for a timetable and dangerous for a bus: it would put the child on
+  // the Primary drop and let them off at 15:40 in the wrong village.
+  assert.equal(strictClassGroup("Balvatika"), null);
+  assert.equal(strictClassGroup("Remedial"), null);
+  assert.equal(strictClassGroup("VIII-A"), null);
+  assert.equal(strictClassGroup(""), null);
+  assert.equal(strictClassGroup("   "), null);
+}
+
+/* ── buildShiftRiders joins the desk's own rows to the rules ── */
+{
+  const riders = buildShiftRiders({
+    assignments: [
+      { studentId: "s1", routeId: "r1", academicYearCode: "2026-27", effectiveTo: null },
+      // Closed assignment — not on the bus.
+      { studentId: "s2", routeId: "r1", academicYearCode: "2026-27", effectiveTo: "2026-08-31" },
+      // Another year.
+      { studentId: "s3", routeId: "r1", academicYearCode: "2025-26", effectiveTo: null },
+      // Another bus.
+      { studentId: "s4", routeId: "r2", academicYearCode: "2026-27", effectiveTo: null },
+      // Class the group list does not know.
+      { studentId: "s5", routeId: "r1", academicYearCode: "2026-27", effectiveTo: null, dropShiftId: "main" },
+      // On the roster's route but missing from the roster entirely.
+      { studentId: "ghost", routeId: "r1", academicYearCode: "2026-27", effectiveTo: null },
+    ],
+    students: [
+      { id: "s1", fullName: "Aarav", classId: "c1" },
+      { id: "s2", fullName: "Bina", classId: "c1" },
+      { id: "s3", fullName: "Chand", classId: "c1" },
+      { id: "s4", fullName: "Devi", classId: "c1" },
+      { id: "s5", fullName: "Esha", classId: "c9" },
+    ],
+    classes: [
+      { id: "c1", name: "V" },
+      { id: "c9", name: "Balvatika" },
+    ],
+    academicYearCode: "2026-27",
+    routeId: "r1",
+  });
+
+  assert.deepEqual(
+    riders.map((r) => r.studentId),
+    ["s1", "s5", "ghost"],
+    "live riders on this route in this year only",
+  );
+  assert.equal(riders[0].groupCode, "PRIMARY");
+  assert.equal(riders[1].groupCode, null, "an unknown class name must not become Primary");
+  assert.equal(riders[1].dropShiftId, "main", "the hand-placement is carried through");
+  assert.equal(riders[2].groupCode, null, "a child missing from the roster has no group");
+  assert.equal(riders[2].studentName, "ghost", "and is still named, never dropped");
 }
 
 console.log("  ✓ transport shifts — resolution, coverage, feasibility, suggestions");

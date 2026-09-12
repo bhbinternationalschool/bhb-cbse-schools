@@ -33,6 +33,7 @@ import { FleetEdgeStatusStrip } from "@/components/transport/FleetEdgeStatusStri
 import { BoardingPointAuditPanel } from "@/components/transport/BoardingPointAuditPanel";
 import { StaffRiderPanel } from "@/components/transport/StaffRiderPanel";
 import { StopLinkRepairPanel } from "@/components/transport/StopLinkRepairPanel";
+import { strictClassGroup } from "@/lib/transportShifts";
 import { TransportAmendDialog } from "@/components/transport/TransportAmendDialog";
 import { NearestStopPicker } from "@/components/transport/NearestStopPicker";
 import { StudentVillageStopPicker } from "@/components/transport/StudentVillageStopPicker";
@@ -58,7 +59,6 @@ import {
 import { checkHold, type HoldCheck } from "@/lib/holds";
 import {
   DEFAULT_AY,
-  classGroupCodeForName,
   loadMasters,
   type ClassGroupCode,
   type MastersState,
@@ -1909,8 +1909,9 @@ function PickerGroup({
 /**
  * The class group that decides a child's bus run.
  *
- * Returns null when the class is not on the roster rather than falling back to
- * a group. A guessed group would put the child on a run confidently and
+ * Returns null when the class is not on the roster, and also when its name is
+ * not one the class groups know — `strictClassGroup` refuses the PRIMARY
+ * fallback that masters.ts applies for timetables. A guessed group would put the child on a run confidently and
  * wrongly; null makes the run picker say the class is not known, which is the
  * thing somebody can actually fix.
  */
@@ -1920,5 +1921,5 @@ function classGroupOf(
 ): ClassGroupCode | null {
   if (!student?.classId || !masters) return null;
   const cls = masters.classes.find((c) => c.id === student.classId);
-  return cls?.name ? classGroupCodeForName(cls.name) : null;
+  return cls?.name ? strictClassGroup(cls.name) : null;
 }

@@ -23,11 +23,7 @@
  * wrong village. Every caller surfaces those; none of them guesses.
  */
 
-import {
-  CLASS_GROUPS,
-  classGroupCodeForName,
-  type ClassGroupCode,
-} from "@/lib/masters";
+import { CLASS_GROUPS, type ClassGroupCode } from "@/lib/masters";
 import {
   resolveSchoolTiming,
   type SchoolTimingConfig,
@@ -64,6 +60,38 @@ export function shiftTimeLabel(shift: TransportShift): string {
 
 export function groupLabel(code: ClassGroupCode): string {
   return CLASS_GROUPS.find((g) => g.code === code)?.label ?? code;
+}
+
+/**
+ * The class group a class name belongs to, or null when nobody can tell.
+ *
+ * `classGroupCodeForName` in masters.ts answers PRIMARY for anything it does
+ * not recognise. For a timetable or a report card that guess is harmless. Here
+ * it is not: it would put a child from an unrecognised class on the Primary
+ * drop run, confidently and silently, and they would be let off at 15:40 in
+ * the wrong village. So this matches the known class names (plus the
+ * unambiguous pre-primary words) and returns null otherwise, which surfaces
+ * the child as unresolved instead of routing them wrongly.
+ */
+export function strictClassGroup(name: string): ClassGroupCode | null {
+  const n = (name || "").trim();
+  if (!n) return null;
+  for (const g of CLASS_GROUPS) {
+    if (g.classNames.some((c) => c.toLowerCase() === n.toLowerCase())) {
+      return g.code;
+    }
+  }
+  const lower = n.toLowerCase();
+  if (
+    lower.includes("nursery") ||
+    lower.includes("lkg") ||
+    lower.includes("ukg") ||
+    lower.includes("pre-primary") ||
+    lower.includes("pre primary")
+  ) {
+    return "PRE_PRIMARY";
+  }
+  return null;
 }
 
 /** Does this run operate on this weekday? Empty `weekdays` means every day. */
@@ -602,7 +630,7 @@ export function buildShiftRiders(input: {
       return {
         studentId: a.studentId,
         studentName: st?.fullName || a.studentId,
-        groupCode: className ? classGroupCodeForName(className) : null,
+        groupCode: className ? strictClassGroup(className) : null,
         pickupShiftId: a.pickupShiftId,
         dropShiftId: a.dropShiftId,
       };

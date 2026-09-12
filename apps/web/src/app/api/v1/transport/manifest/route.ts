@@ -4,10 +4,10 @@ import { fetchTransportDeskFromDb } from "@/lib/transportNormalized.server";
 import { fetchSisFromDb } from "@/lib/sisNormalized.server";
 import type { SisStudent } from "@/lib/sis";
 import { fetchMastersDeskFromDb } from "@/lib/mastersNormalized.server";
-import { classGroupCodeForName } from "@/lib/masters";
 import {
   listRouteShifts,
   resolveRiderShift,
+  strictClassGroup,
 } from "@/lib/transportShifts";
 
 export const runtime = "nodejs";
@@ -119,7 +119,7 @@ export async function GET(request: Request) {
         direction,
         overrideShiftId:
           direction === "pickup" ? a.pickupShiftId : a.dropShiftId,
-        groupCode: className ? classGroupCodeForName(className) : null,
+        groupCode: className ? strictClassGroup(className) : null,
       });
     }
 
