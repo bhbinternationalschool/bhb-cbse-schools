@@ -242,6 +242,7 @@ jobs:
           npm run test:review-demo-records
           npm run test:wa-template-shape-sync
           npm run test:pdf-letterhead-assets
+          npm run test:brief-call-link
           npm run test:fee-student-search
 
       - name: Test — admissions village market

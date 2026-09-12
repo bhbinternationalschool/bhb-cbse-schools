@@ -103,6 +103,7 @@ SELFTESTS=(
   test:review-demo-records
   test:wa-template-shape-sync
   test:pdf-letterhead-assets
+  test:brief-call-link
   test:fee-student-search
   test:household-dues-ay
   test:refreshment-chart
