@@ -45,7 +45,7 @@ export const PARENT_BODY_LEGAL_NAME: string | null =
  */
 export const ENTITY_TYPE: string | null = "registered trust";
 
-/** Registration / CBSE affiliation particulars shown on the About page. */
+/** Registration and board-affiliation particulars shown on the About page. */
 export const REGISTRATION_DETAILS: { label: string; value: string }[] = [
   {
     label: "Constitution",
@@ -63,11 +63,22 @@ export const REGISTRATION_DETAILS: { label: string; value: string }[] = [
   {
     label: "Recognition",
     value:
-      "Recognised by the State Government of Uttar Pradesh for Nursery to Class VIII",
+      "Recognised by the Office of the District Basic Education Officer, Varanasi, under the Uttar Pradesh Basic Shiksha Parishad — Classes 1 to 5 (No. VAR09679123374) and Classes 6 to 8 (No. VAR09679139293)",
   },
-  // No central-board affiliation number is held, so none is listed. Do NOT add
-  // the trust's PAN either — the gateway takes it through KYC, it has no
-  // business on a public page.
+  {
+    label: "UDISE code",
+    value: "09674104900",
+  },
+  {
+    // Stated as a positive fact rather than left out. An omission reads as an
+    // oversight to a merchant-onboarding reviewer, who then asks for the
+    // certificate; "None, and here is why" closes the question instead.
+    label: "Board affiliation",
+    value:
+      "None. The school teaches Nursery to Class VIII and runs no secondary classes, so no CBSE / ICSE / AICTE affiliation is held or required.",
+  },
+  // Do NOT add the trust's PAN here — the gateway takes it through KYC, it has
+  // no business on a public page.
 ];
 
 export const TRADING_NAME = "BHB International School";
@@ -87,16 +98,26 @@ export const TRADING_NAME = "BHB International School";
  * true, and is as far as this may go.
  */
 export const RECOGNITION_STATEMENT =
-  "BHB International School is recognized by the State Government of Uttar Pradesh (Nursery to Class VIII) and follows the standard NCERT/CBSE curriculum framework.";
+  "BHB International School is recognised by the State Government of Uttar Pradesh for Nursery to Class VIII. The school is not affiliated to CBSE, ICSE, AICTE or any other central board, and follows the NCERT curriculum framework.";
 
 /*
- * There is deliberately no CLASS_RANGE constant. Public copy states what the
- * school is *recognised* for — see RECOGNITION_STATEMENT — and does not
- * enumerate the classes it teaches. Recognition covers Nursery to Class VIII,
- * while IX and X are taught here with those candidates registered for board
- * examinations through an affiliated partner school. One "offering X to Y"
- * line cannot carry both facts without being wrong in one direction or the
- * other, so the public pages omit it rather than pick a wrong half.
+ * There is deliberately no CLASS_RANGE constant: public copy states what the
+ * school is *recognised* for — see RECOGNITION_STATEMENT — which is Nursery to
+ * Class VIII, and that is also the full extent of what is taught.
+ *
+ * An earlier version of this note, and a SECONDARY entry in PUBLIC_SERVICES
+ * below, said Classes IX and X were taught here with candidates registered for
+ * board examinations through an affiliated partner school. The director
+ * confirmed on 2026-09-12 that this is not the case: the school runs Nursery to
+ * Class VIII and nothing above it. Both were removed — a public site offering
+ * secondary schooling reads to a payment gateway's review as a claim to
+ * central-board affiliation, which is what led Cashfree to demand a CBSE
+ * affiliation certificate that a Class-VIII school cannot hold.
+ *
+ * `feeStructureSecondary202627.ts` still defines an IX–X fee master taken from
+ * the school fee PDF. It is deliberately left in place — removing a fee master
+ * affects billing — but it is no longer advertised. If the school truly has no
+ * IX–X students, retire that master as a separate, considered change.
  */
 
 /**
@@ -244,16 +265,6 @@ export const PUBLIC_SERVICES: PublicService[] = [
       "New admission ₹32,300 for the session, which includes a refundable security deposit. Students continuing from the previous session pay ₹27,300. Payable in full or in monthly instalments from April to March.",
   },
   {
-    code: "SECONDARY",
-    name: "Secondary programme — Classes IX and X",
-    summary:
-      "Full-session secondary schooling: tuition, amenities, examinations and school communications.",
-    price: formatInr(39400),
-    cadence: "per academic session (2026-27), new admission",
-    detail:
-      "New admission ₹39,400 for the session, which includes a refundable security deposit. Students continuing from the previous session pay ₹33,400. Payable in full or in monthly instalments from April to March. Classes IX and X are taught at this campus; those students are registered for board examinations through an affiliated partner school, and any board registration or examination fee charged by that board is payable to that board separately and is not collected here.",
-  },
-  {
     code: "TRANSPORT",
     name: "School bus transport",
     summary:
@@ -276,7 +287,7 @@ export const PUBLIC_SERVICES: PublicService[] = [
     price: `${formatInr(500)} – ${formatInr(1000)}`,
     cadence: "per examination cycle",
     detail:
-      "₹500 per cycle from Nursery to Class VIII and ₹1,000 per cycle for Classes IX and X, charged in September and February. This is the school's own examination fee and is separate from any board examination fee. Already counted inside the session fee shown above; listed separately because it appears as its own line on the fee receipt.",
+      "₹500 per cycle from Nursery to Class VIII, charged in September and February. This is the school's own examination fee and is separate from any board examination fee. Already counted inside the session fee shown above; listed separately because it appears as its own line on the fee receipt.",
   },
   {
     code: "AMENITY",
@@ -286,7 +297,7 @@ export const PUBLIC_SERVICES: PublicService[] = [
     price: `${formatInr(1000)} – ${formatInr(3500)}`,
     cadence: "once per academic session, in April",
     detail:
-      "₹1,500 for Foundation and Primary, ₹2,000 for Classes VI to VIII and ₹3,500 for Classes IX and X on new admission, with a lower rate for Foundation students continuing from the previous session. Already counted inside the session fee shown above; listed separately because it appears as its own line on the fee receipt.",
+      "₹1,500 for Foundation and Primary and ₹2,000 for Classes VI to VIII on new admission, with a lower rate for Foundation students continuing from the previous session. Already counted inside the session fee shown above; listed separately because it appears as its own line on the fee receipt.",
   },
 ];
 

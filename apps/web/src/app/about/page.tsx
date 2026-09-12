@@ -134,13 +134,16 @@ export default function AboutPage() {
           Nature of business
         </h2>
         <p className="mt-3">
-          {TRADING_NAME} is a co-educational English-medium school recognised by
-          the State Government of Uttar Pradesh, operating at {ADDRESS_ONE_LINE}{" "}
-          and following the standard NCERT/CBSE curriculum framework. Payments
-          accepted through this website are academic fees and related school
-          charges billed to enrolled students and to applicants for admission —
-          session fees, transport, and examination and amenity charges. The
-          school does not sell physical goods online.
+          {TRADING_NAME} is a co-educational English-medium school operating at{" "}
+          {ADDRESS_ONE_LINE}, recognised by the Office of the District Basic
+          Education Officer, Varanasi, under the Uttar Pradesh Basic Shiksha
+          Parishad for Nursery to Class VIII. The school runs no secondary
+          classes and is therefore not affiliated to CBSE, ICSE, AICTE or any
+          other central board; it follows the NCERT curriculum framework.
+          Payments accepted through this website are academic fees and related
+          school charges billed to enrolled students and to applicants for
+          admission — session fees, transport, and examination and amenity
+          charges. The school does not sell physical goods online.
         </p>
 
         <h2 className="mt-8 text-lg font-semibold text-slate-900">
