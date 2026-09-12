@@ -51,6 +51,7 @@ import {
 } from "@/components/ui/erp-roster";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type Mode = "hr" | "self";
 type AiLanguage = "en" | "hi" | "both";
@@ -146,6 +147,20 @@ export function StaffAgreementPanel({
     }
     return rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }, [agreements, fixedStaffId, effectiveMode, sessionStaff]);
+
+  // Newest agreement first; status groups the unsigned ones together.
+  const agrSort = useTableSort(
+    visible,
+    {
+      agreementNo: (r) => r.agreementNo,
+      staff: (r) => r.staffName,
+      template: (r) => r.title,
+      status: (r) => r.status,
+      created: (r) => r.createdAt,
+    },
+    "created",
+    "desc",
+  );
 
   const editingAgreement = useMemo(() => {
     if (!editingId) return null;
@@ -700,18 +715,18 @@ export function StaffAgreementPanel({
         <ErpTable>
           <ErpTableHead>
             <tr>
-              <th className="px-4 py-3 font-bold">Agreement No.</th>
-              <th className="px-4 py-3 font-bold">Staff</th>
-              <th className="px-4 py-3 font-bold">Template</th>
-              <th className="px-4 py-3 font-bold">Status</th>
-              <th className="px-4 py-3 font-bold">Created</th>
+              <ErpSortTh sort={agrSort} field="agreementNo" className="px-4 py-3">Agreement No.</ErpSortTh>
+              <ErpSortTh sort={agrSort} field="staff" className="px-4 py-3">Staff</ErpSortTh>
+              <ErpSortTh sort={agrSort} field="template" className="px-4 py-3">Template</ErpSortTh>
+              <ErpSortTh sort={agrSort} field="status" className="px-4 py-3">Status</ErpSortTh>
+              <ErpSortTh sort={agrSort} field="created" className="px-4 py-3">Created</ErpSortTh>
               <th className="px-4 py-3 font-bold">Hash</th>
               <th className="px-4 py-3 font-bold" />
               <th className="w-10 px-2 py-2" aria-label="Actions" />
             </tr>
           </ErpTableHead>
           <ErpTableBody>
-            {visible.map((row) => (
+            {agrSort.rows.map((row) => (
               <tr key={row.id} className="hover:bg-[var(--surface-sunken)]">
                 <td className="px-4 py-3 font-mono text-xs font-semibold text-[var(--brand-deep)]">
                   {row.agreementNo || "—"}

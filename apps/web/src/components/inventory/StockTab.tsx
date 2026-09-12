@@ -37,6 +37,7 @@ import {
   type InvStockReportRowData,
 } from "@/lib/inventory/types";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type Section = "onhand" | "assets";
 
@@ -102,6 +103,20 @@ function OnHandSection({ boot }: { boot: InvBootstrap }) {
         r.categoryName.toLowerCase().includes(term),
     );
   }, [stock.data, debounced]);
+
+  // Most valuable stock first; on-hand and value sort as numbers.
+  const stockSort = useTableSort(
+    rows,
+    {
+      item: (r) => r.itemName,
+      category: (r) => r.categoryName || "",
+      onHand: (r) => r.qtyOnHand,
+      avgCost: (r) => r.avgCostPaise || 0,
+      value: (r) => r.valuePaise,
+    },
+    "value",
+    "desc",
+  );
 
   const totals = stock.data?.totals;
 
@@ -180,16 +195,16 @@ function OnHandSection({ boot }: { boot: InvBootstrap }) {
           <ErpTable minWidth="min-w-[900px]">
             <ErpTableHead>
               <tr>
-                <th className="px-3 py-2 text-left font-medium">Item</th>
-                <th className="px-3 py-2 text-left font-medium">Category</th>
-                <th className="px-3 py-2 text-right font-medium">On hand</th>
-                <th className="px-3 py-2 text-right font-medium">Avg cost</th>
-                <th className="px-3 py-2 text-right font-medium">Value</th>
+                <ErpSortTh sort={stockSort} field="item" className="px-3 py-2 text-left font-medium">Item</ErpSortTh>
+                <ErpSortTh sort={stockSort} field="category" className="px-3 py-2 text-left font-medium">Category</ErpSortTh>
+                <ErpSortTh sort={stockSort} field="onHand" align="right" className="px-3 py-2 text-right font-medium">On hand</ErpSortTh>
+                <ErpSortTh sort={stockSort} field="avgCost" align="right" className="px-3 py-2 text-right font-medium">Avg cost</ErpSortTh>
+                <ErpSortTh sort={stockSort} field="value" align="right" className="px-3 py-2 text-right font-medium">Value</ErpSortTh>
                 <th className="px-3 py-2 text-right font-medium" />
               </tr>
             </ErpTableHead>
             <ErpTableBody hoverable>
-              {rows.map((r) => (
+              {stockSort.rows.map((r) => (
                 <tr key={r.itemId}>
                   <td className="px-3 py-2">
                     <div className="font-medium">{r.itemName}</div>

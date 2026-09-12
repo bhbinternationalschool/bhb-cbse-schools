@@ -20,6 +20,7 @@ import { loadSis, type SisState } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type Category = {
   id: string;
@@ -111,6 +112,19 @@ export function InterSchoolPanel({
   const [events, setEvents] = useState<Evt[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [participants, setParticipants] = useState<Participant[]>([]);
+
+  // Fee status sorts so the unpaid registrations come together.
+  const partSort = useTableSort(
+    participants,
+    {
+      student: (p) => p.studentName,
+      school: (p) => p.schoolName,
+      fee: (p) => p.feeStatus,
+      status: (p) => p.status,
+    },
+    "student",
+    "asc",
+  );
   const [certificates, setCertificates] = useState<Certificate[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -597,16 +611,16 @@ export function InterSchoolPanel({
                 <ErpTable minWidth="min-w-0" className="text-sm">
                   <ErpTableHead>
                     <tr className="text-left text-[10px] uppercase text-[var(--muted)]">
-                      <th className="px-3 py-2">Student</th>
-                      <th className="px-3 py-2">School</th>
+                      <ErpSortTh sort={partSort} field="student" className="px-3 py-2">Student</ErpSortTh>
+                      <ErpSortTh sort={partSort} field="school" className="px-3 py-2">School</ErpSortTh>
                       <th className="px-3 py-2">Category</th>
-                      <th className="px-3 py-2">Fee</th>
-                      <th className="px-3 py-2">Status</th>
+                      <ErpSortTh sort={partSort} field="fee" className="px-3 py-2">Fee</ErpSortTh>
+                      <ErpSortTh sort={partSort} field="status" className="px-3 py-2">Status</ErpSortTh>
                       <th className="px-3 py-2"></th>
                     </tr>
                   </ErpTableHead>
                   <ErpTableBody>
-                    {participants.map((p) => {
+                    {partSort.rows.map((p) => {
                       const cat = selected.categories.find((c) => c.id === p.categoryId);
                       return (
                         <tr key={p.id}>

@@ -8,6 +8,7 @@ import {
   WaDeliveryTicks,
   type WaTickStage,
 } from "@/components/comms/WaDeliveryTicks";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type Row = {
   voucherId: string;
@@ -92,6 +93,19 @@ export function ReceiptDeliveryPanel({
     [rows],
   );
 
+  // Sorting by WhatsApp stage groups the receipts that never reached a phone.
+  const delSort = useTableSort(
+    sorted,
+    {
+      receipt: (r) => r.receiptNo || "",
+      to: (r) => r.mobile || "",
+      sent: (r) => r.sentAt || "",
+      stage: (r) => r.stage,
+    },
+    "sent",
+    "desc",
+  );
+
   const needsAttention = (counts.failed ?? 0) + (counts.unknown ?? 0);
 
   return (
@@ -138,15 +152,15 @@ export function ReceiptDeliveryPanel({
           <ErpTable minWidth="min-w-[560px]">
             <ErpTableHead>
               <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
-                <th className="px-3 py-2.5">Receipt</th>
-                <th className="px-3 py-2.5">To</th>
-                <th className="px-3 py-2.5">Sent</th>
-                <th className="px-3 py-2.5">WhatsApp</th>
+                <ErpSortTh sort={delSort} field="receipt" className="px-3 py-2.5">Receipt</ErpSortTh>
+                <ErpSortTh sort={delSort} field="to" className="px-3 py-2.5">To</ErpSortTh>
+                <ErpSortTh sort={delSort} field="sent" className="px-3 py-2.5">Sent</ErpSortTh>
+                <ErpSortTh sort={delSort} field="stage" className="px-3 py-2.5">WhatsApp</ErpSortTh>
                 <th className="w-10 px-3 py-2.5" />
               </tr>
             </ErpTableHead>
             <ErpTableBody>
-              {sorted.map((r) => (
+              {delSort.rows.map((r) => (
                 <tr key={r.voucherId} className="text-[var(--brand-deep)]">
                   <td className="px-3 py-2 font-medium">{r.receiptNo || "—"}</td>
                   <td className="px-3 py-2">{r.mobile || "—"}</td>

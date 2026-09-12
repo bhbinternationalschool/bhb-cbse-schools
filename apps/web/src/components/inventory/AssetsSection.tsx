@@ -42,6 +42,7 @@ import {
   type InvBootstrap,
 } from "@/lib/inventory/types";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type Draft = Partial<InvAssetRow> & {
   costInput?: string;
@@ -89,6 +90,20 @@ export function AssetsSection({ boot }: { boot: InvBootstrap }) {
   const [bulk, setBulk] = useState(false);
 
   const rows = assets.data ?? [];
+
+  // Sorting by condition brings the scrapped and lost assets together.
+  const assetSort = useTableSort(
+    rows,
+    {
+      tag: (a) => a.assetTag,
+      item: (a) => a.itemName,
+      where: (a) => a.locationName || "",
+      custodian: (a) => a.custodian || "",
+      condition: (a) => a.status,
+    },
+    "tag",
+    "asc",
+  );
   const s = summary.data;
 
   function reloadAll() {
@@ -246,17 +261,17 @@ export function AssetsSection({ boot }: { boot: InvBootstrap }) {
           <ErpTable minWidth="min-w-[940px]">
             <ErpTableHead>
               <tr>
-                <th className="px-3 py-2 text-left font-medium">Tag</th>
-                <th className="px-3 py-2 text-left font-medium">Item</th>
-                <th className="px-3 py-2 text-left font-medium">Where</th>
-                <th className="px-3 py-2 text-left font-medium">Custodian</th>
-                <th className="px-3 py-2 text-left font-medium">Condition</th>
+                <ErpSortTh sort={assetSort} field="tag" className="px-3 py-2 text-left font-medium">Tag</ErpSortTh>
+                <ErpSortTh sort={assetSort} field="item" className="px-3 py-2 text-left font-medium">Item</ErpSortTh>
+                <ErpSortTh sort={assetSort} field="where" className="px-3 py-2 text-left font-medium">Where</ErpSortTh>
+                <ErpSortTh sort={assetSort} field="custodian" className="px-3 py-2 text-left font-medium">Custodian</ErpSortTh>
+                <ErpSortTh sort={assetSort} field="condition" className="px-3 py-2 text-left font-medium">Condition</ErpSortTh>
                 <th className="px-3 py-2 text-right font-medium">Cost</th>
                 <th className="px-3 py-2 text-right font-medium" />
               </tr>
             </ErpTableHead>
             <ErpTableBody hoverable>
-              {rows.map((a) => (
+              {assetSort.rows.map((a) => (
                 <tr
                   key={a.id}
                   className={

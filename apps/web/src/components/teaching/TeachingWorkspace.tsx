@@ -32,6 +32,7 @@ import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type TeachTab = "today" | "plan" | "lessons" | "coverage";
 
@@ -158,6 +159,20 @@ export function TeachingWorkspace() {
       policy: state.policy,
     });
   }, [state, dayResult, ay]);
+
+  // Sorting by status groups the periods nobody has logged yet. Topic and Log hold controls, so they are not sort handles.
+  const dayRowSort = useTableSort(
+    dayRows,
+    {
+      period: (row) => row.expected.bellLabel,
+      klass: (row) => (masters ? classSectionLabel(masters, row.expected.classId, row.expected.sectionId) : ""),
+      subject: (row) => (masters ? subjectLabel(masters, row.expected.subjectId) : ""),
+      teacher: (row) => (masters ? teacherLabel(masters, row.expected.effectiveStaffId) : ""),
+      status: (row) => row.log ? 1 : 0,
+    },
+    "period",
+    "asc",
+  );
 
   function logPeriod(row: PeriodDelivery, status: TeachingLogStatus) {
     if (!state) return;
@@ -419,17 +434,17 @@ export function TeachingWorkspace() {
                 <ErpTable minWidth="min-w-[900px]">
                   <ErpTableHead>
                     <tr>
-                      <th className="px-3 py-2">Period</th>
-                      <th className="px-3 py-2">Class</th>
-                      <th className="px-3 py-2">Subject</th>
-                      <th className="px-3 py-2">Teacher</th>
-                      <th className="px-3 py-2">Status</th>
+                      <ErpSortTh sort={dayRowSort} field="period" className="px-3 py-2">Period</ErpSortTh>
+                      <ErpSortTh sort={dayRowSort} field="klass" className="px-3 py-2">Class</ErpSortTh>
+                      <ErpSortTh sort={dayRowSort} field="subject" className="px-3 py-2">Subject</ErpSortTh>
+                      <ErpSortTh sort={dayRowSort} field="teacher" className="px-3 py-2">Teacher</ErpSortTh>
+                      <ErpSortTh sort={dayRowSort} field="status" className="px-3 py-2">Status</ErpSortTh>
                       <th className="px-3 py-2">Topic covered</th>
                       {canEdit ? <th className="px-3 py-2">Log</th> : null}
                     </tr>
                   </ErpTableHead>
                   <ErpTableBody>
-                    {dayRows.map((row) => {
+                    {dayRowSort.rows.map((row) => {
                       const key = `${row.expected.periodNo}-${row.expected.classId}-${row.expected.sectionId}`;
                       const units = unitsForDay(row);
                       return (

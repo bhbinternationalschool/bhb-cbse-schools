@@ -23,6 +23,7 @@ import {
 } from "@/lib/classUpgrade";
 import { StudentNameLabel } from "@/components/students/StudentAvatar";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type UpgradeMode = "section" | "class" | "type";
 
@@ -148,6 +149,18 @@ export function StudentUpgradePanel({
   const history = useMemo(
     () => (sis ? listClassUpgrades(sis).slice(0, 40) : []),
     [sis],
+  );
+
+  // Upgrade history, newest first; the change columns show a from → to pair, so they sort on where the child came FROM.
+  const upgSort = useTableSort(
+    history,
+    {
+      when: (u) => u.effectiveOn,
+      student: (u) => u.studentName,
+      reason: (u) => u.reason,
+    },
+    "when",
+    "desc",
   );
 
   function flash(msg: string) {
@@ -653,17 +666,17 @@ export function StudentUpgradePanel({
             <ErpTable>
               <ErpTableHead>
                 <tr>
-                  <th className="px-2 py-1.5 font-semibold">When</th>
-                  <th className="px-2 py-1.5 font-semibold">Student</th>
+                  <ErpSortTh sort={upgSort} field="when" className="px-2 py-1.5 font-semibold">When</ErpSortTh>
+                  <ErpSortTh sort={upgSort} field="student" className="px-2 py-1.5 font-semibold">Student</ErpSortTh>
                   <th className="px-2 py-1.5 font-semibold">Change</th>
                   <th className="px-2 py-1.5 font-semibold">Class / section</th>
                   <th className="px-2 py-1.5 font-semibold">Type</th>
                   <th className="px-2 py-1.5 font-semibold">Fee</th>
-                  <th className="px-2 py-1.5 font-semibold">Reason</th>
+                  <ErpSortTh sort={upgSort} field="reason" className="px-2 py-1.5 font-semibold">Reason</ErpSortTh>
                 </tr>
               </ErpTableHead>
               <ErpTableBody>
-                {history.map((u) => {
+                {upgSort.rows.map((u) => {
                   const sectionOnly =
                     u.fromClassId === u.toClassId &&
                     u.fromSectionId !== u.toSectionId;

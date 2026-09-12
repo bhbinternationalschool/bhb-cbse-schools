@@ -34,6 +34,7 @@ import {
 import type { SisStudent } from "@/lib/sis";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 const DIMENSIONS: { id: RollupDimension; label: string }[] = [
   { id: "unit", label: "Chapter / topic" },
@@ -86,6 +87,20 @@ export function ItemAnalysis(props: {
     () => rollupItemScores({ questions, scoresByStudent, dimension, unitLabel }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [questions, scoresByStudent, dimension, units],
+  );
+
+  // Weakest area first: class average ascending is the question this screen answers.
+  const itemSort = useTableSort(
+    rows,
+    {
+      area: (r) => r.label,
+      maxMarks: (r) => r.maxMarks,
+      marked: (r) => r.students,
+      avg: (r) => r.students ? r.avgPct : -1,
+      belowHalf: (r) => r.students ? r.belowHalfShare : -1,
+    },
+    "avg",
+    "asc",
   );
   const selected = rows.find((r) => r.key === selectedKey) ?? null;
   const below = selected
@@ -297,15 +312,15 @@ export function ItemAnalysis(props: {
           <ErpTable className="text-xs">
             <ErpTableHead>
               <tr>
-                <th className="py-1 text-left">Area</th>
-                <th className="py-1 text-right">Marks</th>
-                <th className="py-1 text-right">Marked</th>
-                <th className="py-1 text-right">Class avg</th>
-                <th className="py-1 text-right">Under ½</th>
+                <ErpSortTh sort={itemSort} field="area" className="py-1 text-left">Area</ErpSortTh>
+                <ErpSortTh sort={itemSort} field="maxMarks" align="right" className="py-1 text-right">Marks</ErpSortTh>
+                <ErpSortTh sort={itemSort} field="marked" align="right" className="py-1 text-right">Marked</ErpSortTh>
+                <ErpSortTh sort={itemSort} field="avg" align="right" className="py-1 text-right">Class avg</ErpSortTh>
+                <ErpSortTh sort={itemSort} field="belowHalf" align="right" className="py-1 text-right">Under ½</ErpSortTh>
               </tr>
             </ErpTableHead>
             <ErpTableBody>
-              {rows.map((r) => (
+              {itemSort.rows.map((r) => (
                 <tr
                   key={r.key}
                   onClick={() => setSelectedKey(r.key === selectedKey ? "" : r.key)}

@@ -7,6 +7,7 @@ import { computeFreeTeacherSlots } from "@/lib/timetableReportCatalog";
 import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { field } from "@/components/ui/erp-ui";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 /**
  * "Which teacher is free at period X on day Y?" — the computation already
@@ -54,6 +55,18 @@ export function FreePeriodsPanel({
       );
     });
   }, [slots, periodNo, query]);
+
+  // Who is free when — by period to fill a slot, by teacher to check a person.
+  const freeSort = useTableSort(
+    filtered,
+    {
+      period: (s) => s.startTime,
+      empCode: (s) => s.empCode,
+      teacher: (s) => s.teacherName,
+    },
+    "period",
+    "asc",
+  );
 
   return (
     <div className="space-y-3">
@@ -113,14 +126,14 @@ export function FreePeriodsPanel({
           <ErpTable minWidth="min-w-[480px]">
             <ErpTableHead>
               <tr>
-                <th className="px-3 py-2 font-semibold">Period</th>
-                <th className="px-3 py-2 font-semibold">Emp code</th>
-                <th className="px-3 py-2 font-semibold">Teacher</th>
+                <ErpSortTh sort={freeSort} field="period" className="px-3 py-2 font-semibold">Period</ErpSortTh>
+                <ErpSortTh sort={freeSort} field="empCode" className="px-3 py-2 font-semibold">Emp code</ErpSortTh>
+                <ErpSortTh sort={freeSort} field="teacher" className="px-3 py-2 font-semibold">Teacher</ErpSortTh>
                 <th className="w-10 px-2 py-2" aria-label="Actions" />
               </tr>
             </ErpTableHead>
             <ErpTableBody>
-              {filtered.map((s) => (
+              {freeSort.rows.map((s) => (
                 <tr key={`${s.periodNo}-${s.teacherId}`}>
                   <td className="px-3 py-2 font-medium text-[var(--brand-deep)]">
                     {s.periodLabel} · {s.startTime}–{s.endTime}

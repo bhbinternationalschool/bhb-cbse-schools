@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { normalizeVehicleKey } from "@/lib/fleetEdgeLink";
 import type { TransportState } from "@/lib/transport";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 /**
  * Where each bus actually is.
@@ -118,6 +119,21 @@ export function LivePositionsPanel({ state }: { state: TransportState }) {
     .sort((a, b) => Number(!!b.position) - Number(!!a.position) || b.students - a.students);
 
   const tracked = rows.filter((r) => r.position);
+  // Sorted by how fresh the fix is, newest first — the order somebody
+  // watching the fleet already wants — and every column sorts by its value,
+  // so "Last fix" orders by the actual timestamp rather than by the words
+  // "3 minutes ago".
+  const busSort = useTableSort(
+    tracked,
+    {
+      bus: (r) => r.label || r.registrationNo,
+      children: (r) => r.students,
+      status: (r) => r.position?.motion ?? "",
+      lastFix: (r) => r.position?.at ?? "",
+    },
+    "lastFix",
+    "desc",
+  );
   const untracked = rows.filter((r) => !r.position);
   const childrenUntracked = untracked.reduce((n, r) => n + r.students, 0);
 
@@ -162,15 +178,15 @@ export function LivePositionsPanel({ state }: { state: TransportState }) {
           <table className="w-full min-w-[520px] text-[11px]">
             <thead>
               <tr className="text-left text-[10px] uppercase tracking-wide text-[var(--muted)]">
-                <th className="py-1 pr-3 font-semibold">Bus</th>
-                <th className="py-1 pr-3 font-semibold">Children</th>
-                <th className="py-1 pr-3 font-semibold">Status</th>
-                <th className="py-1 pr-3 font-semibold">Last fix</th>
+                <ErpSortTh sort={busSort} field="bus" className="py-1 pr-3">Bus</ErpSortTh>
+                <ErpSortTh sort={busSort} field="children" className="py-1 pr-3">Children</ErpSortTh>
+                <ErpSortTh sort={busSort} field="status" className="py-1 pr-3">Status</ErpSortTh>
+                <ErpSortTh sort={busSort} field="lastFix" className="py-1 pr-3">Last fix</ErpSortTh>
                 <th className="py-1 font-semibold">Position</th>
               </tr>
             </thead>
             <tbody>
-              {tracked.map((r) => {
+              {busSort.rows.map((r) => {
                 const p = r.position!;
                 const style = FRESHNESS_STYLE[p.freshness];
                 return (

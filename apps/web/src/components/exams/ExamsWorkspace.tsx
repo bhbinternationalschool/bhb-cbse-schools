@@ -77,6 +77,7 @@ import { ItemScoresPanel } from "@/components/exams/ItemScoresPanel";
 import { AtRiskPanel } from "@/components/exams/AtRiskPanel";
 import { ExamReportsRunner } from "@/components/reports/ModuleReportRunners";
 import { hasPermission } from "@/lib/rbac";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type Tab =
   | "dashboard"
@@ -563,6 +564,17 @@ export function ExamsWorkspace() {
     if ("error" in built) return { error: built.error } as const;
     return { sheet: built } as const;
   }, [tab, tick, examTermId, classId, sectionId, roster, classLabel, ay]);
+
+  // The result sheet, best first; grade and pass sort too. Decision is a picker, not a value.
+  const resultSort = useTableSort(
+    classResult?.sheet?.rows ?? [],
+    {
+      percent: (row) => row.card ? row.card.percent : -1,
+      grade: (row) => row.card?.overallGrade ?? "",
+    },
+    "percent",
+    "desc",
+  );
 
   function onSuggestPromotions() {
     if (!examTermId || !classId || !sectionId) {
@@ -1927,17 +1939,15 @@ export function ExamsWorkspace() {
                       <th className="px-4 py-2.5 font-bold text-[var(--brand-deep)]">
                         Student
                       </th>
-                      <th className="px-4 py-2.5 text-right font-bold">%</th>
-                      <th className="px-4 py-2.5 text-right font-bold">
-                        Grade
-                      </th>
+                      <ErpSortTh sort={resultSort} field="percent" align="right" className="px-4 py-2.5 text-right font-bold">%</ErpSortTh>
+                      <ErpSortTh sort={resultSort} field="grade" className="px-4 py-2.5 text-right font-bold">Grade</ErpSortTh>
                       <th className="px-4 py-2.5 font-bold">Pass</th>
                       <th className="px-4 py-2.5 font-bold">Decision</th>
                       <th className="px-4 py-2.5 font-bold">Next class</th>
                     </tr>
                   </ErpTableHead>
                   <ErpTableBody>
-                    {classResult.sheet.rows.map((row) => {
+                    {resultSort.rows.map((row) => {
                       const decision =
                         row.record?.decision ??
                         (row.card ? "pending" : "pending");

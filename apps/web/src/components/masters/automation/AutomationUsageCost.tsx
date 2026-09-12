@@ -27,6 +27,7 @@ import {
   type WaUsageYearWindow,
 } from "@/lib/waUsageCost";
 import { autoBtnOutline, autoBtnPrimary, autoInp } from "./automationUi";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 const WINDOWS = [
   { id: "7", label: "7 days", days: 7 },
@@ -192,6 +193,62 @@ export function AutomationUsageCost({ readOnly }: { readOnly: boolean }) {
         s.className.toLowerCase().includes(needle),
     );
   }, [byStudent, childQ]);
+
+  // Sorting for the four tables below. Every column sorts by the NUMBER
+  // behind the cell, not the rendered string, so "₹2,500" orders as 250000
+  // and not alphabetically. Each starts on cost, highest first, which is the
+  // order the server already sends — so the first view is unchanged and a
+  // click is what reorders it.
+  const bucketSort = useTableSort(
+    summary?.buckets ?? [],
+    {
+      type: (b) => b.label,
+      sent: (b) => b.sent,
+      delivered: (b) => b.delivered,
+      failed: (b) => b.failed,
+      rate: (b) => b.ratePaise,
+      cost: (b) => b.costPaise,
+    },
+    "cost",
+    "desc",
+  );
+  const templateSort = useTableSort(
+    summary?.templates ?? [],
+    {
+      template: (t) => t.templateName,
+      sent: (t) => t.sent,
+      delivered: (t) => t.delivered,
+      failed: (t) => t.failed,
+      cost: (t) => t.costPaise,
+    },
+    "cost",
+    "desc",
+  );
+  const classSort = useTableSort(
+    byStudent?.classes ?? [],
+    {
+      className: (c) => c.className,
+      students: (c) => c.students,
+      messages: (c) => c.messages,
+      delivered: (c) => c.delivered,
+      perChild: (c) => c.perStudentPaise,
+      cost: (c) => c.costPaise,
+    },
+    "cost",
+    "desc",
+  );
+  const childSort = useTableSort(
+    children,
+    {
+      child: (s) => s.name,
+      className: (s) => s.className,
+      messages: (s) => s.messages,
+      delivered: (s) => s.delivered,
+      cost: (s) => s.costPaise,
+    },
+    "cost",
+    "desc",
+  );
 
   const save = useCallback(async () => {
     setSaving(true);
@@ -431,16 +488,16 @@ export function AutomationUsageCost({ readOnly }: { readOnly: boolean }) {
               <table className="w-full text-[12px]">
                 <thead className="sticky top-0 bg-[var(--surface-sunken)] text-[10px] uppercase text-[var(--muted)]">
                   <tr>
-                    <th className="px-3 py-2 text-left">Type</th>
-                    <th className="px-3 py-2 text-right">Sent</th>
-                    <th className="px-3 py-2 text-right">Delivered</th>
-                    <th className="px-3 py-2 text-right">Failed</th>
-                    <th className="px-3 py-2 text-right">Rate</th>
-                    <th className="px-3 py-2 text-right">Cost</th>
+                    <ErpSortTh sort={bucketSort} field="type">Type</ErpSortTh>
+                    <ErpSortTh sort={bucketSort} field="sent" align="right">Sent</ErpSortTh>
+                    <ErpSortTh sort={bucketSort} field="delivered" align="right">Delivered</ErpSortTh>
+                    <ErpSortTh sort={bucketSort} field="failed" align="right">Failed</ErpSortTh>
+                    <ErpSortTh sort={bucketSort} field="rate" align="right">Rate</ErpSortTh>
+                    <ErpSortTh sort={bucketSort} field="cost" align="right">Cost</ErpSortTh>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--border)]">
-                  {summary.buckets.map((b) => (
+                  {bucketSort.rows.map((b) => (
                     <tr key={b.category}>
                       <td className="px-3 py-2 font-medium text-[var(--brand-deep)]">
                         {b.label}
@@ -480,38 +537,7 @@ export function AutomationUsageCost({ readOnly }: { readOnly: boolean }) {
                       : ""}
                     .
                   </div>
-                  <table className="w-full text-[12px]">
-                    <thead className="bg-[var(--surface-sunken)] text-[10px] uppercase text-[var(--muted)]">
-                      <tr>
-                        <th className="px-3 py-2 text-left">Type</th>
-                        <th className="px-3 py-2 text-right">Sent</th>
-                        <th className="px-3 py-2 text-right">Delivered</th>
-                        <th className="px-3 py-2 text-right">Failed</th>
-                        <th className="px-3 py-2 text-right">Rate</th>
-                        <th className="px-3 py-2 text-right">Cost</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[var(--border)]">
-                      {a.summary.buckets.map((b) => (
-                        <tr key={b.category}>
-                          <td className="px-3 py-2 font-medium text-[var(--brand-deep)]">
-                            {b.label}
-                          </td>
-                          <td className="px-3 py-2 text-right">{b.sent}</td>
-                          <td className="px-3 py-2 text-right">{b.delivered}</td>
-                          <td className="px-3 py-2 text-right text-rose-700">
-                            {b.failed || ""}
-                          </td>
-                          <td className="px-3 py-2 text-right text-[var(--muted)]">
-                            ₹{rateRupees(b.ratePaise)}
-                          </td>
-                          <td className="px-3 py-2 text-right font-semibold">
-                            {rupees(b.costPaise)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <AudienceBucketTable buckets={a.summary.buckets} />
                   {a.summary.templates.length > 0 ? (
                     <div className="px-3 py-2 text-[10px] text-[var(--muted)]">
                       Dearest here:{" "}
@@ -543,15 +569,17 @@ export function AutomationUsageCost({ readOnly }: { readOnly: boolean }) {
               <table className="w-full text-[12px]">
                 <thead className="sticky top-0 bg-[var(--surface-sunken)] text-[10px] uppercase text-[var(--muted)]">
                   <tr>
-                    <th className="px-3 py-2 text-left">Template</th>
-                    <th className="px-3 py-2 text-right">Sent</th>
-                    <th className="px-3 py-2 text-right">Delivered</th>
-                    <th className="px-3 py-2 text-right">Failed</th>
-                    <th className="px-3 py-2 text-right">Cost</th>
+                    <ErpSortTh sort={templateSort} field="template">Template</ErpSortTh>
+                    <ErpSortTh sort={templateSort} field="sent" align="right">Sent</ErpSortTh>
+                    <ErpSortTh sort={templateSort} field="delivered" align="right">Delivered</ErpSortTh>
+                    <ErpSortTh sort={templateSort} field="failed" align="right">Failed</ErpSortTh>
+                    <ErpSortTh sort={templateSort} field="cost" align="right">Cost</ErpSortTh>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--border)]">
-                  {summary.templates.slice(0, 25).map((t) => (
+                  {/* Sorted first, THEN cut to 25 — cutting first would sort
+                      only the top of the list and quietly hide the rest. */}
+                  {templateSort.rows.slice(0, 25).map((t) => (
                     <tr key={t.templateName}>
                       <td className="px-3 py-2">
                         <span className="font-medium text-[var(--brand-deep)]">
@@ -589,16 +617,16 @@ export function AutomationUsageCost({ readOnly }: { readOnly: boolean }) {
                   <table className="w-full text-[12px]">
                     <thead className="sticky top-0 bg-[var(--surface-sunken)] text-[10px] uppercase text-[var(--muted)]">
                       <tr>
-                        <th className="px-3 py-2 text-left">Class</th>
-                        <th className="px-3 py-2 text-right">Children written to</th>
-                        <th className="px-3 py-2 text-right">Messages</th>
-                        <th className="px-3 py-2 text-right">Delivered</th>
-                        <th className="px-3 py-2 text-right">Per child</th>
-                        <th className="px-3 py-2 text-right">Cost</th>
+                        <ErpSortTh sort={classSort} field="className">Class</ErpSortTh>
+                        <ErpSortTh sort={classSort} field="students" align="right">Children written to</ErpSortTh>
+                        <ErpSortTh sort={classSort} field="messages" align="right">Messages</ErpSortTh>
+                        <ErpSortTh sort={classSort} field="delivered" align="right">Delivered</ErpSortTh>
+                        <ErpSortTh sort={classSort} field="perChild" align="right">Per child</ErpSortTh>
+                        <ErpSortTh sort={classSort} field="cost" align="right">Cost</ErpSortTh>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[var(--border)]">
-                      {byStudent.classes.map((c) => (
+                      {classSort.rows.map((c) => (
                         <tr key={c.classId || "none"}>
                           <td className="px-3 py-2 font-medium text-[var(--brand-deep)]">
                             {c.className}
@@ -670,15 +698,15 @@ export function AutomationUsageCost({ readOnly }: { readOnly: boolean }) {
                   <table className="w-full text-[12px]">
                     <thead className="sticky top-0 bg-[var(--surface-sunken)] text-[10px] uppercase text-[var(--muted)]">
                       <tr>
-                        <th className="px-3 py-2 text-left">Child</th>
-                        <th className="px-3 py-2 text-left">Class</th>
-                        <th className="px-3 py-2 text-right">Messages</th>
-                        <th className="px-3 py-2 text-right">Delivered</th>
-                        <th className="px-3 py-2 text-right">Their share</th>
+                        <ErpSortTh sort={childSort} field="child">Child</ErpSortTh>
+                        <ErpSortTh sort={childSort} field="className">Class</ErpSortTh>
+                        <ErpSortTh sort={childSort} field="messages" align="right">Messages</ErpSortTh>
+                        <ErpSortTh sort={childSort} field="delivered" align="right">Delivered</ErpSortTh>
+                        <ErpSortTh sort={childSort} field="cost" align="right">Their share</ErpSortTh>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[var(--border)]">
-                      {(showAllChildren ? children : children.slice(0, 50)).map(
+                      {(showAllChildren ? childSort.rows : childSort.rows.slice(0, 50)).map(
                         (s) => (
                           <tr key={s.studentId}>
                             <td className="px-3 py-2">
@@ -937,5 +965,56 @@ export function AutomationUsageCost({ readOnly }: { readOnly: boolean }) {
         <MastersEmptyRow label="No usage yet." />
       ) : null}
     </div>
+  );
+}
+
+/**
+ * One audience's cost table. Its own component because a table inside a
+ * `.map()` cannot hold a hook, and sorting needs one per table — the three
+ * audiences sort independently, which is what somebody comparing them wants.
+ */
+function AudienceBucketTable({
+  buckets,
+}: {
+  buckets: WaUsageSummary["buckets"];
+}) {
+  const sort = useTableSort(
+    buckets,
+    {
+      type: (b) => b.label,
+      sent: (b) => b.sent,
+      delivered: (b) => b.delivered,
+      failed: (b) => b.failed,
+      rate: (b) => b.ratePaise,
+      cost: (b) => b.costPaise,
+    },
+    "cost",
+    "desc",
+  );
+  return (
+    <table className="w-full text-[12px]">
+      <thead className="bg-[var(--surface-sunken)] text-[10px] uppercase text-[var(--muted)]">
+        <tr>
+          <ErpSortTh sort={sort} field="type">Type</ErpSortTh>
+          <ErpSortTh sort={sort} field="sent" align="right">Sent</ErpSortTh>
+          <ErpSortTh sort={sort} field="delivered" align="right">Delivered</ErpSortTh>
+          <ErpSortTh sort={sort} field="failed" align="right">Failed</ErpSortTh>
+          <ErpSortTh sort={sort} field="rate" align="right">Rate</ErpSortTh>
+          <ErpSortTh sort={sort} field="cost" align="right">Cost</ErpSortTh>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-[var(--border)]">
+        {sort.rows.map((b) => (
+          <tr key={b.category}>
+            <td className="px-3 py-2 font-medium text-[var(--brand-deep)]">{b.label}</td>
+            <td className="px-3 py-2 text-right">{b.sent}</td>
+            <td className="px-3 py-2 text-right">{b.delivered}</td>
+            <td className="px-3 py-2 text-right text-rose-700">{b.failed || ""}</td>
+            <td className="px-3 py-2 text-right text-[var(--muted)]">₹{rateRupees(b.ratePaise)}</td>
+            <td className="px-3 py-2 text-right font-semibold">{rupees(b.costPaise)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }

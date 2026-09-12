@@ -542,7 +542,7 @@ export function FleetEdgeReport({ canEdit }: { canEdit: boolean }) {
         {a.fuelDifference != null ? `${a.fuelDifference} L${a.fuelTank ? ` (${a.fuelTank})` : ""}` : ""}
       </span>
     ) },
-    { key: "location", header: "Location", value: (a) => a.location || "", render: (a) => (
+    { key: "location", header: "Location", value: (a) => a.location || "", sortable: true, render: (a) => (
       <span className="text-xs">
         {a.location ? <span title={a.location}>{a.location.length > 60 ? `${a.location.slice(0, 60)}…` : a.location}</span> : "—"}
         {mapsHref(a.lat, a.lng) ? <> · <a className="text-[var(--brand-deep)] underline" href={mapsHref(a.lat, a.lng) || "#"} target="_blank" rel="noreferrer"><MapPin className="inline size-3" aria-hidden /> map</a></> : null}

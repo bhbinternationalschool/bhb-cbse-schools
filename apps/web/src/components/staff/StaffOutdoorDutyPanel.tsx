@@ -18,6 +18,7 @@ import {
 } from "@/lib/staffAttendance";
 import { canManageStaffLeave, resolveSessionStaff } from "@/lib/staffResolve";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 function fmt(iso: string | null): string {
   if (!iso) return "—";
@@ -92,6 +93,25 @@ export function StaffOutdoorDutyPanel() {
     return listOutdoorDutyForStaff(attendance, selfStaff.id);
   }, [attendance, isManager, selfStaff]);
 
+  // Newest trip first, which is what the office checks; a duration sorts by
+  // the minutes it lasted, not by the words "1 h 20 m".
+  const dutySort = useTableSort(
+    history,
+    {
+      staff: (s) => staffLabel(s.staffId),
+      purpose: (s) => s.purpose,
+      destination: (s) => s.destination,
+      out: (s) => s.startedAt ?? "",
+      back: (s) => s.endedAt ?? "",
+      duration: (s) =>
+        s.startedAt && s.endedAt
+          ? Date.parse(s.endedAt) - Date.parse(s.startedAt)
+          : -1,
+    },
+    "out",
+    "desc",
+  );
+
   if (!masters || !attendance) {
     return <p className="text-sm text-[var(--muted)]">Loading outdoor duty…</p>;
   }
@@ -158,17 +178,17 @@ export function StaffOutdoorDutyPanel() {
             <ErpTableHead>
               <tr>
                 {isManager ? <th className="px-4 py-2">Staff</th> : null}
-                <th className="px-3 py-2">Purpose</th>
-                <th className="px-3 py-2">Destination</th>
-                <th className="px-3 py-2">Out</th>
-                <th className="px-3 py-2">In</th>
-                <th className="px-3 py-2">Duration</th>
+                <ErpSortTh sort={dutySort} field="purpose">Purpose</ErpSortTh>
+                <ErpSortTh sort={dutySort} field="destination">Destination</ErpSortTh>
+                <ErpSortTh sort={dutySort} field="out">Out</ErpSortTh>
+                <ErpSortTh sort={dutySort} field="back">In</ErpSortTh>
+                <ErpSortTh sort={dutySort} field="duration">Duration</ErpSortTh>
                 <th className="px-3 py-2">GPS</th>
                 <th className="w-10 px-2 py-2" aria-label="Actions" />
               </tr>
             </ErpTableHead>
             <ErpTableBody>
-              {history.map((s) => (
+              {dutySort.rows.map((s) => (
                 <tr key={s.id}>
                   {isManager ? (
                     <td className="px-4 py-2 font-medium text-[var(--brand-deep)]">

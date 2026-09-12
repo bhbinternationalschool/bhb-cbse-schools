@@ -50,6 +50,7 @@ import {
   siblingsOf,
   type SisStudent,
 } from "@/lib/sis";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type Load =
   | { kind: "loading" }
@@ -238,6 +239,31 @@ export function StudentFeeDuesCard({ studentId }: { studentId: string }) {
     };
   }, [load]);
 
+  // Dues keep their billed order to start with — the order the counter reads
+  // them in — and payments keep newest first. Both sort by the value behind
+  // the cell: a balance by its paise, a date by its ISO string.
+  const dueSort = useTableSort(
+    summary?.rows ?? [],
+    {
+      head: (l) => l.label || l.feeHeadName,
+      dueOn: (l) => l.dueOn || "",
+      balance: (l) => l.balancePaise,
+    },
+    "dueOn",
+    "asc",
+  );
+  const paymentSort = useTableSort(
+    payments?.rows ?? [],
+    {
+      date: (r) => r.date || "",
+      receipt: (r) => r.receiptNo,
+      heads: (r) => r.heads.join(", "),
+      amount: (r) => r.sharePaise,
+    },
+    "date",
+    "desc",
+  );
+
   if (load.kind === "missing") return null;
 
   const collectHref =
@@ -317,13 +343,13 @@ export function StudentFeeDuesCard({ studentId }: { studentId: string }) {
               <table className="w-full text-left text-[11px]">
                 <thead className="sticky top-0 bg-[var(--surface-sunken)] text-[10px] uppercase tracking-wide text-[var(--muted)]">
                   <tr>
-                    <th className="px-3 py-1.5 font-bold">Head</th>
-                    <th className="px-3 py-1.5 font-bold">Due on</th>
-                    <th className="px-3 py-1.5 text-right font-bold">Balance</th>
+                    <ErpSortTh sort={dueSort} field="head">Head</ErpSortTh>
+                    <ErpSortTh sort={dueSort} field="dueOn">Due on</ErpSortTh>
+                    <ErpSortTh sort={dueSort} field="balance" align="right">Balance</ErpSortTh>
                   </tr>
                 </thead>
                 <tbody>
-                  {summary.rows.map((l) => {
+                  {dueSort.rows.map((l) => {
                     const late = summary.overdueKeys.has(l.dueKey);
                     return (
                       <tr
@@ -377,16 +403,18 @@ export function StudentFeeDuesCard({ studentId }: { studentId: string }) {
             <table className="w-full text-left text-[11px]">
               <thead className="sticky top-0 bg-[var(--surface-sunken)] text-[10px] uppercase tracking-wide text-[var(--muted)]">
                 <tr>
-                  <th className="px-3 py-1.5 font-bold">Date</th>
-                  <th className="px-3 py-1.5 font-bold">Receipt</th>
-                  <th className="px-3 py-1.5 font-bold">Paid for</th>
-                  <th className="px-3 py-1.5 text-right font-bold">Amount</th>
+                  <ErpSortTh sort={paymentSort} field="date">Date</ErpSortTh>
+                  <ErpSortTh sort={paymentSort} field="receipt">Receipt</ErpSortTh>
+                  <ErpSortTh sort={paymentSort} field="heads">Paid for</ErpSortTh>
+                  <ErpSortTh sort={paymentSort} field="amount" align="right">Amount</ErpSortTh>
                 </tr>
               </thead>
               <tbody>
+                {/* Sorted before the preview is cut, so the first rows shown
+                    are the first rows of the CHOSEN order, not of the old one. */}
                 {(showAllPayments
-                  ? payments.rows
-                  : payments.rows.slice(0, PAYMENT_PREVIEW)
+                  ? paymentSort.rows
+                  : paymentSort.rows.slice(0, PAYMENT_PREVIEW)
                 ).map((r) => (
                   <tr key={r.id} className="border-t border-[var(--border)]">
                     <td className="px-3 py-1.5 tabular-nums text-[var(--muted)]">

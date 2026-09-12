@@ -33,6 +33,7 @@ import { invApi, useAsync, useDebounced, useSaver } from "@/lib/inventory/client
 import type { InvVendor } from "@/lib/inventory/types";
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import { openWaMe } from "@/lib/waMe";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 const EMPTY: Partial<InvVendor> = {
   name: "",
@@ -93,6 +94,20 @@ export function VendorsTab({ onChanged }: { onChanged?: () => void }) {
   }
 
   const vendors = useMemo(() => list.data ?? [], [list.data]);
+
+  // Terms and discount sort as numbers, so "who gives us longest credit" is one click.
+  const vendorSort = useTableSort(
+    vendors,
+    {
+      code: (v) => v.code || "",
+      name: (v) => v.name,
+      gstin: (v) => v.gstin || "",
+      terms: (v) => v.paymentTermsDays || 0,
+      discount: (v) => v.defaultDiscountPct || 0,
+    },
+    "name",
+    "asc",
+  );
   const counts = useMemo(
     () => ({
       total: vendors.length,
@@ -160,17 +175,17 @@ export function VendorsTab({ onChanged }: { onChanged?: () => void }) {
           <ErpTable minWidth="min-w-[820px]">
             <ErpTableHead>
               <tr>
-                <th className="px-3 py-2 text-left font-medium">Code</th>
-                <th className="px-3 py-2 text-left font-medium">Vendor</th>
+                <ErpSortTh sort={vendorSort} field="code" className="px-3 py-2 text-left font-medium">Code</ErpSortTh>
+                <ErpSortTh sort={vendorSort} field="name" className="px-3 py-2 text-left font-medium">Vendor</ErpSortTh>
                 <th className="px-3 py-2 text-left font-medium">Contact</th>
-                <th className="px-3 py-2 text-left font-medium">GSTIN</th>
-                <th className="px-3 py-2 text-right font-medium">Terms</th>
-                <th className="px-3 py-2 text-right font-medium">Discount</th>
+                <ErpSortTh sort={vendorSort} field="gstin" className="px-3 py-2 text-left font-medium">GSTIN</ErpSortTh>
+                <ErpSortTh sort={vendorSort} field="terms" align="right" className="px-3 py-2 text-right font-medium">Terms</ErpSortTh>
+                <ErpSortTh sort={vendorSort} field="discount" align="right" className="px-3 py-2 text-right font-medium">Discount</ErpSortTh>
                 <th className="px-3 py-2 text-right font-medium" />
               </tr>
             </ErpTableHead>
             <ErpTableBody hoverable>
-              {vendors.map((v) => (
+              {vendorSort.rows.map((v) => (
                 <tr key={v.id}>
                   <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
                     {v.code || "—"}

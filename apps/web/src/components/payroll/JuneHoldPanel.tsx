@@ -26,6 +26,7 @@ import {
   ErpTableShell,
 } from "@/components/ui/erp-roster";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 export function JuneHoldPanel() {
   const session = useDemoSession();
@@ -133,6 +134,19 @@ export function JuneHoldPanel() {
       h.status === "held" ||
       h.status === "pending_super_admin" ||
       h.status === "forfeited_incomplete_year",
+  );
+
+  // Held salary, newest month first.
+  const holdSort = useTableSort(
+    openHolds,
+    {
+      staff: (h) => h.fullName,
+      month: (h) => h.month,
+      amount: (h) => h.amount,
+      status: (h) => h.status,
+    },
+    "month",
+    "desc",
   );
 
   return (
@@ -294,14 +308,14 @@ export function JuneHoldPanel() {
           <ErpTable minWidth="min-w-[640px]">
             <ErpTableHead>
               <tr>
-                <th className="px-3 py-2 font-medium">Staff</th>
-                <th className="px-3 py-2 font-medium">Month</th>
-                <th className="px-3 py-2 font-medium">Amount</th>
-                <th className="px-3 py-2 font-medium">Status</th>
+                <ErpSortTh sort={holdSort} field="staff" className="px-3 py-2 font-medium">Staff</ErpSortTh>
+                <ErpSortTh sort={holdSort} field="month" className="px-3 py-2 font-medium">Month</ErpSortTh>
+                <ErpSortTh sort={holdSort} field="amount" align="right" className="px-3 py-2 font-medium">Amount</ErpSortTh>
+                <ErpSortTh sort={holdSort} field="status" className="px-3 py-2 font-medium">Status</ErpSortTh>
               </tr>
             </ErpTableHead>
             <ErpTableBody>
-              {openHolds.map((h) => (
+              {holdSort.rows.map((h) => (
                 <tr key={h.id}>
                   <td className="px-3 py-2">
                     <div className="font-semibold text-[var(--brand-deep)]">

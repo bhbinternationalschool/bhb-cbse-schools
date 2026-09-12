@@ -34,6 +34,7 @@ import {
   resolveSessionStaff,
 } from "@/lib/staffResolve";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type LeaveTab =
   | "request"
@@ -178,6 +179,23 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
         : rows.filter((r) => r.status === statusFilter);
     return filtered.sort((a, b) => b.appliedAt.localeCompare(a.appliedAt));
   }, [hr, ay, statusFilter, isManager, selfStaff]);
+
+  // Newest application first, and "Status" brings the pending ones together —
+  // the list a manager works through. Days sorts as a number.
+  const leaveSort = useTableSort(
+    history,
+    {
+      staff: (r) => staffLabel(r.staffId),
+      type: (r) => r.typeCode,
+      dates: (r) => r.fromDate,
+      days: (r) => r.days,
+      status: (r) => r.status,
+      origin: (r) => r.origin,
+      by: (r) => r.decidedBy || r.appliedBy,
+    },
+    "dates",
+    "desc",
+  );
 
   const balances = useMemo(() => {
     if (!hr || !masters) return [];
@@ -833,18 +851,18 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
           <ErpTable>
             <ErpTableHead>
               <tr>
-                <th className="px-4 py-2">Staff</th>
-                <th className="px-3 py-2">Type</th>
-                <th className="px-3 py-2">Dates</th>
-                <th className="px-3 py-2">Days</th>
-                <th className="px-3 py-2">Status</th>
-                <th className="px-3 py-2">Origin</th>
+                <ErpSortTh sort={leaveSort} field="staff" className="px-4 py-2">Staff</ErpSortTh>
+                <ErpSortTh sort={leaveSort} field="type">Type</ErpSortTh>
+                <ErpSortTh sort={leaveSort} field="dates">Dates</ErpSortTh>
+                <ErpSortTh sort={leaveSort} field="days">Days</ErpSortTh>
+                <ErpSortTh sort={leaveSort} field="status">Status</ErpSortTh>
+                <ErpSortTh sort={leaveSort} field="origin">Origin</ErpSortTh>
                 <th className="px-3 py-2">By</th>
                 <th className="w-10 px-2 py-2" aria-label="Actions" />
               </tr>
             </ErpTableHead>
             <ErpTableBody>
-              {history.map((r) => (
+              {leaveSort.rows.map((r) => (
                 <tr key={r.id}>
                   <td className="px-4 py-2">{staffLabel(r.staffId)}</td>
                   <td className="px-3 py-2">{r.typeCode}</td>

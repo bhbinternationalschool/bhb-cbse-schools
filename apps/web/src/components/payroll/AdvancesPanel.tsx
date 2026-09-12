@@ -30,6 +30,7 @@ import {
   ErpTableShell,
 } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
   const session = useDemoSession();
@@ -95,6 +96,18 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
     }
     return [...list].sort((a, b) => b.givenDate.localeCompare(a.givenDate));
   }, [advances, showClosed, viewStaffId, tick]);
+
+  // Newest advance first; amounts sort by their rupees, not their labels.
+  const advSort = useTableSort(
+    visible,
+    {
+      staff: (a) => a.empCode,
+      given: (a) => a.givenDate,
+      amount: (a) => a.amount,
+    },
+    "given",
+    "desc",
+  );
 
   const viewDue = viewStaffId ? outstandingForStaff(viewStaffId) : 0;
   const returnDue = returnStaffId ? outstandingForStaff(returnStaffId) : 0;
@@ -428,9 +441,9 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
           <ErpTable className="text-xs">
             <ErpTableHead>
               <tr>
-                <th className="py-2 pr-2 font-semibold">Staff / advance</th>
-                <th className="py-2 pr-2 font-semibold">Given</th>
-                <th className="py-2 pr-2 font-semibold">Amount</th>
+                <ErpSortTh sort={advSort} field="staff" className="py-2 pr-2 font-semibold">Staff / advance</ErpSortTh>
+                <ErpSortTh sort={advSort} field="given" className="py-2 pr-2 font-semibold">Given</ErpSortTh>
+                <ErpSortTh sort={advSort} field="amount" className="py-2 pr-2 font-semibold">Amount</ErpSortTh>
                 <th className="py-2 pr-2 font-semibold">Outstanding</th>
                 <th className="py-2 pr-2 font-semibold">
                   Recoveries (salary month / return)
@@ -439,7 +452,7 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
               </tr>
             </ErpTableHead>
             <ErpTableBody>
-              {visible.map((a) => {
+              {advSort.rows.map((a) => {
                 const bal = outstandingOf(a);
                 return (
                   <tr key={a.id} className="align-top">

@@ -26,6 +26,7 @@ import {
   attendanceMonthLabel,
   studentAttendanceSummary,
 } from "@/lib/studentAttendance";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type Load =
   | { kind: "loading" }
@@ -92,6 +93,21 @@ export function StudentAttendanceCard({ studentId }: { studentId: string }) {
       academicYearCode: load.student.academicYearCode || undefined,
     });
   }, [load]);
+
+  // The months arrive oldest first, which is the reading order, so that is
+  // where the sort starts. A month sorts by its own key (2026-04), never by
+  // the label — "April, August, December" is alphabetical nonsense.
+  const monthSort = useTableSort(
+    summary?.months ?? [],
+    {
+      month: (m) => m.month,
+      marked: (m) => m.marked,
+      absent: (m) => m.absent,
+      percent: (m) => (m.percent === null ? -1 : m.percent),
+    },
+    "month",
+    "asc",
+  );
 
   if (load.kind === "missing") return null;
 
@@ -196,18 +212,14 @@ export function StudentAttendanceCard({ studentId }: { studentId: string }) {
                 <table className="w-full text-left text-[11px]">
                   <thead className="bg-[var(--surface-sunken)] text-[10px] uppercase tracking-wide text-[var(--muted)]">
                     <tr>
-                      <th className="px-3 py-1.5 font-bold">Month</th>
-                      <th className="px-3 py-1.5 text-right font-bold">
-                        Marked
-                      </th>
-                      <th className="px-3 py-1.5 text-right font-bold">
-                        Absent
-                      </th>
-                      <th className="px-3 py-1.5 text-right font-bold">%</th>
+                      <ErpSortTh sort={monthSort} field="month">Month</ErpSortTh>
+                      <ErpSortTh sort={monthSort} field="marked" align="right">Marked</ErpSortTh>
+                      <ErpSortTh sort={monthSort} field="absent" align="right">Absent</ErpSortTh>
+                      <ErpSortTh sort={monthSort} field="percent" align="right">%</ErpSortTh>
                     </tr>
                   </thead>
                   <tbody>
-                    {summary.months.map((m) => (
+                    {monthSort.rows.map((m) => (
                       <tr
                         key={m.month}
                         className="border-t border-[var(--border)]"

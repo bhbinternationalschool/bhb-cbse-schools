@@ -23,6 +23,7 @@ import {
 } from "@/lib/salarySetup";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 export function BankFileExportPanel({
   academicYearCode,
@@ -70,6 +71,20 @@ export function BankFileExportPanel({
       requirePosted: true,
     });
   }, [masters, month, academicYearCode, includeUpi, tick]);
+
+  // Status first, so the accounts that are NOT ready to pay come together.
+  const bankSort = useTableSort(
+    preview?.rows ?? [],
+    {
+      staff: (r) => r.empCode,
+      account: (r) => r.accountNo || "",
+      ifsc: (r) => r.ifsc || "",
+      amount: (r) => r.amount,
+      status: (r) => r.ok ? 1 : 0,
+    },
+    "status",
+    "asc",
+  );
 
   const settings = normalizeSalarySettings(loadSalarySetup().settings);
 
@@ -239,16 +254,16 @@ export function BankFileExportPanel({
                 <ErpTable className="text-xs">
                   <ErpTableHead>
                     <tr>
-                      <th className="py-2 pr-2 font-semibold">Staff</th>
-                      <th className="py-2 pr-2 font-semibold">A/c</th>
-                      <th className="py-2 pr-2 font-semibold">IFSC</th>
-                      <th className="py-2 pr-2 font-semibold">Amount</th>
-                      <th className="py-2 font-semibold">Status</th>
+                      <ErpSortTh sort={bankSort} field="staff" className="py-2 pr-2 font-semibold">Staff</ErpSortTh>
+                      <ErpSortTh sort={bankSort} field="account" className="py-2 pr-2 font-semibold">A/c</ErpSortTh>
+                      <ErpSortTh sort={bankSort} field="ifsc" className="py-2 pr-2 font-semibold">IFSC</ErpSortTh>
+                      <ErpSortTh sort={bankSort} field="amount" align="right" className="py-2 pr-2 font-semibold">Amount</ErpSortTh>
+                      <ErpSortTh sort={bankSort} field="status" className="py-2 font-semibold">Status</ErpSortTh>
                       <th className="w-10 px-2 py-2" aria-label="Actions" />
                     </tr>
                   </ErpTableHead>
                   <ErpTableBody>
-                    {preview.rows.map((r) => (
+                    {bankSort.rows.map((r) => (
                       <tr key={r.staffId}>
                         <td className="py-2 pr-2">
                           <span className="font-semibold text-[var(--brand-deep)]">

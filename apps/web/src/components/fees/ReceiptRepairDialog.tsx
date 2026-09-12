@@ -18,6 +18,7 @@ import {
 import { checkReceiptRepair, type RepairAllocation } from "@/lib/receiptRepair";
 import { currentAcademicYearCode, type MastersState } from "@/lib/masters";
 import type { SisState } from "@/lib/sis";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 const FIELD =
   "w-full rounded-lg border border-[rgba(32,48,80,0.18)] px-2 py-1 text-xs";
@@ -64,6 +65,18 @@ export function ReceiptRepairDialog({
     });
     return openFeeDues(rows.flatMap((r) => r.dues)).filter((d) => d.balancePaise > 0);
   }, [sis, masters, voucher.householdId]);
+
+  // Sorting by Outstanding puts the biggest gap first; the attach box is an input.
+  const dueSort = useTableSort(
+    dues,
+    {
+      student: (d) => nameOf(d.studentId),
+      head: (d) => d.label,
+      outstanding: (d) => d.balancePaise,
+    },
+    "student",
+    "asc",
+  );
 
   const nameOf = (studentId: string) =>
     sis?.students.find((s) => s.id === studentId)?.fullName ?? studentId;
@@ -189,14 +202,14 @@ export function ReceiptRepairDialog({
             <ErpTable minWidth="min-w-0" className="text-[11px]">
               <ErpTableHead sticky>
                 <tr>
-                  <th className="px-2 py-1.5">Student</th>
-                  <th className="px-2 py-1.5">Head / month</th>
-                  <th className="px-2 py-1.5 text-right">Outstanding</th>
+                  <ErpSortTh sort={dueSort} field="student" className="px-2 py-1.5">Student</ErpSortTh>
+                  <ErpSortTh sort={dueSort} field="head" className="px-2 py-1.5">Head / month</ErpSortTh>
+                  <ErpSortTh sort={dueSort} field="outstanding" align="right" className="px-2 py-1.5 text-right">Outstanding</ErpSortTh>
                   <th className="px-2 py-1.5 text-right">Attach ₹</th>
                 </tr>
               </ErpTableHead>
               <ErpTableBody>
-                {dues.map((d) => (
+                {dueSort.rows.map((d) => (
                   <tr key={d.dueKey} className="border-t border-[var(--border)]">
                     <td className="px-2 py-1">{nameOf(d.studentId)}</td>
                     <td className="px-2 py-1">{d.label}</td>

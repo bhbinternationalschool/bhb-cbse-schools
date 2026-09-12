@@ -16,6 +16,7 @@ import {
 } from "@/lib/transport";
 import { TransportBusBadge } from "@/components/transport/TransportBusBadge";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type Props = {
   studentId: string;
@@ -180,6 +181,19 @@ function TransportScheduleDialog({
 
   const totalDue = rows.reduce((s, r) => s + r.balancePaise, 0);
 
+  // A rider's months read in order, but Balance sorts so an unpaid month can be found.
+  const monthSort = useTableSort(
+    rows,
+    {
+      month: (r) => r.periodLabel,
+      fee: (r) => r.amountPaise,
+      paid: (r) => r.paidPaise,
+      balance: (r) => r.balancePaise,
+    },
+    "month",
+    "asc",
+  );
+
   return (
     // Base UI: focus is trapped inside, the page behind is locked and
     // Escape closes. The hand-rolled version had a click-catching
@@ -214,14 +228,14 @@ function TransportScheduleDialog({
             <ErpTable minWidth="min-w-0">
               <ErpTableHead>
                 <tr>
-                  <th className="py-1 font-semibold">Month</th>
-                  <th className="py-1 text-right font-semibold">Fee</th>
-                  <th className="py-1 text-right font-semibold">Paid</th>
-                  <th className="py-1 text-right font-semibold">Balance</th>
+                  <ErpSortTh sort={monthSort} field="month" className="py-1 font-semibold">Month</ErpSortTh>
+                  <ErpSortTh sort={monthSort} field="fee" align="right" className="py-1 text-right font-semibold">Fee</ErpSortTh>
+                  <ErpSortTh sort={monthSort} field="paid" align="right" className="py-1 text-right font-semibold">Paid</ErpSortTh>
+                  <ErpSortTh sort={monthSort} field="balance" align="right" className="py-1 text-right font-semibold">Balance</ErpSortTh>
                 </tr>
               </ErpTableHead>
               <ErpTableBody>
-                {rows.map((r) => (
+                {monthSort.rows.map((r) => (
                   <tr
                     key={r.periodKey}
                     className={r.paid ? "text-[var(--success)]" : ""}

@@ -26,6 +26,7 @@ import {
 import { loadMasters } from "@/lib/masters";
 import { classLabelForStudent } from "@/lib/parentPortal";
 import { loadSis, normalizeStudent, type SisStudent } from "@/lib/sis";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type Load =
   | { kind: "loading" }
@@ -201,20 +202,7 @@ export function StudentExamMarksCard({ studentId }: { studentId: string }) {
                         {rc.curriculumNote}
                       </p>
                     ) : null}
-                    <table className="w-full text-left text-[11px]">
-                      <thead className="bg-[var(--surface-sunken)] text-[10px] uppercase tracking-wide text-[var(--muted)]">
-                        <tr>
-                          <th className="px-3 py-1 font-bold">Subject</th>
-                          <th className="px-3 py-1 text-right font-bold">
-                            Marks
-                          </th>
-                          <th className="px-3 py-1 text-right font-bold">
-                            Grade
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rc.lines.map((l) => (
+                    <SubjectMarksTable lines={rc.lines} renderRow={(l) => (
                           <tr
                             key={l.subjectId}
                             className="border-t border-[var(--border)]"
@@ -248,9 +236,7 @@ export function StudentExamMarksCard({ studentId }: { studentId: string }) {
                               {l.grade || "—"}
                             </td>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        )} />
                   </>
                 ) : null}
               </li>
@@ -259,5 +245,47 @@ export function StudentExamMarksCard({ studentId }: { studentId: string }) {
         </ul>
       ) : null}
     </section>
+  );
+}
+
+/**
+ * One report card's subjects. Its own component because a hook cannot live
+ * inside the `.map()` over report cards, and each card sorts on its own —
+ * a parent comparing two terms wants them ordered the same way, and a
+ * teacher looking for the weakest subject wants one of them by marks.
+ *
+ * Marks sort by the PERCENTAGE, not the raw number: 38/50 stands above
+ * 40/100, and ordering by "38" would put it below. A subject with no mark
+ * entered sorts last either way rather than pretending to be a zero.
+ */
+function SubjectMarksTable({
+  lines,
+  renderRow,
+}: {
+  lines: ReportCard["lines"];
+  renderRow: (line: ReportCard["lines"][number]) => React.ReactNode;
+}) {
+  const sort = useTableSort(
+    lines,
+    {
+      subject: (l) => l.subjectName,
+      marks: (l) =>
+        l.marksObtained == null || !l.maxMarks ? -1 : (l.marksObtained / l.maxMarks) * 100,
+      grade: (l) => l.grade || "",
+    },
+    "subject",
+    "asc",
+  );
+  return (
+    <table className="w-full text-left text-[11px]">
+      <thead className="bg-[var(--surface-sunken)] text-[10px] uppercase tracking-wide text-[var(--muted)]">
+        <tr>
+          <ErpSortTh sort={sort} field="subject" className="px-3 py-1">Subject</ErpSortTh>
+          <ErpSortTh sort={sort} field="marks" align="right" className="px-3 py-1">Marks</ErpSortTh>
+          <ErpSortTh sort={sort} field="grade" align="right" className="px-3 py-1">Grade</ErpSortTh>
+        </tr>
+      </thead>
+      <tbody>{sort.rows.map((l) => renderRow(l))}</tbody>
+    </table>
   );
 }

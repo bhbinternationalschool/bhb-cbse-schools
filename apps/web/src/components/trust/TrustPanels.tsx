@@ -42,6 +42,7 @@ import {
 } from "@/lib/trustReportCatalog";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 export type TrustPanelProps = {
   state: TrustState;
@@ -287,6 +288,19 @@ export function WorksPanel({
     (w) => !selectedProjectId || w.projectId === selectedProjectId,
   );
 
+  // Work items: amount sorts by paise, status groups what is still open.
+  const workSort = useTableSort(
+    items,
+    {
+      work: (w) => w.name,
+      category: (w) => w.category,
+      amount: (w) => w.amountPaise,
+      status: (w) => w.status,
+    },
+    "work",
+    "asc",
+  );
+
   const suggested = suggestRate(category, unit, state);
 
   function add() {
@@ -346,15 +360,15 @@ export function WorksPanel({
         <ErpTable minWidth="min-w-full">
           <ErpTableHead>
             <tr>
-              <th className="pb-2">Work</th>
-              <th className="pb-2">Category</th>
+              <ErpSortTh sort={workSort} field="work" className="pb-2">Work</ErpSortTh>
+              <ErpSortTh sort={workSort} field="category" className="pb-2">Category</ErpSortTh>
               <th className="pb-2 text-right">Qty</th>
-              <th className="pb-2 text-right">Amount</th>
-              <th className="pb-2">Status</th>
+              <ErpSortTh sort={workSort} field="amount" align="right" className="pb-2 text-right">Amount</ErpSortTh>
+              <ErpSortTh sort={workSort} field="status" className="pb-2">Status</ErpSortTh>
             </tr>
           </ErpTableHead>
           <ErpTableBody>
-            {items.map((w) => (
+            {workSort.rows.map((w) => (
               <tr key={w.id}>
                 <td className="py-2">{w.name}</td>
                 <td className="py-2">{w.category}</td>
@@ -388,6 +402,19 @@ export function MaterialsPanel({
 
   const lines = state.materials.filter(
     (m) => !selectedProjectId || m.projectId === selectedProjectId,
+  );
+
+  // Sorting by Balance shows what is still to be issued.
+  const materialSort = useTableSort(
+    lines,
+    {
+      material: (m) => m.name,
+      required: (m) => m.requiredQty,
+      issued: (m) => m.issuedQty,
+      balance: (m) => materialBalance(m),
+    },
+    "material",
+    "asc",
   );
 
   function add() {
@@ -431,14 +458,14 @@ export function MaterialsPanel({
         <ErpTable minWidth="min-w-full">
           <ErpTableHead>
             <tr>
-              <th className="pb-2">Material</th>
-              <th className="pb-2 text-right">Required</th>
-              <th className="pb-2 text-right">Issued</th>
-              <th className="pb-2 text-right">Balance</th>
+              <ErpSortTh sort={materialSort} field="material" className="pb-2">Material</ErpSortTh>
+              <ErpSortTh sort={materialSort} field="required" align="right" className="pb-2 text-right">Required</ErpSortTh>
+              <ErpSortTh sort={materialSort} field="issued" align="right" className="pb-2 text-right">Issued</ErpSortTh>
+              <ErpSortTh sort={materialSort} field="balance" align="right" className="pb-2 text-right">Balance</ErpSortTh>
             </tr>
           </ErpTableHead>
           <ErpTableBody>
-            {lines.map((m) => (
+            {materialSort.rows.map((m) => (
               <tr key={m.id}>
                 <td className="py-2">{m.name}</td>
                 <td className="py-2 text-right">{m.requiredQty}</td>
@@ -575,6 +602,19 @@ export function AllotmentsPanel({
   const allotments = state.allotments.filter(
     (a) => !selectedProjectId || a.projectId === selectedProjectId,
   );
+
+  // Allotments by due date, so what is closest to its deadline comes first.
+  const allotSort = useTableSort(
+    allotments,
+    {
+      code: (a) => a.code,
+      assignee: (a) => a.partyName,
+      due: (a) => a.targetEnd,
+      progress: (a) => a.progressPct,
+    },
+    "due",
+    "asc",
+  );
   const overdue = listOverdueAllotments(state);
   const workItems = state.workItems.filter((w) => w.projectId === selectedProjectId);
 
@@ -633,15 +673,15 @@ export function AllotmentsPanel({
         <ErpTable minWidth="min-w-full">
           <ErpTableHead>
             <tr>
-              <th className="pb-2">Code</th>
-              <th className="pb-2">Assignee</th>
-              <th className="pb-2">Due</th>
-              <th className="pb-2 text-right">%</th>
+              <ErpSortTh sort={allotSort} field="code" className="pb-2">Code</ErpSortTh>
+              <ErpSortTh sort={allotSort} field="assignee" className="pb-2">Assignee</ErpSortTh>
+              <ErpSortTh sort={allotSort} field="due" className="pb-2">Due</ErpSortTh>
+              <ErpSortTh sort={allotSort} field="progress" align="right" className="pb-2 text-right">%</ErpSortTh>
               <th className="pb-2">Actions</th>
             </tr>
           </ErpTableHead>
           <ErpTableBody>
-            {allotments.map((a) => (
+            {allotSort.rows.map((a) => (
               <tr key={a.id}>
                 <td className="py-2 font-mono text-xs">{a.code}</td>
                 <td className="py-2">{a.partyName}</td>

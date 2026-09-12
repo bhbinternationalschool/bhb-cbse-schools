@@ -50,6 +50,7 @@ import {
   ErpTableShell,
 } from "@/components/ui/erp-roster";
 import { BulkActionBar, RowActionMenu, RowCheckbox, useRowSelection } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type AttTab =
   | "punch"
@@ -213,6 +214,21 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
         .includes(q);
     });
   }, [roster, query, masters]);
+
+  // The register sorts by whatever the office is scanning for: the code it
+  // reads off a card, the name it hears, the rule, or today's mark. The
+  // punch columns are inputs, not values, so they are not sort handles.
+  const staffSort = useTableSort(
+    filtered,
+    {
+      code: (s) => s.empCode,
+      name: (s) => s.fullName,
+      rule: (s) => ruleForStaff(rulesState, s.id)?.code ?? "",
+      mark: (s) => marks.find((m) => m.staffId === s.id)?.status ?? "",
+    },
+    "code",
+    "asc",
+  );
 
   const summary = useMemo(() => summarizeStaffMarks(marks), [marks]);
 
@@ -851,18 +867,18 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
                       label="Select all staff shown"
                     />
                   </th>
-                  <th className="px-3 py-2">Code</th>
-                  <th className="px-3 py-2">Name</th>
-                  <th className="px-3 py-2">Rule</th>
+                  <ErpSortTh sort={staffSort} field="code">Code</ErpSortTh>
+                  <ErpSortTh sort={staffSort} field="name">Name</ErpSortTh>
+                  <ErpSortTh sort={staffSort} field="rule">Rule</ErpSortTh>
                   <th className="px-3 py-2">In</th>
                   <th className="px-3 py-2">Out</th>
                   <th className="px-3 py-2">Way</th>
-                  <th className="px-3 py-2">Mark</th>
+                  <ErpSortTh sort={staffSort} field="mark">Mark</ErpSortTh>
                   <th className="w-10 px-2 py-2" aria-label="Actions" />
                 </tr>
               </ErpTableHead>
               <ErpTableBody>
-                {filtered.map((s) => {
+                {staffSort.rows.map((s) => {
                   const mark = marks.find((m) => m.staffId === s.id);
                   const rule = ruleForStaff(rulesState, s.id);
                   return (

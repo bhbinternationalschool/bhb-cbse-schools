@@ -50,6 +50,7 @@ import {
   ErpTableHead,
 } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 const CARD = "rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4";
 const BTN =
@@ -712,6 +713,19 @@ export function ChequesPanel({
     return [...byRef.values()].filter((c) => c.openPaise > 0);
   }, [rows]);
 
+  // Uncleared cheques, oldest received first — the ones to chase.
+  const chequeSort = useTableSort(
+    open,
+    {
+      cheque: (c) => c.ref,
+      received: (c) => c.receivedOn,
+      from: (c) => c.partyName || c.narration || "",
+      amount: (c) => c.openPaise,
+    },
+    "received",
+    "asc",
+  );
+
   const clear = async () => {
     if (!clearing || busy) return;
     const cheque = open.find((c) => c.ref === clearing.ref);
@@ -831,15 +845,15 @@ export function ChequesPanel({
           <ErpTable minWidth="min-w-[40rem]">
             <ErpTableHead>
               <tr>
-                <th className="pb-2 text-left">Cheque</th>
-                <th className="pb-2 text-left">Received</th>
-                <th className="pb-2 text-left">From</th>
-                <th className="pb-2 text-right">Amount</th>
+                <ErpSortTh sort={chequeSort} field="cheque" className="pb-2 text-left">Cheque</ErpSortTh>
+                <ErpSortTh sort={chequeSort} field="received" className="pb-2 text-left">Received</ErpSortTh>
+                <ErpSortTh sort={chequeSort} field="from" className="pb-2 text-left">From</ErpSortTh>
+                <ErpSortTh sort={chequeSort} field="amount" align="right" className="pb-2 text-right">Amount</ErpSortTh>
                 <th className="pb-2 text-right">Action</th>
               </tr>
             </ErpTableHead>
             <ErpTableBody>
-              {open.map((c) => (
+              {chequeSort.rows.map((c) => (
                 <tr key={c.ref}>
                   <td className="py-2 font-mono text-xs">{c.ref}</td>
                   <td className="py-2">{c.receivedOn}</td>

@@ -11,6 +11,7 @@ import {
   ErpTableShell,
 } from "@/components/ui/erp-roster";
 import { field } from "@/components/ui/erp-ui";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 /**
  * "Who teaches this class/subject?" lookup — the assignment data has always
@@ -54,6 +55,21 @@ export function TeacherAssignmentsPanel({
       );
     });
   }, [rows, query, kind]);
+
+  // Who teaches what, ordered however the office is reading it — by class to
+  // check a timetable, by teacher to check a load.
+  const taSort = useTableSort(
+    filtered,
+    {
+      className: (r) => r.className,
+      sectionName: (r) => r.sectionName,
+      subjectName: (r) => r.subjectName,
+      teacherName: (r) => r.teacherName,
+      role: (r) => (r.isPrimary ? "Primary" : r.kind),
+    },
+    "className",
+    "asc",
+  );
 
   return (
     <div className="space-y-3">
@@ -107,15 +123,15 @@ export function TeacherAssignmentsPanel({
           <ErpTable minWidth="min-w-[560px]">
             <ErpTableHead>
               <tr>
-                <th className="px-3 py-2 font-semibold">Class</th>
-                <th className="px-3 py-2 font-semibold">Section</th>
-                <th className="px-3 py-2 font-semibold">Subject</th>
-                <th className="px-3 py-2 font-semibold">Teacher</th>
-                <th className="px-3 py-2 font-semibold">Role</th>
+                <ErpSortTh sort={taSort} field="className">Class</ErpSortTh>
+                <ErpSortTh sort={taSort} field="sectionName">Section</ErpSortTh>
+                <ErpSortTh sort={taSort} field="subjectName">Subject</ErpSortTh>
+                <ErpSortTh sort={taSort} field="teacherName">Teacher</ErpSortTh>
+                <ErpSortTh sort={taSort} field="role">Role</ErpSortTh>
               </tr>
             </ErpTableHead>
             <ErpTableBody>
-              {filtered.map((r) => (
+              {taSort.rows.map((r) => (
                 <tr key={r.id}>
                   <td className="px-3 py-2 font-medium text-[var(--brand-deep)]">
                     {r.className}

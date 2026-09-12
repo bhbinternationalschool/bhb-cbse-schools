@@ -29,6 +29,7 @@ import {
   ErpTableHead,
   ErpTableShell,
 } from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 /** Staff-facing payslips: month filter + print. */
 export function StaffMyPayslips({ staffId }: { staffId: string }) {
@@ -192,6 +193,19 @@ export function StaffMyAdvances({ staffId }: { staffId: string }) {
     return staffId ? advancesForStaff(staffId) : [];
   }, [staffId, tick]);
 
+  // A staff member's own advances, newest first.
+  const myAdvSort = useTableSort(
+    list,
+    {
+      given: (a) => a.givenDate,
+      source: (a) => a.source,
+      amount: (a) => a.amount,
+      recovered: (a) => recoveredTotal(a),
+    },
+    "given",
+    "desc",
+  );
+
   useEffect(() => {
     setTick((n) => n + 1);
   }, []);
@@ -224,16 +238,16 @@ export function StaffMyAdvances({ staffId }: { staffId: string }) {
         <ErpTable className="text-xs">
           <ErpTableHead>
             <tr>
-              <th className="px-3 py-2 font-semibold">Given</th>
-              <th className="px-3 py-2 font-semibold">Source</th>
-              <th className="px-3 py-2 font-semibold">Amount</th>
-              <th className="px-3 py-2 font-semibold">Recovered</th>
+              <ErpSortTh sort={myAdvSort} field="given" className="px-3 py-2 font-semibold">Given</ErpSortTh>
+              <ErpSortTh sort={myAdvSort} field="source" className="px-3 py-2 font-semibold">Source</ErpSortTh>
+              <ErpSortTh sort={myAdvSort} field="amount" align="right" className="px-3 py-2 font-semibold">Amount</ErpSortTh>
+              <ErpSortTh sort={myAdvSort} field="recovered" align="right" className="px-3 py-2 font-semibold">Recovered</ErpSortTh>
               <th className="px-3 py-2 font-semibold">Balance</th>
               <th className="px-3 py-2 font-semibold">How recovered</th>
             </tr>
           </ErpTableHead>
           <ErpTableBody>
-            {list.map((a) => {
+            {myAdvSort.rows.map((a) => {
               const bal = outstandingOf(a);
               return (
                 <tr key={a.id} className="align-top">

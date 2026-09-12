@@ -19,6 +19,7 @@ import {
 } from "@/lib/staffHr";
 import { canManageStaffLeave, resolveSessionStaff } from "@/lib/staffResolve";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 const STATUS_LABEL: Record<StaffRequestStatus, string> = {
   open: "Open",
@@ -87,6 +88,21 @@ export function StaffRequestsPanel() {
     if (typeFilter !== "all") list = list.filter((t) => t.type === typeFilter);
     return [...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }, [hr, isManager, selfStaff, statusFilter, typeFilter]);
+
+  // Open first when sorting by status, because an open request is the one
+  // that needs somebody; the date sorts by its real timestamp.
+  const reqSort = useTableSort(
+    rows,
+    {
+      raisedBy: (t) => staffLabel(t.staffId),
+      type: (t) => t.type,
+      subject: (t) => t.subject,
+      status: (t) => t.status,
+      date: (t) => t.updatedAt || t.createdAt,
+    },
+    "date",
+    "desc",
+  );
 
   function onSave(ticket: StaffRequestTicket, patch: Partial<StaffRequestTicket>) {
     const result = updateStaffRequestTicket(ticket.id, {
@@ -162,16 +178,16 @@ export function StaffRequestsPanel() {
             <ErpTableHead>
               <tr>
                 <th className="px-4 py-2">Raised by</th>
-                <th className="px-3 py-2">Type</th>
-                <th className="px-3 py-2">Subject</th>
-                <th className="px-3 py-2">Status</th>
+                <ErpSortTh sort={reqSort} field="type">Type</ErpSortTh>
+                <ErpSortTh sort={reqSort} field="subject">Subject</ErpSortTh>
+                <ErpSortTh sort={reqSort} field="status">Status</ErpSortTh>
                 {isManager ? <th className="px-3 py-2">Assigned to</th> : null}
-                <th className="px-3 py-2">Date</th>
+                <ErpSortTh sort={reqSort} field="date">Date</ErpSortTh>
                 {isManager ? <th className="px-3 py-2">Action</th> : null}
               </tr>
             </ErpTableHead>
             <ErpTableBody>
-              {rows.map((t) => (
+              {reqSort.rows.map((t) => (
                 <tr key={t.id}>
                   <td className="px-4 py-2 font-medium text-[var(--brand-deep)]">
                     {staffLabel(t.staffId)}

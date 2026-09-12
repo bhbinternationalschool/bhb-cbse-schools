@@ -58,6 +58,7 @@ import {
   ErpTableShell,
 } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type HwTab =
   | "dashboard"
@@ -1364,6 +1365,16 @@ function RosterSubmitTable({
     sectionId,
   }).filter((p) => p.requiresSubmit);
   const roster = rosterForSection(sis, sectionId, ay);
+
+  // Only the name sorts: every other column is one homework post's submission state.
+  const hwRosterSort = useTableSort(
+    roster,
+    {
+      student: (stu) => stu.fullName,
+    },
+    "student",
+    "asc",
+  );
   if (!posts.length) {
     return (
       <p className="text-xs text-[var(--muted)]">
@@ -1376,7 +1387,7 @@ function RosterSubmitTable({
       <ErpTable>
         <ErpTableHead>
           <tr>
-            <th className="px-3 py-2">Student</th>
+            <ErpSortTh sort={hwRosterSort} field="student" className="px-3 py-2">Student</ErpSortTh>
             {posts.map((p) => (
               <th key={p.id} className="px-3 py-2">
                 {p.title.slice(0, 20)}
@@ -1386,7 +1397,7 @@ function RosterSubmitTable({
           </tr>
         </ErpTableHead>
         <ErpTableBody>
-          {roster.map((stu) => (
+          {hwRosterSort.rows.map((stu) => (
             <tr key={stu.id}>
               <td className="px-3 py-2 font-medium">{stu.fullName}</td>
               {posts.map((p) => {

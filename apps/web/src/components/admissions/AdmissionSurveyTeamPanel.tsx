@@ -27,6 +27,7 @@ import {
 } from "@/components/masters/MastersLayout";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 const inp =
   "w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm";
@@ -132,6 +133,20 @@ export function AdmissionSurveyTeamPanel({
       !state.surveyTeam.some(
         (m) => m.kind === "external" && m.externalId === e.id,
       ),
+  );
+
+  // Sorting by App shows at a glance who has not signed in yet — the reason
+  // this list is checked before a survey day.
+  const teamSort = useTableSort(
+    state.surveyTeam,
+    {
+      name: (m) => m.fullName,
+      type: (m) => m.kind,
+      role: (m) => m.role,
+      app: (m) => (m.assigned ? 1 : 0),
+    },
+    "name",
+    "asc",
   );
 
   return (
@@ -259,15 +274,15 @@ export function AdmissionSurveyTeamPanel({
           <ErpTable>
             <ErpTableHead>
               <tr>
-                <th className="px-2 py-2">Name</th>
-                <th className="px-2 py-2">Type</th>
-                <th className="px-2 py-2">Role</th>
-                <th className="px-2 py-2">App</th>
+                <ErpSortTh sort={teamSort} field="name" className="px-2 py-2">Name</ErpSortTh>
+                <ErpSortTh sort={teamSort} field="type" className="px-2 py-2">Type</ErpSortTh>
+                <ErpSortTh sort={teamSort} field="role" className="px-2 py-2">Role</ErpSortTh>
+                <ErpSortTh sort={teamSort} field="app" className="px-2 py-2">App</ErpSortTh>
                 <th className="px-2 py-2">Actions</th>
               </tr>
             </ErpTableHead>
             <ErpTableBody>
-              {state.surveyTeam.map((m) => (
+              {teamSort.rows.map((m) => (
                 <tr key={m.id}>
                   <td className="px-2 py-2 text-[12px]">
                     <span className="font-medium text-[var(--brand-deep)]">

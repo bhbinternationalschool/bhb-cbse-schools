@@ -33,6 +33,7 @@ import {
 } from "@/lib/staffAttendanceRules";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 export function StaffAttendanceRulesPanel() {
   const [state, setState] = useState<StaffAttendanceRulesState | null>(null);
@@ -50,6 +51,22 @@ export function StaffAttendanceRulesPanel() {
   const [assignRuleId, setAssignRuleId] = useState("");
 
   const roster = useMemo(() => activeStaffSorted(loadMasters().staff ?? []), [state]);
+
+  // Which staff have no rule yet is the question this screen exists for, so
+  // "Assigned rule" sorts — an empty one comes first ascending, which is the
+  // list somebody assigning rules wants in front of them.
+  const ruleSort = useTableSort(
+    roster,
+    {
+      staff: (s) => s.fullName,
+      rule: (s) => {
+        const asg = state?.assignments.find((a) => a.staffId === s.id);
+        return state?.rules.find((r) => r.id === asg?.ruleId)?.code ?? "";
+      },
+    },
+    "staff",
+    "asc",
+  );
 
   function reload() {
     migrateLegacyTimingIntoMasters();
@@ -506,13 +523,13 @@ export function StaffAttendanceRulesPanel() {
             <ErpTableHead sticky>
               <tr>
                 <th className="px-3 py-2 w-10" />
-                <th className="px-3 py-2">Staff</th>
-                <th className="px-3 py-2">Assigned rule</th>
+                <ErpSortTh sort={ruleSort} field="staff">Staff</ErpSortTh>
+                <ErpSortTh sort={ruleSort} field="rule">Assigned rule</ErpSortTh>
                 <th className="w-10 px-2 py-2" aria-label="Actions" />
               </tr>
             </ErpTableHead>
             <ErpTableBody hoverable>
-              {roster.map((s) => {
+              {ruleSort.rows.map((s) => {
                 const asg = state.assignments.find((a) => a.staffId === s.id);
                 return (
                   <tr key={s.id}>
