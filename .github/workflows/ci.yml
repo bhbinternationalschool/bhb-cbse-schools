@@ -238,6 +238,7 @@ jobs:
           npm run test:erp-reports
           npm run test:fleet-live
           npm run test:udise-doc-intake
+          npm run test:roster-name-case
           npm run test:fee-student-search
 
       - name: Test — admissions village market

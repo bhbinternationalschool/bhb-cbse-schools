@@ -79,13 +79,14 @@ const household = { address: "", pincode: "" };
 const plan = planUdiseCorrections({ extract: p1, student, household });
 assert.equal(plan.docKey, "aadhaar");
 const by = (f: string) => plan.changes.find((c) => c.field === f);
-assert.equal(by("fullName")?.after, "Aarav Sharma");
+assert.equal(by("fullName")?.after, "AARAV SHARMA", "written in the roster's own convention, not the card's");
 assert.equal(by("fullName")?.apply, true, "a spelling fix is applied");
 assert.equal(by("dob")?.after, "2019-05-12");
 assert.equal(by("dob")?.before, "2019-12-05", "the day/month swap the old parser caused gets corrected");
 assert.equal(by("aadhaarNumber")?.apply, true);
 assert.equal(by("gender")?.after, "M");
 assert.equal(by("address")?.target, "household");
+assert.equal(by("address")?.after, "VILL AYAR, VARANASI", "an address follows the same convention");
 assert.equal(by("pincode")?.after, "221007");
 assert.equal(plan.changes.filter((c) => !c.apply).length, 0);
 
@@ -112,7 +113,7 @@ assert.match(l4.changes.find((c) => c.field === "aadhaarNumber")!.reason, /compl
 /* ── Plan: the father's Aadhaar ───────────────────────────────────── */
 const fatherDoc: UdiseDocExtract = { ...p1, person: "father", nameOnDoc: "Rakesh Kumar Sharma", dob: "1988-01-01", aadhaarNumber: GOOD2, gender: "M" };
 const fp = planUdiseCorrections({ extract: fatherDoc, student, household });
-assert.equal(fp.changes.find((c) => c.field === "fatherAadhaarNumber")?.after, GOOD2);
+assert.equal(fp.changes.find((c) => c.field === "fatherAadhaarNumber")?.after, GOOD2, "a number is not a name — untouched");
 assert.equal(fp.changes.find((c) => c.field === "dob"), undefined, "a parent's DOB never touches the child");
 assert.equal(fp.changes.find((c) => c.field === "aadhaarNumber"), undefined);
 assert.equal(fp.changes.find((c) => c.field === "fullName"), undefined, "the parent's name never overwrites the child's");
@@ -128,7 +129,7 @@ const bc: UdiseDocExtract = { docType: "birth_certificate", person: "unknown", n
 const bp = planUdiseCorrections({ extract: bc, student, household });
 assert.equal(bp.person, "child", "a birth certificate is the child's document");
 assert.equal(bp.docKey, "birthCert");
-assert.equal(bp.changes.find((c) => c.field === "motherName")?.after, "Sunita Sharma");
+assert.equal(bp.changes.find((c) => c.field === "motherName")?.after, "SUNITA SHARMA");
 assert.equal(bp.changes.find((c) => c.field === "motherName")?.apply, true);
 assert.equal(bp.changes.find((c) => c.field === "dob")?.apply, true);
 assert.equal(bp.changes.find((c) => c.field === "address"), undefined, "a birth certificate carries no current address");
@@ -156,7 +157,7 @@ assert.match(office.text, /Aadhaar card received/);
 assert.match(office.text, /Change in UDISE\+ portal/);
 assert.ok(office.portalChanges.some((p) => p.startsWith("Date of Birth (dd/mm/yyyy) → 12/05/2019")), office.portalChanges.join(" | "));
 assert.doesNotMatch(office.text, new RegExp(GOOD), "masked for the office too");
-assert.match(office.text, /Arav Sarma → \*Aarav Sharma\*/);
+assert.match(office.text, /Arav Sarma → \*AARAV SHARMA\*/);
 assert.match(office.oneLine, /6 fields updated/);
 const heldOffice = renderOfficeAlert({ plan: wrongChild, childName: "Arav Sarma", classLabel: "Class 1-A", guardianName: "Rakesh", fileUrl: null });
 assert.match(heldOffice.text, /Needs your decision/);

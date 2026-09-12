@@ -99,6 +99,7 @@ SELFTESTS=(
   test:erp-reports
   test:fleet-live
   test:udise-doc-intake
+  test:roster-name-case
   test:fee-student-search
   test:household-dues-ay
   test:refreshment-chart
