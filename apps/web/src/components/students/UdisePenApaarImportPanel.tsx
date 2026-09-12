@@ -56,6 +56,7 @@ import {
   ErpTableHead,
   ErpTableShell,
 } from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type Props = {
   masters: MastersState;
@@ -336,6 +337,19 @@ export function UdisePenApaarImportPanel({
     if (filter === "all") return preview;
     return preview.filter((p) => p.tone === filter);
   }, [preview, filter, ambiguousRows, otherSessionRows, inactiveRows]);
+
+  // Sorting by Status groups everything the import cannot do on its own,
+  // which is the list the office has to work through. Sorted BEFORE the
+  // 250-row preview is cut, so the cut shows the top of the chosen order.
+  const previewSort = useTableSort(
+    visible,
+    {
+      status: (p) => p.tone,
+      student: (p) => p.udise.fullName,
+    },
+    "status",
+    "asc",
+  );
 
   function refreshPreview(nextSis: SisState, mat: unknown[][]) {
     const { preview: p } = previewUdiseStudentDetailsSync(
@@ -1359,8 +1373,8 @@ export function UdisePenApaarImportPanel({
                 <ErpTable minWidth="min-w-[1100px]" className="border-collapse text-[11px]">
                   <ErpTableHead sticky>
                     <tr>
-                      <th className="px-2 py-1.5 font-medium">Status</th>
-                      <th className="px-2 py-1.5 font-medium">UDISE student</th>
+                      <ErpSortTh sort={previewSort} field="status" className="px-2 py-1.5 font-medium">Status</ErpSortTh>
+                      <ErpSortTh sort={previewSort} field="student" className="px-2 py-1.5 font-medium">UDISE student</ErpSortTh>
                       <th className="px-2 py-1.5 font-medium">
                         Class · Aadhaar validation · MBU
                       </th>
@@ -1370,7 +1384,7 @@ export function UdisePenApaarImportPanel({
                     </tr>
                   </ErpTableHead>
                   <ErpTableBody>
-                    {visible.slice(0, 250).map((p) => (
+                    {previewSort.rows.slice(0, 250).map((p) => (
                       <tr
                         key={`${p.rowIndex}-${p.udise.pen}-${p.udise.fullName}`}
                         className={`align-top ${TONE_ROW[p.tone]}`}

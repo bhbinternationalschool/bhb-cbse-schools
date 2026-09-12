@@ -55,6 +55,7 @@ import {
   type RteReportId,
   type RteState,
 } from "@/lib/rteEws";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type RteTab =
   | "dashboard"
@@ -173,6 +174,26 @@ export function RteWorkspace({
       state.applications.filter((a) => a.academicYearCode === ay),
     );
   }, [state, ay]);
+
+  // The allotted list: by lottery number as the portal sends it, or by name/class/status to find one child. S.No. is a running count, and the last two columns are actions.
+  const rteSort = useTableSort(
+    apps,
+    {
+      lottery: (a) => a.lotteryNo,
+      regId: (a) => a.govtApplicationNo,
+      student: (a) => a.childName,
+      father: (a) => a.parentName,
+      klass: (a) => a.classId,
+      gender: (a) => a.gender,
+      dob: (a) => a.dateOfBirth,
+      block: (a) => a.blockTown,
+      ward: (a) => a.gramPanchayatWard,
+      portalStatus: (a) => a.portalAdmissionStatus,
+      schoolStatus: (a) => a.status,
+    },
+    "lottery",
+    "asc",
+  );
 
   const enrolled = useMemo(() => listEnrolledRteStudents(sis ?? undefined), [sis]);
 
@@ -717,39 +738,17 @@ export function RteWorkspace({
                     <th className="whitespace-nowrap px-2 py-2 font-medium">
                       S.No.
                     </th>
-                    <th className="whitespace-nowrap px-2 py-2 font-medium">
-                      Lottery No
-                    </th>
-                    <th className="whitespace-nowrap px-2 py-2 font-medium">
-                      Registration ID
-                    </th>
-                    <th className="whitespace-nowrap px-2 py-2 font-medium">
-                      Student Name
-                    </th>
-                    <th className="whitespace-nowrap px-2 py-2 font-medium">
-                      Father Name
-                    </th>
-                    <th className="whitespace-nowrap px-2 py-2 font-medium">
-                      Class
-                    </th>
-                    <th className="whitespace-nowrap px-2 py-2 font-medium">
-                      Gender
-                    </th>
-                    <th className="whitespace-nowrap px-2 py-2 font-medium">
-                      DOB
-                    </th>
-                    <th className="whitespace-nowrap px-2 py-2 font-medium">
-                      Block/Town
-                    </th>
-                    <th className="whitespace-nowrap px-2 py-2 font-medium">
-                      Grampanchayat/Ward
-                    </th>
-                    <th className="whitespace-nowrap px-2 py-2 font-medium">
-                      Admission Status (portal)
-                    </th>
-                    <th className="whitespace-nowrap px-2 py-2 font-medium">
-                      School status
-                    </th>
+                    <ErpSortTh sort={rteSort} field="lottery" className="whitespace-nowrap px-2 py-2 font-medium">Lottery No</ErpSortTh>
+                    <ErpSortTh sort={rteSort} field="regId" className="whitespace-nowrap px-2 py-2 font-medium">Registration ID</ErpSortTh>
+                    <ErpSortTh sort={rteSort} field="student" className="whitespace-nowrap px-2 py-2 font-medium">Student Name</ErpSortTh>
+                    <ErpSortTh sort={rteSort} field="father" className="whitespace-nowrap px-2 py-2 font-medium">Father Name</ErpSortTh>
+                    <ErpSortTh sort={rteSort} field="klass" className="whitespace-nowrap px-2 py-2 font-medium">Class</ErpSortTh>
+                    <ErpSortTh sort={rteSort} field="gender" className="whitespace-nowrap px-2 py-2 font-medium">Gender</ErpSortTh>
+                    <ErpSortTh sort={rteSort} field="dob" className="whitespace-nowrap px-2 py-2 font-medium">DOB</ErpSortTh>
+                    <ErpSortTh sort={rteSort} field="block" className="whitespace-nowrap px-2 py-2 font-medium">Block/Town</ErpSortTh>
+                    <ErpSortTh sort={rteSort} field="ward" className="whitespace-nowrap px-2 py-2 font-medium">Grampanchayat/Ward</ErpSortTh>
+                    <ErpSortTh sort={rteSort} field="portalStatus" className="whitespace-nowrap px-2 py-2 font-medium">Admission Status (portal)</ErpSortTh>
+                    <ErpSortTh sort={rteSort} field="schoolStatus" className="whitespace-nowrap px-2 py-2 font-medium">School status</ErpSortTh>
                     <th className="whitespace-nowrap px-2 py-2 font-medium">
                       Reg. fee
                     </th>
@@ -759,7 +758,7 @@ export function RteWorkspace({
                   </tr>
                 </ErpTableHead>
                 <ErpTableBody>
-                  {apps.map((a, i) => (
+                  {rteSort.rows.map((a, i) => (
                     <AppTableRow
                       key={a.id}
                       app={a}
