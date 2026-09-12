@@ -7,6 +7,14 @@
  * all, and an exam datesheet simply could not be sent to a parent. The example
  * is a sample for Meta's reviewer; every real send supplies its own file.
  *
+ * It also EDITS a template that already exists on Meta. `bhb_daily_brief`
+ * was created header-less on 2026-09-10 — the ordinary submit path drops a
+ * media header when it has no example file — was approved that way, and then
+ * refused every send with "(#132018) There's an issue with the parameters in
+ * your template" because the ERP kept attaching the PDF. Creating it again
+ * is impossible (the name is taken), so the existing template is edited in
+ * place and goes back to Meta for review, keeping its id and its history.
+ *
  * Dry run by default. To actually submit:
  *
  *   ALLOW_LOCAL_PROD_WRITES=1 npx tsx apps/web/scripts/wa-submit-media-templates.mts \
@@ -108,7 +116,26 @@ async function uploadSample(bytes: Buffer, mime: string): Promise<string> {
   return done.h;
 }
 
+/** What Meta already holds, by `name|language` — so an existing template is edited, not re-created. */
+async function fetchExisting(): Promise<Map<string, { id: string; status: string }>> {
+  const out = new Map<string, { id: string; status: string }>();
+  const r = await fetch(
+    `https://graph.facebook.com/${GRAPH}/${WABA}/message_templates?limit=200&fields=name,language,status,id`,
+    { headers: { Authorization: `Bearer ${TOKEN}` } },
+  );
+  const j = (await r.json()) as {
+    data?: { name?: string; language?: string; status?: string; id?: string }[];
+    error?: { message?: string };
+  };
+  if (!r.ok) throw new Error(j.error?.message || `Meta list failed: HTTP ${r.status}`);
+  for (const t of j.data ?? []) {
+    if (t.name && t.language && t.id) out.set(`${t.name}|${t.language}`, { id: t.id, status: t.status || "" });
+  }
+  return out;
+}
+
 const { tenantId, state } = await readRegistry();
+const existing = await fetchExisting();
 const media = state.templates.filter(
   (t) => t.headerFormat !== "NONE" && t.headerFormat !== "TEXT",
 );
@@ -141,28 +168,47 @@ for (const family of families) {
     console.log(`  ${t.metaName} [${t.language}] header=${header ? (header as { format?: string }).format : "MISSING"}`);
     console.log(`      ${body.text.replace(/\n/g, "⏎").slice(0, 150)}`);
     if (p.warnings.length) console.log(`      warnings: ${p.warnings.join("; ")}`);
+    const already = existing.get(`${p.name}|${p.language}`);
+    if (already) {
+      console.log(`      exists on Meta as ${already.id} (${already.status}) → EDIT in place`);
+    }
     if (!SUBMIT) continue;
 
-    const r = await fetch(`https://graph.facebook.com/${GRAPH}/${WABA}/message_templates`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: p.name,
-        language: p.language,
-        category: p.category,
-        components: p.components,
-      }),
-    });
+    // Editing keeps the id, the history and the name; Meta re-reviews it.
+    // Name and language cannot change on an edit, so only the components go.
+    const r = already
+      ? await fetch(`https://graph.facebook.com/${GRAPH}/${already.id}`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ components: p.components }),
+        })
+      : await fetch(`https://graph.facebook.com/${GRAPH}/${WABA}/message_templates`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: p.name,
+            language: p.language,
+            category: p.category,
+            components: p.components,
+          }),
+        });
     const j = (await r.json()) as {
       id?: string;
       status?: string;
+      success?: boolean;
       error?: { error_user_msg?: string; message?: string };
     };
-    if (!r.ok || !j.id) {
+    if (!r.ok || (!j.id && j.success !== true)) {
       console.log(`      ✗ ${j.error?.error_user_msg || j.error?.message || r.status}`);
       continue;
     }
-    console.log(`      ✓ ${j.id} ${j.status ?? "PENDING"}`);
+    const id = j.id || already?.id || "";
+    console.log(`      ✓ ${already ? "edited" : "created"} ${id} ${j.status ?? "PENDING review"}`);
+    if (!j.id && already) {
+      // An edit answers {success:true} with no id; the registry still needs
+      // the id it already had recorded against the row.
+      j.id = already.id;
+    }
     // Written after EVERY success, so a crash never leaves a template on
     // Meta that the registry does not know about.
     next = markTemplateSubmittedToMeta(next, t.id, j.id, "script wa-submit-media-templates");
