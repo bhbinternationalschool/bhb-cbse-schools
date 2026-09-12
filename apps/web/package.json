@@ -125,6 +125,7 @@
     "test:boarding-suggest": "npx tsx src/lib/boardingSuggestAi.selftest.ts",
     "test:live-bus-marker": "npx tsx src/lib/liveBusMarker.selftest.ts",
     "test:transport-pin-intake": "npx tsx src/lib/transportPinIntake.selftest.ts",
+    "test:storage-quota": "npx tsx src/lib/browserStorageQuota.selftest.ts",
     "test:transport-boarding": "npx tsx src/lib/transportBoarding.selftest.ts",
     "test:transport-crew-access": "npx tsx src/lib/transportCrewAccess.selftest.ts",
     "test:transport-crew": "npx tsx src/lib/transportCrew.selftest.ts",
