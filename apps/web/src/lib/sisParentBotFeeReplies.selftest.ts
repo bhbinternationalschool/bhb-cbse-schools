@@ -13,6 +13,8 @@ import {
   detectSisFeeReplyIntent,
   parseSisPromiseToPay,
   promiseSummaryForOffice,
+  promiseIsEmpty,
+  composeSisPromiseUnclear,
 } from "./sisParentBotEngine";
 
 console.log("sisParentBotFeeReplies.selftest.ts");
@@ -90,5 +92,22 @@ assert.match(composeSisPromiseRecorded(parseSisPromiseToPay("salary aane par", T
 assert.match(promiseSummaryForOffice(parseSisPromiseToPay("2000 15 tarikh tak", T)), /₹2,000, by 2026-09-15/);
 /* never a menu in any of these */
 for (const s of [composeSisNeedTimeAsk(true), composeSisClaimsPaidReply(true), rec]) assert.doesNotMatch(s, /KIDS|DUES|MENU/);
+
+/* ── An answer that is not an answer (11 Sep 2026, live) ──────────── */
+// Both of these were recorded as promises reading "amount not given, date
+// not given", and recording them closed the question — so the real answer
+// that followed ("1500 dina") was met with "I don't have that information".
+assert.equal(promiseIsEmpty(parseSisPromiseToPay("Hindi", T)), true);
+assert.equal(promiseIsEmpty(parseSisPromiseToPay("Aanjli mam ko", T)), true);
+assert.equal(promiseIsEmpty(parseSisPromiseToPay("Bath kar lo", T)), true);
+// A real answer, in any of its shapes, is never empty.
+assert.equal(promiseIsEmpty(parseSisPromiseToPay("1500 dina", T)), false, "the answer that was missed");
+assert.equal(parseSisPromiseToPay("1500 dina", T).amountPaise, 150000);
+assert.equal(promiseIsEmpty(parseSisPromiseToPay("2000 15 tarikh tak", T)), false);
+assert.equal(promiseIsEmpty(parseSisPromiseToPay("पूरा अगले सोमवार", T)), false);
+assert.equal(promiseIsEmpty(parseSisPromiseToPay("kal", T)), false, "a date alone is an answer");
+assert.match(composeSisPromiseUnclear(true), /राशि/);
+assert.match(composeSisPromiseUnclear(false), /amount/);
+for (const s of [composeSisPromiseUnclear(true), composeSisPromiseUnclear(false)]) assert.doesNotMatch(s, /KIDS|DUES/);
 
 console.log("ok");
