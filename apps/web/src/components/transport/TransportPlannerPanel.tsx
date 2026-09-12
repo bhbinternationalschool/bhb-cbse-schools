@@ -272,18 +272,31 @@ export function TransportPlannerPanel({
                   </h3>
                   <p className="text-xs text-[var(--muted)]">
                     {c.busNo}
-                    {c.vehicleReg ? ` (${c.vehicleReg})` : ""} · {c.riderCount}/
-                    {c.seatCapacity} seats
+                    {c.vehicleReg ? ` (${c.vehicleReg})` : ""} ·{" "}
+                    {/*
+                      A capacity of 0 is "nobody recorded it". Rendering it as
+                      "24/0 seats · Full" would call every bus in the fleet
+                      full on a number that does not exist.
+                    */}
+                    {c.seatCapacity > 0
+                      ? `${c.riderCount}/${c.seatCapacity} seats`
+                      : `${c.riderCount} riders`}
                   </p>
                 </div>
                 <span
                   className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
-                    c.riderCount >= c.seatCapacity
-                      ? "bg-[#c2410c]/15 text-[var(--tone-coral)]"
-                      : "bg-[var(--success-soft)] text-[var(--success)]"
+                    c.seatCapacity <= 0
+                      ? "bg-[var(--surface-sunken)] text-[var(--muted)]"
+                      : c.riderCount >= c.seatCapacity
+                        ? "bg-[#c2410c]/15 text-[var(--tone-coral)]"
+                        : "bg-[var(--success-soft)] text-[var(--success)]"
                   }`}
                 >
-                  {c.riderCount >= c.seatCapacity ? "Full" : "Seats open"}
+                  {c.seatCapacity <= 0
+                    ? "Seats not set"
+                    : c.riderCount >= c.seatCapacity
+                      ? "Full"
+                      : "Seats open"}
                 </span>
               </div>
               {c.unassignedNearby.length ? (
@@ -422,8 +435,10 @@ export function TransportPlannerPanel({
                               <p className="text-[11px] text-[var(--muted)]">
                                 {s.busNo}
                                 {s.vehicleReg ? ` · ${s.vehicleReg}` : ""} ·{" "}
-                                {s.riderCount}/{s.seatCapacity} riders ·{" "}
-                                {formatInr(s.monthlyFeePaise)}/mo
+                                {s.seatCapacity > 0
+                                  ? `${s.riderCount}/${s.seatCapacity} riders`
+                                  : `${s.riderCount} riders`}{" "}
+                                · {formatInr(s.monthlyFeePaise)}/mo
                               </p>
                             </div>
                             <span className="rounded-full bg-[var(--surface-sunken)] px-2 py-0.5 text-[10px] font-bold text-[var(--brand-deep)]">

@@ -193,6 +193,7 @@ export function TransportWorkspace() {
     assignment: TransportAssignment;
     studentName: string;
     classGroupCode: ClassGroupCode | null;
+    home: { lat: number; lng: number } | null;
     dues: FeeDueLine[];
   } | null>(null);
   const [holdCheck, setHoldCheck] = useState<HoldCheck | null>(null);
@@ -313,6 +314,7 @@ export function TransportWorkspace() {
       assignment: asg,
       studentName: rider.fullName,
       classGroupCode: classGroupOf(student, masters),
+      home: homeOf(rider.studentId, sis),
       dues,
     });
   }
@@ -706,6 +708,7 @@ export function TransportWorkspace() {
               assignment={rosterEditing.assignment}
               studentName={rosterEditing.studentName}
               classGroupCode={rosterEditing.classGroupCode}
+              home={rosterEditing.home}
               academicYearCode={session.academicYearCode}
               state={state}
               dues={rosterEditing.dues}
@@ -964,6 +967,7 @@ function RidersPanel(props: RidersPanelProps) {
     assignment: (typeof riders)[number];
     studentName: string;
     classGroupCode: ClassGroupCode | null;
+    home: { lat: number; lng: number } | null;
     dues: FeeDueLine[];
   } | null>(null);
 
@@ -1561,6 +1565,7 @@ function RidersPanel(props: RidersPanelProps) {
                           assignment,
                           studentName: student?.fullName ?? "this student",
                           classGroupCode: classGroupOf(student, masters),
+                          home: homeOf(assignment.studentId, sis),
                           dues,
                         });
                       }}
@@ -1649,6 +1654,7 @@ function RidersPanel(props: RidersPanelProps) {
           assignment={amending.assignment}
           studentName={amending.studentName}
           classGroupCode={amending.classGroupCode}
+          home={amending.home}
           academicYearCode={academicYearCode}
           state={state}
           dues={amending.dues}
@@ -1904,6 +1910,24 @@ function PickerGroup({
       <ul className="mt-1 space-y-1">{children}</ul>
     </div>
   );
+}
+
+/**
+ * A child's household coordinates, when the school has geocoded them.
+ *
+ * null rather than a guess. The stop picker then says the address has not
+ * been placed on the map and offers a locality search, instead of ranking
+ * stops by distance from somewhere nobody established.
+ */
+function homeOf(
+  studentId: string,
+  sis: SisState | null,
+): { lat: number; lng: number } | null {
+  const student = sis?.students.find((st) => st.id === studentId);
+  if (!student?.householdId) return null;
+  const hh = sis?.households.find((h) => h.id === student.householdId);
+  if (!hh || !householdHasGeo(hh)) return null;
+  return { lat: hh.geoLat as number, lng: hh.geoLng as number };
 }
 
 /**

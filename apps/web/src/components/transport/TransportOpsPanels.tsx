@@ -870,7 +870,9 @@ export function FleetPanel({
     "diesel",
   );
   const [odo, setOdo] = useState("0");
-  const [seats, setSeats] = useState("40");
+  // Blank, not "40". Pre-filling a capacity is how all six vehicles came to
+  // claim forty seats when the fleet is a Magic, a Winger and a van.
+  const [seats, setSeats] = useState("");
   const [driverName, setDriverName] = useState("");
   const [driverMobile, setDriverMobile] = useState("");
   const [driverStaffId, setDriverStaffId] = useState("");
@@ -887,7 +889,8 @@ export function FleetPanel({
       name: vname || reg,
       fuelType,
       odometerKm: Number(odo) || 0,
-      seatCapacity: Number(seats) || 40,
+      // 0 = left blank = not recorded. Never 40.
+      seatCapacity: Math.max(0, Math.round(Number(seats) || 0)),
       driverName: driverName.trim(),
       driverMobile: driverMobile.replace(/\D/g, "").slice(-10),
       driverStaffId,
@@ -901,7 +904,7 @@ export function FleetPanel({
     setReg("");
     setVname("");
     setOdo("0");
-    setSeats("40");
+    setSeats("");
     setDriverName("");
     setDriverMobile("");
     setDriverStaffId("");
@@ -968,9 +971,15 @@ export function FleetPanel({
             </span>
             <input
               className="field !py-1.5"
+              inputMode="numeric"
               value={seats}
+              placeholder="How many this vehicle actually seats"
               onChange={(e) => setSeats(e.target.value)}
             />
+            <span className="mt-1 block text-[10px] text-[var(--muted)]">
+              Leave blank if nobody has counted. Blank reads as “not recorded”
+              everywhere and never blocks a rider; a wrong number does both.
+            </span>
           </label>
           <label className="text-sm sm:col-span-2">
             <span className="mb-1 block text-[11px] text-[var(--muted)]">
@@ -1089,7 +1098,11 @@ export function FleetPanel({
                       : "diesel",
                   );
                   setOdo(String(v.odometerKm));
-                  setSeats(String(v.seatCapacity || 40));
+                  setSeats(
+                    v.seatCapacity && v.seatCapacity > 0
+                      ? String(v.seatCapacity)
+                      : "",
+                  );
                   setDriverName(v.driverName || "");
                   setDriverMobile(v.driverMobile || "");
                   setDriverStaffId(v.driverStaffId || "");

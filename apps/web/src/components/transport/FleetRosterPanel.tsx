@@ -433,8 +433,14 @@ function RosterCard({
 }) {
   // Staff occupy seats exactly as children do. Counting only the children
   // reports room on a bus that is already full.
+  //
+  // A capacity of 0 means nobody recorded it. Subtracting from it would mark
+  // EVERY bus "over capacity" in red, which is both wrong and useless — the
+  // panel says the seats are unrecorded instead, which is the thing somebody
+  // can go and fix.
+  const seatsKnown = roster.seatCapacity > 0;
   const seatsLeft = Math.max(0, roster.seatCapacity - roster.seatsUsed);
-  const over = roster.seatsUsed > roster.seatCapacity;
+  const over = seatsKnown && roster.seatsUsed > roster.seatCapacity;
   const riderKeys = useMemo(() => roster.riders.map((r) => r.studentId), [roster.riders]);
   const riderSel = useRowSelection(riderKeys);
   const riderById = (id: string) => roster.riders.find((r) => r.studentId === id);
@@ -487,13 +493,21 @@ function RosterCard({
                   : "font-semibold text-[var(--ink)]"
               }
             >
-              {roster.seatsUsed}/{roster.seatCapacity} seats
+              {seatsKnown
+                ? `${roster.seatsUsed}/${roster.seatCapacity} seats`
+                : `${roster.seatsUsed} riders`}
               {roster.staffRiders.length > 0
                 ? ` (${roster.riders.length} students + ${roster.staffRiders.length} staff)`
                 : ""}
             </span>
             <span className="text-[var(--muted)]">
-              {over
+              {!seatsKnown
+                ? ` · seats not recorded for this vehicle · ${
+                    roster.concessionTotalPaise > 0
+                      ? `${formatInr(roster.monthlyTotalPaise)} gross − ${formatInr(roster.concessionTotalPaise)} discount = ${formatInr(roster.netTotalPaise)}/month`
+                      : `${formatInr(roster.monthlyTotalPaise)}/month`
+                  }`
+                : over
                 ? " — over capacity"
                 : ` · ${seatsLeft} free · ${
                     roster.concessionTotalPaise > 0

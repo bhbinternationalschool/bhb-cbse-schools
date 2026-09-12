@@ -23,12 +23,21 @@ export function NearestStopPicker({
   state,
   home,
   selectedStopId,
+  exceptStudentId,
+  academicYearCode,
   onPick,
 }: {
   state: TransportState;
   /** The child's household coordinates, when the school has them. */
   home: { lat: number; lng: number } | null;
   selectedStopId: string;
+  /**
+   * The rider being moved, when there is one. They already hold a seat on
+   * their current bus, and counting them against it would show this screen's
+   * own seat line a different number from the rows above it.
+   */
+  exceptStudentId?: string;
+  academicYearCode?: string;
   onPick: (choice: { routeId: string; stopId: string }) => void;
 }) {
   const [term, setTerm] = useState("");
@@ -45,8 +54,12 @@ export function NearestStopPicker({
 
   const { ranked, unpinned } = useMemo(() => {
     if (!point) return { ranked: [] as RankedStop[], unpinned: [] };
-    return rankStopsNearPoint(state, point, { limit: 12 });
-  }, [state, point]);
+    return rankStopsNearPoint(state, point, {
+      limit: 12,
+      exceptStudentId,
+      academicYearCode,
+    });
+  }, [state, point, exceptStudentId, academicYearCode]);
 
   useEffect(() => {
     const q = term.trim();
@@ -202,7 +215,11 @@ export function NearestStopPicker({
                     {r.monthlyFeePaise > 0
                       ? ` · ${formatInr(r.monthlyFeePaise)}/month`
                       : " · not priced"}
-                    {r.seatsLeft <= 0 ? " · bus full" : ` · ${r.seatsLeft} seats`}
+                    {r.seatsLeft == null
+                      ? " · seats not recorded"
+                      : r.seatsLeft <= 0
+                        ? " · bus full"
+                        : ` · ${r.seatsLeft} seats`}
                   </div>
                 </button>
               </li>

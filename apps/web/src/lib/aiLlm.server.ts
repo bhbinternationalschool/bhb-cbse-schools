@@ -103,6 +103,13 @@ import {
   type CollectionsWeeklyLanguage,
 } from "@/lib/collectionsWeeklyAi";
 import {
+  buildBoardingSuggestSystemPrompt,
+  buildBoardingSuggestUserPrompt,
+  parseBoardingSuggestionJson,
+  type BoardingSuggestDraft,
+  type BoardingSuggestFacts,
+} from "@/lib/boardingSuggestAi";
+import {
   buildPtmBriefSystemPrompt,
   buildPtmBriefUserPrompt,
   parsePtmBriefJson,
@@ -1387,6 +1394,45 @@ export async function generatePtmBriefJson(opts: {
   return {
     ok: false,
     error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI PTM briefs",
+    engine: r.engine,
+  };
+}
+
+/**
+ * Which existing stop this child should board at, and why. Draft only.
+ *
+ * The shortlist and every number on it are built by the caller from the desk;
+ * the model weighs them. `parseBoardingSuggestionJson` is handed the stop ids
+ * that were actually offered, so an id the model invents cannot come back out
+ * as a place to send a child.
+ */
+export async function generateBoardingSuggestionJson(opts: {
+  facts: BoardingSuggestFacts;
+  schoolName: string;
+}): Promise<
+  | { ok: true; draft: BoardingSuggestDraft; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const ids = opts.facts.candidates.map((c) => c.stopId);
+  const r = await callLlmJson(
+    {
+      system: buildBoardingSuggestSystemPrompt({ schoolName: opts.schoolName }),
+      userMessage: buildBoardingSuggestUserPrompt(opts.facts),
+      maxTokens: 900,
+      // Low: this is a judgement between measured options, not a piece of
+      // writing. The same shortlist should give the same answer twice.
+      temperature: 0.2,
+      geminiMaxTokens: 3072,
+      meta: { route: "boarding-point", promptVersion: "v1" },
+    },
+    (text) => parseBoardingSuggestionJson(text, ids),
+  );
+  if (r.ok) {
+    return { ok: true, draft: r.data, engine: r.engine, generationId: r.generationId };
+  }
+  return {
+    ok: false,
+    error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI boarding suggestions",
     engine: r.engine,
   };
 }

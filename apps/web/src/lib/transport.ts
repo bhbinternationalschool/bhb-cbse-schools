@@ -272,7 +272,17 @@ export type FleetVehicle = {
   primaryRouteId: string;
   /** Bus photo URL for Fee Take / parent comms */
   photoUrl?: string;
-  /** Passenger capacity for route planning */
+  /**
+   * Seats, as somebody recorded them.
+   *
+   * 0 means NOBODY HAS RECORDED IT. It is not zero seats and it is not the
+   * 40 this field used to invent: on 2026-09-12 all six vehicles read exactly
+   * 40, which is the old default, while the fleet is a Tata Magic (about 7),
+   * a Winger (about 13) and a van. A check built on that number would have
+   * refused a legitimate move on a fiction, or waved a child onto a 13-seater
+   * that already had 31. Every reader must branch on 0 rather than subtract
+   * from it — `seatsOnRoute` does it once so they do not each have to.
+   */
   seatCapacity?: number;
   /** Assigned driver (WhatsApp hub / fleet comms) */
   driverName?: string;
@@ -868,7 +878,9 @@ export function normalizeVehicle(v: Partial<FleetVehicle>): FleetVehicle {
     avgMileage: Math.max(0, Number(v.avgMileage) || 0),
     primaryRouteId: v.primaryRouteId ?? "",
     photoUrl: v.photoUrl?.trim() || "",
-    seatCapacity: Math.max(1, Number(v.seatCapacity) || 40),
+    // Unknown stays 0. See the field's comment: a default of 40 made "nobody
+    // measured this" indistinguishable from "a forty-seat bus".
+    seatCapacity: Math.max(0, Math.round(Number(v.seatCapacity) || 0)),
     driverName: (v.driverName ?? "").trim(),
     driverMobile: (v.driverMobile ?? "").replace(/\D/g, "").slice(-10),
     driverStaffId: (v.driverStaffId ?? "").trim(),
@@ -1521,6 +1533,83 @@ export function setRouteStops(
   return { ok: true, route: updated };
 }
 
+/* ─── Seats ────────────────────────────────────────────────── */
+
+/**
+ * How full a bus is, or an honest admission that nobody can say.
+ *
+ * `known: false` is the state of every vehicle in the fleet today, and it must
+ * not collapse into either "full" or "empty". Subtracting riders from an
+ * unrecorded capacity gives a negative number that `Math.max(0, …)` turns into
+ * "bus full", which is how an unmeasured van ends up refusing children; using
+ * the old 40 default gives "five seats free" on a Tata Magic.
+ */
+export type RouteSeats =
+  | { known: true; capacity: number; used: number; left: number; full: boolean }
+  | { known: false; capacity: 0; used: number };
+
+/**
+ * Seats on the vehicle serving a route.
+ *
+ * WHO COUNTS AS ABOARD
+ * The same rule `ridersOnRoute` has always used: the assignment's date window
+ * covers the day being asked about. Not "effectiveTo is null" — an amendment
+ * CLOSES the old assignment with a future end date and opens the new one with
+ * a future start, so on the day of the change both rows exist for one child.
+ * Counting open-ended rows only would lose the rider who is still on the bus
+ * until the end of the month; counting every row would seat them twice.
+ *
+ * `exceptStudentId` leaves one child out. Without it, changing the stop of a
+ * rider already on the bus counts them against their own seat and reports the
+ * bus one fuller than it is — which on a full bus refuses a move that frees
+ * nothing and takes nothing.
+ */
+export function seatsOnRoute(
+  state: TransportState,
+  routeId: string,
+  opts?: {
+    exceptStudentId?: string;
+    academicYearCode?: string;
+    /** The day to ask about. Defaults to today. */
+    onDate?: string;
+  },
+): RouteSeats {
+  const route = state.routes.find((r) => r.id === routeId);
+  const vehicle = route?.vehicleId
+    ? state.vehicles.find((v) => v.id === route.vehicleId)
+    : state.vehicles.find((v) => v.primaryRouteId === routeId);
+
+  const on = opts?.onDate || todayIso();
+  const used = state.assignments.filter(
+    (a) =>
+      a.routeId === routeId &&
+      a.effectiveFrom <= on &&
+      (!a.effectiveTo || a.effectiveTo >= on) &&
+      a.studentId !== opts?.exceptStudentId &&
+      (!opts?.academicYearCode || a.academicYearCode === opts.academicYearCode),
+  ).length;
+
+  const capacity = Math.max(0, Math.round(Number(vehicle?.seatCapacity) || 0));
+  if (capacity <= 0) return { known: false, capacity: 0, used };
+  return {
+    known: true,
+    capacity,
+    used,
+    left: Math.max(0, capacity - used),
+    full: used >= capacity,
+  };
+}
+
+/** One line for a screen: "6 seats free", "full (40 of 40)", or the truth. */
+export function describeRouteSeats(seats: RouteSeats): string {
+  if (!seats.known) {
+    return `${seats.used} riders · seats not recorded for this vehicle`;
+  }
+  return seats.full
+    ? `full — ${seats.used} of ${seats.capacity}`
+    : `${seats.left} of ${seats.capacity} seats free`;
+}
+
 /* ─── Shifts ───────────────────────────────────────────────── */
 
 /**
@@ -1628,8 +1717,17 @@ export function assignStudentToRoute(input: {
    */
   pickupShiftId?: string;
   dropShiftId?: string;
+  /**
+   * Why this child may be seated on a bus already at capacity.
+   *
+   * Required only when the capacity is actually RECORDED and already met. A
+   * vehicle whose seats nobody has entered never blocks a move — refusing on
+   * an unknown would stop the office working over a number that does not
+   * exist. That case returns a warning instead.
+   */
+  overCapacityReason?: string;
 }):
-  | { ok: true; assignment: TransportAssignment }
+  | { ok: true; assignment: TransportAssignment; warning?: string }
   | { ok: false; error: string } {
   const state = loadTransport();
   const route = state.routes.find((r) => r.id === input.routeId && r.isActive);
@@ -1664,6 +1762,24 @@ export function assignStudentToRoute(input: {
   }
 
   const ay = input.academicYearCode ?? DEFAULT_AY;
+
+  // Seats, asked for the year this assignment belongs to. The child being
+  // assigned is left out of the count: when only their stop is changing they
+  // already hold a seat on this bus, and counting them against it would refuse
+  // a move that frees nothing and takes nothing.
+  const seats = seatsOnRoute(state, route.id, {
+    exceptStudentId: input.studentId,
+    academicYearCode: ay,
+  });
+  let seatWarning: string | undefined;
+  if (!seats.known) {
+    seatWarning = `No seat capacity is recorded for ${route.busNo || route.code}, so nobody can say whether it is full — it carries ${seats.used} already. Set the seats in Fleet.`;
+  } else if (seats.full && !input.overCapacityReason?.trim()) {
+    return {
+      ok: false,
+      error: `${route.busNo || route.code} is full — ${seats.used} of ${seats.capacity} seats. Enter a reason to seat one more.`,
+    };
+  }
   const expected = expectedMonthlyFeePaise(route, stop, state.feePolicy);
   const override =
     input.monthlyFeePaise != null && input.monthlyFeePaise > 0
@@ -1718,7 +1834,7 @@ export function assignStudentToRoute(input: {
     assignments: [assignment, ...nextAssignments],
   });
   saveTransport(alignVehiclesToRoutes(loadTransport()));
-  return { ok: true, assignment };
+  return { ok: true, assignment, ...(seatWarning ? { warning: seatWarning } : {}) };
 }
 
 /** Sync vehicle.primaryRouteId ↔ route.vehicleId from fleet records. */

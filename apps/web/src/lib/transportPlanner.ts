@@ -16,6 +16,7 @@ import {
   haversineKm,
   applyServiceMode,
   listActiveRoutes,
+  seatsOnRoute,
   stopHasGeo,
   type StopDistanceSource,
   type TransportServiceMode,
@@ -473,7 +474,9 @@ function vehicleForRoute(
     busNo: route.busNo || veh?.name || "",
     vehicleReg: route.vehicleReg || veh?.registrationNo || "",
     photoUrl: veh?.photoUrl || "",
-    seatCapacity: veh?.seatCapacity || 40,
+    // 0 = nobody recorded it. See FleetVehicle.seatCapacity for why this
+    // must not default to 40.
+    seatCapacity: Math.max(0, Math.round(Number(veh?.seatCapacity) || 0)),
   };
 }
 
@@ -547,7 +550,11 @@ export function buildRouteClusters(
       .slice(0, 8)
       .map((x) => x.profile);
 
-    const seatsLeft = Math.max(0, veh.seatCapacity - riders);
+    // An unrecorded capacity must not cap the suggestions at zero — that
+    // would silently stop proposing riders for every bus in the fleet, which
+    // reads as "no candidates" rather than "nobody entered the seats".
+    const seatsLeft =
+      veh.seatCapacity > 0 ? Math.max(0, veh.seatCapacity - riders) : null;
     return {
       routeId: route.id,
       routeCode: route.code,
@@ -558,7 +565,9 @@ export function buildRouteClusters(
       riderCount: riders,
       seatCapacity: veh.seatCapacity,
       unassignedNearby: nearby,
-      suggestedAdds: nearby.slice(0, seatsLeft).map((p) => p.studentId),
+      suggestedAdds: (seatsLeft == null ? nearby : nearby.slice(0, seatsLeft)).map(
+        (p) => p.studentId,
+      ),
     };
   });
 }
@@ -713,7 +722,8 @@ export type RankedStop = {
   /** Road km from campus — what the fee is worked out on. */
   distanceFromSchoolKm: number;
   monthlyFeePaise: number;
-  seatsLeft: number;
+  /** null when the vehicle's capacity has never been recorded. */
+  seatsLeft: number | null;
 };
 
 export type NearestStops = {
@@ -736,7 +746,13 @@ export type NearestStops = {
 export function rankStopsNearPoint(
   state: TransportState,
   point: { lat: number; lng: number },
-  opts?: { limit?: number; withinKm?: number },
+  opts?: {
+    limit?: number;
+    withinKm?: number;
+    /** The rider being moved, so they are not counted against their own seat. */
+    exceptStudentId?: string;
+    academicYearCode?: string;
+  },
 ): NearestStops {
   const ranked: RankedStop[] = [];
   const unpinned: NearestStops["unpinned"] = [];
@@ -744,7 +760,17 @@ export function rankStopsNearPoint(
   for (const route of listActiveRoutes(state)) {
     const routeLabel = route.busNo || route.code;
     const veh = vehicleForRoute(route, state);
-    const seatsLeft = Math.max(0, veh.seatCapacity - ridersOnRoute(state, route.id));
+    // One seat truth. This used to subtract `ridersOnRoute` from the vehicle's
+    // capacity while the move dialog asked `seatsOnRoute`, and the two count
+    // riders differently — so the same bus showed "13 seats" in the picker and
+    // "5 free" in the line below it, on one screen.
+    const seats = seatsOnRoute(state, route.id, {
+      exceptStudentId: opts?.exceptStudentId,
+      academicYearCode: opts?.academicYearCode,
+    });
+    // null = the vehicle's seats were never recorded. NOT zero seats: the
+    // picker says so rather than labelling every bus "full".
+    const seatsLeft = seats.known ? seats.left : null;
 
     for (const stop of route.stops) {
       if (!stopHasGeo(stop)) {
