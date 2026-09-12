@@ -19,6 +19,7 @@ import {
 } from "@/lib/sis";
 import { sisDualWriteDbEnabled } from "@/lib/sisDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { fetchAllPages } from "@/lib/supabase/pageAll";
 
 export type SisRemoteBundle = {
   households: Household[];
@@ -494,17 +495,36 @@ export async function fetchSisFromDb(): Promise<{
   }
   const { sb, tenantId } = ctx;
 
+  // Paged: PostgREST caps a request at 1,000 rows and calls the cut a success.
+  // 717 student rows today (one per enrolled year, not per child), so the
+  // roster — the register, the fee counter's search, every desk that reads a
+  // child's details — is one intake away from silently loading a prefix of
+  // itself. See lib/supabase/pageAll.ts.
   const [hhRes, stuRes, metaRes] = await Promise.all([
-    sb.from("sis_households").select("*").eq("tenant_id", tenantId),
-    sb.from("sis_students").select("*").eq("tenant_id", tenantId),
+    fetchAllPages<HouseholdRow>((from, to) =>
+      sb
+        .from("sis_households")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllPages<StudentRow>((from, to) =>
+      sb
+        .from("sis_students")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
     sb.from("sis_sync_meta").select("*").eq("tenant_id", tenantId).maybeSingle(),
   ]);
 
   if (hhRes.error || stuRes.error) {
     console.warn(
       "[sis-db] fetch failed",
-      hhRes.error?.message,
-      stuRes.error?.message,
+      hhRes.error ?? undefined,
+      stuRes.error ?? undefined,
     );
     return {
       bundle: {
@@ -520,11 +540,11 @@ export async function fetchSisFromDb(): Promise<{
 
   const householdUpdatedAt: Record<string, string> = {};
   const studentUpdatedAt: Record<string, string> = {};
-  const households = ((hhRes.data ?? []) as HouseholdRow[]).map((row) => {
+  const households = hhRes.rows.map((row) => {
     householdUpdatedAt[row.id] = row.updated_at;
     return rowToHousehold(row);
   });
-  const students = ((stuRes.data ?? []) as StudentRow[]).map((row) => {
+  const students = stuRes.rows.map((row) => {
     studentUpdatedAt[row.id] = row.updated_at;
     return rowToStudent(row);
   });
@@ -647,6 +667,8 @@ type IdentityRow = {
   docs: unknown;
   notes: string | null;
   photo_url: string | null;
+  /** Non-column fields — see STUDENT_PROFILE_KEYS (migration 20260912110000). */
+  profile?: unknown;
 };
 
 type EnrollmentRow = {
@@ -682,6 +704,11 @@ type EnrollmentRow = {
 function identityEnrollmentToStudent(row: EnrollmentRow): SisStudent {
   const i = row.sis_student_identities;
   return normalizeStudent({
+    // Non-column fields first; the columns below win where both exist —
+    // the same order as rowToStudent. Without this the split read blanks
+    // every profile field (full Aadhaar numbers, occupation, UDISE+ flags …)
+    // the moment SIS_IDENTITY_SPLIT is switched on.
+    ...studentProfileFromRow(i.profile),
     revisionAt: row.updated_at,
     id: row.id,
     admissionNo: i.admission_no ?? "",
@@ -757,20 +784,32 @@ export async function fetchSisFromDbViaIdentitySplit(): Promise<{
   }
   const { sb, tenantId } = ctx;
 
+  // Paged for the same reason as fetchSisFromDb above.
   const [hhRes, enrRes, metaRes] = await Promise.all([
-    sb.from("sis_households").select("*").eq("tenant_id", tenantId),
-    sb
-      .from("sis_enrollments")
-      .select("*, sis_student_identities!inner(*)")
-      .eq("tenant_id", tenantId),
+    fetchAllPages<HouseholdRow>((from, to) =>
+      sb
+        .from("sis_households")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllPages<EnrollmentRow>((from, to) =>
+      sb
+        .from("sis_enrollments")
+        .select("*, sis_student_identities!inner(*)")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
     sb.from("sis_sync_meta").select("*").eq("tenant_id", tenantId).maybeSingle(),
   ]);
 
   if (hhRes.error || enrRes.error) {
     console.warn(
       "[sis-db] identity-split fetch failed",
-      hhRes.error?.message,
-      enrRes.error?.message,
+      hhRes.error ?? undefined,
+      enrRes.error ?? undefined,
     );
     return {
       bundle: { households: [], students: [], householdUpdatedAt: {}, studentUpdatedAt: {} },
@@ -781,11 +820,11 @@ export async function fetchSisFromDbViaIdentitySplit(): Promise<{
 
   const householdUpdatedAt: Record<string, string> = {};
   const studentUpdatedAt: Record<string, string> = {};
-  const households = ((hhRes.data ?? []) as HouseholdRow[]).map((row) => {
+  const households = hhRes.rows.map((row) => {
     householdUpdatedAt[row.id] = row.updated_at;
     return rowToHousehold(row);
   });
-  const students = ((enrRes.data ?? []) as unknown as EnrollmentRow[]).map((row) => {
+  const students = enrRes.rows.map((row) => {
     studentUpdatedAt[row.id] = row.updated_at;
     return identityEnrollmentToStudent(row);
   });

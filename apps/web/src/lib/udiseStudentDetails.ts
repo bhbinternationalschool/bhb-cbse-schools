@@ -1426,11 +1426,10 @@ function sisFilledOf(
     fullName: student.fullName || "",
     pen: student.pen || "",
     apaarId: student.apaarId || "",
-    aadhaar: a4
-      ? student.aadhaarVerification === "verified_udise"
-        ? `********${a4}`
-        : student.aadhaarNumber || `********${a4}`
-      : "",
+    // Staff surface: the whole number whenever it is known, verified or not —
+    // the same rule as displayAadhaar. Only the last four are masked, because
+    // only the last four are all there is.
+    aadhaar: a4 ? student.aadhaarNumber || `********${a4}` : "",
     aadhaarVerification: student.aadhaarVerification || "missing",
     motherName: student.motherName || "",
     fatherName: student.fatherName || "",
@@ -1658,8 +1657,11 @@ function propagateIdentityAcrossSessions(
       penStatus: source.penStatus,
       apaarId: source.apaarId,
       aadhaarLast4: source.aadhaarLast4,
-      aadhaarNumber:
-        source.aadhaarVerification === "verified_udise" ? "" : s.aadhaarNumber,
+      // The stored 12 digits survive the sync. Blanking them on
+      // "verified_udise" was removed from the student form and normalizeStudent
+      // on 2026-09-06 and left here: a portal sync would still wipe a number
+      // the office had typed, and there is nowhere to read it back from.
+      aadhaarNumber: s.aadhaarNumber,
       aadhaarVerification: source.aadhaarVerification,
       notes: [
         s.notes,
@@ -1738,10 +1740,8 @@ export function applyUdiseStudentDetailsSync(
       penStatus: (p.willUpdate.penStatus ?? cur.penStatus) as PenStatus,
       apaarId: p.willUpdate.apaarId ?? cur.apaarId,
       aadhaarLast4: p.willUpdate.aadhaarLast4 ?? cur.aadhaarLast4,
-      aadhaarNumber:
-        p.willUpdate.aadhaarVerification === "verified_udise"
-          ? ""
-          : (p.willUpdate.aadhaarNumber ?? cur.aadhaarNumber),
+      // Never blanked on verification — see the note in syncFromCurrentSession.
+      aadhaarNumber: p.willUpdate.aadhaarNumber ?? cur.aadhaarNumber,
       aadhaarVerification:
         p.willUpdate.aadhaarVerification ?? cur.aadhaarVerification,
       category: p.willUpdate.category ?? cur.category,
@@ -1970,10 +1970,8 @@ export function applyUdiseRowToStudent(input: {
     penStatus: (will.penStatus ?? cur.penStatus) as PenStatus,
     apaarId: will.apaarId ?? cur.apaarId,
     aadhaarLast4: will.aadhaarLast4 ?? cur.aadhaarLast4,
-    aadhaarNumber:
-      will.aadhaarVerification === "verified_udise"
-        ? ""
-        : (will.aadhaarNumber ?? cur.aadhaarNumber),
+    // Never blanked on verification — see the note in syncFromCurrentSession.
+    aadhaarNumber: will.aadhaarNumber ?? cur.aadhaarNumber,
     aadhaarVerification: will.aadhaarVerification ?? cur.aadhaarVerification,
     category: will.category ?? cur.category,
     gender: will.gender ?? cur.gender,

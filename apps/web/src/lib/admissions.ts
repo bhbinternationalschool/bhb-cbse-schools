@@ -2689,10 +2689,25 @@ export function enrollLead(
     sisHouseholdId = hh.id;
   }
 
+  /*
+   * Who the father is, and whose phone the lead's key mobile is.
+   *
+   * `primary` is whichever guardian the registration marked primary — often
+   * the mother. Falling back to it for "father" wrote her name and, worse,
+   * her mobile into the father's fields; so did falling back to the lead's own
+   * mobile when the registering parent was the mother. A number nobody said
+   * belongs to the father must not be recorded as his (see
+   * alignHouseholdMobiles for the same rule on the student form).
+   */
   const father =
-    admHh?.guardians.find((g) => g.relation === "father") || primary;
+    admHh?.guardians.find((g) => g.relation === "father") ||
+    (primary?.relation === "father" ? primary : undefined);
   const motherG =
     mother || admHh?.guardians.find((g) => g.relation === "mother");
+  const leadMobileIsMothers =
+    (!!motherG?.mobile && normalizeMobile(motherG.mobile) === parentMobile) ||
+    (!!lead.motherName.trim() &&
+      normParentName(lead.guardianName) === normParentName(lead.motherName));
 
   const rteTagIds = lead.rte
     ? ensureRteEwsTagIds({
@@ -2719,10 +2734,15 @@ export function enrollLead(
     studentType,
     feeGroupId: feeGroupId || null,
     joinedOn: admissionDate,
-    fatherName: father?.fullName || lead.guardianName,
+    fatherName:
+      father?.fullName || (leadMobileIsMothers ? "" : lead.guardianName),
     motherName: motherG?.fullName || lead.motherName,
-    fatherMobile: father?.mobile || parentMobile,
-    motherMobile: motherG?.mobile || "",
+    fatherMobile:
+      normalizeMobile(father?.mobile ?? "") ||
+      (leadMobileIsMothers ? "" : parentMobile),
+    motherMobile:
+      normalizeMobile(motherG?.mobile ?? "") ||
+      (leadMobileIsMothers ? parentMobile : ""),
     householdId: sisHouseholdId,
     category: (["GEN", "OBC", "SC", "ST", "EWS"].includes(lead.category)
       ? lead.category
