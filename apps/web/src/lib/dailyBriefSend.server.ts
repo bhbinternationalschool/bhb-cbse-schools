@@ -200,18 +200,43 @@ export async function sendDailyBrief(
       continue;
     }
     const positions = templateVariablePositions(resolved.template, values);
+    const hasMediaHeader =
+      resolved.template.headerFormat === "DOCUMENT" ||
+      resolved.template.headerFormat === "IMAGE" ||
+      resolved.template.headerFormat === "VIDEO";
+    if (!hasMediaHeader) {
+      // Said once per recipient, loudly, because the numbers still go out and
+      // the body says the full brief is attached — which it is not until the
+      // template carries a real DOCUMENT header on Meta.
+      console.error(
+        `[daily-brief] ${resolved.template.metaName}/${resolved.template.language} has no media header on Meta — ` +
+          "the brief is sending WITHOUT its PDF. Re-submit the template with a document example " +
+          "(scripts/wa-submit-media-templates.mts) to attach it again.",
+      );
+    }
     const res = await sendWhatsAppTemplate({
       toMobile: r.mobile,
       name: resolved.template.metaName,
       language: resolved.template.metaLanguage || resolved.template.language,
       fromPhoneNumberId: resolved.sender?.phoneNumberId,
+      // A header parameter for a template Meta approved WITHOUT a header is
+      // refused as "(#132018) There's an issue with the parameters in your
+      // template" — which is how the 6 PM brief failed silently from the day
+      // it was scheduled. The seed asked for a DOCUMENT header; the submit
+      // path drops a media header when it has no example file to send with
+      // it, so Meta holds this template with a body and a footer and nothing
+      // else. Send the shape that was actually approved.
       components: [
-        {
-          type: "header",
-          parameters: [
-            { type: "document", document: { link: documentUrl, filename: briefFilename(date) } },
-          ],
-        },
+        ...(hasMediaHeader
+          ? [
+              {
+                type: "header" as const,
+                parameters: [
+                  { type: "document" as const, document: { link: documentUrl, filename: briefFilename(date) } },
+                ],
+              },
+            ]
+          : []),
         {
           type: "body",
           parameters: Object.keys(positions)
