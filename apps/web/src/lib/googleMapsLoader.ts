@@ -23,6 +23,12 @@ type GoogleMapsNamespace = {
     extend: (p: { lat: number; lng: number }) => void;
   };
   SymbolPath: { CIRCLE: unknown };
+  /**
+   * Needed to anchor a rotating Symbol on its own centre. Without an anchor
+   * Google places the path's 0,0 at the coordinate, so a bus icon drawn
+   * around its middle swings around its corner as it turns.
+   */
+  Point: new (x: number, y: number) => unknown;
 };
 
 declare global {

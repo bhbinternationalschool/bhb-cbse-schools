@@ -12,6 +12,17 @@ import {
   type TransportMapMarker,
 } from "@/lib/transportMapMarkers";
 import type { TransportState } from "@/lib/transport";
+import {
+  ANIMATE_MS,
+  BUS_ICON_PATH,
+  BUS_STOPPED_PATH,
+  appliedRotation,
+  decideAnimation,
+  easeInOut,
+  interpolate,
+  liveBusStyle,
+  type LiveBusPositionInput,
+} from "@/lib/liveBusMarker";
 
 const MARKER_COLORS: Record<TransportMapMarker["kind"], string> = {
   school: "#C5A028",
@@ -27,7 +38,36 @@ type GMap = {
   setZoom: (z: number) => void;
 };
 
-type GMarker = { setMap: (m: unknown) => void };
+type GMarker = {
+  setMap: (m: unknown) => void;
+  setPosition?: (p: { lat: number; lng: number }) => void;
+  setIcon?: (i: unknown) => void;
+  setTitle?: (t: string) => void;
+};
+
+/**
+ * One vehicle on the live feed. `courseDeg`, `speedKmh` and `freshness` come
+ * straight from Fleet Edge via /api/transport/live and decide the icon — see
+ * lib/liveBusMarker.ts for what each is allowed to imply.
+ */
+export type LiveVehicleMarker = LiveBusPositionInput & {
+  id: string;
+  label: string;
+  /** Shown under the label: "2 min ago", "Moving · 34 km/h". */
+  detail: string;
+  /** The fix's own timestamp, so a re-delivered ping is not re-animated. */
+  at: string;
+};
+
+/** What a marker is currently showing, so the next fix knows where to start. */
+type LiveMarkerState = {
+  marker: GMarker;
+  lat: number;
+  lng: number;
+  rotation: number;
+  at: string;
+  raf: number | null;
+};
 
 type Props = {
   transport: TransportState;
@@ -35,6 +75,15 @@ type Props = {
   masters: MastersState | null;
   academicYearCode?: string;
   layers: TransportMapLayers;
+  /**
+   * Vehicles from the Fleet Edge feed, re-polled by the caller.
+   *
+   * Kept out of `markers` on purpose. Everything in `markers` is destroyed
+   * and rebuilt whenever it changes, which is why the map has never shown a
+   * bus travel — it vanished and reappeared every thirty seconds. These are
+   * held in their own map, keyed by vehicle, and updated in place.
+   */
+  liveVehicles?: LiveVehicleMarker[];
   className?: string;
 };
 
@@ -44,11 +93,14 @@ export function TransportGoogleMap({
   masters,
   academicYearCode,
   layers,
+  liveVehicles,
   className = "",
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<GMap | null>(null);
   const markersRef = useRef<GMarker[]>([]);
+  const liveRef = useRef<Map<string, LiveMarkerState>>(new Map());
+  const mapsApiRef = useRef<Awaited<ReturnType<typeof loadGoogleMaps>> | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error" | "no-key">(
     "loading",
   );
@@ -99,6 +151,7 @@ export function TransportGoogleMap({
     void loadGoogleMaps(apiKey)
       .then((maps) => {
         if (cancelled || !containerRef.current) return;
+        mapsApiRef.current = maps;
 
         if (!mapRef.current) {
           mapRef.current = new maps.Map(containerRef.current, {
@@ -154,6 +207,143 @@ export function TransportGoogleMap({
     };
   }, [apiKey, markers, bounds]);
 
+  /**
+   * The live layer.
+   *
+   * Separate from the effect above because that one tears every marker down
+   * and builds it again — fine for stops, fatal for a vehicle that is meant
+   * to be seen travelling. Here each bus keeps its marker for as long as it
+   * keeps reporting, and only its position and heading change.
+   */
+  useEffect(() => {
+    const maps = mapsApiRef.current;
+    const map = mapRef.current;
+    if (!maps || !map) return;
+
+    const wanted = layers.buses ? (liveVehicles ?? []) : [];
+    const seen = new Set<string>();
+
+    for (const v of wanted) {
+      seen.add(v.id);
+      const style = liveBusStyle(v);
+      const icon = {
+        path: style.directional ? BUS_ICON_PATH : BUS_STOPPED_PATH,
+        scale: 1.25,
+        fillColor: style.fill,
+        fillOpacity: style.opacity,
+        strokeColor: "#ffffff",
+        strokeWeight: 1.5,
+        rotation: appliedRotation(style, 0),
+        anchor: new maps.Point(0, 0),
+      };
+      const title = `${v.label} — ${v.detail}`;
+      const existing = liveRef.current.get(v.id);
+
+      if (!existing) {
+        const marker = new maps.Marker({
+          map,
+          position: { lat: v.lat, lng: v.lng },
+          title,
+          icon,
+          // Above every static marker: a moving vehicle is what the screen is
+          // for, and it must not end up under a stop pin.
+          zIndex: 2000,
+        }) as unknown as GMarker;
+        liveRef.current.set(v.id, {
+          marker,
+          lat: v.lat,
+          lng: v.lng,
+          rotation: style.rotation ?? 0,
+          at: v.at,
+          raf: null,
+        });
+        continue;
+      }
+
+      existing.marker.setTitle?.(title);
+
+      // The same ping delivered twice is not movement. Repaint the icon (the
+      // fix has aged, so its colour may have changed) and leave it be.
+      if (existing.at === v.at) {
+        existing.marker.setIcon?.({ ...icon, rotation: existing.rotation });
+        continue;
+      }
+
+      const decision = decideAnimation({
+        from: { lat: existing.lat, lng: existing.lng },
+        to: { lat: v.lat, lng: v.lng },
+        elapsedMs: Date.parse(v.at) - Date.parse(existing.at),
+        freshness: v.freshness,
+      });
+
+      if (existing.raf != null) cancelAnimationFrame(existing.raf);
+
+      const targetRotation = appliedRotation(style, existing.rotation);
+
+      if (!decision.animate) {
+        existing.marker.setPosition?.({ lat: v.lat, lng: v.lng });
+        existing.marker.setIcon?.({ ...icon, rotation: targetRotation });
+        liveRef.current.set(v.id, {
+          ...existing,
+          lat: v.lat,
+          lng: v.lng,
+          rotation: targetRotation,
+          at: v.at,
+          raf: null,
+        });
+        continue;
+      }
+
+      const from = { lat: existing.lat, lng: existing.lng };
+      const to = { lat: v.lat, lng: v.lng };
+      const fromRotation = existing.rotation;
+      const started = performance.now();
+      const step = (now: number) => {
+        const t = easeInOut((now - started) / (decision.durationMs || ANIMATE_MS));
+        const at = interpolate(from, to, t);
+        existing.marker.setPosition?.(at);
+        existing.marker.setIcon?.({
+          ...icon,
+          rotation: fromRotation + (targetRotation - fromRotation) * t,
+        });
+        const state = liveRef.current.get(v.id);
+        if (!state) return;
+        if (t < 1) {
+          state.raf = requestAnimationFrame(step);
+        } else {
+          state.raf = null;
+          state.lat = to.lat;
+          state.lng = to.lng;
+          state.rotation = targetRotation;
+        }
+      };
+      liveRef.current.set(v.id, { ...existing, at: v.at, raf: requestAnimationFrame(step) });
+    }
+
+    // A vehicle that stopped reporting leaves the map rather than freezing
+    // mid-road — the panel beside this names it as untracked, which is the
+    // honest place for it.
+    for (const [id, state] of liveRef.current) {
+      if (seen.has(id)) continue;
+      if (state.raf != null) cancelAnimationFrame(state.raf);
+      state.marker.setMap(null);
+      liveRef.current.delete(id);
+    }
+  }, [liveVehicles, layers.buses, status]);
+
+  // Stop every animation when the map goes away, or a frame callback fires
+  // against a marker whose map has been torn down.
+  useEffect(() => {
+    const live = liveRef.current;
+    return () => {
+      for (const state of live.values()) {
+        if (state.raf != null) cancelAnimationFrame(state.raf);
+        state.marker.setMap(null);
+      }
+      live.clear();
+    };
+  }, []);
+
   return (
     <div className={`relative ${className}`}>
       <div
@@ -201,7 +391,10 @@ export function TransportMapLegend({
       { key: "stops", label: "Route stops (zone)", color: MARKER_COLORS.stop },
       { key: "unassigned", label: "Unassigned homes", color: MARKER_COLORS.unassigned },
       { key: "riders", label: "Assigned riders", color: MARKER_COLORS.rider },
-      { key: "buses", label: "Bus GPS", color: MARKER_COLORS.bus },
+      // Not "Bus GPS" any more: this toggles the Fleet Edge live layer, and
+      // the count beside it is vehicles actually reporting, not hand-typed
+      // pings.
+      { key: "buses", label: "Live buses", color: MARKER_COLORS.bus },
     ];
 
   return (
