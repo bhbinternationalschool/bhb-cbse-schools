@@ -255,6 +255,30 @@ SELFTESTS=(
   test:wa-staff-att-bot
   test:erp-commands
   test:class-channel-apply
+  # Added 2026-09-12, in CI's order, after the drift check below reported that
+  # ci.yml had been running these for weeks while this script did not:
+  # WhatsApp failure reasons, household numbers, audience specs, the tutor and
+  # staff-link bots, the leave command, the daily brief, automation approvals
+  # and scheduling, the number gap, the four parent-app student readers,
+  # transport tracking, usage cost and command templates. Every one passes on a
+  # clean checkout; none needs a server or a key.
+  test:wa-failure-reason
+  test:wa-household-numbers
+  test:wa-audience-spec
+  test:wa-tutor-bot
+  test:wa-student-link
+  test:leave-command
+  test:daily-brief
+  test:automation-approvals
+  test:automation-schedule
+  test:wa-number-gap
+  test:student-attendance
+  test:student-homework
+  test:student-transport
+  test:student-library
+  test:wa-transport-track
+  test:wa-usage-cost
+  test:wa-command-templates
 )
 
 bold "Verifying $(git rev-parse --short HEAD 2>/dev/null || echo 'working tree') on $(git branch --show-current 2>/dev/null || echo '?')"
@@ -321,14 +345,10 @@ fi
 # suite that says "all checks passed".
 # Self-tests that legitimately run nowhere in this suite, each with its reason.
 # An entry here is a claim someone has to defend, which is the point.
-NOT_IN_SUITE=(
-  # Drives a real HTTP endpoint; needs the dev server up, so it cannot run in
-  # a suite that must pass on a clean checkout with nothing listening.
-  test:wa-webhook
-)
-
-# Self-tests that legitimately run nowhere in this suite, each with its reason.
-# An entry here is a claim someone has to defend, which is the point.
+#
+# (There were two of these arrays until 2026-09-12, a merge artefact: bash keeps
+# the last assignment, so the first was dead code listing one entry where the
+# live one lists three.)
 NOT_IN_SUITE=(
   # Drives a real HTTP endpoint, so it needs the dev server listening. This
   # suite must pass on a clean checkout with nothing running.

@@ -1,5 +1,12 @@
 "use client";
 
+// ratchet-allow: raw_table — a status readout beside the map, refreshed from
+// the Fleet Edge feed on a timer. Sortable through the shared ErpSortTh, but
+// not a roster: it holds no records of its own.
+// ratchet-allow: grids_without_row_menu — a live position is a reading, not a
+// record. The action a row invites is "where is that bus", which is the map
+// next to it; vehicles themselves are managed on the Fleet tab.
+
 import { useCallback, useEffect, useState } from "react";
 
 import { normalizeVehicleKey } from "@/lib/fleetEdgeLink";

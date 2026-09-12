@@ -1,5 +1,11 @@
 "use client";
 
+// ratchet-allow: raw_table — a detail table inside one child's record, see
+// StudentAttendanceCard: a compact card table, not a roster.
+// ratchet-allow: grids_without_row_menu — one child's marks term by term, built
+// from buildReportCard. A row is a subject's score; marks are entered in Exams,
+// against the class marksheet.
+
 /**
  * This child's marks, term by term, on the child's own page.
  *

@@ -1,5 +1,13 @@
 "use client";
 
+// ratchet-allow: raw_table — a detail table inside one child's record: three
+// narrow columns in a scrollable 16rem box, sharing the page with five other
+// cards. ErpTableShell is the roster shell (its own card, border and density)
+// and would put a card inside a card.
+// ratchet-allow: grids_without_row_menu — months of one child's attendance are
+// a reading, not records: there is nothing to do to a row. Marking happens in
+// the Attendance desk, against the class register.
+
 /**
  * How often this child is actually in school, on the child's own page.
  *

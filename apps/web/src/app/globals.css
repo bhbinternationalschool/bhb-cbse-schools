@@ -1534,6 +1534,15 @@ h3,
   .dark .text-\[\#5c6478\]:not(.theme-light-island *) {
     color: var(--muted);
   }
+  /* #5a6b85 is the secondary ink on the public "where is my child's bus" page,
+     the one a WhatsApp link opens at the gate. That page is not inside the ERP
+     shell, but the theme script sets `dark` on <html> from the phone's own
+     setting, so for any parent whose phone is in dark mode every line of it —
+     the age of the fix, the reason there is no position, the guidance — was
+     dark slate on a dark card. Same treatment as its neighbour above. */
+  .dark .text-\[\#5a6b85\]:not(.theme-light-island *) {
+    color: var(--muted);
+  }
   .dark .text-\[\#3730a3\]:not(.theme-light-island *) {
     color: #8681da;
   }
@@ -1562,6 +1571,14 @@ h3,
     color: #dd6a6a;
   }
   .dark .text-\[\#8a5a10\]:not(.theme-light-island *) {
+    color: #eaaa48;
+  }
+  /* Added 2026-09-12 by regenerating the inventory, which is what the header
+     above asks for when new literals appear. #7a5c00 is the "late / pending"
+     chip on the four student cards — dark brown ink on a 22% gold wash, which
+     on a dark card measured 1.9:1 and could not be read at all. Lifted to the
+     same tint as #8a5a10, its nearest neighbour in the inventory. */
+  .dark .text-\[\#7a5c00\]:not(.theme-light-island *) {
     color: #eaaa48;
   }
   .dark .text-\[\#8a6400\]:not(.theme-light-island *) {
