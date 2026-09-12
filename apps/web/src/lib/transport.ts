@@ -9,6 +9,7 @@ import {
   SESSION_MONTHS,
   dueOnForSessionMonth,
   sessionStartYear,
+  type ClassGroupCode,
 } from "@/lib/masters";
 import { checkHold } from "@/lib/holds";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
@@ -50,6 +51,55 @@ export type TransportStop = {
   monthlyFeePaise?: number;
 };
 
+/** A pick-up run or a drop run. */
+export type TransportShiftDirection = "pickup" | "drop";
+
+/**
+ * One timed run of a route.
+ *
+ * A route is a path; a shift is a journey along it at a stated time. The
+ * distinction only starts to matter in the afternoon: the morning is one run
+ * because everybody starts school together, but dismissal is staggered by
+ * class group, so the same bus goes out at 13:40 for the little ones and
+ * again at 15:40 for the rest.
+ *
+ * Until this existed, both of those were recorded as `trip: "PM"` — one label
+ * for two different journeys. The attendant's list mixed the two runs and the
+ * boarding register could not say which one a child was on.
+ *
+ * A route with NO shifts behaves exactly as it always did: one implicit run
+ * each way. Shifts are opt-in per route, so nothing changes until the office
+ * sets them up.
+ */
+export type TransportShift = {
+  id: string;
+  /** What the office calls this run — "Morning", "Early drop", "Main drop". */
+  name: string;
+  direction: TransportShiftDirection;
+  /**
+   * HH:mm the vehicle rolls — leaves the depot for a pick-up run, leaves the
+   * campus for a drop run.
+   *
+   * "" means nobody has set it. That is NOT midnight and not "same as the
+   * other run": a run with no time cannot be put on a parent's screen or used
+   * to check whether one vehicle can serve two dismissals, and both of those
+   * refuse rather than guess.
+   */
+  departTime: string;
+  /**
+   * Class groups this run carries.
+   *
+   * This is how a rider reaches the right run without anybody assigning 168
+   * children one at a time — the child's class decides, and it keeps deciding
+   * correctly when they move up a class in April. Empty means the run claims
+   * no group by rule, so only a per-child override puts anyone on it.
+   */
+  classGroups: ClassGroupCode[];
+  /** 0=Sun … 6=Sat. Empty means every day the route runs. */
+  weekdays: number[];
+  isActive: boolean;
+};
+
 export type TransportRoute = {
   id: string;
   code: string;
@@ -61,6 +111,11 @@ export type TransportRoute = {
   monthlyFeePaise: number;
   isActive: boolean;
   stops: TransportStop[];
+  /**
+   * Timed runs along this route. Empty means one implicit run each way, which
+   * is how every route behaved before shifts existed.
+   */
+  shifts: TransportShift[];
   /**
    * Measured round trip for the whole route — campus out, every stop, campus
    * back — from Google Directions when "Suggest order" was last run.
@@ -93,6 +148,16 @@ export type TransportAssignment = {
   /** Audit when fee override differs from expected */
   feeOverrideReason: string;
   boardingSuspended: boolean;
+  /**
+   * Runs chosen by hand for this child, overriding the class-group rule.
+   *
+   * "" means follow the rule, which is what almost every rider does. The
+   * override exists for the cases the rule cannot know: a Class II child who
+   * waits for an elder sister and goes home on the late run, or a child kept
+   * back for coaching twice a week.
+   */
+  pickupShiftId?: string;
+  dropShiftId?: string;
   createdAt: string;
 };
 
@@ -688,10 +753,48 @@ export function stopHasGeo(stop: TransportStop | undefined): boolean {
   );
 }
 
+/**
+ * A stored shift, made safe to read.
+ *
+ * An unparseable time becomes "" rather than a plausible default. Callers
+ * treat "" as "nobody has set this" and refuse to show or plan around it; a
+ * silent 00:00 would be believed and would put midnight on a parent's screen.
+ */
+export function normalizeShift(sh: Partial<TransportShift>): TransportShift {
+  const time = (sh.departTime ?? "").trim();
+  const ok = /^\d{1,2}:\d{2}$/.test(time);
+  let depart = "";
+  if (ok) {
+    const [h, m] = time.split(":").map(Number);
+    if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+      depart = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+    }
+  }
+  return {
+    id: sh.id ?? id("ts"),
+    name: (sh.name ?? "").trim() || "Run",
+    direction: sh.direction === "drop" ? "drop" : "pickup",
+    departTime: depart,
+    classGroups: Array.isArray(sh.classGroups)
+      ? (sh.classGroups.filter(
+          (g, i, all) => typeof g === "string" && all.indexOf(g) === i,
+        ) as ClassGroupCode[])
+      : [],
+    weekdays: Array.isArray(sh.weekdays)
+      ? sh.weekdays
+          .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6)
+          .filter((n, i, all) => all.indexOf(n) === i)
+          .sort()
+      : [],
+    isActive: sh.isActive !== false,
+  };
+}
+
 function normalizeRoute(r: Partial<TransportRoute>): TransportRoute {
   const stops = Array.isArray(r.stops)
     ? r.stops.map((s, i) => normalizeStop(s, i))
     : [];
+  const shifts = Array.isArray(r.shifts) ? r.shifts.map(normalizeShift) : [];
   const rtMin = Number(r.roundTripMinutes);
   const rtKm = Number(r.roundTripKm);
   return {
@@ -704,6 +807,7 @@ function normalizeRoute(r: Partial<TransportRoute>): TransportRoute {
     monthlyFeePaise: Math.max(0, r.monthlyFeePaise ?? 0),
     isActive: r.isActive !== false,
     stops,
+    shifts,
     ...(Number.isFinite(rtMin) && rtMin > 0 ? { roundTripMinutes: Math.round(rtMin) } : {}),
     ...(Number.isFinite(rtKm) && rtKm > 0 ? { roundTripKm: Math.round(rtKm * 10) / 10 } : {}),
   };
@@ -728,6 +832,8 @@ function normalizeAssignment(
       a.serviceMode === "pickup" || a.serviceMode === "drop"
         ? a.serviceMode
         : "both",
+    pickupShiftId: (a.pickupShiftId ?? "").trim(),
+    dropShiftId: (a.dropShiftId ?? "").trim(),
     createdAt: a.createdAt ?? new Date().toISOString(),
   };
 }
