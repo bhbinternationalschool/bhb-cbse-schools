@@ -74,7 +74,21 @@ export function BoardingSuggestionCard({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ studentId, academicYearCode }),
       });
-      const data = (await r.json()) as Response;
+      // A route that throws returns an empty body or an HTML error page, and
+      // `r.json()` then fails with "Unexpected end of JSON input" — which is
+      // what a clerk saw instead of anything actionable. Say what happened.
+      const text = await r.text();
+      let data: Response;
+      try {
+        data = JSON.parse(text) as Response;
+      } catch {
+        setError(
+          r.ok
+            ? "The server replied with something that was not a suggestion."
+            : `The suggestion service failed (HTTP ${r.status}). Nothing was changed.`,
+        );
+        return;
+      }
       // A 502 still carries the measured shortlist — show it rather than
       // throwing away work the clerk can use.
       if (!data.ok && !data.candidates) {

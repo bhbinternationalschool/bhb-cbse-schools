@@ -28,6 +28,9 @@ import { TENANT } from "@/lib/types";
 import { generateBoardingSuggestionJson, llmStatus } from "@/lib/aiLlm.server";
 import {
   boardingSuggestionWorthAsking,
+  noStopIsWalkable,
+  shortestWalkKm,
+  MAX_SENSIBLE_WALK_KM,
   type BoardingCandidateFact,
   type BoardingSuggestFacts,
 } from "@/lib/boardingSuggestAi";
@@ -295,6 +298,36 @@ export async function POST(req: Request) {
         },
     currentStopId: current?.stopId ?? "",
   };
+
+  // Not one stop is within walking distance of where the record puts this
+  // family. That is a statement about the LOCATION, not about the stops, and
+  // no amount of weighing makes a ten-kilometre walk the right answer — so it
+  // is answered from the facts and the model is not asked.
+  if (noStopIsWalkable(facts)) {
+    const best = shortestWalkKm(facts) ?? 0;
+    const where =
+      home.precision === "village"
+        ? `the centroid of ${home.label}, which is the village this family was matched to`
+        : home.precision === "household"
+          ? `their geocoded address (${home.label})`
+          : `the pin dropped for this child (${home.label})`;
+    return NextResponse.json({
+      ok: true,
+      engine: "none",
+      askedModel: false,
+      candidates,
+      context,
+      draft: {
+        stopId: "",
+        recommendation: `No stop is within walking distance of where the school has this family placed. The nearest is ${best} km away — ${where}.`,
+        reasons: [],
+        caution:
+          home.precision === "village"
+            ? "Check the village match before anything else: a family matched to the wrong village of a similar name lands kilometres from every stop, which is what this looks like. Pinning the child's actual boarding point settles it."
+            : "Check the recorded location. If it is right, this family needs a stop nearer to them rather than a different existing one.",
+      },
+    });
+  }
 
   // One candidate is not a choice. Answer from the facts rather than spending
   // a call to be told the only option is the only option.
