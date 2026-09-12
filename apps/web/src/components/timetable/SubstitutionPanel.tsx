@@ -28,6 +28,7 @@ import { isoDateWeekday } from "@/lib/examTimetable";
 import type { MastersState } from "@/lib/masters";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 export function SubstitutionPanel(props: {
   masters: MastersState;
@@ -45,6 +46,19 @@ export function SubstitutionPanel(props: {
   const [manualAbsent, setManualAbsent] = useState<string[]>([]);
   const [manualPick, setManualPick] = useState("");
   const [rows, setRows] = useState<TimetableSubstitution[]>([]);
+
+  // The Substitute column is a picker, not a value, so it is not a sort handle.
+  const subSort = useTableSort(
+    rows,
+    {
+      period: (row) => row.periodNo,
+      klass: (row) => classSectionLabel(masters, row.classId, row.sectionId),
+      subject: (row) => subjectLabel(masters, row.subjectId),
+      absent: (row) => teacherLabel(masters, row.absentTeacherId),
+    },
+    "period",
+    "asc",
+  );
   const [dirty, setDirty] = useState(false);
 
   // "Free a teacher for part of the day" — a separate flow from the
@@ -638,15 +652,9 @@ export function SubstitutionPanel(props: {
                 <ErpTable minWidth="min-w-[560px]" className="border-collapse">
                   <ErpTableHead>
                     <tr>
-                      <th className="border border-[var(--border)] p-2">
-                        Period
-                      </th>
-                      <th className="border border-[var(--border)] p-2">
-                        Class
-                      </th>
-                      <th className="border border-[var(--border)] p-2">
-                        Subject
-                      </th>
+                      <ErpSortTh sort={subSort} field="period" className="border border-[var(--border)] p-2">Period</ErpSortTh>
+                      <ErpSortTh sort={subSort} field="klass" className="border border-[var(--border)] p-2">Class</ErpSortTh>
+                      <ErpSortTh sort={subSort} field="subject" className="border border-[var(--border)] p-2">Subject</ErpSortTh>
                       <th className="border border-[var(--border)] p-2">
                         Substitute
                       </th>
@@ -765,9 +773,7 @@ export function SubstitutionPanel(props: {
                   <th className="border border-[var(--border)] p-2">
                     Subject
                   </th>
-                  <th className="border border-[var(--border)] p-2">
-                    Absent teacher
-                  </th>
+                  <ErpSortTh sort={subSort} field="absent" className="border border-[var(--border)] p-2">Absent teacher</ErpSortTh>
                   <th className="border border-[var(--border)] p-2">
                     Substitute
                   </th>
@@ -780,7 +786,7 @@ export function SubstitutionPanel(props: {
                 </tr>
               </ErpTableHead>
               <ErpTableBody>
-                {rows.map((row) => {
+                {subSort.rows.map((row) => {
                   const candidates = canEdit ? candidatesForRow(row) : [];
                   const knownIds = new Set(candidates.map((c) => c.staff.id));
                   return (

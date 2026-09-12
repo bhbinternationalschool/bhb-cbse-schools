@@ -28,6 +28,7 @@ import { currentAcademicYearCode, type MastersState } from "@/lib/masters";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 const inp = "w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm";
 
@@ -84,6 +85,19 @@ export function AdmissionsKbPanel({ masters, canEdit, by }: { masters: MastersSt
         .filter((e) => !filter || e.kind === filter)
         .sort((a, b) => a.kind.localeCompare(b.kind) || a.title.localeCompare(b.title)),
     [state.entries, filter],
+  );
+
+  // Sorting by status brings the expired entries together; validity sorts by date.
+  const kbSort = useTableSort(
+    rows,
+    {
+      kind: (e) => e.kind,
+      title: (e) => e.title,
+      classes: (e) => e.classScope || "all",
+      validTill: (e) => e.validTill || "",
+    },
+    "title",
+    "asc",
   );
 
   function persist(next: AdmissionsKbState, msg: string) {
@@ -301,17 +315,17 @@ export function AdmissionsKbPanel({ masters, canEdit, by }: { masters: MastersSt
           <ErpTable>
             <ErpTableHead>
               <tr>
-                <th className="px-3 py-2 text-left">Kind</th>
-                <th className="px-2 py-2 text-left">Title</th>
+                <ErpSortTh sort={kbSort} field="kind" className="px-3 py-2 text-left">Kind</ErpSortTh>
+                <ErpSortTh sort={kbSort} field="title" className="px-2 py-2 text-left">Title</ErpSortTh>
                 <th className="px-2 py-2 text-left">Text</th>
-                <th className="px-2 py-2 text-left">Classes</th>
-                <th className="px-2 py-2 text-left">Valid till</th>
+                <ErpSortTh sort={kbSort} field="classes" className="px-2 py-2 text-left">Classes</ErpSortTh>
+                <ErpSortTh sort={kbSort} field="validTill" className="px-2 py-2 text-left">Valid till</ErpSortTh>
                 <th className="px-2 py-2 text-left">Status</th>
                 <th className="px-2 py-2" />
               </tr>
             </ErpTableHead>
             <ErpTableBody>
-              {rows.map((e) => {
+              {kbSort.rows.map((e) => {
                 const isLive = kbEntryIsLive(e);
                 return (
                   <tr key={e.id} className="align-top text-xs">

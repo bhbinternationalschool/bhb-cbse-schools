@@ -21,6 +21,7 @@ import {
   ErpTableHead,
   ErpTableShell,
 } from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 const CARD = "rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4";
 const FIELD =
@@ -55,6 +56,20 @@ export function VendorHistoryPanel() {
   const [q, setQ] = useState("");
   const [picked, setPicked] = useState("");
   const [statement, setStatement] = useState<VendorStatement | null>(null);
+
+  // A vendor statement reads oldest first — the running balance only makes sense that way — but the amounts sort too.
+  const vhSort = useTableSort(
+    statement?.rows ?? [],
+    {
+      date: (r) => r.date,
+      voucher: (r) => r.voucherNo,
+      account: (r) => r.accountName,
+      billed: (r) => r.creditPaise || 0,
+      paid: (r) => r.debitPaise || 0,
+    },
+    "date",
+    "asc",
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -207,17 +222,17 @@ export function VendorHistoryPanel() {
                 <ErpTable minWidth="min-w-[42rem]" className="text-xs">
                   <ErpTableHead>
                     <tr>
-                      <th className="py-1 pr-2">Date</th>
-                      <th className="py-1 pr-2">Voucher</th>
-                      <th className="py-1 pr-2">Account</th>
+                      <ErpSortTh sort={vhSort} field="date" className="py-1 pr-2">Date</ErpSortTh>
+                      <ErpSortTh sort={vhSort} field="voucher" className="py-1 pr-2">Voucher</ErpSortTh>
+                      <ErpSortTh sort={vhSort} field="account" className="py-1 pr-2">Account</ErpSortTh>
                       <th className="py-1 pr-2">What</th>
-                      <th className="py-1 pr-2 text-right">Billed</th>
-                      <th className="py-1 pr-2 text-right">Paid</th>
+                      <ErpSortTh sort={vhSort} field="billed" align="right" className="py-1 pr-2 text-right">Billed</ErpSortTh>
+                      <ErpSortTh sort={vhSort} field="paid" align="right" className="py-1 pr-2 text-right">Paid</ErpSortTh>
                       <th className="py-1 text-right">Owed after</th>
                     </tr>
                   </ErpTableHead>
                   <ErpTableBody hoverable>
-                    {statement.rows.map((r, i) => (
+                    {vhSort.rows.map((r, i) => (
                       <tr key={`${r.voucherNo}-${i}`}>
                         <td className="py-1 pr-2 tabular-nums">{r.date}</td>
                         <td className="py-1 pr-2">{r.voucherNo}</td>

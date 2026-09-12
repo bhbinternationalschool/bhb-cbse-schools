@@ -10,6 +10,7 @@ import {
 } from "@/lib/studentImport";
 import type { SisState } from "@/lib/sis";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type Props = {
   masters: MastersState;
@@ -40,6 +41,17 @@ export function SessionImportGapDialog({
   onClose,
   onApplied,
 }: Props) {
+
+  // Sorting by class groups the children a teacher can confirm together.
+  const gapSort = useTableSort(
+    missing,
+    {
+      student: (row) => row.fullName,
+      klass: (row) => classLabel(row.classId, row.sectionId, masters),
+    },
+    "student",
+    "asc",
+  );
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
@@ -50,7 +62,7 @@ export function SessionImportGapDialog({
 
   const [choices, setChoices] = useState<Record<string, SessionGapAction>>(
     () =>
-      Object.fromEntries(missing.map((m) => [m.studentId, "leave" as const])),
+      Object.fromEntries(gapSort.rows.map((m) => [m.studentId, "leave" as const])),
   );
   const [busy, setBusy] = useState(false);
 
@@ -161,8 +173,8 @@ export function SessionImportGapDialog({
           <ErpTable className="text-xs">
             <ErpTableHead sticky>
               <tr>
-                <th className="px-2 py-2 font-semibold">Student</th>
-                <th className="px-2 py-2 font-semibold">Class</th>
+                <ErpSortTh sort={gapSort} field="student" className="px-2 py-2 font-semibold">Student</ErpSortTh>
+                <ErpSortTh sort={gapSort} field="klass" className="px-2 py-2 font-semibold">Class</ErpSortTh>
                 <th className="px-2 py-2 font-semibold">Action</th>
               </tr>
             </ErpTableHead>
