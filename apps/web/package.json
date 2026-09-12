@@ -85,6 +85,7 @@
     "test:erp-ask": "npx tsx src/lib/erpAsk.selftest.ts",
     "test:erp-reports": "npx tsx src/lib/erpReports.selftest.ts",
     "test:fleet-live": "npx tsx src/lib/fleetLive.selftest.ts",
+    "test:pdf-letterhead-assets": "npx tsx src/lib/pdfLetterheadAssets.selftest.ts",
     "test:wa-template-shape-sync": "npx tsx src/lib/waTemplateShapeSync.selftest.ts",
     "test:review-demo-records": "npx tsx src/lib/reviewDemoRecords.selftest.ts",
     "test:roster-name-case": "npx tsx src/lib/rosterNameCase.selftest.ts",

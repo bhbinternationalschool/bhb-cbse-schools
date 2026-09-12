@@ -102,6 +102,7 @@ SELFTESTS=(
   test:roster-name-case
   test:review-demo-records
   test:wa-template-shape-sync
+  test:pdf-letterhead-assets
   test:fee-student-search
   test:household-dues-ay
   test:refreshment-chart

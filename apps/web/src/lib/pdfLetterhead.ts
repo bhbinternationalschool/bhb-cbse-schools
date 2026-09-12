@@ -35,39 +35,68 @@ export type ResolvedSchoolBrandAssets = SchoolBrandAssets & {
 let cachedLogoDataUrl: string | null | undefined;
 const brandImageCache = new Map<string, string | null>();
 
-function resolveAssetUrl(url: string): string {
+/**
+ * An absolute URL for a brand asset, in the browser AND on the server.
+ *
+ * The school's logo is stored as the relative path `/logo.png?v=2`. A
+ * browser can resolve that against its own origin; a server has no origin
+ * to resolve against, so this used to hand `fetch` a bare path, which
+ * cannot work. Every PDF the SERVER renders therefore printed the grey
+ * "BHB" placeholder instead of the crest — the 6 PM brief and the five
+ * command-desk reports. Receipts were fine only because
+ * receiptPdf.server.ts reads the crest off disk itself, so nobody noticed.
+ */
+export function resolveAssetUrl(url: string): string {
   if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:")) {
     return url;
   }
-  if (typeof window !== "undefined") {
-    const path = url.startsWith("/") ? url : `/${url}`;
-    return `${window.location.origin}${path}`;
-  }
-  return url;
+  const path = url.startsWith("/") ? url : `/${url}`;
+  if (typeof window !== "undefined") return `${window.location.origin}${path}`;
+  const origin = (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "")
+    .trim()
+    .replace(/\/+$/, "");
+  // No origin configured: return the path unchanged and let the caller
+  // refuse it, rather than fetching something that cannot resolve.
+  return origin ? `${origin}${path}` : path;
 }
 
 async function loadImageAsDataUrl(url: string): Promise<string | null> {
-  if (typeof window === "undefined" || !url) return null;
+  if (!url) return null;
   const key = url.slice(0, 120);
   if (brandImageCache.has(key)) return brandImageCache.get(key) ?? null;
+  const target = resolveAssetUrl(url);
+  if (!/^(https?:|data:)/.test(target)) return null;
   try {
-    const res = await fetch(resolveAssetUrl(url));
-    if (!res.ok) {
-      brandImageCache.set(key, null);
-      return null;
+    const res = await fetch(target);
+    if (!res.ok) return null;
+    const mime = (res.headers.get("content-type") || "image/png").split(";")[0]!.trim();
+    let dataUrl: string | null = null;
+    if (typeof window === "undefined") {
+      // No FileReader on a server. Chunked so a large crest cannot blow the
+      // argument limit of String.fromCharCode.
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      let binary = "";
+      const CHUNK = 0x8000;
+      for (let i = 0; i < bytes.length; i += CHUNK) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+      }
+      dataUrl = `data:${mime};base64,${btoa(binary)}`;
+    } else {
+      const blob = await res.blob();
+      dataUrl = await new Promise<string | null>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () =>
+          resolve(typeof reader.result === "string" ? reader.result : null);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(blob);
+      });
     }
-    const blob = await res.blob();
-    const dataUrl = await new Promise<string | null>((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () =>
-        resolve(typeof reader.result === "string" ? reader.result : null);
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(blob);
-    });
-    brandImageCache.set(key, dataUrl);
+    // Only a success is remembered. A cold start that could not reach the
+    // asset once must not print a placeholder for the life of the instance,
+    // which is what caching the failure used to guarantee.
+    if (dataUrl) brandImageCache.set(key, dataUrl);
     return dataUrl;
   } catch {
-    brandImageCache.set(key, null);
     return null;
   }
 }
@@ -173,7 +202,8 @@ export async function resolvePdfLetterhead(
   const profile = normalizeSchoolProfile(masters?.schoolProfile ?? loadMasters().schoolProfile);
   const logoUrl = profile.logoUrl || TENANT.logoUrl;
 
-  if (cachedLogoDataUrl === undefined) {
+  if (!cachedLogoDataUrl) {
+    // Same reason as above: a null is a miss to retry, not an answer to keep.
     cachedLogoDataUrl = await loadImageAsDataUrl(logoUrl);
   }
 
