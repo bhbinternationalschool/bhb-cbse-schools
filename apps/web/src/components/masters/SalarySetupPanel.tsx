@@ -51,6 +51,7 @@ import {
 } from "@/components/masters/MastersLayout";
 import { RemoveControl } from "@/components/masters/RemoveControl";
 import { IncrementPanel } from "@/components/payroll/IncrementPanel";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type SalTab = "settings" | "heads" | "structures" | "assign" | "increment";
 
@@ -1005,6 +1006,24 @@ function AssignPanel({
     .filter((s) => s.status === "active")
     .sort((a, b) => a.empCode.localeCompare(b.empCode));
 
+  // Sorting the setup list by what is SAVED is how the office finds who has
+  // no structure yet — the whole point of the screen. The editable columns
+  // (override, additional, PF/ESIC) are inputs, not values, so they stay
+  // plain headings.
+  const salarySort = useTableSort(
+    roster,
+    {
+      staff: (s) => s.fullName,
+      saved: (s) => (state.staffLinks.some((l) => l.staffId === s.id) ? 1 : 0),
+      structure: (s) => {
+        const link = state.staffLinks.find((l) => l.staffId === s.id);
+        return state.structures.find((x) => x.id === link?.structureId)?.name ?? "";
+      },
+    },
+    "staff",
+    "asc",
+  );
+
   /** Local edits — nothing persisted until Assign */
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
 
@@ -1118,9 +1137,9 @@ function AssignPanel({
         <ErpTable minWidth="min-w-[860px]">
           <ErpTableHead>
             <tr className="text-[11px] text-[var(--muted)]">
-              <th className="px-3 py-2 font-medium">Staff</th>
-              <th className="px-3 py-2 font-medium">Saved</th>
-              <th className="px-3 py-2 font-medium">Structure</th>
+              <ErpSortTh sort={salarySort} field="staff">Staff</ErpSortTh>
+              <ErpSortTh sort={salarySort} field="saved">Saved</ErpSortTh>
+              <ErpSortTh sort={salarySort} field="structure">Structure</ErpSortTh>
               <th className="px-3 py-2 font-medium">Basic override</th>
               <th className="px-3 py-2 font-medium" title="Paid on top of the structure; not counted for PF wages or ESIC">
                 Additional ₹ / month
@@ -1130,7 +1149,7 @@ function AssignPanel({
             </tr>
           </ErpTableHead>
           <ErpTableBody>
-            {roster.map((s) => {
+            {salarySort.rows.map((s) => {
               const link = state.staffLinks.find((l) => l.staffId === s.id);
               const draft = currentDraft(s.id);
               const dirty = isDirty(s.id);

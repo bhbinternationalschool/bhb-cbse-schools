@@ -27,6 +27,7 @@ import {
   exportFilterReport,
 } from "@/lib/reportExport";
 import { TENANT } from "@/lib/types";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 export function StaffAppraisalPanel({ ay }: { ay: string }) {
   const session = useDemoSession();
@@ -79,6 +80,19 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
       .filter((a) => a.cycleId === cycle.id)
       .sort((a, b) => b.ratedAt.localeCompare(a.ratedAt));
   }, [hr, cycle]);
+
+  // The average sorts as a NUMBER, so "who scored lowest this cycle" is one
+  // click — the reason anybody opens this list.
+  const apprSort = useTableSort(
+    cycleAppraisals,
+    {
+      staff: (a) => staffLabel(a.staffId),
+      avg: (a) => Number(appraisalAverage(a.scores)) || 0,
+      ratedBy: (a) => a.ratedBy,
+    },
+    "staff",
+    "asc",
+  );
 
   useEffect(() => {
     if (!staffId || !hr || !cycle) return;
@@ -431,13 +445,13 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
             <ErpTable>
               <ErpTableHead>
                 <tr>
-                  <th className="px-4 py-2">Staff</th>
-                  <th className="px-3 py-2">Avg</th>
-                  <th className="px-3 py-2">Rated by</th>
+                  <ErpSortTh sort={apprSort} field="staff" className="px-4 py-2">Staff</ErpSortTh>
+                  <ErpSortTh sort={apprSort} field="avg">Avg</ErpSortTh>
+                  <ErpSortTh sort={apprSort} field="ratedBy">Rated by</ErpSortTh>
                 </tr>
               </ErpTableHead>
               <ErpTableBody hoverable>
-                {cycleAppraisals.map((a) => (
+                {apprSort.rows.map((a) => (
                   <tr
                     key={a.id}
                     className="cursor-pointer"

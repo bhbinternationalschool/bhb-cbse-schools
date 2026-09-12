@@ -14,6 +14,7 @@ import { normalizeStaffGeoSettings, type StaffGeoConsent, type StaffGeoSettings,
 import { loadMasters } from "@/lib/masters";
 import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 const inp = "w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm";
 
@@ -32,6 +33,25 @@ export function StaffGeoAdminPanel({ canEdit }: { canEdit: boolean }) {
   const [settings, setSettings] = useState<StaffGeoSettings | null>(null);
   const [consents, setConsents] = useState<StaffGeoConsent[]>([]);
   const [board, setBoard] = useState<BoardRow[]>([]);
+
+  // Distance sorts by metres and the last ping by minutes, so "farthest from
+  // school" and "quietest device" are one click each — the two questions this
+  // board is opened for. A row with no reading sorts last either way rather
+  // than pretending to be at the gate.
+  const geoSort = useTableSort(
+    board,
+    {
+      staff: (r) => r.fullName,
+      status: (r) => r.presence,
+      distance: (r) => (r.distanceM === null ? Number.POSITIVE_INFINITY : r.distanceM),
+      lastPing: (r) =>
+        r.minutesSincePing === null ? Number.POSITIVE_INFINITY : r.minutesSincePing,
+      consent: (r) => (r.consented ? 1 : 0),
+      exempt: (r) => (r.exempt ? 1 : 0),
+    },
+    "staff",
+    "asc",
+  );
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [tracking, setTracking] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -126,17 +146,17 @@ export function StaffGeoAdminPanel({ canEdit }: { canEdit: boolean }) {
             <ErpTable>
               <ErpTableHead>
                 <tr>
-                  <th className="px-2 py-2 text-left">Staff</th>
-                  <th className="px-2 py-2 text-left">Status</th>
-                  <th className="px-2 py-2 text-right">Distance</th>
-                  <th className="px-2 py-2 text-right">Last ping</th>
-                  <th className="px-2 py-2 text-left">Consent</th>
-                  <th className="px-2 py-2 text-left">Exempt</th>
+                  <ErpSortTh sort={geoSort} field="staff" className="px-2 py-2">Staff</ErpSortTh>
+                  <ErpSortTh sort={geoSort} field="status" className="px-2 py-2">Status</ErpSortTh>
+                  <ErpSortTh sort={geoSort} field="distance" align="right" className="px-2 py-2">Distance</ErpSortTh>
+                  <ErpSortTh sort={geoSort} field="lastPing" align="right" className="px-2 py-2">Last ping</ErpSortTh>
+                  <ErpSortTh sort={geoSort} field="consent" className="px-2 py-2">Consent</ErpSortTh>
+                  <ErpSortTh sort={geoSort} field="exempt" className="px-2 py-2">Exempt</ErpSortTh>
                   <th className="w-10 px-2 py-2" aria-label="Actions" />
                 </tr>
               </ErpTableHead>
               <ErpTableBody>
-                {board.map((r) => {
+                {geoSort.rows.map((r) => {
                   const p = PRESENCE_LABEL[r.presence];
                   return (
                     <tr key={r.staffId} className="text-xs">
