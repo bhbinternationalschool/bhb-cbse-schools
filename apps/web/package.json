@@ -85,6 +85,7 @@
     "test:erp-ask": "npx tsx src/lib/erpAsk.selftest.ts",
     "test:erp-reports": "npx tsx src/lib/erpReports.selftest.ts",
     "test:fleet-live": "npx tsx src/lib/fleetLive.selftest.ts",
+    "test:roster-name-case": "npx tsx src/lib/rosterNameCase.selftest.ts",
     "test:udise-doc-intake": "npx tsx src/lib/udiseDocIntake.selftest.ts",
     "test:rbac-scope": "npx tsx src/lib/rbacScope.selftest.ts",
     "test:rbac-user-grants": "npx tsx src/lib/rbacUserGrants.selftest.ts",

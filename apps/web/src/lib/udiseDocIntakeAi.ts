@@ -18,7 +18,7 @@
  */
 
 import { aadhaarChecksumValid, aadhaarDigits, maskAadhaar } from "@/lib/aadhaar";
-import type { StudentDocKey } from "@/lib/sis";
+import { toRosterCase, type StudentDocKey } from "@/lib/sis";
 
 export type UdiseDocType = "aadhaar" | "birth_certificate" | "address_proof" | "other";
 export type UdiseDocPerson = "child" | "father" | "mother" | "unknown";
@@ -219,8 +219,20 @@ export function planUdiseCorrections(input: { extract: UdiseDocExtract; student:
   const flags: string[] = [];
   const person: UdiseDocPerson = e.person === "unknown" && e.docType === "birth_certificate" ? "child" : e.person;
   const put = (c: UdiseFieldChange) => {
-    if ((c.before || "") === (c.after || "")) return;
-    changes.push(c);
+    // A name or an address read off a document is usually Title Case; the
+    // roster is upper case. Write it in the roster's own convention, and
+    // say so in the same words, or the office is told one thing and the
+    // record shows another.
+    const cased: UdiseFieldChange =
+      c.field === "aadhaarNumber" || c.field === "fatherAadhaarNumber" || c.field === "motherAadhaarNumber" || c.field === "dob" || c.field === "pincode" || c.field === "gender"
+        ? c
+        : { ...c, after: toRosterCase(c.after) };
+    // A difference of case alone is not something the document taught us —
+    // it is the roster's convention, which normalizeStudent applies on the
+    // next save anyway. Putting "Aarav Sharma → AARAV SHARMA" in front of
+    // the office as a correction would be noise dressed as a finding.
+    if (toRosterCase(cased.before || "") === (cased.after || "")) return;
+    changes.push(cased);
   };
 
   if (e.docType === "other") {

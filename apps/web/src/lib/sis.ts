@@ -752,7 +752,7 @@ export function normalizeStudent(s: Partial<SisStudent> & { id: string }): SisSt
     legacyErpAdmissionNo: s.legacyErpAdmissionNo ?? "",
     systemAdmissionPending: !!s.systemAdmissionPending,
     importedViaLegacyList: !!s.importedViaLegacyList,
-    fullName: cleanRepeatedName(s.fullName ?? ""),
+    fullName: toRosterCase(cleanRepeatedName(s.fullName ?? "")),
     gender: s.gender ?? "",
     dob: s.dob ?? "",
     status: s.status === "inactive" ? "inactive" : "active",
@@ -764,8 +764,8 @@ export function normalizeStudent(s: Partial<SisStudent> & { id: string }): SisSt
     studentType: s.studentType ?? "NEW",
     feeGroupId: s.feeGroupId ?? null,
     joinedOn: s.joinedOn ?? "",
-    fatherName: cleanRepeatedName(s.fatherName ?? ""),
-    motherName: cleanRepeatedName(s.motherName ?? ""),
+    fatherName: toRosterCase(cleanRepeatedName(s.fatherName ?? "")),
+    motherName: toRosterCase(cleanRepeatedName(s.motherName ?? "")),
     fatherMobile: normalizeMobile(s.fatherMobile ?? ""),
     motherMobile: normalizeMobile(s.motherMobile ?? ""),
     fatherAadhaarLast4: (() => {
@@ -916,6 +916,34 @@ function householdAddressKey(
     .join("|");
 }
 
+/**
+ * The roster's own convention for a name or a place: UPPER CASE.
+ *
+ * The student form has forced this since it was written — every name,
+ * address and place field is upper-cased as the office types. 234 of this
+ * school's 239 students follow it, and so do its printed documents, the
+ * UDISE+ working sheet and the CBSE formats.
+ *
+ * But the rule lived in ONE form, so every other way in wrote whatever it
+ * was handed: the admissions desk copies a child's name straight off the
+ * public enquiry form (which does not upper-case), and so does the RTE
+ * application path. That is where "Yatharth Singh", "Rudraksha Yadav" and
+ * "Anjal" came from — the last with "VINAY GUPTA" as the father, because
+ * the father was typed at the counter and the child came from an enquiry.
+ * Households drifted further still: 118 of 199 guardian names and 112 city
+ * names were mixed case, even though the counter form upper-cases both.
+ *
+ * A convention enforced by a form is a convention with holes in it. This is
+ * the one gate every write passes through, so it belongs here: the form,
+ * the admissions desk, RTE, the parent app, an import and the WhatsApp
+ * document reader now all agree without any of them having to remember.
+ *
+ * Devanagari and other scripts have no case, so this leaves them untouched.
+ */
+export function toRosterCase(v: string): string {
+  return (v ?? "").toUpperCase();
+}
+
 export function cleanRepeatedName(rawName: string): string {
   if (!rawName) return "";
   const parts = rawName.split(/[,/|]/).map((p) => p.trim()).filter(Boolean);
@@ -953,16 +981,17 @@ export function normalizeHousehold(h: Partial<Household> & { id: string }): Hous
   return {
     id: h.id,
     code: h.code ?? "",
-    guardianName: cleanRepeatedName(h.guardianName ?? ""),
+    guardianName: toRosterCase(cleanRepeatedName(h.guardianName ?? "")),
     mobile,
     /** Legacy households without WhatsApp inherit guardian mobile */
     whatsappMobile: whatsappRaw || mobile,
+    // Not the email: an address is a name, an email is an identifier.
     email: h.email ?? "",
-    address: h.address ?? "",
-    locality: h.locality ?? "",
-    landmark: h.landmark ?? "",
-    city: h.city ?? "",
-    state: h.state ?? "Uttar Pradesh",
+    address: toRosterCase(h.address ?? ""),
+    locality: toRosterCase(h.locality ?? ""),
+    landmark: toRosterCase(h.landmark ?? ""),
+    city: toRosterCase(h.city ?? ""),
+    state: toRosterCase(h.state ?? "Uttar Pradesh"),
     pincode: (h.pincode ?? "").replace(/\D/g, "").slice(0, 6),
     altMobile: normalizeMobile(h.altMobile ?? ""),
     guardianPhotoUrl:
