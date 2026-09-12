@@ -117,6 +117,7 @@
     "test:transport-shortfall": "npx tsx src/lib/transportShortfall.selftest.ts",
     "test:transport-afternoon-waves": "npx tsx src/lib/transportAfternoonWaves.selftest.ts",
     "test:transport-shifts": "npx tsx src/lib/transportShifts.selftest.ts",
+    "test:transport-seats": "npx tsx src/lib/transportSeats.selftest.ts",
     "test:transport-boarding": "npx tsx src/lib/transportBoarding.selftest.ts",
     "test:transport-crew-access": "npx tsx src/lib/transportCrewAccess.selftest.ts",
     "test:transport-crew": "npx tsx src/lib/transportCrew.selftest.ts",
