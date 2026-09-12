@@ -69,6 +69,7 @@ import {
   type InvSale,
   type InvTenderMode,
 } from "@/lib/inventory/types";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type Section = "sell" | "sales" | "dues";
 
@@ -1832,6 +1833,21 @@ function SalesSection({
 
   const rows = sales.data?.rows ?? [];
 
+  // Sorting by Owing brings the unpaid counter sales together; totals sort
+  // by their paise, not by the rendered rupee string.
+  const saleSort = useTableSort(
+    rows,
+    {
+      receipt: (s) => s.saleNo,
+      buyer: (s) => s.buyerName || "",
+      total: (s) => s.totalPaise,
+      paid: (s) => s.paidPaise,
+      owing: (s) => s.balancePaise,
+    },
+    "receipt",
+    "desc",
+  );
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -1869,17 +1885,17 @@ function SalesSection({
           <ErpTable minWidth="min-w-[940px]">
             <ErpTableHead>
               <tr>
-                <th className="px-3 py-2 text-left font-medium">Receipt</th>
-                <th className="px-3 py-2 text-left font-medium">Buyer</th>
+                <ErpSortTh sort={saleSort} field="receipt" className="px-3 py-2 text-left font-medium">Receipt</ErpSortTh>
+                <ErpSortTh sort={saleSort} field="buyer" className="px-3 py-2 text-left font-medium">Buyer</ErpSortTh>
                 <th className="px-3 py-2 text-left font-medium">Items</th>
-                <th className="px-3 py-2 text-right font-medium">Total</th>
-                <th className="px-3 py-2 text-right font-medium">Paid</th>
-                <th className="px-3 py-2 text-right font-medium">Owing</th>
+                <ErpSortTh sort={saleSort} field="total" align="right" className="px-3 py-2 text-right font-medium">Total</ErpSortTh>
+                <ErpSortTh sort={saleSort} field="paid" align="right" className="px-3 py-2 text-right font-medium">Paid</ErpSortTh>
+                <ErpSortTh sort={saleSort} field="owing" align="right" className="px-3 py-2 text-right font-medium">Owing</ErpSortTh>
                 <th className="px-3 py-2 text-right font-medium" />
               </tr>
             </ErpTableHead>
             <ErpTableBody hoverable>
-              {rows.map((s) => (
+              {saleSort.rows.map((s) => (
                 <tr key={s.id} className={s.status === "void" ? "opacity-60" : ""}>
                   <td className="px-3 py-2">
                     <div className="font-mono text-xs">{s.saleNo}</div>
