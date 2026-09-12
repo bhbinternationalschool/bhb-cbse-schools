@@ -1756,12 +1756,20 @@ export function assignStudentToRoute(input: {
     }
   }
 
-  // Seats. The child being assigned is left out of the count: when only their
-  // stop is changing they already hold a seat on this bus, and counting them
-  // against it would refuse a move that frees nothing and takes nothing.
+  const hold = checkHold(input.studentId, "HOLD_TRANSPORT");
+  if (!hold.allowed) {
+    return { ok: false, error: hold.message };
+  }
+
+  const ay = input.academicYearCode ?? DEFAULT_AY;
+
+  // Seats, asked for the year this assignment belongs to. The child being
+  // assigned is left out of the count: when only their stop is changing they
+  // already hold a seat on this bus, and counting them against it would refuse
+  // a move that frees nothing and takes nothing.
   const seats = seatsOnRoute(state, route.id, {
     exceptStudentId: input.studentId,
-    academicYearCode: input.academicYearCode ?? DEFAULT_AY,
+    academicYearCode: ay,
   });
   let seatWarning: string | undefined;
   if (!seats.known) {
@@ -1772,13 +1780,6 @@ export function assignStudentToRoute(input: {
       error: `${route.busNo || route.code} is full — ${seats.used} of ${seats.capacity} seats. Enter a reason to seat one more.`,
     };
   }
-
-  const hold = checkHold(input.studentId, "HOLD_TRANSPORT");
-  if (!hold.allowed) {
-    return { ok: false, error: hold.message };
-  }
-
-  const ay = input.academicYearCode ?? DEFAULT_AY;
   const expected = expectedMonthlyFeePaise(route, stop, state.feePolicy);
   const override =
     input.monthlyFeePaise != null && input.monthlyFeePaise > 0
