@@ -44,6 +44,7 @@ import {
 } from "@/components/ui/erp-roster";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type RowState = {
   studentId: string;
@@ -102,6 +103,17 @@ export function RemarksPanel(props: {
   } = props;
 
   const [rows, setRows] = useState<RowState[]>([]);
+
+  // Sorting by Source shows which remarks are still unwritten — the class teacher's own worklist. The remark box is a textarea, not a value.
+  const remarkSort = useTableSort(
+    rows,
+    {
+      student: (row) => roster.find((s) => s.id === row.studentId)?.fullName ?? "",
+      source: (row) => row.text || row.textHi ? row.source : "",
+    },
+    "student",
+    "asc",
+  );
   const [tone, setTone] = useState<RemarkTone>("balanced");
   const [language, setLanguage] = useState<RemarkLanguage>("en");
   const [includeSubjects, setIncludeSubjects] = useState(true);
@@ -508,17 +520,17 @@ export function RemarksPanel(props: {
         <ErpTable minWidth="min-w-full" className="text-xs sm:text-sm">
           <ErpTableHead>
             <tr>
-              <th className="px-4 py-2.5 font-bold text-[var(--brand-deep)]">Student</th>
+              <ErpSortTh sort={remarkSort} field="student" className="px-4 py-2.5 font-bold text-[var(--brand-deep)]">Student</ErpSortTh>
               <th className="px-4 py-2.5 font-bold text-[var(--brand-deep)]">Result</th>
               <th className="w-[45%] px-4 py-2.5 font-bold text-[var(--brand-deep)]">
                 Class teacher&apos;s remark
               </th>
-              <th className="px-4 py-2.5 font-bold text-[var(--brand-deep)]">Source</th>
+              <ErpSortTh sort={remarkSort} field="source" className="px-4 py-2.5 font-bold text-[var(--brand-deep)]">Source</ErpSortTh>
               <th className="px-2 py-2.5" />
             </tr>
           </ErpTableHead>
           <ErpTableBody>
-            {rows.map((row) => {
+            {remarkSort.rows.map((row) => {
               const st = roster.find((s) => s.id === row.studentId);
               if (!st) return null;
               const isOpen = expanded.has(row.studentId);

@@ -33,6 +33,7 @@ import {
   ErpTableHead,
 } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 const CARD = "rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4";
 const BTN =
@@ -179,6 +180,20 @@ function Tile({ label, value, hint, tone }: { label: string; value: string; hint
 export function LedgerBookPanel({ canApprove }: { canApprove: boolean }) {
   const [cockpit, setCockpit] = useState<Cockpit | null>(null);
   const [overview, setOverview] = useState<LedgerOverview | null>(null);
+
+  // The day book, newest first; sorting by type or source groups what came from one desk.
+  const voucherSort = useTableSort(
+    overview?.vouchers ?? [],
+    {
+      no: (v) => v.voucherNo,
+      date: (v) => v.date,
+      type: (v) => v.voucherType,
+      source: (v) => v.sourceType || "manual",
+      by: (v) => v.createdBy,
+    },
+    "date",
+    "desc",
+  );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [coverage, setCoverage] = useState<
@@ -195,6 +210,18 @@ export function LedgerBookPanel({ canApprove }: { canApprove: boolean }) {
       }
     | null
   >(null);
+
+  // Reconciliation coverage: sorting by desk records shows the biggest gaps first.
+  const coverageSort = useTableSort(
+    coverage?.rows ?? [],
+    {
+      source: (r) => r.source,
+      deskRecords: (r) => r.deskRecords,
+      ledgerVouchers: (r) => r.ledgerVouchers,
+    },
+    "source",
+    "asc",
+  );
   const [projection, setProjection] = useState<
     | {
         ok: boolean;
@@ -471,14 +498,14 @@ export function LedgerBookPanel({ canApprove }: { canApprove: boolean }) {
             <ErpTable minWidth="min-w-[34rem]">
               <ErpTableHead>
                 <tr>
-                  <th className="pb-2 text-left">Source</th>
-                  <th className="pb-2 text-right">Desk records</th>
-                  <th className="pb-2 text-right">In the book</th>
+                  <ErpSortTh sort={coverageSort} field="source" className="pb-2 text-left">Source</ErpSortTh>
+                  <ErpSortTh sort={coverageSort} field="deskRecords" align="right" className="pb-2 text-right">Desk records</ErpSortTh>
+                  <ErpSortTh sort={coverageSort} field="ledgerVouchers" align="right" className="pb-2 text-right">In the book</ErpSortTh>
                   <th className="pb-2 text-left">Verdict</th>
                 </tr>
               </ErpTableHead>
               <ErpTableBody>
-                {coverage.rows.map((r) => {
+                {coverageSort.rows.map((r) => {
                   const clean = r.missingInLedger.length === 0 && r.orphanedInLedger.length === 0;
                   return (
                     <tr key={r.source}>
@@ -531,17 +558,17 @@ export function LedgerBookPanel({ canApprove }: { canApprove: boolean }) {
             <ErpTable minWidth="min-w-[40rem]">
               <ErpTableHead>
                 <tr>
-                  <th className="pb-2 text-left">No.</th>
-                  <th className="pb-2 text-left">Date</th>
-                  <th className="pb-2 text-left">Type</th>
+                  <ErpSortTh sort={voucherSort} field="no" className="pb-2 text-left">No.</ErpSortTh>
+                  <ErpSortTh sort={voucherSort} field="date" className="pb-2 text-left">Date</ErpSortTh>
+                  <ErpSortTh sort={voucherSort} field="type" className="pb-2 text-left">Type</ErpSortTh>
                   <th className="pb-2 text-left">Narration</th>
-                  <th className="pb-2 text-left">Source</th>
-                  <th className="pb-2 text-left">By</th>
+                  <ErpSortTh sort={voucherSort} field="source" className="pb-2 text-left">Source</ErpSortTh>
+                  <ErpSortTh sort={voucherSort} field="by" className="pb-2 text-left">By</ErpSortTh>
                   <th className="w-10 px-2 py-2" aria-label="Actions" />
                 </tr>
               </ErpTableHead>
               <ErpTableBody>
-                {overview.vouchers.map((v) => (
+                {voucherSort.rows.map((v) => (
                   <tr key={v.id}>
                     <td className="py-1.5 font-mono text-xs">{v.voucherNo}</td>
                     <td className="py-1.5">{v.date}</td>
