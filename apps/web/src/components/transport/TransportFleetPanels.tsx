@@ -16,6 +16,7 @@ import {
   DEFAULT_MAP_LAYERS,
   TransportGoogleMap,
   TransportMapLegend,
+  type LiveVehicleMarker,
 } from "@/components/transport/TransportGoogleMap";
 import {
   buildTransportMapMarkers,
@@ -935,7 +936,19 @@ type LiveBusRow = {
   routeName: string | null;
   busNo: string | null;
   tracked: boolean;
-  position: { lat: number; lng: number; recordedAt: string; ageSec: number; freshness: "live" | "recent" | "stale"; speedKmh: number | null; fuelPercent: number | null } | null;
+  position: {
+    lat: number;
+    lng: number;
+    recordedAt: string;
+    ageSec: number;
+    freshness: "live" | "recent" | "stale" | "cold";
+    speedKmh: number | null;
+    /** Heading in degrees. Already sent by /api/transport/live; the client
+     *  used to drop it, which is why every bus was drawn as a dot. */
+    courseDeg: number | null;
+    ignitionOn: boolean | null;
+    fuelPercent: number | null;
+  } | null;
 };
 
 export function LiveMapPanel({
@@ -985,20 +998,41 @@ export function LiveMapPanel({
       clearInterval(t);
     };
   }, []);
-  const liveState = useMemo<TransportState>(() => {
-    const pings = liveBuses
-      .filter((b) => b.position)
-      .map((b) => ({
-        id: `live_${b.vehicleId}`,
-        vehicleId: b.vehicleId,
-        lat: b.position!.lat,
-        lng: b.position!.lng,
-        recordedAt: b.position!.recordedAt,
-        source: "device" as const,
-        note: `Fleet Edge · ${b.position!.freshness}${b.position!.speedKmh != null ? ` · ${Math.round(b.position!.speedKmh)} km/h` : ""}`,
-      }));
-    return { ...state, gpsPings: [...pings, ...state.gpsPings] };
-  }, [state, liveBuses]);
+  /**
+   * Live fixes used to be flattened into `gpsPings` — an array whose shape has
+   * no heading, no speed and no age — so the map drew each bus as the same
+   * blue dot as a hand-typed ping, and rebuilt it from scratch every poll.
+   * They are passed to the map as vehicles now; `gpsPings` keeps only what a
+   * clerk actually recorded by hand.
+   */
+  const liveVehicles = useMemo<LiveVehicleMarker[]>(
+    () =>
+      liveBuses
+        .filter((b) => b.position)
+        .map((b) => {
+          const pos = b.position!;
+          const age =
+            pos.ageSec < 60
+              ? `${pos.ageSec}s ago`
+              : `${Math.round(pos.ageSec / 60)} min ago`;
+          const speed =
+            pos.speedKmh != null ? ` · ${Math.round(pos.speedKmh)} km/h` : "";
+          return {
+            id: b.vehicleId || pos.recordedAt,
+            label: b.busNo || b.routeName || b.registrationNo || b.name,
+            detail: `${age}${speed}`,
+            lat: pos.lat,
+            lng: pos.lng,
+            speedKmh: pos.speedKmh,
+            courseDeg: pos.courseDeg,
+            ignitionOn: pos.ignitionOn,
+            freshness: pos.freshness,
+            at: pos.recordedAt,
+          };
+        }),
+    [liveBuses],
+  );
+  const liveState = state;
   const last = lastGpsPingByVehicle(liveState);
   const onRoad = state.vehicles.filter(
     (v) => v.isActive && v.status === "active",
@@ -1025,9 +1059,20 @@ export function LiveMapPanel({
       stops: countKind("stops"),
       unassigned: countKind("unassigned"),
       riders: countKind("riders"),
-      buses: countKind("buses"),
+      // Buses on the map are the live ones now. Counting hand-typed gpsPings
+      // here would report a fleet the map is not drawing.
+      buses: liveVehicles.length,
     };
-  }, [state, sis, masters, academicYearCode]);
+  }, [liveState, sis, masters, academicYearCode, liveVehicles.length]);
+
+  /**
+   * Buses the map cannot show, counted rather than quietly omitted.
+   *
+   * Three of six report. A map drawing three buses with nothing said reads as
+   * "the fleet", and an office would trust a screen that cannot see half of
+   * it — the same reason the panel below names untracked vehicles.
+   */
+  const untrackedCount = liveBuses.filter((b) => !b.position).length;
 
   function toggleLayer(key: keyof TransportMapLayers) {
     setLayers((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -1042,8 +1087,16 @@ export function LiveMapPanel({
               Live route map
             </h2>
             <p className="mt-0.5 text-xs text-[var(--muted)]">
-              School · route stop zones · pinned homes · bus GPS
+              School · route stop zones · pinned homes · live buses
             </p>
+            {untrackedCount > 0 ? (
+              <p className="mt-0.5 text-[11px] font-semibold text-[var(--danger)]">
+                {untrackedCount} of {liveBuses.length} vehicle
+                {liveBuses.length === 1 ? "" : "s"} {untrackedCount === 1 ? "is" : "are"}{" "}
+                not on the map — no tracker reporting. This map is not the whole
+                fleet.
+              </p>
+            ) : null}
           </div>
           <TransportMapLegend
             layers={layers}
@@ -1092,12 +1145,17 @@ export function LiveMapPanel({
             masters={masters ?? null}
             academicYearCode={academicYearCode}
             layers={layers}
+            liveVehicles={liveVehicles}
           />
         </div>
         <p className="mt-2 text-[10px] text-[var(--muted)]">
-          Orange = students without transport (need SIS address pin). Navy dots =
-          stop fee zones (~distance from school). Enable{" "}
-          <strong>Maps JavaScript API</strong> on your Google key.
+          A bus points the way it is travelling only while it is actually
+          moving; a stopped one is drawn square, because the heading a parked
+          tracker reports is wherever it last pointed. Green = heard from in
+          the last few minutes, amber = older, faded = a last known position
+          and not a live one. Orange = students without transport (need SIS
+          address pin). Navy dots = stop fee zones (~distance from school).
+          Enable <strong>Maps JavaScript API</strong> on your Google key.
         </p>
       </section>
 

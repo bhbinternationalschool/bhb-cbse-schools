@@ -152,6 +152,7 @@ SELFTESTS=(
   test:transport-shifts
   test:transport-seats
   test:boarding-suggest
+  test:live-bus-marker
   test:transport-boarding
   test:transport-crew-access
   test:transport-crew
