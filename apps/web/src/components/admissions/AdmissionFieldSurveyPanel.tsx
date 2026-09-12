@@ -50,6 +50,7 @@ import { SisParentMatchBanner } from "@/components/admissions/SisParentMatchBann
 import { AdmissionSurveyTeamPanel } from "@/components/admissions/AdmissionSurveyTeamPanel";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 const inp =
   "w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm";
@@ -141,6 +142,20 @@ export function AdmissionFieldSurveyPanel({
   const stats = useMemo(() => fieldSurveyStats(state), [state]);
   const leads = useMemo(() => listFieldSurveyLeads(state), [state]);
   const productivity = useMemo(() => surveyAgentProductivity(state), [state]);
+
+  // Busiest agent first; Status groups who is on the field right now.
+  const agentSort = useTableSort(
+    productivity,
+    {
+      agent: (p) => p.agentName,
+      captures: (p) => p.captures,
+      open: (p) => p.open,
+      registered: (p) => p.registered,
+      status: (p) => p.checkedIn ? 1 : 0,
+    },
+    "captures",
+    "desc",
+  );
   const classes = useMemo(
     () => (masters.classes ?? []).filter((c) => c.isActive),
     [masters],
@@ -737,15 +752,15 @@ export function AdmissionFieldSurveyPanel({
             <ErpTable className="text-[12px]">
               <ErpTableHead>
                 <tr>
-                  <th className="py-1 pr-2">Agent</th>
-                  <th className="py-1 pr-2">Captures</th>
-                  <th className="py-1 pr-2">Open</th>
-                  <th className="py-1 pr-2">Reg</th>
-                  <th className="py-1">Status</th>
+                  <ErpSortTh sort={agentSort} field="agent" className="py-1 pr-2">Agent</ErpSortTh>
+                  <ErpSortTh sort={agentSort} field="captures" align="right" className="py-1 pr-2">Captures</ErpSortTh>
+                  <ErpSortTh sort={agentSort} field="open" align="right" className="py-1 pr-2">Open</ErpSortTh>
+                  <ErpSortTh sort={agentSort} field="registered" align="right" className="py-1 pr-2">Reg</ErpSortTh>
+                  <ErpSortTh sort={agentSort} field="status" className="py-1">Status</ErpSortTh>
                 </tr>
               </ErpTableHead>
               <ErpTableBody>
-                {productivity.map((p) => (
+                {agentSort.rows.map((p) => (
                   <tr key={p.agentName}>
                     <td className="py-1.5 pr-2 font-medium">{p.agentName}</td>
                     <td className="py-1.5 pr-2">{p.captures}</td>

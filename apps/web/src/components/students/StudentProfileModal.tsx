@@ -48,6 +48,7 @@ import {
   ErpTableHead,
   ErpTableShell,
 } from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type ProfileTab =
   | "profile"
@@ -148,6 +149,20 @@ export function StudentProfileModal({
     }
     return { lines, billed, paid, balance };
   }, [fees, student, masters]);
+
+  // A child's fee lines in due order, with balance sortable to find what is outstanding.
+  const feeLineSort = useTableSort(
+    feeSummary.lines,
+    {
+      head: (l) => l.label || l.feeHeadName,
+      dueOn: (l) => l.dueOn || "",
+      billed: (l) => l.billedPaise - l.concessionPaise,
+      paid: (l) => l.paidPaise,
+      balance: (l) => l.balancePaise,
+    },
+    "dueOn",
+    "asc",
+  );
 
   const examCards = useMemo(() => {
     if (!exams) return [] as ReportCard[];
@@ -489,15 +504,15 @@ export function StudentProfileModal({
                   <ErpTable>
                     <ErpTableHead>
                       <tr>
-                        <th className="px-3 py-2">Head</th>
-                        <th className="px-3 py-2">Due on</th>
-                        <th className="px-3 py-2 text-right">Billed</th>
-                        <th className="px-3 py-2 text-right">Paid</th>
-                        <th className="px-3 py-2 text-right">Balance</th>
+                        <ErpSortTh sort={feeLineSort} field="head" className="px-3 py-2">Head</ErpSortTh>
+                        <ErpSortTh sort={feeLineSort} field="dueOn" className="px-3 py-2">Due on</ErpSortTh>
+                        <ErpSortTh sort={feeLineSort} field="billed" align="right" className="px-3 py-2 text-right">Billed</ErpSortTh>
+                        <ErpSortTh sort={feeLineSort} field="paid" align="right" className="px-3 py-2 text-right">Paid</ErpSortTh>
+                        <ErpSortTh sort={feeLineSort} field="balance" align="right" className="px-3 py-2 text-right">Balance</ErpSortTh>
                       </tr>
                     </ErpTableHead>
                     <ErpTableBody>
-                      {feeSummary.lines.map((l) => (
+                      {feeLineSort.rows.map((l) => (
                         <tr key={l.dueKey}>
                           <td className="px-3 py-2 text-[var(--brand-deep)]">
                             {l.label || l.feeHeadName}

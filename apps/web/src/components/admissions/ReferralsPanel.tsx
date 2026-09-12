@@ -38,6 +38,7 @@ import { TENANT } from "@/lib/types";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 const inp = "w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm";
 const STATUS_LABEL: Record<TestimonialStatus, string> = { requested: "Requested", received: "Received", polished: "Polished", approved: "Approved", declined: "Declined" };
@@ -73,6 +74,19 @@ export function ReferralsPanel({ admissions, sis, canEdit, by }: { admissions: A
       .filter((h) => !q || h.guardianName.toLowerCase().includes(q) || (h.mobile || "").includes(q) || referralCodeFor(h).toLowerCase().includes(q))
       .slice(0, 200);
   }, [households, studentsByHh, search]);
+
+  // Which family has actually brought enrolments — sort by Enrolled, descending, and the answer is the top row.
+  const refSort = useTableSort(
+    rows,
+    {
+      parent: (h) => h.guardianName || "",
+      leads: (h) => attrByHh.get(h.id)?.leads || 0,
+      registered: (h) => attrByHh.get(h.id)?.registered || 0,
+      enrolled: (h) => attrByHh.get(h.id)?.enrolled || 0,
+    },
+    "parent",
+    "asc",
+  );
 
   function persist(next: ReferralsState, msg: string) {
     setState(saveReferrals(next));
@@ -191,12 +205,12 @@ export function ReferralsPanel({ admissions, sis, canEdit, by }: { admissions: A
             <ErpTable>
               <ErpTableHead>
                 <tr>
-                  <th className="px-2 py-2 text-left">Parent</th>
+                  <ErpSortTh sort={refSort} field="parent" className="px-2 py-2 text-left">Parent</ErpSortTh>
                   <th className="px-2 py-2 text-left">Children</th>
                   <th className="px-2 py-2 text-left">Code</th>
-                  <th className="px-2 py-2 text-right">Leads</th>
-                  <th className="px-2 py-2 text-right">Registered</th>
-                  <th className="px-2 py-2 text-right">Enrolled</th>
+                  <ErpSortTh sort={refSort} field="leads" align="right" className="px-2 py-2 text-right">Leads</ErpSortTh>
+                  <ErpSortTh sort={refSort} field="registered" align="right" className="px-2 py-2 text-right">Registered</ErpSortTh>
+                  <ErpSortTh sort={refSort} field="enrolled" align="right" className="px-2 py-2 text-right">Enrolled</ErpSortTh>
                   <th className="px-2 py-2 text-left">Invited</th>
                   <th className="px-2 py-2" />
                 </tr>
@@ -207,7 +221,7 @@ export function ReferralsPanel({ admissions, sis, canEdit, by }: { admissions: A
                     <td colSpan={8} className="px-2 py-6 text-center text-xs text-[var(--muted)]">No enrolled households match.</td>
                   </tr>
                 ) : (
-                  rows.map((h) => {
+                  refSort.rows.map((h) => {
                     const code = referralCodeFor(h);
                     const a = attrByHh.get(h.id);
                     const inv = state.invites.find((i) => i.householdId === h.id);
