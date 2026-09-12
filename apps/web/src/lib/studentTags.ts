@@ -24,10 +24,6 @@ const TAG_COLORS = [
   "#ad1457",
 ];
 
-function id(prefix: string) {
-  return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
-}
-
 export const DEFAULT_STUDENT_TAGS: Omit<StudentTag, "id" | "createdAt">[] = [
   { code: "STAFF", name: "Staff ward", color: "#1565c0", isActive: true },
   { code: "SIB", name: "Sibling", color: "#00838f", isActive: true },
@@ -37,12 +33,27 @@ export const DEFAULT_STUDENT_TAGS: Omit<StudentTag, "id" | "createdAt">[] = [
   { code: "NEED", name: "Special care", color: "#6a1b9a", isActive: true },
 ];
 
+/**
+ * The id of a default tag is derived from its code, not drawn at random.
+ *
+ * These six are seeded by whichever browser first opens a screen that lists
+ * tags. While the list lived in localStorage that was harmless. Now that tag
+ * definitions have their own table (migration 20260912130000) and a student's
+ * tagIds are stored, a random id per browser would give the school twelve
+ * default tags for six meanings, and a child tagged "RTE" on one machine would
+ * point at an id another machine cannot name. Same trap as every other
+ * per-browser id in this codebase.
+ */
+export function defaultTagId(code: string): string {
+  return `stag_${code.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
+}
+
 export function ensureDefaultTags(sis: SisState): SisState {
   if ((sis.tags ?? []).length > 0) return sis;
   return {
     ...sis,
     tags: DEFAULT_STUDENT_TAGS.map((t) =>
-      normalizeStudentTag({ ...t, id: id("stag") }),
+      normalizeStudentTag({ ...t, id: defaultTagId(t.code) }),
     ),
   };
 }
@@ -178,6 +189,9 @@ export function ensureRteEwsTagIds(input?: {
     if (!existing) {
       tags.push(
         normalizeStudentTag({
+          // Same derived id as the default seed, so admitting an RTE child on
+          // one machine and on another cannot produce two "RTE" tags.
+          id: defaultTagId(code),
           name: meta.name,
           code,
           color: meta.color,

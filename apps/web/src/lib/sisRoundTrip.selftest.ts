@@ -23,20 +23,33 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import {
+  normalizeClassUpgrade,
   normalizeHousehold,
   normalizeStudent,
+  normalizeStudentTag,
   STUDENT_PROFILE_KEYS,
+  type ClassUpgradeRecord,
   type Household,
+  type SisState,
   type SisStudent,
+  type StudentTag,
 } from "./sis";
 import {
+  classUpgradeToRow,
   householdToRow,
+  rowToClassUpgrade,
   rowToHousehold,
   rowToStudent,
+  rowToStudentTag,
+  studentTagToRow,
   studentToRow,
+  type ClassUpgradeRow,
   type HouseholdRow,
+  type SisRemoteBundle,
   type StudentRow,
+  type StudentTagRow,
 } from "./sisNormalized.server";
+import { mergeSisRemoteIntoState } from "./sisPersistence";
 
 console.log("sisRoundTrip.selftest.ts");
 
@@ -304,6 +317,177 @@ const HOUSEHOLD_NOT_ON_ROW: Record<string, string> = {
   console.log(
     `  ok  all ${Object.keys(HOUSEHOLD_FIELDS).length - Object.keys(HOUSEHOLD_NOT_ON_ROW).length} household fields round trip`,
   );
+}
+
+/* ── Tag definitions and the class-upgrade history ─────────────────────
+ *
+ * Both were part of SisState and stored nowhere at all until 2026-09-12: they
+ * lived in the localStorage of whichever machine wrote them. They now have
+ * their own tables, so they get the same field-by-field treatment.
+ */
+const TAG_FIELDS: Record<keyof Required<StudentTag>, true> = {
+  id: true, code: true, name: true, color: true, isActive: true, createdAt: true,
+};
+
+const UPGRADE_FIELDS: Record<keyof Required<ClassUpgradeRecord>, true> = {
+  id: true, studentId: true, studentName: true, admissionNo: true,
+  fromClassId: true, fromSectionId: true, toClassId: true, toSectionId: true,
+  fromFeeGroupId: true, toFeeGroupId: true, fromStudentType: true,
+  toStudentType: true, reason: true, effectiveOn: true, createdAt: true,
+  createdBy: true,
+};
+
+{
+  // A RETIRED tag, deliberately: `is_active` coming back as `?? true` would
+  // revive every tag the office has put away, and that is the one field here
+  // whose default is not the safe answer.
+  const tag = normalizeStudentTag({
+    id: "stag_rte",
+    code: "RTE",
+    name: "RTE",
+    color: "#c62828",
+    isActive: false,
+    createdAt: "2026-09-12T10:00:00.000Z",
+  });
+  const back = rowToStudentTag(
+    studentTagToRow(tag, TENANT, NOW) as unknown as StudentTagRow,
+  );
+  const missing = (Object.keys(TAG_FIELDS) as (keyof StudentTag)[]).filter(
+    (k) => JSON.stringify(tag[k]) !== JSON.stringify(back[k]),
+  );
+  assert.deepEqual(missing, [], `tag fields lost: ${missing.join(", ")}`);
+  assert.equal(back.isActive, false, "a retired tag must not come back active");
+  console.log(`  ok  all ${Object.keys(TAG_FIELDS).length} tag fields round trip`);
+}
+
+{
+  const upgrade = normalizeClassUpgrade({
+    id: "cup_1",
+    studentId: "stu_1",
+    studentName: "Round Trip",
+    admissionNo: "BHB-RT-1",
+    fromClassId: "cls_1",
+    fromSectionId: "sec_1",
+    toClassId: "cls_2",
+    toSectionId: "sec_2",
+    fromFeeGroupId: "fg_1",
+    toFeeGroupId: null,
+    fromStudentType: "NEW",
+    toStudentType: "PROMOTE",
+    reason: "Moved up a class after admission",
+    effectiveOn: "2026-07-04",
+    createdAt: "2026-07-04T09:30:00.000Z",
+    createdBy: "principal",
+  });
+  const back = rowToClassUpgrade(
+    classUpgradeToRow(upgrade, TENANT, NOW) as unknown as ClassUpgradeRow,
+  );
+  const missing = (
+    Object.keys(UPGRADE_FIELDS) as (keyof ClassUpgradeRecord)[]
+  ).filter((k) => JSON.stringify(upgrade[k]) !== JSON.stringify(back[k]));
+  assert.deepEqual(missing, [], `upgrade fields lost: ${missing.join(", ")}`);
+  // A null fee group is "no group", not "the group called empty string".
+  assert.equal(back.toFeeGroupId, null, "a null fee group stays null");
+  assert.equal(back.createdAt, "2026-07-04T09:30:00.000Z", "the ISO string is kept verbatim");
+  console.log(
+    `  ok  all ${Object.keys(UPGRADE_FIELDS).length} class-upgrade fields round trip`,
+  );
+}
+
+/* ── The first hydrate must not erase what only the browser holds ──────
+ *
+ * The tables start empty. A plain "the database is the truth" replace would
+ * wipe the office's tag list on the first read after the deploy, before it had
+ * ever been pushed — the shape of the 2026-08-21 transport desk wipe.
+ */
+{
+  const localTag = normalizeStudentTag({ id: "stag_sport", code: "SPORT", name: "Sports" });
+  const remoteTag = normalizeStudentTag({ id: "stag_rte", code: "RTE", name: "RTE" });
+  const localUp = normalizeClassUpgrade({
+    id: "cup_local", studentId: "stu_1", createdAt: "2026-07-01T00:00:00.000Z",
+  });
+  const remoteUp = normalizeClassUpgrade({
+    id: "cup_remote", studentId: "stu_2", createdAt: "2026-08-01T00:00:00.000Z",
+  });
+
+  const local: SisState = {
+    version: 1,
+    households: [],
+    students: [],
+    curriculumRequests: [],
+    tags: [localTag],
+    classUpgrades: [localUp],
+  };
+  const bundle = (over: Partial<SisRemoteBundle>): SisRemoteBundle => ({
+    households: [],
+    students: [],
+    tags: [],
+    classUpgrades: [],
+    householdUpdatedAt: {},
+    studentUpdatedAt: {},
+    ...over,
+  });
+
+  const bootstrap = mergeSisRemoteIntoState(local, bundle({}), { preferDb: true });
+  assert.deepEqual(
+    bootstrap.tags.map((x) => x.id),
+    ["stag_sport"],
+    "empty tables must not erase the only copy of the tag list",
+  );
+  assert.deepEqual(
+    bootstrap.classUpgrades.map((x) => x.id),
+    ["cup_local"],
+    "empty tables must not erase the only copy of the move history",
+  );
+
+  const stored = mergeSisRemoteIntoState(
+    local,
+    bundle({ tags: [remoteTag], classUpgrades: [remoteUp] }),
+    { preferDb: true },
+  );
+  assert.deepEqual(
+    stored.tags.map((x) => x.id),
+    ["stag_rte"],
+    "once the table holds tags it is the complete list — retiring happens by flag, not deletion",
+  );
+  assert.deepEqual(
+    stored.classUpgrades.map((x) => x.id),
+    ["cup_remote", "cup_local"],
+    "history is the union of both, newest first — it must never shrink",
+  );
+  console.log("  ok  the first hydrate keeps tags and history the browser alone holds");
+
+  // A child tagged on the machine whose ids lost must keep the tag: the code is
+  // the natural key. Without this the next edit of that child drops it.
+  const tagged = normalizeStudent({
+    id: "stu_tagged",
+    fullName: "Tagged Child",
+    tagIds: ["stag_old_random", "stag_keepme"],
+  });
+  const withTagged: SisState = {
+    ...local,
+    students: [tagged],
+    tags: [
+      normalizeStudentTag({ id: "stag_old_random", code: "RTE", name: "RTE" }),
+      normalizeStudentTag({ id: "stag_keepme", code: "SPORT", name: "Sports" }),
+    ],
+  };
+  const remapped = mergeSisRemoteIntoState(
+    withTagged,
+    bundle({
+      tags: [
+        normalizeStudentTag({ id: "stag_rte", code: "RTE", name: "RTE" }),
+        normalizeStudentTag({ id: "stag_keepme", code: "SPORT", name: "Sports" }),
+      ],
+    }),
+    { preferDb: true },
+  );
+  assert.deepEqual(
+    remapped.students[0]!.tagIds,
+    ["stag_rte", "stag_keepme"],
+    "a tag id that lost is re-pointed by code; one that survived is untouched",
+  );
+  console.log("  ok  a child's tags follow the stored tag row with the same code");
 }
 
 /* ── The two writers that edit an existing student ─────────────────────
