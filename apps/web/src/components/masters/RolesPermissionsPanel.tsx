@@ -40,6 +40,7 @@ import {
   MastersWorkCard,
 } from "@/components/masters/MastersLayout";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type RbacTab = "matrix" | "mobile" | "roles" | "assignments" | "summary" | "audit";
 
@@ -55,6 +56,29 @@ export function RolesPermissionsPanel() {
   const session = useDemoSession();
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [state, setState] = useState<RbacState | null>(null);
+
+  // Sorting by Expires shows which role assignments lapse soonest.
+  const assignSort = useTableSort(
+    state?.assignments ?? [],
+    {
+      role: (a) => a.roleId,
+      expires: (a) => a.expiresOn || "",
+    },
+    "role",
+    "asc",
+  );
+
+  // Roles: Type separates the built-in ones from what the school added. The Active box is a control.
+  const roleSort = useTableSort(
+    state?.roles ?? [],
+    {
+      code: (r) => r.code,
+      name: (r) => r.name,
+      type: (r) => r.isBuiltIn ? "Built-in" : "Custom",
+    },
+    "code",
+    "asc",
+  );
   const [tab, setTab] = useState<RbacTab>("matrix");
   const [notice, setNotice] = useState<string | null>(null);
   const [roleId, setRoleId] = useState<string>("");
@@ -112,9 +136,31 @@ export function RolesPermissionsPanel() {
     [state],
   );
 
+  // Which capability nobody holds is the question this summary answers.
+  const capSort = useTableSort(
+    summary,
+    {
+      capability: (row) => row.capability,
+      roles: (row) => row.roleNames.length,
+    },
+    "capability",
+    "asc",
+  );
+
   const staffRows = useMemo(
     () => (state && masters ? staffAccessOverview(state, masters) : []),
     [state, masters],
+  );
+
+  // Staff and the roles they carry.
+  const staffRowSort = useTableSort(
+    staffRows,
+    {
+      staff: (r) => r.staffName,
+      roles: (r) => r.roles.join(", "),
+    },
+    "staff",
+    "asc",
   );
 
   /**
@@ -137,6 +183,17 @@ export function RolesPermissionsPanel() {
       expired: !!g.expiresOn && g.expiresOn < today,
     }));
   }, [state?.userGrants, masters]);
+
+  // Per-person grants, which are the ones worth reviewing first.
+  const grantSort = useTableSort(
+    grantRows,
+    {
+      staff: (g) => g.staffName,
+      permission: (g) => g.module,
+    },
+    "staff",
+    "asc",
+  );
 
   function commit(next: RbacState, msg?: string) {
     setState(next);
@@ -509,15 +566,15 @@ export function RolesPermissionsPanel() {
             <ErpTable>
               <ErpTableHead>
                 <tr>
-                  <th className="px-3 py-2">Code</th>
-                  <th className="px-3 py-2">Name</th>
-                  <th className="px-3 py-2">Type</th>
+                  <ErpSortTh sort={roleSort} field="code" className="px-3 py-2">Code</ErpSortTh>
+                  <ErpSortTh sort={roleSort} field="name" className="px-3 py-2">Name</ErpSortTh>
+                  <ErpSortTh sort={roleSort} field="type" className="px-3 py-2">Type</ErpSortTh>
                   <th className="px-3 py-2">Active</th>
                   <th className="px-3 py-2" />
                 </tr>
               </ErpTableHead>
               <ErpTableBody>
-                {state.roles.map((r) => (
+                {roleSort.rows.map((r) => (
                   <tr key={r.id}>
                     <td className="px-3 py-2 font-mono text-[12px]">{r.code}</td>
                     <td className="px-3 py-2">{r.name}</td>
@@ -677,14 +734,14 @@ export function RolesPermissionsPanel() {
                 <ErpTableHead>
                   <tr>
                     <th className="px-3 py-2">Staff</th>
-                    <th className="px-3 py-2">Role</th>
-                    <th className="px-3 py-2">Expires</th>
+                    <ErpSortTh sort={assignSort} field="role" className="px-3 py-2">Role</ErpSortTh>
+                    <ErpSortTh sort={assignSort} field="expires" className="px-3 py-2">Expires</ErpSortTh>
                     <th className="px-3 py-2">Note</th>
                     <th className="px-3 py-2" />
                   </tr>
                 </ErpTableHead>
                 <ErpTableBody>
-                  {state.assignments.map((a) => {
+                  {assignSort.rows.map((a) => {
                     const staff = masters.staff?.find((s) => s.id === a.staffId);
                     const role = state.roles.find((r) => r.id === a.roleId);
                     return (
@@ -732,12 +789,12 @@ export function RolesPermissionsPanel() {
             <ErpTable>
               <ErpTableHead>
                 <tr>
-                  <th className="px-3 py-2">Capability</th>
-                  <th className="px-3 py-2">Roles with access</th>
+                  <ErpSortTh sort={capSort} field="capability" className="px-3 py-2">Capability</ErpSortTh>
+                  <ErpSortTh sort={capSort} field="roles" className="px-3 py-2">Roles with access</ErpSortTh>
                 </tr>
               </ErpTableHead>
               <ErpTableBody>
-                {summary.map((row) => (
+                {capSort.rows.map((row) => (
                   <tr key={row.capability}>
                     <td className="px-3 py-2">{row.capability}</td>
                     <td className="px-3 py-2 text-[12px] text-[var(--muted)]">
@@ -759,12 +816,12 @@ export function RolesPermissionsPanel() {
               <ErpTable>
                 <ErpTableHead>
                   <tr>
-                    <th className="px-3 py-2">Staff</th>
-                    <th className="px-3 py-2">Roles</th>
+                    <ErpSortTh sort={staffRowSort} field="staff" className="px-3 py-2">Staff</ErpSortTh>
+                    <ErpSortTh sort={staffRowSort} field="roles" className="px-3 py-2">Roles</ErpSortTh>
                   </tr>
                 </ErpTableHead>
                 <ErpTableBody>
-                  {staffRows.map((r) => (
+                  {staffRowSort.rows.map((r) => (
                     <tr key={r.staffId}>
                       <td className="px-3 py-2">
                         {r.staffName}
@@ -792,13 +849,13 @@ export function RolesPermissionsPanel() {
               <ErpTable>
                 <ErpTableHead>
                   <tr>
-                    <th className="px-3 py-2">Staff</th>
-                    <th className="px-3 py-2">Permission</th>
+                    <ErpSortTh sort={grantSort} field="staff" className="px-3 py-2">Staff</ErpSortTh>
+                    <ErpSortTh sort={grantSort} field="permission" className="px-3 py-2">Permission</ErpSortTh>
                     <th className="px-3 py-2">Why</th>
                   </tr>
                 </ErpTableHead>
                 <ErpTableBody>
-                  {grantRows.map((g) => (
+                  {grantSort.rows.map((g) => (
                     <tr key={g.id}>
                       <td className="px-3 py-2">
                         {g.staffName}

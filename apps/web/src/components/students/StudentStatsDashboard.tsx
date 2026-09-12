@@ -15,6 +15,7 @@ import { FilterExportButtons } from "@/components/reports/FilterExportButtons";
 import { describeFilters } from "@/lib/reportExport";
 import { TENANT } from "@/lib/types";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 function StatIcon({
   tone,
@@ -185,6 +186,19 @@ function StudentListDrawer({
     const sec = masters.sections.find((x) => x.id === s.sectionId)?.name ?? "";
     return sec ? `${cls}-${sec}` : cls;
   };
+
+  // The drill-down list — by class to group them, by admission number to
+  // find one child. The # column is a running count, so it is not a handle.
+  const statSort = useTableSort(
+    students,
+    {
+      student: (s) => s.fullName,
+      klass: (s) => classSec(s),
+      admission: (s) => s.admissionNo,
+    },
+    "student",
+    "asc",
+  );
   return (
     // Base UI: focus is trapped inside, the page behind is locked and
     // Escape closes. The hand-rolled version had a click-catching
@@ -212,13 +226,13 @@ function StudentListDrawer({
             <ErpTableHead sticky>
               <tr>
                 <th className="px-4 py-2 font-semibold">#</th>
-                <th className="px-4 py-2 font-semibold">Student</th>
-                <th className="px-4 py-2 font-semibold">Class</th>
-                <th className="px-4 py-2 font-semibold">Admission</th>
+                <ErpSortTh sort={statSort} field="student" className="px-4 py-2 font-semibold">Student</ErpSortTh>
+                <ErpSortTh sort={statSort} field="klass" className="px-4 py-2 font-semibold">Class</ErpSortTh>
+                <ErpSortTh sort={statSort} field="admission" className="px-4 py-2 font-semibold">Admission</ErpSortTh>
               </tr>
             </ErpTableHead>
             <ErpTableBody>
-              {students.map((s, i) => (
+              {statSort.rows.map((s, i) => (
                 <tr key={s.id}>
                   <td className="px-4 py-2 tabular-nums text-[#90a4ae]">
                     {i + 1}
