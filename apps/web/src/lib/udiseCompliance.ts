@@ -101,10 +101,27 @@ export type UdiseComplianceRow = {
   nearestCenterMapsUrl: string;
 };
 
-/** Indian mobile → tel:+91… for direct dial from phone / softphone. */
+/**
+ * Indian mobile → tel:+91… for direct dial from a phone or softphone.
+ *
+ * NOT normalizeMobile(), which keeps the FIRST ten digits: on "919140132524"
+ * that yields 9191401325 — a different, perfectly valid-looking number. A
+ * wrong number in a school's calling list is worse than no number, so a
+ * country code or a trunk 0 is stripped from the front first, and anything
+ * still not a ten-digit Indian mobile returns "" rather than a link that
+ * dials a stranger.
+ *
+ * No number in this roster carries a country code today; this is here so
+ * that the day somebody pastes one, it dials the right family.
+ */
 export function telHrefForMobile(mobile: string): string {
-  const d = normalizeMobile(mobile);
-  if (!isValidMobile(d)) return "";
+  let d = String(mobile || "").replace(/\D/g, "");
+  if (d.length > 10 && d.startsWith("91")) d = d.slice(2);
+  if (d.length === 11 && d.startsWith("0")) d = d.slice(1);
+  // An Indian mobile begins 6-9. This rejects the placeholder "0000000000"
+  // that a few household records carry, which isValidMobile accepts as ten
+  // digits and which would otherwise print as a link that dials nothing.
+  if (!isValidMobile(d) || !/^[6-9]/.test(d)) return "";
   return `tel:+91${d}`;
 }
 

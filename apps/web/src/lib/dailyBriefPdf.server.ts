@@ -33,6 +33,7 @@ import {
   tenderModeLabel,
   type DailyBrief,
 } from "@/lib/dailyBrief";
+import { telHrefForMobile } from "@/lib/udiseCompliance";
 
 const MARGIN = 36;
 
@@ -131,7 +132,18 @@ export async function renderDailyBriefPdf(
   };
 
   const table = (
-    columns: { key: string; label: string; width: number; align?: "right" }[],
+    columns: {
+      key: string;
+      label: string;
+      width: number;
+      align?: "right";
+      /**
+       * A cell can carry a link. The calling list uses it for `tel:` so a
+       * number can be dialled by tapping it on a phone, instead of being
+       * copied out by hand at six in the evening.
+       */
+      href?: (row: Record<string, string>) => string;
+    }[],
     rows: Record<string, string>[],
   ) => {
     const total = columns.reduce((s, c) => s + c.width, 0);
@@ -165,8 +177,24 @@ export async function renderDailyBriefPdf(
         const v = r[c.key] ?? "";
         font(false, v);
         const fitted = (doc.splitTextToSize(v, widths[i]! - 6) as string[])[0] ?? "";
-        if (c.align === "right") doc.text(fitted, x + widths[i]! - 4, y, { align: "right" });
-        else doc.text(fitted, x + 2, y);
+        const href = c.href ? c.href(r) : "";
+        if (href) {
+          // Drawn as a link so it reads as one: blue, underlined, and with a
+          // real PDF link annotation over the text — which is what a phone's
+          // PDF viewer turns into a tap-to-dial.
+          doc.setTextColor(21, 101, 192);
+          doc.text(fitted, x + 2, y);
+          const w = doc.getTextWidth(fitted);
+          doc.setDrawColor(21, 101, 192);
+          doc.setLineWidth(0.5);
+          doc.line(x + 2, y + 1.5, x + 2 + w, y + 1.5);
+          doc.link(x + 2, y - 8, w, 11, { url: href });
+          doc.setTextColor(20, 20, 20);
+        } else if (c.align === "right") {
+          doc.text(fitted, x + widths[i]! - 4, y, { align: "right" });
+        } else {
+          doc.text(fitted, x + 2, y);
+        }
         x += widths[i]!;
       });
       y += 13;
@@ -322,7 +350,15 @@ export async function renderDailyBriefPdf(
         { key: "name", label: "Child", width: 26 },
         { key: "father", label: "Father", width: 24 },
         { key: "cls", label: "Class", width: 18 },
-        { key: "mobile", label: "Mobile", width: 16 },
+        {
+          key: "mobile",
+          label: "Mobile",
+          width: 16,
+          // "no number" rows carry nothing to dial, and telHrefForMobile
+          // returns "" for anything that is not a real Indian mobile — so a
+          // half-entered number never becomes a link that fails on tap.
+          href: (row) => telHrefForMobile(row.mobile ?? ""),
+        },
         { key: "due", label: "Overdue", width: 16, align: "right" },
       ],
       brief.defaulters.rows.map((r) => ({
