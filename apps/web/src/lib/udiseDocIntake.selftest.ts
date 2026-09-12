@@ -13,6 +13,9 @@ import {
   planUdiseCorrections,
   renderOfficeAlert,
   renderParentAck,
+  matchPaymentToReceipts,
+  renderPaymentProofAck,
+  renderPaymentProofOfficeAlert,
   type UdiseDocExtract,
 } from "./udiseDocIntakeAi";
 
@@ -121,7 +124,7 @@ const strangerDad = planUdiseCorrections({ extract: { ...fatherDoc, nameOnDoc: "
 assert.equal(strangerDad.changes.filter((c) => c.apply).length, 0);
 
 /* ── Plan: birth certificate ──────────────────────────────────────── */
-const bc: UdiseDocExtract = { docType: "birth_certificate", person: "unknown", nameOnDoc: "Aarav Sharma", dob: "2019-05-12", aadhaarNumber: "", gender: "M", fatherName: "Rakesh Sharma", motherName: "Sunita Sharma", address: "", pincode: "", missing: [], notes: "" };
+const bc: UdiseDocExtract = { docType: "birth_certificate", person: "unknown", nameOnDoc: "Aarav Sharma", dob: "2019-05-12", aadhaarNumber: "", gender: "M", fatherName: "Rakesh Sharma", motherName: "Sunita Sharma", address: "", pincode: "", payment: null, missing: [], notes: "" };
 const bp = planUdiseCorrections({ extract: bc, student, household });
 assert.equal(bp.person, "child", "a birth certificate is the child's document");
 assert.equal(bp.docKey, "birthCert");
@@ -164,5 +167,87 @@ assert.equal(missingDocsFor({ gaps: ["student_aadhaar", "pen"], hasDob: true, ha
 assert.equal(missingDocsFor({ gaps: ["parent_aadhaar"], hasDob: false, hasAddress: false, language: "en" }), "father's or mother's Aadhaar card, birth certificate, address proof (ration card / electricity bill)");
 assert.match(missingDocsFor({ gaps: ["student_aadhaar"], hasDob: true, hasAddress: true, language: "hi" }), /आधार/);
 assert.equal(missingDocsFor({ gaps: ["pen", "apaar"], hasDob: true, hasAddress: true, language: "en" }), "", "a portal-side gap asks the parent for nothing");
+
+/* ── A payment the parent is showing us ──────────────────────────────
+ *
+ * Four families answered yesterday's fee reminder with "भुगतान हो गया",
+ * and the bot asks them for the receipt or a screenshot. Before this, a
+ * screenshot came back as "could not be recognised as an Aadhaar card".
+ */
+const payJson = (over = {}) =>
+  JSON.stringify({
+    docType: "payment_proof", person: "unknown", nameOnDoc: "", dob: "", aadhaarNumber: "",
+    gender: "", fatherName: "", motherName: "", address: "", pincode: "",
+    payment: { amount: "2500", dateIso: "2026-09-10", reference: "428812345678", method: "UPI", payeeName: "BHB INTERNATIONAL SCHOOL", ...over },
+    missing: [], notes: "",
+  });
+
+const pay = parseUdiseDocExtract(payJson())!;
+assert.equal(pay.docType, "payment_proof");
+assert.equal(pay.payment?.amountPaise, 250000, "₹2,500 → paise");
+assert.equal(pay.payment?.dateIso, "2026-09-10");
+assert.equal(pay.payment?.reference, "428812345678");
+assert.equal(pay.payment?.method, "UPI");
+/* A screenshot is never a vault document and never touches the record. */
+assert.equal(docSlotFor("payment_proof"), null);
+const payPlan = planUdiseCorrections({ extract: pay, student, household });
+assert.equal(payPlan.changes.length, 0, "a payment proof changes no field of the student record");
+
+/* Amounts and references that must NOT become facts. */
+assert.equal(parseUdiseDocExtract(payJson({ amount: "0" }))!.payment?.amountPaise, 0);
+assert.ok(parseUdiseDocExtract(payJson({ amount: "0" }))!.missing.includes("amount"));
+assert.equal(parseUdiseDocExtract(payJson({ amount: "99999999" }))!.payment?.amountPaise, 0, "larger than any school fee — refused");
+assert.equal(parseUdiseDocExtract(payJson({ reference: "12" }))!.payment?.reference, "", "a two-character scrap is not a reference");
+assert.equal(parseUdiseDocExtract(payJson({ dateIso: "2031-01-01" }))!.payment?.dateIso, "", "a future date is not a payment date");
+assert.equal(parseUdiseDocExtract(payJson({ dateIso: "10/09/2026" }))!.payment?.dateIso, "");
+/* A non-payment document carries no payment block at all. */
+assert.equal(p1.payment, null);
+
+/* ── Matching against the fee book ── */
+const receipts = [
+  { receiptNo: "RCV-00501", collectionDate: "2026-09-10", totalPaise: 250000, refs: ["4288 1234 5678"] },
+  { receiptNo: "RCV-00502", collectionDate: "2026-09-02", totalPaise: 180000, refs: ["AXIS9911"] },
+];
+assert.deepEqual(
+  matchPaymentToReceipts({ amountPaise: 250000, dateIso: "2026-09-10", reference: "428812345678", receipts }),
+  { kind: "by_reference", receiptNo: "RCV-00501" },
+  "a UTR match ignores spacing and case",
+);
+assert.deepEqual(
+  matchPaymentToReceipts({ amountPaise: 180000, dateIso: "2026-09-03", reference: "", receipts }),
+  { kind: "by_amount_and_date", receiptNo: "RCV-00502" },
+  "same amount within three days is a likely match",
+);
+assert.equal(
+  matchPaymentToReceipts({ amountPaise: 180000, dateIso: "2026-08-01", reference: "", receipts }).kind,
+  "none",
+  "same amount five weeks earlier is NOT this payment",
+);
+assert.deepEqual(
+  matchPaymentToReceipts({ amountPaise: 0, dateIso: "", reference: "", receipts }),
+  { kind: "none", reason: "nothing_readable" },
+);
+assert.equal(matchPaymentToReceipts({ amountPaise: 999900, dateIso: "2026-09-10", reference: "ZZZZZZZZ", receipts }).kind, "none");
+/* A short reference must never be matched loosely against the book. */
+assert.equal(matchPaymentToReceipts({ amountPaise: 0, dateIso: "", reference: "AXIS", receipts }).kind, "none");
+
+/* ── What the parent and the office read ── */
+const already = renderPaymentProofAck({ payment: pay.payment!, match: { kind: "by_reference", receiptNo: "RCV-00501" }, childName: "Aarav", language: "en" });
+assert.match(already, /already in our records/);
+assert.match(already, /RCV-00501/);
+const hiAck = renderPaymentProofAck({ payment: pay.payment!, match: { kind: "none", reason: "no_receipt_matches" }, childName: "Aarav", language: "hi" });
+assert.match(hiAck, /₹2,500/);
+assert.match(hiAck, /कार्यालय/);
+assert.doesNotMatch(hiAck, /दर्ज हो गया|recorded/, "a photograph never confirms a payment");
+const unread = renderPaymentProofAck({ payment: { amountPaise: 0, dateIso: "", reference: "", method: "", payeeName: "" }, match: { kind: "none", reason: "nothing_readable" }, childName: "Aarav", language: "en" });
+assert.match(unread, /could not read/);
+assert.match(unread, /UTR/);
+const po = renderPaymentProofOfficeAlert({ payment: pay.payment!, match: { kind: "none", reason: "no_receipt_matches" }, childName: "Aarav Sharma", classLabel: "Class 1-A", guardianName: "Rakesh", openDuesPaise: 515000, fileUrl: null });
+assert.match(po.text, /No receipt matches/);
+assert.match(po.text, /Open dues on record: \*₹5,150\*/);
+assert.match(po.text, /never books money/);
+assert.match(po.oneLine, /₹2,500/);
+const po2 = renderPaymentProofOfficeAlert({ payment: pay.payment!, match: { kind: "by_amount_and_date", receiptNo: "RCV-00502" }, childName: "A", classLabel: "I", guardianName: "R", openDuesPaise: 0, fileUrl: null });
+assert.match(po2.text, /CONFIRM before replying/, "a likely match must be labelled as likely");
 
 console.log("ok");

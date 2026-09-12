@@ -20,7 +20,7 @@
 import { aadhaarChecksumValid, aadhaarDigits, maskAadhaar } from "@/lib/aadhaar";
 import type { StudentDocKey } from "@/lib/sis";
 
-export type UdiseDocType = "aadhaar" | "birth_certificate" | "address_proof" | "other";
+export type UdiseDocType = "aadhaar" | "birth_certificate" | "address_proof" | "payment_proof" | "other";
 export type UdiseDocPerson = "child" | "father" | "mother" | "unknown";
 
 export type UdiseDocExtract = {
@@ -37,6 +37,22 @@ export type UdiseDocExtract = {
   motherName: string;
   address: string;
   pincode: string;
+  /**
+   * A payment the parent is showing us: a UPI screenshot, a bank slip, or a
+   * photo of one of our own receipts. Read, never acted on — money is
+   * recorded at the counter by a person, never by a photograph.
+   */
+  payment: {
+    amountPaise: number;
+    /** ISO date of the payment, "" when the screenshot does not print one. */
+    dateIso: string;
+    /** UTR / transaction id / receipt number, "" when unreadable. */
+    reference: string;
+    /** "UPI", "PhonePe", "cash", "bank transfer"… as printed. */
+    method: string;
+    /** Who the money went to, as printed — the check that it came to us. */
+    payeeName: string;
+  } | null;
   /** Field names the model could not read. */
   missing: string[];
   notes: string;
@@ -45,12 +61,13 @@ export type UdiseDocExtract = {
 export const UDISE_DOC_EXTRACT_SYSTEM = [
   "You read one Indian identity document photographed by a parent for a school's records: an Aadhaar card, a birth certificate, or an address proof (ration card, voter ID, electricity bill).",
   "Copy what is PRINTED. Never guess, never complete a partly hidden number, never infer a date from an age.",
-  "docType: aadhaar | birth_certificate | address_proof | other. person: child | father | mother | unknown — an Aadhaar of an adult is father or mother only if the card says so or the relation is printed; else unknown.",
+  "docType: aadhaar | birth_certificate | address_proof | payment_proof | other. payment_proof is a UPI/bank payment screenshot, a bank slip, or a photo of a school fee receipt. person: child | father | mother | unknown — an Aadhaar of an adult is father or mother only if the card says so or the relation is printed; else unknown.",
   "nameOnDoc: the holder's name exactly as printed (Latin letters; transliterate Devanagari). dob: YYYY-MM-DD only when day, month and year are all printed; a 'Year of Birth' alone is NOT a dob — leave it empty and add 'dob' to missing.",
   "aadhaarNumber: the 12 digits only when all twelve are clearly legible; otherwise empty and add 'aadhaarNumber' to missing. Never output a partial number.",
   "gender: M or F when printed, else empty. fatherName / motherName: only from a birth certificate that prints them. address and pincode: only from the document's own address block.",
+  "payment (payment_proof only, else null): amount (the rupee figure paid, digits only), dateIso (YYYY-MM-DD, empty if the screenshot shows no full date), reference (UTR / transaction id / UPI ref / receipt no, exactly as printed, empty if unreadable), method (UPI, PhonePe, Google Pay, cash, NEFT…), payeeName (who received it, as printed). Never guess an amount or a reference: a wrong figure here becomes a wrong claim about money.",
   "missing: names of fields you could not read. notes: one short line — quality issues, a hidden corner, a mismatch you noticed.",
-  'Respond with JSON only: {"docType":"aadhaar","person":"child","nameOnDoc":"","dob":"","aadhaarNumber":"","gender":"","fatherName":"","motherName":"","address":"","pincode":"","missing":[],"notes":""}',
+  'Respond with JSON only: {"docType":"aadhaar","person":"child","nameOnDoc":"","dob":"","aadhaarNumber":"","gender":"","fatherName":"","motherName":"","address":"","pincode":"","payment":null,"missing":[],"notes":""}'
 ].join("\n");
 
 export const UDISE_DOC_EXTRACT_PROMPT = "Read this document and return the JSON.";
@@ -69,7 +86,10 @@ export function parseUdiseDocExtract(text: string): UdiseDocExtract | null {
   const o = raw as Record<string, unknown>;
   const missing = new Set<string>(Array.isArray(o.missing) ? o.missing.map((m) => clean(m, 40)).filter(Boolean) : []);
   const docTypeRaw = clean(o.docType, 30).toLowerCase();
-  const docType: UdiseDocType = docTypeRaw === "aadhaar" || docTypeRaw === "birth_certificate" || docTypeRaw === "address_proof" ? (docTypeRaw as UdiseDocType) : "other";
+  const docType: UdiseDocType =
+    docTypeRaw === "aadhaar" || docTypeRaw === "birth_certificate" || docTypeRaw === "address_proof" || docTypeRaw === "payment_proof"
+      ? (docTypeRaw as UdiseDocType)
+      : "other";
   const personRaw = clean(o.person, 20).toLowerCase();
   const person: UdiseDocPerson = personRaw === "child" || personRaw === "father" || personRaw === "mother" ? (personRaw as UdiseDocPerson) : "unknown";
   let dob = clean(o.dob, 10);
@@ -98,8 +118,47 @@ export function parseUdiseDocExtract(text: string): UdiseDocExtract | null {
     motherName: clean(o.motherName, 120),
     address: clean(o.address, 240),
     pincode,
+    payment: parsePaymentBlock(o.payment, docType, missing),
     missing: [...missing],
     notes: clean(o.notes, 200),
+  };
+}
+
+/**
+ * The payment block, or null. Every field is checked, because each one
+ * becomes a sentence the office reads about somebody's money:
+ *   - an amount must be a positive figure under ₹10,00,000 (a school fee
+ *     is not larger, and a mis-read "2500000" for ₹2,500 would be);
+ *   - a date must be a real date and not in the future;
+ *   - a reference must look like one — six characters or more — because a
+ *     two-character scrap matches half the fee book.
+ * Anything that fails is dropped and named in `missing`, never guessed.
+ */
+function parsePaymentBlock(raw: unknown, docType: UdiseDocType, missing: Set<string>): UdiseDocExtract["payment"] {
+  if (docType !== "payment_proof") return null;
+  const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const digits = String(o.amount ?? o.amountPaise ?? "").replace(/[^\d.]/g, "");
+  const rupees = Number(digits);
+  let amountPaise = 0;
+  if (Number.isFinite(rupees) && rupees > 0 && rupees <= 1_000_000) amountPaise = Math.round(rupees * 100);
+  else missing.add("amount");
+
+  let dateIso = clean(o.dateIso ?? o.date, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateIso) || Number.isNaN(Date.parse(`${dateIso}T00:00:00Z`)) || dateIso > new Date().toISOString().slice(0, 10)) {
+    if (dateIso) missing.add("paymentDate");
+    dateIso = "";
+  }
+  let reference = clean(o.reference, 40).replace(/\s+/g, "");
+  if (reference.length < 6) {
+    if (reference) missing.add("reference");
+    reference = "";
+  }
+  return {
+    amountPaise,
+    dateIso,
+    reference,
+    method: clean(o.method, 30),
+    payeeName: clean(o.payeeName, 80),
   };
 }
 
@@ -115,6 +174,7 @@ export const DOC_TYPE_LABEL: Record<UdiseDocType, string> = {
   aadhaar: "Aadhaar card",
   birth_certificate: "Birth certificate",
   address_proof: "Address proof",
+  payment_proof: "Payment proof",
   other: "Document",
 };
 
@@ -283,6 +343,146 @@ export function planUdiseCorrections(input: { extract: UdiseDocExtract; student:
   }
 
   return { docType: e.docType, person, docKey: docSlotFor(e.docType), changes, flags };
+}
+
+/* ── a payment the parent is showing us ──────────────────────────── */
+
+/** One receipt, as much of it as matching needs. */
+export type ReceiptForMatch = {
+  receiptNo: string;
+  collectionDate: string;
+  totalPaise: number;
+  /** Every tender reference on the receipt: UTR, cheque no, auth code. */
+  refs: string[];
+};
+
+export type PaymentMatch =
+  | { kind: "by_reference"; receiptNo: string }
+  | { kind: "by_amount_and_date"; receiptNo: string }
+  | { kind: "none"; reason: "no_receipt_matches" | "nothing_readable" };
+
+function normRef(s: string): string {
+  return String(s || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+}
+
+function daysApart(a: string, b: string): number {
+  const t1 = Date.parse(`${a}T00:00:00Z`);
+  const t2 = Date.parse(`${b}T00:00:00Z`);
+  if (Number.isNaN(t1) || Number.isNaN(t2)) return 9999;
+  return Math.abs(t1 - t2) / 86_400_000;
+}
+
+/**
+ * Is this payment already in the fee book?
+ *
+ * The reference decides when there is one: a UTR is unique, and a match on
+ * it is the only kind worth calling certain. Failing that, the same amount
+ * within three days of the same family is offered as a likely match — and
+ * labelled as likely, because two siblings' fees are often equal and a
+ * parent who paid twice in a week would otherwise be told their second
+ * payment was already recorded.
+ *
+ * It never decides anything. Booking money stays a person's job; this only
+ * tells the office where to look.
+ */
+export function matchPaymentToReceipts(input: {
+  amountPaise: number;
+  dateIso: string;
+  reference: string;
+  receipts: ReceiptForMatch[];
+}): PaymentMatch {
+  const ref = normRef(input.reference);
+  if (ref.length >= 6) {
+    const hit = input.receipts.find((r) => r.refs.some((x) => normRef(x) === ref));
+    if (hit) return { kind: "by_reference", receiptNo: hit.receiptNo };
+  }
+  if (input.amountPaise > 0 && input.dateIso) {
+    const hit = input.receipts.find(
+      (r) => r.totalPaise === input.amountPaise && daysApart(r.collectionDate, input.dateIso) <= 3,
+    );
+    if (hit) return { kind: "by_amount_and_date", receiptNo: hit.receiptNo };
+  }
+  if (!input.amountPaise && !ref) return { kind: "none", reason: "nothing_readable" };
+  return { kind: "none", reason: "no_receipt_matches" };
+}
+
+function inr(paise: number): string {
+  return "₹" + Math.round(paise / 100).toLocaleString("en-IN");
+}
+
+/**
+ * What the parent hears. Never "your payment is recorded" — we have seen a
+ * picture, not the bank. What it promises is that a person will check, and
+ * by when.
+ */
+export function renderPaymentProofAck(input: {
+  payment: NonNullable<UdiseDocExtract["payment"]>;
+  match: PaymentMatch;
+  childName: string;
+  language: "en" | "hi";
+}): string {
+  const { payment: p, match } = input;
+  const hi = input.language === "hi";
+  const bits: string[] = [];
+  if (p.amountPaise) bits.push(hi ? `राशि ${inr(p.amountPaise)}` : `${inr(p.amountPaise)}`);
+  if (p.dateIso) bits.push(hi ? `तारीख ${ddmmyyyy(p.dateIso)}` : `on ${ddmmyyyy(p.dateIso)}`);
+  if (p.reference) bits.push(hi ? `संदर्भ ${p.reference}` : `ref ${p.reference}`);
+  const read = bits.join(hi ? ", " : " · ");
+
+  if (match.kind === "by_reference") {
+    return hi
+      ? `धन्यवाद 🙏 यह भुगतान हमारे रिकॉर्ड में पहले से दर्ज है — रसीद *${match.receiptNo}*.\n\nयदि आपको रसीद नहीं मिली हो तो बताइए, हम दोबारा भेज देंगे।`
+      : `Thank you 🙏 This payment is already in our records — receipt *${match.receiptNo}*.\n\nIf you did not get the receipt, tell us and we will send it again.`;
+  }
+  if (match.kind === "by_amount_and_date") {
+    return hi
+      ? `धन्यवाद 🙏 ${read ? read + " — " : ""}संभवतः यह रसीद *${match.receiptNo}* वाला ही भुगतान है। कार्यालय पुष्टि करके आपको बताएगा।`
+      : `Thank you 🙏 ${read ? read + " — " : ""}this looks like receipt *${match.receiptNo}*. The office will confirm and come back to you.`;
+  }
+  if (!read) {
+    return hi
+      ? "धन्यवाद 🙏 स्क्रीनशॉट मिल गया, पर उसमें राशि/संदर्भ पढ़ा नहीं जा सका।\n\nकृपया *राशि*, *तारीख* और *UTR/संदर्भ संख्या* लिख भेजें — कार्यालय तुरंत जाँच कर देगा।"
+      : "Thank you 🙏 We have the screenshot, but could not read the amount or reference from it.\n\nPlease type the *amount*, the *date* and the *UTR / reference number* — the office will check straight away.";
+  }
+  return hi
+    ? `धन्यवाद 🙏 मिल गया: ${read}।\n\nयह भुगतान अभी हमारी रसीदों में नहीं मिला — कार्यालय बैंक से मिलान करके आज ही आपसे संपर्क करेगा। तब तक कोई स्मरण संदेश नहीं आएगा।`
+    : `Thank you 🙏 Received: ${read}.\n\nWe could not find this payment in our receipts yet — the office will check it against the bank and come back to you today. No reminders will go out meanwhile.`;
+}
+
+/** What the office reads: the figures, the match, and what to do. */
+export function renderPaymentProofOfficeAlert(input: {
+  payment: NonNullable<UdiseDocExtract["payment"]>;
+  match: PaymentMatch;
+  childName: string;
+  classLabel: string;
+  guardianName: string;
+  openDuesPaise: number;
+  fileUrl: string | null;
+}): { text: string; oneLine: string } {
+  const { payment: p, match } = input;
+  const lines = [
+    `💸 *Payment proof* · ${input.childName} (${input.classLabel})`,
+    `From: ${input.guardianName || "parent"} on WhatsApp`,
+    "",
+    `Amount: *${p.amountPaise ? inr(p.amountPaise) : "not readable"}*`,
+    `Date: ${p.dateIso ? ddmmyyyy(p.dateIso) : "not readable"}`,
+    `Reference: ${p.reference || "not readable"}${p.method ? ` · ${p.method}` : ""}`,
+  ];
+  if (p.payeeName) lines.push(`Paid to: ${p.payeeName}`);
+  lines.push("", `Open dues on record: *${inr(input.openDuesPaise)}*`);
+  if (match.kind === "by_reference") {
+    lines.push("", `✅ Already booked — receipt *${match.receiptNo}* carries this reference. Nothing to do beyond telling the family.`);
+  } else if (match.kind === "by_amount_and_date") {
+    lines.push("", `🔎 Probably receipt *${match.receiptNo}* (same amount, within three days). CONFIRM before replying — siblings' fees are often equal.`);
+  } else if (match.reason === "nothing_readable") {
+    lines.push("", "⚠️ Neither an amount nor a reference could be read. The parent has been asked to type them.");
+  } else {
+    lines.push("", "❗ *No receipt matches.* Check the bank statement and the counter book, then either book it or tell the family what is missing.");
+  }
+  lines.push("", "Nothing was posted to the fee book — a photograph never books money.");
+  if (input.fileUrl) lines.push("", `Screenshot: ${input.fileUrl}`);
+  const oneLine = `Payment proof from ${input.guardianName || "a parent"} for ${input.childName}: ${p.amountPaise ? inr(p.amountPaise) : "amount unreadable"}${match.kind === "none" ? " — no receipt matches" : ` — ${match.receiptNo}`}`;
+  return { text: lines.join("\n"), oneLine };
 }
 
 /* ── what people read ────────────────────────────────────────────── */
