@@ -15,6 +15,8 @@ import { useMemo, useState } from "react";
 import { Sparkles } from "lucide-react";
 import type { AdmissionsState } from "@/lib/admissions";
 import type { SisState } from "@/lib/sis";
+import { currentAcademicYearCode } from "@/lib/masters";
+import { studentsInSession } from "@/lib/sis";
 import { ReferralPolicyEditor } from "@/components/admissions/ReferralPolicyEditor";
 import {
   approvedTestimonialLines,
@@ -62,7 +64,11 @@ export function ReferralsPanel({ admissions, sis, canEdit, by }: { admissions: A
   const households = useMemo(() => sis.households.map((h) => ({ id: h.id, code: h.code, mobile: h.mobile, whatsappMobile: h.whatsappMobile, guardianName: h.guardianName })), [sis.households]);
   const studentsByHh = useMemo(() => {
     const m = new Map<string, string[]>();
-    for (const s of sis.students) if (s.status === "active" && s.householdId) m.set(s.householdId, [...(m.get(s.householdId) || []), s.fullName]);
+    // One row per child: the unscoped loop pushed the same name in once per
+    // year the child had been enrolled, so a one-child family read "Aarav +3".
+    for (const s of studentsInSession(sis, currentAcademicYearCode()))
+      if (s.householdId)
+        m.set(s.householdId, [...(m.get(s.householdId) || []), s.fullName]);
     return m;
   }, [sis.students]);
   const attribution = useMemo(() => referralAttribution(admissions.leads, households), [admissions.leads, households]);

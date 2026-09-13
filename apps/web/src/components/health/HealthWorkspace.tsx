@@ -6,9 +6,9 @@ import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionCo
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { field } from "@/components/ui/erp-ui";
-import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import { DEFAULT_AY, loadMasters, type MastersState, currentAcademicYearCode} from "@/lib/masters";
 import { classSectionLabel } from "@/lib/timetable";
-import { loadSis, type SisState, type SisStudent } from "@/lib/sis";
+import { loadSis, type SisState, type SisStudent, studentsInSession} from "@/lib/sis";
 import {
   deleteMedication,
   deleteVaccination,
@@ -61,8 +61,10 @@ function StudentPicker({
     if (!sis) return [];
     const q = query.trim().toLowerCase();
     if (!q) return [];
-    return sis.students
-      .filter((s) => s.status === "active")
+      // One row per child, this session. SIS keeps a row per child per
+      // year and marks them all active, so the same name appeared several
+      // times and, in a capped list, pushed real matches off the end.
+    return studentsInSession(sis, currentAcademicYearCode(masters))
       .filter((s) => s.fullName.toLowerCase().includes(q) || s.admissionNo.toLowerCase().includes(q))
       .slice(0, 15);
   }, [sis, query]);

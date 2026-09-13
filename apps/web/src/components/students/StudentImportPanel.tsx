@@ -6,12 +6,14 @@ import {
   STUDENT_TYPES,
   type FeeStudentType,
   type MastersState,
+  currentAcademicYearCode,
 } from "@/lib/masters";
 import {
   clearAllStudents,
   isLikelyDemoRoster,
   saveSis,
   type SisState,
+  studentsInSession,
 } from "@/lib/sis";
 import {
   applyStudentImport,
@@ -45,6 +47,12 @@ export function StudentImportPanel({ masters, sis, onApplied }: Props) {
   const session = useDemoSession();
   const sessions = useMemo(() => listImportSessions(masters), [masters]);
   const liveAy = session.academicYearCode;
+  // SIS keeps one row per child per session, so `students.length` is a ROW
+  // count, not a headcount — 717 rows for 239 children here. The delete
+  // really does remove every row, so that number stays; what was missing is
+  // the number a reader expects, shown beside it.
+  const childCount = studentsInSession(sis, currentAcademicYearCode()).length;
+
   const [open, setOpen] = useState(sis.students.length === 0);
   const [wipeConfirmOpen, setWipeConfirmOpen] = useState(false);
   const [wipeConfirmText, setWipeConfirmText] = useState("");
@@ -284,7 +292,7 @@ export function StudentImportPanel({ masters, sis, onApplied }: Props) {
               ? " Demo roster still present — clear before live data."
               : sis.students.length === 0
                 ? " Roster is empty."
-                : ` ${sis.students.length} student(s) on file.`}
+                : ` ${childCount} child(ren) this session, ${sis.students.length} record(s) on file across all sessions.`}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -521,7 +529,8 @@ export function StudentImportPanel({ masters, sis, onApplied }: Props) {
                 Danger zone
               </p>
               <p className="mt-1 text-xs text-red-800">
-                Erases all {sis.students.length} student record(s) — this
+                Erases all {sis.students.length} student record(s) across
+                every session ({childCount} children this session) — this
                 browser and the remote database. Fee receipts are kept;
                 everything else is gone. There is no undo from this screen.
               </p>

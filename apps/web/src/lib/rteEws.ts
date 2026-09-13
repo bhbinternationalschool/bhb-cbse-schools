@@ -15,6 +15,7 @@ import {
   saveMasters,
   suggestFeeStudentType,
   type MastersState,
+  currentAcademicYearCode,
 } from "@/lib/masters";
 import {
   describeFilters,
@@ -31,6 +32,7 @@ import {
   suggestSrn,
   type SisState,
   type SisStudent,
+  studentsInSession,
 } from "@/lib/sis";
 import { ensureRteEwsTagIds } from "@/lib/studentTags";
 import { TENANT } from "@/lib/types";
@@ -279,8 +281,9 @@ export function countEnrolledQuota(
   sis?: SisState,
 ): number {
   const state = sis ?? loadSis();
-  return state.students.filter((s) => {
-    if (s.status !== "active") return false;
+  // `ay` was accepted and never used, so a statutory quota count ran about
+  // three times high — every year's row for every child.
+  return studentsInSession(state, ay).filter((s) => {
     if (s.classId !== classId) return false;
     if (type === "RTE") return s.studentType === "RTE";
     if (type === "EWS") return s.category === "EWS" || s.studentType === "RTE";
@@ -348,8 +351,10 @@ export function suggestSeatTotal(
   sis?: SisState,
 ): number {
   const state = sis ?? loadSis();
-  const strength = state.students.filter(
-    (s) => s.status === "active" && s.classId === classId,
+  // Unscoped this counted every year's row, so the suggested RTE seat count
+  // came out roughly three times the class's real strength.
+  const strength = studentsInSession(state, currentAcademicYearCode()).filter(
+    (s) => s.classId === classId,
   ).length;
   if (strength <= 0) return 0;
   return Math.max(1, Math.ceil((strength * mandatedPct) / 100));
@@ -1470,10 +1475,10 @@ export function listReadyForSis(state?: RteState): QuotaApplication[] {
 
 export function listEnrolledRteStudents(sis?: SisState) {
   const state = sis ?? loadSis();
-  return state.students
+  // A government-facing register: one row per child, this session.
+  return studentsInSession(state, currentAcademicYearCode())
     .filter(
       (s) =>
-        s.status === "active" &&
         (s.studentType === "RTE" || s.category === "EWS"),
     )
     .sort((a, b) => a.fullName.localeCompare(b.fullName));

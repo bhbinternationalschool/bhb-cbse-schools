@@ -18,7 +18,9 @@ import {
   type SisStudent,
   type StudentDocFile,
   type StudentDocKey,
+  childrenOfHousehold,
 } from "@/lib/sis";
+import { DEFAULT_AY } from "@/lib/masters";
 import { useDocLocalPreview } from "@/lib/useDocLocalPreview";
 import {
   getExistingPushSubscription,
@@ -94,9 +96,10 @@ export function ParentProfileDocsPortal({
       state: hh.state,
       pincode: hh.pincode,
     });
-    const kids = sis.students.filter(
-      (s) => s.householdId === hh.id && s.status === "active",
-    );
+    // One row per child, this session. SIS keeps a row per child per year and
+    // leaves them all active, so the unscoped filter showed a family their own
+    // child once for every year they had been enrolled.
+    const kids = childrenOfHousehold(sis, hh.id, DEFAULT_AY);
     setChildren(kids);
     const aid =
       activeId && kids.some((k) => k.id === activeId)

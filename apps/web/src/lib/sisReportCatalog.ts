@@ -213,9 +213,18 @@ export function filterSisStudents(
   const status = filters.status ?? "active";
   let rows = sis.students.slice();
 
-  if (filters.academicYearCode) {
+  // A report is about the children the school teaches NOW unless a year is
+  // named. Leaving this conditional is why the UDISE compliance register —
+  // the sheet the office actually works from — printed 717 rows for 239
+  // children: SIS keeps one row per child per session and marks them all
+  // active. Pass "all" to deliberately report across sessions.
+  const reportAy =
+    filters.academicYearCode === "all"
+      ? ""
+      : filters.academicYearCode || currentAcademicYearCode();
+  if (reportAy) {
     rows = rows.filter(
-      (s) => s.academicYearCode === filters.academicYearCode,
+      (s) => !s.academicYearCode || s.academicYearCode === reportAy,
     );
   }
   if (status !== "all") {

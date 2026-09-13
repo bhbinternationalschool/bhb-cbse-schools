@@ -80,12 +80,30 @@ export function monthDay(ymd: string): string {
 }
 
 /** Students whose birthday falls on `dateYmd` (29-Feb birthdays count on 28-Feb in non-leap years). */
-export function studentsWithBirthday<T extends BirthdayStudentLike>(students: T[], dateYmd: string): T[] {
+export function studentsWithBirthday<T extends BirthdayStudentLike>(
+  students: T[],
+  dateYmd: string,
+  /**
+   * The running session. Omit it and children who have left are greeted
+   * forever — their row stays "active" and nothing else removes them.
+   */
+  sessionAy?: string,
+): T[] {
   const md = monthDay(dateYmd);
   if (!md) return [];
   const year = Number(dateYmd.slice(0, 4));
   const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
-  return dedupeStudents(students.filter((s) => (s.status ?? "active") === "active"))
+  // dedupeStudents already stops a double send, but nothing removed a child
+  // who has LEFT: their row stays "active" forever, so an ex-parent received
+  // a birthday template and card link from the school every year, at a
+  // template charge each.
+  return dedupeStudents(
+    students.filter(
+      (s) =>
+        (s.status ?? "active") === "active" &&
+        (!sessionAy || !s.academicYearCode || s.academicYearCode === sessionAy),
+    ),
+  )
     .filter((s) => {
       const b = monthDay(s.dob);
       if (!b) return false;

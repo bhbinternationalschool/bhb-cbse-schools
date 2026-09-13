@@ -13,10 +13,10 @@ import {
 } from "@/lib/docVerificationOcr";
 import type { StaffDocKey } from "@/lib/foundationMasters";
 import { visionConfigured, visionExtractText } from "@/lib/googleVision.server";
-import { loadMasters } from "@/lib/masters";
+import { loadMasters, currentAcademicYearCode} from "@/lib/masters";
 import { hasPermission } from "@/lib/rbac";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { loadSis, type StudentDocKey } from "@/lib/sis";
+import { loadSis, type StudentDocKey, childrenOfHousehold} from "@/lib/sis";
 import {
   fetchWaMediaAsDataUrl,
   getInboundMediaById,
@@ -38,9 +38,15 @@ export async function GET(req: Request) {
   const enriched = items.map((item) => ({
     ...item,
     householdChildren: item.householdId
-      ? sis.students
-          .filter((s) => s.householdId === item.householdId)
-          .map((s) => ({ id: s.id, name: s.fullName }))
+      ? // One row per child, this session. There was no status filter at all
+        // here, so the picker offered the same name several times and a
+        // document could be filed onto a prior-year row, where it would never
+        // appear on the child's current profile.
+        childrenOfHousehold(
+          sis,
+          item.householdId,
+          currentAcademicYearCode(loadMasters()),
+        ).map((s) => ({ id: s.id, name: s.fullName }))
       : [],
   }));
   return NextResponse.json({

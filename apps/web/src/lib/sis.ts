@@ -1834,6 +1834,125 @@ function normalizeAyCode(code: string): string {
   return t;
 }
 
+/**
+ * Every child the school teaches THIS session, once each.
+ *
+ * The list behind every student picker, dropdown and tagging roster. SIS
+ * keeps one row per child per academic year and leaves every one of them
+ * `status: "active"`, so `students.filter(s => s.status === "active")` — the
+ * expression copied into a dozen screens — returns 681 rows for 239 children
+ * on this school's data. In a picker capped at `.slice(0, 8)` the duplicates
+ * push real matches off the end, so a clerk searching a name cannot find it.
+ *
+ * Same two rules as `childrenOfHousehold`: a row with no academic year is
+ * kept, and identity is the admission number AND the name, never the number
+ * alone.
+ */
+export function studentsInSession(
+  state: SisState | null | undefined,
+  academicYearCode?: string,
+): SisStudent[] {
+  if (!state || !Array.isArray(state.students)) return [];
+  const targetAy =
+    academicYearCode && academicYearCode !== "all"
+      ? normalizeAyCode(academicYearCode)
+      : "";
+
+  const mine = state.students.filter(
+    (s) =>
+      s.status === "active" &&
+      (!targetAy ||
+        !s.academicYearCode ||
+        normalizeAyCode(s.academicYearCode) === targetAy),
+  );
+
+  const best = new Map<string, SisStudent>();
+  for (const s of mine) {
+    const name = (s.fullName || "").trim().toUpperCase();
+    const adm = (s.admissionNo || "").trim().toUpperCase();
+    const key = adm ? `${adm}::${name}` : `${s.householdId ?? ""}::${name}`;
+    const prev = best.get(key);
+    if (!prev) {
+      best.set(key, s);
+      continue;
+    }
+    const prevAy = normalizeAyCode(prev.academicYearCode || "");
+    const thisAy = normalizeAyCode(s.academicYearCode || "");
+    if (targetAy) {
+      if (thisAy === targetAy && prevAy !== targetAy) best.set(key, s);
+    } else if (thisAy > prevAy) {
+      best.set(key, s);
+    }
+  }
+  return [...best.values()];
+}
+
+/**
+ * The children of one household, as the school teaches them THIS session.
+ *
+ * SIS keeps one row per child per academic year and leaves every one of them
+ * `status: "active"`. A parent portal that filters on household and status
+ * alone therefore shows a family their own child two, three or four times —
+ * once for every year the child has been enrolled — and keeps showing a child
+ * who has left. On this school's data that is 681 rows for 239 children.
+ *
+ * `siblingsOf` has always got this right ("same academic year only"). This is
+ * the same rule for the other question, asked in a dozen places: not "who
+ * else is in this family" but "which children ARE this family".
+ *
+ * Pass the session. Omit it and the rows still collapse to one per child,
+ * keeping the newest, so a caller that forgets returns a list that is
+ * slightly too long rather than one that repeats a child's name back to their
+ * own parent.
+ *
+ * A row carrying no academic year is KEPT. It is an old record, not a wrong
+ * one, and dropping it would hide a real child from their own parent.
+ */
+export function childrenOfHousehold(
+  state: SisState | null | undefined,
+  householdId: string,
+  academicYearCode?: string,
+): SisStudent[] {
+  if (!state || !Array.isArray(state.students) || !householdId) return [];
+  const targetAy =
+    academicYearCode && academicYearCode !== "all"
+      ? normalizeAyCode(academicYearCode)
+      : "";
+
+  const mine = state.students.filter(
+    (s) =>
+      s.householdId === householdId &&
+      s.status === "active" &&
+      (!targetAy ||
+        !s.academicYearCode ||
+        normalizeAyCode(s.academicYearCode) === targetAy),
+  );
+
+  // One row per child. Keyed on admission number AND name, never the number
+  // alone: an admission number typed twice is an ordinary office error, and
+  // merging those two children would hide one from their parent. A child
+  // listed twice is visible; a child missing is not.
+  const best = new Map<string, SisStudent>();
+  for (const s of mine) {
+    const name = (s.fullName || "").trim().toUpperCase();
+    const adm = (s.admissionNo || "").trim().toUpperCase();
+    const key = adm ? `${adm}::${name}` : name;
+    const prev = best.get(key);
+    if (!prev) {
+      best.set(key, s);
+      continue;
+    }
+    const prevAy = normalizeAyCode(prev.academicYearCode || "");
+    const thisAy = normalizeAyCode(s.academicYearCode || "");
+    if (targetAy) {
+      if (thisAy === targetAy && prevAy !== targetAy) best.set(key, s);
+    } else if (thisAy > prevAy) {
+      best.set(key, s);
+    }
+  }
+  return [...best.values()];
+}
+
 export function siblingsOf(
   state: SisState,
   student: SisStudent,

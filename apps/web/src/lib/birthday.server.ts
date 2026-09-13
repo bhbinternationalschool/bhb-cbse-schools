@@ -14,7 +14,7 @@ import { getServerTenantContext } from "@/lib/serverTenant";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { getSchoolMirrorSync } from "@/lib/schoolDataMirror";
 import { loadSis, type SisState, type SisStudent, type Household } from "@/lib/sis";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { loadMasters, type MastersState, currentAcademicYearCode} from "@/lib/masters";
 import {
   ageOn,
   alreadySent,
@@ -88,7 +88,7 @@ export async function findBirthdayCardSubject(opts: { date: string; studentId?: 
 > {
   const { sis, masters } = await sisAndMasters();
   if (opts.group) {
-    const names = studentsWithBirthday(sis.students, opts.date).map((s) => s.fullName);
+    const names = studentsWithBirthday(sis.students, opts.date, currentAcademicYearCode(loadMasters())).map((s) => s.fullName);
     if (!names.length) return { ok: false, error: "No birthdays on this date" };
     return { ok: true, studentName: "", className: "", photoUrl: "", names };
   }
@@ -113,7 +113,13 @@ export async function birthdaysOn(date: string): Promise<BirthdayToday[]> {
   const { sis, masters } = await sisAndMasters();
   const st = await readBirthdayState();
   const hh = new Map(sis.households.map((h) => [h.id, h]));
-  return studentsWithBirthday(sis.students, date).map((s) => {
+  // The session matters: without it a child who has left is greeted every
+  // year forever, at a template charge each.
+  return studentsWithBirthday(
+    sis.students,
+    date,
+    currentAcademicYearCode(loadMasters()),
+  ).map((s) => {
     const h = hh.get(s.householdId) as Household | undefined;
     return {
       studentId: s.id,

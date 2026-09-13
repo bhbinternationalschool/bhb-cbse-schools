@@ -13,7 +13,7 @@ import { previewHolidayDates } from "@/lib/holidayPolicy";
 import { listExamDateSheet, type ExamsState } from "@/lib/exams";
 import type { PtmState } from "@/lib/ptm";
 import { computeStudentDues, type FeesState } from "@/lib/fees";
-import type { SisState } from "@/lib/sis";
+import { studentsInSession, type SisState } from "@/lib/sis";
 
 export type EventKind = "function" | "sports_day" | "trip" | "other";
 
@@ -194,8 +194,11 @@ export function listUpcomingCalendarItems(input: {
   }
 
   const feeDueTotals = new Map<string, { count: number; totalPaise: number }>();
-  for (const student of sis.students) {
-    if (student.status !== "active") continue;
+  // The one loop in this function that ignored the academicYearCode it was
+  // handed. Unscoped it summed every historical year's dues into the "Fees
+  // due — N students" calendar item, so leadership read roughly three times
+  // the money actually owed.
+  for (const student of studentsInSession(sis, academicYearCode)) {
     const dues = computeStudentDues(student, masters, fees, { includeFuture: true });
     for (const d of dues) {
       if (d.balancePaise <= 0) continue;

@@ -24,8 +24,8 @@ import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 import { DeskListActions } from "@/components/ui/desk-list-actions";
 import { ExportMenu, RowActionMenu } from "@/components/ui/erp-grid";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
-import { DOC_ACCEPT, DOC_MAX_BYTES } from "@/lib/sis";
-import { DEFAULT_AY, formatInr, loadMasters, type MastersState } from "@/lib/masters";
+import { DOC_ACCEPT, DOC_MAX_BYTES, studentsInSession} from "@/lib/sis";
+import { DEFAULT_AY, formatInr, loadMasters, type MastersState, currentAcademicYearCode} from "@/lib/masters";
 import { loadSis, type SisState } from "@/lib/sis";
 import {
   availableCountForTitle,
@@ -258,8 +258,10 @@ export function LibraryWorkspace() {
   const studentHits = useMemo(() => {
     const q = borrowerQuery.trim().toLowerCase();
     if (q.length < 2 || borrowerType !== "student" || !sis) return [];
-    return sis.students
-      .filter((s) => s.status === "active")
+    // One row per child, this session. SIS keeps a row per child per year and
+    // marks them all active, so the same name appeared several times and, in a
+    // capped list, pushed real matches off the end.
+    return studentsInSession(sis, currentAcademicYearCode(masters))
       .filter(
         (s) =>
           s.fullName.toLowerCase().includes(q) ||
@@ -1270,8 +1272,7 @@ export function LibraryWorkspace() {
                   className={`${field} mt-1`}
                 >
                   <option value="">All students</option>
-                  {(sis?.students ?? [])
-                    .filter((s) => s.status === "active")
+                  {studentsInSession(sis, currentAcademicYearCode(masters))
                     .map((s) => (
                       <option key={s.id} value={s.id}>
                         {s.fullName}

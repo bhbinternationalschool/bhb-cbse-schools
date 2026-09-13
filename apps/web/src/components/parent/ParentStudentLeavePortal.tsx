@@ -6,7 +6,7 @@ import {
   classLabelForStudent,
   resolveParentHousehold,
 } from "@/lib/parentPortal";
-import { loadSis, type Household, type SisStudent } from "@/lib/sis";
+import { loadSis, type Household, type SisStudent, childrenOfHousehold} from "@/lib/sis";
 import { StudentNameLabel } from "@/components/students/StudentAvatar";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import {
@@ -62,9 +62,10 @@ export function ParentStudentLeavePortal({
       setActiveId(null);
       return;
     }
-    const kids = sis.students.filter(
-      (s) => s.householdId === hh.id && s.status === "active",
-    );
+    // One row per child, this session. SIS keeps a row per child per year and
+    // leaves them all active, so the unscoped filter showed a family their own
+    // child once for every year they had been enrolled.
+    const kids = childrenOfHousehold(sis, hh.id, DEFAULT_AY);
     setChildren(kids);
     const aid =
       activeId && kids.some((k) => k.id === activeId)

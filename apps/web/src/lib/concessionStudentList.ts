@@ -16,8 +16,9 @@ import {
   type ConcessionGrant,
   type ConcessionRule,
   type MastersState,
+  currentAcademicYearCode,
 } from "@/lib/masters";
-import type { SisState, SisStudent } from "@/lib/sis";
+import { studentsInSession, type SisState, type SisStudent } from "@/lib/sis";
 
 export type ConcessionStudentListRow = {
   id: string;
@@ -174,7 +175,10 @@ export function buildConcessionStudentList(
           normalizeAcademicYearCode(s.academicYearCode) ===
             normalizeAcademicYearCode(sessionAy),
       )
-    : sis.students.filter((s) => s.status === "active");
+    : // No session given: still one row per child, newest kept. Otherwise an
+      // Excel-seeded discount resolved to whichever year's row came first and
+      // attached money to a stale student record.
+      studentsInSession(sis, currentAcademicYearCode());
 
   for (const seedGrant of seedRows) {
     const adm = canonicalAdmissionNo(seedGrant.admissionNo);
