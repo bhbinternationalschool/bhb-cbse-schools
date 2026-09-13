@@ -4,25 +4,33 @@
 
 import { TENANT } from "@/lib/types";
 import type { WaResolvedIdentity, WaResolvedRole } from "@/lib/waRoleResolver";
-import { CRM_BOT_QUICK_PROMPTS } from "@/lib/crmAdmissionBotEngine";
-import { SIS_BOT_QUICK_PROMPTS } from "@/lib/sisParentBotEngine";
+import { CRM_BOT_LABEL_HI, CRM_BOT_QUICK_PROMPTS } from "@/lib/crmAdmissionBotEngine";
+import { SIS_BOT_LABEL_HI, SIS_BOT_QUICK_PROMPTS } from "@/lib/sisParentBotEngine";
 import {
   STAFF_BOT_OFFICE_PROMPTS,
   STAFF_BOT_OWNER_PROMPTS,
 } from "@/lib/waStaffBotPrompts";
 import type { WaInteractiveMenu } from "@/lib/waInteractive";
-import { VISITOR_PURPOSE_OPTIONS } from "@/lib/waUnifiedBotEngine";
+import { VISITOR_PURPOSE_LABEL_HI, VISITOR_PURPOSE_OPTIONS } from "@/lib/waUnifiedBotEngine";
 import { TRANSPORT_BOT_PROMPTS } from "@/lib/waTransportBotPrompts";
 
+/**
+ * `hindi` is decided by the caller from the family's own language (see
+ * unifiedHindiFor in waUnifiedBotServer). It only ever applies to families
+ * and unknown numbers; a staff menu is English whatever is passed.
+ */
 export function menuKnownUserGreeting(
   identity: WaResolvedIdentity,
+  hindi = false,
 ): { menu: WaInteractiveMenu; textFallback: string } {
   const school = TENANT.nameDisplay;
   const who = identity.displayName ? ` ${identity.displayName}` : "";
-  const body = `Namaste${who} — *${school}*\n\nYour number is on our records. Choose an option:`;
+  const body = hindi
+    ? `नमस्ते${who} जी 🙏 — *${school}*\n\nआपका नंबर स्कूल के रिकॉर्ड में है। नीचे से चुनें:`
+    : `Namaste${who} — *${school}*\n\nYour number is on our records. Choose an option:`;
 
   if (identity.roles.length === 1) {
-    return roleFlowMenu(identity.roles[0]!, body);
+    return roleFlowMenu(identity.roles[0]!, body, hindi);
   }
 
   const rows = identity.roles.map((r) => ({
@@ -55,48 +63,68 @@ export function menuKnownUserGreeting(
 
 export function menuVisitorPurpose(
   visitorName: string,
+  hindi = false,
 ): { menu: WaInteractiveMenu; textFallback: string } {
-  const body = `Thank you, *${visitorName}*.\n\nWhat brings you to *${TENANT.shortName}*?`;
+  const body = hindi
+    ? `धन्यवाद, *${visitorName}* जी।\n\n*${TENANT.shortName}* से आपको किस बारे में मदद चाहिए?`
+    : `Thank you, *${visitorName}*.\n\nWhat brings you to *${TENANT.shortName}*?`;
+  const label = (p: (typeof VISITOR_PURPOSE_OPTIONS)[number]) =>
+    hindi ? VISITOR_PURPOSE_LABEL_HI[p.id] : p.label;
   const rows = VISITOR_PURPOSE_OPTIONS.map((p) => ({
     id: `purpose_${p.id}`,
     title: p.keyword,
-    description: p.label.slice(0, 72),
+    description: label(p).slice(0, 72),
   }));
   const textFallback = [
     body,
     "",
-    ...VISITOR_PURPOSE_OPTIONS.map((p) => `• *${p.keyword}* — ${p.label}`),
+    ...VISITOR_PURPOSE_OPTIONS.map((p) => `• *${p.keyword}* — ${label(p)}`),
   ].join("\n");
   return {
     menu: {
       kind: "list",
       body,
-      buttonText: "Select purpose",
-      sections: [{ title: "I need help with", rows }],
+      buttonText: hindi ? "विकल्प चुनें" : "Select purpose",
+      sections: [{ title: hindi ? "मुझे मदद चाहिए" : "I need help with", rows }],
     },
     textFallback,
   };
 }
 
-export function menuUnknownWelcome(): {
+/**
+ * First reply to a number the school does not know. Hindi by default — most
+ * such numbers are local families — with one English line, because the
+ * sender's language is exactly what the school cannot know yet.
+ */
+export function menuUnknownWelcome(hindi = true): {
   menu: WaInteractiveMenu;
   textFallback: string;
 } {
-  const body = `Namaste — *${TENANT.nameDisplay}* welcomes you.\n\nYour number is not on file yet. Tap below or reply with your *full name*.`;
+  const body = hindi
+    ? `नमस्ते 🙏 *${TENANT.nameDisplay}* में आपका स्वागत है।\n\nआपका नंबर अभी हमारे रिकॉर्ड में नहीं है। नीचे बटन दबाएँ या अपना *पूरा नाम* लिखकर भेजें।\n\n_English: tap below or reply with your full name._`
+    : `Namaste — *${TENANT.nameDisplay}* welcomes you.\n\nYour number is not on file yet. Tap below or reply with your *full name*.`;
   const textFallback = [
     body,
     "",
-    "Please reply with your full name (e.g. Rajesh Kumar).",
+    hindi
+      ? "कृपया अपना पूरा नाम लिखें (जैसे: राजेश कुमार)।"
+      : "Please reply with your full name (e.g. Rajesh Kumar).",
   ].join("\n");
   return {
     menu: {
       kind: "buttons",
       body,
-      buttons: [
-        { id: "purpose_admission", title: "Admission" },
-        { id: "purpose_job", title: "Job enquiry" },
-        { id: "menu_main", title: "Main menu" },
-      ],
+      buttons: hindi
+        ? [
+            { id: "purpose_admission", title: "एडमिशन" },
+            { id: "purpose_job", title: "नौकरी" },
+            { id: "menu_main", title: "मुख्य मेनू" },
+          ]
+        : [
+            { id: "purpose_admission", title: "Admission" },
+            { id: "purpose_job", title: "Job enquiry" },
+            { id: "menu_main", title: "Main menu" },
+          ],
     },
     textFallback,
   };
@@ -134,6 +162,7 @@ function transportDriverMenu(
 function roleFlowMenu(
   role: WaResolvedRole,
   headerBody?: string,
+  hindi = false,
 ): { menu: WaInteractiveMenu; textFallback: string } {
   switch (role.kind) {
     case "owner":
@@ -141,13 +170,13 @@ function roleFlowMenu(
     case "staff":
       return staffMenu(false, role.staff?.fullName || "", headerBody);
     case "parent":
-      return parentMenu(role, headerBody);
+      return parentMenu(role, headerBody, hindi);
     case "teacher":
       return teacherMenu(headerBody);
     case "survey":
       return surveyMenu(headerBody);
     case "admission_lead":
-      return admissionMenu(headerBody);
+      return admissionMenu(headerBody, hindi);
     case "vendor":
       return {
         menu: {
@@ -211,24 +240,28 @@ function staffMenu(
 function parentMenu(
   role: WaResolvedRole,
   headerBody?: string,
+  hindi = false,
 ): { menu: WaInteractiveMenu; textFallback: string } {
-  const body = headerBody || `*Parent desk* — ${role.staff?.fullName || "Guardian"}`;
+  const who = role.staff?.fullName || (hindi ? "अभिभावक" : "Guardian");
+  const body = headerBody || (hindi ? `*अभिभावक सेवा* — ${who}` : `*Parent desk* — ${who}`);
+  const label = (q: (typeof SIS_BOT_QUICK_PROMPTS)[number]) =>
+    hindi ? SIS_BOT_LABEL_HI[q.id] : q.label;
   const rows = SIS_BOT_QUICK_PROMPTS.map((q) => ({
     id: `parent_${q.id}`,
     title: q.waKeyword,
-    description: q.label.slice(0, 72),
+    description: label(q).slice(0, 72),
   }));
   const textFallback = [
     body,
     "",
-    ...SIS_BOT_QUICK_PROMPTS.map((q) => `• *${q.waKeyword}* — ${q.label}`),
+    ...SIS_BOT_QUICK_PROMPTS.map((q) => `• *${q.waKeyword}* — ${label(q)}`),
   ].join("\n");
   return {
     menu: {
       kind: "list",
       body,
-      buttonText: "Parent services",
-      sections: [{ title: "For enrolled families", rows }],
+      buttonText: hindi ? "अभिभावक सेवाएँ" : "Parent services",
+      sections: [{ title: hindi ? "नामांकित परिवारों के लिए" : "For enrolled families", rows }],
     },
     textFallback,
   };
@@ -272,24 +305,27 @@ function surveyMenu(
 
 function admissionMenu(
   headerBody?: string,
+  hindi = false,
 ): { menu: WaInteractiveMenu; textFallback: string } {
-  const body = headerBody || "*Admission enquiry*";
+  const body = headerBody || (hindi ? "*एडमिशन जानकारी*" : "*Admission enquiry*");
+  const label = (q: (typeof CRM_BOT_QUICK_PROMPTS)[number]) =>
+    hindi ? CRM_BOT_LABEL_HI[q.id] : q.label;
   const rows = CRM_BOT_QUICK_PROMPTS.map((q) => ({
     id: `admission_${q.id}`,
     title: q.waKeyword,
-    description: q.label.slice(0, 72),
+    description: label(q).slice(0, 72),
   }));
   const textFallback = [
     body,
     "",
-    ...CRM_BOT_QUICK_PROMPTS.map((q) => `• *${q.waKeyword}* — ${q.label}`),
+    ...CRM_BOT_QUICK_PROMPTS.map((q) => `• *${q.waKeyword}* — ${label(q)}`),
   ].join("\n");
   return {
     menu: {
       kind: "list",
       body,
-      buttonText: "Admission help",
-      sections: [{ title: "Enquiry & registration", rows }],
+      buttonText: hindi ? "एडमिशन मदद" : "Admission help",
+      sections: [{ title: hindi ? "जानकारी और रजिस्ट्रेशन" : "Enquiry & registration", rows }],
     },
     textFallback,
   };
@@ -344,6 +380,7 @@ export function interactiveIdToText(id: string): string | null {
 export function roleFlowInteractiveMenu(
   flow: string,
   displayName: string,
+  hindi = false,
 ): { menu: WaInteractiveMenu; textFallback: string } | null {
   const fakeRole = (kind: WaResolvedRole["kind"]): WaResolvedRole => ({
     kind,
@@ -356,14 +393,14 @@ export function roleFlowInteractiveMenu(
     case "staff":
       return staffMenu(false, displayName);
     case "parent":
-      return parentMenu(fakeRole("parent"));
+      return parentMenu(fakeRole("parent"), undefined, hindi);
     case "teacher":
       return teacherMenu();
     case "survey":
       return surveyMenu();
     case "admission_lead":
     case "admission":
-      return admissionMenu();
+      return admissionMenu(undefined, hindi);
     case "vendor":
       return {
         menu: {

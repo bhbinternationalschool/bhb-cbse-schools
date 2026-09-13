@@ -44,7 +44,7 @@ export const SIS_BOT_QUICK_PROMPTS: {
  * had chosen nothing, which the school writes to in Hindi — got English the
  * moment they tapped a button on any template.
  */
-const SIS_BOT_LABEL_HI: Record<SisBotQuickId, string> = {
+export const SIS_BOT_LABEL_HI: Record<SisBotQuickId, string> = {
   kids: "मेरे बच्चे",
   dues: "बकाया फीस",
   pay: "फीस जमा करें",

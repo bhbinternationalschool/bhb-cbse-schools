@@ -13,6 +13,7 @@
  * assertModulePermission guard), not lib/dutyRoster.ts's ungated one.
  */
 
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { householdOf, householdWhatsApp, type SisState } from "@/lib/sis";
@@ -340,9 +341,13 @@ export async function notifyHealthParent(
   const household = householdOf(sis, student.householdId);
   const mobile = householdWhatsApp(household);
   if (!mobile) return { ok: false, error: "No WhatsApp number on file" };
-  const body =
-    `Infirmary note for ${student.fullName}: ${healthVisitReasonLabel(visit.reason)} on ${visit.date}${visit.time ? ` at ${visit.time}` : ""}. ` +
-    `${visit.symptoms ? `Symptoms: ${visit.symptoms}. ` : ""}${visit.actionTaken ? `Action taken: ${visit.actionTaken}.` : ""}`.trim();
+  const body = (
+    waTemplateLanguageFor(household ?? {}) === "hi"
+      ? `${student.fullName} के बारे में मेडिकल रूम की सूचना: ${healthVisitReasonLabel(visit.reason)}, ${visit.date}${visit.time ? `, समय ${visit.time}` : ""}। ` +
+        `${visit.symptoms ? `लक्षण: ${visit.symptoms}। ` : ""}${visit.actionTaken ? `क्या किया गया: ${visit.actionTaken}।` : ""}`
+      : `Infirmary note for ${student.fullName}: ${healthVisitReasonLabel(visit.reason)} on ${visit.date}${visit.time ? ` at ${visit.time}` : ""}. ` +
+        `${visit.symptoms ? `Symptoms: ${visit.symptoms}. ` : ""}${visit.actionTaken ? `Action taken: ${visit.actionTaken}.` : ""}`
+  ).trim();
   try {
     const res = await fetch("/api/wa/dispatch", {
       method: "POST",

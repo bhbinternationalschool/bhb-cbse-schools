@@ -16,6 +16,7 @@ import {
 import { readModuleLocalState, writeModuleLocalState } from "@/lib/moduleLocalState.server";
 import { scopeAllows, staffSectionScope } from "@/lib/api/v1/staffScope";
 import { sendPushToSubject } from "@/lib/webPush.server";
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 
 export const runtime = "nodejs";
 
@@ -166,11 +167,17 @@ export async function POST(request: Request) {
 
     let parentNotified = false;
     if (body.notifyParent && student.householdId) {
+      const hh = sis.households.find((h) => h.id === student.householdId);
+      const hindi = waTemplateLanguageFor(hh ?? {}) === "hi";
       const r = await sendPushToSubject("parent", student.householdId, {
-        title: body.referredToHospital
-          ? `${student.fullName} — please call the school`
-          : `${student.fullName} visited the sick room`,
-        body: `${healthVisitReasonLabel(reason)} at ${time}: ${symptoms.slice(0, 100)}${actionTaken ? ` · ${actionTaken.slice(0, 80)}` : ""}`,
+        title: hindi
+          ? body.referredToHospital
+            ? `${student.fullName} — कृपया स्कूल को फ़ोन करें`
+            : `${student.fullName} स्कूल के मेडिकल रूम में आए`
+          : body.referredToHospital
+            ? `${student.fullName} — please call the school`
+            : `${student.fullName} visited the sick room`,
+        body: `${healthVisitReasonLabel(reason)} ${hindi ? "समय" : "at"} ${time}: ${symptoms.slice(0, 100)}${actionTaken ? ` · ${actionTaken.slice(0, 80)}` : ""}`,
         url: `/profile?studentId=${encodeURIComponent(student.id)}`,
         data: { kind: "health", studentId: student.id, visitId: visit.id },
       }).catch(() => ({ sent: 0, expired: 0, failed: 0 }));

@@ -305,7 +305,31 @@ export function composeWhatsAppDefaulterReminder(input: {
   overdueDays: number;
   stageLabel: string;
   payUrl?: string;
+  /** The family's language; the school writes in Hindi unless they chose English. */
+  hindi?: boolean;
 }): string {
+  if (input.hindi) {
+    const daysHi =
+      input.overdueDays < 0
+        ? "आगामी"
+        : input.overdueDays === 0
+          ? "आज देय"
+          : `${input.overdueDays} दिन से बकाया`;
+    const hi = [
+      `*${input.schoolName}*`,
+      `फीस स्मरण · ${input.stageLabel}`,
+      "",
+      `${input.studentName}${input.classLabel ? ` (${input.classLabel})` : ""}`,
+      `राशि: *${formatInr(input.amountPaise)}* (${daysHi})`,
+      "",
+    ];
+    if (input.payUrl) hi.push("ऑनलाइन भुगतान:", input.payUrl, "");
+    hi.push(
+      "कृपया स्कूल काउंटर पर या ऊपर दिए लिंक से बकाया फीस जमा करें।",
+      "यदि पहले ही जमा कर दी है तो कृपया इसे अनदेखा करें। धन्यवाद 🙏",
+    );
+    return hi.join("\n");
+  }
   const days =
     input.overdueDays < 0
       ? "upcoming"
@@ -338,7 +362,24 @@ export function composeEscalationNotice(input: {
   amountPaise: number;
   overdueDays: number;
   earliestDueOn: string;
+  hindi?: boolean;
 }): string {
+  if (input.hindi) {
+    return [
+      `${input.schoolName}`,
+      `बकाया फीस सूचना`,
+      "",
+      `छात्र: ${input.studentName} (${input.classLabel})`,
+      `प्रवेश संख्या: ${input.admissionNo}`,
+      `बकाया राशि: ${formatInr(input.amountPaise)}`,
+      `कितने दिन से बकाया: ${input.overdueDays}`,
+      `सबसे पुरानी देय तिथि: ${input.earliestDueOn}`,
+      "",
+      "कृपया बकाया फीस शीघ्र जमा करें, ताकि स्कूल नियमों के अनुसार रिपोर्ट कार्ड / प्रमाण पत्र / टीसी पर रोक न लगे।",
+      "",
+      "लेखा कार्यालय",
+    ].join("\n");
+  }
   return [
     `${input.schoolName}`,
     `FEE OVERDUE NOTICE`,

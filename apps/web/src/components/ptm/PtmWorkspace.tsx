@@ -1,5 +1,6 @@
 "use client";
 
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
@@ -849,6 +850,7 @@ export function PtmWorkspace() {
                   if (!slot || mobile.replace(/\D/g, "").length < 10) continue;
                   const stu = sis.students.find((s) => s.id === b.studentId);
                   const msg = composeWhatsAppPtmReminder({
+                    hindi: waTemplateLanguageFor(sis.households.find((h) => h.id === stu?.householdId) ?? {}) === "hi",
                     childName: stu?.fullName || b.parentName,
                     eventName: selectedEvent.name,
                     date: selectedEvent.date,
@@ -910,6 +912,7 @@ export function PtmWorkspace() {
                             (s) => s.id === b.studentId,
                           );
                           const msg = composeWhatsAppPtmConfirm({
+                            hindi: waTemplateLanguageFor(sis.households.find((h) => h.id === stu?.householdId) ?? {}) === "hi",
                             childName: stu?.fullName || b.parentName,
                             eventName: selectedEvent.name,
                             date: selectedEvent.date,
@@ -940,6 +943,7 @@ export function PtmWorkspace() {
                             (s) => s.id === b.studentId,
                           );
                           const msg = composeWhatsAppPtmReminder({
+                            hindi: waTemplateLanguageFor(sis.households.find((h) => h.id === stu?.householdId) ?? {}) === "hi",
                             childName: stu?.fullName || b.parentName,
                             eventName: selectedEvent.name,
                             date: selectedEvent.date,
@@ -1089,7 +1093,7 @@ export function PtmWorkspace() {
                   attendance, homework, conduct log and earlier PTM notes.
                   {fbHousehold?.preferredLanguage
                     ? ` Family prefers ${languageLabel(fbHousehold.preferredLanguage)}.`
-                    : " Family language not asked yet — English."}
+                    : " Family language not asked yet — Hindi (school default)."}
                 </CardDescription>
               </CardHeader>
               <CardContent className="grid gap-3 pt-0">

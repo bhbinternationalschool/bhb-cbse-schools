@@ -669,7 +669,30 @@ export function composeWhatsAppPaymentLinkMessage(
   payUrl: string,
   schoolName: string,
   autoSettle = false,
+  hindi = false,
 ): string {
+  if (hindi) {
+    return [
+      `*${schoolName}*`,
+      `फीस भुगतान लिंक · ${link.code}`,
+      "",
+      `${link.studentName}${link.classLabel ? ` (${link.classLabel})` : ""}`,
+      `राशि: *${formatInr(link.amountPaise)}*`,
+      `मान्य: ${link.expiresOn} तक`,
+      "",
+      autoSettle ? "सुरक्षित भुगतान (UPI / कार्ड / नेटबैंकिंग):" : "GPay / UPI से भुगतान करें:",
+      payUrl,
+      "",
+      ...(autoSettle
+        ? ["भुगतान के बाद रसीद अपने-आप WhatsApp पर आ जाएगी।"]
+        : [
+            "1️⃣ लिंक खोलें → Google Pay / UPI से भुगतान करें",
+            "2️⃣ रसीद के लिए पेज पर *Confirm paid* दबाएँ",
+          ]),
+      "",
+      "या स्कूल काउंटर पर भुगतान करके UTR नंबर बताएँ।",
+    ].join("\n");
+  }
   const lines = [
     `*${schoolName}*`,
     `Fee payment link · ${link.code}`,

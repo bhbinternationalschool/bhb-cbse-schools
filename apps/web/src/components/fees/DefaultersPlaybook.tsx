@@ -1,5 +1,6 @@
 "use client";
 
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { useEffect, useMemo, useState } from "react";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import Link from "next/link";
@@ -220,7 +221,7 @@ export function DefaultersPlaybook() {
                 ? "due today"
                 : `${row.overdueDays} day(s) overdue`,
           stageLabel: row.stageLabel,
-          // Household's preferred language (Students → Family); "" = not asked → English.
+          // Household's preferred language (Students → Family); "" = not asked → the school default, Hindi.
           language: sis ? householdOf(sis, row.householdId)?.preferredLanguage ?? "" : "",
         }),
       });
@@ -291,6 +292,12 @@ export function DefaultersPlaybook() {
     return householdWhatsApp(householdOf(sis, row.householdId));
   }
 
+  /** Hindi unless the family chose English — the school's default for parents. */
+  function familyHindi(row: LiveDefaulter): boolean {
+    const hh = sis ? householdOf(sis, row.householdId) : undefined;
+    return waTemplateLanguageFor(hh ?? {}) === "hi";
+  }
+
   function createLinkForRow(row: LiveDefaulter) {
     const dues =
       row.overdueDues.length > 0 ? row.overdueDues : row.openDues;
@@ -323,6 +330,7 @@ export function DefaultersPlaybook() {
         url,
         TENANT.nameDisplay,
         attached.attached,
+        familyHindi(row),
       );
       openWaMe(mobile, msg, undefined, { module: "fees" });
       flash(`${attached.attached ? "Checkout" : "UPI"} link ${link.code} — WhatsApp opened`);
@@ -359,6 +367,7 @@ export function DefaultersPlaybook() {
       overdueDays: row.overdueDays,
       stageLabel: row.stageLabel,
       payUrl: payUrl || undefined,
+      hindi: familyHindi(row),
     });
     if (mobile && isValidMobile(mobile)) {
       openWaMe(mobile, msg, undefined, { module: "fees" });
@@ -431,6 +440,7 @@ export function DefaultersPlaybook() {
         amountPaise: row.overdueAmountPaise,
         overdueDays: row.overdueDays,
         earliestDueOn: row.earliestDueOn,
+        hindi: familyHindi(row),
       });
       void navigator.clipboard.writeText(text).then(
         () => flash("Escalation notice copied"),
@@ -459,7 +469,7 @@ export function DefaultersPlaybook() {
         setError(result.error);
         return;
       }
-      const invite = composeParentMeetingInvite(result.meeting);
+      const invite = composeParentMeetingInvite(result.meeting, familyHindi(row));
       setMeetings(listOpenParentMeetings());
       if (mobile && isValidMobile(mobile)) {
         openWaMe(mobile, invite);

@@ -57,6 +57,8 @@ import {
 } from "@/lib/voiceNote";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { sendWhatsAppText, waNormalizeLocal10 } from "@/lib/waSend";
+import { SCHOOL_DEFAULT_WA_LANGUAGE, waTemplateLanguageFor } from "@/lib/householdPrefs";
+import { loadSis } from "@/lib/sis";
 import { sendWhatsAppInteractive } from "@/lib/waInteractive";
 import {
   appendWaHubExchange,
@@ -405,7 +407,7 @@ async function delegateActiveFlow(
         });
         return { replied: true, escalate: false, audience: "staff_bot_off", stub: false };
       }
-      const pack = menuKnownUserGreeting(identity);
+      const pack = menuKnownUserGreeting(identity, unifiedHindiFor(identity));
       await sendBotReply({
         mobile10,
         displayName: session.displayName || identity.displayName,
@@ -453,7 +455,7 @@ async function delegateActiveFlow(
 
     const intent = detectStaffBotIntent(opts.text);
     if (intent === "menu") {
-      const pack = menuKnownUserGreeting(identity);
+      const pack = menuKnownUserGreeting(identity, unifiedHindiFor(identity));
       await sendBotReply({
         mobile10,
         displayName: session.displayName || identity.displayName,
@@ -534,7 +536,7 @@ async function delegateActiveFlow(
         visitorName: name,
         forceEscalate: true,
       });
-      const hint = composeActiveFlowHint("transport", name);
+      const hint = composeActiveFlowHint("transport", name, unifiedHindiFor(identity));
       await sendBotReply({
         mobile10,
         displayName: name,
@@ -552,7 +554,7 @@ async function delegateActiveFlow(
     }
     const intent = detectTransportBotIntent(opts.text);
     if (intent === "menu") {
-      const pack = menuKnownUserGreeting(identity);
+      const pack = menuKnownUserGreeting(identity, unifiedHindiFor(identity));
       await sendBotReply({
         mobile10,
         displayName: ctx.driverName,
@@ -648,9 +650,13 @@ async function delegateActiveFlow(
         category: categoryForUnifiedAudience("visitor_job", "job"),
         audience: "visitor_job",
         flow,
-        text: captured.ok
-          ? "Thank you — the school office has your CV. If it matches a vacancy, someone will call you."
-          : "Thank you. We could not read that file, so please send your CV as a PDF or a clear photo, or reply with your subject and the classes you teach.",
+        text: unifiedHindiFor(identity)
+          ? captured.ok
+            ? "धन्यवाद 🙏 आपका बायोडाटा स्कूल ऑफिस को मिल गया है। किसी पद से मेल खाने पर आपको कॉल किया जाएगा।"
+            : "धन्यवाद। यह फ़ाइल पढ़ी नहीं जा सकी — कृपया बायोडाटा PDF या साफ़ फ़ोटो में भेजें, या अपना विषय और आप कौन-सी कक्षाएँ पढ़ाते हैं, लिखें।"
+          : captured.ok
+            ? "Thank you — the school office has your CV. If it matches a vacancy, someone will call you."
+            : "Thank you. We could not read that file, so please send your CV as a PDF or a clear photo, or reply with your subject and the classes you teach.",
         inbound: { text: opts.text || "[CV]", waMessageId: opts.waMessageId },
       });
       return {
@@ -666,12 +672,7 @@ async function delegateActiveFlow(
       visitorName: name,
       forceEscalate: true,
     });
-    const ack =
-      flow === "job"
-        ? composeActiveFlowHint("job", name)
-        : flow === "meeting"
-          ? composeActiveFlowHint("meeting", name)
-          : composeActiveFlowHint("other", name);
+    const ack = composeActiveFlowHint(flow, name, unifiedHindiFor(identity));
     await sendBotReply({
       mobile10,
       displayName: name,
@@ -689,7 +690,7 @@ async function delegateActiveFlow(
       return delegateActiveFlow("parent", opts, identity, session);
     }
     const name = session.visitorName || session.displayName;
-    const hint = composeActiveFlowHint("fee", name);
+    const hint = composeActiveFlowHint("fee", name, unifiedHindiFor(identity));
     await sendBotReply({
       mobile10,
       displayName: name,
@@ -703,7 +704,7 @@ async function delegateActiveFlow(
 
   if (flow === "timing") {
     const name = session.visitorName || session.displayName;
-    const hint = composeActiveFlowHint("timing", name);
+    const hint = composeActiveFlowHint("timing", name, unifiedHindiFor(identity));
     await sendBotReply({
       mobile10,
       displayName: name,
@@ -727,6 +728,32 @@ async function delegateActiveFlow(
 /**
  * Single entry for all inbound WhatsApp parent/staff messages.
  */
+
+const STAFF_SIDE_ROLES = new Set(["owner", "staff", "teacher", "survey", "vendor", "transport"]);
+
+/**
+ * Whether the unified bot should write to this sender in Hindi.
+ *
+ * Families get their own language, and a family that chose nothing gets the
+ * school's default (Hindi). Unknown numbers get the default too. Anyone who
+ * is also on the staff side stays in English — those menus are the school's
+ * own working tools, and a teacher who is also a parent is a teacher first
+ * when they message the school number.
+ */
+function unifiedHindiFor(identity: WaResolvedIdentity): boolean {
+  if (identity.roles.some((r) => STAFF_SIDE_ROLES.has(r.kind))) return false;
+  const parent = identity.roles.find((r) => r.kind === "parent" && r.householdId);
+  if (parent) {
+    try {
+      const hh = loadSis().households.find((h) => h.id === parent.householdId);
+      return waTemplateLanguageFor(hh ?? {}) === "hi";
+    } catch {
+      return SCHOOL_DEFAULT_WA_LANGUAGE === "hi";
+    }
+  }
+  return SCHOOL_DEFAULT_WA_LANGUAGE === "hi";
+}
+
 export async function handleWaUnifiedInbound(opts: {
   fromWaId: string;
   text: string;
@@ -966,7 +993,7 @@ export async function handleWaUnifiedInbound(opts: {
     };
     await writeStore(store);
     const pack = identity.isKnown
-      ? menuKnownUserGreeting(identity)
+      ? menuKnownUserGreeting(identity, unifiedHindiFor(identity))
       : menuUnknownWelcome();
     const ok = await sendBotReply({
       mobile10,
@@ -1073,7 +1100,7 @@ export async function handleWaUnifiedInbound(opts: {
       sessions: { ...store.sessions, [mobile10]: { ...session, updatedAt: nowIso() } },
     };
     await writeStore(store);
-    const purposePack = menuVisitorPurpose(name);
+    const purposePack = menuVisitorPurpose(name, unifiedHindiFor(identity));
     await sendBotReply({
       mobile10,
       displayName: name,
@@ -1114,12 +1141,14 @@ export async function handleWaUnifiedInbound(opts: {
           displayName: session.visitorName || session.displayName,
           category: "general",
           audience: "visitor_parked",
-          text: "I'll pass this to the school office and someone will reply. Send *menu* any time to start again.",
+          text: unifiedHindiFor(identity)
+            ? "आपका संदेश स्कूल ऑफिस को भेज दिया गया है, जल्द ही जवाब मिलेगा। दोबारा शुरू करने के लिए कभी भी *menu* लिखें।"
+            : "I'll pass this to the school office and someone will reply. Send *menu* any time to start again.",
           inbound: inboundLog,
         });
         return { replied: true, escalate: true, audience: "visitor_parked", stub: false };
       }
-      const purposePack = menuVisitorPurpose(session.visitorName || "there");
+      const purposePack = menuVisitorPurpose(session.visitorName || "there", unifiedHindiFor(identity));
       await sendBotReply({
         mobile10,
         displayName: session.visitorName || session.displayName,
@@ -1139,8 +1168,9 @@ export async function handleWaUnifiedInbound(opts: {
       sessions: { ...store.sessions, [mobile10]: { ...session, updatedAt: nowIso() } },
     };
     await writeStore(store);
-    const flowMenu = roleFlowInteractiveMenu(String(flow), session.visitorName);
-    const hint = composeActiveFlowHint(flow, session.visitorName);
+    const hindi = unifiedHindiFor(identity);
+    const flowMenu = roleFlowInteractiveMenu(String(flow), session.visitorName, hindi);
+    const hint = composeActiveFlowHint(flow, session.visitorName, hindi);
     await sendBotReply({
       mobile10,
       displayName: session.visitorName,
@@ -1175,7 +1205,7 @@ export async function handleWaUnifiedInbound(opts: {
   ) {
     const role = pickRoleByInput(identity.roles, text);
     if (!role) {
-      const pack = menuKnownUserGreeting(identity);
+      const pack = menuKnownUserGreeting(identity, unifiedHindiFor(identity));
       await sendBotReply({
         mobile10,
         displayName: identity.displayName,
@@ -1200,9 +1230,11 @@ export async function handleWaUnifiedInbound(opts: {
       sessions: { ...store.sessions, [mobile10]: { ...session, updatedAt: nowIso() } },
     };
     await writeStore(store);
+    const hindi = unifiedHindiFor(identity);
     const flowMenu = roleFlowInteractiveMenu(
       String(session.activeFlow),
       session.displayName,
+      hindi,
     );
     await sendBotReply({
       mobile10,
@@ -1213,7 +1245,7 @@ export async function handleWaUnifiedInbound(opts: {
       menu: flowMenu || undefined,
       text: flowMenu
         ? undefined
-        : composeActiveFlowHint(session.activeFlow!, session.displayName),
+        : composeActiveFlowHint(session.activeFlow!, session.displayName, hindi),
       inbound: inboundLog,
     });
     return {
@@ -1252,7 +1284,7 @@ export async function handleWaUnifiedInbound(opts: {
     await writeStore(store);
   }
 
-  const pack = menuKnownUserGreeting(identity);
+  const pack = menuKnownUserGreeting(identity, unifiedHindiFor(identity));
   await sendBotReply({
     mobile10,
     displayName: identity.displayName,

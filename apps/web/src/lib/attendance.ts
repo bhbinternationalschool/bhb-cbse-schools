@@ -5,6 +5,7 @@
  * Policy: teacher cut-off lock, absent WhatsApp nudges, office exceptions.
  */
 
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { getSessionActor } from "@/lib/sessionActor";
 import { hasPermission } from "@/lib/rbac";
@@ -502,8 +503,16 @@ export function composeAbsentNudgeMessage(input: {
   studentName: string;
   date: string;
   classLabel?: string;
+  /** The family's language; the school writes in Hindi unless they chose English. */
+  hindi?: boolean;
 }): string {
   const where = input.classLabel ? ` (${input.classLabel})` : "";
+  if (input.hindi) {
+    return (
+      `${TENANT.shortName}: ${input.studentName}${where} ${input.date} को *अनुपस्थित* दर्ज हैं। ` +
+      `यदि यह सही है तो OK लिखें, और यदि बच्चा स्कूल आया था तो WRONG लिखें। धन्यवाद 🙏`
+    );
+  }
   return (
     `${TENANT.shortName}: ${input.studentName}${where} is marked ABSENT on ${input.date}. ` +
     `Reply OK if correct, or WRONG if the child was present. Thank you.`
@@ -548,6 +557,7 @@ export function buildAbsentNudgeDrafts(input: {
       studentName: st.fullName,
       date: input.register.date,
       classLabel: input.classLabel,
+      hindi: waTemplateLanguageFor(hh ?? {}) === "hi",
     });
     drafts.push({
       studentId: st.id,

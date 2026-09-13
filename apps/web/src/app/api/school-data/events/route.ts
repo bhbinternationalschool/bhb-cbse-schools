@@ -282,7 +282,7 @@ export async function PATCH(req: Request) {
       skippedNoMobile += 1;
       continue;
     }
-    const r = await sendEventRsvpPrompt(event, { id: hh.id, whatsappMobile: mobile });
+    const r = await sendEventRsvpPrompt(event, { id: hh.id, whatsappMobile: mobile, preferredLanguage: hh.preferredLanguage });
     if (r.ok) sent += 1;
     else failed += 1;
   }

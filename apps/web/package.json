@@ -85,6 +85,8 @@
     "test:wa-templates-automation": "npx tsx src/lib/waTemplatesAutomation.selftest.ts",
     "test:wa-template-seeds": "npx tsx src/lib/waTemplateSeeds.selftest.ts",
     "test:wa-relay": "npx tsx src/lib/waRelay.selftest.ts",
+    "test:wa-unified-menus-hindi": "npx tsx src/lib/waUnifiedMenusHindi.selftest.ts",
+    "test:parent-messages-hindi": "npx tsx src/lib/parentMessagesHindi.selftest.ts",
     "test:concession-review-ai": "npx tsx src/lib/concessionReviewAi.selftest.ts",
     "test:collections-weekly-ai": "npx tsx src/lib/collectionsWeeklyAi.selftest.ts",
     "test:erp-ask": "npx tsx src/lib/erpAsk.selftest.ts",

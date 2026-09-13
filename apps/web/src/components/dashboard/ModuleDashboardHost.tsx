@@ -125,7 +125,9 @@ async function runRowAction(
     classLabel: String(row.class ?? ""),
     amountPaise: Number(row.amountPaise ?? 0),
     overdueDays: Number(row.daysOverdue ?? 0),
-    stageLabel: "Reminder",
+    stageLabel: row.language === "en" ? "Reminder" : "स्मरण",
+    // Families are written to in Hindi unless they chose English.
+    hindi: row.language !== "en",
   });
   const mobile = String(row.mobile ?? "").replace(/\D/g, "");
   if (mobile.length < 10) {

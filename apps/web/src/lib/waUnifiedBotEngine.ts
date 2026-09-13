@@ -333,11 +333,35 @@ export function composeRolePickPrompt(identity: WaResolvedIdentity): string {
   return lines.join("\n");
 }
 
+/** Visitor purposes in Hindi; keywords stay in English letters. */
+export const VISITOR_PURPOSE_LABEL_HI: Record<WaVisitorPurpose, string> = {
+  admission: "एडमिशन / जानकारी",
+  job: "नौकरी",
+  vendor: "सप्लायर / वेंडर",
+  transport: "बस / परिवहन",
+  fee: "फीस / भुगतान",
+  timing: "स्कूल का समय / जानकारी",
+  meeting: "मिलना / स्कूल आना",
+  other: "कुछ और",
+};
+
+/**
+ * The line sent when a flow starts.
+ *
+ * `hindi` is for families and unknown numbers — the school writes to them in
+ * Hindi unless they chose English. Staff, teacher, survey and vendor hints
+ * stay English: those are the school's own people and businesses.
+ */
 export function composeActiveFlowHint(
   flow: WaRoleKind | WaVisitorPurpose,
   displayName: string,
+  hindi = false,
 ): string {
-  const name = displayName || "there";
+  const name = displayName || (hindi ? "जी" : "there");
+  if (hindi) {
+    const hi = activeFlowHintHi(flow, name);
+    if (hi) return hi;
+  }
   switch (flow) {
     case "owner":
     case "staff":
@@ -407,6 +431,57 @@ export function composeActiveFlowHint(
         isKnown: true,
         roles: [],
       });
+  }
+}
+
+function activeFlowHintHi(flow: WaRoleKind | WaVisitorPurpose, name: string): string | null {
+  switch (flow) {
+    case "parent":
+      return `*अभिभावक सेवा* — ${name}\n\nलिखें *KIDS* · *DUES* · *PAY* (GPay/UPI) · *PAY 1* · *RECEIPTS* · *HUMAN* · *MENU*`;
+    case "admission":
+    case "admission_lead":
+      return `*एडमिशन जानकारी* — ${name}\n\nलिखें *FEE* · *REGISTER* · *DOCS* · *STATUS* · *VISIT* · *HUMAN* · *MENU*`;
+    case "job":
+      return [
+        `*नौकरी* — ${name}`,
+        "",
+        "अगले संदेश में अपनी योग्यता और किस पद में रुचि है, लिखें।",
+        "स्कूल आपसे संपर्क करेगा। ऑफिस से बात के लिए *HUMAN* लिखें।",
+      ].join("\n");
+    case "transport":
+      return [
+        `*बस / परिवहन* — ${name}`,
+        "",
+        "रूट या पिकअप की जानकारी के लिए बच्चे का नाम और इलाका लिखें।",
+        "परिवहन कार्यालय: सोम–शनि, ऑफिस समय में। कॉल-बैक के लिए *HUMAN* लिखें।",
+      ].join("\n");
+    case "fee":
+      return [
+        `*फीस जानकारी* — ${name}`,
+        "",
+        "यदि आपका बच्चा पहले से पढ़ रहा है, तो *MENU* लिखें, फिर *PARENT* → *DUES* / *PAY* चुनें।",
+        "नए एडमिशन की फीस के लिए *ADMISSION* लिखें।",
+        "अकाउंट्स ऑफिस के लिए *HUMAN* लिखें।",
+      ].join("\n");
+    case "timing":
+      return [
+        `*स्कूल का समय* — ${TENANT.nameDisplay}`,
+        "",
+        "ऑफिस: सोम–शनि, आमतौर पर सुबह 8:00 से दोपहर 2:00 बजे तक (ऑफिस से पुष्टि कर लें)।",
+        `पता: ${TENANT.schoolAddress}`,
+        "और विकल्पों के लिए *MENU* लिखें।",
+      ].join("\n");
+    case "meeting":
+      return [
+        `*मिलना / स्कूल आना* — ${name}`,
+        "",
+        "अगले संदेश में अपनी सुविधा की तारीख और समय लिखें।",
+        "एडमिशन ऑफिस पुष्टि करेगा। तुरंत मदद के लिए *HUMAN* लिखें।",
+      ].join("\n");
+    case "other":
+      return `*सहायता* — ${name}\n\nकृपया अपना सवाल लिखें। स्टाफ से बात के लिए *HUMAN* लिखें।`;
+    default:
+      return null;
   }
 }
 

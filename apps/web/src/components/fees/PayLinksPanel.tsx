@@ -1,5 +1,6 @@
 "use client";
 
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { useEffect, useMemo, useState } from "react";
 import { formatInr } from "@/lib/fees";
 import {
@@ -96,6 +97,7 @@ export function PayLinksPanel({
       url,
       TENANT.nameDisplay,
       !!link.gatewayCheckoutUrl,
+      waTemplateLanguageFor(hh ?? {}) === "hi",
     );
     openWaMe(mobile, msg, undefined, { module: "fees" });
     flash(`WhatsApp opened for ${mobile}`);
