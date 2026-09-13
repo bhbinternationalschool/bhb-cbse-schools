@@ -725,6 +725,7 @@ export function TransportWorkspace() {
               studentName={rosterEditing.studentName}
               classGroupCode={rosterEditing.classGroupCode}
               home={rosterEditing.home}
+              canEdit={hasPermission(session, masters, "transport", "edit")}
               academicYearCode={session.academicYearCode}
               state={state}
               dues={rosterEditing.dues}
@@ -1671,6 +1672,7 @@ function RidersPanel(props: RidersPanelProps) {
           studentName={amending.studentName}
           classGroupCode={amending.classGroupCode}
           home={amending.home}
+          canEdit={props.canEdit}
           academicYearCode={academicYearCode}
           state={state}
           dues={amending.dues}

@@ -16,6 +16,7 @@ import { planTransportAmendment } from "@/lib/transportAmend";
 import { RiderShiftPicker } from "@/components/transport/RiderShiftPicker";
 import { NearestStopPicker } from "@/components/transport/NearestStopPicker";
 import { BoardingSuggestionCard } from "@/components/transport/BoardingSuggestionCard";
+import { StudentVillageStopPicker } from "@/components/transport/StudentVillageStopPicker";
 import type { ClassGroupCode } from "@/lib/masters";
 import { monthLabel } from "@/lib/transportStartMonth";
 
@@ -33,6 +34,7 @@ export function TransportAmendDialog({
   academicYearCode,
   classGroupCode,
   home,
+  canEdit,
   state,
   dues,
   onClose,
@@ -54,6 +56,14 @@ export function TransportAmendDialog({
    * instead of ranking stops around a place nobody established.
    */
   home: { lat: number; lng: number } | null;
+  /**
+   * Whether this clerk may change transport. The dialog's own fields have
+   * always assumed yes; it is passed explicitly because pinning a boarding
+   * point is a WRITE OF ITS OWN, saved the moment the pin is dropped and not
+   * when the move is saved. Offering that button to someone the server will
+   * refuse produces a 403 after the map has already been used.
+   */
+  canEdit: boolean;
   state: TransportState;
   /** The student's fee lines — the caller has the student and masters to build them. */
   dues: FeeDueLine[];
@@ -93,6 +103,22 @@ export function TransportAmendDialog({
     dropShiftId: assignment.dropShiftId ?? "",
   });
   const [error, setError] = useState<string | null>(null);
+  /**
+   * A boarding point pinned during this dialog.
+   *
+   * It is saved against the student immediately, but the `home` prop was read
+   * by the roster before the dialog opened and does not know about it. Holding
+   * it here is what makes the stop ranking answer the question the clerk just
+   * answered, instead of ranking around a village centroid a kilometre away.
+   */
+  const [pinnedHome, setPinnedHome] = useState<{ lat: number; lng: number } | null>(
+    null,
+  );
+  /** True while the pin map is open on top of this dialog — see the Escape guard. */
+  const [pinMapOpen, setPinMapOpen] = useState(false);
+
+  /** The best point known for this child right now: a fresh pin beats the roster's. */
+  const effectiveHome = pinnedHome ?? home;
 
   /**
    * Leave the dialog by whichever exit the clerk took.
@@ -112,11 +138,13 @@ export function TransportAmendDialog({
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") leave();
+      // The pin map is a modal of its own with its own Escape. Without this
+      // guard one press closes both, throwing away a half-filled move.
+      if (e.key === "Escape" && !pinMapOpen) leave();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [leave]);
+  }, [leave, pinMapOpen]);
 
   const currentMonth = new Date().toISOString().slice(0, 7);
   const check = useMemo(
@@ -245,7 +273,7 @@ export function TransportAmendDialog({
   return (
     // Base UI: focus trap, scroll lock, Escape. The hand-rolled overlay
     // had none of them, so Tab left the open card for the page behind it.
-    <Dialog open onOpenChange={(next) => !next && leave()}>
+    <Dialog open onOpenChange={(next) => !next && !pinMapOpen && leave()}>
       <DialogPopup aria-labelledby="transport-amend-title" className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-2xl">
         <div className="border-b border-[var(--border)] p-4 sm:p-5">
           <h2
@@ -327,13 +355,45 @@ export function TransportAmendDialog({
           )}
 
           {/*
+            WHY THE PIN COMES FIRST
+            A move usually begins with "this stop is wrong for where they
+            live". Everything below answers that by measuring from the child's
+            home — and for most riders that home is still a village centroid,
+            a kilometre of slack that makes both the ranking and the AI
+            suggestion refuse to choose between nearby stops.
+
+            So the clerk gets to fix the input before reading the output. The
+            same picker the new-assignment flow has: pinning was possible when
+            arranging transport and impossible when correcting it, which is
+            backwards — a correction is exactly when somebody has just learnt
+            where the child really waits.
+          */}
+          <StudentVillageStopPicker
+            studentId={assignment.studentId}
+            studentLabel={studentName}
+            canEdit={canEdit}
+            onMapOpenChange={setPinMapOpen}
+            onSaved={(point) => setPinnedHome(point)}
+          />
+
+          {/*
             The suggestion sits above the picker, not inside it. The picker
             ranks by straight line from whatever point the clerk chose; this
             measures the actual walk and weighs seats, siblings and observed
             halts. Different questions, and the cheap one stays available when
             the paid one is not worth asking.
+
+            The key remounts the card when a pin lands. A suggestion generated
+            from the village centroid is not an opinion about the pinned point,
+            and leaving it on screen would let the old answer look like the new
+            one — it carries its own "measured from" line saying which.
           */}
           <BoardingSuggestionCard
+            key={
+              pinnedHome
+                ? `${pinnedHome.lat.toFixed(5)},${pinnedHome.lng.toFixed(5)}`
+                : "home"
+            }
             studentId={assignment.studentId}
             academicYearCode={academicYearCode}
             stopRouteId={(id) =>
@@ -358,7 +418,7 @@ export function TransportAmendDialog({
           */}
           <NearestStopPicker
             state={state}
-            home={home}
+            home={effectiveHome}
             selectedStopId={stopId}
             exceptStudentId={assignment.studentId}
             academicYearCode={academicYearCode}
