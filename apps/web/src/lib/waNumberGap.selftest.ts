@@ -160,6 +160,94 @@ const KID = {
   assert.deepEqual(fixed.map((r) => r.studentName), ["Chirag Rao"]);
 }
 
+// --- one row per child, not one per session they were enrolled --------
+//
+// SIS keeps a row per child PER ACADEMIC YEAR and leaves every one of them
+// "active". On production that is 717 rows for 239 children, 83% of them
+// carrying two to four. The office reported the same name appearing three
+// times on this very screen.
+{
+  const sis = {
+    households: [
+      { id: "hh1", guardianName: "Promoted Parent", mobile: "9876500001" },
+      { id: "hh2", guardianName: "Left In 2024", mobile: "9876500002" },
+    ],
+    students: [
+      // One child, three sessions, three rows — all "active".
+      { id: "r1", admissionNo: "BHB-2023-24-1001", fullName: "Ishaan Rao",
+        householdId: "hh1", status: "active", academicYearCode: "2023-24" },
+      { id: "r2", admissionNo: "BHB-2023-24-1001", fullName: "Ishaan Rao",
+        householdId: "hh1", status: "active", academicYearCode: "2024-25" },
+      { id: "r3", admissionNo: "BHB-2023-24-1001", fullName: "Ishaan Rao",
+        householdId: "hh1", status: "active", academicYearCode: "2026-27" },
+      // A child whose last row is an old session: they have left.
+      { id: "r4", admissionNo: "BHB-2023-24-1002", fullName: "Old Scholar",
+        householdId: "hh2", status: "active", academicYearCode: "2024-25" },
+    ],
+  };
+  const verdicts: WaVerdictMap = {
+    "9876500001": { onWhatsApp: false },
+    "9876500002": { onWhatsApp: false },
+  };
+
+  const scoped = studentsNeedingWaNumber(sis, verdicts, {
+    academicYearCode: "2026-27",
+  });
+  assert.deepEqual(
+    scoped.map((r) => r.studentName),
+    ["Ishaan Rao"],
+    "the enrolled child once, and the leaver not at all",
+  );
+  assert.equal(waGapFamilyCount(scoped), 1);
+  assert.equal(
+    waGapHeadline(scoped),
+    "1 family is NOT on WhatsApp — 1 child affected",
+    "the headline counted every year's row before this",
+  );
+
+  // Even with no session given — an older caller, a test — a child is never
+  // listed twice. Forgetting to scope makes the list slightly too long, never
+  // visibly broken.
+  const unscoped = studentsNeedingWaNumber(sis, verdicts, {});
+  assert.deepEqual(
+    unscoped.map((r) => r.studentName).sort(),
+    ["Ishaan Rao", "Old Scholar"],
+    "one row per child even unscoped",
+  );
+
+  // A row with no year at all is an old record, not a wrong one. Dropping it
+  // would hide a real family from the screen that exists to find families
+  // nobody can reach.
+  const noYear = studentsNeedingWaNumber(
+    {
+      households: [{ id: "hh9", guardianName: "No Year", mobile: "9876500001" }],
+      students: [
+        { id: "x1", admissionNo: "BHB-OLD-1", fullName: "Undated Child",
+          householdId: "hh9", status: "active" },
+      ],
+    },
+    verdicts,
+    { academicYearCode: "2026-27" },
+  );
+  assert.deepEqual(noYear.map((r) => r.studentName), ["Undated Child"]);
+
+  // Siblings are still two rows — they are two children, not a duplicate.
+  const siblings = studentsNeedingWaNumber(
+    {
+      households: [{ id: "hh1", guardianName: "Two Kids", mobile: "9876500001" }],
+      students: [
+        { id: "a1", admissionNo: "BHB-1", fullName: "Elder", householdId: "hh1",
+          status: "active", academicYearCode: "2026-27" },
+        { id: "a2", admissionNo: "BHB-2", fullName: "Younger", householdId: "hh1",
+          status: "active", academicYearCode: "2026-27" },
+      ],
+    },
+    verdicts,
+    { academicYearCode: "2026-27" },
+  );
+  assert.equal(siblings.length, 2, "siblings are not duplicates");
+}
+
 // --- an empty roster says nothing, and neither does a missing one ------
 {
   assert.deepEqual(studentsNeedingWaNumber(null, {}), []);

@@ -82,6 +82,15 @@ type StudentLike = {
   status?: string;
   fatherMobile?: string;
   motherMobile?: string;
+  /**
+   * SIS keeps ONE ROW PER CHILD PER ACADEMIC YEAR and every one of them stays
+   * `status: "active"`. Filtering on status alone therefore returns the same
+   * child once for every year they have been enrolled — on this school's
+   * production data, 717 rows for 239 children, with 83% of children carrying
+   * two to four rows each. That is why the office saw the same name three
+   * times on a screen meant to list families once.
+   */
+  academicYearCode?: string;
 };
 
 function verdictOf(
@@ -150,6 +159,68 @@ export function householdWaGap(
  * One row per STUDENT, not per family: the counter and the roster both work
  * child by child, and a clerk looking at Aarav should see Aarav's name.
  */
+/**
+ * One row per child, for the session the school is actually running.
+ *
+ * TWO THINGS THIS FIXES, AND THEY ARE DIFFERENT
+ *
+ * 1. WRONG YEAR. With `academicYearCode` given, a child with no row in that
+ *    session has left the school and is dropped. The office asking "whose
+ *    number is this?" is asking about families it teaches today.
+ *
+ * 2. REPEATED NAMES. Even with no session given — an older caller, a test —
+ *    the same child is never listed twice. The fallback keeps their NEWEST
+ *    row, because a child's contact details are most likely to be current
+ *    there. Collapsing regardless means forgetting to pass the session makes
+ *    the list slightly too long, never visibly broken.
+ *
+ * A row carrying no year at all is kept rather than dropped. It is an old
+ * record, not a wrong one, and dropping it would quietly hide a family from
+ * the very screen that exists to find families nobody can reach.
+ */
+function oneRowPerChild(
+  students: StudentLike[],
+  academicYearCode?: string,
+): StudentLike[] {
+  const scoped = academicYearCode
+    ? students.filter(
+        (s) => !s.academicYearCode || s.academicYearCode === academicYearCode,
+      )
+    : students;
+
+  const best = new Map<string, StudentLike>();
+  for (const s of scoped) {
+    // The key is the admission number AND the name, never the number alone.
+    // A child's identity across years is the number, but two rows sharing one
+    // number are not necessarily one child — an admission number typed twice
+    // is an ordinary office error, and merging those two children would HIDE
+    // one from the very screen that exists to find families nobody can reach.
+    // Requiring the name to agree as well means the worst case is a child
+    // listed twice, which is visible, rather than a child missing, which is
+    // not. Falling back to the row id would defeat the exercise entirely:
+    // every year's row has its own.
+    const name = (s.fullName || "").trim().toUpperCase();
+    const adm = (s.admissionNo || "").trim().toUpperCase();
+    const key = adm ? `${adm}::${name}` : `${s.householdId ?? ""}::${name}`;
+    const prev = best.get(key);
+    if (!prev) {
+      best.set(key, s);
+      continue;
+    }
+    // Prefer the requested session outright; otherwise the later year.
+    const prevYear = prev.academicYearCode ?? "";
+    const thisYear = s.academicYearCode ?? "";
+    if (academicYearCode) {
+      if (thisYear === academicYearCode && prevYear !== academicYearCode) {
+        best.set(key, s);
+      }
+    } else if (thisYear > prevYear) {
+      best.set(key, s);
+    }
+  }
+  return [...best.values()];
+}
+
 export function studentsNeedingWaNumber(
   sis: {
     students?: StudentLike[];
@@ -161,11 +232,21 @@ export function studentsNeedingWaNumber(
     classLabel?: (student: StudentLike) => string;
     /** Only these students (the counter scopes to one family). */
     studentIds?: string[];
+    /**
+     * The running session, e.g. "2026-27". Children with no row in it are a
+     * child who has left, and are dropped. Pass it from the signed-in
+     * session — every screen that lists families is asking about families
+     * the school currently teaches.
+     */
+    academicYearCode?: string;
   },
 ): WaGapStudent[] {
   if (!sis) return [];
-  const active = (sis.students ?? []).filter(
-    (s) => (s.status ?? "active") === "active" && !!s.householdId,
+  const active = oneRowPerChild(
+    (sis.students ?? []).filter(
+      (s) => (s.status ?? "active") === "active" && !!s.householdId,
+    ),
+    opts?.academicYearCode,
   );
   const wanted = opts?.studentIds ? new Set(opts.studentIds) : null;
   const byHousehold = new Map<string, StudentLike[]>();

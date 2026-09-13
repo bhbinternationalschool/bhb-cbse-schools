@@ -1024,6 +1024,10 @@ export function StudentsWorkspace() {
       <WaNumberGapBanner
         sis={state}
         masters={masters}
+        // The table below is filtered to this session; the banner must agree.
+        // It used to receive the whole roster and list a child once per year
+        // they had been enrolled.
+        academicYearCode={effectiveSession}
         onSaved={() => {
           setState(loadSis());
           setPanelTick((t) => t + 1);
