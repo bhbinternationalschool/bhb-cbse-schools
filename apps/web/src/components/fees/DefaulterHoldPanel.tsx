@@ -34,6 +34,11 @@ import {
 } from "@/lib/defaulterHoldPolicy";
 import type { HoldRound, RoundBlocker, RoundCounts } from "@/lib/defaulterHoldRound";
 import type { HoldCode, OverdueStage } from "@/lib/types";
+import {
+  ensureHoldDecisionsHydrated,
+  invalidateHoldDecisions,
+} from "@/lib/holdDecisionsCache";
+import type { StandingDecision } from "@/lib/holdResolve";
 
 const STAGES: OverdueStage[] = ["S0", "S1", "S2", "S3", "S4"];
 
@@ -68,6 +73,8 @@ export function DefaulterHoldPanel() {
   const [notice, setNotice] = useState("");
   const [allowReason, setAllowReason] = useState("");
   const [duesCacheAt, setDuesCacheAt] = useState<string | null>(null);
+  const [standing, setStanding] = useState<StandingDecision[] | null>(null);
+  const [liftReason, setLiftReason] = useState("");
 
   useEffect(() => {
     setSis(loadSis());
@@ -239,7 +246,63 @@ export function DefaulterHoldPanel() {
       setRound(j.round as HoldRound);
       setCounts(j.counts as RoundCounts);
       setBlockers([]);
+      // The gates read a cached snapshot. Applying just changed what they
+      // should enforce, so drop it and read again rather than leaving this
+      // browser showing the state from before the press.
+      invalidateHoldDecisions();
+      await loadStanding();
       setNotice(j.message || "Round applied.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  const loadStanding = useCallback(async () => {
+    const snap = await ensureHoldDecisionsHydrated({ force: true });
+    if (!snap.known) {
+      // Never render an empty list as "nobody is blocked".
+      setStanding(null);
+      setError(
+        snap.error
+          ? `Could not read who is currently blocked: ${snap.error}`
+          : "Could not read who is currently blocked.",
+      );
+      return;
+    }
+    setStanding(snap.decisions);
+  }, []);
+
+  useEffect(() => {
+    void loadStanding();
+  }, [loadStanding]);
+
+  async function liftBlocks(studentIds: string[]) {
+    if (studentIds.length === 0) return;
+    if (!liftReason.trim()) {
+      setError("Lifting a block needs a reason — say why, for next month.");
+      return;
+    }
+    setBusy("lift");
+    setError("");
+    setNotice("");
+    try {
+      const r = await fetch("/api/fees/hold-decisions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          holdCode: gateCode,
+          studentIds,
+          reason: liftReason,
+        }),
+      });
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      invalidateHoldDecisions();
+      await loadStanding();
+      liftSelection.clear();
+      setNotice(`${j.released} block${j.released === 1 ? "" : "s"} lifted.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -272,6 +335,18 @@ export function DefaulterHoldPanel() {
   const sorted = sort.rows;
   const visibleKeys = sorted.map((r) => r.studentId);
   const selection = useRowSelection(visibleKeys);
+
+  // Everyone currently withheld from THIS service. Allows are kept in the
+  // table too — the office needs to see who was looked at and spared, not
+  // only who was stopped.
+  const standingHere = useMemo(
+    () => (standing ?? []).filter((d) => d.holdCode === gateCode),
+    [standing, gateCode],
+  );
+  const liftKeys = standingHere
+    .filter((d) => d.decision === "disallow")
+    .map((d) => d.studentId);
+  const liftSelection = useRowSelection(liftKeys);
 
   const isDraft = round?.status === "draft";
   const staleIds = new Set(stale.map((s) => s.studentId));
@@ -619,7 +694,97 @@ export function DefaulterHoldPanel() {
         ) : null}
       </ErpPanel>
 
-      {isDraft ? (
+      {/* ── who is withheld right now ────────────────────────── */}
+      <ErpPanel
+        title="Withheld right now"
+        description="What the gates are actually enforcing for this service today. Lifting a block takes effect immediately."
+      >
+        {standing === null ? (
+          <p className="text-sm text-amber-700 dark:text-amber-300">
+            Could not read the current blocks, so this list is not shown. It is
+            not a list of nobody.
+          </p>
+        ) : standingHere.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Nobody is withheld from {HOLD_LABELS[gateCode]}.
+          </p>
+        ) : (
+          <>
+            <label className="mb-2 block text-xs">
+              <span className="mb-1 block text-muted-foreground">
+                Reason, used when you lift a block
+              </span>
+              <input
+                className="erp-input w-full"
+                value={liftReason}
+                placeholder="Paid in full on 20 Sep"
+                onChange={(e) => setLiftReason(e.target.value)}
+              />
+            </label>
+            <ErpTableShell density="compact" exportAs="withheld-now">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr>
+                    <th className="w-8 px-2 py-2" />
+                    <th className="px-2 py-2 text-left">Child</th>
+                    <th className="px-2 py-2 text-left">Decision</th>
+                    <th className="px-2 py-2 text-left">Decided</th>
+                    <th className="px-2 py-2 text-left">By</th>
+                    <th className="px-2 py-2 text-left">Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {standingHere.map((d) => (
+                    <tr
+                      key={`${d.studentId}-${d.holdCode}`}
+                      className="border-t border-[var(--border)]"
+                    >
+                      <td className="px-2 py-2">
+                        {d.decision === "disallow" ? (
+                          <RowCheckbox
+                            checked={liftSelection.isSelected(d.studentId)}
+                            onChange={() => liftSelection.toggle(d.studentId)}
+                            label={`Select ${nameOf(d.studentId)}`}
+                          />
+                        ) : null}
+                      </td>
+                      <td className="px-2 py-2">{nameOf(d.studentId)}</td>
+                      <td className="px-2 py-2">
+                        {d.decision === "disallow" ? "Withheld" : "Let through"}
+                      </td>
+                      <td className="px-2 py-2">
+                        {new Date(d.decidedAt).toLocaleDateString()}
+                      </td>
+                      <td className="px-2 py-2">{d.decidedBy}</td>
+                      <td className="px-2 py-2 text-xs text-muted-foreground">
+                        {d.reason}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </ErpTableShell>
+          </>
+        )}
+      </ErpPanel>
+
+      {liftSelection.count > 0 && selection.count === 0 ? (
+        <BulkActionBar
+          selection={liftSelection}
+          noun="block"
+          actions={[
+            {
+              id: "lift",
+              label: "Lift the block",
+              disabled: busy === "lift",
+              title: "Needs the reason typed above",
+              onRun: (keys) => liftBlocks(keys),
+            },
+          ]}
+        />
+      ) : null}
+
+      {isDraft && selection.count > 0 ? (
         <BulkActionBar
           selection={selection}
           noun="child"
