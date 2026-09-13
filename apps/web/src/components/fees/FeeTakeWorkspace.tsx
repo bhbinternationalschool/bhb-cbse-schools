@@ -1,5 +1,6 @@
 "use client";
 
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { startTransition, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { IndianRupee } from "lucide-react";
@@ -1703,6 +1704,7 @@ export function FeeTakeWorkspace() {
         url,
         TENANT.nameDisplay,
         attached.attached,
+        waTemplateLanguageFor(hh ?? {}) === "hi",
       );
       openWaMe(mobile, msg, undefined, { module: "fees" });
       flash(

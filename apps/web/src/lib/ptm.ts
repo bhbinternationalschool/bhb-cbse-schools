@@ -501,7 +501,23 @@ export function composeWhatsAppPtmConfirm(input: {
   startAt: string;
   teacherName: string;
   roomOrLink: string;
+  hindi?: boolean;
 }): string {
+  if (input.hindi) {
+    return [
+      `*${TENANT.shortName}*`,
+      `अभिभावक-शिक्षक बैठक (PTM) बुक हो गई`,
+      "",
+      `${input.childName}`,
+      `${input.eventName} · ${input.date} ${input.startAt}`,
+      `किनसे मिलना है: ${input.teacherName}`,
+      input.roomOrLink ? `कहाँ: ${input.roomOrLink}` : "",
+      "",
+      "कृपया 5 मिनट पहले पहुँचें। धन्यवाद 🙏",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
   return [
     `*${TENANT.shortName}*`,
     `PTM booked`,
@@ -524,7 +540,23 @@ export function composeWhatsAppPtmReminder(input: {
   startAt: string;
   teacherName: string;
   roomOrLink: string;
+  hindi?: boolean;
 }): string {
+  if (input.hindi) {
+    return [
+      `*${TENANT.shortName}*`,
+      `PTM स्मरण`,
+      "",
+      `${input.childName} — कृपया समय पर पहुँचें`,
+      `${input.eventName} · ${input.date} ${input.startAt}`,
+      `किनसे मिलना है: ${input.teacherName}`,
+      input.roomOrLink ? `कहाँ: ${input.roomOrLink}` : "",
+      "",
+      "जल्द मिलते हैं 🙏",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
   return [
     `*${TENANT.shortName}*`,
     `PTM reminder`,

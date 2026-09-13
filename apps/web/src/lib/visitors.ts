@@ -9,6 +9,7 @@
  * guard lib/dutyRoster.ts's saveDutyRoster is missing.
  */
 
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { householdOf, householdWhatsApp, type SisState } from "@/lib/sis";
@@ -317,8 +318,11 @@ export async function notifyGatePassParent(
   const mobile = householdWhatsApp(household);
   if (!mobile) return { ok: false, error: "No WhatsApp number on file" };
   const body =
-    `Gate pass for ${student.fullName}: early pickup requested on ${pass.date}` +
-    `${pass.requestedPickupTime ? ` at ${pass.requestedPickupTime}` : ""}. Reason: ${pass.reason}.`;
+    waTemplateLanguageFor(household ?? {}) === "hi"
+      ? `${student.fullName} का गेट पास: ${pass.date} को जल्दी ले जाने का अनुरोध` +
+        `${pass.requestedPickupTime ? `, समय ${pass.requestedPickupTime}` : ""}। कारण: ${pass.reason}।`
+      : `Gate pass for ${student.fullName}: early pickup requested on ${pass.date}` +
+        `${pass.requestedPickupTime ? ` at ${pass.requestedPickupTime}` : ""}. Reason: ${pass.reason}.`;
   try {
     const res = await fetch("/api/wa/dispatch", {
       method: "POST",

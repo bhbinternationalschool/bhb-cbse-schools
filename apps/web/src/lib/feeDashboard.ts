@@ -2,6 +2,7 @@
  * Fee Take module dashboard — KPIs, trends, drill-down lists.
  */
 
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import type {
   DashboardChartPoint,
   DashboardKpi,
@@ -227,6 +228,8 @@ export function buildFeesDashboardModel(
     /** Carried for the row's WhatsApp action — see DashboardRowAction. */
     mobile: string;
     amountPaise: number;
+    /** "hi" | "en" — the family's language for the reminder. */
+    language: string;
   }[] = [];
   const active = sis.students.filter(
     (s) => s.status === "active" && s.academicYearCode === ay,
@@ -263,6 +266,7 @@ export function buildFeesDashboardModel(
       .reduce((max, d) => Math.max(max, daysBetween(d.dueOn, today)), 0);
     const household = sis.households.find((h) => h.id === student.householdId);
     defaulterRows.push({
+      language: waTemplateLanguageFor(household ?? {}),
       id: student.id,
       rank: "",
       name: student.fullName,

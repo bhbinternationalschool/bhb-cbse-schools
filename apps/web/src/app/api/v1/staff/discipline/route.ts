@@ -22,6 +22,7 @@ import {
 import { readModuleLocalState, writeModuleLocalState } from "@/lib/moduleLocalState.server";
 import { scopeAllows, staffSectionScope } from "@/lib/api/v1/staffScope";
 import { sendPushToSubject } from "@/lib/webPush.server";
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 
 export const runtime = "nodejs";
 
@@ -182,8 +183,16 @@ export async function POST(request: Request) {
 
     let parentNotified = false;
     if (body.notifyParent && student.householdId) {
+      const hh = sis.households.find((h) => h.id === student.householdId);
+      const hindi = waTemplateLanguageFor(hh ?? {}) === "hi";
       const r = await sendPushToSubject("parent", student.householdId, {
-        title: points >= 0 ? `Well done, ${student.fullName}` : `A note from school about ${student.fullName}`,
+        title: hindi
+          ? points >= 0
+            ? `शाबाश, ${student.fullName} 👏`
+            : `${student.fullName} के बारे में स्कूल से एक सूचना`
+          : points >= 0
+            ? `Well done, ${student.fullName}`
+            : `A note from school about ${student.fullName}`,
         body: `${disciplineCategoryLabel(category)} · ${date}: ${description.slice(0, 140)}`,
         url: `/profile?studentId=${encodeURIComponent(student.id)}`,
         data: { kind: "discipline", studentId: student.id, incidentId: incident.id },

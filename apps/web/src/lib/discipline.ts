@@ -13,6 +13,7 @@
  * calls assertModulePermission — the actual server/session-enforced check.
  */
 
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { householdOf, householdWhatsApp, type SisState } from "@/lib/sis";
@@ -294,7 +295,11 @@ export async function notifyDisciplineParent(
   const household = householdOf(sis, student.householdId);
   const mobile = householdWhatsApp(household);
   if (!mobile) return { ok: false, error: "No WhatsApp number on file" };
-  const body = `Discipline note for ${student.fullName}: ${disciplineCategoryLabel(incident.category)} on ${incident.date}. ${incident.description}`.trim();
+  const body = (
+    waTemplateLanguageFor(household ?? {}) === "hi"
+      ? `${student.fullName} के बारे में अनुशासन सूचना: ${disciplineCategoryLabel(incident.category)}, ${incident.date}। ${incident.description}`
+      : `Discipline note for ${student.fullName}: ${disciplineCategoryLabel(incident.category)} on ${incident.date}. ${incident.description}`
+  ).trim();
   try {
     const res = await fetch("/api/wa/dispatch", {
       method: "POST",

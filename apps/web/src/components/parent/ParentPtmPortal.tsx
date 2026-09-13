@@ -1,5 +1,6 @@
 "use client";
 
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { useEffect, useMemo, useState } from "react";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
 import {
@@ -135,6 +136,7 @@ export function ParentPtmPortal({
     const mobile = householdWhatsApp(household);
     if (slot && evt && mobile.replace(/\D/g, "").length >= 10) {
       const msg = composeWhatsAppPtmConfirm({
+        hindi: waTemplateLanguageFor(household ?? {}) === "hi",
         childName: child.fullName,
         eventName: evt.name,
         date: evt.date,
@@ -164,6 +166,7 @@ export function ParentPtmPortal({
     const slot = ptm.slots.find((s) => s.id === booking.slotId);
     if (!slot) return;
     const msg = composeWhatsAppPtmConfirm({
+      hindi: waTemplateLanguageFor(household ?? {}) === "hi",
       childName: child.fullName,
       eventName: selectedEvent.name,
       date: selectedEvent.date,

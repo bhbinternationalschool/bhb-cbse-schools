@@ -1,5 +1,6 @@
 "use client";
 
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { useMemo, useState } from "react";
 import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import {
@@ -133,6 +134,7 @@ function CreatePlanPanel({
         studentName: row.fullName,
         classLabel: row.classLabel,
         plan: result.plan,
+        hindi: waTemplateLanguageFor(householdOf(sis, row.householdId) ?? {}) === "hi",
       });
       if (mobile && isValidMobile(mobile)) {
         openWaMe(mobile, msg, undefined, { module: "fees" });
@@ -351,6 +353,7 @@ function ActivePlanPanel({
       studentName: row.fullName,
       classLabel: row.classLabel,
       plan,
+      hindi: waTemplateLanguageFor(householdOf(sis, row.householdId) ?? {}) === "hi",
     });
     if (mobile && isValidMobile(mobile)) {
       openWaMe(mobile, msg, undefined, { module: "fees" });

@@ -170,7 +170,23 @@ export function listOpenParentMeetings(
     .sort((a, b) => a.scheduledOn.localeCompare(b.scheduledOn));
 }
 
-export function composeParentMeetingInvite(m: FeeRecoveryMeeting): string {
+export function composeParentMeetingInvite(m: FeeRecoveryMeeting, hindi = false): string {
+  if (hindi) {
+    return [
+      `*${TENANT.nameDisplay}*`,
+      `बकाया फीस के संबंध में मुलाक़ात`,
+      "",
+      `छात्र: ${m.studentName}${m.classLabel ? ` (${m.classLabel})` : ""}`,
+      m.admissionNo ? `प्रवेश संख्या: ${m.admissionNo}` : "",
+      `बकाया: *${formatInr(m.amountPaise)}* · ${m.overdueDays} दिन`,
+      `कृपया *${m.scheduledOn}* को स्कूल ऑफिस आकर मिलें`,
+      m.note ? `\n${m.note}` : "",
+      "",
+      "कृपया आने की पुष्टि करें। धन्यवाद 🙏",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
   return [
     `*${TENANT.nameDisplay}*`,
     `Fee recovery meeting`,

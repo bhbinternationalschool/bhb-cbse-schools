@@ -7,6 +7,8 @@ import { promises as fs } from "fs";
 import path from "path";
 import {
   ADMISSION_SOURCE_LABELS,
+  ADMISSION_SOURCE_LABELS_HI,
+  stageLabelForBotHi,
   composeAdmissionOffer,
   composeAdmissionRegisterStep,
   detectCrmBotIntent,
@@ -18,6 +20,7 @@ import { TENANT } from "@/lib/types";
 import { sendWhatsAppText, waNormalizeLocal10 } from "@/lib/waSend";
 import { generateTutorText } from "@/lib/aiLlm.server";
 import { answerAdmissionsQuestion } from "@/lib/admissionsKb.server";
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 
 export type WaCrmBotChannel = "whatsapp";
 
@@ -246,12 +249,13 @@ async function tryAiFallbackReply(
     applicationNo: string;
     stageLabel: string;
   } | null,
+  hindi = false,
 ): Promise<string | null> {
   const system = `You are a WhatsApp assistant for prospective-parent admissions enquiries at ${TENANT.nameDisplay}.
 You may ONLY discuss the enquiry record given below (child's name, enquiry number, stage/status, next steps) and share the public registration link.
 You do NOT know this school's fees, admission dates, seat availability, curriculum, medium of instruction, transport, uniform, or any other policy or factual detail — even if it seems like common knowledge for a school, do not state it, confirm it, or guess at it.
 For ANY question outside the enquiry record above, reply that you don't have that information and to reply *HUMAN* to talk to the admissions office — do not attempt to answer it a different way.
-Keep the reply under 300 characters, warm and simple, plain text (no markdown headers).`;
+Keep the reply under 300 characters, warm and simple, plain text (no markdown headers), in ${hindi ? "simple Hindi (Devanagari script)" : "simple English"}.`;
 
   const userMessage = `Enquiry on file: ${
     lead
@@ -368,14 +372,23 @@ export async function handleWaCrmBotInbound(opts: {
         .sort((a, b) => (a.leadDate || "").localeCompare(b.leadDate || ""))
     : [];
 
+  // The family's own language if the enquiry recorded one, else the school's
+  // default (Hindi). A parent who writes in Devanagari is answered in Hindi
+  // whatever the record says.
+  const hindi =
+    /[\u0900-\u097F]/.test(text) ||
+    waTemplateLanguageFor({ preferredLanguage: leadRow?.preferredLanguage }) === "hi";
+
   const leadCtx = leadRow
     ? {
         childName: leadRow.childName,
         enquiryNo: leadRow.enquiryNo,
         applicationNo: leadRow.applicationNo,
-        stageLabel: stageLabel(leadRow.stage),
+        stageLabel: hindi ? stageLabelForBotHi(leadRow.stage) : stageLabel(leadRow.stage),
         enquiryDate: familyLeads[0]?.leadDate || leadRow.leadDate,
-        sourceLabel: ADMISSION_SOURCE_LABELS[leadRow.source] || "Enquiry",
+        sourceLabel: hindi
+          ? ADMISSION_SOURCE_LABELS_HI[leadRow.source] || "पूछताछ"
+          : ADMISSION_SOURCE_LABELS[leadRow.source] || "Enquiry",
         feeAmountLabel:
           leadRow.registrationFeeAmountPaise > 0
             ? `₹${(leadRow.registrationFeeAmountPaise / 100).toLocaleString("en-IN")}`
@@ -388,14 +401,15 @@ export async function handleWaCrmBotInbound(opts: {
   const bot = replyCrmBotIntent(intent, {
     registerUrl,
     lead: leadCtx,
+    hindi,
   });
   let replyText = bot.text;
 
   // "YES" / "NO" only mean admission right after we asked — otherwise
   // they are just words in a sentence and the normal matcher handles them.
-  const answer = /^(yes|y|haan|haa|ha|ok|okay|sure)\b/i.test(text)
+  const answer = /^(yes|y|haan|haa|ha|ok|okay|sure)\b|^(हाँ|हां|हा|जी हाँ|ठीक है)/i.test(text)
     ? "yes"
-    : /^(no|nahi|nahin|not now|later)\b/i.test(text)
+    : /^(no|nahi|nahin|not now|later)\b|^(नहीं|नही|अभी नहीं)/i.test(text)
       ? "no"
       : null;
   // Set once the admission offer (or its answer) has composed the reply,
@@ -404,16 +418,23 @@ export async function handleWaCrmBotInbound(opts: {
   if (answer && awaitingAdmission && leadCtx && intent === "unknown") {
     replyText =
       answer === "yes"
-        ? composeAdmissionRegisterStep(registerUrl, leadCtx.feeAmountLabel)
-        : [
-            "Understood — we have noted that for now.",
-            "",
-            "If you change your mind, reply *REGISTER* any time.",
-            "Reply *HUMAN* to talk to the admissions office.",
-          ].join("\n");
+        ? composeAdmissionRegisterStep(registerUrl, leadCtx.feeAmountLabel, hindi)
+        : hindi
+          ? [
+              "ठीक है — हमने अभी के लिए यह दर्ज कर लिया है।",
+              "",
+              "यदि आप मन बदलें, तो कभी भी *REGISTER* लिखें।",
+              "एडमिशन ऑफिस से बात करने के लिए *HUMAN* लिखें।",
+            ].join("\n")
+          : [
+              "Understood — we have noted that for now.",
+              "",
+              "If you change your mind, reply *REGISTER* any time.",
+              "Reply *HUMAN* to talk to the admissions office.",
+            ].join("\n");
     handledAdmissionOffer = true;
   } else if (isGreeting && awaitingAdmission && leadCtx && !opts.forceEscalate) {
-    replyText = composeAdmissionOffer(leadCtx, registerUrl);
+    replyText = composeAdmissionOffer(leadCtx, registerUrl, hindi);
     handledAdmissionOffer = true;
   }
   if (
@@ -422,18 +443,28 @@ export async function handleWaCrmBotInbound(opts: {
     !opts.forceEscalate &&
     !handledAdmissionOffer
   ) {
-    replyText =
-      "Reply *FEE* · *REGISTER* · *DOCS* · *STATUS* · *VISIT* · *HUMAN* — or *MENU* for the main school menu.";
+    replyText = hindi
+      ? "लिखें *FEE* · *REGISTER* · *DOCS* · *STATUS* · *VISIT* · *HUMAN* — या स्कूल के मुख्य मेनू के लिए *MENU*।"
+      : "Reply *FEE* · *REGISTER* · *DOCS* · *STATUS* · *VISIT* · *HUMAN* — or *MENU* for the main school menu.";
   }
   if (isGreeting && leadRow && !opts.fromUnified && !handledAdmissionOffer) {
-    replyText = [
-      `Namaste${opts.profileName ? ` ${opts.profileName}` : ""} — *${TENANT.nameDisplay} Admissions*.`,
-      leadRow.childName
-        ? `We have your enquiry for *${leadRow.childName}* (${stageLabel(leadRow.stage)}).`
-        : `We have enquiry *${leadRow.enquiryNo}* on file.`,
-      "",
-      "Reply: FEE · REGISTER · DOCS · STATUS · VISIT · HUMAN",
-    ].join("\n");
+    replyText = hindi
+      ? [
+          `नमस्ते${opts.profileName ? ` ${opts.profileName} जी` : ""} 🙏 — *${TENANT.nameDisplay} एडमिशन*।`,
+          leadRow.childName
+            ? `*${leadRow.childName}* के एडमिशन की आपकी पूछताछ दर्ज है (${stageLabelForBotHi(leadRow.stage)})।`
+            : `पूछताछ *${leadRow.enquiryNo}* दर्ज है।`,
+          "",
+          "लिखें: FEE · REGISTER · DOCS · STATUS · VISIT · HUMAN",
+        ].join("\n")
+      : [
+          `Namaste${opts.profileName ? ` ${opts.profileName}` : ""} — *${TENANT.nameDisplay} Admissions*.`,
+          leadRow.childName
+            ? `We have your enquiry for *${leadRow.childName}* (${stageLabel(leadRow.stage)}).`
+            : `We have enquiry *${leadRow.enquiryNo}* on file.`,
+          "",
+          "Reply: FEE · REGISTER · DOCS · STATUS · VISIT · HUMAN",
+        ].join("\n");
   }
   if (
     leadCreatedEnquiryNo &&
@@ -442,13 +473,21 @@ export async function handleWaCrmBotInbound(opts: {
     !isGreeting &&
     !handledAdmissionOffer
   ) {
-    replyText = [
-      `Thank you for contacting *${TENANT.nameDisplay} Admissions*.`,
-      `We created enquiry *${leadCreatedEnquiryNo}* for this WhatsApp number.`,
-      "",
-      "Reply: FEE · REGISTER · DOCS · STATUS · VISIT · HUMAN",
-      `Register online: ${publicRegisterUrl()}`,
-    ].join("\n");
+    replyText = hindi
+      ? [
+          `*${TENANT.nameDisplay} एडमिशन* से संपर्क करने के लिए धन्यवाद 🙏`,
+          `इस WhatsApp नंबर के लिए पूछताछ *${leadCreatedEnquiryNo}* दर्ज कर ली गई है।`,
+          "",
+          "लिखें: FEE · REGISTER · DOCS · STATUS · VISIT · HUMAN",
+          `ऑनलाइन रजिस्ट्रेशन: ${publicRegisterUrl()}`,
+        ].join("\n")
+      : [
+          `Thank you for contacting *${TENANT.nameDisplay} Admissions*.`,
+          `We created enquiry *${leadCreatedEnquiryNo}* for this WhatsApp number.`,
+          "",
+          "Reply: FEE · REGISTER · DOCS · STATUS · VISIT · HUMAN",
+          `Register online: ${publicRegisterUrl()}`,
+        ].join("\n");
   }
   if (leadRow?.guardianName && !thread.parentName) {
     thread = { ...thread, parentName: leadRow.guardianName };
@@ -468,13 +507,14 @@ export async function handleWaCrmBotInbound(opts: {
     const kb = await answerAdmissionsQuestion({
       question: text,
       channel: "wa",
+      language: hindi ? "hi" : "en",
       lead: leadCtx,
       registerUrl: publicRegisterUrl(),
     });
     if (kb.grounded) {
       replyText = kb.reply;
     } else if (intent === "unknown") {
-      const aiReply = await tryAiFallbackReply(text, leadCtx);
+      const aiReply = await tryAiFallbackReply(text, leadCtx, hindi);
       if (aiReply) replyText = aiReply;
     }
   }

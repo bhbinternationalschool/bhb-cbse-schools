@@ -9,6 +9,8 @@
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { sendWhatsAppInteractive } from "@/lib/waInteractive";
 import { sendWhatsAppText } from "@/lib/waSend";
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
+import { loadSis } from "@/lib/sis";
 import {
   buildEventRsvpButtonId,
   parseEventRsvpButtonId,
@@ -29,17 +31,35 @@ const CHOICE_LABEL: Record<RsvpChoice, string> = {
   maybe: "Maybe",
 };
 
+const CHOICE_LABEL_HI: Record<RsvpChoice, string> = {
+  yes: "हाँ, आएँगे",
+  no: "नहीं आ पाएँगे",
+  maybe: "शायद",
+};
+
+/** The family's language when the button reply only carries its id. */
+function householdHindi(householdId: string): boolean {
+  try {
+    const hh = loadSis().households.find((h) => h.id === householdId);
+    return waTemplateLanguageFor(hh ?? {}) === "hi";
+  } catch {
+    return waTemplateLanguageFor({}) === "hi";
+  }
+}
+
 /** Send the Yes/No/Maybe RSVP prompt for one household. */
 export async function sendEventRsvpPrompt(
   event: SchoolEvent,
-  household: { id: string; whatsappMobile: string },
+  household: { id: string; whatsappMobile: string; preferredLanguage?: string },
 ): Promise<{ ok: boolean; error?: string }> {
   if (!household.whatsappMobile) {
     return { ok: false, error: "Household has no WhatsApp number" };
   }
+  const hindi = waTemplateLanguageFor(household) === "hi";
+  const labels = hindi ? CHOICE_LABEL_HI : CHOICE_LABEL;
   const body = `${event.title}\n${formatEventDateRange(event)}${
     event.location ? ` · ${event.location}` : ""
-  }\n\nWill you be attending?`;
+  }\n\n${hindi ? "क्या आप आएँगे?" : "Will you be attending?"}`;
   const choices: RsvpChoice[] = ["yes", "no", "maybe"];
   const r = await sendWhatsAppInteractive({
     toMobile: household.whatsappMobile,
@@ -48,10 +68,12 @@ export async function sendEventRsvpPrompt(
       body,
       buttons: choices.map((choice) => ({
         id: buildEventRsvpButtonId(event.id, household.id, choice),
-        title: CHOICE_LABEL[choice].slice(0, 20),
+        title: labels[choice].slice(0, 20),
       })),
     },
-    textFallback: `${body}\n\nReply YES, NO or MAYBE.`,
+    textFallback: hindi
+      ? `${body}\n\nजवाब में YES (हाँ), NO (नहीं) या MAYBE (शायद) लिखें।`
+      : `${body}\n\nReply YES, NO or MAYBE.`,
   });
   return { ok: r.ok, error: r.error };
 }
@@ -103,7 +125,9 @@ export async function recordEventRsvpFromButtonId(
     return null;
   }
 
-  return `Thanks! We've recorded "${CHOICE_LABEL[choice]}" for ${title}.`;
+  return householdHindi(householdId)
+    ? `धन्यवाद 🙏 ${title} के लिए आपका जवाब "${CHOICE_LABEL_HI[choice]}" दर्ज कर लिया गया है।`
+    : `Thanks! We've recorded "${CHOICE_LABEL[choice]}" for ${title}.`;
 }
 
 /** Convenience wrapper used by the inbound webhook — records the RSVP and
