@@ -82,6 +82,7 @@ import {
   COMPLAINT_FLOW_SCREEN_ID,
 } from "@/lib/waComplaintsFlow";
 import { ensureMetaFlowPublished } from "@/lib/waFlowsMeta.server";
+import { SCHOOL_DEFAULT_WA_LANGUAGE } from "@/lib/householdPrefs";
 
 export type WaSisBotMsg = {
   id: string;
@@ -268,11 +269,14 @@ async function tryAiFallbackReply(
 
   // Family's language (Students → Family). Unset → mirror the parent's own
   // language; regional → draft in Hindi and render through Sarvam below.
-  const pref = householdLanguage(hh, "en");
+  const pref = householdLanguage(hh, SCHOOL_DEFAULT_WA_LANGUAGE);
   const sarvamTarget = sarvamTargetFor(hh);
   const langRule =
     pref.source === "default"
-      ? "Reply in the language the parent wrote in — Hindi (Devanagari) if they wrote in Hindi or Hinglish, otherwise simple English."
+      ? // Unset used to mirror the parent, so anyone typing in Roman letters
+        // ("fees kitna baaki hai") got English. They get Hindi now, unless
+        // they wrote in genuine English sentences.
+        "Reply in Hindi (Devanagari), formal register (आप). Only if the parent wrote in full English sentences, reply in simple English."
       : pref.language === "en"
         ? "Reply in simple English."
         : `Reply in Hindi (Devanagari), formal register (आप).${sarvamTarget ? ` (The family's language is ${languageLabel(pref.language)}; the reply will be translated from Hindi.)` : ""}`;
@@ -426,10 +430,13 @@ async function buildPayLinkReply(
   dues: FeeDueLine[],
   payLabel: { studentName: string; classLabel: string; studentId: string },
 ): Promise<{ text: string; escalate: boolean }> {
+  const hindi = waTemplateLanguageFor(hh) === "hi";
   if (dues.length === 0) {
     return {
       escalate: false,
-      text: "No open dues till the current running month. Reply *DUES* to refresh.",
+      text: hindi
+        ? "चालू महीने तक कोई फीस बकाया नहीं है। दोबारा देखने के लिए *DUES* लिखें।"
+        : "No open dues till the current running month. Reply *DUES* to refresh.",
     };
   }
 
@@ -501,6 +508,7 @@ async function buildPayLinkReply(
       code: link.code,
       studentHint: `${payLabel.studentName}${payLabel.classLabel ? ` (${payLabel.classLabel})` : ""}`,
       autoSettle,
+      hindi,
     }),
   };
 }
@@ -512,6 +520,9 @@ async function buildBotReply(
 ): Promise<{ text: string; escalate: boolean }> {
   const masters = loadMasters();
   const kids = childrenOf(hh);
+  // The family's language, Hindi when they have not chosen. Every reply below
+  // was English-only until 2026-09-13.
+  const hindi = waTemplateLanguageFor(hh) === "hi";
   const childLines: SisBotChildLine[] = kids.map((s) => ({
     name: s.fullName,
     classLabel: classLabelForStudent(s, masters),
@@ -521,7 +532,7 @@ async function buildBotReply(
 
   switch (intent) {
     case "kids":
-      return { escalate: false, text: composeSisKidsReply(childLines) };
+      return { escalate: false, text: composeSisKidsReply(childLines, hindi) };
     case "dues": {
       const dues = flattenOpenDues(hh.id);
       const dueLines: SisBotDueLine[] = dues.map((d) => ({
@@ -538,6 +549,7 @@ async function buildBotReply(
           dueLines,
           totalPaise: total,
           runningMonthOnly: true,
+          hindi,
         }),
       };
     }
@@ -600,14 +612,17 @@ async function buildBotReply(
         date: v.collectionDate,
         amountLabel: formatInr(v.totalPaise),
       }));
-      return { escalate: false, text: composeSisReceiptsReply(rows) };
+      return { escalate: false, text: composeSisReceiptsReply(rows, hindi) };
     }
     case "info":
-      return { escalate: false, text: composeSisInfoReply() };
+      return { escalate: false, text: composeSisInfoReply(hindi) };
     case "human":
-      return { escalate: true, text: composeSisHumanReply() };
+      return { escalate: true, text: composeSisHumanReply(hindi) };
     case "complaint":
-      return { escalate: false, text: "Opening the complaint form…" };
+      return {
+        escalate: false,
+        text: hindi ? "शिकायत का फॉर्म खोला जा रहा है…" : "Opening the complaint form…",
+      };
     case "bus": {
       const { busLocationReplyForHousehold } = await import(
         "@/lib/parentBusLocation.server"
@@ -626,9 +641,11 @@ async function buildBotReply(
         // BUS is offered only to households that ride, so the 130-odd
         // families without transport are not shown a keyword that can only
         // tell them they have no bus.
-        text: sisBotWelcomeText(kids.length > 1, await householdRidesTheBus(
-          kids.map((s) => ({ id: s.id, name: s.fullName })),
-        )),
+        text: sisBotWelcomeText(
+          kids.length > 1,
+          await householdRidesTheBus(kids.map((s) => ({ id: s.id, name: s.fullName }))),
+          hindi,
+        ),
       };
     }
   }
@@ -691,7 +708,9 @@ export async function handleWaSisBotInbound(opts: {
   const relay = parseTeacherWaText(text);
   if (relay) {
     const child = childrenOf(hh).find((s) => s.id === relay.studentId);
-    const hindi = (hh.preferredLanguage || "") !== "" && hh.preferredLanguage !== "en";
+    // Blank used to mean English here; the school writes in Hindi unless the
+    // family chose otherwise.
+    const hindi = waTemplateLanguageFor(hh) === "hi";
     if (!child) {
       return finishLanguageFlow(store, thread, parentMsg, hindi ? "यह बच्चा आपके परिवार में दर्ज नहीं है। कृपया ऐप से दोबारा भेजें।" : "That child is not on your family's record. Please send again from the app.");
     }
@@ -847,7 +866,7 @@ export async function handleWaSisBotInbound(opts: {
       if (asks > 2) {
         intent = "human";
         officeNote = `Parent asked for time but did not give an amount or a date after two asks. Last message: "${text.slice(0, 120)}"`;
-        bot = { escalate: true, text: composeSisHumanReply() };
+        bot = { escalate: true, text: composeSisHumanReply(waTemplateLanguageFor(hh) === "hi") };
       } else {
         nextPendingAsk = "ptp";
         nextPtpAsks = asks;
@@ -882,7 +901,9 @@ export async function handleWaSisBotInbound(opts: {
   let replyText = bot.text;
   if (opts.fromUnified && intent === "unknown") {
     replyText =
-      "Reply *KIDS* · *DUES* · *PAY* (GPay/UPI) · *PAY 1* · *RECEIPTS* · *HUMAN* — or *MENU* for the main school menu.";
+      waTemplateLanguageFor(hh) === "hi"
+        ? "*KIDS* · *DUES* · *PAY* (GPay/UPI) · *PAY 1* · *RECEIPTS* · *HUMAN* में से कोई शब्द लिखें — या स्कूल के मुख्य मेनू के लिए *MENU*।"
+        : "Reply *KIDS* · *DUES* · *PAY* (GPay/UPI) · *PAY 1* · *RECEIPTS* · *HUMAN* — or *MENU* for the main school menu.";
   }
   let escalateUngrounded = false;
   if (intent === "unknown" && !isGreeting && text.trim().length > 3) {

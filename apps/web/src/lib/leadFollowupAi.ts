@@ -102,7 +102,9 @@ export function followupLanguageLabel(code: string): string {
 export function followupDraftLanguage(code: string): { draftIn: "en" | "hi"; translateTo: HouseholdLanguage | null } {
   if (code === "hi" || code === "bho") return { draftIn: "hi", translateTo: null };
   if (code === "bn" || code === "ur" || code === "mai") return { draftIn: "hi", translateTo: code };
-  return { draftIn: "en", translateTo: null };
+  // Only English is English. Anything unrecognised is written in Hindi, the
+  // school's language, rather than silently in English.
+  return { draftIn: code === "en" ? "en" : "hi", translateTo: null };
 }
 
 export function buildFollowupSystemPrompt(opts: { tone: FollowupTone; draftIn: "en" | "hi" }): string {

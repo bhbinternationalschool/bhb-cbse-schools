@@ -55,7 +55,8 @@ export async function POST(req: Request) {
       ? Math.max(0, Math.round(body.daysSinceEnquiry as number))
       : 0,
     followUpSummary: (body.followUpSummary || "").trim().slice(0, 600),
-    language: body.language === "hi" ? "hi" : "en",
+    // The caller sent no language, so this was always English.
+    language: body.language === "en" ? "en" : "hi",
   });
 
   if (!result.ok) {

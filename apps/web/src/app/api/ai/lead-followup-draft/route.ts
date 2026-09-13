@@ -17,6 +17,7 @@ import { PROSPECT_AUDIENCE } from "@/lib/admissionsKb.server";
 import { sarvamConfigured, sarvamTranslate, type SarvamLang } from "@/lib/sarvam.server";
 import { HOUSEHOLD_LANGUAGES } from "@/lib/householdPrefs";
 import { TENANT } from "@/lib/types";
+import { SCHOOL_DEFAULT_WA_LANGUAGE } from "@/lib/householdPrefs";
 
 export const runtime = "nodejs";
 
@@ -52,7 +53,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
   const tone: FollowupTone = body.tone === "formal" || body.tone === "urgent" ? body.tone : "warm";
-  const language = HOUSEHOLD_LANGUAGES.some((l) => l.id === body.language) ? String(body.language) : "en";
+  const language = HOUSEHOLD_LANGUAGES.some((l) => l.id === body.language) ? String(body.language) : SCHOOL_DEFAULT_WA_LANGUAGE;
   const { draftIn, translateTo } = followupDraftLanguage(language);
 
   const facts = cleanFollowupFacts({

@@ -8,7 +8,7 @@
  * about progress before it becomes a problem".
  */
 
-import { householdLanguage, type HouseholdPrefsLike } from "@/lib/householdPrefs";
+import { householdLanguage, type HouseholdPrefsLike, SCHOOL_DEFAULT_WA_LANGUAGE } from "@/lib/householdPrefs";
 
 export function retentionOutreachText(opts: {
   schoolName: string;
@@ -19,7 +19,7 @@ export function retentionOutreachText(opts: {
   teacherName: string;
   household: HouseholdPrefsLike;
 }): { text: string; language: string } {
-  const { language } = householdLanguage(opts.household, "en");
+  const { language } = householdLanguage(opts.household, SCHOOL_DEFAULT_WA_LANGUAGE);
   const parent = opts.parentName || (language === "en" ? "Parent" : "अभिभावक");
   if (language === "hi" || language === "bho" || language === "mai") {
     return {

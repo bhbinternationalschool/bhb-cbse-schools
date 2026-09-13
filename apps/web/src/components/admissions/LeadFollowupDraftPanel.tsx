@@ -29,6 +29,7 @@ import {
 } from "@/lib/leadFollowupAi";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { openWaMe } from "@/lib/waMe";
+import { SCHOOL_DEFAULT_WA_LANGUAGE } from "@/lib/householdPrefs";
 
 type Result = {
   draft: LeadFollowupDraft;
@@ -56,7 +57,7 @@ export function LeadFollowupDraftPanel(props: {
 }) {
   const { lead } = props;
   const [tone, setTone] = useState<FollowupTone>("warm");
-  const [language, setLanguage] = useState<string>(lead.preferredLanguage || "en");
+  const [language, setLanguage] = useState<string>(lead.preferredLanguage || SCHOOL_DEFAULT_WA_LANGUAGE);
   const [note, setNote] = useState("");
   const [channel, setChannel] = useState<FollowupChannel>("whatsapp");
   const [busy, setBusy] = useState(false);
@@ -100,7 +101,7 @@ export function LeadFollowupDraftPanel(props: {
 
   useEffect(() => {
     setRes(null);
-    setLanguage(lead.preferredLanguage || "en");
+    setLanguage(lead.preferredLanguage || SCHOOL_DEFAULT_WA_LANGUAGE);
   }, [lead.id, lead.preferredLanguage]);
 
   async function draft() {

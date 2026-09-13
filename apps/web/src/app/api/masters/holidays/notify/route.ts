@@ -18,6 +18,7 @@ import { fetchServerBlob } from "@/lib/serverBlob";
 import { TENANT } from "@/lib/types";
 import { listApprovedTemplates, normalizeWaTemplatesState, type WaTemplatesState } from "@/lib/waTemplates";
 import { POST as broadcastPost } from "@/app/api/v1/owner/broadcast/route";
+import { SCHOOL_DEFAULT_WA_LANGUAGE } from "@/lib/householdPrefs";
 
 export const runtime = "nodejs";
 
@@ -72,7 +73,9 @@ export async function POST(req: Request) {
   try {
     const { state: raw } = await fetchServerBlob<WaTemplatesState>("wa_templates_state");
     const approved = listApprovedTemplates(normalizeWaTemplatesState(raw)).filter((t) => t.familyKey === notice.family);
-    const tpl = approved.find((t) => t.language === "en") ?? approved[0];
+    // One template for the whole school, so it is the school's language: Hindi.
+    // It picked English, which went to all 200 families.
+    const tpl = approved.find((t) => t.language === SCHOOL_DEFAULT_WA_LANGUAGE) ?? approved[0];
     if (tpl) {
       template = {
         name: tpl.metaName,
