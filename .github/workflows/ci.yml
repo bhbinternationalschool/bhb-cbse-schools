@@ -313,6 +313,7 @@ jobs:
           npm run test:lead-timeline
           npm run test:ledger
           npm run test:voucher-filter
+          npm run test:voucher-amend
           npm run test:lesson-plan-ai
           npm run test:marketing-content-ai
           npm run test:module-filters

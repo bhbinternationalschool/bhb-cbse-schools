@@ -25,6 +25,11 @@ import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import {
+  AmendVoucherDialog,
+  VoidVoucherDialog,
+  type PartyRow,
+} from "@/components/accounts/VoucherAmendDialogs";
+import {
   childCodesByParent,
   headGaps,
   type ChartAccount,
@@ -81,6 +86,9 @@ export function VoucherBrowserPanel({ canEdit }: { canEdit: boolean }) {
   const [error, setError] = useState("");
   const [page, setPage] = useState(0);
   const [fixing, setFixing] = useState<VoucherFacts | null>(null);
+  const [amending, setAmending] = useState<VoucherFacts | null>(null);
+  const [voiding, setVoiding] = useState<VoucherFacts | null>(null);
+  const [parties, setParties] = useState<PartyRow[]>([]);
   const [notice, setNotice] = useState("");
 
   // The draft is what the operator is typing; `applied` is what was searched.
@@ -103,8 +111,12 @@ export function VoucherBrowserPanel({ canEdit }: { canEdit: boolean }) {
 
   useEffect(() => {
     void (async () => {
-      const r = await ledgerApi<{ ok: boolean; accounts?: ChartRow[] }>({ action: "accounts" });
-      setChart(r.accounts ?? []);
+      const [a, p] = await Promise.all([
+        ledgerApi<{ ok: boolean; accounts?: ChartRow[] }>({ action: "accounts" }),
+        ledgerApi<{ ok: boolean; parties?: PartyRow[] }>({ action: "parties" }),
+      ]);
+      setChart(a.accounts ?? []);
+      setParties(p.parties ?? []);
     })();
   }, []);
 
@@ -413,8 +425,25 @@ export function VoucherBrowserPanel({ canEdit }: { canEdit: boolean }) {
                           hidden: (x) => !canEdit || x.reversed,
                         },
                         {
+                          id: "amend",
+                          label: "Change it…",
+                          onSelect: (x) => setAmending(x),
+                          // A reversal is the record of a void; rewriting one
+                          // would leave the original explained by nothing.
+                          hidden: (x) => !canEdit || x.reversed || x.isReversal,
+                        },
+                        {
+                          id: "void",
+                          label: "Void it…",
+                          tone: "danger",
+                          separatorAbove: true,
+                          onSelect: (x) => setVoiding(x),
+                          hidden: (x) => !canEdit || x.reversed || x.isReversal,
+                        },
+                        {
                           id: "copy",
                           label: "Copy voucher number",
+                          separatorAbove: true,
                           onSelect: (x) => void navigator.clipboard.writeText(x.voucherNo),
                         },
                       ]}
@@ -456,6 +485,32 @@ export function VoucherBrowserPanel({ canEdit }: { canEdit: boolean }) {
             Page {page + 1} of {Math.ceil(total / PAGE)}
           </span>
         </div>
+      ) : null}
+
+      {amending ? (
+        <AmendVoucherDialog
+          voucher={amending}
+          chart={chart}
+          parties={parties}
+          onClose={() => setAmending(null)}
+          onDone={(msg) => {
+            setAmending(null);
+            setNotice(msg);
+            void search(applied, page * PAGE);
+          }}
+        />
+      ) : null}
+
+      {voiding ? (
+        <VoidVoucherDialog
+          voucher={voiding}
+          onClose={() => setVoiding(null)}
+          onDone={(msg) => {
+            setVoiding(null);
+            setNotice(msg);
+            void search(applied, page * PAGE);
+          }}
+        />
       ) : null}
 
       {fixing ? (

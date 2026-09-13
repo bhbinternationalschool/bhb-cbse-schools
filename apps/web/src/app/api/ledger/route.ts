@@ -65,6 +65,9 @@ import {
   accountStatement,
   ledgerSearchVouchers,
   ledgerReclassifyHead,
+  ledgerVoidVoucher,
+  ledgerAmendVoucher,
+  ledgerListParties,
   balanceSheetReport,
   caYearEndPack,
   incomeExpenditureReport,
@@ -81,6 +84,7 @@ import {
   unmatch,
 } from "@/lib/ledger/reconcile.server";
 import type { VoucherFilter } from "@/lib/ledger/voucherFilter";
+import type { AmendLine } from "@/lib/ledger/voucherAmend";
 import type { LedgerVoucherInput } from "@/lib/ledger/types";
 
 export const runtime = "nodejs";
@@ -157,6 +161,16 @@ type PostBody =
       limit?: number;
       offset?: number;
     }
+  | { action: "parties" }
+  | { action: "void-voucher"; voucherId: string; reason: string }
+  | {
+      action: "amend-voucher";
+      voucherId: string;
+      lines: AmendLine[];
+      date: string;
+      narration: string;
+      reason: string;
+    }
   | {
       action: "reclassify-head";
       voucherId: string;
@@ -209,6 +223,11 @@ export async function POST(req: Request) {
     body.action === "lock" ||
     body.action === "close-year" ||
     body.action === "open-balances" ||
+    // Undoing or rewriting something already posted is a decision about the
+    // book, not data entry — the same class as locking a period.
+    body.action === "void-voucher" ||
+    body.action === "amend-voucher" ||
+    body.action === "reverse" ||
     // Projection writes vouchers for every desk record it can see. It is
     // idempotent and safe to repeat, but it is still a bulk write to the book.
     body.action === "project" ||
@@ -227,6 +246,7 @@ export async function POST(req: Request) {
     "receipts-payments",
     "account-statement",
     "search-vouchers",
+    "parties",
     "ca-pack",
     "reconcile",
     "parity",
@@ -389,6 +409,36 @@ export async function POST(req: Request) {
         filter: body.filter ?? {},
         limit: body.limit,
         offset: body.offset,
+      });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "parties": {
+      // Existing parties only — see ledgerListParties for why this is not a
+      // free-text box.
+      return NextResponse.json({ ok: true, parties: await ledgerListParties() });
+    }
+    case "void-voucher": {
+      // Reversal, not deletion — the database refuses to delete a posted
+      // line. Every balance follows from ledger_lines, so the mirror posting
+      // adjusts the trial balance, the statements, the party sub-ledger and
+      // the server book without anything else being told.
+      const res = await ledgerVoidVoucher({
+        voucherId: String(body.voucherId ?? ""),
+        reason: String(body.reason ?? ""),
+        actor,
+      });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "amend-voucher": {
+      // Void, then post the corrected voucher. The only way to change a head,
+      // a party, an amount or a date on something already in the book.
+      const res = await ledgerAmendVoucher({
+        voucherId: String(body.voucherId ?? ""),
+        lines: Array.isArray(body.lines) ? body.lines : [],
+        date: String(body.date ?? ""),
+        narration: String(body.narration ?? ""),
+        reason: String(body.reason ?? ""),
+        actor,
       });
       return NextResponse.json(res, { status: res.ok ? 200 : 422 });
     }

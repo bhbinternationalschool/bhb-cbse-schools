@@ -30,7 +30,8 @@ import {
   type VoucherFilter,
   type VoucherLineFacts,
 } from "@/lib/ledger/voucherFilter";
-import { ledgerListAccounts, ledgerPost } from "@/lib/ledger/ledger.server";
+import { ledgerListAccounts, ledgerPost, ledgerReverse } from "@/lib/ledger/ledger.server";
+import { planAmend, planVoid, type AmendLine } from "@/lib/ledger/voucherAmend";
 import {
   buildVendorStatement,
   type VendorLine,
@@ -853,4 +854,212 @@ export async function ledgerReclassifyHead(input: {
   });
   if (!res.ok) return { ok: false, error: res.error };
   return { ok: true, voucherNo: res.voucherNo };
+}
+
+/* ─── Voiding and amending a posted voucher ─────────────────── */
+
+/** The one voucher, with its lines, in the shape the planners want. */
+async function readVoucherFacts(voucherId: string): Promise<VoucherFacts | null> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return null;
+  const { data: vRow } = await ctx.sb
+    .from("ledger_vouchers")
+    .select("id, voucher_no, voucher_type, voucher_date, narration, created_by, source_type, reverses_voucher_id")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("id", voucherId)
+    .maybeSingle();
+  if (!vRow) return null;
+
+  const { data: lRows } = await ctx.sb
+    .from("ledger_lines")
+    .select("line_no, debit_paise, credit_paise, ledger_accounts!inner(code, name), ledger_parties(name)")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("voucher_id", voucherId)
+    .order("line_no", { ascending: true });
+
+  const { data: revRow } = await ctx.sb
+    .from("ledger_vouchers")
+    .select("id")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("reverses_voucher_id", voucherId)
+    .limit(1);
+
+  return {
+    id: String(vRow.id),
+    voucherNo: String(vRow.voucher_no ?? ""),
+    voucherType: String(vRow.voucher_type ?? ""),
+    date: String(vRow.voucher_date ?? ""),
+    narration: String(vRow.narration ?? ""),
+    createdBy: String(vRow.created_by ?? ""),
+    sourceType: String(vRow.source_type ?? ""),
+    reversed: (revRow ?? []).length > 0,
+    isReversal: !!vRow.reverses_voucher_id,
+    lines: ((lRows ?? []) as Record<string, unknown>[]).map((r) => {
+      const a = r.ledger_accounts as { code?: string; name?: string } | null;
+      const p = r.ledger_parties as { name?: string } | null;
+      return {
+        accountCode: String(a?.code ?? ""),
+        accountName: String(a?.name ?? ""),
+        partyName: String(p?.name ?? ""),
+        debitPaise: Number(r.debit_paise ?? 0),
+        creditPaise: Number(r.credit_paise ?? 0),
+      };
+    }),
+  };
+}
+
+/**
+ * Void a voucher.
+ *
+ * This is `ledger_reverse` with a reason the operator had to type. Nothing
+ * else needs adjusting: every balance in the system — trial balance, account
+ * statement, party sub-ledger, the server book's own position — is derived
+ * from `ledger_lines`, so the mirror posting moves all of them at once. The
+ * RPC is idempotent (a second press returns the reversal that already
+ * exists) and refuses to reverse a reversal.
+ */
+export async function ledgerVoidVoucher(input: {
+  voucherId: string;
+  reason: string;
+  actor: string;
+}): Promise<{ ok: boolean; error?: string; voucherNo?: string; alreadyVoided?: boolean }> {
+  const voucher = await readVoucherFacts(input.voucherId);
+  if (!voucher) return { ok: false, error: "No such voucher" };
+
+  const plan = planVoid({ voucher, reason: input.reason });
+  if (!plan.ok) return { ok: false, error: plan.error };
+
+  const res = await ledgerReverse({
+    voucherId: input.voucherId,
+    reason: plan.reason,
+    createdBy: input.actor,
+  });
+  if (!res.ok) return { ok: false, error: res.error };
+  return { ok: true, voucherNo: res.voucherNo, alreadyVoided: res.created === false };
+}
+
+/**
+ * Change a posted voucher: post the corrected one, then void the original.
+ *
+ * THE ORDER IS THE SAFETY
+ * These are two round trips and cannot be one transaction from here, so one
+ * of them can fail with the other already done. Voiding first would leave the
+ * book short a voucher — money simply gone — and it cannot be put back,
+ * because `ledger_reverse` refuses to reverse a reversal, so the void is not
+ * undoable. Posting first leaves the opposite failure: the amount counted
+ * twice for as long as it takes to reverse the replacement, which IS legal
+ * because a replacement is an ordinary voucher.
+ *
+ * Between "briefly double" and "silently missing", double is the one you can
+ * see and fix. So: validate, post, void, and on a failed void reverse the
+ * replacement to put the book back exactly as it was.
+ */
+export async function ledgerAmendVoucher(input: {
+  voucherId: string;
+  lines: AmendLine[];
+  date: string;
+  narration: string;
+  reason: string;
+  actor: string;
+}): Promise<{ ok: boolean; error?: string; voidedAs?: string; postedAs?: string }> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
+
+  const voucher = await readVoucherFacts(input.voucherId);
+  if (!voucher) return { ok: false, error: "No such voucher" };
+
+  const chart = await ledgerListAccounts();
+  const plan = planAmend({
+    voucher,
+    lines: input.lines,
+    date: input.date,
+    narration: input.narration,
+    reason: input.reason,
+    postableCodes: new Set(chart.map((a) => a.code)),
+  });
+  if (!plan.ok) return { ok: false, error: plan.error };
+
+  // 1. The replacement. A locked period or an unknown head is refused here,
+  //    while the original is still untouched.
+  const posted = await ledgerPost({
+    voucherType: voucher.voucherType as never,
+    date: input.date,
+    narration: plan.narration,
+    // Idempotent: a retry after a network timeout lands once rather than
+    // posting the correction twice.
+    sourceType: "voucher_amend",
+    sourceId: `${input.voucherId}:${input.date}`,
+    createdBy: input.actor,
+    lines: plan.lines.map((l) => ({
+      accountCode: l.accountCode,
+      debitPaise: l.debitPaise,
+      creditPaise: l.creditPaise,
+      narration: l.narration ?? "",
+      party: l.party
+        ? { kind: l.party.kind as never, externalId: l.party.externalId, name: l.party.name }
+        : undefined,
+    })),
+  });
+  if (!posted.ok) {
+    return { ok: false, error: `Nothing was changed — the replacement was refused: ${posted.error}` };
+  }
+
+  // 2. Void the original.
+  const voided = await ledgerReverse({
+    voucherId: input.voucherId,
+    reason: plan.voidReason,
+    createdBy: input.actor,
+  });
+
+  if (!voided.ok) {
+    // Take the replacement back out, so the book is where it started.
+    const undo = posted.voucherId
+      ? await ledgerReverse({
+          voucherId: posted.voucherId,
+          reason: `${voucher.voucherNo} could not be voided, so its replacement is withdrawn`,
+          createdBy: input.actor,
+        })
+      : null;
+    if (undo?.ok) {
+      return {
+        ok: false,
+        error: `Nothing was changed — ${voucher.voucherNo} could not be voided (${voided.error}), so the replacement was withdrawn.`,
+      };
+    }
+    return {
+      ok: false,
+      error:
+        `${voucher.voucherNo} could not be voided (${voided.error}) and the replacement ${posted.voucherNo} could not be ` +
+        `withdrawn either. BOTH are now in the book and this amount is counted twice — void ${posted.voucherNo} by hand.`,
+    };
+  }
+
+  return { ok: true, voidedAs: voided.voucherNo, postedAs: posted.voucherNo };
+}
+
+export async function ledgerListParties(): Promise<
+  { kind: string; externalId: string; name: string }[]
+> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return [];
+  const out: { kind: string; externalId: string; name: string }[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await ctx.sb
+      .from("ledger_parties")
+      .select("kind, external_id, name")
+      .eq("tenant_id", ctx.tenantId)
+      .order("name", { ascending: true })
+      .range(from, from + 999);
+    if (error) break;
+    const rows = (data ?? []) as Record<string, unknown>[];
+    for (const r of rows) {
+      out.push({
+        kind: String(r.kind ?? ""),
+        externalId: String(r.external_id ?? ""),
+        name: String(r.name ?? ""),
+      });
+    }
+    if (rows.length < 1000) break;
+  }
+  return out;
 }
