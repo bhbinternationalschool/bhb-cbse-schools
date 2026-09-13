@@ -10,7 +10,8 @@ import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { loadSis, householdWhatsApp } from "@/lib/sis";
+import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
+import { loadSis, householdWhatsApp, studentsInSession} from "@/lib/sis";
 import { sendEventRsvpPrompt } from "@/lib/waEventsRsvp.server";
 import {
   normalizeEventKind,
@@ -259,9 +260,14 @@ export async function PATCH(req: Request) {
   await Promise.all([ensureSisHydratedServer(), ensureSchoolMirrorHydrated()]);
   const sis = loadSis();
   const classSet = new Set(event.classIds);
-  const targetStudents = sis.students.filter(
-    (s) => s.status === "active" && (classSet.size === 0 || classSet.has(s.classId)),
-  );
+  // Scoped to the running session. Unscoped, `classSet.has(s.classId)`
+  // matched LAST year's class, so a "Class V picnic" reached families whose
+  // child is now in VI, and children who left years ago still carry an
+  // active row — a template charge each, to people with no child here.
+  const targetStudents = studentsInSession(
+    sis,
+    currentAcademicYearCode(loadMasters()),
+  ).filter((s) => classSet.size === 0 || classSet.has(s.classId));
   const householdIds = Array.from(new Set(targetStudents.map((s) => s.householdId)));
   const households = householdIds
     .map((id) => sis.households.find((h) => h.id === id))

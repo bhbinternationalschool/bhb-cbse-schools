@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { loadMasters, type MastersState } from "@/lib/masters";
-import { loadSis, type SisState, type SisStudent } from "@/lib/sis";
+import { loadMasters, type MastersState, currentAcademicYearCode} from "@/lib/masters";
+import { loadSis, type SisState, type SisStudent, studentsInSession} from "@/lib/sis";
 import {
   TAG_COLORS,
   createStudentTag,
@@ -52,7 +52,9 @@ export function StudentTagsPanel({
 
   const students = useMemo(() => {
     if (!sis || !masters) return [] as SisStudent[];
-    let rows = sis.students.filter((s) => s.status === "active");
+    // One row per child, this session — SIS keeps a row per child per year
+    // and marks them all active.
+    let rows = studentsInSession(sis, currentAcademicYearCode(masters));
     if (classId) {
       rows = rows.filter(
         (s) =>

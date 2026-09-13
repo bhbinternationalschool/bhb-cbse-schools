@@ -56,7 +56,7 @@ import {
   attachCashfreeToPaymentLink,
   shouldUseCashfreeCheckout,
 } from "@/lib/cashfree.server";
-import { loadSis, householdWhatsApp, type Household, type SisStudent } from "@/lib/sis";
+import { loadSis, householdWhatsApp, type Household, type SisStudent, childrenOfHousehold} from "@/lib/sis";
 import { TENANT } from "@/lib/types";
 import {
   sendWaFlowMessage,
@@ -185,8 +185,14 @@ export function isSisRegisteredMobile(fromWaId: string): boolean {
 }
 
 function childrenOf(hh: Household): SisStudent[] {
-  return loadSis().students.filter(
-    (s) => s.householdId === hh.id && s.status === "active",
+  // One row per child, this session. flattenOpenDues just below has always
+  // been scoped, with a comment warning that otherwise "the bot would quote a
+  // parent several times what they owe" — this list had the same fault and
+  // told a parent their one child three times, with three stale class labels.
+  return childrenOfHousehold(
+    loadSis(),
+    hh.id,
+    currentAcademicYearCode(loadMasters()),
   );
 }
 

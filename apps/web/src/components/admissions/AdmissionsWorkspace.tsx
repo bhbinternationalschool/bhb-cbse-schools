@@ -58,11 +58,11 @@ import {
   type GuardianRelation,
   type TransportInterest,
 } from "@/lib/admissions";
-import { listSessionYearOptions, loadMasters, type MastersState } from "@/lib/masters";
+import { listSessionYearOptions, loadMasters, type MastersState, currentAcademicYearCode} from "@/lib/masters";
 import { admissionDocumentHref, buildAdmissionDocumentDetails, pendingDocumentsForLead } from "@/lib/admissionDocumentLinks";
 import { leadConversionLikelihood } from "@/lib/admissionsAi";
 import { pushToast } from "@/components/shell/Toast";
-import { STUDENT_CATEGORIES, loadSis, type SisState } from "@/lib/sis";
+import { STUDENT_CATEGORIES, loadSis, type SisState, childrenOfHousehold} from "@/lib/sis";
 import {
   closeSuspectedLeadNotMatch,
   keepSuspectedLeadOpen,
@@ -3660,10 +3660,12 @@ function LeadDetail({
                 const h = sis.households.find(
                   (x) => x.id === lead.referredByHouseholdId,
                 );
-                const kids = sis.students.filter(
-                  (s) =>
-                    s.householdId === lead.referredByHouseholdId &&
-                    s.status === "active",
+                // One row per child, this session — "their wards" used to
+                // repeat a name once per year the child had been enrolled.
+                const kids = childrenOfHousehold(
+                  sis,
+                  lead.referredByHouseholdId,
+                  currentAcademicYearCode(),
                 );
                 return (
                   <p className="mt-0.5 text-[10px] text-[var(--muted)]">

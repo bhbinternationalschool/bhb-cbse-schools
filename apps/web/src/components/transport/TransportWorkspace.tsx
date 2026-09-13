@@ -1037,7 +1037,15 @@ function RidersPanel(props: RidersPanelProps) {
 
   const siblingGaps = useMemo(() => {
     if (!sis || !masters) return [];
-    const profiles = buildStudentTransportProfiles(sis, masters, state);
+    // Without the session this silently fell back to DEFAULT_AY while every
+    // other caller passes the year, so the sibling-gap card was built from a
+    // different roster than the rest of the screen.
+    const profiles = buildStudentTransportProfiles(
+      sis,
+      masters,
+      state,
+      academicYearCode,
+    );
     // The household carries a guardian name; the father's name lives on the
     // student. Prefer the guardian, fall back to any sibling's father.
     const labels = new Map(

@@ -375,6 +375,7 @@ jobs:
           npm run test:automation-approvals
           npm run test:automation-schedule
           npm run test:wa-number-gap
+          npm run test:session-scoped-students
           npm run test:student-attendance
           npm run test:student-homework
           npm run test:student-transport

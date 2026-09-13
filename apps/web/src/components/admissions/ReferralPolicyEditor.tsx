@@ -11,8 +11,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { AdmissionLead } from "@/lib/admissions";
-import { formatInr, loadMasters, type MastersState } from "@/lib/masters";
+import { formatInr, loadMasters, type MastersState, currentAcademicYearCode} from "@/lib/masters";
 import type { SisState } from "@/lib/sis";
+import { childrenOfHousehold } from "@/lib/sis";
 import { referralCodeFor } from "@/lib/referrals";
 import {
   awardReferralForLead,
@@ -70,9 +71,13 @@ export function ReferralPolicyEditor({
           referralCodeFor(h) === (lead.referralCode || "").trim().toUpperCase(),
       );
     if (!hh) return lead.referralCode || "—";
-    const kids = sis.students
-      .filter((s) => s.householdId === hh.id && s.status === "active")
-      .map((s) => s.fullName);
+    // One row per child: the unscoped filter inflated the "+N siblings"
+    // count by the number of years each child had been enrolled.
+    const kids = childrenOfHousehold(
+      sis,
+      hh.id,
+      currentAcademicYearCode(),
+    ).map((s) => s.fullName);
     return `${hh.guardianName || "Parent"}${kids.length ? ` (${kids[0]}${kids.length > 1 ? ` +${kids.length - 1}` : ""})` : ""}`;
   }
 

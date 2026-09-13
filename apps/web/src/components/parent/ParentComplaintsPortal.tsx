@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { resolveParentHousehold } from "@/lib/parentPortal";
-import { loadSis, type Household, type SisStudent } from "@/lib/sis";
+import { loadSis, type Household, type SisStudent, childrenOfHousehold} from "@/lib/sis";
+import { DEFAULT_AY } from "@/lib/masters";
 import { btn, field } from "@/components/ui/erp-ui";
 import {
   complaintCategoryLabel,
@@ -50,7 +51,8 @@ export function ParentComplaintsPortal({
       setChildren([]);
       return;
     }
-    setChildren(sis.students.filter((s) => s.householdId === hh.id && s.status === "active"));
+    // One row per child, this session — see childrenOfHousehold.
+    setChildren(childrenOfHousehold(sis, hh.id, DEFAULT_AY));
   }
 
   useEffect(() => {

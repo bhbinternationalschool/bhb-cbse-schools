@@ -20,7 +20,9 @@ import {
   normalizeClassUpgrade,
   type StudentTag,
   type ClassUpgradeRecord,
+  studentsInSession,
 } from "@/lib/sis";
+import { currentAcademicYearCode } from "@/lib/masters";
 import { sisDualWriteDbEnabled } from "@/lib/sisDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
@@ -1367,7 +1369,12 @@ export async function pushSisToDb(
     );
   }
 
-  const activeCount = students.filter((s) => s.status === "active").length;
+  // The number an operator reads to confirm a sync looks right, so it must be
+  // a headcount and not a row count: SIS keeps one row per child per session.
+  const activeCount = studentsInSession(
+    { students } as SisState,
+    currentAcademicYearCode(),
+  ).length;
   await sb.from("sis_sync_meta").upsert(
     {
       tenant_id: tenantId,

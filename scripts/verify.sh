@@ -277,6 +277,7 @@ SELFTESTS=(
   test:automation-approvals
   test:automation-schedule
   test:wa-number-gap
+  test:session-scoped-students
   test:student-attendance
   test:student-homework
   test:student-transport

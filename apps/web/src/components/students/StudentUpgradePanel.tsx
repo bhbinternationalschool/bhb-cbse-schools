@@ -10,12 +10,14 @@ import {
   resolveFeeGroupId,
   type FeeStudentType,
   type MastersState,
+  currentAcademicYearCode,
 } from "@/lib/masters";
 import {
   loadSis,
   studentTypeShort,
   type SisState,
   type SisStudent,
+  studentsInSession,
 } from "@/lib/sis";
 import {
   listClassUpgrades,
@@ -86,7 +88,9 @@ export function StudentUpgradePanel({
   const hits = useMemo(() => {
     if (!sis || !masters) return [] as SisStudent[];
     const q = query.trim().toLowerCase();
-    let rows = sis.students.filter((s) => s.status === "active");
+    // One row per child, this session — SIS keeps a row per child per year
+    // and marks them all active.
+    let rows = studentsInSession(sis, currentAcademicYearCode(masters));
     if (q) {
       rows = rows.filter(
         (s) =>

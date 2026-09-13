@@ -27,6 +27,7 @@ import {
   type SisState,
   type SisStudent,
   type StudentCategory,
+  studentsInSession,
 } from "@/lib/sis";
 
 export type UdiseStudentRow = {
@@ -684,9 +685,11 @@ export function parseUdiseStudentDetailsMatrix(
   return out;
 }
 
-function activeStudents(sis: SisState): SisStudent[] {
-  return sis.students.filter((s) => s.status === "active");
-}
+// `activeStudents` used to live here: `students.filter(s => s.status ===
+// "active")` with no session. It had no callers, which is the only reason it
+// never caused harm — SIS keeps one row per child per session and marks them
+// all active. Removed rather than left as a pattern for the next caller to
+// copy. Use `studentsInSession` from "@/lib/sis".
 
 /**
  * One record per child (by admission no) for matching. A promoted student has a
@@ -2329,9 +2332,11 @@ export function reconcileUdisePortalUpload(input: {
     if (!cleanPen(s.pen)) matchedButPlaceholderPen += 1;
   }
 
+  // The loop above already discards rows from another year (matchedButOtherYear);
+  // this half of the same reconciliation did not, so a DEPARTED child's PEN
+  // masked a genuine "PEN in the file but not in SIS" gap.
   const sisActivePens = new Set(
-    state.students
-      .filter((s) => s.status === "active")
+    studentsInSession(state, scope)
       .map((s) => cleanPen(s.pen))
       .filter(Boolean),
   );
