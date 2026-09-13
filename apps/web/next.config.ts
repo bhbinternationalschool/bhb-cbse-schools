@@ -3,6 +3,20 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // The withhold policy briefly lived at its own address, linked from nowhere.
+  // It is now a tab on the Defaulters page. Redirected here, at the routing
+  // layer, rather than with redirect() inside a page: the in-page version left
+  // a blank screen and a React removeChild error when reached by client-side
+  // navigation, because the page tore down mid-transition.
+  async redirects() {
+    return [
+      {
+        source: "/fees/defaulter-policy",
+        destination: "/fees/defaulters?tab=policy",
+        permanent: false,
+      },
+    ];
+  },
   transpilePackages: ["@bhb/time"],
   outputFileTracingRoot: path.join(__dirname, "../.."),
   // Lint is a dedicated CI job (.github/workflows/ci.yml) rather than a

@@ -42,10 +42,12 @@ import type { StandingDecision } from "@/lib/holdResolve";
 
 const STAGES: OverdueStage[] = ["S0", "S1", "S2", "S3", "S4"];
 
+// Short, because they sit in a narrow table cell and were cut off to
+// "Propose…" on a phone. The full meaning is spelt out once, under the table.
 const MODE_LABEL: Record<HoldGateMode, string> = {
-  off: "Not in use",
-  propose: "Propose — the office approves each round",
-  auto: "Automatic — withheld as soon as they qualify",
+  off: "Off",
+  propose: "Propose",
+  auto: "Automatic",
 };
 
 /** The two the school runs by approval, shown first because they are used. */
@@ -393,7 +395,7 @@ export function DefaulterHoldPanel() {
                         <td className="px-2 py-2">{HOLD_LABELS[code]}</td>
                         <td className="px-2 py-2">
                           <select
-                            className="erp-input w-full"
+                            className="erp-input w-full min-w-[7.5rem]"
                             value={g.mode}
                             onChange={(e) =>
                               patchGate(code, {
@@ -412,7 +414,7 @@ export function DefaulterHoldPanel() {
                         </td>
                         <td className="px-2 py-2">
                           <select
-                            className="erp-input"
+                            className="erp-input min-w-[8.5rem]"
                             value={g.fromStage}
                             disabled={g.mode === "off"}
                             onChange={(e) =>
@@ -468,6 +470,12 @@ export function DefaulterHoldPanel() {
             </ErpTableShell>
 
             <p className="mt-3 text-xs text-muted-foreground">
+              <strong>Off</strong> — not used. <strong>Propose</strong> — the
+              office builds a list and approves it; nobody is withheld until
+              then. <strong>Automatic</strong> — withheld the moment a child
+              qualifies, with no list.
+            </p>
+            <p className="mt-2 text-xs text-muted-foreground">
               The stage counts days late only. A child fifty rupees short for a
               fortnight reaches S3 Serious beside one owing forty thousand, so
               the money floor is what separates them — leave it at zero and it
