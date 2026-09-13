@@ -98,6 +98,7 @@ SELFTESTS=(
   test:wa-relay
   test:wa-unified-menus-hindi
   test:parent-messages-hindi
+  test:parent-bot-real-chats
   test:concession-review-ai
   test:collections-weekly-ai
   test:erp-ask
