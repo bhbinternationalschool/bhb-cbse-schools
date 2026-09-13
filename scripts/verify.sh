@@ -211,6 +211,7 @@ SELFTESTS=(
   test:lead-quality
   test:lead-timeline
   test:ledger
+  test:voucher-filter
   test:lesson-plan-ai
   test:marketing-content-ai
   test:module-filters

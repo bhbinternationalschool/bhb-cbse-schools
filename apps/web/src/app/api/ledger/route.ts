@@ -63,6 +63,8 @@ import {
   ledgerVendors,
   ledgerVendorStatement,
   accountStatement,
+  ledgerSearchVouchers,
+  ledgerReclassifyHead,
   balanceSheetReport,
   caYearEndPack,
   incomeExpenditureReport,
@@ -78,6 +80,7 @@ import {
   proposeChequeClearings,
   unmatch,
 } from "@/lib/ledger/reconcile.server";
+import type { VoucherFilter } from "@/lib/ledger/voucherFilter";
 import type { LedgerVoucherInput } from "@/lib/ledger/types";
 
 export const runtime = "nodejs";
@@ -148,6 +151,19 @@ type PostBody =
   | { action: "balance-sheet"; from: string; to: string }
   | { action: "receipts-payments"; from: string; to: string }
   | { action: "account-statement"; code: string; from: string; to: string }
+  | {
+      action: "search-vouchers";
+      filter?: VoucherFilter;
+      limit?: number;
+      offset?: number;
+    }
+  | {
+      action: "reclassify-head";
+      voucherId: string;
+      lineIndex: number;
+      toCode: string;
+      reason: string;
+    }
   | { action: "ca-pack"; fyCode: string; from: string; to: string; csv?: boolean }
   | { action: "anomalies"; asOf: string }
   | { action: "ageing"; asOf: string; side?: "payables" | "receivables" }
@@ -210,6 +226,7 @@ export async function POST(req: Request) {
     "balance-sheet",
     "receipts-payments",
     "account-statement",
+    "search-vouchers",
     "ca-pack",
     "reconcile",
     "parity",
@@ -362,6 +379,30 @@ export async function POST(req: Request) {
     }
     case "receipts-payments": {
       const res = await receiptsPaymentsReport({ from: body.from, to: body.to });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "search-vouchers": {
+      // Read-only. The book's own table shows the newest fifty by creation
+      // time, which cannot reach an import posted in one afternoon months
+      // after the dates it carries.
+      const res = await ledgerSearchVouchers({
+        filter: body.filter ?? {},
+        limit: body.limit,
+        offset: body.offset,
+      });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "reclassify-head": {
+      // Posts a journal moving one line to another head. Never edits the
+      // original: the book is append-only, so the mistake and the correction
+      // both stay on the record.
+      const res = await ledgerReclassifyHead({
+        voucherId: String(body.voucherId ?? ""),
+        lineIndex: Number(body.lineIndex ?? -1),
+        toCode: String(body.toCode ?? ""),
+        reason: String(body.reason ?? ""),
+        actor,
+      });
       return NextResponse.json(res, { status: res.ok ? 200 : 422 });
     }
     case "account-statement": {

@@ -1,4 +1,7 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — the tables left here are summaries:
+// payables ageing and source coverage are aggregates with no per-row operation.
+// The voucher list, which did carry a row menu, moved to VoucherBrowserPanel.
 
 /**
  * Accounts → the server book (Ledger v2), on screen.
@@ -26,13 +29,13 @@ import {
   RefreshCw,
   Scale,
 } from "lucide-react";
+import { VoucherBrowserPanel } from "@/components/accounts/VoucherBrowserPanel";
 import { formatInr } from "@/lib/fees";
 import {
   ErpTable,
   ErpTableBody,
   ErpTableHead,
 } from "@/components/ui/erp-roster";
-import { RowActionMenu } from "@/components/ui/erp-grid";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 const CARD = "rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4";
@@ -181,19 +184,6 @@ export function LedgerBookPanel({ canApprove }: { canApprove: boolean }) {
   const [cockpit, setCockpit] = useState<Cockpit | null>(null);
   const [overview, setOverview] = useState<LedgerOverview | null>(null);
 
-  // The day book, newest first; sorting by type or source groups what came from one desk.
-  const voucherSort = useTableSort(
-    overview?.vouchers ?? [],
-    {
-      no: (v) => v.voucherNo,
-      date: (v) => v.date,
-      type: (v) => v.voucherType,
-      source: (v) => v.sourceType || "manual",
-      by: (v) => v.createdBy,
-    },
-    "date",
-    "desc",
-  );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [coverage, setCoverage] = useState<
@@ -533,59 +523,20 @@ export function LedgerBookPanel({ canApprove }: { canApprove: boolean }) {
         ) : null}
       </section>
 
-      {/* Recent vouchers */}
-      <section className={CARD}>
-        <div className="flex items-center justify-between">
-          <h4 className="text-sm font-bold text-[var(--brand-deep)]">Recent vouchers</h4>
-          {overview ? (
-            <span
-              className={`inline-flex items-center gap-1 text-xs font-bold ${
-                overview.totals.balanced ? "text-[var(--success)]" : "text-[var(--danger)]"
-              }`}
-            >
-              <Scale className="size-3.5" aria-hidden />
-              {overview.totals.balanced
-                ? `Balanced · ${formatInr(overview.totals.totalDebit)} both sides`
-                : "OUT OF BALANCE"}
-            </span>
-          ) : null}
-        </div>
-        {overview && overview.vouchers.length === 0 ? (
-          <p className="mt-2 text-sm text-[var(--muted)]">No vouchers in the book yet.</p>
-        ) : null}
-        {overview && overview.vouchers.length > 0 ? (
-          <div className="mt-2 overflow-x-auto">
-            <ErpTable minWidth="min-w-[40rem]">
-              <ErpTableHead>
-                <tr>
-                  <ErpSortTh sort={voucherSort} field="no" className="pb-2 text-left">No.</ErpSortTh>
-                  <ErpSortTh sort={voucherSort} field="date" className="pb-2 text-left">Date</ErpSortTh>
-                  <ErpSortTh sort={voucherSort} field="type" className="pb-2 text-left">Type</ErpSortTh>
-                  <th className="pb-2 text-left">Narration</th>
-                  <ErpSortTh sort={voucherSort} field="source" className="pb-2 text-left">Source</ErpSortTh>
-                  <ErpSortTh sort={voucherSort} field="by" className="pb-2 text-left">By</ErpSortTh>
-                  <th className="w-10 px-2 py-2" aria-label="Actions" />
-                </tr>
-              </ErpTableHead>
-              <ErpTableBody>
-                {voucherSort.rows.map((v) => (
-                  <tr key={v.id}>
-                    <td className="py-1.5 font-mono text-xs">{v.voucherNo}</td>
-                    <td className="py-1.5">{v.date}</td>
-                    <td className="py-1.5">{v.voucherType}</td>
-                    <td className="py-1.5 text-xs text-[var(--muted)]">{v.narration}</td>
-                    <td className="py-1.5 text-xs">{v.sourceType || "manual"}</td>
-                    <td className="py-1.5 text-xs">{v.createdBy}</td>
-                    <td className="px-2 py-1.5 text-right">
-                      <RowActionMenu row={v} label="Voucher actions" actions={[{ id: "copy", label: "Copy voucher number", onSelect: (x) => void navigator.clipboard.writeText(x.voucherNo) }, { id: "statement", label: "Open Book reports", onSelect: () => { window.location.href = "/accounts?tab=bookreports"; } }]} />
-                    </td>
-                  </tr>
-                ))}
-              </ErpTableBody>
-            </ErpTable>
-          </div>
-        ) : null}
-      </section>
+      {/*
+        The book's voucher list used to be the newest fifty by creation time.
+        That could not reach an import whose vouchers carry March dates but
+        were posted in September, so it is now a search over the whole book —
+        and the place an unclassified line gets put on a real head.
+      */}
+      <VoucherBrowserPanel canEdit={canApprove} />
+      {overview && !overview.totals.balanced ? (
+        <p className="rounded-xl border border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2 text-xs font-bold text-[var(--danger)]">
+          <Scale className="mr-1 inline size-3.5" aria-hidden />
+          The book is OUT OF BALANCE — debits {formatInr(overview.totals.totalDebit)}, credits{" "}
+          {formatInr(overview.totals.totalCredit)}.
+        </p>
+      ) : null}
     </div>
   );
 }

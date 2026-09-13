@@ -23,6 +23,15 @@ import {
 import type { LedgerAccountKind } from "@/lib/ledger/types";
 import { L_ACCOUNTS_PAYABLE } from "@/lib/ledger/coa";
 import {
+  childCodesByParent,
+  matchesVoucherFilter,
+  planHeadReclass,
+  type VoucherFacts,
+  type VoucherFilter,
+  type VoucherLineFacts,
+} from "@/lib/ledger/voucherFilter";
+import { ledgerListAccounts, ledgerPost } from "@/lib/ledger/ledger.server";
+import {
   buildVendorStatement,
   type VendorLine,
   type VendorStatement,
@@ -590,4 +599,258 @@ export async function ledgerVendorStatement(input: {
       asOf: input.asOf || new Date().toISOString().slice(0, 10),
     }),
   };
+}
+
+/* ─── Finding a voucher, and fixing its head ────────────────── */
+
+/**
+ * Search the whole book, not the newest fifty.
+ *
+ * `ledgerRecentVouchers` answers "what just happened" and the book's table
+ * was built on it, so 398 old-ERP vouchers posted on one September afternoon
+ * were unreachable from the screen: they sit behind hundreds of fee receipts
+ * in creation order. Everything here is filtered in the database where it can
+ * be — dates, type, source, text — and only the head/party tests, which need
+ * the lines, are applied after they are read.
+ */
+export async function ledgerSearchVouchers(input: {
+  filter: VoucherFilter;
+  limit?: number;
+  offset?: number;
+}): Promise<{
+  ok: boolean;
+  error?: string;
+  rows: VoucherFacts[];
+  total: number;
+  /** Distinct values present in the book, so the filter offers only real options. */
+  facets: { voucherTypes: string[]; sourceTypes: string[] };
+}> {
+  const empty = { rows: [], total: 0, facets: { voucherTypes: [], sourceTypes: [] } };
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "Supabase tenant not configured", ...empty };
+
+  const f = input.filter ?? {};
+  const limit = Math.min(Math.max(input.limit ?? 100, 1), 500);
+  const offset = Math.max(input.offset ?? 0, 0);
+
+  // 1. Narrow in the database first.
+  const readVouchers = async (): Promise<Record<string, unknown>[]> => {
+    const out: Record<string, unknown>[] = [];
+    for (let from = 0; ; from += 1000) {
+      let q = ctx.sb
+        .from("ledger_vouchers")
+        .select("id, voucher_no, voucher_type, voucher_date, narration, created_by, source_type, reverses_voucher_id")
+        .eq("tenant_id", ctx.tenantId);
+      if (f.from) q = q.gte("voucher_date", f.from);
+      if (f.to) q = q.lte("voucher_date", f.to);
+      if (f.voucherType) q = q.eq("voucher_type", f.voucherType);
+      if (f.sourceType) q = q.eq("source_type", f.sourceType === "manual" ? "" : f.sourceType);
+      const { data, error } = await q
+        .order("voucher_date", { ascending: false })
+        .order("voucher_no", { ascending: false })
+        .range(from, from + 999);
+      if (error) return out;
+      const rows = (data ?? []) as Record<string, unknown>[];
+      out.push(...rows);
+      if (rows.length < 1000) break;
+    }
+    return out;
+  };
+
+  const [voucherRows, chart] = await Promise.all([readVouchers(), ledgerListAccounts()]);
+  if (voucherRows.length === 0) return { ok: true, ...empty };
+
+  // Which of these are reversed BY something. The book keeps no flag — the
+  // reversal is the record — so it is read rather than trusted.
+  const reversedIds = new Set<string>();
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await ctx.sb
+      .from("ledger_vouchers")
+      .select("reverses_voucher_id")
+      .eq("tenant_id", ctx.tenantId)
+      .not("reverses_voucher_id", "is", null)
+      .range(from, from + 999);
+    if (error) break;
+    const rows = (data ?? []) as { reverses_voucher_id: string }[];
+    for (const r of rows) reversedIds.add(String(r.reverses_voucher_id));
+    if (rows.length < 1000) break;
+  }
+
+  // 2. Lines for those vouchers, chunked — `in` has a URL length limit.
+  const ids = voucherRows.map((r) => String(r.id));
+  const linesByVoucher = new Map<string, VoucherLineFacts[]>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const chunk = ids.slice(i, i + 200);
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await ctx.sb
+        .from("ledger_lines")
+        .select("voucher_id, line_no, debit_paise, credit_paise, ledger_accounts!inner(code, name), ledger_parties(name)")
+        .eq("tenant_id", ctx.tenantId)
+        .in("voucher_id", chunk)
+        .order("line_no", { ascending: true })
+        .range(from, from + 999);
+      if (error) break;
+      const rows = (data ?? []) as Record<string, unknown>[];
+      for (const r of rows) {
+        const a = r.ledger_accounts as { code?: string; name?: string } | null;
+        const p = r.ledger_parties as { name?: string } | null;
+        const vid = String(r.voucher_id);
+        const list = linesByVoucher.get(vid) ?? [];
+        list.push({
+          accountCode: String(a?.code ?? ""),
+          accountName: String(a?.name ?? ""),
+          partyName: String(p?.name ?? ""),
+          debitPaise: Number(r.debit_paise ?? 0),
+          creditPaise: Number(r.credit_paise ?? 0),
+        });
+        linesByVoucher.set(vid, list);
+      }
+      if (rows.length < 1000) break;
+    }
+  }
+
+  const facts: VoucherFacts[] = voucherRows.map((r) => ({
+    id: String(r.id),
+    voucherNo: String(r.voucher_no ?? ""),
+    voucherType: String(r.voucher_type ?? ""),
+    date: String(r.voucher_date ?? ""),
+    narration: String(r.narration ?? ""),
+    createdBy: String(r.created_by ?? ""),
+    sourceType: String(r.source_type ?? ""),
+    reversed: reversedIds.has(String(r.id)),
+    isReversal: !!r.reverses_voucher_id,
+    lines: linesByVoucher.get(String(r.id)) ?? [],
+  }));
+
+  // 3. The tests that need the lines.
+  const chartForFilter = chart.map((a) => ({
+    code: a.code,
+    name: a.name,
+    parentCode: a.parentCode || undefined,
+    isCash: a.isCash,
+    isBank: a.isBank,
+  }));
+  const byParent = childCodesByParent(chartForFilter);
+  const matched = facts.filter((v) => matchesVoucherFilter(v, f, chartForFilter, byParent));
+
+  // Facets come from everything read, not from the filtered page, so the
+  // dropdowns do not empty themselves as soon as one is chosen.
+  const voucherTypes = [...new Set(facts.map((v) => v.voucherType).filter(Boolean))].sort();
+  const sourceTypes = [...new Set(facts.map((v) => v.sourceType || "manual"))].sort();
+
+  return {
+    ok: true,
+    rows: matched.slice(offset, offset + limit),
+    total: matched.length,
+    facets: { voucherTypes, sourceTypes },
+  };
+}
+
+/**
+ * Move one line to a different head.
+ *
+ * Posts a journal; never edits the line. The book is append-only by design —
+ * see `ledgerReverse` — so a correction has to leave both the original
+ * classification and the fix on the record. An auditor reading the head sees
+ * the amount arrive and where it came from.
+ */
+export async function ledgerReclassifyHead(input: {
+  voucherId: string;
+  lineIndex: number;
+  toCode: string;
+  reason: string;
+  date?: string;
+  actor: string;
+}): Promise<{ ok: boolean; error?: string; voucherNo?: string }> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
+
+  // Read the one voucher directly — searching the book for it would read
+  // every line in it to answer a question about one row.
+  const { data: vRow, error: vErr } = await ctx.sb
+    .from("ledger_vouchers")
+    .select("id, voucher_no, voucher_type, voucher_date, narration, created_by, source_type, reverses_voucher_id")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("id", input.voucherId)
+    .maybeSingle();
+  if (vErr) return { ok: false, error: vErr.message };
+  if (!vRow) return { ok: false, error: "No such voucher" };
+
+  const { data: lRows, error: lErr } = await ctx.sb
+    .from("ledger_lines")
+    .select("line_no, debit_paise, credit_paise, ledger_accounts!inner(code, name), ledger_parties(name)")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("voucher_id", input.voucherId)
+    .order("line_no", { ascending: true });
+  if (lErr) return { ok: false, error: lErr.message };
+
+  const { data: revRow } = await ctx.sb
+    .from("ledger_vouchers")
+    .select("id")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("reverses_voucher_id", input.voucherId)
+    .limit(1);
+
+  const chart = (await ledgerListAccounts()).map((a) => ({
+    code: a.code,
+    name: a.name,
+    parentCode: a.parentCode || undefined,
+    isCash: a.isCash,
+    isBank: a.isBank,
+  }));
+
+  const voucher: VoucherFacts = {
+    id: String(vRow.id),
+    voucherNo: String(vRow.voucher_no ?? ""),
+    voucherType: String(vRow.voucher_type ?? ""),
+    date: String(vRow.voucher_date ?? ""),
+    narration: String(vRow.narration ?? ""),
+    createdBy: String(vRow.created_by ?? ""),
+    sourceType: String(vRow.source_type ?? ""),
+    reversed: (revRow ?? []).length > 0,
+    isReversal: !!vRow.reverses_voucher_id,
+    lines: ((lRows ?? []) as Record<string, unknown>[]).map((r) => {
+      const a = r.ledger_accounts as { code?: string; name?: string } | null;
+      const p = r.ledger_parties as { name?: string } | null;
+      return {
+        accountCode: String(a?.code ?? ""),
+        accountName: String(a?.name ?? ""),
+        partyName: String(p?.name ?? ""),
+        debitPaise: Number(r.debit_paise ?? 0),
+        creditPaise: Number(r.credit_paise ?? 0),
+      };
+    }),
+  };
+
+  const plan = planHeadReclass({
+    voucher,
+    lineIndex: input.lineIndex,
+    toCode: input.toCode,
+    chart,
+    reason: input.reason,
+  });
+  if (!plan.ok || !plan.lines) return { ok: false, error: plan.error };
+
+  // Dated today, not on the original's date: a correction made in September
+  // belongs in September. Back-dating it into a closed month is how a locked
+  // period silently moves.
+  const date = input.date || new Date().toISOString().slice(0, 10);
+
+  const res = await ledgerPost({
+    voucherType: "journal",
+    date,
+    narration: plan.narration ?? "",
+    // Idempotent per line: pressing the button twice posts one journal.
+    sourceType: "head_reclass",
+    sourceId: `${input.voucherId}:${input.lineIndex}:${input.toCode}`,
+    createdBy: input.actor,
+    lines: plan.lines.map((l) => ({
+      accountCode: l.accountCode,
+      debitPaise: l.debitPaise,
+      creditPaise: l.creditPaise,
+      narration: l.narration,
+    })),
+  });
+  if (!res.ok) return { ok: false, error: res.error };
+  return { ok: true, voucherNo: res.voucherNo };
 }
