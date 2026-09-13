@@ -27,6 +27,7 @@ import {
   applyMetaTemplateSync,
   emptyWaTemplates,
   normalizeWaTemplatesState,
+  resolveTemplateForSend,
   templateFamilyReady,
   type WaTemplatesState,
 } from "@/lib/waTemplates";
@@ -140,4 +141,59 @@ export async function syncWaTemplatesFromMeta(): Promise<WaTemplateSyncResult> {
     qualityEvents: qualityEvents.length,
     readyFamilies: families.filter((f) => templateFamilyReady(state, f).ready),
   };
+}
+
+/**
+ * Resolve a template for sending, and if the registry says "not approved",
+ * ask Meta once before believing it.
+ *
+ * WHY
+ * The registry is a copy of Meta's state, refreshed by a scheduled job. Any
+ * gap between Meta approving a template and the next refresh is a window in
+ * which every send of that template fails before it is even attempted —
+ * silently, because the message never left the building. It has happened
+ * three times: fee receipts, the daily brief, and on 13 Sep 2026 the transport
+ * location request, where all five parents "failed" on a Sunday evening
+ * because the refresh job does not run on Sundays and Meta's approval had
+ * arrived after Saturday's last run.
+ *
+ * A template that is genuinely unapproved still fails — Meta is asked, it says
+ * no, and the send is refused exactly as before. What changes is that a stale
+ * copy can no longer outvote Meta.
+ *
+ * THROTTLED
+ * One sync per process per ten minutes. A loop over 150 parents with a truly
+ * unapproved template must not become 150 calls to Meta.
+ */
+let lastFreshSyncAt = 0;
+const FRESH_SYNC_MIN_GAP_MS = 10 * 60 * 1000;
+
+export async function resolveTemplateForSendFresh(
+  args: Omit<Parameters<typeof resolveTemplateForSend>[0], "state">,
+): Promise<{
+  resolved: ReturnType<typeof resolveTemplateForSend>;
+  state: WaTemplatesState;
+  refreshed: boolean;
+}> {
+  const load = async () => {
+    const { state: raw } = await fetchServerBlob<WaTemplatesState>("wa_templates_state");
+    return normalizeWaTemplatesState(raw);
+  };
+
+  let state = await load();
+  let resolved = resolveTemplateForSend({ ...args, state });
+  if (resolved.ok) return { resolved, state, refreshed: false };
+
+  const now = Date.now();
+  if (now - lastFreshSyncAt < FRESH_SYNC_MIN_GAP_MS) {
+    return { resolved, state, refreshed: false };
+  }
+  lastFreshSyncAt = now;
+
+  const sync = await syncWaTemplatesFromMeta();
+  if (!sync.ok) return { resolved, state, refreshed: false };
+
+  state = await load();
+  resolved = resolveTemplateForSend({ ...args, state });
+  return { resolved, state, refreshed: true };
 }

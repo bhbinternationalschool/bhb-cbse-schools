@@ -33,14 +33,11 @@ import {
 } from "@/lib/transportNormalized.server";
 import { fetchSisFromDb } from "@/lib/sisNormalized.server";
 import { sendWhatsAppTemplate } from "@/lib/waSend";
-import { fetchServerBlob } from "@/lib/serverBlob";
 import {
-  normalizeWaTemplatesState,
-  resolveTemplateForSend,
   templateButtonComponents,
   templateVariablePositions,
-  type WaTemplatesState,
 } from "@/lib/waTemplates";
+import { resolveTemplateForSendFresh } from "@/lib/waTemplateSync.server";
 import { buildTransportMessage } from "@/lib/transportParentMessages";
 import type { SisState } from "@/lib/sis";
 
@@ -260,8 +257,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Could not read the student roster" }, { status: 502 });
   }
   const sis = sisRes.bundle as unknown as SisState;
-  const { state: rawTemplates } = await fetchServerBlob<WaTemplatesState>("wa_templates_state");
-  const templates = normalizeWaTemplatesState(rawTemplates);
+  // The registry is a copy of Meta's state. It is consulted per family below
+  // through resolveTemplateForSendFresh, which asks Meta once before trusting a
+  // "not approved" — see that function for the Sunday-evening incident.
+  let refreshedFromMeta = false;
 
   const sentBy = auth.ctx.session.fullName || auth.ctx.session.email || "";
   const now = new Date().toISOString();
@@ -290,11 +289,12 @@ export async function POST(req: Request) {
       failures.push({ householdId: t.householdId, error: built2.error });
       continue;
     }
-    const resolved = resolveTemplateForSend({
-      state: templates,
+    const fresh = await resolveTemplateForSendFresh({
       familyKey: built2.message.familyKey,
       language,
     });
+    if (fresh.refreshed) refreshedFromMeta = true;
+    const resolved = fresh.resolved;
     if (!resolved.ok) {
       failures.push({ householdId: t.householdId, error: resolved.reason });
       continue;
@@ -357,5 +357,20 @@ export async function POST(req: Request) {
     sent,
     failed: failures.length,
     failures: failures.slice(0, 20),
+    // Grouped reasons for the screen. It used to say only "5 failed", which
+    // left the office guessing whether it was the numbers, the template or
+    // WhatsApp itself.
+    failureReasons: groupFailureReasons(failures),
+    refreshedFromMeta,
   });
+}
+
+function groupFailureReasons(
+  failures: { householdId: string; error: string }[],
+): { reason: string; count: number }[] {
+  const m = new Map<string, number>();
+  for (const f of failures) m.set(f.error, (m.get(f.error) ?? 0) + 1);
+  return [...m.entries()]
+    .map(([reason, count]) => ({ reason, count }))
+    .sort((a, b) => b.count - a.count);
 }

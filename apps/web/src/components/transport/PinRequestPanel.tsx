@@ -106,8 +106,16 @@ export function PinRequestPanel({ canEdit }: { canEdit: boolean }) {
         return;
       }
       setPreview(null);
+      // Say WHY, not just how many. "5 failed" on its own left the office
+      // unable to tell a missing number from an unapproved template.
+      const reasons: { reason: string; count: number }[] = Array.isArray(body.failureReasons)
+        ? body.failureReasons
+        : [];
+      const why = reasons.length
+        ? " Why: " + reasons.map((r) => `${r.count} × ${r.reason}`).join("; ") + "."
+        : "";
       setResult(
-        `Sent to ${body.sent} of ${body.attempted}${body.failed ? ` · ${body.failed} failed` : ""}.`,
+        `Sent to ${body.sent} of ${body.attempted}${body.failed ? ` · ${body.failed} failed` : ""}.${why}`,
       );
       await load();
     } catch (e) {
