@@ -267,14 +267,18 @@ create_job "bhb-online-classes-tick" "*/5 7-21 * * 1-6" \
 # Run wipes on every deploy and scale-to-zero, and the Masters button hands the
 # merged registry to the BROWSER to save, so it cannot run unattended.
 #
-# School hours, because that is when an approval can be acted on and when the
-# office would notice a family key that is still not sendable. Every two hours
-# 08:00-16:00 Mon-Sat (5 ticks a day): approvals arrive a handful of times a
-# month, so the interval is about bounding how long a silent refusal can last,
-# not about catching one quickly. Idempotent — it merges Meta's statuses and
-# refuses outright if the stored registry cannot be read, rather than writing
-# from an empty one and erasing 67 configured templates.
-create_job "bhb-wa-template-refresh" "0 8-16/2 * * 1-6" \
+# Every hour 07:00-21:00, SEVEN days a week (15 ticks a day). It used to be
+# every two hours 08:00-16:00 Mon-Sat, on the theory that approvals only
+# matter in school hours. They do not: the office sends in the evening and on
+# Sundays too. On Sunday 13 Sep 2026 the location request failed for all five
+# parents at 7 pm — Meta had approved it after Saturday's 4 pm run, and nothing
+# would have noticed until Monday 8 am. The send path now asks Meta itself
+# before trusting a "not approved" (resolveTemplateForSendFresh), but most
+# senders do not use it yet, so the schedule is the net under all of them.
+# One Meta list call per tick; the cost is negligible. Idempotent — it merges
+# Meta's statuses and refuses outright if the stored registry cannot be read,
+# rather than writing from an empty one and erasing the configured templates.
+create_job "bhb-wa-template-refresh" "0 7-21 * * *" \
   "${APP_URL}/api/wa/templates/refresh" \
   "Asia/Kolkata" "120s"
 
