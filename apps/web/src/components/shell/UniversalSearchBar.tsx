@@ -49,6 +49,7 @@ const MODULE_CATALOG: { href: string; label: string; keywords: string }[] = [
   { href: "/trust", label: "Trust", keywords: "projects works capital" },
   { href: "/fees", label: "Fee Take", keywords: "collect receipt dues payment" },
   { href: "/fees/defaulters", label: "Defaulters", keywords: "overdue recovery" },
+  { href: "/fees/defaulters?tab=policy", label: "Withhold policy & approvals", keywords: "defaulter policy hold withhold block allow disallow bus transport admit card round bulk" },
   { href: "/attendance", label: "Attendance", keywords: "register present leave" },
   { href: "/homework", label: "Homework", keywords: "diary assignment" },
   { href: "/timetable", label: "Timetable", keywords: "periods schedule auto assign bell" },
