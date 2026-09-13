@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ClassChannelsPanel } from "@/components/comms/ClassChannelsPanel";
 import { HouseholdMessageLogPanel } from "@/components/comms/HouseholdMessageLogPanel";
+import { OfficeRelayPanel } from "@/components/comms/OfficeRelayPanel";
 import { WaChatHubPanel } from "@/components/comms/WaChatHubPanel";
 import { WaSendToAudiencePanel } from "@/components/comms/WaSendToAudiencePanel";
 import { AutomationBadNumbers } from "@/components/masters/automation/AutomationBadNumbers";
@@ -35,6 +36,7 @@ export type WaWorkspaceTab =
   | "delivered"
   | "numbers"
   | "cost"
+  | "relay"
   | "log";
 
 const TABS: ModuleTabItem[] = [
@@ -44,6 +46,7 @@ const TABS: ModuleTabItem[] = [
   { id: "delivered", label: "Delivered", tone: "navy" },
   { id: "numbers", label: "Numbers to fix", tone: "coral" },
   { id: "cost", label: "Usage & cost", tone: "amber" },
+  { id: "relay", label: "Office relay", tone: "violet" },
   { id: "log", label: "Household log", tone: "slate" },
 ];
 
@@ -80,6 +83,8 @@ export function WaWorkspacePanel({
         return "Numbers that cannot receive WhatsApp, whose children they belong to, and what to do about each.";
       case "cost":
         return "What WhatsApp costs, at your own rates — by month, by class, by child, parents against staff.";
+      case "relay":
+        return "Messages the bot could not answer go to the office phone you choose for each kind; the office replies from that phone and the answer goes back from the school number. Every message is kept.";
       default:
         return "One family's whole message history, WhatsApp and in-app together.";
     }
@@ -109,6 +114,7 @@ export function WaWorkspacePanel({
         {tab === "delivered" ? <AutomationSentMessages /> : null}
         {tab === "numbers" ? <AutomationBadNumbers readOnly={readOnly} /> : null}
         {tab === "cost" ? <AutomationUsageCost readOnly={readOnly} /> : null}
+        {tab === "relay" ? <OfficeRelayPanel readOnly={readOnly} /> : null}
         {tab === "log" ? <HouseholdMessageLogPanel /> : null}
       </div>
     </div>
