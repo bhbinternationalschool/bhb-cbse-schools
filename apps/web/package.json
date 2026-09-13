@@ -160,6 +160,7 @@
     "test:automation-schedule": "npx tsx src/lib/automationSchedule.selftest.ts",
     "test:wa-number-gap": "npx tsx src/lib/waNumberGap.selftest.ts",
     "test:session-scoped-students": "npx tsx src/lib/sessionScopedStudents.selftest.ts",
+    "test:counter-discount-settled": "npx tsx src/lib/counterDiscountSettled.selftest.ts",
     "test:student-attendance": "npx tsx src/lib/studentAttendance.selftest.ts",
     "test:student-homework": "npx tsx src/lib/studentHomework.selftest.ts",
     "test:student-transport": "npx tsx src/lib/studentTransport.selftest.ts",

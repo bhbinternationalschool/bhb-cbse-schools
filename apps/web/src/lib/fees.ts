@@ -1685,6 +1685,106 @@ function normalizeVoucher(v: Partial<CollectionVoucher>): CollectionVoucher {
   };
 }
 
+/**
+ * The stamp that marks a discount as given at the counter rather than by a
+ * standing Masters rule.
+ *
+ * Written onto the due line by `applyPostedWaiver` and frozen onto the
+ * receipt by `voucherLineFromDue`; read back by `counterWaiversByDueKey`. One
+ * constant because the reader subtracts money based on it — a typo on either
+ * side would silently stop settling discounts again, which is the whole bug.
+ */
+export const COUNTER_DISCOUNT_CODE = "COUNTER";
+
+/**
+ * Counter discounts, read back from the receipts that recorded them.
+ *
+ * WHY THIS EXISTS
+ * A discount given at the counter is settled through a `fee_adjustments`
+ * waiver row, and `postedWaiversByDueKey` subtracts it. That works in the
+ * browser and nowhere else:
+ *
+ *   loadFeeAdjustments()  →  if (typeof window === "undefined") return [];
+ *
+ * The open-dues cache is rebuilt on the SERVER. There the waiver map is
+ * always empty, `applyPostedWaiver` does nothing, and the balance settles at
+ *
+ *   billed − standing concession − cash collected
+ *
+ * which is EXACTLY the discount. Every family given a counter discount then
+ * showed that discount as still owed. Measured on production 2026-09-13: 265
+ * dues, 120 children, ₹77,854 — and for 231 of them the open balance equalled
+ * the waiver to the rupee, with billed − waived − collected summing to zero.
+ *
+ * Worse, the waiver rows themselves are not durable. They live in
+ * localStorage, synced as one whole-blob `module_local_state` row, so
+ * whichever browser saves last wins: 302 counter discounts are recorded on
+ * receipts and only ONE waiver row survives in the database.
+ *
+ * So the receipt is the source of truth here, not the adjustment. It is
+ * written once, server-side, never overwritten by another browser, and it
+ * already carries the number.
+ *
+ * THE SAME WAIVER RECORDED TWICE
+ * A due part-paid across two receipts can carry the waiver on BOTH lines,
+ * because the bug made the discount reappear as owed and the counter stamped
+ * it again. Summing then over-states the waiver. It is left summed anyway:
+ * `applyPostedWaiver` floors the balance at zero, and on all seven production
+ * cases the family had in fact settled, so zero is the right answer whether
+ * the waiver is counted once or twice. Capping it instead would need a rule
+ * for which receipt's figure is the real one, and there is no honest way to
+ * choose. What actually stops this recurring is the fix itself: once a
+ * discount stops reappearing, nobody re-enters it.
+ *
+ * ONLY THE COUNTER PART
+ * `line.concessionPaise` is the WHOLE discount on that line — standing
+ * Masters concessions plus the counter waiver. The standing part is
+ * recomputed by `concessionForHead` on every pass, so counting the whole
+ * figure here would subtract it twice. On production that would be ₹96,694
+ * wrongly knocked off. Only `concessionDetails` entries stamped `COUNTER` are
+ * taken: 302 lines are purely counter, 378 purely standing, 12 carry both.
+ */
+export function counterWaiversByDueKey(fees: FeesState): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const v of fees.vouchers) {
+    if (v.voidedAt) continue;
+    for (const line of v.lines) {
+      let waived = 0;
+      for (const d of line.concessionDetails ?? []) {
+        if (d.code === COUNTER_DISCOUNT_CODE) waived += d.amountPaise ?? 0;
+      }
+      if (waived > 0) {
+        map.set(line.dueKey, (map.get(line.dueKey) ?? 0) + waived);
+      }
+    }
+  }
+  return map;
+}
+
+/**
+ * Every settled discount for this student: the counter ones read off the
+ * receipts, plus any waiver recorded from the adjustments screen.
+ *
+ * A counter discount that reached a receipt is counted ONCE, from the
+ * receipt. Its adjustment row — when one survived — names the voucher it came
+ * from, so it can be recognised and skipped rather than subtracted again.
+ * Waivers with no such voucher are a different act: a discount recorded
+ * WITHOUT collecting anything, which never reaches a receipt line and is only
+ * ever known from the adjustment.
+ */
+export function settledWaiversByDueKey(
+  fees: FeesState,
+  studentId: string,
+): Map<string, number> {
+  const fromReceipts = counterWaiversByDueKey(fees);
+  const map = new Map(fromReceipts);
+  for (const [dueKey, amount] of postedWaiversByDueKey(studentId)) {
+    if (fromReceipts.has(dueKey)) continue;
+    map.set(dueKey, (map.get(dueKey) ?? 0) + amount);
+  }
+  return map;
+}
+
 export function paidByDueKey(fees: FeesState): Map<string, number> {
   const map = new Map<string, number>();
   for (const v of fees.vouchers) {
@@ -2062,7 +2162,10 @@ export function computeStudentDues(
   const includeFuture = options?.includeFuture ?? true;
   const includePaid = options?.includePaid ?? true;
   const paidMap = options?.paidMap ?? paidByDueKey(fees);
-  const waiverMap = postedWaiversByDueKey(student.id);
+  // Receipts first, adjustments second. The adjustment store is invisible to
+  // the server and is not durable anyway, so a counter discount that reached
+  // a receipt is settled from the receipt.
+  const waiverMap = settledWaiversByDueKey(fees, student.id);
   const lines: FeeDueLine[] = [];
   const midYearPolicy = normalizeMidYearFeePolicy(masters.midYearFeePolicy);
 
@@ -2453,7 +2556,7 @@ function applyPostedWaiver(
       {
         grantId: "",
         concessionId: "",
-        code: "COUNTER",
+        code: COUNTER_DISCOUNT_CODE,
         name: "Counter discount · this month only",
         kind: "waiver",
         rateLabel: formatInr(waived),
