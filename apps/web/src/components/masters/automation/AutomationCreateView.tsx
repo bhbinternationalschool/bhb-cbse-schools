@@ -14,6 +14,7 @@ import { WaTemplateVariablesPicker } from "@/components/masters/WaTemplateVariab
 import { AutomationSchedulePicker } from "./AutomationSchedulePicker";
 import { AutomationAudiencePicker } from "./AutomationAudiencePicker";
 import { AutomationSetupHelper } from "./AutomationSetupHelper";
+import { SCHOOL_DEFAULT_WA_LANGUAGE } from "@/lib/householdPrefs";
 import {
   autoBtnOutline,
   autoBtnTeal,
@@ -61,7 +62,7 @@ export function AutomationCreateView({
   const [actionType, setActionType] =
     useState<AutomationActionType>("whatsapp_template");
   const [templateFamilyKey, setTemplateFamilyKey] = useState("");
-  const [templateLanguage, setTemplateLanguage] = useState<"en" | "hi">("en");
+  const [templateLanguage, setTemplateLanguage] = useState<"en" | "hi">(SCHOOL_DEFAULT_WA_LANGUAGE);
   const [audienceSummary, setAudienceSummary] = useState("");
 
   const templates = loadWaTemplates().templates;

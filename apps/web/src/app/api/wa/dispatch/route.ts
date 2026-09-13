@@ -26,6 +26,7 @@ import {
 import { logHouseholdWaSend } from "@/lib/householdMessageLog.server";
 import { resolveHouseholdByMobileServer } from "@/lib/parentHousehold.server";
 import { isInQuietHours, quietHoursLabel } from "@/lib/householdPrefs";
+import { SCHOOL_DEFAULT_WA_LANGUAGE } from "@/lib/householdPrefs";
 
 export const runtime = "nodejs";
 
@@ -230,7 +231,9 @@ export async function POST(req: Request) {
         fallbackMobile,
         template: {
           name: item.template.name,
-          language: item.template.language || "en",
+          // A queued item that carries no language is a family nobody has
+          // asked, and the school writes to those in Hindi.
+          language: item.template.language || SCHOOL_DEFAULT_WA_LANGUAGE,
           components,
         },
         clientMessageId: item.messageId,

@@ -56,6 +56,7 @@ import type { CampaignMessage } from "@/lib/waCampaigns";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 import { SequencesPanel } from "@/components/admissions/SequencesPanel";
 import { openWaMe } from "@/lib/waMe";
+import { SCHOOL_DEFAULT_WA_LANGUAGE } from "@/lib/householdPrefs";
 
 const inp =
   "w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm";
@@ -323,7 +324,7 @@ export function AdmissionCampaignsPanel({
                 ? {
                     template: {
                       name: m.templateName,
-                      language: m.templateLanguage || "en",
+                      language: m.templateLanguage || SCHOOL_DEFAULT_WA_LANGUAGE,
                     },
                   }
                 : {}),

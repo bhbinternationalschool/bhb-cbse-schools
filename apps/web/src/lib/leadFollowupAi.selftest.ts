@@ -47,7 +47,10 @@ assert.deepEqual(followupDraftLanguage("en"), { draftIn: "en", translateTo: null
 assert.deepEqual(followupDraftLanguage("hi"), { draftIn: "hi", translateTo: null });
 assert.deepEqual(followupDraftLanguage("bho"), { draftIn: "hi", translateTo: null });
 assert.deepEqual(followupDraftLanguage("bn"), { draftIn: "hi", translateTo: "bn" });
-assert.deepEqual(followupDraftLanguage(""), { draftIn: "en", translateTo: null });
+// A lead with no stated language is written to in Hindi, the school's
+// language (SCHOOL_DEFAULT_WA_LANGUAGE). This asserted English, which is how
+// every un-asked family came to receive English drafts.
+assert.deepEqual(followupDraftLanguage(""), { draftIn: "hi", translateTo: null });
 
 // Parser: partial JSON ok, empty → null, lengths capped.
 assert.equal(parseFollowupDraft("{}"), null);

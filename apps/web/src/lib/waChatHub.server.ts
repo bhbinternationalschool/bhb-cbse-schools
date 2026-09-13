@@ -9,6 +9,7 @@ import {
   waCategoryLabel,
 } from "@/lib/waChatCategories";
 import { waNormalizeLocal10 } from "@/lib/waSend";
+import { SCHOOL_DEFAULT_WA_LANGUAGE } from "@/lib/householdPrefs";
 
 export type WaHubMsgRole = "contact" | "bot" | "staff";
 
@@ -483,7 +484,7 @@ export async function staffSendWaHubTemplate(opts: {
   const send = await sendWhatsAppTemplate({
     toMobile: thread.mobile,
     name: opts.templateName,
-    language: opts.language || "en",
+    language: opts.language || SCHOOL_DEFAULT_WA_LANGUAGE,
     components,
   });
   if (!send.ok) {

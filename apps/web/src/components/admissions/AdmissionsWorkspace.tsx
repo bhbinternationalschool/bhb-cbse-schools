@@ -128,6 +128,7 @@ import { loadCrmParentChat } from "@/lib/crmParentChat";
 import { HOUSEHOLD_LANGUAGES } from "@/lib/householdPrefs";
 import { LEAD_CONCERNS, PREVIOUS_BOARDS } from "@/lib/admissionsEnquiryForm";
 import { AdmissionReportsPanel } from "@/components/admissions/AdmissionReportsPanel";
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 
 type AdmTab =
   | "dashboard"
@@ -2611,6 +2612,10 @@ function LeadDetail({
           sourceLabel: sourceLabel(lead.source),
           daysSinceEnquiry: days,
           followUpSummary,
+          // The family's own language, or the school's (Hindi) when unset.
+          language: waTemplateLanguageFor({
+            preferredLanguage: lead.preferredLanguage,
+          }),
         }),
       });
       const json = (await res.json()) as {

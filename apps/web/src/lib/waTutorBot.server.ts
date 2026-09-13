@@ -47,6 +47,7 @@ import {
 import { answerParentTutor, parseTutorAsk } from "@/lib/tutorApi.server";
 import { shouldUseCashfreeCheckout } from "@/lib/cashfree.server";
 import { TENANT } from "@/lib/types";
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 
 type Slice = { version: 1; sessions: WaTutorState[] };
 
@@ -160,7 +161,7 @@ export async function handleWaTutorInbound(opts: {
   const activeIndex = session
     ? Math.max(0, childRefs.findIndex((c) => c.id === session.studentId))
     : 0;
-  const language = (opts.household.preferredLanguage || "en") === "hi" ? "hi" : "en";
+  const language = waTemplateLanguageFor(opts.household);
 
   const statusFor = async (
     index: number,

@@ -6,6 +6,7 @@
 import type { WaTemplateLanguage } from "@/lib/waTemplates";
 import { nextCronRunIst } from "@/lib/automationSchedule";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { SCHOOL_DEFAULT_WA_LANGUAGE } from "@/lib/householdPrefs";
 
 const STORAGE_KEY = "bhb_automation_v1";
 
@@ -179,7 +180,7 @@ const SEED_RULES: SeedRule[] = [
     eventKey: "",
     actionType: "whatsapp_template",
     templateFamilyKey: "fees_stage_reminder",
-    templateLanguage: "en",
+    templateLanguage: SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: "Households with overdue fees (stages S1–S4)",
     minAmountPaise: 0,
     quietHours: defaultQuietHours(),
@@ -197,7 +198,7 @@ const SEED_RULES: SeedRule[] = [
     eventKey: "",
     actionType: "whatsapp_template",
     templateFamilyKey: "fees_soft_reminder",
-    templateLanguage: "en",
+    templateLanguage: SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: "Dues within next 3 days",
     minAmountPaise: 0,
     quietHours: defaultQuietHours(),
@@ -215,7 +216,7 @@ const SEED_RULES: SeedRule[] = [
     eventKey: "",
     actionType: "whatsapp_template",
     templateFamilyKey: "admissions_followup",
-    templateLanguage: "en",
+    templateLanguage: SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: "Open leads with overdue follow-up",
     minAmountPaise: 0,
     quietHours: defaultQuietHours(),
@@ -233,7 +234,7 @@ const SEED_RULES: SeedRule[] = [
     eventKey: "",
     actionType: "whatsapp_template",
     templateFamilyKey: "admissions_fee_reminder",
-    templateLanguage: "en",
+    templateLanguage: SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: "Leads with unpaid/partial registration fee",
     minAmountPaise: 0,
     quietHours: defaultQuietHours(),
@@ -251,7 +252,7 @@ const SEED_RULES: SeedRule[] = [
     eventKey: "campaign.due",
     actionType: "enqueue_campaign",
     templateFamilyKey: "",
-    templateLanguage: "en",
+    templateLanguage: SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: "Queued campaign messages due now",
     minAmountPaise: 0,
     quietHours: { ...defaultQuietHours(), enabled: false },
@@ -269,7 +270,7 @@ const SEED_RULES: SeedRule[] = [
     eventKey: "attendance.absent_marked",
     actionType: "whatsapp_template",
     templateFamilyKey: "attendance_absent",
-    templateLanguage: "en",
+    templateLanguage: SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: "Parents of students marked absent today",
     minAmountPaise: 0,
     quietHours: defaultQuietHours(),
@@ -287,7 +288,7 @@ const SEED_RULES: SeedRule[] = [
     eventKey: "homework.published",
     actionType: "whatsapp_template",
     templateFamilyKey: "homework_published",
-    templateLanguage: "en",
+    templateLanguage: SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: "Class parents",
     minAmountPaise: 0,
     quietHours: defaultQuietHours(),
@@ -305,7 +306,7 @@ const SEED_RULES: SeedRule[] = [
     eventKey: "exams.datesheet_published",
     actionType: "whatsapp_template",
     templateFamilyKey: "exams_datesheet",
-    templateLanguage: "en",
+    templateLanguage: SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: "Exam cohort parents",
     minAmountPaise: 0,
     quietHours: defaultQuietHours(),
@@ -323,7 +324,7 @@ const SEED_RULES: SeedRule[] = [
     eventKey: "ptm.opened",
     actionType: "whatsapp_template",
     templateFamilyKey: "ptm_invite",
-    templateLanguage: "en",
+    templateLanguage: SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: "PTM eligible parents",
     minAmountPaise: 0,
     quietHours: defaultQuietHours(),
@@ -341,7 +342,7 @@ const SEED_RULES: SeedRule[] = [
     eventKey: "leave.decided",
     actionType: "whatsapp_template",
     templateFamilyKey: "leave_student_status",
-    templateLanguage: "en",
+    templateLanguage: SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: "Leave requester / guardian",
     minAmountPaise: 0,
     quietHours: defaultQuietHours(),
@@ -359,7 +360,7 @@ const SEED_RULES: SeedRule[] = [
     eventKey: "",
     actionType: "whatsapp_template",
     templateFamilyKey: "vault_expiry",
-    templateLanguage: "en",
+    templateLanguage: SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: "Document owners / office",
     minAmountPaise: 0,
     quietHours: defaultQuietHours(),
@@ -377,7 +378,7 @@ const SEED_RULES: SeedRule[] = [
     eventKey: "comms.notice_published",
     actionType: "whatsapp_template",
     templateFamilyKey: "comms_notice",
-    templateLanguage: "en",
+    templateLanguage: SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: "Notice audience",
     minAmountPaise: 0,
     quietHours: defaultQuietHours(),
@@ -399,7 +400,7 @@ const SEED_RULES: SeedRule[] = [
     eventKey: "",
     actionType: "whatsapp_template",
     templateFamilyKey: "udise_docs_request",
-    templateLanguage: "en",
+    templateLanguage: SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: "Families of students with UDISE+ gaps (Aadhaar, birth certificate, address)",
     minAmountPaise: 0,
     quietHours: defaultQuietHours(),
@@ -435,7 +436,16 @@ function normalizeRule(raw: Partial<AutomationRule> | null): AutomationRule | nu
     eventKey: String(raw.eventKey || ""),
     actionType: (raw.actionType as AutomationActionType) || "whatsapp_template",
     templateFamilyKey: String(raw.templateFamilyKey || ""),
-    templateLanguage: raw.templateLanguage === "hi" ? "hi" : "en",
+    // A rule's language is only the FALLBACK for a family whose own language
+    // did not reach the dispatch entry. It read `=== "hi" ? "hi" : "en"`, so
+    // every one of the 13 stored rules — all seeded "en" — fell back to
+    // English. Only an explicit "en" stays English now.
+    templateLanguage:
+      raw.templateLanguage === "en"
+        ? "en"
+        : raw.templateLanguage === "hi"
+          ? "hi"
+          : SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: String(raw.audienceSummary || ""),
     minAmountPaise: Math.max(0, Math.round(Number(raw.minAmountPaise) || 0)),
     quietHours: normalizeQuiet(raw.quietHours),
@@ -668,7 +678,7 @@ export function createAutomationRule(
     eventKey: opts.eventKey || "",
     actionType: opts.actionType,
     templateFamilyKey: opts.templateFamilyKey || "",
-    templateLanguage: opts.templateLanguage || "en",
+    templateLanguage: opts.templateLanguage || SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: opts.audienceSummary || "",
     minAmountPaise: opts.minAmountPaise || 0,
     quietHours: defaultQuietHours(),

@@ -34,10 +34,49 @@ export const SIS_BOT_QUICK_PROMPTS: {
   { id: "bus", label: "Where is the bus", waKeyword: "BUS" },
 ];
 
+/**
+ * The same menu in Hindi. The KEYWORDS stay in English letters, because they
+ * are what the bot recognises and what a parent types; only the explanation
+ * beside each is translated.
+ *
+ * Until 2026-09-13 every reply in this file was English-only and took no
+ * language at all, so a family who had chosen Hindi — and every family who
+ * had chosen nothing, which the school writes to in Hindi — got English the
+ * moment they tapped a button on any template.
+ */
+const SIS_BOT_LABEL_HI: Record<SisBotQuickId, string> = {
+  kids: "मेरे बच्चे",
+  dues: "बकाया फीस",
+  pay: "फीस जमा करें",
+  receipts: "हाल की रसीदें",
+  info: "स्कूल की जानकारी",
+  human: "ऑफिस से बात करें",
+  complaint: "शिकायत दर्ज करें",
+  tutor: "बच्चे की पढ़ाई में मदद",
+  bus: "बस कहाँ है",
+};
+
 export function sisBotWelcomeText(
   multiChild = false,
   hasTransport = false,
+  hindi = false,
 ): string {
+  if (hindi) {
+    return [
+      `नमस्ते — *${TENANT.shortName}* अभिभावक सहायक।`,
+      "",
+      "यह सुविधा इस WhatsApp नंबर से जुड़े *स्कूल में पढ़ रहे बच्चों* के लिए है।",
+      "नए प्रवेश / पूछताछ के लिए कृपया प्रवेश वाला WhatsApp नंबर इस्तेमाल करें।",
+      "",
+      "नीचे दिया गया शब्द लिखकर भेजें:",
+      ...SIS_BOT_QUICK_PROMPTS.filter(
+        (q) => q.id !== "pay" && (q.id !== "bus" || hasTransport),
+      ).map((q) => `• *${q.waKeyword}* — ${SIS_BOT_LABEL_HI[q.id]}`),
+      multiChild
+        ? "• *PAY* — सभी बच्चों की फीस · *PAY 1* / *PAY 2* — एक बच्चे की (GPay / UPI)"
+        : "• *PAY* — GPay / UPI से फीस जमा करने का लिंक",
+    ].join("\n");
+  }
   const payHint = multiChild
     ? "• *PAY* — all children · *PAY 1* / *PAY 2* — one child (GPay / UPI)"
     : "• *PAY* — GPay / UPI pay link";
@@ -136,7 +175,32 @@ export type SisBotDueLine = {
   dueOn: string;
 };
 
-export function composeSisKidsReply(children: SisBotChildLine[]): string {
+export function composeSisKidsReply(
+  children: SisBotChildLine[],
+  hindi = false,
+): string {
+  if (hindi) {
+    if (children.length === 0) {
+      return [
+        "इस WhatsApp नंबर से कोई पढ़ रहा बच्चा नहीं जुड़ा है।",
+        "कृपया स्कूल ऑफिस से अपना मोबाइल / WhatsApp नंबर अपडेट करवाएँ।",
+        "",
+        sisBotWelcomeText(false, false, true),
+      ].join("\n");
+    }
+    return [
+      `*${TENANT.shortName} में आपके बच्चे*`,
+      "",
+      ...children.map(
+        (c, i) =>
+          `${i + 1}. *${c.name}* · ${c.classLabel || "—"} · प्रवेश सं. ${c.admissionNo || "—"}`,
+      ),
+      "",
+      children.length > 1
+        ? "बकाया देखने के लिए *DUES* · सबकी फीस के लिए *PAY* · एक बच्चे के लिए *PAY 1* / *PAY 2* लिखें।"
+        : "बकाया फीस के लिए *DUES* · GPay / UPI लिंक के लिए *PAY* लिखें।",
+    ].join("\n");
+  }
   if (children.length === 0) {
     return [
       "No active students found for this WhatsApp number.",
@@ -167,11 +231,47 @@ export function composeSisDuesReply(opts: {
   totalPaise: number;
   runningMonthOnly?: boolean;
   childFilterName?: string;
+  hindi?: boolean;
 }): string {
   const scope =
     opts.childFilterName != null
       ? ` · ${opts.childFilterName}`
       : "";
+  if (opts.hindi) {
+    const who = opts.guardianName || "अभिभावक";
+    if (opts.dueLines.length === 0) {
+      return [
+        `*बकाया फीस${scope}* · ${who}`,
+        "",
+        "चालू महीने तक कोई फीस बकाया नहीं है। धन्यवाद!",
+        "हाल के भुगतान देखने के लिए *RECEIPTS* लिखें।",
+      ].join("\n");
+    }
+    const maxHi = 12;
+    return [
+      `*बकाया फीस${scope}* · ${who}`,
+      opts.runningMonthOnly
+        ? "(चालू महीने तक — आगे की किश्तें शामिल नहीं)"
+        : "(बाकी राशि)",
+      "",
+      ...opts.dueLines.slice(0, maxHi).map(
+        (d) => `• ${d.studentName}: ${d.label} — *${d.amountLabel}* (अंतिम तिथि ${d.dueOn})`,
+      ),
+      opts.dueLines.length > maxHi
+        ? `…और ${opts.dueLines.length - maxHi} पंक्ति`
+        : null,
+      "",
+      `*कुल जमा करना है: ${formatInr(opts.totalPaise)}*`,
+      "",
+      opts.childFilterName != null
+        ? `इस बच्चे का लिंक पाने के लिए *PAY ${opts.childFilterName.split(" ")[0]}* लिखें।`
+        : "सभी बच्चों के लिए *PAY* · एक बच्चे के लिए *PAY 1* / *PAY 2* लिखें।",
+      "",
+      "_GPay से भुगतान के बाद लिंक पर *Confirm paid* दबाएँ, रसीद तुरंत मिल जाएगी।_",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
   if (opts.dueLines.length === 0) {
     return [
       `*Fee dues${scope}* · ${opts.guardianName || "Parent"}`,
@@ -217,7 +317,37 @@ export function composeSisPayReply(opts: {
   code: string;
   studentHint: string;
   autoSettle?: boolean;
+  hindi?: boolean;
 }): string {
+  if (opts.hindi) {
+    const hi = [
+      `*${TENANT.shortName}* · फीस भुगतान लिंक ${opts.code}`,
+      opts.studentHint,
+      `राशि: *${formatInr(opts.amountPaise)}*`,
+      "",
+      opts.autoSettle
+        ? "ऑनलाइन भुगतान करें (रसीद यहीं अपने आप आ जाएगी):"
+        : "*Google Pay / UPI* से भुगतान करें (GPay, PhonePe, Paytm):",
+      opts.payUrl,
+    ];
+    if (opts.upiUri && !opts.autoSettle) {
+      hi.push(
+        "",
+        "या सीधे GPay / UPI खोलें:",
+        opts.upiUri,
+        "",
+        "तरीका:",
+        "1️⃣ GPay / UPI ऐप में भुगतान करें",
+        "2️⃣ लिंक पर वापस आएँ",
+        "3️⃣ *Confirm paid* दबाएँ — खाता अपडेट होगा और रसीद यहीं आएगी",
+      );
+    } else if (opts.autoSettle) {
+      hi.push("", "कुछ दबाने की ज़रूरत नहीं — भुगतान होते ही खाता और रसीद अपडेट हो जाएँगे।");
+    } else {
+      hi.push("", "लिंक पर भुगतान करने के बाद खाता अपडेट होगा और रसीद यहीं भेजी जाएगी।");
+    }
+    return hi.join("\n");
+  }
   const lines = [
     `*${TENANT.shortName}* · Fee pay link ${opts.code}`,
     opts.studentHint,
@@ -253,7 +383,20 @@ export function composeSisPayReply(opts: {
 
 export function composeSisReceiptsReply(
   rows: { receiptNo: string; date: string; amountLabel: string }[],
+  hindi = false,
 ): string {
+  if (hindi) {
+    if (rows.length === 0) {
+      return "इस परिवार की अभी कोई फीस रसीद नहीं है। भुगतान के लिए *PAY* लिखें।";
+    }
+    return [
+      "*हाल की फीस रसीदें*",
+      "",
+      ...rows.slice(0, 8).map((r) => `• ${r.receiptNo} · ${r.date} · *${r.amountLabel}*`),
+      "",
+      "GPay / UPI से भुगतान के बाद पूरी डिजिटल रसीद भेजी जाती है (लिंक पर *Confirm paid* दबाएँ)।",
+    ].join("\n");
+  }
   if (rows.length === 0) {
     return "No fee receipts yet for this household. Reply *PAY* when ready.";
   }
@@ -268,7 +411,22 @@ export function composeSisReceiptsReply(
   ].join("\n");
 }
 
-export function composeSisInfoReply(): string {
+export function composeSisInfoReply(hindi = false): string {
+  if (hindi) {
+    return [
+      `*${TENANT.nameDisplay}*`,
+      TENANT.city,
+      TENANT.publicPortal ? `पोर्टल: ${TENANT.publicPortal}` : null,
+      "",
+      "फीस ऑफिस का समय: स्कूल के कार्य दिवस (कृपया ऑफिस से पुष्टि करें)।",
+      "",
+      "मेनू: " + SIS_BOT_QUICK_PROMPTS.map((q) => q.waKeyword).join(" · "),
+      "फीस जमा करने के लिए *PAY* लिखें → GPay / UPI → लिंक पर *Confirm paid* दबाएँ।",
+      "एक से अधिक बच्चे: हर बच्चे के लिए *PAY 1* · *PAY 2*।",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
   return [
     `*${TENANT.nameDisplay}*`,
     TENANT.city,
@@ -285,7 +443,14 @@ export function composeSisInfoReply(): string {
     .join("\n");
 }
 
-export function composeSisHumanReply(): string {
+export function composeSisHumanReply(hindi = false): string {
+  if (hindi) {
+    return [
+      "आपको *स्कूल ऑफिस* से जोड़ा जा रहा है।",
+      "स्टाफ का कोई सदस्य इसी WhatsApp पर जवाब देगा।",
+      "कृपया बच्चे का नाम, कक्षा और अपना सवाल लिखें।",
+    ].join("\n");
+  }
   return [
     "Connecting you to *school office*.",
     "A staff member will reply on this WhatsApp.",

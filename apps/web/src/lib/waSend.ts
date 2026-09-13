@@ -3,6 +3,7 @@
  */
 
 import { isOptedOut, isWithin24HourWindow } from "@/lib/waContactState.server";
+import { SCHOOL_DEFAULT_WA_LANGUAGE } from "@/lib/householdPrefs";
 
 export function waDigitsToE164India(mobile: string): string {
   const d = (mobile || "").replace(/\D/g, "");
@@ -382,7 +383,7 @@ export async function sendWhatsAppTemplate(opts: {
 
   const phoneNumberId = resolvePhoneNumberId(opts.fromPhoneNumberId);
   const metaToken = metaAccessToken();
-  const languageCode = (opts.language || "en").slice(0, 5);
+  const languageCode = (opts.language || SCHOOL_DEFAULT_WA_LANGUAGE).slice(0, 5);
 
   if (phoneNumberId && metaToken) {
     const version = metaGraphVersion();

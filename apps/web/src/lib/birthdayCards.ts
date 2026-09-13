@@ -18,7 +18,7 @@
 
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { assertModulePermission } from "@/lib/rbacGuard";
-import { householdLanguage, type HouseholdLanguage, type HouseholdPrefsLike } from "@/lib/householdPrefs";
+import { householdLanguage, SCHOOL_DEFAULT_WA_LANGUAGE, type HouseholdLanguage, type HouseholdPrefsLike } from "@/lib/householdPrefs";
 
 /* ─── Designs & formats ─────────────────────────────────────────────── */
 
@@ -220,11 +220,18 @@ export function defaultBirthdaySettings(): BirthdaySettings {
     cardWish: "",
     messageEn: "",
     messageHi: "",
-    defaultLanguage: "en",
+    // The school writes to families in Hindi unless they chose otherwise
+    // (SCHOOL_DEFAULT_WA_LANGUAGE, decided 2026-09-07). This stayed "en" and
+    // no birthday settings have ever been saved, so every birthday greeting
+    // to a family without a stated choice — 191 of 200 — went in English.
+    defaultLanguage: SCHOOL_DEFAULT_WA_LANGUAGE,
     autoSend: false,
     sendHour: 9,
     waTemplateName: "",
-    waTemplateLanguage: "en",
+    // Blank means "the family's language". It was "en", which is truthy, so
+    // the send used the English template for every family even when the
+    // family's language had correctly resolved to Hindi.
+    waTemplateLanguage: "",
     waTemplateVars: [],
     socialEnabled: false,
     socialIncludePhoto: false,
@@ -245,11 +252,13 @@ export function normalizeBirthdaySettings(raw: unknown): BirthdaySettings {
     cardWish: str(r.cardWish, 120),
     messageEn: str(r.messageEn, 1000),
     messageHi: str(r.messageHi, 1000),
-    defaultLanguage: r.defaultLanguage === "hi" ? "hi" : "en",
+    // Only an explicit "en" is English; anything else is the school default.
+    // It read `=== "hi" ? "hi" : "en"`, so a missing value meant English.
+    defaultLanguage: r.defaultLanguage === "en" ? "en" : r.defaultLanguage === "hi" ? "hi" : SCHOOL_DEFAULT_WA_LANGUAGE,
     autoSend: r.autoSend === true,
     sendHour: Number.isInteger(Number(r.sendHour)) && Number(r.sendHour) >= 0 && Number(r.sendHour) <= 23 ? Number(r.sendHour) : 9,
     waTemplateName: str(r.waTemplateName, 120),
-    waTemplateLanguage: str(r.waTemplateLanguage, 10) || "en",
+    waTemplateLanguage: str(r.waTemplateLanguage, 10),
     waTemplateVars: Array.isArray(r.waTemplateVars) ? r.waTemplateVars.map((x) => str(x, 30)).filter(Boolean).slice(0, 8) : [],
     socialEnabled: r.socialEnabled === true,
     socialIncludePhoto: r.socialIncludePhoto === true,
