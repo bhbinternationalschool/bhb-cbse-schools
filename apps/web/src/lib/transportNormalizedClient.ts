@@ -43,9 +43,46 @@ function writeMeta(patch: DeskMeta) {
   localStorage.setItem(META_KEY, JSON.stringify(patch));
 }
 
+/**
+ * Is this a desk worth sending, or the shape of a client that never loaded?
+ *
+ * Nothing in the UI empties routes, vehicles and assignments all at once —
+ * deactivating a route sets isActive=false and ending an assignment sets
+ * effectiveTo, both of which keep the row. So an all-empty desk is never a
+ * decision; it is a client that failed to hydrate, and on 12 Sep 2026 it was
+ * a client whose cache had been dropped for quota.
+ *
+ * The server already refuses these (pushTransportDeskToDb's PROTECTED guard),
+ * which is the 502 the director saw eight times. Catching it here as well is
+ * not belt and braces: an empty push that reaches the server is one
+ * misconfiguration away from being accepted, and it costs a round trip and an
+ * error in the console every few seconds in the meantime.
+ */
+function deskIsUnsendable(state: TransportState): boolean {
+  return (
+    (state.routes?.length ?? 0) === 0 &&
+    (state.vehicles?.length ?? 0) === 0 &&
+    (state.assignments?.length ?? 0) === 0
+  );
+}
+
+let emptyPushWarned = false;
+
 export function scheduleTransportDeskSync(state: TransportState) {
   if (!isSupabaseConfigured()) return;
   if (typeof window === "undefined") return;
+  if (deskIsUnsendable(state)) {
+    if (!emptyPushWarned) {
+      emptyPushWarned = true;
+      console.warn(
+        "[transport-db] not pushing an empty desk — no routes, vehicles or " +
+          "assignments. This client has not hydrated; the database is left as " +
+          "it is. Reload, and if it persists this browser's storage is full.",
+      );
+    }
+    return;
+  }
+  emptyPushWarned = false;
   pending = state;
   if (pushTimer) clearTimeout(pushTimer);
   pushTimer = setTimeout(() => {

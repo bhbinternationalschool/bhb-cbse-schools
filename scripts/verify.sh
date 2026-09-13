@@ -158,6 +158,7 @@ SELFTESTS=(
   test:hold-resolve
   test:live-bus-marker
   test:transport-pin-intake
+  test:storage-quota
   test:transport-boarding
   test:transport-crew-access
   test:transport-crew
