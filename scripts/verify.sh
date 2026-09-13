@@ -154,6 +154,7 @@ SELFTESTS=(
   test:transport-shifts
   test:transport-seats
   test:boarding-suggest
+  test:defaulter-hold-policy
   test:live-bus-marker
   test:transport-pin-intake
   test:transport-boarding

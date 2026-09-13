@@ -358,6 +358,7 @@ jobs:
           npm run test:transport-shifts
           npm run test:transport-seats
           npm run test:boarding-suggest
+          npm run test:defaulter-hold-policy
           npm run test:live-bus-marker
           npm run test:transport-pin-intake
           npm run test:wa-contact-state
