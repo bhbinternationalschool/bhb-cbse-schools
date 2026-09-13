@@ -22,6 +22,7 @@ import {
 } from "@/lib/waFailureReason";
 import { toE164India } from "@/lib/waContactState.server";
 import { loadSis, householdWhatsApp, type Household } from "@/lib/sis";
+import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { householdMobile10 } from "@/lib/parentHousehold.server";
 import {
@@ -271,6 +272,14 @@ export async function listWaBadNumbers(opts?: {
   const households = sis.households ?? [];
   const students = sis.students ?? [];
 
+  // One SIS row per child PER SESSION, all of them "active" — so without this
+  // a child is named once for every year they have been enrolled, and
+  // families whose last child left are still listed as unreachable.
+  const sessionAy = currentAcademicYearCode(loadMasters());
+  const enrolledNow = (s: { status?: string; academicYearCode?: string }) =>
+    s.status === "active" &&
+    (!s.academicYearCode || s.academicYearCode === sessionAy);
+
   // Everything we know is dead: the stored verdicts plus what the failures
   // just told us. Needed to answer "does this family have anything left".
   const deadNumbers = new Set<string>([
@@ -295,7 +304,7 @@ export async function listWaBadNumbers(opts?: {
       const cands = householdCandidateNumbers({
         household: hh,
         students: students.filter(
-          (s) => s.householdId === hh.id && s.status === "active",
+          (s) => s.householdId === hh.id && enrolledNow(s),
         ),
       });
       const mine = cands.find((c) => c.mobile10 === a.mobile);
@@ -316,7 +325,7 @@ export async function listWaBadNumbers(opts?: {
       guardianNames: hhs.map((h) => h.guardianName).filter(Boolean),
       familyCount: hhs.length,
       children: students
-        .filter((s) => hhIds.has(s.householdId) && s.status === "active")
+        .filter((s) => hhIds.has(s.householdId) && enrolledNow(s))
         .map((s) => s.fullName),
       kind: a.kind,
       label: a.label,

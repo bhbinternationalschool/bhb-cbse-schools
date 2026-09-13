@@ -30,7 +30,8 @@ import {
 import { ensureSisHydrated } from "@/lib/sisPersistence";
 import { withHydrationSlot } from "@/lib/deskHydrateGuard";
 import { classLabelForStudent } from "@/lib/parentPortal";
-import type { MastersState } from "@/lib/masters";
+import { currentAcademicYearCode, type MastersState } from "@/lib/masters";
+import { useDemoSession } from "@/components/shell/SessionContext";
 import {
   studentsNeedingWaNumber,
   waGapHeadline,
@@ -94,6 +95,7 @@ export function WaNumberGapBanner({
   sis,
   masters,
   studentIds,
+  academicYearCode,
   onSaved,
   title,
 }: {
@@ -106,10 +108,17 @@ export function WaNumberGapBanner({
   masters?: MastersState | null;
   /** Scope to these students — the fee counter passes the family at the desk. */
   studentIds?: string[];
+  /**
+   * The session to list. Defaults to the signed-in one, which is what every
+   * mount wants; the students desk passes the session chosen in its header so
+   * the banner and the table beneath it never disagree about who is enrolled.
+   */
+  academicYearCode?: string;
   /** The page holds SIS in state; tell it to re-read after a save. */
   onSaved?: () => void;
   title?: string;
 }) {
+  const session = useDemoSession();
   const [verdicts, setVerdicts] = useState<WaVerdictMap | null>(null);
   const [ownSis, setOwnSis] = useState<SisState | null>(null);
   const [configured, setConfigured] = useState(true);
@@ -163,17 +172,28 @@ export function WaNumberGapBanner({
 
   const roster = selfLoad ? ownSis : (sis ?? null);
 
+  // Explicit prop first, then the signed-in session, then the calendar. The
+  // last is a floor, not a guess: currentAcademicYearCode resolves by date.
+  const sessionAy =
+    academicYearCode ||
+    session.academicYearCode ||
+    (masters ? currentAcademicYearCode(masters) : "");
+
   const rows = useMemo(() => {
     if (!verdicts) return [];
     return studentsNeedingWaNumber(roster, verdicts, {
       studentIds,
+      // SIS holds one row per child per session, all of them "active", so
+      // without this the same family is listed once per year they have been
+      // enrolled — three rows for one child on this school's data.
+      academicYearCode: sessionAy,
       classLabel: (s) =>
         classLabelForStudent(
           s as Parameters<typeof classLabelForStudent>[0],
           masters ?? undefined,
         ),
     }).filter((r) => !cleared.includes(r.gap.householdId));
-  }, [verdicts, roster, studentIds, masters, cleared]);
+  }, [verdicts, roster, studentIds, sessionAy, masters, cleared]);
 
   const scoped = !!studentIds;
 

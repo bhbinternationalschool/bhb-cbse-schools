@@ -17,6 +17,7 @@ import "server-only";
 
 import { checkWhatsAppContacts, waOutboundConfigured } from "@/lib/waSend";
 import { loadSis, type Household } from "@/lib/sis";
+import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { householdMobile10 } from "@/lib/parentHousehold.server";
 import { recordWaNumberVerdicts } from "@/lib/waNumberHealth.server";
@@ -56,15 +57,40 @@ const BATCH = 100;
  * unless you also know whether the father's or the mother's number works,
  * because that is what the sender will fall to.
  */
+/**
+ * Is this row a child the school teaches in the running session?
+ *
+ * SIS keeps one row per child per academic year and leaves every one of them
+ * `status: "active"`, so filtering on status alone reaches families whose
+ * last child left years ago, and names a child once for every year they were
+ * enrolled. Here that is not merely untidy: every extra household is a number
+ * this module pays Meta to look up, and a family the office is then told to
+ * chase for a WhatsApp number it no longer needs.
+ *
+ * A row carrying no year is kept. It is an old record, not a wrong one, and
+ * dropping it would hide a real family from the list that exists to find
+ * families nobody can reach.
+ */
+function enrolledThisSession(): (s: {
+  status?: string;
+  academicYearCode?: string;
+}) => boolean {
+  const academicYearCode = currentAcademicYearCode(loadMasters());
+  return (s) =>
+    s.status === "active" &&
+    (!s.academicYearCode || s.academicYearCode === academicYearCode);
+}
+
 function rosterCandidateNumbers(): {
   candidates: WaCandidateNumber[];
   /** Which families each number belongs to — a placeholder has several. */
   householdsByMobile: Map<string, Household[]>;
 } {
   const sis = loadSis();
+  const inSession = enrolledThisSession();
   const activeIds = new Set(
     (sis.students ?? [])
-      .filter((s) => s.status === "active")
+      .filter(inSession)
       .map((s) => s.householdId)
       .filter(Boolean),
   );
@@ -77,7 +103,7 @@ function rosterCandidateNumbers(): {
     const forHousehold = householdCandidateNumbers({
       household: h,
       students: (sis.students ?? []).filter(
-        (s) => s.householdId === h.id && s.status === "active",
+        (s) => s.householdId === h.id && inSession(s),
       ),
     });
     for (const c of forHousehold) {
@@ -125,6 +151,7 @@ export async function checkRosterOnWhatsApp(): Promise<WaRosterCheckResult> {
 
   const sis = loadSis();
   const students = sis.students ?? [];
+  const stillEnrolled = enrolledThisSession();
 
   let onWhatsApp = 0;
   let notOnWhatsApp = 0;
@@ -171,7 +198,7 @@ export async function checkRosterOnWhatsApp(): Promise<WaRosterCheckResult> {
         label: byMobileLabel.get(m10) || "Number on file",
         guardianNames: hhs.map((h) => h.guardianName).filter(Boolean),
         children: students
-          .filter((s) => hhIds.has(s.householdId) && s.status === "active")
+          .filter((s) => hhIds.has(s.householdId) && stillEnrolled(s))
           .map((s) => s.fullName),
       });
     }
