@@ -58,6 +58,7 @@ import {
   type HoldCheck,
 } from "@/lib/holds";
 import type { HoldCode } from "@/lib/types";
+import { useHoldDecisions } from "@/lib/useHoldDecisions";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 
 function todayIso() {
@@ -67,6 +68,9 @@ function todayIso() {
 type Tab = "dashboard" | "desk" | "reports";
 
 export function CertificatesWorkspace() {
+  // Fee holds are server truth. Without this the gates below read an
+  // unloaded snapshot and every child looks allowed.
+  const holdDecisions = useHoldDecisions();
   const session = useDemoSession();
   const [tab, setTab] = useState<Tab>("desk");
   const [masters, setMasters] = useState<MastersState | null>(null);
@@ -177,7 +181,9 @@ export function CertificatesWorkspace() {
   const eligibility = useMemo(() => {
     if (!student) return null;
     return certificateEligibility(student, kind);
-  }, [student, kind, tick]);
+    // holdDecisions.version: eligibility folds in checkHold, which reads a
+    // snapshot that lands after the first render.
+  }, [student, kind, tick, holdDecisions.version]);
 
   useEffect(() => {
     const code = holdCodeForCertificate(kind);
@@ -187,7 +193,7 @@ export function CertificatesWorkspace() {
     }
     setHoldCode(code);
     setHoldCheck(checkHold(student.id, code));
-  }, [student?.id, kind, tick]);
+  }, [student?.id, kind, tick, holdDecisions.version]);
 
   useEffect(() => {
     if (!student) {

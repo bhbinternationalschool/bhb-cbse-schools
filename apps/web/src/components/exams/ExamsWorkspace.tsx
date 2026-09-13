@@ -68,6 +68,7 @@ import {
   ClassResultSheetView,
   printClassResultSheet,
 } from "@/components/exams/ClassResultSheet";
+import { useHoldDecisions } from "@/lib/useHoldDecisions";
 import { ExamDateSheetPanel } from "@/components/exams/ExamDateSheetPanel";
 import { InvigilationPanel } from "@/components/exams/InvigilationPanel";
 import { ExamPapersPanel } from "@/components/exams/ExamPapersPanel";
@@ -95,6 +96,9 @@ type Tab =
   | "setup";
 
 export function ExamsWorkspace() {
+  // Fee holds are server truth. Without this the gates below read an
+  // unloaded snapshot and every child looks allowed.
+  useHoldDecisions();
   const session = useDemoSession();
   const [tab, setTab] = useState<Tab>("dashboard");
   const [masters, setMasters] = useState<MastersState | null>(() =>

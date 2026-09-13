@@ -98,6 +98,7 @@ import {
   runTransportReport,
   type TransportReportFormat,
 } from "@/lib/transportReportCatalog";
+import { useHoldDecisions } from "@/lib/useHoldDecisions";
 
 type TransportTab =
   | "dashboard"
@@ -145,6 +146,9 @@ function todayIso() {
 }
 
 export function TransportWorkspace() {
+  // Fee holds are server truth. Without this the gates below read an
+  // unloaded snapshot and every child looks allowed.
+  useHoldDecisions();
   const session = useDemoSession();
   const [tab, setTab] = useState<TransportTab>("dashboard");
 

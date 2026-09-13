@@ -14,6 +14,7 @@ import {
   HoldStatusBanner,
   PrincipalHoldOverrideDialog,
 } from "@/components/fees/PrincipalHoldOverrideDialog";
+import { useHoldDecisions } from "@/lib/useHoldDecisions";
 import { field } from "@/components/ui/erp-ui";
 import { useDemoSession } from "@/components/shell/SessionContext";
 
@@ -24,6 +25,9 @@ type Props = {
 };
 
 export function AdmitCardsPanel({ academicYearCode, masters, terms }: Props) {
+  // Fee holds are server truth. Without this the gates below read an
+  // unloaded snapshot and every child looks allowed.
+  const holdDecisions = useHoldDecisions();
   const session = useDemoSession();
   const [examTermId, setExamTermId] = useState("");
   const [classId, setClassId] = useState("");
@@ -97,7 +101,9 @@ export function AdmitCardsPanel({ academicYearCode, masters, terms }: Props) {
         student,
         hold: checkHold(student.id, "HOLD_ADMIT_CARD"),
       })),
-    [roster, tick], // eslint-disable-line react-hooks/exhaustive-deps
+    // holdDecisions.version matters: the verdicts below are computed from a
+    // snapshot that arrives after the first render.
+    [roster, tick, holdDecisions.version], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const allowedRows = rows.filter((r) => r.hold.allowed);
   const blockedRows = rows.filter(

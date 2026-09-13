@@ -123,6 +123,8 @@
     "test:transport-shifts": "npx tsx src/lib/transportShifts.selftest.ts",
     "test:transport-seats": "npx tsx src/lib/transportSeats.selftest.ts",
     "test:boarding-suggest": "npx tsx src/lib/boardingSuggestAi.selftest.ts",
+    "test:defaulter-hold-policy": "npx tsx src/lib/defaulterHoldPolicy.selftest.ts",
+    "test:hold-resolve": "npx tsx src/lib/holdResolve.selftest.ts",
     "test:live-bus-marker": "npx tsx src/lib/liveBusMarker.selftest.ts",
     "test:transport-pin-intake": "npx tsx src/lib/transportPinIntake.selftest.ts",
     "test:transport-boarding": "npx tsx src/lib/transportBoarding.selftest.ts",

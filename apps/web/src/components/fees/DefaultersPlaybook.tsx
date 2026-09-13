@@ -48,6 +48,7 @@ import {
   type FeeRecoveryMeeting,
 } from "@/lib/feeRecoveryTasks";
 import type { HoldCode } from "@/lib/types";
+import { useHoldDecisions } from "@/lib/useHoldDecisions";
 import { paymentLikelihood } from "@/lib/collectionsAi";
 import { AGEING_BAND_LABEL, type AgeingBand } from "@/lib/collectionsWeeklyAi";
 import { CollectionsWeeklyNoteCard } from "@/components/fees/CollectionsWeeklyNoteCard";
@@ -72,6 +73,9 @@ function ageingBandOf(r: { overdueDays: number }): AgeingBand {
 }
 
 export function DefaultersPlaybook() {
+  // Fee holds are server truth. Without this the gates below read an
+  // unloaded snapshot and every child looks allowed.
+  useHoldDecisions();
   const session = useDemoSession();
   const ay = session.academicYearCode;
   const [sis, setSis] = useState<SisState | null>(null);
