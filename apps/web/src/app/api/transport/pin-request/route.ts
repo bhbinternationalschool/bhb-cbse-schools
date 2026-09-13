@@ -33,6 +33,7 @@ import {
 } from "@/lib/transportNormalized.server";
 import { fetchSisFromDb } from "@/lib/sisNormalized.server";
 import { sendWhatsAppTemplate } from "@/lib/waSend";
+import { logHouseholdWaSend } from "@/lib/householdMessageLog.server";
 import {
   templateButtonComponents,
   templateVariablePositions,
@@ -319,6 +320,24 @@ export async function POST(req: Request) {
       // One ask per household per day, whatever a double-click does.
       clientMessageId: `pin_request:${t.householdId}:${now.slice(0, 10)}`,
     });
+
+    // Into the school's message log too, so it shows on the WhatsApp screen's
+    // Delivered tab with its ticks. It did not: this route called
+    // sendWhatsAppTemplate directly and wrote only its own table, so on
+    // 13 Sep 2026 five requests were delivered by Meta and appeared nowhere the
+    // office looks. Fail-open, like every other caller of the logger.
+    await logHouseholdWaSend({
+      mobile,
+      purpose: "transport_pin_request",
+      via: "template",
+      templateName: resolved.template.metaName,
+      preview: `Boarding location request · ${t.childNames.join(" / ")}${
+        t.busNo ? ` · bus ${t.busNo}` : ""
+      }`,
+      status: res.ok ? "sent" : "failed",
+      error: res.ok ? "" : res.error || "",
+      waMessageId: res.ok ? res.providerId || "" : "",
+    }).catch(() => undefined);
 
     // Recorded whether or not it went: "failed" is a different fact from
     // "asked and ignored", and merging them would report a response rate that
