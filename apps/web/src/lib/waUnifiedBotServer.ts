@@ -57,6 +57,13 @@ import {
 } from "@/lib/voiceNote";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { sendWhatsAppText, waNormalizeLocal10 } from "@/lib/waSend";
+import {
+  detectSisBotIntent,
+  detectSisFeeQuestion,
+  detectSisFeeReplyIntent,
+  looksLikeAutoReply,
+} from "@/lib/sisParentBotEngine";
+import { matchSeedQuickReply } from "@/lib/waTemplates";
 import { SCHOOL_DEFAULT_WA_LANGUAGE, waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { loadSis } from "@/lib/sis";
 import { sendWhatsAppInteractive } from "@/lib/waInteractive";
@@ -754,6 +761,16 @@ function unifiedHindiFor(identity: WaResolvedIdentity): boolean {
   return SCHOOL_DEFAULT_WA_LANGUAGE === "hi";
 }
 
+
+/** Text only a parent sends: a fee-reminder button, a payment reply, a fee question, a parent keyword. */
+function isParentBusiness(text: string): boolean {
+  const t = (text || "").trim();
+  if (!t) return false;
+  if (matchSeedQuickReply(t)) return true;
+  if (detectSisFeeReplyIntent(t) || detectSisFeeQuestion(t)) return true;
+  return ["dues", "pay", "receipts", "kids", "bus"].includes(detectSisBotIntent(t)) && /^[A-Za-z]+(\s+\S+)?$/.test(t);
+}
+
 export async function handleWaUnifiedInbound(opts: {
   fromWaId: string;
   text: string;
@@ -869,6 +886,20 @@ export async function handleWaUnifiedInbound(opts: {
       stub: false,
       error: "Invalid mobile",
     };
+  }
+
+  // Another WhatsApp Business account's automatic reply ("You have contacted
+  // Aqua RO Service… currently unavailable"). Answering it draws the next
+  // auto-reply; logged for the office, never answered.
+  if (looksLikeAutoReply(rawText)) {
+    await sendBotReply({
+      mobile10,
+      displayName: opts.profileName?.trim() || "",
+      category: "general",
+      audience: "auto_reply",
+      inbound: inboundLog,
+    });
+    return { replied: false, escalate: false, audience: "auto_reply", stub: false };
   }
 
   // ── A student's own number ──
@@ -1203,6 +1234,22 @@ export async function handleWaUnifiedInbound(opts: {
     session.phase === "pick_role" &&
     !session.activeFlow
   ) {
+    // A parent who is also staff, replying to a fee reminder ("थोड़ा समय
+    // चाहिए", "भुगतान हो गया") or asking DUES, is answering as a parent. On
+    // 13 Sep 2026 a teacher-parent got "Choose: 1. TEACHER 2. PARENT" and her
+    // reply was never dealt with.
+    const parentRole = identity.roles.find((r) => r.kind === "parent");
+    if (parentRole && isParentBusiness(text)) {
+      session.activeFlow = "parent";
+      session.phase = "active";
+      session.displayName = identity.displayName;
+      store = {
+        ...store,
+        sessions: { ...store.sessions, [mobile10]: { ...session, updatedAt: nowIso() } },
+      };
+      await writeStore(store);
+      return delegateActiveFlow("parent", { ...opts, text }, identity, session);
+    }
     const role = pickRoleByInput(identity.roles, text);
     if (!role) {
       const pack = menuKnownUserGreeting(identity, unifiedHindiFor(identity));

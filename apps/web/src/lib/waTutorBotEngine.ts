@@ -103,6 +103,12 @@ export function isReservedBotWord(text: string): boolean {
  * asked for the tutor, and answering would take the conversation somewhere
  * they did not choose.
  */
+// Words that only fee talk uses. Not "rupaye", "baki" or a bare "jama":
+// those are ordinary words in a maths question ("jama karo", "kitne rupaye
+// baki bache") and an open study session must still get them.
+const FEE_TALK =
+  /\b(fees?|fis|paid|payment|bhugtan|dues)\b|\bjama\s*(h|hai|he|kar\s*di|kar\s*diya|ho\s*gaya|ho\s*gayi)\b|फीस|भुगतान|बकाया|\b(dal|daal)\s*(di|diya|diye)\b/i;
+
 export function parseWaTutorCommand(
   raw: string,
   sessionOpen: boolean,
@@ -125,10 +131,16 @@ export function parseWaTutorCommand(
     if (Number.isInteger(n) && n > 0) return { kind: "child", index: n };
   }
 
+  // Fee talk is never the tutor's, whatever word it starts with. On 11 Sep
+  // 2026 "Exam fees jama h" (the exam fee is paid) opened exam preparation
+  // and "Pass dal di hu" (I have paid it in) was offered a ₹49 study pass.
+  if (FEE_TALK.test(text)) return { kind: "none" };
+
   if (headUpper === "PASS" || headUpper === "BUY") {
     const n = Number(tail);
     if (tail && Number.isInteger(n) && n > 0) return { kind: "buy", index: n };
-    return { kind: "plans" };
+    // "PASS" alone asks for the plans; "pass dal di" is a sentence, not a command.
+    if (!tail) return { kind: "plans" };
   }
 
   const hit = MODE_KEYWORDS.find((m) => m.word === headUpper);

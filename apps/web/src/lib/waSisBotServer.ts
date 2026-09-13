@@ -50,6 +50,15 @@ import {
   promiseSummaryForOffice,
   promiseIsEmpty,
   composeSisPromiseUnclear,
+  composeSisAcknowledgement,
+  composeSisFeeStructureReply,
+  composeSisUngroundedReply,
+  detectSisFeeQuestion,
+  isSisAcknowledgement,
+  isSisGreeting,
+  type SisChildFeeYear,
+  type SisFeeHeadLine,
+  type SisFeeQuestion,
 } from "@/lib/sisParentBotEngine";
 import { attachRazorpayToPaymentLink } from "@/lib/razorpay.server";
 import {
@@ -71,7 +80,8 @@ import {
   languageLabel,
   languageMenuText,
   languageGateDecision,
-  sarvamTargetFor, languageAskStandsAlone, waTemplateLanguageFor } from "@/lib/householdPrefs";
+  LANGUAGE_MENU_KEYWORDS,
+  sarvamTargetFor, waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { patchMirrorHousehold } from "@/lib/parentHousehold.server";
 import { sarvamConfigured, sarvamTranslate, type SarvamLang } from "@/lib/sarvam.server";
 import { formatKbContext, retrieveRelevantKb } from "@/lib/schoolKb.server";
@@ -237,8 +247,6 @@ function dueStudentName(due: FeeDueLine): string {
  * fallback) on any failure — this is a graceful upgrade, never a hard
  * dependency for the bot to keep working.
  */
-const UNGROUNDED_REPLY =
-  "I don't have that information here. Reply *HUMAN* and the school office will get back to you.";
 
 async function tryAiFallbackReply(
   hh: Household,
@@ -296,7 +304,10 @@ ${kbContext ? `Relevant school notices:\n${kbContext}\n` : ""}Parent's message: 
     const r = await generateParentBotReplyJson({ system, userMessage });
     if (!r.ok) return null;
     // Hard gate: an ungrounded answer never reaches the parent verbatim.
-    if (!r.grounded) return { text: UNGROUNDED_REPLY, grounded: false };
+    // Already escalated by the caller, so the parent is told it has gone to
+    // the office — not asked to type HUMAN — and in their own language. It
+    // was English for every family until 2026-09-14.
+    if (!r.grounded) return { text: composeSisUngroundedReply(waTemplateLanguageFor(hh) === "hi"), grounded: false };
     const reply = r.reply.trim();
     if (!reply) return null;
     // Regional preference: render the Hindi draft in the family's language
@@ -513,6 +524,70 @@ async function buildPayLinkReply(
   };
 }
 
+/**
+ * The whole session's fee for each child, from the child's own record:
+ * every head with its instalments, the concession already applied, what is
+ * paid and what is left. Store sales are left out — they are purchases, not
+ * the fee a parent is asking about.
+ */
+function childFeeYears(hh: Household, hindi: boolean): { academicYear: string; children: SisChildFeeYear[] } {
+  const masters = loadMasters();
+  const ay = currentAcademicYearCode(masters);
+  const sis = loadSis();
+  const fees = loadFees();
+  const rows = computeHouseholdDues(hh.id, sis, masters, fees, {
+    includeFuture: true,
+    includePaid: true,
+    academicYearCode: ay,
+  });
+  const headName = (d: FeeDueLine) => {
+    if (d.kind === "transport") return hindi ? "बस / परिवहन" : "Transport";
+    const h = (masters.feeHeads ?? []).find((x) => x.id === d.feeHeadId);
+    return (hindi ? h?.nameHi || h?.nameEn : h?.nameEn) || d.feeHeadName || d.label;
+  };
+  const children: SisChildFeeYear[] = rows.map(({ student, dues }) => {
+    const lines = dues.filter((d) => d.kind !== "store");
+    const byHead = new Map<string, { head: string; transport: boolean; nets: number[] }>();
+    for (const d of lines) {
+      const key = `${d.kind === "transport" ? "transport" : d.feeHeadId || d.feeHeadName}`;
+      const net = Math.max(0, d.billedPaise - d.concessionPaise);
+      // A head the school named "Transport fee" is a bus fee too, even when
+      // it is billed as an ordinary head rather than from the route.
+      const isBus = d.kind === "transport" || /transport|\bbus\b|\bvan\b|परिवहन|बस/i.test(`${d.feeHeadName} ${headName(d)}`);
+      const cur = byHead.get(key) ?? { head: headName(d), transport: isBus, nets: [] };
+      cur.nets.push(net);
+      byHead.set(key, cur);
+    }
+    const heads: SisFeeHeadLine[] = [...byHead.values()]
+      .map((h) => ({
+        head: h.head,
+        transport: h.transport,
+        count: h.nets.length,
+        eachPaise: h.nets.every((n) => n === h.nets[0]) ? h.nets[0]! : null,
+        totalPaise: h.nets.reduce((a, b) => a + b, 0),
+      }))
+      .filter((h) => h.totalPaise > 0);
+    const dueNow = flattenOpenDues(hh.id, student.id).reduce((a, d) => a + d.balancePaise, 0);
+    return {
+      name: student.fullName,
+      classLabel: classLabelForStudent(student, masters),
+      heads,
+      concessionPaise: lines.reduce((a, d) => a + d.concessionPaise, 0),
+      totalPaise: heads.reduce((a, h) => a + h.totalPaise, 0),
+      paidPaise: lines.reduce((a, d) => a + d.paidPaise, 0),
+      balancePaise: lines.reduce((a, d) => a + d.balancePaise, 0),
+      dueNowPaise: dueNow,
+    };
+  });
+  return { academicYear: ay, children };
+}
+
+export function feeQuestionReply(hh: Household, question: SisFeeQuestion): { text: string; escalate: boolean } {
+  const hindi = waTemplateLanguageFor(hh) === "hi";
+  const { academicYear, children } = childFeeYears(hh, hindi);
+  return composeSisFeeStructureReply({ academicYear, children, question, hindi });
+}
+
 async function buildBotReply(
   hh: Household,
   intent: ReturnType<typeof detectSisBotIntent>,
@@ -725,9 +800,11 @@ export async function handleWaSisBotInbound(opts: {
     return finishLanguageFlow(store, thread, parentMsg, ack);
   }
 
-  const isGreeting =
-    !opts.fromUnified &&
-    (!text || /^(hi|hello|namaste|hey|start|menu)$/i.test(text));
+  // "hlw", "hello sir", "namaskar", "good morning" are greetings too. It
+  // used to be six exact words, and only when the message had not come
+  // through the unified bot — which is how every parent message arrives — so
+  // "Hlw" got a bare list of keywords instead of the welcome.
+  const isGreeting = isSisGreeting(text);
 
   // ── Language preference: decided from the HOUSEHOLD, not from the thread.
   //
@@ -743,15 +820,30 @@ export async function handleWaSisBotInbound(opts: {
   // it free. Meta's 24-hour window opens when the customer writes to us;
   // sending them a template does not open it, so the menu cannot ride out
   // behind a receipt. It rides on the reply the receipt provokes.
-  const gate = languageGateDecision({ known: hh.preferredLanguage, text });
-  // The question is asked on this turn either way; what changes is whether
-  // it is the whole reply or a trailer behind the real answer. A parent who
-  // tapped "Already paid" or typed DUES gets that dealt with FIRST.
-  const askLanguage = gate.action === "ask";
-  if (askLanguage && languageAskStandsAlone({ text, isGreeting })) {
+  // The language question is asked only when the parent asks for it (LANG).
+  //
+  // It used to be appended to EVERY reply for a family with no language on
+  // record — 191 of 200 households — so a parent asking about fees got the
+  // answer followed by a six-line "Which language…" menu, message after
+  // message (13 Sep 2026). The school writes in Hindi unless a family says
+  // otherwise, so there is nothing to ask. A bare "2" is read as a language
+  // only right after the menu was sent, never out of the blue.
+  const explicitLang = LANGUAGE_MENU_KEYWORDS.some((k) => {
+    const u = text.toUpperCase();
+    return u === k || u.startsWith(`${k} `);
+  });
+  const lastBot = [...thread.messages].reverse().find((m) => m.role === "bot");
+  const justAskedLanguage = !!lastBot && lastBot.text.startsWith(languageMenuText().slice(0, 40));
+  const rawGate = languageGateDecision({ known: justAskedLanguage ? "" : hh.preferredLanguage || (explicitLang ? "" : "hi"), text });
+  const gate =
+    rawGate.action === "ask" && !explicitLang
+      ? ({ action: "pass" } as const)
+      : rawGate.action === "save" && !explicitLang && !justAskedLanguage && /^\s*\d+\s*$/.test(text)
+        ? ({ action: "pass" } as const)
+        : rawGate;
+  if (gate.action === "ask") {
     return finishLanguageFlow(store, thread, parentMsg, languageMenuText());
   }
-  const languageTrailer = askLanguage ? `\n\n${languageMenuText()}` : "";
   if (gate.action === "save") {
     const choice = gate.choice;
     const updated: Household = { ...hh, preferredLanguage: choice };
@@ -805,7 +897,7 @@ export async function handleWaSisBotInbound(opts: {
           mobile10,
           command: linkCmd,
         });
-        return finishLanguageFlow(store, thread, parentMsg, r.replyText + languageTrailer);
+        return finishLanguageFlow(store, thread, parentMsg, r.replyText);
       } catch (e) {
         console.error("[wa-sis-bot] student link failed", e);
       }
@@ -829,7 +921,7 @@ export async function handleWaSisBotInbound(opts: {
         text,
       });
       if (tutor.handled) {
-        return finishLanguageFlow(store, thread, parentMsg, tutor.replyText + languageTrailer);
+        return finishLanguageFlow(store, thread, parentMsg, tutor.replyText);
       }
     } catch (e) {
       // Study help failing must never take the fee and receipt bot with
@@ -848,7 +940,11 @@ export async function handleWaSisBotInbound(opts: {
   const hindi = waTemplateLanguageFor(hh) === "hi";
   const paidButton = !!quickReply && /paid|भुगतान/i.test(quickReply.label);
   const feeReply = paidButton ? ("claims_paid" as const) : detectSisFeeReplyIntent(text);
-  const answeringPtp = thread.pendingAsk === "ptp" && !quickReply && detectSisBotIntent(text) === "unknown";
+  // "1500 dina" in answer to "how much and by when" says it is already paid,
+  // not a promise — read the payment first.
+  const answeringPtp =
+    thread.pendingAsk === "ptp" && !quickReply && feeReply !== "claims_paid" && detectSisBotIntent(text) === "unknown";
+  const feeQuestion = !quickReply && !feeReply ? detectSisFeeQuestion(text) : null;
   let nextPendingAsk: WaSisBotThread["pendingAsk"] = undefined;
   let nextPtpAsks: number | undefined;
   let lastPromise = thread.lastPromise;
@@ -888,6 +984,17 @@ export async function handleWaSisBotInbound(opts: {
     nextPendingAsk = "ptp";
     nextPtpAsks = 1;
     bot = { escalate: false, text: composeSisNeedTimeAsk(hindi) };
+  } else if (feeQuestion) {
+    // "How much is the fee / the bus / any discount?" — the year's fee from
+    // the child's own record, not the dues list (see detectSisFeeQuestion).
+    intent = "dues";
+    bot = feeQuestionReply(hh, feeQuestion);
+    if (bot.escalate) {
+      officeNote = `Parent asked about fees${feeQuestion.transport ? " / transport" : ""}${feeQuestion.discount ? " / a discount" : ""}${feeQuestion.namedClass ? ` / class ${feeQuestion.namedClass}` : ""}: "${text.slice(0, 160)}"`;
+    }
+  } else if (!quickReply && isSisAcknowledgement(text)) {
+    intent = "info";
+    bot = { escalate: false, text: composeSisAcknowledgement(hindi) };
   } else {
     intent = quickReply
       ? ("human" as const)
@@ -899,7 +1006,7 @@ export async function handleWaSisBotInbound(opts: {
       : await buildBotReply(hh, intent, text);
   }
   let replyText = bot.text;
-  if (opts.fromUnified && intent === "unknown") {
+  if (opts.fromUnified && intent === "unknown" && !isGreeting) {
     replyText =
       waTemplateLanguageFor(hh) === "hi"
         ? "*KIDS* · *DUES* · *PAY* (GPay/UPI) · *PAY 1* · *RECEIPTS* · *HUMAN* में से कोई शब्द लिखें — या स्कूल के मुख्य मेनू के लिए *MENU*।"
@@ -914,8 +1021,6 @@ export async function handleWaSisBotInbound(opts: {
       escalateUngrounded = !aiReply.grounded;
     }
   }
-
-  replyText += languageTrailer;
 
   const botMsg: WaSisBotMsg = {
     id: nid("wsm"),

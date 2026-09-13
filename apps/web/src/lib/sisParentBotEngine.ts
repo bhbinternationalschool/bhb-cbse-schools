@@ -475,10 +475,22 @@ const CLAIMS_PAID =
 const NEED_TIME =
   /thod[ai]\s*(samay|time|waqt|din)|samay\s*(chahiye|dijiye|de\b|do\b|lagega)|time\s*(chahiye|do\b|dijiye|lagega|chahie)|kuch\s*din|agle\s*(hafte|mahine|week|month)|next\s*(week|month)|salary\s*(aane|milne|ke\s*baad)|tankhwah|baad\s*m[e]?\b|bad\s*me\b|later\b|will\s*pay|(de|kar|jama\s*kar)\s*(denge|dunga|dungi|denga)|थोड़ा\s*(समय|टाइम|वक्त|वक़्त)|समय\s*(चाहिए|दीजिए|दो|लगेगा)|कुछ\s*दिन|अगले\s*(हफ्ते|महीने|सप्ताह)|बाद\s*में|(दे|कर|जमा\s*कर)\s*(देंगे|दूंगा|दूँगा|दूंगी|दूँगी|देंगें)|तनख्वाह|सैलरी/i;
 
+/**
+ * The ways parents actually said "already paid" on 11 Sep 2026 that the
+ * pattern above missed — "Exam fees jama h", "Pass dal di hu" (paid it in,
+ * which the tutor then read as a request for a study PASS), "1500 dina".
+ * Only read as a payment when the message is not itself a question: "fees
+ * kab jama hai?" asks when it is due.
+ */
+const CLAIMS_PAID_LOOSE =
+  /\b(daal|dal)\s*(di|diya|diye|de|chuke|chuki)\b|\bjama\s*(h|hai|he|ho\s*chuka|ho\s*chuki)\b|\b\d{3,6}\s*(rs|rupaye|rupees|₹)?\s*(dina|diya|diye|di|de\s*di|de\s*diya|jama\s*kiya|jama\s*kiye)\b|\b(de|bhar)\s*(di|diya|diye)\s*(hu|hun|hoon|hai|h|he)\b|\bpay(ment)?\s*kar\s*(di|diya|diye)\b|डाल\s*(दी|दिया|दिए)|जमा\s*(है|हो\s*चुका|हो\s*चुकी)|दे\s*(दी|दिया|दिए)\s*(हूँ|हूं|है|हैं)/i;
+const IS_QUESTION = /\?|\b(kab|kitna|kitni|kaise|kahan|kya|when|how|where)\b|कब|कितना|कितनी|कैसे|कहाँ|क्या/i;
+
 export function detectSisFeeReplyIntent(text: string): SisFeeReplyIntent | null {
   const t = (text || "").trim();
   if (!t) return null;
   if (CLAIMS_PAID.test(t)) return "claims_paid";
+  if (CLAIMS_PAID_LOOSE.test(t) && !IS_QUESTION.test(t)) return "claims_paid";
   if (NEED_TIME.test(t)) return "need_time";
   return null;
 }
@@ -636,4 +648,242 @@ export function composeSisPromiseUnclear(hindi: boolean): string {
 export function promiseSummaryForOffice(p: SisPromiseToPay): string {
   const parts = [p.amountPaise != null ? formatInr(p.amountPaise) : p.full ? "full amount" : "amount not given", p.byDate ? `by ${p.byDate}` : "date not given"];
   return `Promise to pay: ${parts.join(", ")} — "${p.raw.slice(0, 120)}"`;
+}
+
+/* ── "How much is the fee?" ──────────────────────────────────────────────
+ *
+ * On 13 Sep 2026 a parent asked four times — "Ukg ka fees kitna hai",
+ * "Transport ka", "Monthly school fees kitna hai transport kitna hai",
+ * "Aur fees mein kuchh discount" — and got the same list of September dues
+ * three times and an English "I don't have that information" once. The
+ * keyword matcher files any sentence containing "fee" under DUES, and DUES
+ * answers "what do I owe now", not "what does the year cost".
+ *
+ * This answers from the child's OWN fee record for the session: every head,
+ * the amount per instalment and how many, the concession already applied,
+ * what is paid and what is left. Nothing here is general knowledge about
+ * the school; a question it cannot answer from that record goes to the
+ * office.
+ */
+
+export type SisFeeQuestion = {
+  /** Asked about the bus / transport fee. */
+  transport: boolean;
+  /** Asked about the bus ONLY ("Transport ka") — the answer shows just that. */
+  transportOnly: boolean;
+  /** Asked about a discount / concession. */
+  discount: boolean;
+  /** A class the parent named ("UKG", "class 5"), normalised; "" when none. */
+  namedClass: string;
+};
+
+const FEE_WORD = /\bfe+s?\b|\bfees\b|\bfis\b|फीस|फ़ीस|शुल्क|\btuition\b|\btution\b|\bkiraya\b|किराया/i;
+const TRANSPORT_WORD = /\btransport\b|\btrans?port\b|\bbus\b|\bvan\b|\bgaadi\b|\bgadi\b|बस|वैन|गाड़ी|ट्रांसपोर्ट/i;
+const DISCOUNT_WORD = /discount|concession|\bchhut\b|\bchut\b|\bchoot\b|maaf|माफ़|माफ|छूट|रियायत|कम\s*(कर|हो)/i;
+const ASK_WORD =
+  /kitn[aie]|how\s*much|what\s*is|kya\s*(hai|h\b|he\b)|batai?y?e|bata\s*(de|do|en|ein|dijiye)|bataen|structure|monthly|mahin[aeo]|mah?ine|saal|annual|yearly|total|pura|poora|kul\b|कितन[ाीे]|क्या\s*है|बताइए|बताएं|बताएँ|मासिक|महीने|सालाना|साल\s*का|कुल/i;
+const CLASS_WORD = /\b(nursery|lkg|ukg|pre[-\s]?nursery|play\s*group|class\s*\d{1,2}|\d{1,2}\s*(st|nd|rd|th)\b)|नर्सरी|एलकेजी|यूकेजी|कक्षा\s*\d{1,2}/i;
+
+/**
+ * Is this a question about how much the fee IS (not what is owed now)?
+ *
+ * Needs an ask word or a class/discount word next to a fee or transport
+ * word — "fees jama kar di" is a payment, handled before this runs, and a
+ * bare "fees" still means DUES. A short follow-up like "Transport ka" /
+ * "bus ki" counts: it only ever follows a fee question.
+ */
+export function detectSisFeeQuestion(text: string): SisFeeQuestion | null {
+  const t = (text || "").trim();
+  if (!t) return null;
+  const fee = FEE_WORD.test(t);
+  const transport = TRANSPORT_WORD.test(t);
+  const discount = DISCOUNT_WORD.test(t);
+  const ask = ASK_WORD.test(t);
+  const cls = t.match(CLASS_WORD);
+  const shortFollowUp = transport && /^\S+\s+(ka|ki|ke|का|की|के)\s*\??$/i.test(t);
+  const isQuestion =
+    ((fee || transport) && (ask || !!cls)) ||
+    (fee && discount) ||
+    shortFollowUp;
+  if (!isQuestion) return null;
+  return {
+    transport,
+    transportOnly: transport && !fee && !discount && !cls,
+    discount,
+    namedClass: cls ? normaliseClassName(cls[0]) : "",
+  };
+}
+
+/** "UKG" / "class 5" / "5th" / "कक्षा 5" → "UKG" / "5" for comparison with a class label. */
+export function normaliseClassName(raw: string): string {
+  const t = (raw || "").trim().toLowerCase();
+  if (/nursery|नर्सरी/.test(t)) return "NURSERY";
+  if (/lkg|एलकेजी/.test(t)) return "LKG";
+  if (/ukg|यूकेजी/.test(t)) return "UKG";
+  const n = t.match(/\d{1,2}/);
+  return n ? n[0]! : t.toUpperCase();
+}
+
+/** Does a class label ("UKG-A", "Class 5 B", "V-A") name this class? */
+export function classLabelMatches(label: string, named: string): boolean {
+  if (!named) return true;
+  const l = (label || "").toUpperCase();
+  if (/^\d+$/.test(named)) {
+    const roman = ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"][Number(named)] ?? "";
+    return new RegExp(`(^|[^0-9])${named}([^0-9]|$)`).test(l) || (!!roman && new RegExp(`(^|[^A-Z])${roman}([^A-Z]|$)`).test(l));
+  }
+  return l.includes(named);
+}
+
+export type SisFeeHeadLine = {
+  head: string;
+  transport: boolean;
+  /** Net of concession, per instalment, when every instalment is the same; null when they differ. */
+  eachPaise: number | null;
+  count: number;
+  totalPaise: number;
+};
+
+export type SisChildFeeYear = {
+  name: string;
+  classLabel: string;
+  heads: SisFeeHeadLine[];
+  concessionPaise: number;
+  totalPaise: number;
+  paidPaise: number;
+  balancePaise: number;
+  /** Owed up to the running month. */
+  dueNowPaise: number;
+};
+
+export function composeSisFeeStructureReply(opts: {
+  academicYear: string;
+  children: SisChildFeeYear[];
+  question: SisFeeQuestion;
+  hindi: boolean;
+}): { text: string; escalate: boolean } {
+  const { hindi, question } = opts;
+  const shown = opts.children.filter((c) => c.heads.length > 0);
+  const lines: string[] = [];
+  let escalate = false;
+
+  lines.push(hindi ? `*फीस की जानकारी* · सत्र ${opts.academicYear}` : `*Fee details* · session ${opts.academicYear}`);
+
+  if (shown.length === 0) {
+    lines.push(
+      "",
+      hindi
+        ? "आपके बच्चे की इस सत्र की फीस अभी रिकॉर्ड में नहीं मिली। आपका सवाल स्कूल ऑफिस को भेज दिया गया है, वे जल्द बताएँगे।"
+        : "This session's fee for your child is not on the record yet. Your question has gone to the school office and they will reply soon.",
+    );
+    return { text: lines.join("\n"), escalate: true };
+  }
+
+  for (const c of shown) {
+    if (question.transportOnly && !c.heads.some((h) => h.transport)) continue;
+    lines.push("", `*${c.name}*${c.classLabel ? ` (${c.classLabel})` : ""}`);
+    const heads = question.transportOnly
+      ? c.heads.filter((h) => h.transport)
+      : question.transport && !question.discount
+        ? [...c.heads.filter((h) => h.transport), ...c.heads.filter((h) => !h.transport)]
+        : c.heads;
+    for (const h of heads) {
+      const amount =
+        h.eachPaise != null && h.count > 1
+          ? `${formatInr(h.eachPaise)} × ${h.count} = *${formatInr(h.totalPaise)}*`
+          : `*${formatInr(h.totalPaise)}*`;
+      lines.push(`• ${h.head}: ${amount}`);
+    }
+    if (question.transportOnly) continue;
+    if (c.concessionPaise > 0) {
+      lines.push(
+        hindi
+          ? `_(ऊपर की राशि में ${formatInr(c.concessionPaise)} की छूट पहले ही घटा दी गई है)_`
+          : `_(the amounts above already have a concession of ${formatInr(c.concessionPaise)} taken off)_`,
+      );
+    }
+    lines.push(
+      hindi
+        ? `साल की कुल फीस: *${formatInr(c.totalPaise)}* · जमा: ${formatInr(c.paidPaise)} · बाकी: *${formatInr(c.balancePaise)}*`
+        : `Year total: *${formatInr(c.totalPaise)}* · paid: ${formatInr(c.paidPaise)} · left: *${formatInr(c.balancePaise)}*`,
+    );
+    if (c.dueNowPaise > 0) {
+      lines.push(hindi ? `अभी तक देय (चालू महीने तक): ${formatInr(c.dueNowPaise)}` : `Due up to this month: ${formatInr(c.dueNowPaise)}`);
+    }
+  }
+
+  if (question.transport && !shown.some((c) => c.heads.some((h) => h.transport))) {
+    escalate = true;
+    lines.push(
+      "",
+      hindi
+        ? "🚌 आपके बच्चे के लिए स्कूल बस रिकॉर्ड में नहीं है, इसलिए ऊपर बस की फीस नहीं है। बस सुविधा और उसकी फीस के लिए आपका सवाल ऑफिस को भेज दिया गया है।"
+        : "🚌 Your child is not on the school bus in our records, so no bus fee is shown. Your question about the bus and its fee has gone to the office.",
+    );
+  }
+
+  if (question.namedClass && !shown.some((c) => classLabelMatches(c.classLabel, question.namedClass))) {
+    escalate = true;
+    lines.push(
+      "",
+      hindi
+        ? `ऊपर आपके बच्चे की अपनी फीस है। *${question.namedClass}* कक्षा (जैसे नए एडमिशन) की फीस के लिए आपका सवाल ऑफिस को भेज दिया गया है।`
+        : `The above is your own child's fee. For the *${question.namedClass}* class fee (for example a new admission), your question has gone to the office.`,
+    );
+  }
+
+  if (question.discount) {
+    escalate = true;
+    lines.push(
+      "",
+      hindi
+        ? "छूट के बारे में आपकी बात स्कूल ऑफिस तक पहुँचा दी गई है — छूट का निर्णय ऑफिस/प्रधानाचार्य करते हैं, वे आपसे बात करेंगे।"
+        : "Your request about a discount has gone to the school office — discounts are decided by the office / principal, and they will talk to you.",
+    );
+  }
+
+  lines.push("", hindi ? "अभी का बकाया देखने के लिए *DUES*, भुगतान के लिए *PAY* लिखें।" : "Reply *DUES* for what is owed now, *PAY* to pay.");
+  return { text: lines.join("\n"), escalate };
+}
+
+/* ── Small talk that is not a question ─────────────────────────────── */
+
+/** "ok", "thanks", "ठीक है", "👍" — acknowledge, do not send the menu again. */
+export function isSisAcknowledgement(text: string): boolean {
+  if (/^[👍🙏✅👌\s]+$/u.test((text || "").trim()) && (text || "").trim()) return true;
+  const t = (text || "").trim().toLowerCase().replace(/[.!🙏👍\s]+$/u, "");
+  if (!t) return false;
+  return /^(ok+|okay|okk?|k|thik\s*h(ai|e)?|theek\s*h(ai|e)?|thank\s*(you|u)|thanks|thx|dhanyavaad|dhanyawad|shukriya|ji|jee|haan\s*ji|ha\s*ji|done|noted|ठीक\s*है|धन्यवाद|शुक्रिया|जी|ओके)$/iu.test(t) || /^[👍🙏✅👌]+$/u.test((text || "").trim());
+}
+
+export function composeSisAcknowledgement(hindi: boolean): string {
+  return hindi
+    ? "धन्यवाद 🙏 कुछ और जानना हो तो लिखें — या *DUES* · *PAY* · *RECEIPTS* · *HUMAN*।"
+    : "Thank you 🙏 Write any time — or reply *DUES* · *PAY* · *RECEIPTS* · *HUMAN*.";
+}
+
+/** "hi", "hlw", "hello sir", "namaskar", "good morning", "प्रणाम" — a greeting, answered with the welcome. */
+export function isSisGreeting(text: string): boolean {
+  const t = (text || "").trim().toLowerCase().replace(/[.!🙏\s]+$/u, "");
+  if (!t) return true;
+  return /^(hi+|hii+|hey|hlo+|hlw|helo+|hello+|hello\s*(sir|mam|ma'am|madam|ji)|hi\s*(sir|mam|madam|ji)|namaste|namaskar|namaskaar|pranam|good\s*(morning|afternoon|evening)|gm|start|menu|नमस्ते|नमस्कार|प्रणाम|राम\s*राम|जय\s*श्री\s*राम)$/iu.test(t);
+}
+
+/**
+ * An automatic reply from the parent's own WhatsApp Business account —
+ * "You have contacted Aqua RO Service… we are currently unavailable". The
+ * bot answered one with the school menu on 13 Sep 2026, which then triggers
+ * the other side's auto-reply again. Logged, never answered.
+ */
+export function looksLikeAutoReply(text: string): boolean {
+  const t = (text || "").toLowerCase();
+  if (t.length < 25) return false;
+  return /you have contacted|currently unavailable|we (will|shall) (get back|get in touch|respond)|thank(s| you) for (contacting|your message|reaching)|this is an auto(mated|matic)|auto[-\s]?reply|out of office|मैसेज के लिए धन्यवाद|संदेश के लिए धन्यवाद|हम जल्द ही आपसे संपर्क|catalog(ue)?\b.*(book|order)|booking.*catalog/i.test(t);
+}
+
+/** When the model cannot answer from the family's own record — already sent to the office. */
+export function composeSisUngroundedReply(hindi: boolean): string {
+  return hindi
+    ? "इसकी जानकारी मेरे पास नहीं है 🙏 आपका सवाल स्कूल ऑफिस को भेज दिया गया है — वे जल्द ही इसी WhatsApp पर जवाब देंगे।"
+    : "I don't have that information 🙏 Your question has been sent to the school office — they will reply on this WhatsApp soon.";
 }
