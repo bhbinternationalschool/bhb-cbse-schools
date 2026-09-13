@@ -11,6 +11,8 @@ import {
   resolveSchoolCollectionsUpi,
 } from "@/lib/admissions";
 import {
+  COUNTER_DISCOUNT_CODE,
+  waiverFromReceiptLabel,
   composeWhatsAppFeeReceipt,
   computeHouseholdDues,
   formatInr,
@@ -47,6 +49,7 @@ import {
   composeSisNeedTimeAsk,
   composeSisPromiseRecorded,
   composeSisClaimsPaidReply,
+  composeSisPaidStatement,
   promiseSummaryForOffice,
   promiseIsEmpty,
   composeSisPromiseUnclear,
@@ -588,6 +591,58 @@ export function feeQuestionReply(hh: Household, question: SisFeeQuestion): { tex
   return composeSisFeeStructureReply({ academicYear, children, question, hindi });
 }
 
+/**
+ * The family's receipts this session and what is still owed up to the
+ * running month, for a parent who says the fee is paid. Null when the fee
+ * record could not be read — a statement built from an empty book would tell
+ * a family that has paid that they have paid nothing.
+ */
+export function paidClaimStatement(
+  hh: Household,
+  hindi: boolean,
+): { text: string; escalate: boolean; officeNote: string } | null {
+  try {
+    const masters = loadMasters();
+    const ay = currentAcademicYearCode(masters);
+    const fees = loadFees();
+    if (!Array.isArray(fees.vouchers) || fees.vouchers.length === 0) return null;
+    const receipts = householdReceipts(hh.id, fees)
+      .filter((v) => v.academicYearCode === ay)
+      .map((v) => ({
+        date: v.collectionDate,
+        receiptNo: v.schoolReceiptNo ? `${v.receiptNo} (${v.schoolReceiptNo})` : v.receiptNo,
+        amountPaise: v.totalPaise,
+        waivedPaise: (v.lines ?? []).reduce((a, l) => {
+          const stamped = (l.concessionDetails ?? [])
+            .filter((d) => d.code === COUNTER_DISCOUNT_CODE)
+            .reduce((x, d) => x + (d.amountPaise ?? 0), 0);
+          return a + (stamped > 0 ? stamped : waiverFromReceiptLabel(l.label));
+        }, 0),
+        covered: (v.lines ?? []).map((l) => ({
+          studentName: l.studentName,
+          label: l.label,
+          amountPaise: l.amountPaise,
+        })),
+      }));
+    const openDues = flattenOpenDues(hh.id).map((d) => ({
+      studentName: dueStudentName(d),
+      label: d.label,
+      amountPaise: d.balancePaise,
+      dueOn: d.dueOn,
+    }));
+    return composeSisPaidStatement({
+      hindi,
+      guardianName: hh.guardianName,
+      academicYear: ay,
+      receipts,
+      openDues,
+    });
+  } catch (e) {
+    console.error("[wa-sis-bot] paid statement failed", e);
+    return null;
+  }
+}
+
 async function buildBotReply(
   hh: Household,
   intent: ReturnType<typeof detectSisBotIntent>,
@@ -977,8 +1032,17 @@ export async function handleWaSisBotInbound(opts: {
     }
   } else if (feeReply === "claims_paid") {
     intent = "human";
-    officeNote = "Parent says the fee is already paid — re-check receipts and the counter book, then reply here.";
-    bot = { escalate: true, text: composeSisClaimsPaidReply(hindi) };
+    // Show the family its own record — what was paid, what it covered, what
+    // is still left and so why the reminder came. Only if the record cannot
+    // be read does the old "we will re-check" apology go instead.
+    const statement = paidClaimStatement(hh, hindi);
+    if (statement) {
+      officeNote = statement.officeNote;
+      bot = { escalate: statement.escalate, text: statement.text };
+    } else {
+      officeNote = "Parent says the fee is already paid — re-check receipts and the counter book, then reply here.";
+      bot = { escalate: true, text: composeSisClaimsPaidReply(hindi) };
+    }
   } else if (feeReply === "need_time") {
     intent = "human";
     nextPendingAsk = "ptp";

@@ -25,6 +25,7 @@ import {
   COUNTER_DISCOUNT_CODE,
   counterWaiversByDueKey,
   settledWaiversByDueKey,
+  waiverFromReceiptLabel,
   type FeesState,
 } from "./fees";
 
@@ -189,6 +190,60 @@ assert.equal(
 assert.equal(
   counterWaiversByDueKey(
     feesWith([{ id: "r", voidedAt: null, lines: [line("acad:stu_1:y", 100000, 25000, [])] }]),
+  ).size,
+  0,
+);
+
+/* ── older receipts: the waiver is only in the label ────────── */
+
+// DEEPAK SINGH's family, RCV-00114 (30 Apr 2026): "Tuition Fee · April ·
+// −₹125 waived", concessionDetails empty. ₹125 kept showing as due — and the
+// parent's own receipt said it was waived.
+const labelled = (dueKey: string, label: string, amountPaise: number, concessionPaise: number) => ({
+  ...line(dueKey, amountPaise, concessionPaise, []),
+  label,
+});
+assert.equal(waiverFromReceiptLabel("Tuition Fee · April · −₹125 waived"), 12500);
+assert.equal(waiverFromReceiptLabel("Transport · April 2026 · RAJESH VAN · −₹100 waived"), 10000);
+assert.equal(waiverFromReceiptLabel("Amenity Fees · April · −₹1,000 waived"), 100000);
+assert.equal(waiverFromReceiptLabel("Tuition Fee · April"), 0);
+assert.equal(waiverFromReceiptLabel("Tuition Fee · April · waived"), 0, "no amount, nothing read");
+assert.equal(waiverFromReceiptLabel("Registration · registration waived"), 0);
+
+const oldReceipt = feesWith([
+  { id: "rcv_old", voidedAt: null, lines: [labelled("acad:stu_1:apr_old", "Tuition Fee · April · −₹125 waived", 137500, 12500)] },
+]);
+assert.equal(counterWaiversByDueKey(oldReceipt).get("acad:stu_1:apr_old"), 12500);
+
+// The standing concession inside concessionPaise is NOT taken: the label says
+// ₹200 waived though the line's concession total is ₹450 (a ₹250 sibling rule).
+const labelWithStanding = feesWith([
+  { id: "rcv_s", voidedAt: null, lines: [labelled("acad:stu_1:may_s", "Tuition Fee · May · −₹200 waived", 120000, 45000)] },
+]);
+assert.equal(counterWaiversByDueKey(labelWithStanding).get("acad:stu_1:may_s"), 20000);
+
+// Part-paid across two old receipts, both labelled with the same ₹200: once.
+const labelTwice = feesWith([
+  { id: "a", voidedAt: null, lines: [labelled("acad:stu_1:t2", "Tuition Fee · April · −₹200 waived", 125000, 20000)] },
+  { id: "b", voidedAt: null, lines: [labelled("acad:stu_1:t2", "Tuition Fee · April · −₹200 waived", 20000, 20000)] },
+]);
+assert.equal(counterWaiversByDueKey(labelTwice).get("acad:stu_1:t2"), 20000, "the largest label, not the sum");
+
+// A due with a stamped receipt keeps the stamped figure; its older label is ignored.
+const labelAndStamp = feesWith([
+  { id: "a", voidedAt: null, lines: [labelled("acad:stu_1:mix", "Tuition Fee · April · −₹500 waived", 140000, 50000)] },
+  {
+    id: "b",
+    voidedAt: null,
+    lines: [{ ...line("acad:stu_1:mix", 10000, 40000, [detail(COUNTER_DISCOUNT_CODE, 40000)]), label: "Tuition Fee · April · −₹400 waived" }],
+  },
+]);
+assert.equal(counterWaiversByDueKey(labelAndStamp).get("acad:stu_1:mix"), 40000);
+
+// A voided old receipt settles nothing.
+assert.equal(
+  counterWaiversByDueKey(
+    feesWith([{ id: "v", voidedAt: "2026-05-01T00:00:00Z", lines: [labelled("acad:stu_1:vo", "Tuition Fee · April · −₹125 waived", 137500, 12500)] }]),
   ).size,
   0,
 );

@@ -9,6 +9,8 @@ import assert from "node:assert/strict";
 
 import {
   classLabelMatches,
+  composeSisPaidStatement,
+  summariseCovered,
   composeSisFeeStructureReply,
   detectSisBotIntent,
   detectSisFeeQuestion,
@@ -149,5 +151,46 @@ assert.ok(classLabelMatches("Class 5 B", "5"));
 assert.ok(classLabelMatches("V-A", "5"));
 assert.ok(!classLabelMatches("UKG-A", "5"));
 assert.ok(classLabelMatches("UKG-A", "UKG"));
+
+/* ── "Jama ho gaya" → the family's own record ─────────────────────── */
+
+assert.equal(
+  summariseCovered([
+    { label: "Tuition Fee · July" },
+    { label: "Tuition Fee · April · −₹450 waived" },
+    { label: "Transport · June 2026 · WINGER · −₹100 waived" },
+    { label: "Tuition Fee · May" },
+    { label: "Transport · July 2026 · WINGER" },
+  ]),
+  "Tuition Fee (April, May, July) · Transport (June, July)",
+  "months in school-year order, route and waiver text dropped",
+);
+
+const receipts = [
+  { date: "2026-08-07", receiptNo: "RCV-00437", amountPaise: 150000, covered: [{ studentName: "SHIVANSH", label: "Tuition Fee · July", amountPaise: 150000 }] },
+  { date: "2026-04-21", receiptNo: "RCV-00099", amountPaise: 400000, waivedPaise: 100000, covered: [{ studentName: "SHIVANSH", label: "Amenity Fees · April · −₹500 waived", amountPaise: 100000 }] },
+];
+const owing = composeSisPaidStatement({
+  hindi: true,
+  guardianName: "ROHIT DIXIT",
+  academicYear: "2026-27",
+  receipts,
+  openDues: [{ studentName: "SHIVANSH", label: "Tuition Fee · August", amountPaise: 150000, dueOn: "2026-08-10" }],
+});
+assert.match(owing.text, /7 Aug 2026 · रसीद RCV-00437 · \*₹1,500\*/, "date, receipt and amount of each payment");
+assert.match(owing.text, /SHIVANSH: Tuition Fee \(July\)/, "what the payment covered");
+assert.match(owing.text, /छूट ₹1,000/, "the discount given");
+assert.match(owing.text, /कुल जमा: ₹5,500/);
+assert.match(owing.text, /Tuition Fee · August — \*₹1,500\*/, "what is still left");
+assert.match(owing.text, /स्मरण/, "why the reminder came");
+assert.equal(owing.escalate, true, "a dispute with dues on record reaches the office");
+
+const clear = composeSisPaidStatement({ hindi: true, guardianName: "", academicYear: "2026-27", receipts, openDues: [] });
+assert.match(clear.text, /पूरी फीस जमा है/);
+assert.equal(clear.escalate, false, "the record agrees with the parent — nobody needs to call");
+
+const none = composeSisPaidStatement({ hindi: false, guardianName: "X", academicYear: "2026-27", receipts: [], openDues: [{ studentName: "A", label: "Tuition Fee · April", amountPaise: 100, dueOn: "2026-04-10" }] });
+assert.match(none.text, /No receipt for this session/);
+assert.equal(none.escalate, true);
 
 console.log("  ok");
