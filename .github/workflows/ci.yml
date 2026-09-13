@@ -240,6 +240,7 @@ jobs:
           npm run test:erp-chat
           npm run test:wa-templates-automation
           npm run test:wa-template-seeds
+          npm run test:wa-relay
           npm run test:concession-review-ai
           npm run test:collections-weekly-ai
           npm run test:erp-ask

@@ -20,6 +20,7 @@ import {
 } from "@/lib/waTemplatesMeta.server";
 import { ensureWabaWebhookSubscription } from "@/lib/waMeta.server";
 import { handleWaUnifiedInbound } from "@/lib/waUnifiedBotServer";
+import { handleRelayReply, relayEscalation } from "@/lib/waRelay.server";
 import { isProductionEnv } from "@/lib/apiRouteAuth.server";
 import { recordInboundMessage } from "@/lib/waContactState.server";
 import {
@@ -139,6 +140,35 @@ export async function POST(req: Request) {
   for (const msg of inbound) {
     await recordInboundMessage(msg.fromWaId, msg.text);
 
+    // An office phone answering a forwarded message. Checked FIRST, before
+    // media intake, the transport pin, the staff bots and the unified bot:
+    // office phones are usually staff, and "#K7Q2 fees received" read by the
+    // staff command bot would be treated as a command, or by the class channel
+    // as a homework draft. Only a swipe-reply to a forward or a "#code" is
+    // taken; anything else from that phone carries on exactly as before.
+    try {
+      const relayReply = await handleRelayReply({
+        fromWaId: msg.fromWaId,
+        text: msg.text,
+        waMessageId: msg.waMessageId,
+        replyToWaMessageId: msg.replyToWaMessageId,
+        hasMedia: !!msg.media,
+      });
+      if (relayReply.handled) {
+        results.push({
+          audience: "office_relay_reply",
+          from: msg.fromWaId,
+          escalate: false,
+          replied: !!relayReply.delivered,
+          stub: false,
+          error: relayReply.error,
+        });
+        continue;
+      }
+    } catch (e) {
+      console.error("[wa/webhook] office relay reply check failed", msg.waMessageId, e);
+    }
+
     if (msg.flowResponse) {
       const householdId = parseComplaintFlowToken(msg.flowResponse.flowToken);
       const parsed = parseComplaintFlowResponse(msg.flowResponse.responseJson);
@@ -161,6 +191,20 @@ export async function POST(req: Request) {
         replyText = ticket.ok
           ? `Complaint logged (ref: ${ticket.ticket.id.slice(-6).toUpperCase()}). The office will follow up soon.`
           : `Sorry, that couldn't be logged (${ticket.error}). Please message HUMAN to reach the office directly.`;
+        // A complaint used to be filed and seen by nobody until someone
+        // opened the complaints screen. It now reaches the complaints number.
+        const complaintText = `${parsed.subject}${parsed.description ? ` — ${parsed.description}` : ""}`;
+        after(async () => {
+          await relayEscalation({
+            fromWaId: msg.fromWaId,
+            text: `[${parsed.category}] ${complaintText}`,
+            waMessageId: msg.waMessageId,
+            profileName: msg.profileName,
+            audience: "complaint_flow",
+            category: "complaint",
+            reason: ticket.ok ? "complaint form submitted" : "complaint form could not be logged",
+          });
+        });
       }
       const send = await sendWhatsAppText({ toMobile: mobile10, body: replyText });
       results.push({
@@ -323,7 +367,20 @@ export async function POST(req: Request) {
     if (isVoiceNote) {
       after(async () => {
         try {
-          await handleWaUnifiedInbound(dispatch);
+          const vr = await handleWaUnifiedInbound(dispatch);
+          if (vr.escalate) {
+            await relayEscalation({
+              fromWaId: msg.fromWaId,
+              text: msg.text,
+              waMessageId: msg.waMessageId,
+              profileName: msg.profileName,
+              audience: vr.audience,
+              mediaNote: msg.mediaNote ?? "voice note",
+              media: msg.media
+                ? { mediaId: msg.media.mediaId, mimeType: msg.media.mimeType, filename: msg.media.filename }
+                : null,
+            });
+          }
         } catch (e) {
           // Nothing is waiting on this any more, so a throw here would be
           // invisible. The parent is left with no reply at all, which is the
@@ -343,6 +400,24 @@ export async function POST(req: Request) {
     }
 
     const r = await handleWaUnifiedInbound(dispatch);
+    // The bot handed this over to a person. Forward it to the office phone for
+    // its category — after the response, so Meta is answered promptly and a
+    // slow forward cannot make it re-deliver the webhook.
+    if (r.escalate) {
+      after(async () => {
+        await relayEscalation({
+          fromWaId: msg.fromWaId,
+          text: msg.text,
+          waMessageId: msg.waMessageId,
+          profileName: msg.profileName,
+          audience: r.audience,
+          mediaNote: msg.mediaNote ?? null,
+          media: msg.media
+            ? { mediaId: msg.media.mediaId, mimeType: msg.media.mimeType, filename: msg.media.filename }
+            : null,
+        });
+      });
+    }
     results.push({
       audience: r.audience,
       from: msg.fromWaId,

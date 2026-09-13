@@ -193,6 +193,10 @@ export const WA_TEMPLATE_VARIABLES: WaTemplateVariableDef[] = [
   { key: "payLink", label: "Payment link", group: "Fees", sample: "https://school.example/pay" },
   { key: "payToken", label: "Pay-now button token (link id + code)", group: "Fees", sample: "pl_8f3k2x9a.PL-7K2M", hint: "Fills the Pay now button's URL; the sender supplies it from the payment link." },
   { key: "receiptNo", label: "Receipt number", group: "Fees", sample: "RCP-1042" },
+  { key: "relayKind", label: "Office relay: kind of message", group: "School", sample: "Fees" },
+  { key: "relaySender", label: "Office relay: who sent it", group: "School", sample: "Priya Sharma (98765 43210), parent of Aarav Sharma, Class 5 A" },
+  { key: "relayCode", label: "Office relay: reference code", group: "School", sample: "K7Q2" },
+  { key: "relayMessage", label: "Office relay: the message", group: "School", sample: "I paid the fee yesterday but it still shows due" },
   { key: "briefDate", label: "Brief date", group: "School", sample: "10 Sep 2026" },
   { key: "collection", label: "Day's collection line", group: "Fees", sample: "₹4,850 in 7 receipts — Cash ₹3,000, UPI ₹1,850" },
   { key: "expenses", label: "Day's expenses line", group: "Fees", sample: "₹1,200 across 3 vouchers" },
@@ -1073,6 +1077,29 @@ const SEED_DEFS: SeedDef[] = [
     bodyHi:
       "📢 *{{schoolName}} की सूचना*\n\n*{{noticeTitle}}*\n\n{{noticeBody}}\n\nकृपया ध्यान से पढ़ें और कोई प्रश्न हो तो इसी संदेश का उत्तर दें। धन्यवाद! 🙏",
     footerEn: "School office",
+    footerHi: "विद्यालय कार्यालय",
+  },
+  {
+    /*
+      Sent to an OFFICE phone, never to a family: a message the bot could not
+      answer, forwarded by the office relay when that phone has not written to
+      the school number in the last 24 hours. Variables are in the order the
+      relay fills them — kind, sender, code, message (waRelay.server.ts).
+    */
+    familyKey: "comms_office_relay",
+    nameEn: "Office relay forward",
+    nameHi: "कार्यालय को अग्रेषित संदेश",
+    module: "comms",
+    category: "UTILITY",
+    metaName: "bhb_office_relay",
+    headerFormat: "TEXT",
+    headerTextEn: "Message for the office",
+    headerTextHi: "कार्यालय के लिए संदेश",
+    bodyEn:
+      "📨 A message the school's WhatsApp assistant could not answer.\n\nType: *{{relayKind}}*\nFrom: {{relaySender}}\nReference: #{{relayCode}}\n\nMessage: {{relayMessage}}\n\nTo answer, reply to this message or start your reply with #{{relayCode}}. Your answer is sent to them from the school number.",
+    bodyHi:
+      "📨 एक संदेश जिसका उत्तर विद्यालय का WhatsApp सहायक नहीं दे सका।\n\nप्रकार: *{{relayKind}}*\nकिसका: {{relaySender}}\nसंदर्भ: #{{relayCode}}\n\nसंदेश: {{relayMessage}}\n\nउत्तर देने के लिए इसी संदेश का उत्तर दें, या अपना उत्तर #{{relayCode}} से शुरू करें। आपका उत्तर विद्यालय के नंबर से उन्हें भेजा जाएगा।",
+    footerEn: "School office relay",
     footerHi: "विद्यालय कार्यालय",
   },
   {

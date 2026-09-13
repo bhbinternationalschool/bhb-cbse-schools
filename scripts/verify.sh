@@ -95,6 +95,7 @@ SELFTESTS=(
   test:erp-chat
   test:wa-templates-automation
   test:wa-template-seeds
+  test:wa-relay
   test:concession-review-ai
   test:collections-weekly-ai
   test:erp-ask

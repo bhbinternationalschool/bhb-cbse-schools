@@ -37,6 +37,13 @@ export function parseMetaWebhookInbound(body: unknown): {
   mediaNote?: string;
   media?: WaInboundMediaRef;
   flowResponse?: WaInboundFlowResponse;
+  /**
+   * The message this one REPLIES to (Meta's `context.id`), when the sender
+   * swiped to reply. The office relay uses it: an office phone answering a
+   * forwarded message points straight back at the forward, and so at the
+   * parent who sent the original.
+   */
+  replyToWaMessageId?: string;
 }[] {
   const out: {
     fromWaId: string;
@@ -47,6 +54,7 @@ export function parseMetaWebhookInbound(body: unknown): {
     mediaNote?: string;
     media?: WaInboundMediaRef;
     flowResponse?: WaInboundFlowResponse;
+    replyToWaMessageId?: string;
   }[] = [];
   const root = body as {
     entry?: {
@@ -56,6 +64,7 @@ export function parseMetaWebhookInbound(body: unknown): {
           messages?: {
             from?: string;
             id?: string;
+            context?: { id?: string; from?: string };
             type?: string;
             text?: { body?: string };
             button?: { text?: string; payload?: string };
@@ -198,6 +207,7 @@ export function parseMetaWebhookInbound(body: unknown): {
           flowResponse,
           mediaNote,
           media,
+          replyToWaMessageId: msg.context?.id || undefined,
         });
       }
     }
