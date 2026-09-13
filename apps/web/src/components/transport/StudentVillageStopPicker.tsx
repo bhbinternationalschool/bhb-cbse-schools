@@ -58,11 +58,25 @@ export function StudentVillageStopPicker({
   studentLabel,
   canEdit,
   onSaved,
+  onMapOpenChange,
 }: {
   studentId: string;
   studentLabel?: string;
   canEdit: boolean;
-  onSaved?: () => void;
+  /**
+   * The point that was just saved, so a host screen can re-rank stops around
+   * it without waiting for its own data to reload. null when the save
+   * recorded only the village and no pin was dropped.
+   */
+  onSaved?: (point: { lat: number; lng: number } | null) => void;
+  /**
+   * Whether the map is currently open ON TOP of the host.
+   *
+   * The map is its own modal, and a host that is itself a dialog listens for
+   * Escape. Without this, one Escape closes the map AND the dialog behind it,
+   * discarding a half-filled form the clerk never asked to leave.
+   */
+  onMapOpenChange?: (open: boolean) => void;
 }) {
   const [directory, setDirectory] = useState<DirectoryVillage[] | null>(null);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
@@ -70,10 +84,19 @@ export function StudentVillageStopPicker({
   const [villageId, setVillageId] = useState("");
   const [pointName, setPointName] = useState("");
   const [pin, setPin] = useState<{ lat: number; lng: number } | null>(null);
-  const [mapOpen, setMapOpen] = useState(false);
+  const [mapOpen, setMapOpenState] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  /** Open or close the map, telling the host so it can hold its own Escape. */
+  const setMapOpen = useCallback(
+    (next: boolean) => {
+      setMapOpenState(next);
+      onMapOpenChange?.(next);
+    },
+    [onMapOpenChange],
+  );
 
   /* ── load ─────────────────────────────────────────────────── */
 
@@ -197,7 +220,9 @@ export function StudentVillageStopPicker({
         }
         setNotice("Saved");
         await load();
-        onSaved?.();
+        onSaved?.(
+          lat !== undefined && lng !== undefined ? { lat, lng } : null,
+        );
       } catch (e) {
         setError(e instanceof Error ? e.message : "Network error");
       } finally {
