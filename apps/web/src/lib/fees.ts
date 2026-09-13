@@ -1746,6 +1746,7 @@ export const COUNTER_DISCOUNT_CODE = "COUNTER";
  */
 export function counterWaiversByDueKey(fees: FeesState): Map<string, number> {
   const map = new Map<string, number>();
+  const fromLabel = new Map<string, number>();
   for (const v of fees.vouchers) {
     if (v.voidedAt) continue;
     for (const line of v.lines) {
@@ -1755,10 +1756,48 @@ export function counterWaiversByDueKey(fees: FeesState): Map<string, number> {
       }
       if (waived > 0) {
         map.set(line.dueKey, (map.get(line.dueKey) ?? 0) + waived);
+        continue;
+      }
+      const labelled = waiverFromReceiptLabel(line.label);
+      if (labelled > 0) {
+        fromLabel.set(line.dueKey, Math.max(fromLabel.get(line.dueKey) ?? 0, labelled));
       }
     }
   }
+  // Receipts from before the COUNTER stamp existed (17 Mar – 8 May 2026 on
+  // production) carry the waiver only in the line's label. A due with any
+  // stamped receipt keeps the stamped figure; the label is the fallback.
+  for (const [dueKey, amount] of fromLabel) {
+    if (!map.has(dueKey)) map.set(dueKey, amount);
+  }
   return map;
+}
+
+/**
+ * "Tuition Fee · April · −₹125 waived" → 12500 paise.
+ *
+ * THE OLDER RECEIPTS
+ * Until the COUNTER stamp was added, a counter discount reached the receipt
+ * only as text: the dues engine appends "· −₹X waived" to the label of a due
+ * it has applied a waiver to (see applyPostedWaiver), and the counter froze
+ * that label onto the receipt. `concessionDetails` on those lines is empty.
+ * On production, 14 Sep 2026: 72 live lines, ₹25,737 — every one of them
+ * shown to the family as still owed, and contradicted by the family's own
+ * receipt saying it was waived.
+ *
+ * X is the WHOLE waiver applied to that due at the moment of collection, so a
+ * due part-paid across two receipts carries the same X twice; the caller
+ * takes the largest, not the sum. X is never the standing concession — that
+ * is not written into the label — so it cannot be subtracted twice the way
+ * `line.concessionPaise` would be. A fully waived head ("· waived", no
+ * amount) is not read: nothing on the line says how much, and there are none
+ * on production.
+ */
+export function waiverFromReceiptLabel(label: string | undefined): number {
+  const m = /[−-]\s*₹\s*([\d,]+(?:\.\d{1,2})?)\s+waived\s*$/.exec(label || "");
+  if (!m) return 0;
+  const rupees = Number(m[1]!.replace(/,/g, ""));
+  return Number.isFinite(rupees) && rupees > 0 ? Math.round(rupees * 100) : 0;
 }
 
 /**

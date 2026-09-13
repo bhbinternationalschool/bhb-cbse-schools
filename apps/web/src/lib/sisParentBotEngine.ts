@@ -887,3 +887,175 @@ export function composeSisUngroundedReply(hindi: boolean): string {
     ? "इसकी जानकारी मेरे पास नहीं है 🙏 आपका सवाल स्कूल ऑफिस को भेज दिया गया है — वे जल्द ही इसी WhatsApp पर जवाब देंगे।"
     : "I don't have that information 🙏 Your question has been sent to the school office — they will reply on this WhatsApp soon.";
 }
+
+/* ── "Already paid" → show them the record ─────────────────────────────
+ *
+ * The director's rule (14 Sep 2026): when a parent says "jama ho gaya",
+ * "paid", "sab jama hai", do not just apologise — look up the family's own
+ * receipts and dues and show them, with dates and amounts, what they paid,
+ * what each payment covered, and what is still left up to this month. That
+ * remaining amount is why the reminder came. A parent who can see the
+ * receipt list either finds the gap themselves or sends the one receipt the
+ * school is missing.
+ */
+
+export type SisPaidReceipt = {
+  /** YYYY-MM-DD */
+  date: string;
+  receiptNo: string;
+  amountPaise: number;
+  /** Discount given on this receipt, if any. */
+  waivedPaise?: number;
+  /** What the payment was put against, as on the receipt. */
+  covered: { studentName: string; label: string; amountPaise: number }[];
+};
+
+export type SisOpenDue = {
+  studentName: string;
+  label: string;
+  amountPaise: number;
+  dueOn: string;
+};
+
+/** "2026-08-12" → "12 Aug 2026". */
+export function formatPaidDate(iso: string): string {
+  const d = (iso || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return iso || "";
+  const [y, m, day] = d.split("-").map(Number);
+  const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m! - 1];
+  return `${day} ${mon} ${y}`;
+}
+
+/**
+ * "Tuition Fee · April", "Tuition Fee · May", "Exam Fee · April" for one
+ * child → "Tuition Fee (April, May) · Exam Fee (April)". A receipt for four
+ * months of three heads is otherwise twelve lines on a phone.
+ */
+export function summariseCovered(lines: { label: string }[]): string {
+  const order: string[] = [];
+  const periods = new Map<string, string[]>();
+  for (const l of lines) {
+    // "Transport · September 2026 · MAGIC-2 · −₹100 waived" → head
+    // "Transport", period "September". The route and the waiver are not
+    // what a parent needs in a list of what the payment covered.
+    const segs = (l.label || "").split(" · ").map((x) => x.trim()).filter((x) => x && !/waived$/i.test(x));
+    const h = segs[0] || (l.label || "").trim();
+    const p = (segs[1] || "").replace(/\s+\d{4}$/, "");
+    if (!periods.has(h)) {
+      periods.set(h, []);
+      order.push(h);
+    }
+    if (p && !periods.get(h)!.includes(p)) periods.get(h)!.push(p);
+  }
+  const monthIdx = (m: string) => ACADEMIC_MONTHS.indexOf(m.slice(0, 3).toLowerCase());
+  return order
+    .map((h) => {
+      const ps = periods.get(h)!;
+      if (ps.every((p) => monthIdx(p) >= 0)) ps.sort((a, b) => monthIdx(a) - monthIdx(b));
+      return ps.length ? `${h} (${ps.join(", ")})` : h;
+    })
+    .join(" · ");
+}
+
+/** April first: the school year's order, so "June, July, August" reads as a run. */
+const ACADEMIC_MONTHS = ["apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec", "jan", "feb", "mar"];
+
+export function composeSisPaidStatement(opts: {
+  hindi: boolean;
+  guardianName: string;
+  academicYear: string;
+  /** This session's receipts, newest first. */
+  receipts: SisPaidReceipt[];
+  /** Still owed up to the running month. */
+  openDues: SisOpenDue[];
+}): { text: string; escalate: boolean; officeNote: string } {
+  const { hindi } = opts;
+  const MAX_RECEIPTS = 6;
+  const MAX_DUES = 10;
+  const paidTotal = opts.receipts.reduce((a, r) => a + r.amountPaise, 0);
+  const dueTotal = opts.openDues.reduce((a, d) => a + d.amountPaise, 0);
+  const who = opts.guardianName?.trim();
+  const lines: string[] = [];
+
+  lines.push(
+    hindi
+      ? `🙏 ${who ? `${who} जी, ` : ""}आपके परिवार की फीस का विवरण (सत्र ${opts.academicYear}):`
+      : `🙏 ${who ? `${who}, ` : ""}here is your family's fee record (session ${opts.academicYear}):`,
+  );
+
+  lines.push("", hindi ? "✅ *जमा की गई फीस*" : "✅ *Fees paid*");
+  if (opts.receipts.length === 0) {
+    lines.push(hindi ? "इस सत्र की कोई रसीद हमारे रिकॉर्ड में नहीं है।" : "No receipt for this session is on our record.");
+  } else {
+    for (const r of opts.receipts.slice(0, MAX_RECEIPTS)) {
+      const off = r.waivedPaise && r.waivedPaise > 0
+        ? hindi ? ` (छूट ${formatInr(r.waivedPaise)})` : ` (discount ${formatInr(r.waivedPaise)})`
+        : "";
+      lines.push(
+        hindi
+          ? `• ${formatPaidDate(r.date)} · रसीद ${r.receiptNo} · *${formatInr(r.amountPaise)}*${off}`
+          : `• ${formatPaidDate(r.date)} · receipt ${r.receiptNo} · *${formatInr(r.amountPaise)}*${off}`,
+      );
+      const byChild = new Map<string, { label: string }[]>();
+      for (const c of r.covered) {
+        const k = c.studentName || "";
+        byChild.set(k, [...(byChild.get(k) ?? []), c]);
+      }
+      for (const [child, ls] of byChild) {
+        const summary = summariseCovered(ls);
+        if (summary) lines.push(`   ${child ? `${child}: ` : ""}${summary}`);
+      }
+    }
+    if (opts.receipts.length > MAX_RECEIPTS) {
+      const more = opts.receipts.length - MAX_RECEIPTS;
+      lines.push(hindi ? `   …और ${more} पुरानी रसीदें` : `   …and ${more} earlier receipts`);
+    }
+    lines.push(hindi ? `*कुल जमा: ${formatInr(paidTotal)}*` : `*Total paid: ${formatInr(paidTotal)}*`);
+  }
+
+  if (opts.openDues.length === 0) {
+    lines.push(
+      "",
+      hindi
+        ? "✅ चालू महीने तक आपकी *पूरी फीस जमा है*, कुछ बाकी नहीं है।"
+        : "✅ Everything up to this month is *paid* — nothing is due.",
+      hindi
+        ? "यदि आपको बकाया का स्मरण मिला था, तो वह आपका भुगतान दर्ज होने से पहले चला गया होगा — इसके लिए खेद है 🙏"
+        : "If you received a reminder, it went out before your payment was recorded — sorry for that 🙏",
+    );
+    return {
+      text: lines.join("\n"),
+      escalate: false,
+      officeNote: `Parent says paid — record agrees: nothing due up to this month (${opts.receipts.length} receipts, ${formatInr(paidTotal)}).`,
+    };
+  }
+
+  lines.push("", hindi ? "⏳ *अभी तक बाकी (चालू महीने तक)*" : "⏳ *Still due (up to this month)*");
+  for (const d of opts.openDues.slice(0, MAX_DUES)) {
+    lines.push(
+      hindi
+        ? `• ${d.studentName}: ${d.label} — *${formatInr(d.amountPaise)}* (अंतिम तिथि ${formatPaidDate(d.dueOn)})`
+        : `• ${d.studentName}: ${d.label} — *${formatInr(d.amountPaise)}* (due ${formatPaidDate(d.dueOn)})`,
+    );
+  }
+  if (opts.openDues.length > MAX_DUES) {
+    const more = opts.openDues.length - MAX_DUES;
+    lines.push(hindi ? `…और ${more} पंक्ति` : `…and ${more} more`);
+  }
+  lines.push(
+    hindi ? `*कुल बाकी: ${formatInr(dueTotal)}*` : `*Total due: ${formatInr(dueTotal)}*`,
+    "",
+    hindi
+      ? "इसी बाकी राशि के लिए आपको फीस का स्मरण संदेश भेजा गया था।"
+      : "This remaining amount is why you received the fee reminder.",
+    "",
+    hindi
+      ? "यदि आपने कोई भुगतान किया है जो ऊपर नहीं दिख रहा, तो कृपया उसकी *रसीद या स्क्रीनशॉट* यहीं भेजें — ऑफिस जाँच कर रिकॉर्ड ठीक कर देगा। भुगतान के लिए *PAY* लिखें।"
+      : "If you made a payment that is not shown above, please send its *receipt or a screenshot* here — the office will check and correct the record. Reply *PAY* to pay.",
+  );
+  return {
+    text: lines.join("\n"),
+    escalate: true,
+    officeNote: `Parent says paid — record shows ${formatInr(dueTotal)} still due up to this month over ${opts.openDues.length} line(s); ${opts.receipts.length} receipts this session totalling ${formatInr(paidTotal)}. Check for a payment not yet entered.`,
+  };
+}
