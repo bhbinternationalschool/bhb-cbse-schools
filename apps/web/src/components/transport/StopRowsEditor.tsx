@@ -8,6 +8,11 @@ import type { StopDistanceSource } from "@/lib/transport";
 
 export type StopDraft = {
   key: string;
+  /**
+   * The saved stop this row edits, when there is one. Carried through to the
+   * save so the stop keeps its id — every rider's assignment points at it.
+   */
+  stopId?: string;
   name: string;
   distanceKm: number;
   distanceSource: StopDistanceSource;

@@ -41,6 +41,8 @@ export type BrokenStopGroup = {
   /** The orphaned id itself. Meaningless as a name, but it groups the riders. */
   orphanStopId: string;
   studentIds: string[];
+  /** The orphaned assignments themselves — receipts are keyed by these. */
+  assignmentIds: string[];
   riderCount: number;
   /** Distinct monthly fees among these riders, in paise, ascending. */
   feesPaise: number[];
@@ -63,6 +65,12 @@ export type StopCandidate = {
   distanceKm: number | null;
   /** True when this stop's price equals a fee the group already pays. */
   feeMatches: boolean;
+  /**
+   * Fee receipt lines for these riders that name this stop. The strongest
+   * evidence there is: the stop's name was printed on the family's receipt
+   * while the link still resolved.
+   */
+  receiptCount: number;
   /** Plain-language reason, shown next to the option. */
   reason: string;
 };
@@ -118,6 +126,7 @@ export function findBrokenStopLinks(
         routeLabel: route.busNo || route.code,
         orphanStopId: stopId,
         studentIds: [],
+        assignmentIds: [],
         riderCount: 0,
         feesPaise: [],
         geoCount: 0,
@@ -126,6 +135,7 @@ export function findBrokenStopLinks(
       buckets.set(key, g);
     }
     g.studentIds.push(a.studentId);
+    g.assignmentIds.push(a.id);
     g.riderCount += 1;
     const fee = feeOf(a);
     if (fee > 0 && !g.feesPaise.includes(fee)) g.feesPaise.push(fee);
@@ -174,11 +184,73 @@ export function findBrokenStopLinks(
  * Hiding them would make an unmeasured stop look like a stop that does not
  * exist, which is how this whole mess reads to begin with.
  */
+/** Case- and whitespace-insensitive key for a stop name. */
+export function stopNameKey(name: string): string {
+  return String(name ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/** The shape of a receipt this module needs — a subset of CollectionVoucher. */
+export type ReceiptForStopEvidence = {
+  lines?: { transport?: { assignmentId?: string; stopName?: string } | null }[];
+};
+
+/**
+ * How many receipt lines for this group's riders name each stop.
+ *
+ * Every transport due that was ever collected carries the stop's name (see
+ * TransportDueDetail.stopName), written while the assignment still resolved.
+ * When the stop ids were regenerated the receipts kept the names, so they are
+ * the one record that says where these children actually boarded — not a
+ * centroid, not a price. Keyed by `stopNameKey`.
+ */
+export function receiptStopNamesForGroup(
+  group: Pick<BrokenStopGroup, "assignmentIds">,
+  receipts: ReceiptForStopEvidence[],
+): Map<string, number> {
+  const ids = new Set(group.assignmentIds);
+  const out = new Map<string, number>();
+  for (const v of receipts) {
+    for (const line of v.lines ?? []) {
+      const t = line.transport;
+      if (!t?.assignmentId || !ids.has(t.assignmentId)) continue;
+      const key = stopNameKey(t.stopName ?? "");
+      if (!key) continue;
+      out.set(key, (out.get(key) ?? 0) + 1);
+    }
+  }
+  return out;
+}
+
+/**
+ * The one stop the receipts point at, or null.
+ *
+ * Null when no receipt names a stop on this route, and null when receipts
+ * name two DIFFERENT places — that is a disagreement for a person to read,
+ * not a tie to break. Two stops with the same name and the same Google place
+ * are one place entered twice; the earlier one in sequence is chosen and the
+ * duplicate is the office's to remove.
+ */
+export function pickReceiptBackedStop(
+  candidates: StopCandidate[],
+): string | null {
+  const backed = candidates.filter((c) => c.receiptCount > 0);
+  if (backed.length === 0) return null;
+  const places = new Set(
+    backed.map(
+      (c) => (c.stop.placeId ?? "").trim() || `name:${stopNameKey(c.stop.name)}`,
+    ),
+  );
+  if (places.size !== 1) return null;
+  return [...backed].sort((a, b) => a.stop.sequence - b.stop.sequence)[0].stop.id;
+}
+
 export function suggestStopsForGroup(
   group: BrokenStopGroup,
   route: TransportRoute,
+  evidence?: { receiptStopNames?: Map<string, number> },
 ): StopCandidate[] {
   const stops = [...route.stops].sort((a, b) => a.sequence - b.sequence);
+  const receipts = evidence?.receiptStopNames ?? new Map<string, number>();
 
   const scored = stops.map((stop) => {
     const pinned = stop.geoLat != null && stop.geoLng != null;
@@ -195,8 +267,14 @@ export function suggestStopsForGroup(
         : null;
     const price = Math.max(0, Number(stop.monthlyFeePaise) || 0);
     const feeMatches = price > 0 && group.feesPaise.includes(price);
+    const receiptCount = receipts.get(stopNameKey(stop.name)) ?? 0;
 
     const bits: string[] = [];
+    if (receiptCount > 0) {
+      bits.push(
+        `named on ${receiptCount} fee receipt line${receiptCount === 1 ? "" : "s"} for these riders`,
+      );
+    }
     if (distanceKm != null) {
       bits.push(`${distanceKm} km from where these families live`);
     } else if (!pinned) {
@@ -206,10 +284,12 @@ export function suggestStopsForGroup(
     }
     if (feeMatches) bits.push(`price ₹${price / 100} matches what they pay`);
 
-    return { stop, distanceKm, feeMatches, reason: bits.join(" · ") };
+    return { stop, distanceKm, feeMatches, receiptCount, reason: bits.join(" · ") };
   });
 
   return scored.sort((a, b) => {
+    // What the receipts say outranks what the map or the price suggests.
+    if (a.receiptCount !== b.receiptCount) return b.receiptCount - a.receiptCount;
     if (a.feeMatches !== b.feeMatches) return a.feeMatches ? -1 : 1;
     if (a.distanceKm == null && b.distanceKm == null) return 0;
     if (a.distanceKm == null) return 1;

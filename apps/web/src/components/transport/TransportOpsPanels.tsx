@@ -115,6 +115,7 @@ export function RoutesPanel({
     setStopRows(
       r.stops.map((s) => ({
         ...newStopDraft(),
+        stopId: s.id,
         name: s.name,
         distanceKm: s.distanceKm,
         distanceSource: s.distanceSource,
@@ -144,6 +145,7 @@ export function RoutesPanel({
     const stopLines = stopRows
       .filter((r) => r.name.trim())
       .map((r) => ({
+        id: r.stopId,
         name: r.name.trim(),
         distanceKm: r.distanceKm,
         distanceSource: r.distanceSource,
@@ -163,18 +165,10 @@ export function RoutesPanel({
       vehicleId,
       monthlyFeePaise: Math.round(Number(fee || "0") * 100),
       isActive: true,
-      stops: stopLines.map((s, i) => ({
-        id: `st_${i}`,
-        name: s.name,
-        sequence: i + 1,
-        distanceKm: s.distanceKm,
-        distanceSource: s.distanceSource,
-        geoLat: s.geoLat,
-        geoLng: s.geoLng,
-        placeId: s.placeId,
-        geoAddress: s.geoAddress,
-        monthlyFeePaise: s.monthlyFeePaise,
-      })),
+      // Stops are NOT passed here. This used to hand the upsert a list with
+      // made-up ids (st_0, st_1…) and then have setRouteStops re-key it — two
+      // rewrites, and every rider on the route orphaned each time the route
+      // was saved. setRouteStops below keeps each existing stop's id.
     });
     if (!r.ok) {
       onError(r.error);
@@ -183,9 +177,9 @@ export function RoutesPanel({
     if (measuredRoundTrip) {
       setRouteRoundTrip(r.route.id, measuredRoundTrip);
     }
-    if (stopLines.length) {
-      setRouteStops(r.route.id, stopLines);
-    }
+    // Unconditionally: an emptied list is a decision, and it was already
+    // possible through the upsert before this change.
+    setRouteStops(r.route.id, stopLines);
 
     // Saved unconditionally, including as an empty list: clearing every run is
     // a real decision ("this bus goes back to one journey each way") and must
