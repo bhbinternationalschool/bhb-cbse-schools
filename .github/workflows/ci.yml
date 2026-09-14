@@ -364,6 +364,7 @@ jobs:
           npm run test:syllabus-outcomes-import
           npm run test:transport-overlap-billing
           npm run test:transport-shifts
+          npm run test:transport-phone-empty-desk
           npm run test:transport-seats
           npm run test:boarding-suggest
           npm run test:defaulter-hold-policy

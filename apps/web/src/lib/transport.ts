@@ -13,6 +13,7 @@ import {
 } from "@/lib/masters";
 import { checkHold } from "@/lib/holds";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { serverTransportDeskIsEmpty } from "@/lib/transportHydrationState";
 import { TENANT } from "@/lib/types";
 
 /* ─── Core ops ─────────────────────────────────────────────── */
@@ -620,6 +621,22 @@ export type TransportComplianceAlert = {
 const STORAGE_KEY = "bhb_transport_v2";
 const LEGACY_KEY = "bhb_transport_v1";
 
+/**
+ * The desk, held in memory, independent of localStorage.
+ *
+ * localStorage is a cache and on a phone it is a small one: WebKit allows
+ * about half of what desktop Chrome does, and fees, attendance and masters
+ * alone can fill it. When `writeCacheOrInvalidate` cannot store the desk it
+ * drops the entry, and until 14 Sep 2026 `loadTransport()` then read that
+ * absence as "no routes, no riders" — while the server held 174 assignments.
+ * A cache that could not be written must not read as an empty desk.
+ *
+ * Held unconditionally, like SIS: nothing in this module clears the desk on
+ * purpose, so there is no deliberate clear for a memory copy to resurrect.
+ * Same pattern as `memorySisState`; see the note there.
+ */
+let memoryTransportState: TransportState | null = null;
+
 function id(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -945,6 +962,9 @@ export function loadTransport(): TransportState {
   if (typeof window === "undefined") return emptyTransport();
   try {
     const raw2 = localStorage.getItem(STORAGE_KEY);
+    // A cache that could not be written (or was evicted to make room for
+    // another desk) must not read as "no routes". See memoryTransportState.
+    if (!raw2 && memoryTransportState) return memoryTransportState;
     if (raw2) {
       const parsed = JSON.parse(raw2) as Partial<TransportState>;
       return {
@@ -1013,7 +1033,7 @@ export function saveTransport(state: TransportState) {
   if (!assertModulePermission("transport", "edit", "saveTransport")) return;
 
   if (typeof window === "undefined") return;
-  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify({ ...state, version: 2 }));
+  writeTransportLocalRaw(state);
   void import("@/lib/transportPersistence").then(({ scheduleTransportSync }) => {
     scheduleTransportSync(state);
   });
@@ -1022,7 +1042,11 @@ export function saveTransport(state: TransportState) {
 
 export function writeTransportLocalRaw(state: TransportState) {
   if (typeof window === "undefined") return;
-  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify({ ...state, version: 2 }));
+  const next: TransportState = { ...state, version: 2 };
+  // Memory first, and unconditionally: this must survive a cache that cannot
+  // hold the desk. writeCacheOrInvalidate never throws for a full disk.
+  memoryTransportState = next;
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
 }
 
 export function transportStateIsEmpty(state: TransportState): boolean {
@@ -3397,9 +3421,20 @@ function buildRealFleetVehicles(): FleetVehicle[] {
 
 /** Seed the real fleet when the registry is genuinely empty — no
  * fictional route, dealer, or fuel stock; none of that is known either. */
+/**
+ * Seed a starter fleet — but only when the SERVER has said the desk is empty.
+ *
+ * An empty local cache is not that. On 14 Sep 2026 a phone with full storage
+ * downloaded the whole desk, could not cache it, read back nothing, and this
+ * function invented five vehicles and pushed them; the server refused the
+ * push twelve times because it held routes and assignments the client had
+ * just been sent. Before the server answers (null) or when it holds data
+ * (false) this returns whatever is loaded and touches nothing.
+ */
 export function seedTransportIfEmpty(): TransportState {
   const state = loadTransport();
   if (state.routes.length > 0 || state.vehicles.length > 0) return state;
+  if (serverTransportDeskIsEmpty() !== true) return state;
   const next: TransportState = { ...state, vehicles: buildRealFleetVehicles() };
   saveTransport(next);
   return next;
@@ -3415,6 +3450,9 @@ export function migrateDemoFleetToReal(): TransportState {
   const onlyDemoVehicle =
     state.vehicles.length === 1 && state.vehicles[0].registrationNo === "UP32 BT 4512";
   if (!onlyDemoVehicle) return state;
+  // A save here pushes the desk. Do not rewrite a stale cache before the
+  // server has said what it holds — see seedTransportIfEmpty.
+  if (serverTransportDeskIsEmpty() === null) return state;
   const demoVehicleId = state.vehicles[0].id;
   const next: TransportState = {
     ...state,
