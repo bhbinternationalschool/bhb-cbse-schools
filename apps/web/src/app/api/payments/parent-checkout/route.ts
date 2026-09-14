@@ -25,7 +25,7 @@ import {
 } from "@/lib/cashfree.server";
 import { attachRazorpayToPaymentLink } from "@/lib/razorpay.server";
 import { publicAppOrigin } from "@/lib/waSisBotServer";
-import { ensureSchoolMirrorLoaded } from "@/lib/schoolDataMirror.server";
+import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { householdWhatsApp, loadSis } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
 
@@ -64,7 +64,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "dueKeys required" }, { status: 400 });
   }
 
-  await ensureSchoolMirrorLoaded();
+  // Hydrated from the database: the local mirror file does not exist on Cloud
+  // Run, so "loaded" meant no fee structure and nothing to pay.
+  await ensureSchoolMirrorHydrated();
   const sis = loadSis();
   const masters = loadMasters();
   const fees = loadFees();

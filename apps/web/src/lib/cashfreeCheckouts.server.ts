@@ -30,7 +30,7 @@ import { cashfreePayPageUrl, isCashfreeOrderId } from "@/lib/cashfreeCheckout";
 import { getPaymentLink, loadPayments } from "@/lib/payments";
 import { settlePaymentLinkWithWhatsApp } from "@/lib/paymentSettlement.server";
 import { recordPaymentGatewayEvent } from "@/lib/paymentsNormalized.server";
-import { ensureSchoolMirrorLoaded } from "@/lib/schoolDataMirror.server";
+import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
 
 export type CheckoutKind = "fee_link" | "registration" | "event_fee" | "tutor_pass";
@@ -216,7 +216,7 @@ export async function settleCashfreeCheckout(opts: {
     paymentRef = p?.bankReference || p?.cfPaymentId || `CF_${opts.orderId}`;
   }
 
-  await ensureSchoolMirrorLoaded();
+  await ensureSchoolMirrorHydrated();
   let result: SettleResult;
   switch (row.kind) {
     case "fee_link": {

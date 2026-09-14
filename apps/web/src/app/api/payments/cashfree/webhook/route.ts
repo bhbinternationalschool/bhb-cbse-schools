@@ -30,7 +30,7 @@ import {
   saveAdmissions,
 } from "@/lib/admissions";
 import { settlePaymentLinkWithWhatsApp } from "@/lib/paymentSettlement.server";
-import { ensureSchoolMirrorLoaded } from "@/lib/schoolDataMirror.server";
+import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { recordPaymentGatewayEvent } from "@/lib/paymentsNormalized.server";
 import { ingestSettlementWebhook } from "@/lib/ledger/pgSettlement.server";
 import { activateTutorPassOrder } from "@/lib/tutorPasses.server";
@@ -303,7 +303,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, ignored: eventType || linkStatus });
   }
 
-  await ensureSchoolMirrorLoaded();
+  await ensureSchoolMirrorHydrated();
 
   // AI tutor passes: re-verify the link with the gateway, then activate.
   // The pass is time, not money in the fee ledger — the settlement sweep

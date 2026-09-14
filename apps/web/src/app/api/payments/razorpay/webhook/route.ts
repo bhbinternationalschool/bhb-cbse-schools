@@ -13,7 +13,7 @@ import {
   loadPayments,
 } from "@/lib/payments";
 import { settlePaymentLinkWithWhatsApp } from "@/lib/paymentSettlement.server";
-import { ensureSchoolMirrorLoaded } from "@/lib/schoolDataMirror.server";
+import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { recordPaymentGatewayEvent } from "@/lib/paymentsNormalized.server";
 
 export const runtime = "nodejs";
@@ -123,7 +123,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, ignored: eventName });
   }
 
-  await ensureSchoolMirrorLoaded();
+  await ensureSchoolMirrorHydrated();
   const { linkId, code, paymentId } = extractLinkRef(event);
   const state = loadPayments();
   const link =

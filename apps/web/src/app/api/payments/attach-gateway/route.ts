@@ -21,7 +21,7 @@ import {
 import { attachRazorpayToPaymentLink } from "@/lib/razorpay.server";
 import { publicAppOrigin } from "@/lib/waSisBotServer";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
-import { ensureSchoolMirrorLoaded } from "@/lib/schoolDataMirror.server";
+import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { householdWhatsApp, loadSis } from "@/lib/sis";
 
 export const runtime = "nodejs";
@@ -53,7 +53,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "link required" }, { status: 400 });
   }
 
-  await ensureSchoolMirrorLoaded();
+  await ensureSchoolMirrorHydrated();
   const state = loadPayments();
   let link = getPaymentLink(snapshot.id, state);
 
