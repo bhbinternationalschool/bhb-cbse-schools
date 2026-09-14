@@ -282,6 +282,12 @@ create_job "bhb-wa-template-refresh" "0 7-21 * * *" \
   "${APP_URL}/api/wa/templates/refresh" \
   "Asia/Kolkata" "120s"
 
+# Parent chats that have gone quiet get a thank-you and the assistant guide,
+# once per conversation, inside Meta's 24-hour window, 8 am–8 pm only.
+create_job "bhb-wa-parent-chat-close" "*/15 8-19 * * *" \
+  "${APP_URL}/api/wa/parent-chat-close" \
+  "Asia/Kolkata" "120s"
+
 # Cashfree settlement sweep: pulls what the gateway actually paid into the
 # bank, with its event-level breakdown, and posts it to the ledger.
 #

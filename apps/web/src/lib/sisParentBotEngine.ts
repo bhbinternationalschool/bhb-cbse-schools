@@ -719,6 +719,9 @@ export function detectSisFeeQuestion(text: string): SisFeeQuestion | null {
   const isQuestion =
     ((fee || transport) && (ask || !!cls)) ||
     (fee && discount) ||
+    // "बस की फीस?", "bus fee" — naming the bus fee is asking about it. A
+    // payment ("bus fees jama kar di") is read before this ever runs.
+    (fee && transport) ||
     shortFollowUp;
   if (!isQuestion) return null;
   return {

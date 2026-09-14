@@ -246,6 +246,7 @@ jobs:
           npm run test:parent-bot-real-chats
           npm run test:pin-review
           npm run test:due-pay-link
+          npm run test:wa-parent-guide
           npm run test:concession-review-ai
           npm run test:collections-weekly-ai
           npm run test:erp-ask
