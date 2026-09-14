@@ -38,6 +38,7 @@ import {
   composeSisInfoReply,
   composeSisKidsReply,
   composeSisPayReply,
+  composeSisDirectPayReply,
   composeSisReceiptsReply,
   detectSisBotIntent,
   parseSisPaySelection,
@@ -96,6 +97,7 @@ import {
 } from "@/lib/waComplaintsFlow";
 import { ensureMetaFlowPublished } from "@/lib/waFlowsMeta.server";
 import { SCHOOL_DEFAULT_WA_LANGUAGE } from "@/lib/householdPrefs";
+import { duePayUrl } from "@/lib/duePayToken.server";
 
 export type WaSisBotMsg = {
   id: string;
@@ -454,6 +456,32 @@ async function buildPayLinkReply(
     };
   }
 
+  // The family's own direct link: tapping it raises the checkout for what is
+  // owed at that moment and opens the gateway. The link below is the old
+  // path, kept only for a server with no signing secret.
+  const directUrl = duePayUrl(publicAppOrigin(), {
+    householdId: hh.id,
+    studentId: kids.length > 1 && payLabel.classLabel !== "Household" ? payLabel.studentId : undefined,
+    scope: "open",
+  });
+  if (directUrl) {
+    return {
+      escalate: false,
+      text: composeSisDirectPayReply({
+        hindi,
+        url: directUrl,
+        who: `${payLabel.studentName}${payLabel.classLabel && payLabel.classLabel !== "Household" ? ` (${payLabel.classLabel})` : ""}`,
+        lines: dues.map((d) => ({
+          studentName: dueStudentName(d),
+          label: d.label,
+          amountPaise: d.balancePaise,
+          dueOn: d.dueOn,
+        })),
+        totalPaise: dues.reduce((a, d) => a + d.balancePaise, 0),
+      }),
+    };
+  }
+
   const masters = loadMasters();
   const created = createPaymentLink({
     householdId: hh.id,
@@ -680,6 +708,7 @@ async function buildBotReply(
           totalPaise: total,
           runningMonthOnly: true,
           hindi,
+          payUrl: dues.length ? duePayUrl(publicAppOrigin(), { householdId: hh.id, scope: "open" }) || undefined : undefined,
         }),
       };
     }
@@ -1073,8 +1102,8 @@ export async function handleWaSisBotInbound(opts: {
   if (opts.fromUnified && intent === "unknown" && !isGreeting) {
     replyText =
       waTemplateLanguageFor(hh) === "hi"
-        ? "*KIDS* · *DUES* · *PAY* (GPay/UPI) · *PAY 1* · *RECEIPTS* · *HUMAN* में से कोई शब्द लिखें — या स्कूल के मुख्य मेनू के लिए *MENU*।"
-        : "Reply *KIDS* · *DUES* · *PAY* (GPay/UPI) · *PAY 1* · *RECEIPTS* · *HUMAN* — or *MENU* for the main school menu.";
+        ? "*KIDS* · *DUES* · *PAY* (ऑनलाइन भुगतान) · *PAY 1* · *RECEIPTS* · *HUMAN* में से कोई शब्द लिखें — या स्कूल के मुख्य मेनू के लिए *MENU*।"
+        : "Reply *KIDS* · *DUES* · *PAY* (online payment) · *PAY 1* · *RECEIPTS* · *HUMAN* — or *MENU* for the main school menu.";
   }
   let escalateUngrounded = false;
   if (intent === "unknown" && !isGreeting && text.trim().length > 3) {

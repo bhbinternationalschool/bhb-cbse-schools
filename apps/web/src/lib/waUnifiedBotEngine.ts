@@ -372,7 +372,7 @@ export function composeActiveFlowHint(
     case "teacher":
       return `*Teacher mode* — ${name}\n\n*IN* / *OUT* + location · *STATUS* · *HW 8A Maths…* · *MENU*`;
     case "parent":
-      return `*Parent mode* — ${name}\n\nReply *KIDS* · *DUES* · *PAY* (GPay/UPI) · *PAY 1* · *RECEIPTS* · *HUMAN* · *MENU*`;
+      return `*Parent mode* — ${name}\n\nReply *KIDS* · *DUES* · *PAY* (online payment) · *PAY 1* · *RECEIPTS* · *HUMAN* · *MENU*`;
     case "survey":
       return `*Survey mode* — ${name}\n\nReply *STATUS* · *CAPTURE* · *MENU*`;
     case "admission":
@@ -437,7 +437,7 @@ export function composeActiveFlowHint(
 function activeFlowHintHi(flow: WaRoleKind | WaVisitorPurpose, name: string): string | null {
   switch (flow) {
     case "parent":
-      return `*अभिभावक सेवा* — ${name}\n\nलिखें *KIDS* · *DUES* · *PAY* (GPay/UPI) · *PAY 1* · *RECEIPTS* · *HUMAN* · *MENU*`;
+      return `*अभिभावक सेवा* — ${name}\n\nलिखें *KIDS* · *DUES* · *PAY* (ऑनलाइन भुगतान) · *PAY 1* · *RECEIPTS* · *HUMAN* · *MENU*`;
     case "admission":
     case "admission_lead":
       return `*एडमिशन जानकारी* — ${name}\n\nलिखें *FEE* · *REGISTER* · *DOCS* · *STATUS* · *VISIT* · *HUMAN* · *MENU*`;

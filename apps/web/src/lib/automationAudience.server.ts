@@ -35,6 +35,7 @@ import {
   type WaCandidateNumber,
 } from "@/lib/waHouseholdNumbers";
 import { publicOrigin } from "@/lib/birthday.server";
+import { duePayUrl } from "@/lib/duePayToken.server";
 import { TENANT } from "@/lib/types";
 
 export type AutomationRecipient = {
@@ -266,7 +267,17 @@ async function feeRecipients(
         dueDate: d.earliestDueOn,
         overdueDays: String(Math.max(0, d.overdueDays)),
         stage: d.stageLabel,
-        payLink: PARENT_PORTAL,
+        // The family's direct payment link for exactly the dues this reminder
+        // is about — it opens the gateway, not the portal login. Until 14 Sep
+        // 2026 every fee reminder linked to /parent, where a parent had to sign
+        // in before they could pay anything. The portal stays the fallback
+        // only when no link can be signed.
+        payLink:
+          duePayUrl(publicOrigin(), {
+            householdId: d.householdId,
+            studentId: d.studentId,
+            scope: kind === "overdue" ? "overdue" : "open",
+          }) || PARENT_PORTAL,
       },
     });
   }

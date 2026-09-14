@@ -88,6 +88,8 @@
     "test:wa-unified-menus-hindi": "npx tsx src/lib/waUnifiedMenusHindi.selftest.ts",
     "test:parent-messages-hindi": "npx tsx src/lib/parentMessagesHindi.selftest.ts",
     "test:parent-bot-real-chats": "npx tsx src/lib/parentBotRealChats.selftest.ts",
+    "test:pin-review": "npx tsx src/lib/pinReview.selftest.ts",
+    "test:due-pay-link": "npx tsx src/lib/duePayLink.selftest.ts",
     "test:concession-review-ai": "npx tsx src/lib/concessionReviewAi.selftest.ts",
     "test:collections-weekly-ai": "npx tsx src/lib/collectionsWeeklyAi.selftest.ts",
     "test:erp-ask": "npx tsx src/lib/erpAsk.selftest.ts",

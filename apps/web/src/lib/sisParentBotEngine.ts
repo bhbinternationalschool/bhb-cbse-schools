@@ -73,13 +73,13 @@ export function sisBotWelcomeText(
         (q) => q.id !== "pay" && (q.id !== "bus" || hasTransport),
       ).map((q) => `• *${q.waKeyword}* — ${SIS_BOT_LABEL_HI[q.id]}`),
       multiChild
-        ? "• *PAY* — सभी बच्चों की फीस · *PAY 1* / *PAY 2* — एक बच्चे की (GPay / UPI)"
-        : "• *PAY* — GPay / UPI से फीस जमा करने का लिंक",
+        ? "• *PAY* — सभी बच्चों की फीस · *PAY 1* / *PAY 2* — एक बच्चे की (ऑनलाइन भुगतान लिंक)"
+        : "• *PAY* — फीस का ऑनलाइन भुगतान लिंक (UPI / कार्ड / नेटबैंकिंग)",
     ].join("\n");
   }
   const payHint = multiChild
-    ? "• *PAY* — all children · *PAY 1* / *PAY 2* — one child (GPay / UPI)"
-    : "• *PAY* — GPay / UPI pay link";
+    ? "• *PAY* — all children · *PAY 1* / *PAY 2* — one child (online payment link)"
+    : "• *PAY* — online payment link (UPI / card / net banking)";
   return [
     `Namaste — *${TENANT.shortName}* parent assistant (SIS).`,
     "",
@@ -198,7 +198,7 @@ export function composeSisKidsReply(
       "",
       children.length > 1
         ? "बकाया देखने के लिए *DUES* · सबकी फीस के लिए *PAY* · एक बच्चे के लिए *PAY 1* / *PAY 2* लिखें।"
-        : "बकाया फीस के लिए *DUES* · GPay / UPI लिंक के लिए *PAY* लिखें।",
+        : "बकाया फीस के लिए *DUES* · ऑनलाइन भुगतान लिंक के लिए *PAY* लिखें।",
     ].join("\n");
   }
   if (children.length === 0) {
@@ -211,8 +211,8 @@ export function composeSisKidsReply(
   }
   const payLine =
     children.length > 1
-      ? "Reply *DUES* · *PAY* (all) · *PAY 1* / *PAY 2* per child — pay via GPay / UPI."
-      : "Reply *DUES* for fee balance · *PAY* for a GPay / UPI link.";
+      ? "Reply *DUES* · *PAY* (all) · *PAY 1* / *PAY 2* per child — pay online."
+      : "Reply *DUES* for fee balance · *PAY* for an online payment link.";
   return [
     `*Your children at ${TENANT.shortName}*`,
     "",
@@ -232,6 +232,12 @@ export function composeSisDuesReply(opts: {
   runningMonthOnly?: boolean;
   childFilterName?: string;
   hindi?: boolean;
+  /**
+   * The family's direct payment link (/pay/due). When given, the parent pays
+   * from this message; the old "PAY, then GPay, then tap Confirm paid" steps
+   * are gone either way.
+   */
+  payUrl?: string;
 }): string {
   const scope =
     opts.childFilterName != null
@@ -263,11 +269,17 @@ export function composeSisDuesReply(opts: {
       "",
       `*कुल जमा करना है: ${formatInr(opts.totalPaise)}*`,
       "",
-      opts.childFilterName != null
-        ? `इस बच्चे का लिंक पाने के लिए *PAY ${opts.childFilterName.split(" ")[0]}* लिखें।`
-        : "सभी बच्चों के लिए *PAY* · एक बच्चे के लिए *PAY 1* / *PAY 2* लिखें।",
-      "",
-      "_GPay से भुगतान के बाद लिंक पर *Confirm paid* दबाएँ, रसीद तुरंत मिल जाएगी।_",
+      ...(opts.payUrl
+        ? [
+            "💳 *अभी ऑनलाइन भुगतान करें* (UPI / कार्ड / नेटबैंकिंग):",
+            opts.payUrl,
+            "_भुगतान होते ही रसीद अपने आप यहीं WhatsApp पर आ जाएगी।_",
+          ]
+        : [
+            opts.childFilterName != null
+              ? `इस बच्चे का भुगतान लिंक पाने के लिए *PAY ${opts.childFilterName.split(" ")[0]}* लिखें।`
+              : "ऑनलाइन भुगतान लिंक के लिए *PAY* लिखें।",
+          ]),
     ]
       .filter(Boolean)
       .join("\n");
@@ -284,8 +296,8 @@ export function composeSisDuesReply(opts: {
   const shown = opts.dueLines.slice(0, max);
   const payHint =
     opts.childFilterName != null
-      ? `Reply *PAY ${opts.childFilterName.split(" ")[0]}* for this child's link.`
-      : "Reply *PAY* for all children · *PAY 1* / *PAY 2* for one child.";
+      ? `Reply *PAY ${opts.childFilterName.split(" ")[0]}* for this child's payment link.`
+      : "Reply *PAY* for an online payment link.";
   return [
     `*Fee dues${scope}* · ${opts.guardianName || "Parent"}`,
     opts.runningMonthOnly
@@ -302,9 +314,13 @@ export function composeSisDuesReply(opts: {
     "",
     `*Total to pay: ${formatInr(opts.totalPaise)}*`,
     "",
-    payHint,
-    "",
-    "_After GPay payment, tap *Confirm paid* on the link for instant receipt._",
+    ...(opts.payUrl
+      ? [
+          "💳 *Pay online now* (UPI / card / net banking):",
+          opts.payUrl,
+          "_The receipt comes to this WhatsApp automatically when the payment goes through._",
+        ]
+      : [payHint]),
   ]
     .filter(Boolean)
     .join("\n");
@@ -394,7 +410,7 @@ export function composeSisReceiptsReply(
       "",
       ...rows.slice(0, 8).map((r) => `• ${r.receiptNo} · ${r.date} · *${r.amountLabel}*`),
       "",
-      "GPay / UPI से भुगतान के बाद पूरी डिजिटल रसीद भेजी जाती है (लिंक पर *Confirm paid* दबाएँ)।",
+      "ऑनलाइन भुगतान होते ही पूरी डिजिटल रसीद अपने आप यहीं आ जाती है।",
     ].join("\n");
   }
   if (rows.length === 0) {
@@ -407,7 +423,7 @@ export function composeSisReceiptsReply(
       (r) => `• ${r.receiptNo} · ${r.date} · *${r.amountLabel}*`,
     ),
     "",
-    "Full digital receipt is sent after GPay / UPI payment (tap *Confirm paid* on the link).",
+    "The full digital receipt arrives here automatically as soon as an online payment goes through.",
   ].join("\n");
 }
 
@@ -421,7 +437,7 @@ export function composeSisInfoReply(hindi = false): string {
       "फीस ऑफिस का समय: स्कूल के कार्य दिवस (कृपया ऑफिस से पुष्टि करें)।",
       "",
       "मेनू: " + SIS_BOT_QUICK_PROMPTS.map((q) => q.waKeyword).join(" · "),
-      "फीस जमा करने के लिए *PAY* लिखें → GPay / UPI → लिंक पर *Confirm paid* दबाएँ।",
+      "फीस जमा करने के लिए *PAY* लिखें → लिंक खोलें → UPI / कार्ड / नेटबैंकिंग से भुगतान करें। रसीद अपने आप आएगी।",
       "एक से अधिक बच्चे: हर बच्चे के लिए *PAY 1* · *PAY 2*।",
     ]
       .filter(Boolean)
@@ -433,10 +449,9 @@ export function composeSisInfoReply(hindi = false): string {
     TENANT.publicPortal ? `Portal: ${TENANT.publicPortal}` : null,
     "",
     "Fee office hours: school working days (confirm with front office).",
-    "Parent web portal: /parent (demo login) for fees & subjects.",
     "",
     "Menu: " + SIS_BOT_QUICK_PROMPTS.map((q) => q.waKeyword).join(" · "),
-    "Pay fees: reply *PAY* → GPay / UPI → tap *Confirm paid* on the link.",
+    "Pay fees: reply *PAY* → open the link → pay by UPI / card / net banking. The receipt comes automatically.",
     "Multi-child: *PAY 1* · *PAY 2* per child.",
   ]
     .filter(Boolean)
@@ -1058,4 +1073,60 @@ export function composeSisPaidStatement(opts: {
     escalate: true,
     officeNote: `Parent says paid — record shows ${formatInr(dueTotal)} still due up to this month over ${opts.openDues.length} line(s); ${opts.receipts.length} receipts this session totalling ${formatInr(paidTotal)}. Check for a payment not yet entered.`,
   };
+}
+
+
+/* ── PAY: the direct link with what it pays for ──────────────────────── */
+
+/**
+ * The reply to PAY / PAY 1: the family's own payment link and exactly what it
+ * collects, line by line. The parent taps once and pays on the gateway; the
+ * receipt books itself. There is no "pay in GPay, come back, tap Confirm
+ * paid" — that was the fallback for a school with no gateway, and it had
+ * been the only thing parents were ever told.
+ */
+export function composeSisDirectPayReply(opts: {
+  hindi: boolean;
+  url: string;
+  who: string;
+  lines: { studentName: string; label: string; amountPaise: number; dueOn: string }[];
+  totalPaise: number;
+}): string {
+  const MAX = 12;
+  const byChild = new Set(opts.lines.map((l) => l.studentName)).size > 1;
+  const row = (l: (typeof opts.lines)[number]) =>
+    `• ${byChild && l.studentName ? `${l.studentName}: ` : ""}${l.label} — ${formatInr(l.amountPaise)}`;
+  const more = opts.lines.length > MAX ? opts.lines.length - MAX : 0;
+  if (opts.hindi) {
+    return [
+      `💳 *फीस भुगतान* · ${opts.who}`,
+      "",
+      "*इस भुगतान में शामिल:*",
+      ...opts.lines.slice(0, MAX).map(row),
+      more ? `…और ${more} पंक्ति` : "",
+      `*कुल: ${formatInr(opts.totalPaise)}*`,
+      "",
+      "👇 नीचे के लिंक से सीधे भुगतान करें — UPI (GPay, PhonePe, Paytm), कार्ड या नेटबैंकिंग:",
+      opts.url,
+      "",
+      "✅ भुगतान होते ही खाता अपडेट होगा और रसीद अपने आप इसी WhatsApp पर आ जाएगी — कुछ और दबाने की ज़रूरत नहीं।",
+    ]
+      .filter((l, i, a) => l !== "" || a[i - 1] !== "")
+      .join("\n");
+  }
+  return [
+    `💳 *Fee payment* · ${opts.who}`,
+    "",
+    "*This payment covers:*",
+    ...opts.lines.slice(0, MAX).map(row),
+    more ? `…and ${more} more` : "",
+    `*Total: ${formatInr(opts.totalPaise)}*`,
+    "",
+    "👇 Pay directly from this link — UPI (GPay, PhonePe, Paytm), card or net banking:",
+    opts.url,
+    "",
+    "✅ The moment the payment goes through, your account updates and the receipt comes to this WhatsApp by itself — nothing else to tap.",
+  ]
+    .filter((l, i, a) => l !== "" || a[i - 1] !== "")
+    .join("\n");
 }
