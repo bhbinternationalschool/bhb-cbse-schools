@@ -191,6 +191,7 @@ export const WA_TEMPLATE_VARIABLES: WaTemplateVariableDef[] = [
   { key: "amount", label: "Amount", group: "Fees", sample: "₹5,000" },
   { key: "dueDate", label: "Due date", group: "Fees", sample: "15 Aug 2026" },
   { key: "payLink", label: "Payment link", group: "Fees", sample: "https://school.example/pay" },
+  { key: "duePayToken", label: "Pay-now button token (family's dues)", group: "Fees", sample: "eyJoIjoiaGhfYWJjIiwic2MiOiJvcGVuIn0.Ab12Cd34Ef56Gh78Ij90Kl", hint: "Fills the reminder's Pay now button: opens this family's payment for what they owe at that moment." },
   { key: "payToken", label: "Pay-now button token (link id + code)", group: "Fees", sample: "pl_8f3k2x9a.PL-7K2M", hint: "Fills the Pay now button's URL; the sender supplies it from the payment link." },
   { key: "receiptNo", label: "Receipt number", group: "Fees", sample: "RCP-1042" },
   { key: "relayKind", label: "Office relay: kind of message", group: "School", sample: "Fees" },
@@ -368,7 +369,17 @@ export const WA_BUS_TRACK_URL =
   "https://bhbinternational.school/track/bus/{{trackToken}}";
 const TRACK_BUS_EN: WaTemplateButton = { type: "URL", text: "Track the bus", url: WA_BUS_TRACK_URL };
 const TRACK_BUS_HI: WaTemplateButton = { type: "URL", text: "बस ट्रैक करें", url: WA_BUS_TRACK_URL };
-/** "Pay now" for reminders that carry no link of their own: the parent portal's fee page. */
+/**
+ * "Pay now" on the fee reminders: THIS family's payment for what they owe at
+ * the moment they tap — /pay/due raises the checkout then and redirects to
+ * the gateway. It used to open the parent portal login (WA_PARENT_APP_URL),
+ * so a parent had to sign in before they could pay anything; 1,126 reminders
+ * went out that way in September 2026.
+ */
+export const WA_DUE_PAY_URL = "https://bhbinternational.school/pay/due/{{duePayToken}}";
+const PAY_DUE_EN: WaTemplateButton = { type: "URL", text: "Pay now", url: WA_DUE_PAY_URL };
+const PAY_DUE_HI: WaTemplateButton = { type: "URL", text: "अभी भुगतान करें", url: WA_DUE_PAY_URL };
+/** The parent portal's fee page — still on the transport fee reminder, which no rule sends yet. */
 const PAY_PORTAL_EN: WaTemplateButton = { type: "URL", text: "Pay now", url: WA_PARENT_APP_URL };
 const PAY_PORTAL_HI: WaTemplateButton = { type: "URL", text: "अभी भुगतान करें", url: WA_PARENT_APP_URL };
 
@@ -750,12 +761,12 @@ const SEED_DEFS: SeedDef[] = [
     headerFormat: "TEXT",
     headerTextEn: "Fee reminder",
     headerTextHi: "शुल्क स्मरण",
-    buttons: [PAY_PORTAL_EN, PAID_EN],
-    buttonsHi: [PAY_PORTAL_HI, PAID_HI],
+    buttons: [PAY_DUE_EN, PAID_EN],
+    buttonsHi: [PAY_DUE_HI, PAID_HI],
     bodyEn:
-      "Namaste {{guardianName}} ji 🙏\n\nA friendly reminder that {{childName}}'s school fee ({{classLabel}}) is due soon:\n\n💰 Amount: *{{feeDue}}*\n\nPay in a minute from your phone — UPI, card or net banking:\n🔗 {{payLink}}\n\nYour receipt arrives on WhatsApp the moment the payment goes through. Thank you! 🙏",
+      "Namaste {{guardianName}} ji 🙏\n\nA friendly reminder that {{childName}}'s school fee ({{classLabel}}) is due soon:\n\n💰 Amount: *{{feeDue}}*\n\nTap *Pay now* below to pay directly — UPI (GPay, PhonePe, Paytm), card or net banking. No login needed, and the receipt comes to WhatsApp by itself.\n\nIf the button does not open: {{payLink}}\n\nThank you! 🙏",
     bodyHi:
-      "नमस्ते {{guardianName}} जी 🙏\n\nएक विनम्र स्मरण — {{childName}} ({{classLabel}}) का विद्यालय शुल्क शीघ्र देय है:\n\n💰 राशि: *{{feeDue}}*\n\nअपने फ़ोन से एक मिनट में भुगतान करें — UPI, कार्ड या नेट बैंकिंग:\n🔗 {{payLink}}\n\nभुगतान होते ही रसीद व्हाट्सऐप पर आ जाएगी। धन्यवाद! 🙏",
+      "नमस्ते {{guardianName}} जी 🙏\n\nएक विनम्र स्मरण — {{childName}} ({{classLabel}}) का विद्यालय शुल्क शीघ्र देय है:\n\n💰 राशि: *{{feeDue}}*\n\nनीचे *अभी भुगतान करें* दबाकर सीधे भुगतान करें — UPI (GPay, PhonePe, Paytm), कार्ड या नेट बैंकिंग। लॉगिन की ज़रूरत नहीं, रसीद अपने आप व्हाट्सऐप पर आ जाएगी।\n\nयदि बटन न खुले: {{payLink}}\n\nधन्यवाद! 🙏",
     footerEn: "Fee counter · Reply to this message for help",
     footerHi: "शुल्क काउंटर · सहायता के लिए इसी संदेश का उत्तर दें",
   },
@@ -769,12 +780,12 @@ const SEED_DEFS: SeedDef[] = [
     headerFormat: "TEXT",
     headerTextEn: "Fee overdue",
     headerTextHi: "शुल्क बकाया",
-    buttons: [PAY_PORTAL_EN, PAID_EN, { type: "QUICK_REPLY", text: "Need more time" }],
-    buttonsHi: [PAY_PORTAL_HI, PAID_HI, { type: "QUICK_REPLY", text: "थोड़ा समय चाहिए" }],
+    buttons: [PAY_DUE_EN, PAID_EN, { type: "QUICK_REPLY", text: "Need more time" }],
+    buttonsHi: [PAY_DUE_HI, PAID_HI, { type: "QUICK_REPLY", text: "थोड़ा समय चाहिए" }],
     bodyEn:
-      "Namaste {{guardianName}} ji 🙏\n\n{{childName}}'s school fee is *overdue* (reminder {{stage}}):\n\n💰 Amount pending: *{{feeDue}}*\n\nPlease clear it at your earliest — it takes a minute:\n🔗 {{payLink}}\n\nIf you have already paid or need a little more time, just reply to this message and the fee counter will help. Thank you! 🙏",
+      "Namaste {{guardianName}} ji 🙏\n\n{{childName}}'s school fee is *overdue* (reminder {{stage}}):\n\n💰 Amount pending: *{{feeDue}}*\n\nTap *Pay now* below to pay directly — UPI (GPay, PhonePe, Paytm), card or net banking. No login needed, and the receipt comes to WhatsApp by itself.\n\nIf the button does not open: {{payLink}}\n\nAlready paid, or need a little more time? Tap a button below. Thank you! 🙏",
     bodyHi:
-      "नमस्ते {{guardianName}} जी 🙏\n\n{{childName}} का विद्यालय शुल्क *बकाया* है (स्मरण {{stage}}):\n\n💰 बकाया राशि: *{{feeDue}}*\n\nकृपया जल्द से जल्द भुगतान करें — इसमें एक मिनट लगता है:\n🔗 {{payLink}}\n\nयदि आपने भुगतान कर दिया है या थोड़ा समय चाहिए, तो इसी संदेश का उत्तर दें — शुल्क काउंटर आपकी मदद करेगा। धन्यवाद! 🙏",
+      "नमस्ते {{guardianName}} जी 🙏\n\n{{childName}} का विद्यालय शुल्क *बकाया* है (स्मरण {{stage}}):\n\n💰 बकाया राशि: *{{feeDue}}*\n\nनीचे *अभी भुगतान करें* दबाकर सीधे भुगतान करें — UPI (GPay, PhonePe, Paytm), कार्ड या नेट बैंकिंग। लॉगिन की ज़रूरत नहीं, रसीद अपने आप व्हाट्सऐप पर आ जाएगी।\n\nयदि बटन न खुले: {{payLink}}\n\nभुगतान कर दिया है या थोड़ा समय चाहिए? नीचे का बटन दबाएँ। धन्यवाद! 🙏",
     footerEn: "Fee counter · Reply to this message for help",
     footerHi: "शुल्क काउंटर · सहायता के लिए इसी संदेश का उत्तर दें",
   },
