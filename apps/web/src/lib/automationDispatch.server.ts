@@ -19,6 +19,7 @@ import { POST as dispatchPost } from "@/app/api/wa/dispatch/route";
 import type { AutomationApprovalItem, AutomationModule } from "@/lib/automation";
 import { loadWaTemplatesServer } from "@/lib/waTemplatesRead.server";
 import {
+  templateButtonComponents,
   resolveTemplateForSend,
   type WaTemplateLanguage,
   type WaTemplatesState,
@@ -63,6 +64,7 @@ type DispatchMessage = {
     language: string;
     variables: Record<string, string>;
     variableKeys: string[];
+    components?: ReturnType<typeof templateButtonComponents>["components"];
   };
 };
 
@@ -144,6 +146,14 @@ function buildMessages(
       continue;
     }
     const tpl = resolved.template;
+    // A "Pay now" button with a per-family URL needs its value on every send —
+    // Meta rejects the message otherwise. A card raised before the button
+    // existed has no value for it: skipped with a reason, never sent broken.
+    const buttons = templateButtonComponents(tpl, entry.variables || {});
+    if (buttons.missing.length) {
+      skipped.push(`${mobile}: the template's button needs ${buttons.missing.join(", ")} — re-run the rule`);
+      continue;
+    }
     messages.push({
       messageId: `auto_${item.id}_${mobile}`,
       mobile,
@@ -154,6 +164,7 @@ function buildMessages(
         language: tpl.metaLanguage || tpl.language,
         variables: entry.variables || {},
         variableKeys: tpl.variables,
+        ...(buttons.components.length ? { components: buttons.components } : {}),
       },
     });
   }

@@ -35,7 +35,7 @@ import {
   type WaCandidateNumber,
 } from "@/lib/waHouseholdNumbers";
 import { publicOrigin } from "@/lib/birthday.server";
-import { duePayUrl } from "@/lib/duePayToken.server";
+import { duePayTokenFor, duePayUrl } from "@/lib/duePayToken.server";
 import { TENANT } from "@/lib/types";
 
 export type AutomationRecipient = {
@@ -278,6 +278,13 @@ async function feeRecipients(
             studentId: d.studentId,
             scope: kind === "overdue" ? "overdue" : "open",
           }) || PARENT_PORTAL,
+        // The same link for the template's "Pay now" button, which can only
+        // carry the part after /pay/due/.
+        duePayToken: duePayTokenFor({
+          householdId: d.householdId,
+          studentId: d.studentId,
+          scope: kind === "overdue" ? "overdue" : "open",
+        }),
       },
     });
   }

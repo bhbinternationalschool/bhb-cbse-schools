@@ -282,8 +282,20 @@ const withoutToken = templateButtonComponents(payLinkEn, { payLink: "https://x" 
 assert.deepEqual(withoutToken.missing, ["payToken"], "a missing button value is reported, never defaulted");
 assert.equal(withoutToken.components.length, 0);
 // Static buttons and quick replies need no parameters at all.
-const soft = seeds.find((t) => t.familyKey === "fees_soft_reminder" && t.language === "en")!;
-assert.deepEqual(templateButtonComponents(soft, {}), { components: [], missing: [] });
+const transportFee = seeds.find((t) => t.familyKey === "transport_fee" && t.language === "en")!;
+assert.deepEqual(templateButtonComponents(transportFee, {}), { components: [], missing: [] });
+// The fee reminders' Pay now opens THIS family's payment: /pay/due/<token>, not the portal login.
+for (const key of ["fees_soft_reminder", "fees_stage_reminder"]) {
+  for (const lang of ["en", "hi"]) {
+    const t = seeds.find((x) => x.familyKey === key && x.language === lang)!;
+    assert.equal(t.buttons[0]!.url, "https://bhbinternational.school/pay/due/{{duePayToken}}", `${key}/${lang} Pay now`);
+    assert.deepEqual(templateButtonComponents(t, {}).missing, ["duePayToken"], "never sent without the family's token");
+    assert.deepEqual(templateButtonComponents(t, { duePayToken: "abc.def" }).components, [
+      { type: "button", sub_type: "url", index: 0, parameters: [{ type: "text", text: "abc.def" }] },
+    ]);
+    assert.doesNotMatch(t.body, /Confirm paid/);
+  }
+}
 
 /* ── a tap on a template button is recognised in either language ── */
 

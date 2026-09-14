@@ -10,10 +10,12 @@ import { sendWaWithFailover } from "@/lib/waSend";
 import {
   normalizeWaTemplatesState,
   resolveTemplateForSend,
+  templateButtonComponents,
   templateVariablePositions,
   type WaTemplatesState,
 } from "@/lib/waTemplates";
 import { writeAudit } from "@/lib/audit.server";
+import { duePayTokenFor } from "@/lib/duePayToken.server";
 
 export const runtime = "nodejs";
 
@@ -108,7 +110,7 @@ export async function POST(request: Request) {
     }
 
     let template:
-      | { name: string; language: string; components?: never }
+      | { name: string; language: string; buttons: ReturnType<typeof templateButtonComponents>["components"] }
       | undefined;
     let fromPhoneNumberId: string | undefined;
     let variables: Record<string, string> | undefined;
@@ -131,9 +133,20 @@ export async function POST(request: Request) {
       if (!resolved.ok) {
         throw new ApiError("bad_request", resolved.reason, 400);
       }
+      // A "Pay now" button that opens this family's own payment needs its
+      // token on the send; everything else the app supplies.
+      const buttonVars: Record<string, string> = {
+        ...(body.variables ?? {}),
+        ...(household ? { duePayToken: duePayTokenFor({ householdId: household.id, scope: "open" }) } : {}),
+      };
+      const buttons = templateButtonComponents(resolved.template, buttonVars);
+      if (buttons.missing.length) {
+        throw new ApiError("bad_request", `This template's button needs ${buttons.missing.join(", ")} — the number is not on a family record`, 400);
+      }
       template = {
         name: resolved.template.metaName,
         language: resolved.template.metaLanguage || resolved.template.language,
+        buttons: buttons.components,
       };
       variables = templateVariablePositions(resolved.template, body.variables ?? {});
       fromPhoneNumberId = resolved.sender?.phoneNumberId;
@@ -147,14 +160,19 @@ export async function POST(request: Request) {
         ? {
             name: template.name,
             language: template.language,
-            components: variables
+            components: variables || template.buttons.length
               ? [
-                  {
-                    type: "body",
-                    parameters: Object.keys(variables)
-                      .sort((a, b) => Number(a) - Number(b))
-                      .map((k) => ({ type: "text", text: variables![k] })),
-                  },
+                  ...(variables
+                    ? [
+                        {
+                          type: "body" as const,
+                          parameters: Object.keys(variables)
+                            .sort((a, b) => Number(a) - Number(b))
+                            .map((k) => ({ type: "text" as const, text: variables![k] })),
+                        },
+                      ]
+                    : []),
+                  ...template.buttons,
                 ]
               : undefined,
           }

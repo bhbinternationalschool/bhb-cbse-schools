@@ -73,6 +73,15 @@ export function verifyDuePayToken(raw: string | null | undefined): DuePayPayload
   }
 }
 
+/**
+ * Just the token, for a template's "Pay now" button: Meta allows one variable
+ * at the END of a button URL, so the button is
+ * https://bhbinternational.school/pay/due/{{duePayToken}}.
+ */
+export function duePayTokenFor(input: { householdId: string; studentId?: string; scope: DuePayScope }): string {
+  return signDuePayToken(input) ?? "";
+}
+
 /** The full link for a message, or "" when no secret is available (never a broken link). */
 export function duePayUrl(
   origin: string,

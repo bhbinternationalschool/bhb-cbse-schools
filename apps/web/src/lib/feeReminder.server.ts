@@ -18,6 +18,8 @@
  */
 
 import { sendWaWithFailover, buildWaTemplateBodyComponent } from "@/lib/waSend";
+import { templateButtonComponents } from "@/lib/waTemplates";
+import { duePayTokenFor, duePayUrl } from "@/lib/duePayToken.server";
 import { listOptedOutSet, toE164India } from "@/lib/waContactState.server";
 import { formatInr } from "@/lib/masters";
 import { TENANT } from "@/lib/types";
@@ -109,16 +111,30 @@ export async function sendFeeReminders(opts: {
       feeDue: formatInr(r.amountPaise),
       amount: formatInr(r.amountPaise),
       overdueDays: String(Math.max(0, r.overdueDays)),
-      payLink: r.payLink || `${TENANT.publicPortal || "bhbinternational.school"}/parent`,
+      // The family's direct payment for what is overdue, not the portal login.
+      payLink:
+        r.payLink ||
+        duePayUrl(`https://${(TENANT.publicPortal || "bhbinternational.school").replace(/^https?:\/\//, "")}`, {
+          householdId: r.householdId,
+          scope: "overdue",
+        }) ||
+        `${TENANT.publicPortal || "bhbinternational.school"}/parent`,
+      duePayToken: duePayTokenFor({ householdId: r.householdId, scope: "overdue" }),
     };
     const tpl = templateForFamily(opts.templatesByLang ?? null, r.language, opts.template)
       ?? opts.template;
+    const buttons = templateButtonComponents({ buttons: (tpl as { buttons?: import("@/lib/waTemplates").WaTemplateButton[] }).buttons ?? [] }, vars);
+    if (buttons.missing.length) {
+      out.failed += 1;
+      if (out.errors.length < 3) out.errors.push(`Template button needs ${buttons.missing.join(", ")}`);
+      continue;
+    }
     const res = await sendWaWithFailover({
       primaryMobile: r.mobile,
       template: {
         name: tpl.metaName,
         language: tpl.language,
-        components: [buildWaTemplateBodyComponent(tpl.variables, vars)],
+        components: [buildWaTemplateBodyComponent(tpl.variables, vars), ...buttons.components],
       },
       clientMessageId: `feerem_${opts.todayIso}_${r.householdId}`,
     });
