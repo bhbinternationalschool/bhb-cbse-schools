@@ -129,6 +129,7 @@
     "test:transport-shortfall": "npx tsx src/lib/transportShortfall.selftest.ts",
     "test:transport-afternoon-waves": "npx tsx src/lib/transportAfternoonWaves.selftest.ts",
     "test:transport-shifts": "npx tsx src/lib/transportShifts.selftest.ts",
+    "test:transport-phone-empty-desk": "npx tsx src/lib/transportPhoneEmptyDesk.selftest.ts",
     "test:transport-seats": "npx tsx src/lib/transportSeats.selftest.ts",
     "test:boarding-suggest": "npx tsx src/lib/boardingSuggestAi.selftest.ts",
     "test:defaulter-hold-policy": "npx tsx src/lib/defaulterHoldPolicy.selftest.ts",

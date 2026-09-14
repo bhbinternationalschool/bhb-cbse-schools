@@ -9,32 +9,41 @@ import {
   recordDeskSyncFailure,
   recordDeskSyncSuccess,
 } from "@/lib/deskSyncStatus";
+import { recordTransportDeskAnswer } from "@/lib/transportHydrationState";
 
 const META_KEY = "bhb_transport_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let pending: TransportState | null = null;
 
-type DeskMeta = {
+export type DeskMeta = {
   updatedAt: string;
   routeCount: number;
   vehicleCount: number;
+  /** What the server last said it held. 0 on metas written before 14 Sep 2026. */
+  assignmentCount: number;
+};
+
+const EMPTY_META: DeskMeta = {
+  updatedAt: "",
+  routeCount: 0,
+  vehicleCount: 0,
+  assignmentCount: 0,
 };
 
 function readMeta(): DeskMeta {
-  if (typeof window === "undefined") {
-    return { updatedAt: "", routeCount: 0, vehicleCount: 0 };
-  }
+  if (typeof window === "undefined") return EMPTY_META;
   try {
     const raw = localStorage.getItem(META_KEY);
-    if (!raw) return { updatedAt: "", routeCount: 0, vehicleCount: 0 };
-    const p = JSON.parse(raw) as DeskMeta;
+    if (!raw) return EMPTY_META;
+    const p = JSON.parse(raw) as Partial<DeskMeta>;
     return {
       updatedAt: String(p.updatedAt || ""),
       routeCount: Number(p.routeCount) || 0,
       vehicleCount: Number(p.vehicleCount) || 0,
+      assignmentCount: Number(p.assignmentCount) || 0,
     };
   } catch {
-    return { updatedAt: "", routeCount: 0, vehicleCount: 0 };
+    return EMPTY_META;
   }
 }
 
@@ -58,12 +67,37 @@ function writeMeta(patch: DeskMeta) {
  * misconfiguration away from being accepted, and it costs a round trip and an
  * error in the console every few seconds in the meantime.
  */
-function deskIsUnsendable(state: TransportState): boolean {
-  return (
-    (state.routes?.length ?? 0) === 0 &&
-    (state.vehicles?.length ?? 0) === 0 &&
-    (state.assignments?.length ?? 0) === 0
-  );
+/**
+ * Why this desk must not be sent, or null when it may be.
+ *
+ * Two shapes are refused. All-empty (above). And — added 14 Sep 2026 — a
+ * desk with NO routes or NO assignments when the server's last answer
+ * (`meta`) said it holds some. That is the shape a phone produced after its
+ * cache was dropped for quota: `seedTransportIfEmpty` gave it five vehicles,
+ * so it was not all-empty, and the server refused it twelve times. A desk
+ * that has lost its routes while the database has them is a client that lost
+ * its cache, not an office that deleted every route; deactivating a route
+ * sets isActive=false and keeps the row.
+ *
+ * Exported for the self-test; pure on purpose.
+ */
+export function whyDeskIsUnsendable(
+  state: TransportState,
+  meta: Pick<DeskMeta, "routeCount" | "assignmentCount">,
+): string | null {
+  const routes = state.routes?.length ?? 0;
+  const vehicles = state.vehicles?.length ?? 0;
+  const assignments = state.assignments?.length ?? 0;
+  if (routes === 0 && vehicles === 0 && assignments === 0) {
+    return "no routes, vehicles or assignments";
+  }
+  if (routes === 0 && meta.routeCount > 0) {
+    return `no routes, while the server holds ${meta.routeCount}`;
+  }
+  if (assignments === 0 && meta.assignmentCount > 0) {
+    return `no assignments, while the server holds ${meta.assignmentCount}`;
+  }
+  return null;
 }
 
 let emptyPushWarned = false;
@@ -71,13 +105,14 @@ let emptyPushWarned = false;
 export function scheduleTransportDeskSync(state: TransportState) {
   if (!isSupabaseConfigured()) return;
   if (typeof window === "undefined") return;
-  if (deskIsUnsendable(state)) {
+  const refusal = whyDeskIsUnsendable(state, readMeta());
+  if (refusal) {
     if (!emptyPushWarned) {
       emptyPushWarned = true;
       console.warn(
-        "[transport-db] not pushing an empty desk — no routes, vehicles or " +
-          "assignments. This client has not hydrated; the database is left as " +
-          "it is. Reload, and if it persists this browser's storage is full.",
+        `[transport-db] not pushing this desk — ${refusal}. This client has ` +
+          "not hydrated, or its cache was dropped; the database is left as it " +
+          "is. Reload, and if it persists this browser's storage is full.",
       );
     }
     return;
@@ -113,6 +148,7 @@ async function pushTransportDeskApi(state: TransportState) {
         updatedAt: body.updatedAt || new Date().toISOString(),
         routeCount: body.routeCount ?? state.routes.length,
         vehicleCount: body.vehicleCount ?? state.vehicles.length,
+        assignmentCount: state.assignments?.length ?? 0,
       });
     } else if (!res.ok) {
       console.warn("[transport-db] desk push failed", body?.error || res.status);
@@ -176,6 +212,7 @@ export async function hydrateTransportDeskFromDb(
       updatedAt?: string;
       routeCount?: number;
       vehicleCount?: number;
+      assignmentCount?: number;
     };
     const bundle = {
       feePolicy: body.feePolicy ?? empty.feePolicy,
@@ -213,6 +250,14 @@ export async function hydrateTransportDeskFromDb(
     };
     const meta = readMeta();
     const remoteRoutes = body.routeCount ?? bundle.routes.length;
+    const remoteAssignments = body.assignmentCount ?? bundle.assignments.length;
+    // The server has answered. Recorded before the take/skip decision, so a
+    // skipped take still tells seedTransportIfEmpty the truth.
+    recordTransportDeskAnswer({
+      routes: remoteRoutes,
+      vehicles: body.vehicleCount ?? bundle.vehicles.length,
+      assignments: remoteAssignments,
+    });
     const shouldTake =
       preferDb ||
       process.env.NEXT_PUBLIC_TRANSPORT_READ_FROM_DB === "true" ||
@@ -226,6 +271,7 @@ export async function hydrateTransportDeskFromDb(
       updatedAt: body.updatedAt || new Date().toISOString(),
       routeCount: remoteRoutes,
       vehicleCount: body.vehicleCount ?? bundle.vehicles.length,
+      assignmentCount: remoteAssignments,
     });
     return { bundle, changed: true, ok: true };
   } catch {

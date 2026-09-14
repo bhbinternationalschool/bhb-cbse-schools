@@ -158,6 +158,7 @@ SELFTESTS=(
   test:transport-shortfall
   test:transport-afternoon-waves
   test:transport-shifts
+  test:transport-phone-empty-desk
   test:transport-seats
   test:boarding-suggest
   test:defaulter-hold-policy
