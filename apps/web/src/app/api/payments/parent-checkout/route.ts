@@ -127,6 +127,20 @@ export async function POST(req: Request) {
     : await attachRazorpayToPaymentLink(attachOpts);
 
   const link = gw.ok ? gw.link : created.link;
+
+  // Saved to the database before the parent is sent to pay. The gateway's
+  // webhook books a payment by finding its link; a link that lived only in
+  // this server's memory is money with nothing to book it against once the
+  // instance restarts (two of the first three checkouts, found 14 Sep 2026).
+  const { pushPaymentLinkToDb } = await import("@/lib/paymentsNormalized.server");
+  const saved = await pushPaymentLinkToDb(link);
+  if (!saved.ok) {
+    console.error("[parent-checkout] payment link not saved", link.id, saved.error);
+    return NextResponse.json(
+      { error: "Could not start payment just now — please try again in a minute" },
+      { status: 503 },
+    );
+  }
   const shareUrl = buildPaymentShareUrlAbsolute(
     publicAppOrigin(),
     buildEnrichedPaymentSharePayload(link, TENANT.nameDisplay, masters),

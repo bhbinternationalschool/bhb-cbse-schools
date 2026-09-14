@@ -99,6 +99,8 @@ SELFTESTS=(
   test:wa-unified-menus-hindi
   test:parent-messages-hindi
   test:parent-bot-real-chats
+  test:pin-review
+  test:due-pay-link
   test:concession-review-ai
   test:collections-weekly-ai
   test:erp-ask

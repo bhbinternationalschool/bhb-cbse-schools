@@ -32,6 +32,7 @@ import { LivePositionsPanel } from "@/components/transport/LivePositionsPanel";
 import { FleetEdgeStatusStrip } from "@/components/transport/FleetEdgeStatusStrip";
 import { BoardingPointAuditPanel } from "@/components/transport/BoardingPointAuditPanel";
 import { PinRequestPanel } from "@/components/transport/PinRequestPanel";
+import { PinsReceivedPanel } from "@/components/transport/PinsReceivedPanel";
 import { StaffRiderPanel } from "@/components/transport/StaffRiderPanel";
 import { StopLinkRepairPanel } from "@/components/transport/StopLinkRepairPanel";
 import { strictClassGroup } from "@/lib/transportShifts";
@@ -644,6 +645,7 @@ export function TransportWorkspace() {
               <PinRequestPanel
                 canEdit={hasPermission(session, masters, "transport", "edit")}
               />
+              <PinsReceivedPanel />
               <BoardingPointAuditPanel
                 academicYearCode={session.academicYearCode}
                 canEdit={hasPermission(session, masters, "transport", "edit")}
