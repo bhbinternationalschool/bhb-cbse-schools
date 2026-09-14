@@ -98,6 +98,8 @@ import {
 import { ensureMetaFlowPublished } from "@/lib/waFlowsMeta.server";
 import { SCHOOL_DEFAULT_WA_LANGUAGE } from "@/lib/householdPrefs";
 import { duePayUrl } from "@/lib/duePayToken.server";
+import { parentChatClosingMessage } from "@/lib/parentBotGuide";
+import { alreadyClosed } from "@/lib/parentChatClose";
 
 export type WaSisBotMsg = {
   id: string;
@@ -126,6 +128,8 @@ export type WaSisBotThread = {
   ptpAsks?: number;
   /** Last promise to pay the parent made on WhatsApp. */
   lastPromise?: { amountPaise: number | null; byDate: string | null; at: string; raw: string };
+  /** When the closing thank-you + guide was last sent; the chat is closed until the parent writes again. */
+  closingSentAt?: string;
 };
 
 type Store = { version: 1; threads: WaSisBotThread[] };
@@ -350,6 +354,26 @@ async function finishLanguageFlow(
     stub: !send.ok,
     error: send.ok ? undefined : send.error,
   };
+}
+
+/**
+ * Record the closing message on a thread. Re-reads the store and patches the
+ * one thread, so a parent message that arrived while the sweep was sending is
+ * kept rather than overwritten by the sweep's older copy.
+ */
+export async function appendSisBotClosing(opts: { threadId: string; text: string; at: string }): Promise<void> {
+  const store = await readStore();
+  const next = store.threads.map((t) =>
+    t.id === opts.threadId
+      ? {
+          ...t,
+          closingSentAt: opts.at,
+          messages: [...t.messages, { id: nid("wsm"), role: "bot" as const, text: opts.text, at: opts.at, by: "SIS parent WA bot · closing" }],
+          updatedAt: opts.at,
+        }
+      : t,
+  );
+  await writeStore({ ...store, threads: next });
 }
 
 export async function listWaSisBotThreads(): Promise<WaSisBotThread[]> {
@@ -1033,6 +1057,7 @@ export async function handleWaSisBotInbound(opts: {
   let nextPtpAsks: number | undefined;
   let lastPromise = thread.lastPromise;
   let officeNote = "";
+  let closingNow = false;
   let intent: ReturnType<typeof detectSisBotIntent>;
   let bot: { text: string; escalate: boolean };
   if (answeringPtp) {
@@ -1086,8 +1111,22 @@ export async function handleWaSisBotInbound(opts: {
       officeNote = `Parent asked about fees${feeQuestion.transport ? " / transport" : ""}${feeQuestion.discount ? " / a discount" : ""}${feeQuestion.namedClass ? ` / class ${feeQuestion.namedClass}` : ""}: "${text.slice(0, 160)}"`;
     }
   } else if (!quickReply && isSisAcknowledgement(text)) {
+    // "ok / thanks" ends the conversation: thanks + the guide, once. A second
+    // "ok" in the same closed conversation just gets a short thank-you.
     intent = "info";
-    bot = { escalate: false, text: composeSisAcknowledgement(hindi) };
+    if (alreadyClosed({ status: thread.status, messages: thread.messages, closingSentAt: thread.closingSentAt })) {
+      bot = { escalate: false, text: composeSisAcknowledgement(hindi) };
+    } else {
+      const { householdRidesTheBus } = await import("@/lib/parentBusLocation.server");
+      bot = {
+        escalate: false,
+        text: parentChatClosingMessage({
+          needsOffice: thread.status === "needs_staff",
+          hasTransport: await householdRidesTheBus(childrenOf(hh).map((s) => ({ id: s.id, name: s.fullName }))),
+        }),
+      };
+      closingNow = true;
+    }
   } else {
     intent = quickReply
       ? ("human" as const)
@@ -1138,6 +1177,8 @@ export async function handleWaSisBotInbound(opts: {
     pendingAsk: nextPendingAsk,
     ptpAsks: nextPtpAsks,
     lastPromise,
+    // Set AFTER this parent message is in the thread, so the closing covers it.
+    closingSentAt: closingNow ? new Date(Date.now() + 1).toISOString() : thread.closingSentAt,
     updatedAt: nowIso(),
   };
   store = {
