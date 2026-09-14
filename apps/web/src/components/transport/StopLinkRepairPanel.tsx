@@ -1,13 +1,15 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { formatInr } from "@/lib/fees";
+import { formatInr, loadFees } from "@/lib/fees";
 import type { MastersState } from "@/lib/masters";
 import type { SisState } from "@/lib/sis";
 import type { TransportState } from "@/lib/transport";
 import { buildStudentTransportProfiles } from "@/lib/transportPlanner";
 import {
   findBrokenStopLinks,
+  pickReceiptBackedStop,
+  receiptStopNamesForGroup,
   relinkStopGroup,
   suggestStopsForGroup,
   type BrokenStopGroup,
@@ -34,12 +36,19 @@ export function StopLinkRepairPanel({
   sis,
   academicYearCode,
   onDone,
+  onApplied,
 }: {
   state: TransportState;
   masters: MastersState | null;
   sis: SisState | null;
   academicYearCode: string;
   onDone: () => void;
+  /**
+   * Called after a group is relinked so the parent re-reads the desk. Without
+   * it the repaired group stayed on screen exactly as before — the office
+   * read that as "not accepting" on 14 Sep 2026, and pressed again.
+   */
+  onApplied?: () => void;
 }) {
   const [flash, setFlash] = useState("");
   const [error, setError] = useState("");
@@ -60,6 +69,10 @@ export function StopLinkRepairPanel({
     () => new Map((sis?.students ?? []).map((s) => [s.id, s.fullName])),
     [sis],
   );
+  // Receipts name the stop each child boarded at while the link still held.
+  // Re-read whenever the desk changes; loadFees is a cache read.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const receipts = useMemo(() => loadFees().vouchers ?? [], [state]);
 
   if (!sis || !masters) {
     return (
@@ -90,10 +103,10 @@ export function StopLinkRepairPanel({
     );
   }
 
-  function apply(group: BrokenStopGroup, key: string) {
+  function apply(group: BrokenStopGroup, key: string, suggested: string | null) {
     setError("");
     setFlash("");
-    const toStopId = choice[key];
+    const toStopId = choice[key] ?? suggested;
     if (!toStopId) {
       setError("Pick a stop for this group first");
       return;
@@ -115,6 +128,7 @@ export function StopLinkRepairPanel({
       delete next[key];
       return next;
     });
+    onApplied?.();
   }
 
   return (
@@ -166,7 +180,15 @@ export function StopLinkRepairPanel({
       {report.groups.map((g) => {
         const key = `${g.routeId}::${g.orphanStopId}`;
         const route = state.routes.find((r) => r.id === g.routeId);
-        const candidates = route ? suggestStopsForGroup(g, route) : [];
+        const candidates = route
+          ? suggestStopsForGroup(g, route, {
+              receiptStopNames: receiptStopNamesForGroup(g, receipts),
+            })
+          : [];
+        // Pre-selected only when the receipts agree on one place; the office
+        // still presses the button, and can pick another stop first.
+        const suggested = pickReceiptBackedStop(candidates);
+        const selected = choice[key] ?? suggested;
         const names = g.studentIds
           .map((id) => nameById.get(id) || id)
           .slice(0, 6);
@@ -230,7 +252,7 @@ export function StopLinkRepairPanel({
                       type="radio"
                       name={key}
                       className="mt-0.5"
-                      checked={choice[key] === c.stop.id}
+                      checked={selected === c.stop.id}
                       onChange={() =>
                         setChoice((prev) => ({ ...prev, [key]: c.stop.id }))
                       }
@@ -257,7 +279,7 @@ export function StopLinkRepairPanel({
               type="button"
               className="mt-3 rounded-lg bg-[var(--primary)] px-3 py-2 text-xs font-bold text-[var(--primary-foreground)] disabled:opacity-50"
               disabled={!choice[key]}
-              onClick={() => apply(g, key)}
+              onClick={() => apply(g, key, suggested)}
             >
               Link {g.riderCount} rider{g.riderCount === 1 ? "" : "s"} to this
               stop

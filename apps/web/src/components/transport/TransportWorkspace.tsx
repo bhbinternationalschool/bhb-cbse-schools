@@ -709,6 +709,7 @@ export function TransportWorkspace() {
                   setRepairingStopLinks(false);
                   refresh();
                 }}
+                onApplied={refresh}
               />
             ) : (
               <FleetRosterPanel

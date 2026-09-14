@@ -1512,43 +1512,113 @@ export function setRouteRoundTrip(
   return true;
 }
 
+export type RouteStopInput = {
+  /** The existing stop this row IS, when the editor knows. */
+  id?: string;
+  name: string;
+  distanceKm?: number;
+  geoLat?: number;
+  geoLng?: number;
+  placeId?: string;
+  geoAddress?: string;
+  distanceSource?: StopDistanceSource;
+  monthlyFeePaise?: number;
+};
+
+function stopNameKey(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * The next stop list for a route, keeping every stop's id that can be kept.
+ *
+ * Assignments name their stop by id. Until 14 Sep 2026 this function minted a
+ * fresh id for EVERY row on every save — so adding one stop to a route, or
+ * fixing a spelling, orphaned every rider on that route. It happened on
+ * 23 Aug (124 riders) and again in September (171 of 182), and each time the
+ * fee benchmark, the driver's manifest and the parent app lost the stop for
+ * every child on the bus.
+ *
+ * A row keeps an existing stop's id when: it says which stop it is (`id`);
+ * or it carries the same Google place; or, failing both, the same name.
+ * Each existing stop is claimed at most once, in row order, so two rows
+ * with one name take the two existing ids in sequence rather than sharing
+ * one. Only a row that matches nothing is a new stop.
+ *
+ * Pure — exported for the self-test.
+ */
+export function planRouteStops(
+  existing: TransportStop[],
+  rows: RouteStopInput[],
+): TransportStop[] {
+  const kept = rows.filter((r) => r.name.trim());
+  const unclaimed = new Set(existing.map((s) => s.id));
+  const byId = new Map(existing.map((s) => [s.id, s]));
+
+  const claim = (row: RouteStopInput): string | null => {
+    if (row.id && unclaimed.has(row.id)) return row.id;
+    const place = (row.placeId ?? "").trim();
+    if (place) {
+      const hit = existing.find(
+        (s) => unclaimed.has(s.id) && (s.placeId ?? "").trim() === place,
+      );
+      if (hit) return hit.id;
+    }
+    const key = stopNameKey(row.name);
+    const hit = existing.find(
+      (s) => unclaimed.has(s.id) && stopNameKey(s.name) === key,
+    );
+    return hit ? hit.id : null;
+  };
+
+  // Two passes: rows that name their stop claim first, so a renamed row
+  // cannot lose its id to a later row that merely shares its old name.
+  const ids: (string | null)[] = kept.map(() => null);
+  kept.forEach((row, i) => {
+    if (row.id && unclaimed.has(row.id)) {
+      ids[i] = row.id;
+      unclaimed.delete(row.id);
+    }
+  });
+  kept.forEach((row, i) => {
+    if (ids[i]) return;
+    const found = claim(row);
+    if (found) {
+      ids[i] = found;
+      unclaimed.delete(found);
+    }
+  });
+
+  return kept.map((row, i) => {
+    const prior = ids[i] ? byId.get(ids[i] as string) : undefined;
+    return normalizeStop(
+      {
+        id: ids[i] ?? undefined,
+        name: row.name.trim(),
+        sequence: i + 1,
+        distanceKm: row.distanceKm ?? prior?.distanceKm ?? 0,
+        geoLat: row.geoLat,
+        geoLng: row.geoLng,
+        placeId: row.placeId,
+        geoAddress: row.geoAddress,
+        distanceSource: row.distanceSource,
+        monthlyFeePaise: row.monthlyFeePaise,
+      },
+      i,
+    );
+  });
+}
+
 export function setRouteStops(
   routeId: string,
-  stops: {
-    name: string;
-    distanceKm?: number;
-    geoLat?: number;
-    geoLng?: number;
-    placeId?: string;
-    geoAddress?: string;
-    distanceSource?: StopDistanceSource;
-    monthlyFeePaise?: number;
-  }[],
+  stops: RouteStopInput[],
 ):
   | { ok: true; route: TransportRoute }
   | { ok: false; error: string } {
   const state = loadTransport();
   const route = state.routes.find((r) => r.id === routeId);
   if (!route) return { ok: false, error: "Route not found" };
-  const nextStops = stops
-    .map((s) => s.name.trim())
-    .filter(Boolean)
-    .map((name, i) =>
-      normalizeStop(
-        {
-          name,
-          sequence: i + 1,
-          distanceKm: stops[i]?.distanceKm ?? 0,
-          geoLat: stops[i]?.geoLat,
-          geoLng: stops[i]?.geoLng,
-          placeId: stops[i]?.placeId,
-          geoAddress: stops[i]?.geoAddress,
-          distanceSource: stops[i]?.distanceSource,
-          monthlyFeePaise: stops[i]?.monthlyFeePaise,
-        },
-        i,
-      ),
-    );
+  const nextStops = planRouteStops(route.stops, stops);
   const updated = { ...route, stops: nextStops };
   saveTransport({
     ...state,
