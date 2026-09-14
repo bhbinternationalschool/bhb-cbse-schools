@@ -33,7 +33,7 @@ import {
 } from "@/lib/payments";
 import { classLabelForStudent } from "@/lib/parentPortal";
 import { householdWhatsApp, loadSis, type Household } from "@/lib/sis";
-import { ensureSchoolMirrorLoaded } from "@/lib/schoolDataMirror.server";
+import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { TENANT } from "@/lib/types";
 import type { DuePayScope } from "@/lib/duePayToken";
 
@@ -100,7 +100,11 @@ export async function startDirectFeeCheckout(input: {
   scope: DuePayScope;
   appOrigin: string;
 }): Promise<DirectCheckoutResult> {
-  await ensureSchoolMirrorLoaded();
+  // HYDRATED, not merely loaded. ensureSchoolMirrorLoaded only reads a local
+  // file, which does not exist on Cloud Run: the first live test (14 Sep 2026)
+  // found no fee structure, computed no dues, and told a family who owed
+  // ₹3,250 that nothing was due.
+  await ensureSchoolMirrorHydrated();
   const { ensurePaymentsHydratedServer } = await import("@/lib/paymentsPersistence");
   await ensurePaymentsHydratedServer();
 

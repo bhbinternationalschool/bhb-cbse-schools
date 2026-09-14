@@ -3,7 +3,7 @@
  */
 
 import { applyPaymentLink } from "@/lib/payments";
-import { ensureSchoolMirrorLoaded } from "@/lib/schoolDataMirror.server";
+import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { householdWhatsApp, loadSis, normalizeMobile } from "@/lib/sis";
 import { sendSisFeeReceiptOnWhatsApp } from "@/lib/waSisBotServer";
 
@@ -23,7 +23,10 @@ export async function settlePaymentLinkWithWhatsApp(opts: {
     })
   | { ok: false; error: string }
 > {
-  await ensureSchoolMirrorLoaded();
+  // Hydrated from the database, not the local mirror file (absent on Cloud
+  // Run): a webhook landing on a freshly started instance otherwise finds no
+  // payment link and a parent's money is not booked.
+  await ensureSchoolMirrorHydrated();
   const result = applyPaymentLink({
     linkId: opts.linkId,
     cashierName: opts.cashierName,

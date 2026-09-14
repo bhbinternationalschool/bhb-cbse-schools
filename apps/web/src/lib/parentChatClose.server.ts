@@ -40,9 +40,34 @@ export async function runParentChatCloseSweep(opts: { dryRun?: boolean; now?: Da
   const h = istHour(now);
   if (h < 8 || h >= 20) return out;
   const sis = loadSis();
+  // The guide or a closing already sent after the parent last wrote — e.g. the
+  // one-off guide of 14 Sep — closes that conversation too. Without this the
+  // first sweep re-sent the whole guide to families who had it 20 minutes ago.
+  const lastGuideAt = new Map<string, string>();
+  const ctx = await getServerTenantContext();
+  if (ctx) {
+    const { data } = await ctx.sb
+      .from("household_message_log")
+      .select("household_id, created_at")
+      .eq("tenant_id", ctx.tenantId)
+      .in("purpose", ["parent_bot_guide", "parent_chat_close"])
+      .eq("status", "sent")
+      .gte("created_at", new Date(now.getTime() - 26 * 3_600_000).toISOString());
+    for (const r of data ?? []) {
+      const k = String(r.household_id);
+      const at = String(r.created_at);
+      if (!lastGuideAt.has(k) || at > lastGuideAt.get(k)!) lastGuideAt.set(k, at);
+    }
+  } else {
+    return out;
+  }
   for (const t of await listWaSisBotThreads()) {
     out.checked += 1;
-    const d = shouldCloseThread(t, now);
+    const guided = lastGuideAt.get(t.householdId);
+    const d = shouldCloseThread(
+      guided && (!t.closingSentAt || guided > t.closingSentAt) ? { ...t, closingSentAt: new Date(guided).toISOString() } : t,
+      now,
+    );
     if (!d.close) continue;
     const hh = sis.households.find((x) => x.id === t.householdId);
     if (hh && isInQuietHours(hh, now)) continue;

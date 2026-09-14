@@ -6,12 +6,12 @@ import { NextResponse } from "next/server";
 import { getPaymentLink, loadPayments } from "@/lib/payments";
 import { settlePaymentLinkWithWhatsApp } from "@/lib/paymentSettlement.server";
 import { authorizePaymentLinkAccess } from "@/lib/apiRouteAuth.server";
-import { ensureSchoolMirrorLoaded } from "@/lib/schoolDataMirror.server";
+import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  await ensureSchoolMirrorLoaded();
+  await ensureSchoolMirrorHydrated();
   const url = new URL(req.url);
   const linkId = url.searchParams.get("linkId") || "";
   const code = url.searchParams.get("code") || "";
@@ -44,7 +44,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  await ensureSchoolMirrorLoaded();
+  await ensureSchoolMirrorHydrated();
   let body: { linkId?: string; code?: string; upiRef?: string; sendWhatsApp?: boolean };
   try {
     body = (await req.json()) as typeof body;

@@ -15,7 +15,7 @@ import {
 } from "@/lib/cashfree.server";
 import { publicAppOrigin } from "@/lib/waSisBotServer";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
-import { ensureSchoolMirrorLoaded } from "@/lib/schoolDataMirror.server";
+import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 
 export const runtime = "nodejs";
 
@@ -39,7 +39,7 @@ export async function POST(req: Request) {
     );
   }
 
-  await ensureSchoolMirrorLoaded();
+  await ensureSchoolMirrorHydrated();
   const state = loadAdmissions();
   const payment = (state.registrationPayments || []).find(
     (p) => p.id === body.paymentId,
