@@ -89,6 +89,10 @@ export type AssessmentScheme = {
   coScholasticAreas: CoScholasticArea[];
   /** Exams this scheme's classes sit; empty = all. */
   termIds: string[];
+  /** Print the child's profile photo on the report card. */
+  showPhoto: boolean;
+  /** Attendance on the card: null = the school-wide policy switch. */
+  showAttendance: boolean | null;
   note: string;
 };
 
@@ -265,6 +269,8 @@ export function defaultAssessmentScheme(passPercent = 33): AssessmentScheme {
     showResultOnCard: true,
     coScholasticAreas: [],
     termIds: [],
+    showPhoto: false,
+    showAttendance: null,
     note: "",
   };
 }
@@ -314,13 +320,17 @@ export function normalizeAssessmentScheme(
     showResultOnCard: raw.showResultOnCard !== false,
     coScholasticAreas: normalizeCoScholasticAreas(raw.coScholasticAreas),
     termIds: Array.isArray(raw.termIds) ? raw.termIds.map(String).filter(Boolean) : [],
+    showPhoto: !!raw.showPhoto,
+    showAttendance: raw.showAttendance == null ? null : !!raw.showAttendance,
     note: String(raw.note ?? "").slice(0, 400),
   };
 }
 
 /**
  * A usable list: exactly one default (created if none), no class in two
- * schemes (the first keeps it), no duplicate ids.
+ * schemes (the first keeps it), no duplicate ids. The default may name
+ * classes too — it is simply also the fallback for every class no scheme
+ * names.
  */
 export function normalizeAssessmentSchemes(
   list: unknown,
@@ -338,7 +348,7 @@ export function normalizeAssessmentSchemes(
     const classIds = s.classIds.filter((c) => (seenClasses.has(c) ? false : (seenClasses.add(c), true)));
     const isDefault = s.isDefault && !hasDefault;
     if (isDefault) hasDefault = true;
-    out.push({ ...s, classIds: isDefault ? [] : classIds, isDefault });
+    out.push({ ...s, classIds, isDefault });
   }
   if (!hasDefault) out.unshift(defaultAssessmentScheme(passPercent));
   // Default first, then by name.
@@ -352,7 +362,7 @@ export function schemeForClass(
   schemes: AssessmentScheme[],
 ): AssessmentScheme {
   return (
-    schemes.find((s) => !s.isDefault && s.classIds.includes(classId)) ??
+    schemes.find((s) => s.classIds.includes(classId)) ??
     schemes.find((s) => s.isDefault) ??
     defaultAssessmentScheme()
   );
@@ -375,7 +385,7 @@ export type SchemePreset = {
   /** CLASS_GROUPS code the preset is meant for; the school may re-assign. */
   band: "PRE_PRIMARY" | "PRIMARY" | "MIDDLE" | "SECONDARY" | "SENIOR";
   summary: string;
-  build: (passPercent: number) => Omit<AssessmentScheme, "id" | "classIds" | "isDefault">;
+  build: (passPercent: number) => Partial<AssessmentScheme>;
 };
 
 export const SCHEME_PRESETS: SchemePreset[] = [
@@ -550,6 +560,7 @@ export function schemeFromPreset(
 ): AssessmentScheme {
   return normalizeAssessmentScheme(
     {
+      ...defaultAssessmentScheme(passPercent),
       ...preset.build(passPercent),
       id: `scheme_${preset.key}_${Math.random().toString(36).slice(2, 8)}`,
       classIds,
@@ -557,6 +568,28 @@ export function schemeFromPreset(
     },
     passPercent,
   );
+}
+
+/** A fresh scheme with the default settings, no classes, a new id. */
+export function blankScheme(passPercent: number, name = "New scheme"): AssessmentScheme {
+  return {
+    ...defaultAssessmentScheme(passPercent),
+    id: `scheme_${Math.random().toString(36).slice(2, 10)}`,
+    name,
+    isDefault: false,
+    classIds: [],
+  };
+}
+
+/** A copy of a scheme under a new id, no classes (they cannot be in two). */
+export function duplicateScheme(source: AssessmentScheme): AssessmentScheme {
+  return {
+    ...source,
+    id: `scheme_${Math.random().toString(36).slice(2, 10)}`,
+    name: `${source.name} (copy)`.slice(0, 60),
+    isDefault: false,
+    classIds: [],
+  };
 }
 
 export function displayModeLabel(mode: DisplayMode): string {

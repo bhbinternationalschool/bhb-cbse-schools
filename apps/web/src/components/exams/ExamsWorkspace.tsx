@@ -4,6 +4,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ClipboardList } from "lucide-react";
 import {
+  absenceKey,
   applyPromotionsToSis,
   buildClassResultSheet,
   buildEmptyCoScholasticGrid,
@@ -147,10 +148,12 @@ type MarkRowProps = {
   areas: CoScholasticArea[];
   /** domain → rating ("" for unrated). */
   ratings: Record<string, string>;
-  /** Recorded absent from this exam; marks are then not entered. */
-  absent: boolean;
+  /** Absent for every subject taken (the row toggle). */
+  absentAll: boolean;
+  /** Absent for at least one subject — shows the reason box. */
+  absentAny: boolean;
   absentReason: string;
-  onAbsent: (studentId: string, absent: boolean) => void;
+  onAbsentAll: (studentId: string, absent: boolean) => void;
   onAbsentReason: (studentId: string, reason: string) => void;
   onMark: (studentId: string, subjectId: string, component: string, value: string) => void;
   onGrade: (studentId: string, subjectId: string, component: string, grade: string) => void;
@@ -179,9 +182,10 @@ const MarkRow = memo(function MarkRow({
   grades,
   areas,
   ratings,
-  absent,
+  absentAll,
+  absentAny,
   absentReason,
-  onAbsent,
+  onAbsentAll,
   onAbsentReason,
   onMark,
   onGrade,
@@ -203,15 +207,16 @@ const MarkRow = memo(function MarkRow({
             <label className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--muted)]">
               <input
                 type="checkbox"
-                checked={absent}
+                checked={absentAll}
                 disabled={locked}
-                onChange={(e) => onAbsent(st.id, e.target.checked)}
-                aria-label={`${st.fullName} absent in this exam`}
+                onChange={(e) => onAbsentAll(st.id, e.target.checked)}
+                aria-label={`${st.fullName} absent in all subjects`}
+                title="Absent in all subjects. For one paper, type AB in that subject's cell."
               />
-              <span className={absent ? "font-semibold text-[var(--danger)]" : ""}>
-                {absent ? "Absent" : "Present"}
+              <span className={absentAny ? "font-semibold text-[var(--danger)]" : ""}>
+                {absentAll ? "Absent (all)" : absentAny ? "Absent (some)" : "Present"}
               </span>
-              {absent ? (
+              {absentAny ? (
                 <input
                   className="field !w-36 !px-1.5 !py-0.5 text-[11px]"
                   value={absentReason}
@@ -235,14 +240,7 @@ const MarkRow = memo(function MarkRow({
         const name = col.component ? `${sub.name} ${col.component.label}` : sub.name;
         return (
           <td key={cellKey(st.id, sub.id, code)} className="px-1 py-1">
-            {absent ? (
-              <span
-                className="block w-14 px-1 py-1 text-center text-[11px] font-semibold text-[var(--danger)]"
-                title="Absent in this exam"
-              >
-                AB
-              </span>
-            ) : !takesIt ? (
+            {!takesIt ? (
               <span
                 className="block w-14 px-1 py-1 text-center text-[10px] text-[var(--muted)]"
                 title="Not on this student's curriculum"
@@ -263,16 +261,19 @@ const MarkRow = memo(function MarkRow({
                     {g.grade}
                   </option>
                 ))}
+                <option value="AB">AB · absent</option>
               </select>
             ) : (
               <input
-                className="field !w-14 !px-1 !py-1 text-center tabular-nums"
+                className={`field !w-14 !px-1 !py-1 text-center tabular-nums ${
+                  values[key] === "AB" ? "!font-semibold !text-[var(--danger)]" : ""
+                }`}
                 inputMode="decimal"
                 disabled={locked}
                 value={values[key] ?? ""}
                 onChange={(e) => onMark(st.id, sub.id, code, e.target.value)}
                 aria-label={`${st.fullName} ${name}`}
-                title={`out of ${max}`}
+                title={`out of ${max} · type AB if absent for this paper`}
               />
             )}
           </td>
@@ -391,8 +392,10 @@ export function ExamsWorkspace() {
   const [examTermId, setExamTermId] = useState("");
   const [grid, setGrid] = useState<StudentSubjectMark[]>([]);
   const [coScholasticGrid, setCoScholasticGrid] = useState<StudentCoScholasticEntry[]>([]);
-  /** studentId → reason, for students marked absent in this exam. */
-  const [absences, setAbsences] = useState<Map<string, string>>(new Map());
+  /** "studentId:subjectId" cells the child was absent for. */
+  const [absentCells, setAbsentCells] = useState<Set<string>>(new Set());
+  /** studentId → optional reason, shared by that child's absent papers. */
+  const [absentReasons, setAbsentReasons] = useState<Map<string, string>>(new Map());
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -578,8 +581,9 @@ export function ExamsWorkspace() {
       const values: Record<string, string> = {};
       for (const col of columns) {
         const c = gridIndex.get(cellKey(st.id, col.subject.id, col.component?.code ?? ""));
-        values[columnKey(col)] =
-          entryMode === "grades"
+        values[columnKey(col)] = absentCells.has(absenceKey(st.id, col.subject.id))
+          ? "AB"
+          : entryMode === "grades"
             ? c?.grade && c.grade !== "—"
               ? c.grade
               : ""
@@ -589,7 +593,7 @@ export function ExamsWorkspace() {
       }
       return values;
     },
-    [roster, columns, gridIndex, entryMode],
+    [roster, columns, gridIndex, entryMode, absentCells],
   );
 
   const ratingsByStudent = useStableByStudent(
@@ -622,7 +626,14 @@ export function ExamsWorkspace() {
       ),
     );
     setCoScholasticGrid(buildEmptyCoScholasticGrid(roster, existing, areas));
-    setAbsences(new Map((existing?.absences ?? []).map((a) => [a.studentId, a.reason])));
+    setAbsentCells(new Set((existing?.absences ?? []).map((a) => absenceKey(a.studentId, a.subjectId))));
+    setAbsentReasons(
+      new Map(
+        (existing?.absences ?? [])
+          .filter((a) => a.reason)
+          .map((a) => [a.studentId, a.reason]),
+      ),
+    );
     setDirty(false);
     // `exams` is deliberately not a dependency: a save bumps it, and
     // rebuilding the grid from the saved sheet then would be a no-op that
@@ -636,6 +647,61 @@ export function ExamsWorkspace() {
     window.setTimeout(() => setNotice(null), 2800);
   }
 
+  /** Absent for one paper (typed AB in the cell), or present again. */
+  const setAbsentCell = useCallback((studentId: string, subjectId: string, absent: boolean) => {
+    setAbsentCells((prev) => {
+      const key = absenceKey(studentId, subjectId);
+      if (prev.has(key) === absent) return prev;
+      const next = new Set(prev);
+      if (absent) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+    setDirty(true);
+  }, []);
+
+  /** The row toggle: absent for every subject this child takes, or none. */
+  const setAbsentAll = useCallback(
+    (studentId: string, absent: boolean) => {
+      const takes = takesBy.get(studentId);
+      const subjectIds = subjects
+        .filter((sub) => !takes || takes.has(sub.id))
+        .map((sub) => sub.id);
+      setAbsentCells((prev) => {
+        const next = new Set(prev);
+        for (const sid of subjectIds) {
+          const key = absenceKey(studentId, sid);
+          if (absent) next.add(key);
+          else next.delete(key);
+        }
+        return next;
+      });
+      setDirty(true);
+    },
+    [subjects, takesBy],
+  );
+
+  const setAbsentReason = useCallback((studentId: string, reason: string) => {
+    setAbsentReasons((prev) => {
+      const next = new Map(prev);
+      next.set(studentId, reason);
+      return next;
+    });
+    setDirty(true);
+  }, []);
+
+  /** Which children are absent for everything they take / for anything. */
+  const absentByStudent = useMemo(() => {
+    const out = new Map<string, { all: boolean; any: boolean }>();
+    for (const st of roster) {
+      const takes = takesBy.get(st.id);
+      const mine = subjects.filter((sub) => !takes || takes.has(sub.id));
+      const count = mine.filter((sub) => absentCells.has(absenceKey(st.id, sub.id))).length;
+      out.set(st.id, { all: mine.length > 0 && count === mine.length, any: count > 0 });
+    }
+    return out;
+  }, [roster, subjects, takesBy, absentCells]);
+
   const setMark = useCallback(
     (studentId: string, subjectId: string, component: string, value: string) => {
       if (!term) return;
@@ -645,10 +711,18 @@ export function ExamsWorkspace() {
       if (!col) return;
       const takes = takesBy.get(studentId);
       if (takes && !takes.has(subjectId)) return;
+      const raw = value.trim();
+      // "AB" (or just "a") in a cell = absent for this paper.
+      if (/^ab?$/i.test(raw)) {
+        setAbsentCell(studentId, subjectId, true);
+        return;
+      }
+      setAbsentCell(studentId, subjectId, false);
+      const cleaned = raw.replace(/[^0-9.]/g, "");
       const max = col.component ? col.component.maxMarks : effectiveMaxMarks(term, col.subject);
       let obtained: number | null = null;
-      if (value.trim() !== "") {
-        const n = Number(value);
+      if (cleaned !== "") {
+        const n = Number(cleaned);
         if (!Number.isFinite(n)) return;
         obtained = Math.min(max, Math.max(0, n));
       }
@@ -661,34 +735,20 @@ export function ExamsWorkspace() {
       );
       setDirty(true);
     },
-    [term, columns, takesBy],
+    [term, columns, takesBy, setAbsentCell],
   );
 
-  const setAbsent = useCallback((studentId: string, absent: boolean) => {
-    setAbsences((prev) => {
-      const next = new Map(prev);
-      if (absent) next.set(studentId, prev.get(studentId) ?? "");
-      else next.delete(studentId);
-      return next;
-    });
-    setDirty(true);
-  }, []);
-
-  const setAbsentReason = useCallback((studentId: string, reason: string) => {
-    setAbsences((prev) => {
-      if (!prev.has(studentId)) return prev;
-      const next = new Map(prev);
-      next.set(studentId, reason);
-      return next;
-    });
-    setDirty(true);
-  }, []);
 
   /** Grade-only / descriptor schemes: the teacher picks the grade; no number. */
   const setGrade = useCallback(
     (studentId: string, subjectId: string, component: string, grade: string) => {
       const takes = takesBy.get(studentId);
       if (takes && !takes.has(subjectId)) return;
+      if (grade === "AB") {
+        setAbsentCell(studentId, subjectId, true);
+        return;
+      }
+      setAbsentCell(studentId, subjectId, false);
       setGrid((prev) =>
         prev.map((m) =>
           m.studentId === studentId && m.subjectId === subjectId && m.component === component
@@ -698,7 +758,7 @@ export function ExamsWorkspace() {
       );
       setDirty(true);
     },
-    [takesBy],
+    [takesBy, setAbsentCell],
   );
 
   const setCoScholasticRating = useCallback(
@@ -724,7 +784,7 @@ export function ExamsWorkspace() {
     }
     // Drop marks for subjects the student does not take
     const marks = grid.map((m) => {
-      if (absences.has(m.studentId)) {
+      if (absentCells.has(absenceKey(m.studentId, m.subjectId))) {
         return { ...m, marksObtained: null, grade: "AB" };
       }
       const takes = takesBy.get(m.studentId);
@@ -740,7 +800,10 @@ export function ExamsWorkspace() {
       sectionId,
       marks,
       coScholastic: areas.length > 0 ? coScholasticGrid : undefined,
-      absences: [...absences.entries()].map(([studentId, reason]) => ({ studentId, reason })),
+      absences: [...absentCells].map((key) => {
+        const [studentId, subjectId] = key.split(":");
+        return { studentId: studentId ?? "", subjectId: subjectId ?? "", reason: absentReasons.get(studentId ?? "") ?? "" };
+      }),
       enteredBy: session.fullName,
       lock,
     });
@@ -2095,7 +2158,9 @@ export function ExamsWorkspace() {
                   (enrollment-aware)
                   {scheme ? ` · ${scheme.name}` : ""}
                   {entryMode === "grades" ? " · grades, not marks" : ""}
-                  {absences.size > 0 ? ` · ${absences.size} absent` : ""}
+                  {absentCells.size > 0
+                    ? ` · ${[...absentByStudent.values()].filter((a) => a.any).length} absent (${absentCells.size} papers)`
+                    : ""}
                   {sheetMeta?.lockedAt
                     ? " · locked"
                     : sheetMeta
@@ -2184,9 +2249,10 @@ export function ExamsWorkspace() {
                             grades={gradeChoices}
                             areas={areas}
                             ratings={ratingsByStudent.get(st.id) ?? {}}
-                            absent={absences.has(st.id)}
-                            absentReason={absences.get(st.id) ?? ""}
-                            onAbsent={setAbsent}
+                            absentAll={absentByStudent.get(st.id)?.all ?? false}
+                            absentAny={absentByStudent.get(st.id)?.any ?? false}
+                            absentReason={absentReasons.get(st.id) ?? ""}
+                            onAbsentAll={setAbsentAll}
                             onAbsentReason={setAbsentReason}
                             onMark={setMark}
                             onGrade={setGrade}

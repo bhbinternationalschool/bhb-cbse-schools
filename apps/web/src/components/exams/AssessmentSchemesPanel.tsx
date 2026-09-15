@@ -8,8 +8,10 @@ import {
   type ExamTerm,
 } from "@/lib/exams";
 import {
+  blankScheme,
   CBSE_CO_SCHOLASTIC_AREAS,
   componentsTotalMax,
+  duplicateScheme,
   displayModeLabel,
   gradeBandsForPreset,
   gradeScaleLabel,
@@ -96,6 +98,13 @@ export function AssessmentSchemesPanel({
     setDraft(schemeFromPreset(preset, policy.passPercent, classIds));
   }
 
+  function makeFallback(scheme: AssessmentScheme) {
+    persist(
+      policy.schemes.map((s) => ({ ...s, isDefault: s.id === scheme.id })),
+      `${scheme.name} is now the fallback for classes not named elsewhere`,
+    );
+  }
+
   function remove(scheme: AssessmentScheme) {
     if (scheme.isDefault) return;
     if (
@@ -118,7 +127,7 @@ export function AssessmentSchemesPanel({
       return;
     }
     if (!draft.isDefault && draft.classIds.length === 0) {
-      onError("Tick at least one class for this scheme, or remove it");
+      onError("Tick at least one class for this scheme, or remove it (the fallback scheme may have none)");
       return;
     }
     const exists = policy.schemes.some((s) => s.id === draft.id);
@@ -148,6 +157,14 @@ export function AssessmentSchemesPanel({
         </div>
         {!draft ? (
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold"
+              onClick={() => setDraft(blankScheme(policy.passPercent))}
+            >
+              <Plus className="size-3.5" aria-hidden />
+              New scheme
+            </button>
             <select
               className="field !py-1.5 text-xs"
               value={presetKey}
@@ -186,9 +203,11 @@ export function AssessmentSchemesPanel({
                   ) : null}
                 </p>
                 <p className="mt-0.5 text-xs text-[var(--muted)]">
+                  {s.classIds.map((id) => classNameById.get(id) ?? id).join(", ") ||
+                    (s.isDefault ? "" : "No classes")}
                   {s.isDefault
-                    ? "Every class not named in another scheme"
-                    : s.classIds.map((id) => classNameById.get(id) ?? id).join(", ") || "No classes"}
+                    ? `${s.classIds.length ? " · plus " : ""}every class not named in another scheme`
+                    : ""}
                 </p>
                 <p className="mt-0.5 text-xs text-[var(--muted)]">{schemeSummary(s)}</p>
               </div>
@@ -200,6 +219,23 @@ export function AssessmentSchemesPanel({
                 >
                   Edit
                 </button>
+                <button
+                  type="button"
+                  className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs font-semibold"
+                  onClick={() => setDraft(duplicateScheme(s))}
+                >
+                  Duplicate
+                </button>
+                {!s.isDefault ? (
+                  <button
+                    type="button"
+                    className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs font-semibold"
+                    onClick={() => makeFallback(s)}
+                    title="Classes not named in any scheme follow this one instead"
+                  >
+                    Make fallback
+                  </button>
+                ) : null}
                 {!s.isDefault ? (
                   <button
                     type="button"
@@ -287,9 +323,11 @@ function SchemeEditor({
         <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">Classes</p>
         {draft.isDefault ? (
           <p className="mt-1 text-xs text-[var(--muted)]">
-            The default scheme covers every class not ticked in another scheme.
+            This is the fallback: besides the classes ticked here, it covers every class not ticked in
+            any other scheme.
           </p>
-        ) : (
+        ) : null}
+        {(
           <div className="mt-2 flex flex-wrap gap-2">
             {classes.map((c) => {
               const taken = assignedElsewhere.get(c.id);
@@ -624,6 +662,29 @@ function SchemeEditor({
             onChange={(e) => set("showResultOnCard", e.target.checked)}
           />
           Print the result (promoted / detained) once decided
+        </label>
+        <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
+          <input
+            type="checkbox"
+            checked={draft.showPhoto}
+            onChange={(e) => set("showPhoto", e.target.checked)}
+          />
+          Print the student&apos;s photo from the profile
+        </label>
+        <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
+          <span>Attendance on the card</span>
+          <select
+            className="field !w-auto !py-1 text-xs"
+            value={draft.showAttendance == null ? "policy" : draft.showAttendance ? "yes" : "no"}
+            onChange={(e) =>
+              set("showAttendance", e.target.value === "policy" ? null : e.target.value === "yes")
+            }
+            aria-label="Attendance on the card"
+          >
+            <option value="policy">As the school policy says</option>
+            <option value="yes">Show</option>
+            <option value="no">Hide</option>
+          </select>
         </label>
       </div>
 
