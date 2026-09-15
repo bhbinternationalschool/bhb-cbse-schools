@@ -10,8 +10,9 @@ import {
   buildEmptyMarksGrid,
   buildReportCard,
   canPrintReportCard,
-  CO_SCHOLASTIC_DOMAINS,
+  coScholasticAreasForClass,
   coScholasticDomainLabel,
+  componentsForTerm,
   createExamTerm,
   deactivateExamTerm,
   deleteExamTerm,
@@ -26,11 +27,13 @@ import {
   loadExams,
   saveMarkSheet,
   savePromotionDecision,
+  schemeForClassId,
   subjectsForMarkEntry,
   subjectTakeMap,
   suggestPromotionsForSection,
   unlockMarkSheet,
   updateExamTerm,
+  type AssessmentScheme,
   type ClassResultRow,
   type CoScholasticDomain,
   type CoScholasticRating,
@@ -38,6 +41,7 @@ import {
   type ExamPolicy,
   type ExamSubject,
   type ExamTerm,
+  type SchemeComponent,
   type PromotionDecision,
   type ReportCard,
   type StudentCoScholasticEntry,
@@ -51,6 +55,8 @@ import {
   type SheetConflict,
 } from "@/lib/examsSheetSync";
 import { DeskSyncBanner } from "@/components/accounts/DeskSyncBanner";
+import { AssessmentSchemesPanel } from "@/components/exams/AssessmentSchemesPanel";
+import { pickableGrades, type CoScholasticArea, type GradeBand } from "@/lib/examSchemes";
 import { rosterForSection } from "@/lib/attendance";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
 import { loadSis, type SisState, type SisStudent } from "@/lib/sis";
@@ -113,25 +119,36 @@ type Tab =
   | "result_reports"
   | "setup";
 
-function cellKey(studentId: string, subjectId: string) {
-  return `${studentId}:${subjectId}`;
+function cellKey(studentId: string, subjectId: string, component = "") {
+  return `${studentId}:${subjectId}:${component}`;
+}
+
+/** One column of the marks grid: a subject, or one component of it. */
+type GridColumn = { subject: ExamSubject; component: SchemeComponent | null };
+
+function columnKey(col: GridColumn): string {
+  return `${col.subject.id}:${col.component?.code ?? ""}`;
 }
 
 type MarkRowProps = {
   student: SisStudent;
   /** Passed down so the name label does not re-read the SIS blob per row. */
   sis: SisState | undefined;
-  subjects: ExamSubject[];
+  columns: GridColumn[];
   term: ExamTerm;
-  /** subjectId → what the input shows ("" for not entered). */
+  /** columnKey → what the cell shows: the mark, or the picked grade. */
   values: Record<string, string>;
   /** Exam-subject ids on this student's curriculum. */
   takes: Set<string> | undefined;
   locked: boolean;
-  coScholastic: boolean;
+  /** "marks": numeric inputs. "grades": a grade picker per column (grade-only / descriptor schemes). */
+  entryMode: "marks" | "grades";
+  grades: GradeBand[];
+  areas: CoScholasticArea[];
   /** domain → rating ("" for unrated). */
   ratings: Record<string, string>;
-  onMark: (studentId: string, subjectId: string, value: string) => void;
+  onMark: (studentId: string, subjectId: string, component: string, value: string) => void;
+  onGrade: (studentId: string, subjectId: string, component: string, grade: string) => void;
   onRating: (studentId: string, domain: CoScholasticDomain, value: string) => void;
 };
 
@@ -148,14 +165,17 @@ type MarkRowProps = {
 const MarkRow = memo(function MarkRow({
   student: st,
   sis,
-  subjects,
+  columns,
   term,
   values,
   takes,
   locked,
-  coScholastic,
+  entryMode,
+  grades,
+  areas,
   ratings,
   onMark,
+  onGrade,
   onRating,
 }: MarkRowProps) {
   return (
@@ -174,49 +194,67 @@ const MarkRow = memo(function MarkRow({
           </div>
         </div>
       </td>
-      {subjects.map((sub) => {
+      {columns.map((col) => {
+        const sub = col.subject;
+        const code = col.component?.code ?? "";
+        const key = columnKey(col);
         const takesIt = takes ? takes.has(sub.id) : true;
+        const max = col.component ? col.component.maxMarks : effectiveMaxMarks(term, sub);
+        const name = col.component ? `${sub.name} ${col.component.label}` : sub.name;
         return (
-          <td key={cellKey(st.id, sub.id)} className="px-1 py-1">
-            {takesIt ? (
-              <input
-                className="field !w-14 !px-1 !py-1 text-center tabular-nums"
-                inputMode="decimal"
-                disabled={locked}
-                value={values[sub.id] ?? ""}
-                onChange={(e) => onMark(st.id, sub.id, e.target.value)}
-                aria-label={`${st.fullName} ${sub.name}`}
-                title={`out of ${effectiveMaxMarks(term, sub)}`}
-              />
-            ) : (
+          <td key={cellKey(st.id, sub.id, code)} className="px-1 py-1">
+            {!takesIt ? (
               <span
                 className="block w-14 px-1 py-1 text-center text-[10px] text-[var(--muted)]"
                 title="Not on this student's curriculum"
               >
                 —
               </span>
+            ) : entryMode === "grades" ? (
+              <select
+                className="field !w-16 !px-1 !py-1 text-center"
+                disabled={locked}
+                value={values[key] ?? ""}
+                onChange={(e) => onGrade(st.id, sub.id, code, e.target.value)}
+                aria-label={`${st.fullName} ${name}`}
+              >
+                <option value="">—</option>
+                {grades.map((g) => (
+                  <option key={g.grade} value={g.grade} title={g.label}>
+                    {g.grade}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                className="field !w-14 !px-1 !py-1 text-center tabular-nums"
+                inputMode="decimal"
+                disabled={locked}
+                value={values[key] ?? ""}
+                onChange={(e) => onMark(st.id, sub.id, code, e.target.value)}
+                aria-label={`${st.fullName} ${name}`}
+                title={`out of ${max}`}
+              />
             )}
           </td>
         );
       })}
-      {coScholastic
-        ? CO_SCHOLASTIC_DOMAINS.map((domain) => (
-            <td key={`${st.id}:${domain}`} className="px-1 py-1">
-              <select
-                className="field !w-16 !px-1 !py-1 text-center"
-                disabled={locked}
-                value={ratings[domain] ?? ""}
-                onChange={(e) => onRating(st.id, domain, e.target.value)}
-                aria-label={`${st.fullName} ${coScholasticDomainLabel(domain)}`}
-              >
-                <option value="">—</option>
-                <option value="A">A</option>
-                <option value="B">B</option>
-                <option value="C">C</option>
-              </select>
-            </td>
-          ))
-        : null}
+      {areas.map((area) => (
+        <td key={`${st.id}:${area.code}`} className="px-1 py-1">
+          <select
+            className="field !w-16 !px-1 !py-1 text-center"
+            disabled={locked}
+            value={ratings[area.code] ?? ""}
+            onChange={(e) => onRating(st.id, area.code, e.target.value)}
+            aria-label={`${st.fullName} ${coScholasticDomainLabel(area.code, areas)}`}
+          >
+            <option value="">—</option>
+            <option value="A">A</option>
+            <option value="B">B</option>
+            <option value="C">C</option>
+          </select>
+        </td>
+      ))}
     </tr>
   );
 });
@@ -456,6 +494,30 @@ export function ExamsWorkspace() {
     return subjectsForMarkEntry(classId, roster, exams, examDeps);
   }, [classId, roster, exams, examDeps]);
 
+  /** How this class is assessed — the school's scheme for it. */
+  const scheme = useMemo<AssessmentScheme | null>(
+    () => (classId ? schemeForClassId(classId, policy) : null),
+    [classId, policy],
+  );
+  const entryMode: "marks" | "grades" =
+    scheme && scheme.displayMode !== "marks_grade" ? "grades" : "marks";
+  const gradeChoices = useMemo(() => (scheme ? pickableGrades(scheme) : []), [scheme]);
+  const areas = useMemo<CoScholasticArea[]>(
+    () => (classId ? coScholasticAreasForClass(classId, policy) : []),
+    [classId, policy],
+  );
+  /** Subject × component columns for the current exam. */
+  const columns = useMemo<GridColumn[]>(() => {
+    if (!term) return [];
+    const parts = scheme ? componentsForTerm(scheme, term.code) : [];
+    const out: GridColumn[] = [];
+    for (const subject of subjects) {
+      if (parts.length === 0) out.push({ subject, component: null });
+      else for (const component of parts) out.push({ subject, component });
+    }
+    return out;
+  }, [subjects, scheme, term]);
+
   /** studentId → exam-subject ids on that child's curriculum, resolved once
    * for the section. The grid, setMark and onSave all read this. */
   const takesBy = useMemo(
@@ -465,7 +527,7 @@ export function ExamsWorkspace() {
 
   const gridIndex = useMemo(() => {
     const m = new Map<string, StudentSubjectMark>();
-    for (const c of grid) m.set(cellKey(c.studentId, c.subjectId), c);
+    for (const c of grid) m.set(cellKey(c.studentId, c.subjectId, c.component), c);
     return m;
   }, [grid]);
 
@@ -473,13 +535,20 @@ export function ExamsWorkspace() {
     roster,
     (st) => {
       const values: Record<string, string> = {};
-      for (const sub of subjects) {
-        const c = gridIndex.get(cellKey(st.id, sub.id));
-        values[sub.id] = c?.marksObtained == null ? "" : String(c.marksObtained);
+      for (const col of columns) {
+        const c = gridIndex.get(cellKey(st.id, col.subject.id, col.component?.code ?? ""));
+        values[columnKey(col)] =
+          entryMode === "grades"
+            ? c?.grade && c.grade !== "—"
+              ? c.grade
+              : ""
+            : c?.marksObtained == null
+              ? ""
+              : String(c.marksObtained);
       }
       return values;
     },
-    [roster, subjects, gridIndex],
+    [roster, columns, gridIndex, entryMode],
   );
 
   const ratingsByStudent = useStableByStudent(
@@ -508,15 +577,16 @@ export function ExamsWorkspace() {
         term,
         existing,
         policy.passPercent,
+        scheme ?? undefined,
       ),
     );
-    setCoScholasticGrid(buildEmptyCoScholasticGrid(roster, existing));
+    setCoScholasticGrid(buildEmptyCoScholasticGrid(roster, existing, areas));
     setDirty(false);
     // `exams` is deliberately not a dependency: a save bumps it, and
     // rebuilding the grid from the saved sheet then would be a no-op that
     // also discards anything typed between clicking Save and the re-render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ay, term?.id, sectionId, classId, roster, subjects, policy.passPercent]);
+  }, [ay, term?.id, sectionId, classId, roster, subjects, policy.passPercent, scheme, areas]);
 
   function flash(msg: string) {
     setNotice(msg);
@@ -525,13 +595,15 @@ export function ExamsWorkspace() {
   }
 
   const setMark = useCallback(
-    (studentId: string, subjectId: string, value: string) => {
+    (studentId: string, subjectId: string, component: string, value: string) => {
       if (!term) return;
-      const sub = subjects.find((s) => s.id === subjectId);
-      if (!sub) return;
+      const col = columns.find(
+        (c) => c.subject.id === subjectId && (c.component?.code ?? "") === component,
+      );
+      if (!col) return;
       const takes = takesBy.get(studentId);
       if (takes && !takes.has(subjectId)) return;
-      const max = effectiveMaxMarks(term, sub);
+      const max = col.component ? col.component.maxMarks : effectiveMaxMarks(term, col.subject);
       let obtained: number | null = null;
       if (value.trim() !== "") {
         const n = Number(value);
@@ -540,14 +612,31 @@ export function ExamsWorkspace() {
       }
       setGrid((prev) =>
         prev.map((m) =>
-          m.studentId === studentId && m.subjectId === subjectId
+          m.studentId === studentId && m.subjectId === subjectId && m.component === component
             ? { ...m, marksObtained: obtained }
             : m,
         ),
       );
       setDirty(true);
     },
-    [term, subjects, takesBy],
+    [term, columns, takesBy],
+  );
+
+  /** Grade-only / descriptor schemes: the teacher picks the grade; no number. */
+  const setGrade = useCallback(
+    (studentId: string, subjectId: string, component: string, grade: string) => {
+      const takes = takesBy.get(studentId);
+      if (takes && !takes.has(subjectId)) return;
+      setGrid((prev) =>
+        prev.map((m) =>
+          m.studentId === studentId && m.subjectId === subjectId && m.component === component
+            ? { ...m, marksObtained: null, grade: grade || "—" }
+            : m,
+        ),
+      );
+      setDirty(true);
+    },
+    [takesBy],
   );
 
   const setCoScholasticRating = useCallback(
@@ -585,7 +674,7 @@ export function ExamsWorkspace() {
       classId,
       sectionId,
       marks,
-      coScholastic: policy.enableCoScholastic ? coScholasticGrid : undefined,
+      coScholastic: areas.length > 0 ? coScholasticGrid : undefined,
       enteredBy: session.fullName,
       lock,
     });
@@ -667,13 +756,42 @@ export function ExamsWorkspace() {
       setHoldDialog(true);
       return;
     }
-    const card = buildReportCard({
-      student: st,
-      classLabel: classLabelOf(studentId),
-      examTermId,
-      academicYearCode: ay,
-      deps: { ...examDeps, holdChecks: new Map([[studentId, hold]]) },
-    });
+    const studentScheme = schemeForClassId(st.classId, policy);
+    let card: ReportCard | { error: string };
+    if (
+      studentScheme.showRank ||
+      studentScheme.showClassAverage ||
+      studentScheme.showResultOnCard
+    ) {
+      // Rank and average need the whole section; the result comes from the
+      // recorded decision. buildClassResultSheet fills all three.
+      const sheet = buildClassResultSheet({
+        students: rosterForSection(sis?.students ?? [], st.sectionId, {
+          classId: st.classId,
+          academicYearCode: ay,
+        }),
+        classLabel: classLabelOf(studentId),
+        classId: st.classId,
+        sectionId: st.sectionId,
+        examTermId,
+        academicYearCode: ay,
+        deps: { ...examDeps, attendance: loadAttendance() },
+      });
+      if ("error" in sheet) {
+        card = { error: sheet.error };
+      } else {
+        const row = sheet.rows.find((r) => r.student.id === studentId);
+        card = row?.card ?? { error: row?.error || "No marks for this student" };
+      }
+    } else {
+      card = buildReportCard({
+        student: st,
+        classLabel: classLabelOf(studentId),
+        examTermId,
+        academicYearCode: ay,
+        deps: { ...examDeps, holdChecks: new Map([[studentId, hold]]) },
+      });
+    }
     if ("error" in card) {
       setError(card.error);
       setPreview(null);
@@ -1131,6 +1249,14 @@ export function ExamsWorkspace() {
 
       {tab === "setup" ? (
         <div className="mt-6 grid gap-6 lg:grid-cols-2">
+          <AssessmentSchemesPanel
+            policy={policy}
+            masters={masters}
+            terms={allTerms}
+            onSaved={refresh}
+            onFlash={flash}
+            onError={setError}
+          />
           <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5">
             <h2 className="text-sm font-bold text-[var(--brand-deep)]">
               Create exam
@@ -1901,6 +2027,8 @@ export function ExamsWorkspace() {
                 <span>
                   {roster.length} students · {subjects.length} subjects
                   (enrollment-aware)
+                  {scheme ? ` · ${scheme.name}` : ""}
+                  {entryMode === "grades" ? " · grades, not marks" : ""}
                   {sheetMeta?.lockedAt
                     ? " · locked"
                     : sheetMeta
@@ -1945,27 +2073,32 @@ export function ExamsWorkspace() {
                       <th className="sticky left-0 z-10 bg-[var(--surface-sunken)] px-4 py-2.5 font-bold text-[var(--brand-deep)]">
                         Student
                       </th>
-                      {subjects.map((sub) => (
+                      {columns.map((col) => (
                         <th
-                          key={sub.id}
-                          className="px-4 py-2.5 text-center font-bold text-[var(--brand-deep)]"
+                          key={columnKey(col)}
+                          className="px-3 py-2.5 text-center font-bold text-[var(--brand-deep)]"
                         >
-                          {sub.code}
+                          {col.subject.code}
+                          {col.component ? (
+                            <span className="block text-[10px] font-semibold text-[var(--muted)]">
+                              {col.component.label}
+                            </span>
+                          ) : null}
                           <div className="text-[10px] font-normal text-[var(--muted)]">
-                            /{term ? effectiveMaxMarks(term, sub) : "—"}
+                            {entryMode === "grades"
+                              ? "grade"
+                              : `/${col.component ? col.component.maxMarks : term ? effectiveMaxMarks(term, col.subject) : "—"}`}
                           </div>
                         </th>
                       ))}
-                      {policy.enableCoScholastic
-                        ? CO_SCHOLASTIC_DOMAINS.map((domain) => (
-                            <th
-                              key={domain}
-                              className="px-4 py-2.5 text-center font-bold text-[var(--brand-deep)]"
-                            >
-                              {coScholasticDomainLabel(domain)}
-                            </th>
-                          ))
-                        : null}
+                      {areas.map((area) => (
+                        <th
+                          key={area.code}
+                          className="px-4 py-2.5 text-center font-bold text-[var(--brand-deep)]"
+                        >
+                          {coScholasticDomainLabel(area.code, areas)}
+                        </th>
+                      ))}
                     </tr>
                   </ErpTableHead>
                   <ErpTableBody>
@@ -1975,14 +2108,17 @@ export function ExamsWorkspace() {
                             key={st.id}
                             student={st}
                             sis={sis ?? undefined}
-                            subjects={subjects}
+                            columns={columns}
                             term={term}
                             values={valuesByStudent.get(st.id) ?? {}}
                             takes={takesBy.get(st.id)}
                             locked={!!sheetMeta?.lockedAt}
-                            coScholastic={policy.enableCoScholastic}
+                            entryMode={entryMode}
+                            grades={gradeChoices}
+                            areas={areas}
                             ratings={ratingsByStudent.get(st.id) ?? {}}
                             onMark={setMark}
+                            onGrade={setGrade}
                             onRating={setCoScholasticRating}
                           />
                         ))

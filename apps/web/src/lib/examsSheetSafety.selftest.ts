@@ -93,7 +93,7 @@ const deps = { state, masters, sis: { version: 1, households: [], students: [stu
     examTermId: term.id,
     classId: cls.id,
     sectionId: sec.id,
-    marks: [{ studentId: student.id, subjectId: eng.id, marksObtained: 30, grade: "B1", remark: "", remarkSource: "manual" }],
+    marks: [{ studentId: student.id, component: "", subjectId: eng.id, marksObtained: 30, grade: "B1", remark: "", remarkSource: "manual" }],
     coScholastic: [],
     overallRemarks: [],
     itemScores: [],
@@ -106,7 +106,7 @@ const deps = { state, masters, sis: { version: 1, households: [], students: [stu
     examTermId: term.id,
     classId: cls.id,
     sectionId: sec.id,
-    marks: [{ studentId: student.id, subjectId: eng.id, marksObtained: 39, grade: "", remark: "", remarkSource: "manual" as const }],
+    marks: [{ studentId: student.id, component: "", subjectId: eng.id, marksObtained: 39, grade: "", remark: "", remarkSource: "manual" as const }],
     enteredBy: "Teacher B",
   };
   const r1 = prepareMarkSheet(input, state, locked, deps);
@@ -159,7 +159,7 @@ const deps = { state, masters, sis: { version: 1, households: [], students: [stu
     examTermId: term.id,
     classId: cls.id,
     sectionId: sec.id,
-    marks: [{ studentId: student.id, subjectId: eng.id, marksObtained: 12, grade: "E", remark: "", remarkSource: "manual" }],
+    marks: [{ studentId: student.id, component: "", subjectId: eng.id, marksObtained: 12, grade: "E", remark: "", remarkSource: "manual" }],
     coScholastic: [],
     overallRemarks: [],
     itemScores: [],

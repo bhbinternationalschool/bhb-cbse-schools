@@ -5,6 +5,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   defaultExamPolicy,
+  examMarkRowId,
   normalizeExamPolicy,
   type ExamDateSheetEntry,
   type ExamPolicy,
@@ -245,11 +246,12 @@ function sheetToRows(
     updated_at: s.updatedAt || new Date().toISOString(),
   };
   const marks = (s.marks || []).map((m) => ({
-    id: `${s.id}:${m.studentId}:${m.subjectId}`,
+    id: examMarkRowId(s.id, m),
     mark_sheet_id: s.id,
     tenant_id: tenantId,
     student_id: m.studentId,
     subject_id: m.subjectId,
+    component: m.component || "",
     marks_obtained: m.marksObtained,
     grade: m.grade || "—",
     remark: m.remark || "",
@@ -310,6 +312,7 @@ function rowToSheet(
       (m): StudentSubjectMark => ({
         studentId: String(m.student_id),
         subjectId: String(m.subject_id),
+        component: String(m.component ?? ""),
         marksObtained:
           m.marks_obtained === null || m.marks_obtained === undefined
             ? null

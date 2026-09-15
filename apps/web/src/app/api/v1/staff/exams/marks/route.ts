@@ -4,7 +4,13 @@ import { assertPermission, requestMeta, resolveApiAuth } from "@/lib/api/v1/auth
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { ensureExamsHydratedServer } from "@/lib/examsPersistence";
-import { loadExams, prepareMarkSheet } from "@/lib/exams";
+import {
+  componentsForTerm,
+  getExamPolicy,
+  loadExams,
+  prepareMarkSheet,
+  schemeForClassId,
+} from "@/lib/exams";
 import {
   fetchExamSheetByKeyFromDb,
   pushExamSheetToDb,
@@ -62,6 +68,25 @@ export async function POST(request: Request) {
     await Promise.all([ensureSisHydratedServer(), ensureExamsHydratedServer()]);
     const ay = ctx.session.academicYearCode;
     const state = loadExams();
+    // The app enters one number per subject. A class assessed component-wise
+    // (80 + 20, theory + practical) or by grades / descriptors is entered on
+    // the desk, where those columns exist.
+    const term = state.terms.find((t) => t.id === termId);
+    const scheme = schemeForClassId(classId, getExamPolicy(state));
+    if (term && componentsForTerm(scheme, term.code).length > 0) {
+      throw new ApiError(
+        "bad_request",
+        `This class is assessed component-wise for ${term.label} (${componentsForTerm(scheme, term.code).map((c) => c.label).join(" + ")}). Enter these marks on the exams desk.`,
+        400,
+      );
+    }
+    if (scheme.displayMode !== "marks_grade") {
+      throw new ApiError(
+        "bad_request",
+        "This class is assessed by grades, not marks. Enter them on the exams desk.",
+        400,
+      );
+    }
     const existing = (await fetchExamSheetByKeyFromDb(ay, termId, sectionId)) ?? undefined;
     if (existing?.lockedAt) {
       throw new ApiError("forbidden", "This mark sheet is locked by the exams desk", 403);
@@ -76,6 +101,7 @@ export async function POST(request: Request) {
       byKey.set(key, {
         studentId: e.studentId,
         subjectId,
+        component: "",
         marksObtained: e.marksObtained == null ? null : Math.round(e.marksObtained * 2) / 2,
         grade: prev?.grade ?? "",
         remark: prev?.remark ?? "",

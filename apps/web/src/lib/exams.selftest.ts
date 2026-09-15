@@ -32,8 +32,8 @@ const sheetA: MarkSheet = {
   classId: "class-9",
   sectionId: "section-a",
   marks: [
-    { studentId: "stu-1", subjectId: "sub-math", marksObtained: 88, grade: "A1", remark: "", remarkSource: "manual" },
-    { studentId: "stu-2", subjectId: "sub-math", marksObtained: 72, grade: "B1", remark: "", remarkSource: "manual" },
+    { studentId: "stu-1", component: "", subjectId: "sub-math", marksObtained: 88, grade: "A1", remark: "", remarkSource: "manual" },
+    { studentId: "stu-2", component: "", subjectId: "sub-math", marksObtained: 72, grade: "B1", remark: "", remarkSource: "manual" },
   ],
   coScholastic: [
     { studentId: "stu-1", domain: "socioEmotional", rating: "A" },
@@ -62,7 +62,7 @@ const sheetB: MarkSheet = {
   classId: "class-9",
   sectionId: "section-b",
   marks: [
-    { studentId: "stu-3", subjectId: "sub-eng", marksObtained: 91, grade: "A1", remark: "", remarkSource: "manual" },
+    { studentId: "stu-3", component: "", subjectId: "sub-eng", marksObtained: 91, grade: "A1", remark: "", remarkSource: "manual" },
   ],
   coScholastic: [],
   overallRemarks: [],
@@ -110,7 +110,7 @@ const sheetB: MarkSheet = {
   const absentSheet: MarkSheet = {
     ...sheetA,
     id: "sheet-absent",
-    marks: [{ studentId: "stu-4", subjectId: "sub-sci", marksObtained: null, grade: "", remark: "Absent", remarkSource: "manual" }],
+    marks: [{ studentId: "stu-4", component: "", subjectId: "sub-sci", marksObtained: null, grade: "", remark: "Absent", remarkSource: "manual" }],
   };
   const flat = flattenExamMarks([absentSheet]);
   assert.equal(flat.length, 1);

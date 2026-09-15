@@ -42,6 +42,29 @@ import type { Subject as MasterSubject } from "@/lib/foundationMasters";
 import { ncfTagForSubject } from "@/lib/cbseSubjectGroups";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
+import {
+  componentsForTerm,
+  componentsTotalMax,
+  defaultAssessmentScheme,
+  effectivePassPercent,
+  gradeForPercent,
+  gradeLabel,
+  NEP_CO_SCHOLASTIC_AREAS,
+  normalizeAssessmentSchemes,
+  schemeForClass,
+  type AssessmentScheme,
+  type CoScholasticArea,
+} from "@/lib/examSchemes";
+
+export {
+  componentsForTerm,
+  componentsTotalMax,
+  gradeForPercent,
+  gradeLabel,
+  schemeForClass,
+  type AssessmentScheme,
+  type SchemeComponent,
+} from "@/lib/examSchemes";
 
 export type ExamTerm = {
   id: string;
@@ -106,6 +129,14 @@ export type ExamPolicy = {
    * (defaults false) so it never appears on a report unannounced. */
   enableCoScholastic: boolean;
   /**
+   * How each class band is assessed — grade scale, marks vs grades vs
+   * descriptors, subject components (80 + 20, theory + practical), pass and
+   * promotion rules, co-scholastic areas. One default scheme always exists
+   * and reproduces the pre-2026-09-15 behaviour; the school adds others
+   * per band (see lib/examSchemes.ts).
+   */
+  schemes: AssessmentScheme[];
+  /**
    * Early-warning thresholds for the At-risk tab (lib/academicRisk.ts).
    * Absent → DEFAULT_RISK_THRESHOLDS; the school tunes them here.
    */
@@ -156,8 +187,13 @@ export function normalizeRemarkSource(v: unknown): RemarkSource {
 export type StudentSubjectMark = {
   studentId: string;
   subjectId: string;
+  /** Which part of the subject this row is — "" for the whole subject,
+   * else a SchemeComponent code ("TE", "PT", "PR"…). One row per part. */
+  component: string;
   /** null = not entered / absent */
   marksObtained: number | null;
+  /** Grade for this row. In grade-only / descriptor schemes the teacher
+   * picks it and marksObtained stays null. */
   grade: string;
   remark: string;
   /** Provenance of `remark`; "manual" for anything saved before this existed */
@@ -202,7 +238,7 @@ export type StudentItemScore = {
 /** NEP 2020 Holistic Progress Card — co-scholastic domains rated by whoever
  * enters marks for the class (same permission, no separate class-teacher
  * gate — see the co-scholastic rounds's plan for why). */
-export type CoScholasticDomain = "socioEmotional" | "psychomotor";
+export type CoScholasticDomain = string;
 
 /** CBSE-style 3-band letter rating, deliberately distinct from the 8-point
  * A1-E academic scale so the two are never confused on a printed report. */
@@ -228,14 +264,21 @@ export function coScholasticRatingLabel(
   return rating ? CO_SCHOLASTIC_RATING_LABELS[rating] : "Not rated";
 }
 
-const CO_SCHOLASTIC_DOMAIN_LABELS: Record<CoScholasticDomain, string> = {
+const CO_SCHOLASTIC_DOMAIN_LABELS: Record<string, string> = {
   socioEmotional: "Socio-Emotional Skills",
   psychomotor: "Psychomotor Skills",
 };
 
-/** Pure — human label for a co-scholastic domain. */
-export function coScholasticDomainLabel(domain: CoScholasticDomain): string {
-  return CO_SCHOLASTIC_DOMAIN_LABELS[domain];
+/** Pure — human label for a co-scholastic domain / area. */
+export function coScholasticDomainLabel(
+  domain: CoScholasticDomain,
+  areas?: CoScholasticArea[],
+): string {
+  return (
+    areas?.find((a) => a.code === domain)?.label ??
+    CO_SCHOLASTIC_DOMAIN_LABELS[domain] ??
+    domain
+  );
 }
 
 export const CO_SCHOLASTIC_DOMAINS: CoScholasticDomain[] = [
@@ -264,11 +307,23 @@ export type MarkSheet = {
   updatedAt: string;
 };
 
+/** Row id shared with exam_desk_marks: the old three-part key for a whole
+ * mark, a fourth part for a component, so rows saved before components
+ * existed keep their ids. */
+export function examMarkRowId(
+  sheetId: string,
+  m: Pick<StudentSubjectMark, "studentId" | "subjectId" | "component">,
+): string {
+  const base = `${sheetId}:${m.studentId}:${m.subjectId}`;
+  return m.component ? `${base}:${m.component}` : base;
+}
+
 export type FlatExamMark = {
   id: string;
   sheetId: string;
   studentId: string;
   subjectId: string;
+  component: string;
   marksObtained: number | null;
   grade: string;
   remark: string;
@@ -286,10 +341,11 @@ export function flattenExamMarks(sheets: MarkSheet[]): FlatExamMark[] {
   for (const sheet of sheets) {
     for (const mark of sheet.marks) {
       out.push({
-        id: `${sheet.id}:${mark.studentId}:${mark.subjectId}`,
+        id: examMarkRowId(sheet.id, mark),
         sheetId: sheet.id,
         studentId: mark.studentId,
         subjectId: mark.subjectId,
+        component: mark.component,
         marksObtained: mark.marksObtained,
         grade: mark.grade,
         remark: mark.remark,
@@ -494,6 +550,7 @@ export function defaultExamPolicy(): ExamPolicy {
     defaultRequiresSeparateMarksheet: true,
     requireAllSubjectsPassForPromotion: true,
     enableCoScholastic: false,
+    schemes: [defaultAssessmentScheme(33)],
     riskThresholds: { attendancePct: 75, incidents: 3, homeworkRatio: 0.6, homeworkMinDue: 5, subjectDrops: 2 },
   };
 }
@@ -504,11 +561,12 @@ export function normalizeExamPolicy(
   const d = defaultExamPolicy();
   if (!p) return d;
   const stage = p.reportCardHoldFromStage;
+  const passPercent = Math.min(
+    100,
+    Math.max(1, Math.floor(p.passPercent ?? d.passPercent)),
+  );
   return {
-    passPercent: Math.min(
-      100,
-      Math.max(1, Math.floor(p.passPercent ?? d.passPercent)),
-    ),
+    passPercent,
     gradeScale: "cbse8",
     defaultUtMaxMarks: Math.max(
       1,
@@ -545,8 +603,30 @@ export function normalizeExamPolicy(
     requireAllSubjectsPassForPromotion:
       p.requireAllSubjectsPassForPromotion !== false,
     enableCoScholastic: !!p.enableCoScholastic,
+    schemes: normalizeAssessmentSchemes(p.schemes, passPercent),
     riskThresholds: normalizeRiskThresholds(p.riskThresholds),
   };
+}
+
+/** The scheme that assesses this class (the default when none names it). */
+export function schemeForClassId(
+  classId: string,
+  policy: ExamPolicy,
+): AssessmentScheme {
+  return schemeForClass(classId, policy.schemes);
+}
+
+/**
+ * Co-scholastic areas rated for a class: the scheme's own list, else the
+ * legacy NEP pair when the policy switch is on, else none.
+ */
+export function coScholasticAreasForClass(
+  classId: string,
+  policy: ExamPolicy,
+): CoScholasticArea[] {
+  const scheme = schemeForClassId(classId, policy);
+  if (scheme.coScholasticAreas.length > 0) return scheme.coScholasticAreas;
+  return policy.enableCoScholastic ? NEP_CO_SCHOLASTIC_AREAS : [];
 }
 
 function normalizeRiskThresholds(
@@ -887,6 +967,7 @@ function normalizeMark(m: Partial<StudentSubjectMark>): StudentSubjectMark {
   return {
     studentId: m.studentId ?? "",
     subjectId: m.subjectId ?? "",
+    component: String(m.component ?? "").toUpperCase().slice(0, 8),
     marksObtained: obtained,
     grade: m.grade ?? "—",
     remark: m.remark ?? "",
@@ -923,7 +1004,9 @@ function normalizeCoScholasticEntry(
   e: Partial<StudentCoScholasticEntry>,
 ): StudentCoScholasticEntry {
   const rating = e.rating === "A" || e.rating === "B" || e.rating === "C" ? e.rating : null;
-  const domain = e.domain === "psychomotor" ? "psychomotor" : "socioEmotional";
+  // Any area code the scheme defines is valid; unknown strings used to be
+  // silently coerced to socio-emotional, which mislabelled the rating.
+  const domain = String(e.domain ?? "").trim() || "socioEmotional";
   return {
     studentId: e.studentId ?? "",
     domain,
@@ -1829,26 +1912,55 @@ export function buildEmptyMarksGrid(
   term: ExamTerm,
   existing?: MarkSheet,
   passPercent = 33,
+  scheme?: AssessmentScheme,
 ): StudentSubjectMark[] {
   const map = new Map<string, StudentSubjectMark>();
   for (const m of existing?.marks ?? []) {
-    map.set(`${m.studentId}:${m.subjectId}`, m);
+    map.set(`${m.studentId}:${m.subjectId}:${m.component}`, m);
   }
+  const parts = scheme ? componentsForTerm(scheme, term.code) : [];
+  const pass = scheme ? effectivePassPercent(scheme, passPercent) : passPercent;
+  const gradeOf = (obtained: number | null, max: number, prevGrade: string | undefined) => {
+    if (scheme && scheme.displayMode !== "marks_grade" && obtained == null) {
+      // Grade-only / descriptor entry: the teacher picked this grade.
+      return prevGrade && prevGrade !== "—" ? prevGrade : "—";
+    }
+    if (scheme) {
+      return gradeForPercent(obtained == null || max <= 0 ? null : (obtained / max) * 100, scheme);
+    }
+    return gradeFromMarks(obtained, max, pass);
+  };
   const out: StudentSubjectMark[] = [];
   for (const st of students) {
     for (const sub of subjects) {
-      const key = `${st.id}:${sub.id}`;
-      const prev = map.get(key);
-      const max = effectiveMaxMarks(term, sub);
-      const obtained = prev?.marksObtained ?? null;
-      out.push({
-        studentId: st.id,
-        subjectId: sub.id,
-        marksObtained: obtained,
-        grade: gradeFromMarks(obtained, max, passPercent),
-        remark: prev?.remark ?? "",
-        remarkSource: prev?.remarkSource ?? "manual",
-      });
+      if (parts.length === 0) {
+        const prev = map.get(`${st.id}:${sub.id}:`);
+        const max = effectiveMaxMarks(term, sub);
+        const obtained = prev?.marksObtained ?? null;
+        out.push({
+          studentId: st.id,
+          subjectId: sub.id,
+          component: "",
+          marksObtained: obtained,
+          grade: gradeOf(obtained, max, prev?.grade),
+          remark: prev?.remark ?? "",
+          remarkSource: prev?.remarkSource ?? "manual",
+        });
+        continue;
+      }
+      for (const c of parts) {
+        const prev = map.get(`${st.id}:${sub.id}:${c.code}`);
+        const obtained = prev?.marksObtained ?? null;
+        out.push({
+          studentId: st.id,
+          subjectId: sub.id,
+          component: c.code,
+          marksObtained: obtained,
+          grade: gradeOf(obtained, c.maxMarks, prev?.grade),
+          remark: prev?.remark ?? "",
+          remarkSource: prev?.remarkSource ?? "manual",
+        });
+      }
     }
   }
   return out;
@@ -1860,14 +1972,16 @@ export function buildEmptyMarksGrid(
 export function buildEmptyCoScholasticGrid(
   students: SisStudent[],
   existing?: MarkSheet,
+  areas?: CoScholasticArea[],
 ): StudentCoScholasticEntry[] {
   const map = new Map<string, StudentCoScholasticEntry>();
   for (const e of existing?.coScholastic ?? []) {
     map.set(`${e.studentId}:${e.domain}`, e);
   }
+  const domains = areas ? areas.map((a) => a.code) : CO_SCHOLASTIC_DOMAINS;
   const out: StudentCoScholasticEntry[] = [];
   for (const st of students) {
-    for (const domain of CO_SCHOLASTIC_DOMAINS) {
+    for (const domain of domains) {
       const key = `${st.id}:${domain}`;
       const prev = map.get(key);
       out.push({
@@ -1939,26 +2053,57 @@ export function prepareMarkSheet(
   for (const s of state.subjects) {
     if (s.isActive && !subById.has(s.id)) subById.set(s.id, s);
   }
-  const passPercent = getExamPolicy(state).passPercent;
+  const policy = getExamPolicy(state);
+  const scheme = schemeForClassId(input.classId, policy);
+  const parts = componentsForTerm(scheme, term.code);
+  const partByCode = new Map(parts.map((c) => [c.code, c]));
+  const maxFor = (sub: ExamSubject | undefined, component: string): number => {
+    if (component) return partByCode.get(component)?.maxMarks ?? 0;
+    return sub ? effectiveMaxMarks(term, sub) : 100;
+  };
 
   for (const m of input.marks) {
     const sub = subById.get(m.subjectId);
     if (!sub) continue;
-    const max = effectiveMaxMarks(term, sub);
+    const component = String(m.component ?? "").toUpperCase();
+    if (component && !partByCode.has(component)) {
+      return {
+        ok: false,
+        error: `${sub.name}: "${component}" is not a component of this class's assessment scheme`,
+      };
+    }
+    if (!component && parts.length > 0) {
+      return {
+        ok: false,
+        error: `${sub.name}: this exam is entered component-wise (${parts.map((c) => c.code).join(" + ")}) for this class`,
+      };
+    }
+    const max = maxFor(sub, component);
     if (m.marksObtained != null && m.marksObtained > max) {
       return {
         ok: false,
-        error: `${sub.name}: marks cannot exceed ${max}`,
+        error: `${sub.name}${component ? ` (${partByCode.get(component)?.label ?? component})` : ""}: marks cannot exceed ${max}`,
       };
     }
   }
 
   const normalizedMarks = input.marks.map((m) => {
     const sub = subById.get(m.subjectId);
-    const max = sub ? effectiveMaxMarks(term, sub) : 100;
+    const component = String(m.component ?? "").toUpperCase();
+    const max = maxFor(sub, component);
+    const picked =
+      scheme.displayMode !== "marks_grade" && m.marksObtained == null
+        ? m.grade && m.grade !== "—"
+          ? m.grade
+          : "—"
+        : gradeForPercent(
+            m.marksObtained == null || max <= 0 ? null : (m.marksObtained / max) * 100,
+            scheme,
+          );
     return normalizeMark({
       ...m,
-      grade: gradeFromMarks(m.marksObtained, max, passPercent),
+      component,
+      grade: picked,
     });
   });
 
@@ -2223,8 +2368,14 @@ export function saveSheetItemScores(input: {
   if (input.applyTotals) {
     const sub =
       state.subjects.find((s) => s.id === input.subjectId) ?? null;
-    const max = sub ? effectiveMaxMarks(term, sub) : 100;
-    const passPercent = getExamPolicy(state).passPercent;
+    const policy = getExamPolicy(state);
+    const scheme = schemeForClassId(input.classId, policy);
+    const parts = componentsForTerm(scheme, term.code);
+    // Item marks are the written paper: they feed the exam component when
+    // the class is assessed component-wise, else the whole subject mark.
+    const target = parts.find((c) => c.kind === "exam") ?? parts[0] ?? null;
+    const max = target ? target.maxMarks : sub ? effectiveMaxMarks(term, sub) : 100;
+    const passPercent = effectivePassPercent(scheme, policy.passPercent);
     const totals = new Map<string, number>();
     const touched = new Set<string>();
     for (const e of fresh) {
@@ -2232,14 +2383,21 @@ export function saveSheetItemScores(input: {
       totals.set(e.studentId, (totals.get(e.studentId) ?? 0) + e.marks);
       touched.add(e.studentId);
     }
-    const byStudent = new Map(marks.filter((m) => m.subjectId === input.subjectId).map((m) => [m.studentId, m]));
+    const component = target?.code ?? "";
+    const byStudent = new Map(
+      marks
+        .filter((m) => m.subjectId === input.subjectId && m.component === component)
+        .map((m) => [m.studentId, m]),
+    );
+    void passPercent;
     for (const studentId of touched) {
       const total = Math.min(max, Math.round((totals.get(studentId) ?? 0) * 100) / 100);
       const prev = byStudent.get(studentId);
       const next = normalizeMark({
-        ...(prev ?? { studentId, subjectId: input.subjectId, remark: "", remarkSource: "manual" }),
+        ...(prev ?? { studentId, subjectId: input.subjectId, component, remark: "", remarkSource: "manual" }),
+        component,
         marksObtained: total,
-        grade: gradeFromMarks(total, max, passPercent),
+        grade: gradeForPercent(max > 0 ? (total / max) * 100 : null, scheme),
       });
       if (prev) {
         marks = marks.map((m) => (m === prev ? next : m));
@@ -2280,7 +2438,18 @@ export type ReportCardLine = {
   maxMarks: number;
   marksObtained: number | null;
   grade: string;
+  /** Long form of the grade under the scheme ("Meets expectations"). */
+  gradeLabel: string;
   remark: string;
+  /** Component breakdown when the class is assessed component-wise. */
+  parts: {
+    code: string;
+    label: string;
+    maxMarks: number;
+    marksObtained: number | null;
+    /** Below the pass line on its own (only meaningful with passEachComponent). */
+    failed: boolean;
+  }[];
 };
 
 export type ReportCardComponentLine = {
@@ -2331,6 +2500,17 @@ export type ReportCard = {
   /** Class teacher's overall remark from THIS term's own sheet (never
    * aggregated across component exams). null when none was written. */
   overallRemark: { text: string; textHi: string; source: RemarkSource } | null;
+  /** The scheme this class is assessed under. */
+  schemeId: string;
+  schemeName: string;
+  displayMode: AssessmentScheme["displayMode"];
+  /** Set by buildClassResultSheet when the scheme shows them; null otherwise. */
+  rank: number | null;
+  classSize: number | null;
+  classAverage: number | null;
+  /** "Promoted to VI" / "Detained" from the recorded decision, when the
+   * scheme prints it and a decision exists. */
+  result: string | null;
 };
 
 function overallRemarkForReportCard(
@@ -2384,15 +2564,18 @@ function coScholasticForReportCard(
   studentId: string,
   state: ExamsState,
   policy: ExamPolicy,
+  classId: string,
 ): ReportCard["coScholastic"] {
-  if (!policy.enableCoScholastic) return [];
+  const areas = coScholasticAreasForClass(classId, policy);
+  if (areas.length === 0) return [];
   const sheet = findMarkSheet(ay, examTermId, sectionId, state);
   if (!sheet) return [];
+  const codes = new Set(areas.map((a) => a.code));
   return sheet.coScholastic
-    .filter((e) => e.studentId === studentId)
+    .filter((e) => e.studentId === studentId && codes.has(e.domain))
     .map((e) => ({
       domain: e.domain,
-      domainLabel: coScholasticDomainLabel(e.domain),
+      domainLabel: coScholasticDomainLabel(e.domain, areas),
       rating: e.rating,
       ratingLabel: coScholasticRatingLabel(e.rating),
     }));
@@ -2424,27 +2607,84 @@ function studentHasMarksOnSheet(
   );
 }
 
-/** Resolve a mark row by exam-subject id or matching code (legacy id drift). */
-function markForExamSubject(
+/** Every row (all components) for a student and subject, by id or code. */
+function marksForExamSubject(
   sheet: MarkSheet | undefined,
   studentId: string,
   subject: ExamSubject,
   allSubjects: ExamSubject[],
-): StudentSubjectMark | undefined {
-  if (!sheet) return undefined;
-  const direct = sheet.marks.find(
+): StudentSubjectMark[] {
+  if (!sheet) return [];
+  const direct = sheet.marks.filter(
     (m) => m.studentId === studentId && m.subjectId === subject.id,
   );
-  if (direct) return direct;
+  if (direct.length) return direct;
   const code = subject.code.toUpperCase();
   const ids = new Set(
     allSubjects
       .filter((s) => s.code.toUpperCase() === code)
       .map((s) => s.id),
   );
-  return sheet.marks.find(
+  return sheet.marks.filter(
     (m) => m.studentId === studentId && ids.has(m.subjectId),
   );
+}
+
+/**
+ * One subject's standing on one sheet under a scheme: the whole mark, or
+ * the sum of its component marks with the breakdown. `obtained` is null
+ * until at least one part is entered.
+ */
+function subjectStandingOnSheet(
+  sheet: MarkSheet | undefined,
+  studentId: string,
+  subject: ExamSubject,
+  allSubjects: ExamSubject[],
+  term: ExamTerm,
+  scheme: AssessmentScheme,
+  passPercent: number,
+): {
+  maxMarks: number;
+  obtained: number | null;
+  pickedGrade: string;
+  remark: string;
+  parts: ReportCardLine["parts"];
+} {
+  const rows = marksForExamSubject(sheet, studentId, subject, allSubjects);
+  const components = componentsForTerm(scheme, term.code);
+  const remark = rows.find((r) => r.remark)?.remark ?? "";
+  if (components.length === 0) {
+    const whole = rows.find((r) => !r.component) ?? rows[0];
+    return {
+      maxMarks: effectiveMaxMarks(term, subject),
+      obtained: whole?.marksObtained ?? null,
+      pickedGrade: whole?.grade ?? "—",
+      remark,
+      parts: [],
+    };
+  }
+  let sum = 0;
+  let any = false;
+  const parts = components.map((c) => {
+    const row = rows.find((r) => r.component === c.code);
+    const got = row?.marksObtained ?? null;
+    if (got != null) {
+      sum += got;
+      any = true;
+    }
+    const failed =
+      scheme.passEachComponent && got != null && c.maxMarks > 0
+        ? (got / c.maxMarks) * 100 < passPercent
+        : false;
+    return { code: c.code, label: c.label, maxMarks: c.maxMarks, marksObtained: got, failed };
+  });
+  return {
+    maxMarks: componentsTotalMax(components),
+    obtained: any ? Math.round(sum * 100) / 100 : null,
+    pickedGrade: rows.find((r) => r.grade && r.grade !== "—")?.grade ?? "—",
+    remark,
+    parts,
+  };
 }
 
 export function buildReportCard(input: {
@@ -2511,6 +2751,21 @@ export function buildReportCard(input: {
         : "";
 
   const policy = getExamPolicy(state);
+  const scheme = schemeForClassId(input.student.classId, policy);
+  const passLine = effectivePassPercent(scheme, policy.passPercent);
+  const gradeOf = (obtained: number | null, max: number, picked = "—") =>
+    scheme.displayMode !== "marks_grade" && obtained == null
+      ? picked
+      : gradeForPercent(obtained == null || max <= 0 ? null : (obtained / max) * 100, scheme);
+  const cardMeta = {
+    schemeId: scheme.id,
+    schemeName: scheme.name,
+    displayMode: scheme.displayMode,
+    rank: null,
+    classSize: null,
+    classAverage: null,
+    result: null,
+  } as const;
   const hold =
     input.deps?.holdChecks?.get(input.student.id) ??
     checkHold(input.student.id, "HOLD_REPORT_CARD");
@@ -2571,14 +2826,18 @@ export function buildReportCard(input: {
         const weight =
           aggregateMode === "hy" ? c.weightInHy : c.weightInFinal;
         const sheet = findMarkSheet(ay, c.id, input.student.sectionId, state);
-        const m = markForExamSubject(
+        const standing = subjectStandingOnSheet(
           sheet,
           input.student.id,
           sub,
           allExamSubs,
+          c,
+          scheme,
+          passLine,
         );
-        const max = effectiveMaxMarks(c, sub);
-        const obtained = m?.marksObtained ?? null;
+        const m = standing.obtained == null ? undefined : { remark: standing.remark };
+        const max = standing.maxMarks;
+        const obtained = standing.obtained;
         if (c.requiredOnMarksheet || obtained != null) {
           components.push({
             examTermId: c.id,
@@ -2605,17 +2864,16 @@ export function buildReportCard(input: {
           ? Math.round((weightedSum / weightTotal) * displayMax * 10) / 10
           : null;
 
+      const aggGrade = gradeOf(obtainedScaled, displayMax);
       lines.push({
         subjectId: sub.id,
         subjectName: sub.name,
         maxMarks: displayMax,
         marksObtained: obtainedScaled,
-        grade: gradeFromMarks(
-          obtainedScaled,
-          displayMax,
-          policy.passPercent,
-        ),
+        grade: aggGrade,
+        gradeLabel: gradeLabel(aggGrade, scheme),
         remark,
+        parts: [],
       });
 
       if (obtainedScaled != null) {
@@ -2658,8 +2916,9 @@ export function buildReportCard(input: {
       totalMax,
       percent,
       overallGrade: policy.includeOverallGrade
-        ? gradeFromPercent(percent, policy.passPercent)
+        ? gradeForPercent(percent, scheme)
         : "—",
+      ...cardMeta,
       attendance: policy.showAttendanceOnReport
         ? attendanceSummaryForStudent(
             input.student.id,
@@ -2679,6 +2938,7 @@ export function buildReportCard(input: {
         input.student.id,
         state,
         policy,
+        input.student.classId,
       ),
       overallRemark: overallRemarkForReportCard(
         ay,
@@ -2702,34 +2962,47 @@ export function buildReportCard(input: {
   let totalMax = 0;
   let counted = 0;
 
+  let graded = 0;
   for (const sub of subjects) {
-    const m = markForExamSubject(sheet, input.student.id, sub, allExamSubs);
-    const max = effectiveMaxMarks(term, sub);
-    const obtained = m?.marksObtained ?? null;
+    const standing = subjectStandingOnSheet(
+      sheet,
+      input.student.id,
+      sub,
+      allExamSubs,
+      term,
+      scheme,
+      passLine,
+    );
+    const max = standing.maxMarks;
+    const obtained = standing.obtained;
+    const grade = gradeOf(obtained, max, standing.pickedGrade);
     lines.push({
       subjectId: sub.id,
       subjectName: sub.name,
       maxMarks: max,
       marksObtained: obtained,
-      grade: gradeFromMarks(obtained, max, policy.passPercent),
-      remark: m?.remark ?? "",
+      grade,
+      gradeLabel: gradeLabel(grade, scheme),
+      remark: standing.remark,
+      parts: standing.parts,
     });
     if (obtained != null) {
       totalObtained += obtained;
       totalMax += max;
       counted += 1;
     }
+    if (grade !== "—") graded += 1;
   }
 
-  if (counted === 0) {
+  if (counted === 0 && graded === 0) {
     return { error: "No marks entered for this student in this exam" };
   }
   if (
     policy.requireAllSubjectsForReport &&
-    counted < subjects.length
+    Math.max(counted, graded) < subjects.length
   ) {
     return {
-      error: `Exam policy requires all ${subjects.length} subjects marked (${counted} entered)`,
+      error: `Exam policy requires all ${subjects.length} subjects marked (${Math.max(counted, graded)} entered)`,
     };
   }
 
@@ -2749,9 +3022,11 @@ export function buildReportCard(input: {
     totalObtained,
     totalMax,
     percent,
-    overallGrade: policy.includeOverallGrade
-      ? gradeFromPercent(percent, policy.passPercent)
-      : "—",
+    overallGrade:
+      policy.includeOverallGrade && totalMax > 0
+        ? gradeForPercent(percent, scheme)
+        : "—",
+    ...cardMeta,
     attendance: policy.showAttendanceOnReport
       ? attendanceSummaryForStudent(
           input.student.id,
@@ -2771,6 +3046,7 @@ export function buildReportCard(input: {
       input.student.id,
       state,
       policy,
+      input.student.classId,
     ),
     overallRemark: overallRemarkForReportCard(
       ay,
@@ -2797,6 +3073,7 @@ export function evaluatePromotionPass(
   lines: ReportCardLine[],
   passPercent: number,
   requireAllSubjects: boolean,
+  opts?: { passEachComponent?: boolean },
 ): { passed: boolean; failedSubjects: string[] } {
   const failedSubjects: string[] = [];
   let obtainedTotal = 0;
@@ -2806,7 +3083,9 @@ export function evaluatePromotionPass(
     obtainedTotal += line.marksObtained;
     maxTotal += line.maxMarks;
     const pct = (line.marksObtained / line.maxMarks) * 100;
-    if (pct < passPercent) failedSubjects.push(line.subjectName);
+    const partFailed =
+      !!opts?.passEachComponent && (line.parts ?? []).some((p) => p.failed);
+    if (pct < passPercent || partFailed) failedSubjects.push(line.subjectName);
   }
   const overallPct = maxTotal > 0 ? (obtainedTotal / maxTotal) * 100 : 0;
   if (requireAllSubjects && failedSubjects.length > 0) {
@@ -2866,6 +3145,8 @@ export type ClassResultRow = {
   error: string | null;
   passed: boolean;
   failedSubjects: string[];
+  /** Why `suggested` is what it is when the child did not pass. */
+  suggestionNote: string;
   suggested: PromotionDecision;
   record: PromotionRecord | null;
   nextClass: SchoolClass | null;
@@ -2926,6 +3207,11 @@ export function buildClassResultSheet(input: {
       ),
   };
 
+  const scheme = schemeForClassId(input.classId, policy);
+  const passLine = effectivePassPercent(scheme, policy.passPercent);
+  const requireAll =
+    scheme.requireAllSubjectsPass ?? policy.requireAllSubjectsPassForPromotion;
+
   const rows: ClassResultRow[] = [];
   for (const student of input.students) {
     const card = buildReportCard({
@@ -2944,6 +3230,7 @@ export function buildClassResultSheet(input: {
         error: card.error,
         passed: false,
         failedSubjects: [],
+        suggestionNote: "",
         suggested: "pending",
         record,
         nextClass,
@@ -2953,12 +3240,26 @@ export function buildClassResultSheet(input: {
     }
     const evalPass = evaluatePromotionPass(
       card.lines,
-      policy.passPercent,
-      policy.requireAllSubjectsPassForPromotion,
+      passLine,
+      requireAll,
+      { passEachComponent: scheme.passEachComponent },
     );
-    const suggested: PromotionDecision = evalPass.passed
-      ? "promoted"
-      : "detained";
+    // The scheme's promotion rule decides what a failure means: RTE bands
+    // are promoted regardless, V/VIII under the 2019 amendment sit a
+    // re-examination first, IX upwards are detained.
+    let suggested: PromotionDecision = "promoted";
+    let suggestionNote = "";
+    if (!evalPass.passed) {
+      if (scheme.promotionRule === "no_detention") {
+        suggested = "promoted";
+        suggestionNote = "Promoted under the no-detention rule";
+      } else if (scheme.promotionRule === "reexam_then_detain") {
+        suggested = "conditional";
+        suggestionNote = "Re-examination required";
+      } else {
+        suggested = "detained";
+      }
+    }
     const record =
       findPromotionRecord(student.id, term.id, ay, state) ?? null;
     rows.push({
@@ -2967,11 +3268,52 @@ export function buildClassResultSheet(input: {
       error: null,
       passed: evalPass.passed,
       failedSubjects: evalPass.failedSubjects,
+      suggestionNote,
       suggested,
       record,
       nextClass,
       nextSection,
     });
+  }
+
+  // Rank, class average and the recorded result, when the scheme prints
+  // them. Ties share a rank; the next rank skips (1, 1, 3).
+  const withCards = rows.filter((r) => r.card && r.card.totalMax > 0);
+  const average =
+    withCards.length > 0
+      ? Math.round(
+          (withCards.reduce((s, r) => s + (r.card?.percent ?? 0), 0) /
+            withCards.length) *
+            10,
+        ) / 10
+      : null;
+  const byPercent = [...withCards].sort(
+    (a, b) => (b.card?.percent ?? 0) - (a.card?.percent ?? 0),
+  );
+  const rankOf = new Map<string, number>();
+  byPercent.forEach((r, i) => {
+    const prev = byPercent[i - 1];
+    const rank =
+      prev && prev.card?.percent === r.card?.percent
+        ? (rankOf.get(prev.student.id) ?? i + 1)
+        : i + 1;
+    rankOf.set(r.student.id, rank);
+  });
+  for (const r of rows) {
+    if (!r.card) continue;
+    const decision = r.record?.decision;
+    r.card = {
+      ...r.card,
+      rank: scheme.showRank ? (rankOf.get(r.student.id) ?? null) : null,
+      classSize: scheme.showRank ? withCards.length : null,
+      classAverage: scheme.showClassAverage ? average : null,
+      result:
+        scheme.showResultOnCard && decision && decision !== "pending"
+          ? decision === "promoted" && r.record?.toClassId
+            ? `Promoted to ${masters.classes.find((c) => c.id === r.record?.toClassId)?.name ?? "next class"}`
+            : promotionDecisionLabel(decision)
+          : null,
+    };
   }
 
   const summary = {
@@ -3138,10 +3480,14 @@ export function suggestPromotionsForSection(input: {
       overallGrade: row.card.overallGrade,
       passed: row.passed,
       decidedBy: input.decidedBy,
-      remark:
+      remark: [
+        row.suggestionNote,
         row.failedSubjects.length > 0
           ? `Below pass: ${row.failedSubjects.join(", ")}`
           : "",
+      ]
+        .filter(Boolean)
+        .join(" · "),
     });
     if (r.ok) updated += 1;
     else skipped += 1;

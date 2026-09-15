@@ -309,6 +309,7 @@ jobs:
           npm run test:exam-invigilation
           npm run test:exams
           npm run test:exams-sheet-safety
+          npm run test:exam-schemes
           npm run test:household-prefs
           npm run test:item-analytics
           npm run test:fleet-edge-link

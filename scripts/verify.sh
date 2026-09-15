@@ -214,6 +214,7 @@ SELFTESTS=(
   test:exam-invigilation
   test:exams
   test:exams-sheet-safety
+  test:exam-schemes
   test:household-prefs
   test:item-analytics
   test:item-score-import
