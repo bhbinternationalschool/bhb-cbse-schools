@@ -119,6 +119,8 @@ function cellKey(studentId: string, subjectId: string) {
 
 type MarkRowProps = {
   student: SisStudent;
+  /** Passed down so the name label does not re-read the SIS blob per row. */
+  sis: SisState | undefined;
   subjects: ExamSubject[];
   term: ExamTerm;
   /** subjectId → what the input shows ("" for not entered). */
@@ -145,6 +147,7 @@ type MarkRowProps = {
  */
 const MarkRow = memo(function MarkRow({
   student: st,
+  sis,
   subjects,
   term,
   values,
@@ -162,7 +165,7 @@ const MarkRow = memo(function MarkRow({
           <StudentAvatar student={st} size={28} />
           <div className="min-w-0">
             <div className="truncate font-medium text-[var(--brand-deep)]">
-              <StudentNameLabel student={st} />
+              <StudentNameLabel student={st} sis={sis} />
             </div>
             <div className="text-[10px] text-[var(--muted)]">
               {st.admissionNo}
@@ -1971,6 +1974,7 @@ export function ExamsWorkspace() {
                           <MarkRow
                             key={st.id}
                             student={st}
+                            sis={sis ?? undefined}
                             subjects={subjects}
                             term={term}
                             values={valuesByStudent.get(st.id) ?? {}}
@@ -2071,7 +2075,7 @@ export function ExamsWorkspace() {
                         <StudentAvatar student={st} size={36} />
                         <div className="min-w-0 flex-1">
                           <div className="truncate font-medium text-[var(--ink)]">
-                            <StudentNameLabel student={st} />
+                            <StudentNameLabel student={st} sis={sis ?? undefined} />
                           </div>
                           <div className="text-xs text-[var(--muted)]">
                             {st.admissionNo}

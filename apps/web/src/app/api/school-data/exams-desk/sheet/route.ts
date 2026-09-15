@@ -58,6 +58,18 @@ function bad(status: number, error: string) {
  * client cannot clear it by sending lockedAt: null.
  */
 export async function POST(req: Request) {
+  try {
+    return await saveSheet(req);
+  } catch (e) {
+    // A thrown error used to surface as a bare "Internal Server Error" with
+    // no body, so the desk could only say "HTTP 500". Say what happened.
+    const message = e instanceof Error ? e.message : String(e);
+    console.error("[exams-desk/sheet] save failed:", message);
+    return bad(500, `The server could not save the mark sheet: ${message}`);
+  }
+}
+
+async function saveSheet(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["exams-desk"], "POST");
   if (!auth.ok) return auth.response;
   if (!examsDualWriteDbEnabled()) {
