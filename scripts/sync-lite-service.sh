@@ -33,13 +33,16 @@ REGION="${GCP_REGION:-asia-southeast1}"
 SOURCE="school-erp-web"
 TARGET="school-erp-lite"
 TMP="$(mktemp -t lite-service.XXXXXX.json)"
-trap 'rm -f "$TMP"' EXIT
 
-gcloud run services describe "$SOURCE" --project="$PROJECT_ID" --region="$REGION" --format=json \
-  | python3 - "$TARGET" > "$TMP" <<'PY'
+SRC_JSON="$(mktemp -t lite-source.XXXXXX.json)"
+trap 'rm -f "$TMP" "$SRC_JSON"' EXIT
+# Two steps, not a pipe into `python3 -` with a heredoc: the heredoc *is*
+# stdin for `python3 -`, so piped JSON never reached it (first run, 15 Sep).
+gcloud run services describe "$SOURCE" --project="$PROJECT_ID" --region="$REGION" --format=json > "$SRC_JSON"
+python3 -c "$(cat <<'PY'
 import json, sys
 target = sys.argv[1]
-svc = json.load(sys.stdin)
+svc = json.load(open(sys.argv[2]))
 
 meta = svc["metadata"]
 for k in ("uid", "resourceVersion", "generation", "creationTimestamp", "selfLink"):
@@ -73,6 +76,7 @@ svc["spec"]["traffic"] = [{"latestRevision": True, "percent": 100}]
 svc.pop("status", None)
 json.dump(svc, sys.stdout)
 PY
+)" "$TARGET" "$SRC_JSON" > "$TMP"
 
 gcloud run services replace "$TMP" --project="$PROJECT_ID" --region="$REGION" --quiet >/dev/null
 # Public like the main service: Tata's pushes and the scheduler carry their own
