@@ -19,6 +19,7 @@ import {
   type ReportColumn,
 } from "@/lib/reportExport";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 const STORAGE_KEY = "bhb_student_leave_v1";
 
@@ -145,9 +146,9 @@ export function saveStudentLeave(state: StudentLeaveState): void {
   } catch (e) {
     console.warn("[studentLeave] localStorage quota exceeded — relying on server DB sync", e);
   }
-  void import("@/lib/studentLeavePersistence").then(({ scheduleStudentLeaveSync }) => {
+  void trackServerWork(import("@/lib/studentLeavePersistence").then(({ scheduleStudentLeaveSync }) => {
     scheduleStudentLeaveSync(state);
-  });
+  }));
 }
 
 export function createStudentLeaveRequest(input: {

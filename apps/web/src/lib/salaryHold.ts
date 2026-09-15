@@ -21,6 +21,7 @@ import {
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { isSuperAdminSession } from "@/lib/superAdmin";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 export type JuneHoldStatus =
   | "held"
   | "forfeited_incomplete_year"
@@ -181,7 +182,7 @@ export function saveSalaryHold(state: SalaryHoldState) {
   if (!assertModulePermission("payroll", "edit", "saveSalaryHold")) return;
   if (typeof window === "undefined") return;
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
-  void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("salary_hold", state));
+  void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("salary_hold", state)));
 }
 
 /** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */

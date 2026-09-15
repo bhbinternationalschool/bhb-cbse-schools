@@ -20,6 +20,7 @@ import {
   isDeskHydrated,
   markDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "library";
 
@@ -35,7 +36,7 @@ const blob = createDomainBlobPersistence<LibraryState>({
 export const libraryRemoteEnabled = blob.remoteEnabled;
 export const scheduleLibrarySync = (state: LibraryState) => {
   if (typeof window === "undefined") {
-    void pushLibraryRemoteServer(state);
+    void trackServerWork(pushLibraryRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("library")) blob.scheduleSync(state);

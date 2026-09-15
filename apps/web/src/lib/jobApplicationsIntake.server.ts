@@ -14,6 +14,7 @@ import {
   createJobApplication,
   recentApplicationFor,
 } from "@/lib/jobApplications.server";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MAX_BYTES = 4 * 1024 * 1024;
 const ALLOWED = /^(image\/(jpeg|jpg|png|webp)|application\/pdf)$/;
@@ -125,6 +126,6 @@ export async function captureWhatsAppJobCv(input: {
     return { ok: false, reason: "save_failed" };
   }
 
-  void alertLeadershipOfJobApplication(created.application).catch(() => {});
+  void trackServerWork(alertLeadershipOfJobApplication(created.application).catch(() => {}));
   return { ok: true };
 }

@@ -9,6 +9,7 @@
  * marker. Status tracked here is a separate, additive concern.
  */
 
+import { trackServerWork } from "@/lib/serverWork";
 export type SyncStatus = "idle" | "pending" | "retrying" | "failed";
 
 export type SyncStatusState = {
@@ -79,7 +80,7 @@ function attempt(key: string, entry: RetryEntry) {
     status: entry.attempts === 0 ? "pending" : "retrying",
     attempts: entry.attempts,
   });
-  void entry.run().then((result) => {
+  void trackServerWork(entry.run().then((result) => {
     // A newer call for this key may have replaced this entry mid-flight.
     if (entries.get(key) !== entry) return;
     if (result.ok) {
@@ -105,7 +106,7 @@ function attempt(key: string, entry: RetryEntry) {
       attempts: entry.attempts,
     });
     entry.timer = setTimeout(() => attempt(key, entry), delay);
-  });
+  }));
 }
 
 /** Runs `run` immediately; retries on failure per the backoff ladder. */

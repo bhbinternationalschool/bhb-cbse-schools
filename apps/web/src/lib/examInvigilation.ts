@@ -27,6 +27,7 @@ import { teacherLabel, teachingPeriods } from "@/lib/timetable";
 import { isoDateWeekday } from "@/lib/examTimetable";
 import { absentTeachersForDate, type AbsentTeacher } from "@/lib/timetableSubstitution";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type InvigilationAssignment = {
   id: string;
@@ -100,7 +101,7 @@ export function saveInvigilation(state: InvigilationState): InvigilationState {
   const next = normalizeInvigilationState(state);
   if (typeof window !== "undefined") {
     writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
-    void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("exam_invigilation", next));
+    void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("exam_invigilation", next)));
     window.dispatchEvent(new CustomEvent("bhb-invigilation"));
   }
   return next;

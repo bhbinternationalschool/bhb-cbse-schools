@@ -21,6 +21,7 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "staff_attendance";
 
@@ -41,7 +42,7 @@ export function resetStaffAttendancePersistenceCache() {
 
 export function scheduleStaffAttendanceSync(state: StaffAttendanceState) {
   if (typeof window === "undefined") {
-    void pushStaffAttendanceRemoteServer(state);
+    void trackServerWork(pushStaffAttendanceRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("staff_attendance")) {

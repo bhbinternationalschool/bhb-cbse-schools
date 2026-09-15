@@ -8,6 +8,7 @@
 import "server-only";
 import { aiCacheGet, aiCacheKey, aiCachePut } from "@/lib/aiCache.server";
 import { prefersHindi, videoSearchQuery, type TutorLanguage } from "@/lib/tutorPlans";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type TutorVideo = {
   videoId: string;
@@ -84,7 +85,7 @@ export async function searchTutorVideos(opts: {
       });
     }
     if (items.length) {
-      void aiCachePut({ key: cacheKey, route: "tutor-videos", engine: "youtube", model: "search.list", response: JSON.stringify(items), generationId: "" });
+      void trackServerWork(aiCachePut({ key: cacheKey, route: "tutor-videos", engine: "youtube", model: "search.list", response: JSON.stringify(items), generationId: "" }));
     }
     return { query, searchUrl, items, source: "api" };
   } catch (e) {

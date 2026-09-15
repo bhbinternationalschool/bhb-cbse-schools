@@ -6,6 +6,7 @@ import {
   splitEmployerPfContribution,
   type StatutoryDue,
 } from "@/lib/statutoryCompliance";
+import { trackServerWork } from "@/lib/serverWork";
 /**
  * PF / ESIC remittance to Government.
  * When staff avails PF and/or ESIC, employee deduction + employer
@@ -287,11 +288,11 @@ export function saveStatutoryRemit(state: StatutoryRemitState) {
   if (!assertModulePermission("payroll", "edit", "saveStatutoryRemit")) return;
   if (typeof window === "undefined") return;
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
-  void import("@/lib/statutoryNormalizedClient").then(
+  void trackServerWork(import("@/lib/statutoryNormalizedClient").then(
     ({ scheduleStatutoryDeskSync }) => {
       scheduleStatutoryDeskSync(state);
     },
-  );
+  ));
 }
 
 /** Permission-bypassing raw writer — hydration-only, mirrors payroll.ts's writePayrollLocalRaw.

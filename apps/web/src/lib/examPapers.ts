@@ -15,6 +15,7 @@ import {
 } from "@/lib/schoolIdentity";
 import { TENANT } from "@/lib/types";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type ExamPaperQuestionType =
   | "mcq"
@@ -620,11 +621,11 @@ export function saveExamPapers(state: ExamPapersState) {
   if (typeof window === "undefined") return;
   const next = normalizeExamPapersState(state);
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
-  void import("@/lib/examPapersPersistence").then(
+  void trackServerWork(import("@/lib/examPapersPersistence").then(
     ({ scheduleExamPapersSync }) => {
       scheduleExamPapersSync(next);
     },
-  );
+  ));
 }
 
 export function writeExamPapersLocalRaw(state: ExamPapersState) {

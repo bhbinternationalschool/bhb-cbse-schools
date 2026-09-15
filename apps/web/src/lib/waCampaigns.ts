@@ -21,6 +21,7 @@ import { TENANT } from "@/lib/types";
 
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 const STORAGE_KEY = "bhb_wa_campaigns_v1";
 export const WA_ME_BATCH_CAP = 20;
 
@@ -439,7 +440,7 @@ export function saveWaCampaigns(state: WaCampaignsState): void {
   if (!assertModulePermission("admissions", "edit", "saveWaCampaigns")) return;
   if (typeof window === "undefined") return;
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
-  void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("wa_campaigns", state));
+  void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("wa_campaigns", state)));
 }
 
 /** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */

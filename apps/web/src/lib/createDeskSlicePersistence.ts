@@ -21,6 +21,7 @@ import {
 } from "@/lib/deskSliceNormalizedClient";
 import { mergeDeskSliceBundle } from "@/lib/deskSliceMerge";
 import { pushDeskSliceToDb } from "@/lib/deskSliceNormalized.server";
+import { trackServerWork } from "@/lib/serverWork";
 
 export function createDeskSlicePersistence<T extends { version: number }>(opts: {
   moduleId: DeskModuleId;
@@ -56,7 +57,7 @@ export function createDeskSlicePersistence<T extends { version: number }>(opts: 
 
   function scheduleSync(state: T) {
     if (typeof window === "undefined") {
-      void pushRemoteServer(state);
+      void trackServerWork(pushRemoteServer(state));
       return;
     }
     if (!deskSkipBlobPushClient(opts.moduleId)) blob.scheduleSync(state);

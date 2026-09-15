@@ -21,6 +21,7 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "vault";
 
@@ -41,7 +42,7 @@ export function resetVaultPersistenceCache() {
 
 export function scheduleVaultSync(state: VaultState) {
   if (typeof window === "undefined") {
-    void pushVaultRemoteServer(state);
+    void trackServerWork(pushVaultRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("vault")) {

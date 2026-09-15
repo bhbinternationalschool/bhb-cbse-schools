@@ -27,6 +27,7 @@ import {
   type PunchGeoInput,
 } from "@/lib/staffGeofence.server";
 import { waNormalizeLocal10 } from "@/lib/waSend";
+import { trackServerWork } from "@/lib/serverWork";
 
 const LOCAL_FILE = path.join(process.cwd(), ".data", "staff_attendance_server.json");
 
@@ -89,11 +90,11 @@ export async function saveStaffAttendanceServer(
   cache = normalizeStaffAttendanceState(state);
   loaded = true;
   writeStaffAttendanceLocalRaw(cache);
-  void pushServerBlob("staff_attendance_state", cache);
+  void trackServerWork(pushServerBlob("staff_attendance_state", cache));
   const { pushStaffAttendanceDeskToDb } = await import(
     "@/lib/staffAttendanceNormalized.server"
   );
-  void pushStaffAttendanceDeskToDb(cache);
+  void trackServerWork(pushStaffAttendanceDeskToDb(cache));
   try {
     await fs.mkdir(path.dirname(LOCAL_FILE), { recursive: true });
     await fs.writeFile(LOCAL_FILE, JSON.stringify(cache, null, 2), "utf8");

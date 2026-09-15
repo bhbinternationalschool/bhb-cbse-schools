@@ -10,6 +10,7 @@ import {
 } from "@/lib/reportExport";
 import { TENANT } from "@/lib/types";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type LibraryCopyStatus =
   | "available"
@@ -540,7 +541,7 @@ export function saveLibrary(state: LibraryState) {
   const normalized = migrateLibraryState(state);
   if (typeof window === "undefined") return;
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(normalized));
-  void import("@/lib/libraryPersistence").then((m) => m.scheduleLibrarySync(normalized));
+  void trackServerWork(import("@/lib/libraryPersistence").then((m) => m.scheduleLibrarySync(normalized)));
 }
 
 export function categoryLabel(category: LibraryCategory): string {

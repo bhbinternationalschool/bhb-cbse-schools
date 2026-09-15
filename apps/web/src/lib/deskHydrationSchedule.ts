@@ -4,6 +4,7 @@
 
 import { yieldToMain } from "@/lib/runWhenIdle";
 import { withHydrationSlot } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type DeskHydrateId =
   | "rbac"
@@ -319,7 +320,7 @@ async function runBackgroundHydration(initialPathname: string): Promise<void> {
   const { ensureDeskCutoverClient } = await import(
     "@/lib/ensureDeskCutoverClient"
   );
-  void ensureDeskCutoverClient();
+  void trackServerWork(ensureDeskCutoverClient());
 }
 
 /**
@@ -332,7 +333,7 @@ export function startDeskHydrationBackground(pathname: string): void {
     backgroundPromise = runBackgroundHydration(pathname);
     return;
   }
-  void ensureDeskHydratedPriority(pathname);
+  void trackServerWork(ensureDeskHydratedPriority(pathname));
 }
 
 export function deskHydrationBackgroundDone(): Promise<void> | null {
@@ -346,5 +347,5 @@ export async function ensureAllDeskHydrated(): Promise<void> {
   const { ensureDeskCutoverClient } = await import(
     "@/lib/ensureDeskCutoverClient"
   );
-  void ensureDeskCutoverClient();
+  void trackServerWork(ensureDeskCutoverClient());
 }

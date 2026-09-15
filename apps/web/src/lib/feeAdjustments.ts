@@ -16,6 +16,7 @@ import {
 import { openFeeDues, type FeeDueLine } from "@/lib/fees";
 import { loadSis, saveSis, type SisStudent } from "@/lib/sis";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type FeeAdjustmentType =
   | "waiver"
@@ -123,7 +124,7 @@ export function saveFeeAdjustments(rows: FeeAdjustment[]) {
 
   if (typeof window === "undefined") return;
   localStorage.setItem(ADJUST_KEY, JSON.stringify(rows));
-  void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("fee_adjustments", { rows: rows }));
+  void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("fee_adjustments", { rows: rows })));
 }
 
 /** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */

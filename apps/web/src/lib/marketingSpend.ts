@@ -9,6 +9,7 @@
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { sourceLabel, type AdmissionLead, type AdmissionSource } from "@/lib/admissions";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type SpendEntry = {
   id: string;
@@ -67,7 +68,7 @@ export function saveMarketingSpend(state: MarketingSpendState): MarketingSpendSt
   if (!assertModulePermission("admissions", "edit", "saveMarketingSpend")) return next;
   if (typeof window !== "undefined") {
     writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
-    void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("marketing_spend", next));
+    void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("marketing_spend", next)));
     window.dispatchEvent(new CustomEvent("bhb-marketing-spend"));
   }
   return next;

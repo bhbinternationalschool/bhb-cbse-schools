@@ -11,6 +11,7 @@
  * else.
  */
 
+import { trackServerWork } from "@/lib/serverWork";
 export type AuditAction =
   | "create"
   | "update"
@@ -37,7 +38,7 @@ export { diffForAudit } from "@/lib/auditRedaction";
 export function recordAudit(input: AuditRecordInput): void {
   if (typeof window === "undefined") return;
   try {
-    void fetch("/api/audit", {
+    void trackServerWork(fetch("/api/audit", {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
@@ -45,7 +46,7 @@ export function recordAudit(input: AuditRecordInput): void {
       keepalive: true,
     }).catch(() => {
       /* auditing is best-effort from the browser; server logs failures */
-    });
+    }));
   } catch {
     /* never surface to the user */
   }

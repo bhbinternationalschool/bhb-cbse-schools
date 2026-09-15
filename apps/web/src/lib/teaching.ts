@@ -30,6 +30,7 @@ import {
   type TimetableGrid,
   type TimetableState,
 } from "@/lib/timetable";
+import { trackServerWork } from "@/lib/serverWork";
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -625,9 +626,9 @@ export function saveTeaching(state: TeachingState) {
       e,
     );
   }
-  void import("@/lib/teachingPersistence").then(({ scheduleTeachingSync }) => {
+  void trackServerWork(import("@/lib/teachingPersistence").then(({ scheduleTeachingSync }) => {
     scheduleTeachingSync(next);
-  });
+  }));
 }
 
 /** Hydrate path — write local without scheduling a cloud push. */

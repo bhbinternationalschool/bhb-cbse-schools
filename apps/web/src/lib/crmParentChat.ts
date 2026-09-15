@@ -23,6 +23,7 @@ import { formatInr } from "@/lib/masters";
 
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 const STORAGE_KEY = "bhb_crm_parent_chat_v1";
 
 /** Distinguishes this product surface from SIS parent account chats */
@@ -157,7 +158,7 @@ export function saveCrmParentChat(state: CrmParentChatState): void {
     STORAGE_KEY,
     JSON.stringify({ ...state, audience: CRM_CHAT_AUDIENCE }),
   );
-  void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("crm_parent_chat", { ...state, audience: CRM_CHAT_AUDIENCE }));
+  void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("crm_parent_chat", { ...state, audience: CRM_CHAT_AUDIENCE })));
 }
 
 /** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */

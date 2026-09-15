@@ -7,6 +7,7 @@ import type { WaTemplateLanguage } from "@/lib/waTemplates";
 import { nextCronRunIst } from "@/lib/automationSchedule";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { SCHOOL_DEFAULT_WA_LANGUAGE } from "@/lib/householdPrefs";
+import { trackServerWork } from "@/lib/serverWork";
 
 const STORAGE_KEY = "bhb_automation_v1";
 
@@ -541,9 +542,9 @@ export function saveAutomation(state: AutomationState): void {
   const next = normalizeAutomationState(state);
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
   window.dispatchEvent(new CustomEvent("bhb-automation"));
-  void import("@/lib/automationPersistence").then(({ scheduleAutomationSync }) => {
+  void trackServerWork(import("@/lib/automationPersistence").then(({ scheduleAutomationSync }) => {
     scheduleAutomationSync(next);
-  });
+  }));
 }
 
 export function setRuleEnabled(

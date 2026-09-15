@@ -177,6 +177,7 @@ import {
   type PendingErpConfirm,
   type SectionMatch,
 } from "@/lib/erpCommands";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type ErpCommandFlow = "owner" | "staff" | "teacher";
 
@@ -756,10 +757,10 @@ export async function handleErpStaffCommand(
 
   if (command.id === "commands_digest") {
     if (inbound.flow !== "owner") {
-      void audit(session, command, parsed.fields, text, "denied", {
+      void trackServerWork(audit(session, command, parsed.fields, text, "denied", {
         reason: "rbac",
         channel: inbound.channel,
-      });
+      }));
       return {
         handled: true,
         audience: "erp_command_denied",
@@ -768,7 +769,7 @@ export async function handleErpStaffCommand(
     }
     const { composeCommandDigestForDate } = await import("@/lib/erpCommandsDigest.server");
     const digest = await composeCommandDigestForDate(todayIso);
-    void audit(session, command, parsed.fields, text, "ok", { channel: inbound.channel });
+    void trackServerWork(audit(session, command, parsed.fields, text, "ok", { channel: inbound.channel }));
     return { handled: true, audience: "erp_command_commands_digest", text: digest.text };
   }
 
@@ -789,10 +790,10 @@ export async function handleErpStaffCommand(
   }
 
   if (!allowed.some((c) => c.id === command.id)) {
-    void audit(session, command, parsed.fields, text, "denied", {
+    void trackServerWork(audit(session, command, parsed.fields, text, "denied", {
       reason: "rbac",
       channel: inbound.channel,
-    });
+    }));
     return {
       handled: true,
       audience: "erp_command_denied",
@@ -872,11 +873,11 @@ export async function handleErpStaffCommand(
       );
       const allowed = res.sections.filter((s) => mine.has(s.sectionId));
       if (!allowed.length) {
-        void audit(session, command, parsed.fields, text, "denied", {
+        void trackServerWork(audit(session, command, parsed.fields, text, "denied", {
           reason: "scope",
           classId: res.classId,
           channel: inbound.channel,
-        });
+        }));
         return {
           handled: true,
           audience: "erp_command_denied",
@@ -931,11 +932,11 @@ export async function handleErpStaffCommand(
         roleCodes,
       );
       if (!mine.some((s) => s.sectionId === sectionMatch!.sectionId)) {
-        void audit(session, command, parsed.fields, text, "denied", {
+        void trackServerWork(audit(session, command, parsed.fields, text, "denied", {
           reason: "scope",
           sectionId: sectionMatch.sectionId,
           channel: inbound.channel,
-        });
+        }));
         return {
           handled: true,
           audience: "erp_command_denied",
@@ -1037,11 +1038,11 @@ export async function handleErpStaffCommand(
     }
     const student = matches[0]!.student;
     if (command.scope === "own_sections" && !mineIds.has(student.sectionId)) {
-      void audit(session, command, parsed.fields, text, "denied", {
+      void trackServerWork(audit(session, command, parsed.fields, text, "denied", {
         reason: "scope",
         studentId: student.id,
         channel: inbound.channel,
-      });
+      }));
       return {
         handled: true,
         audience: "erp_command_denied",
@@ -1080,10 +1081,10 @@ export async function handleErpStaffCommand(
   if (command.id === "collection_today") {
     const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
     if (!isOfficeLike(roleCodes) && !roleCodes.includes("accounts")) {
-      void audit(session, command, parsed.fields, text, "denied", {
+      void trackServerWork(audit(session, command, parsed.fields, text, "denied", {
         reason: "scope",
         channel: inbound.channel,
-      });
+      }));
       return {
         handled: true,
         audience: "erp_command_denied",
@@ -1094,7 +1095,7 @@ export async function handleErpStaffCommand(
   if (command.id === "admissions_week") {
     const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
     if (!isOfficeLike(roleCodes) && !roleCodes.includes("admissions")) {
-      void audit(session, command, parsed.fields, text, "denied", { reason: "scope", channel: inbound.channel });
+      void trackServerWork(audit(session, command, parsed.fields, text, "denied", { reason: "scope", channel: inbound.channel }));
       return {
         handled: true,
         audience: "erp_command_denied",
@@ -1106,7 +1107,7 @@ export async function handleErpStaffCommand(
   if (command.id === "school_snapshot") {
     const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
     if (!isOfficeLike(roleCodes)) {
-      void audit(session, command, parsed.fields, text, "denied", { reason: "scope", channel: inbound.channel });
+      void trackServerWork(audit(session, command, parsed.fields, text, "denied", { reason: "scope", channel: inbound.channel }));
       return {
         handled: true,
         audience: "erp_command_denied",
@@ -1153,11 +1154,11 @@ export async function handleErpStaffCommand(
     // personal mobile is shown whole only to the office — the same
     // asymmetry student_details uses for a parent's number.
     const unmasked = isOfficeLike(roleCodes) || staffContactIsOpen(who.designation);
-    void audit(session, command, parsed.fields, text, "ok", {
+    void trackServerWork(audit(session, command, parsed.fields, text, "ok", {
       staffId: who.id,
       unmasked: String(unmasked),
       channel: inbound.channel,
-    });
+    }));
     return {
       handled: true,
       audience: "erp_command_staff_contact",
@@ -1185,7 +1186,7 @@ export async function handleErpStaffCommand(
         return { handled: true, audience: "erp_command_ask", text: formatSectionProblem(res.reason, res.options, askedRaw) };
       }
       if (!office && !mine.some((s) => s.sectionId === res.match.sectionId)) {
-        void audit(session, command, parsed.fields, text, "denied", { reason: "scope", channel: inbound.channel });
+        void trackServerWork(audit(session, command, parsed.fields, text, "denied", { reason: "scope", channel: inbound.channel }));
         return {
           handled: true,
           audience: "erp_command_denied",
@@ -1223,7 +1224,7 @@ export async function handleErpStaffCommand(
         const mineIds = new Set(mine.map((s) => s.sectionId));
         sections = sections.filter((s) => mineIds.has(s.sectionId));
         if (!sections.length) {
-          void audit(session, command, parsed.fields, text, "denied", { reason: "scope", channel: inbound.channel });
+          void trackServerWork(audit(session, command, parsed.fields, text, "denied", { reason: "scope", channel: inbound.channel }));
           return {
             handled: true,
             audience: "erp_command_denied",
@@ -1271,10 +1272,10 @@ export async function handleErpStaffCommand(
   if (command.id === "pay_link" && resolved.studentId) {
     const roleCodes = resolveSessionRoles(rbac, session, masters).map((x) => x.code);
     if (!isOfficeLike(roleCodes) && !roleCodes.includes("accounts")) {
-      void audit(session, command, parsed.fields, text, "denied", {
+      void trackServerWork(audit(session, command, parsed.fields, text, "denied", {
         reason: "scope",
         channel: inbound.channel,
-      });
+      }));
       return {
         handled: true,
         audience: "erp_command_denied",
@@ -1338,10 +1339,10 @@ export async function handleErpStaffCommand(
   if (command.id === "fee_reminder") {
     const roleCodes = resolveSessionRoles(rbac, session, masters).map((x) => x.code);
     if (!isOfficeLike(roleCodes) && !roleCodes.includes("accounts")) {
-      void audit(session, command, parsed.fields, text, "denied", {
+      void trackServerWork(audit(session, command, parsed.fields, text, "denied", {
         reason: "scope",
         channel: inbound.channel,
-      });
+      }));
       return {
         handled: true,
         audience: "erp_command_denied",
@@ -1465,10 +1466,10 @@ export async function handleErpStaffCommand(
   if (command.id === "bus_delay") {
     const roleCodes = resolveSessionRoles(rbac, session, masters).map((x) => x.code);
     if (!isOfficeLike(roleCodes) && !roleCodes.includes("transport")) {
-      void audit(session, command, parsed.fields, text, "denied", {
+      void trackServerWork(audit(session, command, parsed.fields, text, "denied", {
         reason: "scope",
         channel: inbound.channel,
-      });
+      }));
       return {
         handled: true,
         audience: "erp_command_denied",
@@ -1829,10 +1830,10 @@ export async function handleErpStaffCommand(
   if (command.id === "staff_broadcast") {
     const roleCodes = resolveSessionRoles(rbac, session, masters).map((x) => x.code);
     if (!isOfficeLike(roleCodes)) {
-      void audit(session, command, parsed.fields, text, "denied", {
+      void trackServerWork(audit(session, command, parsed.fields, text, "denied", {
         reason: "scope",
         channel: inbound.channel,
-      });
+      }));
       return {
         handled: true,
         audience: "erp_command_denied",
@@ -2187,12 +2188,12 @@ export async function handleErpStaffCommand(
   // …and what its numbers mean. A list with no usable numbering clears
   // the previous one rather than leaving it armed.
   await rememberPick(actor, command.id, text, reply.picks);
-  void audit(session, command, parsed.fields, text, "ok", {
+  void trackServerWork(audit(session, command, parsed.fields, text, "ok", {
     ...resolved,
     source: parsed.source,
     voice: fromVoice,
     channel: inbound.channel,
-  });
+  }));
   return {
     handled: true,
     audience: `erp_command_${command.id}`,
@@ -3144,10 +3145,10 @@ async function runConfirmedWrite(
   // Permission is re-checked at confirm time, not trusted from the card:
   // a role can change in the minutes a card sits waiting.
   if (!hasPermission(session, masters, command.module, command.action, rbac)) {
-    void audit(session, command, pending.fields, pending.originalText, "denied", {
+    void trackServerWork(audit(session, command, pending.fields, pending.originalText, "denied", {
       reason: "rbac_at_confirm",
       channel: inbound.channel,
-    });
+    }));
     return {
       handled: true,
       audience: "erp_command_denied",
@@ -3160,10 +3161,10 @@ async function runConfirmedWrite(
       const roleCodes = resolveSessionRoles(rbac, session, masters).map((x) => x.code);
       const mine = staffAllowedSections(inbound.staff, masters, session.academicYearCode, roleCodes);
       if (!isOfficeLike(roleCodes) && !mine.some((x) => x.sectionId === r.sectionId)) {
-        void audit(session, command, pending.fields, pending.originalText, "denied", {
+        void trackServerWork(audit(session, command, pending.fields, pending.originalText, "denied", {
           reason: "scope_at_confirm",
           channel: inbound.channel,
-        });
+        }));
         return {
           handled: true,
           audience: "erp_command_denied",
@@ -3183,23 +3184,23 @@ async function runConfirmedWrite(
       dueAt: r.dueAt || "",
     });
     if (!res.ok) {
-      void audit(session, command, pending.fields, pending.originalText, "error", {
+      void trackServerWork(audit(session, command, pending.fields, pending.originalText, "error", {
         reason: res.error,
         channel: inbound.channel,
-      });
+      }));
       return {
         handled: true,
         audience: "erp_command_error",
         text: `Couldn't post it: ${res.error}`,
       };
     }
-    void audit(session, command, pending.fields, pending.originalText, "ok", {
+    void trackServerWork(audit(session, command, pending.fields, pending.originalText, "ok", {
       channel: inbound.channel,
       postId: res.post.id,
       sectionId: res.post.sectionId,
       subjectId: res.post.subjectId,
       dueAt: res.post.dueAt || "",
-    });
+    }));
     const label = (r.sectionLabel || "").replace(" · ", " ");
     return {
       handled: true,
@@ -3242,14 +3243,14 @@ async function runConfirmedWrite(
       expiresInDays: 7,
     });
     if (!res.ok) {
-      void audit(session, command, pending.fields, pending.originalText, "error", {
+      void trackServerWork(audit(session, command, pending.fields, pending.originalText, "error", {
         reason: res.error,
         channel: inbound.channel,
         studentId: r.studentId,
-      });
+      }));
       return { handled: true, audience: "erp_command_error", text: `Couldn't raise the link: ${res.error}` };
     }
-    void audit(session, command, pending.fields, pending.originalText, "ok", {
+    void trackServerWork(audit(session, command, pending.fields, pending.originalText, "ok", {
       channel: inbound.channel,
       studentId: r.studentId,
       linkId: res.link.id,
@@ -3257,7 +3258,7 @@ async function runConfirmedWrite(
       amountPaise: res.link.amountPaise,
       gateway: res.gatewayMode,
       whatsappSent: res.whatsapp.sent,
-    });
+    }));
     const bits = [`Link ${res.link.code} raised for ${formatInr(res.link.amountPaise)}`];
     bits.push(
       res.whatsapp.sent
@@ -3312,13 +3313,13 @@ async function runConfirmedWrite(
       ...st,
       feeRemindedOn: { ...(st.feeRemindedOn ?? {}), ...res.remindedOn },
     });
-    void audit(session, command, pending.fields, pending.originalText, "ok", {
+    void trackServerWork(audit(session, command, pending.fields, pending.originalText, "ok", {
       channel: inbound.channel,
       title: r.title,
       template: r.templateMetaName,
       sent: res.sent,
       failed: res.failed,
-    });
+    }));
     const bits = [`Reminded ${res.sent} famil${res.sent === 1 ? "y" : "ies"} in ${r.title || "that class"}`];
     if (res.failed) bits.push(`${res.failed} failed`);
     return {
@@ -3330,10 +3331,10 @@ async function runConfirmedWrite(
   if (command.id === "bus_delay") {
     const roleCodes = resolveSessionRoles(rbac, session, masters).map((x) => x.code);
     if (!isOfficeLike(roleCodes) && !roleCodes.includes("transport")) {
-      void audit(session, command, pending.fields, pending.originalText, "denied", {
+      void trackServerWork(audit(session, command, pending.fields, pending.originalText, "denied", {
         reason: "scope_at_confirm",
         channel: inbound.channel,
-      });
+      }));
       return {
         handled: true,
         audience: "erp_command_denied",
@@ -3377,7 +3378,7 @@ async function runConfirmedWrite(
         busDelayedAt: { ...(st.busDelayedAt ?? {}), [r.routeId]: sentAt },
       });
     }
-    void audit(session, command, pending.fields, pending.originalText, "ok", {
+    void trackServerWork(audit(session, command, pending.fields, pending.originalText, "ok", {
       channel: inbound.channel,
       routeId: r.routeId,
       routeLabel: r.routeLabel,
@@ -3385,7 +3386,7 @@ async function runConfirmedWrite(
       template: r.templateMetaName,
       sent: res.sent,
       failed: res.failed,
-    });
+    }));
     const bits = [
       `Told ${res.sent} famil${res.sent === 1 ? "y" : "ies"} on ${r.routeLabel || "that route"} — ${minutes} minutes late`,
     ];
@@ -3410,10 +3411,10 @@ async function runConfirmedWrite(
         const mine = staffAllowedSections(inbound.staff, masters, session.academicYearCode, roleCodes);
         const st = loadSis().students.find((x) => x.id === r.studentId);
         if (st && !mine.some((x) => x.sectionId === st.sectionId)) {
-          void audit(session, command, pending.fields, pending.originalText, "denied", {
+          void trackServerWork(audit(session, command, pending.fields, pending.originalText, "denied", {
             reason: "scope_at_confirm",
             channel: inbound.channel,
-          });
+          }));
           return {
             handled: true,
             audience: "erp_command_denied",
@@ -3449,14 +3450,14 @@ async function runConfirmedWrite(
         : null,
     });
     if (!res.ok) {
-      void audit(session, command, pending.fields, pending.originalText, "error", {
+      void trackServerWork(audit(session, command, pending.fields, pending.originalText, "error", {
         reason: res.error,
         channel: inbound.channel,
         studentId: r.studentId,
-      });
+      }));
       return { handled: true, audience: "erp_command_error", text: `Couldn't book it: ${res.error}` };
     }
-    void audit(session, command, pending.fields, pending.originalText, "ok", {
+    void trackServerWork(audit(session, command, pending.fields, pending.originalText, "ok", {
       channel: inbound.channel,
       studentId: r.studentId,
       eventId: r.eventId,
@@ -3465,7 +3466,7 @@ async function runConfirmedWrite(
       persisted: res.persisted,
       pushSent: res.pushSent,
       whatsappSent: res.whatsapp.sent,
-    });
+    }));
     const bits = [
       `Booked · ${res.studentName} · ${res.event.name} ${res.slot.startAt} with ${res.slot.teacherName}`,
     ];
@@ -3498,19 +3499,19 @@ async function runConfirmedWrite(
       todayIso: istDateOf(),
     });
     if (!res.ok) {
-      void audit(session, command, pending.fields, pending.originalText, "error", {
+      void trackServerWork(audit(session, command, pending.fields, pending.originalText, "error", {
         reason: res.error,
         channel: inbound.channel,
-      });
+      }));
       return { handled: true, audience: "erp_command_error", text: `Couldn't record it: ${res.error}` };
     }
-    void audit(session, command, pending.fields, pending.originalText, "ok", {
+    void trackServerWork(audit(session, command, pending.fields, pending.originalText, "ok", {
       channel: inbound.channel,
       requestId: r.leaveRequestId,
       decision: res.request.status,
       appliedDates: res.appliedDates.length,
       pendingDates: res.pendingDates.length,
-    });
+    }));
     const bits = [`${res.request.status === "approved" ? "Approved" : "Rejected"} · ${res.studentName}`];
     if (res.appliedDates.length) bits.push(`marked on ${res.appliedDates.length} day${res.appliedDates.length === 1 ? "" : "s"}`);
     if (res.pendingDates.length) bits.push(`${res.pendingDates.length} day${res.pendingDates.length === 1 ? "" : "s"} still to be marked`);
@@ -3543,18 +3544,18 @@ async function runConfirmedWrite(
       source: "office",
     });
     if (!res.ok) {
-      void audit(session, command, pending.fields, pending.originalText, "error", {
+      void trackServerWork(audit(session, command, pending.fields, pending.originalText, "error", {
         reason: res.error,
         channel: inbound.channel,
-      });
+      }));
       return { handled: true, audience: "erp_command_error", text: `Couldn't file it: ${res.error}` };
     }
-    void audit(session, command, pending.fields, pending.originalText, "ok", {
+    void trackServerWork(audit(session, command, pending.fields, pending.originalText, "ok", {
       channel: inbound.channel,
       ticketId: res.ticket.id,
       studentId: r.studentId,
       category: r.category,
-    });
+    }));
     return {
       handled: true,
       audience: "erp_command_raise_complaint",
@@ -3564,10 +3565,10 @@ async function runConfirmedWrite(
   if (command.id === "staff_broadcast") {
     const roleCodes = resolveSessionRoles(rbac, session, masters).map((x) => x.code);
     if (!isOfficeLike(roleCodes)) {
-      void audit(session, command, pending.fields, pending.originalText, "denied", {
+      void trackServerWork(audit(session, command, pending.fields, pending.originalText, "denied", {
         reason: "scope_at_confirm",
         channel: inbound.channel,
-      });
+      }));
       return {
         handled: true,
         audience: "erp_command_denied",
@@ -3616,7 +3617,7 @@ async function runConfirmedWrite(
         originUrl: publicOrigin(),
       });
     }
-    void audit(session, command, pending.fields, pending.originalText, "ok", {
+    void trackServerWork(audit(session, command, pending.fields, pending.originalText, "ok", {
       channel: inbound.channel,
       staffCount: staffIds.length,
       pushSent: push.sent,
@@ -3624,7 +3625,7 @@ async function runConfirmedWrite(
       waFailed: wa.failed,
       template: r.templateMetaName || "(none)",
       message: r.message,
-    });
+    }));
     const bits = [`${push.sent} phone${push.sent === 1 ? "" : "s"} notified`];
     if (r.templateMetaName) {
       bits.push(`WhatsApp to ${wa.sent} of ${wa.recipientCount}`);
@@ -3642,10 +3643,10 @@ async function runConfirmedWrite(
     const roleCodes = resolveSessionRoles(rbac, session, masters).map((x) => x.code);
     const mine = staffAllowedSections(inbound.staff, masters, session.academicYearCode, roleCodes);
     if (!isOfficeLike(roleCodes) && !mine.some((x) => x.sectionId === r.sectionId)) {
-      void audit(session, command, pending.fields, pending.originalText, "denied", {
+      void trackServerWork(audit(session, command, pending.fields, pending.originalText, "denied", {
         reason: "scope_at_confirm",
         channel: inbound.channel,
-      });
+      }));
       return {
         handled: true,
         audience: "erp_command_denied",
@@ -3698,7 +3699,7 @@ async function runConfirmedWrite(
       res.sent += one.sent;
       res.failed += one.failed;
     }
-    void audit(session, command, pending.fields, pending.originalText, "ok", {
+    void trackServerWork(audit(session, command, pending.fields, pending.originalText, "ok", {
       channel: inbound.channel,
       sectionId: r.sectionId,
       template: r.templateMetaName,
@@ -3707,7 +3708,7 @@ async function runConfirmedWrite(
       sent: res.sent,
       failed: res.failed,
       message: r.message,
-    });
+    }));
     const label = (r.sectionLabel || "").replace(" · ", " ");
     const bits = [`Sent to ${res.sent} of ${res.recipientCount} families in ${label}`];
     if (res.failed) bits.push(`${res.failed} failed`);
@@ -3723,10 +3724,10 @@ async function runConfirmedWrite(
       const roleCodes = resolveSessionRoles(rbac, session, masters).map((x) => x.code);
       const mine = staffAllowedSections(inbound.staff, masters, session.academicYearCode, roleCodes);
       if (!isOfficeLike(roleCodes) && !mine.some((x) => x.sectionId === r.sectionId)) {
-        void audit(session, command, pending.fields, pending.originalText, "denied", {
+        void trackServerWork(audit(session, command, pending.fields, pending.originalText, "denied", {
           reason: "scope_at_confirm",
           channel: inbound.channel,
-        });
+        }));
         return {
           handled: true,
           audience: "erp_command_denied",
@@ -3758,15 +3759,15 @@ async function runConfirmedWrite(
       remark: r.correcting ? "Corrected via ERP command" : "Marked via ERP command",
     });
     if (!res.ok) {
-      void audit(session, command, pending.fields, pending.originalText, "error", {
+      void trackServerWork(audit(session, command, pending.fields, pending.originalText, "error", {
         reason: res.error,
         channel: inbound.channel,
-      });
+      }));
       return { handled: true, audience: "erp_command_error", text: `Couldn't mark it: ${res.error}` };
     }
     const absent = marks.filter((m) => m.status === "A").length;
     const present = marks.filter((m) => m.status === "P").length;
-    void audit(session, command, pending.fields, pending.originalText, "ok", {
+    void trackServerWork(audit(session, command, pending.fields, pending.originalText, "ok", {
       channel: inbound.channel,
       registerId: res.register.id,
       sectionId: r.sectionId,
@@ -3774,7 +3775,7 @@ async function runConfirmedWrite(
       present,
       absent,
       correcting: !!r.correcting,
-    });
+    }));
     return {
       handled: true,
       audience: "erp_command_mark_attendance",
@@ -3834,7 +3835,7 @@ async function runReportCommand(
   }
   const kind = reportKindDef(def.id);
   if (!hasPermission(session, masters, kind.module, kind.action, rbac)) {
-    void audit(session, command_report(), parsed.fields, text, "denied", { reason: "rbac", channel: inbound.channel, report: kind.id });
+    void trackServerWork(audit(session, command_report(), parsed.fields, text, "denied", { reason: "rbac", channel: inbound.channel, report: kind.id }));
     return { handled: true, audience: "erp_command_denied", text: `Your role doesn't include *${kind.module} · ${kind.action}* in the ERP, so I can't send the ${kind.title.toLowerCase()} report.` };
   }
 
@@ -3857,7 +3858,7 @@ async function runReportCommand(
       const mineIds = new Set(mine.map((s) => s.sectionId));
       const allowed = sections.filter((s) => mineIds.has(s.sectionId));
       if (!allowed.length) {
-        void audit(session, command_report(), parsed.fields, text, "denied", { reason: "scope", channel: inbound.channel, report: kind.id });
+        void trackServerWork(audit(session, command_report(), parsed.fields, text, "denied", { reason: "scope", channel: inbound.channel, report: kind.id }));
         return { handled: true, audience: "erp_command_denied", text: `${scopeLabel} isn't one of your sections, so I can't send that report. Ask the office.` };
       }
       sections = allowed;
@@ -3891,7 +3892,7 @@ async function runReportCommand(
     });
     bytes = await renderTableReportPdf(table, { requestedBy: inbound.staff?.fullName || inbound.displayName, channel: inbound.channel, atIso }, masters);
   } catch (e) {
-    void audit(session, command_report(), parsed.fields, text, "error", { channel: inbound.channel, report: kind.id, reason: e instanceof Error ? e.message : String(e) });
+    void trackServerWork(audit(session, command_report(), parsed.fields, text, "error", { channel: inbound.channel, report: kind.id, reason: e instanceof Error ? e.message : String(e) }));
     return { handled: true, audience, text: `Sorry — the ${kind.title.toLowerCase()} report could not be built just now. Try again in a minute or open the ERP.` };
   }
 
@@ -3900,7 +3901,7 @@ async function runReportCommand(
     const { sendWhatsAppDocument } = await import("@/lib/waSend");
     const toMobile = /^\d{10}$/.test(inbound.actorKey) ? inbound.actorKey : (inbound.staff?.mobile || "");
     const sent = await sendWhatsAppDocument({ toMobile, bytes, filename: table.filename, caption });
-    void audit(session, command_report(), parsed.fields, text, sent.ok ? "ok" : "error", { channel: "whatsapp", report: kind.id, rows: table.rows.length, scope: scopeLabel, sent: sent.ok, error: sent.error });
+    void trackServerWork(audit(session, command_report(), parsed.fields, text, sent.ok ? "ok" : "error", { channel: "whatsapp", report: kind.id, rows: table.rows.length, scope: scopeLabel, sent: sent.ok, error: sent.error }));
     if (!sent.ok) {
       const stored = await storeReportPdf(bytes, table.filename, atIso);
       return {
@@ -3916,7 +3917,7 @@ async function runReportCommand(
   }
 
   const stored = await storeReportPdf(bytes, table.filename, atIso);
-  void audit(session, command_report(), parsed.fields, text, stored.ok ? "ok" : "error", { channel: "app", report: kind.id, rows: table.rows.length, scope: scopeLabel, stored: stored.ok, error: stored.ok ? undefined : stored.error });
+  void trackServerWork(audit(session, command_report(), parsed.fields, text, stored.ok ? "ok" : "error", { channel: "app", report: kind.id, rows: table.rows.length, scope: scopeLabel, stored: stored.ok, error: stored.ok ? undefined : stored.error }));
   if (!stored.ok) {
     return { handled: true, audience, text: `The ${kind.title.toLowerCase()} report was built (${table.summary}) but could not be stored: ${stored.error}.` };
   }
@@ -3994,7 +3995,7 @@ async function tryAnswerQuestion(
       },
     });
   } catch (e) {
-    void audit(session, ASK_COMMAND, {}, text, "error", { channel: inbound.channel, reason: e instanceof Error ? e.message : String(e) });
+    void trackServerWork(audit(session, ASK_COMMAND, {}, text, "error", { channel: inbound.channel, reason: e instanceof Error ? e.message : String(e) }));
     return null;
   }
   if (!outcome) return null;
@@ -4004,13 +4005,13 @@ async function tryAnswerQuestion(
     ...fresh,
     lastAsk: { ...(fresh.lastAsk ?? {}), [actor]: { at: new Date(nowMs).toISOString(), question: text.slice(0, 300), answer: outcome.text.slice(0, 600) } },
   });
-  void audit(session, ASK_COMMAND, {}, text, "ok", {
+  void trackServerWork(audit(session, ASK_COMMAND, {}, text, "ok", {
     channel: inbound.channel,
     tools: outcome.toolsUsed,
     planSource: outcome.planSource,
     answerSource: outcome.answerSource,
     generationIds: outcome.generationIds,
-  });
+  }));
   return { handled: true, audience: "erp_ask", text: outcome.text };
 }
 

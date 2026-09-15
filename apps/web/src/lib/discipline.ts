@@ -17,6 +17,7 @@ import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { householdOf, householdWhatsApp, type SisState } from "@/lib/sis";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type DisciplineCategory =
   | "uniform"
@@ -172,7 +173,7 @@ export function saveDiscipline(state: DisciplineState): DisciplineState {
   const next = normalizeDisciplineState(state);
   if (typeof window !== "undefined") {
     writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
-    void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("discipline", next));
+    void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("discipline", next)));
     window.dispatchEvent(new CustomEvent("bhb-discipline"));
   }
   return next;

@@ -13,6 +13,7 @@
 
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type IdCardKind = "student" | "staff";
 
@@ -233,7 +234,7 @@ export function saveIdCardTemplateState(state: IdCardTemplateState): IdCardTempl
   const next = normalizeIdCardTemplateState(state);
   if (typeof window !== "undefined") {
     writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
-    void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("id_card_template", next));
+    void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("id_card_template", next)));
     window.dispatchEvent(new CustomEvent("bhb-id-card-template"));
   }
   return next;

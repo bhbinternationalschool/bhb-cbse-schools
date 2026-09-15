@@ -17,6 +17,7 @@ import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { householdOf, householdWhatsApp, type SisState } from "@/lib/sis";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type HealthVisitReason = "injury" | "illness" | "checkup" | "medication" | "other";
 
@@ -209,7 +210,7 @@ export function saveHealth(state: HealthState): HealthState {
   const next = normalizeHealthState(state);
   if (typeof window !== "undefined") {
     writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
-    void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("health", next));
+    void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("health", next)));
     window.dispatchEvent(new CustomEvent("bhb-health"));
   }
   return next;

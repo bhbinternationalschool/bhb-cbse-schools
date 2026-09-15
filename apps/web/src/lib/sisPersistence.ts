@@ -25,6 +25,7 @@ import {
   sisNormalizedSyncEnabled,
 } from "@/lib/sisNormalizedClient";
 import { dedupeHydration, isDeskHydrated, markDeskHydrated, resetDeskHydrated } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "sis";
 
@@ -234,7 +235,7 @@ export async function wipeRemoteSisRoster(): Promise<{
 export function scheduleSisSync(state: SisState) {
   if (!sisRemoteEnabled()) return;
   if (typeof window === "undefined") {
-    void pushSisToDb(state);
+    void trackServerWork(pushSisToDb(state));
     return;
   }
   scheduleSisDeskSync(state);
@@ -336,7 +337,7 @@ async function hydrateSisOnce(): Promise<boolean> {
   // echo is what was timing out every ordinary read. Local edits reach the
   // DB only through an explicit saveSis() from the UI.
   if (next.students.length > 0 && !readFromDb) {
-    void pushSisState(next);
+    void trackServerWork(pushSisState(next));
   }
 
   if (changed) {

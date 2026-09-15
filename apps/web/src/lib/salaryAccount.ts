@@ -8,6 +8,7 @@ import type { PayrollRun, PayrollStaffLine } from "@/lib/payroll";
 
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 export type SalaryAccountEntryType =
   | "net_payable"
   | "june_hold"
@@ -62,7 +63,7 @@ export function saveSalaryAccount(state: SalaryAccountState) {
   if (!assertModulePermission("payroll", "edit", "saveSalaryAccount")) return;
   if (typeof window === "undefined") return;
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
-  void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("salary_account", state));
+  void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("salary_account", state)));
 }
 
 /** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */

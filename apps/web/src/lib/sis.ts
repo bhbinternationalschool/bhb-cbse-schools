@@ -39,6 +39,7 @@ import {
   type CurriculumRequest,
   type StudentCurriculum,
 } from "@/lib/studentCurriculum";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type { CurriculumRequest, StudentCurriculum } from "@/lib/studentCurriculum";
 
@@ -1518,11 +1519,11 @@ export function loadSis(): SisState {
       if (slim !== cachedRaw) writeCacheOrInvalidate(STORAGE_KEY, slim);
       syncSisIntoMasters(next, masters);
       if (next.students.length > 0) {
-        void import("@/lib/feeDiscountImportHydrate").then(
+        void trackServerWork(import("@/lib/feeDiscountImportHydrate").then(
           ({ mergeAndPersistFeeDiscountSeed }) => {
             mergeAndPersistFeeDiscountSeed(masters, next);
           },
-        );
+        ));
       }
       return next;
     }
@@ -1564,9 +1565,9 @@ export function saveSis(state: SisState) {
 
   if (typeof window === "undefined") {
     setMirrorSlice("sis", state);
-    void import("@/lib/sisPersistence").then(({ scheduleSisSync }) => {
+    void trackServerWork(import("@/lib/sisPersistence").then(({ scheduleSisSync }) => {
       scheduleSisSync(state);
-    });
+    }));
     return;
   }
   memorySisState = state;
@@ -1576,12 +1577,12 @@ export function saveSis(state: SisState) {
     scheduleClientSchoolMirrorSync({ sis: state });
   }
   // Dual-mode: push full roster + curriculum when Supabase is configured
-  void import("@/lib/sisPersistence").then(({ scheduleSisSync }) => {
+  void trackServerWork(import("@/lib/sisPersistence").then(({ scheduleSisSync }) => {
     scheduleSisSync(state);
-  });
-  void import("@/lib/curriculumPersistence").then(({ scheduleCurriculumSync }) => {
+  }));
+  void trackServerWork(import("@/lib/curriculumPersistence").then(({ scheduleCurriculumSync }) => {
     scheduleCurriculumSync(state);
-  });
+  }));
   // A same-tab write never fires the native "storage" event (that only
   // fires in OTHER tabs) — dashboards that relied on it alone (e.g.
   // SchoolHomeDashboard) stayed stale after a merge/edit until a full

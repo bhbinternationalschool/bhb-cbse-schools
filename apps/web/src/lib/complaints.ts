@@ -12,6 +12,7 @@
 
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type ComplaintCategory =
   | "academic"
@@ -155,7 +156,7 @@ export function saveComplaints(state: ComplaintState): void {
   if (typeof window === "undefined") return;
   try {
     writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(normalizeComplaintState(state)));
-    void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("complaints", normalizeComplaintState(state)));
+    void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("complaints", normalizeComplaintState(state))));
     window.dispatchEvent(new CustomEvent("bhb-complaints"));
   } catch (e) {
     console.warn("[complaints] localStorage quota exceeded", e);

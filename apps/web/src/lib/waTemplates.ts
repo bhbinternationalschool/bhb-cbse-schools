@@ -3,6 +3,7 @@
  * Store: localStorage `bhb_wa_templates_v1` + Supabase blob `wa_templates_state`.
  */
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 const STORAGE_KEY = "bhb_wa_templates_v1";
 
@@ -1700,9 +1701,9 @@ export function saveWaTemplates(state: WaTemplatesState): void {
   const next = normalizeWaTemplatesState(state);
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
   window.dispatchEvent(new CustomEvent("bhb-wa-templates"));
-  void import("@/lib/waTemplatesPersistence").then(({ scheduleWaTemplatesSync }) => {
+  void trackServerWork(import("@/lib/waTemplatesPersistence").then(({ scheduleWaTemplatesSync }) => {
     scheduleWaTemplatesSync(next);
-  });
+  }));
 }
 
 export function appendWaTemplatesAudit(

@@ -1,5 +1,6 @@
 /** Yield to the browser so paint and input stay responsive during long work. */
 
+import { trackServerWork } from "@/lib/serverWork";
 export function yieldToMain(timeoutMs = 50): Promise<void> {
   if (typeof window === "undefined") return Promise.resolve();
 
@@ -24,7 +25,7 @@ export function runWhenIdle(
   if (typeof window === "undefined") return;
 
   const run = () => {
-    void fn();
+    void trackServerWork(fn());
   };
 
   if ("requestIdleCallback" in window) {

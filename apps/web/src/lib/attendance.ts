@@ -20,6 +20,7 @@ import {
 import { TENANT } from "@/lib/types";
 import { openWaMe, waMeUrl } from "@/lib/waMe";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type AttendanceStatus = "P" | "A" | "L" | "HD" | "LE";
 
@@ -290,11 +291,11 @@ export function saveAttendance(state: AttendanceState) {
   const next = normalizeAttendanceState(state);
   if (typeof window === "undefined") {
     writeAttendanceLocalRaw(next);
-    void import("@/lib/attendancePersistence").then(
+    void trackServerWork(import("@/lib/attendancePersistence").then(
       ({ scheduleAttendanceSync }) => {
         scheduleAttendanceSync(next);
       },
-    );
+    ));
     return;
   }
   try {
@@ -302,11 +303,11 @@ export function saveAttendance(state: AttendanceState) {
   } catch (e) {
     console.warn("[attendance] localStorage quota exceeded — relying on server DB sync", e);
   }
-  void import("@/lib/attendancePersistence").then(
+  void trackServerWork(import("@/lib/attendancePersistence").then(
     ({ scheduleAttendanceSync }) => {
       scheduleAttendanceSync(next);
     },
-  );
+  ));
 }
 
 export function writeAttendanceLocalRaw(state: AttendanceState) {
@@ -1013,11 +1014,11 @@ export function resolveAttendanceException(input: {
   };
   const nextState = { ...state, exceptions: next };
   writeAttendanceLocalRaw(nextState);
-  void import("@/lib/attendancePersistence").then(
+  void trackServerWork(import("@/lib/attendancePersistence").then(
     ({ scheduleAttendanceSync }) => {
       scheduleAttendanceSync(nextState);
     },
-  );
+  ));
   return { ok: true };
 }
 
@@ -1076,11 +1077,11 @@ export function fileParentAttendanceDispute(input: {
     saveAttendance(next);
   } else {
     writeAttendanceLocalRaw(next);
-    void import("@/lib/attendancePersistence").then(
+    void trackServerWork(import("@/lib/attendancePersistence").then(
       ({ scheduleAttendanceSync }) => {
         scheduleAttendanceSync(next);
       },
-    );
+    ));
   }
   return { ok: true, exception };
 }

@@ -45,6 +45,7 @@ import {
   type SalaryHead,
   type SalarySetupState,
 } from "@/lib/salarySetup";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type PayrollRunStatus =
   | "draft"
@@ -246,9 +247,9 @@ export function savePayroll(state: PayrollState) {
     STORAGE_KEY,
     JSON.stringify({ ...state, version: 2 }),
   );
-  void import("@/lib/payrollPersistence").then(({ schedulePayrollSync }) => {
+  void trackServerWork(import("@/lib/payrollPersistence").then(({ schedulePayrollSync }) => {
     schedulePayrollSync(state);
-  });
+  }));
 }
 
 export function writePayrollLocalRaw(state: PayrollState) {

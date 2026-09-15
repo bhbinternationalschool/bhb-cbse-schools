@@ -31,6 +31,7 @@ import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { guardMastersOverwrite } from "@/lib/mastersWriteGuard";
 import { resolveAcademicYear, fallbackAcademicYear } from "@/lib/academicYearResolve";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type Campus = {
   id: string;
@@ -2059,9 +2060,9 @@ async function persistMastersClient(
 ): Promise<MastersSaveOutcome> {
   if (typeof window === "undefined") {
     setMirrorSlice("masters", state);
-    void import("@/lib/staffPersistence").then(({ scheduleStaffSync }) => {
+    void trackServerWork(import("@/lib/staffPersistence").then(({ scheduleStaffSync }) => {
       scheduleStaffSync(state);
-    });
+    }));
     return { ok: true };
   }
   // Same protection as writeMastersLocalRaw: a save that would leave the
@@ -2103,14 +2104,14 @@ async function persistMastersClient(
     console.warn("[masters] localStorage quota exceeded — using server DB persistence", e);
   }
   writeMastersMirrorMeta(new Date().toISOString());
-  void import("@/lib/staffPersistence").then(
+  void trackServerWork(import("@/lib/staffPersistence").then(
     ({ scheduleStaffSync, stripStaffFromMastersForBlob }) => {
       scheduleClientSchoolMirrorSync({
         masters: stripStaffFromMastersForBlob(state),
       });
       scheduleStaffSync(state);
     },
-  );
+  ));
   // Deliberately does NOT touch the desk meta. `bhb_masters_desk_db_meta_v1`
   // holds the desk revision this client last saw, and it is sent back as
   // `baseUpdatedAt` for optimistic locking (mastersNormalizedClient.ts).

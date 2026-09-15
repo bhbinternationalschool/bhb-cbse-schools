@@ -6,6 +6,7 @@ import { assertModulePermission } from "@/lib/rbacGuard";
 import { formatInr } from "@/lib/masters";
 import { TENANT } from "@/lib/types";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 const STORAGE_KEY = "bhb_fee_recovery_tasks_v1";
 
@@ -81,9 +82,9 @@ export function saveFeeRecoveryTasks(state: FeeRecoveryTasksState): void {
   if (!assertModulePermission("fees", "edit", "saveFeeRecoveryTasks")) return;
   if (typeof window === "undefined") return;
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
-  void import("@/lib/feeRecoveryTasksPersistence").then((m) => {
+  void trackServerWork(import("@/lib/feeRecoveryTasksPersistence").then((m) => {
     m.scheduleFeeRecoveryTasksSync(state);
-  });
+  }));
 }
 
 export {

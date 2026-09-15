@@ -3,6 +3,7 @@
  */
 
 import { TENANT } from "@/lib/types";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type ReportColumn = {
   key: string;
@@ -329,8 +330,8 @@ export function exportFilterReport(
   if (!input.columns.length) {
     return { ok: false, error: "Nothing to export" };
   }
-  if (format === "excel") void downloadXlsxReport(input);
-  else void downloadPdfReport(input);
+  if (format === "excel") void trackServerWork(downloadXlsxReport(input));
+  else void trackServerWork(downloadPdfReport(input));
   return { ok: true };
 }
 

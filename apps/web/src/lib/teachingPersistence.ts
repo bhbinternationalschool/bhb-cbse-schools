@@ -21,6 +21,7 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "teaching";
 
@@ -46,7 +47,7 @@ export function resetTeachingPersistenceCache() {
 
 export function scheduleTeachingSync(state: TeachingState) {
   if (typeof window === "undefined") {
-    void pushTeachingRemoteServer(state);
+    void trackServerWork(pushTeachingRemoteServer(state));
     return;
   }
   blob.scheduleSync(state);

@@ -37,6 +37,7 @@ import {
 import { ensureRteEwsTagIds } from "@/lib/studentTags";
 import { TENANT } from "@/lib/types";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 const STORAGE_KEY = "bhb_rte_ews_v1";
 
@@ -247,9 +248,9 @@ export function saveRte(state: RteState): void {
 
   if (typeof window === "undefined") return;
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
-  void import("@/lib/rtePersistence").then(({ scheduleRteSync }) => {
+  void trackServerWork(import("@/lib/rtePersistence").then(({ scheduleRteSync }) => {
     scheduleRteSync(state);
-  });
+  }));
 
 }
 
@@ -1585,7 +1586,7 @@ export function removeRteFromStudent(input: {
       !(g.studentId === st.id && g.id.startsWith(RTE_WAIVER_GRANT_PREFIX)),
   );
   if (kept.length !== existing.length) {
-    void saveMasters({ ...masters, concessionGrants: kept });
+    void trackServerWork(saveMasters({ ...masters, concessionGrants: kept }));
   }
   return { ok: true };
 }

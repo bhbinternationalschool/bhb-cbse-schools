@@ -9,6 +9,7 @@ import {
 import { DEFAULT_AY } from "@/lib/masters";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type LeaveTypeCode = string;
 
@@ -534,9 +535,9 @@ function persistStaffHr(state: StaffHrState) {
     return;
   }
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(normalizeState(state)));
-  void import("@/lib/staffHrPersistence").then(({ scheduleStaffHrSync }) => {
+  void trackServerWork(import("@/lib/staffHrPersistence").then(({ scheduleStaffHrSync }) => {
     scheduleStaffHrSync(state);
-  });
+  }));
 }
 
 export function saveStaffHr(state: StaffHrState) {

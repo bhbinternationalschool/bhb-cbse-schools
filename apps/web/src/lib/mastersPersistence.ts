@@ -19,6 +19,7 @@ import { deskSkipMirrorBlobSliceClient } from "@/lib/deskCutover";
 import { dedupeHydration, isDeskHydrated, markDeskHydrated, resetDeskHydrated } from "@/lib/deskHydrateGuard";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { guardMastersOverwrite } from "@/lib/mastersWriteGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "masters";
 
@@ -71,7 +72,7 @@ export function writeMastersLocalRaw(state: MastersState): void {
 
 export function scheduleMastersSync(state: MastersState) {
   if (typeof window === "undefined") {
-    void pushMastersRemoteServer(state);
+    void trackServerWork(pushMastersRemoteServer(state));
     return;
   }
   scheduleMastersDeskSync(state);

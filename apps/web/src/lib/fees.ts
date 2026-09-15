@@ -88,6 +88,7 @@ import {
   recordAccountsPostingFailure,
   type AccountsPostingAction,
 } from "@/lib/accountsPostingFailures";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type DueKind =
   | "academic"
@@ -1024,7 +1025,7 @@ function notifyFeesUpdated() {
 function kickFeesIdbHydrate() {
   if (feesIdbHydrateStarted || typeof window === "undefined") return;
   feesIdbHydrateStarted = true;
-  void import("@/lib/feesLocalStore").then(async (idb) => {
+  void trackServerWork(import("@/lib/feesLocalStore").then(async (idb) => {
     if (!idb.feesIdbAvailable()) return;
     const remote = await idb.readFeesFromIdb();
     if (!remote) return;
@@ -1035,7 +1036,7 @@ function kickFeesIdbHydrate() {
       feesWorkingCopy = next;
       notifyFeesUpdated();
     }
-  });
+  }));
 }
 
 /**
@@ -1069,7 +1070,7 @@ function persistFeesClient(state: FeesState, opts?: { sync?: boolean }) {
   feesWorkingCopy = state;
   const compact = compactFeesForStorage(state);
 
-  void import("@/lib/feesLocalStore").then(async (idb) => {
+  void trackServerWork(import("@/lib/feesLocalStore").then(async (idb) => {
     if (idb.feesIdbAvailable()) {
       try {
         await idb.writeFeesToIdb(compact);
@@ -1077,7 +1078,7 @@ function persistFeesClient(state: FeesState, opts?: { sync?: boolean }) {
         console.warn("[fees] IndexedDB write failed", e);
       }
     }
-  });
+  }));
 
   try {
     writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(compact));
@@ -1091,16 +1092,16 @@ function persistFeesClient(state: FeesState, opts?: { sync?: boolean }) {
     } catch {
       /* ignore */
     }
-    void import("@/lib/feesLocalStore").then((idb) => {
+    void trackServerWork(import("@/lib/feesLocalStore").then((idb) => {
       idb.markFeesPreferIdb();
-    });
+    }));
   }
 
   if (sync) {
     scheduleClientSchoolMirrorSync({ fees: state });
-    void import("@/lib/feesPersistence").then(({ scheduleFeesSync }) => {
+    void trackServerWork(import("@/lib/feesPersistence").then(({ scheduleFeesSync }) => {
       scheduleFeesSync(state);
-    });
+    }));
   }
   notifyFeesUpdated();
 }
@@ -1118,13 +1119,13 @@ export function loadFees(): FeesState {
 
   try {
     if (!feesIdbHydrateStarted) {
-      void import("@/lib/feesLocalStore").then(async (idb) => {
+      void trackServerWork(import("@/lib/feesLocalStore").then(async (idb) => {
         if (idb.feesPreferIdb()) {
           const hydrated = await hydrateFeesStore();
           if (hydrated) return;
         }
         kickFeesIdbHydrate();
-      });
+      }));
     }
 
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -3262,7 +3263,7 @@ function runAccountsPosting(
     m: typeof import("@/lib/accountsPostings"),
   ) => { ok: true } | { ok: false; error: string },
 ): void {
-  void import("@/lib/accountsPostings")
+  void trackServerWork(import("@/lib/accountsPostings")
     .then((m) => {
       const res = post(m);
       if (!res.ok) {
@@ -3274,7 +3275,7 @@ function runAccountsPosting(
         ...spec,
         reason: e instanceof Error ? e.message : String(e),
       });
-    });
+    }));
 }
 
 export function collectPayment(input: {
@@ -3718,11 +3719,11 @@ export function voidVoucher(voucherId: string): boolean {
   // An R-series receipt is an admissions registration payment — reopen it in
   // the CRM, or the lead keeps saying "paid" for money the void returned.
   // (No-op for ordinary fee receipts: nothing links to this voucher id.)
-  void import("@/lib/admissions")
+  void trackServerWork(import("@/lib/admissions")
     .then(({ revertRegistrationPaymentForVoidedReceipt }) => {
       revertRegistrationPaymentForVoidedReceipt(voucher.id);
     })
-    .catch(() => {});
+    .catch(() => {}));
 
   // Future-month grants born from this receipt's counter discount die with
   // it — a voided receipt must not leave its concession running in Masters.
@@ -3730,12 +3731,12 @@ export function voidVoucher(voucherId: string): boolean {
 
   // So do the counter waivers it carried: otherwise the discount outlives
   // the receipt and each retry stacks another waiver on the same line.
-  void import("@/lib/feeAdjustments").then(({ cancelAdjustmentsForVoucher }) => {
+  void trackServerWork(import("@/lib/feeAdjustments").then(({ cancelAdjustmentsForVoucher }) => {
     cancelAdjustmentsForVoucher({
       voucherId: voucher.id,
       receiptNo: voucher.receiptNo,
     });
-  });
+  }));
   return true;
 }
 
@@ -3760,7 +3761,7 @@ function revokeGrantsFromVoidedReceipt(voucher: CollectionVoucher): void {
     };
   });
   if (changed) {
-    void saveMasters({ ...masters, concessionGrants: next });
+    void trackServerWork(saveMasters({ ...masters, concessionGrants: next }));
   }
 }
 
@@ -3940,7 +3941,7 @@ export function markWhatsAppReceiptSent(voucherId: string): boolean {
  */
 function notifyFeeReceiptPush(householdId: string, voucher: CollectionVoucher) {
   if (typeof window === "undefined") return;
-  void fetch("/api/push/notify", {
+  void trackServerWork(fetch("/api/push/notify", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -3949,7 +3950,7 @@ function notifyFeeReceiptPush(householdId: string, voucher: CollectionVoucher) {
       body: `Receipt ${voucher.receiptNo} — ${formatInr(voucher.totalPaise)} received. Thank you.`,
       url: "/parent?tab=fees",
     }),
-  }).catch(() => undefined);
+  }).catch(() => undefined));
 }
 
 /**
@@ -4044,7 +4045,7 @@ export async function deliverWhatsAppFeeReceipt(input: {
     typeof navigator !== "undefined" &&
     navigator.clipboard?.writeText
   ) {
-    void navigator.clipboard.writeText(receiptUrl).catch(() => undefined);
+    void trackServerWork(navigator.clipboard.writeText(receiptUrl).catch(() => undefined));
   }
 
   // Live WhatsApp Business API — message from school number (+91 94519 38805)

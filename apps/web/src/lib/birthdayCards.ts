@@ -19,6 +19,7 @@
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { householdLanguage, SCHOOL_DEFAULT_WA_LANGUAGE, type HouseholdLanguage, type HouseholdPrefsLike } from "@/lib/householdPrefs";
+import { trackServerWork } from "@/lib/serverWork";
 
 /* ─── Designs & formats ─────────────────────────────────────────────── */
 
@@ -309,7 +310,7 @@ export function saveBirthdayState(state: BirthdayState): BirthdayState {
   if (!assertModulePermission("students", "edit", "saveBirthdayState")) return next;
   if (typeof window !== "undefined") {
     writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
-    void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("birthday_settings", next));
+    void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("birthday_settings", next)));
     window.dispatchEvent(new CustomEvent("bhb-birthday-settings"));
   }
   return next;

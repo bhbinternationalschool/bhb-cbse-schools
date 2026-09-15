@@ -40,6 +40,7 @@ import {
   listInactiveStudentDues,
   listRteFeeRows,
 } from "@/lib/feeFinance";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type FeeReportCategory = "collection" | "dues" | "student" | "general";
 
@@ -1360,7 +1361,7 @@ export function runFeeReport(
           }),
         );
         if (format === "pdf") {
-          void downloadFeeAgreementPdf(docs, { masters }).catch(() => undefined);
+          void trackServerWork(downloadFeeAgreementPdf(docs, { masters }).catch(() => undefined));
         } else {
           downloadFeeAgreementExcel(docs);
         }

@@ -18,6 +18,7 @@ import { transportReadFromDbEnabled } from "@/lib/transportDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
 import { dedupeHydration, isDeskHydrated, markDeskHydrated, resetDeskHydrated } from "@/lib/deskHydrateGuard";
 import { resetTransportDeskAnswer } from "@/lib/transportHydrationState";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "transport";
 
@@ -39,7 +40,7 @@ export function resetTransportPersistenceCache() {
 
 export function scheduleTransportSync(state: TransportState) {
   if (typeof window === "undefined") {
-    void pushTransportRemoteServer(state);
+    void trackServerWork(pushTransportRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("transport")) blob.scheduleSync(state);

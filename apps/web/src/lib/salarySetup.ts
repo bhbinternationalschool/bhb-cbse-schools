@@ -11,6 +11,7 @@ import type {
 } from "@/lib/foundationMasters";
 import { DEFAULT_AY } from "@/lib/masters";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type SalaryHeadKind = "earning" | "deduction" | "employer";
 
@@ -430,9 +431,9 @@ export function saveSalarySetup(state: SalarySetupState) {
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   // Persist to Supabase (salary_setup_state). Until 2026-08-18 this stopped
   // at localStorage and the login-time cache wipe erased the whole setup.
-  void import("@/lib/salarySetupPersistence").then(({ scheduleSalarySetupSync }) => {
+  void trackServerWork(import("@/lib/salarySetupPersistence").then(({ scheduleSalarySetupSync }) => {
     scheduleSalarySetupSync(state);
-  });
+  }));
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("bhb-salary-setup-updated"));
   }

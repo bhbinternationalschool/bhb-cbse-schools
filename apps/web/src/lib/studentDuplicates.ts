@@ -10,6 +10,7 @@
 import { saveSis, type SisState, type SisStudent } from "@/lib/sis";
 import { recordSisDeletion, recordSisMerge } from "@/lib/sisNormalizedClient";
 import { normalizeSessionCode } from "@/lib/studentImport";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type DuplicateReason =
   | "admissionNo"
@@ -348,9 +349,9 @@ export function mergeStudents(
   // deletes the dropped rows in one transaction (sis_merge_students).
   recordSisMerge({ keepId, dropIds: [...dropSet] });
   saveSis(next);
-  void import("@/lib/sisPersistence").then(({ pushSisState, flushSisSync }) => {
+  void trackServerWork(import("@/lib/sisPersistence").then(({ pushSisState, flushSisSync }) => {
     pushSisState(next).then(() => flushSisSync()).catch(console.error);
-  });
+  }));
   return { ok: true, state: next, merged: drops.length };
 }
 
@@ -378,8 +379,8 @@ export function removeDuplicateStudents(
       .map((h) => h.id),
   });
   saveSis(next);
-  void import("@/lib/sisPersistence").then(({ pushSisState, flushSisSync }) => {
+  void trackServerWork(import("@/lib/sisPersistence").then(({ pushSisState, flushSisSync }) => {
     pushSisState(next).then(() => flushSisSync()).catch(console.error);
-  });
+  }));
   return next;
 }

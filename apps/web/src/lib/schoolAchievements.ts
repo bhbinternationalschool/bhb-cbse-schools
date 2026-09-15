@@ -10,6 +10,7 @@
 
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type AchievementKind =
   | "board_result"
@@ -152,7 +153,7 @@ export function saveSchoolAchievements(state: SchoolAchievementsState): SchoolAc
   if (!assertModulePermission("admissions", "edit", "saveSchoolAchievements")) return next;
   if (typeof window !== "undefined") {
     writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
-    void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("school_achievements", next));
+    void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("school_achievements", next)));
     window.dispatchEvent(new CustomEvent("bhb-school-achievements"));
   }
   return next;

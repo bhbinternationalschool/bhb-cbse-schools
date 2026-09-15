@@ -28,6 +28,7 @@ import {
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "admissions";
 
@@ -114,7 +115,7 @@ export function scheduleAdmissionsSync(state: AdmissionsState) {
   const normalized = normalizeAdmissionsState(state);
 
   if (typeof window === "undefined") {
-    void pushAdmissionsRemoteServer(normalized);
+    void trackServerWork(pushAdmissionsRemoteServer(normalized));
     return;
   }
 
@@ -126,7 +127,7 @@ export function scheduleAdmissionsSync(state: AdmissionsState) {
     pushTimer = null;
     if (!payload) return;
     if (!deskSkipBlobPushClient("admissions")) {
-      void pushBlobState(payload);
+      void trackServerWork(pushBlobState(payload));
     }
     scheduleAdmissionsDeskSync(payload);
   }, DESK_PUSH_DEBOUNCE_MS);
