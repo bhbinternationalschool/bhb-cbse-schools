@@ -102,6 +102,7 @@ SELFTESTS=(
   test:pin-review
   test:due-pay-link
   test:wa-parent-guide
+  test:fleet-keep-rule
   test:concession-review-ai
   test:collections-weekly-ai
   test:erp-ask

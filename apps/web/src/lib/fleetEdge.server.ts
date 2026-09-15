@@ -28,6 +28,7 @@
  * report telemetry before its registration number is even allotted.
  */
 
+import { shouldKeepTelemetry } from "@/lib/fleetKeepRule";
 import {
   classifyFleetEdgePush,
   FUEL_FIELDS,
@@ -543,11 +544,30 @@ async function notifyFleetEdgeFirstSeen(vehicleRef: string): Promise<void> {
   }
 }
 
+/** Last ignition state seen per vehicle on this instance — lets a night-time engine start be kept. */
+const lastIgnitionByVehicle = new Map<string, boolean>();
+
 export async function ingestFleetEdgeTelemetry(
   telemetry: FleetEdgeTelemetryPayload,
   sourceIp: string | null,
 ): Promise<{ ok: boolean; error?: string }> {
   const vehicleRef = telemetry.vehicleId || telemetry.registrationNumber || null;
+
+  // Keep 6:00 AM–3:30 PM IST, and after that only while moving (see
+  // fleetKeepRule.ts). A parked bus after hours is acknowledged to Tata and
+  // not stored — neither the raw event nor the position.
+  // Judged on arrival time, not Tata's eventDateTime: that carries no offset
+  // (it is UTC, e.g. "2026-09-15T10:18:57") and would read 5½ hours out on
+  // any server not running in UTC. Pushes arrive within a few minutes.
+  const ignitionKey = vehicleRef || "";
+  const keep = shouldKeepTelemetry({
+    at: new Date(),
+    speedKmh: telemetry.speed,
+    ignitionOn: telemetry.ignitionOn,
+    lastIgnitionOn: lastIgnitionByVehicle.get(ignitionKey),
+  });
+  if (telemetry.ignitionOn != null && ignitionKey) lastIgnitionByVehicle.set(ignitionKey, telemetry.ignitionOn);
+  if (!keep.keep) return { ok: true };
 
   if (vehicleRef) {
     void (async () => {
