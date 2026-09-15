@@ -14,6 +14,10 @@ import {
   scheduleExamsDeskSync,
 } from "@/lib/examsNormalizedClient";
 import { mergeDbDeskIntoExamsState } from "@/lib/examsNormalizedMerge";
+import {
+  pendingExamSheetIds,
+  retryPendingExamSheets,
+} from "@/lib/examsSheetSync";
 import { examsReadFromDbEnabled } from "@/lib/examsDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
 import {
@@ -97,12 +101,16 @@ export async function ensureExamsHydrated(): Promise<boolean> {
   if (changed && (hasDesk || readFromDb)) {
     const merged = mergeDbDeskIntoExamsState(loadExams(), bundle, {
       preferDb: readFromDb,
+      keepLocalSheetIds: pendingExamSheetIds(),
     });
     writeExamsLocalRaw(merged);
     normChanged = true;
   }
 
   // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
+  // The one exception is a sheet THIS browser saved that never reached the
+  // server: it was kept in the merge above, and goes up now.
+  void trackServerWork(retryPendingExamSheets());
 
   if (normChanged && !readFromDb) {
     scheduleExamsSync(loadExams());

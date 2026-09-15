@@ -1,7 +1,7 @@
 "use client";
 // ratchet-allow: grids_without_row_menu — the marks-entry grid and the promotion summary — cells are inputs, not a record list
 
-import { useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ClipboardList } from "lucide-react";
 import {
   applyPromotionsToSis,
@@ -23,25 +23,43 @@ import {
   listExamTerms,
   promotionDecisionLabel,
   saveExamPolicy,
+  loadExams,
   saveMarkSheet,
   savePromotionDecision,
-  studentTakesExamSubject,
   subjectsForMarkEntry,
+  subjectTakeMap,
   suggestPromotionsForSection,
+  unlockMarkSheet,
   updateExamTerm,
   type ClassResultRow,
+  type CoScholasticDomain,
   type CoScholasticRating,
+  type ExamDeps,
   type ExamPolicy,
+  type ExamSubject,
   type ExamTerm,
   type PromotionDecision,
   type ReportCard,
   type StudentCoScholasticEntry,
   type StudentSubjectMark,
 } from "@/lib/exams";
+import { loadAttendance } from "@/lib/attendance";
+import {
+  clearExamSheetConflict,
+  examSheetConflicts,
+  retryPendingExamSheets,
+  type SheetConflict,
+} from "@/lib/examsSheetSync";
+import { DeskSyncBanner } from "@/components/accounts/DeskSyncBanner";
 import { rosterForSection } from "@/lib/attendance";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
-import { loadSis, type SisState } from "@/lib/sis";
-import { checkHold, setReportCardHoldFromStage, type HoldCheck } from "@/lib/holds";
+import { loadSis, type SisState, type SisStudent } from "@/lib/sis";
+import {
+  checkHold,
+  checkHoldsForStudents,
+  setReportCardHoldFromStage,
+  type HoldCheck,
+} from "@/lib/holds";
 import {
   StudentAvatar,
   StudentNameLabel,
@@ -77,7 +95,7 @@ import { RemarksPanel } from "@/components/exams/RemarksPanel";
 import { ItemScoresPanel } from "@/components/exams/ItemScoresPanel";
 import { AtRiskPanel } from "@/components/exams/AtRiskPanel";
 import { ExamReportsRunner } from "@/components/reports/ModuleReportRunners";
-import { hasPermission } from "@/lib/rbac";
+import { hasPermission, inferRoleCodes } from "@/lib/rbac";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type Tab =
@@ -94,6 +112,190 @@ type Tab =
   | "results"
   | "result_reports"
   | "setup";
+
+function cellKey(studentId: string, subjectId: string) {
+  return `${studentId}:${subjectId}`;
+}
+
+type MarkRowProps = {
+  student: SisStudent;
+  /** Passed down so the name label does not re-read the SIS blob per row. */
+  sis: SisState | undefined;
+  subjects: ExamSubject[];
+  term: ExamTerm;
+  /** subjectId → what the input shows ("" for not entered). */
+  values: Record<string, string>;
+  /** Exam-subject ids on this student's curriculum. */
+  takes: Set<string> | undefined;
+  locked: boolean;
+  coScholastic: boolean;
+  /** domain → rating ("" for unrated). */
+  ratings: Record<string, string>;
+  onMark: (studentId: string, subjectId: string, value: string) => void;
+  onRating: (studentId: string, domain: CoScholasticDomain, value: string) => void;
+};
+
+/**
+ * One student's row of the marks grid.
+ *
+ * Memoised on purpose: a keystroke changes ONE cell, and the row's props for
+ * every other student are referentially the same (the parent keeps a
+ * per-student values object stable while its contents are unchanged), so
+ * only the edited row re-renders. Before this the whole 2,000-line
+ * workspace re-rendered every cell on every keystroke and, worse, asked the
+ * subject resolver per cell — see subjectTakeMap.
+ */
+const MarkRow = memo(function MarkRow({
+  student: st,
+  sis,
+  subjects,
+  term,
+  values,
+  takes,
+  locked,
+  coScholastic,
+  ratings,
+  onMark,
+  onRating,
+}: MarkRowProps) {
+  return (
+    <tr className="border-b border-[var(--border)]">
+      <td className="sticky left-0 z-10 bg-[var(--card)] px-3 py-1.5">
+        <div className="flex items-center gap-2">
+          <StudentAvatar student={st} size={28} />
+          <div className="min-w-0">
+            <div className="truncate font-medium text-[var(--brand-deep)]">
+              <StudentNameLabel student={st} sis={sis} />
+            </div>
+            <div className="text-[10px] text-[var(--muted)]">
+              {st.admissionNo}
+              {st.rollNo ? ` · Roll ${st.rollNo}` : ""}
+            </div>
+          </div>
+        </div>
+      </td>
+      {subjects.map((sub) => {
+        const takesIt = takes ? takes.has(sub.id) : true;
+        return (
+          <td key={cellKey(st.id, sub.id)} className="px-1 py-1">
+            {takesIt ? (
+              <input
+                className="field !w-14 !px-1 !py-1 text-center tabular-nums"
+                inputMode="decimal"
+                disabled={locked}
+                value={values[sub.id] ?? ""}
+                onChange={(e) => onMark(st.id, sub.id, e.target.value)}
+                aria-label={`${st.fullName} ${sub.name}`}
+                title={`out of ${effectiveMaxMarks(term, sub)}`}
+              />
+            ) : (
+              <span
+                className="block w-14 px-1 py-1 text-center text-[10px] text-[var(--muted)]"
+                title="Not on this student's curriculum"
+              >
+                —
+              </span>
+            )}
+          </td>
+        );
+      })}
+      {coScholastic
+        ? CO_SCHOLASTIC_DOMAINS.map((domain) => (
+            <td key={`${st.id}:${domain}`} className="px-1 py-1">
+              <select
+                className="field !w-16 !px-1 !py-1 text-center"
+                disabled={locked}
+                value={ratings[domain] ?? ""}
+                onChange={(e) => onRating(st.id, domain, e.target.value)}
+                aria-label={`${st.fullName} ${coScholasticDomainLabel(domain)}`}
+              >
+                <option value="">—</option>
+                <option value="A">A</option>
+                <option value="B">B</option>
+                <option value="C">C</option>
+              </select>
+            </td>
+          ))
+        : null}
+    </tr>
+  );
+});
+
+/**
+ * Per-student objects that keep their identity while their contents are
+ * unchanged, so MarkRow's memo holds for every row but the one being typed
+ * in. Cheap: one string per student per render.
+ */
+function useStableByStudent<T extends Record<string, string>>(
+  roster: SisStudent[],
+  build: (st: SisStudent) => T,
+  deps: unknown[],
+): Map<string, T> {
+  const cache = useRef(new Map<string, { sig: string; value: T }>());
+  return useMemo(() => {
+    const out = new Map<string, T>();
+    for (const st of roster) {
+      const value = build(st);
+      const sig = Object.keys(value)
+        .sort()
+        .map((k) => `${k}=${value[k]}`)
+        .join("|");
+      const prev = cache.current.get(st.id);
+      if (prev && prev.sig === sig) {
+        out.set(st.id, prev.value);
+      } else {
+        cache.current.set(st.id, { sig, value });
+        out.set(st.id, value);
+      }
+    }
+    return out;
+    // `deps` is the caller's own list; `build` and `roster` are covered by it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+}
+
+function ConflictNotice({
+  conflicts,
+  onDismiss,
+}: {
+  conflicts: SheetConflict[];
+  onDismiss: (sheetId: string) => void;
+}) {
+  if (conflicts.length === 0) return null;
+  return (
+    <div
+      role="alert"
+      className="mt-4 rounded-xl border border-[var(--warning)]/50 bg-[var(--warning-soft)] p-4 text-sm"
+    >
+      <p className="font-semibold text-[var(--ink)]">
+        {conflicts.length === 1
+          ? "One save was refused by the server"
+          : `${conflicts.length} saves were refused by the server`}
+      </p>
+      <ul className="mt-2 space-y-2">
+        {conflicts.map((c) => (
+          <li key={c.sheetId} className="flex flex-wrap items-start justify-between gap-2">
+            <span className="text-[var(--ink)]">
+              {c.error}
+              <span className="block text-xs text-[var(--muted)]">
+                Your copy of that sheet ({c.sheet.marks.filter((m) => m.marksObtained != null).length} marks) is kept in this browser until you dismiss this.
+              </span>
+            </span>
+            <button
+              type="button"
+              className="rounded-lg border border-[var(--border)] px-2 py-1 text-xs font-semibold"
+              onClick={() => onDismiss(c.sheetId)}
+            >
+              Dismiss
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+const UNLOCK_ROLES = new Set(["owner", "principal", "admin", "office"]);
 
 export function ExamsWorkspace() {
   // Fee holds are server truth. Without this the gates below read an
@@ -120,6 +322,7 @@ export function ExamsWorkspace() {
   const [preview, setPreview] = useState<ReportCard | null>(null);
   const [holdCheck, setHoldCheck] = useState<HoldCheck | null>(null);
   const [holdDialog, setHoldDialog] = useState(false);
+  const [conflicts, setConflicts] = useState<SheetConflict[]>([]);
 
   const [newCode, setNewCode] = useState("UT3");
   const [newLabel, setNewLabel] = useState("Unit Test 3");
@@ -156,8 +359,18 @@ export function ExamsWorkspace() {
     const p = getExamPolicy();
     setPolicyDraft(p);
     setReportCardHoldFromStage(p.reportCardHoldFromStage);
+    setConflicts(examSheetConflicts());
     setTick((x) => x + 1);
   }
+
+  // A refused save is recorded by the push, which runs after the click
+  // handler returns; pick it up when the sync status changes.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onFailed = () => setConflicts(examSheetConflicts());
+    window.addEventListener("bhb-desk-sync-failed", onFailed);
+    return () => window.removeEventListener("bhb-desk-sync-failed", onFailed);
+  }, []);
 
   useEffect(() => {
     // Paint immediately from localStorage, then refresh after remote hydrate
@@ -177,15 +390,29 @@ export function ExamsWorkspace() {
     })();
   }, []);
 
-  const terms = useMemo(() => {
+  /**
+   * ONE parse of the exams blob per change, shared by everything below.
+   * Every reader in lib/exams falls back to loadExams() when not given a
+   * state, and the grid used to hit that fallback per cell per render.
+   */
+  const exams = useMemo(() => {
     void tick;
-    return listExamTerms(ay);
-  }, [ay, tick]);
+    return loadExams();
+  }, [tick]);
 
-  const allTerms = useMemo(() => {
-    void tick;
-    return listAllExamTerms(ay);
-  }, [ay, tick]);
+  /** Stores already in hand, for the readers that loop over students. */
+  const examDeps = useMemo<ExamDeps>(
+    () => ({
+      state: exams,
+      masters: masters ?? undefined,
+      sis: sis ?? undefined,
+    }),
+    [exams, masters, sis],
+  );
+
+  const terms = useMemo(() => listExamTerms(ay, exams), [ay, exams]);
+
+  const allTerms = useMemo(() => listAllExamTerms(ay, exams), [ay, exams]);
 
   useEffect(() => {
     if (!examTermId && terms[0]) setExamTermId(terms[0].id);
@@ -214,7 +441,7 @@ export function ExamsWorkspace() {
   }, [sectionId, sectionOptions]);
 
   const term = terms.find((t) => t.id === examTermId) ?? null;
-  const policy = policyDraft ?? getExamPolicy();
+  const policy = policyDraft ?? getExamPolicy(exams);
 
   const roster = useMemo(() => {
     if (!sis || !sectionId) return [];
@@ -226,8 +453,46 @@ export function ExamsWorkspace() {
 
   const subjects = useMemo(() => {
     if (!classId) return [];
-    return subjectsForMarkEntry(classId, roster);
-  }, [classId, roster, tick]);
+    return subjectsForMarkEntry(classId, roster, exams, examDeps);
+  }, [classId, roster, exams, examDeps]);
+
+  /** studentId → exam-subject ids on that child's curriculum, resolved once
+   * for the section. The grid, setMark and onSave all read this. */
+  const takesBy = useMemo(
+    () => subjectTakeMap(roster, subjects, exams, examDeps),
+    [roster, subjects, exams, examDeps],
+  );
+
+  const gridIndex = useMemo(() => {
+    const m = new Map<string, StudentSubjectMark>();
+    for (const c of grid) m.set(cellKey(c.studentId, c.subjectId), c);
+    return m;
+  }, [grid]);
+
+  const valuesByStudent = useStableByStudent(
+    roster,
+    (st) => {
+      const values: Record<string, string> = {};
+      for (const sub of subjects) {
+        const c = gridIndex.get(cellKey(st.id, sub.id));
+        values[sub.id] = c?.marksObtained == null ? "" : String(c.marksObtained);
+      }
+      return values;
+    },
+    [roster, subjects, gridIndex],
+  );
+
+  const ratingsByStudent = useStableByStudent(
+    roster,
+    (st) => {
+      const ratings: Record<string, string> = {};
+      for (const e of coScholasticGrid) {
+        if (e.studentId === st.id) ratings[e.domain] = e.rating ?? "";
+      }
+      return ratings;
+    },
+    [roster, coScholasticGrid],
+  );
 
   useEffect(() => {
     if (!term || !sectionId || !classId) {
@@ -235,7 +500,7 @@ export function ExamsWorkspace() {
       setDirty(false);
       return;
     }
-    const existing = findMarkSheet(ay, term.id, sectionId);
+    const existing = findMarkSheet(ay, term.id, sectionId, exams);
     setGrid(
       buildEmptyMarksGrid(
         roster,
@@ -247,6 +512,10 @@ export function ExamsWorkspace() {
     );
     setCoScholasticGrid(buildEmptyCoScholasticGrid(roster, existing));
     setDirty(false);
+    // `exams` is deliberately not a dependency: a save bumps it, and
+    // rebuilding the grid from the saved sheet then would be a no-op that
+    // also discards anything typed between clicking Save and the re-render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ay, term?.id, sectionId, classId, roster, subjects, policy.passPercent]);
 
   function flash(msg: string) {
@@ -255,49 +524,47 @@ export function ExamsWorkspace() {
     window.setTimeout(() => setNotice(null), 2800);
   }
 
-  function cellKey(studentId: string, subjectId: string) {
-    return `${studentId}:${subjectId}`;
-  }
+  const setMark = useCallback(
+    (studentId: string, subjectId: string, value: string) => {
+      if (!term) return;
+      const sub = subjects.find((s) => s.id === subjectId);
+      if (!sub) return;
+      const takes = takesBy.get(studentId);
+      if (takes && !takes.has(subjectId)) return;
+      const max = effectiveMaxMarks(term, sub);
+      let obtained: number | null = null;
+      if (value.trim() !== "") {
+        const n = Number(value);
+        if (!Number.isFinite(n)) return;
+        obtained = Math.min(max, Math.max(0, n));
+      }
+      setGrid((prev) =>
+        prev.map((m) =>
+          m.studentId === studentId && m.subjectId === subjectId
+            ? { ...m, marksObtained: obtained }
+            : m,
+        ),
+      );
+      setDirty(true);
+    },
+    [term, subjects, takesBy],
+  );
 
-  function setMark(studentId: string, subjectId: string, value: string) {
-    if (!term) return;
-    const sub = subjects.find((s) => s.id === subjectId);
-    if (!sub) return;
-    const st = roster.find((s) => s.id === studentId);
-    if (st && !studentTakesExamSubject(st, sub)) return;
-    const max = effectiveMaxMarks(term, sub);
-    let obtained: number | null = null;
-    if (value.trim() !== "") {
-      const n = Number(value);
-      if (!Number.isFinite(n)) return;
-      obtained = Math.min(max, Math.max(0, n));
-    }
-    setGrid((prev) =>
-      prev.map((m) =>
-        m.studentId === studentId && m.subjectId === subjectId
-          ? { ...m, marksObtained: obtained }
-          : m,
-      ),
-    );
-    setDirty(true);
-  }
-
-  function setCoScholasticRating(
-    studentId: string,
-    domain: StudentCoScholasticEntry["domain"],
-    value: string,
-  ) {
-    const rating: CoScholasticRating | null =
-      value === "A" || value === "B" || value === "C" ? value : null;
-    setCoScholasticGrid((prev) =>
-      prev.map((e) =>
-        e.studentId === studentId && e.domain === domain
-          ? { ...e, rating }
-          : e,
-      ),
-    );
-    setDirty(true);
-  }
+  const setCoScholasticRating = useCallback(
+    (studentId: string, domain: CoScholasticDomain, value: string) => {
+      const rating: CoScholasticRating | null =
+        value === "A" || value === "B" || value === "C" ? value : null;
+      setCoScholasticGrid((prev) =>
+        prev.map((e) =>
+          e.studentId === studentId && e.domain === domain
+            ? { ...e, rating }
+            : e,
+        ),
+      );
+      setDirty(true);
+    },
+    [],
+  );
 
   function onSave(lock = false) {
     if (!term || !classId || !sectionId) {
@@ -306,9 +573,8 @@ export function ExamsWorkspace() {
     }
     // Drop marks for subjects the student does not take
     const marks = grid.map((m) => {
-      const st = roster.find((s) => s.id === m.studentId);
-      const sub = subjects.find((s) => s.id === m.subjectId);
-      if (st && sub && !studentTakesExamSubject(st, sub)) {
+      const takes = takesBy.get(m.studentId);
+      if (takes && !takes.has(m.subjectId)) {
         return { ...m, marksObtained: null, grade: "—" };
       }
       return m;
@@ -331,9 +597,49 @@ export function ExamsWorkspace() {
     refresh();
     flash(
       lock
-        ? "Mark sheet saved and locked"
-        : `Marks saved · ${roster.length} students`,
+        ? "Mark sheet saved and locked · sending to the server"
+        : `Marks saved · ${roster.length} students · sending to the server`,
     );
+  }
+
+  const canUnlock = useMemo(() => {
+    if (!masters) return false;
+    try {
+      if (hasPermission(session, masters, "exams", "approve")) return true;
+      return inferRoleCodes(session, masters).some((c) => UNLOCK_ROLES.has(c));
+    } catch {
+      return false;
+    }
+  }, [session, masters]);
+
+  function onUnlock() {
+    if (!term || !sectionId) return;
+    const reason = window.prompt(
+      "Why is this mark sheet being unlocked? (recorded in the audit log)",
+      "",
+    );
+    if (reason === null) return;
+    const result = unlockMarkSheet({
+      academicYearCode: ay,
+      examTermId: term.id,
+      sectionId,
+      reason,
+      by: session.fullName,
+    });
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    refresh();
+    flash("Mark sheet unlocked · sending to the server");
+  }
+
+  async function retrySync(): Promise<boolean> {
+    const ok = await retryPendingExamSheets();
+    const { scheduleExamsSync } = await import("@/lib/examsPersistence");
+    scheduleExamsSync(loadExams());
+    refresh();
+    return ok;
   }
 
   function classLabelOf(studentId: string): string {
@@ -366,6 +672,7 @@ export function ExamsWorkspace() {
       classLabel: classLabelOf(studentId),
       examTermId,
       academicYearCode: ay,
+      deps: { ...examDeps, holdChecks: new Map([[studentId, hold]]) },
     });
     if ("error" in card) {
       setError(card.error);
@@ -541,10 +848,20 @@ export function ExamsWorkspace() {
   }
 
   const sheetMeta = useMemo(() => {
-    void tick;
     if (!examTermId || !sectionId) return null;
-    return findMarkSheet(ay, examTermId, sectionId);
-  }, [ay, examTermId, sectionId, tick]);
+    return findMarkSheet(ay, examTermId, sectionId, exams);
+  }, [ay, examTermId, sectionId, exams]);
+
+  /** Fee-hold verdicts for the section, computed once per roster change
+   * instead of once per child per render on the report-card list. */
+  const reportHolds = useMemo(() => {
+    void tick;
+    if (tab !== "reports" || roster.length === 0) return new Map<string, HoldCheck>();
+    return checkHoldsForStudents(
+      roster.map((s) => s.id),
+      "HOLD_REPORT_CARD",
+    );
+  }, [tab, roster, tick]);
 
   const classLabel = useMemo(() => {
     const c = classOptions.find((x) => x.id === classId)?.name ?? "—";
@@ -564,10 +881,11 @@ export function ExamsWorkspace() {
       sectionId,
       examTermId,
       academicYearCode: ay,
+      deps: { ...examDeps, attendance: loadAttendance() },
     });
     if ("error" in built) return { error: built.error } as const;
     return { sheet: built } as const;
-  }, [tab, tick, examTermId, classId, sectionId, roster, classLabel, ay]);
+  }, [tab, tick, examTermId, classId, sectionId, roster, classLabel, ay, examDeps]);
 
   // The result sheet, best first; grade and pass sort too. Decision is a picker, not a value.
   const resultSort = useTableSort(
@@ -693,6 +1011,19 @@ export function ExamsWorkspace() {
           { id: "result_reports", label: "Result reports", tone: "teal" },
           { id: "setup", label: "Exams & policy", tone: "navy" },
         ]}
+      />
+
+      <DeskSyncBanner
+        module="exams"
+        title="Your exam marks are not saved on the server"
+        onRetry={retrySync}
+      />
+      <ConflictNotice
+        conflicts={conflicts}
+        onDismiss={(id) => {
+          clearExamSheetConflict(id);
+          setConflicts(examSheetConflicts());
+        }}
       />
 
       {tab !== "setup" &&
@@ -1594,6 +1925,16 @@ export function ExamsWorkspace() {
                   >
                     Save & lock
                   </button>
+                  {sheetMeta?.lockedAt && canUnlock ? (
+                    <button
+                      type="button"
+                      className="rounded-lg border border-[var(--warning)]/60 px-3 py-1.5 text-xs font-semibold"
+                      onClick={onUnlock}
+                      title="Lift the lock so marks can be corrected. The reason is recorded."
+                    >
+                      Unlock
+                    </button>
+                  ) : null}
                 </div>
               </div>
 
@@ -1628,98 +1969,24 @@ export function ExamsWorkspace() {
                     </tr>
                   </ErpTableHead>
                   <ErpTableBody>
-                    {roster.map((st) => (
-                      <tr
-                        key={st.id}
-                        className="border-b border-[var(--border)]"
-                      >
-                        <td className="sticky left-0 z-10 bg-[var(--card)] px-3 py-1.5">
-                          <div className="flex items-center gap-2">
-                            <StudentAvatar student={st} size={28} />
-                            <div className="min-w-0">
-                              <div className="truncate font-medium text-[var(--brand-deep)]">
-                                <StudentNameLabel student={st} />
-                              </div>
-                              <div className="text-[10px] text-[var(--muted)]">
-                                {st.admissionNo}
-                                {st.rollNo ? ` · Roll ${st.rollNo}` : ""}
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-                        {subjects.map((sub) => {
-                          const cell = grid.find(
-                            (m) =>
-                              m.studentId === st.id &&
-                              m.subjectId === sub.id,
-                          );
-                          const takes = studentTakesExamSubject(st, sub);
-                          return (
-                            <td
-                              key={cellKey(st.id, sub.id)}
-                              className="px-1 py-1"
-                            >
-                              {takes ? (
-                                <input
-                                  className="field !w-14 !px-1 !py-1 text-center tabular-nums"
-                                  inputMode="decimal"
-                                  disabled={!!sheetMeta?.lockedAt}
-                                  value={
-                                    cell?.marksObtained == null
-                                      ? ""
-                                      : String(cell.marksObtained)
-                                  }
-                                  onChange={(e) =>
-                                    setMark(st.id, sub.id, e.target.value)
-                                  }
-                                  aria-label={`${st.fullName} ${sub.name}`}
-                                />
-                              ) : (
-                                <span
-                                  className="block w-14 px-1 py-1 text-center text-[10px] text-[var(--muted)]"
-                                  title="Not on this student's curriculum"
-                                >
-                                  —
-                                </span>
-                              )}
-                            </td>
-                          );
-                        })}
-                        {policy.enableCoScholastic
-                          ? CO_SCHOLASTIC_DOMAINS.map((domain) => {
-                              const entry = coScholasticGrid.find(
-                                (e) =>
-                                  e.studentId === st.id && e.domain === domain,
-                              );
-                              return (
-                                <td
-                                  key={`${st.id}:${domain}`}
-                                  className="px-1 py-1"
-                                >
-                                  <select
-                                    className="field !w-16 !px-1 !py-1 text-center"
-                                    disabled={!!sheetMeta?.lockedAt}
-                                    value={entry?.rating ?? ""}
-                                    onChange={(e) =>
-                                      setCoScholasticRating(
-                                        st.id,
-                                        domain,
-                                        e.target.value,
-                                      )
-                                    }
-                                    aria-label={`${st.fullName} ${coScholasticDomainLabel(domain)}`}
-                                  >
-                                    <option value="">—</option>
-                                    <option value="A">A</option>
-                                    <option value="B">B</option>
-                                    <option value="C">C</option>
-                                  </select>
-                                </td>
-                              );
-                            })
-                          : null}
-                      </tr>
-                    ))}
+                    {term
+                      ? roster.map((st) => (
+                          <MarkRow
+                            key={st.id}
+                            student={st}
+                            sis={sis ?? undefined}
+                            subjects={subjects}
+                            term={term}
+                            values={valuesByStudent.get(st.id) ?? {}}
+                            takes={takesBy.get(st.id)}
+                            locked={!!sheetMeta?.lockedAt}
+                            coScholastic={policy.enableCoScholastic}
+                            ratings={ratingsByStudent.get(st.id) ?? {}}
+                            onMark={setMark}
+                            onRating={setCoScholasticRating}
+                          />
+                        ))
+                      : null}
                   </ErpTableBody>
                 </ErpTable>
               </ErpTableShell>
@@ -1792,7 +2059,8 @@ export function ExamsWorkspace() {
             ) : (
               <ul className="mt-3 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)]">
                 {roster.map((st) => {
-                  const hold = checkHold(st.id, "HOLD_REPORT_CARD");
+                  const hold =
+                    reportHolds.get(st.id) ?? checkHold(st.id, "HOLD_REPORT_CARD");
                   return (
                     <li key={st.id}>
                       <button
@@ -1807,7 +2075,7 @@ export function ExamsWorkspace() {
                         <StudentAvatar student={st} size={36} />
                         <div className="min-w-0 flex-1">
                           <div className="truncate font-medium text-[var(--ink)]">
-                            <StudentNameLabel student={st} />
+                            <StudentNameLabel student={st} sis={sis ?? undefined} />
                           </div>
                           <div className="text-xs text-[var(--muted)]">
                             {st.admissionNo}

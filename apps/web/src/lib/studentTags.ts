@@ -74,9 +74,11 @@ export function tagsForStudent(
   student: Pick<SisStudent, "tagIds">,
   sis?: SisState,
 ): StudentTag[] {
-  const state = sis ?? loadSis();
   const ids = student.tagIds ?? [];
+  // Most students carry no tags; do not parse the SIS blob to learn that.
+  // This ran per row on every roster screen (33 parses per section render).
   if (!ids.length) return [];
+  const state = sis ?? loadSis();
   const map = new Map((state.tags ?? []).map((t) => [t.id, t]));
   return ids
     .map((tid) => map.get(tid))

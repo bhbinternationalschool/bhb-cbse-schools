@@ -16,6 +16,7 @@ import {
   loadSis,
   normalizeStudent,
   saveSis,
+  type SisState,
   type SisStudent,
 } from "@/lib/sis";
 import {
@@ -26,10 +27,16 @@ import {
   resolveStudentSubjects,
 } from "@/lib/studentCurriculum";
 import { curriculumAfterClassChange } from "@/lib/officeCurriculumWorkflow";
-import { checkHold, setReportCardHoldFromStage } from "@/lib/holds";
+import {
+  checkHold,
+  checkHoldsForStudents,
+  setReportCardHoldFromStage,
+  type HoldCheck,
+} from "@/lib/holds";
 import {
   loadAttendance,
   type AttendanceRegister,
+  type AttendanceState,
 } from "@/lib/attendance";
 import type { Subject as MasterSubject } from "@/lib/foundationMasters";
 import { ncfTagForSubject } from "@/lib/cbseSubjectGroups";
@@ -417,12 +424,50 @@ export type ExamsState = {
   promotions: PromotionRecord[];
 };
 
+/**
+ * Stores a caller has already loaded.
+ *
+ * Every reader in this file falls back to `loadExams()` / `loadMasters()` /
+ * `loadSis()` when a dep is missing. That is correct and it is slow: each of
+ * those is a localStorage read plus a JSON.parse plus a normalise pass over
+ * the whole blob (the SIS one is 1.2 MB). On 2026-09-15 the mark-entry grid
+ * called into this path once per CELL per render — 529 parses of the SIS
+ * blob and 1,455 of masters for ONE keystroke, 9.6 s frozen. A screen that
+ * loops over students or subjects loads each store once and passes it here.
+ */
+export type ExamDeps = {
+  state?: ExamsState;
+  masters?: MastersState;
+  sis?: SisState;
+  attendance?: AttendanceState;
+  /** Pre-computed HOLD_REPORT_CARD verdicts by student id. */
+  holdChecks?: Map<string, HoldCheck>;
+};
+
 const STORAGE_KEY = "bhb_exams_v1";
 
 let serverExamsCache: ExamsState | null = null;
 
 function id(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * The id of an exam subject synthesised from a masters subject code.
+ *
+ * Deterministic on purpose. Synthesised subjects used to get a random id and
+ * were written to storage from inside a read (a render, a report card) so
+ * that the next read would find them by id. Making the read pure means the
+ * same code must always resolve to the same id, whether or not it has been
+ * persisted yet — a mark saved against `esub_skt` on the phone and one saved
+ * on the desk are the same subject.
+ */
+export function examSubjectIdForCode(code: string): string {
+  const slug = code
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return `esub_${slug || "x"}`;
 }
 
 export function todayIso() {
@@ -1475,11 +1520,16 @@ export function subjectsForClass(
 export function syncExamSubjectsFromMasters(
   classId?: string,
   state?: ExamsState,
+  deps?: ExamDeps & {
+    /** Write the widened catalog to storage. Off by default: this is a
+     * read-path helper and a read must not write (see ExamDeps). */
+    persist?: boolean;
+  },
 ): ExamsState {
-  const s = state ?? loadExams();
+  const s = state ?? deps?.state ?? loadExams();
   let masters: MastersState;
   try {
-    masters = loadMasters();
+    masters = deps?.masters ?? loadMasters();
   } catch {
     return s;
   }
@@ -1503,7 +1553,7 @@ export function syncExamSubjectsFromMasters(
 
   // Also pull any confirmed student enrollments so cart-only codes exist
   try {
-    const sis = loadSis();
+    const sis = deps?.sis ?? loadSis();
     for (const st of sis.students) {
       if (classId && st.classId !== classId) continue;
       if (!isCurriculumConfirmed(st)) continue;
@@ -1529,7 +1579,7 @@ export function syncExamSubjectsFromMasters(
     const existing = byCode.get(code);
     if (!existing) {
       const row: ExamSubject = {
-        id: id("esub"),
+        id: examSubjectIdForCode(master.code),
         code: master.code,
         name: master.nameEn,
         classIds: classId ? [classId] : [],
@@ -1564,7 +1614,7 @@ export function syncExamSubjectsFromMasters(
 
   if (!changed) return s;
   const next = { ...s, subjects };
-  saveExams(next);
+  if (deps?.persist) saveExams(next);
   return next;
 }
 
@@ -1591,7 +1641,7 @@ function matchExamSubjectsToCodes(
     const master = mastersSubs.find((s) => s.code.toUpperCase() === code);
     if (!master) continue;
     out.push({
-      id: id("esub"),
+      id: examSubjectIdForCode(master.code),
       code: master.code,
       name: master.nameEn,
       classIds: [],
@@ -1610,14 +1660,15 @@ function matchExamSubjectsToCodes(
 export function subjectsForStudent(
   student: SisStudent,
   state?: ExamsState,
+  deps?: ExamDeps,
 ): ExamSubject[] {
-  let s = state ?? loadExams();
-  s = syncExamSubjectsFromMasters(student.classId, s);
+  let s = state ?? deps?.state ?? loadExams();
+  s = syncExamSubjectsFromMasters(student.classId, s, deps);
   const examSubs = subjectsForClass(student.classId, s);
 
   let masters: MastersState;
   try {
-    masters = loadMasters();
+    masters = deps?.masters ?? loadMasters();
   } catch {
     return examSubs;
   }
@@ -1639,13 +1690,9 @@ export function subjectsForStudent(
     masters.subjects,
   );
 
-  // Persist any synthesized exam subjects
-  const knownIds = new Set(s.subjects.map((x) => x.id));
-  const toAdd = matched.filter((m) => !knownIds.has(m.id));
-  if (toAdd.length > 0) {
-    const next = { ...s, subjects: [...s.subjects, ...toAdd] };
-    saveExams(next);
-  }
+  // Synthesised subjects are NOT written here — this runs inside renders and
+  // report cards. Their ids are deterministic (examSubjectIdForCode), and
+  // saveMarkSheet persists whichever ones a sheet actually uses.
 
   if (matched.length > 0) return matched;
   return source === "confirmed_cart" ? [] : examSubs;
@@ -1656,12 +1703,14 @@ export function subjectsForMarkEntry(
   classId: string,
   students: SisStudent[],
   state?: ExamsState,
+  deps?: ExamDeps,
 ): ExamSubject[] {
-  const s = syncExamSubjectsFromMasters(classId, state ?? loadExams());
+  const d = withLoadedDeps(deps);
+  const s = syncExamSubjectsFromMasters(classId, state ?? d.state, d);
   const byCode = new Map<string, ExamSubject>();
 
   for (const st of students) {
-    for (const sub of subjectsForStudent(st, s)) {
+    for (const sub of subjectsForStudent(st, s, d)) {
       byCode.set(sub.code.toUpperCase(), sub);
     }
   }
@@ -1680,10 +1729,76 @@ export function studentTakesExamSubject(
   student: SisStudent,
   subject: ExamSubject,
   state?: ExamsState,
+  deps?: ExamDeps,
 ): boolean {
-  const list = subjectsForStudent(student, state);
+  const list = subjectsForStudent(student, state, deps);
   const code = subject.code.toUpperCase();
   return list.some((s) => s.code.toUpperCase() === code);
+}
+
+/** Fill in whichever stores the caller did not pass, loading each ONCE. */
+function withLoadedDeps(deps?: ExamDeps): ExamDeps & { state: ExamsState } {
+  let masters: MastersState | null = deps?.masters ?? null;
+  if (!masters) {
+    try {
+      masters = loadMasters();
+    } catch {
+      masters = null;
+    }
+  }
+  let sis: SisState | null = deps?.sis ?? null;
+  if (!sis) {
+    try {
+      sis = loadSis();
+    } catch {
+      sis = null;
+    }
+  }
+  return {
+    ...deps,
+    state: deps?.state ?? loadExams(),
+    ...(masters ? { masters } : {}),
+    ...(sis ? { sis } : {}),
+  };
+}
+
+/**
+ * Which exam subjects each student in a section takes, resolved once for the
+ * whole roster: `Map<studentId, Set<subjectId>>`.
+ *
+ * The mark-entry grid asked `studentTakesExamSubject` per cell in render,
+ * and each call re-parsed the school's stores from localStorage. For LKG-A
+ * (33 × 7 cells) that was 9.6 s per keystroke. This does the same
+ * resolution with every store loaded once and every class synced once.
+ */
+export function subjectTakeMap(
+  students: SisStudent[],
+  subjects: ExamSubject[],
+  state?: ExamsState,
+  deps?: ExamDeps,
+): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  if (students.length === 0) return out;
+  const d = withLoadedDeps(deps);
+  let s = state ?? d.state;
+  for (const classId of new Set(students.map((st) => st.classId))) {
+    s = syncExamSubjectsFromMasters(classId, s, d);
+  }
+  const idsByCode = new Map<string, string[]>();
+  for (const sub of subjects) {
+    const code = sub.code.toUpperCase();
+    idsByCode.set(code, [...(idsByCode.get(code) ?? []), sub.id]);
+  }
+  for (const st of students) {
+    const takes = new Set<string>();
+    for (const sub of subjectsForStudent(st, s, d)) {
+      for (const sid of idsByCode.get(sub.code.toUpperCase()) ?? []) {
+        takes.add(sid);
+      }
+    }
+    out.set(st.id, takes);
+  }
+  return out;
 }
 
 export function findMarkSheet(
@@ -1765,7 +1880,7 @@ export function buildEmptyCoScholasticGrid(
   return out;
 }
 
-export function saveMarkSheet(input: {
+export type SaveMarkSheetInput = {
   academicYearCode: string;
   examTermId: string;
   classId: string;
@@ -1774,30 +1889,51 @@ export function saveMarkSheet(input: {
   coScholastic?: StudentCoScholasticEntry[];
   enteredBy: string;
   lock?: boolean;
-}):
-  | { ok: true; sheet: MarkSheet }
+};
+
+/** What a sheet write is for. The server applies different rules to each:
+ * a locked sheet still takes remarks and an unlock, nothing else. */
+export type SheetWriteIntent =
+  | "marks"
+  | "lock"
+  | "unlock"
+  | "remarks"
+  | "itemScores";
+
+export const LOCKED_SHEET_MESSAGE =
+  "Mark sheet is locked — ask the principal or exam in-charge to unlock it before changing marks";
+
+/**
+ * Pure: validate and build the next version of a section's mark sheet
+ * without touching storage. `existing` is the sheet the caller holds — from
+ * the browser's copy on the desk, from the database on the server — so the
+ * lock and the version it carries are whatever THAT copy says.
+ *
+ * Refuses a locked sheet outright. It used to let `lock: true` through,
+ * which meant "Save & lock" on an already-locked sheet quietly rewrote the
+ * marks it was supposed to be protecting.
+ */
+export function prepareMarkSheet(
+  input: SaveMarkSheetInput,
+  state: ExamsState,
+  existing: MarkSheet | undefined,
+  deps?: ExamDeps,
+):
+  | { ok: true; sheet: MarkSheet; subjectsUsed: ExamSubject[] }
   | { ok: false; error: string } {
   if (!input.examTermId || !input.sectionId || !input.classId) {
     return { ok: false, error: "Select exam, class and section" };
   }
-  const state = loadExams();
   const term = state.terms.find((t) => t.id === input.examTermId);
   if (!term) return { ok: false, error: "Exam term not found" };
+  if (existing?.lockedAt) {
+    return { ok: false, error: LOCKED_SHEET_MESSAGE };
+  }
 
-  const subjects = subjectsForMarkEntry(
-    input.classId,
-    // Validate against marks' student ids present in sheet
-    (() => {
-      try {
-        const sis = loadSis();
-        const ids = new Set(input.marks.map((m) => m.studentId));
-        return sis.students.filter((st) => ids.has(st.id));
-      } catch {
-        return [];
-      }
-    })(),
-    state,
-  );
+  const d = withLoadedDeps({ ...deps, state });
+  const ids = new Set(input.marks.map((m) => m.studentId));
+  const students = (d.sis?.students ?? []).filter((st) => ids.has(st.id));
+  const subjects = subjectsForMarkEntry(input.classId, students, state, d);
   const subById = new Map(subjects.map((s) => [s.id, s]));
   // Also allow any active exam subject by id (legacy sheets)
   for (const s of state.subjects) {
@@ -1815,19 +1951,6 @@ export function saveMarkSheet(input: {
         error: `${sub.name}: marks cannot exceed ${max}`,
       };
     }
-  }
-
-  const existing = findMarkSheet(
-    input.academicYearCode,
-    input.examTermId,
-    input.sectionId,
-    state,
-  );
-  if (existing?.lockedAt && !input.lock) {
-    return {
-      ok: false,
-      error: "Mark sheet is locked — unlock is not available in demo",
-    };
   }
 
   const normalizedMarks = input.marks.map((m) => {
@@ -1855,10 +1978,129 @@ export function saveMarkSheet(input: {
     updatedAt: now,
   });
 
-  const sheets = existing
-    ? state.sheets.map((s) => (s.id === existing.id ? sheet : s))
+  // Synthesised subjects the sheet refers to but the catalog has not stored
+  // yet — persisted alongside the sheet so its marks always resolve.
+  const known = new Set(state.subjects.map((x) => x.id));
+  const subjectsUsed: ExamSubject[] = [];
+  for (const m of sheet.marks) {
+    if (known.has(m.subjectId)) continue;
+    const sub = subById.get(m.subjectId);
+    if (sub) {
+      subjectsUsed.push(sub);
+      known.add(sub.id);
+    }
+  }
+
+  return { ok: true, sheet, subjectsUsed };
+}
+
+/**
+ * Write one sheet to the local copy and queue it for the server on its own.
+ *
+ * Sheets used to travel inside the whole-desk push, which replaced every
+ * sheet on the server with whatever this browser held — a stale tab saving
+ * Class 10-B silently deleted the 9-A sheet another teacher had just saved,
+ * marks and all. A sheet now goes alone, carrying the version it was edited
+ * from (`expectedUpdatedAt`), so the server can refuse it if someone else
+ * saved in between instead of overwriting them.
+ *
+ * On the server this only updates the process cache; the route that called
+ * it pushes the sheet itself and awaits the result.
+ */
+function commitSheet(
+  state: ExamsState,
+  sheet: MarkSheet,
+  opts: {
+    expectedUpdatedAt: string | null;
+    intent: SheetWriteIntent;
+    reason?: string;
+    subjectsUsed?: ExamSubject[];
+  },
+): void {
+  const subjects =
+    opts.subjectsUsed && opts.subjectsUsed.length > 0
+      ? [...state.subjects, ...opts.subjectsUsed]
+      : state.subjects;
+  const sheets = state.sheets.some((s) => s.id === sheet.id)
+    ? state.sheets.map((s) => (s.id === sheet.id ? sheet : s))
     : [sheet, ...state.sheets];
-  saveExams({ ...state, sheets });
+  const next: ExamsState = { ...state, subjects, sheets };
+
+  if (typeof window === "undefined") {
+    writeExamsLocalRaw(next);
+    return;
+  }
+  if (!assertModulePermission("exams", "edit", "saveMarkSheet")) return;
+  writeExamsLocalRaw(next);
+  void trackServerWork(
+    import("@/lib/examsSheetSync").then(({ scheduleExamSheetPush }) => {
+      scheduleExamSheetPush(sheet.id, {
+        expectedUpdatedAt: opts.expectedUpdatedAt,
+        intent: opts.intent,
+        reason: opts.reason,
+        subjectsUsed: opts.subjectsUsed,
+      });
+    }),
+  );
+}
+
+export function saveMarkSheet(
+  input: SaveMarkSheetInput,
+): { ok: true; sheet: MarkSheet } | { ok: false; error: string } {
+  const state = loadExams();
+  const existing = findMarkSheet(
+    input.academicYearCode,
+    input.examTermId,
+    input.sectionId,
+    state,
+  );
+  const prepared = prepareMarkSheet(input, state, existing);
+  if (!prepared.ok) return prepared;
+  commitSheet(state, prepared.sheet, {
+    expectedUpdatedAt: existing?.updatedAt ?? null,
+    intent: input.lock ? "lock" : "marks",
+    subjectsUsed: prepared.subjectsUsed,
+  });
+  return { ok: true, sheet: prepared.sheet };
+}
+
+/**
+ * Lift the lock on a section's sheet so marks can be corrected. Who may do
+ * this is decided on the server (owner / principal / admin / office, or the
+ * exams approve grant); the reason is recorded in the audit log with the
+ * unlock itself.
+ */
+export function unlockMarkSheet(input: {
+  academicYearCode: string;
+  examTermId: string;
+  sectionId: string;
+  reason: string;
+  by: string;
+}): { ok: true; sheet: MarkSheet } | { ok: false; error: string } {
+  const reason = input.reason.trim();
+  if (reason.length < 4) {
+    return { ok: false, error: "Give a reason for unlocking (at least a few words)" };
+  }
+  const state = loadExams();
+  const existing = findMarkSheet(
+    input.academicYearCode,
+    input.examTermId,
+    input.sectionId,
+    state,
+  );
+  if (!existing) return { ok: false, error: "No mark sheet saved for this exam and section" };
+  if (!existing.lockedAt) return { ok: false, error: "This mark sheet is not locked" };
+  const sheet = normalizeSheet({
+    ...existing,
+    lockedAt: null,
+    enteredBy: input.by || existing.enteredBy,
+    updatedAt: new Date().toISOString(),
+  });
+  commitSheet(state, sheet, {
+    expectedUpdatedAt: existing.updatedAt,
+    intent: "unlock",
+    reason,
+  });
   return { ok: true, sheet };
 }
 
@@ -1916,8 +2158,10 @@ export function saveSheetRemarks(input: {
     overallRemarks: input.overallRemarks,
     updatedAt: new Date().toISOString(),
   });
-  const sheets = state.sheets.map((s) => (s.id === existing.id ? sheet : s));
-  saveExams({ ...state, sheets });
+  commitSheet(state, sheet, {
+    expectedUpdatedAt: existing.updatedAt,
+    intent: "remarks",
+  });
   return { ok: true, sheet };
 }
 
@@ -2023,10 +2267,10 @@ export function saveSheetItemScores(input: {
     enteredBy: input.enteredBy || existing?.enteredBy || "",
     updatedAt: now,
   });
-  const sheets = existing
-    ? state.sheets.map((s) => (s.id === existing.id ? sheet : s))
-    : [sheet, ...state.sheets];
-  saveExams({ ...state, sheets });
+  commitSheet(state, sheet, {
+    expectedUpdatedAt: existing?.updatedAt ?? null,
+    intent: "itemScores",
+  });
   return { ok: true, sheet, totalsApplied };
 }
 
@@ -2106,8 +2350,9 @@ function attendanceSummaryForStudent(
   studentId: string,
   sectionId: string,
   ay: string,
+  attendance?: AttendanceState,
 ): ReportCard["attendance"] {
-  const regs = loadAttendance().registers.filter(
+  const regs = (attendance ?? loadAttendance()).registers.filter(
     (r: AttendanceRegister) =>
       r.academicYearCode === ay && r.sectionId === sectionId,
   );
@@ -2207,18 +2452,23 @@ export function buildReportCard(input: {
   classLabel: string;
   examTermId: string;
   academicYearCode?: string;
+  /** Pass the stores when building cards for more than one student. */
+  deps?: ExamDeps;
 }): ReportCard | { error: string } {
   const ay = input.academicYearCode ?? input.student.academicYearCode ?? DEFAULT_AY;
-  const state = loadExams();
+  const state = input.deps?.state ?? loadExams();
   const term = state.terms.find((t) => t.id === input.examTermId);
   if (!term) return { error: "Exam term not found" };
 
-  let masters: MastersState | null = null;
-  try {
-    masters = loadMasters();
-  } catch {
-    masters = null;
+  let masters: MastersState | null = input.deps?.masters ?? null;
+  if (!masters) {
+    try {
+      masters = loadMasters();
+    } catch {
+      masters = null;
+    }
   }
+  const deps: ExamDeps = { ...input.deps, state, masters: masters ?? undefined };
 
   const mode = masters
     ? curriculumChoiceMode(classGroupForStudent(input.student, masters))
@@ -2242,7 +2492,7 @@ export function buildReportCard(input: {
     }
   }
 
-  const subjects = subjectsForStudent(input.student, state);
+  const subjects = subjectsForStudent(input.student, state, deps);
   if (subjects.length === 0) {
     return {
       error: cartStage
@@ -2261,7 +2511,9 @@ export function buildReportCard(input: {
         : "";
 
   const policy = getExamPolicy(state);
-  const hold = checkHold(input.student.id, "HOLD_REPORT_CARD");
+  const hold =
+    input.deps?.holdChecks?.get(input.student.id) ??
+    checkHold(input.student.id, "HOLD_REPORT_CARD");
   const allExamSubs = state.subjects;
 
   const wantAggregate =
@@ -2413,6 +2665,7 @@ export function buildReportCard(input: {
             input.student.id,
             input.student.sectionId,
             ay,
+            input.deps?.attendance,
           )
         : null,
       holdBlocked: !hold.allowed,
@@ -2504,6 +2757,7 @@ export function buildReportCard(input: {
           input.student.id,
           input.student.sectionId,
           ay,
+          input.deps?.attendance,
         )
       : null,
     holdBlocked: !hold.allowed,
@@ -2645,17 +2899,32 @@ export function buildClassResultSheet(input: {
   sectionId: string;
   examTermId: string;
   academicYearCode?: string;
+  deps?: ExamDeps;
 }): ClassResultSheet | { error: string } {
   const ay = input.academicYearCode ?? DEFAULT_AY;
-  const state = loadExams();
+  const state = input.deps?.state ?? loadExams();
   const term = state.terms.find((t) => t.id === input.examTermId);
   if (!term) return { error: "Exam term not found" };
   const policy = getExamPolicy(state);
-  const masters = loadMasters();
+  const masters = input.deps?.masters ?? loadMasters();
   const nextClass = nextClassAfter(input.classId, masters);
   const nextSection = nextClass
     ? defaultSectionForClass(nextClass.id, masters)
     : null;
+  // One parse of every store for the whole section, not one per child.
+  const deps: ExamDeps = {
+    ...input.deps,
+    state,
+    masters,
+    sis: input.deps?.sis ?? loadSis(),
+    attendance: input.deps?.attendance ?? loadAttendance(),
+    holdChecks:
+      input.deps?.holdChecks ??
+      checkHoldsForStudents(
+        input.students.map((s) => s.id),
+        "HOLD_REPORT_CARD",
+      ),
+  };
 
   const rows: ClassResultRow[] = [];
   for (const student of input.students) {
@@ -2664,6 +2933,7 @@ export function buildClassResultSheet(input: {
       classLabel: input.classLabel,
       examTermId: term.id,
       academicYearCode: ay,
+      deps,
     });
     if ("error" in card) {
       const record =

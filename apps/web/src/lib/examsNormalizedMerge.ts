@@ -22,7 +22,17 @@ function preferRemoteDb(
 export function mergeDbDeskIntoExamsState(
   state: ExamsState,
   bundle: ExamDeskBundle,
-  opts?: { preferDb?: boolean },
+  opts?: {
+    preferDb?: boolean;
+    /**
+     * Sheets this browser saved that the server has not confirmed yet
+     * (examsSheetSync.pendingExamSheetIds). The local copy of these wins
+     * over the server's, and one the server does not have at all is kept.
+     * Without this, a hydrate after a failed push threw the unsent marks
+     * away and the teacher never knew.
+     */
+    keepLocalSheetIds?: Set<string>;
+  },
 ): ExamsState {
   const localSheets = state.sheets ?? [];
   const remoteSheets = bundle.sheets ?? [];
@@ -48,6 +58,12 @@ export function mergeDbDeskIntoExamsState(
   if (!takeSheets) {
     for (const s of localSheets) {
       if (!sheetById.has(s.id)) sheetById.set(s.id, s);
+    }
+  }
+  const keep = opts?.keepLocalSheetIds;
+  if (keep && keep.size > 0) {
+    for (const s of localSheets) {
+      if (keep.has(s.id)) sheetById.set(s.id, s);
     }
   }
 

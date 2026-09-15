@@ -3,8 +3,12 @@ import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { assertPermission, requestMeta, resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
-import { ensureExamsHydratedServer, pushExamsRemoteServer } from "@/lib/examsPersistence";
-import { findMarkSheet, loadExams, saveMarkSheet } from "@/lib/exams";
+import { ensureExamsHydratedServer } from "@/lib/examsPersistence";
+import { loadExams, prepareMarkSheet } from "@/lib/exams";
+import {
+  fetchExamSheetByKeyFromDb,
+  pushExamSheetToDb,
+} from "@/lib/examsNormalized.server";
 import { assertSectionScope } from "@/lib/api/v1/staffScope";
 
 export const runtime = "nodejs";
@@ -20,8 +24,15 @@ type Body = {
 /**
  * POST /api/v1/staff/exams/marks — save one subject's marks for a section
  * and exam. Merges into the section's mark sheet (other subjects untouched),
- * validates against max marks the way the exams desk does, and pushes the
+ * validates against max marks the way the exams desk does, and writes THAT
  * sheet to the desk tables. null = not entered / absent.
+ *
+ * The sheet being merged into is read from the database for this request,
+ * not from the process-wide exams cache: two teachers saving different
+ * subjects of the same section at once used to interleave on that cache,
+ * and the second push could carry a sheet without the first one's marks. The
+ * write is refused (409) if the sheet changed between the read and the
+ * write, and the app re-fetches and retries.
  */
 export async function POST(request: Request) {
   try {
@@ -50,7 +61,8 @@ export async function POST(request: Request) {
     await ensureSchoolMirrorHydrated();
     await Promise.all([ensureSisHydratedServer(), ensureExamsHydratedServer()]);
     const ay = ctx.session.academicYearCode;
-    const existing = findMarkSheet(ay, termId, sectionId);
+    const state = loadExams();
+    const existing = (await fetchExamSheetByKeyFromDb(ay, termId, sectionId)) ?? undefined;
     if (existing?.lockedAt) {
       throw new ApiError("forbidden", "This mark sheet is locked by the exams desk", 403);
     }
@@ -71,17 +83,25 @@ export async function POST(request: Request) {
       });
     }
 
-    const result = saveMarkSheet({
-      academicYearCode: ay,
-      examTermId: termId,
-      classId,
-      sectionId,
-      marks: [...byKey.values()],
-      enteredBy: ctx.session.fullName || "Teacher",
+    const prepared = prepareMarkSheet(
+      {
+        academicYearCode: ay,
+        examTermId: termId,
+        classId,
+        sectionId,
+        marks: [...byKey.values()],
+        enteredBy: ctx.session.fullName || "Teacher",
+      },
+      state,
+      existing,
+    );
+    if (!prepared.ok) throw new ApiError("bad_request", prepared.error, 400);
+    const pushed = await pushExamSheetToDb(prepared.sheet, {
+      subjectsUsed: prepared.subjectsUsed,
+      expectedUpdatedAt: existing?.updatedAt ?? null,
     });
-    if (!result.ok) throw new ApiError("bad_request", result.error, 400);
-    const pushed = await pushExamsRemoteServer(loadExams());
     if (!pushed.ok) {
+      if (pushed.conflict) throw new ApiError("conflict", pushed.error, 409);
       console.warn("[staff-exams-v1] push failed", pushed.error);
       throw new ApiError("server_error", "Could not save — try again", 503);
     }
@@ -92,17 +112,17 @@ export async function POST(request: Request) {
       module: "exams",
       action: "edit",
       entityType: "mark_sheet",
-      entityId: result.sheet.id,
+      entityId: prepared.sheet.id,
       summary: `Marks entered from app: ${entries.length} students, subject ${subjectId}, section ${sectionId}`,
       after: { termId, subjectId, count: entries.length },
       ip: meta.ip,
       userAgent: meta.userAgent,
     });
 
-    const saved = result.sheet.marks.filter((m) => m.subjectId === subjectId);
+    const saved = prepared.sheet.marks.filter((m) => m.subjectId === subjectId);
     return apiOk({
-      sheetId: result.sheet.id,
-      updatedAt: result.sheet.updatedAt,
+      sheetId: prepared.sheet.id,
+      updatedAt: prepared.sheet.updatedAt,
       marks: saved.map((m) => ({
         studentId: m.studentId,
         marksObtained: m.marksObtained,

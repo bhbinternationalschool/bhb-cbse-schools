@@ -14,9 +14,10 @@ import {
   formatInr,
   loadFees,
   openFeeDues,
+  type FeesState,
 } from "@/lib/fees";
-import { loadMasters } from "@/lib/masters";
-import { loadSis } from "@/lib/sis";
+import { loadMasters, type MastersState } from "@/lib/masters";
+import { loadSis, type SisState } from "@/lib/sis";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import {
   gateForHold,
@@ -268,17 +269,34 @@ export function addCalendarDays(isoDate: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+/**
+ * Already-loaded stores for a batch of hold checks.
+ *
+ * `studentHoldContext` parses the SIS, masters and fee blobs from
+ * localStorage on every call. A screen that checks 33 children — the exam
+ * desk's report-card list, a section's result sheet — paid that parse 33
+ * times over, ~1.6 MB of JSON per child, which is most of why those tabs
+ * took seconds to open. Callers that loop pass the stores once.
+ */
+export type HoldDeps = {
+  sis?: SisState;
+  masters?: MastersState;
+  fees?: FeesState;
+  holds?: HoldsState;
+};
+
 /** Overdue stage for a student from live Fee Take dues (incl. plan EMIs). */
 export function studentHoldContext(
   studentId: string,
   asOf = todayIso(),
+  deps?: HoldDeps,
 ): StudentHoldContext | null {
-  const sis = loadSis();
+  const sis = deps?.sis ?? loadSis();
   const student = sis.students.find((s) => s.id === studentId);
   if (!student) return null;
 
-  const masters = loadMasters();
-  const fees = loadFees();
+  const masters = deps?.masters ?? loadMasters();
+  const fees = deps?.fees ?? loadFees();
   const dues = computeStudentDues(student, masters, fees, {
     asOf,
     includeFuture: true,
@@ -308,7 +326,7 @@ export function studentHoldContext(
   }
 
   const stage = resolveStage(overdueDays);
-  const holds = loadHolds();
+  const holds = deps?.holds ?? loadHolds();
   // Which services this child is actually being refused today. Derived from
   // the gate, not from the stage, so it cannot drift from enforcement.
   const activeHolds = (Object.keys(HOLD_FROM_STAGE) as HoldCode[])
@@ -353,8 +371,9 @@ export function checkHold(
   studentId: string,
   holdCode: HoldCode,
   asOf = todayIso(),
+  deps?: HoldDeps,
 ): HoldCheck {
-  const ctx = studentHoldContext(studentId, asOf);
+  const ctx = studentHoldContext(studentId, asOf, deps);
   if (!ctx) {
     return {
       allowed: false,
@@ -367,7 +386,12 @@ export function checkHold(
     };
   }
 
-  const override = findActiveOverride(loadHolds(), studentId, holdCode, asOf);
+  const override = findActiveOverride(
+    deps?.holds ?? loadHolds(),
+    studentId,
+    holdCode,
+    asOf,
+  );
   const snap = holdDecisionsSnapshot();
 
   // The gate's settings come from the school's policy when it has loaded. If
@@ -624,4 +648,29 @@ export function holdCodeForCertificate(
     return "HOLD_CERT";
   }
   return null;
+}
+
+/**
+ * One hold verdict per student, with the stores parsed once for the whole
+ * batch instead of once per child. Same answer as calling `checkHold` in a
+ * loop — this is only the loop with the loads hoisted out of it.
+ */
+export function checkHoldsForStudents(
+  studentIds: readonly string[],
+  holdCode: HoldCode,
+  asOf = todayIso(),
+): Map<string, HoldCheck> {
+  const out = new Map<string, HoldCheck>();
+  if (studentIds.length === 0) return out;
+  const deps: HoldDeps = {
+    sis: loadSis(),
+    masters: loadMasters(),
+    fees: loadFees(),
+    holds: loadHolds(),
+  };
+  for (const id of studentIds) {
+    if (out.has(id)) continue;
+    out.set(id, checkHold(id, holdCode, asOf, deps));
+  }
+  return out;
 }

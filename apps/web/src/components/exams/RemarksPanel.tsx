@@ -14,6 +14,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Sparkles } from "lucide-react";
 import {
   buildReportCard,
+  loadExams,
+  type ExamDeps,
   findMarkSheet,
   saveSheetRemarks,
   type ExamPolicy,
@@ -23,7 +25,10 @@ import {
   type ReportCard,
   type StudentOverallRemark,
 } from "@/lib/exams";
-import type { SisStudent } from "@/lib/sis";
+import { loadSis, type SisStudent } from "@/lib/sis";
+import { loadMasters } from "@/lib/masters";
+import { loadAttendance } from "@/lib/attendance";
+import { checkHoldsForStudents } from "@/lib/holds";
 import {
   REMARK_MAX_STUDENTS_PER_REQUEST,
   REMARK_TONES,
@@ -144,6 +149,17 @@ export function RemarksPanel(props: {
       setDirty(false);
       return;
     }
+    // Every store once for the section, not once per child.
+    const deps: ExamDeps = {
+      state: loadExams(),
+      masters: loadMasters(),
+      sis: loadSis(),
+      attendance: loadAttendance(),
+      holdChecks: checkHoldsForStudents(
+        roster.map((s) => s.id),
+        "HOLD_REPORT_CARD",
+      ),
+    };
     const next: RowState[] = roster.map((st) => {
       const saved = sheet?.overallRemarks.find((r) => r.studentId === st.id);
       const built = buildReportCard({
@@ -151,6 +167,7 @@ export function RemarksPanel(props: {
         classLabel,
         examTermId: term.id,
         academicYearCode: ay,
+        deps,
       });
       const card = "error" in built ? null : built;
       const subjectRows = subjects

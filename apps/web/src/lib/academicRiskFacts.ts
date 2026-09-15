@@ -7,14 +7,30 @@
 
 import { classLabel as classLabelOf } from "@/lib/homework";
 import { listIncidentsForStudent, loadDiscipline } from "@/lib/discipline";
-import { buildReportCard, listExamTerms, loadExams, type ExamTerm, type ReportCard } from "@/lib/exams";
+import {
+  buildReportCard,
+  listExamTerms,
+  loadExams,
+  type ExamDeps,
+  type ExamTerm,
+  type ReportCard,
+} from "@/lib/exams";
+import { loadAttendance } from "@/lib/attendance";
+import { checkHoldsForStudents } from "@/lib/holds";
+import { loadSis } from "@/lib/sis";
 import { loadHomework, submissionForStudent } from "@/lib/homework";
 import type { MastersState } from "@/lib/masters";
 import type { SisStudent } from "@/lib/sis";
 import type { StudentRiskFacts } from "@/lib/academicRisk";
 
-function cardFor(st: SisStudent, classLabel: string, termId: string, ay: string): ReportCard | null {
-  const b = buildReportCard({ student: st, classLabel, examTermId: termId, academicYearCode: ay });
+function cardFor(
+  st: SisStudent,
+  classLabel: string,
+  termId: string,
+  ay: string,
+  deps: ExamDeps,
+): ReportCard | null {
+  const b = buildReportCard({ student: st, classLabel, examTermId: termId, academicYearCode: ay, deps });
   if ("error" in b) return null;
   if (!(b.totalMax > 0 && b.lines.some((l) => l.marksObtained != null))) return null;
   return b;
@@ -35,6 +51,17 @@ export function buildSectionRiskFacts(input: {
   const exams = loadExams();
   const terms = listExamTerms(ay, exams);
   const earlier = terms.filter((t) => t.sortOrder < input.term.sortOrder).reverse();
+  // Every store once for the section, not once per student per term.
+  const deps: ExamDeps = {
+    state: exams,
+    masters: input.masters,
+    sis: loadSis(),
+    attendance: loadAttendance(),
+    holdChecks: checkHoldsForStudents(
+      input.roster.map((s) => s.id),
+      "HOLD_REPORT_CARD",
+    ),
+  };
   const hw = loadHomework();
   const disc = loadDiscipline();
   const discUsed = disc.incidents.length > 0;
@@ -44,10 +71,10 @@ export function buildSectionRiskFacts(input: {
   const facts: StudentRiskFacts[] = [];
   for (const st of input.roster) {
     const classLabel = classLabelOf(input.masters, st.classId, st.sectionId);
-    const cur = cardFor(st, classLabel, input.term.id, ay);
+    const cur = cardFor(st, classLabel, input.term.id, ay, deps);
     let prev: ReportCard | null = null;
     for (const t of earlier) {
-      prev = cardFor(st, classLabel, t.id, ay);
+      prev = cardFor(st, classLabel, t.id, ay, deps);
       if (prev) break;
     }
     if (prev) prevLabels.add(prev.examTerm.label);
