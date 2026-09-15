@@ -99,7 +99,10 @@ export function installServerWorkTracker(opts: { capMs?: number } = {}): void {
       track(withBody);
       return withBody;
     };
-    Object.assign(trackedFetch, originalFetch);
+    // Deliberately NOT copying properties from the original: Next.js marks its
+    // own patched fetch (__nextPatched) and skips patching a fetch that carries
+    // the mark. Copying it made Next skip its fetch instrumentation and broke
+    // prerendering ("Expected workUnitAsyncStorage to have a store").
     globalThis.fetch = trackedFetch as typeof fetch;
   }
 
@@ -122,4 +125,6 @@ export function installServerWorkTracker(opts: { capMs?: number } = {}): void {
     } as typeof res.end;
     return als.run(ctx, () => originalEmit.call(this, event, ...args));
   } as typeof http.Server.prototype.emit;
+
+  console.log(`[serverWork] tracker installed — replies wait for their work (cap ${capMs} ms)`);
 }
