@@ -215,6 +215,7 @@ SELFTESTS=(
   test:exams
   test:exams-sheet-safety
   test:exam-schemes
+  test:exam-report-templates
   test:household-prefs
   test:item-analytics
   test:item-score-import

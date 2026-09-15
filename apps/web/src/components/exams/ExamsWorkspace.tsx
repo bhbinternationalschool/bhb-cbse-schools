@@ -26,6 +26,7 @@ import {
   promotionDecisionLabel,
   saveExamPolicy,
   loadExams,
+  reportTemplateForClassId,
   saveMarkSheet,
   savePromotionDecision,
   schemeForClassId,
@@ -57,6 +58,7 @@ import {
 } from "@/lib/examsSheetSync";
 import { DeskSyncBanner } from "@/components/accounts/DeskSyncBanner";
 import { AssessmentSchemesPanel } from "@/components/exams/AssessmentSchemesPanel";
+import { ReportCardTemplatesPanel } from "@/components/exams/ReportCardTemplatesPanel";
 import { pickableGrades, type CoScholasticArea, type GradeBand } from "@/lib/examSchemes";
 import { rosterForSection } from "@/lib/attendance";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
@@ -886,11 +888,12 @@ export function ExamsWorkspace() {
       return;
     }
     const studentScheme = schemeForClassId(st.classId, policy);
+    const studentTemplate = reportTemplateForClassId(st.classId, policy);
     let card: ReportCard | { error: string };
     if (
-      studentScheme.showRank ||
-      studentScheme.showClassAverage ||
-      studentScheme.showResultOnCard
+      (studentTemplate.showRank ?? studentScheme.showRank) ||
+      (studentTemplate.showClassAverage ?? studentScheme.showClassAverage) ||
+      (studentTemplate.showResult ?? studentScheme.showResultOnCard)
     ) {
       // Rank and average need the whole section; the result comes from the
       // recorded decision. buildClassResultSheet fills all three.
@@ -1382,6 +1385,13 @@ export function ExamsWorkspace() {
             policy={policy}
             masters={masters}
             terms={allTerms}
+            onSaved={refresh}
+            onFlash={flash}
+            onError={setError}
+          />
+          <ReportCardTemplatesPanel
+            policy={policy}
+            masters={masters}
             onSaved={refresh}
             onFlash={flash}
             onError={setError}

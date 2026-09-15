@@ -43,6 +43,7 @@
     "test:exams": "npx tsx src/lib/exams.selftest.ts",
     "test:exams-sheet-safety": "npx tsx src/lib/examsSheetSafety.selftest.ts",
     "test:exam-schemes": "npx tsx src/lib/examSchemes.selftest.ts",
+    "test:exam-report-templates": "npx tsx src/lib/examReportTemplates.selftest.ts",
     "test:masters-revision-guard": "npx tsx src/lib/mastersRevisionGuard.selftest.ts",
     "test:masters-revision-lifecycle": "npx tsx src/lib/mastersRevisionLifecycle.selftest.ts",
     "test:tenant-wipe-expiry": "npx tsx src/lib/tenantDataWipe.selftest.ts",

@@ -56,6 +56,20 @@ import {
   type CoScholasticArea,
 } from "@/lib/examSchemes";
 
+import {
+  normalizeReportCardTemplates,
+  reportCardTemplateForClass,
+  resolvePresentation,
+  type CardPresentation,
+  type ReportCardTemplate,
+} from "@/lib/examReportTemplates";
+
+export {
+  reportCardTemplateForClass,
+  type CardPresentation,
+  type ReportCardTemplate,
+} from "@/lib/examReportTemplates";
+
 export {
   componentsForTerm,
   componentsTotalMax,
@@ -136,6 +150,12 @@ export type ExamPolicy = {
    * per band (see lib/examSchemes.ts).
    */
   schemes: AssessmentScheme[];
+  /**
+   * How each class's printed report card looks — layout, title, which
+   * blocks and signatures. Prefilled templates, assigned per class or per
+   * band; "Classic" reproduces the old card (lib/examReportTemplates.ts).
+   */
+  reportTemplates: ReportCardTemplate[];
   /**
    * Early-warning thresholds for the At-risk tab (lib/academicRisk.ts).
    * Absent → DEFAULT_RISK_THRESHOLDS; the school tunes them here.
@@ -606,6 +626,7 @@ export function defaultExamPolicy(): ExamPolicy {
     requireAllSubjectsPassForPromotion: true,
     enableCoScholastic: false,
     schemes: [defaultAssessmentScheme(33)],
+    reportTemplates: normalizeReportCardTemplates([]),
     riskThresholds: { attendancePct: 75, incidents: 3, homeworkRatio: 0.6, homeworkMinDue: 5, subjectDrops: 2 },
   };
 }
@@ -659,6 +680,7 @@ export function normalizeExamPolicy(
       p.requireAllSubjectsPassForPromotion !== false,
     enableCoScholastic: !!p.enableCoScholastic,
     schemes: normalizeAssessmentSchemes(p.schemes, passPercent),
+    reportTemplates: normalizeReportCardTemplates(p.reportTemplates),
     riskThresholds: normalizeRiskThresholds(p.riskThresholds),
   };
 }
@@ -675,6 +697,14 @@ export function schemeForClassId(
  * Co-scholastic areas rated for a class: the scheme's own list, else the
  * legacy NEP pair when the policy switch is on, else none.
  */
+/** The printed-card template for this class (the default when none names it). */
+export function reportTemplateForClassId(
+  classId: string,
+  policy: ExamPolicy,
+): ReportCardTemplate {
+  return reportCardTemplateForClass(classId, policy.reportTemplates);
+}
+
 export function coScholasticAreasForClass(
   classId: string,
   policy: ExamPolicy,
@@ -2585,6 +2615,8 @@ export type ReportCard = {
   absentSubjects: string[];
   /** The scheme asks for the profile photo on the card. */
   showPhoto: boolean;
+  /** What the printed card shows, from the class's template. */
+  presentation: CardPresentation;
 };
 
 function overallRemarkForReportCard(
@@ -2842,8 +2874,18 @@ export function buildReportCard(input: {
     absent: null,
     absentSubjects: [] as string[],
     showPhoto: scheme.showPhoto,
+    presentation: resolvePresentation(
+      reportTemplateForClassId(input.student.classId, policy),
+      {
+        showPhoto: scheme.showPhoto,
+        showAttendance: scheme.showAttendance ?? policy.showAttendanceOnReport,
+        showRank: scheme.showRank,
+        showClassAverage: scheme.showClassAverage,
+        showResult: scheme.showResultOnCard,
+      },
+    ),
   };
-  const showAttendance = scheme.showAttendance ?? policy.showAttendanceOnReport;
+  const showAttendance = cardMeta.presentation.showAttendance;
   const hold =
     input.deps?.holdChecks?.get(input.student.id) ??
     checkHold(input.student.id, "HOLD_REPORT_CARD");
@@ -3324,6 +3366,13 @@ export function buildClassResultSheet(input: {
   const passLine = effectivePassPercent(scheme, policy.passPercent);
   const requireAll =
     scheme.requireAllSubjectsPass ?? policy.requireAllSubjectsPassForPromotion;
+  const show = resolvePresentation(reportTemplateForClassId(input.classId, policy), {
+    showPhoto: scheme.showPhoto,
+    showAttendance: scheme.showAttendance ?? policy.showAttendanceOnReport,
+    showRank: scheme.showRank,
+    showClassAverage: scheme.showClassAverage,
+    showResult: scheme.showResultOnCard,
+  });
 
   const rows: ClassResultRow[] = [];
   for (const student of input.students) {
@@ -3432,12 +3481,12 @@ export function buildClassResultSheet(input: {
     const decision = r.record?.decision;
     r.card = {
       ...r.card,
-      rank: scheme.showRank ? (rankOf.get(r.student.id) ?? null) : null,
-      classSize: scheme.showRank ? withCards.length : null,
-      classAverage: scheme.showClassAverage ? average : null,
+      rank: show.showRank ? (rankOf.get(r.student.id) ?? null) : null,
+      classSize: show.showRank ? withCards.length : null,
+      classAverage: show.showClassAverage ? average : null,
       result: r.card.absent
         ? "Absent"
-        : scheme.showResultOnCard && decision && decision !== "pending"
+        : show.showResult && decision && decision !== "pending"
           ? decision === "promoted" && r.record?.toClassId
             ? `Promoted to ${masters.classes.find((c) => c.id === r.record?.toClassId)?.name ?? "next class"}`
             : promotionDecisionLabel(decision)
