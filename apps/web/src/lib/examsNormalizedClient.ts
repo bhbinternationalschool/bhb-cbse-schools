@@ -70,11 +70,12 @@ async function pushExamsDeskApi(state: ExamsState) {
     const res = await fetch("/api/school-data/exams-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      // Setup only. Sheets go one at a time through examsSheetSync.ts —
+      // sending them here replaced (and pruned) every sheet on the server.
       body: JSON.stringify({
         terms: state.terms,
         subjects: state.subjects,
         dateSheet: state.dateSheet,
-        sheets: state.sheets,
         policy: state.policy,
         promotions: state.promotions,
       }),

@@ -213,6 +213,7 @@ SELFTESTS=(
   test:email
   test:exam-invigilation
   test:exams
+  test:exams-sheet-safety
   test:household-prefs
   test:item-analytics
   test:item-score-import

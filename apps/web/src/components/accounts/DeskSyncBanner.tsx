@@ -21,15 +21,24 @@ import {
  * Deliberately alarming in tone, because the state it describes is one where
  * the operator believes their work is safe and it is not.
  */
-export function DeskSyncBanner({ onRetry }: { onRetry?: () => Promise<boolean> }) {
+export function DeskSyncBanner({
+  onRetry,
+  module = "accounts",
+  title = "Your accounts changes are not saved on the server",
+}: {
+  onRetry?: () => Promise<boolean>;
+  /** Which desk's sync status to show (deskSyncStatus module key). */
+  module?: string;
+  title?: string;
+}) {
   const [state, setState] = useState<DeskSyncState | null>(null);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<string | null>(null);
 
   const reload = useCallback(() => {
-    const s = deskSyncState("accounts");
+    const s = deskSyncState(module);
     setState(s.consecutiveFailures > 0 ? s : null);
-  }, []);
+  }, [module]);
 
   useEffect(() => {
     reload();
@@ -48,7 +57,7 @@ export function DeskSyncBanner({ onRetry }: { onRetry?: () => Promise<boolean> }
     try {
       const ok = await onRetry();
       if (ok) {
-        clearDeskSyncStatus("accounts");
+        clearDeskSyncStatus(module);
         setState(null);
         setOutcome(null);
       } else {
@@ -73,7 +82,7 @@ export function DeskSyncBanner({ onRetry }: { onRetry?: () => Promise<boolean> }
           />
           <div>
             <p className="font-semibold text-red-900 dark:text-red-200">
-              Your accounts changes are not saved on the server
+              {title}
             </p>
             <p className="mt-0.5 text-red-800 dark:text-red-300">
               {explainDeskSyncFailure(state)}

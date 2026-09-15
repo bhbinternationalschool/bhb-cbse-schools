@@ -24,6 +24,7 @@ import { examsDualWriteDbEnabled } from "@/lib/examsDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { fetchAllPages, fetchByIds } from "@/lib/supabase/pageAll";
 import { replaceChildRows } from "./replaceChildRows.server";
+import { sameInstant } from "@/lib/examsSheetVersion";
 
 export type ExamDeskSyncMeta = {
   termCount: number;
@@ -446,10 +447,15 @@ export async function pushExamDeskToDb(
   const terms = state.terms ?? [];
   const subjects = state.subjects ?? [];
   const dateSheet = state.dateSheet ?? [];
-  const sheets = state.sheets ?? [];
   const promotions = state.promotions ?? [];
   const policy = normalizeExamPolicy(state.policy);
 
+  // Sheets are NOT written here any more. They arrive one at a time through
+  // pushExamSheetToDb (see examsSheetSync.ts): a whole-desk payload is this
+  // browser's copy of every sheet, and pruning the server to it deleted the
+  // sheets other teachers had saved since this tab last hydrated — marks
+  // cascade-deleted with them. This push is setup only: terms, subjects, the
+  // date sheet, promotions and the policy.
   await Promise.all([
     deleteStale(sb, tenantId, "exam_desk_terms", new Set(terms.map((t) => t.id))),
     deleteStale(
@@ -463,12 +469,6 @@ export async function pushExamDeskToDb(
       tenantId,
       "exam_desk_date_sheet",
       new Set(dateSheet.map((d) => d.id)),
-    ),
-    deleteStale(
-      sb,
-      tenantId,
-      "exam_desk_sheets",
-      new Set(sheets.map((s) => s.id)),
     ),
     deleteStale(
       sb,
@@ -499,103 +499,11 @@ export async function pushExamDeskToDb(
   );
   if (!r.ok) return r;
 
-  const sheetHeaders: Record<string, unknown>[] = [];
-  const allMarks: Record<string, unknown>[] = [];
-  const allCoScholastic: Record<string, unknown>[] = [];
-  const allRemarks: Record<string, unknown>[] = [];
-  const allItemScores: Record<string, unknown>[] = [];
-  let lastSheetAt: string | null = null;
-
-  for (const sheet of sheets) {
-    const { header, marks, coScholastic, remarks, itemScores } = sheetToRows(tenantId, sheet);
-    sheetHeaders.push(header);
-    allMarks.push(...marks);
-    allCoScholastic.push(...coScholastic);
-    allRemarks.push(...remarks);
-    allItemScores.push(...itemScores);
-    const updated = String(header.updated_at);
-    if (!lastSheetAt || updated > lastSheetAt) lastSheetAt = updated;
+  // Deleting an exam (allowed only while it has no marks) drops its sheets
+  // locally; mirror that for sheets that have no marks and whose exam is gone.
+  if (terms.length > 0) {
+    await deleteOrphanEmptySheets(sb, tenantId, new Set(terms.map((t) => t.id)));
   }
-
-  r = await upsertChunks(sb, "exam_desk_sheets", sheetHeaders);
-  if (!r.ok) return r;
-
-  const sheetIds = new Set(sheets.map((s) => s.id));
-  const { rows: existingMarks } = await fetchAllPages<{ id: string; mark_sheet_id: string }>(
-    (from, to) =>
-      sb
-        .from("exam_desk_marks")
-        .select("id, mark_sheet_id")
-        .eq("tenant_id", tenantId)
-        .order("id", { ascending: true })
-        .range(from, to),
-  );
-  const staleMarkIds = (existingMarks ?? [])
-    .filter((m) => sheetIds.has(String(m.mark_sheet_id)))
-    .map((m) => String(m.id));
-  if (staleMarkIds.length) {
-    await sb.from("exam_desk_marks").delete().in("id", staleMarkIds);
-  }
-
-  r = await upsertChunks(sb, "exam_desk_marks", allMarks, 500);
-  if (!r.ok) return r;
-
-  const { rows: existingCoScholastic } = await fetchAllPages<{ id: string; mark_sheet_id: string }>(
-    (from, to) =>
-      sb
-        .from("exam_desk_coscholastic")
-        .select("id, mark_sheet_id")
-        .eq("tenant_id", tenantId)
-        .order("id", { ascending: true })
-        .range(from, to),
-  );
-  const staleCoScholasticIds = (existingCoScholastic ?? [])
-    .filter((e) => sheetIds.has(String(e.mark_sheet_id)))
-    .map((e) => String(e.id));
-  if (staleCoScholasticIds.length) {
-    await sb.from("exam_desk_coscholastic").delete().in("id", staleCoScholasticIds);
-  }
-
-  r = await upsertChunks(sb, "exam_desk_coscholastic", allCoScholastic, 500);
-  if (!r.ok) return r;
-
-  const { rows: existingRemarks } = await fetchAllPages<{ id: string; mark_sheet_id: string }>(
-    (from, to) =>
-      sb
-        .from("exam_desk_remarks")
-        .select("id, mark_sheet_id")
-        .eq("tenant_id", tenantId)
-        .order("id", { ascending: true })
-        .range(from, to),
-  );
-  const staleRemarkIds = (existingRemarks ?? [])
-    .filter((e) => sheetIds.has(String(e.mark_sheet_id)))
-    .map((e) => String(e.id));
-  if (staleRemarkIds.length) {
-    await sb.from("exam_desk_remarks").delete().in("id", staleRemarkIds);
-  }
-
-  r = await upsertChunks(sb, "exam_desk_remarks", allRemarks, 500);
-  if (!r.ok) return r;
-
-  const { rows: existingItemScores } = await fetchAllPages<{ id: string; mark_sheet_id: string }>(
-    (from, to) =>
-      sb
-        .from("exam_desk_item_scores")
-        .select("id, mark_sheet_id")
-        .eq("tenant_id", tenantId)
-        .order("id", { ascending: true })
-        .range(from, to),
-  );
-  const staleItemScoreIds = (existingItemScores ?? [])
-    .filter((e) => sheetIds.has(String(e.mark_sheet_id)))
-    .map((e) => String(e.id));
-  for (let i = 0; i < staleItemScoreIds.length; i += 500) {
-    await sb.from("exam_desk_item_scores").delete().in("id", staleItemScoreIds.slice(i, i + 500));
-  }
-
-  r = await upsertChunks(sb, "exam_desk_item_scores", allItemScores, 500);
-  if (!r.ok) return r;
 
   r = await upsertChunks(
     sb,
@@ -610,22 +518,96 @@ export async function pushExamDeskToDb(
     updated_at: now,
   });
 
-  await sb.from("exam_desk_sync_meta").upsert(
-    {
-      tenant_id: tenantId,
-      term_count: terms.length,
-      subject_count: subjects.length,
-      sheet_count: sheets.length,
-      mark_count: allMarks.length,
-      promotion_count: promotions.length,
-      last_sheet_at: lastSheetAt,
-      updated_at: now,
-    },
-    { onConflict: "tenant_id" },
-  );
+  await writeSyncMeta(sb, tenantId, {
+    term_count: terms.length,
+    subject_count: subjects.length,
+    promotion_count: promotions.length,
+    updated_at: now,
+  });
 
   return { ok: true };
 }
+
+async function countRows(
+  sb: SupabaseClient,
+  table: string,
+  tenantId: string,
+): Promise<number | null> {
+  const { count, error } = await sb
+    .from(table)
+    .select("id", { count: "exact", head: true })
+    .eq("tenant_id", tenantId);
+  if (error) return null;
+  return count ?? 0;
+}
+
+/**
+ * sync_meta carries the counts the client compares on hydrate. They used to
+ * be the size of the pushed payload; now that sheets and setup are written
+ * by different calls, each write counts what the tables actually hold.
+ */
+async function writeSyncMeta(
+  sb: SupabaseClient,
+  tenantId: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  const [sheetCount, markCount] = await Promise.all([
+    countRows(sb, "exam_desk_sheets", tenantId),
+    countRows(sb, "exam_desk_marks", tenantId),
+  ]);
+  const { data: latest } = await sb
+    .from("exam_desk_sheets")
+    .select("updated_at")
+    .eq("tenant_id", tenantId)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  await sb.from("exam_desk_sync_meta").upsert(
+    {
+      tenant_id: tenantId,
+      ...(sheetCount === null ? {} : { sheet_count: sheetCount }),
+      ...(markCount === null ? {} : { mark_count: markCount }),
+      last_sheet_at: (latest?.updated_at as string | null) ?? null,
+      updated_at: new Date().toISOString(),
+      ...patch,
+    },
+    { onConflict: "tenant_id" },
+  );
+}
+
+async function deleteOrphanEmptySheets(
+  sb: SupabaseClient,
+  tenantId: string,
+  keepTermIds: Set<string>,
+): Promise<void> {
+  const { data, error } = await sb
+    .from("exam_desk_sheets")
+    .select("id, exam_term_id")
+    .eq("tenant_id", tenantId);
+  if (error || !data) return;
+  const orphans = data
+    .filter((r) => !keepTermIds.has(String(r.exam_term_id)))
+    .map((r) => String(r.id));
+  if (orphans.length === 0) return;
+  const { data: marked } = await sb
+    .from("exam_desk_marks")
+    .select("mark_sheet_id")
+    .eq("tenant_id", tenantId)
+    .in("mark_sheet_id", orphans)
+    .not("marks_obtained", "is", null)
+    .limit(orphans.length);
+  const hasMarks = new Set((marked ?? []).map((r) => String(r.mark_sheet_id)));
+  const empty = orphans.filter((id) => !hasMarks.has(id));
+  if (empty.length === 0) return;
+  const { error: delErr } = await sb
+    .from("exam_desk_sheets")
+    .delete()
+    .in("id", empty);
+  if (delErr) {
+    console.error("[exam_desk_sheets] orphan cleanup failed:", delErr.message);
+  }
+}
+
 
 export async function fetchExamDeskFromDb(): Promise<{
   bundle: ExamDeskBundle;
@@ -798,14 +780,84 @@ export async function fetchExamDeskFromDb(): Promise<{
   };
 }
 
+export type SheetPushResult =
+  | { ok: true }
+  | { ok: false; error: string; conflict?: boolean };
+
+/**
+ * Write one section's sheet: header, then each child table inside its own
+ * transaction, then the counts.
+ *
+ * `expectedUpdatedAt` is the version the caller edited from (null = the
+ * caller created the sheet). When the stored header is at a different
+ * version somebody else saved in between; the write is refused with
+ * `conflict: true` and nothing is changed. Omit it to write unconditionally
+ * (only the mirror service does).
+ */
 export async function pushExamSheetToDb(
   sheet: MarkSheet,
-): Promise<{ ok: boolean; error?: string }> {
+  opts?: {
+    subjectsUsed?: ExamSubject[];
+    expectedUpdatedAt?: string | null;
+  },
+): Promise<SheetPushResult> {
   if (!examsDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
   if (!ctx) return { ok: false, error: "No tenant" };
   const { sb, tenantId } = ctx;
   const { header, marks, coScholastic, remarks, itemScores } = sheetToRows(tenantId, sheet);
+
+  if (opts && "expectedUpdatedAt" in opts) {
+    const { data: current, error: curErr } = await sb
+      .from("exam_desk_sheets")
+      .select("id, updated_at, entered_by")
+      .eq("tenant_id", tenantId)
+      .eq("id", sheet.id)
+      .maybeSingle();
+    if (curErr) return { ok: false, error: curErr.message };
+    const storedAt = (current?.updated_at as string | null) ?? null;
+    if (!sameInstant(storedAt, opts.expectedUpdatedAt ?? null)) {
+      const who = String(current?.entered_by || "someone else");
+      const when = storedAt
+        ? new Date(storedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })
+        : "";
+      return {
+        ok: false,
+        conflict: true,
+        error: storedAt
+          ? `${who} saved this mark sheet at ${when}, after you opened it. Reload to see their marks, then enter yours again. Nothing you typed has been sent.`
+          : "This mark sheet was removed on the server after you opened it. Reload before saving again.",
+      };
+    }
+    if (!current) {
+      // New here — but the (year, exam, section) key may already be taken
+      // by a sheet this browser never saw.
+      const { data: twin } = await sb
+        .from("exam_desk_sheets")
+        .select("id, entered_by, updated_at")
+        .eq("tenant_id", tenantId)
+        .eq("academic_year_code", sheet.academicYearCode)
+        .eq("exam_term_id", sheet.examTermId)
+        .eq("section_id", sheet.sectionId)
+        .maybeSingle();
+      if (twin && String(twin.id) !== sheet.id) {
+        return {
+          ok: false,
+          conflict: true,
+          error: `${String(twin.entered_by || "Someone")} already saved a mark sheet for this exam and section. Reload to see it, then enter your marks on that sheet.`,
+        };
+      }
+    }
+  }
+
+  if (opts?.subjectsUsed?.length) {
+    const r = await upsertChunks(
+      sb,
+      "exam_desk_subjects",
+      opts.subjectsUsed.map((s) => subjectToRow(tenantId, s)),
+    );
+    if (!r.ok) return { ok: false, error: r.error ?? "exam subjects not written" };
+  }
 
   const { error: hErr } = await sb.from("exam_desk_sheets").upsert(header);
   if (hErr) return { ok: false, error: hErr.message };
@@ -835,14 +887,70 @@ export async function pushExamSheetToDb(
     if (!write.ok) return { ok: false, error: write.error };
   }
 
-  await sb.from("exam_desk_sync_meta").upsert(
-    {
-      tenant_id: tenantId,
-      last_sheet_at: header.updated_at,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "tenant_id" },
-  );
+  await writeSyncMeta(sb, tenantId, {});
 
   return { ok: true };
+}
+
+/** One sheet with all its child rows, by id. */
+export async function fetchExamSheetFromDb(
+  sheetId: string,
+): Promise<MarkSheet | null> {
+  const ctx = await resolveCtx();
+  if (!ctx) return null;
+  const { sb, tenantId } = ctx;
+  const { data: header } = await sb
+    .from("exam_desk_sheets")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .eq("id", sheetId)
+    .maybeSingle();
+  if (!header) return null;
+  return loadSheetChildren(sb, tenantId, header as Record<string, unknown>);
+}
+
+/** One sheet by its natural key (year, exam, section). */
+export async function fetchExamSheetByKeyFromDb(
+  academicYearCode: string,
+  examTermId: string,
+  sectionId: string,
+): Promise<MarkSheet | null> {
+  const ctx = await resolveCtx();
+  if (!ctx) return null;
+  const { sb, tenantId } = ctx;
+  const { data: header } = await sb
+    .from("exam_desk_sheets")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .eq("academic_year_code", academicYearCode)
+    .eq("exam_term_id", examTermId)
+    .eq("section_id", sectionId)
+    .maybeSingle();
+  if (!header) return null;
+  return loadSheetChildren(sb, tenantId, header as Record<string, unknown>);
+}
+
+async function loadSheetChildren(
+  sb: SupabaseClient,
+  tenantId: string,
+  header: Record<string, unknown>,
+): Promise<MarkSheet> {
+  const sheetId = String(header.id);
+  const child = (table: string) =>
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb
+        .from(table)
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .eq("mark_sheet_id", sheetId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ).then((r) => r.rows);
+  const [marks, co, remarks, items] = await Promise.all([
+    child("exam_desk_marks"),
+    child("exam_desk_coscholastic"),
+    child("exam_desk_remarks"),
+    child("exam_desk_item_scores"),
+  ]);
+  return rowToSheet(header, marks, co, remarks, items);
 }
