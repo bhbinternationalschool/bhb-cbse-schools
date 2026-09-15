@@ -136,7 +136,7 @@ const deps = { state, masters, sis: { version: 1, households: [], students: [stu
 
   // Absent: the cell's number is dropped and the row reads AB, reason kept.
   const r6 = prepareMarkSheet(
-    { ...input, absences: [{ studentId: student.id, reason: "  Fever " }] },
+    { ...input, absences: [{ studentId: student.id, subjectId: eng.id, reason: "  Fever " }] },
     state,
     open,
     deps,
@@ -145,7 +145,7 @@ const deps = { state, masters, sis: { version: 1, households: [], students: [stu
   if (r6.ok) {
     assert.equal(r6.sheet.marks[0]!.marksObtained, null);
     assert.equal(r6.sheet.marks[0]!.grade, "AB");
-    assert.deepEqual(r6.sheet.absences, [{ studentId: student.id, reason: "Fever" }]);
+    assert.deepEqual(r6.sheet.absences, [{ studentId: student.id, subjectId: eng.id, reason: "Fever" }]);
   }
   const r7 = prepareMarkSheet(input, state, r6.ok ? r6.sheet : open, deps);
   assert.ok(r7.ok && r7.sheet.absences.length === 1, "omitting absences keeps what the sheet had");

@@ -74,6 +74,15 @@ console.log("examSchemes.selftest.ts");
   assert.equal(list.filter((s) => s.isDefault).length, 1, "a default is created when none was given");
   assert.ok(list[0]!.isDefault, "the default sorts first");
   assert.deepEqual(list.find((s) => s.id === "s_b")?.classIds, [], "a class already taken by A is not also B's");
+  const withDefaultClasses = normalizeAssessmentSchemes(
+    [{ id: "d", name: "D", isDefault: true, classIds: [c1!] }, a],
+    33,
+  );
+  assert.deepEqual(withDefaultClasses.find((s) => s.isDefault)?.classIds, [c1!], "the fallback may name classes too");
+  assert.equal(schemeForClass(c1!, withDefaultClasses).id, "d", "…and then keeps them from later schemes");
+  assert.equal(schemeForClass("cls_other", withDefaultClasses).id, "d", "unnamed classes still fall back to it");
+  assert.equal(list[0]!.showPhoto, false);
+  assert.equal(list[0]!.showAttendance, null);
   assert.equal(schemeForClass(c1!, list).id, "s_a");
   assert.ok(schemeForClass("cls_unknown", list).isDefault, "an unnamed class gets the default");
 
@@ -158,8 +167,15 @@ const eng: ExamSubject = { id: "sub_eng", code: "ENG", name: "English", classIds
 // ------------------------------------------------------- promotion
 {
   const line = (obtained: number, max: number, parts: ReportCardLine["parts"] = []): ReportCardLine => ({
-    subjectId: "s", subjectName: "Physics", maxMarks: max, marksObtained: obtained, grade: "", gradeLabel: "", remark: "", parts,
+    subjectId: "s", subjectName: "Physics", maxMarks: max, marksObtained: obtained, grade: "", gradeLabel: "", absent: false, remark: "", parts,
   });
+  const absentLine = line(0, 100);
+  absentLine.marksObtained = null;
+  absentLine.absent = true;
+  const ab = evaluatePromotionPass([absentLine, line(80, 100)], 33, true);
+  assert.equal(ab.passed, false, "an absent paper fails that subject");
+  assert.deepEqual(ab.failedSubjects, ["Physics (absent)"]);
+
   const partsFailedPractical = [
     { code: "TH", label: "Theory", maxMarks: 70, marksObtained: 60, failed: false },
     { code: "PR", label: "Practical", maxMarks: 30, marksObtained: 5, failed: true },

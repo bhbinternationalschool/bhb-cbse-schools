@@ -260,10 +260,11 @@ function sheetToRows(
     remark_source: normalizeRemarkSource(m.remarkSource),
   }));
   const absences = (s.absences || []).map((a) => ({
-    id: `${s.id}:${a.studentId}`,
+    id: `${s.id}:${a.studentId}:${a.subjectId}`,
     mark_sheet_id: s.id,
     tenant_id: tenantId,
     student_id: a.studentId,
+    subject_id: a.subjectId,
     reason: a.reason || "",
     updated_at: s.updatedAt || new Date().toISOString(),
   }));
@@ -336,6 +337,7 @@ function rowToSheet(
     absences: absenceRows.map(
       (r): StudentExamAbsence => ({
         studentId: String(r.student_id),
+        subjectId: String(r.subject_id || ""),
         reason: String(r.reason || ""),
       }),
     ),

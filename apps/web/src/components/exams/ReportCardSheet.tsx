@@ -5,6 +5,7 @@
  * followed dark mode would print white ink on white stock. */
 
 import { type ReportCard } from "@/lib/exams";
+import { StudentAvatar } from "@/components/students/StudentAvatar";
 import {
   schoolAddressLine,
   schoolPrintName,
@@ -74,6 +75,11 @@ export function ReportCardSheet({ card }: { card: ReportCard }) {
         </header>
 
         <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
+          {card.showPhoto ? (
+            <div className="sm:col-span-2">
+              <StudentAvatar student={card.student} size={72} />
+            </div>
+          ) : null}
           <div>
             <dt className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
               Student
@@ -113,6 +119,10 @@ export function ReportCardSheet({ card }: { card: ReportCard }) {
             {card.absent.reason ? (
               <span className="font-normal text-[var(--muted)]"> — {card.absent.reason}</span>
             ) : null}
+          </p>
+        ) : card.absentSubjects.length > 0 ? (
+          <p className="mt-3 rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-2 text-sm text-[var(--brand-deep)]">
+            <span className="font-semibold">Absent for:</span> {card.absentSubjects.join(", ")}
           </p>
         ) : null}
 
@@ -169,7 +179,7 @@ export function ReportCardSheet({ card }: { card: ReportCard }) {
                 ) : null}
                 {!gradesOnly ? (
                   <td className="py-2 pr-2 text-right tabular-nums">
-                    {line.marksObtained == null ? "—" : line.marksObtained}
+                    {line.absent ? "AB" : line.marksObtained == null ? "—" : line.marksObtained}
                   </td>
                 ) : null}
                 <td className={`py-2 font-semibold ${gradesOnly ? "text-left" : "text-right"}`}>
