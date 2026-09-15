@@ -297,6 +297,10 @@ if [[ -n "${BIGQUERY_PROJECT_ID:-}" ]]; then
 fi
 
 echo ""
+echo "Syncing school-erp-lite (GPS pushes + night ticks, per-request billing)…"
+bash "$ROOT/scripts/sync-lite-service.sh" || echo "WARNING: school-erp-lite sync failed — the main service still works; re-run scripts/sync-lite-service.sh"
+
+echo ""
 echo "Deploy submitted. When green:"
 echo "  https://bhbinternational.school/login"
 echo "  gcloud run services describe school-erp-web --region=$REGION --format='value(status.url)'"

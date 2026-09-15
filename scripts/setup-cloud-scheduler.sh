@@ -7,6 +7,10 @@ ENV_FILE="${ROOT}/apps/web/.env.local"
 PROJECT_ID="${GCP_PROJECT_ID:-school-erp-prod-493619}"
 REGION="${GCP_REGION:-asia-southeast1}"
 APP_URL="${NEXT_PUBLIC_APP_URL_OVERRIDE:-https://bhbinternational.school}"
+# Per-request-billed twin of the main service (scripts/sync-lite-service.sh).
+# Jobs that run through the night go here so they do not keep the main
+# service — billed per instance-second — awake until morning.
+LITE_URL="${LITE_URL:-https://school-erp-lite-lgeutmxlnq-as.a.run.app}"
 
 get_env() {
   python3 - "$ENV_FILE" "$1" <<'PY'
@@ -150,14 +154,14 @@ create_job "bhb-daily-brief" "0 18 * * 1-6" \
   "Asia/Kolkata" "300s"
 
 create_job "bhb-bigquery-nightly-sync" "0 2 * * *" \
-  "${APP_URL}/api/analytics/bigquery-sync/tick" \
+  "${LITE_URL}/api/analytics/bigquery-sync/tick" \
   "Asia/Kolkata" "300s"
 
 # Birthday greetings: the tick sends once the IST clock passes the hour set in
 # Students → Birthdays (and auto-send is on); it is idempotent, so hourly is safe
 # and also retries quiet-hours deferrals.
 create_job "bhb-birthday-tick" "5 * * * *" \
-  "${APP_URL}/api/birthday/tick" \
+  "${LITE_URL}/api/birthday/tick" \
   "Asia/Kolkata" "300s"
 
 # Fee integrity: money that has lost its breakdown.
@@ -177,7 +181,7 @@ create_job "bhb-birthday-tick" "5 * * * *" \
 # and the failure is visible in the job history — a job that only ever shows
 # green teaches everyone to ignore it.
 create_job "bhb-fee-integrity-tick" "35 * * * *" \
-  "${APP_URL}/api/fees/integrity/tick" \
+  "${LITE_URL}/api/fees/integrity/tick" \
   "Asia/Kolkata" "120s"
 
 # Ledger projection: the server book is derived from the desks (a fee receipt
@@ -203,7 +207,7 @@ create_job "bhb-collections-weekly-note" "15 8 * * 1" \
 # road at midnight is exactly what the owner wants to hear about — every 15
 # minutes, each alert on its own cooldown so nobody is messaged twice.
 create_job "bhb-fleet-alerts-tick" "*/15 * * * *" \
-  "${APP_URL}/api/transport/fleet-alerts/tick" \
+  "${LITE_URL}/api/transport/fleet-alerts/tick" \
   "Asia/Kolkata" "120s"
 
 # ERP command desk: the director's end-of-day digest of what staff asked the

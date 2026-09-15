@@ -105,7 +105,11 @@ steps:
       - --allow-unauthenticated
       - --port=3000
       - --memory=2Gi
-      - --cpu=2
+      # 1, not 2 (2026-09-15). Measured p99 over three days: CPU 18% of two
+      # vCPU, memory 40% of 2 GiB. CPU is ~90% of the Cloud Run line under
+      # instance-based billing, so this halves it; memory stays at 2 GiB for
+      # PDF / spreadsheet spikes.
+      - --cpu=1
       # 0, not 1. A warm 2 vCPU / 2 GiB instance billed around the clock was
       # the largest single line on the GCP bill, for a school ERP used in
       # office hours. The trade is a few seconds of cold start on the first
