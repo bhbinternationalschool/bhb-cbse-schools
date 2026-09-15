@@ -5,7 +5,7 @@
  */
 
 import { createHmac, timingSafeEqual } from "crypto";
-import { NextResponse, after } from "next/server";
+import { NextResponse } from "next/server";
 import {
   parseGenericBspInbound,
   parseMetaWebhookInbound,
@@ -36,6 +36,7 @@ import {
 } from "@/lib/waComplaintsFlow";
 import { appendServerComplaintTicket } from "@/lib/complaintsServer";
 import { loadSis } from "@/lib/sis";
+import { trackServerWork } from "@/lib/serverWork";
 
 export const runtime = "nodejs";
 
@@ -97,7 +98,7 @@ export async function POST(req: Request) {
   }
 
   await ensureSchoolMirrorHydrated();
-  void ensureWabaWebhookSubscription();
+  void trackServerWork(ensureWabaWebhookSubscription());
 
   let body: unknown;
   try {
@@ -194,7 +195,7 @@ export async function POST(req: Request) {
         // A complaint used to be filed and seen by nobody until someone
         // opened the complaints screen. It now reaches the complaints number.
         const complaintText = `${parsed.subject}${parsed.description ? ` — ${parsed.description}` : ""}`;
-        after(async () => {
+        void trackServerWork((async () => {
           await relayEscalation({
             fromWaId: msg.fromWaId,
             text: `[${parsed.category}] ${complaintText}`,
@@ -204,7 +205,7 @@ export async function POST(req: Request) {
             category: "complaint",
             reason: ticket.ok ? "complaint form submitted" : "complaint form could not be logged",
           });
-        });
+        })());
       }
       const send = await sendWhatsAppText({ toMobile: mobile10, body: replyText });
       results.push({
@@ -248,7 +249,7 @@ export async function POST(req: Request) {
       ) {
         const media = msg.media;
         const hh = household;
-        after(async () => {
+        void trackServerWork((async () => {
           try {
             const { captureUdiseDocumentFromWhatsApp } = await import(
               "@/lib/udiseDocIntake.server"
@@ -278,7 +279,7 @@ export async function POST(req: Request) {
           } catch (e) {
             console.error("[wa/webhook] document intake failed", msg.waMessageId, e);
           }
-        });
+        })());
         results.push({
           audience: "document_intake_deferred",
           from: msg.fromWaId,
@@ -330,11 +331,12 @@ export async function POST(req: Request) {
       }
     }
 
-    // A voice note takes about six seconds to transcribe, and Meta re-delivers
-    // a webhook it did not get a prompt answer for. So it is answered now and
-    // done afterwards: after() runs once the response has been sent, which
-    // Cloud Run only keeps CPU for because cloudbuild.yaml sets
-    // --no-cpu-throttling. Read that comment before removing this.
+    // A voice note takes about six seconds to transcribe. It is started here
+    // and tracked (lib/serverWork.ts): the reply to Meta is held until it
+    // finishes, capped at 25 s, and a re-delivery is dropped by the message-id
+    // dedupe anyway. This used to be after(), which only ran because Cloud Run
+    // kept CPU after the response (--no-cpu-throttling); with request-based
+    // billing it would not run at all.
     //
     // Only voice notes. Every other message is fast and stays synchronous, so
     // its result is still reported in this response and nothing that works
@@ -365,7 +367,7 @@ export async function POST(req: Request) {
     };
 
     if (isVoiceNote) {
-      after(async () => {
+      void trackServerWork((async () => {
         try {
           const vr = await handleWaUnifiedInbound(dispatch);
           if (vr.escalate) {
@@ -388,7 +390,7 @@ export async function POST(req: Request) {
           // the logs.
           console.error("[wa/webhook] voice note processing failed", msg.waMessageId, e);
         }
-      });
+      })());
       results.push({
         audience: "voice_note_deferred",
         from: msg.fromWaId,
@@ -404,7 +406,7 @@ export async function POST(req: Request) {
     // its category — after the response, so Meta is answered promptly and a
     // slow forward cannot make it re-deliver the webhook.
     if (r.escalate) {
-      after(async () => {
+      void trackServerWork((async () => {
         await relayEscalation({
           fromWaId: msg.fromWaId,
           text: msg.text,
@@ -416,7 +418,7 @@ export async function POST(req: Request) {
             ? { mediaId: msg.media.mediaId, mimeType: msg.media.mimeType, filename: msg.media.filename }
             : null,
         });
-      });
+      })());
     }
     results.push({
       audience: r.audience,

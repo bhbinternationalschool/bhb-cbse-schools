@@ -24,6 +24,7 @@ import {
   holdDecisionsSnapshot,
 } from "@/lib/holdDecisionsCache";
 import { resolveHold, type HoldVerdict } from "@/lib/holdResolve";
+import { trackServerWork } from "@/lib/serverWork";
 
 const STORAGE_KEY = "bhb_holds_v1";
 /** Demo Principal PIN — changeable in local storage via setPrincipalPin. */
@@ -186,7 +187,7 @@ export function saveHolds(state: HoldsState) {
   if (typeof window === "undefined") return;
   try {
     writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
-    void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("fee_holds", state));
+    void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("fee_holds", state)));
   } catch (e) {
     console.warn("[holds] localStorage quota exceeded", e);
   }

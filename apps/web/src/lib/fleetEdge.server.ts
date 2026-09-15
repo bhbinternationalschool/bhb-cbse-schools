@@ -37,6 +37,7 @@ import {
 } from "@/lib/fleetEdgePush";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { sendWaWithFailover } from "@/lib/waSend";
+import { trackServerWork } from "@/lib/serverWork";
 
 const KNOWN_ALERT_NAMES = new Set([
   "FuelDrainAlert",
@@ -415,7 +416,7 @@ export async function ingestFleetEdgeAlert(
   if (isSosAlert(alert.alertName)) {
     // Fire regardless of insert success — a DB hiccup must never suppress
     // a safety escalation.
-    void notifyFleetEdgeSos(alert, result.id ?? null);
+    void trackServerWork(notifyFleetEdgeSos(alert, result.id ?? null));
   }
   return { ok: result.ok, error: result.error };
 }
@@ -570,7 +571,7 @@ export async function ingestFleetEdgeTelemetry(
   if (!keep.keep) return { ok: true };
 
   if (vehicleRef) {
-    void (async () => {
+    void trackServerWork((async () => {
       try {
         const ctx = await getServerTenantContext();
         if (!ctx) return;
@@ -585,11 +586,11 @@ export async function ingestFleetEdgeTelemetry(
           console.warn("[fleetEdge] first-seen check failed", error.message);
           return;
         }
-        if ((count ?? 0) === 0) void notifyFleetEdgeFirstSeen(vehicleRef);
+        if ((count ?? 0) === 0) void trackServerWork(notifyFleetEdgeFirstSeen(vehicleRef));
       } catch (e) {
         console.warn("[fleetEdge] first-seen check threw", e);
       }
-    })();
+    })());
   }
 
   const inserted = await insertEvent({

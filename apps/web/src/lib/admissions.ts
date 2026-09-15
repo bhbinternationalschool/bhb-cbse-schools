@@ -48,6 +48,7 @@ import {
   tenderModeLabel,
   type TenderMode,
 } from "@/lib/fees";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type AdmissionStage =
   | "enquiry"
@@ -1483,9 +1484,9 @@ export function saveAdmissions(state: AdmissionsState): void {
 
   if (typeof window === "undefined") {
     writeAdmissionsLocalRaw(normalized);
-    void import("@/lib/admissionsPersistence").then(({ scheduleAdmissionsSync }) => {
+    void trackServerWork(import("@/lib/admissionsPersistence").then(({ scheduleAdmissionsSync }) => {
       scheduleAdmissionsSync(normalized);
-    });
+    }));
     return;
   }
   // The database write is scheduled FIRST, and never depends on the cache.
@@ -1495,9 +1496,9 @@ export function saveAdmissions(state: AdmissionsState): void {
   // on a 2.37 MB payload, so neither sync below ever ran. A full cache stopped
   // the record from being written at all. See lib/browserStorage.ts.
   scheduleClientSchoolMirrorSync({ admissions: normalized });
-  void import("@/lib/admissionsPersistence").then(({ scheduleAdmissionsSync }) => {
+  void trackServerWork(import("@/lib/admissionsPersistence").then(({ scheduleAdmissionsSync }) => {
     scheduleAdmissionsSync(normalized);
-  });
+  }));
   writeAdmissionsLocalRaw(normalized);
 }
 

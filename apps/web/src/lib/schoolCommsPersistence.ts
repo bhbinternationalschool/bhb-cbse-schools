@@ -21,6 +21,7 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "school_comms";
 
@@ -36,17 +37,17 @@ const blob = createDomainBlobPersistence<SchoolCommsState>({
 export const schoolCommsRemoteEnabled = blob.remoteEnabled;
 export const scheduleSchoolCommsSync = (state: SchoolCommsState) => {
   if (typeof window === "undefined") {
-    void pushSchoolCommsRemoteServer(state);
+    void trackServerWork(pushSchoolCommsRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("school_comms")) blob.scheduleSync(state);
   scheduleSchoolCommsDeskSync(state);
-  void import("@/lib/galleryPersistence").then(({ scheduleGalleryDeskSync }) => {
+  void trackServerWork(import("@/lib/galleryPersistence").then(({ scheduleGalleryDeskSync }) => {
     scheduleGalleryDeskSync();
-  });
-  void import("@/lib/newsPersistence").then(({ scheduleNewsDeskSync }) => {
+  }));
+  void trackServerWork(import("@/lib/newsPersistence").then(({ scheduleNewsDeskSync }) => {
     scheduleNewsDeskSync();
-  });
+  }));
 };
 export const ensureSchoolCommsHydrated = async () => {
   if (isDeskHydrated(MODULE)) return false;

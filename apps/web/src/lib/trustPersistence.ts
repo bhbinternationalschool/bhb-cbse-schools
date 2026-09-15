@@ -21,6 +21,7 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "trust";
 
@@ -41,7 +42,7 @@ export function resetTrustPersistenceCache() {
 
 export function scheduleTrustSync(state: TrustState) {
   if (typeof window === "undefined") {
-    void pushTrustRemoteServer(state);
+    void trackServerWork(pushTrustRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("trust")) blob.scheduleSync(state);

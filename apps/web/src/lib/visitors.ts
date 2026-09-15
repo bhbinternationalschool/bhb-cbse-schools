@@ -14,6 +14,7 @@ import { assertModulePermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { householdOf, householdWhatsApp, type SisState } from "@/lib/sis";
 import { listAssignmentsForDate, type DutyRosterState } from "@/lib/dutyRoster";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type VisitorPurpose =
   | "admission"
@@ -234,7 +235,7 @@ export function saveVisitors(state: VisitorState): VisitorState {
   const next = normalizeVisitorState(state);
   if (typeof window !== "undefined") {
     writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
-    void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("visitors", next));
+    void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("visitors", next)));
     window.dispatchEvent(new CustomEvent("bhb-visitors"));
   }
   return next;

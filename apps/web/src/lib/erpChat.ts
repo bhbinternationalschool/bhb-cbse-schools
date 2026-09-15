@@ -23,6 +23,7 @@ import { resolveSessionStaff } from "@/lib/staffResolve";
 import type { SisState } from "@/lib/sis";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type ErpChatThreadKind =
   | "staff_dm"
@@ -294,9 +295,9 @@ export function saveErpChat(state: ErpChatState) {
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
   window.dispatchEvent(new Event(ERP_CHAT_EVENT));
   window.dispatchEvent(new Event("bhb-staff-chat"));
-  void import("@/lib/erpChatPersistence").then(({ scheduleErpChatSync }) => {
+  void trackServerWork(import("@/lib/erpChatPersistence").then(({ scheduleErpChatSync }) => {
     scheduleErpChatSync(next);
-  });
+  }));
 }
 
 export function writeErpChatLocalRaw(state: ErpChatState) {

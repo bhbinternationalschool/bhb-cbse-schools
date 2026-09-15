@@ -18,6 +18,7 @@ import {
   type ReportColumn,
 } from "@/lib/reportExport";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 const STORAGE_KEY = "bhb_ptm_v1";
 
@@ -141,9 +142,9 @@ export function savePtm(state: PtmState): void {
   } catch (e) {
     console.warn("[ptm] localStorage quota exceeded — relying on server DB sync", e);
   }
-  void import("@/lib/ptmPersistence").then(({ schedulePtmSync }) => {
+  void trackServerWork(import("@/lib/ptmPersistence").then(({ schedulePtmSync }) => {
     schedulePtmSync(state);
-  });
+  }));
 }
 
 export function writePtmLocalRaw(state: PtmState) {

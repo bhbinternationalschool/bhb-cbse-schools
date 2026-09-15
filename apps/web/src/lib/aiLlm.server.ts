@@ -147,6 +147,7 @@ import {
   type MeetingMinutesDraft,
   type MinutesLanguage,
 } from "@/lib/meetingMinutesAi";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type LlmEngine = "openai" | "gemini" | "none";
 export type PreferredEngine = "auto" | "openai" | "gemini";
@@ -428,7 +429,7 @@ async function callLlmText(
   for (const engine of engines) {
     const { r, generationId } = await attemptEngine(engine, attemptOpts, requester);
     if (r.ok) {
-      if (key) void aiCachePut({ key, route: opts.meta.route, engine, model: r.model, response: r.text, generationId });
+      if (key) void trackServerWork(aiCachePut({ key, route: opts.meta.route, engine, model: r.model, response: r.text, generationId }));
       return { ok: true, text: r.text, engine, generationId };
     }
     errors.push(`${engine}: ${r.error}`);
@@ -483,7 +484,7 @@ async function callLlmJson<T>(
     }
     const parsed = parse(r.text);
     if (parsed) {
-      if (key) void aiCachePut({ key, route: opts.meta.route, engine, model: r.model, response: r.text, generationId });
+      if (key) void trackServerWork(aiCachePut({ key, route: opts.meta.route, engine, model: r.model, response: r.text, generationId }));
       return { ok: true, data: parsed, engine, generationId };
     }
     errors.push(`${engine}: invalid JSON in response`);

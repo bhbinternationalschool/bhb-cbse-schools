@@ -17,6 +17,7 @@ import { mergeDbDeskIntoPaymentsState } from "@/lib/paymentsNormalizedMerge";
 import { paymentsReadFromDbEnabled } from "@/lib/paymentsDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
 import { dedupeHydration, isDeskHydrated, markDeskHydrated, resetDeskHydrated } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "payments";
 
@@ -37,7 +38,7 @@ export function resetPaymentsPersistenceCache() {
 
 export function schedulePaymentsSync(state: PaymentsState) {
   if (typeof window === "undefined") {
-    void pushPaymentsRemoteServer(state);
+    void trackServerWork(pushPaymentsRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("payments")) {

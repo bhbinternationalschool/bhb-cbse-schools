@@ -12,6 +12,7 @@ import {
 } from "@/lib/numberSeries";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type AgreementTemplateId =
   | "appointment_letter"
@@ -335,11 +336,11 @@ export function loadAgreements(): AgreementState {
 function persistAgreements(state: AgreementState) {
   if (typeof window === "undefined") return;
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
-  void import("@/lib/staffAgreementPersistence").then(
+  void trackServerWork(import("@/lib/staffAgreementPersistence").then(
     ({ scheduleStaffAgreementsSync }) => {
       scheduleStaffAgreementsSync(state);
     },
-  );
+  ));
 }
 
 export function saveAgreements(state: AgreementState) {

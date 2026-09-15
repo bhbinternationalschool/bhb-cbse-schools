@@ -21,6 +21,7 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "notifications";
 
@@ -41,7 +42,7 @@ export function resetNotificationsPersistenceCache() {
 
 export function scheduleNotificationsSync(state: NotificationsState) {
   if (typeof window === "undefined") {
-    void pushNotificationsRemoteServer(state);
+    void trackServerWork(pushNotificationsRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("notifications")) blob.scheduleSync(state);

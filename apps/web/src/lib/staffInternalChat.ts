@@ -8,6 +8,7 @@ import type { StaffRecord } from "@/lib/foundationMasters";
 import { resolveSessionStaff } from "@/lib/staffResolve";
 import type { SessionLike } from "@/lib/rbac";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type StaffChatMessage = {
   id: string;
@@ -105,9 +106,9 @@ export function saveStaffChat(state: StaffChatState) {
   const next = normalizeStaffChatState(state);
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
   window.dispatchEvent(new Event("bhb-staff-chat"));
-  void import("@/lib/staffChatPersistence").then(({ scheduleStaffChatSync }) => {
+  void trackServerWork(import("@/lib/staffChatPersistence").then(({ scheduleStaffChatSync }) => {
     scheduleStaffChatSync(next);
-  });
+  }));
 }
 
 export function writeStaffChatLocalRaw(state: StaffChatState) {

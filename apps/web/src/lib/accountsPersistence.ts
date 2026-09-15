@@ -23,6 +23,7 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "accounts";
 
@@ -38,7 +39,7 @@ const blob = createDomainBlobPersistence<AccountsState>({
 export const accountsRemoteEnabled = blob.remoteEnabled;
 export const scheduleAccountsSync = (state: AccountsState) => {
   if (typeof window === "undefined") {
-    void pushAccountsRemoteServer(state);
+    void trackServerWork(pushAccountsRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("accounts")) blob.scheduleSync(state);

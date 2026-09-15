@@ -21,6 +21,7 @@
  */
 
 /** True for the various ways browsers signal "storage is full". */
+import { trackServerWork } from "@/lib/serverWork";
 export function isStorageQuotaError(err: unknown): boolean {
   if (err instanceof DOMException) {
     return (
@@ -165,7 +166,7 @@ let quotaNoticeShown = false;
 function noteQuotaDropOnce(key: string) {
   if (quotaNoticeShown || typeof window === "undefined") return;
   quotaNoticeShown = true;
-  void import("@/components/shell/Toast")
+  void trackServerWork(import("@/components/shell/Toast")
     .then(({ pushToast }) =>
       pushToast({
         kind: "info",
@@ -175,5 +176,5 @@ function noteQuotaDropOnce(key: string) {
         durationMs: 9000,
       }),
     )
-    .catch(() => {});
+    .catch(() => {}));
 }

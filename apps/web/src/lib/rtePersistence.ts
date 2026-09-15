@@ -21,6 +21,7 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "rte";
 
@@ -41,7 +42,7 @@ export function resetRtePersistenceCache() {
 
 export function scheduleRteSync(state: RteState) {
   if (typeof window === "undefined") {
-    void pushRteRemoteServer(state);
+    void trackServerWork(pushRteRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("rte")) blob.scheduleSync(state);

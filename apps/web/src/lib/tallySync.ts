@@ -19,6 +19,7 @@ import {
 
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 export type TallyJvSide = "debit" | "credit";
 
 export type TallyJvLine = {
@@ -94,7 +95,7 @@ export function saveTallySync(state: TallySyncState) {
   if (!assertModulePermission("payroll", "edit", "saveTallySync")) return;
   if (typeof window === "undefined") return;
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
-  void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("tally_sync", state));
+  void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("tally_sync", state)));
 }
 
 /** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */

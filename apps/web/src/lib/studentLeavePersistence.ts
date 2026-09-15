@@ -21,6 +21,7 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "student_leave";
 
@@ -41,7 +42,7 @@ export function resetStudentLeavePersistenceCache() {
 
 export function scheduleStudentLeaveSync(state: StudentLeaveState) {
   if (typeof window === "undefined") {
-    void pushStudentLeaveRemoteServer(state);
+    void trackServerWork(pushStudentLeaveRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("student_leave")) {

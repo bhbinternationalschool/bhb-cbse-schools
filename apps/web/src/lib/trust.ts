@@ -9,6 +9,7 @@ import {
   postTrustCostLineToCwip,
 } from "@/lib/accountsCapex";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 /* ─── Types ─────────────────────────────────────────────────── */
 
@@ -464,9 +465,9 @@ export function saveTrust(state: TrustState): void {
 
   if (typeof window === "undefined") return;
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify({ ...state, version: 1 }));
-  void import("@/lib/trustPersistence").then(({ scheduleTrustSync }) => {
+  void trackServerWork(import("@/lib/trustPersistence").then(({ scheduleTrustSync }) => {
     scheduleTrustSync(state);
-  });
+  }));
 
 }
 

@@ -21,6 +21,7 @@ import {
   deskSkipMirrorBlobSlice,
   type MirrorBlobSlice,
 } from "@/lib/deskCutover";
+import { trackServerWork } from "@/lib/serverWork";
 
 const DATA_FILE = path.join(process.cwd(), ".data", "school_mirror.json");
 
@@ -56,7 +57,7 @@ function ensurePersistHook() {
   if (registered) return;
   registered = true;
   registerSchoolMirrorDiskPersist(() => {
-    void persistMirrorQuiet();
+    void trackServerWork(persistMirrorQuiet());
   });
 }
 

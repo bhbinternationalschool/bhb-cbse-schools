@@ -21,6 +21,7 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "ptm";
 
@@ -41,7 +42,7 @@ export function resetPtmPersistenceCache() {
 
 export function schedulePtmSync(state: PtmState) {
   if (typeof window === "undefined") {
-    void pushPtmRemoteServer(state);
+    void trackServerWork(pushPtmRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("ptm")) {

@@ -8,6 +8,7 @@
 
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type ComplianceInfra = {
   classrooms: number;
@@ -184,7 +185,7 @@ export function saveComplianceFacts(state: ComplianceFactsState): ComplianceFact
   if (!assertModulePermission("compliance", "edit", "saveComplianceFacts")) return next;
   if (typeof window !== "undefined") {
     writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
-    void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("compliance_facts", next));
+    void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("compliance_facts", next)));
     window.dispatchEvent(new CustomEvent("bhb-compliance-facts"));
   }
   return next;

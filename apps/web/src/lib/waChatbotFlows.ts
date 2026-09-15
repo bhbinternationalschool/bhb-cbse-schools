@@ -13,6 +13,7 @@ import {
 import { TRANSPORT_BOT_PROMPTS } from "@/lib/waTransportBotPrompts";
 import { VISITOR_PURPOSE_OPTIONS } from "@/lib/waUnifiedBotEngine";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 const STORAGE_KEY = "bhb_wa_chatbot_flows_v1";
 
@@ -344,7 +345,7 @@ export function writeWaChatbotFlowsLocalRaw(state: WaChatbotFlowsState) {
 
 export function saveWaChatbotFlows(state: WaChatbotFlowsState) {
   writeWaChatbotFlowsLocalRaw(state);
-  void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("wa_chatbot_flows", state));
+  void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("wa_chatbot_flows", state)));
 }
 
 export function audienceLabel(a: WaChatbotAudience): string {

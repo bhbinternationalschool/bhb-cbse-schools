@@ -8,6 +8,7 @@ import {
   deskSkipMirrorBlobSliceClient,
   type MirrorBlobSlice,
 } from "@/lib/deskCutover";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type SchoolMirrorBundle = {
   version: 1;
@@ -89,7 +90,7 @@ export function scheduleClientSchoolMirrorSync(partial: {
   maybeAdd("masters", partial.masters);
   maybeAdd("admissions", partial.admissions);
   if (Object.keys(body).length === 0) return;
-  void fetch("/api/school-data/mirror", {
+  void trackServerWork(fetch("/api/school-data/mirror", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -115,13 +116,13 @@ export function scheduleClientSchoolMirrorSync(partial: {
     })
     .catch((err) => {
       console.error("[schoolMirror] push failed:", err);
-    });
+    }));
 }
 
 /** Push full desk working copy to server (WhatsApp identity + chat). */
 export function pushFullSchoolMirrorToServer(): void {
   if (typeof window === "undefined") return;
-  void (async () => {
+  void trackServerWork((async () => {
     const { loadSis } = await import("@/lib/sis");
     const { loadFees } = await import("@/lib/fees");
     const { loadPayments } = await import("@/lib/payments");
@@ -155,7 +156,7 @@ export function pushFullSchoolMirrorToServer(): void {
       partial.admissions = admissions;
     }
     scheduleClientSchoolMirrorSync(partial);
-  })();
+  })());
 }
 
 /** Browser: pull server mirror. */

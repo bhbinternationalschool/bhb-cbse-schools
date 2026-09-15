@@ -15,6 +15,7 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "curriculum";
 
@@ -202,14 +203,14 @@ export function scheduleCurriculumSync(state: SisLike) {
     pendingPush = null;
     pushTimer = null;
     if (!payload) return;
-    void pushCurriculumState(payload);
+    void trackServerWork(pushCurriculumState(payload));
   }, 400);
 }
 
 export function scheduleTemplateSync(list: ClassCurriculumTemplate[]) {
   if (!curriculumRemoteEnabled()) return;
   if (typeof window === "undefined") return;
-  void pushClassCurriculumTemplatesRemote(list);
+  void trackServerWork(pushClassCurriculumTemplatesRemote(list));
 }
 
 /**

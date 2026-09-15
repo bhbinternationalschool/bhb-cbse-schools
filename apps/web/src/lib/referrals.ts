@@ -19,6 +19,7 @@ import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import type { AdmissionLead } from "@/lib/admissions";
 import { ungroundedNumbers } from "@/lib/aiGrounding";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type ReferralInvite = {
   householdId: string;
@@ -143,7 +144,7 @@ export function saveReferrals(state: ReferralsState): ReferralsState {
   if (!assertModulePermission("admissions", "edit", "saveReferrals")) return next;
   if (typeof window !== "undefined") {
     writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
-    void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("referrals", next));
+    void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("referrals", next)));
     window.dispatchEvent(new CustomEvent("bhb-referrals"));
   }
   return next;

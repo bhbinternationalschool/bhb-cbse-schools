@@ -5,6 +5,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { fetchServerBlob, pushServerBlob } from "@/lib/serverBlob";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type WaBotPersistBundle = {
   version: 1;
@@ -131,7 +132,7 @@ async function saveBundle(bundle: WaBotPersistBundle): Promise<void> {
 
   const { deskSkipBlobPush } = await import("@/lib/deskCutover");
   if (!deskSkipBlobPush("wa_threads")) {
-    void pushServerBlob("wa_bot_threads_state", cache);
+    void trackServerWork(pushServerBlob("wa_bot_threads_state", cache));
   }
 
   try {

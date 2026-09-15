@@ -42,6 +42,7 @@ import {
   createJobApplication,
   recentApplicationFor,
 } from "@/lib/jobApplications.server";
+import { trackServerWork } from "@/lib/serverWork";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -269,7 +270,7 @@ export async function POST(req: Request) {
   }
 
   // The applicant does not wait on the alert.
-  void alertLeadershipOfJobApplication(created.application).catch(() => {});
+  void trackServerWork(alertLeadershipOfJobApplication(created.application).catch(() => {}));
 
   return NextResponse.json({ ok: true, received: true });
 }

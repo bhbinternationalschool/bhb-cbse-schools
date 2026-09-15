@@ -17,6 +17,7 @@ import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import type { MastersState } from "@/lib/masters";
 import { feeSummaryForClass } from "@/lib/admissionDocumentLinks";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type AdmissionsKbKind =
   | "fee"
@@ -147,7 +148,7 @@ export function saveAdmissionsKb(state: AdmissionsKbState): AdmissionsKbState {
   if (!assertModulePermission("admissions", "edit", "saveAdmissionsKb")) return next;
   if (typeof window !== "undefined") {
     writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
-    void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("admissions_kb", next));
+    void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("admissions_kb", next)));
     window.dispatchEvent(new CustomEvent("bhb-admissions-kb"));
   }
   return next;

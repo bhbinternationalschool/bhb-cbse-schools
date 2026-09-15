@@ -15,6 +15,7 @@ import { getSessionActor } from "@/lib/sessionActor";
 import { assertSessionWritable } from "@/lib/sessionWriteGuard";
 import { isProtectedSuperAdminEmail } from "@/lib/superAdmin";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type RbacModule =
   | "home"
@@ -916,9 +917,9 @@ export function saveRbac(state: RbacState): void {
     STORAGE_KEY,
     JSON.stringify(normalizeRbacState(state)),
   );
-  void import("@/lib/rbacPersistence").then(({ scheduleRbacSync }) => {
+  void trackServerWork(import("@/lib/rbacPersistence").then(({ scheduleRbacSync }) => {
     scheduleRbacSync(state);
-  });
+  }));
 }
 
 export function writeRbacLocalRaw(state: RbacState): void {

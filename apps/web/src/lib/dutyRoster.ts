@@ -19,6 +19,7 @@ import { isoDateWeekday } from "@/lib/examTimetable";
 import type { MastersState } from "@/lib/masters";
 import { teacherLabel } from "@/lib/timetable";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type DutyType = "assembly" | "gate" | "lunch" | "bus_escort" | "event";
 
@@ -160,7 +161,7 @@ export function saveDutyRoster(state: DutyRosterState): DutyRosterState {
   const next = normalizeDutyRosterState(state);
   if (typeof window !== "undefined") {
     writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
-    void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("duty_roster", next));
+    void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("duty_roster", next)));
     window.dispatchEvent(new CustomEvent("bhb-duty-roster"));
   }
   return next;

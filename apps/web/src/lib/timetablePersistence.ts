@@ -21,6 +21,7 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "timetable";
 
@@ -41,7 +42,7 @@ export function resetTimetablePersistenceCache() {
 
 export function scheduleTimetableSync(state: TimetableState) {
   if (typeof window === "undefined") {
-    void pushTimetableRemoteServer(state);
+    void trackServerWork(pushTimetableRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("timetable")) blob.scheduleSync(state);

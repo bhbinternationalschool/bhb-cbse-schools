@@ -18,6 +18,7 @@ import { getGracePeriodMinutes } from "@/lib/staffHr";
 
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 export type { SchoolWeekTiming };
 
 export type RuleStepKind =
@@ -360,7 +361,7 @@ export function saveAttendanceRules(state: StaffAttendanceRulesState) {
   if (!assertModulePermission("staff", "edit", "saveAttendanceRules")) return;
   if (typeof window === "undefined") return;
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(normalizeState(state)));
-  void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("staff_attendance_rules", normalizeState(state)));
+  void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("staff_attendance_rules", normalizeState(state))));
 }
 
 /** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */

@@ -15,6 +15,7 @@ import { checkHold } from "@/lib/holds";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { serverTransportDeskIsEmpty } from "@/lib/transportHydrationState";
 import { TENANT } from "@/lib/types";
+import { trackServerWork } from "@/lib/serverWork";
 
 /* ─── Core ops ─────────────────────────────────────────────── */
 
@@ -1034,9 +1035,9 @@ export function saveTransport(state: TransportState) {
 
   if (typeof window === "undefined") return;
   writeTransportLocalRaw(state);
-  void import("@/lib/transportPersistence").then(({ scheduleTransportSync }) => {
+  void trackServerWork(import("@/lib/transportPersistence").then(({ scheduleTransportSync }) => {
     scheduleTransportSync(state);
-  });
+  }));
 
 }
 

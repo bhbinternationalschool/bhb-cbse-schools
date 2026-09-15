@@ -11,6 +11,7 @@ import {
   type ReportColumn,
 } from "@/lib/reportExport";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 const STORAGE_KEY = "bhb_vault_v1";
 
@@ -125,9 +126,9 @@ export function saveVault(state: VaultState): void {
 
   if (typeof window === "undefined") return;
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
-  void import("@/lib/vaultPersistence").then(({ scheduleVaultSync }) => {
+  void trackServerWork(import("@/lib/vaultPersistence").then(({ scheduleVaultSync }) => {
     scheduleVaultSync(state);
-  });
+  }));
 
 }
 

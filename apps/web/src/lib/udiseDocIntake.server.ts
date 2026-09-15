@@ -53,6 +53,7 @@ import {
 import { buildWaTemplateBodyComponent, sendWaWithFailover, sendWhatsAppText } from "@/lib/waSend";
 import { normalizeWaTemplatesState, resolveTemplateForSend, templateVariablePositions, type WaTemplatesState } from "@/lib/waTemplates";
 import { sendPushToSubjects } from "@/lib/webPush.server";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MAX_BYTES = 6 * 1024 * 1024;
 const ALLOWED = /^(image\/(jpeg|jpg|png|webp)|application\/pdf)$/;
@@ -528,7 +529,7 @@ export async function captureUdiseDocumentFromWhatsApp(input: {
         applied += studentChanges.length;
         updatedStudents.push({ ...after, revisionAt: push.studentVersions?.[after.id] ?? after.revisionAt });
         const d = diffForAudit(before as unknown as Record<string, unknown>, after as unknown as Record<string, unknown>);
-        void writeAudit({
+        void trackServerWork(writeAudit({
           module: "sis",
           action: "edit",
           entityType: "student",
@@ -536,7 +537,7 @@ export async function captureUdiseDocumentFromWhatsApp(input: {
           summary: `${label} from parent on WhatsApp: ${d.changedFields.join(", ")}`,
           before: d.before,
           after: d.after,
-        }).catch(() => null);
+        }).catch(() => null));
       } else {
         for (const c of studentChanges) c.apply = false;
         plan.flags.push(`The record changed while this was being read (${push.ok ? "no row" : push.error || "push refused"}); corrections are listed for the office, none written.`);
@@ -565,7 +566,7 @@ export async function captureUdiseDocumentFromWhatsApp(input: {
       if (w.ok) {
         applied += hhChanges.length;
         householdUpdated = { ...next, revisionAt: w.updatedAt };
-        void writeAudit({ module: "sis", action: "edit", entityType: "household", entityId: hh.id, summary: `${label} from parent on WhatsApp: address`, before: { address: hh.address, pincode: hh.pincode }, after: { address: next.address, pincode: next.pincode } }).catch(() => null);
+        void trackServerWork(writeAudit({ module: "sis", action: "edit", entityType: "household", entityId: hh.id, summary: `${label} from parent on WhatsApp: address`, before: { address: hh.address, pincode: hh.pincode }, after: { address: next.address, pincode: next.pincode } }).catch(() => null));
       } else {
         for (const c of hhChanges) c.apply = false;
         plan.flags.push(`Address not saved (${w.error}).`);

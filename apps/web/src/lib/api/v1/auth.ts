@@ -16,6 +16,7 @@ import {
 } from "@/lib/rbac";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { ApiError } from "@/lib/api/v1/errors";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type ApiAuthContext = {
   session: DemoSession;
@@ -165,10 +166,10 @@ async function authFromApiKey(request: Request): Promise<ApiAuthContext | null> 
   const have = Buffer.from(String(row.key_hash));
   if (want.length !== have.length || !timingSafeEqual(want, have)) return null;
 
-  void ctx.sb
+  void trackServerWork(ctx.sb
     .from("api_keys")
     .update({ last_used_at: new Date().toISOString() })
-    .eq("id", row.id);
+    .eq("id", row.id));
 
   const session: DemoSession = {
     persona: "staff",

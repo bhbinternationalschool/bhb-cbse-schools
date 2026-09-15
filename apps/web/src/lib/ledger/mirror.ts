@@ -26,6 +26,7 @@
 import type { AccountsState, JournalEntry } from "@/lib/accountsTypes";
 import { isPostableLedgerCode } from "@/lib/ledger/coa";
 import type { LedgerVoucherInput, LedgerVoucherType } from "@/lib/ledger/types";
+import { trackServerWork } from "@/lib/serverWork";
 
 /**
  * Which kind of voucher a desk journal really is.
@@ -143,7 +144,7 @@ export function mirrorJournalToLedger(
   const voucher = deskJournalToLedgerVoucher(entry, state);
   if (!voucher) return;
 
-  void (async () => {
+  void trackServerWork((async () => {
     const { recordAccountsPostingFailure } = await import(
       "@/lib/accountsPostingFailures"
     );
@@ -176,7 +177,7 @@ export function mirrorJournalToLedger(
         payload: voucher,
       });
     }
-  })();
+  })());
 }
 
 /**

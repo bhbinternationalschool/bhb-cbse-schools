@@ -7,6 +7,7 @@ import { assertModulePermission } from "@/lib/rbacGuard";
 import { DEFAULT_AY } from "@/lib/masters";
 import { TENANT } from "@/lib/types";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 const STORAGE_KEY = "bhb_school_comms_v1";
 
@@ -309,9 +310,9 @@ export function saveSchoolComms(state: SchoolCommsState): void {
   if (typeof window === "undefined") return;
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(normalize(state)));
   window.dispatchEvent(new CustomEvent("bhb-school-comms"));
-  void import("@/lib/schoolCommsPersistence").then(({ scheduleSchoolCommsSync }) => {
+  void trackServerWork(import("@/lib/schoolCommsPersistence").then(({ scheduleSchoolCommsSync }) => {
     scheduleSchoolCommsSync(state);
-  });
+  }));
 }
 
 function canEditComms(module: "notices" | "news" | "gallery"): boolean {
@@ -417,7 +418,7 @@ export function upsertNotice(input: {
     const next = { ...state, notices };
     saveSchoolComms(next);
     if (resolved.publishNow && prev.status !== "published") {
-      void pushNoticeNotifications(notice);
+      void trackServerWork(pushNoticeNotifications(notice));
     }
     return { ok: true, notice, state: next };
   }
@@ -444,7 +445,7 @@ export function upsertNotice(input: {
   };
   const next = { ...state, notices: [notice, ...state.notices] };
   saveSchoolComms(next);
-  if (resolved.publishNow) void pushNoticeNotifications(notice);
+  if (resolved.publishNow) void trackServerWork(pushNoticeNotifications(notice));
   return { ok: true, notice, state: next };
 }
 
@@ -471,7 +472,7 @@ export function setNoticeStatus(
   const next = { ...state, notices };
   saveSchoolComms(next);
   if (status === "published" && prev.status !== "published") {
-    void pushNoticeNotifications(notice);
+    void trackServerWork(pushNoticeNotifications(notice));
   }
   return { ok: true, state: next };
 }
@@ -560,7 +561,7 @@ export function upsertNews(input: {
     const next = { ...state, news };
     saveSchoolComms(next);
     if (resolved.publishNow && prev.status !== "published") {
-      void pushNewsNotifications(item);
+      void trackServerWork(pushNewsNotifications(item));
     }
     return { ok: true, item, state: next };
   }
@@ -587,7 +588,7 @@ export function upsertNews(input: {
   };
   const next = { ...state, news: [item, ...state.news] };
   saveSchoolComms(next);
-  if (resolved.publishNow) void pushNewsNotifications(item);
+  if (resolved.publishNow) void trackServerWork(pushNewsNotifications(item));
   return { ok: true, item, state: next };
 }
 
@@ -614,7 +615,7 @@ export function setNewsStatus(
   const next = { ...state, news };
   saveSchoolComms(next);
   if (status === "published" && prev.status !== "published") {
-    void pushNewsNotifications(item);
+    void trackServerWork(pushNewsNotifications(item));
   }
   return { ok: true, state: next };
 }
@@ -798,7 +799,7 @@ export function setAlbumStatus(
   const next = { ...state, albums };
   saveSchoolComms(next);
   if (status === "published" && prev.status !== "published") {
-    void import("@/lib/notifications").then(({ pushNotification }) => {
+    void trackServerWork(import("@/lib/notifications").then(({ pushNotification }) => {
       pushNotification({
         title: `Gallery · ${album.title}`,
         body: album.description || `New album from ${TENANT.nameDisplay}`,
@@ -807,7 +808,7 @@ export function setAlbumStatus(
         audience: "all",
         sourceId: album.id,
       });
-    });
+    }));
   }
   return { ok: true, state: next };
 }

@@ -11,6 +11,7 @@ import type { StaffRecord } from "@/lib/foundationMasters";
 import { DEFAULT_AY } from "@/lib/masters";
 import { loadStaffHr } from "@/lib/staffHr";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 /** How this attendance mark was captured */
 export type AttendancePunchWay =
@@ -350,19 +351,19 @@ function persistStaffAttendanceRaw(state: StaffAttendanceState) {
   const next = normalizeStaffAttendanceState(state);
   if (typeof window === "undefined") {
     writeStaffAttendanceLocalRaw(next);
-    void import("@/lib/staffAttendancePersistence").then(
+    void trackServerWork(import("@/lib/staffAttendancePersistence").then(
       ({ scheduleStaffAttendanceSync }) => {
         scheduleStaffAttendanceSync(next);
       },
-    );
+    ));
     return;
   }
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
-  void import("@/lib/staffAttendancePersistence").then(
+  void trackServerWork(import("@/lib/staffAttendancePersistence").then(
     ({ scheduleStaffAttendanceSync }) => {
       scheduleStaffAttendanceSync(next);
     },
-  );
+  ));
 }
 
 export function saveStaffAttendance(state: StaffAttendanceState) {

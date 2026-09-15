@@ -22,6 +22,7 @@ import { loadMasters, type MastersState } from "@/lib/masters";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { TENANT } from "@/lib/types";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 const SETTINGS_KEY = "bhb_udise_compliance_v1";
 
@@ -187,7 +188,7 @@ export function saveUdiseComplianceSettings(
   );
   if (typeof window !== "undefined") {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
-    void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("udise_compliance", { settings: next }));
+    void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("udise_compliance", { settings: next })));
   }
   return next;
 }

@@ -20,6 +20,7 @@
  */
 
 import type { RbacModule } from "@/lib/rbac";
+import { trackServerWork } from "@/lib/serverWork";
 
 /** Build https://wa.me/91…?text=… from a 10-digit or E.164 mobile. */
 export function waMeUrl(mobile: string, text: string): string {
@@ -108,7 +109,7 @@ export function openWaMe(
   fallbackMobile?: string,
   opts?: { module?: RbacModule; urgent?: boolean },
 ): void {
-  void (async () => {
+  void trackServerWork((async () => {
     const r = await sendFromSchoolWhatsApp({
       mobile,
       text,
@@ -134,5 +135,5 @@ export function openWaMe(
         `template and try again, so the message stays on the school's record.`,
       durationMs: 0,
     });
-  })();
+  })());
 }

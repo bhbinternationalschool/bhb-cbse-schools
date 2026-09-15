@@ -7,6 +7,7 @@ import { assertModulePermission } from "@/lib/rbacGuard";
 import { DEFAULT_AY } from "@/lib/masters";
 import type { MastersState } from "@/lib/masters";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type BellPeriodKind = "teaching" | "break" | "assembly";
 
@@ -394,9 +395,9 @@ export function saveTimetable(state: TimetableState) {
   } catch (e) {
     console.warn("[timetable] localStorage quota exceeded — relying on server DB sync", e);
   }
-  void import("@/lib/timetablePersistence").then(({ scheduleTimetableSync }) => {
+  void trackServerWork(import("@/lib/timetablePersistence").then(({ scheduleTimetableSync }) => {
     scheduleTimetableSync(next);
-  });
+  }));
 }
 
 export function writeTimetableLocalRaw(state: TimetableState) {
@@ -638,9 +639,9 @@ export function publishTimetable(
     return { ok: false, error: "Not allowed to publish timetable" };
   }
   writeTimetableLocalRaw(next);
-  void import("@/lib/timetablePersistence").then(({ scheduleTimetableSync }) => {
+  void trackServerWork(import("@/lib/timetablePersistence").then(({ scheduleTimetableSync }) => {
     scheduleTimetableSync(next);
-  });
+  }));
   return { ok: true };
 }
 
@@ -671,9 +672,9 @@ export function unpublishTimetable(
       publishedBy: publishedGrids.length ? state.meta.publishedBy : "",
     },
   });
-  void import("@/lib/timetablePersistence").then(({ scheduleTimetableSync }) => {
+  void trackServerWork(import("@/lib/timetablePersistence").then(({ scheduleTimetableSync }) => {
     scheduleTimetableSync(loadTimetable());
-  });
+  }));
   return { ok: true };
 }
 

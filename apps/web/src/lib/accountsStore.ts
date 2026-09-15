@@ -56,6 +56,7 @@ import {
   syncModeBankMapFromBanks,
 } from "@/lib/accountsNormalize";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 const STORAGE_KEY = "bhb_accounts_v1";
 
@@ -166,9 +167,9 @@ export function saveAccounts(state: AccountsState): void {
 
   if (typeof window === "undefined") return;
   rememberIfDropped(state);
-  void import("@/lib/accountsPersistence").then(({ scheduleAccountsSync }) => {
+  void trackServerWork(import("@/lib/accountsPersistence").then(({ scheduleAccountsSync }) => {
     scheduleAccountsSync(state);
-  });
+  }));
 }
 
 export function writeAccountsLocalRaw(state: AccountsState): void {

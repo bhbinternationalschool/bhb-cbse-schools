@@ -26,6 +26,7 @@ import {
   type StudentCategory,
 } from "@/lib/sis";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type CertificateKind =
   | "tc"
@@ -368,9 +369,9 @@ export function saveCertificates(state: CertificatesState) {
 
   if (typeof window === "undefined") return;
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
-  void import("@/lib/certificatesPersistence").then(({ scheduleCertificatesSync }) => {
+  void trackServerWork(import("@/lib/certificatesPersistence").then(({ scheduleCertificatesSync }) => {
     scheduleCertificatesSync(state);
-  });
+  }));
 
 }
 

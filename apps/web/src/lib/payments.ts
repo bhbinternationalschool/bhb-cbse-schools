@@ -27,6 +27,7 @@ import {
 } from "@/lib/schoolDataMirror";
 import { loadSis } from "@/lib/sis";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type PaymentLinkStatus =
   | "open"
@@ -136,16 +137,16 @@ export function savePayments(state: PaymentsState) {
 
   if (typeof window === "undefined") {
     setMirrorSlice("payments", state);
-    void import("@/lib/paymentsPersistence").then(({ schedulePaymentsSync }) => {
+    void trackServerWork(import("@/lib/paymentsPersistence").then(({ schedulePaymentsSync }) => {
       schedulePaymentsSync(state);
-    });
+    }));
     return;
   }
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   scheduleClientSchoolMirrorSync({ payments: state });
-  void import("@/lib/paymentsPersistence").then(({ schedulePaymentsSync }) => {
+  void trackServerWork(import("@/lib/paymentsPersistence").then(({ schedulePaymentsSync }) => {
     schedulePaymentsSync(state);
-  });
+  }));
 }
 
 export function writePaymentsLocalRaw(state: PaymentsState) {
@@ -723,13 +724,13 @@ export function whatsAppPaymentLinkUrl(
   const digits = mobile.replace(/\D/g, "");
   const phone = digits.length === 10 ? `91${digits}` : digits;
   if (typeof window !== "undefined") {
-    void fetch("/api/wa/dispatch", {
+    void trackServerWork(fetch("/api/wa/dispatch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         messages: [{ mobile: phone, body: message }],
       }),
-    }).catch(() => null);
+    }).catch(() => null));
   }
   // personal-whatsapp-allow: builder only — every staff caller now goes
   // through openWaMe(). Kept because the parent-facing pay page composes

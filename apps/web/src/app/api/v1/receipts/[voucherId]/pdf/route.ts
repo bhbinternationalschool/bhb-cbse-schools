@@ -14,6 +14,7 @@ import { receiptArchiveFileName, receiptArchiveFolder } from "@/lib/driveArchive
 import { renderReceiptPdf } from "@/lib/receiptPdf.server";
 import { resolveSchoolHeader } from "@/lib/receiptArchive.server";
 import type { CollectionVoucher } from "@/lib/fees";
+import { trackServerWork } from "@/lib/serverWork";
 
 export const runtime = "nodejs";
 
@@ -101,14 +102,14 @@ export async function GET(
         return cls ? `${s.fullName} · ${cls}` : s.fullName;
       },
     });
-    void archiveToDrive({
+    void trackServerWork(archiveToDrive({
       kind: "receipt",
       ref: voucher.id,
       folderPath: receiptArchiveFolder(voucher.academicYearCode, voucher.collectionDate),
       fileName,
       mimeType: "application/pdf",
       data: pdf,
-    }).catch(() => null);
+    }).catch(() => null));
     return new NextResponse(new Uint8Array(pdf), { headers });
   } catch (e) {
     return apiErr(e);

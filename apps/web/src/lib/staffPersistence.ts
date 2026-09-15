@@ -24,6 +24,7 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "staff";
 
@@ -600,7 +601,7 @@ export function stripStaffFromMastersForBlob(
 export function scheduleStaffSync(state: MastersState) {
   if (!staffRemoteEnabled()) return;
   if (typeof window === "undefined") {
-    void pushStaffRemoteServer(state);
+    void trackServerWork(pushStaffRemoteServer(state));
     return;
   }
   pendingPush = state;
@@ -610,7 +611,7 @@ export function scheduleStaffSync(state: MastersState) {
     pendingPush = null;
     pushTimer = null;
     if (!payload) return;
-    void pushStaffSlice(payload);
+    void trackServerWork(pushStaffSlice(payload));
   }, DESK_PUSH_DEBOUNCE_MS);
 }
 

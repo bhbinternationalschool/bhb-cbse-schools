@@ -21,6 +21,7 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "payroll";
 
@@ -36,7 +37,7 @@ const blob = createDomainBlobPersistence<PayrollState>({
 export const payrollRemoteEnabled = blob.remoteEnabled;
 export const schedulePayrollSync = (state: PayrollState) => {
   if (typeof window === "undefined") {
-    void pushPayrollRemoteServer(state);
+    void trackServerWork(pushPayrollRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("payroll")) blob.scheduleSync(state);

@@ -18,6 +18,7 @@ import {
 
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 export type IncrementCycle = "april" | "anniversary" | "hold_month";
 export type IncrementMode = "percent" | "fixed";
 
@@ -216,7 +217,7 @@ export function saveIncrementState(state: IncrementState) {
   if (!assertModulePermission("payroll", "edit", "saveIncrementState")) return;
   if (typeof window === "undefined") return;
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
-  void import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("salary_increment", state));
+  void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("salary_increment", state)));
 }
 
 /** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
