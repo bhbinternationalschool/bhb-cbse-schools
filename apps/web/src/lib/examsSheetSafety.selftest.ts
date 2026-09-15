@@ -93,7 +93,8 @@ const deps = { state, masters, sis: { version: 1, households: [], students: [stu
     examTermId: term.id,
     classId: cls.id,
     sectionId: sec.id,
-    marks: [{ studentId: student.id, subjectId: eng.id, marksObtained: 30, grade: "B1", remark: "", remarkSource: "manual" }],
+    marks: [{ studentId: student.id, component: "", subjectId: eng.id, marksObtained: 30, grade: "B1", remark: "", remarkSource: "manual" }],
+    absences: [],
     coScholastic: [],
     overallRemarks: [],
     itemScores: [],
@@ -106,7 +107,7 @@ const deps = { state, masters, sis: { version: 1, households: [], students: [stu
     examTermId: term.id,
     classId: cls.id,
     sectionId: sec.id,
-    marks: [{ studentId: student.id, subjectId: eng.id, marksObtained: 39, grade: "", remark: "", remarkSource: "manual" as const }],
+    marks: [{ studentId: student.id, component: "", subjectId: eng.id, marksObtained: 39, grade: "", remark: "", remarkSource: "manual" as const }],
     enteredBy: "Teacher B",
   };
   const r1 = prepareMarkSheet(input, state, locked, deps);
@@ -132,6 +133,24 @@ const deps = { state, masters, sis: { version: 1, households: [], students: [stu
   assert.equal(r4.ok, false, "marks above the exam max are refused");
   const r5 = prepareMarkSheet({ ...input, lock: true }, state, undefined, deps);
   assert.ok(r5.ok && r5.sheet.lockedAt, "a fresh sheet can be saved locked");
+
+  // Absent: the cell's number is dropped and the row reads AB, reason kept.
+  const r6 = prepareMarkSheet(
+    { ...input, absences: [{ studentId: student.id, reason: "  Fever " }] },
+    state,
+    open,
+    deps,
+  );
+  assert.ok(r6.ok);
+  if (r6.ok) {
+    assert.equal(r6.sheet.marks[0]!.marksObtained, null);
+    assert.equal(r6.sheet.marks[0]!.grade, "AB");
+    assert.deepEqual(r6.sheet.absences, [{ studentId: student.id, reason: "Fever" }]);
+  }
+  const r7 = prepareMarkSheet(input, state, r6.ok ? r6.sheet : open, deps);
+  assert.ok(r7.ok && r7.sheet.absences.length === 1, "omitting absences keeps what the sheet had");
+  const r8 = prepareMarkSheet({ ...input, absences: [] }, state, r6.ok ? r6.sheet : open, deps);
+  assert.ok(r8.ok && r8.sheet.absences.length === 0 && r8.sheet.marks[0]!.marksObtained === 39, "sending an empty list clears the absence");
 }
 
 // ------------------------------------------------------------ version rule
@@ -159,7 +178,8 @@ const deps = { state, masters, sis: { version: 1, households: [], students: [stu
     examTermId: term.id,
     classId: cls.id,
     sectionId: sec.id,
-    marks: [{ studentId: student.id, subjectId: eng.id, marksObtained: 12, grade: "E", remark: "", remarkSource: "manual" }],
+    marks: [{ studentId: student.id, component: "", subjectId: eng.id, marksObtained: 12, grade: "E", remark: "", remarkSource: "manual" }],
+    absences: [],
     coScholastic: [],
     overallRemarks: [],
     itemScores: [],

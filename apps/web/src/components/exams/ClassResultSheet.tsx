@@ -170,6 +170,8 @@ export function ClassResultSheetView({
                     <td className="py-1.5 px-1">
                       {row.error ? (
                         <span className="text-[var(--muted)]">N/A</span>
+                      ) : row.card?.absent ? (
+                        <span className="font-semibold text-[var(--muted)]">Absent</span>
                       ) : row.passed ? (
                         <span className="font-semibold text-[var(--tone-green)]">
                           Pass

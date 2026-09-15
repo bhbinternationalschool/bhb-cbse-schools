@@ -9,6 +9,7 @@ import { assertSectionScope } from "@/lib/api/v1/staffScope";
 import { auditArrayDiff } from "@/lib/auditDeskDiff.server";
 import { writeAudit } from "@/lib/audit.server";
 import {
+  flattenAbsences,
   flattenCoScholastic,
   flattenExamMarks,
   flattenItemScores,
@@ -124,6 +125,7 @@ async function saveSheet(req: Request) {
     classId: sheet.classId,
     sectionId: sheet.sectionId,
     marks: Array.isArray(sheet.marks) ? sheet.marks : [],
+    absences: Array.isArray(sheet.absences) ? sheet.absences : [],
     coScholastic: Array.isArray(sheet.coScholastic) ? sheet.coScholastic : [],
     overallRemarks: Array.isArray(sheet.overallRemarks) ? sheet.overallRemarks : [],
     itemScores: Array.isArray(sheet.itemScores) ? sheet.itemScores : [],
@@ -158,6 +160,7 @@ async function saveSheet(req: Request) {
               }
             : m;
         }),
+        absences: existing.absences,
         coScholastic: existing.coScholastic,
         itemScores: existing.itemScores,
       };
@@ -181,6 +184,7 @@ async function saveSheet(req: Request) {
   const { ip, userAgent } = requestMeta(req);
   const session = auth.ctx.session;
   await auditArrayDiff({ session, module: "exams", entityType: "student_subject_mark", before: flattenExamMarks(before), after: flattenExamMarks(after), ip, userAgent });
+  await auditArrayDiff({ session, module: "exams", entityType: "exam_absence", before: flattenAbsences(before), after: flattenAbsences(after), ip, userAgent });
   await auditArrayDiff({ session, module: "exams", entityType: "co_scholastic_rating", before: flattenCoScholastic(before), after: flattenCoScholastic(after), ip, userAgent });
   await auditArrayDiff({ session, module: "exams", entityType: "report_card_remark", before: flattenOverallRemarks(before), after: flattenOverallRemarks(after), ip, userAgent });
   await auditArrayDiff({ session, module: "exams", entityType: "exam_item_score", before: flattenItemScores(before), after: flattenItemScores(after), ip, userAgent });

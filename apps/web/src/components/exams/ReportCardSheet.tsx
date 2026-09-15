@@ -34,6 +34,12 @@ export function printReportCard(studentId: string, examTermId: string) {
 
 export function ReportCardSheet({ card }: { card: ReportCard }) {
   const hasSubjectRemarks = card.lines.some((l) => l.remark.trim());
+  // What the class's assessment scheme says the card shows: numbers and a
+  // grade (III upwards), a grade alone (I–II), or a descriptor (pre-primary).
+  const gradesOnly = card.displayMode !== "marks_grade";
+  const descriptors = card.displayMode === "descriptors";
+  const partCodes = card.lines.find((l) => l.parts.length > 0)?.parts.map((p) => ({ code: p.code, label: p.label })) ?? [];
+  const showTotals = !gradesOnly && card.totalMax > 0;
   return (
     <div
       id={`report-card-${card.student.id}-${card.examTerm.id}`}
@@ -101,6 +107,15 @@ export function ReportCardSheet({ card }: { card: ReportCard }) {
           </div>
         </dl>
 
+        {card.absent ? (
+          <p className="mt-3 rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-2 text-sm font-semibold text-[var(--brand-deep)]">
+            Absent in this examination
+            {card.absent.reason ? (
+              <span className="font-normal text-[var(--muted)]"> — {card.absent.reason}</span>
+            ) : null}
+          </p>
+        ) : null}
+
         {card.curriculumNote ? (
           <p className="mt-3 rounded-lg bg-[rgba(32,48,80,0.04)] px-3 py-2 text-[11px] text-[var(--muted)]">
             {card.curriculumNote}
@@ -111,9 +126,18 @@ export function ReportCardSheet({ card }: { card: ReportCard }) {
           <thead>
             <tr className="border-b border-[rgba(32,48,80,0.2)] text-left text-[10px] uppercase tracking-wide text-[var(--muted)]">
               <th className="py-2 pr-2">Subject</th>
-              <th className="py-2 pr-2 text-right">Max</th>
-              <th className="py-2 pr-2 text-right">Obtained</th>
-              <th className="py-2 text-right">Grade</th>
+              {!gradesOnly
+                ? partCodes.map((pc) => (
+                    <th key={pc.code} className="py-2 pr-2 text-right" title={pc.label}>
+                      {pc.code}
+                    </th>
+                  ))
+                : null}
+              {!gradesOnly ? <th className="py-2 pr-2 text-right">Max</th> : null}
+              {!gradesOnly ? <th className="py-2 pr-2 text-right">Obtained</th> : null}
+              <th className={`py-2 ${gradesOnly ? "text-left" : "text-right"}`}>
+                {descriptors ? "Assessment" : "Grade"}
+              </th>
               {hasSubjectRemarks ? <th className="py-2 pl-3">Remark</th> : null}
             </tr>
           </thead>
@@ -126,14 +150,34 @@ export function ReportCardSheet({ card }: { card: ReportCard }) {
                 <td className="py-2 pr-2 font-medium text-[var(--brand-deep)]">
                   {line.subjectName}
                 </td>
-                <td className="py-2 pr-2 text-right tabular-nums">
-                  {line.maxMarks}
-                </td>
-                <td className="py-2 pr-2 text-right tabular-nums">
-                  {line.marksObtained == null ? "—" : line.marksObtained}
-                </td>
-                <td className="py-2 text-right font-semibold">
-                  {line.grade}
+                {!gradesOnly
+                  ? partCodes.map((pc) => {
+                      const part = line.parts.find((p) => p.code === pc.code);
+                      return (
+                        <td key={pc.code} className="py-2 pr-2 text-right tabular-nums">
+                          {part
+                            ? `${part.marksObtained == null ? "—" : part.marksObtained}/${part.maxMarks}${part.failed ? " *" : ""}`
+                            : "—"}
+                        </td>
+                      );
+                    })
+                  : null}
+                {!gradesOnly ? (
+                  <td className="py-2 pr-2 text-right tabular-nums">
+                    {line.maxMarks}
+                  </td>
+                ) : null}
+                {!gradesOnly ? (
+                  <td className="py-2 pr-2 text-right tabular-nums">
+                    {line.marksObtained == null ? "—" : line.marksObtained}
+                  </td>
+                ) : null}
+                <td className={`py-2 font-semibold ${gradesOnly ? "text-left" : "text-right"}`}>
+                  {descriptors
+                    ? line.gradeLabel || line.grade
+                    : gradesOnly && line.gradeLabel
+                      ? `${line.grade} · ${line.gradeLabel}`
+                      : line.grade}
                 </td>
                 {hasSubjectRemarks ? (
                   <td className="py-2 pl-3 text-xs text-[var(--muted)]">
@@ -143,19 +187,24 @@ export function ReportCardSheet({ card }: { card: ReportCard }) {
               </tr>
             ))}
           </tbody>
-          <tfoot>
-            <tr className="border-t-2 border-[var(--brand-deep)] font-bold">
-              <td className="py-2.5 pr-2">Total</td>
-              <td className="py-2.5 pr-2 text-right tabular-nums">
-                {card.totalMax}
-              </td>
-              <td className="py-2.5 pr-2 text-right tabular-nums">
-                {card.totalObtained}
-              </td>
-              <td className="py-2.5 text-right">{card.overallGrade}</td>
-              {hasSubjectRemarks ? <td /> : null}
-            </tr>
-          </tfoot>
+          {showTotals ? (
+            <tfoot>
+              <tr className="border-t-2 border-[var(--brand-deep)] font-bold">
+                <td className="py-2.5 pr-2">Total</td>
+                {partCodes.map((pc) => (
+                  <td key={pc.code} />
+                ))}
+                <td className="py-2.5 pr-2 text-right tabular-nums">
+                  {card.totalMax}
+                </td>
+                <td className="py-2.5 pr-2 text-right tabular-nums">
+                  {card.totalObtained}
+                </td>
+                <td className="py-2.5 text-right">{card.overallGrade}</td>
+                {hasSubjectRemarks ? <td /> : null}
+              </tr>
+            </tfoot>
+          ) : null}
         </table>
 
         {card.aggregateMode !== "none" && card.components.length > 0 ? (
@@ -208,19 +257,57 @@ export function ReportCardSheet({ card }: { card: ReportCard }) {
           </div>
         ) : null}
 
+        {partCodes.length > 0 && !gradesOnly ? (
+          <p className="mt-2 text-[10px] text-[var(--muted)]">
+            {partCodes.map((pc) => `${pc.code} = ${pc.label}`).join(" · ")}
+            {card.lines.some((l) => l.parts.some((p) => p.failed))
+              ? " · * below the pass line in that part"
+              : ""}
+          </p>
+        ) : null}
+
         <div className="mt-4 flex flex-wrap gap-6 text-sm">
-          <div>
-            <span className="text-[var(--muted)]">Percentage </span>
-            <span className="font-bold text-[var(--brand-deep)]">
-              {card.percent}%
-            </span>
-          </div>
-          <div>
-            <span className="text-[var(--muted)]">Overall grade </span>
-            <span className="font-bold text-[var(--brand-deep)]">
-              {card.overallGrade}
-            </span>
-          </div>
+          {showTotals ? (
+            <div>
+              <span className="text-[var(--muted)]">Percentage </span>
+              <span className="font-bold text-[var(--brand-deep)]">
+                {card.percent}%
+              </span>
+            </div>
+          ) : null}
+          {showTotals && card.overallGrade !== "—" ? (
+            <div>
+              <span className="text-[var(--muted)]">Overall grade </span>
+              <span className="font-bold text-[var(--brand-deep)]">
+                {card.overallGrade}
+              </span>
+            </div>
+          ) : null}
+          {card.rank != null ? (
+            <div>
+              <span className="text-[var(--muted)]">Rank </span>
+              <span className="font-bold text-[var(--brand-deep)]">
+                {card.rank}
+                {card.classSize ? ` of ${card.classSize}` : ""}
+              </span>
+            </div>
+          ) : null}
+          {card.classAverage != null ? (
+            <div>
+              <span className="text-[var(--muted)]">Class average </span>
+              <span className="font-bold text-[var(--brand-deep)]">
+                {card.classAverage}%
+              </span>
+            </div>
+          ) : null}
+          {card.result ? (
+            <div>
+              <span className="text-[var(--muted)]">Result </span>
+              <span className="font-bold text-[var(--brand-deep)]">
+                {card.result}
+              </span>
+            </div>
+          ) : null}
           {card.attendance ? (
             <div>
               <span className="text-[var(--muted)]">Attendance </span>
