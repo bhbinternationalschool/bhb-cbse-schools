@@ -286,6 +286,13 @@ export const CO_SCHOLASTIC_DOMAINS: CoScholasticDomain[] = [
   "psychomotor",
 ];
 
+/** A student who did not sit this exam. The reason is optional and is
+ * printed on the report card next to "AB". */
+export type StudentExamAbsence = {
+  studentId: string;
+  reason: string;
+};
+
 export type MarkSheet = {
   id: string;
   academicYearCode: string;
@@ -293,6 +300,8 @@ export type MarkSheet = {
   classId: string;
   sectionId: string;
   marks: StudentSubjectMark[];
+  /** Students absent from this exam — empty on sheets saved before this existed. */
+  absences: StudentExamAbsence[];
   /** NEP 2020 HPC co-scholastic domain ratings — per student, not per
    * subject, so this sits alongside `marks`, not nested inside it. Empty on
    * sheets saved before this field existed. */
@@ -352,6 +361,37 @@ export function flattenExamMarks(sheets: MarkSheet[]): FlatExamMark[] {
         remarkSource: mark.remarkSource,
       });
     }
+  }
+  return out;
+}
+
+export type FlatExamAbsence = {
+  id: string;
+  sheetId: string;
+  studentId: string;
+  reason: string;
+};
+
+/** Pure — one addressable record per absent student, for audit diffing. */
+export function flattenAbsences(sheets: MarkSheet[]): FlatExamAbsence[] {
+  const out: FlatExamAbsence[] = [];
+  for (const sheet of sheets) {
+    for (const a of sheet.absences ?? []) {
+      out.push({ id: `${sheet.id}:${a.studentId}`, sheetId: sheet.id, studentId: a.studentId, reason: a.reason });
+    }
+  }
+  return out;
+}
+
+export function normalizeAbsences(list: unknown): StudentExamAbsence[] {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set<string>();
+  const out: StudentExamAbsence[] = [];
+  for (const raw of list as Partial<StudentExamAbsence>[]) {
+    const studentId = String(raw?.studentId ?? "").trim();
+    if (!studentId || seen.has(studentId)) continue;
+    seen.add(studentId);
+    out.push({ studentId, reason: String(raw?.reason ?? "").trim().slice(0, 200) });
   }
   return out;
 }
@@ -1022,6 +1062,7 @@ function normalizeSheet(s: Partial<MarkSheet>): MarkSheet {
     classId: s.classId ?? "",
     sectionId: s.sectionId ?? "",
     marks: Array.isArray(s.marks) ? s.marks.map(normalizeMark) : [],
+    absences: normalizeAbsences(s.absences),
     coScholastic: Array.isArray(s.coScholastic)
       ? s.coScholastic.map(normalizeCoScholasticEntry)
       : [],
@@ -2001,6 +2042,8 @@ export type SaveMarkSheetInput = {
   sectionId: string;
   marks: StudentSubjectMark[];
   coScholastic?: StudentCoScholasticEntry[];
+  /** Students absent from this exam; omit to keep what the sheet had. */
+  absences?: StudentExamAbsence[];
   enteredBy: string;
   lock?: boolean;
 };
@@ -2087,10 +2130,17 @@ export function prepareMarkSheet(
     }
   }
 
+  const absences = normalizeAbsences(input.absences ?? existing?.absences ?? []);
+  const absentIds = new Set(absences.map((a) => a.studentId));
+
   const normalizedMarks = input.marks.map((m) => {
     const sub = subById.get(m.subjectId);
     const component = String(m.component ?? "").toUpperCase();
     const max = maxFor(sub, component);
+    if (absentIds.has(m.studentId)) {
+      // An absent child has no marks in this exam, whatever the cell held.
+      return normalizeMark({ ...m, component, marksObtained: null, grade: "AB" });
+    }
     const picked =
       scheme.displayMode !== "marks_grade" && m.marksObtained == null
         ? m.grade && m.grade !== "—"
@@ -2115,6 +2165,7 @@ export function prepareMarkSheet(
     classId: input.classId,
     sectionId: input.sectionId,
     marks: normalizedMarks,
+    absences,
     coScholastic: input.coScholastic ?? existing?.coScholastic ?? [],
     overallRemarks: existing?.overallRemarks ?? [],
     itemScores: existing?.itemScores ?? [],
@@ -2511,6 +2562,8 @@ export type ReportCard = {
   /** "Promoted to VI" / "Detained" from the recorded decision, when the
    * scheme prints it and a decision exists. */
   result: string | null;
+  /** Recorded absent from this exam (every part of it). The card prints AB. */
+  absent: { reason: string } | null;
 };
 
 function overallRemarkForReportCard(
@@ -2765,6 +2818,7 @@ export function buildReportCard(input: {
     classSize: null,
     classAverage: null,
     result: null,
+    absent: null,
   } as const;
   const hold =
     input.deps?.holdChecks?.get(input.student.id) ??
@@ -2799,7 +2853,10 @@ export function buildReportCard(input: {
       for (const c of contributors) {
         if (!c.requiresSeparateMarksheet) continue;
         const sheet = findMarkSheet(ay, c.id, input.student.sectionId, state);
-        if (!studentHasMarksOnSheet(sheet, input.student.id)) {
+        if (
+          !studentHasMarksOnSheet(sheet, input.student.id) &&
+          !sheet?.absences.some((a) => a.studentId === input.student.id)
+        ) {
           missing.push(c.code);
         }
       }
@@ -2815,6 +2872,12 @@ export function buildReportCard(input: {
     let totalObtained = 0;
     let totalMax = 0;
     let subjectsWithMarks = 0;
+    const absentIn = contributors.filter((c) =>
+      findMarkSheet(ay, c.id, input.student.sectionId, state)?.absences.some(
+        (a) => a.studentId === input.student.id,
+      ),
+    );
+    const absentEverywhere = absentIn.length === contributors.length;
 
     for (const sub of subjects) {
       let weightedSum = 0;
@@ -2883,7 +2946,7 @@ export function buildReportCard(input: {
       }
     }
 
-    if (subjectsWithMarks === 0) {
+    if (subjectsWithMarks === 0 && !absentEverywhere) {
       return {
         error: `No component marks found for ${
           aggregateMode === "hy" ? "Half-yearly" : "Final"
@@ -2915,10 +2978,22 @@ export function buildReportCard(input: {
       totalObtained: Math.round(totalObtained * 10) / 10,
       totalMax,
       percent,
-      overallGrade: policy.includeOverallGrade
-        ? gradeForPercent(percent, scheme)
-        : "—",
+      overallGrade:
+        policy.includeOverallGrade && !absentEverywhere
+          ? gradeForPercent(percent, scheme)
+          : "—",
       ...cardMeta,
+      absent: absentEverywhere
+        ? {
+            reason: absentIn
+              .map((c) =>
+                findMarkSheet(ay, c.id, input.student.sectionId, state)?.absences.find(
+                  (a) => a.studentId === input.student.id,
+                )?.reason ?? "",
+              )
+              .find(Boolean) ?? "",
+          }
+        : null,
       attendance: policy.showAttendanceOnReport
         ? attendanceSummaryForStudent(
             input.student.id,
@@ -2956,6 +3031,7 @@ export function buildReportCard(input: {
       error: "No marks saved for this class section and exam yet",
     };
   }
+  const absence = sheet.absences.find((a) => a.studentId === input.student.id) ?? null;
 
   const lines: ReportCardLine[] = [];
   let totalObtained = 0;
@@ -2974,8 +3050,8 @@ export function buildReportCard(input: {
       passLine,
     );
     const max = standing.maxMarks;
-    const obtained = standing.obtained;
-    const grade = gradeOf(obtained, max, standing.pickedGrade);
+    const obtained = absence ? null : standing.obtained;
+    const grade = absence ? "AB" : gradeOf(obtained, max, standing.pickedGrade);
     lines.push({
       subjectId: sub.id,
       subjectName: sub.name,
@@ -2994,11 +3070,12 @@ export function buildReportCard(input: {
     if (grade !== "—") graded += 1;
   }
 
-  if (counted === 0 && graded === 0) {
+  if (counted === 0 && graded === 0 && !absence) {
     return { error: "No marks entered for this student in this exam" };
   }
   if (
     policy.requireAllSubjectsForReport &&
+    !absence &&
     Math.max(counted, graded) < subjects.length
   ) {
     return {
@@ -3023,10 +3100,11 @@ export function buildReportCard(input: {
     totalMax,
     percent,
     overallGrade:
-      policy.includeOverallGrade && totalMax > 0
+      policy.includeOverallGrade && totalMax > 0 && !absence
         ? gradeForPercent(percent, scheme)
         : "—",
     ...cardMeta,
+    absent: absence ? { reason: absence.reason } : null,
     attendance: policy.showAttendanceOnReport
       ? attendanceSummaryForStudent(
           input.student.id,
@@ -3238,6 +3316,21 @@ export function buildClassResultSheet(input: {
       });
       continue;
     }
+    if (card.absent) {
+      rows.push({
+        student,
+        card,
+        error: null,
+        passed: false,
+        failedSubjects: [],
+        suggestionNote: "Absent from this exam",
+        suggested: "pending",
+        record: findPromotionRecord(student.id, term.id, ay, state) ?? null,
+        nextClass,
+        nextSection,
+      });
+      continue;
+    }
     const evalPass = evaluatePromotionPass(
       card.lines,
       passLine,
@@ -3278,7 +3371,7 @@ export function buildClassResultSheet(input: {
 
   // Rank, class average and the recorded result, when the scheme prints
   // them. Ties share a rank; the next rank skips (1, 1, 3).
-  const withCards = rows.filter((r) => r.card && r.card.totalMax > 0);
+  const withCards = rows.filter((r) => r.card && r.card.totalMax > 0 && !r.card.absent);
   const average =
     withCards.length > 0
       ? Math.round(
@@ -3307,8 +3400,9 @@ export function buildClassResultSheet(input: {
       rank: scheme.showRank ? (rankOf.get(r.student.id) ?? null) : null,
       classSize: scheme.showRank ? withCards.length : null,
       classAverage: scheme.showClassAverage ? average : null,
-      result:
-        scheme.showResultOnCard && decision && decision !== "pending"
+      result: r.card.absent
+        ? "Absent"
+        : scheme.showResultOnCard && decision && decision !== "pending"
           ? decision === "promoted" && r.record?.toClassId
             ? `Promoted to ${masters.classes.find((c) => c.id === r.record?.toClassId)?.name ?? "next class"}`
             : promotionDecisionLabel(decision)

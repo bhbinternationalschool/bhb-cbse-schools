@@ -16,6 +16,7 @@ import {
   type PromotionDecision,
   type PromotionRecord,
   normalizeRemarkSource,
+  type StudentExamAbsence,
   type StudentCoScholasticEntry,
   type StudentOverallRemark,
   type StudentItemScore,
@@ -230,6 +231,7 @@ function sheetToRows(
 ): {
   header: Record<string, unknown>;
   marks: Record<string, unknown>[];
+  absences: Record<string, unknown>[];
   coScholastic: Record<string, unknown>[];
   remarks: Record<string, unknown>[];
   itemScores: Record<string, unknown>[];
@@ -256,6 +258,14 @@ function sheetToRows(
     grade: m.grade || "—",
     remark: m.remark || "",
     remark_source: normalizeRemarkSource(m.remarkSource),
+  }));
+  const absences = (s.absences || []).map((a) => ({
+    id: `${s.id}:${a.studentId}`,
+    mark_sheet_id: s.id,
+    tenant_id: tenantId,
+    student_id: a.studentId,
+    reason: a.reason || "",
+    updated_at: s.updatedAt || new Date().toISOString(),
   }));
   const coScholastic = (s.coScholastic || []).map((e) => ({
     id: `${s.id}:${e.studentId}:${e.domain}`,
@@ -289,7 +299,7 @@ function sheetToRows(
     marks_obtained: e.marks,
     updated_at: s.updatedAt || new Date().toISOString(),
   }));
-  return { header, marks, coScholastic, remarks, itemScores };
+  return { header, marks, absences, coScholastic, remarks, itemScores };
 }
 
 function rowToSheet(
@@ -298,6 +308,7 @@ function rowToSheet(
   coScholasticRows: Record<string, unknown>[] = [],
   remarkRows: Record<string, unknown>[] = [],
   itemScoreRows: Record<string, unknown>[] = [],
+  absenceRows: Record<string, unknown>[] = [],
 ): MarkSheet {
   return {
     id: String(header.id),
@@ -320,6 +331,12 @@ function rowToSheet(
         grade: String(m.grade || "—"),
         remark: String(m.remark || ""),
         remarkSource: normalizeRemarkSource(m.remark_source),
+      }),
+    ),
+    absences: absenceRows.map(
+      (r): StudentExamAbsence => ({
+        studentId: String(r.student_id),
+        reason: String(r.reason || ""),
       }),
     ),
     overallRemarks: remarkRows.map(
@@ -734,6 +751,27 @@ export async function fetchExamDeskFromDb(): Promise<{
     remarksBySheet.set(sid, list);
   }
 
+  let absenceRows: Record<string, unknown>[] = [];
+  if (sheetIds.length) {
+    const { rows } = await fetchByIds<Record<string, unknown>>(sheetIds, (chunk, from, to) =>
+      sb
+        .from("exam_desk_absences")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .in("mark_sheet_id", chunk)
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
+    absenceRows = rows;
+  }
+  const absencesBySheet = new Map<string, Record<string, unknown>[]>();
+  for (const e of absenceRows) {
+    const sid = String(e.mark_sheet_id);
+    const list = absencesBySheet.get(sid) ?? [];
+    list.push(e);
+    absencesBySheet.set(sid, list);
+  }
+
   const itemScoreRows: Record<string, unknown>[] = [];
   if (sheetIds.length) {
     // Item scores can be large (students × questions × papers): page through.
@@ -766,6 +804,7 @@ export async function fetchExamDeskFromDb(): Promise<{
       coScholasticBySheet.get(String(h.id)) ?? [],
       remarksBySheet.get(String(h.id)) ?? [],
       itemScoresBySheet.get(String(h.id)) ?? [],
+      absencesBySheet.get(String(h.id)) ?? [],
     ),
   );
 
@@ -808,7 +847,7 @@ export async function pushExamSheetToDb(
   const ctx = await resolveCtx();
   if (!ctx) return { ok: false, error: "No tenant" };
   const { sb, tenantId } = ctx;
-  const { header, marks, coScholastic, remarks, itemScores } = sheetToRows(tenantId, sheet);
+  const { header, marks, absences, coScholastic, remarks, itemScores } = sheetToRows(tenantId, sheet);
 
   if (opts && "expectedUpdatedAt" in opts) {
     const { data: current, error: curErr } = await sb
@@ -877,6 +916,7 @@ export async function pushExamSheetToDb(
   // single table is ever left emptied.
   for (const part of [
     { table: "exam_desk_marks", rows: marks },
+    { table: "exam_desk_absences", rows: absences },
     { table: "exam_desk_coscholastic", rows: coScholastic },
     { table: "exam_desk_remarks", rows: remarks },
     { table: "exam_desk_item_scores", rows: itemScores },
@@ -949,11 +989,12 @@ async function loadSheetChildren(
         .order("id", { ascending: true })
         .range(from, to),
     ).then((r) => r.rows);
-  const [marks, co, remarks, items] = await Promise.all([
+  const [marks, co, remarks, items, absences] = await Promise.all([
     child("exam_desk_marks"),
     child("exam_desk_coscholastic"),
     child("exam_desk_remarks"),
     child("exam_desk_item_scores"),
+    child("exam_desk_absences"),
   ]);
-  return rowToSheet(header, marks, co, remarks, items);
+  return rowToSheet(header, marks, co, remarks, items, absences);
 }

@@ -107,6 +107,15 @@ export function ReportCardSheet({ card }: { card: ReportCard }) {
           </div>
         </dl>
 
+        {card.absent ? (
+          <p className="mt-3 rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-2 text-sm font-semibold text-[var(--brand-deep)]">
+            Absent in this examination
+            {card.absent.reason ? (
+              <span className="font-normal text-[var(--muted)]"> — {card.absent.reason}</span>
+            ) : null}
+          </p>
+        ) : null}
+
         {card.curriculumNote ? (
           <p className="mt-3 rounded-lg bg-[rgba(32,48,80,0.04)] px-3 py-2 text-[11px] text-[var(--muted)]">
             {card.curriculumNote}

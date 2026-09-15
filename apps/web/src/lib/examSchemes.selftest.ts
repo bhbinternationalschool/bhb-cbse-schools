@@ -127,6 +127,7 @@ const eng: ExamSubject = { id: "sub_eng", code: "ENG", name: "English", classIds
   const existing = {
     id: "ms_1", academicYearCode: "2026-27", examTermId: "term_hy", classId: "cls_i", sectionId: "sec_1",
     marks: [{ studentId: "stu_1", subjectId: "sub_eng", component: "", marksObtained: null, grade: "B", remark: "", remarkSource: "manual" as const }],
+    absences: [],
     coScholastic: [], overallRemarks: [], itemScores: [], lockedAt: null, enteredBy: "", updatedAt: "2026-09-15T00:00:00.000Z",
   };
   const g2 = buildEmptyMarksGrid([student], [eng], term("HY", 80), existing, 33, gradesOnly);

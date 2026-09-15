@@ -31,6 +31,7 @@ const sheetA: MarkSheet = {
   examTermId: "term-1",
   classId: "class-9",
   sectionId: "section-a",
+  absences: [],
   marks: [
     { studentId: "stu-1", component: "", subjectId: "sub-math", marksObtained: 88, grade: "A1", remark: "", remarkSource: "manual" },
     { studentId: "stu-2", component: "", subjectId: "sub-math", marksObtained: 72, grade: "B1", remark: "", remarkSource: "manual" },
@@ -64,6 +65,7 @@ const sheetB: MarkSheet = {
   marks: [
     { studentId: "stu-3", component: "", subjectId: "sub-eng", marksObtained: 91, grade: "A1", remark: "", remarkSource: "manual" },
   ],
+  absences: [],
   coScholastic: [],
   overallRemarks: [],
   itemScores: [
