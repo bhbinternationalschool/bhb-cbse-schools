@@ -3,7 +3,7 @@
 # same secrets — but billed per request instead of per instance-second.
 #
 # WHY TWO SERVICES (2026-09-15)
-# school-erp-web runs with --no-cpu-throttling so work handed to next/server's
+# school-erp-web ran with --no-cpu-throttling (until PR #217 made replies wait for their work) so work handed to next/server's
 # after() (voice notes, office relay, document photos) and the debounced desk
 # pushes actually finish. The price: CPU is billed for as long as an instance
 # exists, and an instance lives ~15 minutes after its last request.
