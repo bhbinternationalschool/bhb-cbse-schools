@@ -101,6 +101,28 @@ assert.deepEqual(
 assert.equal(withGap[1]!.inPaise, 0);
 assert.equal(withGap[1]!.netPaise, 0);
 
+/* ── A void re-dated to its right month is not September's money ────── */
+
+// 3 Sep 2026: 53 `void_redate` journals cancelled reversals that had landed
+// on the day of the void instead of the day of the receipt. The cancelling
+// half reads as money IN — ₹2,32,695 that nobody paid — with the matching
+// amount going out across March–July. September's tile said ₹7,73,063 when
+// the school had taken ₹5,40,368.
+const redate = summariseMonthlyCash({
+  from: "2026-09-01",
+  to: "2026-09-30",
+  legs: [
+    leg("fees", "2026-09-05", 540368_00),
+    leg("redate", "2026-09-01", 232695_00),
+  ],
+  cancelledVoucherIds: new Set(["redate"]),
+});
+assert.equal(
+  redate[0]!.inPaise,
+  540368_00,
+  "September shows what was collected, not the correction posted alongside it",
+);
+
 /* ── Net is in minus out, and labels are readable ───────────────────── */
 
 const net = summariseMonthlyCash({

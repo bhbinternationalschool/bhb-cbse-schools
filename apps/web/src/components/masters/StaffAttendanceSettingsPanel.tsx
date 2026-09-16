@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { MastersWorkCard } from "@/components/masters/MastersLayout";
+import { loadMasters } from "@/lib/masters";
 import {
   loadStaffAttendance,
   normalizeAttendanceSettings,
@@ -14,8 +15,22 @@ export function StaffAttendanceSettingsPanel() {
   const [state, setState] = useState<StaffAttendanceState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  const [roster, setRoster] = useState<
+    { id: string; fullName: string; empCode: string }[]
+  >([]);
+
   useEffect(() => {
     setState(loadStaffAttendance());
+    setRoster(
+      (loadMasters().staff ?? [])
+        .filter((st) => st.status === "active")
+        .map((st) => ({
+          id: st.id,
+          fullName: st.fullName,
+          empCode: st.empCode,
+        }))
+        .sort((a, b) => a.empCode.localeCompare(b.empCode)),
+    );
   }, []);
 
   function flash(msg: string) {
@@ -33,6 +48,21 @@ export function StaffAttendanceSettingsPanel() {
     const next = saveAttendanceSettings({ [key]: value });
     setState(next);
     flash("Geofence settings saved");
+  }
+
+  function toggleExempt(staffId: string) {
+    const cur = normalizeAttendanceSettings(state?.settings).exemptStaffIds;
+    const next = saveAttendanceSettings({
+      exemptStaffIds: cur.includes(staffId)
+        ? cur.filter((id) => id !== staffId)
+        : [...cur, staffId],
+    });
+    setState(next);
+    flash(
+      cur.includes(staffId)
+        ? "Back on the attendance register"
+        : "Off the attendance register",
+    );
   }
 
   if (!state) {
@@ -126,6 +156,44 @@ export function StaffAttendanceSettingsPanel() {
                 }
               />
             </label>
+          </div>
+        </div>
+
+        {/* Who keeps no attendance at all. */}
+        <div className="border-t border-[var(--border)] pt-4">
+          <p className="text-sm font-semibold text-[var(--brand-deep)]">
+            Staff who keep no attendance
+          </p>
+          <p className="mt-1 text-xs text-[var(--muted)]">
+            They are left off the register instead of being marked absent
+            every day. Anyone whose main role is owner or admin is already
+            off it; tick anyone else here.
+          </p>
+          <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+            {roster.map((st) => {
+              const on = settings.exemptStaffIds.includes(st.id);
+              return (
+                <label
+                  key={st.id}
+                  className="flex items-center gap-2 rounded-lg border border-[var(--border)] px-2 py-1.5 text-xs"
+                >
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    onChange={() => toggleExempt(st.id)}
+                  />
+                  <span className="font-semibold text-[var(--brand-deep)]">
+                    {st.fullName}
+                  </span>
+                  <span className="text-[var(--muted)]">{st.empCode}</span>
+                </label>
+              );
+            })}
+            {roster.length === 0 ? (
+              <p className="text-xs text-[var(--muted)]">
+                No active staff on record.
+              </p>
+            ) : null}
           </div>
         </div>
       </div>

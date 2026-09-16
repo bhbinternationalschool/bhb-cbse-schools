@@ -163,7 +163,18 @@ export async function receiptsPaymentsReport(input: { from: string; to: string }
 }
 
 /**
- * Every voucher that is a reversal, and every voucher one reverses.
+ * Every voucher that cancels something, and everything they cancel.
+ *
+ * Two kinds, and both are corrections rather than movements of money:
+ *
+ *  - a REVERSAL and the entry it reverses;
+ *  - a `void_redate` journal. When a receipt was voided months after it was
+ *    entered, the reversal landed on the day of the void instead of the day
+ *    of the receipt. The repair cancels that reversal and re-posts it in the
+ *    right month — so the cancelling half lands as money IN. On 3 Sep 2026,
+ *    53 of them put ₹2,32,695 into September that nobody had paid, with the
+ *    matching ₹2,32,695 going out across March–July. They sum to zero, and
+ *    they belong in neither month's totals.
  *
  * Not scoped to the reporting window on purpose: an April receipt reversed
  * in July is still a correction, and counting April's side of it as money
@@ -172,16 +183,16 @@ export async function receiptsPaymentsReport(input: { from: string; to: string }
  * A failed scan returns an empty set — the figures then read gross, which is
  * what every caller saw before this existed, rather than failing the report.
  */
-async function reversedVoucherIds(): Promise<Set<string>> {
+async function correctionVoucherIds(): Promise<Set<string>> {
   const ctx = await getServerTenantContext();
   if (!ctx) return new Set();
   const { data, error } = await ctx.sb
     .from("ledger_vouchers")
-    .select("id, reverses_voucher_id")
+    .select("id, reverses_voucher_id, source_type")
     .eq("tenant_id", ctx.tenantId)
-    .not("reverses_voucher_id", "is", null);
+    .or("reverses_voucher_id.not.is.null,source_type.eq.void_redate");
   if (error) {
-    console.warn("[ledger] reversal scan failed", error.message);
+    console.warn("[ledger] correction scan failed", error.message);
     return new Set();
   }
   const out = new Set<string>();
@@ -216,7 +227,7 @@ export async function monthlyCashReport(input: {
 
   const [movements, cancelledVoucherIds] = await Promise.all([
     cashMovements(input),
-    reversedVoucherIds(),
+    correctionVoucherIds(),
   ]);
 
   return {

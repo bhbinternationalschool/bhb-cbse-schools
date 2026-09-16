@@ -1624,6 +1624,24 @@ class TeachingLogResult {
   final int? distanceM;
 }
 
+/// One line of "today's money, by how it was taken".
+///
+/// `mode` is the raw key — a tender mode ("cash", "upi", "cheque", …),
+/// "online" for anything that came through a payment gateway, or
+/// "unrecorded" for a receipt whose tenders were lost. `label` is what the
+/// server wants shown, so a new mode needs no app release.
+class CollectionMode {
+  const CollectionMode({
+    required this.mode,
+    required this.label,
+    required this.paise,
+  });
+
+  final String mode;
+  final String label;
+  final int paise;
+}
+
 class PrincipalSnapshot {
   const PrincipalSnapshot({
     required this.academicYearCode,
@@ -1646,6 +1664,10 @@ class PrincipalSnapshot {
     required this.vaultExpiring30d,
     required this.lowStockSkus,
     required this.registersPending,
+    required this.activeStudents,
+    required this.storeDuesPaise,
+    required this.storeDueStudents,
+    required this.todayByMode,
   });
 
   factory PrincipalSnapshot.fromJson(Map<String, dynamic> j) {
@@ -1654,7 +1676,19 @@ class PrincipalSnapshot {
     final staff = (j["staff"] as Map<String, dynamic>?) ?? const {};
     final adm = (j["admissions"] as Map<String, dynamic>?) ?? const {};
     final alerts = (j["alerts"] as Map<String, dynamic>?) ?? const {};
+    final students = (j["students"] as Map<String, dynamic>?) ?? const {};
     int n(Map<String, dynamic> m, String k) => (m[k] as num?)?.toInt() ?? 0;
+    // Today's money by how it was taken. An older server does not send it;
+    // the tile then simply does not appear, rather than showing zeros.
+    final modes = <CollectionMode>[
+      for (final raw in (fees["todayByMode"] as List<dynamic>? ?? const []))
+        if (raw is Map<String, dynamic>)
+          CollectionMode(
+            mode: (raw["mode"] as String?) ?? "",
+            label: (raw["label"] as String?) ?? "",
+            paise: (raw["paise"] as num?)?.toInt() ?? 0,
+          ),
+    ];
     return PrincipalSnapshot(
       academicYearCode: (j["academicYearCode"] as String?) ?? "",
       todayCollectionPaise: n(fees, "todayCollectionPaise"),
@@ -1676,6 +1710,12 @@ class PrincipalSnapshot {
       vaultExpiring30d: n(alerts, "vaultExpiring30d"),
       lowStockSkus: n(alerts, "lowStockSkus"),
       registersPending: n(alerts, "attendanceRegistersPending"),
+      activeStudents: n(students, "activeCount"),
+      // null = the store could not be read; 0 = nothing is owed. The tile
+      // says which.
+      storeDuesPaise: (fees["storeDuesPaise"] as num?)?.toInt(),
+      storeDueStudents: n(fees, "storeDueStudents"),
+      todayByMode: modes,
     );
   }
 
@@ -1696,6 +1736,10 @@ class PrincipalSnapshot {
   final int admissionsPipeline;
   final int admissionsEnrolled;
   final int followUpsDue;
+  final int activeStudents;
+  final int? storeDuesPaise;
+  final int storeDueStudents;
+  final List<CollectionMode> todayByMode;
   final int vaultExpiring30d;
   final int lowStockSkus;
   final int registersPending;

@@ -249,6 +249,7 @@ jobs:
           npm run test:fee-dues-server-inputs
           npm run test:fee-store-dues-line
           npm run test:ledger-monthly-cash
+          npm run test:app-home-numbers
           npm run test:wa-parent-guide
           npm run test:fleet-keep-rule
           npm run test:server-work-tracker

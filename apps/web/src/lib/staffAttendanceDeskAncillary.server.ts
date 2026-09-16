@@ -43,6 +43,7 @@ export async function pushStaffAttendanceSettingsToDb(
         0,
         Number(s.maxLocationAccuracyM) ?? 120,
       ),
+      exempt_staff_ids: Array.isArray(s.exemptStaffIds) ? s.exemptStaffIds : [],
       updated_at: now,
     },
     { onConflict: "tenant_id" },
@@ -78,5 +79,8 @@ export async function fetchStaffAttendanceSettingsFromDb(): Promise<StaffAttenda
     allowWhatsAppPunch: !!data.allow_whatsapp_punch,
     geofenceRadiusM: Number(data.geofence_radius_m) || 150,
     maxLocationAccuracyM: Number(data.max_location_accuracy_m) ?? 120,
+    exemptStaffIds: Array.isArray(data.exempt_staff_ids)
+      ? (data.exempt_staff_ids as string[])
+      : [],
   };
 }

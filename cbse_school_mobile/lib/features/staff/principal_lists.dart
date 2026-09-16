@@ -183,9 +183,12 @@ class StaffAttendanceTodayScreen extends StatelessWidget {
   static (String, ModuleTone) _label(String status) => switch (status) {
     "P" => ("Present", ModuleTone.teal),
     "A" => ("Absent", ModuleTone.coral),
-    "L" => ("Leave", ModuleTone.blue),
+    // The two were the wrong way round until 2026-09-16. Server truth
+    // (lib/attendance.ts): L = Late, LE = Leave / excused — so a teacher who
+    // came in late was shown to the principal as on leave, and vice versa.
+    "L" => ("Late", ModuleTone.blue),
     "HD" => ("Half day", ModuleTone.blue),
-    "LE" => ("Late", ModuleTone.blue),
+    "LE" => ("Leave", ModuleTone.blue),
     _ => ("Not marked", ModuleTone.coral),
   };
 
