@@ -10,6 +10,7 @@ import { buildTutorSystemPrompt } from "@/lib/tutorPlans";
 import {
   cleanChapterName,
   subjectKeyFor,
+  textbooksListing,
   textbooksPromptBlock,
   tutorGrade,
   type SyllabusBook,
@@ -138,6 +139,27 @@ const chapters: SyllabusChapter[] = [
 
   assert.equal(textbooksPromptBlock({ grade: 7, books: [], chapters: [] }), "", "nothing indexed → no block");
   assert.equal(textbooksPromptBlock({ grade: 7, books: [books[7]!], chapters: [] }), "", "books without chapters → no block");
+}
+
+// ── The bare listing (lesson plans) ────────────────────────────────────
+{
+  const listing = textbooksListing({ grade: 7, books, chapters });
+  assert.equal(`${listing}\n${textbooksPromptBlock({ grade: 7, books, chapters }).split("\n").at(-1)}`, textbooksPromptBlock({ grade: 7, books, chapters }), "the tutor block is the listing plus its one rule");
+  assert.ok(!listing.includes("Using the textbooks"), "the listing carries no tutor instructions");
+
+  assert.equal(textbooksListing({ grade: 7, books, chapters, subjectLabel: "Computational Thinking / ICT", coreFallback: false }), "", "no book for the subject and no fallback → nothing");
+  assert.equal(textbooksListing({ grade: 7, books, chapters, coreFallback: false }), "", "no subject and no fallback → nothing");
+  const mathsOnly = textbooksListing({ grade: 7, books, chapters, subjectLabel: "Mathematics", coreFallback: false });
+  assert.ok(mathsOnly.includes("Ganita Prakash II") && !mathsOnly.includes("Curiosity"), "a known subject lists only itself");
+
+  const hindiPlan = textbooksListing({ grade: 7, books, chapters, subjectLabel: "Mathematics", coreFallback: false, medium: "Hindi" });
+  assert.deepEqual(hindiPlan.split("\n").slice(1), [
+    "Mathematics — Ganita Prakash(Hindi) (English-medium edition: Ganita Prakash, Ganita Prakash II): 1. हमारे आस-पास की बड़ी संख्याएँ",
+  ], "a Hindi plan lists the Hindi-medium edition's chapters and names the English one");
+  const hindiNoEdition = textbooksListing({ grade: 7, books, chapters, subjectLabel: "Science", coreFallback: false, medium: "Hindi" });
+  assert.ok(hindiNoEdition.includes("Science — Curiosity: 1. The Ever-Evolving World of Science"), "no Hindi-medium edition → the English one, with no false note");
+  const hindiSubject = textbooksListing({ grade: 7, books, chapters, subjectLabel: "Hindi", coreFallback: false, medium: "English" });
+  assert.ok(hindiSubject.includes("Hindi — मल्हार"), "Hindi the subject is always its own book");
 }
 
 // ── The prompt carries the block only when there is one ────────────────

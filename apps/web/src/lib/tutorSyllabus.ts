@@ -82,18 +82,26 @@ export function cleanChapterName(name: string): string {
 }
 
 /**
- * The prompt block. With a subject (the homework the parent opened the tutor
- * from), only that subject's books; without one, the core subjects. For each
- * subject the English-medium edition is listed — the model answers in Hindi
- * from English chapter names without trouble — and the Hindi edition is
- * named so a parent quoting its title is understood. Hindi and Sanskrit are
- * listed from their own books.
+ * The textbook list: a header and one line per book. With a subject (the
+ * homework the parent opened the tutor from, the subject a lesson plan is
+ * for), only that subject's books; without one — or with a subject the index
+ * has no book for — the core subjects, unless `coreFallback` is false, in
+ * which case nothing.
+ *
+ * For each subject one medium's edition is listed (English by default: the
+ * model answers in Hindi from English chapter names without trouble) and
+ * the other medium's edition is named, so a title quoted from either book is
+ * understood. `medium: "Hindi"` lists the Hindi-medium edition instead, for
+ * a teacher writing a plan in Hindi. Hindi and Sanskrit are always listed
+ * from their own books.
  */
-export function textbooksPromptBlock(opts: {
+export function textbooksListing(opts: {
   grade: number;
   books: SyllabusBook[];
   chapters: SyllabusChapter[];
   subjectLabel?: string;
+  coreFallback?: boolean;
+  medium?: "English" | "Hindi";
 }): string {
   const byKey = new Map<SubjectKey, SyllabusBook[]>();
   for (const b of opts.books) {
@@ -105,29 +113,47 @@ export function textbooksPromptBlock(opts: {
   for (const c of opts.chapters) chaptersOf.set(c.textbookId, [...(chaptersOf.get(c.textbookId) ?? []), c]);
 
   const asked = subjectKeyFor(opts.subjectLabel);
-  const keys = asked && byKey.has(asked) ? [asked] : CORE_SUBJECTS.filter((k) => byKey.has(k));
+  const keys =
+    asked && byKey.has(asked)
+      ? [asked]
+      : opts.coreFallback === false
+        ? []
+        : CORE_SUBJECTS.filter((k) => byKey.has(k));
   const byName = (a: SyllabusBook, b: SyllabusBook) => a.name.localeCompare(b.name);
+  const preferred = opts.medium ?? "English";
+  const other = preferred === "English" ? "Hindi" : "English";
 
   const lines: string[] = [];
   for (const key of keys) {
     const books = (byKey.get(key) ?? []).slice().sort(byName);
-    const ownMedium = key === "hindi" ? "Hindi" : key === "sanskrit" ? "Sanskrit" : "English";
+    const ownMedium = key === "hindi" ? "Hindi" : key === "sanskrit" ? "Sanskrit" : preferred;
     let listed = books.filter((b) => b.medium === ownMedium);
-    if (!listed.length) listed = books.filter((b) => b.medium === "Hindi");
-    const hindiEditions = key === "hindi" || key === "sanskrit" ? [] : books.filter((b) => b.medium === "Hindi" && !listed.includes(b));
+    if (!listed.length) listed = books.filter((b) => b.medium === (ownMedium === "Hindi" ? "English" : "Hindi"));
+    const otherEditions = key === "hindi" || key === "sanskrit" ? [] : books.filter((b) => b.medium !== listed[0]?.medium && !listed.includes(b));
+    const otherLabel = listed[0]?.medium === other ? preferred : other;
 
     for (const [i, book] of listed.entries()) {
       const chapters = (chaptersOf.get(book.id) ?? []).slice().sort((a, b) => a.position - b.position);
       if (!chapters.length) continue;
-      const hindiNote = i === listed.length - 1 && hindiEditions.length ? ` (Hindi-medium edition: ${hindiEditions.map((b) => b.name).join(", ")})` : "";
-      lines.push(`${SUBJECT_NAME[key]} — ${book.name}${hindiNote}: ${chapters.map((c) => `${c.position}. ${cleanChapterName(c.name)}`).join("; ")}`);
+      const note = i === listed.length - 1 && otherEditions.length ? ` (${otherLabel}-medium edition: ${otherEditions.map((b) => b.name).join(", ")})` : "";
+      lines.push(`${SUBJECT_NAME[key]} — ${book.name}${note}: ${chapters.map((c) => `${c.position}. ${cleanChapterName(c.name)}`).join("; ")}`);
     }
   }
   if (!lines.length) return "";
+  return [`Textbooks: the current NCERT books for Class ${opts.grade}, as listed on DIKSHA, the government's school platform.`, ...lines].join("\n");
+}
 
+/** The tutor's block: the textbook list and how to use it in an answer. */
+export function textbooksPromptBlock(opts: {
+  grade: number;
+  books: SyllabusBook[];
+  chapters: SyllabusChapter[];
+  subjectLabel?: string;
+}): string {
+  const listing = textbooksListing(opts);
+  if (!listing) return "";
   return [
-    `Textbooks: the current NCERT books for Class ${opts.grade}, as listed on DIKSHA, the government's school platform.`,
-    ...lines,
+    listing,
     // The example names no real book: a Class III prompt must not mention a
     // Class VII title next to "never name a book that is not listed".
     "Using the textbooks: when a question belongs to one of these chapters, say which one as listed — book name, then \"Chapter\" and its number and name — and explain it the way that chapter does, in its words. Never name a book, chapter or chapter number that is not in this list. A question that fits no chapter here may still be this class's schoolwork — answer it by the level guide without naming a chapter.",

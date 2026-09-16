@@ -13,6 +13,7 @@ import "server-only";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
 import {
+  textbooksListing,
   textbooksPromptBlock,
   tutorGrade,
   type SyllabusBook,
@@ -33,6 +34,28 @@ export async function tutorTextbooksBlock(ctx: { className?: string; subjectLabe
     return textbooksPromptBlock({ grade, books: value.books, chapters: value.chapters, subjectLabel: ctx.subjectLabel });
   } catch (e) {
     console.warn("[tutor-textbooks] no textbook list for the prompt:", e instanceof Error ? e.message : e);
+    return "";
+  }
+}
+
+/**
+ * The bare textbook list for another AI feature (lesson plans), from the
+ * same cached index read as the tutor. Options as textbooksListing(); empty
+ * when the class has no index or the read fails.
+ */
+export async function ncertTextbooksListing(ctx: {
+  className?: string;
+  subjectLabel?: string;
+  coreFallback?: boolean;
+  medium?: "English" | "Hindi";
+}): Promise<string> {
+  const grade = tutorGrade(ctx.className);
+  if (!grade) return "";
+  try {
+    const value = await classTextbooks(grade);
+    return textbooksListing({ grade, books: value.books, chapters: value.chapters, subjectLabel: ctx.subjectLabel, coreFallback: ctx.coreFallback, medium: ctx.medium });
+  } catch (e) {
+    console.warn("[ncert-textbooks] no textbook list:", e instanceof Error ? e.message : e);
     return "";
   }
 }
