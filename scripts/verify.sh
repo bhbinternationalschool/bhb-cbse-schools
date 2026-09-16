@@ -250,6 +250,7 @@ SELFTESTS=(
   test:fee-due-future
   test:ai-stream
   test:tutor-plans
+  test:tutor-video-sources
   test:staff-home-kind
   test:mobile-features
   test:cashfree-checkout

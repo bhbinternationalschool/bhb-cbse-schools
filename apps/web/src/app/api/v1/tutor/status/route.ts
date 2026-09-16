@@ -38,7 +38,8 @@ export async function GET(request: Request) {
       configured: status.tutorEngine !== "none",
       engine: status.tutorEngine,
       defaultLanguage,
-      videosAvailable: !!(process.env.YOUTUBE_API_KEY || "").trim(),
+      // DIKSHA needs no key; YouTube only tops its list up.
+      videosAvailable: true,
       modes: TUTOR_MODES.map((m) => ({
         code: m.code,
         label: m.label,

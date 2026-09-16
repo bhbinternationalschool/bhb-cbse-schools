@@ -9,6 +9,12 @@
 import "server-only";
 import { buildLeadExtractSystemPrompt, buildLeadExtractUserPrompt, parseLeadExtract, type LeadExtract } from "@/lib/leadExtractAi";
 import {
+  buildVideoTermsSystemPrompt,
+  buildVideoTermsUserPrompt,
+  parseVideoTermsJson,
+  VIDEO_TERMS_PROMPT_VERSION,
+} from "@/lib/tutorVideoSources";
+import {
   buildMarketingSystemPrompt,
   buildMarketingUserPrompt,
   parseMarketingVariants,
@@ -531,6 +537,37 @@ export async function generateTutorText(opts: {
     precheck: opts.precheck,
     meta: { route: "tutor", promptVersion: opts.promptVersion ?? "v1" },
   });
+}
+
+/**
+ * A tutor question → short NCERT lesson names to search DIKSHA's videos
+ * with, in English and Hindi. The model only names what to search for;
+ * every video shown still comes from DIKSHA's own catalogue. Cached: the
+ * same question at the same class asks for the same lessons.
+ */
+export async function generateTutorVideoTermsJson(opts: {
+  topic: string;
+  grade: string;
+  precheck?: Promise<LlmPrecheck>;
+}): Promise<
+  | { ok: true; terms: { en: string[]; hi: string[] }; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const r = await callLlmJson(
+    {
+      system: buildVideoTermsSystemPrompt(),
+      userMessage: buildVideoTermsUserPrompt({ topic: opts.topic, grade: opts.grade }),
+      jsonMode: true,
+      maxTokens: 200,
+      temperature: 0,
+      geminiMaxTokens: 1024,
+      precheck: opts.precheck,
+      meta: { route: "tutor-video-terms", promptVersion: VIDEO_TERMS_PROMPT_VERSION, cacheable: true },
+    },
+    parseVideoTermsJson,
+  );
+  if (r.ok) return { ok: true, terms: r.data, engine: r.engine, generationId: r.generationId };
+  return { ok: false, error: r.error, engine: r.engine };
 }
 
 /**

@@ -31,6 +31,7 @@
     "test:fee-due-future": "npx tsx src/lib/feeDueFuture.selftest.ts",
     "test:ai-stream": "npx tsx src/lib/aiStream.selftest.ts",
     "test:tutor-plans": "npx tsx src/lib/tutorPlans.selftest.ts",
+    "test:tutor-video-sources": "npx tsx src/lib/tutorVideoSources.selftest.ts",
     "test:staff-home-kind": "npx tsx src/lib/staffHomeKind.selftest.ts",
     "test:mobile-features": "npx tsx src/lib/mobileFeatures.selftest.ts",
     "test:cashfree-checkout": "npx tsx src/lib/cashfreeCheckout.selftest.ts",
