@@ -211,6 +211,10 @@ export const WA_TEMPLATE_VARIABLES: WaTemplateVariableDef[] = [
   { key: "trackLink", label: "Bus tracking link", group: "Transport", sample: "https://school.example/track/bus/stu_7f21.1789412400.k3Qw" },
   { key: "paidOn", label: "Paid on date", group: "Fees", sample: "4 Aug 2026" },
   { key: "stage", label: "Reminder stage", group: "Fees", sample: "2" },
+  { key: "examDay", label: "Exam day", group: "Student", sample: "Friday, 18 Sep", hint: "Filled by the exam-eve sweep (lib/examEve.ts) in the family's language." },
+  { key: "childPapers", label: "Each child's paper that day", group: "Student", sample: "Ansh (VII) — Hindi  |  Arav (IV) — Mathematics", hint: "One line per child. Meta refuses a newline inside a variable, so children are joined with \"  |  \"." },
+  { key: "weekLabel", label: "Week covered", group: "School", sample: "8–13 Sep" },
+  { key: "childSummary", label: "Each child's week", group: "Student", sample: "Aarav (III A) — Present 5 of 6 days · Hindi 18/20  |  Anaya (LKG A) — Present 6 of 6 days", hint: "One line per child from lib/weeklyChildDigest.ts; a family with nothing true to report is not messaged." },
   { key: "registerLink", label: "Registration link", group: "Admissions", sample: "https://school.example/register" },
   { key: "homeworkTitle", label: "Homework title", group: "Academic", sample: "Math worksheet ch.4" },
   { key: "subject", label: "Subject", group: "Academic", sample: "Mathematics" },
@@ -348,6 +352,21 @@ const OPEN_APP_EN: WaTemplateButton = { type: "URL", text: "Open parent app", ur
 const OPEN_APP_HI: WaTemplateButton = { type: "URL", text: "पैरेंट ऐप खोलें", url: WA_PARENT_APP_URL };
 const CALL_ME_EN: WaTemplateButton = { type: "QUICK_REPLY", text: "Call me back" };
 const CALL_ME_HI: WaTemplateButton = { type: "QUICK_REPLY", text: "मुझे फ़ोन करें" };
+/**
+ * The weekly digest's only button. A tap is an INBOUND message, which is the
+ * one thing that opens Meta's 24-hour window — the school cannot open it by
+ * sending. That is the whole engagement mechanism: news worth reading, and
+ * one tap that lets the school answer freely for a day.
+ */
+/**
+ * The exam-eve button. Its text is matched by lib/examEve.ts `isPracticeTap`
+ * — change one and the other must change with it, or a tap arrives as text
+ * nothing recognises.
+ */
+const EXAM_PRACTICE_EN: WaTemplateButton = { type: "QUICK_REPLY", text: "Start practice" };
+const EXAM_PRACTICE_HI: WaTemplateButton = { type: "QUICK_REPLY", text: "अभ्यास शुरू करें" };
+const DIGEST_MORE_EN: WaTemplateButton = { type: "QUICK_REPLY", text: "Tell me more" };
+const DIGEST_MORE_HI: WaTemplateButton = { type: "QUICK_REPLY", text: "और बताइए" };
 const PAID_EN: WaTemplateButton = { type: "QUICK_REPLY", text: "Already paid" };
 const PAID_HI: WaTemplateButton = { type: "QUICK_REPLY", text: "भुगतान हो गया" };
 /**
@@ -917,6 +936,31 @@ const SEED_DEFS: SeedDef[] = [
     footerHi: "कक्षा शिक्षक · विवरण पैरेंट ऐप में देखें",
   },
   {
+    familyKey: "exams_tomorrow",
+    nameEn: "Tomorrow's exam paper",
+    nameHi: "कल का पेपर",
+    module: "exams",
+    category: "UTILITY",
+    metaName: "bhb_exam_tomorrow",
+    headerFormat: "TEXT",
+    headerTextEn: "Tomorrow's exam",
+    headerTextHi: "कल की परीक्षा",
+    buttons: [EXAM_PRACTICE_EN],
+    buttonsHi: [EXAM_PRACTICE_HI],
+    // UTILITY and nothing else: no price, no pass, no offer. Meta reclassifies
+    // a template carrying a sales pitch as MARKETING — dearer, and blocked
+    // more. Anything about the tutor pass is said inside the conversation,
+    // after the parent has chosen to tap. {{childPapers}} is one line per
+    // child joined with "  |  " (Meta refuses a newline in a parameter);
+    // lib/examEve.ts is the only thing that builds it.
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\nTomorrow ({{examDay}}), 8:30 AM:\n\n{{childPapers}}\n\nTap *Start practice* for a short practice session on tomorrow's subject. Reply *TIMETABLE* for the full date sheet. Best wishes! 🙏",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\nकल ({{examDay}}), सुबह 8:30 बजे:\n\n{{childPapers}}\n\nकल के विषय का छोटा अभ्यास करने के लिए *अभ्यास शुरू करें* दबाइए। पूरी समय-सारणी के लिए *TIMETABLE* लिखें। शुभकामनाएँ! 🙏",
+    footerEn: "School office · Half-yearly examination",
+    footerHi: "विद्यालय कार्यालय · अर्धवार्षिक परीक्षा",
+  },
+  {
     familyKey: "exams_datesheet",
     nameEn: "Exam datesheet",
     nameHi: "परीक्षा डेटशीट",
@@ -1098,6 +1142,28 @@ const SEED_DEFS: SeedDef[] = [
       the school number in the last 24 hours. Variables are in the order the
       relay fills them — kind, sender, code, message (waRelay.server.ts).
     */
+    familyKey: "comms_weekly_child_digest",
+    nameEn: "Weekly child digest",
+    nameHi: "साप्ताहिक बाल रिपोर्ट",
+    module: "comms",
+    category: "UTILITY",
+    metaName: "bhb_weekly_child_digest",
+    headerFormat: "TEXT",
+    headerTextEn: "Your child this week",
+    headerTextHi: "इस सप्ताह आपके बच्चे",
+    buttons: [DIGEST_MORE_EN],
+    buttonsHi: [DIGEST_MORE_HI],
+    // {{childSummary}} is ONE line per child, joined with "  |  ", because
+    // Meta refuses a parameter containing a newline. lib/weeklyChildDigest.ts
+    // is the only thing that builds it.
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\nHow the week went ({{weekLabel}}):\n\n{{childSummary}}\n\nTap *Tell me more* and we can answer anything — attendance, marks, fees, transport. Thank you for being part of the school. 🙏",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\nइस सप्ताह ({{weekLabel}}) का हाल:\n\n{{childSummary}}\n\n*और बताइए* दबाइए — उपस्थिति, अंक, शुल्क, वाहन, किसी भी बात का उत्तर मिलेगा। विद्यालय परिवार का हिस्सा होने के लिए धन्यवाद। 🙏",
+    footerEn: "School office · Reply STOP to stop these",
+    footerHi: "विद्यालय कार्यालय · बंद करने के लिए STOP लिखें",
+  },
+  {
     familyKey: "comms_office_relay",
     nameEn: "Office relay forward",
     nameHi: "कार्यालय को अग्रेषित संदेश",

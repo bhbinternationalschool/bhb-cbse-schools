@@ -94,14 +94,95 @@ export async function currentTutorPass(
     .order("ends_at", { ascending: false })
     .limit(1);
   const row = (data ?? [])[0] as Record<string, unknown> | undefined;
-  if (!row) return null;
-  const o = rowToOrder(row);
+  if (row) {
+    const o = rowToOrder(row);
+    return {
+      planCode: o.planCode,
+      planLabel: planLabelFor(o.planCode, o.days),
+      startsAt: o.startsAt ?? o.paidAt ?? o.createdAt,
+      endsAt: o.endsAt!,
+    };
+  }
+  // No paid pass — a free trial day in force counts as one. Checked AFTER
+  // the paid pass on purpose: a family that has paid must always see the
+  // pass they bought, never "free trial".
+  return activeTutorTrial(householdId, studentId, now);
+}
+
+export const TUTOR_TRIAL_PLAN_CODE = "trial_day";
+export const TUTOR_TRIAL_HOURS = 24;
+
+/** The child's free trial day, if it is running right now. */
+export async function activeTutorTrial(
+  householdId: string,
+  studentId: string,
+  now = new Date(),
+): Promise<TutorPass | null> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return null;
+  const { data, error } = await ctx.sb
+    .from("tutor_trials")
+    .select("starts_at, ends_at")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("student_id", studentId)
+    .eq("household_id", householdId)
+    .gt("ends_at", now.toISOString())
+    .maybeSingle();
+  if (error || !data) return null;
   return {
-    planCode: o.planCode,
-    planLabel: planLabelFor(o.planCode, o.days),
-    startsAt: o.startsAt ?? o.paidAt ?? o.createdAt,
-    endsAt: o.endsAt!,
+    planCode: TUTOR_TRIAL_PLAN_CODE,
+    planLabel: "Free trial day",
+    startsAt: String(data.starts_at),
+    endsAt: String(data.ends_at),
   };
+}
+
+/**
+ * Give this child their one free day of the full tutor, starting now.
+ *
+ * Once per child, ever — the table's primary key enforces it, so two taps
+ * racing each other cannot grant two days. A child who already had a trial
+ * gets `alreadyUsed` and whatever is left of it (possibly nothing).
+ *
+ * The day runs 24 hours from the first use rather than to midnight: a
+ * parent who opens it at 9 pm the night before a paper should get the
+ * whole of the next day too, which is when the child sits down to revise.
+ *
+ * Kept out of tutor_pass_orders deliberately — see migration
+ * 20260916140000_tutor_trials. A trial is a gift, not a payment.
+ */
+export async function startTutorTrial(opts: {
+  householdId: string;
+  studentId: string;
+  source: string;
+  now?: Date;
+}): Promise<
+  | { ok: true; started: boolean; endsAt: string | null }
+  | { ok: false; error: string }
+> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "No tenant context" };
+  const now = opts.now ?? new Date();
+  const endsAt = new Date(now.getTime() + TUTOR_TRIAL_HOURS * 3_600_000).toISOString();
+
+  const { error } = await ctx.sb.from("tutor_trials").insert({
+    tenant_id: ctx.tenantId,
+    student_id: opts.studentId,
+    household_id: opts.householdId,
+    starts_at: now.toISOString(),
+    ends_at: endsAt,
+    source: opts.source,
+  });
+
+  if (!error) return { ok: true, started: true, endsAt };
+
+  // 23505 = this child already had their day. Not an error — report what
+  // is left of it, so the reply can say "your free day runs till …".
+  if ((error as { code?: string }).code === "23505") {
+    const running = await activeTutorTrial(opts.householdId, opts.studentId, now);
+    return { ok: true, started: false, endsAt: running?.endsAt ?? null };
+  }
+  return { ok: false, error: error.message };
 }
 
 /**

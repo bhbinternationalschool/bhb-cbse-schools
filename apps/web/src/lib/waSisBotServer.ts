@@ -33,6 +33,11 @@ import {
 } from "@/lib/parentPortal";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import {
+  composeSchoolLocationReply,
+  detectSchoolLocationRequest,
+  schoolLocationPin,
+} from "@/lib/schoolLocationReply";
+import {
   composeSisDuesReply,
   composeSisHumanReply,
   composeSisInfoReply,
@@ -75,6 +80,7 @@ import {
   sendWaFlowMessage,
   sendWaWithFailover,
   sendWhatsAppText,
+  sendWhatsAppLocation,
   waNormalizeLocal10,
 } from "@/lib/waSend";
 import { generateParentBotReplyJson } from "@/lib/aiLlm.server";
@@ -724,7 +730,7 @@ async function buildBotReply(
   hh: Household,
   intent: ReturnType<typeof detectSisBotIntent>,
   rawText: string,
-): Promise<{ text: string; escalate: boolean }> {
+): Promise<{ text: string; escalate: boolean; sendLocationPin?: boolean }> {
   const masters = loadMasters();
   const kids = childrenOf(hh);
   // The family's language, Hindi when they have not chosen. Every reply below
@@ -736,6 +742,20 @@ async function buildBotReply(
     admissionNo: s.admissionNo || "",
     status: s.status,
   }));
+
+  // "Where is the school?" — checked before the intent switch, because the
+  // intents never had an answer for it: two parents wrote "लोकेशन भेजें" on
+  // 14 and 16 Sep 2026 and both were told their question had reached the
+  // office. The school's address and coordinates were on record the whole
+  // time. The bus has its own live answer and is excluded inside the
+  // detector, so a parent watching for the van still gets the van.
+  if (detectSchoolLocationRequest(rawText)) {
+    return {
+      escalate: false,
+      text: composeSchoolLocationReply({ hindi, masters }),
+      sendLocationPin: true,
+    };
+  }
 
   switch (intent) {
     case "kids":
@@ -1043,6 +1063,29 @@ export async function handleWaSisBotInbound(opts: {
     }
   }
 
+  // ── Exam eve: the "Start practice" button and TIMETABLE ──
+  //
+  // Before study help, because the button's own words ("अभ्यास शुरू करें")
+  // would otherwise reach the tutor as a question with no subject, and
+  // before the keyword matcher, which has no idea what TIMETABLE means.
+  // The handler answers only those two things and returns null for
+  // everything else, so the normal flow is untouched.
+  try {
+    const { handleExamEveInbound } = await import("@/lib/examEve.server");
+    const exam = await handleExamEveInbound({
+      household: hh,
+      children: childrenOf(hh),
+      mobile10,
+      text,
+    });
+    if (exam) {
+      return finishLanguageFlow(store, thread, parentMsg, exam);
+    }
+  } catch (e) {
+    // A date-sheet read that fails must never take fees and receipts with it.
+    console.error("[wa-sis-bot] exam eve failed", e);
+  }
+
   // ── Study help (the app's tutor, on WhatsApp) ──
   //
   // Asked BEFORE the keyword matcher only so that an open session can claim
@@ -1090,7 +1133,7 @@ export async function handleWaSisBotInbound(opts: {
   let officeNote = "";
   let closingNow = false;
   let intent: ReturnType<typeof detectSisBotIntent>;
-  let bot: { text: string; escalate: boolean };
+  let bot: { text: string; escalate: boolean; sendLocationPin?: boolean };
   if (answeringPtp) {
     const p = parseSisPromiseToPay(text, new Date().toISOString().slice(0, 10));
     if (promiseIsEmpty(p)) {
@@ -1262,6 +1305,17 @@ export async function handleWaSisBotInbound(opts: {
     body: replyText,
     clientMessageId: botMsg.id,
   });
+
+  // The pin the parent actually asked for, beside the address. Best-effort:
+  // the address and the maps link are already delivered, so a failed pin is
+  // logged and nothing more.
+  if (bot.sendLocationPin && send.ok) {
+    const pin = schoolLocationPin(loadMasters());
+    const pinSend = await sendWhatsAppLocation({ toMobile: mobile10, ...pin });
+    if (!pinSend.ok) {
+      console.warn("[wa-sis-bot] location pin not sent:", pinSend.error);
+    }
+  }
 
   return {
     matched: true,

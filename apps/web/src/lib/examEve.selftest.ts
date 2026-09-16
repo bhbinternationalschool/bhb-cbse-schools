@@ -1,0 +1,170 @@
+/**
+ * Self-test: the exam-eve message and its button.
+ * Run: npx tsx apps/web/src/lib/examEve.selftest.ts
+ *
+ * What must hold:
+ *  - the template's button words and `isPracticeTap` are the SAME words. A
+ *    tap arrives as the button's label; if the two drift, the tap reaches
+ *    the generic quick-reply matcher, which answers every template button
+ *    with "your reply has reached the office" — exactly what two parents got
+ *    when they asked for the school's location on 14 and 16 Sep 2026;
+ *  - every template value is one line (Meta refuses a newline — #132000);
+ *  - the printed paper name wins over the subject ("English Rhymes" is not
+ *    "English");
+ *  - Nursery–UKG are told apart, because they get tips, not a tutor;
+ *  - a family with no paper that day gets nothing.
+ */
+
+import assert from "node:assert/strict";
+
+import {
+  PRACTICE_BUTTON_EN,
+  PRACTICE_BUTTON_HI,
+  examDayLabel,
+  examEveFreeText,
+  examEveVariables,
+  isPracticeTap,
+  isPrePrimary,
+  isTimetableRequest,
+  nextExamDate,
+  paperLabel,
+  practicePrompt,
+  prePrimaryTips,
+  timetableReply,
+  tomorrowIso,
+  type EveFamily,
+  type EveSlot,
+} from "./examEve";
+import { matchSeedQuickReply } from "./waTemplates";
+
+console.log("examEve.selftest.ts");
+
+/* ── 1. The button and the detector are the same words ──────────────── */
+
+for (const label of [PRACTICE_BUTTON_EN, PRACTICE_BUTTON_HI]) {
+  const seed = matchSeedQuickReply(label);
+  assert.ok(seed, `"${label}" must be a button on a registered template`);
+  assert.equal(seed!.familyKey, "exams_tomorrow", "and on the exam-eve template");
+  assert.ok(
+    isPracticeTap(label),
+    `a tap on "${label}" must be recognised — otherwise it falls to the office hand-off`,
+  );
+}
+
+/* ── 2. Dates ───────────────────────────────────────────────────────── */
+
+assert.equal(tomorrowIso("2026-09-17"), "2026-09-18");
+assert.equal(tomorrowIso("2026-09-30"), "2026-10-01");
+assert.equal(examDayLabel("2026-09-18", true), "शुक्रवार, 18 सितंबर");
+assert.equal(examDayLabel("2026-09-18", false), "Friday, 18 Sep");
+
+const slots: EveSlot[] = [
+  { date: "2026-09-18", classId: "c4", subjectId: "sub_mat", note: "", startTime: "08:30" },
+  { date: "2026-09-18", classId: "c7", subjectId: "sub_hin", note: "", startTime: "08:30" },
+  { date: "2026-09-18", classId: "cn", subjectId: "sub_hin", note: "Hindi — Oral & Written", startTime: "08:30" },
+  { date: "2026-09-22", classId: "cn", subjectId: "sub_eng", note: "English Rhymes", startTime: "08:30" },
+  { date: "2026-09-22", classId: "c4", subjectId: "sub_hin", note: "", startTime: "08:30" },
+];
+const names = new Map([
+  ["sub_mat", "Mathematics"],
+  ["sub_hin", "Hindi"],
+  ["sub_eng", "English"],
+]);
+
+// The 17th is a gap day; the next paper after it is the 18th, not the 22nd.
+assert.equal(nextExamDate(slots, "2026-09-17"), "2026-09-18");
+assert.equal(nextExamDate(slots, "2026-09-18"), "2026-09-22", "after today, not including it");
+assert.equal(nextExamDate(slots, "2026-09-30"), null);
+
+/* ── 3. The printed paper name wins ─────────────────────────────────── */
+
+assert.equal(paperLabel(slots[3]!, "English", false), "English Rhymes");
+assert.equal(paperLabel(slots[3]!, "English", true), "अंग्रेज़ी कविताएँ");
+assert.equal(paperLabel(slots[0]!, "Mathematics", true), "गणित");
+assert.equal(paperLabel(slots[2]!, "Hindi", true), "हिंदी — मौखिक व लिखित");
+
+/* ── 4. Pre-primary is told apart ───────────────────────────────────── */
+
+for (const c of ["Nursery", "LKG", "UKG", "nursery"]) assert.ok(isPrePrimary(c), c);
+for (const c of ["I", "IV", "X"]) assert.equal(isPrePrimary(c), false, c);
+
+/* ── 5. One family, siblings on one line each ───────────────────────── */
+
+const family: EveFamily = {
+  householdId: "hh1",
+  guardianName: "Vijay Kumar Singh",
+  mobile: "9000000000",
+  hindi: true,
+  children: [
+    { studentId: "s1", name: "Ansh", classId: "c7", className: "VII" },
+    { studentId: "s2", name: "Arav", classId: "c4", className: "IV" },
+  ],
+};
+
+const vars = examEveVariables(family, slots, names, "2026-09-18");
+assert.equal(vars.empty, false);
+assert.equal(vars.examDay, "शुक्रवार, 18 सितंबर");
+assert.equal(vars.childPapers, "Ansh (VII) — हिंदी  |  Arav (IV) — गणित");
+
+for (const [k, v] of Object.entries(vars)) {
+  if (typeof v !== "string") continue;
+  assert.ok(!v.includes("\n"), `${k}: no newline — Meta refuses it`);
+  assert.ok(!/ {4,}/.test(v), `${k}: no run of 4 spaces`);
+  assert.ok(v.trim(), `${k}: never blank`);
+}
+
+// A family with no paper that day gets nothing at all.
+const quiet: EveFamily = {
+  ...family,
+  children: [{ studentId: "s9", name: "Riya", classId: "c-none", className: "II" }],
+};
+assert.equal(examEveVariables(quiet, slots, names, "2026-09-18").empty, true);
+assert.equal(examEveFreeText(quiet, slots, names, "2026-09-18"), "");
+
+/* ── 6. The free-text version invites the tap in the family's language ─ */
+
+const free = examEveFreeText(family, slots, names, "2026-09-18");
+assert.ok(free.includes(PRACTICE_BUTTON_HI), "the Hindi text names the Hindi button");
+assert.ok(free.includes("TIMETABLE"));
+
+/* ── 7. What the tap and TIMETABLE recognise — and what they must not ── */
+
+for (const yes of [PRACTICE_BUTTON_EN, PRACTICE_BUTTON_HI, "practice", "अभ्यास"]) {
+  assert.ok(isPracticeTap(yes), yes);
+}
+for (const no of ["practice karwao maths ka", "DUES", "", "PAY"]) {
+  assert.equal(isPracticeTap(no), false, `not a tap: ${no}`);
+}
+
+for (const yes of ["TIMETABLE", "time table", "date sheet", "exam kab hai timetable", "टाइम टेबल भेजिए", "पेपर कब है"]) {
+  assert.ok(isTimetableRequest(yes), yes);
+}
+for (const no of ["fees kab jama kare", "DUES", "school kaha hai", ""]) {
+  assert.equal(isTimetableRequest(no), false, `not a timetable ask: ${no}`);
+}
+
+/* ── 8. TIMETABLE lists only what is still to come ──────────────────── */
+
+const tt = timetableReply(family, slots, names, "2026-09-19");
+assert.ok(tt.includes("Arav (IV)"));
+assert.ok(tt.includes("सोमवार") === false || tt.includes("22"), "the 22nd is listed");
+assert.ok(!tt.includes("18 सितंबर"), "a paper already sat is not listed");
+assert.ok(!tt.includes("Ansh (VII)"), "a child with nothing left is left out");
+
+const done = timetableReply(family, slots, names, "2026-09-30");
+assert.ok(done.includes("सभी पेपर हो चुके"), "after the last paper, say so");
+
+/* ── 9. The tutor prompt and the pre-primary tips ───────────────────── */
+
+const prompt = practicePrompt(family.children[1]!, "गणित", true);
+assert.ok(prompt.includes("कक्षा IV") && prompt.includes("गणित"), "class and subject reach the tutor");
+assert.ok(prompt.includes("एक बार में एक"), "one question at a time");
+
+const tips = prePrimaryTips(
+  { studentId: "n1", name: "Shivansh", classId: "cn", className: "Nursery" },
+  "अंग्रेज़ी कविताएँ",
+  true,
+);
+assert.ok(tips.includes("कविताएँ") && tips.split("\n").filter((l) => l.startsWith("•")).length === 3);
+
+console.log("  ok — the button is recognised, the lines are one line, the little ones get tips");
