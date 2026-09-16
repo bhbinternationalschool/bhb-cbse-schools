@@ -180,10 +180,9 @@ export function defaultsForType(
   q: Pick<ExamPaperQuestion, "options" | "pairs" | "subQuestions" | "answerLines" | "answerKey" | "text">,
 ): Partial<ExamPaperQuestion> {
   const patch: Partial<ExamPaperQuestion> = { type };
-  // Structure the new type does not use is dropped, so a question switched
-  // from Case study to Long is not still worth its old sub-questions and a
-  // former Match question does not print stray pairs.
-  if (type !== "case_study" && type !== "competency" && q.subQuestions.length) patch.subQuestions = [];
+  // Structure the new type does not use is dropped, so a former Match
+  // question does not print stray pairs. Parts (i), (ii)… belong to any
+  // type, so a type change never throws them away.
   if (type !== "match" && q.pairs.length) patch.pairs = [];
   if (!["mcq", "assertion_reason", "fill", "diagram"].includes(type) && q.options.length) patch.options = [];
   switch (type) {
@@ -256,23 +255,32 @@ export function matchAnswerKey(pairs: { left: string; right: string }[], printed
     .join(", ");
 }
 
-/** Types a sub-question may take (those that fit on one line under a parent). */
+/** Every type a main question can take, a part can take too. Pictures
+ * stay on the main question (a part with a picture is the question's
+ * picture with the part's labels). */
 export const SUB_QUESTION_TYPES: ExamPaperQuestionType[] = [
   "short",
   "mcq",
   "true_false",
   "fill",
+  "match",
   "long",
   "numerical",
   "assertion_reason",
+  "diagram",
+  "primary_picture",
+  "case_study",
+  "competency",
 ];
 
 export type ExamSubQuestion = {
   text: string;
   marks: number;
   type: ExamPaperQuestionType;
-  /** mcq / assertion_reason options, (a) (b) (c)…; word bank for fill. */
+  /** mcq / assertion_reason options, (a) (b) (c)…; word bank for fill; labels for diagram. */
   options: string[];
+  /** match: Column A → Column B pairs, printed with Column B shuffled. */
+  pairs: { left: string; right: string }[];
   /** Teacher key: the correct option text, True/False, the blanks, the answer. */
   answerKey: string;
 };
@@ -284,7 +292,13 @@ export function normalizeSubQuestion(x: unknown): ExamSubQuestion {
     text: String(o.text ?? "").trim(),
     marks: Math.max(0, Number(o.marks) || 0),
     type,
-    options: Array.isArray(o.options) ? o.options.map((v) => String(v ?? "")).slice(0, 6) : [],
+    options: Array.isArray(o.options) ? o.options.map((v) => String(v ?? "")).slice(0, 8) : [],
+    pairs: Array.isArray(o.pairs)
+      ? o.pairs
+          .map((x) => ({ left: String(x?.left ?? "").trim(), right: String(x?.right ?? "").trim() }))
+          .filter((x) => x.left || x.right)
+          .slice(0, 8)
+      : [],
     answerKey: String(o.answerKey ?? "").trim(),
   };
 }
@@ -297,6 +311,7 @@ export function emptySubQuestion(type: ExamPaperQuestionType = "short", marks = 
     marks,
     type: t,
     options: t === "mcq" ? ["", "", "", ""] : t === "assertion_reason" ? ASSERTION_REASON_OPTIONS : [],
+    pairs: t === "match" ? [{ left: "", right: "" }, { left: "", right: "" }, { left: "", right: "" }, { left: "", right: "" }] : [],
     answerKey: t === "true_false" ? "True" : "",
   };
 }

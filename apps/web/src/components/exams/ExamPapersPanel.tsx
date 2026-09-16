@@ -1270,6 +1270,8 @@ function QuestionEditor(props: {
   const [labelling, setLabelling] = useState<string | null>(null);
   const [converting, setConverting] = useState<"hi" | "sa" | null>(null);
   const [convertError, setConvertError] = useState("");
+  /** A question with parts is usually just their heading; its own answer fields fold away. */
+  const [showOwnFields, setShowOwnFields] = useState(false);
 
   /** Hinglish → Hindi / Sanskrit for every text field of this question. */
   async function convertTo(target: "hi" | "sa") {
@@ -1413,7 +1415,38 @@ function QuestionEditor(props: {
         />
       )}
 
-      <QuestionTypeFields q={q} canEdit={canEdit} onChange={props.onChange} />
+      {q.subQuestions.length > 0 ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-[var(--muted)]">
+          <span>
+            This question is a heading for its parts
+            {q.options.length || q.pairs.length || q.answerKey || q.answerLines ? " — it still carries its own options / key / lines" : ""}.
+          </span>
+          {canEdit ? (
+            <button
+              type="button"
+              className="font-semibold underline"
+              onClick={() => setShowOwnFields((v) => !v)}
+            >
+              {showOwnFields ? "Hide its own fields" : "Show its own fields"}
+            </button>
+          ) : null}
+          {canEdit && (q.options.length || q.pairs.length || q.answerKey || q.answerLines || q.formulas.length) ? (
+            <button
+              type="button"
+              className="font-semibold text-[var(--danger)] underline"
+              onClick={() =>
+                props.onChange({ options: [], pairs: [], answerKey: "", answerLines: 0, formulas: [], markingScheme: [] })
+              }
+              title="Remove the main question's own options, pairs, answer key, answer lines, formulas and marking scheme — the parts keep theirs"
+            >
+              Clear its own fields
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      {q.subQuestions.length === 0 || showOwnFields ? (
+        <QuestionTypeFields q={q} canEdit={canEdit} onChange={props.onChange} />
+      ) : null}
       <SubQuestionsFields q={q} canEdit={canEdit} onChange={props.onChange} />
       {convertError ? <p className="mt-1 text-[11px] text-[var(--danger)]">{convertError}</p> : null}
 
@@ -1784,7 +1817,10 @@ function QuestionTypeFields({
   canEdit: boolean;
   onChange: (patch: Partial<ExamPaperQuestion>) => void;
 }) {
-  const optionRows = (labelFor: (i: number) => string, pickCorrect: boolean, min = 2, max = 6) => (
+  const optionRows = (labelFor: (i: number) => string, pickCorrect: boolean, minWanted = 2, max = 6) => {
+    // A heading with parts may drop all of its own options.
+    const min = q.subQuestions.length > 0 ? 0 : minWanted;
+    return (
     <div className="mt-2 space-y-1">
       {q.options.map((opt, i) => (
         <div key={i} className="flex items-center gap-2">
@@ -1834,7 +1870,17 @@ function QuestionTypeFields({
             + option
           </button>
         ) : null}
-        {pickCorrect ? <span>{q.answerKey ? `Correct: ${q.answerKey}` : "Tick the correct option"}</span> : null}
+        {pickCorrect && q.options.length ? <span>{q.answerKey ? `Correct: ${q.answerKey}` : "Tick the correct option"}</span> : null}
+        {canEdit && min === 0 && q.options.length > 0 ? (
+          <button
+            type="button"
+            className="text-[11px] font-semibold text-[var(--danger)] underline"
+            onClick={() => onChange({ options: [], answerKey: "" })}
+            title="The parts carry their own options; the heading needs none"
+          >
+            Remove all options
+          </button>
+        ) : null}
         {q.type === "mcq" ? (
           <label className="inline-flex items-center gap-1">
             Print options in
@@ -1856,7 +1902,8 @@ function QuestionTypeFields({
         ) : null}
       </div>
     </div>
-  );
+    );
+  };
 
   switch (q.type) {
     case "mcq":
@@ -2061,7 +2108,7 @@ function SubQuestionsFields({
               value={sq.type}
               onChange={(e) => {
                 const fresh = emptySubQuestion(e.target.value as ExamPaperQuestionType, sq.marks);
-                setSub(i, { type: fresh.type, options: fresh.options, answerKey: fresh.answerKey });
+                setSub(i, { type: fresh.type, options: fresh.options, pairs: fresh.pairs, answerKey: fresh.answerKey });
               }}
               aria-label={`Sub-question ${i + 1} type`}
             >
@@ -2145,6 +2192,70 @@ function SubQuestionsFields({
                   {v}
                 </label>
               ))}
+            </div>
+          ) : sq.type === "match" ? (
+            <div className="ml-9 mt-1 space-y-1">
+              <div className="grid grid-cols-[1.5rem_1fr_1fr_auto] gap-2 text-[10px] uppercase tracking-wide text-[var(--muted)]">
+                <span />
+                <span>Column A</span>
+                <span>Column B</span>
+                <span />
+              </div>
+              {sq.pairs.map((pair, k) => (
+                <div key={k} className="grid grid-cols-[1.5rem_1fr_1fr_auto] items-center gap-2">
+                  <span className="text-[11px] text-[var(--muted)]">{k + 1}.</span>
+                  <input
+                    className="field !py-0.5 text-[11px]"
+                    disabled={!canEdit}
+                    value={pair.left}
+                    placeholder="Item"
+                    onChange={(e) => setSub(i, { pairs: sq.pairs.map((x, m) => (m === k ? { ...x, left: e.target.value } : x)) })}
+                    aria-label={`Sub-question ${i + 1} pair ${k + 1} column A`}
+                  />
+                  <input
+                    className="field !py-0.5 text-[11px]"
+                    disabled={!canEdit}
+                    value={pair.right}
+                    placeholder="Its match"
+                    onChange={(e) => setSub(i, { pairs: sq.pairs.map((x, m) => (m === k ? { ...x, right: e.target.value } : x)) })}
+                    aria-label={`Sub-question ${i + 1} pair ${k + 1} column B`}
+                  />
+                  {canEdit && sq.pairs.length > 2 ? (
+                    <button type="button" className="text-[11px] text-[var(--danger)]" onClick={() => setSub(i, { pairs: sq.pairs.filter((_, m) => m !== k) })} aria-label={`Remove pair ${k + 1}`}>
+                      ×
+                    </button>
+                  ) : (
+                    <span />
+                  )}
+                </div>
+              ))}
+              {canEdit && sq.pairs.length < 8 ? (
+                <button type="button" className="text-[11px] font-semibold text-[var(--muted)] underline" onClick={() => setSub(i, { pairs: [...sq.pairs, { left: "", right: "" }] })}>
+                  + pair
+                </button>
+              ) : null}
+              <p className="text-[10px] text-[var(--muted)]">Column B prints shuffled; the teacher copy shows the key.</p>
+            </div>
+          ) : sq.type === "diagram" ? (
+            <div className="ml-9 mt-1 flex flex-wrap items-center gap-2 text-[11px]">
+              <span className="text-[var(--muted)]">Labels to mark:</span>
+              <input
+                className="field !inline-block !w-72 !py-0.5 text-[11px]"
+                disabled={!canEdit}
+                value={sq.options.join(", ")}
+                placeholder="e.g. Stamen, Pistil, Petal (comma-separated)"
+                onChange={(e) => setSub(i, { options: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) })}
+                aria-label={`Sub-question ${i + 1} labels`}
+              />
+              <input
+                className="field !inline-block !w-56 !py-0.5 text-[11px]"
+                disabled={!canEdit}
+                value={sq.answerKey}
+                placeholder="Answer key (teacher)"
+                onChange={(e) => setSub(i, { answerKey: e.target.value })}
+                aria-label={`Sub-question ${i + 1} answer key`}
+              />
+              <span className="text-[10px] text-[var(--muted)]">Uses the question&apos;s picture above.</span>
             </div>
           ) : (
             <div className="ml-9 mt-1 flex flex-wrap items-center gap-2">
