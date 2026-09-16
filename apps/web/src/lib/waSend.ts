@@ -181,6 +181,90 @@ export async function sendWhatsAppText(opts: {
   };
 }
 
+/**
+ * Send a real map pin.
+ *
+ * A parent who writes "लोकेशन भेजें" wants something they can tap and drive
+ * to, not a line of text. The text reply carries the address and a maps
+ * link; this puts the pin in the chat beside it.
+ *
+ * Meta-only: a location message is a Cloud API type, and the generic BSP
+ * shape for it is not standard. A failure is not worth failing the reply
+ * over — the address and the link have already been sent.
+ */
+export async function sendWhatsAppLocation(opts: {
+  toMobile: string;
+  latitude: number;
+  longitude: number;
+  name?: string;
+  address?: string;
+  fromPhoneNumberId?: string;
+}): Promise<{ ok: boolean; providerId?: string; error?: string; mode: string }> {
+  const to = waDigitsToE164India(opts.toMobile);
+  if (!to || to.length < 10) return { ok: false, error: "Invalid destination", mode: "none" };
+  if (!Number.isFinite(opts.latitude) || !Number.isFinite(opts.longitude)) {
+    return { ok: false, error: "No coordinates", mode: "none" };
+  }
+  if (await isOptedOut(to)) {
+    return { ok: false, error: "Contact has opted out (STOP)", mode: "none" };
+  }
+  if (!(await isWithin24HourWindow(to))) {
+    return {
+      ok: false,
+      error: "Outside Meta's 24h session window",
+      mode: "none",
+    };
+  }
+
+  const phoneNumberId = resolvePhoneNumberId(opts.fromPhoneNumberId);
+  const metaToken = metaAccessToken();
+  if (!phoneNumberId || !metaToken) {
+    return { ok: false, mode: "stub", error: "Meta credentials missing" };
+  }
+
+  try {
+    const res = await fetch(
+      `https://graph.facebook.com/${metaGraphVersion()}/${phoneNumberId}/messages`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${metaToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          to,
+          type: "location",
+          location: {
+            latitude: opts.latitude,
+            longitude: opts.longitude,
+            name: (opts.name || "").slice(0, 1000),
+            address: (opts.address || "").slice(0, 1000),
+          },
+        }),
+      },
+    );
+    const json = (await res.json().catch(() => ({}))) as {
+      messages?: { id?: string }[];
+      error?: { message?: string };
+    };
+    if (!res.ok) {
+      return {
+        ok: false,
+        mode: "meta",
+        error: json.error?.message || `Meta HTTP ${res.status}`,
+      };
+    }
+    return { ok: true, mode: "meta", providerId: json.messages?.[0]?.id || "ok" };
+  } catch (e) {
+    return {
+      ok: false,
+      mode: "meta",
+      error: e instanceof Error ? e.message : "Meta send failed",
+    };
+  }
+}
+
 /** Send a WhatsApp Flow (interactive multi-step in-chat form). Meta-only —
  * Flows are a Cloud API feature, no generic-BSP fallback makes sense here. */
 /**
