@@ -413,6 +413,10 @@ class LEn extends L {
       'From YouTube, not the school — judge it as you watch.';
 
   @override
+  String get fromDikshaGovernmentLessons =>
+      'From DIKSHA, the Government of India\'s platform for NCERT and CBSE lessons.';
+
+  @override
   String get chooseAPdfOrFile => 'Choose a PDF or file';
 
   @override

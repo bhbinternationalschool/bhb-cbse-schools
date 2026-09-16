@@ -2944,9 +2944,10 @@ class ApiClient {
     ),
   );
 
-  /// YouTube videos for a topic at the child's class level — a search,
-  /// not the tutor, so no pass is needed. Falls back to a search link
-  /// when the school has no YouTube API key.
+  /// Videos for a topic at the child's class level — DIKSHA's NCERT/CBSE
+  /// lessons first, YouTube to top up. A search, not the tutor, so no pass
+  /// is needed. `formats` tells the server this build can play DIKSHA's
+  /// own mp4 files; builds without it are sent YouTube videos only.
   Future<TutorVideos> fetchTutorVideos({
     required String studentId,
     required String topic,
@@ -2956,6 +2957,7 @@ class ApiClient {
       "studentId": studentId,
       "topic": topic,
       "language": language,
+      "formats": const ["youtube", "mp4"],
     }),
   );
 
@@ -3882,6 +3884,10 @@ class TutorVideo {
     required this.channel,
     required this.thumbnail,
     required this.url,
+    this.kind = "youtube",
+    this.mediaUrl = "",
+    this.source = "youtube",
+    this.license = "",
   });
 
   factory TutorVideo.fromJson(Map<String, dynamic> j) => TutorVideo(
@@ -3890,6 +3896,10 @@ class TutorVideo {
     channel: (j["channel"] as String?) ?? "",
     thumbnail: (j["thumbnail"] as String?) ?? "",
     url: (j["url"] as String?) ?? "",
+    kind: (j["kind"] as String?) ?? "youtube",
+    mediaUrl: (j["mediaUrl"] as String?) ?? "",
+    source: (j["source"] as String?) ?? "youtube",
+    license: (j["license"] as String?) ?? "",
   );
 
   final String videoId;
@@ -3897,6 +3907,21 @@ class TutorVideo {
   final String channel;
   final String thumbnail;
   final String url;
+
+  /// "youtube" plays [videoId] in YouTube's embedded player; "mp4" plays
+  /// [mediaUrl], a file DIKSHA hosts itself.
+  final String kind;
+  final String mediaUrl;
+
+  /// "diksha" — listed on the government's NCERT/CBSE platform — or
+  /// "youtube" for a plain YouTube search result.
+  final String source;
+
+  /// The licence DIKSHA lists (e.g. "CC BY 4.0"); shown as credit.
+  final String license;
+
+  bool get isFile => kind == "mp4" && mediaUrl.isNotEmpty;
+  bool get fromDiksha => source == "diksha";
 }
 
 class TutorVideos {

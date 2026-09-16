@@ -829,6 +829,12 @@ abstract class L {
   /// **'From YouTube, not the school — judge it as you watch.'**
   String get fromYoutubeNotTheSchoolJudge;
 
+  /// No description provided for @fromDikshaGovernmentLessons.
+  ///
+  /// In en, this message translates to:
+  /// **'From DIKSHA, the Government of India\'s platform for NCERT and CBSE lessons.'**
+  String get fromDikshaGovernmentLessons;
+
   /// No description provided for @chooseAPdfOrFile.
   ///
   /// In en, this message translates to:

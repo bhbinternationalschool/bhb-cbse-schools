@@ -1465,9 +1465,9 @@ class _LanguageToggle extends StatelessWidget {
   }
 }
 
-/// Videos for the topic of one reply. Each opens inside the app (an
-/// in-app browser tab), never in a separate YouTube app the parent may
-/// not have.
+/// Videos for the topic of one reply — DIKSHA's NCERT/CBSE lessons first,
+/// YouTube to top up. Each plays inside the app, never in a separate
+/// YouTube app the parent may not have.
 class _VideosSheet extends StatefulWidget {
   const _VideosSheet({
     required this.api,
@@ -1530,6 +1530,25 @@ class _VideosSheetState extends State<_VideosSheet> {
     ).push(MaterialPageRoute(builder: (_) => VideoPlayerScreen(video: v)));
   }
 
+  /// Where the list came from, so a government lesson and a stranger's
+  /// upload are not trusted alike.
+  String _sourceNote(List<TutorVideo> items) {
+    final diksha = items.where((i) => i.fromDiksha).length;
+    if (diksha > 0 && diksha == items.length) {
+      return _hindi
+          ? "ये दीक्षा के वीडियो हैं — NCERT और CBSE पाठों का भारत सरकार का मंच।"
+          : "These are from DIKSHA, the Government of India's platform for NCERT and CBSE lessons.";
+    }
+    if (diksha > 0) {
+      return _hindi
+          ? "“DIKSHA” वाले वीडियो भारत सरकार के मंच से हैं; बाकी YouTube के हैं, स्कूल के नहीं — देखकर ही भरोसा करें।"
+          : "Videos marked DIKSHA are from the Government of India's lesson platform; the rest are from YouTube, not the school — judge them as you watch.";
+    }
+    return _hindi
+        ? "वीडियो YouTube के हैं, स्कूल के नहीं — देखकर ही भरोसा करें।"
+        : "Videos are from YouTube, not the school — judge them as you watch.";
+  }
+
   @override
   Widget build(BuildContext context) {
     final v = _videos;
@@ -1582,12 +1601,7 @@ class _VideosSheetState extends State<_VideosSheet> {
                 label: Text(_hindi ? _hi["search"]! : "Search on YouTube"),
               ),
               const SizedBox(height: Space.sm),
-              Text(
-                _hindi
-                    ? "वीडियो YouTube के हैं, स्कूल के नहीं — देखकर ही भरोसा करें।"
-                    : "Videos are from YouTube, not the school — judge them as you watch.",
-                style: AppText.labelMediumMuted,
-              ),
+              Text(_sourceNote(v.items), style: AppText.labelMediumMuted),
             ],
           ],
         ),
@@ -1641,7 +1655,9 @@ class _VideoTile extends StatelessWidget {
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      video.channel,
+                      !video.fromDiksha || video.channel == "DIKSHA"
+                          ? video.channel
+                          : "DIKSHA · ${video.channel}",
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: AppText.labelMediumMuted,

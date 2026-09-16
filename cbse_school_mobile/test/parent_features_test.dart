@@ -498,4 +498,42 @@ void main() {
       expect(done.isActive, isFalse);
     });
   });
+
+  group("tutor videos", () {
+    test("a reply from a server that predates DIKSHA is a YouTube video", () {
+      final v = TutorVideo.fromJson(const {
+        "videoId": "AOTmUQImNHw",
+        "title": "Fractions",
+        "channel": "HindiFreeMath",
+        "thumbnail": "",
+        "url": "https://www.youtube.com/watch?v=AOTmUQImNHw",
+      });
+      expect(v.kind, "youtube");
+      expect(v.isFile, isFalse);
+      expect(v.fromDiksha, isFalse);
+    });
+
+    test("a DIKSHA file plays from its own address, with credit", () {
+      final v = TutorVideo.fromJson(const {
+        "videoId": "",
+        "title": "Addition of two digit numbers | Part 1/3",
+        "channel": "NCERT",
+        "thumbnail": "",
+        "url": "https://diksha.gov.in/play/content/do_1",
+        "kind": "mp4",
+        "mediaUrl": "https://obj.diksha.gov.in/content/assets/do_1/62.mp4",
+        "source": "diksha",
+        "license": "CC BY 4.0",
+      });
+      expect(v.isFile, isTrue);
+      expect(v.fromDiksha, isTrue);
+      expect(v.license, "CC BY 4.0");
+      final noFile = TutorVideo.fromJson(const {"kind": "mp4", "mediaUrl": ""});
+      expect(
+        noFile.isFile,
+        isFalse,
+        reason: "an mp4 entry with no address is not playable as a file",
+      );
+    });
+  });
 }

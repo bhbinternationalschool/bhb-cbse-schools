@@ -412,6 +412,10 @@ class LHi extends L {
       'यह यूट्यूब से है, स्कूल से नहीं — देखते समय स्वयं परखें।';
 
   @override
+  String get fromDikshaGovernmentLessons =>
+      'यह दीक्षा से है — NCERT और CBSE पाठों का भारत सरकार का मंच।';
+
+  @override
   String get chooseAPdfOrFile => 'पीडीएफ़ या फ़ाइल चुनें';
 
   @override

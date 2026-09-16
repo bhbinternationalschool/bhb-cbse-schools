@@ -5,10 +5,12 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/i18n/locale_controller.dart";
 
-/// Plays a YouTube video inside the app. A watch or embed link handed to
-/// the system is claimed by the YouTube app on most phones and drops the
-/// parent into ads and autoplay; an embedded player keeps them here and
-/// one tap back returns to the tutor.
+/// Plays a tutor video inside the app: a YouTube video in YouTube's
+/// embedded player, or a lesson file DIKSHA hosts itself in the web view's
+/// own video player. A watch or embed link handed to the system is claimed
+/// by the YouTube app on most phones and drops the parent into ads and
+/// autoplay; playing here keeps them in the app and one tap back returns
+/// to the tutor.
 class VideoPlayerScreen extends StatefulWidget {
   const VideoPlayerScreen({super.key, required this.video});
 
@@ -25,21 +27,29 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   @override
   void initState() {
     super.initState();
-    final id = Uri.encodeComponent(widget.video.videoId);
+    final v = widget.video;
+    final id = Uri.encodeComponent(v.isFile ? "diksha" : v.videoId);
     // YouTube refuses an embed URL loaded as a bare top-level page
     // ("Video player configuration error 153"): the player must sit in an
     // iframe on a page with a real origin, so it is served as one from the
-    // school's domain.
+    // school's domain. A DIKSHA file needs no origin but uses the same page.
+    // The download and full-screen buttons are hidden because the web view
+    // has nowhere to put either, and a button that does nothing reads as broken.
+    final player = v.isFile
+        ? """<video src="${_attr(v.mediaUrl)}" poster="${_attr(v.thumbnail)}"
+  controls playsinline autoplay preload="metadata"
+  controlslist="nodownload nofullscreen"></video>"""
+        : """<iframe src="https://www.youtube.com/embed/$id?rel=0&modestbranding=1&playsinline=1&autoplay=1"
+  allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen
+  referrerpolicy="strict-origin-when-cross-origin"></iframe>""";
     final html =
         """
 <!doctype html><html><head>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>html,body{margin:0;background:#000;height:100%;overflow:hidden}
-iframe{position:absolute;inset:0;width:100%;height:100%;border:0}</style>
+iframe,video{position:absolute;inset:0;width:100%;height:100%;border:0;background:#000}</style>
 </head><body>
-<iframe src="https://www.youtube.com/embed/$id?rel=0&modestbranding=1&playsinline=1&autoplay=1"
-  allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen
-  referrerpolicy="strict-origin-when-cross-origin"></iframe>
+$player
 </body></html>""";
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
@@ -63,6 +73,11 @@ iframe{position:absolute;inset:0;width:100%;height:100%;border:0}</style>
   }
 
   static const _origin = "https://bhbinternational.school";
+
+  static String _attr(String s) => s
+      .replaceAll("&", "&amp;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("<", "&lt;");
 
   @override
   Widget build(BuildContext context) {
@@ -105,12 +120,19 @@ iframe{position:absolute;inset:0;width:100%;height:100%;border:0}</style>
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  widget.video.channel,
+                  // A Creative Commons licence asks for credit: who made
+                  // it and under which licence, next to the video.
+                  [
+                    widget.video.channel,
+                    widget.video.license,
+                  ].where((s) => s.isNotEmpty).join(" · "),
                   style: AppText.bodySmall.copyWith(color: Colors.white70),
                 ),
                 const SizedBox(height: 14),
                 Text(
-                  context.l10n.fromYoutubeNotTheSchoolJudge,
+                  widget.video.fromDiksha
+                      ? context.l10n.fromDikshaGovernmentLessons
+                      : context.l10n.fromYoutubeNotTheSchoolJudge,
                   style: AppText.labelMediumMuted,
                 ),
               ],
