@@ -1,6 +1,6 @@
 /**
  * The tutor's textbook block, loaded from the DIKSHA chapter index
- * (migration 20260916140000; filled weekly by /api/curriculum/diksha-index/tick).
+ * (migration 20260916140100; filled weekly by /api/curriculum/diksha-index/tick).
  * Rules for what the block says: tutorSyllabus.ts.
  *
  * Cached per class for a few hours: the index changes weekly and a parent's
