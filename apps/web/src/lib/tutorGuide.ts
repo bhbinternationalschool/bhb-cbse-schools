@@ -15,8 +15,13 @@
  *
  * WHAT IT MAY CLAIM — only what exists, checked 2026-09-16:
  *  - the WhatsApp keywords, exactly as waTutorBotEngine parses them;
- *  - answers name the child's NCERT book and chapter (Classes 1–8, from the
- *    DIKSHA chapter index, PR #235);
+ *  - NOT that answers name the child's own book and chapter. The tutor
+ *    knows the NCERT books (DIKSHA index, PR #235), but this school's
+ *    Classes 1–8 use PROPEL books (the store sells "Propel - English, EVS,
+ *    Maths, Hindi" sets), so a parent told "the answer names your child's
+ *    book" would look for "Ganita Prakash" at home and not find it. The guide
+ *    instead asks the parent to name the chapter from their own book, which
+ *    is also what gives the tutor the right topic;
  *  - "Watch videos" in the school app plays DIKSHA's NCERT/CBSE lessons
  *    first (PR #233) — the app, not WhatsApp, which has no video command;
  *  - the free hints per day and the passes, read from the live plan list,
@@ -60,7 +65,7 @@ export function composeTutorGuide(opts: {
       "",
       "*1. सीधे सवाल लिखिए*",
       "जैसे: _भिन्न क्या होती है?_ या _प्रकाश संश्लेषण समझाइए_",
-      "उत्तर में बच्चे की *NCERT किताब और पाठ का नाम* भी आएगा, ताकि वही पाठ खोलकर पढ़ सकें।",
+      "सवाल के साथ बच्चे की किताब का *पाठ का नाम या नंबर* भी लिखें — जैसे _Propel गणित, पाठ 4: भिन्न_ — तो उत्तर उसी पाठ के अनुसार आएगा।",
       "",
       "*2. ये शब्द लिखकर शुरू कीजिए*",
       "• *TEACH* भिन्न — आसान भाषा में समझाना",
@@ -96,7 +101,7 @@ export function composeTutorGuide(opts: {
     "",
     "*1. Just type the question*",
     "e.g. _What is a fraction?_ or _Explain photosynthesis_",
-    "Answers name your child's *NCERT book and chapter*, so you can open that very lesson.",
+    "Add the *chapter name or number* from your child's book — e.g. _Propel Maths, Chapter 4: Fractions_ — and the answer follows that chapter.",
     "",
     "*2. Or start with a word*",
     "• *TEACH* fractions — explained simply",

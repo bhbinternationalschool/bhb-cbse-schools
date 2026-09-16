@@ -27,9 +27,12 @@ import {
   composeNeedsPassText,
   composePlansText,
   composeTutorStatus,
+  appendTutorTurns,
   parseWaTutorCommand,
+  tutorHistoryFor,
   tutorSessionExpired,
   type WaTutorState,
+  type WaTutorTurn,
 } from "@/lib/waTutorBotEngine";
 import {
   tutorMode as normalizeTutorMode,
@@ -89,6 +92,7 @@ async function askTutor(opts: {
   mode: TutorMode;
   message: string;
   language: string;
+  history?: WaTutorTurn[];
 }): Promise<
   | { ok: true; reply: string }
   | { ok: false; needsPass: boolean; reason: string }
@@ -98,6 +102,7 @@ async function askTutor(opts: {
     student: opts.student,
     ask: parseTutorAsk({
       message: opts.message,
+      history: opts.history ?? [],
       mode: opts.mode,
       studentId: opts.student.id,
       language: opts.language,
@@ -195,12 +200,15 @@ export async function handleWaTutorInbound(opts: {
   }
 
   if (cmd.kind === "open") {
+    const openChild = childRefs[activeIndex]?.id || childRefs[0]!.id;
     await writeSession(
       {
         mobile10: opts.mobile10,
-        studentId: childRefs[activeIndex]?.id || childRefs[0]!.id,
+        studentId: openChild,
         mode: session?.mode || "hint",
         updatedAt: new Date().toISOString(),
+        // Opening the menu mid-practice must not forget the practice.
+        turns: tutorHistoryFor(session, openChild),
       },
       opts.mobile10,
     );
@@ -352,12 +360,17 @@ export async function handleWaTutorInbound(opts: {
     cmd.kind === "mode" ? normalizeTutorMode(cmd.mode).code : session?.mode || "hint";
   const question = cmd.kind === "mode" ? cmd.question : cmd.text;
 
+  // The conversation so far for this child — read BEFORE the session is
+  // rewritten below, or the rewrite would wipe it.
+  const history = tutorHistoryFor(session, child.id);
+
   await writeSession(
     {
       mobile10: opts.mobile10,
       studentId: child.id,
       mode,
       updatedAt: new Date().toISOString(),
+      turns: history,
     },
     opts.mobile10,
   );
@@ -382,9 +395,24 @@ export async function handleWaTutorInbound(opts: {
     mode,
     message: question,
     language,
+    history,
   });
 
-  if (answer.ok) return { handled: true, replyText: answer.reply };
+  if (answer.ok) {
+    // Keep the exchange, so the child's next message ("3/4") is read as the
+    // answer to the question the tutor just asked.
+    await writeSession(
+      {
+        mobile10: opts.mobile10,
+        studentId: child.id,
+        mode,
+        updatedAt: new Date().toISOString(),
+        turns: appendTutorTurns(history, question, answer.reply),
+      },
+      opts.mobile10,
+    );
+    return { handled: true, replyText: answer.reply };
+  }
 
   return {
     handled: true,

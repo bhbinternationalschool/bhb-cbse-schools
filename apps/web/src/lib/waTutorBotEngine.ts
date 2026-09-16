@@ -26,6 +26,8 @@ import {
 /** How long an idle tutor session keeps hold of the conversation. */
 export const TUTOR_SESSION_TTL_MS = 6 * 60 * 60_000;
 
+export type WaTutorTurn = { role: "user" | "assistant"; content: string };
+
 export type WaTutorState = {
   /** Bare 10 digits — one session per household number. */
   mobile10: string;
@@ -33,7 +35,51 @@ export type WaTutorState = {
   studentId: string;
   mode: TutorMode;
   updatedAt: string;
+  /**
+   * The conversation so far, for THIS child — what the tutor asked and what
+   * the family answered.
+   *
+   * Until 2026-09-16 there was none: every WhatsApp message reached the model
+   * alone. So the exam-eve practice ("5 questions, one at a time") asked
+   * question 1, the child replied "3/4", and the model — shown only "3/4" —
+   * had no idea what that answered. The app never had this problem because
+   * it sends its history with every ask; WhatsApp now keeps it here.
+   */
+  turns?: WaTutorTurn[];
 };
+
+/** Enough for a practice set in progress; bounded because every session is saved in one bundle. */
+export const WA_TUTOR_MAX_TURNS = 10;
+export const WA_TUTOR_TURN_MAX_CHARS = 1200;
+
+/**
+ * The history to send with the next ask. Empty when the session is for a
+ * different child — one child's fractions are not another child's context.
+ */
+export function tutorHistoryFor(
+  session: WaTutorState | null,
+  studentId: string,
+): WaTutorTurn[] {
+  if (!session || session.studentId !== studentId) return [];
+  return (session.turns ?? []).filter(
+    (t) => (t.role === "user" || t.role === "assistant") && typeof t.content === "string",
+  );
+}
+
+/** History plus this exchange, trimmed to what one session may hold. */
+export function appendTutorTurns(
+  history: WaTutorTurn[],
+  question: string,
+  reply: string,
+): WaTutorTurn[] {
+  const clip = (t: string) =>
+    t.length > WA_TUTOR_TURN_MAX_CHARS ? `${t.slice(0, WA_TUTOR_TURN_MAX_CHARS)}…` : t;
+  return [
+    ...history,
+    { role: "user" as const, content: clip(question) },
+    { role: "assistant" as const, content: clip(reply) },
+  ].slice(-WA_TUTOR_MAX_TURNS);
+}
 
 export type WaTutorCommand =
   /** TUTOR — the menu and where this family stands. */

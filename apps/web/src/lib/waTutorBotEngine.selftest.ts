@@ -11,6 +11,10 @@ import {
   passDaysLeft,
   tutorSessionExpired,
   TUTOR_SESSION_TTL_MS,
+  appendTutorTurns,
+  tutorHistoryFor,
+  WA_TUTOR_MAX_TURNS,
+  WA_TUTOR_TURN_MAX_CHARS,
 } from "./waTutorBotEngine";
 
 console.log("waTutorBotEngine.selftest.ts");
@@ -270,6 +274,50 @@ const closed = (t: string) => parseWaTutorCommand(t, false);
   const off = composeNeedsPassText({ ...base, buy: "off" });
   assert.match(off, /school office/);
   assert.doesNotMatch(off, /Reply \*PASS\*/);
+}
+
+/* ── Conversation memory on WhatsApp (2026-09-16) ─────────────────────
+ * Every WhatsApp message used to reach the model alone. The exam-eve
+ * practice asked question 1, the child replied "3/4", and the model, shown
+ * only "3/4", could not know what it answered. These hold down that the
+ * session now carries the exchange, for the right child, within bounds. */
+{
+  const q1 = "Q1. What fraction of a pizza is left if 1 of 4 slices is eaten?";
+  let turns = appendTutorTurns([], "EXAM practice for Class IV fractions", q1);
+  assert.equal(turns.length, 2);
+  assert.equal(turns[1]!.content, q1, "the question asked is remembered");
+
+  const session = {
+    mobile10: "9000000000",
+    studentId: "stu_arav",
+    mode: "exam" as const,
+    updatedAt: new Date().toISOString(),
+    turns,
+  };
+
+  const history = tutorHistoryFor(session, "stu_arav");
+  assert.ok(
+    history.some((t) => t.role === "assistant" && t.content === q1),
+    "the child's '3/4' is sent WITH the question it answers",
+  );
+
+  assert.deepEqual(
+    tutorHistoryFor(session, "stu_ansh"),
+    [],
+    "one child's practice is never another child's context",
+  );
+  assert.deepEqual(tutorHistoryFor(null, "stu_arav"), [], "no session, no history");
+
+  // Bounded: a long practice keeps the latest exchanges only.
+  for (let i = 0; i < 20; i++) turns = appendTutorTurns(turns, `answer ${i}`, `Q${i + 2}`);
+  assert.equal(turns.length, WA_TUTOR_MAX_TURNS, "history is capped");
+  assert.equal(turns[turns.length - 1]!.content, "Q21", "and keeps the most recent");
+
+  const long = appendTutorTurns([], "x", "y".repeat(5000));
+  assert.ok(
+    long[1]!.content.length <= WA_TUTOR_TURN_MAX_CHARS + 1,
+    "one long reply cannot bloat the saved bundle",
+  );
 }
 
 console.log("OK — waTutorBotEngine.selftest.ts");
