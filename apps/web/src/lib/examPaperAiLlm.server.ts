@@ -10,6 +10,7 @@ import {
 } from "@/lib/examPaperAi";
 import { generateExamPaperJson } from "@/lib/aiLlm.server";
 import {
+  normalizeSubQuestion,
   defaultAnswerLines,
   emptyQuestion,
   emptySection,
@@ -93,7 +94,8 @@ type LlmQuestion = {
   bloomLevel?: string;
   markingScheme?: string[];
   pairs?: { left?: string; right?: string }[];
-  subQuestions?: { text?: string; marks?: number }[];
+  subQuestions?: { text?: string; marks?: number; type?: string; options?: string[]; answerKey?: string }[];
+  attemptAny?: number;
   answerLines?: number;
 };
 
@@ -162,11 +164,9 @@ function toQuestion(
       ? q.pairs.map((x) => ({ left: String(x?.left ?? "").trim(), right: String(x?.right ?? "").trim() })).slice(0, 8)
       : [],
     subQuestions: Array.isArray(q.subQuestions)
-      ? q.subQuestions
-          .map((x) => ({ text: String(x?.text ?? "").trim(), marks: Math.max(0, Number(x?.marks) || 0) }))
-          .filter((x) => x.text)
-          .slice(0, 8)
+      ? q.subQuestions.map((x) => normalizeSubQuestion(x)).filter((x) => x.text).slice(0, 10)
       : [],
+    attemptAny: typeof q.attemptAny === "number" ? q.attemptAny : 0,
     answerLines: typeof q.answerLines === "number" ? q.answerLines : defaultAnswerLines(type),
   });
 }
@@ -217,7 +217,8 @@ const FORMAT_RULES = [
   "Question types and how to write each:",
   "- mcq: 4 options, exactly one correct; answerKey is the option text.",
   "- assertion_reason: text = 'Assertion (A): … Reason (R): …'; options must be exactly the four CBSE choices: 'Both A and R are true and R is the correct explanation of A', 'Both A and R are true but R is not the correct explanation of A', 'A is true but R is false', 'A is false but R is true'; answerKey names the correct one.",
-  "- case_study: text = a short passage / data table / source (60–120 words, original, age-appropriate); subQuestions = 3–4 items [{text, marks}] whose marks add up to marks; markingScheme lists one line per sub-question.",
+  "- case_study: text = a short passage / data table / source (60–120 words, original, age-appropriate); subQuestions = 3–4 items [{text, marks, type, options, answerKey}] whose marks add up to marks; markingScheme lists one line per sub-question.",
+  "- Any question may carry subQuestions (i), (ii)… each with its own type (short|mcq|true_false|fill|long|numerical|assertion_reason), marks, options (for mcq) and answerKey — e.g. text 'Choose the correct answer', subQuestions = six mcq parts. attemptAny = N when the child answers any N of them (else 0).",
   "- match: pairs = 4–6 [{left, right}] Column A → Column B pairs (the paper prints Column B shuffled); text = the instruction line; answerKey may be left empty.",
   "- fill: write the blank as ___ inside text; answerKey = the words for the blanks in order, separated by commas; options may hold a word bank.",
   "- true_false: answerKey is exactly True or False.",

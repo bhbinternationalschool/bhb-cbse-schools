@@ -283,14 +283,48 @@ export function ExamPaperPrintSheet(props: {
                             </ol>
                           ) : null}
                           {q.subQuestions.length ? (
-                            <ol className="mt-2 space-y-1 pl-1 text-[13px]">
-                              {q.subQuestions.map((sq, i) => (
-                                <li key={i} className="flex justify-between gap-3">
-                                  <span>({String.fromCharCode(105 + Math.min(i, 8))}) {sq.text}</span>
-                                  <span className="shrink-0 text-[11px] text-[var(--muted)]">[{sq.marks}]</span>
-                                </li>
-                              ))}
-                            </ol>
+                            <div className="mt-2">
+                              {q.attemptAny > 0 && q.attemptAny < q.subQuestions.length ? (
+                                <p className="text-[12px] italic text-[var(--muted)]">
+                                  Attempt any {q.attemptAny} of the following {q.subQuestions.length}.
+                                </p>
+                              ) : null}
+                              <ol className="mt-1 space-y-1.5 pl-1 text-[13px]">
+                                {q.subQuestions.map((sq, i) => {
+                                  const roman = ["i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"][i] ?? String(i + 1);
+                                  const cols = q.optionColumns || autoOptionColumns(sq.options);
+                                  return (
+                                    <li key={i}>
+                                      <div className="flex justify-between gap-3">
+                                        <span>
+                                          ({roman}) {sq.text}
+                                          {sq.type === "true_false" ? <span className="text-[var(--muted)]"> (True / False)</span> : null}
+                                        </span>
+                                        <span className="shrink-0 text-[11px] text-[var(--muted)]">[{sq.marks}]</span>
+                                      </div>
+                                      {(sq.type === "mcq" || sq.type === "assertion_reason") && sq.options.length ? (
+                                        <ul
+                                          className="ml-6 mt-0.5 grid gap-x-4 gap-y-0.5"
+                                          style={{ gridTemplateColumns: `repeat(${sq.type === "assertion_reason" ? 1 : cols}, minmax(0, 1fr))` }}
+                                        >
+                                          {sq.options.map((opt, k) => (
+                                            <li key={k} className="text-[13px]">
+                                              ({String.fromCharCode(97 + k)}) {opt}
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      ) : null}
+                                      {sq.type === "fill" && sq.options.length ? (
+                                        <p className="ml-6 mt-0.5 text-[12px] text-[var(--muted)]">Word bank: {sq.options.filter(Boolean).join(" · ")}</p>
+                                      ) : null}
+                                      {showAnswers && sq.answerKey ? (
+                                        <p className="ml-6 text-[11px] font-semibold text-[var(--success)] print-hide">Key: {sq.answerKey}</p>
+                                      ) : null}
+                                    </li>
+                                  );
+                                })}
+                              </ol>
+                            </div>
                           ) : null}
                           {q.type === "numerical" ? (
                             <p className="mt-1 text-[12px] text-[var(--muted)]">Show your working. &nbsp; Answer: ______________</p>
