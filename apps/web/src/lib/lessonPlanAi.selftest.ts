@@ -137,4 +137,30 @@ console.log("lessonPlanAi.selftest.ts");
   assert.equal(partial.activities, "");
 }
 
+// ─── NCERT textbooks in the prompt ─────────────────────────────────────
+
+{
+  const listing = "Textbooks: the current NCERT books for Class 8, as listed on DIKSHA, the government's school platform.\nMathematics — Ganita Prakash (Hindi-medium edition: Ganita Prakash (Hindi)): 1. A SQUARE AND A CUBE; 2. POWER PLAY";
+  const plain = buildLessonPlanSystemPrompt({ language: "en", schoolName: "BHB" });
+  const grounded = buildLessonPlanSystemPrompt({ language: "en", schoolName: "BHB", textbooks: listing });
+  const blank = buildLessonPlanSystemPrompt({ language: "en", schoolName: "BHB", textbooks: "   " });
+
+  assert.match(plain, /since the edition is unknown/, "no list → homework stays generic");
+  assert.doesNotMatch(plain, /Textbooks:/);
+  assert.equal(blank, plain, "a blank list is no list");
+
+  assert.ok(grounded.endsWith(listing), "the list closes the prompt");
+  assert.doesNotMatch(grounded, /edition is unknown/, "with a list the edition is known");
+  assert.match(grounded, /Refer to the textbook by book and chapter as listed/);
+  assert.match(grounded, /if a ticked unit matches none of the listed chapters, plan it from its title and name no chapter/, "an older edition's unit title is not forced onto a chapter");
+  assert.match(grounded, /Never name a book, chapter or chapter number that is not listed/);
+  assert.match(grounded, /do not invent CBSE competency codes or textbook page numbers/, "the original guard stays");
+  assert.doesNotMatch(grounded.split("Textbooks: the current")[0]!, /Ganita|Curiosity|Poorvi/, "the instructions name no real book — only the list does");
+
+  for (const p of [plain, grounded, buildLessonPlanSystemPrompt({ language: "hi", schoolName: "BHB", textbooks: listing })]) {
+    assert.doesNotMatch(p, /CBSE-affiliated/, "the school follows the CBSE pattern; it is not CBSE-affiliated");
+    assert.match(p, /following the CBSE pattern and NCERT textbooks/);
+  }
+}
+
 console.log("OK — lessonPlanAi.selftest.ts");

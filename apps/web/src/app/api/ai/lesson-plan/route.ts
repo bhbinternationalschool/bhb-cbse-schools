@@ -6,8 +6,10 @@
  * periods), the class + subject labels, the period count, whatever the
  * teacher already typed and an optional note. This route:
  *   1. gates on staff session + teaching:edit,
- *   2. asks the LLM router for one draft (English or Hindi),
- *   3. returns it. The teacher edits and saves in the editor;
+ *   2. adds the class's current NCERT books for the subject from the DIKSHA
+ *      chapter index, when it has them, so the plan follows the real chapter,
+ *   3. asks the LLM router for one draft (English or Hindi),
+ *   4. returns it. The teacher edits and saves in the editor;
  *      `LessonPlan.source` records ai / ai_edited / manual on save.
  */
 
@@ -20,6 +22,7 @@ import { TENANT } from "@/lib/types";
 import { generateLessonPlanJson, llmStatus } from "@/lib/aiLlm.server";
 import { geminiModel } from "@/lib/erpAiGemini.server";
 import { openAiModel } from "@/lib/openAi.server";
+import { ncertTextbooksListing } from "@/lib/tutorSyllabus.server";
 import {
   cleanLessonPlanAiInput,
   LESSON_PLAN_MAX_PERIODS,
@@ -69,9 +72,20 @@ export async function POST(req: Request) {
     );
   }
 
+  // Only the lesson's own subject — a Science plan gains nothing from the
+  // Hindi book — and in the plan's language, so a Hindi plan quotes the
+  // Hindi-medium chapter names. Empty (never an error) without an index.
+  const textbooks = await ncertTextbooksListing({
+    className: input.classLabel,
+    subjectLabel: input.subjectName,
+    coreFallback: false,
+    medium: input.language === "hi" ? "Hindi" : "English",
+  });
+
   const r = await generateLessonPlanJson({
     input,
     schoolName: TENANT.nameDisplay,
+    textbooks,
   });
   if (!r.ok) {
     return NextResponse.json({ error: r.error, engine: r.engine }, { status: 502 });
@@ -86,6 +100,8 @@ export async function POST(req: Request) {
     generatedAt: new Date().toISOString(),
     /** ai_generations row — the editor reports accepted/edited/rejected against it */
     generationId: r.generationId,
+    /** Whether the draft was written with the class's NCERT chapter list. */
+    groundedOnNcert: textbooks !== "",
     draft: r.draft,
   });
 }

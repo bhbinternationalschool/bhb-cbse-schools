@@ -14,6 +14,10 @@
  *    saved plan was AI-drafted, AI-drafted-then-edited, or typed.
  *  - Missing learning outcomes are passed as absent — the model is told to
  *    derive them from the chapter title, not to invent CBSE codes.
+ *  - The class's current NCERT books for the subject, when the DIKSHA
+ *    chapter index has them, are added by the server (never by the client)
+ *    so the plan can follow the real chapter and name it. Without that list
+ *    the prompt says the edition is unknown, as before.
  */
 
 export type LessonPlanLanguage = "en" | "hi";
@@ -68,28 +72,40 @@ const PERIOD_MINUTES = 40;
 export function buildLessonPlanSystemPrompt(opts: {
   language: LessonPlanLanguage;
   schoolName: string;
+  /** textbooksListing() for the class and subject, built on the server; "" when there is none. */
+  textbooks?: string;
 }): string {
+  const textbooks = (opts.textbooks ?? "").trim();
   const lang =
     opts.language === "hi"
       ? "Write every field in Hindi (Devanagari script). Keep subject-specific technical terms in their standard Hindi form and put the English term in brackets the first time it appears."
       : "Write in clear, plain English suitable for an Indian CBSE school teacher.";
-  return `You draft lesson plans for teachers at ${opts.schoolName}, a CBSE-affiliated school in India. One period is ${PERIOD_MINUTES} minutes.
+  const homework = textbooks
+    ? 'Homework: 1–3 lines, doable in 20–30 minutes. Refer to the textbook by book and chapter as listed ("questions at the end of <book>, Chapter <number>"), never by page or exercise number.'
+    : 'Homework: 1–3 lines, doable in 20–30 minutes, referring to the textbook generically ("exercise questions on …") since the edition is unknown.';
+  const grounding = textbooks
+    ? `
+- Textbooks: the school uses the current NCERT books listed at the end. Plan within the chapter the ticked units belong to and use that chapter's own words for things. When the match is clear, begin the title with the book and chapter ("<book>, Ch <number> — <topic>"). The school's unit titles can come from an older NCERT edition: if a ticked unit matches none of the listed chapters, plan it from its title and name no chapter. Never name a book, chapter or chapter number that is not listed.`
+    : "";
+  // "Following the CBSE pattern", not "CBSE-affiliated": the school is
+  // state-recognised for Nursery–VIII and teaches from NCERT books.
+  return `You draft lesson plans for teachers at ${opts.schoolName}, an Indian school following the CBSE pattern and NCERT textbooks. One period is ${PERIOD_MINUTES} minutes.
 
 ${lang}
 
 Rules:
-- Ground the plan in the chapters/topics and learning outcomes given. If no outcomes are given for a unit, derive sensible ones from its title at the level of the class; do not invent CBSE competency codes or textbook page numbers.
+- Ground the plan in the chapters/topics and learning outcomes given. If no outcomes are given for a unit, derive sensible ones from its title at the level of the class; do not invent CBSE competency codes or textbook page numbers.${grounding}
 - Objectives: 3–5 lines, each starting with a measurable verb (identify, explain, solve, compare, demonstrate…). One objective per line.
 - Teaching aids: a short comma-separated list of things a real classroom has (board, chart, model, lab kit, smart-board slide, textbook exercise) — no expensive or unusual equipment unless the topic requires it.
 - Activities: a period-by-period sequence with minutes, e.g. "Period 1 — Recap (5 min): …". Total minutes per period must add up to ${PERIOD_MINUTES}. Include at least one student-active step (pair work, board work, quick experiment, discussion) per period.
 - Assessment: how understanding is checked in class — 2–4 lines (oral questions, exit ticket, worksheet items, observation).
-- Homework: 1–3 lines, doable in 20–30 minutes, referring to the textbook generically ("exercise questions on …") since the edition is unknown.
+- ${homework}
 - If the teacher already typed something in a field, keep its intent and improve it — do not replace it with something unrelated. If the teacher gave a note, follow it.
 - Age-appropriate language for the class named. No student names, no marks.
 
 Respond with JSON only, exactly this shape:
 {"title":"…","objectives":"…","teachingAids":"…","activities":"…","assessment":"…","homework":"…"}
-Use "\\n" for line breaks inside a field. Every key required, strings only.`;
+Use "\\n" for line breaks inside a field. Every key required, strings only.${textbooks ? `\n\n${textbooks}` : ""}`;
 }
 
 export function buildLessonPlanUserPrompt(input: LessonPlanAiInput): string {
