@@ -90,7 +90,116 @@ export type ExamPaperQuestion = {
   bloomLevel: BloomLevel | "";
   /** Step-wise marking scheme for the teacher copy, one step per line; [] = answer key only */
   markingScheme: string[];
+  /** match: Column A → Column B pairs (printed with Column B shuffled). */
+  pairs: { left: string; right: string }[];
+  /** case_study / competency: numbered sub-questions under the passage, each with its marks. */
+  subQuestions: { text: string; marks: number }[];
+  /** Ruled answer lines printed under the question on the student copy; 0 = none. */
+  answerLines: number;
 };
+
+/** The four CBSE Assertion–Reason choices, in the board's order. */
+export const ASSERTION_REASON_OPTIONS: string[] = [
+  "Both A and R are true and R is the correct explanation of A",
+  "Both A and R are true but R is not the correct explanation of A",
+  "A is true but R is false",
+  "A is false but R is true",
+];
+
+/** Ruled lines a type normally needs on the student copy. */
+export function defaultAnswerLines(type: ExamPaperQuestionType): number {
+  switch (type) {
+    case "short":
+      return 3;
+    case "long":
+      return 8;
+    case "numerical":
+      return 5;
+    case "competency":
+      return 5;
+    case "diagram":
+      return 2;
+    default:
+      return 0;
+  }
+}
+
+/**
+ * What a question should carry once its type is chosen — the shape each
+ * type needs, so the editor opens with the right fields instead of a bare
+ * text box. Existing content is kept; only missing structure is added.
+ */
+export function defaultsForType(
+  type: ExamPaperQuestionType,
+  q: Pick<ExamPaperQuestion, "options" | "pairs" | "subQuestions" | "answerLines" | "answerKey" | "text">,
+): Partial<ExamPaperQuestion> {
+  const patch: Partial<ExamPaperQuestion> = { type };
+  // Structure the new type does not use is dropped, so a question switched
+  // from Case study to Long is not still worth its old sub-questions and a
+  // former Match question does not print stray pairs.
+  if (type !== "case_study" && type !== "competency" && q.subQuestions.length) patch.subQuestions = [];
+  if (type !== "match" && q.pairs.length) patch.pairs = [];
+  if (!["mcq", "assertion_reason", "fill", "diagram"].includes(type) && q.options.length) patch.options = [];
+  switch (type) {
+    case "mcq":
+      if (q.options.length < 2) patch.options = ["", "", "", ""];
+      break;
+    case "assertion_reason":
+      patch.options = ASSERTION_REASON_OPTIONS;
+      if (!/Assertion \(A\)/.test(q.text)) patch.text = q.text ? `Assertion (A): ${q.text}\nReason (R): ` : "Assertion (A): \nReason (R): ";
+      break;
+    case "true_false":
+      if (q.answerKey !== "True" && q.answerKey !== "False") patch.answerKey = "True";
+      patch.options = [];
+      break;
+    case "match":
+      if (q.pairs.length < 2) patch.pairs = [{ left: "", right: "" }, { left: "", right: "" }, { left: "", right: "" }, { left: "", right: "" }];
+      break;
+    case "case_study":
+      if (q.subQuestions.length === 0) patch.subQuestions = [{ text: "", marks: 1 }, { text: "", marks: 1 }, { text: "", marks: 2 }];
+      break;
+    case "fill":
+      if (!q.text.includes("___")) patch.text = q.text ? `${q.text} ___` : "";
+      break;
+    default:
+      break;
+  }
+  if (q.answerLines === 0 && defaultAnswerLines(type) > 0) patch.answerLines = defaultAnswerLines(type);
+  return patch;
+}
+
+/** Total marks of a question with sub-questions is their sum. */
+export function questionTotalMarks(q: Pick<ExamPaperQuestion, "marks" | "subQuestions">): number {
+  if (q.subQuestions.length > 0) return q.subQuestions.reduce((sum, sq) => sum + (sq.marks || 0), 0);
+  return q.marks;
+}
+
+/** Deterministic shuffle of Column B for a match question — the same
+ * order on every print of the same paper, never the answer order. */
+export function shuffledMatchRights(pairs: { left: string; right: string }[], seed: string): string[] {
+  const rights = pairs.map((p) => p.right);
+  let h = 2166136261;
+  for (const ch of seed) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
+  const out = [...rights];
+  for (let i = out.length - 1; i > 0; i--) {
+    h = (Math.imul(h, 1103515245) + 12345) >>> 0;
+    const j = h % (i + 1);
+    [out[i], out[j]] = [out[j]!, out[i]!];
+  }
+  // A shuffle that leaves everything in place is no shuffle; rotate once.
+  if (out.length > 1 && out.every((r, i) => r === rights[i])) out.push(out.shift()!);
+  return out;
+}
+
+/** "1-c, 2-a, 3-d, 4-b" for the teacher copy, against the printed order. */
+export function matchAnswerKey(pairs: { left: string; right: string }[], printedRights: string[]): string {
+  return pairs
+    .map((p, i) => {
+      const j = printedRights.indexOf(p.right);
+      return `${i + 1}-${j >= 0 ? String.fromCharCode(97 + j) : "?"}`;
+    })
+    .join(", ");
+}
 
 export type ExamPaperSection = {
   id: string;
@@ -334,6 +443,13 @@ export function emptyQuestion(
     markingScheme: Array.isArray(partial?.markingScheme)
       ? partial!.markingScheme.map(String).filter(Boolean)
       : [],
+    pairs: Array.isArray(partial?.pairs)
+      ? partial!.pairs.map((x) => ({ left: String(x?.left ?? ""), right: String(x?.right ?? "") }))
+      : [],
+    subQuestions: Array.isArray(partial?.subQuestions)
+      ? partial!.subQuestions.map((x) => ({ text: String(x?.text ?? ""), marks: Math.max(0, Number(x?.marks) || 0) }))
+      : [],
+    answerLines: Math.max(0, Math.min(40, Math.floor(Number(partial?.answerLines) || 0))),
   };
 }
 
@@ -409,6 +525,17 @@ function normalizeQuestion(
     markingScheme: Array.isArray(q.markingScheme)
       ? q.markingScheme.map((m) => String(m || "").trim()).filter(Boolean)
       : [],
+    pairs: Array.isArray(q.pairs)
+      ? q.pairs
+          .map((x) => ({ left: String(x?.left ?? "").trim(), right: String(x?.right ?? "").trim() }))
+          .filter((x) => x.left || x.right)
+      : [],
+    subQuestions: Array.isArray(q.subQuestions)
+      ? q.subQuestions
+          .map((x) => ({ text: String(x?.text ?? "").trim(), marks: Math.max(0, Number(x?.marks) || 0) }))
+          .filter((x) => x.text)
+      : [],
+    answerLines: Math.max(0, Math.min(40, Math.floor(Number(q.answerLines) || 0))),
   };
 }
 

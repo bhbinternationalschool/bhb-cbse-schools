@@ -216,6 +216,7 @@ SELFTESTS=(
   test:exams-sheet-safety
   test:exam-schemes
   test:exam-report-templates
+  test:exam-paper-question-types
   test:household-prefs
   test:item-analytics
   test:item-score-import

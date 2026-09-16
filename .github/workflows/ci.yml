@@ -311,6 +311,7 @@ jobs:
           npm run test:exams-sheet-safety
           npm run test:exam-schemes
           npm run test:exam-report-templates
+          npm run test:exam-paper-question-types
           npm run test:household-prefs
           npm run test:item-analytics
           npm run test:fleet-edge-link
