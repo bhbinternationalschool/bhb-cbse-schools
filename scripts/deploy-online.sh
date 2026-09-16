@@ -67,6 +67,15 @@ FEE_INTEGRITY_NOTIFY_MOBILE="$(get_env FEE_INTEGRITY_NOTIFY_MOBILE)"
 NEXT_PUBLIC_PAYMENT_GATEWAY="$(get_env NEXT_PUBLIC_PAYMENT_GATEWAY)"
 CASHFREE_APP_ID="$(get_env CASHFREE_APP_ID)"
 CASHFREE_ENV="$(get_env CASHFREE_ENV)"
+# Google Play's reviewer signs in as the demo family without a WhatsApp OTP.
+# These lived ONLY on the live service, typed in by hand, so every deploy
+# replaced the env list and silently locked the reviewer out — found again on
+# 2026-09-16, when `/api/auth/otp/verify` answered 401 an hour after a deploy.
+# Blank here = the review login is simply off, which is the right default for
+# anyone else's checkout.
+REVIEW_LOGIN_MOBILE="$(get_env REVIEW_LOGIN_MOBILE)"
+REVIEW_LOGIN_CODE="$(get_env REVIEW_LOGIN_CODE)"
+REVIEW_LOGIN_HOUSEHOLD_ID="$(get_env REVIEW_LOGIN_HOUSEHOLD_ID)"
 
 WHATSAPP_DEFAULT_COUNTRY_CODE="${WHATSAPP_DEFAULT_COUNTRY_CODE:-91}"
 WHATSAPP_GRAPH_VERSION="${WHATSAPP_GRAPH_VERSION:-v21.0}"
@@ -140,7 +149,12 @@ else
   echo "Cashfree: not active (NEXT_PUBLIC_PAYMENT_GATEWAY=${NEXT_PUBLIC_PAYMENT_GATEWAY:-unset}) — pay-links fall back to Razorpay/demo"
 fi
 if [[ -n "$CRON_SECRET" ]]; then
-  echo "Cron guard: CRON_SECRET present (scheduled comms + automation)"
+  if [[ -n "$REVIEW_LOGIN_MOBILE" && -n "$REVIEW_LOGIN_CODE" && -n "$REVIEW_LOGIN_HOUSEHOLD_ID" ]]; then
+  echo "Play review login: configured (demo family signs in without an OTP)"
+else
+  echo "Play review login: NOT SET — a Play reviewer cannot sign in after this deploy"
+fi
+echo "Cron guard: CRON_SECRET present (scheduled comms + automation)"
 else
   echo "Cron guard: CRON_SECRET missing — set in .env.local before production go-live"
 fi
@@ -257,6 +271,9 @@ SUBSTITUTIONS+="@_FEE_INTEGRITY_NOTIFY_MOBILE=${FEE_INTEGRITY_NOTIFY_MOBILE}"
 SUBSTITUTIONS+="@_NEXT_PUBLIC_PAYMENT_GATEWAY=${NEXT_PUBLIC_PAYMENT_GATEWAY}"
 SUBSTITUTIONS+="@_CASHFREE_APP_ID=${CASHFREE_APP_ID}"
 SUBSTITUTIONS+="@_CASHFREE_ENV=${CASHFREE_ENV:-production}"
+SUBSTITUTIONS+="@_REVIEW_LOGIN_MOBILE=${REVIEW_LOGIN_MOBILE}"
+SUBSTITUTIONS+="@_REVIEW_LOGIN_CODE=${REVIEW_LOGIN_CODE}"
+SUBSTITUTIONS+="@_REVIEW_LOGIN_HOUSEHOLD_ID=${REVIEW_LOGIN_HOUSEHOLD_ID}"
 
 gcloud builds submit "$ROOT" \
   --project="$PROJECT_ID" \
