@@ -505,11 +505,11 @@ export type MonthlyCashRow = {
   netPaise: number;
 };
 
-export type CashLeg = {
-  voucherId: string;
-  voucherDate: string;
-  /** The VOUCHER's cash total, repeated on each of its head rows. */
-  cashSignedPaise: number;
+/** What the database returns: only the months that saw money. */
+export type MonthlyCashTotal = {
+  month: string;
+  inPaise: number;
+  outPaise: number;
 };
 
 export function monthLabel(month: string): string {
@@ -521,55 +521,35 @@ export function monthLabel(month: string): string {
   });
 }
 
-export function summariseMonthlyCash(input: {
+/**
+ * Every month in the range, in order, including the ones that saw nothing.
+ *
+ * The arithmetic that matters — one voucher counted once, and corrections
+ * (a reversal, the voucher it reverses, a `void_redate` journal) left out
+ * entirely — happens in `ledger_monthly_cash`, where the rows are. This puts
+ * a row on every month so the chart has no holes: a month with no money is a
+ * fact worth seeing, and a missing bar reads as "not entered yet".
+ */
+export function monthlyCashRows(input: {
   from: string;
   to: string;
-  legs: CashLeg[];
-  /** Reversals, and the vouchers they cancel. */
-  cancelledVoucherIds: Set<string>;
+  totals: MonthlyCashTotal[];
 }): MonthlyCashRow[] {
-  const perVoucher = new Map<string, { month: string; signedPaise: number }>();
-  for (const leg of input.legs) {
-    const month = (leg.voucherDate || "").slice(0, 7);
-    if (!month) continue;
-    // Rule 1 — a reversal and the entry it cancels are ONE correction, not
-    // two movements of money. Counted gross, April 2026 read ₹22.29 lakh in
-    // and ₹22.99 lakh out; what actually moved was ₹10.59 lakh and ₹12.82
-    // lakh. 162 of that month's cash vouchers were reversals.
-    if (input.cancelledVoucherIds.has(leg.voucherId)) continue;
-    // Rule 2 — one voucher, counted once. The cash figure is repeated on
-    // every head row, so a voucher split across three expense heads would
-    // otherwise be counted three times.
-    if (perVoucher.has(leg.voucherId)) continue;
-    perVoucher.set(leg.voucherId, {
-      month,
-      signedPaise: leg.cashSignedPaise,
-    });
-  }
-
-  const byMonth = new Map<string, { inPaise: number; outPaise: number }>();
-  for (const { month, signedPaise } of perVoucher.values()) {
-    const cur = byMonth.get(month) ?? { inPaise: 0, outPaise: 0 };
-    if (signedPaise >= 0) cur.inPaise += signedPaise;
-    else cur.outPaise += -signedPaise;
-    byMonth.set(month, cur);
-  }
-
-  // Every month in the range, including the empty ones: a month that saw no
-  // money is a fact worth seeing, and a missing row reads as "not entered
-  // yet".
+  const byMonth = new Map(input.totals.map((t) => [t.month, t]));
   const rows: MonthlyCashRow[] = [];
   const cursor = new Date(`${input.from.slice(0, 7)}-01T00:00:00Z`);
   const end = new Date(`${input.to.slice(0, 7)}-01T00:00:00Z`);
   while (cursor <= end) {
-    const month = cursor.toISOString().slice(0, 7);
-    const hit = byMonth.get(month) ?? { inPaise: 0, outPaise: 0 };
+    const month = cursor.toISOString().slice(0, 10).slice(0, 7);
+    const hit = byMonth.get(month);
+    const inPaise = hit?.inPaise ?? 0;
+    const outPaise = hit?.outPaise ?? 0;
     rows.push({
       month,
       label: monthLabel(month),
-      inPaise: hit.inPaise,
-      outPaise: hit.outPaise,
-      netPaise: hit.inPaise - hit.outPaise,
+      inPaise,
+      outPaise,
+      netPaise: inPaise - outPaise,
     });
     cursor.setUTCMonth(cursor.getUTCMonth() + 1);
   }

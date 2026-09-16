@@ -78,7 +78,7 @@ export function ModuleDashboardHost({
       let stale = false;
       void import("@/lib/feeStoreDuesKpi").then(
         ({ patchFeeDashWithStoreDues }) =>
-          patchFeeDashWithStoreDues(built).then((patched) => {
+          patchFeeDashWithStoreDues(built, session?.academicYearCode).then((patched) => {
             if (patched && !stale) setModel(patched);
           }),
       );

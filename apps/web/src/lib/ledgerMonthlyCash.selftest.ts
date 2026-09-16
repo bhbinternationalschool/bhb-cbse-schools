@@ -1,140 +1,93 @@
 /**
- * Self-test: month-by-month money in and money out.
+ * Self-test: every month in the range gets a row.
  * Run: npx tsx apps/web/src/lib/ledgerMonthlyCash.selftest.ts
  *
- * Two rules decide whether the Accounts dashboard tells the truth, and the
- * obvious version of this code gets both wrong:
+ * Reported 2026-09-16: "money in / money out only shows April". The database
+ * had all six months; the reply did not. The dashboard pulled every cash
+ * movement of the year through `ledger_cash_movements` — one row per voucher
+ * PER HEAD, 3,147 of them — and PostgREST caps a reply at 1,000. All 1,000
+ * fell inside April. Nothing errored; the chart simply had one bar.
  *
- *  1. `ledger_cash_movements` returns one row per voucher PER HEAD, with the
- *     voucher's cash total repeated on each. Summing the rows counts a
- *     voucher once per expense head it touches.
- *  2. A reversal and the entry it cancels are one correction, not two
- *     movements of money. Counted gross, April 2026 read ₹22.29 lakh in and
- *     ₹22.99 lakh out; what actually moved was ₹10.59 lakh and ₹12.82 lakh.
- *     162 of that month's cash vouchers were reversals.
+ * The arithmetic now happens in `ledger_monthly_cash` (migration
+ * 20260916120000), which returns one row per month — six rows, no cap. What
+ * is left here is the part that still has to be right in TypeScript: every
+ * month in the range gets a row, in order, whether or not money moved.
+ *
+ * The SQL's own two rules (one voucher counted once; reversals and
+ * `void_redate` corrections excluded) were verified against production the
+ * day it was written — April ₹10,59,254 in / ₹11,52,460 out, September
+ * ₹5,60,568 in / ₹50,000 out, against gross figures of ₹22.29 lakh and
+ * ₹7.73 lakh.
  */
 
 import assert from "node:assert/strict";
 
-import { summariseMonthlyCash, type CashLeg } from "./ledger/reports";
+import { monthlyCashRows, monthLabel } from "./ledger/reports";
 
 console.log("ledgerMonthlyCash.selftest.ts");
 
-const leg = (
-  voucherId: string,
-  voucherDate: string,
-  cashSignedPaise: number,
-): CashLeg => ({ voucherId, voucherDate, cashSignedPaise });
+/* ── A quiet month still gets a row ─────────────────────────────────── */
 
-/* ── One voucher across three heads is one movement ─────────────────── */
-
-const split = summariseMonthlyCash({
+const withGap = monthlyCashRows({
   from: "2026-04-01",
-  to: "2026-04-30",
-  legs: [
-    leg("v1", "2026-04-10", -300000),
-    leg("v1", "2026-04-10", -300000),
-    leg("v1", "2026-04-10", -300000),
+  to: "2026-09-16",
+  totals: [
+    { month: "2026-04", inPaise: 1059254_32, outPaise: 1152459_84 },
+    { month: "2026-09", inPaise: 560568_00, outPaise: 50000_00 },
   ],
-  cancelledVoucherIds: new Set(),
 });
-assert.equal(split.length, 1);
-assert.equal(
-  split[0]!.outPaise,
-  300000,
-  "a payment split over three heads is ₹3,000 out, not ₹9,000",
-);
 
-/* ── A reversal and its original both drop out ──────────────────────── */
-
-const withReversal = summariseMonthlyCash({
-  from: "2026-04-01",
-  to: "2026-04-30",
-  legs: [
-    leg("good", "2026-04-02", 500000),
-    leg("wrong", "2026-04-03", 700000),
-    leg("undo", "2026-04-04", -700000),
-  ],
-  cancelledVoucherIds: new Set(["wrong", "undo"]),
-});
-assert.equal(
-  withReversal[0]!.inPaise,
-  500000,
-  "only the receipt that stood counts as money in",
-);
-assert.equal(
-  withReversal[0]!.outPaise,
-  0,
-  "and its reversal is not an expense — that is the ₹11 lakh April error",
-);
-
-/* ── An April entry reversed in July drops out of April ─────────────── */
-
-const laterReversal = summariseMonthlyCash({
-  from: "2026-04-01",
-  to: "2026-07-31",
-  legs: [
-    leg("apr", "2026-04-10", 900000),
-    leg("jul", "2026-07-10", -900000),
-  ],
-  cancelledVoucherIds: new Set(["apr", "jul"]),
-});
-assert.equal(
-  laterReversal.find((r) => r.month === "2026-04")!.inPaise,
-  0,
-  "a correction made in July also corrects April, which is the month the office reads",
-);
-
-/* ── Empty months are shown, not skipped ────────────────────────────── */
-
-const withGap = summariseMonthlyCash({
-  from: "2026-04-01",
-  to: "2026-07-15",
-  legs: [leg("v1", "2026-04-10", 100000), leg("v2", "2026-07-01", 200000)],
-  cancelledVoucherIds: new Set(),
-});
 assert.deepEqual(
   withGap.map((r) => r.month),
-  ["2026-04", "2026-05", "2026-06", "2026-07"],
-  "May and June are shown as zero — a missing row would read as 'not entered yet'",
+  ["2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09"],
+  "all six months — this is the assertion the production bug would fail",
 );
-assert.equal(withGap[1]!.inPaise, 0);
+assert.equal(withGap[1]!.inPaise, 0, "May saw nothing and says so");
 assert.equal(withGap[1]!.netPaise, 0);
-
-/* ── A void re-dated to its right month is not September's money ────── */
-
-// 3 Sep 2026: 53 `void_redate` journals cancelled reversals that had landed
-// on the day of the void instead of the day of the receipt. The cancelling
-// half reads as money IN — ₹2,32,695 that nobody paid — with the matching
-// amount going out across March–July. September's tile said ₹7,73,063 when
-// the school had taken ₹5,40,368.
-const redate = summariseMonthlyCash({
-  from: "2026-09-01",
-  to: "2026-09-30",
-  legs: [
-    leg("fees", "2026-09-05", 540368_00),
-    leg("redate", "2026-09-01", 232695_00),
-  ],
-  cancelledVoucherIds: new Set(["redate"]),
-});
+assert.equal(withGap[0]!.inPaise, 1059254_32);
 assert.equal(
-  redate[0]!.inPaise,
-  540368_00,
-  "September shows what was collected, not the correction posted alongside it",
+  withGap[0]!.netPaise,
+  1059254_32 - 1152459_84,
+  "net is in minus out, and may be negative",
 );
+assert.equal(withGap[5]!.netPaise, 560568_00 - 50000_00);
 
-/* ── Net is in minus out, and labels are readable ───────────────────── */
+/* ── Months the database did not mention are zero, not missing ──────── */
 
-const net = summariseMonthlyCash({
+const empty = monthlyCashRows({ from: "2026-04-01", to: "2026-06-30", totals: [] });
+assert.equal(empty.length, 3, "a book with no cash still shows its months");
+assert.ok(empty.every((r) => r.inPaise === 0 && r.outPaise === 0));
+
+/* ── A single month range is one row, not none ──────────────────────── */
+
+const one = monthlyCashRows({
   from: "2026-09-01",
   to: "2026-09-30",
-  legs: [leg("a", "2026-09-05", 785063_00), leg("b", "2026-09-07", -295195_00)],
-  cancelledVoucherIds: new Set(),
+  totals: [{ month: "2026-09", inPaise: 100, outPaise: 0 }],
 });
-assert.equal(net[0]!.netPaise, 785063_00 - 295195_00);
-assert.ok(
-  net[0]!.label.startsWith("Sep"),
-  `month label should read like "Sep 2026", got ${net[0]!.label}`,
+assert.equal(one.length, 1);
+assert.equal(one[0]!.month, "2026-09");
+
+/* ── A month outside the range is ignored, never appended ───────────── */
+
+const outside = monthlyCashRows({
+  from: "2026-08-01",
+  to: "2026-09-16",
+  totals: [
+    { month: "2026-03", inPaise: 999999, outPaise: 0 },
+    { month: "2026-09", inPaise: 100, outPaise: 50 },
+  ],
+});
+assert.deepEqual(outside.map((r) => r.month), ["2026-08", "2026-09"]);
+assert.equal(
+  outside.reduce((s, r) => s + r.inPaise, 0),
+  100,
+  "March's money must not leak into a range that does not include it",
 );
 
-console.log("  ok — one voucher counted once, corrections cancelled, no month hidden");
+/* ── The label is what the office reads ─────────────────────────────── */
+
+assert.ok(monthLabel("2026-04").startsWith("Apr"), monthLabel("2026-04"));
+assert.ok(monthLabel("2026-09").includes("2026"));
+
+console.log("  ok — every month in the range gets a row, in order");

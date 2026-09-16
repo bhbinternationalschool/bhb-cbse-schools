@@ -14,6 +14,7 @@ import { loadAdmissions, funnelCounts } from "@/lib/admissions";
 import { loadAttendance, summarizeMarks, todayIso } from "@/lib/attendance";
 import { computeFeeKpis } from "@/lib/feeFinance";
 import { storeDuesSummary } from "@/lib/inventory/sales.server";
+import { fetchOpenDuesSummary } from "@/lib/feesDeskAncillary.server";
 import { collectionsByMode, loadFees } from "@/lib/fees";
 import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
 import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
@@ -29,6 +30,8 @@ export type PrincipalSnapshot = {
     mtdCollectionPaise: number;
     openDuesPaise: number;
     defaulterHouseholds: number;
+    /** When the dues cache the reminders use was last rebuilt; "" = unknown. */
+    duesRebuiltAt: string;
     /** Books / uniform on credit. null = the store could not be read. */
     storeDuesPaise: number | null;
     storeDueStudents: number;
@@ -109,6 +112,24 @@ export async function buildPrincipalSnapshot(
   } catch (e) {
     console.error(
       "[principalSnapshot] store dues unavailable:",
+      e instanceof Error ? e.message : e,
+    );
+  }
+
+  // The dues the REMINDERS are built from — the same row the fee dashboard
+  // now shows. Two screens each computing their own total is how the office
+  // ended up reading ₹11.5 lakh on one and ₹13.4 lakh on the other, with no
+  // way to tell which the parent would be asked for.
+  //
+  // The live computation below still runs: it fills the student count and
+  // the rest of the fee KPIs, and it is the fallback when the cache has
+  // never been built.
+  let duesSummary: Awaited<ReturnType<typeof fetchOpenDuesSummary>> | null = null;
+  try {
+    duesSummary = await fetchOpenDuesSummary(ay);
+  } catch (e) {
+    console.error(
+      "[principalSnapshot] open-dues summary unavailable:",
       e instanceof Error ? e.message : e,
     );
   }
@@ -199,8 +220,15 @@ export async function buildPrincipalSnapshot(
     fees: {
       todayCollectionPaise,
       mtdCollectionPaise,
-      openDuesPaise: feeKpi.openPaise,
-      defaulterHouseholds: feeKpi.studentsWithOpenDues,
+      openDuesPaise:
+        duesSummary && duesSummary.rows > 0
+          ? duesSummary.totalBalancePaise
+          : feeKpi.openPaise,
+      defaulterHouseholds:
+        duesSummary && duesSummary.rows > 0
+          ? duesSummary.students
+          : feeKpi.studentsWithOpenDues,
+      duesRebuiltAt: duesSummary?.rebuiltAt ?? "",
       storeDuesPaise,
       storeDueStudents,
       todayByMode,

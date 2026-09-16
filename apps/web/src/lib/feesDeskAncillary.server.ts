@@ -7,7 +7,6 @@ import type {
   ChargeVoucher,
   ChequeInstrument,
   DayCloseSession,
-  FeesState,
   ManualBookSeries,
 } from "@/lib/fees";
 import type { InstallmentPlan, PlanAllocation } from "@/lib/installmentPlans";
@@ -538,28 +537,56 @@ export async function rebuildFeeOpenDuesCache(
   return { ok: true, count: Number(result.count ?? rows.length) };
 }
 
-export async function fetchOpenDuesSummary(academicYearCode?: string): Promise<{
-  count: number;
+export type OpenDuesSummary = {
+  rows: number;
+  students: number;
+  families: number;
   totalBalancePaise: number;
-}> {
+  /** When the dues cache was last rebuilt; "" = never / unknown. */
+  rebuiltAt: string;
+};
+
+/**
+ * What the school is owed, as the REMINDERS see it.
+ *
+ * Summed by `fee_open_dues_summary` (migration 20260916130000), not here.
+ * This used to select every row and add them up in Node — and PostgREST
+ * caps a reply at 1,000 rows while the table holds 1,140, so the total was
+ * quietly short by whatever the last 140 carried.
+ *
+ * This is the figure the WhatsApp reminders and the /pay/due links work
+ * from, which is why both dashboards now show it rather than each computing
+ * its own: the office was reading two different totals on two screens, and
+ * neither was the one the parent was being asked to pay.
+ */
+export async function fetchOpenDuesSummary(
+  academicYearCode?: string,
+): Promise<OpenDuesSummary> {
+  const empty: OpenDuesSummary = {
+    rows: 0,
+    students: 0,
+    families: 0,
+    totalBalancePaise: 0,
+    rebuiltAt: "",
+  };
   const c = await ctx();
-  if (!c) return { count: 0, totalBalancePaise: 0 };
-  let q = c.sb
-    .from("fee_desk_open_dues")
-    .select("balance_paise")
-    .eq("tenant_id", c.tenantId)
-    .gt("balance_paise", 0);
-  if (academicYearCode) {
-    q = q.eq("academic_year_code", academicYearCode);
+  if (!c) return empty;
+  const { data, error } = await c.sb.rpc("fee_open_dues_summary", {
+    p_tenant_id: c.tenantId,
+    p_academic_year_code: academicYearCode ?? null,
+  });
+  if (error) {
+    console.warn("[fees] open-dues summary failed", error.message);
+    return empty;
   }
-  const { data } = await q;
-  const rows = data ?? [];
+  const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | undefined;
+  if (!row) return empty;
   return {
-    count: rows.length,
-    totalBalancePaise: rows.reduce(
-      (s, r) => s + Number(r.balance_paise || 0),
-      0,
-    ),
+    rows: Number(row.rows_count ?? 0),
+    students: Number(row.student_count ?? 0),
+    families: Number(row.family_count ?? 0),
+    totalBalancePaise: Number(row.total_balance_paise ?? 0),
+    rebuiltAt: row.rebuilt_at ? String(row.rebuilt_at) : "",
   };
 }
 
