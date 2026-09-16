@@ -300,6 +300,13 @@ export function ExamPapersPanel({
         sections: st.sections.map((s) => ({ ...s, title: out[i++]!, instructions: out[i++]! })),
       }));
       updateDraft({ print: { ...draft.print, header, language: target }, generalInstructions, sets });
+      if (out.every((t, i) => t === texts[i])) {
+        setHeaderConvertError(
+          "The AI returned the text unchanged — it may already be in Devanagari. Try again, or type it directly.",
+        );
+        if (body.generationId) reportAiOutcome({ ids: [body.generationId], outcome: "rejected" });
+        return;
+      }
       if (body.generationId) reportAiOutcome({ ids: [body.generationId], outcome: "accepted" });
     } catch (e) {
       setHeaderConvertError(e instanceof Error ? e.message : String(e));
@@ -1374,7 +1381,19 @@ function QuestionEditor(props: {
         setConvertError(body?.error || `Could not convert (HTTP ${res.status})`);
         return;
       }
+      // Applied first — the teacher gets whatever the model did return.
       props.onChange(applyTransliteratedQuestion(q, body.texts));
+      // …but "it did nothing" must not read as success. A model that hands
+      // back exactly what it was given (already Devanagari, or it simply
+      // declined) looks like a dead button, which is how this was reported.
+      const unchanged = body.texts.every((t, i) => t === texts[i]);
+      if (unchanged) {
+        setConvertError(
+          "The AI returned the text unchanged — it may already be in Devanagari. Try again, or type it directly.",
+        );
+        if (body.generationId) reportAiOutcome({ ids: [body.generationId], outcome: "rejected" });
+        return;
+      }
       if (body.generationId) reportAiOutcome({ ids: [body.generationId], outcome: "accepted" });
     } catch (e) {
       setConvertError(e instanceof Error ? e.message : String(e));
