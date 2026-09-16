@@ -1,6 +1,6 @@
 /**
  * Sync the NCERT chapter index from DIKSHA (rules: dikshaIndex.ts, tables:
- * migration 20260916140000). Weekly from Cloud Scheduler; a full first run
+ * migration 20260916140100). Weekly from Cloud Scheduler; a full first run
  * reads 87 books — about 26 MB of hierarchy — in under half a minute.
  *
  * Each changed book is written through diksha_replace_textbook(), one

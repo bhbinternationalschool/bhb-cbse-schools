@@ -1,7 +1,7 @@
 /**
  * The NCERT chapter index: which DIKSHA textbooks count, and how one book's
  * hierarchy becomes chapter and resource rows. Pure, so the sync and its
- * self-test share every rule. Tables: migration 20260916140000.
+ * self-test share every rule. Tables: migration 20260916140100.
  *
  * DIKSHA carries two generations of NCERT books. Its CBSE channel holds the
  * pre-2023 editions (Marigold, Math-Magic, Honeysuckle) relabelled "(NEW)";
