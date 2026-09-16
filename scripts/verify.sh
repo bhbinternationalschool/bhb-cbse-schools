@@ -250,10 +250,10 @@ SELFTESTS=(
   test:fee-due-future
   test:ai-stream
   test:tutor-plans
-  test:diksha-index
   test:staff-home-kind
   test:mobile-features
   test:cashfree-checkout
+  test:diksha-index
   test:teacher-contact
   test:question-bank
   test:rbac-infer
