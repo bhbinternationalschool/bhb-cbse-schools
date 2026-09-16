@@ -82,7 +82,14 @@ for (const hindi of [true, false]) {
 
   /* ── 4. It names what is new and real ─────────────────────────────── */
 
-  assert.ok(guide.includes("NCERT"), `${lang}: answers name the NCERT book and chapter`);
+  // The school's books are Propel, not NCERT. The guide must not promise a
+  // parent that answers name "your child's NCERT book" — they would look for
+  // a book they do not own. It asks for the chapter from their own book.
+  assert.ok(
+    !/NCERT (book|किताब)/.test(guide),
+    `${lang}: must not promise the child's NCERT book — this school uses Propel`,
+  );
+  assert.ok(guide.includes("Propel"), `${lang}: asks for the chapter from the child's own book`);
   assert.ok(guide.includes("DIKSHA"), `${lang}: videos from DIKSHA`);
 
   /* ── 5. It fits in one WhatsApp message with the welcome above it ─── */
