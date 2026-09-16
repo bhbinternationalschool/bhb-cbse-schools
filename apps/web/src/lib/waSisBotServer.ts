@@ -1063,6 +1063,29 @@ export async function handleWaSisBotInbound(opts: {
     }
   }
 
+  // ── Exam eve: the "Start practice" button and TIMETABLE ──
+  //
+  // Before study help, because the button's own words ("अभ्यास शुरू करें")
+  // would otherwise reach the tutor as a question with no subject, and
+  // before the keyword matcher, which has no idea what TIMETABLE means.
+  // The handler answers only those two things and returns null for
+  // everything else, so the normal flow is untouched.
+  try {
+    const { handleExamEveInbound } = await import("@/lib/examEve.server");
+    const exam = await handleExamEveInbound({
+      household: hh,
+      children: childrenOf(hh),
+      mobile10,
+      text,
+    });
+    if (exam) {
+      return finishLanguageFlow(store, thread, parentMsg, exam);
+    }
+  } catch (e) {
+    // A date-sheet read that fails must never take fees and receipts with it.
+    console.error("[wa-sis-bot] exam eve failed", e);
+  }
+
   // ── Study help (the app's tutor, on WhatsApp) ──
   //
   // Asked BEFORE the keyword matcher only so that an open session can claim

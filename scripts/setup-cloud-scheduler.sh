@@ -292,6 +292,15 @@ create_job "bhb-wa-parent-chat-close" "*/15 8-19 * * *" \
   "${APP_URL}/api/wa/parent-chat-close" \
   "Asia/Kolkata" "120s"
 
+# The evening before each exam day: tomorrow's papers to every family, with
+# a button that starts the AI tutor on that subject (lib/examEve.server.ts).
+# Daily at 6 pm — it sends nothing when tomorrow has no paper, so the date
+# sheet is the only calendar this job needs. Runs on the main service, not
+# lite: the send path hands work to the reply tracker.
+create_job "bhb-wa-exam-eve" "0 18 * * *" \
+  "${APP_URL}/api/wa/exam-eve" \
+  "Asia/Kolkata" "300s"
+
 # Cashfree settlement sweep: pulls what the gateway actually paid into the
 # bank, with its event-level breakdown, and posts it to the ledger.
 #

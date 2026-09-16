@@ -405,6 +405,41 @@ export async function handleWaTutorInbound(opts: {
 
 
 /**
+ * Open study help on one child in exam-preparation mode and ask the tutor
+ * the first practice question — the landing for the exam-eve button.
+ *
+ * Pins the session to `studentId` first, so the parent's next free-text
+ * reply (the child's answer) goes to the same child and the same mode
+ * without any keyword. Everything after that is the ordinary tutor flow:
+ * the same allowance, the same pass check, the same fair-use ceiling.
+ */
+export async function startExamPractice(opts: {
+  household: Household;
+  children: SisStudent[];
+  mobile10: string;
+  studentId: string;
+  prompt: string;
+}): Promise<WaTutorReply> {
+  await writeSession(
+    {
+      mobile10: opts.mobile10,
+      studentId: opts.studentId,
+      mode: "exam",
+      updatedAt: new Date().toISOString(),
+    },
+    opts.mobile10,
+  );
+  // "EXAM <prompt>" is exactly what a parent could type themselves, so the
+  // button and the keyword go down one path and cannot drift apart.
+  return handleWaTutorInbound({
+    household: opts.household,
+    children: opts.children,
+    mobile10: opts.mobile10,
+    text: `EXAM ${opts.prompt}`,
+  });
+}
+
+/**
  * Tell the parent on WhatsApp that the pass is live.
  *
  * The buy message promises this, so it has to happen — a parent who paid

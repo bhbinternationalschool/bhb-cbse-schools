@@ -354,6 +354,13 @@ const CALL_ME_HI: WaTemplateButton = { type: "QUICK_REPLY", text: "मुझे 
  * sending. That is the whole engagement mechanism: news worth reading, and
  * one tap that lets the school answer freely for a day.
  */
+/**
+ * The exam-eve button. Its text is matched by lib/examEve.ts `isPracticeTap`
+ * — change one and the other must change with it, or a tap arrives as text
+ * nothing recognises.
+ */
+const EXAM_PRACTICE_EN: WaTemplateButton = { type: "QUICK_REPLY", text: "Start practice" };
+const EXAM_PRACTICE_HI: WaTemplateButton = { type: "QUICK_REPLY", text: "अभ्यास शुरू करें" };
 const DIGEST_MORE_EN: WaTemplateButton = { type: "QUICK_REPLY", text: "Tell me more" };
 const DIGEST_MORE_HI: WaTemplateButton = { type: "QUICK_REPLY", text: "और बताइए" };
 const PAID_EN: WaTemplateButton = { type: "QUICK_REPLY", text: "Already paid" };
@@ -923,6 +930,31 @@ const SEED_DEFS: SeedDef[] = [
       "नमस्ते 🙏 *{{classLabel}}* का नया गृहकार्य आ गया है:\n\n📘 विषय: *{{subject}}*\n📝 कार्य: {{homeworkTitle}}\n📅 अंतिम तिथि: *{{dueDate}}*\n\nपूरा विवरण पैरेंट ऐप में देखें — और यदि बच्चे को मदद चाहिए तो वहीं *Ask tutor* दबाएँ। 🎓\n\n— {{schoolName}}, सधन्यवाद 🙏",
     footerEn: "Class teacher · Open the parent app for details",
     footerHi: "कक्षा शिक्षक · विवरण पैरेंट ऐप में देखें",
+  },
+  {
+    familyKey: "exams_tomorrow",
+    nameEn: "Tomorrow's exam paper",
+    nameHi: "कल का पेपर",
+    module: "exams",
+    category: "UTILITY",
+    metaName: "bhb_exam_tomorrow",
+    headerFormat: "TEXT",
+    headerTextEn: "Tomorrow's exam",
+    headerTextHi: "कल की परीक्षा",
+    buttons: [EXAM_PRACTICE_EN],
+    buttonsHi: [EXAM_PRACTICE_HI],
+    // UTILITY and nothing else: no price, no pass, no offer. Meta reclassifies
+    // a template carrying a sales pitch as MARKETING — dearer, and blocked
+    // more. Anything about the tutor pass is said inside the conversation,
+    // after the parent has chosen to tap. {{childPapers}} is one line per
+    // child joined with "  |  " (Meta refuses a newline in a parameter);
+    // lib/examEve.ts is the only thing that builds it.
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\nTomorrow ({{examDay}}), 8:30 AM:\n\n{{childPapers}}\n\nTap *Start practice* for a short practice session on tomorrow's subject. Reply *TIMETABLE* for the full date sheet. Best wishes! 🙏",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\nकल ({{examDay}}), सुबह 8:30 बजे:\n\n{{childPapers}}\n\nकल के विषय का छोटा अभ्यास करने के लिए *अभ्यास शुरू करें* दबाइए। पूरी समय-सारणी के लिए *TIMETABLE* लिखें। शुभकामनाएँ! 🙏",
+    footerEn: "School office · Half-yearly examination",
+    footerHi: "विद्यालय कार्यालय · अर्धवार्षिक परीक्षा",
   },
   {
     familyKey: "exams_datesheet",
