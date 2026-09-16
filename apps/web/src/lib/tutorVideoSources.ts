@@ -235,6 +235,12 @@ export function youtubeIdFrom(url: string | undefined): string {
  * video to be shown as published, with credit; a file with any other or no
  * licence is left out. A YouTube-hosted entry plays through YouTube's own
  * embedded player, which is how YouTube's licence lets it be shown.
+ *
+ * NonCommercial (-NC) is kept on purpose — the director's decision of
+ * 2026-09-16. Many of NCERT's own lessons, most of the Hindi and preschool
+ * ones among them, are CC BY-NC-SA; the video search is free to every
+ * parent (no pass) and the school is run by a trust. Do not drop -NC here
+ * without asking.
  */
 const CC_LICENCE = /^CC BY(?:-NC)?(?:-SA|-ND)? 4\.0$/i;
 
