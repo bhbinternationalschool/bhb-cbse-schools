@@ -302,12 +302,12 @@ export function ExamPaperPrintSheet(props: {
                                         </span>
                                         <span className="shrink-0 text-[11px] text-[var(--muted)]">[{sq.marks}]</span>
                                       </div>
-                                      {(sq.type === "mcq" || sq.type === "assertion_reason") && sq.options.length ? (
+                                      {(sq.type === "mcq" || sq.type === "assertion_reason") && sq.options.some(Boolean) ? (
                                         <ul
                                           className="ml-6 mt-0.5 grid gap-x-4 gap-y-0.5"
                                           style={{ gridTemplateColumns: `repeat(${sq.type === "assertion_reason" ? 1 : cols}, minmax(0, 1fr))` }}
                                         >
-                                          {sq.options.map((opt, k) => (
+                                          {sq.options.filter(Boolean).map((opt, k) => (
                                             <li key={k} className="text-[13px]">
                                               ({String.fromCharCode(97 + k)}) {opt}
                                             </li>
@@ -317,7 +317,45 @@ export function ExamPaperPrintSheet(props: {
                                       {sq.type === "fill" && sq.options.length ? (
                                         <p className="ml-6 mt-0.5 text-[12px] text-[var(--muted)]">Word bank: {sq.options.filter(Boolean).join(" · ")}</p>
                                       ) : null}
-                                      {showAnswers && sq.answerKey ? (
+                                      {sq.type === "diagram" && sq.options.length ? (
+                                        <ol className="ml-6 mt-0.5 list-decimal pl-5 text-[13px]">
+                                          {sq.options.filter(Boolean).map((label, k) => (
+                                            <li key={k}>{label}: ____________</li>
+                                          ))}
+                                        </ol>
+                                      ) : null}
+                                      {sq.type === "match" && sq.pairs.some((p) => p.left || p.right) ? (() => {
+                                        const pairs = sq.pairs.filter((p) => p.left || p.right);
+                                        const rights = shuffledMatchRights(pairs, `${paper.id}:${set.setCode}:${q.id}:${i}`);
+                                        return (
+                                          <div className="ml-6 mt-0.5">
+                                            <table className="w-full max-w-md border-collapse text-[13px]">
+                                              <thead>
+                                                <tr className="text-left text-[10px] uppercase tracking-wide text-[var(--muted)]">
+                                                  <th className="py-0.5 pr-4">Column A</th>
+                                                  <th className="py-0.5">Column B</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody>
+                                                {pairs.map((pair, k) => (
+                                                  <tr key={k}>
+                                                    <td className="py-0.5 pr-4">{k + 1}. {pair.left}</td>
+                                                    <td className="py-0.5">({String.fromCharCode(97 + k)}) {rights[k] ?? ""}</td>
+                                                  </tr>
+                                                ))}
+                                              </tbody>
+                                            </table>
+                                            <p className="mt-0.5 text-[12px] text-[var(--muted)]">Answer: {pairs.map((_, k) => `${k + 1}-____`).join("  ")}</p>
+                                            {showAnswers ? (
+                                              <p className="text-[11px] font-semibold text-[var(--success)] print-hide">Key: {matchAnswerKey(pairs, rights)}</p>
+                                            ) : null}
+                                          </div>
+                                        );
+                                      })() : null}
+                                      {sq.type === "numerical" ? (
+                                        <p className="ml-6 mt-0.5 text-[12px] text-[var(--muted)]">Show your working. &nbsp; Answer: ______________</p>
+                                      ) : null}
+                                      {showAnswers && sq.answerKey && sq.type !== "match" ? (
                                         <p className="ml-6 text-[11px] font-semibold text-[var(--success)] print-hide">Key: {sq.answerKey}</p>
                                       ) : null}
                                     </li>

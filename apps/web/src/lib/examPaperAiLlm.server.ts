@@ -94,7 +94,7 @@ type LlmQuestion = {
   bloomLevel?: string;
   markingScheme?: string[];
   pairs?: { left?: string; right?: string }[];
-  subQuestions?: { text?: string; marks?: number; type?: string; options?: string[]; answerKey?: string }[];
+  subQuestions?: { text?: string; marks?: number; type?: string; options?: string[]; pairs?: { left?: string; right?: string }[]; answerKey?: string }[];
   attemptAny?: number;
   answerLines?: number;
 };
@@ -218,7 +218,7 @@ const FORMAT_RULES = [
   "- mcq: 4 options, exactly one correct; answerKey is the option text.",
   "- assertion_reason: text = 'Assertion (A): … Reason (R): …'; options must be exactly the four CBSE choices: 'Both A and R are true and R is the correct explanation of A', 'Both A and R are true but R is not the correct explanation of A', 'A is true but R is false', 'A is false but R is true'; answerKey names the correct one.",
   "- case_study: text = a short passage / data table / source (60–120 words, original, age-appropriate); subQuestions = 3–4 items [{text, marks, type, options, answerKey}] whose marks add up to marks; markingScheme lists one line per sub-question.",
-  "- Any question may carry subQuestions (i), (ii)… each with its own type (short|mcq|true_false|fill|long|numerical|assertion_reason), marks, options (for mcq) and answerKey — e.g. text 'Choose the correct answer', subQuestions = six mcq parts. attemptAny = N when the child answers any N of them (else 0).",
+  "- Any question may carry subQuestions (i), (ii)… each with its own type (any type except a picture; match parts carry pairs), marks, options (for mcq) and answerKey — e.g. text 'Choose the correct answer', subQuestions = six mcq parts. When a question is only a heading for its parts, leave its own options/pairs/answerKey empty. attemptAny = N when the child answers any N of them (else 0).",
   "- match: pairs = 4–6 [{left, right}] Column A → Column B pairs (the paper prints Column B shuffled); text = the instruction line; answerKey may be left empty.",
   "- fill: write the blank as ___ inside text; answerKey = the words for the blanks in order, separated by commas; options may hold a word bank.",
   "- true_false: answerKey is exactly True or False.",

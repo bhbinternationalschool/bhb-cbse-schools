@@ -50,7 +50,7 @@ console.log("examPaperQuestionTypes.selftest.ts");
   // Structure the new type does not use is dropped on the switch.
   const caseQ = emptyQuestion({ type: "case_study", subQuestions: [{ text: "a", marks: 2 }] as never, pairs: [{ left: "x", right: "y" }], options: ["p", "q"] });
   const toLong = defaultsForType("long", caseQ);
-  assert.deepEqual(toLong.subQuestions, [], "sub-questions go when leaving case study");
+  assert.equal(toLong.subQuestions, undefined, "parts (i), (ii)… survive a type change — any type may head them");
   assert.deepEqual(toLong.pairs, []);
   assert.deepEqual(toLong.options, []);
   assert.equal(defaultsForType("competency", caseQ).subQuestions, undefined, "…but competency keeps them");
@@ -70,17 +70,21 @@ console.log("examPaperQuestionTypes.selftest.ts");
   assert.equal(mcqPart.options.length, 4);
   const tf = emptySubQuestion("true_false");
   assert.equal(tf.answerKey, "True");
-  assert.equal(emptySubQuestion("match" as never).type, "short", "a type that does not fit a part falls back to short");
+  assert.equal(emptySubQuestion("match").type, "match", "match is a part type too");
+  assert.equal(emptySubQuestion("match").pairs.length, 4, "…with four empty pairs");
+  assert.equal(emptySubQuestion("nonsense" as never).type, "short", "an unknown part type falls back to short");
   const typed = emptyQuestion({
     subQuestions: [
       { text: " Capital of India? ", marks: 1, type: "mcq", options: ["Delhi", "Mumbai"], answerKey: "Delhi" },
-      { text: "x", marks: 1, type: "diagram", options: ["p"], answerKey: "" },
+      { text: "x", marks: 1, type: "nonsense", options: ["p"], answerKey: "" },
+      { text: "m", marks: 2, type: "match", pairs: [{ left: " a ", right: " 1 " }, { left: "", right: "" }] },
     ] as never,
   });
   assert.equal(typed.subQuestions[0]!.type, "mcq");
   assert.deepEqual(typed.subQuestions[0]!.options, ["Delhi", "Mumbai"]);
   assert.equal(typed.subQuestions[0]!.answerKey, "Delhi");
   assert.equal(typed.subQuestions[1]!.type, "short", "an unsupported part type becomes short");
+  assert.deepEqual(typed.subQuestions[2]!.pairs, [{ left: "a", right: "1" }], "match parts keep trimmed pairs, empty rows dropped");
 }
 
 {
@@ -134,7 +138,7 @@ console.log("examPaperQuestionTypes.selftest.ts");
   } as never);
   const q = state.bank[0]!.question;
   assert.deepEqual(q.pairs, [{ left: "A", right: "1" }], "pairs are trimmed and empty rows dropped");
-  assert.deepEqual(q.subQuestions, [{ text: "sub", marks: 2, type: "short", options: [], answerKey: "" }], "sub-questions likewise, marks numeric, short by default");
+  assert.deepEqual(q.subQuestions, [{ text: "sub", marks: 2, type: "short", options: [], pairs: [], answerKey: "" }], "sub-questions likewise, marks numeric, short by default");
   assert.equal(q.answerLines, 40, "answer lines are capped");
 }
 
