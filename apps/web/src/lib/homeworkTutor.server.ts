@@ -10,6 +10,7 @@ import { generateTutorText, type LlmPrecheck } from "@/lib/aiLlm.server";
 import type { HomeworkTutorContext } from "@/lib/homeworkTutor.types";
 import type { OpenAiChatTurn } from "@/lib/openAi.server";
 import { buildTutorSystemPrompt, tutorMaxTokens, type TutorLanguage, type TutorMode } from "@/lib/tutorPlans";
+import { tutorTextbooksBlock } from "@/lib/tutorSyllabus.server";
 
 export type { HomeworkTutorContext } from "@/lib/homeworkTutor.types";
 
@@ -27,14 +28,21 @@ export async function replyHomeworkTutor(opts: {
     return { ok: false as const, error: "message required", engine: "none" as const };
   }
   const mode: TutorMode = opts.mode ?? "hint";
+  const context = opts.context || {};
+  // The class's NCERT chapters, when the index has them. For a parent the
+  // class is the school's record of the child (tutorApi.server.ts sets it),
+  // so the list is the child's own; the subject is the homework's, if any.
+  const textbooks = await tutorTextbooksBlock(context);
 
   return generateTutorText({
-    system: buildTutorSystemPrompt(mode, opts.context || {}, TENANT.nameDisplay, opts.language ?? "auto"),
+    system: buildTutorSystemPrompt(mode, context, TENANT.nameDisplay, opts.language ?? "auto", textbooks),
     history: opts.history,
     userMessage: message,
     onDelta: opts.onDelta,
     precheck: opts.precheck,
     maxTokens: tutorMaxTokens(mode),
-    promptVersion: mode === "hint" ? "v1" : `v2-${mode}`,
+    // "-ncert1" marks replies written with the chapter list, so their
+    // outcomes can be told apart from those written without it.
+    promptVersion: `${mode === "hint" ? "v1" : `v2-${mode}`}${textbooks ? "-ncert1" : ""}`,
   });
 }
