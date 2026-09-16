@@ -137,10 +137,10 @@ console.log("lessonPlanAi.selftest.ts");
   assert.equal(partial.activities, "");
 }
 
-// ─── NCERT textbooks in the prompt ─────────────────────────────────────
+// ─── The school's textbooks in the prompt (Propel, not NCERT) ──────────
 
 {
-  const listing = "Textbooks: the current NCERT books for Class 8, as listed on DIKSHA, the government's school platform.\nMathematics — Ganita Prakash (Hindi-medium edition: Ganita Prakash (Hindi)): 1. A SQUARE AND A CUBE; 2. POWER PLAY";
+  const listing = "Textbooks: the books this school's Class 8 children use, chapter by chapter — these are the books in the child's school bag.\nMathematics — Propel Middle Mathematics 8: 1. Rational Numbers; 2. Linear Equations in One Variable";
   const plain = buildLessonPlanSystemPrompt({ language: "en", schoolName: "BHB" });
   const grounded = buildLessonPlanSystemPrompt({ language: "en", schoolName: "BHB", textbooks: listing });
   const blank = buildLessonPlanSystemPrompt({ language: "en", schoolName: "BHB", textbooks: "   " });
@@ -155,11 +155,14 @@ console.log("lessonPlanAi.selftest.ts");
   assert.match(grounded, /if a ticked unit matches none of the listed chapters, plan it from its title and name no chapter/, "an older edition's unit title is not forced onto a chapter");
   assert.match(grounded, /Never name a book, chapter or chapter number that is not listed/);
   assert.match(grounded, /do not invent CBSE competency codes or textbook page numbers/, "the original guard stays");
-  assert.doesNotMatch(grounded.split("Textbooks: the current")[0]!, /Ganita|Curiosity|Poorvi/, "the instructions name no real book — only the list does");
+  assert.doesNotMatch(grounded.split("Textbooks: the books this school")[0]!, /Ganita|Curiosity|Poorvi|Propel/, "the instructions name no real book — only the list does");
+  assert.match(grounded, /the school teaches from its own books, listed at the end/);
+  assert.match(grounded, /never an NCERT book/, "the listed books are the school's; NCERT's are never named");
 
   for (const p of [plain, grounded, buildLessonPlanSystemPrompt({ language: "hi", schoolName: "BHB", textbooks: listing })]) {
     assert.doesNotMatch(p, /CBSE-affiliated/, "the school follows the CBSE pattern; it is not CBSE-affiliated");
-    assert.match(p, /following the CBSE pattern and NCERT textbooks/);
+    assert.match(p, /following the CBSE pattern and teaching from its own publisher's books, not NCERT textbooks — never name an NCERT book or chapter/, "Classes 1–8 are taught from the school's books (director, 16 Sep 2026)");
+    assert.doesNotMatch(p, /school uses the current NCERT books/);
   }
 }
 

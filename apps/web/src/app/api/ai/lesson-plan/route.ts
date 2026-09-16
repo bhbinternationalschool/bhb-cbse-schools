@@ -6,8 +6,9 @@
  * periods), the class + subject labels, the period count, whatever the
  * teacher already typed and an optional note. This route:
  *   1. gates on staff session + teaching:edit,
- *   2. adds the class's current NCERT books for the subject from the DIKSHA
- *      chapter index, when it has them, so the plan follows the real chapter,
+ *   2. adds the school's own books for the class and subject (Propel), when
+ *      loaded, so the plan follows the real chapter — never NCERT's books;
+ *      for Nursery–UKG, NCERT's learning outcomes as a minimum,
  *   3. asks the LLM router for one draft (English or Hindi),
  *   4. returns it. The teacher edits and saves in the editor;
  *      `LessonPlan.source` records ai / ai_edited / manual on save.
@@ -74,9 +75,9 @@ export async function POST(req: Request) {
 
   // Only the lesson's own subject — a Science plan gains nothing from the
   // Hindi book — and in the plan's language, so a Hindi plan quotes the
-  // Hindi-medium chapter names. For Nursery–UKG, NCERT's learning outcomes
-  // for the subject's developmental goals, as a minimum. Empty (never an
-  // error) without an index.
+  // Hindi-medium chapter names. Classes 1–8: the school's own books; for
+  // Nursery–UKG, NCERT's learning outcomes for the subject's developmental
+  // goals, as a minimum. Empty (never an error) when nothing is loaded.
   const ncert = await ncertTextbooksListing({
     className: input.classLabel,
     subjectLabel: input.subjectName,
@@ -103,9 +104,13 @@ export async function POST(req: Request) {
     generatedAt: new Date().toISOString(),
     /** ai_generations row — the editor reports accepted/edited/rejected against it */
     generationId: r.generationId,
-    /** Whether the draft was written with the class's NCERT chapter list. */
+    /** Whether the draft was written with a book list (the school's) or pre-primary outcomes. */
+    groundedOnBooks: ncert.kind !== "none",
+    /** "chapters" (Classes 1–8, the school's books), "outcomes" (Nursery–UKG: NCERT's minimum) or "none". */
+    booksKind: ncert.kind,
+    /** @deprecated same as groundedOnBooks — kept for editors still reading the old name. */
     groundedOnNcert: ncert.kind !== "none",
-    /** "chapters" (Classes 1–8), "outcomes" (Nursery–UKG: NCERT's minimum) or "none". */
+    /** @deprecated same as booksKind. */
     ncertKind: ncert.kind,
     draft: r.draft,
   });

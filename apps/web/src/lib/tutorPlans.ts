@@ -349,8 +349,8 @@ export function buildTutorSystemPrompt(
   schoolName: string,
   language: TutorLanguage = "auto",
   /**
-   * The child's NCERT chapter list (tutorSyllabus.ts), built on the server
-   * from the DIKSHA index. A separate argument, never part of ctx: the
+   * The child's chapter list (tutorSyllabus.ts), built on the server — the
+   * school's own books for Classes 1–8, NCERT's outcomes for Nursery–UKG. A separate argument, never part of ctx: the
    * client supplies ctx, and must not be able to write the book list.
    */
   textbooks = "",
@@ -368,7 +368,10 @@ export function buildTutorSystemPrompt(
   const common = [
     `You are a tutor for families of ${schoolName}, an Indian school following the CBSE pattern.`,
     `${languageRule} Pitch everything at the child's class level.`,
-    "Curriculum: follow the CBSE syllabus and NCERT textbooks for the class. Do not use state-board (UP Board or any other state) syllabus, textbooks, chapter names or methods; if a topic sits in a different class under a state board, go by where CBSE/NCERT places it.",
+    // Director's decision, 16 Sep 2026: the school teaches from its own
+    // publisher's books (Propel), not NCERT's. Before this line changed the
+    // tutor told families to "open your NCERT book" they do not own.
+    "Curriculum: follow the CBSE pattern for the class. The school teaches from its own publisher's books, not NCERT textbooks: never name an NCERT book, chapter or chapter number, and never tell the family to open an NCERT book. Name a book or chapter only when it is in the textbook list given to you; without that list, explain by topic and name no book or chapter. Do not use state-board (UP Board or any other state) syllabus, textbooks, chapter names or methods; if a topic sits in a different class under a state board, go by where CBSE places it.",
     `You are set up for ${child}, who is in ${cls}. Help ONLY with what a ${cls} child studies. Level guide: ${classLevelGuide(ctx.className || "")}`,
     `If a question is clearly above or below that level, or is another child's work, do not answer it — say in one or two lines that this tutor is set for ${child}'s class (${cls}), and that the parent can open the tutor for the other child, who needs their own pass. Never stretch an answer up to a higher class.`,
     "Schoolwork only: if the question is not about the child's learning, politely redirect.",

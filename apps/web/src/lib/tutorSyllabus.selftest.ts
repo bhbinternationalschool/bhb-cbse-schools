@@ -117,7 +117,13 @@ const chapters: SyllabusChapter[] = [
 {
   const all = textbooksPromptBlock({ grade: 7, books, chapters });
   const lines = all.split("\n");
-  assert.equal(lines[0], "Textbooks: the current NCERT books for Class 7, as listed on DIKSHA, the government's school platform.");
+  assert.equal(lines[0], "Textbooks: the books this school's Class 7 children use, chapter by chapter — these are the books in the child's school bag.", "the school's books by default");
+  assert.equal(
+    textbooksListing({ grade: 7, books, chapters, source: "ncert" }).split("\n")[0],
+    "Textbooks: the current NCERT books for Class 7, as listed on DIKSHA, the government's school platform.",
+    "the NCERT header only when asked for by name",
+  );
+  assert.match(all, /never an NCERT book: the child does not have one/);
   assert.deepEqual(lines.slice(1, -1), [
     "Mathematics — Ganita Prakash: 1. Large Numbers Around Us; 2. Arithmetic Expressions",
     "Mathematics — Ganita Prakash II (Hindi-medium edition: Ganita Prakash(Hindi)): 1. Geometric Twins",

@@ -1434,7 +1434,7 @@ Respond with JSON only: {"items":[{"id":"...","text":"..."}]} — every id given
 export async function generateLessonPlanJson(opts: {
   input: LessonPlanAiInput;
   schoolName: string;
-  /** The class's NCERT list for the subject (ncertTextbooksListing().text); "" when none. */
+  /** The class's book list for the subject (ncertTextbooksListing().text — the school's books for Classes 1–8); "" when none. */
   textbooks?: string;
   /** ncertTextbooksListing().kind: "outcomes" for Nursery–UKG, else chapters. */
   textbooksKind?: "chapters" | "outcomes" | "none";
@@ -1458,11 +1458,11 @@ export async function generateLessonPlanJson(opts: {
       ),
       temperature: 0.5,
       geminiMaxTokens: Math.min(8192, 3000 + opts.input.periods * 400),
-      // "v2-ncert1": drafted with the NCERT chapter list, so outcomes of
-      // grounded and ungrounded drafts can be told apart.
+      // "v3-school1": drafted with the SCHOOL's chapter list (from 16 Sep
+      // 2026; "v2-ncert1" was NCERT's), so drafts on either can be told apart.
       meta: {
         route: "lesson-plan",
-        promptVersion: !opts.textbooks ? "v1" : opts.textbooksKind === "outcomes" ? "v2-ncert-outcomes1" : "v2-ncert1",
+        promptVersion: !opts.textbooks ? "v1" : opts.textbooksKind === "outcomes" ? "v2-ncert-outcomes1" : "v3-school1",
         cacheable: true,
       },
     },
