@@ -101,6 +101,7 @@ SELFTESTS=(
   test:parent-bot-real-chats
   test:pin-review
   test:due-pay-link
+  test:fee-dues-server-inputs
   test:wa-parent-guide
   test:fleet-keep-rule
   test:server-work-tracker

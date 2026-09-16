@@ -43,6 +43,12 @@ const MIRROR_PROBE_TABLES = [
   "payment_desk_links",
   "masters_desk_slices",
   "masters_desk_settings",
+  // Both added 2026-09-16 with the transport / adjustments hydrate below:
+  // a bus fee or a posted waiver must invalidate the mirror the same way a
+  // receipt does, or the probe would hold the old dues for 45 seconds
+  // after the transport desk changed them.
+  "transport_desk_slices",
+  "module_local_state",
 ];
 
 function nowIso() {
@@ -242,6 +248,24 @@ export async function hydrateSchoolMirrorFromRemote(
 
       if (admissionsRemote && !admissionsStateIsEmpty(admissionsRemote)) {
         next = { ...next, admissions: admissionsRemote, updatedAt: nowIso() };
+      }
+
+      // The two desks a fee calculation needs that do NOT live in the mirror
+      // bundle — transport and fee adjustments — keep their own module-level
+      // memory, so they are hydrated alongside it rather than merged into
+      // `next`. Without them every server-side dues figure was wrong in two
+      // directions at once; see lib/feeDuesInputs.server.ts for what that
+      // cost the school.
+      try {
+        const { ensureFeeDuesInputsHydrated } = await import(
+          "@/lib/feeDuesInputs.server"
+        );
+        await ensureFeeDuesInputsHydrated({ force: true });
+      } catch (e) {
+        console.warn(
+          "[schoolMirror] fee dues inputs hydrate failed:",
+          e instanceof Error ? e.message : e,
+        );
       }
 
       if (!next.fees) next = { ...next, fees: emptyFeesState() };
