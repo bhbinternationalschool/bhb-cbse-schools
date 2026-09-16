@@ -59,12 +59,51 @@ export type ExamPaperHardness = "easy" | "medium" | "hard" | "mixed";
 
 export type ExamPaperStatus = "draft" | "ready" | "archived";
 
+/** A numbered pointer on a picture: the dot sits on the part (x, y), the
+ * number sits at (lx, ly); all four are fractions of the picture's size so
+ * the overlay scales with it on screen and on paper. */
+export type ExamPaperImageLabel = {
+  n: number;
+  x: number;
+  y: number;
+  lx: number;
+  ly: number;
+};
+
 export type ExamPaperImage = {
   id: string;
   /** data: URL or https */
   dataUrl: string;
   caption: string;
+  /** Pointer lines for "name the parts" questions; [] = plain picture. */
+  labels: ExamPaperImageLabel[];
 };
+
+export function normalizeImageLabels(list: unknown): ExamPaperImageLabel[] {
+  if (!Array.isArray(list)) return [];
+  const clamp = (v: unknown) => Math.max(0, Math.min(1, Number(v) || 0));
+  return list
+    .map((l, i) => {
+      const o = (l ?? {}) as Partial<ExamPaperImageLabel>;
+      return { n: Math.max(1, Math.floor(Number(o.n) || i + 1)), x: clamp(o.x), y: clamp(o.y), lx: clamp(o.lx), ly: clamp(o.ly) };
+    })
+    .slice(0, 30);
+}
+
+/**
+ * How many columns MCQ options print in when the teacher leaves it on
+ * "auto": long options one per line, short ones side by side, up to five
+ * for one-word answers — so "(a) 4 (b) 8 (c) 16 (d) 32" sits on one line
+ * and a sentence-length option never squeezes.
+ */
+export function autoOptionColumns(options: string[]): 1 | 2 | 3 | 4 | 5 {
+  const longest = options.reduce((m, o) => Math.max(m, o.trim().length), 0);
+  if (longest > 40) return 1;
+  if (longest > 22) return 2;
+  if (longest > 12) return 3;
+  if (longest > 6) return 4;
+  return 5;
+}
 
 export type ExamPaperQuestion = {
   id: string;
@@ -96,6 +135,10 @@ export type ExamPaperQuestion = {
   subQuestions: { text: string; marks: number }[];
   /** Ruled answer lines printed under the question on the student copy; 0 = none. */
   answerLines: number;
+  /** Columns the options print in; 0 = auto by option length. */
+  optionColumns: 0 | 1 | 2 | 3 | 4 | 5;
+  /** Columns the pictures print in (rows wrap). */
+  imageColumns: 1 | 2 | 3;
 };
 
 /** The four CBSE Assertion–Reason choices, in the board's order. */
@@ -450,6 +493,8 @@ export function emptyQuestion(
       ? partial!.subQuestions.map((x) => ({ text: String(x?.text ?? ""), marks: Math.max(0, Number(x?.marks) || 0) }))
       : [],
     answerLines: Math.max(0, Math.min(40, Math.floor(Number(partial?.answerLines) || 0))),
+    optionColumns: ([0, 1, 2, 3, 4, 5] as const).includes(partial?.optionColumns as 0) ? (partial!.optionColumns as 0) : 0,
+    imageColumns: ([1, 2, 3] as const).includes(partial?.imageColumns as 1) ? (partial!.imageColumns as 1) : 1,
   };
 }
 
@@ -483,6 +528,7 @@ function normalizeImage(img: Partial<ExamPaperImage>): ExamPaperImage | null {
     id: img.id || nid("img"),
     dataUrl: img.dataUrl,
     caption: img.caption || "",
+    labels: normalizeImageLabels(img.labels),
   };
 }
 
@@ -536,6 +582,8 @@ function normalizeQuestion(
           .filter((x) => x.text)
       : [],
     answerLines: Math.max(0, Math.min(40, Math.floor(Number(q.answerLines) || 0))),
+    optionColumns: ([0, 1, 2, 3, 4, 5] as const).includes(q.optionColumns as 0) ? (q.optionColumns as 0) : 0,
+    imageColumns: ([1, 2, 3] as const).includes(q.imageColumns as 1) ? (q.imageColumns as 1) : 1,
   };
 }
 

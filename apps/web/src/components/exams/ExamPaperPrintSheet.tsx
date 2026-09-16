@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  autoOptionColumns,
   matchAnswerKey,
   questionTotalMarks,
   shuffledMatchRights,
@@ -162,26 +163,69 @@ export function ExamPaperPrintSheet(props: {
                             </ul>
                           ) : null}
                           {q.images.length ? (
-                            <div className="mt-2 flex flex-wrap gap-3">
+                            <div
+                              className="mt-2 grid gap-3"
+                              style={{ gridTemplateColumns: `repeat(${Math.min(q.imageColumns, q.images.length)}, minmax(0, 1fr))` }}
+                            >
                               {q.images.map((img) => (
-                                <figure key={img.id} className="max-w-[220px]">
-                                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                                  <img
-                                    src={img.dataUrl}
-                                    alt={img.caption || "Question figure"}
-                                    className="max-h-40 w-auto rounded border border-[rgba(32,48,80,0.12)] object-contain"
-                                  />
+                                <figure key={img.id} className="min-w-0">
+                                  <div className="relative inline-block max-w-full">
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img
+                                      src={img.dataUrl}
+                                      alt={img.caption || "Question figure"}
+                                      className={`${q.imageColumns > 1 ? "max-h-56" : "max-h-72"} w-auto max-w-full rounded border border-[rgba(32,48,80,0.12)] object-contain`}
+                                    />
+                                    {img.labels.length ? (
+                                      <svg
+                                        className="pointer-events-none absolute inset-0 h-full w-full"
+                                        viewBox="0 0 100 100"
+                                        preserveAspectRatio="none"
+                                        aria-hidden
+                                      >
+                                        {img.labels.map((l) => (
+                                          <g key={l.n}>
+                                            <line x1={l.x * 100} y1={l.y * 100} x2={l.lx * 100} y2={l.ly * 100} stroke="#203050" strokeWidth={0.6} vectorEffect="non-scaling-stroke" />
+                                            <circle cx={l.x * 100} cy={l.y * 100} r={1.1} fill="#203050" />
+                                          </g>
+                                        ))}
+                                      </svg>
+                                    ) : null}
+                                    {img.labels.map((l) => (
+                                      <span
+                                        key={`n-${l.n}`}
+                                        className="absolute flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-[#203050] bg-white text-[10px] font-bold text-[#203050]"
+                                        style={{ left: `${l.lx * 100}%`, top: `${l.ly * 100}%` }}
+                                      >
+                                        {l.n}
+                                      </span>
+                                    ))}
+                                  </div>
                                   {img.caption ? (
                                     <figcaption className="mt-0.5 text-center text-[10px] text-[var(--muted)]">
                                       {img.caption}
                                     </figcaption>
+                                  ) : null}
+                                  {img.labels.length ? (
+                                    <ol className="mt-1 grid grid-cols-2 gap-x-4 text-[12px]">
+                                      {img.labels.map((l) => (
+                                        <li key={`b-${l.n}`}>{l.n}. ____________</li>
+                                      ))}
+                                    </ol>
                                   ) : null}
                                 </figure>
                               ))}
                             </div>
                           ) : null}
                           {(q.type === "mcq" || q.type === "assertion_reason") && q.options.length ? (
-                            <ul className={`mt-1 grid gap-1 ${q.type === "mcq" ? "sm:grid-cols-2" : ""}`}>
+                            <ul
+                              className="mt-1 grid gap-x-4 gap-y-1"
+                              style={{
+                                gridTemplateColumns: `repeat(${
+                                  q.type === "assertion_reason" ? 1 : q.optionColumns || autoOptionColumns(q.options)
+                                }, minmax(0, 1fr))`,
+                              }}
+                            >
                               {q.options.map((opt, i) => (
                                 <li key={i} className="text-[13px]">
                                   ({String.fromCharCode(97 + i)}) {opt}
