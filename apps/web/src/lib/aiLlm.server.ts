@@ -557,6 +557,66 @@ export async function generateExamPaperJson(opts: {
   });
 }
 
+/**
+ * Formula / symbol search for the question-paper editor: unicode text
+ * candidates for a query in a subject ("integration by parts", "ohm",
+ * "matra for oo"). Same query → same answer, so cacheable.
+ */
+export async function generateExamSymbolsJson(opts: {
+  query: string;
+  subject: string;
+  promptVersion?: string;
+}): Promise<
+  | { ok: true; text: string; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  return callLlmText({
+    system: [
+      "You help an Indian school teacher find formulas and symbols for a printed question paper.",
+      "Output JSON only: {\"items\":[{\"insert\":\"unicode text to insert\",\"label\":\"short name\",\"note\":\"one line, optional\"}]} with 3–12 items.",
+      "Use plain Unicode only (superscripts, subscripts, Greek letters, √, π, →, Devanagari) — no LaTeX, no markdown, no images.",
+      "Write formulas the way a CBSE textbook prints them. If the query is a Hindi / Sanskrit letter, matra or grammar term, give the Devanagari characters.",
+      "Never invent a formula; if unsure, give the closest standard ones and say so in note.",
+    ].join("\n"),
+    userMessage: `Subject: ${opts.subject || "general"}\nQuery: ${opts.query}`,
+    jsonMode: true,
+    maxTokens: 900,
+    temperature: 0.2,
+    meta: { route: "exam-symbols", promptVersion: opts.promptVersion ?? "v1", cacheable: true },
+  });
+}
+
+/**
+ * Hinglish (Roman-script Hindi) → Devanagari Hindi, or → Sanskrit, for the
+ * question-paper editor. Each input string maps to one output string in
+ * the same order; nothing else changes.
+ */
+export async function generateTransliterationJson(opts: {
+  texts: string[];
+  target: "hi" | "sa";
+  promptVersion?: string;
+}): Promise<
+  | { ok: true; text: string; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const targetName = opts.target === "sa" ? "Sanskrit (Devanagari)" : "Hindi (Devanagari)";
+  return callLlmText({
+    system: [
+      `You convert text typed in Hinglish (Hindi words in Roman letters, sometimes mixed with English) into ${targetName} for a school question paper.`,
+      "Output JSON only: {\"texts\":[\"…\"]} with exactly one output per input, in the same order.",
+      opts.target === "sa"
+        ? "Render the meaning in correct, simple school-level Sanskrit with proper sandhi and vibhakti; keep numbers, marks in brackets and proper nouns as they are."
+        : "Write natural, correct Hindi in Devanagari; keep numbers, marks in brackets, symbols, formulas and English technical terms that a Hindi textbook keeps in Roman/English as they are; keep ___ blanks and (i), (ii), (a), (b) markers unchanged.",
+      "Do not add, drop or reorder anything. If an input is already in Devanagari, return it unchanged.",
+    ].join("\n"),
+    userMessage: JSON.stringify({ texts: opts.texts }),
+    jsonMode: true,
+    maxTokens: 3000,
+    temperature: 0.1,
+    meta: { route: "transliterate", promptVersion: opts.promptVersion ?? "v1", cacheable: true },
+  });
+}
+
 export async function generateWaTemplateDraftJson(opts: {
   purpose: string;
   module: string;

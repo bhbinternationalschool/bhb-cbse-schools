@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { MastersState } from "@/lib/masters";
 import type { ExamTerm } from "@/lib/exams";
 import {
+  autoOptionColumns,
+  type ExamPaperImage,
+  type ExamPaperImageLabel,
   ASSERTION_REASON_OPTIONS,
   defaultsForType,
   questionTotalMarks,
-  FORMULA_PALETTE,
   HARDNESS_LEVELS,
   PRIMARY_ICON_BANK,
   QUESTION_TYPES,
@@ -39,6 +41,13 @@ import { loadTeaching, type SyllabusUnit } from "@/lib/teaching";
 import { BlueprintPanel } from "@/components/exams/BlueprintPanel";
 import { BankPicker } from "@/components/exams/BankPicker";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
+import {
+  catalogFor,
+  groupsFor,
+  searchCatalog,
+  subjectKeyLabel,
+  type FormulaEntry,
+} from "@/lib/examFormulaCatalog";
 import {
   suggestExamPaperDraft,
   suggestMoreQuestions,
@@ -832,6 +841,7 @@ export function ExamPapersPanel({
             key={section.id}
             section={section}
             canEdit={canEdit}
+            subjectLabel={labelSubject(draft.subjectId)}
             unitLabel={(id) => {
               const u = syllabusUnits.find((x) => x.id === id);
               return u ? `${u.code ? `${u.code} · ` : ""}${u.title}` : "";
@@ -1098,6 +1108,7 @@ export function ExamPapersPanel({
 }
 
 function SectionEditor(props: {
+  subjectLabel: string;
   section: ExamPaperSection;
   canEdit: boolean;
   index: number;
@@ -1208,6 +1219,7 @@ function SectionEditor(props: {
             question={q}
             index={qi}
             canEdit={canEdit}
+            subjectLabel={props.subjectLabel}
             unitLabel={props.unitLabel}
             onBank={() => props.onBankQuestion(q)}
             onChange={(patch) => patchQuestion(q.id, patch)}
@@ -1239,6 +1251,8 @@ function QuestionEditor(props: {
   question: ExamPaperQuestion;
   index: number;
   canEdit: boolean;
+  /** The paper's subject name — picks the formula catalogue. */
+  subjectLabel: string;
   onChange: (patch: Partial<ExamPaperQuestion>) => void;
   onRemove: () => void;
   readImageFile: (file: File, onDone: (dataUrl: string) => void) => void;
@@ -1249,6 +1263,48 @@ function QuestionEditor(props: {
   const { question: q, canEdit } = props;
   const [showIcons, setShowIcons] = useState(false);
   const [showFormulas, setShowFormulas] = useState(false);
+  const [showPictureSearch, setShowPictureSearch] = useState(false);
+  const [labelling, setLabelling] = useState<string | null>(null);
+  const [converting, setConverting] = useState<"hi" | "sa" | null>(null);
+  const [convertError, setConvertError] = useState("");
+
+  /** Hinglish → Hindi / Sanskrit for every text field of this question. */
+  async function convertTo(target: "hi" | "sa") {
+    setConvertError("");
+    setConverting(target);
+    try {
+      const texts = [
+        q.text,
+        ...q.options,
+        ...q.pairs.flatMap((pr) => [pr.left, pr.right]),
+        ...q.subQuestions.map((sq) => sq.text),
+        q.answerKey,
+      ];
+      const res = await fetch("/api/ai/transliterate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ texts, target }),
+      });
+      const body = (await res.json().catch(() => null)) as { texts?: string[]; generationId?: string; error?: string } | null;
+      if (!res.ok || !body?.texts) {
+        setConvertError(body?.error || `Could not convert (HTTP ${res.status})`);
+        return;
+      }
+      const out = body.texts;
+      let i = 0;
+      const text = out[i++]!;
+      const options = q.options.map(() => out[i++]!);
+      const pairs = q.pairs.map(() => ({ left: out[i++]!, right: out[i++]! }));
+      const subQuestions = q.subQuestions.map((sq) => ({ ...sq, text: out[i++]! }));
+      const answerKey = out[i++]!;
+      props.onChange({ text, options, pairs, subQuestions, answerKey });
+      if (body.generationId) reportAiOutcome({ ids: [body.generationId], outcome: "accepted" });
+    } catch (e) {
+      setConvertError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setConverting(null);
+    }
+  }
 
   return (
     <li className="rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] p-3">
@@ -1355,6 +1411,8 @@ function QuestionEditor(props: {
       )}
 
       <QuestionTypeFields q={q} canEdit={canEdit} onChange={props.onChange} />
+      <SubQuestionsFields q={q} canEdit={canEdit} onChange={props.onChange} />
+      {convertError ? <p className="mt-1 text-[11px] text-[var(--danger)]">{convertError}</p> : null}
 
       {q.formulas.length ? (
         <ul className="mt-2 space-y-1 font-mono text-xs text-[var(--brand-deep)]">
@@ -1400,6 +1458,21 @@ function QuestionEditor(props: {
         </div>
       ) : null}
 
+      {q.images.length > 1 && canEdit ? (
+        <label className="mt-2 inline-flex items-center gap-1 text-[11px] text-[var(--muted)]">
+          Pictures in
+          <select
+            className="field !w-auto !py-0.5 text-[11px]"
+            value={q.imageColumns}
+            onChange={(e) => props.onChange({ imageColumns: Number(e.target.value) as 1 | 2 | 3 })}
+          >
+            <option value={1}>1 column</option>
+            <option value={2}>2 columns</option>
+            <option value={3}>3 columns</option>
+          </select>
+          (rows wrap on the paper)
+        </label>
+      ) : null}
       {q.images.length ? (
         <div className="mt-2 flex flex-wrap gap-2">
           {q.images.map((img) => (
@@ -1410,6 +1483,21 @@ function QuestionEditor(props: {
                 alt=""
                 className="max-h-28 rounded border object-contain"
               />
+              {img.labels.length ? (
+                <span className="absolute bottom-0 left-0 rounded bg-[var(--card)]/90 px-1 text-[10px] font-semibold text-[var(--brand-deep)]">
+                  {img.labels.length} label{img.labels.length === 1 ? "" : "s"}
+                </span>
+              ) : null}
+              {canEdit ? (
+                <button
+                  type="button"
+                  className="mt-1 block w-full rounded border border-[var(--border)] px-1 py-0.5 text-[10px] font-semibold"
+                  onClick={() => setLabelling(img.id)}
+                  title="Draw numbered pointer lines on the picture to ask the names of parts"
+                >
+                  {img.labels.length ? "Edit labels" : "Label parts"}
+                </button>
+              ) : null}
               {canEdit ? (
                 <button
                   type="button"
@@ -1461,6 +1549,7 @@ function QuestionEditor(props: {
                         id: `img_${Math.random().toString(36).slice(2, 8)}`,
                         dataUrl,
                         caption: "",
+                        labels: [],
                       },
                     ],
                   });
@@ -1469,6 +1558,32 @@ function QuestionEditor(props: {
               }}
             />
           </label>
+          <button
+            type="button"
+            className="rounded border border-[var(--border)] px-2 py-0.5 text-[11px] font-semibold"
+            onClick={() => setShowPictureSearch(true)}
+            title="Find a free, licensed picture (Wikimedia Commons)"
+          >
+            Search pictures
+          </button>
+          <button
+            type="button"
+            className="rounded border border-[var(--border)] px-2 py-0.5 text-[11px] font-semibold"
+            disabled={converting !== null || !q.text.trim()}
+            onClick={() => void convertTo("hi")}
+            title="Typed in Hinglish? Convert this question (text, options, pairs, sub-questions, key) to Hindi"
+          >
+            {converting === "hi" ? "Converting…" : "Hinglish → हिंदी"}
+          </button>
+          <button
+            type="button"
+            className="rounded border border-[var(--border)] px-2 py-0.5 text-[11px] font-semibold"
+            disabled={converting !== null || !q.text.trim()}
+            onClick={() => void convertTo("sa")}
+            title="Convert this question to Sanskrit"
+          >
+            {converting === "sa" ? "Converting…" : "→ संस्कृतम्"}
+          </button>
           {q.type !== "mcq" && q.type !== "assertion_reason" && q.type !== "true_false" && q.type !== "match" ? (
             <input
               className="field !inline-block !w-48 !py-0.5 text-[11px]"
@@ -1550,42 +1665,44 @@ function QuestionEditor(props: {
       ) : null}
 
       {showFormulas && canEdit ? (
-        <div className="mt-2 space-y-2 rounded-lg bg-[var(--card)] p-2">
-          <p className="text-[10px] text-[var(--muted)]">
-            Tap to insert into question text or as a formula line.
-          </p>
-          <div className="flex flex-wrap gap-1">
-            {FORMULA_PALETTE.map((f) => (
-              <button
-                key={f.label + f.insert}
-                type="button"
-                title={f.group}
-                className="rounded border border-[var(--border)] px-1.5 py-0.5 font-mono text-[11px] hover:bg-[var(--surface-sunken)]"
-                onClick={() => {
-                  props.onChange({
-                    text: q.text ? `${q.text} ${f.insert}` : f.insert,
-                    formulas: q.formulas.includes(f.insert)
-                      ? q.formulas
-                      : [...q.formulas, f.insert],
-                  });
-                }}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-          <input
-            className="field !py-1 font-mono text-xs"
-            placeholder="Or type a custom formula line and press Enter"
-            onKeyDown={(e) => {
-              if (e.key !== "Enter") return;
-              const v = (e.target as HTMLInputElement).value.trim();
-              if (!v) return;
-              props.onChange({ formulas: [...q.formulas, v] });
-              (e.target as HTMLInputElement).value = "";
-            }}
-          />
-        </div>
+        <FormulaCatalogPanel
+          subjectLabel={props.subjectLabel}
+          onInsert={(insert) =>
+            props.onChange({
+              text: q.text ? `${q.text} ${insert}` : insert,
+              formulas: q.formulas.includes(insert) ? q.formulas : [...q.formulas, insert],
+            })
+          }
+          onAddLine={(line) => props.onChange({ formulas: [...q.formulas, line] })}
+        />
+      ) : null}
+
+      {showPictureSearch && canEdit ? (
+        <PictureSearchDialog
+          onClose={() => setShowPictureSearch(false)}
+          onPick={(dataUrl, caption) => {
+            props.onChange({
+              images: [...q.images, { id: `img_${Math.random().toString(36).slice(2, 8)}`, dataUrl, caption, labels: [] }],
+            });
+            setShowPictureSearch(false);
+          }}
+        />
+      ) : null}
+
+      {labelling && canEdit ? (
+        (() => {
+          const img = q.images.find((x) => x.id === labelling);
+          return img ? (
+            <ImageLabelEditor
+              image={img}
+              onClose={() => setLabelling(null)}
+              onSave={(labels) => {
+                props.onChange({ images: q.images.map((x) => (x.id === img.id ? { ...x, labels } : x)) });
+                setLabelling(null);
+              }}
+            />
+          ) : null;
+        })()
       ) : null}
 
       {showIcons && canEdit ? (
@@ -1679,6 +1796,7 @@ function QuestionTypeFields({
               aria-label={`Option ${labelFor(i)} is correct`}
             />
           ) : null}
+          <span className="w-6 text-xs text-[var(--muted)]">({labelFor(i)})</span>
           <input
             className="field !py-1 text-xs"
             disabled={!canEdit}
@@ -1703,20 +1821,37 @@ function QuestionTypeFields({
           ) : null}
         </div>
       ))}
-      {canEdit && q.options.length < max ? (
-        <button
-          type="button"
-          className="text-[11px] font-semibold text-[var(--muted)] underline"
-          onClick={() => onChange({ options: [...q.options, ""] })}
-        >
-          + option
-        </button>
-      ) : null}
-      {pickCorrect ? (
-        <p className="text-[10px] text-[var(--muted)]">
-          {q.answerKey ? `Correct: ${q.answerKey}` : "Tick the correct option"}
-        </p>
-      ) : null}
+      <div className="flex flex-wrap items-center gap-3 text-[10px] text-[var(--muted)]">
+        {canEdit && q.options.length < max ? (
+          <button
+            type="button"
+            className="text-[11px] font-semibold text-[var(--muted)] underline"
+            onClick={() => onChange({ options: [...q.options, ""] })}
+          >
+            + option
+          </button>
+        ) : null}
+        {pickCorrect ? <span>{q.answerKey ? `Correct: ${q.answerKey}` : "Tick the correct option"}</span> : null}
+        {q.type === "mcq" ? (
+          <label className="inline-flex items-center gap-1">
+            Print options in
+            <select
+              className="field !w-auto !py-0.5 text-[10px]"
+              disabled={!canEdit}
+              value={q.optionColumns}
+              onChange={(e) => onChange({ optionColumns: Number(e.target.value) as 0 | 1 | 2 | 3 | 4 | 5 })}
+              aria-label="Option columns"
+            >
+              <option value={0}>auto ({autoOptionColumns(q.options)} col by length)</option>
+              {[1, 2, 3, 4, 5].map((n) => (
+                <option key={n} value={n}>
+                  {n} {n === 1 ? "column" : "columns"}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+      </div>
     </div>
   );
 
@@ -1825,52 +1960,6 @@ function QuestionTypeFields({
           <p className="text-[10px] text-[var(--muted)]">Column B prints shuffled; the teacher copy shows the key (1-c, 2-a …).</p>
         </div>
       );
-    case "case_study":
-    case "competency":
-      return (
-        <div className="mt-2 space-y-1">
-          <p className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
-            Sub-questions {q.type === "competency" ? "(optional)" : ""}
-          </p>
-          {q.subQuestions.map((sq, i) => (
-            <div key={i} className="grid grid-cols-[2rem_1fr_4rem_auto] items-center gap-2">
-              <span className="text-xs text-[var(--muted)]">({String.fromCharCode(105 + Math.min(i, 8))})</span>
-              <input
-                className="field !py-1 text-xs"
-                disabled={!canEdit}
-                value={sq.text}
-                placeholder="Sub-question"
-                onChange={(e) => onChange({ subQuestions: q.subQuestions.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)) })}
-                aria-label={`Sub-question ${i + 1}`}
-              />
-              <input
-                type="number"
-                min={0}
-                className="field !py-1 text-xs"
-                disabled={!canEdit}
-                value={sq.marks}
-                onChange={(e) => onChange({ subQuestions: q.subQuestions.map((x, j) => (j === i ? { ...x, marks: Math.max(0, Number(e.target.value) || 0) } : x)) })}
-                aria-label={`Sub-question ${i + 1} marks`}
-              />
-              {canEdit ? (
-                <button type="button" className="text-xs text-[var(--danger)]" onClick={() => onChange({ subQuestions: q.subQuestions.filter((_, j) => j !== i) })} aria-label={`Remove sub-question ${i + 1}`}>
-                  ×
-                </button>
-              ) : (
-                <span />
-              )}
-            </div>
-          ))}
-          {canEdit && q.subQuestions.length < 8 ? (
-            <button type="button" className="text-[11px] font-semibold text-[var(--muted)] underline" onClick={() => onChange({ subQuestions: [...q.subQuestions, { text: "", marks: 1 }] })}>
-              + sub-question
-            </button>
-          ) : null}
-          {q.subQuestions.length > 0 ? (
-            <p className="text-[10px] text-[var(--muted)]">Total {questionTotalMarks(q)} marks — the sub-questions set the question&apos;s marks.</p>
-          ) : null}
-        </div>
-      );
     case "diagram":
       return (
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
@@ -1882,7 +1971,7 @@ function QuestionTypeFields({
             value={q.options.join(", ")}
             onChange={(e) => onChange({ options: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) })}
           />
-          {q.images.length === 0 ? <span className="text-[10px] text-[var(--danger)]">Upload the picture below.</span> : null}
+          {q.images.length === 0 ? <span className="text-[10px] text-[var(--danger)]">Upload or search a picture below, then &ldquo;Label parts&rdquo; to draw the pointer lines.</span> : null}
         </div>
       );
     case "primary_picture":
@@ -1900,4 +1989,415 @@ function QuestionTypeFields({
     default:
       return null;
   }
+}
+
+/**
+ * Sub-questions (i), (ii), (iii)… under any main question — a passage with
+ * parts, "attempt any three", a long question in steps. Main questions
+ * keep 1, 2, 3; parts take (i), (ii)…; MCQ options stay (a), (b)…. When
+ * parts exist they set the question's marks.
+ */
+function SubQuestionsFields({
+  q,
+  canEdit,
+  onChange,
+}: {
+  q: ExamPaperQuestion;
+  canEdit: boolean;
+  onChange: (patch: Partial<ExamPaperQuestion>) => void;
+}) {
+  const roman = (i: number) => ["i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"][i] ?? String(i + 1);
+  if (q.subQuestions.length === 0) {
+    if (!canEdit) return null;
+    return (
+      <button
+        type="button"
+        className="mt-2 text-[11px] font-semibold text-[var(--muted)] underline"
+        onClick={() => onChange({ subQuestions: [{ text: "", marks: 1 }] })}
+      >
+        + Add sub-question (i), (ii)…
+      </button>
+    );
+  }
+  return (
+    <div className="mt-2 space-y-1">
+      <p className="text-[10px] uppercase tracking-wide text-[var(--muted)]">Sub-questions</p>
+      {q.subQuestions.map((sq, i) => (
+        <div key={i} className="grid grid-cols-[2.2rem_1fr_4rem_auto] items-center gap-2">
+          <span className="text-xs text-[var(--muted)]">({roman(i)})</span>
+          <input
+            className="field !py-1 text-xs"
+            disabled={!canEdit}
+            value={sq.text}
+            placeholder="Sub-question"
+            onChange={(e) => onChange({ subQuestions: q.subQuestions.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)) })}
+            aria-label={`Sub-question ${i + 1}`}
+          />
+          <input
+            type="number"
+            min={0}
+            className="field !py-1 text-xs"
+            disabled={!canEdit}
+            value={sq.marks}
+            onChange={(e) => onChange({ subQuestions: q.subQuestions.map((x, j) => (j === i ? { ...x, marks: Math.max(0, Number(e.target.value) || 0) } : x)) })}
+            aria-label={`Sub-question ${i + 1} marks`}
+          />
+          {canEdit ? (
+            <button type="button" className="text-xs text-[var(--danger)]" onClick={() => onChange({ subQuestions: q.subQuestions.filter((_, j) => j !== i) })} aria-label={`Remove sub-question ${i + 1}`}>
+              ×
+            </button>
+          ) : (
+            <span />
+          )}
+        </div>
+      ))}
+      {canEdit && q.subQuestions.length < 10 ? (
+        <button type="button" className="text-[11px] font-semibold text-[var(--muted)] underline" onClick={() => onChange({ subQuestions: [...q.subQuestions, { text: "", marks: 1 }] })}>
+          + sub-question
+        </button>
+      ) : null}
+      <p className="text-[10px] text-[var(--muted)]">Total {questionTotalMarks(q)} marks — the sub-questions set the question&apos;s marks.</p>
+    </div>
+  );
+}
+
+/**
+ * Formulas and symbols for the paper's subject: the catalogue's groups for
+ * that subject (Maths, Physics, Hindi matras…), a search box over them, and
+ * an AI search for anything missing — the teacher picks; nothing is saved
+ * until inserted.
+ */
+function FormulaCatalogPanel({
+  subjectLabel,
+  onInsert,
+  onAddLine,
+}: {
+  subjectLabel: string;
+  onInsert: (insert: string) => void;
+  onAddLine: (line: string) => void;
+}) {
+  const all = useMemo(() => catalogFor(subjectLabel), [subjectLabel]);
+  const groups = useMemo(() => groupsFor(all), [all]);
+  const [group, setGroup] = useState<string>("");
+  const [query, setQuery] = useState("");
+  const [aiItems, setAiItems] = useState<{ insert: string; label: string; note: string }[] | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState("");
+
+  const shown = useMemo(() => {
+    const searched = searchCatalog(all, query);
+    if (query.trim() || !group) return searched;
+    return searched.filter((f) => `${f.subject}::${f.group}` === group);
+  }, [all, group, query]);
+
+  async function askAi() {
+    setAiBusy(true);
+    setAiError("");
+    setAiItems(null);
+    try {
+      const res = await fetch("/api/ai/exam-symbols", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, subject: subjectLabel }),
+      });
+      const body = (await res.json().catch(() => null)) as { items?: { insert: string; label: string; note: string }[]; error?: string } | null;
+      if (!res.ok || !body?.items) {
+        setAiError(body?.error || `Search failed (HTTP ${res.status})`);
+        return;
+      }
+      setAiItems(body.items);
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
+  const chip = (f: { insert: string; label: string; title?: string }) => (
+    <button
+      key={`${f.label}|${f.insert}`}
+      type="button"
+      title={f.title || f.insert}
+      className="rounded border border-[var(--border)] px-1.5 py-0.5 font-mono text-[11px] hover:bg-[var(--surface-sunken)]"
+      onClick={() => onInsert(f.insert)}
+    >
+      {f.label}
+    </button>
+  );
+
+  return (
+    <div className="mt-2 space-y-2 rounded-lg bg-[var(--card)] p-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-[10px] text-[var(--muted)]">
+          {subjectLabel ? `${subjectLabel} — ` : ""}tap to insert into the question. Groups:
+        </p>
+        <select className="field !w-auto !py-0.5 text-[11px]" value={group} onChange={(e) => setGroup(e.target.value)} aria-label="Formula group">
+          <option value="">All ({all.length})</option>
+          {groups.map((g) => (
+            <option key={`${g.subject}::${g.group}`} value={`${g.subject}::${g.group}`}>
+              {subjectKeyLabel(g.subject)} · {g.group}
+            </option>
+          ))}
+        </select>
+        <input
+          className="field !w-56 !py-0.5 text-[11px]"
+          placeholder="Search formulas / symbols…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          aria-label="Search formulas"
+        />
+        <button
+          type="button"
+          className="rounded border border-[var(--border)] px-2 py-0.5 text-[11px] font-semibold disabled:opacity-50"
+          disabled={aiBusy || query.trim().length < 2}
+          onClick={() => void askAi()}
+          title="Not in the list? Ask the AI for the formula or symbol"
+        >
+          {aiBusy ? "Searching…" : "Search with AI"}
+        </button>
+      </div>
+      <div className="flex max-h-48 flex-wrap gap-1 overflow-y-auto">
+        {shown.slice(0, 200).map((f: FormulaEntry) => chip({ insert: f.insert, label: f.label, title: `${f.group} · ${f.insert}` }))}
+        {shown.length === 0 ? <span className="text-[11px] text-[var(--muted)]">Nothing matches — try &ldquo;Search with AI&rdquo;.</span> : null}
+      </div>
+      {aiError ? <p className="text-[11px] text-[var(--danger)]">{aiError}</p> : null}
+      {aiItems ? (
+        <div className="rounded border border-[var(--border)] p-2">
+          <p className="text-[10px] text-[var(--muted)]">AI suggestions — check before you insert:</p>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {aiItems.map((it) => chip({ insert: it.insert, label: it.label || it.insert, title: it.note || it.insert }))}
+            {aiItems.length === 0 ? <span className="text-[11px] text-[var(--muted)]">No suggestions.</span> : null}
+          </div>
+        </div>
+      ) : null}
+      <input
+        className="field !py-1 font-mono text-xs"
+        placeholder="Or type a custom formula line and press Enter"
+        onKeyDown={(e) => {
+          if (e.key !== "Enter") return;
+          const v = (e.target as HTMLInputElement).value.trim();
+          if (!v) return;
+          onAddLine(v);
+          (e.target as HTMLInputElement).value = "";
+        }}
+      />
+    </div>
+  );
+}
+
+type PictureHit = { id: string; title: string; thumbUrl: string; license: string; author: string; pageUrl: string };
+
+/** Free, licensed pictures from Wikimedia Commons; the credit becomes the caption. */
+function PictureSearchDialog({
+  onClose,
+  onPick,
+}: {
+  onClose: () => void;
+  onPick: (dataUrl: string, caption: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<PictureHit[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [picking, setPicking] = useState<string | null>(null);
+
+  async function search() {
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/exam-papers/picture-search?q=${encodeURIComponent(query)}`);
+      const body = (await res.json().catch(() => null)) as { results?: PictureHit[]; error?: string } | null;
+      if (!res.ok || !body?.results) {
+        setError(body?.error || `Search failed (HTTP ${res.status})`);
+        return;
+      }
+      setHits(body.results);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function pick(h: PictureHit) {
+    setPicking(h.id);
+    setError("");
+    try {
+      const res = await fetch("/api/exam-papers/picture-fetch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: h.thumbUrl }),
+      });
+      const body = (await res.json().catch(() => null)) as { dataUrl?: string; error?: string } | null;
+      if (!res.ok || !body?.dataUrl) {
+        setError(body?.error || `Could not fetch (HTTP ${res.status})`);
+        return;
+      }
+      const credit = [h.author, h.license].filter(Boolean).join(" · ");
+      onPick(body.dataUrl, credit ? `Source: Wikimedia Commons (${credit})` : "Source: Wikimedia Commons");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPicking(null);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Search pictures">
+      <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl bg-[var(--card)] p-4 shadow-xl">
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            className="field flex-1 !py-1.5 text-sm"
+            placeholder="e.g. human heart diagram, neem leaf, water cycle"
+            value={query}
+            autoFocus
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && query.trim().length >= 2) void search();
+            }}
+          />
+          <button type="button" className="btn-accent rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-50" disabled={busy || query.trim().length < 2} onClick={() => void search()}>
+            {busy ? "Searching…" : "Search"}
+          </button>
+          <button type="button" className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold" onClick={onClose}>
+            Close
+          </button>
+        </div>
+        <p className="mt-1 text-[10px] text-[var(--muted)]">
+          Free pictures from Wikimedia Commons (openly licensed). The credit is added as the caption; keep it on the paper.
+        </p>
+        {error ? <p className="mt-2 text-xs text-[var(--danger)]">{error}</p> : null}
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {hits.map((h) => (
+            <button
+              key={h.id}
+              type="button"
+              className="rounded-lg border border-[var(--border)] p-1 text-left hover:bg-[var(--surface-sunken)] disabled:opacity-50"
+              disabled={picking !== null}
+              onClick={() => void pick(h)}
+              title={h.title}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={h.thumbUrl} alt={h.title} className="h-28 w-full rounded object-contain" />
+              <span className="mt-1 block truncate text-[10px] text-[var(--muted)]">{picking === h.id ? "Adding…" : h.license || "licensed"}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Draw numbered pointer lines on a picture: click a part to place its dot,
+ * the number sits in the margin; drag either end to adjust. Positions are
+ * fractions of the picture, so the paper draws the same lines at any size.
+ */
+function ImageLabelEditor({
+  image,
+  onClose,
+  onSave,
+}: {
+  image: ExamPaperImage;
+  onClose: () => void;
+  onSave: (labels: ExamPaperImageLabel[]) => void;
+}) {
+  const [labels, setLabels] = useState<ExamPaperImageLabel[]>(image.labels);
+  const [drag, setDrag] = useState<{ n: number; end: "dot" | "num" } | null>(null);
+  const boxRef = useRef<HTMLDivElement | null>(null);
+
+  const frac = (e: { clientX: number; clientY: number }) => {
+    const r = boxRef.current?.getBoundingClientRect();
+    if (!r || r.width === 0) return { x: 0, y: 0 };
+    return { x: Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)), y: Math.max(0, Math.min(1, (e.clientY - r.top) / r.height)) };
+  };
+
+  function addAt(e: React.MouseEvent) {
+    if (drag) return;
+    const { x, y } = frac(e);
+    const n = labels.length + 1;
+    // Number goes to the nearer margin on the same line.
+    const lx = x < 0.5 ? 0.06 : 0.94;
+    setLabels([...labels, { n, x, y, lx, ly: y }]);
+  }
+
+  function move(e: React.MouseEvent) {
+    if (!drag) return;
+    const { x, y } = frac(e);
+    setLabels((prev) => prev.map((l) => (l.n === drag.n ? (drag.end === "dot" ? { ...l, x, y } : { ...l, lx: x, ly: y }) : l)));
+  }
+
+  function remove(n: number) {
+    setLabels((prev) => prev.filter((l) => l.n !== n).map((l, i) => ({ ...l, n: i + 1 })));
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Label parts of the picture">
+      <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-xl bg-[var(--card)] p-4 shadow-xl">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-semibold text-[var(--brand-deep)]">Label parts — click a part to add a numbered pointer; drag a dot or a number to move it</p>
+          <div className="flex gap-2">
+            <button type="button" className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold" onClick={() => setLabels([])}>
+              Clear all
+            </button>
+            <button type="button" className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold" onClick={onClose}>
+              Cancel
+            </button>
+            <button type="button" className="btn-accent rounded-lg px-3 py-1.5 text-xs font-semibold" onClick={() => onSave(labels)}>
+              Save labels
+            </button>
+          </div>
+        </div>
+        <div
+          ref={boxRef}
+          className="relative mt-3 inline-block max-w-full cursor-crosshair select-none"
+          onClick={addAt}
+          onMouseMove={move}
+          onMouseUp={() => setDrag(null)}
+          onMouseLeave={() => setDrag(null)}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={image.dataUrl} alt="" className="max-h-[70vh] w-auto max-w-full rounded border border-[var(--border)]" draggable={false} />
+          <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden>
+            {labels.map((l) => (
+              <line key={l.n} x1={l.x * 100} y1={l.y * 100} x2={l.lx * 100} y2={l.ly * 100} stroke="#b42318" strokeWidth={0.6} vectorEffect="non-scaling-stroke" />
+            ))}
+          </svg>
+          {labels.map((l) => (
+            <span key={`dot-${l.n}`}>
+              <span
+                className="absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 cursor-move rounded-full border-2 border-white bg-[#b42318]"
+                style={{ left: `${l.x * 100}%`, top: `${l.y * 100}%` }}
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  setDrag({ n: l.n, end: "dot" });
+                }}
+                onClick={(e) => e.stopPropagation()}
+                title={`Dot ${l.n} — drag to move`}
+              />
+              <span
+                className="absolute flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 cursor-move items-center justify-center rounded-full border border-[#b42318] bg-white text-[11px] font-bold text-[#b42318]"
+                style={{ left: `${l.lx * 100}%`, top: `${l.ly * 100}%` }}
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  setDrag({ n: l.n, end: "num" });
+                }}
+                onClick={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  remove(l.n);
+                }}
+                title={`Label ${l.n} — drag to move, double-click to remove`}
+              >
+                {l.n}
+              </span>
+            </span>
+          ))}
+        </div>
+        <p className="mt-2 text-[10px] text-[var(--muted)]">
+          {labels.length} label{labels.length === 1 ? "" : "s"}. The paper prints the lines with the numbers and a blank list &ldquo;1. ____ 2. ____&rdquo; under the picture; put the answers in the answer key.
+        </p>
+      </div>
+    </div>
+  );
 }
