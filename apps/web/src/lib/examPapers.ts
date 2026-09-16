@@ -4,6 +4,7 @@
  */
 
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { normalizePrintSettings, type ExamPaperPrintSettings } from "@/lib/examPaperPrint";
 import { DEFAULT_AY } from "@/lib/masters";
 import {
   schoolAddressLine,
@@ -362,6 +363,8 @@ export type ExamPaper = {
   /** Which set to print / use on exam day */
   activeSetCode: string;
   printLog: ExamPaperPrintEvent[];
+  /** Page size, fold layout, type size and language of the printed paper. */
+  print: ExamPaperPrintSettings;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -738,6 +741,7 @@ export function normalizePaper(p: Partial<ExamPaper>): ExamPaper | null {
           .map(normalizePrint)
           .filter((x): x is ExamPaperPrintEvent => !!x)
       : [],
+    print: normalizePrintSettings(p.print),
     createdBy: p.createdBy || "",
     createdAt: p.createdAt || nowIso(),
     updatedAt: p.updatedAt || nowIso(),

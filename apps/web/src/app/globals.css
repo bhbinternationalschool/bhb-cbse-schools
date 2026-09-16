@@ -1156,7 +1156,7 @@ h3,
     left: 0 !important;
     top: 0 !important;
     width: 100% !important;
-    max-width: 190mm !important;
+    max-width: var(--exam-page-content-w, 190mm) !important;
     margin: 0 auto !important;
     padding: 0 !important;
     border: none !important;
@@ -1183,6 +1183,43 @@ h3,
 
   body.printing-exam-paper .exam-paper-page-total::after {
     content: "";
+  }
+
+  /* Two-up / folded booklet: each face is one landscape sheet, printed edge to edge. */
+  body.printing-exam-paper .exam-paper-sheet.print-target[data-imposed="true"] {
+    max-width: none !important;
+    width: auto !important;
+  }
+  body.printing-exam-paper .exam-paper-sheet.print-target .exam-paper-preview-wrap {
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+  body.printing-exam-paper .exam-paper-sheet.print-target .exam-sheet-faces {
+    margin: 0 !important;
+  }
+  body.printing-exam-paper .exam-paper-sheet.print-target .exam-sheet-faces > * + * {
+    margin-top: 0 !important;
+  }
+  body.printing-exam-paper .exam-paper-sheet.print-target .exam-sheet-face-scale {
+    width: auto !important;
+    height: auto !important;
+  }
+  body.printing-exam-paper .exam-paper-sheet.print-target .exam-sheet-face {
+    transform: none !important;
+    border: none !important;
+    break-after: page;
+    page-break-after: always;
+    break-inside: avoid;
+  }
+  body.printing-exam-paper .exam-paper-sheet.print-target .exam-sheet-face-wrap:last-child .exam-sheet-face {
+    break-after: auto;
+    page-break-after: auto;
+  }
+  body.printing-exam-paper .exam-paper-sheet.print-target .exam-fold-line {
+    display: none !important;
+  }
+  body.printing-exam-paper .exam-paper-sheet.print-target .exam-measure {
+    display: none !important;
   }
 
   body.printing-staff-idcard {
@@ -1879,4 +1916,20 @@ h3,
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
+}
+
+/* Question papers in Devanagari: a Devanagari-first stack, no italics (they distort matras). */
+.exam-paper-sheet[data-lang="hi"],
+.exam-paper-sheet[data-lang="sa"] {
+  font-family: "Noto Sans Devanagari", "Nirmala UI", "Mangal", "Kohinoor Devanagari", "Devanagari MT", "Noto Sans", system-ui, sans-serif;
+}
+.exam-paper-sheet[data-lang="hi"] .italic,
+.exam-paper-sheet[data-lang="sa"] .italic {
+  font-style: normal;
+}
+.exam-paper-sheet[data-lang="hi"] .font-brand-name,
+.exam-paper-sheet[data-lang="sa"] .font-brand-name {
+  font-family: inherit;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }

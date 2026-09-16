@@ -133,3 +133,8 @@ Left for phase 1 follow-up: the class/section pickers on the web desk still list
 3. Internal assessment split for VI–VIII (10 + 5 + 5) and IX–X (5 + 5 + 5 + 5): adopt as CBSE prescribes or a school variant.
 4. Detention policy for V and VIII (re-exam and then detain, or never) — the school is state-recognised for Nursery–VIII, so IX–XII schemes are built for readiness, not for this year's board work.
 5. Whether rank appears on cards (CBSE discourages; many schools still print it).
+
+## Question-paper additions, 16 Sep 2026
+
+- **PR #227** — parts (i), (ii)… take every question type (match, diagram, numerical, case study…); a heading question can drop its own options; a type change keeps the parts.
+- **Print layout (PR #228)** — per paper: page size (A4 / A5 / Legal / Letter), layout (one page per side · two pages per side open flat · folded booklet with imposed page order [4|1]/[2|3], short- or long-edge flip), type size by class band (Nursery–II large ≈14 pt, III–V medium ≈12 pt, VI+ standard ≈11 pt, or fixed), and paper language (auto by subject: Hindi → हिंदी, Sanskrit → संस्कृतम्). The language drives the labels (कक्षा, विषय, समय, पूर्णांक, खण्ड/अंक, स्तम्भ अ/ब, सत्य/असत्य…) and the subject name; the school name, address, exam name, title, general instructions and section titles convert with one AI button and stay editable. Typography rule of the sheet: bold only for the school name, exam name, section titles and question numbers; marks in brackets at the right edge in a lighter weight; instructions smaller (italic in Latin script, upright in Devanagari); the question-type tag is preview-only.
