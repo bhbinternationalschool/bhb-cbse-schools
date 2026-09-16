@@ -107,6 +107,7 @@ SELFTESTS=(
   test:app-home-numbers
   test:exam-paper-transliterate
   test:school-location-reply
+  test:weekly-child-digest
   test:wa-parent-guide
   test:fleet-keep-rule
   test:server-work-tracker

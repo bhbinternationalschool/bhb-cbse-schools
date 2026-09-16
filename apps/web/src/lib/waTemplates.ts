@@ -348,6 +348,14 @@ const OPEN_APP_EN: WaTemplateButton = { type: "URL", text: "Open parent app", ur
 const OPEN_APP_HI: WaTemplateButton = { type: "URL", text: "पैरेंट ऐप खोलें", url: WA_PARENT_APP_URL };
 const CALL_ME_EN: WaTemplateButton = { type: "QUICK_REPLY", text: "Call me back" };
 const CALL_ME_HI: WaTemplateButton = { type: "QUICK_REPLY", text: "मुझे फ़ोन करें" };
+/**
+ * The weekly digest's only button. A tap is an INBOUND message, which is the
+ * one thing that opens Meta's 24-hour window — the school cannot open it by
+ * sending. That is the whole engagement mechanism: news worth reading, and
+ * one tap that lets the school answer freely for a day.
+ */
+const DIGEST_MORE_EN: WaTemplateButton = { type: "QUICK_REPLY", text: "Tell me more" };
+const DIGEST_MORE_HI: WaTemplateButton = { type: "QUICK_REPLY", text: "और बताइए" };
 const PAID_EN: WaTemplateButton = { type: "QUICK_REPLY", text: "Already paid" };
 const PAID_HI: WaTemplateButton = { type: "QUICK_REPLY", text: "भुगतान हो गया" };
 /**
@@ -1098,6 +1106,28 @@ const SEED_DEFS: SeedDef[] = [
       the school number in the last 24 hours. Variables are in the order the
       relay fills them — kind, sender, code, message (waRelay.server.ts).
     */
+    familyKey: "comms_weekly_child_digest",
+    nameEn: "Weekly child digest",
+    nameHi: "साप्ताहिक बाल रिपोर्ट",
+    module: "comms",
+    category: "UTILITY",
+    metaName: "bhb_weekly_child_digest",
+    headerFormat: "TEXT",
+    headerTextEn: "Your child this week",
+    headerTextHi: "इस सप्ताह आपके बच्चे",
+    buttons: [DIGEST_MORE_EN],
+    buttonsHi: [DIGEST_MORE_HI],
+    // {{childSummary}} is ONE line per child, joined with "  |  ", because
+    // Meta refuses a parameter containing a newline. lib/weeklyChildDigest.ts
+    // is the only thing that builds it.
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\nHow the week went ({{weekLabel}}):\n\n{{childSummary}}\n\nTap *Tell me more* and we can answer anything — attendance, marks, fees, transport. Thank you for being part of the school. 🙏",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\nइस सप्ताह ({{weekLabel}}) का हाल:\n\n{{childSummary}}\n\n*और बताइए* दबाइए — उपस्थिति, अंक, शुल्क, वाहन, किसी भी बात का उत्तर मिलेगा। विद्यालय परिवार का हिस्सा होने के लिए धन्यवाद। 🙏",
+    footerEn: "School office · Reply STOP to stop these",
+    footerHi: "विद्यालय कार्यालय · बंद करने के लिए STOP लिखें",
+  },
+  {
     familyKey: "comms_office_relay",
     nameEn: "Office relay forward",
     nameHi: "कार्यालय को अग्रेषित संदेश",
