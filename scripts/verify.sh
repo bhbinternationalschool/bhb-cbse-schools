@@ -109,6 +109,7 @@ SELFTESTS=(
   test:school-location-reply
   test:weekly-child-digest
   test:exam-eve
+  test:tutor-guide
   test:wa-parent-guide
   test:fleet-keep-rule
   test:server-work-tracker
