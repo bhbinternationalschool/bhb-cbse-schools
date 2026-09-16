@@ -18,6 +18,7 @@ import {
   autoOptionColumns,
   defaultsForType,
   emptyQuestion,
+  emptySubQuestion,
   matchAnswerKey,
   normalizeExamPapersState,
   questionTotalMarks,
@@ -47,7 +48,7 @@ console.log("examPaperQuestionTypes.selftest.ts");
   assert.equal(asFill.text, "Water boils at ___", "a blank is appended when none exists");
 
   // Structure the new type does not use is dropped on the switch.
-  const caseQ = emptyQuestion({ type: "case_study", subQuestions: [{ text: "a", marks: 2 }], pairs: [{ left: "x", right: "y" }], options: ["p", "q"] });
+  const caseQ = emptyQuestion({ type: "case_study", subQuestions: [{ text: "a", marks: 2 }] as never, pairs: [{ left: "x", right: "y" }], options: ["p", "q"] });
   const toLong = defaultsForType("long", caseQ);
   assert.deepEqual(toLong.subQuestions, [], "sub-questions go when leaving case study");
   assert.deepEqual(toLong.pairs, []);
@@ -58,9 +59,28 @@ console.log("examPaperQuestionTypes.selftest.ts");
 }
 
 {
-  const q = emptyQuestion({ marks: 1, subQuestions: [{ text: "a", marks: 1 }, { text: "b", marks: 2 }, { text: "c", marks: 1.5 }] });
+  const q = emptyQuestion({ marks: 1, subQuestions: [{ text: "a", marks: 1 }, { text: "b", marks: 2 }, { text: "c", marks: 1.5 }] as never });
   assert.equal(questionTotalMarks(q), 4.5, "sub-questions set the total");
   assert.equal(questionTotalMarks(emptyQuestion({ marks: 3 })), 3);
+  assert.equal(questionTotalMarks({ ...q, attemptAny: 2 }), 3.5, "attempt any 2 → the two largest");
+  assert.equal(questionTotalMarks({ ...q, attemptAny: 9 }), 4.5, "attempt-any beyond the count means all");
+
+  // Parts carry their own type, options and key; a fresh MCQ part comes with four options.
+  const mcqPart = emptySubQuestion("mcq", 1);
+  assert.equal(mcqPart.options.length, 4);
+  const tf = emptySubQuestion("true_false");
+  assert.equal(tf.answerKey, "True");
+  assert.equal(emptySubQuestion("match" as never).type, "short", "a type that does not fit a part falls back to short");
+  const typed = emptyQuestion({
+    subQuestions: [
+      { text: " Capital of India? ", marks: 1, type: "mcq", options: ["Delhi", "Mumbai"], answerKey: "Delhi" },
+      { text: "x", marks: 1, type: "diagram", options: ["p"], answerKey: "" },
+    ] as never,
+  });
+  assert.equal(typed.subQuestions[0]!.type, "mcq");
+  assert.deepEqual(typed.subQuestions[0]!.options, ["Delhi", "Mumbai"]);
+  assert.equal(typed.subQuestions[0]!.answerKey, "Delhi");
+  assert.equal(typed.subQuestions[1]!.type, "short", "an unsupported part type becomes short");
 }
 
 {
@@ -114,7 +134,7 @@ console.log("examPaperQuestionTypes.selftest.ts");
   } as never);
   const q = state.bank[0]!.question;
   assert.deepEqual(q.pairs, [{ left: "A", right: "1" }], "pairs are trimmed and empty rows dropped");
-  assert.deepEqual(q.subQuestions, [{ text: "sub", marks: 2 }], "sub-questions likewise, marks numeric");
+  assert.deepEqual(q.subQuestions, [{ text: "sub", marks: 2, type: "short", options: [], answerKey: "" }], "sub-questions likewise, marks numeric, short by default");
   assert.equal(q.answerLines, 40, "answer lines are capped");
 }
 

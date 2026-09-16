@@ -131,8 +131,11 @@ export type ExamPaperQuestion = {
   markingScheme: string[];
   /** match: Column A → Column B pairs (printed with Column B shuffled). */
   pairs: { left: string; right: string }[];
-  /** case_study / competency: numbered sub-questions under the passage, each with its marks. */
-  subQuestions: { text: string; marks: number }[];
+  /** Numbered parts (i), (ii)… under the question, each with its own type,
+   * marks, options and key — "Q1. Choose the right answer (any five)". */
+  subQuestions: ExamSubQuestion[];
+  /** "Attempt any N of the following"; 0 = all parts compulsory. */
+  attemptAny: number;
   /** Ruled answer lines printed under the question on the student copy; 0 = none. */
   answerLines: number;
   /** Columns the options print in; 0 = auto by option length. */
@@ -199,7 +202,7 @@ export function defaultsForType(
       if (q.pairs.length < 2) patch.pairs = [{ left: "", right: "" }, { left: "", right: "" }, { left: "", right: "" }, { left: "", right: "" }];
       break;
     case "case_study":
-      if (q.subQuestions.length === 0) patch.subQuestions = [{ text: "", marks: 1 }, { text: "", marks: 1 }, { text: "", marks: 2 }];
+      if (q.subQuestions.length === 0) patch.subQuestions = [emptySubQuestion("short", 1), emptySubQuestion("short", 1), emptySubQuestion("short", 2)];
       break;
     case "fill":
       if (!q.text.includes("___")) patch.text = q.text ? `${q.text} ___` : "";
@@ -211,10 +214,19 @@ export function defaultsForType(
   return patch;
 }
 
-/** Total marks of a question with sub-questions is their sum. */
-export function questionTotalMarks(q: Pick<ExamPaperQuestion, "marks" | "subQuestions">): number {
-  if (q.subQuestions.length > 0) return q.subQuestions.reduce((sum, sq) => sum + (sq.marks || 0), 0);
-  return q.marks;
+/**
+ * Total marks of a question with parts: their sum, or — with "attempt any
+ * N" — the N largest, since a child answering the best-paying parts can
+ * score at most that.
+ */
+export function questionTotalMarks(q: Pick<ExamPaperQuestion, "marks" | "subQuestions"> & { attemptAny?: number }): number {
+  if (q.subQuestions.length === 0) return q.marks;
+  const marks = q.subQuestions.map((sq) => sq.marks || 0);
+  const n = q.attemptAny ?? 0;
+  if (n > 0 && n < marks.length) {
+    return [...marks].sort((a, b) => b - a).slice(0, n).reduce((sum, m) => sum + m, 0);
+  }
+  return marks.reduce((sum, m) => sum + m, 0);
 }
 
 /** Deterministic shuffle of Column B for a match question — the same
@@ -242,6 +254,51 @@ export function matchAnswerKey(pairs: { left: string; right: string }[], printed
       return `${i + 1}-${j >= 0 ? String.fromCharCode(97 + j) : "?"}`;
     })
     .join(", ");
+}
+
+/** Types a sub-question may take (those that fit on one line under a parent). */
+export const SUB_QUESTION_TYPES: ExamPaperQuestionType[] = [
+  "short",
+  "mcq",
+  "true_false",
+  "fill",
+  "long",
+  "numerical",
+  "assertion_reason",
+];
+
+export type ExamSubQuestion = {
+  text: string;
+  marks: number;
+  type: ExamPaperQuestionType;
+  /** mcq / assertion_reason options, (a) (b) (c)…; word bank for fill. */
+  options: string[];
+  /** Teacher key: the correct option text, True/False, the blanks, the answer. */
+  answerKey: string;
+};
+
+export function normalizeSubQuestion(x: unknown): ExamSubQuestion {
+  const o = (x ?? {}) as Partial<ExamSubQuestion>;
+  const type = SUB_QUESTION_TYPES.includes(o.type as ExamPaperQuestionType) ? (o.type as ExamPaperQuestionType) : "short";
+  return {
+    text: String(o.text ?? "").trim(),
+    marks: Math.max(0, Number(o.marks) || 0),
+    type,
+    options: Array.isArray(o.options) ? o.options.map((v) => String(v ?? "")).slice(0, 6) : [],
+    answerKey: String(o.answerKey ?? "").trim(),
+  };
+}
+
+/** A fresh part of the given type, with the structure that type needs. */
+export function emptySubQuestion(type: ExamPaperQuestionType = "short", marks = 1): ExamSubQuestion {
+  const t = SUB_QUESTION_TYPES.includes(type) ? type : "short";
+  return {
+    text: "",
+    marks,
+    type: t,
+    options: t === "mcq" ? ["", "", "", ""] : t === "assertion_reason" ? ASSERTION_REASON_OPTIONS : [],
+    answerKey: t === "true_false" ? "True" : "",
+  };
 }
 
 export type ExamPaperSection = {
@@ -490,8 +547,9 @@ export function emptyQuestion(
       ? partial!.pairs.map((x) => ({ left: String(x?.left ?? ""), right: String(x?.right ?? "") }))
       : [],
     subQuestions: Array.isArray(partial?.subQuestions)
-      ? partial!.subQuestions.map((x) => ({ text: String(x?.text ?? ""), marks: Math.max(0, Number(x?.marks) || 0) }))
+      ? partial!.subQuestions.map((x) => normalizeSubQuestion(x))
       : [],
+    attemptAny: Math.max(0, Math.min(20, Math.floor(Number(partial?.attemptAny) || 0))),
     answerLines: Math.max(0, Math.min(40, Math.floor(Number(partial?.answerLines) || 0))),
     optionColumns: ([0, 1, 2, 3, 4, 5] as const).includes(partial?.optionColumns as 0) ? (partial!.optionColumns as 0) : 0,
     imageColumns: ([1, 2, 3] as const).includes(partial?.imageColumns as 1) ? (partial!.imageColumns as 1) : 1,
@@ -577,10 +635,9 @@ function normalizeQuestion(
           .filter((x) => x.left || x.right)
       : [],
     subQuestions: Array.isArray(q.subQuestions)
-      ? q.subQuestions
-          .map((x) => ({ text: String(x?.text ?? "").trim(), marks: Math.max(0, Number(x?.marks) || 0) }))
-          .filter((x) => x.text)
+      ? q.subQuestions.map((x) => normalizeSubQuestion(x)).filter((x) => x.text)
       : [],
+    attemptAny: Math.max(0, Math.min(20, Math.floor(Number(q.attemptAny) || 0))),
     answerLines: Math.max(0, Math.min(40, Math.floor(Number(q.answerLines) || 0))),
     optionColumns: ([0, 1, 2, 3, 4, 5] as const).includes(q.optionColumns as 0) ? (q.optionColumns as 0) : 0,
     imageColumns: ([1, 2, 3] as const).includes(q.imageColumns as 1) ? (q.imageColumns as 1) : 1,

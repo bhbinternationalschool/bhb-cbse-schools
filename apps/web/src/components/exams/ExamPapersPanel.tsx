@@ -4,6 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { MastersState } from "@/lib/masters";
 import type { ExamTerm } from "@/lib/exams";
 import {
+  emptySubQuestion,
+  SUB_QUESTION_TYPES,
+  type ExamSubQuestion,
   autoOptionColumns,
   type ExamPaperImage,
   type ExamPaperImageLabel,
@@ -2007,56 +2010,175 @@ function SubQuestionsFields({
   onChange: (patch: Partial<ExamPaperQuestion>) => void;
 }) {
   const roman = (i: number) => ["i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"][i] ?? String(i + 1);
+  const setSub = (i: number, patch: Partial<ExamSubQuestion>) =>
+    onChange({ subQuestions: q.subQuestions.map((x, j) => (j === i ? { ...x, ...patch } : x)) });
+  const addSub = () => {
+    const last = q.subQuestions[q.subQuestions.length - 1];
+    // A new part copies the previous part's type and marks — six MCQ parts
+    // in a row is the common case.
+    onChange({ subQuestions: [...q.subQuestions, emptySubQuestion(last?.type ?? "short", last?.marks ?? 1)] });
+  };
+
   if (q.subQuestions.length === 0) {
     if (!canEdit) return null;
     return (
       <button
         type="button"
         className="mt-2 text-[11px] font-semibold text-[var(--muted)] underline"
-        onClick={() => onChange({ subQuestions: [{ text: "", marks: 1 }] })}
+        onClick={addSub}
       >
         + Add sub-question (i), (ii)…
       </button>
     );
   }
   return (
-    <div className="mt-2 space-y-1">
-      <p className="text-[10px] uppercase tracking-wide text-[var(--muted)]">Sub-questions</p>
-      {q.subQuestions.map((sq, i) => (
-        <div key={i} className="grid grid-cols-[2.2rem_1fr_4rem_auto] items-center gap-2">
-          <span className="text-xs text-[var(--muted)]">({roman(i)})</span>
-          <input
-            className="field !py-1 text-xs"
-            disabled={!canEdit}
-            value={sq.text}
-            placeholder="Sub-question"
-            onChange={(e) => onChange({ subQuestions: q.subQuestions.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)) })}
-            aria-label={`Sub-question ${i + 1}`}
-          />
+    <div className="mt-2 space-y-1.5">
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="text-[10px] uppercase tracking-wide text-[var(--muted)]">Sub-questions</p>
+        <label className="inline-flex items-center gap-1 text-[11px] text-[var(--muted)]">
+          Attempt any
           <input
             type="number"
             min={0}
-            className="field !py-1 text-xs"
+            max={q.subQuestions.length}
+            className="field !w-14 !py-0.5 text-[11px]"
             disabled={!canEdit}
-            value={sq.marks}
-            onChange={(e) => onChange({ subQuestions: q.subQuestions.map((x, j) => (j === i ? { ...x, marks: Math.max(0, Number(e.target.value) || 0) } : x)) })}
-            aria-label={`Sub-question ${i + 1} marks`}
+            value={q.attemptAny}
+            onChange={(e) => onChange({ attemptAny: Math.max(0, Math.min(20, Number(e.target.value) || 0)) })}
+            aria-label="Attempt any N sub-questions"
+            title="0 = all parts compulsory"
           />
-          {canEdit ? (
-            <button type="button" className="text-xs text-[var(--danger)]" onClick={() => onChange({ subQuestions: q.subQuestions.filter((_, j) => j !== i) })} aria-label={`Remove sub-question ${i + 1}`}>
-              ×
-            </button>
+          of {q.subQuestions.length}
+        </label>
+      </div>
+      {q.subQuestions.map((sq, i) => (
+        <div key={i} className="rounded border border-[var(--border)] p-1.5">
+          <div className="grid grid-cols-[2.2rem_auto_1fr_4rem_auto] items-center gap-2">
+            <span className="text-xs text-[var(--muted)]">({roman(i)})</span>
+            <select
+              className="field !w-auto !py-1 text-[11px]"
+              disabled={!canEdit}
+              value={sq.type}
+              onChange={(e) => {
+                const fresh = emptySubQuestion(e.target.value as ExamPaperQuestionType, sq.marks);
+                setSub(i, { type: fresh.type, options: fresh.options, answerKey: fresh.answerKey });
+              }}
+              aria-label={`Sub-question ${i + 1} type`}
+            >
+              {SUB_QUESTION_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {QUESTION_TYPES.find((x) => x.code === t)?.short ?? t}
+                </option>
+              ))}
+            </select>
+            <input
+              className="field !py-1 text-xs"
+              disabled={!canEdit}
+              value={sq.text}
+              placeholder={sq.type === "fill" ? "Sentence with ___ for the blank" : "Sub-question"}
+              onChange={(e) => setSub(i, { text: e.target.value })}
+              aria-label={`Sub-question ${i + 1}`}
+            />
+            <input
+              type="number"
+              min={0}
+              className="field !py-1 text-xs"
+              disabled={!canEdit}
+              value={sq.marks}
+              onChange={(e) => setSub(i, { marks: Math.max(0, Number(e.target.value) || 0) })}
+              aria-label={`Sub-question ${i + 1} marks`}
+            />
+            {canEdit ? (
+              <button type="button" className="text-xs text-[var(--danger)]" onClick={() => onChange({ subQuestions: q.subQuestions.filter((_, j) => j !== i) })} aria-label={`Remove sub-question ${i + 1}`}>
+                ×
+              </button>
+            ) : (
+              <span />
+            )}
+          </div>
+          {sq.type === "mcq" || sq.type === "assertion_reason" ? (
+            <div className="ml-9 mt-1 grid gap-1 sm:grid-cols-2">
+              {sq.options.map((opt, k) => (
+                <div key={k} className="flex items-center gap-1.5">
+                  <input
+                    type="radio"
+                    name={`sub-correct-${q.id}-${i}`}
+                    checked={!!opt && sq.answerKey === opt}
+                    disabled={!canEdit || !opt}
+                    onChange={() => setSub(i, { answerKey: opt })}
+                    title="Correct option"
+                    aria-label={`Sub-question ${i + 1} option ${String.fromCharCode(97 + k)} is correct`}
+                  />
+                  <span className="w-5 text-[11px] text-[var(--muted)]">({String.fromCharCode(97 + k)})</span>
+                  <input
+                    className="field !py-0.5 text-[11px]"
+                    disabled={!canEdit}
+                    value={opt}
+                    placeholder={`Option ${String.fromCharCode(97 + k)}`}
+                    onChange={(e) => {
+                      const options = [...sq.options];
+                      const wasKey = !!opt && sq.answerKey === opt;
+                      options[k] = e.target.value;
+                      setSub(i, { options, ...(wasKey ? { answerKey: e.target.value } : {}) });
+                    }}
+                    aria-label={`Sub-question ${i + 1} option ${String.fromCharCode(97 + k)}`}
+                  />
+                  {canEdit && sq.type === "mcq" && sq.options.length > 2 ? (
+                    <button type="button" className="text-[11px] text-[var(--danger)]" onClick={() => setSub(i, { options: sq.options.filter((_, m) => m !== k) })} aria-label={`Remove option ${String.fromCharCode(97 + k)}`}>
+                      ×
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+              {canEdit && sq.type === "mcq" && sq.options.length < 6 ? (
+                <button type="button" className="justify-self-start text-[11px] font-semibold text-[var(--muted)] underline" onClick={() => setSub(i, { options: [...sq.options, ""] })}>
+                  + option
+                </button>
+              ) : null}
+            </div>
+          ) : sq.type === "true_false" ? (
+            <div className="ml-9 mt-1 flex items-center gap-3 text-[11px]">
+              <span className="text-[var(--muted)]">Correct:</span>
+              {(["True", "False"] as const).map((v) => (
+                <label key={v} className="inline-flex items-center gap-1">
+                  <input type="radio" name={`sub-tf-${q.id}-${i}`} disabled={!canEdit} checked={sq.answerKey === v} onChange={() => setSub(i, { answerKey: v })} />
+                  {v}
+                </label>
+              ))}
+            </div>
           ) : (
-            <span />
+            <div className="ml-9 mt-1 flex flex-wrap items-center gap-2">
+              <input
+                className="field !inline-block !w-64 !py-0.5 text-[11px]"
+                disabled={!canEdit}
+                value={sq.answerKey}
+                placeholder={sq.type === "fill" ? "Blank answers, in order" : sq.type === "numerical" ? "Final answer with unit" : "Answer key (teacher)"}
+                onChange={(e) => setSub(i, { answerKey: e.target.value })}
+                aria-label={`Sub-question ${i + 1} answer key`}
+              />
+              {sq.type === "fill" ? (
+                <input
+                  className="field !inline-block !w-56 !py-0.5 text-[11px]"
+                  disabled={!canEdit}
+                  value={sq.options.join(", ")}
+                  placeholder="Word bank (optional)"
+                  onChange={(e) => setSub(i, { options: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) })}
+                  aria-label={`Sub-question ${i + 1} word bank`}
+                />
+              ) : null}
+            </div>
           )}
         </div>
       ))}
       {canEdit && q.subQuestions.length < 10 ? (
-        <button type="button" className="text-[11px] font-semibold text-[var(--muted)] underline" onClick={() => onChange({ subQuestions: [...q.subQuestions, { text: "", marks: 1 }] })}>
+        <button type="button" className="text-[11px] font-semibold text-[var(--muted)] underline" onClick={addSub}>
           + sub-question
         </button>
       ) : null}
-      <p className="text-[10px] text-[var(--muted)]">Total {questionTotalMarks(q)} marks — the sub-questions set the question&apos;s marks.</p>
+      <p className="text-[10px] text-[var(--muted)]">
+        Total {questionTotalMarks(q)} marks
+        {q.attemptAny > 0 && q.attemptAny < q.subQuestions.length ? ` (best ${q.attemptAny} of ${q.subQuestions.length})` : ""} — the sub-questions set the question&apos;s marks.
+      </p>
     </div>
   );
 }
