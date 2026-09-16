@@ -72,21 +72,36 @@ const PERIOD_MINUTES = 40;
 export function buildLessonPlanSystemPrompt(opts: {
   language: LessonPlanLanguage;
   schoolName: string;
-  /** textbooksListing() for the class and subject, built on the server; "" when there is none. */
+  /** The NCERT list for the class and subject, built on the server; "" when there is none. */
   textbooks?: string;
+  /**
+   * "chapters" (Classes 1–8: textbooksListing) or "outcomes" (Nursery–UKG:
+   * NCERT's learning outcomes as a minimum, outcomesListing). Chapters when
+   * omitted.
+   */
+  textbooksKind?: "chapters" | "outcomes";
 }): string {
   const textbooks = (opts.textbooks ?? "").trim();
+  const outcomes = !!textbooks && opts.textbooksKind === "outcomes";
   const lang =
     opts.language === "hi"
       ? "Write every field in Hindi (Devanagari script). Keep subject-specific technical terms in their standard Hindi form and put the English term in brackets the first time it appears."
       : "Write in clear, plain English suitable for an Indian CBSE school teacher.";
-  const homework = textbooks
-    ? 'Homework: 1–3 lines, doable in 20–30 minutes. Refer to the textbook by book and chapter as listed ("questions at the end of <book>, Chapter <number>"), never by page or exercise number.'
-    : 'Homework: 1–3 lines, doable in 20–30 minutes, referring to the textbook generically ("exercise questions on …") since the edition is unknown.';
-  const grounding = textbooks
+  const homework = outcomes
+    ? "Homework: 1–2 lines — a short play activity a parent can do with the child at home in 10–15 minutes (everyday objects, a song, drawing, a game), no written drills."
+    : textbooks
+      ? 'Homework: 1–3 lines, doable in 20–30 minutes. Refer to the textbook by book and chapter as listed ("questions at the end of <book>, Chapter <number>"), never by page or exercise number.'
+      : 'Homework: 1–3 lines, doable in 20–30 minutes, referring to the textbook generically ("exercise questions on …") since the edition is unknown.';
+  // Pre-primary: the school's own publisher books are the syllabus; NCERT's
+  // outcomes are the floor the director set, never the ceiling, and there
+  // are no NCERT chapters to cite.
+  const grounding = outcomes
     ? `
+- Pre-primary: the school teaches from its own publisher books. NCERT's learning outcomes for this year, listed at the end, are the minimum a child should reach — not the syllabus and not a ceiling. Plan play-based, hands-on activities (objects, songs, stories, drawing, movement) for what the ticked units ask, building towards the outcomes they touch; where the unit goes beyond them, follow the unit. Name the outcome in plain words in an objective when one clearly fits — never an outcome code, and never an NCERT book or chapter: pre-primary has none.`
+    : textbooks
+      ? `
 - Textbooks: the school uses the current NCERT books listed at the end. Plan within the chapter the ticked units belong to and use that chapter's own words for things. When the match is clear, begin the title with the book and chapter ("<book>, Ch <number> — <topic>"). The school's unit titles can come from an older NCERT edition: if a ticked unit matches none of the listed chapters, plan it from its title and name no chapter. Never name a book, chapter or chapter number that is not listed.`
-    : "";
+      : "";
   // "Following the CBSE pattern", not "CBSE-affiliated": the school is
   // state-recognised for Nursery–VIII and teaches from NCERT books.
   return `You draft lesson plans for teachers at ${opts.schoolName}, an Indian school following the CBSE pattern and NCERT textbooks. One period is ${PERIOD_MINUTES} minutes.

@@ -74,8 +74,10 @@ export async function POST(req: Request) {
 
   // Only the lesson's own subject — a Science plan gains nothing from the
   // Hindi book — and in the plan's language, so a Hindi plan quotes the
-  // Hindi-medium chapter names. Empty (never an error) without an index.
-  const textbooks = await ncertTextbooksListing({
+  // Hindi-medium chapter names. For Nursery–UKG, NCERT's learning outcomes
+  // for the subject's developmental goals, as a minimum. Empty (never an
+  // error) without an index.
+  const ncert = await ncertTextbooksListing({
     className: input.classLabel,
     subjectLabel: input.subjectName,
     coreFallback: false,
@@ -85,7 +87,8 @@ export async function POST(req: Request) {
   const r = await generateLessonPlanJson({
     input,
     schoolName: TENANT.nameDisplay,
-    textbooks,
+    textbooks: ncert.text,
+    textbooksKind: ncert.kind,
   });
   if (!r.ok) {
     return NextResponse.json({ error: r.error, engine: r.engine }, { status: 502 });
@@ -101,7 +104,9 @@ export async function POST(req: Request) {
     /** ai_generations row — the editor reports accepted/edited/rejected against it */
     generationId: r.generationId,
     /** Whether the draft was written with the class's NCERT chapter list. */
-    groundedOnNcert: textbooks !== "",
+    groundedOnNcert: ncert.kind !== "none",
+    /** "chapters" (Classes 1–8), "outcomes" (Nursery–UKG: NCERT's minimum) or "none". */
+    ncertKind: ncert.kind,
     draft: r.draft,
   });
 }

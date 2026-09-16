@@ -11,7 +11,9 @@ import {
   needsRefetch,
   NCERT_CHANNEL,
   parseTextbookHierarchy,
+  preschoolSearchBody,
   selectCurrentTextbooks,
+  selectPreschoolBooks,
   textbookSearchBody,
   textbooksToRetire,
   type DikshaTextbookHit,
@@ -76,6 +78,49 @@ const COLLECTION = "application/vnd.ekstep.content-collection";
   assert.equal(malhar.medium, "Hindi");
   assert.equal(malhar.editionYear, 2024);
   assert.equal(malhar.publishedAt, "2026-09-08T10:12:33.123Z");
+}
+
+// ── Pre-primary competency books ────────────────────────────────────────
+{
+  const body = preschoolSearchBody(0);
+  assert.deepEqual(body.request.filters.gradeLevel, ["Preschool 1", "Preschool 2", "Preschool 3"]);
+  assert.deepEqual(body.request.filters.channel, [NCERT_CHANNEL]);
+  assert.equal("medium" in body.request.filters, false, "the competency books carry no reliable medium to filter on");
+
+  const hit = (over: Partial<DikshaTextbookHit>): DikshaTextbookHit => ({
+    identifier: "do_x",
+    name: "HEALTH AND WELL BEING (HW) Pre School 2 DG 1",
+    channel: NCERT_CHANNEL,
+    gradeLevel: ["Preschool 2"],
+    medium: ["English"],
+    subject: ["Education"],
+    year: "2021",
+    lastPublishedOn: "2023-03-28T17:47:34.187+0000",
+    ...over,
+  });
+  const picked = selectPreschoolBooks([
+    hit({ identifier: "do_hw2" }),
+    hit({ identifier: "do_hw2" }),
+    hit({ identifier: "do_ec1", name: "CHILDREN BECOME EFFECTIVE COMMUNICATORS (EC) Pre School 1 DG 2", gradeLevel: ["Preschool 1"] }),
+    hit({ identifier: "do_il3", name: "Children become involved learners and connect with their immediate environment (IL) Pre School 3 DG 3", gradeLevel: ["Preschool 3"], year: undefined, copyrightYear: 2021 }),
+    // Seen live and rightly refused:
+    hit({ identifier: "do_balvatika", name: "Pre School 3 (Bal Vatika)", gradeLevel: ["Preschool 3"], subject: ["Foundational Literacy and Numeracy"] }),
+    hit({ identifier: "do_up", channel: "01246376237871104093", name: "CHAHAK -1 (HW)" }),
+    hit({ identifier: "do_multi", gradeLevel: ["Preschool 1", "Preschool 2", "Preschool 3"] }),
+    hit({ identifier: "do_class1", gradeLevel: ["Class 1"] }),
+    hit({ identifier: "do_twomedia", medium: ["English", "Hindi"] }),
+  ]);
+  assert.deepEqual(
+    picked.map((b) => [b.id, b.grade, b.subjects[0]]),
+    [
+      ["do_ec1", -2, "Effective Communicators"],
+      ["do_hw2", -1, "Health and Well-being"],
+      ["do_il3", 0, "Involved Learners"],
+    ],
+    "Nursery/LKG/UKG as -2/-1/0, the goal as the subject; no goal code, another channel, several years or a class → out",
+  );
+  assert.equal(picked[2]!.editionYear, 2021, "copyright year stands in for a missing year");
+  assert.equal(picked[1]!.publishedAt, "2023-03-28T17:47:34.187Z");
 }
 
 // ── A book's hierarchy → rows ───────────────────────────────────────────

@@ -1,7 +1,8 @@
 /**
  * Sync the NCERT chapter index from DIKSHA (rules: dikshaIndex.ts, tables:
- * migration 20260916140100). Weekly from Cloud Scheduler; a full first run
- * reads 87 books — about 26 MB of hierarchy — in under half a minute.
+ * migrations 20260916140100, 20260916180000). Weekly from Cloud Scheduler; a
+ * full first run reads the 87 Class 1–8 textbooks (about 26 MB of hierarchy)
+ * and NCERT's 9 pre-primary competency books in under half a minute.
  *
  * Each changed book is written through diksha_replace_textbook(), one
  * transaction per book, so a failure part-way leaves every book either as it
@@ -16,7 +17,9 @@ import {
   DIKSHA_SEARCH_URL,
   needsRefetch,
   parseTextbookHierarchy,
+  preschoolSearchBody,
   selectCurrentTextbooks,
+  selectPreschoolBooks,
   textbookSearchBody,
   textbooksToRetire,
   type DikshaTextbookHit,
@@ -43,8 +46,16 @@ export async function syncDikshaIndex(opts: { dryRun?: boolean; force?: boolean 
   const ctx = await getServerTenantContext();
   if (!ctx && !dryRun) throw new Error("No database: the chapter index cannot be written");
 
-  const catalogue = await readCatalogue();
-  const books = selectCurrentTextbooks(catalogue.hits);
+  // Two catalogues: Classes 1–8 textbooks, and NCERT's pre-primary
+  // competency books. Either incomplete makes the whole read incomplete, so
+  // nothing is retired on a partial view.
+  const [classes, preschool] = await Promise.all([readCatalogue(textbookSearchBody), readCatalogue(preschoolSearchBody)]);
+  const catalogue = {
+    hits: [...classes.hits, ...preschool.hits],
+    listed: classes.listed + preschool.listed,
+    complete: classes.complete && preschool.complete,
+  };
+  const books = [...selectCurrentTextbooks(classes.hits), ...selectPreschoolBooks(preschool.hits)];
 
   let stored: StoredTextbook[] = [];
   if (ctx) {
@@ -105,7 +116,8 @@ export async function syncDikshaIndex(opts: { dryRun?: boolean; force?: boolean 
   }
 
   for (const b of result.written) {
-    const g = (result.byGrade[`Class ${b.grade}`] ??= { books: 0, chapters: 0 });
+    const label = b.grade >= 1 ? `Class ${b.grade}` : ["Nursery", "LKG", "UKG"][b.grade + 2]!;
+    const g = (result.byGrade[label] ??= { books: 0, chapters: 0 });
     g.books += 1;
     g.chapters += b.chapters;
   }
@@ -113,14 +125,16 @@ export async function syncDikshaIndex(opts: { dryRun?: boolean; force?: boolean 
   return result;
 }
 
-async function readCatalogue(): Promise<{ hits: DikshaTextbookHit[]; listed: number; complete: boolean }> {
+async function readCatalogue(
+  bodyFor: (offset: number) => object,
+): Promise<{ hits: DikshaTextbookHit[]; listed: number; complete: boolean }> {
   const hits: DikshaTextbookHit[] = [];
   let listed = 0;
   for (let offset = 0; offset === 0 || offset < listed; offset += 100) {
     const res = await fetch(DIKSHA_SEARCH_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(textbookSearchBody(offset)),
+      body: JSON.stringify(bodyFor(offset)),
       signal: AbortSignal.timeout(20_000),
     });
     const json = (await res.json().catch(() => ({}))) as { result?: { count?: number; content?: DikshaTextbookHit[] } };

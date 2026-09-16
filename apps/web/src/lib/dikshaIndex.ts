@@ -9,6 +9,13 @@
  * 2026-27 (Mridang, Santoor, Maths Mela, Ganita Prakash, Curiosity, Poorvi,
  * Malhar…). Indexing the wrong one would ground the tutor in chapters the
  * child never opens, so the choice is made here, by rule, not by name.
+ *
+ * Nursery–UKG have no NCERT textbooks. NCERT publishes nine competency books
+ * instead — one per NCF foundational-stage developmental goal for each of
+ * Preschool 1–3 — whose "chapters" are learning outcomes. They are indexed
+ * the same way, as grades -2 (Nursery), -1 (LKG) and 0 (UKG). The school
+ * teaches pre-primary from its own publisher books; these outcomes are the
+ * minimum a child should reach, not the syllabus.
  */
 
 export const DIKSHA_SEARCH_URL = "https://diksha.gov.in/api/content/v1/search";
@@ -18,6 +25,14 @@ export const NCERT_CHANNEL = "0125196274181898243";
 /** NCF 2023 editions began with Classes 1–2 in 2023. */
 export const FIRST_CURRENT_EDITION_YEAR = 2023;
 export const INDEX_GRADES = [1, 2, 3, 4, 5, 6, 7, 8] as const;
+/** DIKSHA's Preschool 1–3 (Nursery, LKG, UKG) as grades: one below Class 1 per year. */
+export const PRESCHOOL_GRADE: Record<string, number> = { "Preschool 1": -2, "Preschool 2": -1, "Preschool 3": 0 };
+/** NCF foundational-stage developmental goals, by the code NCERT puts in each book's name. */
+export const PRESCHOOL_GOALS: Record<string, string> = {
+  HW: "Health and Well-being",
+  EC: "Effective Communicators",
+  IL: "Involved Learners",
+};
 const COLLECTION = "application/vnd.ekstep.content-collection";
 
 export const TEXTBOOK_FIELDS = [
@@ -43,6 +58,24 @@ export function textbookSearchBody(offset: number, limit = 100) {
         channel: [NCERT_CHANNEL],
         gradeLevel: INDEX_GRADES.map((g) => `Class ${g}`),
         medium: ["English", "Hindi", "Sanskrit"],
+      },
+      fields: [...TEXTBOOK_FIELDS],
+      sort_by: { identifier: "asc" },
+      limit,
+      offset,
+    },
+  };
+}
+
+/** One page of NCERT's pre-primary books, in a stable order for paging. No medium or board filter: the competency books carry neither reliably. */
+export function preschoolSearchBody(offset: number, limit = 100) {
+  return {
+    request: {
+      filters: {
+        status: ["Live"],
+        primaryCategory: ["Digital Textbook"],
+        channel: [NCERT_CHANNEL],
+        gradeLevel: Object.keys(PRESCHOOL_GRADE),
       },
       fields: [...TEXTBOOK_FIELDS],
       sort_by: { identifier: "asc" },
@@ -128,6 +161,42 @@ export function selectCurrentTextbooks(hits: DikshaTextbookHit[]): IndexTextbook
     });
   }
   return out.sort((a, b) => a.grade - b.grade || a.medium.localeCompare(b.medium) || a.name.localeCompare(b.name));
+}
+
+/**
+ * NCERT's pre-primary competency books: NCERT's channel, one preschool year,
+ * and a developmental-goal code in the name — "HEALTH AND WELL BEING (HW) Pre
+ * School 2 DG 1". The goal is stored as the book's subject. Other pre-primary
+ * items ("Pre School 3 (Bal Vatika)", two files) carry no goal and are left
+ * out. The books are dated 2021 (NCF foundational stage), so the Class 1–8
+ * edition-year rule does not apply to them.
+ */
+export function selectPreschoolBooks(hits: DikshaTextbookHit[]): IndexTextbook[] {
+  const out: IndexTextbook[] = [];
+  const seen = new Set<string>();
+  for (const h of hits) {
+    const id = (h.identifier || "").trim();
+    const name = (h.name || "").replace(/\s+/g, " ").trim();
+    if (!id || !name || seen.has(id) || h.channel !== NCERT_CHANNEL) continue;
+    const grades = list(h.gradeLevel);
+    const grade = grades.length === 1 ? PRESCHOOL_GRADE[grades[0]!] : undefined;
+    if (grade === undefined) continue;
+    const goal = name.match(/\((HW|EC|IL)\)/);
+    if (!goal) continue;
+    const mediums = list(h.medium);
+    if (mediums.length !== 1 || (mediums[0] !== "English" && mediums[0] !== "Hindi")) continue;
+    seen.add(id);
+    out.push({
+      id,
+      grade,
+      medium: mediums[0] as IndexTextbook["medium"],
+      subjects: [PRESCHOOL_GOALS[goal[1]!]!],
+      name,
+      editionYear: Number(h.year) || Number(h.copyrightYear) || 0,
+      publishedAt: dikshaDate(h.lastPublishedOn),
+    });
+  }
+  return out.sort((a, b) => a.grade - b.grade || a.subjects[0]!.localeCompare(b.subjects[0]!));
 }
 
 export type HierarchyNode = {

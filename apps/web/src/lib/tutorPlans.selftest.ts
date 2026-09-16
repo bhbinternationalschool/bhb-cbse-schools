@@ -116,6 +116,26 @@ const dead = { ...live, endsAt: "2026-09-04T18:29:59.999Z" };
   assert.ok(hint.includes("set up for Amay, who is in LKG A"), "the prompt is pinned to the child's class");
   assert.ok(hint.includes("Pre-primary"), "and carries that class's level guide");
   assert.ok(hint.includes("needs their own pass"), "siblings are sent to their own tutor");
+  // Pre-primary: NCERT's minimum per year, the school's own books above it.
+  const nursery = classLevelGuide("Nursery A");
+  const lkg = classLevelGuide("LKG A");
+  const ukg = classLevelGuide("UKG B");
+  assert.match(nursery, /Nursery/);
+  assert.match(nursery, /counts up to 3 objects/);
+  assert.match(lkg, /LKG/);
+  assert.match(lkg, /counts and recognises numerals up to 5/);
+  assert.match(ukg, /UKG/);
+  assert.match(ukg, /counts up to 10 objects, writes numerals up to 9/);
+  for (const g of [nursery, lkg, ukg, classLevelGuide("Pre-primary")]) {
+    assert.match(g, /own publisher books, which go further than this minimum/, "the minimum is never a ceiling");
+    assert.match(g, /never call a task too advanced only because it is above NCERT's minimum/);
+    assert.match(g, /no formal written arithmetic/, "and pre-primary still has an upper bound");
+    assert.doesNotMatch(g, /numbers up to 20–100/, "the old one-size claim is gone");
+  }
+  assert.ok(nursery !== lkg && lkg !== ukg, "each year has its own minimum");
+  assert.match(classLevelGuide("Pre-primary"), /^Pre-primary \(Nursery\/LKG\/UKG\)/, "a year that cannot be told gets the shared guide");
+  assert.match(classLevelGuide("KG"), /UKG/, "KG is UKG");
+
   const two = buildTutorSystemPrompt("teach", { childName: "Dipti", className: "II A" }, "BHB");
   assert.ok(two.includes("Classes I–II") && !two.includes("Pre-primary"));
   assert.ok(buildTutorSystemPrompt("hint", {}, "BHB", "hi").includes("Devanagari"), "Hindi replies are asked for in Devanagari");
