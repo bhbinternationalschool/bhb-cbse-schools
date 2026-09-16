@@ -35,6 +35,7 @@
     "test:staff-home-kind": "npx tsx src/lib/staffHomeKind.selftest.ts",
     "test:mobile-features": "npx tsx src/lib/mobileFeatures.selftest.ts",
     "test:cashfree-checkout": "npx tsx src/lib/cashfreeCheckout.selftest.ts",
+    "test:diksha-index": "npx tsx src/lib/dikshaIndex.selftest.ts",
     "test:teacher-contact": "npx tsx src/lib/teacherContact.selftest.ts",
     "test:academic-risk": "npx tsx src/lib/academicRisk.selftest.ts",
     "test:item-analytics": "npx tsx src/lib/itemAnalytics.selftest.ts",

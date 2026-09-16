@@ -254,6 +254,7 @@ SELFTESTS=(
   test:staff-home-kind
   test:mobile-features
   test:cashfree-checkout
+  test:diksha-index
   test:teacher-contact
   test:question-bank
   test:rbac-infer

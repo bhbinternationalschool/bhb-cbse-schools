@@ -347,6 +347,7 @@ jobs:
           npm run test:staff-home-kind
           npm run test:mobile-features
           npm run test:cashfree-checkout
+          npm run test:diksha-index
           npm run test:teacher-contact
           npm run test:parent-profile
           npm run test:parent-tickets
