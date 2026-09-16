@@ -11,7 +11,9 @@ import {
   dikshaSearchBody,
   fallbackSearchPhrases,
   mergeVideos,
+  nameMatchesPhrase,
   normaliseTopic,
+  orderSeriesParts,
   parseVideoFormats,
   parseVideoTermsJson,
   youtubeIdFrom,
@@ -62,14 +64,42 @@ import {
   assert.deepEqual(parseVideoTermsJson('{"en":"fractions"}'), { en: [], hi: [] });
 
   assert.deepEqual(fallbackSearchPhrases("What is photosynthesis?", "en"), ["photosynthesis"]);
-  assert.deepEqual(fallbackSearchPhrases("Explain the water cycle with examples", "en"), ["water cycle", "water"]);
-  assert.deepEqual(fallbackSearchPhrases("प्रकाश संश्लेषण क्या है?", "hi"), ["प्रकाश संश्लेषण", "संश्लेषण"]);
+  assert.deepEqual(fallbackSearchPhrases("Explain the water cycle with examples", "en"), ["water cycle"], "one phrase, never a lone word");
+  assert.deepEqual(fallbackSearchPhrases("प्रकाश संश्लेषण क्या है?", "hi"), ["प्रकाश संश्लेषण"]);
   assert.deepEqual(fallbackSearchPhrases("photosynthesis kya hota hai", "hi"), [], "no Devanagari → no Hindi-medium search");
   assert.deepEqual(fallbackSearchPhrases("photosynthesis kya hota hai", "en"), ["photosynthesis"]);
   assert.deepEqual(fallbackSearchPhrases("class 6 chapter 3", "en"), [], "numbers and filler are not a topic");
 
   assert.equal(buildVideoTermsUserPrompt({ topic: "  what   is\nhcf ", grade: "Class 6" }), "Class: Class 6\nQuestion: what is hcf");
   assert.equal(normaliseTopic("  Fractions   KYA hai "), "fractions kya hai");
+}
+
+// ── Is a DIKSHA result about the phrase? (cases from live searches) ────
+{
+  const yes: [string, string][] = [
+    ["Addition of two digit numbers | Part 1/3 | English | Class 2", "Two Digit Addition"],
+    ["Activity 30: Counting Objects (Numbers 1–10)", "Counting"],
+    ["Properties of Division of Rational Numbers", "Properties of Rational Numbers"],
+    ["Types of Maps", "Maps"],
+    ["Types of Maps", "map"],
+    ["पादपों में पोषण", "पादपों में पोषण"],
+    ["अध्याय-7 भिन्न : भाग -4 : 7.10 भिन्नों का योग", "भिन्न"],
+    ["Nutrition in Plants · Photosynthesis-Food making Process in Plant · 3", "Photosynthesis"],
+    ["रंग के आधार पर चीज़ों को छाँटना", "रंग"],
+    ["Chapter 7 -Fractions : Part-1 : 7.1 Introduction", "Fraction"],
+  ];
+  for (const [name, phrase] of yes) assert.ok(nameMatchesPhrase(name, phrase), `"${name}" is about "${phrase}"`);
+  const no: [string, string][] = [
+    ["विभिन्न पक्षी | Part1/2 | Different Birds | Hindi | Class 4", "भिन्न"],
+    ["बन्दर बांट", "संज्ञा"],
+    ["अध्याय 25- सबसे बड़ा छाता", "पौधों की देखभाल"],
+    ["Sources of water", "Water Cycle"],
+    ["जलवायु और मौसम", "जल"],
+    ["Mapping the village", "map"],
+    ["Fun with Numbers", "Two Digit Addition"],
+    ["anything", "and of the"],
+  ];
+  for (const [name, phrase] of no) assert.ok(!nameMatchesPhrase(name, phrase), `"${name}" is not about "${phrase}"`);
 }
 
 // ── Search request ──────────────────────────────────────────────────────
@@ -168,6 +198,30 @@ import {
   );
   assert.equal(mergeVideos([first, second], 2).length, 2, "stops at the limit");
   assert.deepEqual(mergeVideos([], 5), []);
+
+  const titles = (list: TutorVideo[]) => orderSeriesParts(list).map((m) => m.title);
+  assert.deepEqual(
+    titles([
+      v("", "Decoration for Festival (Addition and Subtraction) Part 3"),
+      v("", "Tens and Ones"),
+      v("", "Decoration for Festival (Addition and Subtraction) Part 1"),
+      v("", "Addition of two digit numbers | Part 2/3 | English | Class 2"),
+      v("", "Decoration for Festival (Addition and Subtraction) Part 2"),
+      v("", "Addition of two digit numbers | Part 1/3 | English | Class 2"),
+    ]),
+    [
+      "Decoration for Festival (Addition and Subtraction) Part 1",
+      "Decoration for Festival (Addition and Subtraction) Part 2",
+      "Decoration for Festival (Addition and Subtraction) Part 3",
+      "Tens and Ones",
+      "Addition of two digit numbers | Part 1/3 | English | Class 2",
+      "Addition of two digit numbers | Part 2/3 | English | Class 2",
+    ],
+    "a series is gathered where it first appears, in part order; the rest keep their place",
+  );
+  assert.deepEqual(titles([v("", "अध्याय 9 - भाग 2"), v("", "अध्याय 9 - भाग 1")]), ["अध्याय 9 - भाग 1", "अध्याय 9 - भाग 2"]);
+  assert.deepEqual(titles([v("", "Counting"), v("", "Numbers")]), ["Counting", "Numbers"], "no parts → unchanged");
+  assert.deepEqual(titles([v("", "Counterpart 2"), v("", "Counterpart 1")]), ["Counterpart 2", "Counterpart 1"], "a word ending in part is not a part");
 }
 
 console.log("tutorVideoSources.selftest: ok");

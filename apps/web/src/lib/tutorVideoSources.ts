@@ -131,8 +131,10 @@ const STOPWORDS = new Set(
 
 /**
  * Search phrases without the model: the question's own content words in
- * the medium's script. A Hindi-medium search needs Devanagari, so a
- * question typed in English or Hinglish gives none — YouTube covers it.
+ * the medium's script, as one phrase. Not word by word — a lone "numbers"
+ * finds colouring-by-numbers clips, and YouTube is a better second choice
+ * than those. A Hindi-medium search needs Devanagari, so a question typed
+ * in English or Hinglish gives none.
  */
 export function fallbackSearchPhrases(topic: string, lang: "hi" | "en"): string[] {
   const script = lang === "hi" ? /^[\u0900-\u097F]+$/ : /^[a-z0-9]+$/;
@@ -141,10 +143,34 @@ export function fallbackSearchPhrases(topic: string, lang: "hi" | "en"): string[
     .replace(/[^\p{L}\p{M}\p{N}\s]/gu, " ")
     .split(/\s+/)
     .filter((w) => w && !STOPWORDS.has(w) && script.test(w) && !/^\d+$/.test(w));
-  if (!words.length) return [];
-  const all = words.slice(0, 4).join(" ");
-  const longest = [...words].sort((a, b) => b.length - a.length)[0]!;
-  return all === longest ? [all] : [all, longest];
+  return words.length ? [words.slice(0, 4).join(" ")] : [];
+}
+
+const PHRASE_FILLER = new Set("and of the in a an to for with on its their और के की का में से को एवं तथा".split(" "));
+
+function words(text: string): string[] {
+  return text.toLowerCase().split(/[^\p{L}\p{M}\p{N}]+/u).filter(Boolean);
+}
+
+/**
+ * Whether a DIKSHA video's name is about the phrase it was found by.
+ * DIKSHA's search is loose — it also matches descriptions and parts of
+ * words — and when nothing fits it still returns something: "भिन्न"
+ * (fractions) brought back "विभिन्न पक्षी" (different birds), "संज्ञा"
+ * (noun) brought back Class III poems. So every word of the phrase that
+ * carries meaning must begin a word of the name. Longer words may differ
+ * in their last two letters (fraction/fractions, पौधों/पौधे); short ones
+ * only by a plural ending, so "map" finds "maps" but "जल" never "जलवायु".
+ */
+export function nameMatchesPhrase(name: string, phrase: string): boolean {
+  const have = words(name);
+  const need = words(phrase).filter((w) => !PHRASE_FILLER.has(w));
+  if (!need.length) return false;
+  return need.every((w) => {
+    if (w.length <= 4) return have.some((h) => h.startsWith(w) && h.length <= w.length + 2);
+    const stem = w.slice(0, w.length - 2);
+    return have.some((h) => h.startsWith(stem));
+  });
 }
 
 export const DIKSHA_FIELDS = [
@@ -273,6 +299,40 @@ export function mergeVideos(lists: TutorVideo[][], max: number): TutorVideo[] {
       out.push(v);
       if (out.length === max) return out;
     }
+  }
+  return out;
+}
+
+// Not \b: in JavaScript it only knows ASCII letters, so "भाग 2" never matched.
+const PART = /(?<![\p{L}\p{M}\p{N}])(?:part|भाग)\s*[-:]?\s*(\d{1,2})(?:\s*\/\s*\d{1,2})?/iu;
+
+/**
+ * A lesson split into parts comes back in search order — Part 3, Part 1,
+ * Part 2. Parts of one series are put together, in order, where the
+ * series first appears; everything else keeps its place.
+ */
+export function orderSeriesParts(videos: TutorVideo[]): TutorVideo[] {
+  const series = (v: TutorVideo) => {
+    const m = v.title.match(PART);
+    return m ? { key: v.title.replace(PART, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ""), part: Number(m[1]) } : null;
+  };
+  const out: TutorVideo[] = [];
+  const done = new Set<string>();
+  for (const v of videos) {
+    const s = series(v);
+    if (!s) {
+      out.push(v);
+      continue;
+    }
+    if (done.has(s.key)) continue;
+    done.add(s.key);
+    out.push(
+      ...videos
+        .map((x) => ({ x, s: series(x) }))
+        .filter((e) => e.s?.key === s.key)
+        .sort((a, b) => a.s!.part - b.s!.part)
+        .map((e) => e.x),
+    );
   }
   return out;
 }

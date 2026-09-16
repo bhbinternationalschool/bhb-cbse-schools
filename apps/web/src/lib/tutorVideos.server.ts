@@ -23,7 +23,9 @@ import {
   fallbackSearchPhrases,
   mediumFor,
   mergeVideos,
+  nameMatchesPhrase,
   normaliseTopic,
+  orderSeriesParts,
   TUTOR_VIDEO_MAX,
   type DikshaContent,
   type TutorVideo,
@@ -107,31 +109,42 @@ async function searchDiksha(opts: {
   requester: string;
   degraded: { value: boolean };
 }): Promise<TutorVideo[]> {
-  const terms = await generateTutorVideoTermsJson({
-    topic: opts.topic,
-    grade: opts.grades.exact,
-    precheck: startLlmPrecheck({ requester: opts.requester }),
-  });
-  const phrases = terms.ok ? terms.terms[opts.lang] : [];
-  if (!terms.ok) {
+  // Videos worked before there was a model in the path; a failed or
+  // refused call must cost the parent better phrases, not the whole list.
+  let phrases: string[] = [];
+  try {
+    const terms = await generateTutorVideoTermsJson({
+      topic: opts.topic,
+      grade: opts.grades.exact,
+      precheck: startLlmPrecheck({ requester: opts.requester }),
+    });
+    if (terms.ok) phrases = terms.terms[opts.lang];
+    else {
+      opts.degraded.value = true;
+      console.warn("[tutor-videos] search terms fell back:", terms.error);
+    }
+  } catch (e) {
     opts.degraded.value = true;
-    console.warn("[tutor-videos] search terms fell back:", terms.error);
+    console.warn("[tutor-videos] search terms errored:", e instanceof Error ? e.message : e);
   }
   const search = phrases.length ? phrases : fallbackSearchPhrases(opts.topic, opts.lang);
   if (!search.length) return [];
 
   const medium = mediumFor(opts.lang);
-  const run = (phrase: string, grades: string[]) =>
-    dikshaSearch(dikshaSearchBody({ phrase, grades, medium, formats: opts.formats, limit: 8 }), opts.formats, opts.degraded);
+  const run = async (phrase: string, grades: string[]) =>
+    (
+      await dikshaSearch(dikshaSearchBody({ phrase, grades, medium, formats: opts.formats, limit: 12 }), opts.formats, opts.degraded)
+    ).filter((v) => nameMatchesPhrase(v.title, phrase));
 
-  const exact = await Promise.all(search.map((p) => run(p, [opts.grades.exact])));
-  let lists = exact;
   // A class with nothing on the topic borrows the classes either side
-  // before the parent is sent to YouTube.
-  if (mergeVideos(exact, TUTOR_VIDEO_MAX).length < DIKSHA_ENOUGH && opts.grades.nearby.length) {
-    lists = [...exact, await run(search[0]!, opts.grades.nearby)];
-  }
-  return keepPlayable(mergeVideos(lists, TUTOR_VIDEO_MAX + 3), TUTOR_VIDEO_MAX, opts.degraded);
+  // before the parent is sent to YouTube. Asked alongside, not after: the
+  // model has already spent seconds, and DIKSHA answers in about half of one.
+  const [nearby, ...exact] = await Promise.all([
+    opts.grades.nearby.length ? run(search[0]!, opts.grades.nearby) : Promise.resolve([]),
+    ...search.map((p) => run(p, [opts.grades.exact])),
+  ]);
+  const lists = mergeVideos(exact, TUTOR_VIDEO_MAX).length < DIKSHA_ENOUGH ? [...exact, nearby] : exact;
+  return orderSeriesParts(await keepPlayable(mergeVideos(lists, TUTOR_VIDEO_MAX + 3), TUTOR_VIDEO_MAX, opts.degraded));
 }
 
 async function dikshaSearch(
