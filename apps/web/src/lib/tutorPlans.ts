@@ -289,6 +289,15 @@ export type TutorContext = {
 };
 
 /**
+ * The school's pre-primary books go past NCERT's minimum, so the minimum
+ * must never read as a ceiling to the tutor: a parent asking for counting to
+ * 50 in LKG is asking about the child's own book, not something too hard.
+ * The upper bound is what the guide said before NCERT's levels were known.
+ */
+const PRE_PRIMARY_SCHOOL_BOOKS =
+  "The school teaches pre-primary from its own publisher books, which go further than this minimum: help with whatever the child's book or homework asks at pre-primary level — up to numbers to 100, letters and simple words, tracing and writing, shapes and colours, rhymes, Hindi varnamala, and simple addition with objects — and never call a task too advanced only because it is above NCERT's minimum. Nothing beyond that: no formal written arithmetic.";
+
+/**
  * What a child at this class level studies, in the school's Nursery–VIII
  * range on the CBSE pattern. Given to the model so "is this question for
  * this class?" has something concrete to judge against; a parent whose
@@ -301,7 +310,13 @@ export function classLevelGuide(className: string): string {
   const m = n.match(/\b(?:class|std|grade)?\s*(\d{1,2}|i{1,3}|iv|v|vi{1,3}|viii)\b/);
   const num = pre ? 0 : m ? (Number(m[1]) || roman[m[1]] || 0) : 0;
   if (pre || (!m && !num)) {
-    return "Pre-primary (Nursery/LKG/UKG): letters and their sounds, tracing and writing, numbers up to 20–100, counting, shapes and colours, rhymes and simple words, Hindi varnamala, everyday awareness of family, animals, seasons. No formal arithmetic beyond simple counting and one-digit addition with objects.";
+    // One year's NCERT minimum where the year is known — read from NCERT's
+    // pre-primary competency books on DIKSHA (16 Sep 2026) — and always the
+    // school's own books above it (the director's decision the same day).
+    if (/nur|play/.test(n)) return `Pre-primary, Nursery (about age 3–4). NCERT's minimum for the year: listens to and joins in rhymes and stories, names familiar objects, people and animals, counts up to 3 objects and says number names to 5, compares more and less up to 3, compares two things by size or length, scribbles and draws. ${PRE_PRIMARY_SCHOOL_BOOKS}`;
+    if (/lkg/.test(n)) return `Pre-primary, LKG (about age 4–5). NCERT's minimum for the year: counts and recognises numerals up to 5, counts forward and backward to 5, puts two small groups together up to 5 and recounts, compares more and less up to 5, notices a few letters and their sounds, sings short rhymes, describes everyday objects and shapes, draws to share ideas. ${PRE_PRIMARY_SCHOOL_BOOKS}`;
+    if (/ukg|\bkg\b/.test(n)) return `Pre-primary, UKG (about age 5–6). NCERT's minimum for the year: counts up to 10 objects, writes numerals up to 9, compares numbers up to 10, puts groups together up to 9 and recounts, compares length, weight and capacity, recognises letters and their sounds, tries to write own name and a few familiar words, tells a picture story in order. ${PRE_PRIMARY_SCHOOL_BOOKS}`;
+    return `Pre-primary (Nursery/LKG/UKG): letters and their sounds, tracing and writing, counting and numbers, shapes and colours, rhymes and simple words, Hindi varnamala, everyday awareness of family, animals, seasons. ${PRE_PRIMARY_SCHOOL_BOOKS}`;
   }
   if (num <= 2) {
     return "Classes I–II: reading short sentences, simple spellings and grammar (naming words, action words), numbers to 100–1000, place value of two- and three-digit numbers, addition and subtraction, introductory multiplication tables, shapes and patterns, EVS about home, plants, animals and weather, Hindi matras and short words.";

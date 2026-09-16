@@ -13,9 +13,11 @@ import "server-only";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
 import {
+  indexGrade,
+  outcomesListing,
+  outcomesPromptBlock,
   textbooksListing,
   textbooksPromptBlock,
-  tutorGrade,
   type SyllabusBook,
   type SyllabusChapter,
 } from "@/lib/tutorSyllabus";
@@ -27,11 +29,13 @@ type ClassTextbooks = { books: SyllabusBook[]; chapters: SyllabusChapter[] };
 const cache = new Map<number, { at: number; value: ClassTextbooks }>();
 
 export async function tutorTextbooksBlock(ctx: { className?: string; subjectLabel?: string }): Promise<string> {
-  const grade = tutorGrade(ctx.className);
-  if (!grade) return "";
+  const grade = indexGrade(ctx.className);
+  if (grade === null) return "";
   try {
     const value = await classTextbooks(grade);
-    return textbooksPromptBlock({ grade, books: value.books, chapters: value.chapters, subjectLabel: ctx.subjectLabel });
+    const opts = { grade, books: value.books, chapters: value.chapters, subjectLabel: ctx.subjectLabel };
+    // Nursery–UKG: NCERT's learning outcomes as a minimum; Classes 1–8: the books.
+    return grade <= 0 ? outcomesPromptBlock(opts) : textbooksPromptBlock(opts);
   } catch (e) {
     console.warn("[tutor-textbooks] no textbook list for the prompt:", e instanceof Error ? e.message : e);
     return "";
@@ -39,24 +43,27 @@ export async function tutorTextbooksBlock(ctx: { className?: string; subjectLabe
 }
 
 /**
- * The bare textbook list for another AI feature (lesson plans), from the
- * same cached index read as the tutor. Options as textbooksListing(); empty
- * when the class has no index or the read fails.
+ * The bare NCERT list for another AI feature (lesson plans), from the same
+ * cached index read as the tutor: `kind` "chapters" for Classes 1–8 (options
+ * as textbooksListing()), "outcomes" for Nursery–UKG (outcomesListing()),
+ * "none" with empty text when the class has no index or the read fails.
  */
 export async function ncertTextbooksListing(ctx: {
   className?: string;
   subjectLabel?: string;
   coreFallback?: boolean;
   medium?: "English" | "Hindi";
-}): Promise<string> {
-  const grade = tutorGrade(ctx.className);
-  if (!grade) return "";
+}): Promise<{ text: string; kind: "chapters" | "outcomes" | "none" }> {
+  const grade = indexGrade(ctx.className);
+  if (grade === null) return { text: "", kind: "none" };
   try {
     const value = await classTextbooks(grade);
-    return textbooksListing({ grade, books: value.books, chapters: value.chapters, subjectLabel: ctx.subjectLabel, coreFallback: ctx.coreFallback, medium: ctx.medium });
+    const base = { grade, books: value.books, chapters: value.chapters, subjectLabel: ctx.subjectLabel, coreFallback: ctx.coreFallback };
+    const text = grade <= 0 ? outcomesListing(base) : textbooksListing({ ...base, medium: ctx.medium });
+    return { text, kind: !text ? "none" : grade <= 0 ? "outcomes" : "chapters" };
   } catch (e) {
     console.warn("[ncert-textbooks] no textbook list:", e instanceof Error ? e.message : e);
-    return "";
+    return { text: "", kind: "none" };
   }
 }
 

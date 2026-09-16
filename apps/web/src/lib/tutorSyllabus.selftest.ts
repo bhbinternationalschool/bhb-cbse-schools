@@ -9,6 +9,12 @@ import assert from "node:assert/strict";
 import { buildTutorSystemPrompt } from "@/lib/tutorPlans";
 import {
   cleanChapterName,
+  cleanOutcomeName,
+  indexGrade,
+  outcomesListing,
+  outcomesPromptBlock,
+  preschoolGoalsFor,
+  preschoolGrade,
   subjectKeyFor,
   textbooksListing,
   textbooksPromptBlock,
@@ -171,6 +177,82 @@ const chapters: SyllabusChapter[] = [
   assert.equal(withList.replace(`${block}\n`, ""), without, "the list is added as one block and changes nothing else");
   assert.ok(withList.indexOf("Level guide") < withList.indexOf("Textbooks:"), "after the class and level lines");
   assert.ok(withList.indexOf("Textbooks:") < withList.indexOf("Teach the topic"), "before the mode's instructions");
+}
+
+// ── Pre-primary: NCERT's outcomes as a minimum ─────────────────────────
+{
+  assert.equal(preschoolGrade("Nursery A"), -2);
+  assert.equal(preschoolGrade("LKG B"), -1);
+  assert.equal(preschoolGrade("UKG"), 0);
+  assert.equal(preschoolGrade("KG"), 0);
+  assert.equal(preschoolGrade("VI A"), null);
+  assert.equal(indexGrade("LKG A"), -1);
+  assert.equal(indexGrade("VII A"), 7);
+  assert.equal(indexGrade("their class"), null);
+
+  // The school's own Masters subject names.
+  assert.deepEqual(preschoolGoalsFor("Early Numeracy"), ["Involved Learners"]);
+  assert.deepEqual(preschoolGoalsFor("World Around Us / Environmental awareness"), ["Involved Learners"]);
+  assert.deepEqual(preschoolGoalsFor("English — Oral"), ["Effective Communicators"]);
+  assert.deepEqual(preschoolGoalsFor("Hindi — Written"), ["Effective Communicators"]);
+  assert.deepEqual(preschoolGoalsFor("Music, rhymes & movement"), ["Effective Communicators", "Health and Well-being"], "rhymes are communication, movement is well-being");
+  assert.deepEqual(preschoolGoalsFor("Socio-emotional & ethical development"), ["Health and Well-being"]);
+  assert.deepEqual(preschoolGoalsFor("Positive learning habits & self-help"), ["Health and Well-being"]);
+  assert.deepEqual(preschoolGoalsFor("Art Education"), ["Effective Communicators", "Health and Well-being"]);
+  assert.deepEqual(preschoolGoalsFor("Computational Thinking / ICT"), []);
+  assert.deepEqual(preschoolGoalsFor(""), []);
+
+  // DIKSHA's own spellings of outcome codes.
+  const outcomeCases: [string, string][] = [
+    ["IL 2.9 Counts and perceives objects up to five", "Counts and perceives objects up to five"],
+    ["IL 2.3a Remembers and recalls 3–4 objects seen at a time", "Remembers and recalls 3–4 objects seen at a time"],
+    ["IL 2. 30 Demonstrates awareness about technology like T.V., mobile phones.", "Demonstrates awareness about technology like T.V., mobile phones."],
+    ["ECL1 1.1 a Attempts to engage in conversation or small talk with known, ...", "Attempts to engage in conversation or small talk with known, ..."],
+    ["ECL2-2.5 Identifies few letters and sounds", "Identifies few letters and sounds"],
+    ["HW 2.9 Suggests solutions to conflicts (with the support of adults)", "Suggests solutions to conflicts (with the support of adults)"],
+    ["HW2.14 Demonstrates awareness about good touch and bad touch (with guidance from parents and teachers)", "Demonstrates awareness about good touch and bad touch (with guidance from parents and teachers)"],
+    ["Key Competencies", "Key Competencies"],
+  ];
+  for (const [raw, clean] of outcomeCases) assert.equal(cleanOutcomeName(raw), clean, raw);
+  const long = cleanOutcomeName(`IL 3.1 ${"observes ".repeat(20)}`);
+  assert.ok(long.length <= 100 && long.endsWith("…"), "a long outcome is cut at a word, marked");
+
+  const ppBooks: SyllabusBook[] = [
+    { id: "il2", medium: "English", subjects: ["Involved Learners"], name: "Children become involved learners (IL) Preschool 2" },
+    { id: "ec2", medium: "English", subjects: ["Effective Communicators"], name: "CHILDREN BECOME EFFECTIVE COMMUNICATORS (EC) Pre School 2 DG 2" },
+    { id: "hw2", medium: "English", subjects: ["Health and Well-being"], name: "HEALTH AND WELL BEING (HW) Pre School 2 DG 1" },
+  ];
+  const ppChapters: SyllabusChapter[] = [
+    { textbookId: "il2", position: 1, name: "Key Competencies" },
+    { textbookId: "il2", position: 3, name: "IL 2.11 Identifies numerals with corresponding numbers up to 5" },
+    { textbookId: "il2", position: 2, name: "IL 2.9 Counts and perceives objects up to five" },
+    { textbookId: "ec2", position: 1, name: "Key Competencies" },
+    { textbookId: "ec2", position: 2, name: "ECL2-2.2 Sings short poems and rhymes" },
+    { textbookId: "ec2", position: 3, name: "ECL2-1.6 Spends time in reading area or play area." },
+    { textbookId: "ec2", position: 4, name: "ECL2-1.4 a Spends time in reading area or play area." },
+    { textbookId: "hw2", position: 2, name: "HW2.14 Demonstrates awareness about good touch and bad touch (with guidance from parents and teachers)" },
+  ];
+  const all = outcomesListing({ grade: -1, books: ppBooks, chapters: ppChapters });
+  assert.deepEqual(all.split("\n"), [
+    "NCERT's minimum for LKG (DIKSHA Preschool 2), from NCERT's pre-primary competency books. The school teaches pre-primary from its own publisher books, which go further than this.",
+    "Involved Learners: Counts and perceives objects up to five; Identifies numerals with corresponding numbers up to 5",
+    "Effective Communicators: Sings short poems and rhymes; Spends time in reading area or play area.",
+    "Health and Well-being: Demonstrates awareness about good touch and bad touch (with guidance from parents and teachers)",
+  ], "goals in a fixed order, outcomes in book order, overviews and repeats dropped, the header says minimum and names the school's books");
+  const numeracy = outcomesListing({ grade: -1, books: ppBooks, chapters: ppChapters, subjectLabel: "Early Numeracy", coreFallback: false });
+  assert.equal(numeracy.split("\n").length, 2, "a subject narrows to its goal");
+  assert.ok(numeracy.includes("Involved Learners:"));
+  assert.equal(outcomesListing({ grade: -1, books: ppBooks, chapters: ppChapters, subjectLabel: "Computational Thinking / ICT", coreFallback: false }), "", "no goal for the subject and no fallback → nothing");
+  assert.equal(outcomesListing({ grade: -1, books: ppBooks, chapters: ppChapters, subjectLabel: "Computational Thinking / ICT" }), all, "no goal → all three for the tutor");
+  assert.equal(outcomesListing({ grade: 3, books: ppBooks, chapters: ppChapters }), "", "not a pre-primary grade");
+  assert.equal(outcomesListing({ grade: -2, books: [], chapters: [] }), "", "nothing indexed → no block");
+  assert.match(outcomesListing({ grade: -2, books: ppBooks, chapters: ppChapters }), /^NCERT's minimum for Nursery \(DIKSHA Preschool 1\)/);
+
+  const block = outcomesPromptBlock({ grade: -1, books: ppBooks, chapters: ppChapters });
+  assert.ok(block.startsWith(all));
+  assert.match(block, /not a ceiling — the child's own book may ask for more/);
+  assert.match(block, /Never quote outcome codes, and never name an NCERT book or chapter: pre-primary has none/);
+  assert.doesNotMatch(block, /IL ?\d|ECL\d|HW ?\d/, "no outcome code reaches the prompt");
 }
 
 console.log("tutorSyllabus.selftest: ok");

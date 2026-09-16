@@ -163,4 +163,26 @@ console.log("lessonPlanAi.selftest.ts");
   }
 }
 
+// ─── Pre-primary: NCERT's outcomes as a minimum ────────────────────────
+
+{
+  const outcomes = "NCERT's minimum for LKG (DIKSHA Preschool 2), from NCERT's pre-primary competency books. The school teaches pre-primary from its own publisher books, which go further than this.\nInvolved Learners: Counts and perceives objects up to five";
+  const pp = buildLessonPlanSystemPrompt({ language: "en", schoolName: "BHB", textbooks: outcomes, textbooksKind: "outcomes" });
+  assert.ok(pp.endsWith(outcomes));
+  assert.match(pp, /Pre-primary: the school teaches from its own publisher books/);
+  assert.match(pp, /the minimum a child should reach — not the syllabus and not a ceiling/);
+  assert.match(pp, /where the unit goes beyond them, follow the unit/, "a publisher-book unit above the minimum is planned as asked");
+  assert.match(pp, /never an outcome code, and never an NCERT book or chapter/);
+  assert.match(pp, /short play activity a parent can do with the child at home/, "pre-primary homework is play, not exercises");
+  assert.doesNotMatch(pp, /begin the title with the book and chapter/, "no chapter titles for pre-primary");
+  assert.doesNotMatch(pp, /questions at the end of <book>/);
+
+  const chapters = buildLessonPlanSystemPrompt({ language: "en", schoolName: "BHB", textbooks: "Textbooks: x\nMathematics — Ganita Prakash: 1. A", textbooksKind: "chapters" });
+  const defaultKind = buildLessonPlanSystemPrompt({ language: "en", schoolName: "BHB", textbooks: "Textbooks: x\nMathematics — Ganita Prakash: 1. A" });
+  assert.equal(defaultKind, chapters, "chapters are the default kind");
+  assert.doesNotMatch(chapters, /Pre-primary:/);
+  const noList = buildLessonPlanSystemPrompt({ language: "en", schoolName: "BHB", textbooksKind: "outcomes" });
+  assert.equal(noList, buildLessonPlanSystemPrompt({ language: "en", schoolName: "BHB" }), "a kind without a list changes nothing");
+}
+
 console.log("OK — lessonPlanAi.selftest.ts");

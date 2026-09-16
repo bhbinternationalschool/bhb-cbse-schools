@@ -44,6 +44,20 @@ export function tutorGrade(className: string | undefined): number | null {
   return roman[m[1]!] ?? Number(m[1]);
 }
 
+/** Nursery, LKG, UKG as the index stores them (-2, -1, 0); null for anything else. */
+export function preschoolGrade(className: string | undefined): number | null {
+  const n = ` ${(className || "").toLowerCase()} `;
+  if (/[^a-z](nursery|nur|play ?group|pre-?nursery)[^a-z]/.test(n)) return -2;
+  if (/[^a-z]lkg[^a-z]/.test(n)) return -1;
+  if (/[^a-z](ukg|kg)[^a-z]/.test(n)) return 0;
+  return null;
+}
+
+/** The index grade for a class label: Nursery–UKG as -2..0, Classes 1–8 as 1..8, else null. */
+export function indexGrade(className: string | undefined): number | null {
+  return preschoolGrade(className) ?? tutorGrade(className);
+}
+
 /**
  * A subject name — from Masters ("Hindi — Written", "Environmental Studies /
  * World Around Us"), from DIKSHA ("Physical Education And Well Being"), or
@@ -159,3 +173,85 @@ export function textbooksPromptBlock(opts: {
     "Using the textbooks: when a question belongs to one of these chapters, say which one as listed — book name, then \"Chapter\" and its number and name — and explain it the way that chapter does, in its words. Never name a book, chapter or chapter number that is not in this list. A question that fits no chapter here may still be this class's schoolwork — answer it by the level guide without naming a chapter.",
   ].join("\n");
 }
+
+// ── Pre-primary: NCERT's learning outcomes as a minimum ───────────────────
+
+export const PRESCHOOL_GOAL_ORDER = ["Involved Learners", "Effective Communicators", "Health and Well-being"] as const;
+const PRESCHOOL_YEAR = ["Nursery", "LKG", "UKG"] as const;
+
+/**
+ * Which NCF developmental goals a pre-primary subject belongs to. The
+ * school's Masters names ("Early Numeracy", "Music, rhymes & movement",
+ * "Socio-emotional & ethical development") do not line up one-to-one with
+ * the goals, so a subject can touch two: rhymes are communication, movement
+ * is well-being.
+ */
+export function preschoolGoalsFor(label: string | undefined): string[] {
+  const s = (label || "").toLowerCase();
+  const goals = new Set<string>();
+  if (/numer|math|number|count|world around|environment|\bevs\b|science|shape|pattern|गणित|गिनती/.test(s)) goals.add("Involved Learners");
+  if (/english|hindi|language|literacy|read|writ|oral|rhyme|story|poem|phonic|letter|\bart\b|draw|हिंदी|कविता|कहानी/.test(s)) goals.add("Effective Communicators");
+  if (/socio|emotion|habit|self-help|health|physical|hygiene|movement|music|dance|yoga|sport|motor|\bart\b|draw|खेल/.test(s)) goals.add("Health and Well-being");
+  return PRESCHOOL_GOAL_ORDER.filter((g) => goals.has(g));
+}
+
+/** "IL 2.9 Counts and perceives objects up to five" → "Counts and perceives objects up to five". */
+export function cleanOutcomeName(name: string): string {
+  const plain = name.replace(/[\u200B-\u200D\uFEFF]/g, "").replace(/\s+/g, " ").trim();
+  const stripped = plain.replace(/^(?:HW|ECL|IL)\s*\d*\s*[-–.]?\s*\d+\s*(?:\.\s*\d+)?\s*[a-z]?\b[\s.:\-–]*/i, "").trim();
+  const text = stripped || plain;
+  return text.length > 100 ? `${text.slice(0, 99).replace(/\s+\S*$/, "")}…` : text;
+}
+
+/**
+ * NCERT's pre-primary outcomes for one year, grouped by goal. The header says
+ * what they are — the minimum, with the school's own books above it — so a
+ * reader never takes the list for the syllabus. With a subject, only its
+ * goals; without one, all three unless `coreFallback` is false. Each book's
+ * "Key Competencies" overview is not an outcome and is left out; an outcome
+ * NCERT lists twice is listed once.
+ */
+export function outcomesListing(opts: {
+  grade: number;
+  books: SyllabusBook[];
+  chapters: SyllabusChapter[];
+  subjectLabel?: string;
+  coreFallback?: boolean;
+}): string {
+  const year = PRESCHOOL_YEAR[opts.grade + 2];
+  if (!year) return "";
+  const asked = preschoolGoalsFor(opts.subjectLabel);
+  const goals = asked.length ? asked : opts.coreFallback === false ? [] : [...PRESCHOOL_GOAL_ORDER];
+  const lines: string[] = [];
+  for (const goal of goals) {
+    const books = opts.books.filter((b) => b.subjects[0] === goal);
+    const seen = new Set<string>();
+    const outcomes: string[] = [];
+    for (const book of books) {
+      for (const c of opts.chapters.filter((x) => x.textbookId === book.id).sort((a, b) => a.position - b.position)) {
+        if (/^key competenc/i.test(c.name.trim())) continue;
+        const text = cleanOutcomeName(c.name);
+        if (seen.has(text.toLowerCase())) continue;
+        seen.add(text.toLowerCase());
+        outcomes.push(text);
+      }
+    }
+    if (outcomes.length) lines.push(`${goal}: ${outcomes.join("; ")}`);
+  }
+  if (!lines.length) return "";
+  return [
+    `NCERT's minimum for ${year} (DIKSHA Preschool ${opts.grade + 3}), from NCERT's pre-primary competency books. The school teaches pre-primary from its own publisher books, which go further than this.`,
+    ...lines,
+  ].join("\n");
+}
+
+/** The tutor's pre-primary block: the outcomes and how to use them in an answer. */
+export function outcomesPromptBlock(opts: { grade: number; books: SyllabusBook[]; chapters: SyllabusChapter[]; subjectLabel?: string }): string {
+  const listing = outcomesListing(opts);
+  if (!listing) return "";
+  return [
+    listing,
+    "Using NCERT's minimum: it is what NCERT expects by the end of the year, not a ceiling — the child's own book may ask for more, and that is fine. When a question touches one of these, say in plain words what the child is working towards and suggest short play-based practice at home (everyday objects, songs, drawing, games). Never quote outcome codes, and never name an NCERT book or chapter: pre-primary has none.",
+  ].join("\n");
+}
+

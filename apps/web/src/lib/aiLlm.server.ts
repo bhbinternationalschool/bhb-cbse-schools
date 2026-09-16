@@ -1434,8 +1434,10 @@ Respond with JSON only: {"items":[{"id":"...","text":"..."}]} — every id given
 export async function generateLessonPlanJson(opts: {
   input: LessonPlanAiInput;
   schoolName: string;
-  /** The class's NCERT books for the subject (ncertTextbooksListing); "" when none. */
+  /** The class's NCERT list for the subject (ncertTextbooksListing().text); "" when none. */
   textbooks?: string;
+  /** ncertTextbooksListing().kind: "outcomes" for Nursery–UKG, else chapters. */
+  textbooksKind?: "chapters" | "outcomes" | "none";
 }): Promise<
   | { ok: true; draft: LessonPlanDraft; engine: LlmEngine; generationId: string }
   | { ok: false; error: string; engine: LlmEngine }
@@ -1446,6 +1448,7 @@ export async function generateLessonPlanJson(opts: {
         language: opts.input.language,
         schoolName: opts.schoolName,
         textbooks: opts.textbooks,
+        textbooksKind: opts.textbooksKind === "outcomes" ? "outcomes" : "chapters",
       }),
       userMessage: buildLessonPlanUserPrompt(opts.input),
       // Activities grow with periods; Hindi is ~1.6× the tokens of English.
@@ -1457,7 +1460,11 @@ export async function generateLessonPlanJson(opts: {
       geminiMaxTokens: Math.min(8192, 3000 + opts.input.periods * 400),
       // "v2-ncert1": drafted with the NCERT chapter list, so outcomes of
       // grounded and ungrounded drafts can be told apart.
-      meta: { route: "lesson-plan", promptVersion: opts.textbooks ? "v2-ncert1" : "v1", cacheable: true },
+      meta: {
+        route: "lesson-plan",
+        promptVersion: !opts.textbooks ? "v1" : opts.textbooksKind === "outcomes" ? "v2-ncert-outcomes1" : "v2-ncert1",
+        cacheable: true,
+      },
     },
     parseLessonPlanJson,
   );
