@@ -254,6 +254,7 @@ jobs:
           npm run test:school-location-reply
           npm run test:weekly-child-digest
           npm run test:exam-eve
+          npm run test:tutor-guide
           npm run test:wa-parent-guide
           npm run test:fleet-keep-rule
           npm run test:server-work-tracker

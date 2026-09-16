@@ -409,11 +409,48 @@ export async function handleExamEveInbound(opts: {
     }
 
     if (started.length > 0 && runningUntil) {
-      parts.push(
+      // FIRST TAP: the free day starts now, so this is the moment the family
+      // needs to know what they have and how to use it. Sent as its OWN
+      // message, before the first question, so the question is the last
+      // thing on screen and the guide is there to scroll back to. The window
+      // is open — the parent just tapped — so free text is allowed.
+      //
+      // Once per family in practice: a second exam evening finds the trial
+      // already started, so `started` is empty and no guide goes again.
+      const { composeTutorGuide } = await import("@/lib/tutorGuide");
+      const { tutorPlans, freeHintsPerDay } = await import("@/lib/tutorPasses.server");
+      const welcome = [
         hindi
           ? `🎁 *${started.join(", ")}* के लिए AI शिक्षक पूरी तरह *मुफ़्त* — ${istTimeLabel(runningUntil, true)}।\nपढ़ाना, उदाहरण, अभ्यास, उत्तर जाँचना — सब कुछ।`
           : `🎁 The full AI tutor is *free* for *${started.join(", ")}* ${istTimeLabel(runningUntil, false)}.\nTeaching, examples, practice, answer checking — everything.`,
-      );
+        "",
+        composeTutorGuide({
+          hindi,
+          childNames: started,
+          freeHintsPerDay: freeHintsPerDay(),
+          plans: tutorPlans(),
+          multipleChildren: schoolAge.length > 1,
+        }),
+      ].join("\n");
+      const guideSend = await sendWhatsAppText({
+        toMobile: opts.mobile10,
+        body: welcome,
+        clientMessageId: `tutorguide:${family.householdId}`,
+      });
+      await logHouseholdWaSend({
+        mobile: opts.mobile10,
+        purpose: "tutor_guide",
+        via: "text",
+        preview: welcome.slice(0, 200),
+        status: guideSend.ok ? "sent" : "failed",
+        error: guideSend.ok ? undefined : guideSend.error,
+        waMessageId: guideSend.ok ? guideSend.providerId : undefined,
+      }).catch(() => undefined);
+      if (!guideSend.ok) {
+        // The free day is real whether or not the guide arrived; say it in
+        // the reply itself so the family still knows.
+        parts.push(welcome);
+      }
     } else if (runningUntil) {
       parts.push(
         hindi
