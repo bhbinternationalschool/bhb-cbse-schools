@@ -380,6 +380,74 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                       ),
                     ],
                   ),
+                  if (snap.todayByMode.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              "Today, by payment mode",
+                              style: AppText.bodySmallMuted,
+                            ),
+                            const SizedBox(height: 6),
+                            for (final m in snap.todayByMode)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 2),
+                                child: Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Expanded(child: Text(m.label)),
+                                    Text(
+                                      formatInrPaise(m.paise),
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                  if (snap.storeDuesPaise != null &&
+                      snap.storeDuesPaise! > 0) ...[
+                    const SizedBox(height: 8),
+                    Card(
+                      child: ListTile(
+                        dense: true,
+                        title: Text(
+                          "Books / uniform owed: ${formatInrPaise(snap.storeDuesPaise!)}",
+                        ),
+                        subtitle: Text(
+                          "${snap.storeDueStudents} children · paid at the school counter, not in the fee link",
+                          style: AppText.bodySmallMuted,
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 18),
+                  const _SectionTitle("Students"),
+                  Row(
+                    children: [
+                      _Stat(
+                        label: "On roll",
+                        value: "${snap.activeStudents}",
+                        color: AppColors.primary,
+                      ),
+                      const SizedBox(width: 8),
+                      _Stat(
+                        label: "Present today",
+                        value: "${snap.studentPresent}",
+                        color: AppColors.success,
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: 18),
                   _SectionTitle(
                     "Student attendance · ${snap.attendanceDate.isEmpty ? "today" : formatDateLabel(snap.attendanceDate)}",

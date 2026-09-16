@@ -73,6 +73,7 @@ import {
   incomeExpenditureReport,
   packToCsvBundle,
   receiptsPaymentsReport,
+  monthlyCashReport,
   trialBalanceReport,
 } from "@/lib/ledger/reports.server";
 import {
@@ -154,6 +155,7 @@ type PostBody =
   | { action: "income-expenditure"; from: string; to: string }
   | { action: "balance-sheet"; from: string; to: string }
   | { action: "receipts-payments"; from: string; to: string }
+  | { action: "monthly-cash"; from: string; to: string }
   | { action: "account-statement"; code: string; from: string; to: string }
   | {
       action: "search-vouchers";
@@ -244,6 +246,7 @@ export async function POST(req: Request) {
     "income-expenditure",
     "balance-sheet",
     "receipts-payments",
+    "monthly-cash",
     "account-statement",
     "search-vouchers",
     "parties",
@@ -399,6 +402,12 @@ export async function POST(req: Request) {
     }
     case "receipts-payments": {
       const res = await receiptsPaymentsReport({ from: body.from, to: body.to });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    // Month by month, money in and money out — what the Accounts dashboard
+    // charts. Read-only, one call for the whole year.
+    case "monthly-cash": {
+      const res = await monthlyCashReport({ from: body.from, to: body.to });
       return NextResponse.json(res, { status: res.ok ? 200 : 422 });
     }
     case "search-vouchers": {

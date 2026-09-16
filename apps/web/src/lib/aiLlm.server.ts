@@ -611,7 +611,10 @@ export async function generateTransliterationJson(opts: {
     ].join("\n"),
     userMessage: JSON.stringify({ texts: opts.texts }),
     jsonMode: true,
-    maxTokens: 3000,
+    // A question built from parts sends every part's text, options, pairs and
+    // key; Devanagari costs more tokens than the Roman it came from, and a
+    // reply cut off mid-array fails the count check and converts nothing.
+    maxTokens: 8000,
     temperature: 0.1,
     meta: { route: "transliterate", promptVersion: opts.promptVersion ?? "v1", cacheable: true },
   });

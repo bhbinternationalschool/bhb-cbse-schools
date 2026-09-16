@@ -15,7 +15,7 @@ import { computeFeeKpis } from "@/lib/feeFinance";
 import { formatInr, loadFees } from "@/lib/fees";
 import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
 import { loadSis } from "@/lib/sis";
-import { loadStaffAttendance, summarizeStaffMarks } from "@/lib/staffAttendance";
+import { loadStaffAttendance, staffMarkTotals } from "@/lib/staffAttendance";
 import { loadTransport } from "@/lib/transport";
 import { TENANT } from "@/lib/types";
 
@@ -80,9 +80,11 @@ export function composeLeadershipWhatsAppReport(
   let staffPresent = 0;
   let staffMarked = 0;
   if (staffReg) {
-    const sm = summarizeStaffMarks(staffReg.marks || []);
+    // Was staffMarkTotals(...).present — undefined, so this line read
+    // "Present undefined · Absent undefined" in the owner's note.
+    const sm = staffMarkTotals(staffReg.marks || []);
     staffPresent = sm.present;
-    staffMarked = sm.present + sm.absent + sm.leave;
+    staffMarked = sm.marked;
   }
   const staffPct = staffMarked
     ? Math.round((staffPresent / staffMarked) * 100)
@@ -156,7 +158,7 @@ export function composeStaffAttendanceWhatsAppSnapshot(): string {
   if (!reg) {
     return `*Staff attendance* — ${today}\n\nNo register marked yet today. Desk: Attendance → Staff.`;
   }
-  const sm = summarizeStaffMarks(reg.marks || []);
+  const sm = staffMarkTotals(reg.marks || []);
   const total = sm.present + sm.absent + sm.leave;
   return [
     `*Staff attendance* — ${today}`,

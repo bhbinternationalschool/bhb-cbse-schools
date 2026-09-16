@@ -10,6 +10,7 @@ import {
   postSaleReturn,
   reverseCollectionByReceipt,
   storeDuesForStudents,
+  storeDuesSummary,
   voidSale,
   studentPurchases,
   householdSiblings,
@@ -46,6 +47,9 @@ export async function GET(req: Request) {
           q.get("ay") || academicYearCode,
         ),
       };
+    // One row for the whole school — what the fee dashboard shows beside
+    // (never inside) the fee dues.
+    if (view === "dues-summary") return { summary: await storeDuesSummary() };
     if (view === "dues") {
       return {
         dues: await storeDuesForStudents(

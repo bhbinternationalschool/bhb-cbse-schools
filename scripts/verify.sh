@@ -101,6 +101,11 @@ SELFTESTS=(
   test:parent-bot-real-chats
   test:pin-review
   test:due-pay-link
+  test:fee-dues-server-inputs
+  test:fee-store-dues-line
+  test:ledger-monthly-cash
+  test:app-home-numbers
+  test:exam-paper-transliterate
   test:wa-parent-guide
   test:fleet-keep-rule
   test:server-work-tracker

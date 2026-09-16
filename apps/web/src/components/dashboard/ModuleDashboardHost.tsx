@@ -71,6 +71,21 @@ export function ModuleDashboardHost({
     // Accounts KPIs read the server book — the browser-book figures render
     // first (instant), then the authoritative cockpit replaces them. Store
     // sales and everything else the ledger carries show up this way.
+    // Books and uniform on credit live in the store, not the fee book, so
+    // the fee tile names them only after the store answers. Fee figures
+    // render first and stay put if it does not.
+    if (moduleId === "fees" && built) {
+      let stale = false;
+      void import("@/lib/feeStoreDuesKpi").then(
+        ({ patchFeeDashWithStoreDues }) =>
+          patchFeeDashWithStoreDues(built).then((patched) => {
+            if (patched && !stale) setModel(patched);
+          }),
+      );
+      return () => {
+        stale = true;
+      };
+    }
     if (moduleId === "accounts" && built) {
       let stale = false;
       void import("@/lib/accountsServerKpis").then(

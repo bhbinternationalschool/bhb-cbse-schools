@@ -23,6 +23,7 @@ import { loadSis, type Household } from "@/lib/sis";
 import { reviewDemoHouseholdIds } from "@/lib/reviewDemoRecords";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { ensureFeesHydratedServer } from "@/lib/feesPersistence.server";
+import { ensureFeeDuesInputsHydrated } from "@/lib/feeDuesInputs.server";
 import { loadServerMasters } from "@/lib/api/v1/auth";
 import { listLiveDefaulters } from "@/lib/playbook";
 import { currentAcademicYearCode, formatInr } from "@/lib/masters";
@@ -190,7 +191,14 @@ async function feeRecipients(
   todayIso: string,
   minAmountPaise: number,
 ): Promise<AutomationRecipient[]> {
-  await Promise.all([ensureSisHydratedServer(), ensureFeesHydratedServer()]);
+  // Transport and the posted adjustments too, or a reminder quotes school
+  // fee only — the bus fee of 157 riders was missing from every one of
+  // these messages until 2026-09-16 (lib/feeDuesInputs.server.ts).
+  await Promise.all([
+    ensureSisHydratedServer(),
+    ensureFeesHydratedServer(),
+    ensureFeeDuesInputsHydrated(),
+  ]);
   const sis = loadSis();
   const masters = await loadServerMasters();
   const academicYearCode = currentAcademicYearCode(masters);

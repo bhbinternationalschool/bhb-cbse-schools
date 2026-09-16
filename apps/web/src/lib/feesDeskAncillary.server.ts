@@ -465,6 +465,13 @@ export async function rebuildFeeOpenDuesCache(
     "@/lib/schoolDataMirror.server"
   );
   await ensureSchoolMirrorHydrated();
+  // Forced, not TTL-gated: this table is what the reminders and the pay
+  // links quote, so it is rebuilt from the transport desk and the posted
+  // adjustments as they stand right now, never from a 60-second-old copy.
+  const { ensureFeeDuesInputsHydrated } = await import(
+    "@/lib/feeDuesInputs.server"
+  );
+  await ensureFeeDuesInputsHydrated({ force: true });
 
   const { loadMasters, currentAcademicYearCode } = await import("@/lib/masters");
   const { loadSis } = await import("@/lib/sis");

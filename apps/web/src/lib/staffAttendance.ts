@@ -154,6 +154,16 @@ export type StaffAttendanceSettings = {
   geofenceRadiusM: number;
   /** Reject WA pins when accuracy worse than this (0 = ignore) */
   maxLocationAccuracyM: number;
+  /**
+   * Staff who keep no attendance — the owner, and anyone the office says so
+   * of. They are left off the register entirely rather than marked absent:
+   * a director who never punches used to read as a daily absentee, which
+   * made "3 absent today" mean nothing.
+   *
+   * Role-holders (owner / admin) are excluded by `attendanceExemptStaffIds`
+   * without being listed here; this is the office's own list on top.
+   */
+  exemptStaffIds: string[];
 };
 
 export type StaffAttendanceState = {
@@ -179,6 +189,7 @@ export function defaultAttendanceSettings(): StaffAttendanceSettings {
     allowWhatsAppPunch: true,
     geofenceRadiusM: 150,
     maxLocationAccuracyM: 120,
+    exemptStaffIds: [],
   };
 }
 
@@ -211,7 +222,39 @@ export function normalizeAttendanceSettings(
       typeof s?.maxLocationAccuracyM === "number" && s.maxLocationAccuracyM >= 0
         ? s.maxLocationAccuracyM
         : d.maxLocationAccuracyM,
+    exemptStaffIds: Array.isArray(s?.exemptStaffIds)
+      ? [...new Set(s.exemptStaffIds.filter((id): id is string => !!id))]
+      : d.exemptStaffIds,
   };
+}
+
+/**
+ * Who keeps no attendance: the office's own list, plus whoever holds owner
+ * or admin as their MAIN role.
+ *
+ * Main role only, deliberately. Both principals carry `admin` as a second
+ * role so they can fix a setting; dropping everyone with an admin role
+ * anywhere would have taken the two people who run the school off the
+ * register.
+ */
+export function attendanceExemptStaffIds(
+  settings: StaffAttendanceSettings,
+  rbac: {
+    roles: { id: string; code: string }[];
+    assignments: { staffId: string; roleId: string; isPrimary: boolean }[];
+  } | null,
+): Set<string> {
+  const out = new Set(settings.exemptStaffIds ?? []);
+  if (!rbac) return out;
+  const exemptRoleIds = new Set(
+    (rbac.roles ?? [])
+      .filter((r) => r.code === "owner" || r.code === "admin")
+      .map((r) => r.id),
+  );
+  for (const a of rbac.assignments ?? []) {
+    if (a.isPrimary && exemptRoleIds.has(a.roleId)) out.add(a.staffId);
+  }
+  return out;
 }
 
 export function emptyStaffAttendanceState(): StaffAttendanceState {
@@ -747,12 +790,56 @@ export function syncLeaveOntoAttendanceDate(input: {
   });
 }
 
-export function summarizeStaffMarks(marks: StaffAttendanceMark[]) {
-  const counts: Record<string, number> = {};
+/**
+ * How many marks of each STATUS CODE — `{ P: 12, A: 2, … }`.
+ *
+ * Typed as a partial record on purpose. It used to be
+ * `Record<string, number>`, whose index signature made `summary.present` a
+ * perfectly legal `number` — so the principal snapshot read
+ * `staffSum.present ?? 0` and every app in the school showed staff present
+ * as 0 while the register was full (found 2026-09-16), and the WhatsApp
+ * leadership note printed "Present undefined". Neither was a data fault and
+ * neither raised a type error.
+ *
+ * For present / absent / leave, use `staffMarkTotals` below.
+ */
+export function summarizeStaffMarks(
+  marks: StaffAttendanceMark[],
+): Partial<Record<AttendanceStatus, number>> {
+  const counts: Partial<Record<AttendanceStatus, number>> = {};
   for (const m of marks) {
     counts[m.status] = (counts[m.status] ?? 0) + 1;
   }
   return counts;
+}
+
+/**
+ * The staff register in the words the rest of the app speaks — the same
+ * shape `summarizeMarks` returns for students (lib/attendance.ts), so a
+ * reader cannot mistake one for the other.
+ *
+ * Half-day counts as present: the person came to work.
+ */
+export function staffMarkTotals(marks: StaffAttendanceMark[]): {
+  present: number;
+  absent: number;
+  late: number;
+  halfDay: number;
+  leave: number;
+  marked: number;
+} {
+  const c = summarizeStaffMarks(marks);
+  const present = (c.P ?? 0) + (c.L ?? 0) + (c.HD ?? 0);
+  const absent = c.A ?? 0;
+  const leave = c.LE ?? 0;
+  return {
+    present,
+    absent,
+    late: c.L ?? 0,
+    halfDay: c.HD ?? 0,
+    leave,
+    marked: present + absent + leave,
+  };
 }
 
 export function nowHhmm(): string {

@@ -29,11 +29,22 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
-  const texts = (Array.isArray(body.texts) ? body.texts : []).map((t) => String(t ?? "")).slice(0, 60);
+  const texts = (Array.isArray(body.texts) ? body.texts : []).map((t) => String(t ?? ""));
   if (texts.length === 0 || texts.every((t) => !t.trim())) {
     return NextResponse.json({ error: "Nothing to convert" }, { status: 400 });
   }
-  if (texts.join("").length > 6000) {
+  // Refused, never silently trimmed. This used to `.slice(0, 60)`, which
+  // returned fewer lines than the caller sent — and the caller pairs the
+  // answers to its fields BY POSITION, so a trimmed reply would have put
+  // option (b)'s text into option (a). A question with parts, each with
+  // their own options and key, passes 60 lines easily.
+  if (texts.length > 200) {
+    return NextResponse.json(
+      { error: "Too many lines in one question — convert it in two halves" },
+      { status: 400 },
+    );
+  }
+  if (texts.join("").length > 12000) {
     return NextResponse.json({ error: "Too much text at once — convert one question at a time" }, { status: 400 });
   }
   const target = body.target === "sa" ? "sa" : "hi";

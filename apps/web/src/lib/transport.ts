@@ -960,7 +960,16 @@ function migrateFromV1(raw: unknown): TransportState {
 }
 
 export function loadTransport(): TransportState {
-  if (typeof window === "undefined") return emptyTransport();
+  // The server has no localStorage, so until 2026-09-16 this returned an
+  // empty desk there — and every server-side fee calculation then read the
+  // bus fee of 157 riders as zero. `fee_desk_open_dues` held not one
+  // transport line; the reminders, the pay links, the parent app and the
+  // principal cockpit all quoted school fee only, and parents answered
+  // "only September is pending" because that is what we sent them.
+  // `ensureTransportHydratedServer` fills the memory copy from the desk
+  // tables; an instance that has not hydrated yet still reads empty, which
+  // is why the dues paths hydrate before they compute.
+  if (typeof window === "undefined") return memoryTransportState ?? emptyTransport();
   try {
     const raw2 = localStorage.getItem(STORAGE_KEY);
     // A cache that could not be written (or was evicted to make room for
@@ -1042,11 +1051,15 @@ export function saveTransport(state: TransportState) {
 }
 
 export function writeTransportLocalRaw(state: TransportState) {
-  if (typeof window === "undefined") return;
   const next: TransportState = { ...state, version: 2 };
   // Memory first, and unconditionally: this must survive a cache that cannot
   // hold the desk. writeCacheOrInvalidate never throws for a full disk.
   memoryTransportState = next;
+  // On the server the memory copy IS the desk: there is no cache to write,
+  // and returning early here (as this did until 2026-09-16) made
+  // `ensureTransportHydratedServer` a no-op that pulled the whole transport
+  // desk from Supabase and then threw it away.
+  if (typeof window === "undefined") return;
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
 }
 

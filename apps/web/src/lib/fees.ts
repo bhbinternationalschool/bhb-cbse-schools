@@ -209,6 +209,52 @@ export const TENDER_MODES: {
   },
 ];
 
+/**
+ * Today's money by how it was taken — one line per mode, biggest first.
+ *
+ * Gateway money gets its own line rather than being folded into UPI: a UPI
+ * paid into the school's own QR is not the same thing as a link the parent
+ * tapped, and the office reconciles them differently. `gatewayProvider` is
+ * the only thing that tells them apart — the mode of both is "upi".
+ *
+ * `totalPaise` is what the caller is showing as the day's collection. Any
+ * shortfall between the tenders and that total is named "Mode not
+ * recorded", so the parts always add up to the figure beside them: a
+ * receipt whose tenders were lost (the 2026-09-06 wipe did exactly that)
+ * still happened, and silently short parts would be the worse lie.
+ */
+export function collectionsByMode(
+  vouchers: CollectionVoucher[],
+  totalPaise: number,
+): { mode: string; label: string; paise: number }[] {
+  const totals = new Map<string, number>();
+  let tendered = 0;
+  for (const v of vouchers) {
+    for (const t of v.tenders ?? []) {
+      const amount = Number(t.amountPaise) || 0;
+      if (amount === 0) continue;
+      const key = t.gatewayProvider ? "online" : t.mode;
+      totals.set(key, (totals.get(key) ?? 0) + amount);
+      tendered += amount;
+    }
+  }
+  if (tendered < totalPaise) {
+    totals.set("unrecorded", (totals.get("unrecorded") ?? 0) + (totalPaise - tendered));
+  }
+  return [...totals.entries()]
+    .map(([mode, paise]) => ({
+      mode,
+      label:
+        mode === "online"
+          ? "Online (gateway)"
+          : mode === "unrecorded"
+            ? "Mode not recorded"
+            : (TENDER_MODES.find((m) => m.value === mode)?.label ?? mode),
+      paise,
+    }))
+    .sort((a, b) => b.paise - a.paise);
+}
+
 export function tenderModeLabel(mode: TenderMode): string {
   return TENDER_MODES.find((m) => m.value === mode)?.label ?? mode;
 }

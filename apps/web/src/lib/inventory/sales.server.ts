@@ -860,6 +860,47 @@ export async function storeDuesForStudents(
   }));
 }
 
+/**
+ * What the whole school still owes the store, in one row.
+ *
+ * The dashboards and the parent bot quote this ALONGSIDE the fee dues,
+ * never added into them: a store slip is settled through `collectOnSale`
+ * with the fee receipt as its reference, and nothing outside the fee
+ * counter can do that yet. Quoting it inside the fee total — or inside a
+ * pay link — would take the parent's money and leave the slip open.
+ *
+ * Read live, like `storeDuesForStudents`, and for the same reason: the fee
+ * desk rebuilds its own tables wholesale and would delete a mirrored copy.
+ */
+export async function storeDuesSummary(): Promise<{
+  balancePaise: number;
+  saleCount: number;
+  studentCount: number;
+}> {
+  const { sb, tenantId } = await invCtx();
+  const { data, error } = await sb
+    .from("inv_sales")
+    .select("student_id, balance_paise")
+    .eq("tenant_id", tenantId)
+    .in("status", ["open", "part_paid"])
+    .gt("balance_paise", 0);
+  if (error) throw new InvError(`Store dues summary: ${error.message}`, 500);
+
+  const rows = (data ?? []) as Row[];
+  const students = new Set<string>();
+  let balancePaise = 0;
+  for (const r of rows) {
+    balancePaise += int(r.balance_paise);
+    const sid = str(r.student_id);
+    if (sid) students.add(sid);
+  }
+  return {
+    balancePaise,
+    saleCount: rows.length,
+    studentCount: students.size,
+  };
+}
+
 /* ─── What a student already bought ────────────────────────── */
 
 export type InvStudentPurchase = {

@@ -53,6 +53,24 @@ async function ledgerPost<T>(body: Record<string, unknown>): Promise<T | null> {
   }
 }
 
+type MonthlyCashRow = {
+  month: string;
+  label: string;
+  inPaise: number;
+  outPaise: number;
+  netPaise: number;
+};
+
+/** Money in and money out, month by month, from the server book. */
+async function monthlyCash(from: string, to: string): Promise<MonthlyCashRow[]> {
+  const res = await ledgerPost<{ ok: boolean; rows?: MonthlyCashRow[] }>({
+    action: "monthly-cash",
+    from,
+    to,
+  });
+  return res?.ok ? (res.rows ?? []) : [];
+}
+
 export async function patchAccountsDashWithServerBook(
   model: ModuleDashboardModel,
 ): Promise<ModuleDashboardModel | null> {
@@ -60,13 +78,14 @@ export async function patchAccountsDashWithServerBook(
   // "position" is the cockpit without its controls: the same balances in a
   // fraction of the time. The controls run over every voucher and took several
   // seconds, during which the dashboard showed browser-book figures.
-  const [cockpit, rp] = await Promise.all([
+  const [cockpit, rp, months] = await Promise.all([
     ledgerPost<Position>({ action: "position", asOf: today, fyFrom: fyStart() }),
     ledgerPost<{ ok: boolean; report?: { totalReceiptsPaise: number } }>({
       action: "receipts-payments",
       from: today,
       to: today,
     }),
+    monthlyCash(fyStart(), today),
   ]);
   if (!cockpit?.ok) {
     // The server book could not be read. The base model already leaves the
@@ -120,6 +139,54 @@ export async function patchAccountsDashWithServerBook(
       : { ...row, balance: formatInr(paise) };
   });
 
+  // Month by month, in rupees. Money in and money out get a chart each
+  // rather than one netted line: a month that took ₹4L and spent ₹3.9L is
+  // not the same month as one that took ₹10,000 and spent nothing, and a
+  // net-only bar hides exactly that. The table under them carries both
+  // sides and the net, so the figure can be checked against the Receipts &
+  // Payments statement for the same month.
+  const monthRows = months ?? [];
+  const extraCharts = [...(model.extraCharts ?? [])];
+  const extraTables = [...(model.extraTables ?? [])];
+  if (monthRows.length > 0) {
+    extraCharts.push({
+      title: "Money in, month by month (₹)",
+      series: monthRows.map((m) => ({
+        label: m.label,
+        value: Math.round(m.inPaise / 100),
+        date: `${m.month}-01`,
+        color: "#15803d",
+      })),
+      defaultView: "trend",
+    });
+    extraCharts.push({
+      title: "Money out, month by month (₹)",
+      series: monthRows.map((m) => ({
+        label: m.label,
+        value: Math.round(m.outPaise / 100),
+        date: `${m.month}-01`,
+        color: "#b91c1c",
+      })),
+      defaultView: "trend",
+    });
+    extraTables.push({
+      title: "Month by month — server book",
+      columns: [
+        { key: "month", label: "Month" },
+        { key: "moneyIn", label: "Money in", align: "right" },
+        { key: "moneyOut", label: "Money out", align: "right" },
+        { key: "net", label: "Net", align: "right" },
+      ],
+      rows: monthRows.map((m) => ({
+        id: m.month,
+        month: m.label,
+        moneyIn: formatInr(m.inPaise),
+        moneyOut: formatInr(m.outPaise),
+        net: formatInr(m.netPaise),
+      })),
+    });
+  }
+
   return {
     ...model,
     tableRows,
@@ -127,5 +194,7 @@ export async function patchAccountsDashWithServerBook(
       "Cash, banks, payables and today’s money — read from the server book (same figures as the Server book tab).",
     chartTitle: "Fee counter collections — last 7 days (₹)",
     kpis,
+    extraCharts,
+    extraTables,
   };
 }

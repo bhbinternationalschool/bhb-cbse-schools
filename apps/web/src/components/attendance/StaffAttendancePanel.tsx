@@ -14,6 +14,7 @@ import {
   applyApprovedLeaveToMarks,
   defaultStaffMarks,
   findStaffRegister,
+  attendanceExemptStaffIds,
   loadStaffAttendance,
   normalizeAttendanceSettings,
   nowHhmm,
@@ -32,6 +33,7 @@ import {
   ruleForStaff,
 } from "@/lib/staffAttendanceRules";
 import { loadMasters, type MastersState } from "@/lib/masters";
+import { loadRbac } from "@/lib/rbac";
 import { classifyStaffHolidayDay } from "@/lib/holidayPolicy";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
@@ -70,6 +72,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [streamFilter, setStreamFilter] = useState<"all" | "teaching" | "non_teaching">("all");
   const [tick, setTick] = useState(0);
   const [tab, setTab] = useState<AttTab>("manage");
 
@@ -108,12 +111,29 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     })();
   }, []);
 
+  // Who keeps no attendance: the owner, and anyone the office has said so
+  // of. They are left OFF the register rather than marked absent — a
+  // director who never punches used to read as a daily absentee, which made
+  // "absent today" mean nothing.
+  const exemptIds = useMemo(() => {
+    if (!masters) return new Set<string>();
+    const rbac = loadRbac();
+    return attendanceExemptStaffIds(settings, {
+      roles: rbac.roles.map((r) => ({ id: r.id, code: r.code })),
+      assignments: rbac.assignments.map((a) => ({
+        staffId: a.staffId,
+        roleId: a.roleId,
+        isPrimary: a.isPrimary,
+      })),
+    });
+  }, [masters, settings]);
+
   const roster = useMemo(() => {
     if (!masters) return [];
     return (masters.staff ?? [])
-      .filter((s) => s.status === "active")
+      .filter((s) => s.status === "active" && !exemptIds.has(s.id))
       .sort((a, b) => a.empCode.localeCompare(b.empCode));
-  }, [masters]);
+  }, [masters, exemptIds]);
 
   const selfStaff = useMemo(() => {
     if (!masters) return null;
@@ -204,8 +224,16 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return roster;
-    return roster.filter((s) => {
+    const byStream =
+      streamFilter === "all"
+        ? roster
+        : roster.filter((s) =>
+            streamFilter === "non_teaching"
+              ? s.stream === "non_teaching"
+              : s.stream !== "non_teaching",
+          );
+    if (!q) return byStream;
+    return byStream.filter((s) => {
       const des = masters?.designations.find((d) => d.id === s.designationId);
       return [s.empCode, s.fullName, s.mobile, s.rfidNo, s.biometricId, des?.name]
         .filter(Boolean)
@@ -213,7 +241,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
         .toLowerCase()
         .includes(q);
     });
-  }, [roster, query, masters]);
+  }, [roster, query, masters, streamFilter]);
 
   // The register sorts by whatever the office is scanning for: the code it
   // reads off a card, the name it hears, the rule, or today's mark. The
@@ -783,6 +811,26 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
                   }
                 }}
               />
+            </label>
+            <label className="text-xs font-semibold text-[var(--muted)]">
+              Staff
+              <select
+                className="field mt-1 !py-2"
+                value={streamFilter}
+                onChange={(e) =>
+                  setStreamFilter(
+                    e.target.value as "all" | "teaching" | "non_teaching",
+                  )
+                }
+              >
+                <option value="all">All ({roster.length})</option>
+                <option value="teaching">
+                  Teaching ({roster.filter((x) => x.stream !== "non_teaching").length})
+                </option>
+                <option value="non_teaching">
+                  Non-teaching ({roster.filter((x) => x.stream === "non_teaching").length})
+                </option>
+              </select>
             </label>
             <button
               type="button"

@@ -104,8 +104,22 @@ function id(prefix: string) {
  */
 let adjustCache: { raw: string; rows: FeeAdjustment[] } | null = null;
 
+/**
+ * The server's copy of the posted adjustments.
+ *
+ * There is no localStorage on Cloud Run, so until 2026-09-16 every
+ * server-side reader saw no adjustments at all: a "stop future fees"
+ * decision did not stop anything the reminders quoted, and an ad-hoc charge
+ * was never asked for. Counter discounts survived only because PR #200
+ * reads those back off the receipt itself (`counterWaiversByDueKey`), which
+ * is exactly the hole this closes for the rest of them.
+ *
+ * Filled by `ensureFeeAdjustmentsHydratedServer` from module_local_state.
+ */
+let memoryAdjustments: FeeAdjustment[] | null = null;
+
 export function loadFeeAdjustments(): FeeAdjustment[] {
-  if (typeof window === "undefined") return [];
+  if (typeof window === "undefined") return memoryAdjustments ?? [];
   try {
     const raw = localStorage.getItem(ADJUST_KEY);
     if (!raw) return [];
@@ -129,7 +143,12 @@ export function saveFeeAdjustments(rows: FeeAdjustment[]) {
 
 /** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
 export function writeFeeAdjustmentsLocalRaw(state: { rows: FeeAdjustment[] }): void {
-  if (typeof window === "undefined") return;
+  const rows = Array.isArray(state.rows) ? state.rows.map(normalizeAdjustment) : [];
+  // The server keeps the rows in memory; the browser keeps its cache.
+  if (typeof window === "undefined") {
+    memoryAdjustments = rows;
+    return;
+  }
   try {
     writeCacheOrInvalidate(ADJUST_KEY, JSON.stringify(state.rows));
   } catch {
