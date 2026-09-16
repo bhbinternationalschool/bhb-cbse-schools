@@ -333,6 +333,12 @@ export function buildTutorSystemPrompt(
   ctx: TutorContext,
   schoolName: string,
   language: TutorLanguage = "auto",
+  /**
+   * The child's NCERT chapter list (tutorSyllabus.ts), built on the server
+   * from the DIKSHA index. A separate argument, never part of ctx: the
+   * client supplies ctx, and must not be able to write the book list.
+   */
+  textbooks = "",
 ): string {
   const child = ctx.childName || "the child";
   const cls = ctx.className || "their class";
@@ -380,7 +386,7 @@ export function buildTutorSystemPrompt(
       "Build exam preparation: the key points to revise, a short day-wise plan if a date is given, likely question types with one example each, and common mistakes to avoid.",
     ],
   };
-  return [...common, ...byMode[mode], ...cleanCtx(ctx)].join("\n");
+  return [...common, ...(textbooks ? [textbooks] : []), ...byMode[mode], ...cleanCtx(ctx)].join("\n");
 }
 
 /** Token budget per mode — teaching needs room; a hint does not. */

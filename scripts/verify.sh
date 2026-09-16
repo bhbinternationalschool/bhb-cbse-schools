@@ -248,6 +248,7 @@ SELFTESTS=(
   test:school-whatsapp
   test:upload-validation
   test:parent-profile
+  test:tutor-syllabus
   test:drive-archive
   test:receipt-pdf
   test:fee-due-future
