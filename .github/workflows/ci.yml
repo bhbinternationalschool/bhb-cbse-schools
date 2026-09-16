@@ -343,6 +343,7 @@ jobs:
           npm run test:fee-due-future
           npm run test:ai-stream
           npm run test:tutor-plans
+          npm run test:diksha-index
           npm run test:staff-home-kind
           npm run test:mobile-features
           npm run test:cashfree-checkout

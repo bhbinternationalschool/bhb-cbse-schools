@@ -157,6 +157,14 @@ create_job "bhb-bigquery-nightly-sync" "0 2 * * *" \
   "${LITE_URL}/api/analytics/bigquery-sync/tick" \
   "Asia/Kolkata" "300s"
 
+# NCERT chapter index from DIKSHA (lib/dikshaIndex.server.ts). Weekly: DIKSHA
+# shows NCERT revising books through the term (a dozen republished in the first
+# half of September 2026), and only books whose publish date moved are fetched
+# again. Sunday night, on the lite service: a full rebuild reads ~26 MB.
+create_job "bhb-diksha-index-weekly" "30 3 * * 0" \
+  "${LITE_URL}/api/curriculum/diksha-index/tick" \
+  "Asia/Kolkata" "300s"
+
 # Birthday greetings: the tick sends once the IST clock passes the hour set in
 # Students → Birthdays (and auto-send is on); it is idempotent, so hourly is safe
 # and also retries quiet-hours deferrals.
