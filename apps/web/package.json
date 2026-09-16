@@ -98,6 +98,7 @@
     "test:due-pay-link": "npx tsx src/lib/duePayLink.selftest.ts",
     "test:fee-dues-server-inputs": "npx tsx src/lib/feeDuesServerInputs.selftest.ts",
     "test:fee-store-dues-line": "npx tsx src/lib/feeStoreDuesLine.selftest.ts",
+    "test:ledger-monthly-cash": "npx tsx src/lib/ledgerMonthlyCash.selftest.ts",
     "test:wa-parent-guide": "npx tsx src/lib/waParentGuide.selftest.ts",
     "test:fleet-keep-rule": "npx tsx src/lib/fleetKeepRule.selftest.ts",
     "test:server-work-tracker": "npx tsx src/lib/serverWorkTracker.selftest.ts",

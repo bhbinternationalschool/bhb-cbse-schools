@@ -492,3 +492,86 @@ export function trialBalanceToCsv(tb: TrialBalanceReport): string {
   );
   return rows.join("\n");
 }
+
+/* ─── Month by month, money in and money out ───────────────── */
+
+export type MonthlyCashRow = {
+  /** "2026-04" */
+  month: string;
+  /** "Apr 2026" */
+  label: string;
+  inPaise: number;
+  outPaise: number;
+  netPaise: number;
+};
+
+export type CashLeg = {
+  voucherId: string;
+  voucherDate: string;
+  /** The VOUCHER's cash total, repeated on each of its head rows. */
+  cashSignedPaise: number;
+};
+
+export function monthLabel(month: string): string {
+  const d = new Date(`${month}-01T00:00:00Z`);
+  return d.toLocaleDateString("en-IN", {
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+export function summariseMonthlyCash(input: {
+  from: string;
+  to: string;
+  legs: CashLeg[];
+  /** Reversals, and the vouchers they cancel. */
+  cancelledVoucherIds: Set<string>;
+}): MonthlyCashRow[] {
+  const perVoucher = new Map<string, { month: string; signedPaise: number }>();
+  for (const leg of input.legs) {
+    const month = (leg.voucherDate || "").slice(0, 7);
+    if (!month) continue;
+    // Rule 1 — a reversal and the entry it cancels are ONE correction, not
+    // two movements of money. Counted gross, April 2026 read ₹22.29 lakh in
+    // and ₹22.99 lakh out; what actually moved was ₹10.59 lakh and ₹12.82
+    // lakh. 162 of that month's cash vouchers were reversals.
+    if (input.cancelledVoucherIds.has(leg.voucherId)) continue;
+    // Rule 2 — one voucher, counted once. The cash figure is repeated on
+    // every head row, so a voucher split across three expense heads would
+    // otherwise be counted three times.
+    if (perVoucher.has(leg.voucherId)) continue;
+    perVoucher.set(leg.voucherId, {
+      month,
+      signedPaise: leg.cashSignedPaise,
+    });
+  }
+
+  const byMonth = new Map<string, { inPaise: number; outPaise: number }>();
+  for (const { month, signedPaise } of perVoucher.values()) {
+    const cur = byMonth.get(month) ?? { inPaise: 0, outPaise: 0 };
+    if (signedPaise >= 0) cur.inPaise += signedPaise;
+    else cur.outPaise += -signedPaise;
+    byMonth.set(month, cur);
+  }
+
+  // Every month in the range, including the empty ones: a month that saw no
+  // money is a fact worth seeing, and a missing row reads as "not entered
+  // yet".
+  const rows: MonthlyCashRow[] = [];
+  const cursor = new Date(`${input.from.slice(0, 7)}-01T00:00:00Z`);
+  const end = new Date(`${input.to.slice(0, 7)}-01T00:00:00Z`);
+  while (cursor <= end) {
+    const month = cursor.toISOString().slice(0, 7);
+    const hit = byMonth.get(month) ?? { inPaise: 0, outPaise: 0 };
+    rows.push({
+      month,
+      label: monthLabel(month),
+      inPaise: hit.inPaise,
+      outPaise: hit.outPaise,
+      netPaise: hit.inPaise - hit.outPaise,
+    });
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+  }
+  return rows;
+}

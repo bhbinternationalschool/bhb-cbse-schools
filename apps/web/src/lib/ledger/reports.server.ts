@@ -8,6 +8,8 @@
 import { getServerTenantContext } from "@/lib/serverTenant";
 import {
   buildBalanceSheet,
+  summariseMonthlyCash,
+  type MonthlyCashRow,
   buildIncomeExpenditure,
   buildReceiptsPayments,
   buildTrialBalance,
@@ -156,6 +158,78 @@ export async function receiptsPaymentsReport(input: { from: string; to: string }
       openingCashPaise,
       closingCashPaise,
       movements,
+    }),
+  };
+}
+
+/**
+ * Every voucher that is a reversal, and every voucher one reverses.
+ *
+ * Not scoped to the reporting window on purpose: an April receipt reversed
+ * in July is still a correction, and counting April's side of it as money
+ * received would overstate the month the office is looking at.
+ *
+ * A failed scan returns an empty set — the figures then read gross, which is
+ * what every caller saw before this existed, rather than failing the report.
+ */
+async function reversedVoucherIds(): Promise<Set<string>> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return new Set();
+  const { data, error } = await ctx.sb
+    .from("ledger_vouchers")
+    .select("id, reverses_voucher_id")
+    .eq("tenant_id", ctx.tenantId)
+    .not("reverses_voucher_id", "is", null);
+  if (error) {
+    console.warn("[ledger] reversal scan failed", error.message);
+    return new Set();
+  }
+  const out = new Set<string>();
+  for (const r of (data ?? []) as {
+    id: string;
+    reverses_voucher_id: string | null;
+  }[]) {
+    if (r.id) out.add(String(r.id));
+    if (r.reverses_voucher_id) out.add(String(r.reverses_voucher_id));
+  }
+  return out;
+}
+
+/**
+ * Money in and money out, month by month, from the server book.
+ *
+ * Built from the same `ledger_cash_movements` the Receipts & Payments
+ * statement uses, so a month here and that statement agree on what moved.
+ * One call for the whole year rather than twelve — and it is the CASH view:
+ * a fee billed but not collected is not money in, and a bill booked but not
+ * paid is not money out. That is the question this tile is asked ("what came
+ * in last month?"), which is why it does not read income & expenditure.
+ *
+ * The arithmetic — and the two rules that make it correct — is in reports.ts.
+ */
+export async function monthlyCashReport(input: {
+  from: string;
+  to: string;
+}): Promise<{ ok: boolean; rows: MonthlyCashRow[]; error?: string }> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, rows: [], error: "Supabase tenant not configured" };
+
+  const [movements, cancelledVoucherIds] = await Promise.all([
+    cashMovements(input),
+    reversedVoucherIds(),
+  ]);
+
+  return {
+    ok: true,
+    rows: summariseMonthlyCash({
+      from: input.from,
+      to: input.to,
+      legs: movements.map((m) => ({
+        voucherId: m.voucherId,
+        voucherDate: m.voucherDate,
+        cashSignedPaise: m.cashSignedPaise,
+      })),
+      cancelledVoucherIds,
     }),
   };
 }
