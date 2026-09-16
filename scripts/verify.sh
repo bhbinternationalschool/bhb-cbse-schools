@@ -217,6 +217,7 @@ SELFTESTS=(
   test:exam-schemes
   test:exam-report-templates
   test:exam-paper-question-types
+  test:exam-paper-print-layout
   test:exam-formula-catalog
   test:household-prefs
   test:item-analytics

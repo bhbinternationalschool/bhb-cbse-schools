@@ -4,6 +4,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { MastersState } from "@/lib/masters";
 import type { ExamTerm } from "@/lib/exams";
 import {
+  FONT_SCALES,
+  PAGE_SIZES,
+  PAPER_LANGUAGES,
+  PAPER_LAYOUTS,
+  fontScaleForClass,
+  languageForSubject,
+  resolveLanguage,
+  type ExamPaperPrintSettings,
+} from "@/lib/examPaperPrint";
+import {
   emptySubQuestion,
   SUB_QUESTION_TYPES,
   type ExamSubQuestion,
@@ -39,6 +49,7 @@ import {
   type ExamPaperQuestionType,
   type ExamPaperSection,
   type ExamPaperSet,
+  schoolHeaderDefaults,
 } from "@/lib/examPapers";
 import { loadTeaching, type SyllabusUnit } from "@/lib/teaching";
 import { BlueprintPanel } from "@/components/exams/BlueprintPanel";
@@ -85,6 +96,8 @@ export function ExamPapersPanel({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<ExamPaper | null>(null);
   const [printCount, setPrintCount] = useState(1);
+  const [headerConverting, setHeaderConverting] = useState(false);
+  const [headerConvertError, setHeaderConvertError] = useState("");
   const [showPreview, setShowPreview] = useState(false);
   const [aiHardness, setAiHardness] = useState<ExamPaperHardness>("mixed");
   const [aiLoading, setAiLoading] = useState(false);
@@ -237,6 +250,59 @@ export function ExamPapersPanel({
     saveExamPapers(r.state);
     setTick((t) => t + 1);
     onNotice(r.added ? `${r.added} question${r.added === 1 ? "" : "s"} added to the bank (${label})` : `Already in the bank (${label})`);
+  }
+
+  function updatePrint(patch: Partial<ExamPaperPrintSettings>) {
+    if (!draft) return;
+    updateDraft({ print: { ...draft.print, ...patch } });
+  }
+
+  /**
+   * Header + instructions + section titles in the paper's script, via the
+   * same Hinglish → Hindi / Sanskrit route the questions use. The school's
+   * English name and address are the inputs when no override exists yet.
+   */
+  async function convertHeaderTo(target: "hi" | "sa") {
+    if (!draft) return;
+    setHeaderConvertError("");
+    setHeaderConverting(true);
+    try {
+      const defaults = schoolHeaderDefaults();
+      const h = draft.print.header;
+      const sections = draft.sets.flatMap((st) => st.sections);
+      const texts = [
+        h.schoolName || defaults.schoolName,
+        h.address || defaults.address,
+        h.examName || draft.examName || labelExam(draft.examTermId),
+        h.title || draft.title,
+        draft.generalInstructions,
+        ...sections.flatMap((s) => [s.title, s.instructions]),
+      ];
+      const res = await fetch("/api/ai/transliterate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ texts, target }),
+      });
+      const body = (await res.json().catch(() => null)) as { texts?: string[]; generationId?: string; error?: string } | null;
+      if (!res.ok || !body?.texts) {
+        setHeaderConvertError(body?.error || `Could not convert (HTTP ${res.status})`);
+        return;
+      }
+      const out = body.texts;
+      let i = 0;
+      const header = { schoolName: out[i++]!, address: out[i++]!, examName: out[i++]!, title: out[i++]! };
+      const generalInstructions = out[i++]!;
+      const sets = draft.sets.map((st) => ({
+        ...st,
+        sections: st.sections.map((s) => ({ ...s, title: out[i++]!, instructions: out[i++]! })),
+      }));
+      updateDraft({ print: { ...draft.print, header, language: target }, generalInstructions, sets });
+      if (body.generationId) reportAiOutcome({ ids: [body.generationId], outcome: "accepted" });
+    } catch (e) {
+      setHeaderConvertError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setHeaderConverting(false);
+    }
   }
 
   function updateDraft(patch: Partial<ExamPaper>) {
@@ -676,6 +742,17 @@ export function ExamPapersPanel({
               }
             />
           </label>
+
+          <PrintLayoutCard
+            draft={draft}
+            canEdit={canEdit}
+            classLabel={labelClass(draft.classId)}
+            subjectLabel={labelSubject(draft.subjectId)}
+            onChange={updatePrint}
+            onConvertHeader={convertHeaderTo}
+            converting={headerConverting}
+            convertError={headerConvertError}
+          />
 
           <div className="mt-3 text-sm">
             <span className="mb-1 block text-[11px] text-[var(--muted)]">
@@ -2631,6 +2708,136 @@ function ImageLabelEditor({
           {labels.length} label{labels.length === 1 ? "" : "s"}. The paper prints the lines with the numbers and a blank list &ldquo;1. ____ 2. ____&rdquo; under the picture; put the answers in the answer key.
         </p>
       </div>
+    </div>
+  );
+}
+
+
+/* ─── Print layout ───────────────────────────────────────────────── */
+
+function PrintLayoutCard(props: {
+  draft: ExamPaper;
+  canEdit: boolean;
+  classLabel: string;
+  subjectLabel: string;
+  onChange: (patch: Partial<ExamPaperPrintSettings>) => void;
+  onConvertHeader: (target: "hi" | "sa") => void;
+  converting: boolean;
+  convertError: string;
+}) {
+  const { draft, canEdit, classLabel, subjectLabel, onChange, converting, convertError } = props;
+  const s = draft.print;
+  const lang = resolveLanguage(s, subjectLabel);
+  const autoLang = languageForSubject(subjectLabel);
+  const autoScale = fontScaleForClass(classLabel);
+  const layout = PAPER_LAYOUTS.find((l) => l.code === s.layout);
+  const scriptName = lang === "sa" ? "संस्कृतम्" : "हिंदी";
+  return (
+    <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-3 text-sm">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-[13px] font-bold text-[var(--brand-deep)]">Print layout</h3>
+        <p className="text-[11px] text-[var(--muted)]">
+          Bold is kept for the school name, exam name, section titles and question numbers; marks sit in brackets at the right; instructions are smaller.
+        </p>
+      </div>
+      <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <label className="block">
+          <span className="mb-1 block text-[11px] text-[var(--muted)]">Paper size</span>
+          <select className="field !py-1.5" disabled={!canEdit} value={s.pageSize} onChange={(e) => onChange({ pageSize: e.target.value as ExamPaperPrintSettings["pageSize"] })}>
+            {PAGE_SIZES.map((p) => (
+              <option key={p.code} value={p.code}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block lg:col-span-2">
+          <span className="mb-1 block text-[11px] text-[var(--muted)]">Layout</span>
+          <select className="field !py-1.5" disabled={!canEdit} value={s.layout} onChange={(e) => onChange({ layout: e.target.value as ExamPaperPrintSettings["layout"] })}>
+            {PAPER_LAYOUTS.map((l) => (
+              <option key={l.code} value={l.code}>
+                {l.label}
+              </option>
+            ))}
+          </select>
+          {layout ? <span className="mt-1 block text-[11px] text-[var(--muted)]">{layout.hint}</span> : null}
+        </label>
+        {s.layout === "booklet" ? (
+          <label className="block">
+            <span className="mb-1 block text-[11px] text-[var(--muted)]">Printer flips the sheet on</span>
+            <select className="field !py-1.5" disabled={!canEdit} value={s.duplexFlip} onChange={(e) => onChange({ duplexFlip: e.target.value as ExamPaperPrintSettings["duplexFlip"] })}>
+              <option value="short">Short edge (usual for landscape)</option>
+              <option value="long">Long edge</option>
+            </select>
+            <span className="mt-1 block text-[11px] text-[var(--muted)]">Wrong choice = back pages upside down. Test one sheet first.</span>
+          </label>
+        ) : null}
+        <label className="block">
+          <span className="mb-1 block text-[11px] text-[var(--muted)]">Type size</span>
+          <select className="field !py-1.5" disabled={!canEdit} value={s.fontScale} onChange={(e) => onChange({ fontScale: e.target.value as ExamPaperPrintSettings["fontScale"] })}>
+            {FONT_SCALES.map((f) => (
+              <option key={f.code} value={f.code}>
+                {f.code === "auto" ? `Auto by class → ${autoScale === "large" ? "Large" : autoScale === "normal" ? "Medium" : "Standard"} for ${classLabel}` : f.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-[11px] text-[var(--muted)]">Paper language</span>
+          <select className="field !py-1.5" disabled={!canEdit} value={s.language} onChange={(e) => onChange({ language: e.target.value as ExamPaperPrintSettings["language"] })}>
+            {PAPER_LANGUAGES.map((l) => (
+              <option key={l.code} value={l.code}>
+                {l.code === "auto" ? `Auto by subject → ${autoLang === "hi" ? "हिंदी" : autoLang === "sa" ? "संस्कृतम्" : "English"}` : l.label}
+              </option>
+            ))}
+          </select>
+          <span className="mt-1 block text-[11px] text-[var(--muted)]">Labels (Class, Subject, Max marks, Section, Column A/B…) and the subject name follow it.</span>
+        </label>
+      </div>
+
+      {lang !== "en" ? (
+        <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[12px] font-semibold text-[var(--brand-deep)]">Header in {scriptName}</p>
+            {canEdit ? (
+              <button
+                type="button"
+                className="btn-accent !py-1 text-[12px]"
+                disabled={converting}
+                onClick={() => props.onConvertHeader(lang)}
+                title="School name, address, exam name, paper title, general instructions and section titles → this script (AI). Edit the result below."
+              >
+                {converting ? "Converting…" : `Convert header & instructions → ${scriptName}`}
+              </button>
+            ) : null}
+          </div>
+          {convertError ? <p className="mt-1 text-[11px] text-[var(--danger)]">{convertError}</p> : null}
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            {(
+              [
+                ["schoolName", "School name", schoolHeaderDefaults().schoolName],
+                ["address", "Address line", schoolHeaderDefaults().address],
+                ["examName", "Exam name", draft.examName],
+                ["title", "Paper title", draft.title],
+              ] as const
+            ).map(([k, label, fallback]) => (
+              <label key={k} className="block">
+                <span className="mb-1 block text-[11px] text-[var(--muted)]">{label}</span>
+                <input
+                  className="field !py-1.5"
+                  disabled={!canEdit}
+                  value={s.header[k]}
+                  placeholder={fallback ? `Blank = ${fallback}` : "Blank = English default"}
+                  onChange={(e) => onChange({ header: { ...s.header, [k]: e.target.value } })}
+                />
+              </label>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] text-[var(--muted)]">
+            Affiliation number, school code, paper code and marks stay in figures. Question text converts per question with the Hinglish → {scriptName} button.
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 }
