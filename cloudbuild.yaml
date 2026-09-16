@@ -31,6 +31,16 @@ substitutions:
   # text); OpenAI stays as automatic fallback. Every deploy re-applies this
   # value, so changing it on the service alone is undone by the next build.
   _AI_PREFERRED_ENGINE: "gemini"
+  # The school's daily AI ceiling (lib/aiBudget.server.ts; code defaults are
+  # 3,000 calls and 2,000,000 tokens). Raised on 2026-09-16 by the director
+  # for the half-yearly exams (16–26 Sep), when every family is offered a
+  # free tutor day: one exam day was estimated at ~1,500 tutor questions and
+  # ~3.75M tokens, which the defaults would have cut off for the whole school
+  # — tutor, WhatsApp bot and staff AI alike. At Gemini 3.6 Flash prices a
+  # fully used 10M-token day is about $14 (≈₹1,200); spend is what is used,
+  # not the ceiling. Every deploy re-applies these, so change them here.
+  _AI_DAILY_CALLS_PER_TENANT: "10000"
+  _AI_DAILY_TOKENS_PER_TENANT: "10000000"
   _GOOGLE_OAUTH_CLIENT_ID: ""
   _PROTECTED_SUPER_ADMIN_EMAILS: "director@bhbinternational.school,ashishsingh80@gmail.com,ashu.dube21@gmail.com"
   # VAPID public key — not secret (it's meant to ship in the client bundle),
@@ -154,7 +164,7 @@ steps:
       # which Cloud Run refuses once a var is secret-backed — "Cannot update
       # environment variable [...] because it has already been set with a
       # different type." They now go through --set-secrets below instead.
-      - --set-env-vars=^|^NEXT_PUBLIC_APP_URL=${_NEXT_PUBLIC_APP_URL}|NEXT_PUBLIC_DEMO_AUTH=${_NEXT_PUBLIC_DEMO_AUTH}|NEXT_PUBLIC_SUPABASE_URL=${_NEXT_PUBLIC_SUPABASE_URL}|NEXT_PUBLIC_SUPABASE_ANON_KEY=${_NEXT_PUBLIC_SUPABASE_ANON_KEY}|NEXT_PUBLIC_SCHOOL_NAME=BHB International School|NEXT_PUBLIC_TENANT_SLUG=bhb-international|NODE_ENV=production|WHATSAPP_PHONE_ID=${_WHATSAPP_PHONE_ID}|WHATSAPP_WABA_ID=${_WHATSAPP_WABA_ID}|WHATSAPP_DEFAULT_COUNTRY_CODE=${_WHATSAPP_DEFAULT_COUNTRY_CODE}|WHATSAPP_GRAPH_VERSION=${_WHATSAPP_GRAPH_VERSION}|AI_TUTOR_MODEL=${_AI_TUTOR_MODEL}|AI_PREFERRED_ENGINE=${_AI_PREFERRED_ENGINE}|GOOGLE_OAUTH_CLIENT_ID=${_GOOGLE_OAUTH_CLIENT_ID}|PROTECTED_SUPER_ADMIN_EMAILS=${_PROTECTED_SUPER_ADMIN_EMAILS}|NEXT_PUBLIC_VAPID_PUBLIC_KEY=${_NEXT_PUBLIC_VAPID_PUBLIC_KEY}|VAPID_PUBLIC_KEY=${_NEXT_PUBLIC_VAPID_PUBLIC_KEY}|FLEET_EDGE_ALLOWED_IPS=${_FLEET_EDGE_ALLOWED_IPS}|FLEET_EDGE_SOS_NOTIFY_MOBILE=${_FLEET_EDGE_SOS_NOTIFY_MOBILE}|FEE_INTEGRITY_NOTIFY_MOBILE=${_FEE_INTEGRITY_NOTIFY_MOBILE}|NEXT_PUBLIC_PAYMENT_GATEWAY=${_NEXT_PUBLIC_PAYMENT_GATEWAY}|CASHFREE_APP_ID=${_CASHFREE_APP_ID}|CASHFREE_ENV=${_CASHFREE_ENV}|REVIEW_LOGIN_MOBILE=${_REVIEW_LOGIN_MOBILE}|REVIEW_LOGIN_CODE=${_REVIEW_LOGIN_CODE}|REVIEW_LOGIN_HOUSEHOLD_ID=${_REVIEW_LOGIN_HOUSEHOLD_ID}
+      - --set-env-vars=^|^NEXT_PUBLIC_APP_URL=${_NEXT_PUBLIC_APP_URL}|NEXT_PUBLIC_DEMO_AUTH=${_NEXT_PUBLIC_DEMO_AUTH}|NEXT_PUBLIC_SUPABASE_URL=${_NEXT_PUBLIC_SUPABASE_URL}|NEXT_PUBLIC_SUPABASE_ANON_KEY=${_NEXT_PUBLIC_SUPABASE_ANON_KEY}|NEXT_PUBLIC_SCHOOL_NAME=BHB International School|NEXT_PUBLIC_TENANT_SLUG=bhb-international|NODE_ENV=production|WHATSAPP_PHONE_ID=${_WHATSAPP_PHONE_ID}|WHATSAPP_WABA_ID=${_WHATSAPP_WABA_ID}|WHATSAPP_DEFAULT_COUNTRY_CODE=${_WHATSAPP_DEFAULT_COUNTRY_CODE}|WHATSAPP_GRAPH_VERSION=${_WHATSAPP_GRAPH_VERSION}|AI_TUTOR_MODEL=${_AI_TUTOR_MODEL}|AI_PREFERRED_ENGINE=${_AI_PREFERRED_ENGINE}|AI_DAILY_CALLS_PER_TENANT=${_AI_DAILY_CALLS_PER_TENANT}|AI_DAILY_TOKENS_PER_TENANT=${_AI_DAILY_TOKENS_PER_TENANT}|GOOGLE_OAUTH_CLIENT_ID=${_GOOGLE_OAUTH_CLIENT_ID}|PROTECTED_SUPER_ADMIN_EMAILS=${_PROTECTED_SUPER_ADMIN_EMAILS}|NEXT_PUBLIC_VAPID_PUBLIC_KEY=${_NEXT_PUBLIC_VAPID_PUBLIC_KEY}|VAPID_PUBLIC_KEY=${_NEXT_PUBLIC_VAPID_PUBLIC_KEY}|FLEET_EDGE_ALLOWED_IPS=${_FLEET_EDGE_ALLOWED_IPS}|FLEET_EDGE_SOS_NOTIFY_MOBILE=${_FLEET_EDGE_SOS_NOTIFY_MOBILE}|FEE_INTEGRITY_NOTIFY_MOBILE=${_FEE_INTEGRITY_NOTIFY_MOBILE}|NEXT_PUBLIC_PAYMENT_GATEWAY=${_NEXT_PUBLIC_PAYMENT_GATEWAY}|CASHFREE_APP_ID=${_CASHFREE_APP_ID}|CASHFREE_ENV=${_CASHFREE_ENV}|REVIEW_LOGIN_MOBILE=${_REVIEW_LOGIN_MOBILE}|REVIEW_LOGIN_CODE=${_REVIEW_LOGIN_CODE}|REVIEW_LOGIN_HOUSEHOLD_ID=${_REVIEW_LOGIN_HOUSEHOLD_ID}
       - --set-secrets=^|^SUPABASE_SERVICE_ROLE_KEY=school-erp-supabase-service-role-key:latest|CRON_SECRET=school-erp-cron-secret:latest|WA_DISPATCH_SECRET=school-erp-wa-dispatch-secret:latest|MIRROR_SYNC_SECRET=school-erp-mirror-sync-secret:latest|WHATSAPP_TOKEN=school-erp-whatsapp-token:latest|WHATSAPP_VERIFY_TOKEN=school-erp-whatsapp-verify-token:latest|GOOGLE_MAPS_API_KEY=school-erp-google-maps-api-key:latest|GEMINI_API_KEY=school-erp-gemini-api-key:latest|OPENAI_API_KEY=school-erp-openai-api-key:latest|GOOGLE_OAUTH_CLIENT_SECRET=school-erp-google-oauth-client-secret:latest|DIRECT_URL=school-erp-direct-url:latest|VAPID_PRIVATE_KEY=school-erp-vapid-private-key:latest|WA_APP_SECRET=school-erp-wa-app-secret:latest|SARVAM_API_KEY=school-erp-sarvam-api-key:latest|GMAIL_SA_KEY_JSON=school-erp-gmail-sa-key:latest|CASHFREE_SECRET_KEY=school-erp-cashfree-secret-key:latest|GOOGLE_CALENDAR_API_KEY=school-erp-google-calendar-key:latest|YOUTUBE_API_KEY=school-erp-youtube-api-key:latest
 
   # Desk-cutover runtime flags. Applied as an additive env update from the
