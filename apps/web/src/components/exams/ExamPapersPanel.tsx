@@ -4,6 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import type { MastersState } from "@/lib/masters";
 import type { ExamTerm } from "@/lib/exams";
 import {
+  ASSERTION_REASON_OPTIONS,
+  defaultsForType,
+  questionTotalMarks,
   FORMULA_PALETTE,
   HARDNESS_LEVELS,
   PRIMARY_ICON_BANK,
@@ -1258,14 +1261,13 @@ function QuestionEditor(props: {
           disabled={!canEdit}
           value={q.type}
           onChange={(e) =>
-            props.onChange({
-              type: e.target.value as ExamPaperQuestionType,
-            })
+            props.onChange(defaultsForType(e.target.value as ExamPaperQuestionType, q))
           }
+          title={QUESTION_TYPES.find((t) => t.code === q.type)?.label}
         >
           {QUESTION_TYPES.map((t) => (
             <option key={t.code} value={t.code}>
-              {t.short}
+              {t.label}
             </option>
           ))}
         </select>
@@ -1274,8 +1276,9 @@ function QuestionEditor(props: {
           <input
             type="number"
             className="field !w-16 !py-1"
-            disabled={!canEdit}
-            value={q.marks}
+            disabled={!canEdit || q.subQuestions.length > 0}
+            value={q.subQuestions.length > 0 ? questionTotalMarks(q) : q.marks}
+            title={q.subQuestions.length > 0 ? "Sum of the sub-questions" : ""}
             onChange={(e) =>
               props.onChange({ marks: Math.max(0, Number(e.target.value) || 0) })
             }
@@ -1327,32 +1330,31 @@ function QuestionEditor(props: {
         ) : null}
       </div>
 
-      <textarea
-        className="field mt-2 min-h-[64px] !py-1.5 text-sm"
-        disabled={!canEdit}
-        placeholder="Type the question…"
-        value={q.text}
-        onChange={(e) => props.onChange({ text: e.target.value })}
-      />
+      {q.type === "assertion_reason" ? (
+        <AssertionReasonFields q={q} canEdit={canEdit} onChange={props.onChange} />
+      ) : (
+        <textarea
+          className="field mt-2 min-h-[64px] !py-1.5 text-sm"
+          disabled={!canEdit}
+          placeholder={
+            q.type === "case_study"
+              ? "Passage / data / source the sub-questions are based on…"
+              : q.type === "fill"
+                ? "Type the sentence with ___ where the blank goes…"
+                : q.type === "match"
+                  ? "Instruction line, e.g. Match the items in Column A with Column B"
+                  : q.type === "diagram"
+                    ? "Instruction, e.g. Label the parts of the flower shown"
+                    : q.type === "primary_picture"
+                      ? "One short line for the child, e.g. Circle the fruits"
+                      : "Type the question…"
+          }
+          value={q.text}
+          onChange={(e) => props.onChange({ text: e.target.value })}
+        />
+      )}
 
-      {q.type === "mcq" ? (
-        <div className="mt-2 space-y-1">
-          {(q.options.length ? q.options : ["", "", "", ""]).map((opt, i) => (
-            <input
-              key={i}
-              className="field !py-1 text-xs"
-              disabled={!canEdit}
-              placeholder={`Option ${String.fromCharCode(97 + i)}`}
-              value={opt}
-              onChange={(e) => {
-                const options = [...(q.options.length ? q.options : ["", "", "", ""])];
-                options[i] = e.target.value;
-                props.onChange({ options });
-              }}
-            />
-          ))}
-        </div>
-      ) : null}
+      <QuestionTypeFields q={q} canEdit={canEdit} onChange={props.onChange} />
 
       {q.formulas.length ? (
         <ul className="mt-2 space-y-1 font-mono text-xs text-[var(--brand-deep)]">
@@ -1467,12 +1469,34 @@ function QuestionEditor(props: {
               }}
             />
           </label>
-          <input
-            className="field !inline-block !w-40 !py-0.5 text-[11px]"
-            placeholder="Answer key (teacher)"
-            value={q.answerKey}
-            onChange={(e) => props.onChange({ answerKey: e.target.value })}
-          />
+          {q.type !== "mcq" && q.type !== "assertion_reason" && q.type !== "true_false" && q.type !== "match" ? (
+            <input
+              className="field !inline-block !w-48 !py-0.5 text-[11px]"
+              placeholder={
+                q.type === "fill"
+                  ? "Blank answers, in order (comma-separated)"
+                  : q.type === "numerical"
+                    ? "Final answer with unit"
+                    : "Answer key (teacher)"
+              }
+              value={q.answerKey}
+              onChange={(e) => props.onChange({ answerKey: e.target.value })}
+            />
+          ) : null}
+          {q.answerLines > 0 || defaultAnswerLinesFor(q.type) > 0 ? (
+            <label className="inline-flex items-center gap-1 text-[11px]">
+              Answer lines
+              <input
+                type="number"
+                min={0}
+                max={40}
+                className="field !w-14 !py-0.5 text-[11px]"
+                value={q.answerLines}
+                onChange={(e) => props.onChange({ answerLines: Math.max(0, Math.min(40, Number(e.target.value) || 0)) })}
+                title="Ruled lines printed under the question on the student copy"
+              />
+            </label>
+          ) : null}
         </div>
       ) : null}
 
@@ -1588,4 +1612,292 @@ function QuestionEditor(props: {
       ) : null}
     </li>
   );
+}
+
+
+function defaultAnswerLinesFor(type: ExamPaperQuestionType): number {
+  return type === "short" || type === "long" || type === "numerical" || type === "competency" || type === "diagram" ? 1 : 0;
+}
+
+/** Assertion (A) and Reason (R) as two fields, stored in `text` the way the
+ * board writes it; the four CBSE choices follow, with the correct one picked. */
+function AssertionReasonFields({
+  q,
+  canEdit,
+  onChange,
+}: {
+  q: ExamPaperQuestion;
+  canEdit: boolean;
+  onChange: (patch: Partial<ExamPaperQuestion>) => void;
+}) {
+  const m = /Assertion \(A\):\s*([\s\S]*?)\n?Reason \(R\):\s*([\s\S]*)$/.exec(q.text);
+  const assertion = m ? m[1]!.trim() : q.text;
+  const reason = m ? m[2]!.trim() : "";
+  const write = (a: string, r: string) => onChange({ text: `Assertion (A): ${a}\nReason (R): ${r}` });
+  return (
+    <div className="mt-2 space-y-1">
+      <textarea
+        className="field min-h-[40px] !py-1.5 text-sm"
+        disabled={!canEdit}
+        placeholder="Assertion (A)…"
+        value={assertion}
+        onChange={(e) => write(e.target.value, reason)}
+      />
+      <textarea
+        className="field min-h-[40px] !py-1.5 text-sm"
+        disabled={!canEdit}
+        placeholder="Reason (R)…"
+        value={reason}
+        onChange={(e) => write(assertion, e.target.value)}
+      />
+    </div>
+  );
+}
+
+/** The fields each question type needs beyond its text. */
+function QuestionTypeFields({
+  q,
+  canEdit,
+  onChange,
+}: {
+  q: ExamPaperQuestion;
+  canEdit: boolean;
+  onChange: (patch: Partial<ExamPaperQuestion>) => void;
+}) {
+  const optionRows = (labelFor: (i: number) => string, pickCorrect: boolean, min = 2, max = 6) => (
+    <div className="mt-2 space-y-1">
+      {q.options.map((opt, i) => (
+        <div key={i} className="flex items-center gap-2">
+          {pickCorrect ? (
+            <input
+              type="radio"
+              name={`correct-${q.id}`}
+              checked={!!opt && q.answerKey === opt}
+              disabled={!canEdit || !opt}
+              onChange={() => onChange({ answerKey: opt })}
+              title="Correct option"
+              aria-label={`Option ${labelFor(i)} is correct`}
+            />
+          ) : null}
+          <input
+            className="field !py-1 text-xs"
+            disabled={!canEdit}
+            placeholder={`Option ${labelFor(i)}`}
+            value={opt}
+            onChange={(e) => {
+              const options = [...q.options];
+              const wasKey = q.answerKey === opt && !!opt;
+              options[i] = e.target.value;
+              onChange({ options, ...(wasKey ? { answerKey: e.target.value } : {}) });
+            }}
+          />
+          {canEdit && q.options.length > min ? (
+            <button
+              type="button"
+              className="text-xs text-[var(--danger)]"
+              onClick={() => onChange({ options: q.options.filter((_, j) => j !== i) })}
+              aria-label={`Remove option ${labelFor(i)}`}
+            >
+              ×
+            </button>
+          ) : null}
+        </div>
+      ))}
+      {canEdit && q.options.length < max ? (
+        <button
+          type="button"
+          className="text-[11px] font-semibold text-[var(--muted)] underline"
+          onClick={() => onChange({ options: [...q.options, ""] })}
+        >
+          + option
+        </button>
+      ) : null}
+      {pickCorrect ? (
+        <p className="text-[10px] text-[var(--muted)]">
+          {q.answerKey ? `Correct: ${q.answerKey}` : "Tick the correct option"}
+        </p>
+      ) : null}
+    </div>
+  );
+
+  switch (q.type) {
+    case "mcq":
+      return optionRows((i) => String.fromCharCode(97 + i), true);
+    case "assertion_reason":
+      return (
+        <div>
+          {optionRows((i) => String.fromCharCode(97 + i), true, 4, 4)}
+          {canEdit && q.options.join("|") !== ASSERTION_REASON_OPTIONS.join("|") ? (
+            <button
+              type="button"
+              className="mt-1 text-[11px] font-semibold text-[var(--muted)] underline"
+              onClick={() => onChange({ options: ASSERTION_REASON_OPTIONS })}
+            >
+              Reset to the four CBSE choices
+            </button>
+          ) : null}
+        </div>
+      );
+    case "true_false":
+      return (
+        <div className="mt-2 flex items-center gap-4 text-xs">
+          <span className="text-[var(--muted)]">Correct answer:</span>
+          {(["True", "False"] as const).map((v) => (
+            <label key={v} className="inline-flex items-center gap-1">
+              <input
+                type="radio"
+                name={`tf-${q.id}`}
+                disabled={!canEdit}
+                checked={q.answerKey === v}
+                onChange={() => onChange({ answerKey: v })}
+              />
+              {v}
+            </label>
+          ))}
+        </div>
+      );
+    case "fill":
+      return (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+          {canEdit ? (
+            <button
+              type="button"
+              className="rounded border border-[var(--border)] px-2 py-0.5 text-[11px] font-semibold"
+              onClick={() => onChange({ text: `${q.text}${q.text.endsWith(" ") || !q.text ? "" : " "}___ ` })}
+            >
+              Insert blank ___
+            </button>
+          ) : null}
+          <span className="text-[var(--muted)]">
+            {(q.text.match(/___/g) ?? []).length} blank{(q.text.match(/___/g) ?? []).length === 1 ? "" : "s"}
+          </span>
+          <input
+            className="field !inline-block !w-64 !py-0.5 text-[11px]"
+            disabled={!canEdit}
+            placeholder="Word bank (optional, comma-separated)"
+            value={q.options.join(", ")}
+            onChange={(e) => onChange({ options: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) })}
+          />
+        </div>
+      );
+    case "match":
+      return (
+        <div className="mt-2 space-y-1">
+          <div className="grid grid-cols-[1.5rem_1fr_1fr_auto] gap-2 text-[10px] uppercase tracking-wide text-[var(--muted)]">
+            <span />
+            <span>Column A</span>
+            <span>Column B (matching)</span>
+            <span />
+          </div>
+          {q.pairs.map((pair, i) => (
+            <div key={i} className="grid grid-cols-[1.5rem_1fr_1fr_auto] items-center gap-2">
+              <span className="text-xs text-[var(--muted)]">{i + 1}.</span>
+              <input
+                className="field !py-1 text-xs"
+                disabled={!canEdit}
+                value={pair.left}
+                placeholder="Item"
+                onChange={(e) => onChange({ pairs: q.pairs.map((x, j) => (j === i ? { ...x, left: e.target.value } : x)) })}
+                aria-label={`Pair ${i + 1} column A`}
+              />
+              <input
+                className="field !py-1 text-xs"
+                disabled={!canEdit}
+                value={pair.right}
+                placeholder="Its match"
+                onChange={(e) => onChange({ pairs: q.pairs.map((x, j) => (j === i ? { ...x, right: e.target.value } : x)) })}
+                aria-label={`Pair ${i + 1} column B`}
+              />
+              {canEdit && q.pairs.length > 2 ? (
+                <button type="button" className="text-xs text-[var(--danger)]" onClick={() => onChange({ pairs: q.pairs.filter((_, j) => j !== i) })} aria-label={`Remove pair ${i + 1}`}>
+                  ×
+                </button>
+              ) : (
+                <span />
+              )}
+            </div>
+          ))}
+          {canEdit && q.pairs.length < 8 ? (
+            <button type="button" className="text-[11px] font-semibold text-[var(--muted)] underline" onClick={() => onChange({ pairs: [...q.pairs, { left: "", right: "" }] })}>
+              + pair
+            </button>
+          ) : null}
+          <p className="text-[10px] text-[var(--muted)]">Column B prints shuffled; the teacher copy shows the key (1-c, 2-a …).</p>
+        </div>
+      );
+    case "case_study":
+    case "competency":
+      return (
+        <div className="mt-2 space-y-1">
+          <p className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
+            Sub-questions {q.type === "competency" ? "(optional)" : ""}
+          </p>
+          {q.subQuestions.map((sq, i) => (
+            <div key={i} className="grid grid-cols-[2rem_1fr_4rem_auto] items-center gap-2">
+              <span className="text-xs text-[var(--muted)]">({String.fromCharCode(105 + Math.min(i, 8))})</span>
+              <input
+                className="field !py-1 text-xs"
+                disabled={!canEdit}
+                value={sq.text}
+                placeholder="Sub-question"
+                onChange={(e) => onChange({ subQuestions: q.subQuestions.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)) })}
+                aria-label={`Sub-question ${i + 1}`}
+              />
+              <input
+                type="number"
+                min={0}
+                className="field !py-1 text-xs"
+                disabled={!canEdit}
+                value={sq.marks}
+                onChange={(e) => onChange({ subQuestions: q.subQuestions.map((x, j) => (j === i ? { ...x, marks: Math.max(0, Number(e.target.value) || 0) } : x)) })}
+                aria-label={`Sub-question ${i + 1} marks`}
+              />
+              {canEdit ? (
+                <button type="button" className="text-xs text-[var(--danger)]" onClick={() => onChange({ subQuestions: q.subQuestions.filter((_, j) => j !== i) })} aria-label={`Remove sub-question ${i + 1}`}>
+                  ×
+                </button>
+              ) : (
+                <span />
+              )}
+            </div>
+          ))}
+          {canEdit && q.subQuestions.length < 8 ? (
+            <button type="button" className="text-[11px] font-semibold text-[var(--muted)] underline" onClick={() => onChange({ subQuestions: [...q.subQuestions, { text: "", marks: 1 }] })}>
+              + sub-question
+            </button>
+          ) : null}
+          {q.subQuestions.length > 0 ? (
+            <p className="text-[10px] text-[var(--muted)]">Total {questionTotalMarks(q)} marks — the sub-questions set the question&apos;s marks.</p>
+          ) : null}
+        </div>
+      );
+    case "diagram":
+      return (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-[var(--muted)]">Labels to mark:</span>
+          <input
+            className="field !inline-block !w-72 !py-0.5 text-[11px]"
+            disabled={!canEdit}
+            placeholder="e.g. Stamen, Pistil, Petal (comma-separated)"
+            value={q.options.join(", ")}
+            onChange={(e) => onChange({ options: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) })}
+          />
+          {q.images.length === 0 ? <span className="text-[10px] text-[var(--danger)]">Upload the picture below.</span> : null}
+        </div>
+      );
+    case "primary_picture":
+      return (
+        <p className="mt-2 text-[10px] text-[var(--muted)]">
+          Add a picture or icons below; keep the line short. {q.images.length === 0 && q.icons.length === 0 ? "No picture or icons yet." : ""}
+        </p>
+      );
+    case "numerical":
+      return (
+        <p className="mt-2 text-[10px] text-[var(--muted)]">
+          Put the final answer with its unit in the answer key and the step marks in the marking scheme.
+        </p>
+      );
+    default:
+      return null;
+  }
 }

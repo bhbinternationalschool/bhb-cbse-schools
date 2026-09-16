@@ -10,6 +10,7 @@ import {
 } from "@/lib/examPaperAi";
 import { generateExamPaperJson } from "@/lib/aiLlm.server";
 import {
+  defaultAnswerLines,
   emptyQuestion,
   emptySection,
   normalizeBloomLevel,
@@ -91,6 +92,9 @@ type LlmQuestion = {
   unitId?: string;
   bloomLevel?: string;
   markingScheme?: string[];
+  pairs?: { left?: string; right?: string }[];
+  subQuestions?: { text?: string; marks?: number }[];
+  answerLines?: number;
 };
 
 type LlmSection = {
@@ -154,6 +158,16 @@ function toQuestion(
     markingScheme: Array.isArray(q.markingScheme)
       ? q.markingScheme.map((m) => String(m ?? "").trim()).filter(Boolean).slice(0, 12)
       : [],
+    pairs: Array.isArray(q.pairs)
+      ? q.pairs.map((x) => ({ left: String(x?.left ?? "").trim(), right: String(x?.right ?? "").trim() })).slice(0, 8)
+      : [],
+    subQuestions: Array.isArray(q.subQuestions)
+      ? q.subQuestions
+          .map((x) => ({ text: String(x?.text ?? "").trim(), marks: Math.max(0, Number(x?.marks) || 0) }))
+          .filter((x) => x.text)
+          .slice(0, 8)
+      : [],
+    answerLines: typeof q.answerLines === "number" ? q.answerLines : defaultAnswerLines(type),
   });
 }
 
@@ -203,10 +217,14 @@ const FORMAT_RULES = [
   "Question types and how to write each:",
   "- mcq: 4 options, exactly one correct; answerKey is the option text.",
   "- assertion_reason: text = 'Assertion (A): … Reason (R): …'; options must be exactly the four CBSE choices: 'Both A and R are true and R is the correct explanation of A', 'Both A and R are true but R is not the correct explanation of A', 'A is true but R is false', 'A is false but R is true'; answerKey names the correct one.",
-  "- case_study: text = a short passage / data table / source (60–120 words, original, age-appropriate) followed by 3–4 numbered sub-questions on new lines, each with its own marks in brackets; marks = total; markingScheme lists one line per sub-question.",
+  "- case_study: text = a short passage / data table / source (60–120 words, original, age-appropriate); subQuestions = 3–4 items [{text, marks}] whose marks add up to marks; markingScheme lists one line per sub-question.",
+  "- match: pairs = 4–6 [{left, right}] Column A → Column B pairs (the paper prints Column B shuffled); text = the instruction line; answerKey may be left empty.",
+  "- fill: write the blank as ___ inside text; answerKey = the words for the blanks in order, separated by commas; options may hold a word bank.",
+  "- true_false: answerKey is exactly True or False.",
+  "- diagram: options = the labels the student must mark; primary_picture: keep text to one short line.",
+  "- short / long / numerical / competency: set answerLines (ruled lines on the student copy: short 3, long 8, numerical 5, competency 5).",
   "- competency: an application / HOTS item set in a real-life or unfamiliar context that requires using the concept, not recalling it; bloomLevel apply or above.",
   "- numerical: give the worked answer in answerKey and step marks in markingScheme so the total equals marks.",
-  "- short / long / fill / true_false / match / diagram / primary_picture: as usual for a school test.",
   "For every question also give: competencyCode (one of the LO codes listed for its unit, or \"\" if that unit has none — never invent a code), unitId (the unitId it is drawn from, \"\" if whole-subject), bloomLevel (remember|understand|apply|analyse|evaluate|create), markingScheme (array of strings; step-wise value points for the teacher copy — required for anything above 1 mark).",
 ];
 
@@ -225,7 +243,7 @@ function buildDraftPrompt(opts: {
   const system = [
     "You are an experienced Indian CBSE school teacher drafting an exam question paper that follows the board's competency-based assessment pattern.",
     "Output JSON only with shape:",
-    '{"sections":[{"title":"Section A","instructions":"...","questions":[{"type":"mcq|short|long|fill|true_false|match|numerical|diagram|primary_picture|case_study|assertion_reason|competency","text":"...","marks":2,"options":["A","B"],"answerKey":"teacher key","hardness":"easy|medium|hard","competencyCode":"","unitId":"","bloomLevel":"apply","markingScheme":["step 1 — 1 mark","step 2 — 1 mark"]}]}],"explanation":["brief note"]}',
+    '{"sections":[{"title":"Section A","instructions":"...","questions":[{"type":"mcq|short|long|fill|true_false|match|numerical|diagram|primary_picture|case_study|assertion_reason|competency","text":"...","marks":2,"options":["A","B"],"answerKey":"teacher key","hardness":"easy|medium|hard","competencyCode":"","unitId":"","bloomLevel":"apply","markingScheme":["step 1 — 1 mark","step 2 — 1 mark"],"pairs":[],"subQuestions":[],"answerLines":0}]}],"explanation":["brief note"]}',
     ...FORMAT_RULES,
     "Use age-appropriate language for the class. answerKey and markingScheme are for the teacher only.",
     "The marks of all questions MUST add up to exactly maxMarks — before answering, total your marks and add or resize questions until they do; a paper that is short of maxMarks is unusable. Sections in the usual CBSE order: objective (mcq / assertion_reason / fill / true_false) first, then short, then long / case_study / competency.",
@@ -395,7 +413,7 @@ export async function suggestMoreQuestionsLlm(input: {
   const wantType = input.type && VALID_TYPES.has(input.type) ? input.type : null;
   const system = [
     "You are a CBSE teacher adding more exam questions.",
-    'Output JSON: {"questions":[{"type":"short","text":"...","marks":2,"options":[],"answerKey":"...","hardness":"medium","competencyCode":"","unitId":"","bloomLevel":"apply","markingScheme":[]}]}',
+    'Output JSON: {"questions":[{"type":"short","text":"...","marks":2,"options":[],"answerKey":"...","hardness":"medium","competencyCode":"","unitId":"","bloomLevel":"apply","markingScheme":[],"pairs":[],"subQuestions":[],"answerLines":0}]}',
     ...FORMAT_RULES,
     "JSON only.",
   ].join("\n");

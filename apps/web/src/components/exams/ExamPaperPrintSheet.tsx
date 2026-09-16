@@ -1,6 +1,9 @@
 "use client";
 
 import {
+  matchAnswerKey,
+  questionTotalMarks,
+  shuffledMatchRights,
   activeSet,
   questionTypeLabel,
   schoolHeaderDefaults,
@@ -141,7 +144,7 @@ export function ExamPaperPrintSheet(props: {
                           <div className="flex flex-wrap items-baseline justify-between gap-2">
                             <p className="whitespace-pre-wrap">{q.text}</p>
                             <span className="shrink-0 text-[11px] font-semibold text-[var(--muted)]">
-                              [{q.marks}] · {questionTypeLabel(q.type)}
+                              [{questionTotalMarks(q)}] · {questionTypeLabel(q.type)}
                             </span>
                           </div>
                           {q.icons.length ? (
@@ -177,8 +180,8 @@ export function ExamPaperPrintSheet(props: {
                               ))}
                             </div>
                           ) : null}
-                          {q.type === "mcq" && q.options.length ? (
-                            <ul className="mt-1 grid gap-1 sm:grid-cols-2">
+                          {(q.type === "mcq" || q.type === "assertion_reason") && q.options.length ? (
+                            <ul className={`mt-1 grid gap-1 ${q.type === "mcq" ? "sm:grid-cols-2" : ""}`}>
                               {q.options.map((opt, i) => (
                                 <li key={i} className="text-[13px]">
                                   ({String.fromCharCode(97 + i)}) {opt}
@@ -188,10 +191,74 @@ export function ExamPaperPrintSheet(props: {
                           ) : null}
                           {q.type === "true_false" ? (
                             <p className="mt-1 text-[12px] text-[var(--muted)]">
-                              (True / False)
+                              (True / False) &nbsp; Answer: ______
                             </p>
                           ) : null}
-                          {showAnswers && q.answerKey ? (
+                          {q.type === "fill" && q.options.length ? (
+                            <p className="mt-1 rounded border border-[rgba(32,48,80,0.15)] px-2 py-1 text-[12px]">
+                              <span className="text-[var(--muted)]">Word bank: </span>
+                              {q.options.filter(Boolean).join(" · ")}
+                            </p>
+                          ) : null}
+                          {q.type === "match" && q.pairs.length ? (() => {
+                            const rights = shuffledMatchRights(q.pairs, `${paper.id}:${set.setCode}:${q.id}`);
+                            return (
+                              <div className="mt-1">
+                                <table className="w-full max-w-md border-collapse text-[13px]">
+                                  <thead>
+                                    <tr className="text-left text-[10px] uppercase tracking-wide text-[var(--muted)]">
+                                      <th className="py-0.5 pr-4">Column A</th>
+                                      <th className="py-0.5">Column B</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {q.pairs.map((pair, i) => (
+                                      <tr key={i}>
+                                        <td className="py-0.5 pr-4">{i + 1}. {pair.left}</td>
+                                        <td className="py-0.5">({String.fromCharCode(97 + i)}) {rights[i] ?? ""}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                                <p className="mt-1 text-[12px] text-[var(--muted)]">
+                                  Answer: {q.pairs.map((_, i) => `${i + 1}-____`).join("  ")}
+                                </p>
+                                {showAnswers ? (
+                                  <p className="mt-0.5 text-[11px] font-semibold text-[var(--success)] print-hide">
+                                    Key: {matchAnswerKey(q.pairs, rights)}
+                                  </p>
+                                ) : null}
+                              </div>
+                            );
+                          })() : null}
+                          {q.type === "diagram" && q.options.length ? (
+                            <ol className="mt-1 list-decimal pl-5 text-[13px]">
+                              {q.options.filter(Boolean).map((label, i) => (
+                                <li key={i}>{label}: ____________</li>
+                              ))}
+                            </ol>
+                          ) : null}
+                          {q.subQuestions.length ? (
+                            <ol className="mt-2 space-y-1 pl-1 text-[13px]">
+                              {q.subQuestions.map((sq, i) => (
+                                <li key={i} className="flex justify-between gap-3">
+                                  <span>({String.fromCharCode(105 + Math.min(i, 8))}) {sq.text}</span>
+                                  <span className="shrink-0 text-[11px] text-[var(--muted)]">[{sq.marks}]</span>
+                                </li>
+                              ))}
+                            </ol>
+                          ) : null}
+                          {q.type === "numerical" ? (
+                            <p className="mt-1 text-[12px] text-[var(--muted)]">Show your working. &nbsp; Answer: ______________</p>
+                          ) : null}
+                          {q.answerLines > 0 && !showAnswers ? (
+                            <div className="mt-2 space-y-4">
+                              {Array.from({ length: q.answerLines }).map((_, i) => (
+                                <div key={i} className="border-b border-[rgba(32,48,80,0.25)]" />
+                              ))}
+                            </div>
+                          ) : null}
+                          {showAnswers && q.answerKey && q.type !== "match" ? (
                             <p className="mt-1 text-[11px] font-semibold text-[var(--success)] print-hide">
                               Key: {q.answerKey}
                             </p>
