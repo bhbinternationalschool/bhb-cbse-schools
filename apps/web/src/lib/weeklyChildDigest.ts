@@ -130,6 +130,24 @@ export function feeLine(duePaise: number | null, hindi: boolean): string | null 
 }
 
 /**
+ * Does the school have anything to say about this child that is NOT money?
+ *
+ * This decides whether the family is written to at all. A "digest" whose
+ * only content is "₹3,250 pending" is a fee reminder wearing a different
+ * hat, and sending it under a friendlier name is worse than not sending it:
+ * the school promised news about a child and delivered a bill.
+ *
+ * It is load-bearing right now. On 2026-09-16 the attendance register had
+ * not been marked since 31 August, one homework post existed in the whole
+ * year, and no exam marks had been entered at all — so for most families
+ * this returns false and they are left alone until the school has something
+ * to tell them.
+ */
+export function hasNewsBeyondFees(child: DigestChild, hindi: boolean): boolean {
+  return !!attendanceLine(child.attendance, hindi) || !!marksLine(child.marks, hindi);
+}
+
+/**
  * The child line: "Aarav (Class III A) — Present 5 of 6 days · Hindi 18/20".
  *
  * One line per child so a family with three children gets one message, not
@@ -167,16 +185,21 @@ export function digestVariables(
   family: DigestFamily,
   weekLabel: string,
 ): DigestVariables {
-  const lines = (family.children ?? [])
+  const children = family.children ?? [];
+  const lines = children
     .map((c) => childLine(c, family.hindi))
     .filter((l): l is string => !!l);
 
   const childSummary = oneLine(lines, "  |  ");
+  // Fees alone are not news. See hasNewsBeyondFees.
+  const worthSending =
+    childSummary.length > 0 && children.some((c) => hasNewsBeyondFees(c, family.hindi));
+
   return {
     guardianName: (family.guardianName || "").trim() || (family.hindi ? "अभिभावक" : "Parent"),
     weekLabel,
     childSummary,
-    empty: childSummary.length === 0,
+    empty: !worthSending,
   };
 }
 
@@ -187,10 +210,12 @@ export function digestVariables(
  */
 export function digestFreeText(family: DigestFamily, weekLabel: string): string {
   const hindi = family.hindi;
-  const lines = (family.children ?? [])
+  const children = family.children ?? [];
+  const lines = children
     .map((c) => childLine(c, hindi))
     .filter((l): l is string => !!l);
   if (lines.length === 0) return "";
+  if (!children.some((c) => hasNewsBeyondFees(c, hindi))) return "";
 
   const head = hindi
     ? `🗓️ *इस सप्ताह आपके बच्चे* · ${weekLabel}`

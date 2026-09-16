@@ -113,6 +113,50 @@ const silentVars = digestVariables(silentFamily, "8–13 Sep");
 assert.equal(silentVars.empty, true, "nothing true to say → do not send");
 assert.equal(digestFreeText(silentFamily, "8–13 Sep"), "");
 
+/* ── 4b. Fees alone are not news ────────────────────────────────────── */
+
+// The state of the school on the day this was written: the register had not
+// been marked since 31 August, one homework post existed all year, and no
+// exam marks had been entered. Every family would have received a "digest"
+// containing one fact — what they owe. That is a fee reminder in a nicer
+// envelope, and it would have cost the school the trust this message is for.
+const feesOnly: DigestFamily = {
+  householdId: "hh3",
+  guardianName: "Ramesh",
+  mobile: "9000000000",
+  hindi: true,
+  children: [
+    {
+      studentId: "s9",
+      name: "Aarav",
+      classLabel: "III A",
+      attendance: null,
+      marks: [],
+      duePaise: 325000,
+    },
+  ],
+};
+assert.equal(
+  digestVariables(feesOnly, "8–13 Sep").empty,
+  true,
+  "a digest whose only content is a bill must not be sent",
+);
+assert.equal(digestFreeText(feesOnly, "8–13 Sep"), "");
+
+// One real fact is enough to earn the message — and the bill may ride along.
+const withNews: DigestFamily = {
+  ...feesOnly,
+  children: [
+    {
+      ...feesOnly.children[0]!,
+      attendance: { markedDays: 6, present: 6, absent: 0, leave: 0, late: 0 },
+    },
+  ],
+};
+const withNewsVars = digestVariables(withNews, "8–13 Sep");
+assert.equal(withNewsVars.empty, false);
+assert.ok(withNewsVars.childSummary.includes("बकाया"), "the fee line still rides along");
+
 /* ── 5. One message for the whole family, one line per child ────────── */
 
 const family: DigestFamily = {
