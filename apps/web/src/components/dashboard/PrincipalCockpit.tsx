@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { formatInr } from "@/lib/masters";
 import { AlertBannerList } from "@/components/dashboard/AlertBannerList";
+import { duesFreshnessHint } from "@/lib/feeStoreDuesKpi";
 import { WaNumberGapBanner } from "@/components/comms/WaNumberGapBanner";
 import type { PrincipalSnapshot } from "@/lib/principalSnapshot.server";
 import { isProtectedSuperAdminEmail } from "@/lib/superAdmin";
@@ -173,6 +174,7 @@ export function PrincipalCockpit() {
       mtdCollectionPaise: 0,
       openDuesPaise: 0,
       defaulterHouseholds: 0,
+      duesRebuiltAt: "",
       storeDuesPaise: null,
       storeDueStudents: 0,
       todayByMode: [],
@@ -188,14 +190,18 @@ export function PrincipalCockpit() {
   // book's: they are settled at the store counter against the fee receipt,
   // and nothing online can collect them yet. So they are named here beside
   // the fee dues, never added to them.
-  const storeDuesHint =
+  const duesFreshness = duesFreshnessHint(displaySnap.fees.duesRebuiltAt);
+  const storeDuesHint = [
+    `${displaySnap.fees.defaulterHouseholds} students`,
+    duesFreshness,
     displaySnap.fees.storeDuesPaise === null
-      ? `${displaySnap.fees.defaulterHouseholds} students · store dues unavailable`
+      ? "store dues unavailable"
       : displaySnap.fees.storeDuesPaise > 0
-        ? `${displaySnap.fees.defaulterHouseholds} students · plus ${formatInr(
-            displaySnap.fees.storeDuesPaise,
-          )} books/uniform (${displaySnap.fees.storeDueStudents})`
-        : `${displaySnap.fees.defaulterHouseholds} students`;
+        ? `plus ${formatInr(displaySnap.fees.storeDuesPaise)} books/uniform (${displaySnap.fees.storeDueStudents})`
+        : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   const alerts: { text: string; href: string }[] = [];
   if (displaySnap.alerts.attendanceRegistersPending > 0) {

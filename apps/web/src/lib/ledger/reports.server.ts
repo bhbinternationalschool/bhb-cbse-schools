@@ -8,8 +8,9 @@
 import { getServerTenantContext } from "@/lib/serverTenant";
 import {
   buildBalanceSheet,
-  summariseMonthlyCash,
+  monthlyCashRows,
   type MonthlyCashRow,
+  type MonthlyCashTotal,
   buildIncomeExpenditure,
   buildReceiptsPayments,
   buildTrialBalance,
@@ -163,60 +164,20 @@ export async function receiptsPaymentsReport(input: { from: string; to: string }
 }
 
 /**
- * Every voucher that cancels something, and everything they cancel.
- *
- * Two kinds, and both are corrections rather than movements of money:
- *
- *  - a REVERSAL and the entry it reverses;
- *  - a `void_redate` journal. When a receipt was voided months after it was
- *    entered, the reversal landed on the day of the void instead of the day
- *    of the receipt. The repair cancels that reversal and re-posts it in the
- *    right month — so the cancelling half lands as money IN. On 3 Sep 2026,
- *    53 of them put ₹2,32,695 into September that nobody had paid, with the
- *    matching ₹2,32,695 going out across March–July. They sum to zero, and
- *    they belong in neither month's totals.
- *
- * Not scoped to the reporting window on purpose: an April receipt reversed
- * in July is still a correction, and counting April's side of it as money
- * received would overstate the month the office is looking at.
- *
- * A failed scan returns an empty set — the figures then read gross, which is
- * what every caller saw before this existed, rather than failing the report.
- */
-async function correctionVoucherIds(): Promise<Set<string>> {
-  const ctx = await getServerTenantContext();
-  if (!ctx) return new Set();
-  const { data, error } = await ctx.sb
-    .from("ledger_vouchers")
-    .select("id, reverses_voucher_id, source_type")
-    .eq("tenant_id", ctx.tenantId)
-    .or("reverses_voucher_id.not.is.null,source_type.eq.void_redate");
-  if (error) {
-    console.warn("[ledger] correction scan failed", error.message);
-    return new Set();
-  }
-  const out = new Set<string>();
-  for (const r of (data ?? []) as {
-    id: string;
-    reverses_voucher_id: string | null;
-  }[]) {
-    if (r.id) out.add(String(r.id));
-    if (r.reverses_voucher_id) out.add(String(r.reverses_voucher_id));
-  }
-  return out;
-}
-
-/**
  * Money in and money out, month by month, from the server book.
  *
- * Built from the same `ledger_cash_movements` the Receipts & Payments
- * statement uses, so a month here and that statement agree on what moved.
- * One call for the whole year rather than twelve — and it is the CASH view:
- * a fee billed but not collected is not money in, and a bill booked but not
- * paid is not money out. That is the question this tile is asked ("what came
- * in last month?"), which is why it does not read income & expenditure.
+ * Aggregated by `ledger_monthly_cash` (migration 20260916120000) rather than
+ * here. The dashboard used to pull every cash movement of the year through
+ * `ledger_cash_movements` and group them in Node — but that call returns one
+ * row per voucher PER HEAD (3,147 rows for 2026-27) and PostgREST caps a
+ * reply at 1,000, all of which fell inside April. The chart showed April and
+ * nothing else, and nothing errored.
  *
- * The arithmetic — and the two rules that make it correct — is in reports.ts.
+ * The two rules the SQL applies — one voucher counted once, and corrections
+ * (reversals and `void_redate` journals) left out — are documented on the
+ * function itself, with the figures that exposed each.
+ *
+ * Cash view: a fee billed but not collected is not money in.
  */
 export async function monthlyCashReport(input: {
   from: string;
@@ -225,24 +186,22 @@ export async function monthlyCashReport(input: {
   const ctx = await getServerTenantContext();
   if (!ctx) return { ok: false, rows: [], error: "Supabase tenant not configured" };
 
-  const [movements, cancelledVoucherIds] = await Promise.all([
-    cashMovements(input),
-    correctionVoucherIds(),
-  ]);
+  const { data, error } = await ctx.sb.rpc("ledger_monthly_cash", {
+    p_tenant_id: ctx.tenantId,
+    p_from: input.from,
+    p_to: input.to,
+  });
+  if (error) return { ok: false, rows: [], error: error.message };
 
-  return {
-    ok: true,
-    rows: summariseMonthlyCash({
-      from: input.from,
-      to: input.to,
-      legs: movements.map((m) => ({
-        voucherId: m.voucherId,
-        voucherDate: m.voucherDate,
-        cashSignedPaise: m.cashSignedPaise,
-      })),
-      cancelledVoucherIds,
+  const totals: MonthlyCashTotal[] = ((data ?? []) as Record<string, unknown>[]).map(
+    (r) => ({
+      month: String(r.month ?? ""),
+      inPaise: Number(r.in_paise ?? 0),
+      outPaise: Number(r.out_paise ?? 0),
     }),
-  };
+  );
+
+  return { ok: true, rows: monthlyCashRows({ from: input.from, to: input.to, totals }) };
 }
 
 export type AccountStatementRow = {
