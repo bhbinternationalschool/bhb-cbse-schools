@@ -168,12 +168,32 @@ export function PrincipalCockpit() {
   const displaySnap: PrincipalSnapshot = snap ?? {
     generatedAt: new Date().toISOString(),
     academicYearCode: session.academicYearCode || "2025-26",
-    fees: { todayCollectionPaise: 0, mtdCollectionPaise: 0, openDuesPaise: 0, defaulterHouseholds: 0 },
+    fees: {
+      todayCollectionPaise: 0,
+      mtdCollectionPaise: 0,
+      openDuesPaise: 0,
+      defaulterHouseholds: 0,
+      storeDuesPaise: null,
+      storeDueStudents: 0,
+    },
     attendance: { date: "Today", studentPresent: 0, studentAbsent: 0, studentLeave: 0, studentMarkedPct: 0, sectionsMarked: 0 },
     staff: { activeCount: 0, presentToday: 0, absentToday: 0 },
     admissions: { pipeline: 0, enrolled: 0, followUpsDue: 0 },
     alerts: { vaultExpiring30d: 0, lowStockSkus: 0, attendanceRegistersPending: 0 },
   };
+
+  // Books and uniform bought on credit are the store's money, not the fee
+  // book's: they are settled at the store counter against the fee receipt,
+  // and nothing online can collect them yet. So they are named here beside
+  // the fee dues, never added to them.
+  const storeDuesHint =
+    displaySnap.fees.storeDuesPaise === null
+      ? `${displaySnap.fees.defaulterHouseholds} students · store dues unavailable`
+      : displaySnap.fees.storeDuesPaise > 0
+        ? `${displaySnap.fees.defaulterHouseholds} students · plus ${formatInr(
+            displaySnap.fees.storeDuesPaise,
+          )} books/uniform (${displaySnap.fees.storeDueStudents})`
+        : `${displaySnap.fees.defaulterHouseholds} students`;
 
   const alerts: { text: string; href: string }[] = [];
   if (displaySnap.alerts.attendanceRegistersPending > 0) {
@@ -285,7 +305,7 @@ export function PrincipalCockpit() {
         <KpiCard
           label="Open dues"
           value={formatInr(displaySnap.fees.openDuesPaise)}
-          hint={`${displaySnap.fees.defaulterHouseholds} students`}
+          hint={storeDuesHint}
           href="/fees/defaulters"
           tone="rose"
         />

@@ -695,6 +695,31 @@ export function paidClaimStatement(
   }
 }
 
+/**
+ * What this family still owes the school STORE, in paise.
+ *
+ * Zero on any failure — deliberately: the store line is extra information
+ * on a fee reply, and a Supabase hiccup must not stop the parent being told
+ * their fee dues. The fee figures in the same message come from the fee
+ * book and are unaffected either way.
+ */
+async function householdStoreDuesPaise(studentIds: string[]): Promise<number> {
+  if (studentIds.length === 0) return 0;
+  try {
+    const { storeDuesForStudents } = await import(
+      "@/lib/inventory/sales.server"
+    );
+    const rows = await storeDuesForStudents(studentIds);
+    return rows.reduce((sum, r) => sum + (r.balancePaise || 0), 0);
+  } catch (e) {
+    console.warn(
+      "[wa-sis-bot] store dues unavailable:",
+      e instanceof Error ? e.message : e,
+    );
+    return 0;
+  }
+}
+
 async function buildBotReply(
   hh: Household,
   intent: ReturnType<typeof detectSisBotIntent>,
@@ -717,6 +742,11 @@ async function buildBotReply(
       return { escalate: false, text: composeSisKidsReply(childLines, hindi) };
     case "dues": {
       const dues = flattenOpenDues(hh.id);
+      // Books / uniform on credit, named beside the fee dues and never
+      // inside them: the pay link below cannot settle a store slip, so one
+      // combined total would under-pay and the family would think they were
+      // clear. Unknown stays silent rather than quoting a wrong figure.
+      const storeDuesPaise = await householdStoreDuesPaise(kids.map((k) => k.id));
       const dueLines: SisBotDueLine[] = dues.map((d) => ({
         studentName: dueStudentName(d),
         label: d.label,
@@ -732,6 +762,7 @@ async function buildBotReply(
           totalPaise: total,
           runningMonthOnly: true,
           hindi,
+          storeDuesPaise,
           payUrl: dues.length ? duePayUrl(publicAppOrigin(), { householdId: hh.id, scope: "open" }) || undefined : undefined,
         }),
       };

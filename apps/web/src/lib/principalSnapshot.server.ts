@@ -12,6 +12,7 @@ import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { loadAdmissions, funnelCounts } from "@/lib/admissions";
 import { loadAttendance, summarizeMarks, todayIso } from "@/lib/attendance";
 import { computeFeeKpis } from "@/lib/feeFinance";
+import { storeDuesSummary } from "@/lib/inventory/sales.server";
 import { loadFees } from "@/lib/fees";
 import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
 import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
@@ -27,6 +28,9 @@ export type PrincipalSnapshot = {
     mtdCollectionPaise: number;
     openDuesPaise: number;
     defaulterHouseholds: number;
+    /** Books / uniform on credit. null = the store could not be read. */
+    storeDuesPaise: number | null;
+    storeDueStudents: number;
   };
   attendance: {
     date: string;
@@ -79,6 +83,25 @@ export async function buildPrincipalSnapshot(
   } catch (e) {
     console.error(
       "[principalSnapshot] low-stock count unavailable:",
+      e instanceof Error ? e.message : e,
+    );
+  }
+
+  // Books and uniform bought on credit. Quoted BESIDE the fee dues, never
+  // inside them: a store slip is settled through the store's own counter
+  // with the fee receipt as its reference, so folding it into "Open dues"
+  // (or into a pay link) would quote money this ERP cannot yet collect
+  // online. Unknown must not read as nothing — a failed read stays null and
+  // the tile says so.
+  let storeDuesPaise: number | null = null;
+  let storeDueStudents = 0;
+  try {
+    const store = await storeDuesSummary();
+    storeDuesPaise = store.balancePaise;
+    storeDueStudents = store.studentCount;
+  } catch (e) {
+    console.error(
+      "[principalSnapshot] store dues unavailable:",
       e instanceof Error ? e.message : e,
     );
   }
@@ -152,6 +175,8 @@ export async function buildPrincipalSnapshot(
       mtdCollectionPaise,
       openDuesPaise: feeKpi.openPaise,
       defaulterHouseholds: feeKpi.studentsWithOpenDues,
+      storeDuesPaise,
+      storeDueStudents,
     },
     attendance: {
       date: today,

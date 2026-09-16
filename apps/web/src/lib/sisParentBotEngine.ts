@@ -238,7 +238,25 @@ export function composeSisDuesReply(opts: {
    * are gone either way.
    */
   payUrl?: string;
+  /**
+   * Books / uniform this family bought on credit from the school store.
+   *
+   * Named separately and never added to the fee total: a store slip is
+   * settled at the store counter against the fee receipt, and the pay link
+   * in this very message cannot collect it. Quoting one total the link
+   * under-pays would send the parent away thinking they were clear.
+   */
+  storeDuesPaise?: number;
 }): string {
+  const storeDues = opts.storeDuesPaise ?? 0;
+  const storeLineHi =
+    storeDues > 0
+      ? `🛍️ पुस्तक/यूनिफ़ॉर्म (विद्यालय स्टोर): *${formatInr(storeDues)}* — यह राशि विद्यालय काउंटर पर जमा करें (ऑनलाइन लिंक में शामिल नहीं)।`
+      : null;
+  const storeLineEn =
+    storeDues > 0
+      ? `🛍️ Books / uniform (school store): *${formatInr(storeDues)}* — please pay this at the school counter (it is not part of the online link).`
+      : null;
   const scope =
     opts.childFilterName != null
       ? ` · ${opts.childFilterName}`
@@ -250,8 +268,11 @@ export function composeSisDuesReply(opts: {
         `*बकाया फीस${scope}* · ${who}`,
         "",
         "चालू महीने तक कोई फीस बकाया नहीं है। धन्यवाद!",
+        ...(storeLineHi ? ["", storeLineHi] : []),
         "हाल के भुगतान देखने के लिए *RECEIPTS* लिखें।",
-      ].join("\n");
+      ]
+        .filter(Boolean)
+        .join("\n");
     }
     const maxHi = 12;
     return [
@@ -268,6 +289,7 @@ export function composeSisDuesReply(opts: {
         : null,
       "",
       `*कुल जमा करना है: ${formatInr(opts.totalPaise)}*`,
+      ...(storeLineHi ? ["", storeLineHi] : []),
       "",
       ...(opts.payUrl
         ? [
@@ -289,8 +311,11 @@ export function composeSisDuesReply(opts: {
       `*Fee dues${scope}* · ${opts.guardianName || "Parent"}`,
       "",
       "No open dues till the current running month. Thank you!",
+      ...(storeLineEn ? ["", storeLineEn] : []),
       "Reply *RECEIPTS* for recent payments.",
-    ].join("\n");
+    ]
+      .filter(Boolean)
+      .join("\n");
   }
   const max = 12;
   const shown = opts.dueLines.slice(0, max);
@@ -313,6 +338,7 @@ export function composeSisDuesReply(opts: {
       : null,
     "",
     `*Total to pay: ${formatInr(opts.totalPaise)}*`,
+    ...(storeLineEn ? ["", storeLineEn] : []),
     "",
     ...(opts.payUrl
       ? [

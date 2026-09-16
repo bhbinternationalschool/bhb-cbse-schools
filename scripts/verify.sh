@@ -102,6 +102,7 @@ SELFTESTS=(
   test:pin-review
   test:due-pay-link
   test:fee-dues-server-inputs
+  test:fee-store-dues-line
   test:wa-parent-guide
   test:fleet-keep-rule
   test:server-work-tracker
