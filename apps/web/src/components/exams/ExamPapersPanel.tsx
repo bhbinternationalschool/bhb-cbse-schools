@@ -50,6 +50,9 @@ import {
   type ExamPaperSection,
   type ExamPaperSet,
   schoolHeaderDefaults,
+  questionTransliterationTexts,
+  applyTransliteratedQuestion,
+  questionHasConvertibleText,
 } from "@/lib/examPapers";
 import { loadTeaching, type SyllabusUnit } from "@/lib/teaching";
 import { BlueprintPanel } from "@/components/exams/BlueprintPanel";
@@ -1350,18 +1353,17 @@ function QuestionEditor(props: {
   /** A question with parts is usually just their heading; its own answer fields fold away. */
   const [showOwnFields, setShowOwnFields] = useState(false);
 
+  // A question that is only a heading for its parts has no own text, and
+  // both buttons used to be dead on it — the teacher pressed and nothing
+  // happened. Anything typed anywhere on the question is enough.
+  const hasConvertible = questionHasConvertibleText(q);
+
   /** Hinglish → Hindi / Sanskrit for every text field of this question. */
   async function convertTo(target: "hi" | "sa") {
     setConvertError("");
     setConverting(target);
     try {
-      const texts = [
-        q.text,
-        ...q.options,
-        ...q.pairs.flatMap((pr) => [pr.left, pr.right]),
-        ...q.subQuestions.map((sq) => sq.text),
-        q.answerKey,
-      ];
+      const texts = questionTransliterationTexts(q);
       const res = await fetch("/api/ai/transliterate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1372,14 +1374,7 @@ function QuestionEditor(props: {
         setConvertError(body?.error || `Could not convert (HTTP ${res.status})`);
         return;
       }
-      const out = body.texts;
-      let i = 0;
-      const text = out[i++]!;
-      const options = q.options.map(() => out[i++]!);
-      const pairs = q.pairs.map(() => ({ left: out[i++]!, right: out[i++]! }));
-      const subQuestions = q.subQuestions.map((sq) => ({ ...sq, text: out[i++]! }));
-      const answerKey = out[i++]!;
-      props.onChange({ text, options, pairs, subQuestions, answerKey });
+      props.onChange(applyTransliteratedQuestion(q, body.texts));
       if (body.generationId) reportAiOutcome({ ids: [body.generationId], outcome: "accepted" });
     } catch (e) {
       setConvertError(e instanceof Error ? e.message : String(e));
@@ -1682,7 +1677,7 @@ function QuestionEditor(props: {
           <button
             type="button"
             className="rounded border border-[var(--border)] px-2 py-0.5 text-[11px] font-semibold"
-            disabled={converting !== null || !q.text.trim()}
+            disabled={converting !== null || !hasConvertible}
             onClick={() => void convertTo("hi")}
             title="Typed in Hinglish? Convert this question (text, options, pairs, sub-questions, key) to Hindi"
           >
@@ -1691,7 +1686,7 @@ function QuestionEditor(props: {
           <button
             type="button"
             className="rounded border border-[var(--border)] px-2 py-0.5 text-[11px] font-semibold"
-            disabled={converting !== null || !q.text.trim()}
+            disabled={converting !== null || !hasConvertible}
             onClick={() => void convertTo("sa")}
             title="Convert this question to Sanskrit"
           >

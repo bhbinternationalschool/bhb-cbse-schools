@@ -100,6 +100,7 @@
     "test:fee-store-dues-line": "npx tsx src/lib/feeStoreDuesLine.selftest.ts",
     "test:ledger-monthly-cash": "npx tsx src/lib/ledgerMonthlyCash.selftest.ts",
     "test:app-home-numbers": "npx tsx src/lib/appHomeNumbers.selftest.ts",
+    "test:exam-paper-transliterate": "npx tsx src/lib/examPaperTransliterate.selftest.ts",
     "test:wa-parent-guide": "npx tsx src/lib/waParentGuide.selftest.ts",
     "test:fleet-keep-rule": "npx tsx src/lib/fleetKeepRule.selftest.ts",
     "test:server-work-tracker": "npx tsx src/lib/serverWorkTracker.selftest.ts",

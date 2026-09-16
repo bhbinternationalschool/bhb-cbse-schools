@@ -219,6 +219,92 @@ export function defaultsForType(
  * N" — the N largest, since a child answering the best-paying parts can
  * score at most that.
  */
+/* ─── Hinglish → Hindi / Sanskrit, for one question ──────────── */
+
+/**
+ * Every piece of a question that a teacher types and a student reads.
+ *
+ * Built as ONE ordered list so the model gets one call and the answers come
+ * back in a known order; `applyTransliteratedQuestion` puts them back in the
+ * same order. The pairing is what makes the round trip safe, and it is the
+ * reason both live here rather than inside the panel.
+ *
+ * Until 2026-09-16 this list was the question's own text, options, pairs,
+ * sub-question TEXT and answer key — so a question built from parts (PR
+ * #226: parts carry their own options, pairs and key) came back with the
+ * heading in Hindi and every option under it still in Hinglish, and the
+ * pictures kept their English captions. Half-converted reads as broken.
+ */
+export function questionTransliterationTexts(
+  q: Pick<
+    ExamPaperQuestion,
+    "text" | "options" | "pairs" | "subQuestions" | "answerKey" | "images" | "formulas" | "markingScheme"
+  >,
+): string[] {
+  return [
+    q.text,
+    ...q.options,
+    ...q.pairs.flatMap((pr) => [pr.left, pr.right]),
+    ...q.subQuestions.flatMap((sq) => [
+      sq.text,
+      ...sq.options,
+      ...sq.pairs.flatMap((pr) => [pr.left, pr.right]),
+      sq.answerKey,
+    ]),
+    q.answerKey,
+    ...q.images.map((img) => img.caption),
+    ...q.markingScheme,
+  ];
+}
+
+/** Put the converted lines back, in the order `questionTransliterationTexts` sent them. */
+export function applyTransliteratedQuestion(
+  q: Pick<
+    ExamPaperQuestion,
+    "text" | "options" | "pairs" | "subQuestions" | "answerKey" | "images" | "formulas" | "markingScheme"
+  >,
+  out: string[],
+): Pick<
+  ExamPaperQuestion,
+  "text" | "options" | "pairs" | "subQuestions" | "answerKey" | "images" | "markingScheme"
+> {
+  const expected = questionTransliterationTexts(q).length;
+  if (out.length !== expected) {
+    throw new Error(
+      `Converted ${out.length} lines for a question that sent ${expected} — refusing to shuffle the paper`,
+    );
+  }
+  let i = 0;
+  const text = out[i++]!;
+  const options = q.options.map(() => out[i++]!);
+  const pairs = q.pairs.map(() => ({ left: out[i++]!, right: out[i++]! }));
+  const subQuestions = q.subQuestions.map((sq) => ({
+    ...sq,
+    text: out[i++]!,
+    options: sq.options.map(() => out[i++]!),
+    pairs: sq.pairs.map(() => ({ left: out[i++]!, right: out[i++]! })),
+    answerKey: out[i++]!,
+  }));
+  const answerKey = out[i++]!;
+  const images = q.images.map((img) => ({ ...img, caption: out[i++]! }));
+  const markingScheme = q.markingScheme.map(() => out[i++]!);
+  return { text, options, pairs, subQuestions, answerKey, images, markingScheme };
+}
+
+/**
+ * Is there anything on this question worth converting?
+ *
+ * The buttons used to be disabled on `!q.text.trim()` alone, so a question
+ * that is only a heading for its parts — an empty own text, which is how
+ * "Answer any five of the following" is built — had both buttons dead. The
+ * teacher pressed them and nothing happened at all.
+ */
+export function questionHasConvertibleText(
+  q: Parameters<typeof questionTransliterationTexts>[0],
+): boolean {
+  return questionTransliterationTexts(q).some((t) => t.trim().length > 0);
+}
+
 export function questionTotalMarks(q: Pick<ExamPaperQuestion, "marks" | "subQuestions"> & { attemptAny?: number }): number {
   if (q.subQuestions.length === 0) return q.marks;
   const marks = q.subQuestions.map((sq) => sq.marks || 0);

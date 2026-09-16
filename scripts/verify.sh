@@ -105,6 +105,7 @@ SELFTESTS=(
   test:fee-store-dues-line
   test:ledger-monthly-cash
   test:app-home-numbers
+  test:exam-paper-transliterate
   test:wa-parent-guide
   test:fleet-keep-rule
   test:server-work-tracker
