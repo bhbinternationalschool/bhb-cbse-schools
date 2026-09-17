@@ -257,6 +257,7 @@ SELFTESTS=(
   test:tutor-plans
   test:tutor-video-sources
   test:smart-teach
+  test:nucleus-progress
   test:staff-home-kind
   test:mobile-features
   test:cashfree-checkout

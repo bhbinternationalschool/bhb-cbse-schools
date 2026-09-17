@@ -349,6 +349,7 @@ jobs:
           npm run test:tutor-plans
           npm run test:tutor-video-sources
           npm run test:smart-teach
+          npm run test:nucleus-progress
           npm run test:staff-home-kind
           npm run test:mobile-features
           npm run test:cashfree-checkout
