@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { buildTutorSystemPrompt } from "@/lib/tutorPlans";
 import {
   CHAPTER_TOPICS_MAX,
+  preschoolPromptBlock,
   cleanChapterName,
   cleanOutcomeName,
   indexGrade,
@@ -291,6 +292,33 @@ const chapters: SyllabusChapter[] = [
 
   const none = textbooksPromptBlock({ grade: 6, books: sBooks, chapters: sChapters.map((c) => ({ ...c, topics: undefined })), subjectLabel: "Maths" });
   assert.ok(!none.includes("[brackets]"), "no topics loaded → the prompt is exactly as before");
+}
+
+
+// ── Pre-primary: the school's books (units, no numbers) above NCERT's minimum
+{
+  const pBooks: SyllabusBook[] = [
+    { id: "lw-e", medium: "English", subjects: ["English"], name: "Propel Little Wonder English Literacy Coursebook LKG" },
+    { id: "lw-m", medium: "English", subjects: ["Mathematics"], name: "Propel Little Wonder Numeracy Coursebook LKG" },
+  ];
+  const pChapters: SyllabusChapter[] = [
+    { textbookId: "lw-e", position: 1, name: "Story—Who Gets the Apple?" },
+    { textbookId: "lw-e", position: 2, name: "Letter Aa", topics: ["alligator", "apple"] },
+    { textbookId: "lw-m", position: 1, name: "Shapes", topics: ["circle", "square"] },
+  ];
+  const english = preschoolPromptBlock({ grade: -1, school: { books: pBooks, chapters: pChapters }, ncert: { books: [], chapters: [] }, subjectLabel: "English" });
+  assert.match(english, /^Books: the books this school's LKG children use, unit by unit in book order/, "pre-primary header names the year, not a class number");
+  assert.match(english, /Propel Little Wonder English Literacy Coursebook LKG: Story—Who Gets the Apple\?; Letter Aa \[alligator, apple\]$/m, "units in book order, no numbers, topics for one subject");
+  assert.ok(!/\b1\. /.test(english), "no chapter numbers for pre-primary");
+  assert.match(english, /never invent one/, "the rule forbids a chapter number");
+  assert.ok(!english.includes("Numeracy"), "only the asked subject");
+
+  const none = preschoolPromptBlock({ grade: -1, school: { books: [], chapters: [] }, ncert: { books: [], chapters: [] } });
+  assert.equal(none, "", "nothing loaded → nothing, as before");
+
+  // Classes 1–8 keep their numbers.
+  const c3 = textbooksListing({ grade: 3, books: [{ ...pBooks[1]!, name: "Maths 3" }], chapters: [{ textbookId: "lw-m", position: 1, name: "Numbers" }] });
+  assert.match(c3, /Maths 3: 1\. Numbers/);
 }
 
 console.log("tutorSyllabus.selftest: ok");

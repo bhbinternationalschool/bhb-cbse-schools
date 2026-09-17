@@ -179,6 +179,9 @@ export function textbooksListing(opts: {
   // Topics only for a single subject: all core subjects' topics together
   // would triple the prompt for a question that concerns one of them.
   const withTopics = keys.length === 1;
+  // Pre-primary books have units, not numbered chapters: a number here would
+  // invite "Chapter 14" for a book that prints none.
+  const numbered = opts.grade > 0;
   const lines: string[] = [];
   for (const key of keys) {
     const books = (byKey.get(key) ?? []).slice().sort(byName);
@@ -192,14 +195,16 @@ export function textbooksListing(opts: {
       const chapters = (chaptersOf.get(book.id) ?? []).slice().sort((a, b) => a.position - b.position);
       if (!chapters.length) continue;
       const note = i === listed.length - 1 && otherEditions.length ? ` (${otherLabel}-medium edition: ${otherEditions.map((b) => b.name).join(", ")})` : "";
-      lines.push(`${SUBJECT_NAME[key]} — ${book.name}${note}: ${chapters.map((c) => `${c.position}. ${cleanChapterName(c.name)}${withTopics ? chapterTopicsNote(c.topics) : ""}`).join("; ")}`);
+      lines.push(`${SUBJECT_NAME[key]} — ${book.name}${note}: ${chapters.map((c) => `${numbered ? `${c.position}. ` : ""}${cleanChapterName(c.name)}${withTopics ? chapterTopicsNote(c.topics) : ""}`).join("; ")}`);
     }
   }
   if (!lines.length) return "";
   const header =
     (opts.source ?? "school") === "ncert"
       ? `Textbooks: the current NCERT books for Class ${opts.grade}, as listed on DIKSHA, the government's school platform.`
-      : `Textbooks: the books this school's Class ${opts.grade} children use, chapter by chapter — these are the books in the child's school bag.`;
+      : opts.grade <= 0
+        ? `Books: the books this school's ${PRESCHOOL_YEAR[opts.grade + 2] ?? "pre-primary"} children use, unit by unit in book order — these are the books in the child's school bag.`
+        : `Textbooks: the books this school's Class ${opts.grade} children use, chapter by chapter — these are the books in the child's school bag.`;
   return [header, ...lines].join("\n");
 }
 
@@ -305,3 +310,27 @@ export function outcomesPromptBlock(opts: { grade: number; books: SyllabusBook[]
   ].join("\n");
 }
 
+
+
+// ── Pre-primary: the school's books with NCERT's minimum beneath them ─────
+
+/** How the tutor uses the school's pre-primary books (units, no chapter numbers). */
+export const PRESCHOOL_BOOKS_RULE =
+  "Using the school's books: when a question fits one of these units, name the book and the unit as listed (for example the letter, the story or the rhyme) and suggest practice in the same spirit. The units carry no chapter numbers — never invent one, and never name a book or unit that is not listed. Words in [brackets] are what a unit covers.";
+
+/**
+ * The tutor's whole pre-primary block (director, 17 Sep 2026): the school's
+ * own books first — what the child actually does in class — then NCERT's
+ * learning outcomes as the minimum (#240). Either may be missing; the other
+ * still stands.
+ */
+export function preschoolPromptBlock(opts: {
+  grade: number;
+  school: { books: SyllabusBook[]; chapters: SyllabusChapter[] };
+  ncert: { books: SyllabusBook[]; chapters: SyllabusChapter[] };
+  subjectLabel?: string;
+}): string {
+  const books = textbooksListing({ grade: opts.grade, books: opts.school.books, chapters: opts.school.chapters, subjectLabel: opts.subjectLabel, source: "school" });
+  const outcomes = outcomesPromptBlock({ grade: opts.grade, books: opts.ncert.books, chapters: opts.ncert.chapters, subjectLabel: opts.subjectLabel });
+  return [books ? `${books}\n${PRESCHOOL_BOOKS_RULE}` : "", outcomes].filter(Boolean).join("\n");
+}
