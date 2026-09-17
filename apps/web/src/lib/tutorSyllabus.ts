@@ -42,9 +42,9 @@ function chapterTopicsNote(topics: string[] | undefined): string {
   return kept.length ? ` [${kept.join(", ")}]` : "";
 }
 
-export type SubjectKey = "maths" | "science" | "evs" | "social" | "english" | "hindi" | "sanskrit" | "arts" | "pe" | "vocational";
+export type SubjectKey = "maths" | "science" | "evs" | "social" | "english" | "hindi" | "sanskrit" | "arts" | "pe" | "vocational" | "gk" | "computer";
 
-/** What a free question is most likely about. Arts, PE and vocational books are listed only when asked by subject. */
+/** What a free question is most likely about. Arts, PE, vocational, GK and computer books are listed only when asked by subject. */
 export const CORE_SUBJECTS: readonly SubjectKey[] = ["maths", "science", "evs", "social", "english", "hindi", "sanskrit"];
 
 const SUBJECT_NAME: Record<SubjectKey, string> = {
@@ -58,6 +58,8 @@ const SUBJECT_NAME: Record<SubjectKey, string> = {
   arts: "Arts",
   pe: "Physical Education",
   vocational: "Vocational Education",
+  gk: "General Knowledge",
+  computer: "Computer",
 };
 
 /** "maths" → "Mathematics": how a school book's subject key is shown and read back by subjectKeyFor. */
@@ -98,6 +100,10 @@ export function indexGrade(className: string | undefined): number | null {
 export function subjectKeyFor(label: string | undefined): SubjectKey | null {
   const s = (label || "").toLowerCase();
   if (!s.trim()) return null;
+  // GK and computer first: "G.K. / Computer Practical" is a GK paper, and
+  // "Computer Science" is not the science book.
+  if (/general knowledge|\bg\.?\s?k\b|सामान्य ज्ञान/.test(s)) return "gk";
+  if (/computer|\bict\b|information technology|coding|artificial intelligence|\bai\b|कंप्यूटर|कम्प्यूटर/.test(s)) return "computer";
   if (/social|history|geograph|politic|civics|\bsst\b|समाज|इतिहास|भूगोल/.test(s)) return "social";
   if (/environment|world around|\bevs\b|पर्यावरण|आस-पास|अद्भुत संसार/.test(s)) return "evs";
   if (/physical|sport|yoga|खेल|शारीरिक/.test(s)) return "pe";

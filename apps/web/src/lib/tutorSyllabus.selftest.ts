@@ -63,7 +63,11 @@ import {
     ["Arts", "arts"],
     ["Work Education", "vocational"],
     ["Vocational / Skill subject", "vocational"],
-    ["Information Technology / Computer Applications", null],
+    ["Information Technology / Computer Applications", "computer"],
+    ["Computer Science", "computer"],
+    ["G.K. / Computer Practical", "gk"],
+    ["General Knowledge", "gk"],
+    ["Artificial Intelligence", "computer"],
     ["Socio-emotional & ethical development", null],
     ["", null],
   ];
