@@ -29,12 +29,13 @@ import { useDemoSession } from "@/components/shell/SessionContext";
 import { SyllabusPlanPanel } from "@/components/teaching/SyllabusPlanPanel";
 import { LessonPlansPanel } from "@/components/teaching/LessonPlansPanel";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { NucleusProgressPanel } from "@/components/teaching/NucleusProgressPanel";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
-type TeachTab = "today" | "plan" | "lessons" | "coverage";
+type TeachTab = "today" | "plan" | "lessons" | "coverage" | "nucleus";
 
 const STATUS_LABEL: Record<PeriodDelivery["status"], string> = {
   delivered: "Taught",
@@ -358,6 +359,7 @@ export function TeachingWorkspace() {
             { id: "plan", label: "Syllabus" },
             { id: "lessons", label: "Lesson plans" },
             { id: "coverage", label: "Coverage" },
+            { id: "nucleus", label: "Nucleus progress" },
           ]}
           value={tab}
           onChange={(id) => setTab(id as TeachTab)}
@@ -638,6 +640,8 @@ export function TeachingWorkspace() {
           )}
         </section>
       ) : null}
+
+      {tab === "nucleus" ? <NucleusProgressPanel academicYearCode={ay} /> : null}
 
       {tab === "coverage" ? (
         <section className="space-y-4">

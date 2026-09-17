@@ -138,6 +138,19 @@ create_job "bhb-wa-automation-tick" "*/30 8-19 * * 1-6" \
   "${APP_URL}/api/wa/automation/tick" \
   "Asia/Kolkata" "300s"
 
+# "Read Nucleus" — the weekly nudge to copy LEAD's syllabus-progress table
+# into the ERP. LEAD has no API and their login is behind reCAPTCHA, so a
+# human carries the numbers across; without this reminder the screen shows a
+# month-old reading and nobody notices.
+#
+# Monday 08:30 IST, once a week: the figures move by day plans, not by hours,
+# and the principal reads them at the start of the week. The tick itself
+# decides whether to send — nothing goes out while the last reading is under
+# a week old, so a Monday after a Friday paste is silent.
+create_job "bhb-nucleus-reminder" "30 8 * * 1" \
+  "${APP_URL}/api/nucleus/reminder/tick" \
+  "Asia/Kolkata" "120s"
+
 # The 6 PM brief for owner, principal and office head: the day's collection
 # with its mode break-up, expenses by head, attendance class by class, staff
 # absences split into approved leave / awaiting a decision / nothing on file,

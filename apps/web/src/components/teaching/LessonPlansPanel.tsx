@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CheckCircle2, ChevronDown, ChevronRight, Sparkles } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, ExternalLink, Sparkles } from "lucide-react";
 import {
   addResourceLink,
   listLessonPlans,
@@ -18,6 +18,7 @@ import type { LessonPlanDraft, LessonPlanLanguage } from "@/lib/lessonPlanAi";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { AddResourceForm, ResourceList } from "@/components/teaching/ResourceLinks";
 import { VoiceDictateButton } from "@/components/teaching/VoiceDictateButton";
+import { SMART_TEACH_URL, smartTeachBookFor } from "@/lib/smartTeach";
 
 type Draft = {
   id: string;
@@ -333,15 +334,18 @@ export function LessonPlansPanel(props: {
 
   return (
     <div className="space-y-4">
-      {canEdit ? (
-        <button
-          type="button"
-          onClick={() => (draft ? discardDraft() : setDraft(emptyDraft()))}
-          className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--primary-foreground)]"
-        >
-          {draft ? "Close editor" : "New lesson plan"}
-        </button>
-      ) : null}
+      <div className="flex flex-wrap items-center gap-3">
+        {canEdit ? (
+          <button
+            type="button"
+            onClick={() => (draft ? discardDraft() : setDraft(emptyDraft()))}
+            className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--primary-foreground)]"
+          >
+            {draft ? "Close editor" : "New lesson plan"}
+          </button>
+        ) : null}
+        <SmartTeachLink classLabel={props.classLabel} subjectName={props.subjectName} />
+      </div>
 
       {draft ? (
         <LessonPlanEditor
@@ -482,6 +486,35 @@ export function LessonPlansPanel(props: {
         </ul>
       )}
     </div>
+  );
+}
+
+/**
+ * "Smart Teach: Click Code Connect - 8" — the publisher's teacher portal,
+ * shown only for the classes and subjects whose book is on the school's
+ * account (Computer and GK 1–8, Social Studies 1–5). The teacher signs in
+ * there with their own mobile and OTP; nothing is carried across.
+ */
+function SmartTeachLink({
+  classLabel,
+  subjectName,
+}: {
+  classLabel: string;
+  subjectName: string;
+}) {
+  const book = smartTeachBookFor(classLabel, subjectName);
+  if (!book) return null;
+  return (
+    <a
+      href={SMART_TEACH_URL}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={`${book.book} — ${book.has}. Sign in with your own mobile number.`}
+      className="inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--info)] underline"
+    >
+      <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+      Smart Teach: {book.book}
+    </a>
   );
 }
 
