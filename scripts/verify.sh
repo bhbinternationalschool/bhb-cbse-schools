@@ -256,6 +256,7 @@ SELFTESTS=(
   test:ai-stream
   test:tutor-plans
   test:tutor-video-sources
+  test:smart-teach
   test:staff-home-kind
   test:mobile-features
   test:cashfree-checkout
