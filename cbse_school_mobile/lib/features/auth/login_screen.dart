@@ -1,5 +1,6 @@
 import "package:flutter/material.dart";
 
+import "../../app/app_audience.dart";
 import "../../core/api/api_client.dart";
 import "../../core/config/app_config.dart";
 import "../../core/theme/app_theme.dart";
@@ -10,11 +11,20 @@ class LoginScreen extends StatefulWidget {
     super.key,
     required this.config,
     required this.api,
+    required this.audience,
     required this.onSignedIn,
   });
 
   final AppConfig config;
   final ApiClient api;
+
+  /// Which of the two apps this is. Only the staff build offers the
+  /// Parent/Staff toggle: the parent build used to show it as well, and Google
+  /// Play rejected version code 12 on 17 Sep 2026 because the reviewer chose
+  /// Staff, typed the demo parent's mobile and was told "No staff record found
+  /// for this mobile" — a dead end no parent could ever get out of either.
+  final AppAudience audience;
+
   final VoidCallback onSignedIn;
 
   @override
@@ -33,6 +43,10 @@ class _LoginScreenState extends State<LoginScreen> {
   String? _maskedMobile;
   String? _error;
   String? _info;
+
+  /// The parent build has no staff sign-in at all, so `_staffMode` stays false
+  /// there for the life of the screen.
+  bool get _showAudienceToggle => widget.audience == AppAudience.staff;
 
   @override
   void dispose() {
@@ -147,31 +161,32 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                   SizedBox(height: 16),
-                  SegmentedButton<bool>(
-                    segments: [
-                      ButtonSegment(
-                        value: false,
-                        label: Text(context.l10n.parent),
-                        icon: Icon(Icons.family_restroom_outlined),
-                      ),
-                      ButtonSegment(
-                        value: true,
-                        label: Text(context.l10n.staff),
-                        icon: Icon(Icons.badge_outlined),
-                      ),
-                    ],
-                    selected: {_staffMode},
-                    onSelectionChanged: _busy
-                        ? null
-                        : (s) => setState(() {
-                            _staffMode = s.first;
-                            _staffUseOtp = false;
-                            _otpSent = false;
-                            _otp.clear();
-                            _error = null;
-                            _info = null;
-                          }),
-                  ),
+                  if (_showAudienceToggle)
+                    SegmentedButton<bool>(
+                      segments: [
+                        ButtonSegment(
+                          value: false,
+                          label: Text(context.l10n.parent),
+                          icon: Icon(Icons.family_restroom_outlined),
+                        ),
+                        ButtonSegment(
+                          value: true,
+                          label: Text(context.l10n.staff),
+                          icon: Icon(Icons.badge_outlined),
+                        ),
+                      ],
+                      selected: {_staffMode},
+                      onSelectionChanged: _busy
+                          ? null
+                          : (s) => setState(() {
+                              _staffMode = s.first;
+                              _staffUseOtp = false;
+                              _otpSent = false;
+                              _otp.clear();
+                              _error = null;
+                              _info = null;
+                            }),
+                    ),
                   if (_staffMode) ...[
                     const SizedBox(height: 8),
                     Align(
@@ -248,6 +263,16 @@ class _LoginScreenState extends State<LoginScreen> {
                       _error!,
                       style: const TextStyle(color: AppColors.danger),
                     ),
+                    // A mobile the staff roster does not know is far more
+                    // often a parent on the wrong tab than a typo, and the
+                    // server's message alone leaves them stuck.
+                    if (_staffMode && _showAudienceToggle) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        "If you are a parent, choose Parent above.",
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
                   ],
                   if (_info != null) ...[
                     const SizedBox(height: 12),
