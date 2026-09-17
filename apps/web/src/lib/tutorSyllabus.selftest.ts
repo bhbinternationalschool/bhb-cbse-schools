@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 import { buildTutorSystemPrompt } from "@/lib/tutorPlans";
 import {
+  CHAPTER_TOPICS_MAX,
   cleanChapterName,
   cleanOutcomeName,
   indexGrade,
@@ -259,6 +260,37 @@ const chapters: SyllabusChapter[] = [
   assert.match(block, /not a ceiling — the child's own book may ask for more/);
   assert.match(block, /Never quote outcome codes, and never name an NCERT book or chapter: pre-primary has none/);
   assert.doesNotMatch(block, /IL ?\d|ECL\d|HW ?\d/, "no outcome code reaches the prompt");
+}
+
+
+// ── Chapter topics: listed for one subject only, capped, never the book ──
+{
+  const sBooks: SyllabusBook[] = [
+    { id: "sm6", medium: "English", subjects: ["Mathematics"], name: "Propel New Prime Mathematics Coursebook Grade 6" },
+    { id: "se6", medium: "English", subjects: ["English"], name: "Propel New Prime English Coursebook Grade 6" },
+  ];
+  const long = "x".repeat(200);
+  const sChapters: SyllabusChapter[] = [
+    { textbookId: "sm6", position: 5, name: "Factors and Multiples", topics: ["Prime Factorisation", "Highest Common Factor", "  Lowest   Common Multiple (LCM) "] },
+    { textbookId: "sm6", position: 6, name: "Perimeter and Area" },
+    { textbookId: "se6", position: 1, name: "Uncle Ken on the Job", topics: ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", long] },
+  ];
+
+  const maths = textbooksPromptBlock({ grade: 6, books: sBooks, chapters: sChapters, subjectLabel: "Maths" });
+  assert.match(maths, /5\. Factors and Multiples \[Prime Factorisation, Highest Common Factor, Lowest Common Multiple \(LCM\)\]; 6\. Perimeter and Area$/m, "one subject → topics in brackets, spaces tidied; a chapter without topics has no brackets");
+  assert.match(maths, /The words in \[brackets\] after a chapter are the topics it covers/, "and the model is told what the brackets are");
+  assert.match(maths, /not the book's text: explain in your own words/);
+
+  const all = textbooksPromptBlock({ grade: 6, books: sBooks, chapters: sChapters });
+  assert.ok(!all.includes("["), "every subject at once → titles only, no topics and no brackets rule");
+
+  const eng = textbooksListing({ grade: 6, books: sBooks, chapters: sChapters, subjectLabel: "English", coreFallback: false });
+  const kept = eng.match(/\[(.*)\]/)![1]!.split(", ");
+  assert.equal(kept.length, CHAPTER_TOPICS_MAX, `at most ${CHAPTER_TOPICS_MAX} topics per chapter`);
+  assert.ok(!eng.includes(long), "an over-long topic never reaches the prompt whole");
+
+  const none = textbooksPromptBlock({ grade: 6, books: sBooks, chapters: sChapters.map((c) => ({ ...c, topics: undefined })), subjectLabel: "Maths" });
+  assert.ok(!none.includes("[brackets]"), "no topics loaded → the prompt is exactly as before");
 }
 
 console.log("tutorSyllabus.selftest: ok");

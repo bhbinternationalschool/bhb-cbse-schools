@@ -175,10 +175,10 @@ async function schoolClassTextbooks(grade: number): Promise<ClassTextbooks> {
   if (books.length) {
     // A class has a handful of books and at most a few hundred chapters —
     // paged anyway, because the 1,000-row cap has bitten this codebase before.
-    const read = await fetchAllPages<{ textbook_id: string; position: number; name: string }>((from, to) =>
+    const read = await fetchAllPages<{ textbook_id: string; position: number; name: string; topics: string[] | null }>((from, to) =>
       sb
         .from("school_textbook_chapters")
-        .select("textbook_id, position, name")
+        .select("textbook_id, position, name, topics")
         .eq("tenant_id", tenantId)
         .in(
           "textbook_id",
@@ -189,7 +189,12 @@ async function schoolClassTextbooks(grade: number): Promise<ClassTextbooks> {
         .range(from, to),
     );
     if (read.error) throw new Error(`school_textbook_chapters: ${read.error}`);
-    chapters = read.rows.map((c) => ({ textbookId: c.textbook_id, position: Number(c.position), name: c.name }));
+    chapters = read.rows.map((c) => ({
+      textbookId: c.textbook_id,
+      position: Number(c.position),
+      name: c.name,
+      topics: Array.isArray(c.topics) ? c.topics : [],
+    }));
   }
 
   const value: ClassTextbooks = {

@@ -21,7 +21,9 @@
  *     "edition": "2025",                   // optional
  *     "chapters": [
  *       "Large Numbers",                   // position = order in the list
- *       { "name": "Fractions", "exams": ["HY"] }  // exams: which papers set it
+ *       { "name": "Fractions", "exams": ["HY"], "topics": ["Like fractions", "Equivalent fractions"] }
+ *                                          // exams: which papers set it; topics: short
+ *                                          // topic NAMES only, never the book's text
  *     ]
  *   }
  *
@@ -40,7 +42,7 @@ const file = process.argv.slice(2).find((a) => !a.startsWith("--"));
 
 const SUBJECTS = ["maths", "science", "evs", "social", "english", "hindi", "sanskrit", "arts", "pe", "vocational"];
 
-type ChapterIn = string | { name: string; exams?: string[] };
+type ChapterIn = string | { name: string; exams?: string[]; topics?: string[] };
 type BookIn = {
   grade: number;
   subject: string;
@@ -114,9 +116,13 @@ for (const b of books) {
     position: i + 1,
     name: (typeof c === "string" ? c : c.name).replace(/\s+/g, " ").trim(),
     exam_term_codes: typeof c === "string" ? [] : (c.exams ?? []).map((e) => e.trim().toUpperCase()).filter(Boolean),
+    topics: typeof c === "string" ? [] : (c.topics ?? []).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean),
   }));
   const examined = chapters.filter((c) => c.exam_term_codes.length).length;
-  console.log(`Class ${b.grade} ${b.subject.padEnd(10)} ${b.name} — ${chapters.length} chapters${examined ? `, ${examined} marked for exams` : ""}`);
+  const topics = chapters.reduce((n, c) => n + c.topics.length, 0);
+  console.log(
+    `Class ${b.grade} ${b.subject.padEnd(10)} ${b.name} — ${chapters.length} chapters${topics ? `, ${topics} topics` : ""}${examined ? `, ${examined} marked for exams` : ""}`,
+  );
 
   if (!APPLY || !tenant) continue;
   const { data, error } = await tenant.sb.rpc("school_replace_textbook", {
