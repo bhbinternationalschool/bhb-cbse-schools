@@ -29,7 +29,8 @@ export async function replyHomeworkTutor(opts: {
   }
   const mode: TutorMode = opts.mode ?? "hint";
   const context = opts.context || {};
-  // The class's NCERT chapters, when the index has them. For a parent the
+  // The class's chapters — the school's own books (Classes 1–8), NCERT's
+  // outcomes (Nursery–UKG) — when loaded. For a parent the
   // class is the school's record of the child (tutorApi.server.ts sets it),
   // so the list is the child's own; the subject is the homework's, if any.
   const textbooks = await tutorTextbooksBlock(context);
@@ -41,8 +42,9 @@ export async function replyHomeworkTutor(opts: {
     onDelta: opts.onDelta,
     precheck: opts.precheck,
     maxTokens: tutorMaxTokens(mode),
-    // "-ncert1" marks replies written with the chapter list, so their
-    // outcomes can be told apart from those written without it.
-    promptVersion: `${mode === "hint" ? "v1" : `v2-${mode}`}${textbooks ? "-ncert1" : ""}`,
+    // "-books2" marks replies written with the chapter list (the school's
+    // books since 16 Sep 2026; "-ncert1" was NCERT's), so their outcomes can
+    // be told apart from those written without it — or with the old list.
+    promptVersion: `${mode === "hint" ? "v1" : `v2-${mode}`}${textbooks ? "-books2" : ""}`,
   });
 }

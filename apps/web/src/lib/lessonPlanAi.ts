@@ -14,10 +14,12 @@
  *    saved plan was AI-drafted, AI-drafted-then-edited, or typed.
  *  - Missing learning outcomes are passed as absent — the model is told to
  *    derive them from the chapter title, not to invent CBSE codes.
- *  - The class's current NCERT books for the subject, when the DIKSHA
- *    chapter index has them, are added by the server (never by the client)
- *    so the plan can follow the real chapter and name it. Without that list
- *    the prompt says the edition is unknown, as before.
+ *  - The school's own books for the class and subject (Propel; tables
+ *    school_textbooks / school_textbook_chapters), when loaded, are added by
+ *    the server (never by the client) so the plan can follow the real
+ *    chapter and name it. Without that list the prompt says the edition is
+ *    unknown and names no book. Never NCERT's books for Classes 1–8 —
+ *    director's decision, 16 Sep 2026: the children do not have them.
  */
 
 export type LessonPlanLanguage = "en" | "hi";
@@ -72,7 +74,7 @@ const PERIOD_MINUTES = 40;
 export function buildLessonPlanSystemPrompt(opts: {
   language: LessonPlanLanguage;
   schoolName: string;
-  /** The NCERT list for the class and subject, built on the server; "" when there is none. */
+  /** The school's book list (or, pre-primary, NCERT's outcomes) for the class and subject, built on the server; "" when there is none. */
   textbooks?: string;
   /**
    * "chapters" (Classes 1–8: textbooksListing) or "outcomes" (Nursery–UKG:
@@ -100,11 +102,12 @@ export function buildLessonPlanSystemPrompt(opts: {
 - Pre-primary: the school teaches from its own publisher books. NCERT's learning outcomes for this year, listed at the end, are the minimum a child should reach — not the syllabus and not a ceiling. Plan play-based, hands-on activities (objects, songs, stories, drawing, movement) for what the ticked units ask, building towards the outcomes they touch; where the unit goes beyond them, follow the unit. Name the outcome in plain words in an objective when one clearly fits — never an outcome code, and never an NCERT book or chapter: pre-primary has none.`
     : textbooks
       ? `
-- Textbooks: the school uses the current NCERT books listed at the end. Plan within the chapter the ticked units belong to and use that chapter's own words for things. When the match is clear, begin the title with the book and chapter ("<book>, Ch <number> — <topic>"). The school's unit titles can come from an older NCERT edition: if a ticked unit matches none of the listed chapters, plan it from its title and name no chapter. Never name a book, chapter or chapter number that is not listed.`
+- Textbooks: the school teaches from its own books, listed at the end. Plan within the chapter the ticked units belong to and use that chapter's own words for things. When the match is clear, begin the title with the book and chapter ("<book>, Ch <number> — <topic>"). The school's unit titles can be worded differently from the book: if a ticked unit matches none of the listed chapters, plan it from its title and name no chapter. Never name a book, chapter or chapter number that is not listed — never an NCERT book.`
       : "";
   // "Following the CBSE pattern", not "CBSE-affiliated": the school is
-  // state-recognised for Nursery–VIII and teaches from NCERT books.
-  return `You draft lesson plans for teachers at ${opts.schoolName}, an Indian school following the CBSE pattern and NCERT textbooks. One period is ${PERIOD_MINUTES} minutes.
+  // state-recognised for Nursery–VIII and teaches from its own publisher's
+  // books (Propel), not NCERT's.
+  return `You draft lesson plans for teachers at ${opts.schoolName}, an Indian school following the CBSE pattern and teaching from its own publisher's books, not NCERT textbooks — never name an NCERT book or chapter. One period is ${PERIOD_MINUTES} minutes.
 
 ${lang}
 

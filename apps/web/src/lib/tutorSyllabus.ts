@@ -1,12 +1,14 @@
 /**
- * The child's NCERT textbooks, as a short table of contents for the tutor's
- * prompt. Pure: the server loads books and chapters from the DIKSHA chapter
- * index (tables diksha_textbooks / diksha_chapters) and this file decides
- * which of them the prompt carries and how they read.
+ * The child's textbooks, as a short table of contents for the tutor's and the
+ * lesson planner's prompts. Pure: the server loads books and chapters and
+ * this file decides which of them the prompt carries and how they read.
  *
- * Why: the tutor was told "follow NCERT" and had never seen a chapter list.
- * With it, an answer can say "Ganita Prakash, Chapter 7" and use the book's
- * own words, instead of a guess at which edition the child holds.
+ * Whose books (director's decision, 16 Sep 2026): Classes 1–8 follow the
+ * SCHOOL's own books (Propel at this school; tables school_textbooks /
+ * school_textbook_chapters). Before that the list came from the DIKSHA index
+ * of NCERT books, and answers said "Ganita Prakash, Chapter 7" to families
+ * whose child has never seen that book. Nursery–UKG keep NCERT's learning
+ * outcomes as a minimum (DIKSHA index), because that is a floor, not a book.
  *
  * When the index has nothing for the class (not synced yet, Nursery–UKG,
  * a class label that names no class) the block is empty and the prompt is
@@ -33,6 +35,11 @@ const SUBJECT_NAME: Record<SubjectKey, string> = {
   pe: "Physical Education",
   vocational: "Vocational Education",
 };
+
+/** "maths" → "Mathematics": how a school book's subject key is shown and read back by subjectKeyFor. */
+export function subjectDisplayName(key: string): string {
+  return (SUBJECT_NAME as Record<string, string>)[key] ?? key;
+}
 
 /** The index covers Classes 1–8; anything else (Nursery–UKG, an unknown label) is null. */
 export function tutorGrade(className: string | undefined): number | null {
@@ -116,6 +123,14 @@ export function textbooksListing(opts: {
   subjectLabel?: string;
   coreFallback?: boolean;
   medium?: "English" | "Hindi";
+  /**
+   * Whose books these are. "school" (the default since 16 Sep 2026) are the
+   * books the children actually hold — Propel for Classes 1–8 at this school;
+   * "ncert" is the DIKSHA index. The director's decision: the tutor and
+   * lesson plans follow the school's books, and never name an NCERT book to
+   * a family that owns Propel.
+   */
+  source?: "school" | "ncert";
 }): string {
   const byKey = new Map<SubjectKey, SyllabusBook[]>();
   for (const b of opts.books) {
@@ -154,7 +169,11 @@ export function textbooksListing(opts: {
     }
   }
   if (!lines.length) return "";
-  return [`Textbooks: the current NCERT books for Class ${opts.grade}, as listed on DIKSHA, the government's school platform.`, ...lines].join("\n");
+  const header =
+    (opts.source ?? "school") === "ncert"
+      ? `Textbooks: the current NCERT books for Class ${opts.grade}, as listed on DIKSHA, the government's school platform.`
+      : `Textbooks: the books this school's Class ${opts.grade} children use, chapter by chapter — these are the books in the child's school bag.`;
+  return [header, ...lines].join("\n");
 }
 
 /** The tutor's block: the textbook list and how to use it in an answer. */
@@ -163,6 +182,7 @@ export function textbooksPromptBlock(opts: {
   books: SyllabusBook[];
   chapters: SyllabusChapter[];
   subjectLabel?: string;
+  source?: "school" | "ncert";
 }): string {
   const listing = textbooksListing(opts);
   if (!listing) return "";
@@ -170,7 +190,7 @@ export function textbooksPromptBlock(opts: {
     listing,
     // The example names no real book: a Class III prompt must not mention a
     // Class VII title next to "never name a book that is not listed".
-    "Using the textbooks: when a question belongs to one of these chapters, say which one as listed — book name, then \"Chapter\" and its number and name — and explain it the way that chapter does, in its words. Never name a book, chapter or chapter number that is not in this list. A question that fits no chapter here may still be this class's schoolwork — answer it by the level guide without naming a chapter.",
+    "Using the textbooks: when a question belongs to one of these chapters, say which one as listed — book name, then \"Chapter\" and its number and name — and explain it the way that chapter does, in its words. Never name a book, chapter or chapter number that is not in this list — in particular never an NCERT book: the child does not have one. A question that fits no chapter here may still be this class's schoolwork — answer it by the level guide without naming a chapter.",
   ].join("\n");
 }
 
