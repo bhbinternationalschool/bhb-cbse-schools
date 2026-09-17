@@ -85,13 +85,22 @@ export function NucleusProgressPanel({ academicYearCode }: { academicYearCode: s
         body: JSON.stringify({ text, academicYearCode, kind }),
       });
       const body = (await res.json().catch(() => ({}))) as {
+        // The route's own refusal (a bad paste) arrives as data.ok = false;
+        // anything the server threw arrives as error.message. Showing the
+        // paste message for a server fault would blame the paste for, say,
+        // the local-dev write guard.
         data?: {
           ok?: boolean;
           error?: string;
           lineErrors?: string[];
           snapshot?: Snapshot & AssessmentSnapshot;
         };
+        error?: { message?: string };
       };
+      if (!res.ok) {
+        setError(body.error?.message ?? `The server refused the save (HTTP ${res.status}).`);
+        return;
+      }
       const result = body.data;
       if (!result?.ok) {
         setError(result?.error ?? "Could not read the paste.");
