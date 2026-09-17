@@ -16,7 +16,31 @@
  */
 
 export type SyllabusBook = { id: string; medium: string; subjects: string[]; name: string };
-export type SyllabusChapter = { textbookId: string; position: number; name: string };
+export type SyllabusChapter = {
+  textbookId: string;
+  position: number;
+  name: string;
+  /**
+   * What the chapter covers, as short topic names (school books only, from
+   * the contents page or the chapter opener — never the book's text). Listed
+   * only when the prompt carries ONE subject, so a question can be matched to
+   * its chapter without every subject's topics swelling the prompt.
+   */
+  topics?: string[];
+};
+
+/** Topic names per chapter in a prompt, and the longest one kept. */
+export const CHAPTER_TOPICS_MAX = 8;
+export const CHAPTER_TOPIC_MAX_CHARS = 90;
+
+function chapterTopicsNote(topics: string[] | undefined): string {
+  const kept = (topics ?? [])
+    .map((t) => t.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .slice(0, CHAPTER_TOPICS_MAX)
+    .map((t) => (t.length > CHAPTER_TOPIC_MAX_CHARS ? `${t.slice(0, CHAPTER_TOPIC_MAX_CHARS - 1).trimEnd()}…` : t));
+  return kept.length ? ` [${kept.join(", ")}]` : "";
+}
 
 export type SubjectKey = "maths" | "science" | "evs" | "social" | "english" | "hindi" | "sanskrit" | "arts" | "pe" | "vocational";
 
@@ -152,6 +176,9 @@ export function textbooksListing(opts: {
   const preferred = opts.medium ?? "English";
   const other = preferred === "English" ? "Hindi" : "English";
 
+  // Topics only for a single subject: all core subjects' topics together
+  // would triple the prompt for a question that concerns one of them.
+  const withTopics = keys.length === 1;
   const lines: string[] = [];
   for (const key of keys) {
     const books = (byKey.get(key) ?? []).slice().sort(byName);
@@ -165,7 +192,7 @@ export function textbooksListing(opts: {
       const chapters = (chaptersOf.get(book.id) ?? []).slice().sort((a, b) => a.position - b.position);
       if (!chapters.length) continue;
       const note = i === listed.length - 1 && otherEditions.length ? ` (${otherLabel}-medium edition: ${otherEditions.map((b) => b.name).join(", ")})` : "";
-      lines.push(`${SUBJECT_NAME[key]} — ${book.name}${note}: ${chapters.map((c) => `${c.position}. ${cleanChapterName(c.name)}`).join("; ")}`);
+      lines.push(`${SUBJECT_NAME[key]} — ${book.name}${note}: ${chapters.map((c) => `${c.position}. ${cleanChapterName(c.name)}${withTopics ? chapterTopicsNote(c.topics) : ""}`).join("; ")}`);
     }
   }
   if (!lines.length) return "";
@@ -188,6 +215,9 @@ export function textbooksPromptBlock(opts: {
   if (!listing) return "";
   return [
     listing,
+    ...(/\. [^;\n]*\[/.test(listing)
+      ? ["The words in [brackets] after a chapter are the topics it covers — use them to find which chapter a question belongs to. They are topic names, not the book's text: explain in your own words."]
+      : []),
     // The example names no real book: a Class III prompt must not mention a
     // Class VII title next to "never name a book that is not listed".
     "Using the textbooks: when a question belongs to one of these chapters, say which one as listed — book name, then \"Chapter\" and its number and name — and explain it the way that chapter does, in its words. Never name a book, chapter or chapter number that is not in this list — in particular never an NCERT book: the child does not have one. A question that fits no chapter here may still be this class's schoolwork — answer it by the level guide without naming a chapter.",
