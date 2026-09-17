@@ -8,8 +8,17 @@ import {
   type NucleusProgressRow,
   type NucleusSummary,
 } from "@/lib/nucleusProgress";
+import type { AssessmentSummary, NucleusAssessmentRow } from "@/lib/nucleusAssessments";
 
 const NUCLEUS_URL = "https://nucleus.leadgroup.co.in";
+
+type AssessmentSnapshot = {
+  id: string;
+  capturedOn: string;
+  capturedBy: string;
+  rows: NucleusAssessmentRow[];
+  summary: AssessmentSummary;
+};
 
 type Snapshot = {
   id: string;
@@ -32,6 +41,8 @@ type Snapshot = {
  */
 export function NucleusProgressPanel({ academicYearCode }: { academicYearCode: string }) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [assessments, setAssessments] = useState<AssessmentSnapshot | null>(null);
+  const [papersPaste, setPapersPaste] = useState("");
   const [loading, setLoading] = useState(true);
   const [paste, setPaste] = useState("");
   const [busy, setBusy] = useState(false);
@@ -46,8 +57,11 @@ export function NucleusProgressPanel({ academicYearCode }: { academicYearCode: s
         `/api/v1/principal/nucleus-progress?academicYearCode=${encodeURIComponent(academicYearCode)}`,
         { cache: "no-store" },
       );
-      const body = (await res.json().catch(() => ({}))) as { data?: { snapshot?: Snapshot | null } };
+      const body = (await res.json().catch(() => ({}))) as {
+        data?: { snapshot?: Snapshot | null; assessments?: AssessmentSnapshot | null };
+      };
       setSnapshot(body.data?.snapshot ?? null);
+      setAssessments(body.data?.assessments ?? null);
     } finally {
       setLoading(false);
     }
@@ -57,8 +71,9 @@ export function NucleusProgressPanel({ academicYearCode }: { academicYearCode: s
     void load();
   }, [load]);
 
-  async function importPaste() {
-    if (busy || !paste.trim()) return;
+  async function importPaste(kind: "timeliness" | "assessments" = "timeliness") {
+    const text = kind === "assessments" ? papersPaste : paste;
+    if (busy || !text.trim()) return;
     setBusy(true);
     setError(null);
     setLineErrors([]);
@@ -67,10 +82,15 @@ export function NucleusProgressPanel({ academicYearCode }: { academicYearCode: s
       const res = await fetch("/api/v1/principal/nucleus-progress", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: paste, academicYearCode }),
+        body: JSON.stringify({ text, academicYearCode, kind }),
       });
       const body = (await res.json().catch(() => ({}))) as {
-        data?: { ok?: boolean; error?: string; lineErrors?: string[]; snapshot?: Snapshot };
+        data?: {
+          ok?: boolean;
+          error?: string;
+          lineErrors?: string[];
+          snapshot?: Snapshot & AssessmentSnapshot;
+        };
       };
       const result = body.data;
       if (!result?.ok) {
@@ -78,9 +98,15 @@ export function NucleusProgressPanel({ academicYearCode }: { academicYearCode: s
         setLineErrors(result?.lineErrors ?? []);
         return;
       }
-      setSnapshot(result.snapshot ?? null);
-      setPaste("");
-      setNotice(`Saved ${result.snapshot?.rows.length ?? 0} rows.`);
+      if (kind === "assessments") {
+        setAssessments((result.snapshot as AssessmentSnapshot) ?? null);
+        setPapersPaste("");
+        setNotice(`Saved ${result.snapshot?.rows.length ?? 0} papers.`);
+      } else {
+        setSnapshot((result.snapshot as Snapshot) ?? null);
+        setPaste("");
+        setNotice(`Saved ${result.snapshot?.rows.length ?? 0} rows.`);
+      }
     } finally {
       setBusy(false);
     }
@@ -181,6 +207,71 @@ export function NucleusProgressPanel({ academicYearCode }: { academicYearCode: s
         </>
       ) : null}
 
+      <div className="border-t border-[var(--border)] pt-4">
+        <h3 className="text-sm font-bold text-[var(--brand-deep)]">Exam papers in Nucleus</h3>
+        <p className="mt-0.5 text-xs text-[var(--muted)]">
+          {assessments
+            ? `Read on ${assessments.capturedOn}. ${assessments.summary.ready} ready, ${assessments.summary.notCreated} not created.`
+            : "Nothing read yet — paste the Assessments & Answer key table to see which papers are missing."}
+        </p>
+
+        {assessments && assessments.summary.gaps.length > 0 ? (
+          <div className="mt-3 overflow-hidden rounded-xl border border-[var(--border)]">
+            <table className="w-full text-sm">
+              <thead className="bg-[var(--surface-sunken)] text-left text-[11px] uppercase tracking-wide text-[var(--muted)]">
+                <tr>
+                  <th className="px-3 py-2 font-bold">Class</th>
+                  <th className="px-3 py-2 font-bold">Subject</th>
+                  <th className="px-3 py-2 font-bold">Papers not created</th>
+                </tr>
+              </thead>
+              <tbody>
+                {assessments.summary.gaps.slice(0, 15).map((g) => (
+                  <tr key={`${g.classLabel}|${g.division}|${g.subject}`} className="border-t border-[var(--border)]">
+                    <td className="px-3 py-2 font-semibold text-[var(--brand-deep)]">
+                      {g.classLabel} {g.division}
+                    </td>
+                    <td className="px-3 py-2 text-[var(--muted)]">{g.subject}</td>
+                    <td className="px-3 py-2 text-[var(--muted)]">
+                      <span className="font-semibold text-[var(--danger)]">{g.missing.length}</span>
+                      {" — "}
+                      {g.missing.join(", ")}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+
+        <details className="mt-3 rounded-xl border border-[var(--border)] px-4 py-3">
+          <summary className="cursor-pointer text-sm font-semibold text-[var(--brand-deep)]">
+            Paste the exam-paper list
+          </summary>
+          <ol className="mt-2 list-decimal space-y-1 pl-5 text-xs text-[var(--muted)]">
+            <li>Open Nucleus → Academics Resources → Assessments &amp; Answer Keys.</li>
+            <li>Select the whole table and copy it.</li>
+            <li>Paste it below and press Save.</li>
+          </ol>
+          <textarea
+            value={papersPaste}
+            onChange={(e) => setPapersPaste(e.target.value)}
+            rows={6}
+            placeholder="Paste the Assessments & Answer key table here"
+            className="mt-2 w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 font-mono text-xs"
+          />
+          <button
+            type="button"
+            onClick={() => importPaste("assessments")}
+            disabled={busy || !papersPaste.trim()}
+            className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${busy ? "animate-spin" : ""}`} />
+            {busy ? "Saving…" : "Save paper list"}
+          </button>
+        </details>
+      </div>
+
       <details className="rounded-xl border border-[var(--border)] px-4 py-3">
         <summary className="cursor-pointer text-sm font-semibold text-[var(--brand-deep)]">
           Paste a fresh reading
@@ -200,7 +291,7 @@ export function NucleusProgressPanel({ academicYearCode }: { academicYearCode: s
         <div className="mt-2 flex items-center gap-3">
           <button
             type="button"
-            onClick={importPaste}
+            onClick={() => importPaste("timeliness")}
             disabled={busy || !paste.trim()}
             className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
           >

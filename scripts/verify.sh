@@ -258,6 +258,8 @@ SELFTESTS=(
   test:tutor-video-sources
   test:smart-teach
   test:nucleus-progress
+  test:nucleus-reminder
+  test:nucleus-assessments
   test:staff-home-kind
   test:mobile-features
   test:cashfree-checkout

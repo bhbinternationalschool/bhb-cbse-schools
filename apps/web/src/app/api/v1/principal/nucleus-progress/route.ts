@@ -1,6 +1,11 @@
 import { apiErr, apiOk } from "@/lib/api/v1/errors";
 import { assertPermission, resolveApiAuth } from "@/lib/api/v1/auth";
-import { latestNucleusSnapshot, saveNucleusPaste } from "@/lib/nucleusProgress.server";
+import {
+  latestNucleusAssessments,
+  latestNucleusSnapshot,
+  saveNucleusAssessmentPaste,
+  saveNucleusPaste,
+} from "@/lib/nucleusProgress.server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,8 +18,11 @@ export async function GET(request: Request) {
     assertPermission(ctx, "home", "view");
     const url = new URL(request.url);
     const ay = url.searchParams.get("academicYearCode") || ctx.session.academicYearCode;
-    const snapshot = await latestNucleusSnapshot(ay);
-    const res = apiOk({ snapshot });
+    const [snapshot, assessments] = await Promise.all([
+      latestNucleusSnapshot(ay),
+      latestNucleusAssessments(ay),
+    ]);
+    const res = apiOk({ snapshot, assessments });
     res.headers.set("Cache-Control", "no-store, no-cache, must-revalidate");
     return res;
   } catch (e) {
@@ -37,22 +45,30 @@ export async function POST(request: Request) {
       capturedOn?: string;
       note?: string;
       academicYearCode?: string;
+      /** Which Nucleus table was pasted. */
+      kind?: "timeliness" | "assessments";
     };
     const text = typeof body.text === "string" ? body.text : "";
     if (!text.trim()) {
-      return apiOk({ ok: false, error: "Paste the Teacher Timeliness table first." });
+      return apiOk({ ok: false, error: "Paste the table from Nucleus first." });
     }
     const today = new Date().toISOString().slice(0, 10);
     const capturedOn = /^\d{4}-\d{2}-\d{2}$/.test(body.capturedOn ?? "")
       ? body.capturedOn!
       : today;
-    const result = await saveNucleusPaste({
+    const common = {
       text,
       academicYearCode: body.academicYearCode || ctx.session.academicYearCode,
       capturedOn,
       capturedBy: ctx.session.fullName || ctx.session.roleCode || "",
-      note: typeof body.note === "string" ? body.note : "",
-    });
+    };
+    const result =
+      body.kind === "assessments"
+        ? await saveNucleusAssessmentPaste(common)
+        : await saveNucleusPaste({
+            ...common,
+            note: typeof body.note === "string" ? body.note : "",
+          });
     return apiOk(result);
   } catch (e) {
     return apiErr(e);
