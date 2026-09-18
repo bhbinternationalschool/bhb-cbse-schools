@@ -96,7 +96,7 @@ import {
   printClassResultSheet,
 } from "@/components/exams/ClassResultSheet";
 import { useHoldDecisions } from "@/lib/useHoldDecisions";
-import { ExamDateSheetPanel } from "@/components/exams/ExamDateSheetPanel";
+import { ExamDateSheetGrid } from "@/components/exams/ExamDateSheetGrid";
 import { InvigilationPanel } from "@/components/exams/InvigilationPanel";
 import { ExamPapersPanel } from "@/components/exams/ExamPapersPanel";
 import { AdmitCardsPanel } from "@/components/exams/AdmitCardsPanel";
@@ -1347,7 +1347,7 @@ export function ExamsWorkspace() {
       ) : null}
 
       {tab === "datesheet" && masters ? (
-        <ExamDateSheetPanel
+        <ExamDateSheetGrid
           academicYearCode={ay}
           masters={masters}
           terms={terms}
