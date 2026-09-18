@@ -142,6 +142,15 @@ export function ExamPapersPanel({
   const [newClassId, setNewClassId] = useState("");
   const [newSubjectId, setNewSubjectId] = useState("");
   const [filterClassId, setFilterClassId] = useState("");
+  /**
+   * A paper is set for the whole class, not for one section — so picking a
+   * section narrows to that section's class. Kept as its own filter because
+   * that is how the office thinks about a class ("VI B"), and hiding the
+   * distinction would be worse than stating it.
+   */
+  const [filterSectionId, setFilterSectionId] = useState("");
+  const [filterSubjectId, setFilterSubjectId] = useState("");
+  const [filterExamTermId, setFilterExamTermId] = useState("");
 
   useEffect(() => {
     void Promise.all([
@@ -160,17 +169,111 @@ export function ExamPapersPanel({
     if (!newExamTermId && terms[0]) setNewExamTermId(terms[0].id);
   }, [terms, newExamTermId]);
 
-  const papers = useMemo(() => {
+  /** Everything for this session, before the filter bar narrows it. */
+  const allPapers = useMemo(() => {
     void tick;
-    return listExamPapers(ay, {
-      classId: filterClassId || undefined,
-    });
-  }, [ay, filterClassId, tick]);
+    return listExamPapers(ay);
+  }, [ay, tick]);
+
+  const papers = useMemo(
+    () =>
+      allPapers
+        .filter((p) => !filterClassId || p.classId === filterClassId)
+        .filter((p) => !filterSubjectId || p.subjectId === filterSubjectId)
+        .filter((p) => !filterExamTermId || p.examTermId === filterExamTermId),
+    [allPapers, filterClassId, filterSubjectId, filterExamTermId],
+  );
 
   const classOptions = useMemo(
     () => masters.classes.filter((c) => c.isActive),
     [masters],
   );
+
+  const sectionOptions = useMemo(
+    () =>
+      (masters.sections ?? []).filter(
+        (x) => x.isActive && (!filterClassId || x.classId === filterClassId),
+      ),
+    [masters, filterClassId],
+  );
+
+  /**
+   * The filter bar offers what is actually there.
+   *
+   * Listing every subject in masters would let the office pick one of the
+   * forty that has no paper and be told there is nothing — which reads like a
+   * fault rather than an empty shelf. So each list is built from the papers
+   * that survive the *other* filters, and only falls back to the masters list
+   * while the session has no papers at all.
+   */
+  const filterSubjectOptions = useMemo(() => {
+    const ids = new Set(
+      allPapers
+        .filter((p) => !filterClassId || p.classId === filterClassId)
+        .filter((p) => !filterExamTermId || p.examTermId === filterExamTermId)
+        .map((p) => p.subjectId),
+    );
+    const list = (masters.subjects ?? []).filter((x) => ids.has(x.id));
+    if (list.length) return list;
+    return allPapers.length
+      ? []
+      : (masters.subjects ?? []).filter((x) => x.isActive && !x.parentId);
+  }, [allPapers, masters, filterClassId, filterExamTermId]);
+
+  const filterExamOptions = useMemo(() => {
+    const ids = new Set(
+      allPapers
+        .filter((p) => !filterClassId || p.classId === filterClassId)
+        .filter((p) => !filterSubjectId || p.subjectId === filterSubjectId)
+        .map((p) => p.examTermId),
+    );
+    const list = terms.filter((t) => ids.has(t.id));
+    if (list.length) return list;
+    return allPapers.length ? [] : terms;
+  }, [allPapers, terms, filterClassId, filterSubjectId]);
+
+  const filtersOn = !!(
+    filterClassId ||
+    filterSectionId ||
+    filterSubjectId ||
+    filterExamTermId
+  );
+
+  /** Narrowing the class must not leave a section or subject behind that no
+   * longer belongs to it — a filter bar that contradicts itself shows an
+   * empty list and no reason for it. */
+  function pickClass(classId: string) {
+    setFilterClassId(classId);
+    if (
+      filterSectionId &&
+      !(masters.sections ?? []).some(
+        (x) => x.id === filterSectionId && (!classId || x.classId === classId),
+      )
+    ) {
+      setFilterSectionId("");
+    }
+    if (
+      filterSubjectId &&
+      classId &&
+      !allPapers.some((p) => p.classId === classId && p.subjectId === filterSubjectId)
+    ) {
+      setFilterSubjectId("");
+    }
+  }
+
+  /** A section stands for its class: papers are set class-wide. */
+  function pickSection(sectionId: string) {
+    setFilterSectionId(sectionId);
+    const section = (masters.sections ?? []).find((x) => x.id === sectionId);
+    if (section) pickClass(section.classId);
+  }
+
+  function clearFilters() {
+    setFilterClassId("");
+    setFilterSectionId("");
+    setFilterSubjectId("");
+    setFilterExamTermId("");
+  }
 
   const subjectOptions = useMemo(() => {
     const classId = draft?.classId || newClassId;
@@ -1044,6 +1147,17 @@ export function ExamPapersPanel({
   // List view
   return (
     <div className="mt-5 space-y-4">
+      <ExamPaperImportPanel
+        masters={masters}
+        academicYearCode={ay}
+        terms={terms}
+        canEdit={canEdit}
+        actorName={actorName}
+        onError={onError}
+        onNotice={onNotice}
+        onImported={refresh}
+      />
+
       <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">
           Question papers · {ay}
@@ -1129,28 +1243,17 @@ export function ExamPapersPanel({
         )}
       </div>
 
-      <ExamPaperImportPanel
-        masters={masters}
-        academicYearCode={ay}
-        terms={terms}
-        canEdit={canEdit}
-        actorName={actorName}
-        onError={onError}
-        onNotice={onNotice}
-        onImported={refresh}
-      />
-
-      <div className="flex flex-wrap items-end gap-3">
+      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
         <label className="block text-sm">
           <span className="mb-1 block text-[11px] text-[var(--muted)]">
-            Filter by class
+            Class
           </span>
           <select
             className="field !w-auto !py-1.5"
             value={filterClassId}
-            onChange={(e) => setFilterClassId(e.target.value)}
+            onChange={(e) => pickClass(e.target.value)}
           >
-            <option value="">All</option>
+            <option value="">All classes</option>
             {classOptions.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
@@ -1158,15 +1261,94 @@ export function ExamPapersPanel({
             ))}
           </select>
         </label>
+        <label className="block text-sm">
+          <span className="mb-1 block text-[11px] text-[var(--muted)]">
+            Section
+          </span>
+          <select
+            className="field !w-auto !py-1.5"
+            value={filterSectionId}
+            onChange={(e) => pickSection(e.target.value)}
+          >
+            <option value="">All sections</option>
+            {sectionOptions.map((x) => (
+              <option key={x.id} value={x.id}>
+                {labelClass(x.classId)} {x.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block text-[11px] text-[var(--muted)]">
+            Subject
+          </span>
+          <select
+            className="field !w-auto !py-1.5"
+            value={filterSubjectId}
+            onChange={(e) => setFilterSubjectId(e.target.value)}
+            disabled={!filterSubjectOptions.length && !filterSubjectId}
+          >
+            <option value="">All subjects</option>
+            {filterSubjectOptions.map((x) => (
+              <option key={x.id} value={x.id}>
+                {x.nameEn || x.code}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block text-[11px] text-[var(--muted)]">
+            Exam
+          </span>
+          <select
+            className="field !w-auto !py-1.5"
+            value={filterExamTermId}
+            onChange={(e) => setFilterExamTermId(e.target.value)}
+            disabled={!filterExamOptions.length && !filterExamTermId}
+          >
+            <option value="">All exams</option>
+            {filterExamOptions.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.code} · {t.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {filtersOn ? (
+          <button
+            type="button"
+            className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm"
+            onClick={clearFilters}
+          >
+            Clear
+          </button>
+        ) : null}
         <p className="text-[12px] text-[var(--muted)]">
-          {papers.length} paper(s)
+          {papers.length} of {allPapers.length} paper
+          {allPapers.length === 1 ? "" : "s"}
+          {filterSectionId ? (
+            <span className="ml-1">
+              {"· "}a paper is set for the whole class, so a section shows its
+              class&rsquo;s papers
+            </span>
+          ) : null}
         </p>
       </div>
 
       {papers.length === 0 ? (
         <p className="rounded-xl border border-dashed border-[var(--border)] p-6 text-sm text-[var(--muted)]">
-          No papers yet for this session. Create one, then use{" "}
-          <strong>AI draft this set</strong> or add sections manually.
+          {allPapers.length ? (
+            <>
+              No paper matches these filters. <strong>Clear</strong> them to see
+              all {allPapers.length}.
+            </>
+          ) : (
+            <>
+              No papers yet for this session. Import your publisher&rsquo;s
+              folder above, or create one and use{" "}
+              <strong>AI draft this set</strong>.
+            </>
+          )}
         </p>
       ) : (
         <ul className="space-y-2">
