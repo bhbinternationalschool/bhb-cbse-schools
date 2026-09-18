@@ -434,6 +434,30 @@ export type ExamPaperSetSource = {
   importedBy: string;
 };
 
+/**
+ * The publisher's answer key for a set, as a stored document.
+ *
+ * Kept even when the key has also been read onto the questions: the PDF has
+ * the worked solutions laid out as a teacher reads them, and for a
+ * pre-primary paper — where the answers are pictures of traced shapes — it is
+ * the only form the key has.
+ */
+export type ExamPaperAnswerKeyFile = {
+  /** Path inside `school-files`; served through `/api/file`. */
+  filePath: string;
+  fileUrl: string;
+  /** sha-256 of the PDF, hex — re-importing the same key is a no-op. */
+  fileHash: string;
+  /** Where it came from, e.g. the publisher's own URL. */
+  sourceUrl: string;
+  /** How many questions got an answer from it; 0 = attached but not read. */
+  questionsFilled: number;
+  /** Why nothing was written onto the questions, when nothing was. */
+  note: string;
+  importedAt: string;
+  importedBy: string;
+};
+
 export type ExamPaperSet = {
   id: string;
   /** A / B / C / D — school picks one on exam day */
@@ -442,6 +466,8 @@ export type ExamPaperSet = {
   sections: ExamPaperSection[];
   /** null for a set written on this desk; see ExamPaperSetSource. */
   source: ExamPaperSetSource | null;
+  /** null when no answer key has been imported for this set. */
+  answerKey: ExamPaperAnswerKeyFile | null;
 };
 
 export type ExamPaperPrintEvent = {
@@ -720,6 +746,24 @@ export function emptySet(partial?: Partial<ExamPaperSet>): ExamPaperSet {
       ? partial!.sections.map((s) => emptySection(s))
       : [emptySection({ title: "Section A" })],
     source: normalizeSetSource(partial?.source),
+    answerKey: normalizeAnswerKeyFile(partial?.answerKey),
+  };
+}
+
+/** A key that cannot be opened is not a key; it becomes "no key imported". */
+export function normalizeAnswerKeyFile(
+  raw: Partial<ExamPaperAnswerKeyFile> | null | undefined,
+): ExamPaperAnswerKeyFile | null {
+  if (!raw || !raw.filePath || !raw.fileHash) return null;
+  return {
+    filePath: String(raw.filePath),
+    fileUrl: String(raw.fileUrl || ""),
+    fileHash: String(raw.fileHash),
+    sourceUrl: String(raw.sourceUrl || "").slice(0, 400),
+    questionsFilled: Math.max(0, Math.floor(Number(raw.questionsFilled) || 0)),
+    note: String(raw.note || "").slice(0, 300),
+    importedAt: String(raw.importedAt || nowIso()),
+    importedBy: String(raw.importedBy || ""),
   };
 }
 
@@ -836,6 +880,7 @@ function normalizeSet(s: Partial<ExamPaperSet>): ExamPaperSet | null {
           .filter((x): x is ExamPaperSection => !!x)
       : [emptySection()],
     source: normalizeSetSource(s.source),
+    answerKey: normalizeAnswerKeyFile(s.answerKey),
   };
 }
 
@@ -1810,4 +1855,116 @@ export function listPaperImages(
         normText(`${x.caption} ${x.questionText} ${x.paperCode}`).includes(needle),
     )
     .sort((a, b) => b.uses - a.uses || a.questionText.localeCompare(b.questionText));
+}
+
+/* -------------------------------------------------------------------------- */
+/* Answer keys                                                                */
+/* -------------------------------------------------------------------------- */
+
+export type ApplyAnswerKeyInput = {
+  paperId: string;
+  setCode: string;
+  file: ExamPaperAnswerKeyFile;
+  /**
+   * Question number → what the key says. Absent = attach the document only,
+   * which is the right outcome for a key whose answers are pictures.
+   */
+  byNumber?: Map<number, { answer: string; markingScheme: string[] }>;
+  /** Shown on the set when nothing could be written onto the questions. */
+  note?: string;
+};
+
+export type ApplyAnswerKeyOutcome = {
+  state: ExamPapersState;
+  /** Questions that gained an answer. */
+  filled: number;
+  /** Questions the key had nothing readable for — pictures, mostly. */
+  blank: number;
+  error?: string;
+};
+
+/**
+ * Attach a key to a set, and — when the caller has checked it lines up —
+ * write each answer onto its question.
+ *
+ * Questions are matched by their printed number, which is their position in
+ * the paper: the parser numbers them in the order the paper prints them, and
+ * the caller has already refused any key whose numbering or marks disagree.
+ * Nothing here re-decides that; it only writes what it was given.
+ *
+ * An existing answer is not overwritten. A teacher who has typed a better
+ * answer than the publisher's should keep it, and a second run of the import
+ * should change nothing.
+ */
+export function applyAnswerKey(
+  state: ExamPapersState,
+  input: ApplyAnswerKeyInput,
+): ApplyAnswerKeyOutcome {
+  const at = state.papers.findIndex((p) => p.id === input.paperId);
+  if (at < 0) return { state, filled: 0, blank: 0, error: "Paper not found" };
+
+  const paper = state.papers[at]!;
+  const setAt = paper.sets.findIndex((s) => s.setCode === input.setCode);
+  if (setAt < 0) return { state, filled: 0, blank: 0, error: "Set not found" };
+
+  let filled = 0;
+  let blank = 0;
+  let number = 0;
+
+  const set = paper.sets[setAt]!;
+  const sections = set.sections.map((section) => ({
+    ...section,
+    questions: section.questions.map((q) => {
+      number += 1;
+      const item = input.byNumber?.get(number);
+      if (!item) return q;
+      const answer = item.answer.trim();
+      if (!answer) blank += 1;
+      const next = { ...q };
+      if (answer && !q.answerKey.trim()) {
+        next.answerKey = answer;
+        filled += 1;
+      }
+      if (item.markingScheme.length && !q.markingScheme.length) {
+        next.markingScheme = item.markingScheme;
+      }
+      return next;
+    }),
+  }));
+
+  const sets = [...paper.sets];
+  sets[setAt] = {
+    ...set,
+    sections,
+    answerKey: { ...input.file, questionsFilled: filled, note: input.note ?? "" },
+  };
+
+  const next = normalizePaper({ ...paper, sets, updatedAt: nowIso() });
+  if (!next) return { state, filled: 0, blank: 0, error: "Paper became invalid" };
+
+  const papers = [...state.papers];
+  papers[at] = next;
+  return { state: { ...state, papers }, filled, blank };
+}
+
+/** Every set that has no answer key yet — what an import still has to do. */
+export function setsWithoutAnswerKey(state: ExamPapersState): {
+  paperId: string;
+  paperCode: string;
+  setCode: string;
+  publisherLabel: string;
+}[] {
+  const out: { paperId: string; paperCode: string; setCode: string; publisherLabel: string }[] = [];
+  for (const paper of state.papers) {
+    for (const set of paper.sets) {
+      if (set.answerKey) continue;
+      out.push({
+        paperId: paper.id,
+        paperCode: paper.paperCode,
+        setCode: set.setCode,
+        publisherLabel: set.source?.publisherLabel ?? set.label,
+      });
+    }
+  }
+  return out;
 }

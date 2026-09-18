@@ -237,6 +237,7 @@ SELFTESTS=(
   test:item-analytics
   test:item-score-import
   test:exam-paper-import
+  test:answer-key-parse
   test:lead-extract-ai
   test:lead-followup-ai
   test:lead-quality

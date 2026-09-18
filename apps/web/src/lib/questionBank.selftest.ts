@@ -141,6 +141,7 @@ let st = emptyExamPapersState();
       importedAt: "2026-09-18T00:00:00.000Z",
       importedBy: "test",
     },
+    answerKey: null,
   });
 
   const input = {
@@ -220,7 +221,7 @@ let st = emptyExamPapersState();
     generalInstructions: "",
     status: "draft" as const,
     sets: [
-      { id: "s1", setCode: "A", label: "Set A", sections: [{ id: "sec1", title: "A", instructions: "", questions }], source: null },
+      { id: "s1", setCode: "A", label: "Set A", sections: [{ id: "sec1", title: "A", instructions: "", questions }], source: null, answerKey: null },
     ],
     activeSetCode: "A",
     printLog: [],
