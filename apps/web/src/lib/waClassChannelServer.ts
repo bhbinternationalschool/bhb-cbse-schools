@@ -510,8 +510,20 @@ function composeBroadcast(draft: ClassChannelDraft, channel: ClassChannel): stri
     .join("\n");
 }
 
+/**
+ * Send the draft to the channel.
+ *
+ * `who` exists because homework takes a different road to the parents.
+ * This function sends PLAIN TEXT, which Meta delivers only inside a
+ * family's 24-hour window — so for every parent who had not messaged the
+ * school that day it silently failed, counted itself as a "stub", and the
+ * teacher was told the class had been informed. Homework now goes to
+ * families through `sendHomeworkWhatsApp`, which falls back to the approved
+ * template when the window is shut, and this sends only the co-teachers.
+ */
 export async function broadcastClassChannelDraft(
   draftId: string,
+  who: "everyone" | "staff_only" | "parents_only" = "everyone",
 ): Promise<{ ok: true; sent: number; stub: number } | { ok: false; error: string }> {
   const store = await readStore();
   const draft = store.drafts.find((d) => d.id === draftId);
@@ -523,12 +535,14 @@ export async function broadcastClassChannelDraft(
   if (!channel) return { ok: false, error: "Channel not found" };
 
   const body = composeBroadcast(draft, channel);
-  const targets = channel.members.filter((m) => m.role === "parent");
-  // Also notify co-teachers except author
-  for (const m of channel.members) {
-    if (m.role === "parent") continue;
-    if (m.mobile === draft.createdByMobile) continue;
-    if (!targets.some((t) => t.mobile === m.mobile)) targets.push(m);
+  const targets = who === "staff_only" ? [] : channel.members.filter((m) => m.role === "parent");
+  if (who !== "parents_only") {
+    // Also notify co-teachers except author
+    for (const m of channel.members) {
+      if (m.role === "parent") continue;
+      if (m.mobile === draft.createdByMobile) continue;
+      if (!targets.some((t) => t.mobile === m.mobile)) targets.push(m);
+    }
   }
 
   let sent = 0;
@@ -538,7 +552,7 @@ export async function broadcastClassChannelDraft(
     if (r.ok) sent += 1;
     else stub += 1;
   }
-  draft.broadcastCount = sent + stub;
+  draft.broadcastCount += sent + stub;
   await writeStore(store);
   return { ok: true, sent, stub };
 }
@@ -569,11 +583,21 @@ export async function confirmClassChannelDraft(input: {
     if (t.pendingDraftId === draft.id) t.pendingDraftId = "";
   }
   await writeStore(store);
-  const bc = await broadcastClassChannelDraft(draft.id);
+  // Homework reaches the families from the ERP write below, through the
+  // approved template, so it is not also text-broadcast here — that would
+  // message twice every parent whose window happens to be open.
+  const homeworkPath = draft.erpTarget === "homework";
+  const bc = await broadcastClassChannelDraft(draft.id, homeworkPath ? "staff_only" : "everyone");
   // The ERP write happens here, not in a browser effect: parents have just
   // been messaged, and a homework post they can see must exist in the
   // school's own record whether or not anyone opens Comms today.
   const erp = await applyDraftToErpServer(draft.id);
+  if (homeworkPath && erp.status !== "applied") {
+    // The ERP write is what messages the families on the homework path, so
+    // if it failed nobody has heard. Text is worse than the template — it
+    // only reaches an open window — but it is what there is.
+    await broadcastClassChannelDraft(draft.id, "parents_only").catch(() => undefined);
+  }
   const fresh = await readStore();
   const latest = fresh.drafts.find((d) => d.id === draft.id) ?? draft;
   if (!bc.ok) {

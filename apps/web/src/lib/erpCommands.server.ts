@@ -3205,7 +3205,10 @@ async function runConfirmedWrite(
     return {
       handled: true,
       audience: "erp_command_post_homework",
-      text: `Posted. ${label} ${r.subjectName || ""} homework is live${res.push.sent ? ` · ${res.push.sent} phone${res.push.sent === 1 ? "" : "s"} notified` : ""}.\nUndo it in the ERP: Homework → today's posts.`,
+      // What the teacher wants to know is whether the families heard, and
+      // "posted" answered a different question for as long as nothing sent
+      // homework on WhatsApp at all.
+      text: `Posted. ${label} ${r.subjectName || ""} homework is live${res.wa.sent ? ` · ${res.wa.sent} famil${res.wa.sent === 1 ? "y" : "ies"} on WhatsApp` : ""}${res.push.sent ? ` · ${res.push.sent} phone${res.push.sent === 1 ? "" : "s"} notified` : ""}.\nUndo it in the ERP: Homework → today's posts.`,
     };
   }
   if (command.id === "pay_link") {

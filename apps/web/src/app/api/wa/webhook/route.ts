@@ -141,6 +141,38 @@ export async function POST(req: Request) {
   for (const msg of inbound) {
     await recordInboundMessage(msg.fromWaId, msg.text);
 
+    // A teacher answering a child's homework: "#A7K2 well done".
+    //
+    // Before the office relay, which uses the same four-character code
+    // shape. Both are looked up by code, so which one answers must not
+    // depend on which table happened to be read first — homework is checked
+    // first and hands the message straight back when the code matches no
+    // submission of its own.
+    try {
+      const { parseSubmissionReply } = await import("@/lib/homeworkSubmission");
+      const parsedCode = parseSubmissionReply(msg.text || "");
+      if (parsedCode && !msg.media) {
+        const { handleHomeworkRemark } = await import("@/lib/homeworkSubmission.server");
+        const remark = await handleHomeworkRemark({
+          fromMobile10: waNormalizeLocal10(msg.fromWaId),
+          code: parsedCode.code,
+          remark: parsedCode.remark,
+        });
+        if (remark.handled) {
+          results.push({
+            audience: "homework_remark",
+            from: msg.fromWaId,
+            escalate: false,
+            replied: remark.ok,
+            stub: false,
+          });
+          continue;
+        }
+      }
+    } catch (e) {
+      console.error("[wa/webhook] homework remark check failed", msg.waMessageId, e);
+    }
+
     // An office phone answering a forwarded message. Checked FIRST, before
     // media intake, the transport pin, the staff bots and the unified bot:
     // office phones are usually staff, and "#K7Q2 fees received" read by the
@@ -251,6 +283,25 @@ export async function POST(req: Request) {
         const hh = household;
         void trackServerWork((async () => {
           try {
+            // Homework first, and ONLY when homework is actually open for
+            // this family — the same gate the transport pin uses. A family
+            // the school has just asked for a photograph of finished work is
+            // sending exactly that; without the gate every Aadhaar card
+            // would be filed as somebody's classwork.
+            const { captureHomeworkSubmissionFromWhatsApp } = await import(
+              "@/lib/homeworkSubmission.server"
+            );
+            const hw = await captureHomeworkSubmissionFromWhatsApp({
+              mediaId: media.mediaId,
+              mimeType: media.mimeType,
+              fileName: media.filename,
+              caption: msg.text || "",
+              mobile10: waNormalizeLocal10(msg.fromWaId),
+              household: hh,
+              waMessageId: msg.waMessageId,
+            });
+            if (hw.handled) return;
+
             const { captureUdiseDocumentFromWhatsApp } = await import(
               "@/lib/udiseDocIntake.server"
             );

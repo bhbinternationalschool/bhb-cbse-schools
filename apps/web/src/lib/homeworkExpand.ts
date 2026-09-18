@@ -396,3 +396,102 @@ export function resolutionNoteForTeacher(r: HomeworkResolution, ref: HomeworkRef
   }
   return "";
 }
+
+import { submitInviteLine } from "@/lib/homeworkSubmission";
+
+/* ── 5. the same thing on WhatsApp ───────────────────────────────── */
+
+/**
+ * The one line a WhatsApp TEMPLATE variable can carry.
+ *
+ * Meta rejects a variable containing a newline, a tab, or four spaces in a
+ * row, so the expanded message cannot ride inside `bhb_homework_published`.
+ * What fits is the part a parent could not have worked out for themselves:
+ * the chapter, then the work.
+ *
+ * Built from the post itself rather than the expansion, so homework typed
+ * straight into the app — with no chapter resolved — still produces a
+ * sensible line instead of nothing.
+ */
+export const WA_LINE_MAX = 220;
+
+export function homeworkWaLine(post: { title: string; aiTutorHint?: string }): string {
+  const chapter = (post.aiTutorHint || "").replace(/\s+/g, " ").trim();
+  const title = (post.title || "").replace(/\s+/g, " ").trim();
+  // A hint that is not a chapter reference — older posts stored the subject
+  // code there ("ENG") — is not worth a parent's attention.
+  const usable = /\bch\s*\d|अध्याय|पाठ/i.test(chapter) ? chapter : "";
+  const line = [usable, title].filter(Boolean).join(" · ") || title || "See the parent app";
+  return line.length > WA_LINE_MAX ? `${line.slice(0, WA_LINE_MAX - 1).trimEnd()}…` : line;
+}
+
+/** Meta forbids an empty template variable, and a due date is often absent. */
+export function homeworkWaDue(dueLabel: string, language: "en" | "hi"): string {
+  if (dueLabel) return dueLabel;
+  return language === "hi" ? "बताई नहीं गई" : "not given";
+}
+
+export const WA_CHAPTER_LINE_MAX = 200;
+
+/**
+ * Book, chapter and what it covers, on ONE line, for the WhatsApp template.
+ *
+ * Meta cannot leave a line out of a template, so this line has to be true
+ * whatever was resolved. It degrades: book and chapter and topics, then book
+ * and chapter, then the book alone, then an em dash — which is what
+ * `templateVariablePositions` substitutes for anything missing, and the only
+ * honest thing to print when the school's book for that class is not loaded.
+ *
+ * Topics are the part a parent could not have worked out, so they stay until
+ * the line runs out of room rather than being dropped first.
+ */
+export function formatChapterLine(input: {
+  bookName: string;
+  chapterNumber: number;
+  chapterName: string;
+  topics: string[];
+}): string {
+  const one = (v: string) => v.replace(/\s+/g, " ").trim();
+  const book = one(input.bookName);
+  const chapter = input.chapterNumber
+    ? one(`Ch ${input.chapterNumber}${input.chapterName ? ` ${input.chapterName}` : ""}`)
+    : "";
+  const head = [book, chapter].filter(Boolean).join(" · ");
+  if (!head) return "";
+  const topics = input.topics.map(one).filter(Boolean).join(", ");
+  const full = topics ? `${head} — ${topics}` : head;
+  if (full.length <= WA_CHAPTER_LINE_MAX) return full;
+  // Trim the topics, never the chapter: a parent can find the chapter
+  // without the topic list, not the other way round.
+  const room = WA_CHAPTER_LINE_MAX - head.length - 4;
+  if (topics && room > 12) return `${head} — ${topics.slice(0, room).trimEnd()}…`;
+  return head.length <= WA_CHAPTER_LINE_MAX ? head : `${head.slice(0, WA_CHAPTER_LINE_MAX - 1).trimEnd()}…`;
+}
+
+/**
+ * The whole message, for a family whose 24-hour window is open.
+ *
+ * Worth trying before the template every time: the template can only carry
+ * one line, and this carries the book, the chapter, what the chapter covers
+ * and the teacher's own words. A shut window costs one refused send, which
+ * Meta does not bill.
+ */
+export function homeworkWaBody(input: {
+  expansion: HomeworkExpansion;
+  language: "en" | "hi";
+  schoolName: string;
+}): string {
+  const body = input.language === "hi" ? input.expansion.bodyHi : input.expansion.bodyEn;
+  // No "open the app". The message already carries the book, the chapter and
+  // the work, and the help on offer is the same tutor, on the channel the
+  // parent is already reading. Director's instruction, 18 Sep 2026.
+  const tail =
+    input.language === "hi"
+      ? `\n\nमदद चाहिए? इसी नंबर पर *TUTOR* लिखकर भेजें। 🎓\n— ${input.schoolName}`
+      : `\n\nNeeds a hand with it? Reply *TUTOR* on this number. 🎓\n— ${input.schoolName}`;
+  // Always offered, and always true: a photograph of finished work is
+  // accepted against the most likely homework for that child, whether or not
+  // the teacher ticked "requires submission". See submittablePostsFor.
+  const invite = `\n\n${submitInviteLine(input.language)}`;
+  return `${body}${invite}${tail}`;
+}
