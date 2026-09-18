@@ -74,6 +74,8 @@ const examsState: ExamsState = {
   sheets: [],
   policy: defaultExamPolicy(),
   promotions: [],
+      rooms: [],
+      seating: [],
 };
 
 const entryA: ExamDateSheetEntry = {

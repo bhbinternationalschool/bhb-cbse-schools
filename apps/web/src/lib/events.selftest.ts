@@ -105,6 +105,8 @@ const examsState: ExamsState = {
   sheets: [],
   policy: defaultExamPolicy(),
   promotions: [],
+      rooms: [],
+      seating: [],
 };
 
 const ptmState: PtmState = {

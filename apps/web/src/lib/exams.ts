@@ -4,6 +4,7 @@
  */
 
 import { assertModulePermission } from "@/lib/rbacGuard";
+import type { ExamRoom } from "@/lib/examSeating";
 import {
   DEFAULT_AY,
   loadMasters,
@@ -545,6 +546,32 @@ export type PromotionRecord = {
   appliedToSisAt: string | null;
 };
 
+/**
+ * One child's seat for a whole exam.
+ *
+ * Saved rather than recomputed on each open: a child must find the same
+ * bench on every paper, and the slip pasted on the desk has to match what
+ * the invigilator's sheet says. Regenerating would move seats the moment a
+ * child is admitted or marked left.
+ */
+export type ExamSeatAssignment = {
+  roomId: string;
+  benchNumber: number;
+  /** 1-based, left to right. */
+  seatNumber: number;
+  studentId: string;
+  classId: string;
+};
+
+export type ExamSeatingPlan = {
+  id: string;
+  academicYearCode: string;
+  examTermId: string;
+  generatedAt: string;
+  generatedBy: string;
+  seats: ExamSeatAssignment[];
+};
+
 export type ExamsState = {
   version: 1;
   terms: ExamTerm[];
@@ -553,6 +580,10 @@ export type ExamsState = {
   sheets: MarkSheet[];
   policy: ExamPolicy;
   promotions: PromotionRecord[];
+  /** Exam rooms with their own bench count and bench size. */
+  rooms: ExamRoom[];
+  /** One saved seating plan per exam. */
+  seating: ExamSeatingPlan[];
 };
 
 /**
@@ -909,6 +940,8 @@ function emptyState(): ExamsState {
     sheets: [],
     policy: defaultExamPolicy(),
     promotions: [],
+    rooms: [],
+    seating: [],
   };
 }
 
@@ -1184,6 +1217,13 @@ export function loadExams(): ExamsState {
       policy: normalizeExamPolicy(parsed.policy),
       promotions: Array.isArray(parsed.promotions)
         ? parsed.promotions.map(normalizePromotion)
+        : [],
+      // Carried, not dropped. This normaliser sits between the read and the
+      // push, and a field it forgets is a field the next save erases from
+      // the database.
+      rooms: Array.isArray(parsed.rooms) ? parsed.rooms.map(normalizeExamRoom) : [],
+      seating: Array.isArray(parsed.seating)
+        ? parsed.seating.map(normalizeSeatingPlan)
         : [],
     };
     const migrated = terms.some(
@@ -1555,6 +1595,131 @@ export function listExamDateSheet(
         a.startTime.localeCompare(b.startTime) ||
         a.classId.localeCompare(b.classId),
     );
+}
+
+/* ── rooms and seating ───────────────────────────────────────────── */
+
+function normalizeExamRoom(r: Partial<ExamRoom>): ExamRoom {
+  const seats = Math.floor(Number(r.seatsPerBench ?? 2));
+  return {
+    id: r.id ?? id("room"),
+    name: (r.name ?? "").trim() || "Room",
+    benches: Math.max(0, Math.floor(Number(r.benches ?? 0))),
+    // Two or three; anything else is somebody's typo, and a bench of seven
+    // would quietly break every arrangement built on it.
+    seatsPerBench: seats === 3 ? 3 : 2,
+    isActive: r.isActive !== false,
+    note: (r.note ?? "").trim(),
+    sortOrder: Math.floor(Number(r.sortOrder ?? 0)),
+  };
+}
+
+function normalizeSeatingPlan(p: Partial<ExamSeatingPlan>): ExamSeatingPlan {
+  return {
+    id: p.id ?? id("seat"),
+    academicYearCode: p.academicYearCode ?? DEFAULT_AY,
+    examTermId: p.examTermId ?? "",
+    generatedAt: p.generatedAt ?? new Date().toISOString(),
+    generatedBy: p.generatedBy ?? "",
+    seats: Array.isArray(p.seats)
+      ? p.seats.map((s) => ({
+          roomId: String(s.roomId ?? ""),
+          benchNumber: Math.max(1, Math.floor(Number(s.benchNumber ?? 1))),
+          seatNumber: Math.max(1, Math.floor(Number(s.seatNumber ?? 1))),
+          studentId: String(s.studentId ?? ""),
+          classId: String(s.classId ?? ""),
+        }))
+      : [],
+  };
+}
+
+export function listExamRooms(state?: ExamsState): ExamRoom[] {
+  return (state ?? loadExams()).rooms
+    .slice()
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+}
+
+export function saveExamRoom(input: Partial<ExamRoom>): { ok: true; room: ExamRoom } | { ok: false; error: string } {
+  const name = (input.name ?? "").trim();
+  if (!name) return { ok: false, error: "Give the room a name" };
+  const benches = Math.floor(Number(input.benches ?? 0));
+  if (!Number.isFinite(benches) || benches < 1) {
+    return { ok: false, error: "How many benches does this room have?" };
+  }
+  const state = loadExams();
+  const clash = state.rooms.find(
+    (r) => r.id !== input.id && r.name.trim().toLowerCase() === name.toLowerCase(),
+  );
+  if (clash) return { ok: false, error: `There is already a room called ${clash.name}` };
+  const room = normalizeExamRoom({
+    ...input,
+    name,
+    benches,
+    sortOrder: input.sortOrder ?? state.rooms.length + 1,
+  });
+  const rooms = state.rooms.some((r) => r.id === room.id)
+    ? state.rooms.map((r) => (r.id === room.id ? room : r))
+    : [...state.rooms, room];
+  saveExams({ ...state, rooms });
+  return { ok: true, room };
+}
+
+export function deleteExamRoom(roomId: string): { ok: true } | { ok: false; error: string } {
+  const state = loadExams();
+  // A room a saved plan seats children in is not removed from under them.
+  const used = state.seating.find((p) => p.seats.some((s) => s.roomId === roomId));
+  if (used) {
+    return {
+      ok: false,
+      error: "Children are seated in this room by a saved plan. Clear that plan first.",
+    };
+  }
+  saveExams({ ...state, rooms: state.rooms.filter((r) => r.id !== roomId) });
+  return { ok: true };
+}
+
+export function seatingPlanFor(
+  academicYearCode: string,
+  examTermId: string,
+  state?: ExamsState,
+): ExamSeatingPlan | null {
+  const s = state ?? loadExams();
+  return (
+    s.seating.find(
+      (p) => p.academicYearCode === academicYearCode && p.examTermId === examTermId,
+    ) ?? null
+  );
+}
+
+/** One plan per exam — generating again replaces it, never stacks a second. */
+export function saveSeatingPlan(input: {
+  academicYearCode: string;
+  examTermId: string;
+  generatedBy: string;
+  seats: ExamSeatAssignment[];
+}): { ok: true; plan: ExamSeatingPlan } | { ok: false; error: string } {
+  if (!input.examTermId) return { ok: false, error: "Select an exam" };
+  const state = loadExams();
+  const existing = seatingPlanFor(input.academicYearCode, input.examTermId, state);
+  const plan = normalizeSeatingPlan({
+    id: existing?.id,
+    academicYearCode: input.academicYearCode,
+    examTermId: input.examTermId,
+    generatedAt: new Date().toISOString(),
+    generatedBy: input.generatedBy,
+    seats: input.seats,
+  });
+  const seating = existing
+    ? state.seating.map((p) => (p.id === plan.id ? plan : p))
+    : [...state.seating, plan];
+  saveExams({ ...state, seating });
+  return { ok: true, plan };
+}
+
+export function deleteSeatingPlan(planId: string): { ok: true } {
+  const state = loadExams();
+  saveExams({ ...state, seating: state.seating.filter((p) => p.id !== planId) });
+  return { ok: true };
 }
 
 export function saveExamDateSheetEntry(input: {

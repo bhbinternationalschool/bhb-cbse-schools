@@ -33,7 +33,7 @@ export async function GET(req: Request) {
 }
 
 type ExamsDeskPostBody = Partial<
-  Pick<ExamsState, "terms" | "subjects" | "dateSheet" | "sheets" | "policy" | "promotions">
+  Pick<ExamsState, "terms" | "subjects" | "dateSheet" | "sheets" | "policy" | "promotions" | "rooms" | "seating">
 >;
 
 /**
@@ -92,6 +92,10 @@ export async function POST(req: Request) {
     terms: Array.isArray(body.terms) ? body.terms : [],
     subjects: Array.isArray(body.subjects) ? body.subjects : [],
     dateSheet: Array.isArray(body.dateSheet) ? body.dateSheet : [],
+    // Carried through, or a setup push would wipe the rooms and the seating
+    // plan built on them.
+    rooms: Array.isArray(body.rooms) ? body.rooms : [],
+    seating: Array.isArray(body.seating) ? body.seating : [],
     sheets: [],
     policy: body.policy!,
     promotions: Array.isArray(body.promotions) ? body.promotions : [],

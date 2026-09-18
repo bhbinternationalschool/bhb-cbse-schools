@@ -3,6 +3,8 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { ExamRoom } from "@/lib/examSeating";
+import type { ExamSeatingPlan } from "@/lib/exams";
 import {
   defaultExamPolicy,
   examMarkRowId,
@@ -45,6 +47,8 @@ export type ExamDeskBundle = {
   sheets: MarkSheet[];
   policy: ExamPolicy;
   promotions: PromotionRecord[];
+  rooms: ExamRoom[];
+  seating: ExamSeatingPlan[];
 };
 
 const META_SELECT =
@@ -470,6 +474,8 @@ export async function pushExamDeskToDb(
   const subjects = state.subjects ?? [];
   const dateSheet = state.dateSheet ?? [];
   const promotions = state.promotions ?? [];
+  const rooms = state.rooms ?? [];
+  const seating = state.seating ?? [];
   const policy = normalizeExamPolicy(state.policy);
 
   // Sheets are NOT written here any more. They arrive one at a time through
@@ -498,6 +504,8 @@ export async function pushExamDeskToDb(
       "exam_desk_promotions",
       new Set(promotions.map((p) => p.id)),
     ),
+    deleteStale(sb, tenantId, "exam_desk_rooms", new Set(rooms.map((r) => r.id))),
+    deleteStale(sb, tenantId, "exam_desk_seating", new Set(seating.map((p) => p.id))),
   ]);
 
   let r = await upsertChunks(
@@ -532,6 +540,12 @@ export async function pushExamDeskToDb(
     "exam_desk_promotions",
     promotions.map((p) => promotionToRow(tenantId, p)),
   );
+  if (!r.ok) return r;
+
+  r = await upsertChunks(sb, "exam_desk_rooms", rooms.map((x) => roomToRow(tenantId, x)));
+  if (!r.ok) return r;
+
+  r = await upsertChunks(sb, "exam_desk_seating", seating.map((x) => seatingToRow(tenantId, x)));
   if (!r.ok) return r;
 
   await sb.from("exam_desk_policy").upsert({
@@ -631,6 +645,56 @@ async function deleteOrphanEmptySheets(
 }
 
 
+function roomToRow(tenantId: string, r: ExamRoom): Record<string, unknown> {
+  return {
+    tenant_id: tenantId,
+    id: r.id,
+    name: r.name,
+    benches: r.benches,
+    seats_per_bench: r.seatsPerBench === 3 ? 3 : 2,
+    is_active: r.isActive !== false,
+    note: r.note || "",
+    sort_order: r.sortOrder ?? 0,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function rowToRoom(r: Record<string, unknown>): ExamRoom {
+  return {
+    id: String(r.id),
+    name: String(r.name || ""),
+    benches: Number(r.benches || 0),
+    seatsPerBench: Number(r.seats_per_bench) === 3 ? 3 : 2,
+    isActive: r.is_active !== false,
+    note: String(r.note || ""),
+    sortOrder: Number(r.sort_order || 0),
+  };
+}
+
+function seatingToRow(tenantId: string, p: ExamSeatingPlan): Record<string, unknown> {
+  return {
+    tenant_id: tenantId,
+    id: p.id,
+    academic_year_code: p.academicYearCode,
+    exam_term_id: p.examTermId,
+    generated_at: p.generatedAt || new Date().toISOString(),
+    generated_by: p.generatedBy || "",
+    seats: p.seats ?? [],
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function rowToSeating(r: Record<string, unknown>): ExamSeatingPlan {
+  return {
+    id: String(r.id),
+    academicYearCode: String(r.academic_year_code || ""),
+    examTermId: String(r.exam_term_id || ""),
+    generatedAt: String(r.generated_at || ""),
+    generatedBy: String(r.generated_by || ""),
+    seats: Array.isArray(r.seats) ? (r.seats as ExamSeatingPlan["seats"]) : [],
+  };
+}
+
 export async function fetchExamDeskFromDb(): Promise<{
   bundle: ExamDeskBundle;
   meta: ExamDeskSyncMeta | null;
@@ -643,6 +707,8 @@ export async function fetchExamDeskFromDb(): Promise<{
     sheets: [],
     policy: defaultExamPolicy(),
     promotions: [],
+    rooms: [],
+    seating: [],
   };
   if (!ctx) return { bundle: empty, meta: null };
   const { sb, tenantId } = ctx;
@@ -654,6 +720,8 @@ export async function fetchExamDeskFromDb(): Promise<{
     { data: sheetHeaders },
     { data: policyRow },
     { data: promoRows },
+    { data: roomRows },
+    { data: seatingRows },
     { data: metaRow },
   ] = await Promise.all([
     sb.from("exam_desk_terms").select("*").eq("tenant_id", tenantId),
@@ -668,6 +736,8 @@ export async function fetchExamDeskFromDb(): Promise<{
       .eq("tenant_id", tenantId)
       .maybeSingle(),
     sb.from("exam_desk_promotions").select("*").eq("tenant_id", tenantId),
+    sb.from("exam_desk_rooms").select("*").eq("tenant_id", tenantId),
+    sb.from("exam_desk_seating").select("*").eq("tenant_id", tenantId),
     sb
       .from("exam_desk_sync_meta")
       .select(META_SELECT)
@@ -819,7 +889,18 @@ export async function fetchExamDeskFromDb(): Promise<{
   );
 
   return {
-    bundle: { terms, subjects, dateSheet, sheets, policy, promotions },
+    bundle: {
+      terms,
+      subjects,
+      dateSheet,
+      sheets,
+      policy,
+      promotions,
+      rooms: (roomRows ?? [])
+        .map((r) => rowToRoom(r as Record<string, unknown>))
+        .sort((a, b) => a.sortOrder - b.sortOrder),
+      seating: (seatingRows ?? []).map((r) => rowToSeating(r as Record<string, unknown>)),
+    },
     meta: mapMetaRow(metaRow as Record<string, unknown> | null),
   };
 }
