@@ -32,6 +32,14 @@ import {
   type VoiceNoteTranscript,
 } from "@/lib/voiceNote";
 import {
+  UDISE_DOC_EXTRACT_PROMPT,
+  UDISE_DOC_EXTRACT_SYSTEM,
+  UDISE_DOC_PROMPT_VERSION,
+  parseUdiseDocExtract,
+  udiseDocAuditDescriptor,
+  type UdiseDocExtract,
+} from "@/lib/udiseDocIntakeAi";
+import {
   buildFollowupSystemPrompt,
   buildFollowupUserPrompt,
   parseFollowupDraft,
@@ -42,6 +50,7 @@ import {
 
 import {
   generateGeminiText,
+  generateGeminiVisionJson,
   streamGeminiText,
   transcribeGeminiAudio,
   geminiConfigured,
@@ -2127,6 +2136,96 @@ export async function transcribeVoiceNote(opts: {
     requester,
     (r.usage.promptTokens ?? 0) + (r.usage.completionTokens ?? 0),
   );
+
+  return { ok: true, result: parsed, generationId };
+}
+
+/**
+ * Read a document a parent photographed — Aadhaar, birth certificate,
+ * address proof, a receipt, or none of those.
+ *
+ * Gemini only, for the same reason as the voice note above: a second
+ * provider would double the cost and the privacy surface for a photograph
+ * of somebody's Aadhaar card to get a different guess, and the fallback
+ * that matters is a person, not another model.
+ *
+ * What this function exists for is the failure side. The intake used to
+ * call the vision model inline and, on ANY failure — API error, truncated
+ * JSON, a reply that would not parse — substitute an extract that said
+ * `docType: "other"`. The parent and the office were then told the document
+ * "could not be recognised", which is a claim about the document; the truth
+ * was that nobody had read it. The two are indistinguishable afterwards,
+ * because the call left no row behind. So: a failure returns a failure, and
+ * every attempt writes to ai_generations like every other LLM call.
+ *
+ * The photograph never reaches the audit row — a descriptor stands in for
+ * it, see udiseDocAuditDescriptor().
+ */
+export async function readParentDocument(opts: {
+  base64: string;
+  mimeType: string;
+  byteLength: number;
+  waMessageId?: string;
+  requester?: string;
+}): Promise<
+  | { ok: true; result: UdiseDocExtract; generationId: string }
+  | { ok: false; failure: "budget" | "read-failed"; error: string }
+> {
+  if (!geminiConfigured()) {
+    return { ok: false, failure: "read-failed", error: "GEMINI_API_KEY not configured" };
+  }
+
+  const { requester, budget } = await startLlmPrecheck({ requester: opts.requester });
+  if (!budget.ok) return { ok: false, failure: "budget", error: budget.reason };
+
+  const descriptor = udiseDocAuditDescriptor({
+    mimeType: opts.mimeType,
+    byteLength: opts.byteLength,
+    waMessageId: opts.waMessageId,
+  });
+
+  const t0 = Date.now();
+  const r = await generateGeminiVisionJson({
+    system: UDISE_DOC_EXTRACT_SYSTEM,
+    prompt: UDISE_DOC_EXTRACT_PROMPT,
+    base64: opts.base64,
+    mimeType: opts.mimeType,
+    // A fee receipt or a ration card carries far more text than an Aadhaar
+    // card, and the reply is JSON with an address in it. At 700 the model
+    // ran out mid-object, the JSON would not parse, and a truncated reading
+    // was indistinguishable from an unreadable document.
+    maxTokens: 1400,
+  });
+  const latencyMs = Date.now() - t0;
+
+  const parsed = r.ok ? parseUdiseDocExtract(r.text) : null;
+  const parseError = r.ok && !parsed ? "The reading was not valid JSON (truncated or fenced)" : "";
+
+  const generationId = await recordAiGeneration({
+    route: "wa/parent-document",
+    promptVersion: UDISE_DOC_PROMPT_VERSION,
+    tier: "flash",
+    engine: "gemini",
+    model: r.model,
+    status: parsed ? "ok" : "error",
+    error: r.ok ? parseError : r.error,
+    // The descriptor, not the photograph. See udiseDocAuditDescriptor().
+    inputText: `${UDISE_DOC_EXTRACT_SYSTEM}\n---\n${descriptor}`,
+    // The document type only. The reading itself names a child, a date of
+    // birth and an Aadhaar number, and ai_generations stores a hash of what
+    // it is given — a hash of that is of no use to anyone and the row is
+    // read by staff.
+    outputText: parsed ? parsed.docType : "",
+    promptTokens: r.ok ? r.usage.promptTokens : null,
+    completionTokens: r.ok ? r.usage.completionTokens : null,
+    latencyMs,
+    requester,
+  });
+
+  if (!r.ok) return { ok: false, failure: "read-failed", error: r.error };
+  if (!parsed) return { ok: false, failure: "read-failed", error: parseError };
+
+  noteAiBudgetUse(requester, (r.usage.promptTokens ?? 0) + (r.usage.completionTokens ?? 0));
 
   return { ok: true, result: parsed, generationId };
 }

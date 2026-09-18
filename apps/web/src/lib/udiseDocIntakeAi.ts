@@ -18,7 +18,7 @@
  */
 
 import { aadhaarChecksumValid, aadhaarDigits, maskAadhaar } from "@/lib/aadhaar";
-import { toRosterCase, type StudentDocKey } from "@/lib/sis";
+import { toRosterCase, type SisStudent, type StudentDocKey } from "@/lib/sis";
 
 export type UdiseDocType = "aadhaar" | "birth_certificate" | "address_proof" | "payment_proof" | "other";
 export type UdiseDocPerson = "child" | "father" | "mother" | "unknown";
@@ -58,10 +58,19 @@ export type UdiseDocExtract = {
   notes: string;
 };
 
+/**
+ * Bumped whenever the wording above changes, so ai_generations can tell
+ * which prompt produced a reading months later.
+ */
+export const UDISE_DOC_PROMPT_VERSION = "udise-doc/2026-09-18";
+
 export const UDISE_DOC_EXTRACT_SYSTEM = [
   "You read one Indian identity document photographed by a parent for a school's records: an Aadhaar card, a birth certificate, or an address proof (ration card, voter ID, electricity bill).",
   "Copy what is PRINTED. Never guess, never complete a partly hidden number, never infer a date from an age.",
-  "docType: aadhaar | birth_certificate | address_proof | payment_proof | other. payment_proof is a UPI/bank payment screenshot, a bank slip, or a photo of a school fee receipt. person: child | father | mother | unknown — an Aadhaar of an adult is father or mother only if the card says so or the relation is printed; else unknown.",
+  "docType: aadhaar | birth_certificate | address_proof | payment_proof | other.",
+  "payment_proof is ANY record of money: a UPI or bank screenshot, a bank slip, a cash memo, and any fee receipt — including a printed receipt from the school's older software, which looks nothing like ours. A receipt is never 'other'.",
+  "other is a file that is none of the four: a photo of a child, a screenshot of a chat, a circular, a form, a homework page, anything forwarded. Say other rather than guess — a wrong document type is acted on, an honest other is read by a person.",
+  "person: child | father | mother | unknown — an Aadhaar of an adult is father or mother only if the card says so or the relation is printed; else unknown.",
   "nameOnDoc: the holder's name exactly as printed (Latin letters; transliterate Devanagari). dob: YYYY-MM-DD only when day, month and year are all printed; a 'Year of Birth' alone is NOT a dob — leave it empty and add 'dob' to missing.",
   "aadhaarNumber: the 12 digits only when all twelve are clearly legible; otherwise empty and add 'aadhaarNumber' to missing. Never output a partial number.",
   "gender: M or F when printed, else empty. fatherName / motherName: only from a birth certificate that prints them. address and pincode: only from the document's own address block.",
@@ -177,6 +186,92 @@ export const DOC_TYPE_LABEL: Record<UdiseDocType, string> = {
   payment_proof: "Payment proof",
   other: "Document",
 };
+
+/* ── where a file goes ───────────────────────────────────────────── */
+
+/**
+ * What to do with the file, decided by what it IS.
+ *
+ * The intake used to run one path for everything a known family sent, so a
+ * parent who photographed an old fee receipt was asked "which child is this
+ * Aadhaar for?". Three destinations, and only the first belongs to UDISE+:
+ *
+ *   record       — an Aadhaar, birth certificate or address proof: read it,
+ *                  file it in the child's vault, correct the record.
+ *   payment      — money: match it against the fee book, tell the office,
+ *                  post nothing.
+ *   unrecognised — anything else: a person looks at it. We say so plainly
+ *                  and ask the parent for nothing.
+ */
+export type DocIntakeRoute = "record" | "payment" | "unrecognised";
+
+export function documentRouteFor(docType: UdiseDocType): DocIntakeRoute {
+  if (docType === "aadhaar" || docType === "birth_certificate" || docType === "address_proof") return "record";
+  if (docType === "payment_proof") return "payment";
+  return "unrecognised";
+}
+
+/**
+ * Which child the document is about. Returns [] when it cannot be decided —
+ * the office is told, the parent is asked to add the child's name.
+ * A parent's own Aadhaar belongs to every child of the family.
+ */
+export function resolveTargetChildren(input: { children: SisStudent[]; extract: UdiseDocExtract; caption: string }): SisStudent[] {
+  const { children, extract, caption } = input;
+  if (!children.length) return [];
+  if (extract.person === "father" || extract.person === "mother") return children;
+  if (children.length === 1) return children;
+  const byName = (name: string) => children.filter((c) => compareNames(c.fullName, name) !== "different");
+  if (extract.nameOnDoc) {
+    const hit = byName(extract.nameOnDoc);
+    if (hit.length === 1) return hit;
+  }
+  if (caption) {
+    const hit = children.filter((c) => {
+      const first = (c.fullName || "").split(/\s+/)[0]?.toLowerCase() ?? "";
+      return first.length >= 3 && caption.toLowerCase().includes(first);
+    });
+    if (hit.length === 1) return hit;
+  }
+  return [];
+}
+
+/**
+ * The audit row records what was sent, and a photograph cannot go in it —
+ * see voiceNoteAuditDescriptor, same reasoning, same shape.
+ */
+export function udiseDocAuditDescriptor(opts: { mimeType: string; byteLength: number; waMessageId?: string }): string {
+  const kb = Math.round(opts.byteLength / 1024);
+  const id = opts.waMessageId ? ` wa=${opts.waMessageId}` : "";
+  return `[document ${opts.mimeType} ${kb}KB${id}]`;
+}
+
+/**
+ * What the parent hears when we could not read the file at all — the model
+ * errored, or answered with something that was not a reading.
+ *
+ * It must not say the document was "not recognised": nobody has looked at
+ * it yet, and telling a parent their birth certificate was unrecognisable
+ * when in truth our own call failed is the school making an unknown into a
+ * fact. It confirms arrival, promises a person, and asks for nothing — a
+ * parent who has just sent a photo should not be set homework.
+ */
+export function renderUnreadableAck(language: "en" | "hi"): string {
+  return language === "hi"
+    ? "📎 फ़ाइल मिल गई, धन्यवाद 🙏\n\nअभी हम इसे स्वयं पढ़ नहीं सके, इसलिए कार्यालय इसे स्वयं देखेगा और ज़रूरत हुई तो आपसे संपर्क करेगा। आपको कुछ और भेजने की आवश्यकता नहीं है।"
+    : "📎 We have your file, thank you 🙏\n\nWe could not read it automatically, so the office will look at it themselves and contact you if anything is needed. You do not have to send anything again.";
+}
+
+/**
+ * Read, and it is not a document for the child's record — a receipt goes
+ * elsewhere, and this is everything else. Same rule: no question, no UDISE+
+ * wording, no list of the family's children.
+ */
+export function renderUnrecognisedAck(language: "en" | "hi"): string {
+  return language === "hi"
+    ? "📎 मिल गया, धन्यवाद 🙏\n\nकार्यालय इसे देखेगा और ज़रूरत हुई तो आपसे संपर्क करेगा।"
+    : "📎 Received, thank you 🙏\n\nThe office will look at it and contact you if anything is needed.";
+}
 
 /* ── names ───────────────────────────────────────────────────────── */
 
