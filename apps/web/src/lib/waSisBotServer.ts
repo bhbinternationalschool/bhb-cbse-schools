@@ -322,7 +322,24 @@ ${kbContext ? `Relevant school notices:\n${kbContext}\n` : ""}Parent's message: 
     // Already escalated by the caller, so the parent is told it has gone to
     // the office — not asked to type HUMAN — and in their own language. It
     // was English for every family until 2026-09-14.
-    if (!r.grounded) return { text: composeSisUngroundedReply(waTemplateLanguageFor(hh) === "hi"), grounded: false };
+    if (!r.grounded) {
+      // The bot could not answer this. That question is the whole point of
+      // the answer book: it goes in as PROPOSED, with no answer, so the
+      // office can see what parents keep asking and write the school's reply
+      // once. Nobody is answered from it until it is approved.
+      void (async () => {
+        try {
+          const { worthRecording } = await import("@/lib/answerBook");
+          if (!worthRecording(text)) return;
+          const { captureAnswerPair } = await import("@/lib/answerBook.server");
+          await captureAnswerPair({ question: text, source: "unanswered", sourceRef: `household:${hh.id}` });
+        } catch (e) {
+          // Learning is a bonus; the parent has already been handed to the office.
+          console.warn("[answerBook] could not record the question", (e as Error)?.message);
+        }
+      })();
+      return { text: composeSisUngroundedReply(waTemplateLanguageFor(hh) === "hi"), grounded: false };
+    }
     const reply = r.reply.trim();
     if (!reply) return null;
     // Regional preference: render the Hindi draft in the family's language

@@ -130,3 +130,31 @@ export function kbChunkFor(entry: AnswerEntry): { title: string; content: string
       .join("\n"),
   };
 }
+
+/**
+ * Is this worth keeping as a question the school could not answer?
+ *
+ * The bot falls back on plenty that is not a question — "ok", "hlw", a
+ * forwarded photo, a stray digit. A book full of those is a book nobody
+ * reads, and the office would stop opening the screen within a week.
+ *
+ * Deliberately strict: a question missed here costs nothing (the parent was
+ * still handed to the office), while noise kept here costs the office's
+ * attention, which is the scarce thing.
+ */
+const NOT_A_QUESTION =
+  /^(ok(ay)?|k|hm+|thanks?|thank you|thx|ty|yes|no|yep|nope|hi|hlw|hello|hey|namaste|namaskar|ji|haan|han|nahi|nhi|sorry|bye|good (morning|afternoon|evening|night)|धन्यवाद|शुक्रिया|हाँ|हा|जी|नमस्ते|ठीक है|ok ji)\W*$/i;
+
+/** "MEDIA audio", "[image (image/jpeg)]" — a file, not a sentence. */
+const MEDIA_PLACEHOLDER = /^(media\b|\[.*\]$)/i;
+
+export function worthRecording(text: string): boolean {
+  const t = tidy(text, QUESTION_MAX);
+  if (t.length < 8) return false;
+  if (NOT_A_QUESTION.test(t)) return false;
+  if (MEDIA_PLACEHOLDER.test(t)) return false;
+  // A bare number is an answer to something the bot asked, not a question.
+  if (/^[\d\s.,+-]+$/.test(t)) return false;
+  // At least two words: one word is a keyword, not a question.
+  return t.split(/\s+/).filter(Boolean).length >= 2;
+}

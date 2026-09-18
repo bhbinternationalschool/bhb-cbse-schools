@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import {
   entryIsLive,
+  worthRecording,
   kbChunkFor,
   notLiveReason,
   questionKey,
@@ -88,6 +89,33 @@ const base: AnswerEntry = {
   assert.equal(tidy("  a\n\nb  ", 10), "a b");
   assert.equal(tidy(undefined, 10), "");
   assert.equal(tidy("abcdefghijk", 5), "abcde");
+}
+
+/* ── what is worth putting in front of the office ───────────────────── */
+{
+  // Real questions the bot actually failed on, 8–18 Sep 2026.
+  for (const q of [
+    "Security deposit kya hai",
+    "Mere bacchon ka admission May mahine mein hua",
+    "Transport ka kitna lagega",
+    "Ayar tawar se 50 mtr under dihbaba mandir ke pas",
+    "फीस जमा करने की आखिरी तारीख क्या है",
+  ]) {
+    assert.equal(worthRecording(q), true, q);
+  }
+
+  // Noise that would make the office stop opening the screen.
+  for (const junk of [
+    "ok", "Ok ji", "thanks", "Thank you", "hlw", "hi", "नमस्ते", "जी", "हाँ",
+    "Bye", "good night", "5", "1500", "MEDIA audio", "[image (image/jpeg)]",
+    "", "   ", "yes", "k",
+  ]) {
+    assert.equal(worthRecording(junk), false, JSON.stringify(junk));
+  }
+
+  // A single word is a keyword, not a question.
+  assert.equal(worthRecording("DUES"), false);
+  assert.equal(worthRecording("timetable"), false);
 }
 
 console.log("  ok — proposed and expired answers stay silent, and the school's words are what is stored");
