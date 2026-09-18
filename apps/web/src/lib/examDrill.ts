@@ -57,6 +57,111 @@ export function renderScopeQuestion(input: {
     : `📚 ${input.childName}, tomorrow is *${input.paperLabel}*.\n\nShall we revise? First — how far has the class done? Send the number of the last chapter:\n\n${list}\n\n(just the number, like *6*)`;
 }
 
+/**
+ * Devanagari, written in Latin letters, with the vowels dropped.
+ *
+ * A child answering on a phone types "Imandar balak", not "ईमानदार बालक" —
+ * the Hindi keyboard is a setting most of them never turn on. Comparing the
+ * consonant skeletons ("mndr blk") matches the two without needing a real
+ * transliteration: vowels are exactly where transliteration disagrees with
+ * itself (imandar / eemaandaar / imaandar are all the same word).
+ */
+const DEVA: Record<string, string> = {
+  "अ": "a", "आ": "a", "इ": "i", "ई": "i", "उ": "u", "ऊ": "u", "ए": "e", "ऐ": "ai",
+  "ओ": "o", "औ": "au", "ऋ": "ri",
+  "क": "k", "ख": "kh", "ग": "g", "घ": "gh", "ङ": "n",
+  "च": "ch", "छ": "chh", "ज": "j", "झ": "jh", "ञ": "n",
+  "ट": "t", "ठ": "th", "ड": "d", "ढ": "dh", "ण": "n",
+  "त": "t", "थ": "th", "द": "d", "ध": "dh", "न": "n",
+  "प": "p", "फ": "ph", "ब": "b", "भ": "bh", "म": "m",
+  "य": "y", "र": "r", "ल": "l", "व": "v", "ळ": "l",
+  "श": "sh", "ष": "sh", "स": "s", "ह": "h",
+  "ा": "a", "ि": "i", "ी": "i", "ु": "u", "ू": "u", "े": "e", "ै": "ai",
+  "ो": "o", "ौ": "au", "ृ": "ri", "ं": "n", "ँ": "n", "ः": "h",
+  "्": "", "़": "",
+};
+
+function skeleton(text: string): string[] {
+  const latin = String(text || "")
+    .split("")
+    .map((ch) => (ch in DEVA ? DEVA[ch]! : ch))
+    .join("")
+    .toLowerCase();
+  return latin
+    .split(/[^a-z0-9]+/)
+    .map((w) => w.replace(/[aeiou]/g, ""))
+    // One or two consonants ("ka", "hai", "the") carry no identity; they are
+    // the words a child adds around the name, not the name.
+    .filter((w) => w.length >= 2);
+}
+
+/** Every way a child says "all of it". */
+// \b is defined on Latin letters only, so a Devanagari word can never be
+// followed by one — the Hindi alternatives are matched without it.
+const WHOLE_BOOK =
+  /^\s*(?:(?:all|whole|full|complete|everything|poora|pura|sab|sabhi|sara)\b|सब|सभी|पूरा|पूरी|सारा|सारी|पूर्ण)/i;
+
+export type ScopeReply =
+  | { kind: "position"; position: number }
+  /** Could not be read — ask once more, saying a name is fine too. */
+  | { kind: "unclear" };
+
+/**
+ * How far the class has got, from whatever the child sent.
+ *
+ * WHY THIS IS NOT JUST A NUMBER (18 Sep 2026): the drill asked for "the
+ * number of the last chapter" and refused everything else. A child answered
+ * "Imandar balak" — the name of the chapter, in Latin letters — and was told
+ * "कृपया केवल अध्याय का नंबर भेजिए". Nine of twelve drills that evening never
+ * got past this question. The list is right there in the message; a child
+ * reading it back by name has answered, and the drill must hear it.
+ */
+export function readScopeAnswer(text: string, chapters: DrillChapter[]): ScopeReply {
+  const last = chapters.length ? chapters[chapters.length - 1]!.position : 0;
+  if (last < 1) return { kind: "unclear" };
+  const raw = String(text || "").trim();
+  if (!raw) return { kind: "unclear" };
+
+  // A number still wins: it is what the message asks for.
+  const n = parseScopeAnswer(raw, last);
+  if (n !== null) return { kind: "position", position: n };
+
+  if (WHOLE_BOOK.test(raw)) return { kind: "position", position: last };
+
+  // A name, in either script. The best overlap wins; a tie is unclear,
+  // because guessing between two chapters sets questions from the wrong one.
+  const said = skeleton(raw);
+  if (!said.length) return { kind: "unclear" };
+  let best: { position: number; score: number } | null = null;
+  let tied = false;
+  for (const c of chapters) {
+    const name = skeleton(c.name);
+    if (!name.length) continue;
+    // Whole word, or one a real prefix of the other ("imandar" of
+    // "imandarbalak"). NOT any substring: "hn" (हाँ) sits inside "chnd"
+    // (चाँद), and a yes must never be read as chapter six.
+    const matched = said.filter((w) =>
+      name.some((t) => t === w || (w.length >= 3 && t.startsWith(w)) || (t.length >= 3 && w.startsWith(t))),
+    );
+    const hits = matched.length;
+    // Two consonants can coincide; three are a word. Several short ones
+    // agreeing is evidence too — "यह मेरा, यह मीत का" is five short words
+    // and a child reading it back has still named the chapter.
+    if (!hits || (hits < 2 && !matched.some((w) => w.length >= 3))) continue;
+    // Both directions matter: "imandar" is half of "ईमानदार बालक", and
+    // "imandar balak ch" is the whole of it plus noise.
+    const score = hits / Math.max(said.length, name.length);
+    if (!best || score > best.score) {
+      best = { position: c.position, score };
+      tied = false;
+    } else if (score === best.score && c.position !== best.position) {
+      tied = true;
+    }
+  }
+  if (!best || tied || best.score < 0.5) return { kind: "unclear" };
+  return { kind: "position", position: best.position };
+}
+
 /** "6", "chapter 6", "६" → 6. Anything else → null, and we ask again. */
 export function parseScopeAnswer(text: string, maxPosition: number): number | null {
   const western = String(text || "").replace(/[०-९]/g, (d) => String(d.charCodeAt(0) - 0x0966));
@@ -65,6 +170,40 @@ export function parseScopeAnswer(text: string, maxPosition: number): number | nu
   const n = Number(m[1]);
   if (!Number.isFinite(n) || n < 1 || n > maxPosition) return null;
   return n;
+}
+
+/* ── what the child actually sent ────────────────────────────────── */
+
+export type DrillReplyKind =
+  /** An attempt at the question, right or wrong. */
+  | "answer"
+  /** "how?", "I don't know", "batao" — a question, not a wrong answer. */
+  | "help"
+  /** "bye", "बस", "so raha hoon" — the child is done for tonight. */
+  | "stop";
+
+const HELP_RE =
+  /^\s*(?:(?:help|hint|idk|dunno)\b)|don'?t know|do not know|no idea|kaise|kese|कैसे|समझ (?:नहीं|nahi)|samajh (?:nahi|nhi)|पता नहीं|pata nahi|nahi pata|नहीं आता|batao|बताओ|बताइए|बता दीजिए|sikha|सिखा|mushkil|मुश्किल/i;
+
+const STOP_RE =
+  /^\s*(?:(?:bye|stop|quit|exit|enough|bas|khatam)\b)|bye ?bye|good ?night|shubh ratri|शुभ रात्रि|बंद कर|band kar|अब नहीं|ab nahi|nahi karna|नहीं करना|सो (?:रहा|रही|जा)|so raha|so rahi|रहने दो|rehne do|बस करो|kal karenge|कल करेंगे|^\s*बस\s*$/i;
+
+/**
+ * Is this an answer at all?
+ *
+ * WHY (18 Sep 2026): a child who wrote "Lekin kaise" — *but how?* — was
+ * marked ❌ and moved on to the next question, and a child who wrote
+ * "Sorry 😔 bye bye" was told they had written an apology instead of an
+ * answer and then asked question eight. Neither had got anything wrong.
+ * One had asked for teaching, which is the whole point of the drill, and
+ * the other had said good night.
+ */
+export function classifyDrillReply(text: string): DrillReplyKind {
+  const t = String(text || "").trim();
+  if (!t) return "help";
+  if (STOP_RE.test(t)) return "stop";
+  if (HELP_RE.test(t)) return "help";
+  return "answer";
 }
 
 /* ── the drill's own state ───────────────────────────────────────── */
@@ -211,7 +350,9 @@ export function drillScore(state: DrillState): { right: number; asked: number } 
 
 /* ── what the model is asked, and what it may answer ─────────────── */
 
-export const DRILL_PROMPT_VERSION = "exam-drill/2026-09-18";
+// 19 Sep 2026: script no longer counts against an answer, and a child
+// who asks instead of answering is taught rather than marked wrong.
+export const DRILL_PROMPT_VERSION = "exam-drill/2026-09-19";
 
 export const DRILL_QUESTION_SYSTEM = [
   "You set ONE revision question for a school child the evening before their exam. You are given the class, the subject, the chapters the class has actually covered, and what those chapters teach.",
@@ -236,7 +377,14 @@ export const DRILL_QUESTION_SYSTEM = [
 export const DRILL_CHECK_SYSTEM = [
   "You mark one school child's answer to one revision question, the evening before their exam. You are given the question, the expected idea, the child's answer and their class.",
   "verdict: right | close | wrong. 'close' is the right method with a slip — an arithmetic error, a spelling, a missing unit. Do not mark a wrong method 'close' to be kind: the child sits the paper tomorrow.",
-  "A blank, a shrug, 'I don't know', or an answer to a different question is 'wrong'.",
+  "An answer to a DIFFERENT question, or a blank, is 'wrong'.",
+  // 18 Sep 2026: a child wrote "Darji" for दर्जी — the right answer, typed
+  // on the Latin keyboard every family actually has — and was marked as
+  // having made a mistake. Script is not the skill being tested.
+  "SCRIPT IS NOT THE ANSWER. A Hindi or Sanskrit answer typed in Latin letters — 'darji' for दर्जी, 'kumhar' for कुम्हार, 'kavi' for कवि — is the SAME answer: mark it 'right'. Put one short line in howToDoIt asking them to write it in Hindi in the exam. Never mark it down for the keyboard they own.",
+  // Same evening: a child who asked "but how?" was marked wrong and asked
+  // the next question instead of being taught.
+  "WHEN THE CHILD ASKS INSTEAD OF ANSWERING — you are told so — they have not got it wrong. verdict is 'close', whatWentWrong stays EMPTY, and howToDoIt teaches the idea and gives this question's answer plainly, so they can see how it is done.",
   "whatWentWrong (empty when right): ONE sentence naming the actual mistake, in plain words a child understands. Never 'incorrect' — say what they did.",
   "howToDoIt (empty when right): ONE or two short sentences showing the method, with the step they missed. Not the answer to a new question; the way to get this one.",
   "praise (right or close only): four or five words, specific to what they did well. No exclamation storms.",
@@ -306,6 +454,8 @@ export function buildCheckPrompt(input: {
   question: string;
   skill: string;
   answer: string;
+  /** The child asked for help rather than attempting it (classifyDrillReply). */
+  askedForHelp?: boolean;
 }): string {
   return [
     `Class: ${input.className}`,
@@ -313,7 +463,9 @@ export function buildCheckPrompt(input: {
     `Question: ${input.question}`,
     `What it tests: ${input.skill}`,
     "",
-    "The child answered:",
+    input.askedForHelp
+      ? "The child did NOT attempt it. They asked for help, in these words — teach the idea and give the answer:"
+      : "The child answered:",
     input.answer,
   ].join("\n");
 }
@@ -356,13 +508,28 @@ export function renderQuestion(input: { number: number; question: string; hindi:
  * what went wrong, then how to do it — and only then the next question, so
  * the child reads the correction before being asked anything else.
  */
-export function renderCheck(input: { check: DrillCheck; hindi: boolean }): string {
+export function renderCheck(input: {
+  check: DrillCheck;
+  hindi: boolean;
+  /** They asked instead of answering: this is teaching, not marking. */
+  askedForHelp?: boolean;
+}): string {
   const { check } = input;
   if (check.verdict === "right") {
-    return `✅ ${check.praise || (input.hindi ? "बिलकुल सही।" : "That's right.")}`;
+    return [
+      `✅ ${check.praise || (input.hindi ? "बिलकुल सही।" : "That's right.")}`,
+      // Right, but written in the other script: said once, gently, and never
+      // as a mark against the answer.
+      check.howToDoIt ? `✍️ ${check.howToDoIt}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
   }
-  const head =
-    check.verdict === "close"
+  const head = input.askedForHelp
+    ? input.hindi
+      ? "🤝 कोई बात नहीं — ऐसे करते हैं:"
+      : "🤝 No problem — here is how:"
+    : check.verdict === "close"
       ? input.hindi
         ? "🟡 तरीका सही है, पर एक चूक रह गई।"
         : "🟡 Right method, one slip."
@@ -376,11 +543,18 @@ export function renderCheck(input: { check: DrillCheck; hindi: boolean }): strin
 
 export function renderFinish(input: {
   state: DrillState;
-  reason: "mastered" | "ceiling";
+  reason: "mastered" | "ceiling" | "stopped";
   hindi: boolean;
 }): string {
   const { right, asked } = drillScore(input.state);
   const score = input.hindi ? `${asked} में से ${right} सही।` : `${right} right out of ${asked}.`;
+  // The child said good night. That is a decision, not a failure, and it is
+  // answered with thanks rather than with question eight.
+  if (input.reason === "stopped") {
+    return input.hindi
+      ? `👍 ठीक है, आज इतना ही। ${asked ? score + "\n\n" : ""}कल के पेपर के लिए शुभकामनाएँ 🙏 अच्छी नींद लीजिए।\n\nदोबारा अभ्यास के लिए *PRACTICE* लिखें।`
+      : `👍 That's fine — we'll stop here. ${asked ? score + "\n\n" : ""}All the best for tomorrow 🙏 Sleep well.\n\nSend *PRACTICE* any time to go again.`;
+  }
   if (input.reason === "mastered") {
     return input.hindi
       ? `🎉 शाबाश! लगातार ${STREAK_TO_FINISH} सही — ${input.state.subjectLabel} की तैयारी अच्छी है। ${score}\n\nअब आराम कीजिए। कल के पेपर के लिए शुभकामनाएँ 🙏\n\nदोबारा अभ्यास के लिए *PRACTICE* लिखें।`
@@ -394,6 +568,6 @@ export function renderFinish(input: {
 /** The scope answer we could not read. Asked once more, never in a loop. */
 export function renderScopeUnclear(hindi: boolean): string {
   return hindi
-    ? "कृपया केवल अध्याय का नंबर भेजिए, जैसे *6*।"
-    : "Please send just the chapter number, like *6*.";
+    ? "यह समझ नहीं आया 🙏 ऊपर की सूची में से अध्याय का *नंबर* भेजिए (जैसे *6*) — या अध्याय का *नाम* लिख दीजिए।"
+    : "I did not follow that 🙏 Send the chapter *number* from the list above (like *6*) — or just type the chapter's *name*.";
 }

@@ -35,6 +35,8 @@ import {
   renderScopeUnclear,
   type DrillChapter,
   type DrillState,
+  classifyDrillReply,
+  readScopeAnswer,
 } from "@/lib/examDrill";
 
 export function examDrillEnabled(): boolean {
@@ -261,29 +263,43 @@ export async function continueExamDrill(input: {
     const className = childClassName(child, masters);
     const chapters = await chaptersFor(className, open.state.subjectLabel);
     if (!chapters.length) return nothing;
-    const maxPosition = chapters[chapters.length - 1]!.position;
 
     let state = open.state;
     const parts: string[] = [];
+    const said = classifyDrillReply(input.text);
+
+    // 0. "bye", "बस", "so raha hoon" — the child has finished for tonight.
+    //    Ending is a decision they are allowed to make; the old loop marked
+    //    the goodbye wrong and asked the next question.
+    if (said === "stop" && state.phase !== "need_scope") {
+      state = { ...state, phase: "done", endedAt: new Date().toISOString() };
+      await saveDrill(open.id, state, input.mobile10);
+      return {
+        handled: true,
+        replyText: renderFinish({ state, reason: "stopped", hindi: input.hindi }),
+      };
+    }
 
     // 1. The scope, if we are still waiting for it.
     if (state.phase === "need_scope") {
-      const scope = parseScopeAnswer(input.text, maxPosition);
-      if (scope === null) {
+      const scope = readScopeAnswer(input.text, chapters);
+      if (scope.kind !== "position") {
         return { handled: true, replyText: renderScopeUnclear(input.hindi) };
       }
-      state = { ...state, scope, phase: "asking" };
+      state = { ...state, scope: scope.position, phase: "asking" };
     } else if (state.asked.length && !state.asked[state.asked.length - 1]!.verdict) {
       // 2. An answer to the question we asked. Marked before anything else
       //    happens, and the child reads the marking before the next question.
       const last = state.asked[state.asked.length - 1]!;
       const { drillCheckJson } = await import("@/lib/aiLlm.server");
+      const askedForHelp = said === "help";
       const checked = await drillCheckJson({
         className,
         subjectLabel: state.subjectLabel,
         question: last.question,
         skill: last.skill,
         answer: input.text.slice(0, 600),
+        askedForHelp,
       });
       if (!checked.ok) {
         // Say nothing rather than guess a verdict about a child's work.
@@ -295,11 +311,15 @@ export async function continueExamDrill(input: {
             : "I could not check that just now 🙏 Please send your answer again in a moment.",
         };
       }
-      state = recordAnswer(state, checked.draft.verdict, {
+      // A child who asked for help has not got it wrong, whatever the model
+      // returns: 'close' holds the streak where it is, so asking costs them
+      // nothing but does not count as having done it either.
+      const verdict = askedForHelp ? "close" : checked.draft.verdict;
+      state = recordAnswer(state, verdict, {
         answer: input.text,
         check: checked.draft,
       });
-      parts.push(renderCheck({ check: checked.draft, hindi: input.hindi }));
+      parts.push(renderCheck({ check: checked.draft, hindi: input.hindi, askedForHelp }));
     }
 
     // 3. What next — the only place this is decided.
