@@ -76,6 +76,23 @@ assert.deepEqual(shouldCloseThread(office, at("2026-09-14T07:05:00Z")), { close:
 // Not at night, and never outside the 24-hour window.
 assert.deepEqual(shouldCloseThread(chat, at("2026-09-14T15:00:00Z")), { close: false, reason: "quiet_hours" }); // 20:30 IST
 assert.deepEqual(shouldCloseThread(chat, at("2026-09-15T04:30:00Z")), { close: false, reason: "window_closing" });
+// A question the tutor asked outranks the clock: a quiet half hour is a
+// child fetching their book, not the end of the chat (18 Sep 2026).
+assert.deepEqual(shouldCloseThread(chat, at("2026-09-14T05:31:00Z"), { awaitingAnswer: true }), {
+  close: false,
+  reason: "mid_answer",
+});
+// …and it outranks the office's longer wait too.
+assert.deepEqual(shouldCloseThread(office, at("2026-09-14T07:05:00Z"), { awaitingAnswer: true }), {
+  close: false,
+  reason: "mid_answer",
+});
+// With nobody waiting, nothing about the old behaviour changes.
+assert.deepEqual(shouldCloseThread(chat, at("2026-09-14T05:31:00Z"), { awaitingAnswer: false }), {
+  close: true,
+  needsOffice: false,
+});
+
 // A thread the parent never wrote in is not a conversation.
 assert.deepEqual(shouldCloseThread(t([["bot", "2026-09-14T05:00:00Z"]]), at("2026-09-14T06:00:00Z")), { close: false, reason: "no_parent_message" });
 

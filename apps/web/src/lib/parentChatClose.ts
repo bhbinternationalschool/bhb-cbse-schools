@@ -40,9 +40,38 @@ export function alreadyClosed(t: ClosableThread): boolean {
 
 export type CloseDecision =
   | { close: true; needsOffice: boolean }
-  | { close: false; reason: "no_parent_message" | "already_closed" | "still_active" | "window_closing" | "quiet_hours" };
+  | {
+      close: false;
+      reason:
+        | "no_parent_message"
+        | "already_closed"
+        | "still_active"
+        | "window_closing"
+        | "quiet_hours"
+        | "mid_answer";
+    };
 
-export function shouldCloseThread(t: ClosableThread, now: Date): CloseDecision {
+export type CloseContext = {
+  /**
+   * The bot has asked this family something and is waiting for the answer —
+   * today, an exam drill that stopped on its own question.
+   *
+   * Silence then is not the end of the conversation; it is a child fetching
+   * their book. On 18 Sep 2026 the sweep thanked 24 families half an hour
+   * after they tapped "practice", ten of them mid-drill and nine sitting on
+   * the tutor's own question. The goodbye ended the practice the school had
+   * just asked them to do.
+   */
+  awaitingAnswer?: boolean;
+};
+
+export function shouldCloseThread(
+  t: ClosableThread,
+  now: Date,
+  ctx: CloseContext = {},
+): CloseDecision {
+  // Before anything else: never talk over a question we asked.
+  if (ctx.awaitingAnswer) return { close: false, reason: "mid_answer" };
   const lp = lastParentAt(t);
   if (!lp) return { close: false, reason: "no_parent_message" };
   if (alreadyClosed(t)) return { close: false, reason: "already_closed" };

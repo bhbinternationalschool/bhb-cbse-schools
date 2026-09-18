@@ -93,6 +93,44 @@ export async function openDrillFor(mobile10: string): Promise<{ id: string; stat
   return row ? { id: row.id, state: rowToState(row) } : null;
 }
 
+/**
+ * Every number the tutor is currently waiting on for an answer.
+ *
+ * The chat-close sweep uses this. On 18 Sep 2026 it thanked 24 families
+ * for their chat thirty minutes after they tapped "practice" — and ten of
+ * those were mid-drill, nine of them sitting on the tutor's own question
+ * ("which portion is the exam on?"). A child who goes to fetch the book
+ * came back to a goodbye.
+ *
+ * `null` means the table could not be read. That is NOT "nobody is
+ * waiting": the caller must treat an unreadable state as a reason to stay
+ * quiet, never as permission to send ([[erp-unknown-must-not-become-fact]]).
+ */
+export async function mobilesAwaitingDrillReply(
+  now: Date = new Date(),
+): Promise<Set<string> | null> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return null;
+  // A drill nobody has touched for half a day is abandoned, not waiting —
+  // otherwise one unanswered question silences that family for good.
+  const since = new Date(now.getTime() - 12 * 3_600_000).toISOString();
+  const { data, error } = await ctx.sb
+    .from("exam_drill_sessions")
+    .select("mobile10")
+    .eq("tenant_id", ctx.tenantId)
+    .neq("phase", "done")
+    .gte("updated_at", since);
+  if (error) {
+    console.warn("[examDrill] could not read open drills", error.message);
+    return null;
+  }
+  const out = new Set<string>();
+  for (const r of (data ?? []) as { mobile10: string | null }[]) {
+    if (r.mobile10) out.add(String(r.mobile10));
+  }
+  return out;
+}
+
 async function saveDrill(id: string, state: DrillState, mobile10: string): Promise<void> {
   const ctx = await getServerTenantContext();
   if (!ctx) return;
