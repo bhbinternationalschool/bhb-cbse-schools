@@ -84,7 +84,13 @@ export async function applyClassChannelDraftServer(
       dueAt: fields.dueAt,
     });
     if (!res.ok) return { ok: false, error: res.error };
-    return { ok: true, applied: true, detail: `Homework posted (${res.post.id})` };
+    // The teacher is told how many families actually heard, not just that
+    // the post saved — "posted" meant nothing to a parent for as long as
+    // nothing sent it.
+    const reach = res.wa.reason
+      ? res.wa.reason
+      : `${res.wa.sent} of ${res.wa.families} families on WhatsApp${res.wa.failed ? `, ${res.wa.failed} failed` : ""}`;
+    return { ok: true, applied: true, detail: `Homework posted — ${reach}` };
   }
 
   if (fields.target === "notice") {

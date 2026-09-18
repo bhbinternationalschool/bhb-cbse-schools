@@ -30,6 +30,7 @@ import {
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { loadSis } from "@/lib/sis";
 import { sendPushToSubjects } from "@/lib/webPush.server";
+import type { HomeworkWaResult } from "@/lib/homeworkWa.server";
 
 export type PostHomeworkInput = {
   session: DemoSession;
@@ -46,6 +47,13 @@ export type PostHomeworkInput = {
   requiresSubmit?: boolean;
   /** "Ch 6 — Multiples and Factors" — opens the parent app's tutor on the right chapter. */
   aiTutorHint?: string;
+  /**
+   * Message the parents on WhatsApp too. Default true: a homework post the
+   * family never hears about is the state this ERP was already in — one
+   * post in production, nought WhatsApps. Pass false for a backfill or an
+   * import, which must not message anybody about work set weeks ago.
+   */
+  notifyWhatsApp?: boolean;
 };
 
 export type PostHomeworkResult =
@@ -53,6 +61,7 @@ export type PostHomeworkResult =
       ok: true;
       post: HomeworkPost;
       push: { sent: number; expired: number; failed: number };
+      wa: HomeworkWaResult;
     }
   | { ok: false; error: string };
 
@@ -67,6 +76,36 @@ export async function postHomeworkServer(
   await ensureSchoolMirrorHydrated();
   await ensureHomeworkHydratedServer();
 
+  // Written out for parents, unless the caller already did it. The class
+  // channel expands at DRAFT time so the teacher confirms what the parents
+  // will read, and passes both fields; the app, the command desk and the
+  // online-class summary do not, and their families deserve the same
+  // message. An expansion that fails leaves the teacher's words exactly as
+  // typed — see homeworkExpand.server.ts.
+  let bodyEn = input.bodyEn || "";
+  let title = input.title || "";
+  let bodyHi = input.bodyHi || "";
+  let aiTutorHint = input.aiTutorHint || "";
+  if (!bodyHi && !aiTutorHint && bodyEn.trim()) {
+    try {
+      const { expandHomeworkForParents } = await import("@/lib/homeworkExpand.server");
+      const label = classLabel(input.masters, input.classId, input.sectionId);
+      const x = await expandHomeworkForParents({
+        classLabel: label,
+        className: label,
+        subjectLabel: subjectLabel(input.masters, input.subjectId),
+        teacherText: bodyEn,
+        dueAt: (input.dueAt || "").slice(0, 10),
+      });
+      bodyEn = x.bodyEn;
+      title = title || x.title;
+      bodyHi = x.bodyHi;
+      aiTutorHint = x.chapterHint;
+    } catch (e) {
+      console.warn("[homeworkPost] not expanded", (e as Error)?.message);
+    }
+  }
+
   const result = createHomeworkPost({
     academicYearCode: input.session.academicYearCode,
     classId: input.classId || "",
@@ -75,12 +114,12 @@ export async function postHomeworkServer(
     teacherStaffId: input.session.staffId || "",
     teacherName: input.session.fullName,
     date: input.date || homeworkTodayIso(),
-    title: input.title || "",
-    bodyEn: input.bodyEn || "",
-    bodyHi: input.bodyHi || "",
+    title,
+    bodyEn,
+    bodyHi,
     dueAt: input.dueAt || "",
     requiresSubmit: !!input.requiresSubmit,
-    aiTutorHint: input.aiTutorHint || "",
+    aiTutorHint,
   });
   if (!result.ok) return { ok: false, error: result.error };
 
@@ -127,5 +166,23 @@ export async function postHomeworkServer(
     console.warn("[homeworkPost] push failed", (e as Error)?.message);
   }
 
-  return { ok: true, post: result.post, push };
+  // The parents, on WhatsApp. Best-effort in exactly the same way as the
+  // app push above: a teacher's homework is saved whether or not Meta is
+  // reachable, and every failure is written down rather than thrown.
+  let wa: HomeworkWaResult = { families: 0, sent: 0, failed: 0, skipped: 0 };
+  if (input.notifyWhatsApp !== false) {
+    try {
+      const { sendHomeworkWhatsApp } = await import("@/lib/homeworkWa.server");
+      wa = await sendHomeworkWhatsApp({
+        post: result.post,
+        classLabel: classLabel(input.masters, result.post.classId, result.post.sectionId),
+        subjectLabel: subjectLabel(input.masters, result.post.subjectId),
+        bodyHi: result.post.bodyHi,
+      });
+    } catch (e) {
+      console.warn("[homeworkPost] whatsapp failed", (e as Error)?.message);
+    }
+  }
+
+  return { ok: true, post: result.post, push, wa };
 }

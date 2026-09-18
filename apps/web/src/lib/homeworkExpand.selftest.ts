@@ -13,6 +13,10 @@ import {
   renderHomeworkExpansion,
   resolutionNoteForTeacher,
   resolveHomeworkChapter,
+  homeworkWaBody,
+  homeworkWaDue,
+  homeworkWaLine,
+  WA_LINE_MAX,
   type BookFact,
 } from "./homeworkExpand";
 
@@ -158,5 +162,38 @@ assert.match(formatDueLabel("2026-09-18", "2026-09-18"), /^today/);
 assert.match(formatDueLabel("2026-09-25", "2026-09-18"), /^Fri 25 Sept?$/);
 assert.equal(formatDueLabel("", "2026-09-18"), "", "no due date is not a due date");
 assert.equal(formatDueLabel("kal", "2026-09-18"), "");
+
+/* ── What fits in a WhatsApp template ─────────────────────────────── */
+//
+// Meta rejects a variable containing a newline, a tab, or four spaces in a
+// row, so the expanded message cannot ride inside the template — one line
+// carries the chapter and the work instead.
+const line = homeworkWaLine({ title: "Maths — Exercise 5.2", aiTutorHint: "Ch 5 — More about Operations on Numbers" });
+assert.equal(line, "Ch 5 — More about Operations on Numbers · Maths — Exercise 5.2");
+assert.doesNotMatch(line, /[\n\t]/, "a template variable is one line");
+assert.doesNotMatch(line, / {4}/, "Meta rejects four spaces in a row");
+
+// Older posts put the subject CODE in aiTutorHint ("ENG"); that is not a
+// chapter and is not worth a parent's attention.
+assert.equal(homeworkWaLine({ title: "English — practice", aiTutorHint: "ENG" }), "English — practice");
+assert.equal(homeworkWaLine({ title: "English — practice" }), "English — practice");
+assert.equal(homeworkWaLine({ title: "", aiTutorHint: "" }), "See the parent app", "never an empty variable");
+assert.match(homeworkWaLine({ title: "क्ष ".repeat(200), aiTutorHint: "पाठ 3" }), /…$/);
+assert.ok(homeworkWaLine({ title: "x".repeat(400), aiTutorHint: "Ch 2 — Y" }).length <= WA_LINE_MAX);
+
+// Meta forbids an empty variable, and a due date is often absent.
+assert.equal(homeworkWaDue("tomorrow (Sat 19 Sep)", "en"), "tomorrow (Sat 19 Sep)");
+assert.equal(homeworkWaDue("", "en"), "not given");
+assert.equal(homeworkWaDue("", "hi"), "बताई नहीं गई");
+
+// The full message, for a family whose window is open: the family's own
+// language, and the school's name at the end.
+const waHi = homeworkWaBody({ expansion: plain, language: "hi", schoolName: "BHB International School" });
+assert.match(waHi, /अध्याय 5/);
+assert.match(waHi, /BHB International School/);
+assert.doesNotMatch(waHi, /Chapter 5 — More/, "a Hindi family is not sent the English body");
+const waEn = homeworkWaBody({ expansion: plain, language: "en", schoolName: "BHB International School" });
+assert.match(waEn, /Chapter 5 — More about Operations on Numbers/);
+assert.match(waEn, /Ask tutor/);
 
 console.log("ok");

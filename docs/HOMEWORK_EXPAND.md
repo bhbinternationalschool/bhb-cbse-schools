@@ -62,6 +62,43 @@ the confirmed draft carries `bodyHi` and `chapterHint` through
 body and puts the chapter in `aiTutorHint` — so *Ask tutor* in the parent app
 opens on that chapter rather than the whole subject.
 
+## On WhatsApp
+
+Until now nothing sent homework to parents at all. The `bhb_homework_published`
+template has been approved in **both** languages since August and the
+`auto_homework_published` rule has sat in the automation seed the whole time,
+but nothing ever emitted the `homework.published` event the rule waits on — so
+a published post reached families as an app push and nothing else. Production
+has one homework post, `whatsapp_notified_count` 0.
+
+`homeworkWa.server.ts` sends it directly, the way fee receipts are sent, rather
+than through the automation engine: homework is due tomorrow, and an approval
+queue a clerk clears next morning would deliver it after the child left for
+school.
+
+- **The full message first.** Inside a family's 24-hour window they get the
+  whole expansion — book, chapter, what the chapter covers, the teacher's
+  words — in their own language. A shut window costs one refused send, which
+  Meta does not bill.
+- **The template when the window is shut**, which is most families. It carries
+  one line (`homeworkWaLine`): the chapter, then the work. Meta rejects a
+  variable containing a newline, a tab or four consecutive spaces, and forbids
+  an empty one — hence `homeworkWaDue`, because a due date is often absent.
+- **Once per post** (`claimSendOnce`) and **once per family**, not per child:
+  two siblings in one section share a household and a phone.
+- **The family's own language**, never the teacher's.
+- **Quiet hours are not consulted**, for the same reason a receipt ignores
+  them: this is not the school deciding to write to a family, it is work their
+  child has to do, usually by tomorrow. Held until 8 a.m. it would arrive after
+  the child left.
+
+The class channel used to text-broadcast every confirmed draft to parents.
+Plain text only reaches an open 24-hour window, so for most families it
+silently failed while the teacher was told the class had been informed. On the
+homework path that broadcast now goes to the co-teachers only, and the families
+are reached through the template — with the old text broadcast kept as a
+fallback for the case where the ERP write itself fails.
+
 ## The known gap
 
 Nothing in the ERP knows where a class currently *is* in its book. Positional

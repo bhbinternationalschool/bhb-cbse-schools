@@ -396,3 +396,56 @@ export function resolutionNoteForTeacher(r: HomeworkResolution, ref: HomeworkRef
   }
   return "";
 }
+
+/* ── 5. the same thing on WhatsApp ───────────────────────────────── */
+
+/**
+ * The one line a WhatsApp TEMPLATE variable can carry.
+ *
+ * Meta rejects a variable containing a newline, a tab, or four spaces in a
+ * row, so the expanded message cannot ride inside `bhb_homework_published`.
+ * What fits is the part a parent could not have worked out for themselves:
+ * the chapter, then the work.
+ *
+ * Built from the post itself rather than the expansion, so homework typed
+ * straight into the app — with no chapter resolved — still produces a
+ * sensible line instead of nothing.
+ */
+export const WA_LINE_MAX = 220;
+
+export function homeworkWaLine(post: { title: string; aiTutorHint?: string }): string {
+  const chapter = (post.aiTutorHint || "").replace(/\s+/g, " ").trim();
+  const title = (post.title || "").replace(/\s+/g, " ").trim();
+  // A hint that is not a chapter reference — older posts stored the subject
+  // code there ("ENG") — is not worth a parent's attention.
+  const usable = /\bch\s*\d|अध्याय|पाठ/i.test(chapter) ? chapter : "";
+  const line = [usable, title].filter(Boolean).join(" · ") || title || "See the parent app";
+  return line.length > WA_LINE_MAX ? `${line.slice(0, WA_LINE_MAX - 1).trimEnd()}…` : line;
+}
+
+/** Meta forbids an empty template variable, and a due date is often absent. */
+export function homeworkWaDue(dueLabel: string, language: "en" | "hi"): string {
+  if (dueLabel) return dueLabel;
+  return language === "hi" ? "बताई नहीं गई" : "not given";
+}
+
+/**
+ * The whole message, for a family whose 24-hour window is open.
+ *
+ * Worth trying before the template every time: the template can only carry
+ * one line, and this carries the book, the chapter, what the chapter covers
+ * and the teacher's own words. A shut window costs one refused send, which
+ * Meta does not bill.
+ */
+export function homeworkWaBody(input: {
+  expansion: HomeworkExpansion;
+  language: "en" | "hi";
+  schoolName: string;
+}): string {
+  const body = input.language === "hi" ? input.expansion.bodyHi : input.expansion.bodyEn;
+  const tail =
+    input.language === "hi"
+      ? `\n\nपूरा विवरण पैरेंट ऐप में — मदद चाहिए तो वहीं *Ask tutor* दबाएँ। 🎓\n— ${input.schoolName}`
+      : `\n\nFull details in the parent app — tap *Ask tutor* there if your child needs a hand. 🎓\n— ${input.schoolName}`;
+  return `${body}${tail}`;
+}
