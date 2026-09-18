@@ -410,12 +410,38 @@ export type ExamPaperSection = {
   questions: ExamPaperQuestion[];
 };
 
+/**
+ * Where an imported set came from.
+ *
+ * A set built here by a teacher has none of this. A set that arrived as a
+ * Word file from the school's content publisher keeps its original beside
+ * the parsed questions, for two reasons: a teacher can print the publisher's
+ * own layout when the parse has lost a table or a picture, and `fileHash` is
+ * what makes re-importing the same folder a no-op instead of a second copy.
+ */
+export type ExamPaperSetSource = {
+  /** The file as the publisher named it. */
+  fileName: string;
+  /** Path inside `school-files`; served through `/api/file`. */
+  filePath: string;
+  /** What to open to read the original — an `/api/file/...` path. */
+  fileUrl: string;
+  /** sha-256 of the original file, hex. */
+  fileHash: string;
+  /** The publisher's own name for this set, e.g. "Summative Assessment 1 - Set 3". */
+  publisherLabel: string;
+  importedAt: string;
+  importedBy: string;
+};
+
 export type ExamPaperSet = {
   id: string;
   /** A / B / C / D — school picks one on exam day */
   setCode: string;
   label: string;
   sections: ExamPaperSection[];
+  /** null for a set written on this desk; see ExamPaperSetSource. */
+  source: ExamPaperSetSource | null;
 };
 
 export type ExamPaperPrintEvent = {
@@ -681,6 +707,27 @@ export function emptySet(partial?: Partial<ExamPaperSet>): ExamPaperSet {
     sections: Array.isArray(partial?.sections)
       ? partial!.sections.map((s) => emptySection(s))
       : [emptySection({ title: "Section A" })],
+    source: normalizeSetSource(partial?.source),
+  };
+}
+
+/**
+ * A source is only worth keeping if it can still be opened and still
+ * identifies the file — a half-filled one would claim provenance the desk
+ * cannot honour, so it becomes "written here" instead.
+ */
+export function normalizeSetSource(
+  raw: Partial<ExamPaperSetSource> | null | undefined,
+): ExamPaperSetSource | null {
+  if (!raw || !raw.filePath || !raw.fileHash) return null;
+  return {
+    fileName: String(raw.fileName || "").slice(0, 200),
+    filePath: String(raw.filePath),
+    fileUrl: String(raw.fileUrl || ""),
+    fileHash: String(raw.fileHash),
+    publisherLabel: String(raw.publisherLabel || "").slice(0, 200),
+    importedAt: String(raw.importedAt || nowIso()),
+    importedBy: String(raw.importedBy || ""),
   };
 }
 
@@ -776,6 +823,7 @@ function normalizeSet(s: Partial<ExamPaperSet>): ExamPaperSet | null {
           .map(normalizeSection)
           .filter((x): x is ExamPaperSection => !!x)
       : [emptySection()],
+    source: normalizeSetSource(s.source),
   };
 }
 

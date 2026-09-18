@@ -62,8 +62,18 @@ export const MEDIA_BUCKETS: Record<MediaBucket, BucketRules> = {
     types: {
       ...IMAGE_TYPES,
       pdf: "application/pdf",
+      // Question papers arrive from the content publisher as Word files and
+      // are kept alongside the parsed version, so a teacher can print the
+      // publisher's own layout. `.docm` stays out: a macro-enabled document
+      // is a program.
+      docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      doc: "application/msword",
     },
-    maxBytes: 10 * MB,
+    // 20 MB: one Nursery paper in the school's own download is 9.86 MB of
+    // pictures, which the old 10 MB ceiling would have refused on the next
+    // paper like it. Kept in step with migration
+    // 20260918100000_school_files_question_papers.
+    maxBytes: 20 * MB,
     maxVideoBytes: 0,
   },
 };
