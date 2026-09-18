@@ -122,6 +122,7 @@ SELFTESTS=(
   test:homework-expand
   test:homework-submission
   test:exam-drill
+  test:exam-seating
   test:roster-name-case
   test:review-demo-records
   test:wa-template-shape-sync
