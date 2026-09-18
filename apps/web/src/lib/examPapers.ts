@@ -410,12 +410,38 @@ export type ExamPaperSection = {
   questions: ExamPaperQuestion[];
 };
 
+/**
+ * Where an imported set came from.
+ *
+ * A set built here by a teacher has none of this. A set that arrived as a
+ * Word file from the school's content publisher keeps its original beside
+ * the parsed questions, for two reasons: a teacher can print the publisher's
+ * own layout when the parse has lost a table or a picture, and `fileHash` is
+ * what makes re-importing the same folder a no-op instead of a second copy.
+ */
+export type ExamPaperSetSource = {
+  /** The file as the publisher named it. */
+  fileName: string;
+  /** Path inside `school-files`; served through `/api/file`. */
+  filePath: string;
+  /** What to open to read the original — an `/api/file/...` path. */
+  fileUrl: string;
+  /** sha-256 of the original file, hex. */
+  fileHash: string;
+  /** The publisher's own name for this set, e.g. "Summative Assessment 1 - Set 3". */
+  publisherLabel: string;
+  importedAt: string;
+  importedBy: string;
+};
+
 export type ExamPaperSet = {
   id: string;
   /** A / B / C / D — school picks one on exam day */
   setCode: string;
   label: string;
   sections: ExamPaperSection[];
+  /** null for a set written on this desk; see ExamPaperSetSource. */
+  source: ExamPaperSetSource | null;
 };
 
 export type ExamPaperPrintEvent = {
@@ -514,6 +540,18 @@ export type ExamPapersState = {
   bank: BankQuestion[];
   /** Blueprints — desk slice "blueprints" */
   blueprints: ExamBlueprint[];
+  /**
+   * What the school has taught the paper importer about its publisher's
+   * words — `{"subjects":{"understanding our world":"WAU"}}`. Kept with the
+   * papers rather than in one browser, so next term's download is understood
+   * on whichever machine opens it. Shape is `ImportMappings` from
+   * `examPaperImport`; typed loosely here to keep that module free of this one.
+   */
+  importMappings: {
+    classes?: Record<string, string>;
+    subjects?: Record<string, string>;
+    exams?: Record<string, string>;
+  };
 };
 
 const STORAGE_KEY = "bhb_exam_papers_v1";
@@ -623,7 +661,7 @@ export const FORMULA_PALETTE: { insert: string; label: string; group: string }[]
   ];
 
 export function emptyExamPapersState(): ExamPapersState {
-  return { version: 1, papers: [], bank: [], blueprints: [] };
+  return { version: 1, papers: [], bank: [], blueprints: [], importMappings: {} };
 }
 
 export function emptyQuestion(
@@ -681,6 +719,27 @@ export function emptySet(partial?: Partial<ExamPaperSet>): ExamPaperSet {
     sections: Array.isArray(partial?.sections)
       ? partial!.sections.map((s) => emptySection(s))
       : [emptySection({ title: "Section A" })],
+    source: normalizeSetSource(partial?.source),
+  };
+}
+
+/**
+ * A source is only worth keeping if it can still be opened and still
+ * identifies the file — a half-filled one would claim provenance the desk
+ * cannot honour, so it becomes "written here" instead.
+ */
+export function normalizeSetSource(
+  raw: Partial<ExamPaperSetSource> | null | undefined,
+): ExamPaperSetSource | null {
+  if (!raw || !raw.filePath || !raw.fileHash) return null;
+  return {
+    fileName: String(raw.fileName || "").slice(0, 200),
+    filePath: String(raw.filePath),
+    fileUrl: String(raw.fileUrl || ""),
+    fileHash: String(raw.fileHash),
+    publisherLabel: String(raw.publisherLabel || "").slice(0, 200),
+    importedAt: String(raw.importedAt || nowIso()),
+    importedBy: String(raw.importedBy || ""),
   };
 }
 
@@ -776,6 +835,7 @@ function normalizeSet(s: Partial<ExamPaperSet>): ExamPaperSet | null {
           .map(normalizeSection)
           .filter((x): x is ExamPaperSection => !!x)
       : [emptySection()],
+    source: normalizeSetSource(s.source),
   };
 }
 
@@ -849,6 +909,29 @@ export function normalizeExamPapersState(raw: unknown): ExamPapersState {
     blueprints: Array.isArray(p.blueprints)
       ? p.blueprints.map(normalizeBlueprint).filter((x): x is ExamBlueprint => !!x)
       : [],
+    importMappings: normalizeImportMappingsBlob(p.importMappings),
+  };
+}
+
+function normalizeMappingTable(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== "object") return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const key = String(k ?? "").trim().toLowerCase();
+    const value = String(v ?? "").trim();
+    if (key && value) out[key] = value.slice(0, 60);
+  }
+  return out;
+}
+
+function normalizeImportMappingsBlob(
+  raw: ExamPapersState["importMappings"] | undefined,
+): ExamPapersState["importMappings"] {
+  if (!raw || typeof raw !== "object") return {};
+  return {
+    classes: normalizeMappingTable(raw.classes),
+    subjects: normalizeMappingTable(raw.subjects),
+    exams: normalizeMappingTable(raw.exams),
   };
 }
 
@@ -1431,4 +1514,300 @@ export function assembleSectionsFromCells(
     );
   }
   return sections;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Imported papers                                                            */
+/* -------------------------------------------------------------------------- */
+
+/** One class + subject + exam's worth of imported sets, ready to be filed. */
+export type ImportedPaperInput = {
+  /** Existing paper to add these sets to; "" creates a new one. */
+  targetPaperId: string;
+  academicYearCode: string;
+  examTermId: string;
+  classId: string;
+  subjectId: string;
+  /** For the paper code and the printed header. */
+  examCode: string;
+  examName: string;
+  className: string;
+  subjectCode: string;
+  title: string;
+  maxMarks: number;
+  durationMinutes: number;
+  sets: ExamPaperSet[];
+};
+
+export type ImportedPaperOutcome = {
+  state: ExamPapersState;
+  created: number;
+  updated: number;
+  addedSets: number;
+  /** Sets skipped because that exact file is already on the paper. */
+  skippedSets: number;
+};
+
+/**
+ * Fold imported sets into the papers on the desk.
+ *
+ * Two rules, both about not destroying work:
+ *
+ *  * a set is **added**, never swapped for one already there. A teacher may
+ *    have edited Set A after it was imported; re-importing the folder must not
+ *    quietly replace their questions with the publisher's again.
+ *  * a file already on the paper — same sha-256 — is skipped, so running the
+ *    import twice leaves the desk exactly as the first run did.
+ *
+ * Papers arrive as drafts. Nothing imported is marked ready: somebody has to
+ * look at a parsed paper before it is printed for children.
+ */
+export function applyImportedSets(
+  state: ExamPapersState,
+  inputs: ImportedPaperInput[],
+  actor: string,
+): ImportedPaperOutcome {
+  const papers = [...state.papers];
+  let created = 0;
+  let updated = 0;
+  let addedSets = 0;
+  let skippedSets = 0;
+
+  for (const input of inputs) {
+    if (!input.sets.length) continue;
+
+    const at = input.targetPaperId
+      ? papers.findIndex((p) => p.id === input.targetPaperId)
+      : -1;
+
+    if (at >= 0) {
+      const paper = papers[at]!;
+      const seen = new Set(
+        paper.sets.map((s) => s.source?.fileHash).filter(Boolean) as string[],
+      );
+      const takenCodes = new Set(paper.sets.map((s) => s.setCode));
+      const fresh: ExamPaperSet[] = [];
+      for (const set of input.sets) {
+        if (set.source?.fileHash && seen.has(set.source.fileHash)) {
+          skippedSets += 1;
+          continue;
+        }
+        let code = set.setCode;
+        if (takenCodes.has(code)) {
+          let i = 0;
+          while (i < 26 && takenCodes.has(String.fromCharCode(65 + i))) i += 1;
+          code = String.fromCharCode(65 + i);
+        }
+        takenCodes.add(code);
+        fresh.push({ ...set, setCode: code });
+      }
+      if (!fresh.length) continue;
+      const next = normalizePaper({
+        ...paper,
+        sets: [...paper.sets, ...fresh],
+        updatedAt: nowIso(),
+        updatedBy: actor,
+      });
+      if (!next) continue;
+      papers[at] = next;
+      updated += 1;
+      addedSets += fresh.length;
+      continue;
+    }
+
+    const paper = normalizePaper({
+      id: nid("ep"),
+      paperCode: buildPaperCode({
+        academicYearCode: input.academicYearCode,
+        examCode: input.examCode,
+        className: input.className,
+        subjectCode: input.subjectCode,
+        setCode: input.sets[0]!.setCode,
+      }),
+      academicYearCode: input.academicYearCode,
+      examTermId: input.examTermId,
+      classId: input.classId,
+      subjectId: input.subjectId,
+      title: input.title,
+      examName: input.examName,
+      durationMinutes: input.durationMinutes,
+      maxMarks: input.maxMarks,
+      hardness: "mixed",
+      status: "draft",
+      sets: input.sets,
+      activeSetCode: input.sets[0]!.setCode,
+      createdBy: actor,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+      updatedBy: actor,
+    });
+    if (!paper) continue;
+    papers.push(paper);
+    created += 1;
+    addedSets += paper.sets.length;
+  }
+
+  return { state: { ...state, papers }, created, updated, addedSets, skippedSets };
+}
+
+/** What the planner needs to know about the papers already on the desk. */
+export function existingPaperFacts(state: ExamPapersState) {
+  return state.papers.map((p) => ({
+    paperId: p.id,
+    academicYearCode: p.academicYearCode,
+    examTermId: p.examTermId,
+    classId: p.classId,
+    subjectId: p.subjectId,
+    sets: p.sets.map((s) => ({
+      setCode: s.setCode,
+      fileHash: s.source?.fileHash ?? "",
+    })),
+  }));
+}
+
+/**
+ * Put every imported question into the bank for its class and subject.
+ *
+ * Without this the import is a one-term affair: 2,400 questions land inside
+ * papers, and a teacher building next term's paper can only find them by
+ * opening last term's and copying by hand. The bank is the part that makes
+ * them reusable — `BankPicker` searches it by class × subject, type, text,
+ * LO code and tag, and copies an item into whatever section is open.
+ *
+ * Banking is a copy, not a reference: editing a bank item never changes a
+ * paper that was printed from it, and deleting one never empties a paper.
+ * Pictures come along, because a bank question carries the same stored URLs
+ * the paper does — the file itself is not duplicated.
+ *
+ * `addQuestionsToBank` already refuses a question whose text is in the bank
+ * for that class and subject, so three sets of one paper contribute what they
+ * share only once, and re-importing the folder adds nothing.
+ */
+export function bankImportedQuestions(
+  state: ExamPapersState,
+  inputs: ImportedPaperInput[],
+  by: string,
+): { state: ExamPapersState; added: number } {
+  let next = state;
+  let added = 0;
+  for (const input of inputs) {
+    if (!input.classId || !input.subjectId) continue;
+    for (const set of input.sets) {
+      const questions = set.sections
+        .flatMap((s) => s.questions)
+        .filter((q) => q.text.trim());
+      if (!questions.length) continue;
+      const r = addQuestionsToBank(next, {
+        classId: input.classId,
+        subjectId: input.subjectId,
+        questions,
+        // Provenance the teacher can search on: which exam, and which of the
+        // publisher's papers it came out of.
+        tags: [input.examCode, set.source?.publisherLabel || set.label].filter(Boolean),
+        by,
+      });
+      next = r.state;
+      added += r.added;
+    }
+  }
+  return { state: next, added };
+}
+
+/* -------------------------------------------------------------------------- */
+/* The school's own picture library                                           */
+/* -------------------------------------------------------------------------- */
+
+/** One stored picture, with the question it currently illustrates. */
+export type PaperImageRef = {
+  /** The stored URL — an `/api/file/...` path. This is what gets reused. */
+  url: string;
+  caption: string;
+  /** The question it was found on, for searching and for recognising it. */
+  questionText: string;
+  classId: string;
+  subjectId: string;
+  /** Where it came from: paper code, or "" when found on a bank item. */
+  paperCode: string;
+  /** How many questions across the desk point at this same file. */
+  uses: number;
+};
+
+/**
+ * Every picture the school already has, found by walking what it has written.
+ *
+ * Reusing a picture must never mean uploading it again. Once a paper is
+ * imported, its diagrams are stored files with stable URLs, and any question —
+ * in any paper, in any later year — can point at the same file. So the library
+ * is not a separate store to maintain: it is the set of URLs already in the
+ * papers and the bank, which is exactly the set of pictures the school owns.
+ *
+ * Keyed by URL, so the same diagram used on Set A, Set B and a bank item is
+ * one entry with a use count, not three. Pictures the school uploaded by hand
+ * and pictures that arrived inside a Word file are indistinguishable here,
+ * which is the point.
+ *
+ * `data:` URLs are left out deliberately: an image pasted into the desk blob
+ * is not a file anyone can point at, and offering it for reuse would spread
+ * the copy rather than the reference.
+ */
+export function listPaperImages(
+  state: ExamPapersState,
+  filters?: { classId?: string; subjectId?: string; search?: string },
+): PaperImageRef[] {
+  const byUrl = new Map<string, PaperImageRef>();
+
+  const add = (
+    img: ExamPaperImage,
+    q: ExamPaperQuestion,
+    classId: string,
+    subjectId: string,
+    paperCode: string,
+  ) => {
+    const url = (img.dataUrl || "").trim();
+    if (!url || url.startsWith("data:") || url.startsWith("blob:")) return;
+    const found = byUrl.get(url);
+    if (found) {
+      found.uses += 1;
+      // Keep the first caption that says something.
+      if (!found.caption && img.caption) found.caption = img.caption;
+      return;
+    }
+    byUrl.set(url, {
+      url,
+      caption: img.caption || "",
+      questionText: q.text || "",
+      classId,
+      subjectId,
+      paperCode,
+      uses: 1,
+    });
+  };
+
+  for (const paper of state.papers) {
+    for (const set of paper.sets) {
+      for (const section of set.sections) {
+        for (const q of section.questions) {
+          for (const img of q.images) {
+            add(img, q, paper.classId, paper.subjectId, paper.paperCode);
+          }
+        }
+      }
+    }
+  }
+  for (const item of state.bank) {
+    for (const img of item.question.images) {
+      add(img, item.question, item.classId, item.subjectId, "");
+    }
+  }
+
+  const needle = normText(filters?.search || "");
+  return [...byUrl.values()]
+    .filter((x) => !filters?.classId || x.classId === filters.classId)
+    .filter((x) => !filters?.subjectId || x.subjectId === filters.subjectId)
+    .filter(
+      (x) =>
+        !needle ||
+        normText(`${x.caption} ${x.questionText} ${x.paperCode}`).includes(needle),
+    )
+    .sort((a, b) => b.uses - a.uses || a.questionText.localeCompare(b.questionText));
 }

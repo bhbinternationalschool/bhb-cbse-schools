@@ -56,7 +56,9 @@ import {
 } from "@/lib/examPapers";
 import { loadTeaching, type SyllabusUnit } from "@/lib/teaching";
 import { BlueprintPanel } from "@/components/exams/BlueprintPanel";
+import { ExamPaperImportPanel } from "@/components/exams/ExamPaperImportPanel";
 import { BankPicker } from "@/components/exams/BankPicker";
+import { PaperImagePicker } from "@/components/exams/PaperImagePicker";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import {
   catalogFor,
@@ -74,7 +76,6 @@ import {
   printExamPaper,
 } from "@/components/exams/ExamPaperPrintSheet";
 
-const IMG_MAX = 800_000;
 
 type Props = {
   masters: MastersState;
@@ -141,6 +142,15 @@ export function ExamPapersPanel({
   const [newClassId, setNewClassId] = useState("");
   const [newSubjectId, setNewSubjectId] = useState("");
   const [filterClassId, setFilterClassId] = useState("");
+  /**
+   * A paper is set for the whole class, not for one section — so picking a
+   * section narrows to that section's class. Kept as its own filter because
+   * that is how the office thinks about a class ("VI B"), and hiding the
+   * distinction would be worse than stating it.
+   */
+  const [filterSectionId, setFilterSectionId] = useState("");
+  const [filterSubjectId, setFilterSubjectId] = useState("");
+  const [filterExamTermId, setFilterExamTermId] = useState("");
 
   useEffect(() => {
     void Promise.all([
@@ -159,17 +169,111 @@ export function ExamPapersPanel({
     if (!newExamTermId && terms[0]) setNewExamTermId(terms[0].id);
   }, [terms, newExamTermId]);
 
-  const papers = useMemo(() => {
+  /** Everything for this session, before the filter bar narrows it. */
+  const allPapers = useMemo(() => {
     void tick;
-    return listExamPapers(ay, {
-      classId: filterClassId || undefined,
-    });
-  }, [ay, filterClassId, tick]);
+    return listExamPapers(ay);
+  }, [ay, tick]);
+
+  const papers = useMemo(
+    () =>
+      allPapers
+        .filter((p) => !filterClassId || p.classId === filterClassId)
+        .filter((p) => !filterSubjectId || p.subjectId === filterSubjectId)
+        .filter((p) => !filterExamTermId || p.examTermId === filterExamTermId),
+    [allPapers, filterClassId, filterSubjectId, filterExamTermId],
+  );
 
   const classOptions = useMemo(
     () => masters.classes.filter((c) => c.isActive),
     [masters],
   );
+
+  const sectionOptions = useMemo(
+    () =>
+      (masters.sections ?? []).filter(
+        (x) => x.isActive && (!filterClassId || x.classId === filterClassId),
+      ),
+    [masters, filterClassId],
+  );
+
+  /**
+   * The filter bar offers what is actually there.
+   *
+   * Listing every subject in masters would let the office pick one of the
+   * forty that has no paper and be told there is nothing — which reads like a
+   * fault rather than an empty shelf. So each list is built from the papers
+   * that survive the *other* filters, and only falls back to the masters list
+   * while the session has no papers at all.
+   */
+  const filterSubjectOptions = useMemo(() => {
+    const ids = new Set(
+      allPapers
+        .filter((p) => !filterClassId || p.classId === filterClassId)
+        .filter((p) => !filterExamTermId || p.examTermId === filterExamTermId)
+        .map((p) => p.subjectId),
+    );
+    const list = (masters.subjects ?? []).filter((x) => ids.has(x.id));
+    if (list.length) return list;
+    return allPapers.length
+      ? []
+      : (masters.subjects ?? []).filter((x) => x.isActive && !x.parentId);
+  }, [allPapers, masters, filterClassId, filterExamTermId]);
+
+  const filterExamOptions = useMemo(() => {
+    const ids = new Set(
+      allPapers
+        .filter((p) => !filterClassId || p.classId === filterClassId)
+        .filter((p) => !filterSubjectId || p.subjectId === filterSubjectId)
+        .map((p) => p.examTermId),
+    );
+    const list = terms.filter((t) => ids.has(t.id));
+    if (list.length) return list;
+    return allPapers.length ? [] : terms;
+  }, [allPapers, terms, filterClassId, filterSubjectId]);
+
+  const filtersOn = !!(
+    filterClassId ||
+    filterSectionId ||
+    filterSubjectId ||
+    filterExamTermId
+  );
+
+  /** Narrowing the class must not leave a section or subject behind that no
+   * longer belongs to it — a filter bar that contradicts itself shows an
+   * empty list and no reason for it. */
+  function pickClass(classId: string) {
+    setFilterClassId(classId);
+    if (
+      filterSectionId &&
+      !(masters.sections ?? []).some(
+        (x) => x.id === filterSectionId && (!classId || x.classId === classId),
+      )
+    ) {
+      setFilterSectionId("");
+    }
+    if (
+      filterSubjectId &&
+      classId &&
+      !allPapers.some((p) => p.classId === classId && p.subjectId === filterSubjectId)
+    ) {
+      setFilterSubjectId("");
+    }
+  }
+
+  /** A section stands for its class: papers are set class-wide. */
+  function pickSection(sectionId: string) {
+    setFilterSectionId(sectionId);
+    const section = (masters.sections ?? []).find((x) => x.id === sectionId);
+    if (section) pickClass(section.classId);
+  }
+
+  function clearFilters() {
+    setFilterClassId("");
+    setFilterSectionId("");
+    setFilterSubjectId("");
+    setFilterExamTermId("");
+  }
 
   const subjectOptions = useMemo(() => {
     const classId = draft?.classId || newClassId;
@@ -540,23 +644,35 @@ export function ExamPapersPanel({
     );
   }
 
-  function readImageFile(
-    file: File,
-    onDone: (dataUrl: string) => void,
-  ) {
+  /**
+   * Put a picture in storage and give the question its URL.
+   *
+   * This used to read the file into a base64 `data:` URL and hand that
+   * straight to the question, which put the image itself inside the desk
+   * blob — every browser then carried it, every sync pushed it, and the
+   * 800 KB ceiling existed only to stop that becoming unworkable. The
+   * imported papers proved the alternative: 839 pictures cost the desk
+   * nothing but their URLs.
+   *
+   * It uploads, or it says why it could not. There is no third outcome and
+   * no fallback that quietly stores the bytes instead.
+   */
+  async function readImageFile(file: File, onDone: (url: string) => void) {
     if (!file.type.startsWith("image/")) {
       onError("Choose an image file");
       return;
     }
-    if (file.size > IMG_MAX) {
-      onError("Image must be under 800 KB");
+    const { uploadMedia } = await import("@/lib/mediaUpload");
+    const result = await uploadMedia({
+      file,
+      pathPrefix: `exam-papers/${ay}/uploads`,
+      visibility: "private",
+    });
+    if (!result.ok) {
+      onError(result.error);
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") onDone(reader.result);
-    };
-    reader.readAsDataURL(file);
+    onDone(result.url);
   }
 
   if (editingId && draft) {
@@ -1043,6 +1159,17 @@ export function ExamPapersPanel({
   // List view
   return (
     <div className="mt-5 space-y-4">
+      <ExamPaperImportPanel
+        masters={masters}
+        academicYearCode={ay}
+        terms={terms}
+        canEdit={canEdit}
+        actorName={actorName}
+        onError={onError}
+        onNotice={onNotice}
+        onImported={refresh}
+      />
+
       <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">
           Question papers · {ay}
@@ -1128,17 +1255,17 @@ export function ExamPapersPanel({
         )}
       </div>
 
-      <div className="flex flex-wrap items-end gap-3">
+      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
         <label className="block text-sm">
           <span className="mb-1 block text-[11px] text-[var(--muted)]">
-            Filter by class
+            Class
           </span>
           <select
             className="field !w-auto !py-1.5"
             value={filterClassId}
-            onChange={(e) => setFilterClassId(e.target.value)}
+            onChange={(e) => pickClass(e.target.value)}
           >
-            <option value="">All</option>
+            <option value="">All classes</option>
             {classOptions.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
@@ -1146,15 +1273,94 @@ export function ExamPapersPanel({
             ))}
           </select>
         </label>
+        <label className="block text-sm">
+          <span className="mb-1 block text-[11px] text-[var(--muted)]">
+            Section
+          </span>
+          <select
+            className="field !w-auto !py-1.5"
+            value={filterSectionId}
+            onChange={(e) => pickSection(e.target.value)}
+          >
+            <option value="">All sections</option>
+            {sectionOptions.map((x) => (
+              <option key={x.id} value={x.id}>
+                {labelClass(x.classId)} {x.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block text-[11px] text-[var(--muted)]">
+            Subject
+          </span>
+          <select
+            className="field !w-auto !py-1.5"
+            value={filterSubjectId}
+            onChange={(e) => setFilterSubjectId(e.target.value)}
+            disabled={!filterSubjectOptions.length && !filterSubjectId}
+          >
+            <option value="">All subjects</option>
+            {filterSubjectOptions.map((x) => (
+              <option key={x.id} value={x.id}>
+                {x.nameEn || x.code}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block text-[11px] text-[var(--muted)]">
+            Exam
+          </span>
+          <select
+            className="field !w-auto !py-1.5"
+            value={filterExamTermId}
+            onChange={(e) => setFilterExamTermId(e.target.value)}
+            disabled={!filterExamOptions.length && !filterExamTermId}
+          >
+            <option value="">All exams</option>
+            {filterExamOptions.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.code} · {t.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {filtersOn ? (
+          <button
+            type="button"
+            className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm"
+            onClick={clearFilters}
+          >
+            Clear
+          </button>
+        ) : null}
         <p className="text-[12px] text-[var(--muted)]">
-          {papers.length} paper(s)
+          {papers.length} of {allPapers.length} paper
+          {allPapers.length === 1 ? "" : "s"}
+          {filterSectionId ? (
+            <span className="ml-1">
+              {"· "}a paper is set for the whole class, so a section shows its
+              class&rsquo;s papers
+            </span>
+          ) : null}
         </p>
       </div>
 
       {papers.length === 0 ? (
         <p className="rounded-xl border border-dashed border-[var(--border)] p-6 text-sm text-[var(--muted)]">
-          No papers yet for this session. Create one, then use{" "}
-          <strong>AI draft this set</strong> or add sections manually.
+          {allPapers.length ? (
+            <>
+              No paper matches these filters. <strong>Clear</strong> them to see
+              all {allPapers.length}.
+            </>
+          ) : (
+            <>
+              No papers yet for this session. Import your publisher&rsquo;s
+              folder above, or create one and use{" "}
+              <strong>AI draft this set</strong>.
+            </>
+          )}
         </p>
       ) : (
         <ul className="space-y-2">
@@ -1214,7 +1420,8 @@ function SectionEditor(props: {
     excludeTexts: string[];
     onAdd: (q: ExamPaperQuestion) => void;
   };
-  readImageFile: (file: File, onDone: (dataUrl: string) => void) => void;
+  /** Stores the file and calls back with its URL — never with the bytes. */
+  readImageFile: (file: File, onDone: (url: string) => void) => void;
   unitLabel: (unitId: string) => string;
 }) {
   const { section, canEdit } = props;
@@ -1311,6 +1518,8 @@ function SectionEditor(props: {
             canEdit={canEdit}
             subjectLabel={props.subjectLabel}
             unitLabel={props.unitLabel}
+            classId={props.bankPicker.classId}
+            subjectId={props.bankPicker.subjectId}
             onBank={() => props.onBankQuestion(q)}
             onChange={(patch) => patchQuestion(q.id, patch)}
             onRemove={() =>
@@ -1345,15 +1554,20 @@ function QuestionEditor(props: {
   subjectLabel: string;
   onChange: (patch: Partial<ExamPaperQuestion>) => void;
   onRemove: () => void;
-  readImageFile: (file: File, onDone: (dataUrl: string) => void) => void;
+  /** Stores the file and calls back with its URL — never with the bytes. */
+  readImageFile: (file: File, onDone: (url: string) => void) => void;
   /** "Ch 3 · Quadrilaterals" for a unitId, "" when unknown / unlinked */
   unitLabel: (unitId: string) => string;
   onBank: () => void;
+  /** Scopes the school's picture library to this paper's class × subject. */
+  classId: string;
+  subjectId: string;
 }) {
   const { question: q, canEdit } = props;
   const [showIcons, setShowIcons] = useState(false);
   const [showFormulas, setShowFormulas] = useState(false);
   const [showPictureSearch, setShowPictureSearch] = useState(false);
+  const [showSchoolPictures, setShowSchoolPictures] = useState(false);
   const [labelling, setLabelling] = useState<string | null>(null);
   const [converting, setConverting] = useState<"hi" | "sa" | null>(null);
   const [convertError, setConvertError] = useState("");
@@ -1668,13 +1882,13 @@ function QuestionEditor(props: {
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 if (!file) return;
-                props.readImageFile(file, (dataUrl) => {
+                props.readImageFile(file, (url) => {
                   props.onChange({
                     images: [
                       ...q.images,
                       {
                         id: `img_${Math.random().toString(36).slice(2, 8)}`,
-                        dataUrl,
+                        dataUrl: url,
                         caption: "",
                         labels: [],
                       },
@@ -1692,6 +1906,14 @@ function QuestionEditor(props: {
             title="Find a free, licensed picture (Wikimedia Commons)"
           >
             Search pictures
+          </button>
+          <button
+            type="button"
+            className="rounded border border-[var(--border)] px-2 py-0.5 text-[11px] font-semibold"
+            onClick={() => setShowSchoolPictures((v) => !v)}
+            title="Reuse a picture the school already has — no second copy is stored"
+          >
+            School pictures
           </button>
           <button
             type="button"
@@ -1801,6 +2023,31 @@ function QuestionEditor(props: {
             })
           }
           onAddLine={(line) => props.onChange({ formulas: [...q.formulas, line] })}
+        />
+      ) : null}
+
+      {showSchoolPictures && canEdit ? (
+        <PaperImagePicker
+          classId={props.classId}
+          subjectId={props.subjectId}
+          usedUrls={q.images.map((i) => i.dataUrl)}
+          onClose={() => setShowSchoolPictures(false)}
+          onPick={(picked) => {
+            // The same stored file, pointed at again — never re-uploaded and
+            // never copied into the desk.
+            props.onChange({
+              images: [
+                ...q.images,
+                {
+                  id: `img_${Math.random().toString(36).slice(2, 8)}`,
+                  dataUrl: picked.url,
+                  caption: picked.caption,
+                  labels: [],
+                },
+              ],
+            });
+            setShowSchoolPictures(false);
+          }}
         />
       ) : null}
 
