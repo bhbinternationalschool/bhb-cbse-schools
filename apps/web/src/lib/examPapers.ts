@@ -540,6 +540,18 @@ export type ExamPapersState = {
   bank: BankQuestion[];
   /** Blueprints — desk slice "blueprints" */
   blueprints: ExamBlueprint[];
+  /**
+   * What the school has taught the paper importer about its publisher's
+   * words — `{"subjects":{"understanding our world":"WAU"}}`. Kept with the
+   * papers rather than in one browser, so next term's download is understood
+   * on whichever machine opens it. Shape is `ImportMappings` from
+   * `examPaperImport`; typed loosely here to keep that module free of this one.
+   */
+  importMappings: {
+    classes?: Record<string, string>;
+    subjects?: Record<string, string>;
+    exams?: Record<string, string>;
+  };
 };
 
 const STORAGE_KEY = "bhb_exam_papers_v1";
@@ -649,7 +661,7 @@ export const FORMULA_PALETTE: { insert: string; label: string; group: string }[]
   ];
 
 export function emptyExamPapersState(): ExamPapersState {
-  return { version: 1, papers: [], bank: [], blueprints: [] };
+  return { version: 1, papers: [], bank: [], blueprints: [], importMappings: {} };
 }
 
 export function emptyQuestion(
@@ -897,6 +909,29 @@ export function normalizeExamPapersState(raw: unknown): ExamPapersState {
     blueprints: Array.isArray(p.blueprints)
       ? p.blueprints.map(normalizeBlueprint).filter((x): x is ExamBlueprint => !!x)
       : [],
+    importMappings: normalizeImportMappingsBlob(p.importMappings),
+  };
+}
+
+function normalizeMappingTable(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== "object") return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const key = String(k ?? "").trim().toLowerCase();
+    const value = String(v ?? "").trim();
+    if (key && value) out[key] = value.slice(0, 60);
+  }
+  return out;
+}
+
+function normalizeImportMappingsBlob(
+  raw: ExamPapersState["importMappings"] | undefined,
+): ExamPapersState["importMappings"] {
+  if (!raw || typeof raw !== "object") return {};
+  return {
+    classes: normalizeMappingTable(raw.classes),
+    subjects: normalizeMappingTable(raw.subjects),
+    exams: normalizeMappingTable(raw.exams),
   };
 }
 
@@ -1479,4 +1514,153 @@ export function assembleSectionsFromCells(
     );
   }
   return sections;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Imported papers                                                            */
+/* -------------------------------------------------------------------------- */
+
+/** One class + subject + exam's worth of imported sets, ready to be filed. */
+export type ImportedPaperInput = {
+  /** Existing paper to add these sets to; "" creates a new one. */
+  targetPaperId: string;
+  academicYearCode: string;
+  examTermId: string;
+  classId: string;
+  subjectId: string;
+  /** For the paper code and the printed header. */
+  examCode: string;
+  examName: string;
+  className: string;
+  subjectCode: string;
+  title: string;
+  maxMarks: number;
+  durationMinutes: number;
+  sets: ExamPaperSet[];
+};
+
+export type ImportedPaperOutcome = {
+  state: ExamPapersState;
+  created: number;
+  updated: number;
+  addedSets: number;
+  /** Sets skipped because that exact file is already on the paper. */
+  skippedSets: number;
+};
+
+/**
+ * Fold imported sets into the papers on the desk.
+ *
+ * Two rules, both about not destroying work:
+ *
+ *  * a set is **added**, never swapped for one already there. A teacher may
+ *    have edited Set A after it was imported; re-importing the folder must not
+ *    quietly replace their questions with the publisher's again.
+ *  * a file already on the paper — same sha-256 — is skipped, so running the
+ *    import twice leaves the desk exactly as the first run did.
+ *
+ * Papers arrive as drafts. Nothing imported is marked ready: somebody has to
+ * look at a parsed paper before it is printed for children.
+ */
+export function applyImportedSets(
+  state: ExamPapersState,
+  inputs: ImportedPaperInput[],
+  actor: string,
+): ImportedPaperOutcome {
+  const papers = [...state.papers];
+  let created = 0;
+  let updated = 0;
+  let addedSets = 0;
+  let skippedSets = 0;
+
+  for (const input of inputs) {
+    if (!input.sets.length) continue;
+
+    const at = input.targetPaperId
+      ? papers.findIndex((p) => p.id === input.targetPaperId)
+      : -1;
+
+    if (at >= 0) {
+      const paper = papers[at]!;
+      const seen = new Set(
+        paper.sets.map((s) => s.source?.fileHash).filter(Boolean) as string[],
+      );
+      const takenCodes = new Set(paper.sets.map((s) => s.setCode));
+      const fresh: ExamPaperSet[] = [];
+      for (const set of input.sets) {
+        if (set.source?.fileHash && seen.has(set.source.fileHash)) {
+          skippedSets += 1;
+          continue;
+        }
+        let code = set.setCode;
+        if (takenCodes.has(code)) {
+          let i = 0;
+          while (i < 26 && takenCodes.has(String.fromCharCode(65 + i))) i += 1;
+          code = String.fromCharCode(65 + i);
+        }
+        takenCodes.add(code);
+        fresh.push({ ...set, setCode: code });
+      }
+      if (!fresh.length) continue;
+      const next = normalizePaper({
+        ...paper,
+        sets: [...paper.sets, ...fresh],
+        updatedAt: nowIso(),
+        updatedBy: actor,
+      });
+      if (!next) continue;
+      papers[at] = next;
+      updated += 1;
+      addedSets += fresh.length;
+      continue;
+    }
+
+    const paper = normalizePaper({
+      id: nid("ep"),
+      paperCode: buildPaperCode({
+        academicYearCode: input.academicYearCode,
+        examCode: input.examCode,
+        className: input.className,
+        subjectCode: input.subjectCode,
+        setCode: input.sets[0]!.setCode,
+      }),
+      academicYearCode: input.academicYearCode,
+      examTermId: input.examTermId,
+      classId: input.classId,
+      subjectId: input.subjectId,
+      title: input.title,
+      examName: input.examName,
+      durationMinutes: input.durationMinutes,
+      maxMarks: input.maxMarks,
+      hardness: "mixed",
+      status: "draft",
+      sets: input.sets,
+      activeSetCode: input.sets[0]!.setCode,
+      createdBy: actor,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+      updatedBy: actor,
+    });
+    if (!paper) continue;
+    papers.push(paper);
+    created += 1;
+    addedSets += paper.sets.length;
+  }
+
+  return { state: { ...state, papers }, created, updated, addedSets, skippedSets };
+}
+
+/** What the planner needs to know about the papers already on the desk. */
+export function existingPaperFacts(state: ExamPapersState) {
+  return state.papers.map((p) => ({
+    paperId: p.id,
+    academicYearCode: p.academicYearCode,
+    examTermId: p.examTermId,
+    classId: p.classId,
+    subjectId: p.subjectId,
+    sets: p.sets.map((s) => ({
+      setCode: s.setCode,
+      fileHash: s.source?.fileHash ?? "",
+    })),
+  }));
 }

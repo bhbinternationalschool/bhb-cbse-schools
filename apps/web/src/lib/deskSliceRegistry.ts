@@ -47,7 +47,8 @@ export const DESK_SLICE_MODULE_DEFS: DeskSliceModuleDef[] = [
     blobTable: "exam_papers_state",
     // bank + blueprints added 2026-08-19 — same slice table, new slice_key rows.
     sliceKeys: ["papers", "bank", "blueprints"],
-    objectSlices: [],
+    // What the school taught the paper importer about its publisher's words.
+    objectSlices: ["importMappings"],
     signalSlice: "papers",
   },
   {

@@ -56,6 +56,7 @@ import {
 } from "@/lib/examPapers";
 import { loadTeaching, type SyllabusUnit } from "@/lib/teaching";
 import { BlueprintPanel } from "@/components/exams/BlueprintPanel";
+import { ExamPaperImportPanel } from "@/components/exams/ExamPaperImportPanel";
 import { BankPicker } from "@/components/exams/BankPicker";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import {
@@ -1127,6 +1128,17 @@ export function ExamPapersPanel({
           </p>
         )}
       </div>
+
+      <ExamPaperImportPanel
+        masters={masters}
+        academicYearCode={ay}
+        terms={terms}
+        canEdit={canEdit}
+        actorName={actorName}
+        onError={onError}
+        onNotice={onNotice}
+        onImported={refresh}
+      />
 
       <div className="flex flex-wrap items-end gap-3">
         <label className="block text-sm">

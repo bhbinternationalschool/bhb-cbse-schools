@@ -432,6 +432,8 @@ export function parsePaperBody(
   let current: Draft | null = null;
   let question: ExamPaperQuestion | null = null;
   let pendingOption: string | null = null;
+  /** `a)` in its own table cell, waiting for the line that follows it. */
+  let pendingSubpart: string | null = null;
   let started = false;
   let seq = 0;
 
@@ -439,6 +441,7 @@ export function parsePaperBody(
     if (question && current) current.questions.push(question);
     question = null;
     pendingOption = null;
+    pendingSubpart = null;
   };
   const newSection = (title: string): Draft => {
     pushQuestion();
@@ -529,7 +532,19 @@ export function parsePaperBody(
     if (question) {
       for (const rid of imageTokens(line)) addPlaceholder(question, rid);
       const sub = RE_SUBPART_NO.exec(line);
-      const text = sub ? `${sub[1]!.toLowerCase()}) ${(sub[2] ?? "").trim()}` : line;
+      let text = line;
+      if (sub) {
+        const trailing = (sub[2] ?? "").trim();
+        if (!trailing) {
+          // The letter sits alone in its cell; its part is the next line.
+          pendingSubpart = sub[1]!.toLowerCase();
+          continue;
+        }
+        text = `${sub[1]!.toLowerCase()}) ${trailing}`;
+      } else if (pendingSubpart) {
+        text = `${pendingSubpart}) ${line}`;
+        pendingSubpart = null;
+      }
       question.text = question.text ? `${question.text}\n${text}` : text;
       continue;
     }
