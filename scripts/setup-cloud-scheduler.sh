@@ -322,6 +322,13 @@ create_job "bhb-wa-exam-eve" "0 18 * * *" \
   "${APP_URL}/api/wa/exam-eve" \
   "Asia/Kolkata" "300s"
 
+# The answer book: take down any answer whose date has passed, before the
+# school day starts. An expired answer that stays on the shelf is still
+# quoted to parents, which is worse than having none.
+create_job "bhb-wa-answer-expiry" "20 6 * * *" \
+  "${APP_URL}/api/wa/answer-book/expiry-tick" \
+  "Asia/Kolkata" "120s"
+
 # Cashfree settlement sweep: pulls what the gateway actually paid into the
 # bank, with its event-level breakdown, and posts it to the ledger.
 #

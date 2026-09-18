@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Images, Megaphone } from "lucide-react";
+import { hasPermission } from "@/lib/rbac";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { CommsReportsRunner } from "@/components/reports/ModuleReportRunners";
 import { ErpTableShell } from "@/components/ui/erp-roster";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { SocialCredentialsPanel } from "@/components/comms/SocialCredentialsPanel";
+import { AnswerBookPanel } from "@/components/comms/AnswerBookPanel";
 import { EmailIntegrationPanel } from "@/components/comms/EmailIntegrationPanel";
 import { SocialCrossPostPrefsPanel } from "@/components/comms/SocialCrossPostPanel";
 import {
@@ -74,6 +76,7 @@ type CommsTab =
   | "email"
   | "inbox"
   | "whatsapp"
+  | "answers"
   | "reports";
 
 const TABS: ModuleTabItem[] = [
@@ -85,6 +88,7 @@ const TABS: ModuleTabItem[] = [
   { id: "email", label: "Email", tone: "sky" },
   { id: "whatsapp", label: "WhatsApp", tone: "teal" },
   { id: "inbox", label: "Inbox", tone: "slate" },
+  { id: "answers", label: "Answer book", tone: "teal" },
   { id: "reports", label: "Reports", tone: "coral" },
 ];
 
@@ -127,6 +131,9 @@ function tabFromSearch(raw: string | null, path: string): CommsTab {
 export function CommsWorkspace() {
   const session = useDemoSession();
   const readOnly = useSessionReadOnly();
+  // Writing an answer and approving one are different acts: an approved
+  // answer is the school speaking to every parent who asks it next.
+  const canApproveAnswers = hasPermission(session, null, "wa_chatbot", "approve");
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -1304,6 +1311,10 @@ export function CommsWorkspace() {
               searchParams.get("wa"),
           )}
         />
+      ) : null}
+
+      {tab === "answers" ? (
+        <AnswerBookPanel canEdit={!readOnly} canApprove={!readOnly && canApproveAnswers} />
       ) : null}
 
       {tab === "inbox" ? (
