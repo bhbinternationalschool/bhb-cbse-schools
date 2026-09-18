@@ -43,6 +43,7 @@ import { readPaperFile } from "../src/lib/examPaperRead";
 import { storeImportedPaper } from "../src/lib/examPaperImportStore.server";
 import {
   applyImportedSets,
+  bankImportedQuestions,
   existingPaperFacts,
   normalizeExamPapersState,
   type ExamPaperSet,
@@ -58,6 +59,8 @@ type Args = {
   commit: boolean;
   year: string;
   actor: string;
+  /** Put every imported question in the bank too; --no-bank turns it off. */
+  bank: boolean;
   /** `--map 'subject:Numeracy=NUM'` */
   maps: { kind: string; word: string; value: string }[];
 };
@@ -68,11 +71,13 @@ function parseArgs(argv: string[]): Args {
     commit: false,
     year: DEFAULT_AY,
     actor: "Import script",
+    bank: true,
     maps: [],
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     if (a === "--commit") out.commit = true;
+    else if (a === "--no-bank") out.bank = false;
     else if (a === "--year") out.year = argv[++i] ?? out.year;
     else if (a === "--actor") out.actor = argv[++i] ?? out.actor;
     else if (a === "--map") {
@@ -302,8 +307,11 @@ async function main() {
   }
 
   const outcome = applyImportedSets(state, inputs, args.actor);
+  const banked = args.bank
+    ? bankImportedQuestions(outcome.state, inputs, args.actor)
+    : { state: outcome.state, added: 0 };
   const next: ExamPapersState = {
-    ...outcome.state,
+    ...banked.state,
     importMappings: {
       classes: { ...state.importMappings?.classes },
       subjects: { ...state.importMappings?.subjects },
@@ -328,6 +336,9 @@ async function main() {
     `\ndesk: ${outcome.created} paper(s) created, ${outcome.updated} updated, ` +
       `${outcome.addedSets} set(s) added, ${outcome.skippedSets} already present ` +
       `→ ${next.papers.length} paper(s) total`,
+  );
+  console.log(
+    `bank: ${banked.added} question(s) added → ${next.bank.length} in the bank`,
   );
   if (failures.length) {
     console.log(`\n${failures.length} problem(s):`);

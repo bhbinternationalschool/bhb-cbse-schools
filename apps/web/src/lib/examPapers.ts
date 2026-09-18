@@ -1664,3 +1664,51 @@ export function existingPaperFacts(state: ExamPapersState) {
     })),
   }));
 }
+
+/**
+ * Put every imported question into the bank for its class and subject.
+ *
+ * Without this the import is a one-term affair: 2,400 questions land inside
+ * papers, and a teacher building next term's paper can only find them by
+ * opening last term's and copying by hand. The bank is the part that makes
+ * them reusable — `BankPicker` searches it by class × subject, type, text,
+ * LO code and tag, and copies an item into whatever section is open.
+ *
+ * Banking is a copy, not a reference: editing a bank item never changes a
+ * paper that was printed from it, and deleting one never empties a paper.
+ * Pictures come along, because a bank question carries the same stored URLs
+ * the paper does — the file itself is not duplicated.
+ *
+ * `addQuestionsToBank` already refuses a question whose text is in the bank
+ * for that class and subject, so three sets of one paper contribute what they
+ * share only once, and re-importing the folder adds nothing.
+ */
+export function bankImportedQuestions(
+  state: ExamPapersState,
+  inputs: ImportedPaperInput[],
+  by: string,
+): { state: ExamPapersState; added: number } {
+  let next = state;
+  let added = 0;
+  for (const input of inputs) {
+    if (!input.classId || !input.subjectId) continue;
+    for (const set of input.sets) {
+      const questions = set.sections
+        .flatMap((s) => s.questions)
+        .filter((q) => q.text.trim());
+      if (!questions.length) continue;
+      const r = addQuestionsToBank(next, {
+        classId: input.classId,
+        subjectId: input.subjectId,
+        questions,
+        // Provenance the teacher can search on: which exam, and which of the
+        // publisher's papers it came out of.
+        tags: [input.examCode, set.source?.publisherLabel || set.label].filter(Boolean),
+        by,
+      });
+      next = r.state;
+      added += r.added;
+    }
+  }
+  return { state: next, added };
+}

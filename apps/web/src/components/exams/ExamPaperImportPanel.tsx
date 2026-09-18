@@ -25,6 +25,7 @@ import type { MastersState } from "@/lib/masters";
 import type { ExamTerm } from "@/lib/exams";
 import {
   applyImportedSets,
+  bankImportedQuestions,
   existingPaperFacts,
   loadExamPapers,
   saveExamPapers,
@@ -99,6 +100,12 @@ export function ExamPaperImportPanel({
   const [done, setDone] = useState(0);
   const [failures, setFailures] = useState<{ relPath: string; error: string }[]>([]);
   const [showAll, setShowAll] = useState(false);
+  /**
+   * On by default: a paper the school can only reprint is worth far less than
+   * questions it can build the next paper from, and nobody will press
+   * "save to bank" four hundred times by hand.
+   */
+  const [toBank, setToBank] = useState(true);
 
   const catalog = useMemo<ImportCatalog>(
     () => ({
@@ -286,8 +293,11 @@ export function ExamPaperImportPanel({
 
     const state = loadExamPapers();
     const outcome = applyImportedSets(state, inputs, actorName);
+    const banked = toBank
+      ? bankImportedQuestions(outcome.state, inputs, actorName)
+      : { state: outcome.state, added: 0 };
     saveExamPapers({
-      ...outcome.state,
+      ...banked.state,
       importMappings: {
         classes: { ...state.importMappings?.classes, ...learned.classes },
         subjects: { ...state.importMappings?.subjects, ...learned.subjects },
@@ -304,6 +314,7 @@ export function ExamPaperImportPanel({
       `Imported ${outcome.addedSets} set${outcome.addedSets === 1 ? "" : "s"} — ` +
         `${outcome.created} new paper${outcome.created === 1 ? "" : "s"}, ` +
         `${outcome.updated} updated` +
+        (banked.added ? `, ${banked.added} questions into the bank` : "") +
         (problems.length ? `. ${problems.length} file(s) failed — see below.` : ""),
     );
   }
@@ -517,6 +528,16 @@ export function ExamPaperImportPanel({
               >
                 Clear
               </button>
+              <label className="flex items-center gap-1.5 text-[11px] text-[var(--muted)]">
+                <input
+                  type="checkbox"
+                  checked={toBank}
+                  onChange={(e) => setToBank(e.target.checked)}
+                  disabled={importing}
+                />
+                Also put every question in the question bank, so next
+                term&rsquo;s paper can be built from them
+              </label>
               <span className="text-[11px] text-[var(--muted)]">
                 Imported papers arrive as drafts — nothing is marked ready to
                 print until a teacher has looked.

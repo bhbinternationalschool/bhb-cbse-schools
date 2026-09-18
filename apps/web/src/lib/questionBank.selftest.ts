@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 
 import {
   addQuestionsToBank,
+  applyImportedSets,
+  bankImportedQuestions,
   assembleSectionsFromCells,
   blueprintTotalMarks,
   emptyExamPapersState,
@@ -115,6 +117,85 @@ let st = emptyExamPapersState();
   assert.equal(round.bank.length, 2);
   assert.equal(round.blueprints.length, 1);
   assert.equal(normalizeExamPapersState({ papers: [] }).bank.length, 0, "old blobs without bank still load");
+}
+
+// An import fills the bank as well as the papers — otherwise the questions
+// are only reprintable, never reusable.
+{
+  const question = (text: string, marks: number) =>
+    emptyQuestion({ text, marks, images: [{ id: "i1", dataUrl: "/api/file/x.png", caption: "", labels: [] }] });
+  const set = (code: string, texts: string[]) => ({
+    id: `set_${code}`,
+    setCode: code,
+    label: `Summative Assessment 1 - Set ${code}`,
+    sections: [
+      { id: `sec_${code}`, title: "Section A", instructions: "", questions: texts.map((t) => question(t, 2)) },
+    ],
+    source: {
+      fileName: `set-${code}.docx`,
+      filePath: `exam-papers/x/${code}.docx`,
+      fileUrl: `/api/file/exam-papers/x/${code}.docx`,
+      fileHash: `hash-${code}`,
+      publisherLabel: `Summative Assessment 1 - Set ${code}`,
+      importedAt: "2026-09-18T00:00:00.000Z",
+      importedBy: "test",
+    },
+  });
+
+  const input = {
+    targetPaperId: "",
+    academicYearCode: "2026-27",
+    examTermId: "term_hy",
+    classId: "cls_6",
+    subjectId: "sub_mat",
+    examCode: "HY",
+    examName: "HY · Half-yearly",
+    className: "VI",
+    subjectCode: "MAT",
+    title: "Half-yearly · VI · Mathematics",
+    maxMarks: 80,
+    durationMinutes: 180,
+    // Two sets that share a question — the shared one must bank once.
+    sets: [set("A", ["Find the HCF of 42 and 70.", "Draw a pentagon."]), set("B", ["Find the HCF of 42 and 70.", "Name two prime numbers."])],
+  };
+
+  const filed = applyImportedSets(emptyExamPapersState(), [input], "test");
+  assert.equal(filed.created, 1);
+
+  const banked = bankImportedQuestions(filed.state, [input], "test");
+  assert.equal(banked.added, 3, "four questions, one of them shared, bank as three");
+
+  const forClass = listBank(banked.state, { classId: "cls_6", subjectId: "sub_mat" });
+  assert.equal(forClass.length, 3);
+  assert.equal(
+    listBank(banked.state, { classId: "cls_7", subjectId: "sub_mat" }).length,
+    0,
+    "a bank item belongs to one class and subject",
+  );
+  assert.deepEqual(
+    forClass[0]!.question.images.map((i) => i.dataUrl),
+    ["/api/file/x.png"],
+    "the picture comes along as a stored URL, not a second copy of the file",
+  );
+  assert.ok(
+    forClass[0]!.tags.includes("HY"),
+    "tagged with the exam so a teacher can search by it",
+  );
+  assert.equal(
+    listBank(banked.state, { classId: "cls_6", subjectId: "sub_mat", search: "hcf" }).length,
+    1,
+    "and found by its text",
+  );
+
+  // Re-importing the same folder must not double the bank.
+  const again = bankImportedQuestions(banked.state, [input], "test");
+  assert.equal(again.added, 0);
+  assert.equal(again.state.bank.length, 3);
+
+  // A bank item is a copy: editing it leaves the printed paper alone.
+  const taken = takeFromBank(again.state, forClass[0]!.id);
+  assert.ok(taken);
+  assert.notEqual(taken.question.id, forClass[0]!.question.id);
 }
 
 console.log("OK — questionBank.selftest.ts");
