@@ -9,6 +9,9 @@
  * Staff with notifications edit may run it by hand.
  *   ?dryRun=1              build every message, send none (read tonight's first)
  *   ?examDate=YYYY-MM-DD   a specific exam day (a missed evening)
+ *   ?resend=1&onlyClasses=I   message those families AGAIN, marked as a
+ *                             correction — for when the first message named
+ *                             the wrong paper (Class I, 18 Sep 2026).
  */
 
 import { NextResponse } from "next/server";
@@ -26,9 +29,14 @@ export async function POST(req: Request) {
   const url = new URL(req.url);
   const dryRun = url.searchParams.get("dryRun") === "1";
   const examDate = url.searchParams.get("examDate")?.trim() || undefined;
+  const resend = url.searchParams.get("resend") === "1";
+  const onlyClasses = (url.searchParams.get("onlyClasses") || "")
+    .split(",")
+    .map((c) => c.trim())
+    .filter(Boolean);
   if (examDate && !/^\d{4}-\d{2}-\d{2}$/.test(examDate)) {
     return NextResponse.json({ ok: false, error: "examDate must be YYYY-MM-DD" }, { status: 400 });
   }
-  const r = await runExamEveSweep({ dryRun, examDate });
-  return NextResponse.json({ ok: true, dryRun, ...r });
+  const r = await runExamEveSweep({ dryRun, examDate, resend, onlyClasses });
+  return NextResponse.json({ ok: true, dryRun, resend, ...r });
 }

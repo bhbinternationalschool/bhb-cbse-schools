@@ -72,6 +72,14 @@ const SUBJECT_HI: Record<string, string> = {
   "General Knowledge": "सामान्य ज्ञान",
   "Artificial Intelligence": "कृत्रिम बुद्धिमत्ता (AI)",
   "Health & Physical Education": "शारीरिक शिक्षा",
+  // Classes I–II sit EVS, not Science. Their date-sheet rows said "Science"
+  // until 18 Sep 2026, and 24 Class I families were told विज्ञान the evening
+  // before an EVS paper. The data was corrected; this line is why the
+  // corrected row reads as Hindi rather than as nine English words in the
+  // middle of a Hindi message.
+  "Environmental Studies / World Around Us": "पर्यावरण अध्ययन",
+  "Environmental Studies": "पर्यावरण अध्ययन",
+  "World Around Us": "पर्यावरण अध्ययन",
 };
 
 /** The printed paper names, in Hindi, for the ones that are not one subject. */
@@ -162,6 +170,15 @@ export function familyPapersOn(
   return out;
 }
 
+/** How this send differs from the ordinary evening one. */
+export type EveSendOptions = {
+  /**
+   * This family was already told something wrong for this date, so say so.
+   * Without it a parent holding two messages cannot tell which is current.
+   */
+  correction?: boolean;
+};
+
 export type EveVariables = {
   guardianName: string;
   examDay: string;
@@ -176,10 +193,17 @@ export function examEveVariables(
   slots: EveSlot[],
   subjectNames: Map<string, string>,
   date: string,
+  opts: EveSendOptions = {},
 ): EveVariables {
   const papers = familyPapersOn(family, slots, subjectNames, date);
   const childPapers = oneLine(
-    papers.map((p) => `${p.child.name} (${p.child.className}) — ${p.label}`),
+    [
+      // A family that has already been told the wrong paper must be able to
+      // see which of the two messages to believe. The template's own words
+      // are fixed and approved, so the correction has to live in a variable.
+      opts.correction ? (family.hindi ? "सुधार —" : "Correction —") : "",
+      ...papers.map((p) => `${p.child.name} (${p.child.className}) — ${p.label}`),
+    ],
     "  |  ",
   );
   return {
@@ -197,6 +221,7 @@ export function examEveFreeText(
   slots: EveSlot[],
   subjectNames: Map<string, string>,
   date: string,
+  opts: EveSendOptions = {},
 ): string {
   const papers = familyPapersOn(family, slots, subjectNames, date);
   if (papers.length === 0) return "";
@@ -204,6 +229,11 @@ export function examEveFreeText(
   const day = examDayLabel(date, hindi);
   const anySchoolAge = papers.some((p) => !isPrePrimary(p.child.className));
   return [
+    opts.correction
+      ? hindi
+        ? "⚠️ *सुधार* — पहले भेजे गए संदेश में विषय गलत था। सही जानकारी:"
+        : "⚠️ *Correction* — the earlier message named the wrong paper. The right one:"
+      : "",
     hindi ? `📝 *कल के पेपर* · ${day}, सुबह 8:30 बजे` : `📝 *Tomorrow's papers* · ${day}, 8:30 AM`,
     "",
     ...papers.map((p) => `• ${p.child.name} (${p.child.className}) — *${p.label}*`),
@@ -216,7 +246,10 @@ export function examEveFreeText(
         ? `बच्चे के साथ थोड़ा अभ्यास करने के सुझाव चाहिए? *${PRACTICE_BUTTON_HI}* लिखें।`
         : `Want a few ideas to practise together? Reply *${PRACTICE_BUTTON_EN}*.`,
     hindi ? "पूरी समय-सारणी के लिए *TIMETABLE* लिखें।" : "Reply *TIMETABLE* for the full date sheet.",
-  ].join("\n");
+  ]
+    .filter((line, i, all) => !(line === "" && all[i - 1] === ""))
+    .join("\n")
+    .replace(/^\n+/, "");
 }
 
 /** Did the parent tap (or type) the practice button? */

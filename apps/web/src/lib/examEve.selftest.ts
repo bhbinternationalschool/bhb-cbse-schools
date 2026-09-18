@@ -167,4 +167,66 @@ const tips = prePrimaryTips(
 );
 assert.ok(tips.includes("कविताएँ") && tips.split("\n").filter((l) => l.startsWith("•")).length === 3);
 
+/* ── 10. EVS reads as Hindi, and a correction says so ───────────────── */
+
+// Classes I–II sit EVS. Their rows said "Science" until 18 Sep 2026 and
+// 24 families were told विज्ञान the evening before an EVS paper. Once the
+// data was fixed, the message still had to read as Hindi.
+{
+  const evsSlot: EveSlot = {
+    date: "2026-09-19",
+    classId: "c1",
+    subjectId: "sub_evs",
+    note: "",
+    startTime: "08:30",
+  };
+  const evsNames = new Map([["sub_evs", "Environmental Studies / World Around Us"]]);
+  const evsFamily: EveFamily = {
+    householdId: "hh1",
+    guardianName: "श्री राम",
+    mobile: "9000000002",
+    hindi: true,
+    children: [{ studentId: "s1", name: "PRATYUSH", classId: "c1", className: "I" }],
+  };
+
+  assert.equal(
+    paperLabel(evsSlot, "Environmental Studies / World Around Us", true),
+    "पर्यावरण अध्ययन",
+    "a Hindi message must not carry nine English words as a subject",
+  );
+  assert.equal(paperLabel(evsSlot, "Environmental Studies / World Around Us", false), "Environmental Studies / World Around Us");
+
+  // An ordinary send says nothing about corrections.
+  const plain = examEveVariables(evsFamily, [evsSlot], evsNames, "2026-09-19");
+  assert.ok(plain.childPapers.includes("पर्यावरण अध्ययन"));
+  assert.ok(!plain.childPapers.includes("सुधार"), "an ordinary evening is not a correction");
+
+  // A resend does, in the same single line Meta requires.
+  const fixed = examEveVariables(evsFamily, [evsSlot], evsNames, "2026-09-19", {
+    correction: true,
+  });
+  assert.ok(fixed.childPapers.startsWith("सुधार —"), "the family must see which message to believe");
+  assert.ok(!/[\n\t]/.test(fixed.childPapers), "still one line");
+  assert.ok(!/ {4,}/.test(fixed.childPapers), "no four-space run (Meta #132000)");
+
+  const fixedText = examEveFreeText(evsFamily, [evsSlot], evsNames, "2026-09-19", {
+    correction: true,
+  });
+  assert.ok(fixedText.startsWith("⚠️ *सुधार*"), "the free-text correction leads with it");
+  assert.ok(fixedText.includes("पर्यावरण अध्ययन"));
+  const plainText = examEveFreeText(evsFamily, [evsSlot], evsNames, "2026-09-19");
+  assert.ok(plainText.startsWith("📝"), "an ordinary message still opens with the papers");
+  assert.ok(!plainText.includes("सुधार"));
+
+  // English keeps its own wording.
+  const enFixed = examEveVariables(
+    { ...evsFamily, hindi: false },
+    [evsSlot],
+    evsNames,
+    "2026-09-19",
+    { correction: true },
+  );
+  assert.ok(enFixed.childPapers.startsWith("Correction —"));
+}
+
 console.log("  ok — the button is recognised, the lines are one line, the little ones get tips");
