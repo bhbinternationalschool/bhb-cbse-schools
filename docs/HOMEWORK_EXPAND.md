@@ -156,6 +156,15 @@ submission is handed on to the office relay, which uses the same code shape —
 homework is checked first so the answer never depends on which table was read
 first.
 
+### Sent twice
+
+`homework_desk_submissions` is UNIQUE on (post_id, student_id). Meta
+re-delivers any webhook it does not get a prompt 200 for, and that
+re-delivery races the desk read which filters out work already submitted — so
+the second insert loses with a 23505. That is not a failure: the child's
+homework IS recorded. It is answered with "we already have this", and the
+teacher is not sent a second copy of the same photograph.
+
 ### A wipe this had to avoid
 
 `pushHomeworkDeskToDb` upserts whole submission rows, so a column the desk
