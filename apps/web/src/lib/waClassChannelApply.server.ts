@@ -79,6 +79,8 @@ export async function applyClassChannelDraftServer(
       subjectId: fields.subjectId,
       title: fields.title,
       bodyEn: fields.body,
+      bodyHi: fields.bodyHi,
+      aiTutorHint: fields.chapterHint,
       dueAt: fields.dueAt,
     });
     if (!res.ok) return { ok: false, error: res.error };

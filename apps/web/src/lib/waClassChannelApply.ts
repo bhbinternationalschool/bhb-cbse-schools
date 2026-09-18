@@ -25,6 +25,8 @@ export type ClassChannelDraftLike = {
   dueAt: string;
   eventDate: string;
   mediaNote: string;
+  bodyHi?: string;
+  chapterHint?: string;
   status: string;
   createdByStaffId?: string;
   createdByName: string;
@@ -32,7 +34,7 @@ export type ClassChannelDraftLike = {
 };
 
 export type ClassChannelErpFields =
-  | { target: "homework"; title: string; body: string; subjectId: string; dueAt: string }
+  | { target: "homework"; title: string; body: string; bodyHi: string; chapterHint: string; subjectId: string; dueAt: string }
   | { target: "notice"; title: string; body: string; audience: CommsAudience; pinned: boolean }
   | { target: "none" };
 
@@ -50,6 +52,10 @@ export function classChannelErpFields(draft: ClassChannelDraftLike): ClassChanne
       target: "homework",
       title: draft.title,
       body: classChannelBodyWithMedia(draft.body, draft.mediaNote),
+      // Written when the draft was expanded; "" when it was not, and the
+      // parent app then shows the English body to everyone, as before.
+      bodyHi: draft.bodyHi ? classChannelBodyWithMedia(draft.bodyHi, draft.mediaNote) : "",
+      chapterHint: draft.chapterHint || "",
       subjectId: draft.subjectId,
       dueAt: draft.dueAt || "",
     };
@@ -96,6 +102,8 @@ export function applyClassChannelDraftToErp(
       date: new Date().toISOString().slice(0, 10),
       title: fields.title,
       bodyEn: fields.body,
+      bodyHi: fields.bodyHi,
+      aiTutorHint: fields.chapterHint,
       dueAt: fields.dueAt || undefined,
     });
     if (!res.ok) return { ok: false, error: res.error };

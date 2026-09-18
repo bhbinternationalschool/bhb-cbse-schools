@@ -32,6 +32,14 @@ import {
   type VoiceNoteTranscript,
 } from "@/lib/voiceNote";
 import {
+  HOMEWORK_EXPAND_PROMPT_VERSION,
+  HOMEWORK_EXPAND_SYSTEM,
+  buildHomeworkExpandPrompt,
+  parseHomeworkExpansion,
+  type HomeworkExpandFacts,
+  type HomeworkExpansion,
+} from "@/lib/homeworkExpand";
+import {
   UDISE_DOC_EXTRACT_PROMPT,
   UDISE_DOC_EXTRACT_SYSTEM,
   UDISE_DOC_PROMPT_VERSION,
@@ -1485,6 +1493,41 @@ export async function generateLessonPlanJson(opts: {
     error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI lesson plans",
     engine: r.engine,
   };
+}
+
+/**
+ * A teacher's shorthand, written out for parents in both languages.
+ *
+ * Everything nameable is decided before this is called: the facts carry the
+ * book and chapter the resolver found, or carry neither. The model's job is
+ * the writing, and `parseHomeworkExpansion` refuses a draft that names a
+ * chapter the facts did not give it — a wrong chapter number reads exactly
+ * as authoritative as a right one and sends a whole section to the wrong
+ * pages.
+ *
+ * Not cacheable: the teacher's own sentence is in the prompt and no two are
+ * the same, so a cache would only ever cost a lookup.
+ */
+export async function expandHomeworkJson(opts: {
+  facts: HomeworkExpandFacts;
+  schoolName: string;
+}): Promise<
+  | { ok: true; draft: HomeworkExpansion; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const r = await callLlmJson(
+    {
+      system: `${HOMEWORK_EXPAND_SYSTEM}\nThe school is ${opts.schoolName}.`,
+      userMessage: buildHomeworkExpandPrompt(opts.facts),
+      // Two short bodies, one of them Hindi (~1.6x the tokens of English).
+      maxTokens: 900,
+      temperature: 0.3,
+      meta: { route: "homework-expand", promptVersion: HOMEWORK_EXPAND_PROMPT_VERSION },
+    },
+    (text) => parseHomeworkExpansion(text, opts.facts),
+  );
+  if (r.ok) return { ok: true, draft: r.data, engine: r.engine, generationId: r.generationId };
+  return { ok: false, error: r.error || "No AI engine configured", engine: r.engine };
 }
 
 /** Three-paragraph PTM brief for one student. Draft only — nothing saved. */
