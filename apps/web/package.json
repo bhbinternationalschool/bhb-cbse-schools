@@ -45,6 +45,7 @@
     "test:item-score-import": "npx tsx src/lib/itemScoreImport.selftest.ts",
     "test:exam-paper-import": "npx tsx src/lib/examPaperImport.selftest.ts",
     "test:answer-key-parse": "npx tsx src/lib/answerKeyParse.selftest.ts",
+    "test:desk-shrink-guard": "npx tsx src/lib/deskSliceShrinkGuard.selftest.ts",
     "test:syllabus-outcomes-import": "npx tsx src/lib/syllabusOutcomesImport.selftest.ts",
     "test:exams": "npx tsx src/lib/exams.selftest.ts",
     "test:exams-sheet-safety": "npx tsx src/lib/examsSheetSafety.selftest.ts",

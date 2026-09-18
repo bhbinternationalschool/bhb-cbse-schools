@@ -75,7 +75,12 @@ export async function POST(req: Request, ctx: RouteCtx) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const result = await pushDeskSliceToDb(id, body);
+  // A deliberate bulk deletion says so in the request. Nothing sets this
+  // today: it exists so that a screen which really does clear a desk has a
+  // way through the shrink guard, rather than the guard being loosened for
+  // everyone the first time it fires.
+  const allowShrink = new URL(req.url).searchParams.get("allowShrink") === "1";
+  const result = await pushDeskSliceToDb(id, body, { allowShrink });
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error || "Sync failed" },

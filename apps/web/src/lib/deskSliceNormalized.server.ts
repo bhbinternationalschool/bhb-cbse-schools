@@ -10,6 +10,7 @@ import {
   type DeskSliceModuleDef,
 } from "@/lib/deskSliceRegistry";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { judgeDeskShrink } from "@/lib/deskSliceShrinkGuard";
 
 export type DeskSliceSyncMeta = {
   sliceCount: number;
@@ -76,6 +77,13 @@ function resolveDef(id: DeskModuleId): DeskSliceModuleDef | null {
 export async function pushDeskSliceToDb(
   id: DeskModuleId,
   state: { version: number } & Record<string, unknown>,
+  opts?: {
+    /**
+     * The caller means to delete this much. Set it only where a person has
+     * asked for a bulk deletion — never as a way past a surprising refusal.
+     */
+    allowShrink?: boolean;
+  },
 ): Promise<{ ok: boolean; error?: string }> {
   const def = resolveDef(id);
   if (!def) return { ok: false, error: "Unknown desk slice module" };
@@ -123,6 +131,29 @@ export async function pushDeskSliceToDb(
   if (carriesNoKeys && (existing?.length ?? 0) > 0) {
     return { ok: false, error: "Refusing to sync: payload carries no slice keys" };
   }
+
+  // The guard above catches a client that holds nothing at all. It does not
+  // catch one that holds almost nothing — a browser that never hydrated this
+  // desk and has since created a single row. That payload is a well-formed
+  // array and looks exactly like a real edit; only its size gives it away.
+  // See deskSliceShrinkGuard for the incident this is here to prevent.
+  const incomingRows = countPayloadRows(def, rest);
+  const { data: meta } = await sb
+    .from(`${def.deskPrefix}_desk_sync_meta`)
+    .select("row_count")
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+  const shrink = judgeDeskShrink(
+    Number((meta as { row_count?: number } | null)?.row_count ?? 0),
+    incomingRows,
+    opts?.allowShrink,
+  );
+  if (!shrink.ok) {
+    console.warn(
+      `[desk-slice] ${id}: refused a push leaving ${shrink.incomingRows} of ${shrink.storedRows} rows`,
+    );
+    return { ok: false, error: shrink.reason };
+  }
   const keep = new Set(rows.map((r) => String(r.slice_key)));
   const stale = (existing ?? [])
     .map((r) => String((r as { slice_key: string }).slice_key))
@@ -142,12 +173,11 @@ export async function pushDeskSliceToDb(
     await sb.from(slicesTable).delete().eq("tenant_id", tenantId);
   }
 
-  const rowCount = countPayloadRows(def, rest);
   await sb.from(`${def.deskPrefix}_desk_sync_meta`).upsert(
     {
       tenant_id: tenantId,
       slice_count: rows.length,
-      row_count: rowCount,
+      row_count: incomingRows,
       last_updated_at: now,
       updated_at: now,
     },
