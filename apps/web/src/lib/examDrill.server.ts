@@ -257,7 +257,10 @@ export async function continueExamDrill(input: {
             : "I could not check that just now 🙏 Please send your answer again in a moment.",
         };
       }
-      state = recordAnswer(state, checked.draft.verdict);
+      state = recordAnswer(state, checked.draft.verdict, {
+        answer: input.text,
+        check: checked.draft,
+      });
       parts.push(renderCheck({ check: checked.draft, hindi: input.hindi }));
     }
 

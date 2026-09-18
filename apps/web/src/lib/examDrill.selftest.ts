@@ -4,6 +4,8 @@
  */
 import assert from "node:assert/strict";
 import {
+  DRILL_ANSWER_MAX,
+  DRILL_NOTE_MAX,
   MAX_QUESTIONS,
   STREAK_TO_FINISH,
   buildCheckPrompt,
@@ -189,5 +191,52 @@ const shown = renderCheck({ check: wrong!, hindi: false });
 assert.match(shown, /You added instead of multiplying/);
 assert.match(shown, /💡 One pen is ₹12/);
 assert.doesNotMatch(shown, /^❌ Not quite$/m, "never just 'wrong'");
+
+/* ── A session must read back as a lesson, not a scoreboard ───────── */
+//
+// The verdict alone does not say what a child was taught, or whether the
+// marking was fair. "What did it actually say to them?" is the first
+// question anyone asks about a drill that upset a child.
+let taught: DrillState = {
+  ...newDrill({ studentId: "s", subjectLabel: "Hindi", paperLabel: "Hindi", paperDate: "2026-09-19", nowIso: "n" }),
+  scope: 6,
+  phase: "asking",
+  asked: [{ question: "'लड़का' का स्त्रीलिंग?", skill: "लिंग बदलना", chapterPosition: 5 }],
+};
+taught = recordAnswer(taught, "wrong", {
+  answer: "लड़का",
+  check: {
+    whatWentWrong: "आपने वही शब्द दोबारा लिख दिया।",
+    howToDoIt: "'लड़का' का स्त्रीलिंग 'लड़की' होता है — अंत की 'आ' को 'ई' कर दीजिए।",
+    praise: "",
+  },
+});
+const recorded = taught.asked[0]!;
+assert.equal(recorded.verdict, "wrong");
+assert.equal(recorded.answer, "लड़का", "what the child typed is kept");
+assert.match(recorded.whatWentWrong!, /वही शब्द/);
+assert.match(recorded.howToDoIt!, /लड़की/);
+
+// Long answers are cut rather than carried whole: this sits in a jsonb
+// column that grows with every question of every child.
+let long: DrillState = { ...taught, asked: [{ question: "q", skill: "k", chapterPosition: 1 }] };
+long = recordAnswer(long, "wrong", {
+  answer: "क".repeat(DRILL_ANSWER_MAX + 200),
+  check: { whatWentWrong: "x".repeat(DRILL_NOTE_MAX + 200), howToDoIt: "y", praise: "" },
+});
+assert.equal(long.asked[0]!.answer!.length, DRILL_ANSWER_MAX);
+assert.equal(long.asked[0]!.whatWentWrong!.length, DRILL_NOTE_MAX);
+
+// A right answer keeps the praise and carries no correction.
+let praised: DrillState = { ...taught, asked: [{ question: "q", skill: "k", chapterPosition: 1 }] };
+praised = recordAnswer(praised, "right", { answer: "रानी", check: { whatWentWrong: "", howToDoIt: "", praise: "बिलकुल सही" } });
+assert.equal(praised.asked[0]!.praise, "बिलकुल सही");
+assert.equal(praised.asked[0]!.whatWentWrong, undefined, "nothing empty is stored");
+
+// Recording without detail still works — the older call shape.
+let bare: DrillState = { ...taught, asked: [{ question: "q", skill: "k", chapterPosition: 1 }] };
+bare = recordAnswer(bare, "right");
+assert.equal(bare.asked[0]!.verdict, "right");
+assert.equal(bare.asked[0]!.answer, undefined);
 
 console.log("ok");
