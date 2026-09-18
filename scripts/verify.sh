@@ -239,6 +239,7 @@ SELFTESTS=(
   test:exam-paper-import
   test:answer-key-parse
   test:desk-shrink-guard
+  test:nucleus-manifest
   test:lead-extract-ai
   test:lead-followup-ai
   test:lead-quality

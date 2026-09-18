@@ -339,6 +339,7 @@ jobs:
           npm run test:exam-paper-import
           npm run test:answer-key-parse
           npm run test:desk-shrink-guard
+          npm run test:nucleus-manifest
           npm run test:lead-extract-ai
           npm run test:lead-followup-ai
           npm run test:lead-quality
