@@ -16,6 +16,10 @@
  * Nothing is written without `--commit`. A run without it reads every file,
  * prints exactly what would be filed, and stops.
  *
+ * `--bank-existing` does only the last step, for papers already on the desk:
+ * it banks their questions without touching a file or storage. That is the
+ * repair path when papers were imported by a build that did not yet bank.
+ *
  *   cd apps/web
  *   npx tsx scripts/import-question-papers.mts "~/Downloads/Lead Assessments 2"
  *   ALLOW_LOCAL_PROD_WRITES=1 npx tsx scripts/import-question-papers.mts \
@@ -61,6 +65,8 @@ type Args = {
   actor: string;
   /** Put every imported question in the bank too; --no-bank turns it off. */
   bank: boolean;
+  /** Bank the questions of papers already on the desk; no folder needed. */
+  bankExisting: boolean;
   /** `--map 'subject:Numeracy=NUM'` */
   maps: { kind: string; word: string; value: string }[];
 };
@@ -72,12 +78,14 @@ function parseArgs(argv: string[]): Args {
     year: DEFAULT_AY,
     actor: "Import script",
     bank: true,
+    bankExisting: false,
     maps: [],
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     if (a === "--commit") out.commit = true;
     else if (a === "--no-bank") out.bank = false;
+    else if (a === "--bank-existing") out.bankExisting = true;
     else if (a === "--year") out.year = argv[++i] ?? out.year;
     else if (a === "--actor") out.actor = argv[++i] ?? out.actor;
     else if (a === "--map") {
@@ -175,8 +183,60 @@ function mappingsFrom(state: ExamPapersState, args: Args): ImportMappings {
   return mergeImportMappings(learned);
 }
 
+/**
+ * Bank the questions of papers already on the desk.
+ *
+ * Reads nothing from disk and writes nothing to storage: the papers are
+ * already there, and a bank item is a copy of a question, not of a file.
+ */
+async function bankExisting(args: Args) {
+  const [catalog, state] = await Promise.all([loadCatalog(args.year), loadDeskState()]);
+  const papers = state.papers.filter((p) => p.academicYearCode === args.year);
+  console.log(
+    `${papers.length} paper(s) in ${args.year}; bank currently holds ${state.bank.length}`,
+  );
+
+  const inputs: ImportedPaperInput[] = papers.map((p) => {
+    const term = catalog.terms.find((t) => t.id === p.examTermId);
+    return {
+      targetPaperId: p.id,
+      academicYearCode: p.academicYearCode,
+      examTermId: p.examTermId,
+      classId: p.classId,
+      subjectId: p.subjectId,
+      examCode: term?.code || "",
+      examName: p.examName,
+      className: "",
+      subjectCode: "",
+      title: p.title,
+      maxMarks: p.maxMarks,
+      durationMinutes: p.durationMinutes,
+      sets: p.sets,
+    };
+  });
+
+  const banked = bankImportedQuestions(state, inputs, args.actor);
+  console.log(
+    `would add ${banked.added} question(s) → ${banked.state.bank.length} in the bank`,
+  );
+  if (!args.commit) {
+    console.log("\nDry run — nothing written. Re-run with --commit.");
+    return;
+  }
+  const push = await pushDeskSliceToDb("exam_papers", banked.state);
+  if (!push.ok) {
+    console.error(`desk write failed: ${push.error}`);
+    process.exit(1);
+  }
+  console.log(`bank: ${banked.added} added → ${banked.state.bank.length} in the bank`);
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  if (args.bankExisting) {
+    await bankExisting(args);
+    return;
+  }
   if (!args.folder) {
     console.error("Usage: import-question-papers.mts <folder> [--commit]");
     process.exit(1);
