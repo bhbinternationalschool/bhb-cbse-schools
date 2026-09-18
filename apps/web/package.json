@@ -13,6 +13,7 @@
     "test:concession-ground": "npx tsx src/lib/concessionGround.selftest.ts",
     "test:fee-backdate": "npx tsx src/lib/feeBackdate.selftest.ts",
     "test:receipt-auto-wa": "npx tsx src/lib/feeReceiptAutoWa.selftest.ts",
+    "test:review-login": "npx tsx src/lib/reviewLogin.selftest.ts",
     "test:cash-pool-orphans": "npx tsx src/lib/cashPoolOrphans.selftest.ts",
     "test:receipt-lookup": "npx tsx src/lib/receiptLookup.selftest.ts",
     "test:school-receipt-no": "npx tsx src/lib/schoolReceiptNo.selftest.ts",

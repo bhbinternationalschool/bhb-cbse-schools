@@ -221,6 +221,7 @@ SELFTESTS=(
   test:concession-ground
   test:fee-backdate
   test:receipt-auto-wa
+  test:review-login
   test:desk-sync-status
   test:duty-roster
   test:email
