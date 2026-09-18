@@ -266,6 +266,7 @@ jobs:
           npm run test:udise-doc-intake
           npm run test:homework-expand
           npm run test:homework-submission
+          npm run test:exam-drill
           npm run test:roster-name-case
           npm run test:review-demo-records
           npm run test:wa-template-shape-sync

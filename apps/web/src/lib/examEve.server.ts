@@ -460,6 +460,32 @@ export async function handleExamEveInbound(opts: {
     }
 
     const first = schoolAge[0]!;
+
+    // The structured drill, when it is switched on: it asks how far the
+    // class has got and then runs question → marking → correction → question
+    // until three in a row are right. It declines (handled:false) when the
+    // child's book is not loaded, and the free-form tutor below takes over —
+    // which is exactly what happened before it existed.
+    const { startExamDrill } = await import("@/lib/examDrill.server");
+    const drill = await startExamDrill({
+      household: opts.household,
+      studentId: first.child.studentId,
+      mobile10: opts.mobile10,
+      subjectLabel: first.label,
+      paperLabel: first.label,
+      paperDate: date,
+      hindi,
+    });
+    if (drill.handled) {
+      parts.push(drill.replyText);
+      parts.push(
+        hindi
+          ? "उत्तर सीधे यहीं लिखें। रोकने के लिए *TUTOR OFF*।"
+          : "Type the answer right here. *TUTOR OFF* to stop.",
+      );
+      return parts.join("\n\n");
+    }
+
     const { startExamPractice } = await import("@/lib/waTutorBot.server");
     const tutor = await startExamPractice({
       household: opts.household,

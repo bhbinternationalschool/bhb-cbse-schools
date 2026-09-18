@@ -128,6 +128,7 @@
     "test:udise-doc-intake": "npx tsx src/lib/udiseDocIntake.selftest.ts",
     "test:homework-expand": "npx tsx src/lib/homeworkExpand.selftest.ts",
     "test:homework-submission": "npx tsx src/lib/homeworkSubmission.selftest.ts",
+    "test:exam-drill": "npx tsx src/lib/examDrill.selftest.ts",
     "test:rbac-scope": "npx tsx src/lib/rbacScope.selftest.ts",
     "test:rbac-user-grants": "npx tsx src/lib/rbacUserGrants.selftest.ts",
     "test:visitor-gate": "npx tsx src/lib/visitorGate.selftest.ts",
