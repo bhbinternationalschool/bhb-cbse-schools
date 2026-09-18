@@ -142,6 +142,41 @@ export function SyllabusPlanPanel(props: {
     );
   }
 
+  // The school's own books, already in the ERP for the AI to read from.
+  // Until 19 Sep 2026 nothing on this screen could see them, so a syllabus
+  // that was fully loaded (68 books, 1,538 chapters) showed as empty.
+  const [fillingFromBooks, setFillingFromBooks] = useState(false);
+
+  async function fillFromBooks() {
+    if (!classId || !subjectId) return props.onError("Pick a class and subject first");
+    props.onError(null);
+    props.onNotice(null);
+    setFillingFromBooks(true);
+    try {
+      const res = await fetch(
+        `/api/v1/teaching/syllabus-from-books?classId=${encodeURIComponent(classId)}&subjectId=${encodeURIComponent(subjectId)}`,
+      );
+      const body = (await res.json().catch(() => null)) as
+        | { ok?: boolean; data?: { book: string | null; chapters: SyllabusImportChapter[]; reason?: string }; error?: { message?: string } }
+        | null;
+      if (!res.ok || !body?.ok) {
+        return props.onError(body?.error?.message || "Could not read the school's books");
+      }
+      const found = body.data;
+      if (!found || !found.chapters.length) {
+        // Say which book is missing, rather than leaving the teacher to guess
+        // whether the screen failed or the shelf is empty.
+        return props.onError(found?.reason || "No book is loaded for this class and subject");
+      }
+      importChapters(found.chapters);
+      if (found.book) props.onNotice(`From ${found.book} · check it against your own plan before teaching`);
+    } catch (e) {
+      props.onError((e as Error)?.message || "Could not read the school's books");
+    } finally {
+      setFillingFromBooks(false);
+    }
+  }
+
   const [outcomesCsv, setOutcomesCsv] = useState("");
   const [showOutcomesImport, setShowOutcomesImport] = useState(false);
 
@@ -267,6 +302,25 @@ export function SyllabusPlanPanel(props: {
           ))}
         </ul>
       )}
+
+      {canEdit ? (
+        <div className="rounded-xl border border-dashed border-[var(--border)] px-4 py-3 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold text-[var(--brand-deep)]">From the school&apos;s own book</span>
+            <span className="text-[var(--muted)]">
+              The chapters and topics already loaded for this class and subject. Anything already in the plan is left as it is.
+            </span>
+            <button
+              type="button"
+              className="ml-auto rounded-lg border border-[var(--border)] px-2 py-1 font-semibold disabled:opacity-50"
+              onClick={fillFromBooks}
+              disabled={fillingFromBooks}
+            >
+              {fillingFromBooks ? "Reading…" : "Fill from the book"}
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {canEdit ? (
         <SyllabusOcrImport
