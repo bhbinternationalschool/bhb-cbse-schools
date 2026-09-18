@@ -16,9 +16,12 @@ import {
   homeworkWaBody,
   homeworkWaDue,
   homeworkWaLine,
+  formatChapterLine,
+  WA_CHAPTER_LINE_MAX,
   WA_LINE_MAX,
   type BookFact,
 } from "./homeworkExpand";
+import { seedWaTemplates } from "./waTemplates";
 
 console.log("homeworkExpand.selftest.ts");
 
@@ -194,6 +197,70 @@ assert.match(waHi, /BHB International School/);
 assert.doesNotMatch(waHi, /Chapter 5 — More/, "a Hindi family is not sent the English body");
 const waEn = homeworkWaBody({ expansion: plain, language: "en", schoolName: "BHB International School" });
 assert.match(waEn, /Chapter 5 — More about Operations on Numbers/);
-assert.match(waEn, /Ask tutor/);
+assert.match(waEn, /Reply \*TUTOR\*/);
+
+/* ── The chapter, in WhatsApp itself ──────────────────────────────── */
+//
+// Director's instruction, 18 Sep 2026: show the chapter in the message, stop
+// sending parents to the app. Meta cannot omit a template line, so this one
+// has to be true whatever was resolved.
+const chLine = formatChapterLine({
+  bookName: "Propel Edition A Mathematics Grade 5",
+  chapterNumber: 5,
+  chapterName: "More about Operations on Numbers",
+  topics: ["numeric expressions and DMAS", "unitary method: value of one and many"],
+});
+assert.equal(
+  chLine,
+  "Propel Edition A Mathematics Grade 5 · Ch 5 More about Operations on Numbers — numeric expressions and DMAS, unitary method: value of one and many",
+);
+assert.doesNotMatch(chLine, /[\n\t]/, "one line: Meta refuses a newline in a variable");
+assert.ok(chLine.length <= WA_CHAPTER_LINE_MAX);
+
+// It degrades rather than printing something untrue.
+assert.equal(
+  formatChapterLine({ bookName: "Propel Maths 5", chapterNumber: 5, chapterName: "Operations", topics: [] }),
+  "Propel Maths 5 · Ch 5 Operations",
+);
+assert.equal(
+  formatChapterLine({ bookName: "Propel Maths 5", chapterNumber: 0, chapterName: "", topics: [] }),
+  "Propel Maths 5",
+  "book alone, when the chapter did not resolve",
+);
+assert.equal(
+  formatChapterLine({ bookName: "", chapterNumber: 0, chapterName: "", topics: [] }),
+  "",
+  "nothing resolved, nothing claimed — the template prints a dash",
+);
+
+// The chapter survives; the topics are what gets trimmed.
+const long = formatChapterLine({
+  bookName: "Propel Edition A Mathematics Grade 5",
+  chapterNumber: 6,
+  chapterName: "Multiples and Factors",
+  topics: ["multiples of two or more numbers", "factors of two or more numbers", "divisibility by 2, 3, 4, 5, 6, 9 and 10", "prime and composite numbers"],
+});
+assert.ok(long.length <= WA_CHAPTER_LINE_MAX, `chapter line is ${long.length} chars`);
+assert.match(long, /Ch 6 Multiples and Factors/, "the chapter is never the part that is cut");
+assert.match(long, /…$/);
+
+// And nothing sends a parent to the app any more.
+for (const lang of ["en", "hi"] as const) {
+  const msg = homeworkWaBody({ expansion: plain, language: lang, schoolName: "BHB International School" });
+  assert.doesNotMatch(msg, /parent app|पैरेंट ऐप|Ask tutor/, "no app to open");
+  assert.match(msg, /TUTOR/, "help is offered on the channel they are already reading");
+}
+
+/* ── The template itself keeps the promise ────────────────────────── */
+const full = seedWaTemplates().filter((t) => t.familyKey === "homework_published_full");
+assert.equal(full.length, 2, "both languages, or the family is unusable");
+for (const t of full) {
+  const label = `homework_published_full/${t.language}`;
+  assert.doesNotMatch(t.body, /parent app|पैरेंट ऐप|Open the app|ऐप खोल/i, `${label}: still sends parents to the app`);
+  assert.equal(t.buttons.length, 0, `${label}: an "Open parent app" button is still an ask`);
+  assert.match(t.body, /TUTOR/, `${label}: help must be offered on WhatsApp itself`);
+  assert.ok(t.variables.includes("chapterLine"), `${label}: the chapter has to be in the message`);
+  assert.ok(t.body.length <= 1024, `${label}: ${t.body.length} chars`);
+}
 
 console.log("ok");

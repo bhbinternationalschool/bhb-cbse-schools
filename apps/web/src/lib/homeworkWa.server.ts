@@ -38,13 +38,32 @@ import { sendWaWithFailover } from "@/lib/waSend";
 import {
   normalizeWaTemplatesState,
   resolveTemplateForSend,
+  templateFamilyReady,
   templateVariablePositions,
   type WaTemplatesState,
 } from "@/lib/waTemplates";
 import { TENANT } from "@/lib/types";
 import { homeworkWaBody, homeworkWaDue, homeworkWaLine } from "@/lib/homeworkExpand";
 
+/** Tells the family homework exists and sends them to the app. The floor. */
 export const HOMEWORK_TEMPLATE_FAMILY = "homework_published";
+/** Shows the book, the chapter and the work in WhatsApp itself. Preferred. */
+export const HOMEWORK_TEMPLATE_FAMILY_FULL = "homework_published_full";
+
+/**
+ * Which homework template to use.
+ *
+ * The one that carries the chapter, as soon as Meta has approved it in BOTH
+ * languages — a half-approved family would send Hindi households English.
+ * Until then the older one keeps sending, so Meta's queue can take as long
+ * as it likes without a single post going undelivered. Same arrangement as
+ * chooseReceiptFamily().
+ */
+function chooseHomeworkFamily(state: WaTemplatesState): { familyKey: string; withChapter: boolean } {
+  return templateFamilyReady(state, HOMEWORK_TEMPLATE_FAMILY_FULL).ready
+    ? { familyKey: HOMEWORK_TEMPLATE_FAMILY_FULL, withChapter: true }
+    : { familyKey: HOMEWORK_TEMPLATE_FAMILY, withChapter: false };
+}
 
 export type HomeworkWaResult = {
   families: number;
@@ -131,6 +150,24 @@ export async function sendHomeworkWhatsApp(input: {
 
     // One claim for the whole dispatch: two requests for the same post must
     // not each message forty families.
+    const choice = chooseHomeworkFamily(state);
+
+    // Looked up once for the whole section, not once per family: it is the
+    // same book and the same chapter for every child in it.
+    let chapterLine = "";
+    if (choice.withChapter && post.aiTutorHint) {
+      try {
+        const { chapterLineForPost } = await import("@/lib/homeworkExpand.server");
+        chapterLine = await chapterLineForPost({
+          className: input.classLabel,
+          subjectLabel: input.subjectLabel,
+          aiTutorHint: post.aiTutorHint,
+        });
+      } catch (e) {
+        console.warn("[homeworkWa] chapter line unavailable", (e as Error)?.message);
+      }
+    }
+
     const claim = await claimSendOnce(`homework:${post.id}`, post.teacherName || "homework", `${input.classLabel} · ${input.subjectLabel}`);
     if (!claim.ok) return { ...empty, families: families.length, reason: claim.message };
 
@@ -160,7 +197,7 @@ export async function sendHomeworkWhatsApp(input: {
         let templateName = "";
 
         if (!r.ok && /24h|window|session/i.test(r.error || "")) {
-          const resolved = resolveTemplateForSend({ state, familyKey: HOMEWORK_TEMPLATE_FAMILY, language });
+          const resolved = resolveTemplateForSend({ state, familyKey: choice.familyKey, language });
           if (!resolved.ok) {
             // Named, not swallowed: a template that is approved at Meta and
             // stale here reads as a 24-hour-window error, which points at
@@ -169,10 +206,21 @@ export async function sendHomeworkWhatsApp(input: {
             skipped += 1;
             continue;
           }
+          // templateVariablePositions fills only the names this template's
+          // body actually uses, so the same map serves both families — and
+          // substitutes an em dash for anything missing, which is why the
+          // chapter line is allowed to come back empty.
           const values = templateVariablePositions(resolved.template, {
             classLabel: input.classLabel,
             subject: input.subjectLabel,
-            homeworkTitle: homeworkWaLine(post),
+            // Subject first, so the line is complete on its own and carries
+            // the subject even when no book resolved. "📘 —" reads like
+            // something went wrong, and repeating the subject in the
+            // greeting as well only to repeat it here reads like a machine.
+            chapterLine: [input.subjectLabel, chapterLine].filter(Boolean).join(" · "),
+            // With its own chapter line above it, the work no longer has to
+            // carry the chapter too.
+            homeworkTitle: choice.withChapter ? post.title || homeworkWaLine(post) : homeworkWaLine(post),
             dueDate: homeworkWaDue(post.dueAt, language),
             schoolName: TENANT.nameDisplay,
           });

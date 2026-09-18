@@ -216,7 +216,8 @@ export const WA_TEMPLATE_VARIABLES: WaTemplateVariableDef[] = [
   { key: "weekLabel", label: "Week covered", group: "School", sample: "8–13 Sep" },
   { key: "childSummary", label: "Each child's week", group: "Student", sample: "Aarav (III A) — Present 5 of 6 days · Hindi 18/20  |  Anaya (LKG A) — Present 6 of 6 days", hint: "One line per child from lib/weeklyChildDigest.ts; a family with nothing true to report is not messaged." },
   { key: "registerLink", label: "Registration link", group: "Admissions", sample: "https://school.example/register" },
-  { key: "homeworkTitle", label: "Homework title", group: "Academic", sample: "Math worksheet ch.4" },
+  { key: "homeworkTitle", label: "Homework title", group: "Academic", sample: "Exercise 5.2, questions 1–5" },
+  { key: "chapterLine", label: "Subject, book, chapter and what it covers", group: "Academic", sample: "Mathematics · Propel Maths Grade 5 · Ch 5 More about Operations on Numbers — DMAS, unitary method", hint: "Resolved from the school's own books by homeworkExpand. One line — Meta refuses a newline inside a variable — and it degrades to subject and book, then to the subject alone, so the line is never a bare dash, never untrue, and never repeats what the greeting already said." },
   { key: "subject", label: "Subject", group: "Academic", sample: "Mathematics" },
   { key: "examName", label: "Exam name", group: "Academic", sample: "Term 1" },
   { key: "ptmDate", label: "PTM date", group: "Academic", sample: "12 Aug 2026" },
@@ -934,6 +935,42 @@ const SEED_DEFS: SeedDef[] = [
       "नमस्ते 🙏 *{{classLabel}}* का नया गृहकार्य आ गया है:\n\n📘 विषय: *{{subject}}*\n📝 कार्य: {{homeworkTitle}}\n📅 अंतिम तिथि: *{{dueDate}}*\n\nपूरा विवरण पैरेंट ऐप में देखें — और यदि बच्चे को मदद चाहिए तो वहीं *Ask tutor* दबाएँ। 🎓\n\n— {{schoolName}}, सधन्यवाद 🙏",
     footerEn: "Class teacher · Open the parent app for details",
     footerHi: "कक्षा शिक्षक · विवरण पैरेंट ऐप में देखें",
+  },
+  {
+    /*
+      The homework a parent can act on WITHOUT opening anything.
+
+      `homework_published` above tells them homework exists and sends them to
+      the app for what it is — which is a second app to open for a parent who
+      is already reading their phone, and nothing at all for the many who
+      never installed it. Director's instruction, 18 Sep 2026: show the
+      chapter here, in WhatsApp, and stop asking them to open the app.
+
+      The help offer moves with it. "Tap Ask tutor in the app" becomes "reply
+      TUTOR on this number", which is the same tutor on the channel the
+      message already arrived on.
+
+      A separate family rather than an edit to the approved one: an edited
+      template goes back into Meta's queue, and homework would stop reaching
+      families while it sat there. This one is preferred the moment it is
+      approved in BOTH languages, and until then the old one keeps sending —
+      the same arrangement as fees_receipt / fees_receipt_doc.
+    */
+    familyKey: "homework_published_full",
+    nameEn: "Homework published (with the chapter)",
+    nameHi: "गृहकार्य प्रकाशित (अध्याय सहित)",
+    module: "homework",
+    category: "UTILITY",
+    metaName: "bhb_homework_full",
+    headerFormat: "TEXT",
+    headerTextEn: "New homework",
+    headerTextHi: "नया गृहकार्य",
+    bodyEn:
+      "Namaste 🙏 New homework for *{{classLabel}}*:\n\n📘 {{chapterLine}}\n✏️ {{homeworkTitle}}\n📅 Due: *{{dueDate}}*\n\nNeeds a hand with it? Reply *TUTOR* on this number and we will help your child through it. 🎓\n\n— {{schoolName}}, with thanks 🙏",
+    bodyHi:
+      "नमस्ते 🙏 *{{classLabel}}* का नया गृहकार्य:\n\n📘 {{chapterLine}}\n✏️ {{homeworkTitle}}\n📅 अंतिम तिथि: *{{dueDate}}*\n\nमदद चाहिए? इसी नंबर पर *TUTOR* लिखकर भेजें, हम बच्चे की सहायता करेंगे। 🎓\n\n— {{schoolName}}, सधन्यवाद 🙏",
+    footerEn: "Class teacher · Reply TUTOR for help",
+    footerHi: "कक्षा शिक्षक · मदद हेतु TUTOR भेजें",
   },
   {
     familyKey: "exams_tomorrow",

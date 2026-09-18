@@ -18,12 +18,14 @@ import { TENANT } from "@/lib/types";
 import { cleanChapterName, subjectDisplayName, subjectKeyFor } from "@/lib/tutorSyllabus";
 import { schoolBooksForClass } from "@/lib/tutorSyllabus.server";
 import {
+  formatChapterLine,
   formatDueLabel,
   homeworkExpandFacts,
   parseHomeworkReference,
   renderHomeworkExpansion,
   resolutionNoteForTeacher,
   resolveHomeworkChapter,
+  HOMEWORK_TOPICS_IN_MESSAGE,
   type BookFact,
   type HomeworkExpandFacts,
   type HomeworkExpansion,
@@ -130,4 +132,43 @@ export async function expandHomeworkForParents(input: {
     facts,
     usedAi,
   };
+}
+
+/**
+ * The WhatsApp chapter line for a post that was saved earlier.
+ *
+ * The post keeps the chapter in `aiTutorHint` ("Ch 6 — Multiples and
+ * Factors") and nothing else of the book, so the book's name and the
+ * chapter's topics are looked up again here rather than being carried
+ * through every draft, every table column and every caller. The books are
+ * cached for six hours, so this is a map lookup in practice — and it works
+ * for a post written before any of this existed.
+ *
+ * Returns "" when the chapter cannot be found, and the template then prints
+ * a dash rather than a book the child does not have.
+ */
+export async function chapterLineForPost(input: {
+  className: string;
+  subjectLabel: string;
+  aiTutorHint: string;
+}): Promise<string> {
+  const m = /(?:ch|chapter|अध्याय|पाठ)\s*(\d{1,2})/i.exec(input.aiTutorHint || "");
+  if (!m) return "";
+  const position = Number(m[1]);
+  try {
+    const books = await booksFor(input.className, input.subjectLabel);
+    if (books.length !== 1) return "";
+    const book = books[0]!;
+    const chapter = book.chapters.find((c) => c.position === position);
+    if (!chapter) return "";
+    return formatChapterLine({
+      bookName: book.name,
+      chapterNumber: chapter.position,
+      chapterName: chapter.name,
+      topics: chapter.topics.slice(0, HOMEWORK_TOPICS_IN_MESSAGE),
+    });
+  } catch (e) {
+    console.warn("[homework-expand] chapter line unavailable", e instanceof Error ? e.message : e);
+    return "";
+  }
 }

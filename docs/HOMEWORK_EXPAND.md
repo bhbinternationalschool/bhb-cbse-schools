@@ -80,10 +80,25 @@ school.
   whole expansion — book, chapter, what the chapter covers, the teacher's
   words — in their own language. A shut window costs one refused send, which
   Meta does not bill.
-- **The template when the window is shut**, which is most families. It carries
-  one line (`homeworkWaLine`): the chapter, then the work. Meta rejects a
-  variable containing a newline, a tab or four consecutive spaces, and forbids
-  an empty one — hence `homeworkWaDue`, because a due date is often absent.
+- **The template when the window is shut**, which is most families.
+  `homework_published_full` (`bhb_homework_full`) shows the subject, the book,
+  the chapter and what the chapter covers **in the message** — the director's
+  instruction of 18 Sep 2026 was to stop sending parents to the app for it,
+  so the body names no app and carries no app button, and the help on offer
+  is "reply *TUTOR* on this number", which is the same tutor on the channel
+  the message already arrived on.
+  Meta cannot leave a line out of a template, so `formatChapterLine` degrades
+  instead: subject · book · chapter — topics, then subject · book, then the
+  subject alone. Never a bare dash, never untrue. It rejects a variable
+  containing a newline, a tab or four consecutive spaces and forbids an empty
+  one — hence `homeworkWaLine` and `homeworkWaDue`.
+- **A new family, not an edit.** An edited template goes back into Meta's
+  queue and homework would stop reaching families while it sat there.
+  `chooseHomeworkFamily` prefers the new one the moment it is approved in
+  BOTH languages and keeps sending the old one until then — the same
+  arrangement as `fees_receipt` / `fees_receipt_doc`. **It needs
+  `scripts/wa-submit-seed-templates.mts --submit` and Meta's approval before
+  any parent sees the chapter.**
 - **Once per post** (`claimSendOnce`) and **once per family**, not per child:
   two siblings in one section share a household and a phone.
 - **The family's own language**, never the teacher's.

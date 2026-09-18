@@ -429,6 +429,43 @@ export function homeworkWaDue(dueLabel: string, language: "en" | "hi"): string {
   return language === "hi" ? "बताई नहीं गई" : "not given";
 }
 
+export const WA_CHAPTER_LINE_MAX = 200;
+
+/**
+ * Book, chapter and what it covers, on ONE line, for the WhatsApp template.
+ *
+ * Meta cannot leave a line out of a template, so this line has to be true
+ * whatever was resolved. It degrades: book and chapter and topics, then book
+ * and chapter, then the book alone, then an em dash — which is what
+ * `templateVariablePositions` substitutes for anything missing, and the only
+ * honest thing to print when the school's book for that class is not loaded.
+ *
+ * Topics are the part a parent could not have worked out, so they stay until
+ * the line runs out of room rather than being dropped first.
+ */
+export function formatChapterLine(input: {
+  bookName: string;
+  chapterNumber: number;
+  chapterName: string;
+  topics: string[];
+}): string {
+  const one = (v: string) => v.replace(/\s+/g, " ").trim();
+  const book = one(input.bookName);
+  const chapter = input.chapterNumber
+    ? one(`Ch ${input.chapterNumber}${input.chapterName ? ` ${input.chapterName}` : ""}`)
+    : "";
+  const head = [book, chapter].filter(Boolean).join(" · ");
+  if (!head) return "";
+  const topics = input.topics.map(one).filter(Boolean).join(", ");
+  const full = topics ? `${head} — ${topics}` : head;
+  if (full.length <= WA_CHAPTER_LINE_MAX) return full;
+  // Trim the topics, never the chapter: a parent can find the chapter
+  // without the topic list, not the other way round.
+  const room = WA_CHAPTER_LINE_MAX - head.length - 4;
+  if (topics && room > 12) return `${head} — ${topics.slice(0, room).trimEnd()}…`;
+  return head.length <= WA_CHAPTER_LINE_MAX ? head : `${head.slice(0, WA_CHAPTER_LINE_MAX - 1).trimEnd()}…`;
+}
+
 /**
  * The whole message, for a family whose 24-hour window is open.
  *
@@ -443,9 +480,12 @@ export function homeworkWaBody(input: {
   schoolName: string;
 }): string {
   const body = input.language === "hi" ? input.expansion.bodyHi : input.expansion.bodyEn;
+  // No "open the app". The message already carries the book, the chapter and
+  // the work, and the help on offer is the same tutor, on the channel the
+  // parent is already reading. Director's instruction, 18 Sep 2026.
   const tail =
     input.language === "hi"
-      ? `\n\nपूरा विवरण पैरेंट ऐप में — मदद चाहिए तो वहीं *Ask tutor* दबाएँ। 🎓\n— ${input.schoolName}`
-      : `\n\nFull details in the parent app — tap *Ask tutor* there if your child needs a hand. 🎓\n— ${input.schoolName}`;
+      ? `\n\nमदद चाहिए? इसी नंबर पर *TUTOR* लिखकर भेजें। 🎓\n— ${input.schoolName}`
+      : `\n\nNeeds a hand with it? Reply *TUTOR* on this number. 🎓\n— ${input.schoolName}`;
   return `${body}${tail}`;
 }
