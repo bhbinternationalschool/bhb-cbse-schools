@@ -24,7 +24,12 @@ List<RouteBase> staffRoutes(
   GoRoute(
     path: "/login",
     builder: (context, state) =>
-        LoginScreen(config: config, api: api, onSignedIn: onSignedIn),
+        LoginScreen(
+          config: config,
+          api: api,
+          audience: AppAudience.staff,
+          onSignedIn: onSignedIn,
+        ),
   ),
   GoRoute(
     path: "/staff",

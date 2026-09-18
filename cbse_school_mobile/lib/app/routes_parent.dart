@@ -20,7 +20,12 @@ List<RouteBase> parentRoutes(
   GoRoute(
     path: "/login",
     builder: (context, state) =>
-        LoginScreen(config: config, api: api, onSignedIn: onSignedIn),
+        LoginScreen(
+          config: config,
+          api: api,
+          audience: AppAudience.parent,
+          onSignedIn: onSignedIn,
+        ),
   ),
   GoRoute(
     path: "/home",
