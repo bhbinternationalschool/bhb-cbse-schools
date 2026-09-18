@@ -16,6 +16,11 @@
  * Nothing is written without `--commit`. A run without it reads every file,
  * prints exactly what would be filed, and stops.
  *
+ * `--reparse` re-reads the .docx already stored for each set and rebuilds its
+ * questions with the current parser. That is the repair path when the parser
+ * itself is corrected: the files are already in storage, so nothing is
+ * uploaded and no picture is copied again.
+ *
  * `--bank-existing` does only the last step, for papers already on the desk:
  * it banks their questions without touching a file or storage. That is the
  * repair path when papers were imported by a build that did not yet bank.
@@ -45,6 +50,7 @@ import {
 } from "../src/lib/examPaperImport";
 import { readPaperFile } from "../src/lib/examPaperRead";
 import { storeImportedPaper } from "../src/lib/examPaperImportStore.server";
+import { privateMediaUrl } from "../src/lib/media";
 import {
   applyImportedSets,
   bankImportedQuestions,
@@ -67,6 +73,8 @@ type Args = {
   bank: boolean;
   /** Bank the questions of papers already on the desk; no folder needed. */
   bankExisting: boolean;
+  /** Re-read each set's stored .docx and rebuild its questions. */
+  reparse: boolean;
   /** `--map 'subject:Numeracy=NUM'` */
   maps: { kind: string; word: string; value: string }[];
 };
@@ -79,6 +87,7 @@ function parseArgs(argv: string[]): Args {
     actor: "Import script",
     bank: true,
     bankExisting: false,
+    reparse: false,
     maps: [],
   };
   for (let i = 0; i < argv.length; i++) {
@@ -86,6 +95,7 @@ function parseArgs(argv: string[]): Args {
     if (a === "--commit") out.commit = true;
     else if (a === "--no-bank") out.bank = false;
     else if (a === "--bank-existing") out.bankExisting = true;
+    else if (a === "--reparse") out.reparse = true;
     else if (a === "--year") out.year = argv[++i] ?? out.year;
     else if (a === "--actor") out.actor = argv[++i] ?? out.actor;
     else if (a === "--map") {
@@ -231,8 +241,124 @@ async function bankExisting(args: Args) {
   console.log(`bank: ${banked.added} added → ${banked.state.bank.length} in the bank`);
 }
 
+/**
+ * Rebuild every set's questions from the .docx already in storage.
+ *
+ * Re-running the folder import cannot do this: a set is matched by the hash
+ * of its source file, so an unchanged file is correctly skipped as already
+ * imported. When the fault is in the *reader* rather than the file, the fix
+ * has to re-read what was stored.
+ *
+ * Pictures are not touched. They were uploaded to a path derived from the
+ * set's folder and the picture's own relationship id, so the same names can
+ * be rebuilt without moving a byte.
+ *
+ * It refuses any set somebody has since worked on — a typed answer key or a
+ * marking scheme is evidence of that — because rebuilding would throw the
+ * work away.
+ */
+async function reparse(args: Args) {
+  const ctx = await getServerTenantContext();
+  if (!ctx) throw new Error("Supabase service role not configured");
+  const state = await loadDeskState();
+
+  let looked = 0;
+  let changed = 0;
+  let before = 0;
+  let after = 0;
+  const skipped: string[] = [];
+  const papers = [...state.papers];
+
+  for (let i = 0; i < papers.length; i++) {
+    const paper = papers[i]!;
+    const sets = [...paper.sets];
+    let touched = false;
+
+    for (let j = 0; j < sets.length; j++) {
+      const set = sets[j]!;
+      const path = set.source?.filePath;
+      if (!path) continue;
+      looked += 1;
+
+      const worked = set.sections.some((sec) =>
+        sec.questions.some((q) => q.answerKey.trim() || q.markingScheme.length),
+      );
+      if (worked) {
+        skipped.push(`${paper.paperCode} set ${set.setCode} — already has answers or a marking scheme`);
+        continue;
+      }
+
+      const dl = await ctx.sb.storage.from("school-files").download(path);
+      if (dl.error || !dl.data) {
+        skipped.push(`${paper.paperCode} set ${set.setCode} — stored file unreadable: ${dl.error?.message}`);
+        continue;
+      }
+      const bytes = new Uint8Array(await dl.data.arrayBuffer());
+      const read = await readPaperFile(set.source!.fileName, bytes);
+      if (read.facts.readError || !read.body || !read.body.questionCount) {
+        skipped.push(`${paper.paperCode} set ${set.setCode} — ${read.facts.readError ?? "no questions could be read"}`);
+        continue;
+      }
+      if (read.facts.fileHash !== set.source!.fileHash) {
+        skipped.push(`${paper.paperCode} set ${set.setCode} — the stored file is not the one that was imported`);
+        continue;
+      }
+
+      const folder = path.split("/").slice(0, -1).join("/");
+      const extByRid = new Map(read.images.map((im) => [im.rid, im.extension]));
+      const sections = read.body.sections.map((section) => ({
+        ...section,
+        questions: section.questions.map((q) => ({
+          ...q,
+          images: q.images
+            .map((img) => {
+              const ext = extByRid.get(img.id);
+              return ext
+                ? { ...img, dataUrl: privateMediaUrl(`${folder}/media/${img.id}.${ext}`) }
+                : { ...img, dataUrl: "" };
+            })
+            .filter((img) => img.dataUrl),
+        })),
+      }));
+
+      const wasCount = set.sections.reduce((n, sec) => n + sec.questions.length, 0);
+      before += wasCount;
+      after += read.body.questionCount;
+      if (wasCount !== read.body.questionCount) changed += 1;
+      sets[j] = { ...set, sections };
+      touched = true;
+    }
+
+    if (touched) papers[i] = { ...paper, sets, updatedAt: new Date().toISOString(), updatedBy: args.actor };
+  }
+
+  console.log(
+    `${looked} set(s) read · ${changed} whose question count changes · ` +
+      `${before} → ${after} questions`,
+  );
+  if (skipped.length) {
+    console.log(`\n${skipped.length} left alone:`);
+    for (const s of skipped.slice(0, 20)) console.log(`  ${s}`);
+  }
+  if (!args.commit) {
+    console.log("\nDry run — nothing written. Re-run with --commit.");
+    return;
+  }
+  const next = normalizeExamPapersState({ ...state, papers });
+  const push = await pushDeskSliceToDb("exam_papers", next);
+  if (!push.ok) {
+    console.error(`desk write failed: ${push.error}`);
+    process.exit(1);
+  }
+  console.log(`\nwritten — ${next.papers.length} papers on the desk`);
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  if (args.reparse) {
+    await reparse(args);
+    return;
+  }
   if (args.bankExisting) {
     await bankExisting(args);
     return;

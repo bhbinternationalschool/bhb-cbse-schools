@@ -47,6 +47,17 @@ export type ParsedAnswerKey = {
 const RE_PAGE = /page\s+\d+\s+of\s+\d+/gi;
 const RE_FOOTER_CODE = /\b[A-Z]{1,4}\d{2,4}-[A-Z0-9]+-[A-Z]{1,3}-\d+-\d+\b/g;
 const RE_QUESTION = /^(\d{1,3})\)\s*(.*)$/;
+/**
+ * The same heading with its bracket missing — `36 Read the given source…`.
+ *
+ * The publisher's own typesetting drops the bracket about twenty times across
+ * a term's keys, and each time the reader skipped that question, leaving a
+ * gap in the numbering that failed the alignment check and cost the whole
+ * paper its answers. It is only honoured when the number is the very next one
+ * expected AND the line carries a marks annotation, which every real heading
+ * does and a sentence inside a solution does not.
+ */
+const RE_QUESTION_NO_BRACKET = /^(\d{1,3})\s+(\S.*)$/;
 const RE_ANSWER = /^answer\s*:?\s*(.*)$/i;
 const RE_SOLUTION = /^solution\s*:?\s*(.*)$/i;
 const RE_SECTION = /^section\s+[A-Za-z0-9]+\s*$/i;
@@ -81,16 +92,31 @@ type Block = { number: number; marks: number; lines: string[] };
 function blocksOf(lines: string[]): Block[] {
   const blocks: Block[] = [];
   let current: Block | null = null;
+  let lastNumber = 0;
+
+  const open = (number: number, rest: string, line: string): Block => {
+    const block: Block = {
+      number,
+      marks: Number(RE_MARKS.exec(line)?.[1] ?? 0),
+      lines: [rest.trim()].filter(Boolean),
+    };
+    blocks.push(block);
+    lastNumber = number;
+    return block;
+  };
+
   for (const line of lines) {
     const q = RE_QUESTION.exec(line);
-    if (q) {
-      current = {
-        number: Number(q[1]),
-        marks: Number(RE_MARKS.exec(line)?.[1] ?? 0),
-        lines: [(q[2] ?? "").trim()].filter(Boolean),
-      };
-      blocks.push(current);
+    if (q && Number(q[1]) > lastNumber) {
+      current = open(Number(q[1]), q[2] ?? "", line);
       continue;
+    }
+    if (!q) {
+      const loose = RE_QUESTION_NO_BRACKET.exec(line);
+      if (loose && Number(loose[1]) === lastNumber + 1 && RE_MARKS.test(line)) {
+        current = open(Number(loose[1]), loose[2] ?? "", line);
+        continue;
+      }
     }
     if (RE_SECTION.test(line)) {
       current = null;

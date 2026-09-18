@@ -163,11 +163,46 @@ Maximum Marks: 10
 }
 
 {
-  // Numbering that repeats means the reader lost its place.
+  // A repeated number cannot open a second question — numbering only ever
+  // ascends — so the line stays inside the question it interrupted, and the
+  // short count is what stops the key being written onto the paper.
   const doubled = MATHS.replace("2) Which of the following is the smallest", "1) Which of the following is the smallest");
-  const r = matchAnswerKeyToQuestions(parseAnswerKey(doubled), [{ marks: 1 }, { marks: 1 }, { marks: 4 }]);
+  const key = parseAnswerKey(doubled);
+  assert.deepEqual(key.items.map((i) => i.number), [1, 3], "no number appears twice");
+  const r = matchAnswerKeyToQuestions(key, [{ marks: 1 }, { marks: 1 }, { marks: 4 }]);
   assert.equal(r.ok, false);
-  if (!r.ok) assert.match(r.reason, /appears twice|comes after/);
+}
+
+{
+  // The publisher drops the closing bracket about twenty times a term:
+  // `36 Read the given source…  (4 marks)`. Skipping those left a gap in the
+  // numbering that cost the whole paper its answers.
+  const loose = `Class6      BHB INTERNATIONAL SCHOOL      Social Science
+Name: ....   Max. Marks: 8   Time: 60 min
+                              Section A
+1) Name two continents.                                              (4 marks)
+Answer:
+Asia and Africa.
+                              Section B
+Case-Based Questions                                           (1×4=4 marks)
+36 Read the given source and answer the following questions.         (4 marks)
+Answer:
+Antarctica is the frozen continent.
+`;
+  const key = parseAnswerKey(loose);
+  assert.equal(key.items.length, 1, "36 does not follow 1, so it is not a heading");
+
+  const sequential = loose.replace("36 Read the given source", "2 Read the given source");
+  const ok = parseAnswerKey(sequential);
+  assert.deepEqual(ok.items.map((i) => i.number), [1, 2], "the next number, with marks, is a heading");
+  assert.equal(ok.items[1]!.answer, "Antarctica is the frozen continent.");
+
+  // The same line without its marks annotation is a sentence, not a heading.
+  const noMarks = loose.replace("2 Read the given", "2 Read the given").replace(
+    "36 Read the given source and answer the following questions.         (4 marks)",
+    "2 continents were named in the passage above.",
+  );
+  assert.equal(parseAnswerKey(noMarks).items.length, 1);
 }
 
 console.log("OK — answerKeyParse.selftest.ts");
