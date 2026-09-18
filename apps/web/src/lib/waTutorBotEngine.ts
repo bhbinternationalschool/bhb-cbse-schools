@@ -356,3 +356,25 @@ export function tutorSessionExpired(
   if (!Number.isFinite(at)) return true;
   return now.getTime() - at > TUTOR_SESSION_TTL_MS;
 }
+
+/**
+ * The tutor's answer, out of whatever the tutor route replied with.
+ *
+ * WHY THIS EXISTS (18 Sep 2026): the WhatsApp bot read `reply` off the top
+ * of the payload, but a successful answer comes back wrapped —
+ * `{ ok: true, data: { reply } }` — while a refusal is flat
+ * (`{ ok: false, error, needsPass }`). So every refusal was read correctly
+ * and every ANSWER was dropped. Eleven families were told "Study help could
+ * not answer just now" on exam eve, after the model had answered and after
+ * their free tutor day had been charged for it.
+ *
+ * Reading both shapes is the fix; keeping it here, pure, is what lets a
+ * test hold the two apart.
+ */
+export function tutorReplyFromPayload(payload: unknown): string {
+  if (!payload || typeof payload !== "object") return "";
+  const p = payload as { reply?: unknown; data?: { reply?: unknown } };
+  const wrapped = p.data && typeof p.data === "object" ? p.data.reply : undefined;
+  const reply = typeof wrapped === "string" && wrapped.trim() ? wrapped : p.reply;
+  return typeof reply === "string" ? reply.trim() : "";
+}

@@ -33,6 +33,7 @@ import {
   tutorSessionExpired,
   type WaTutorState,
   type WaTutorTurn,
+  tutorReplyFromPayload,
 } from "@/lib/waTutorBotEngine";
 import {
   tutorMode as normalizeTutorMode,
@@ -110,9 +111,27 @@ async function askTutor(opts: {
     stream: false,
   });
   const json = (await res.json().catch(() => null)) as
-    | { ok?: boolean; reply?: string; error?: string; needsPass?: boolean }
+    | {
+        ok?: boolean;
+        reply?: string;
+        error?: string;
+        needsPass?: boolean;
+        data?: { reply?: string };
+      }
     | null;
-  if (res.ok && json?.reply) return { ok: true, reply: json.reply };
+  // An answer arrives wrapped ({ ok: true, data: { reply } }); a refusal is
+  // flat. Reading only the flat shape threw away every answer — see
+  // tutorReplyFromPayload.
+  const reply = tutorReplyFromPayload(json);
+  if (res.ok && reply) return { ok: true, reply };
+  if (res.ok) {
+    // The route said yes and the parent still gets nothing: that is a shape
+    // drift, not a model failure, and it must not pass as one silently again.
+    console.warn(
+      "[waTutorBot] tutor route returned ok with no readable reply",
+      json ? Object.keys(json).join(",") : "null body",
+    );
+  }
   return {
     ok: false,
     needsPass: !!json?.needsPass,
