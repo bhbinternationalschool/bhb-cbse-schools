@@ -15,6 +15,7 @@ import {
   tutorHistoryFor,
   WA_TUTOR_MAX_TURNS,
   WA_TUTOR_TURN_MAX_CHARS,
+  tutorReplyFromPayload,
 } from "./waTutorBotEngine";
 
 console.log("waTutorBotEngine.selftest.ts");
@@ -319,5 +320,30 @@ const closed = (t: string) => parseWaTutorCommand(t, false);
     "one long reply cannot bloat the saved bundle",
   );
 }
+
+/* ── the tutor's answer must survive the trip back ──────────────────── */
+//
+// 18 Sep 2026: an answer comes back wrapped, a refusal comes back flat, and
+// the bot read only the flat shape — so every answer was dropped and eleven
+// families were told study help had failed after it had already answered
+// (and after their free tutor day was charged).
+{
+  assert.equal(
+    tutorReplyFromPayload({ ok: true, data: { reply: "'चित्रकार' सही उत्तर है।" } }),
+    "'चित्रकार' सही उत्तर है।",
+    "the wrapped answer is the one the route actually sends",
+  );
+  // The older flat shape still reads, so this cannot break by being reverted.
+  assert.equal(tutorReplyFromPayload({ ok: true, reply: "hello" }), "hello");
+  // A refusal carries no reply, and must not be mistaken for one.
+  assert.equal(tutorReplyFromPayload({ ok: false, error: "Free hints are over", needsPass: true }), "");
+  // Nothing usable is an empty string, never a crash.
+  for (const junk of [null, undefined, "", 42, {}, { data: {} }, { data: { reply: "   " } }, { reply: "  " }]) {
+    assert.equal(tutorReplyFromPayload(junk), "", JSON.stringify(junk ?? null));
+  }
+  // Whitespace is trimmed, not treated as an answer.
+  assert.equal(tutorReplyFromPayload({ data: { reply: "  ok  " } }), "ok");
+}
+
 
 console.log("OK — waTutorBotEngine.selftest.ts");
