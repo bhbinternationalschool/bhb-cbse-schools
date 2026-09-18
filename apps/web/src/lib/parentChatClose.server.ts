@@ -15,6 +15,7 @@ import { childrenOfHousehold, householdWhatsApp, loadSis, type Household } from 
 import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
 import { sendWhatsAppText, waNormalizeLocal10 } from "@/lib/waSend";
 import { appendSisBotClosing, listWaSisBotThreads } from "@/lib/waSisBotServer";
+import { mobilesAwaitingDrillReply } from "@/lib/examDrill.server";
 
 async function ridesBus(hh: Household): Promise<boolean> {
   try {
@@ -30,6 +31,10 @@ export type SweepResult = {
   checked: number;
   closed: { mobile: string; guardian: string; needsOffice: boolean }[];
   failed: { mobile: string; error: string }[];
+  /** Threads left open because the tutor is waiting on that family's answer. */
+  midAnswer?: number;
+  /** The whole sweep stood down, and why. */
+  skipped?: string;
 };
 
 /** Every 15 minutes in school hours: thank and guide each parent whose chat has gone quiet. */
@@ -61,14 +66,29 @@ export async function runParentChatCloseSweep(opts: { dryRun?: boolean; now?: Da
   } else {
     return out;
   }
+  // Silence is not always the end of a conversation: it is also a child
+  // fetching their book. A thread the tutor is waiting on stays open.
+  const awaitingAnswer = await mobilesAwaitingDrillReply(now);
+  if (!awaitingAnswer) {
+    // Unreadable is not empty. Sending now could thank a family in the
+    // middle of the practice the school asked them to do.
+    out.skipped = "open drills unreadable — nothing closed";
+    return out;
+  }
+  out.midAnswer = 0;
+
   for (const t of await listWaSisBotThreads()) {
     out.checked += 1;
     const guided = lastGuideAt.get(t.householdId);
     const d = shouldCloseThread(
       guided && (!t.closingSentAt || guided > t.closingSentAt) ? { ...t, closingSentAt: new Date(guided).toISOString() } : t,
       now,
+      { awaitingAnswer: awaitingAnswer.has(waNormalizeLocal10(t.mobile)) },
     );
-    if (!d.close) continue;
+    if (!d.close) {
+      if (d.reason === "mid_answer") out.midAnswer += 1;
+      continue;
+    }
     const hh = sis.households.find((x) => x.id === t.householdId);
     if (hh && isInQuietHours(hh, now)) continue;
     const text = parentChatClosingMessage({ needsOffice: d.needsOffice, hasTransport: hh ? await ridesBus(hh) : true });
