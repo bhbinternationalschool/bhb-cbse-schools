@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readReviewLogin, isReviewLoginPair } from "@/lib/reviewLogin.server";
 import { demoSessionCookieName, type DemoSession } from "@/lib/auth";
 import { appSessionCookieOptions } from "@/lib/authCookies.server";
 import { signSession } from "@/lib/sessionCookie.server";
@@ -29,15 +30,9 @@ export async function POST(request: Request) {
     // App-store review access: Play/App Store reviewers cannot receive a
     // WhatsApp OTP, so a fixed mobile+code pair (env-configured, disabled
     // unless all three vars are set) signs into one designated household.
-    const reviewMobile = process.env.REVIEW_LOGIN_MOBILE?.trim();
-    const reviewCode = process.env.REVIEW_LOGIN_CODE?.trim();
-    const reviewHousehold = process.env.REVIEW_LOGIN_HOUSEHOLD_ID?.trim();
-    const isReviewLogin =
-      !!reviewMobile &&
-      !!reviewCode &&
-      !!reviewHousehold &&
-      mobile === reviewMobile &&
-      code === reviewCode;
+    const review = readReviewLogin();
+    const reviewHousehold = review?.householdId;
+    const isReviewLogin = isReviewLoginPair(mobile, code);
 
     if (!isReviewLogin) {
       const verified = await verifyParentOtp({ mobile, code });

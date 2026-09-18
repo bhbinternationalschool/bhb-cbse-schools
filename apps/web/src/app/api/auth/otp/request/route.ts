@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { issueParentOtp } from "@/lib/parentOtp.server";
 import { resolveHouseholdByMobileServer } from "@/lib/parentHousehold.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
+import { isReviewLoginMobile } from "@/lib/reviewLogin.server";
 
 export const runtime = "nodejs";
 
@@ -12,6 +13,18 @@ export async function POST(request: Request) {
     const mobile = (body.mobile || "").trim();
     if (!mobile) {
       return NextResponse.json({ error: "Mobile required" }, { status: 400 });
+    }
+
+    // App-store review access: the listed number is fictional and no phone
+    // answers it, so sending a WhatsApp OTP can only fail — and a failed send
+    // returns 502, stranding the reviewer at their first tap. The fixed code
+    // is checked at /verify; knowing the number alone signs nobody in.
+    if (isReviewLoginMobile(mobile)) {
+      return NextResponse.json({
+        ok: true,
+        expiresInSec: 600,
+        maskedMobile: `******${mobile.slice(-4)}`,
+      });
     }
 
     await ensureSchoolMirrorHydrated();
