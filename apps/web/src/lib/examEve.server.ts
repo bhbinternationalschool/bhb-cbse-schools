@@ -39,6 +39,7 @@ import {
   tomorrowIso,
   type EveChild,
   type EveFamily,
+  type EveSendOptions,
   type EveSlot,
 } from "@/lib/examEve";
 
@@ -152,6 +153,22 @@ export async function runExamEveSweep(opts: {
   now?: Date;
   /** Force a specific exam date (testing / a missed evening). */
   examDate?: string;
+  /**
+   * Send this date's message AGAIN, to families who were already sent one.
+   *
+   * The evening sweep is once per family per exam date, which is what stops
+   * a scheduler retry messaging everyone twice. That guard also blocks the
+   * one case where a second message is the right thing: the first one was
+   * wrong. A resend skips the ledger check, says "correction" in the words
+   * the family reads, and carries its own clientMessageId so the send
+   * layer's own dedupe does not swallow it.
+   *
+   * Narrow it with `onlyClasses`; a resend to everybody is almost never
+   * what is meant.
+   */
+  resend?: boolean;
+  /** Class names as the roster prints them ("I", "VIII"). Empty = all. */
+  onlyClasses?: string[];
 }): Promise<ExamEveResult> {
   const now = opts.now ?? new Date();
   const today = istTodayIso(now.getTime());
@@ -179,7 +196,14 @@ export async function runExamEveSweep(opts: {
 
   const sis = loadSis();
   const households = sis.households ?? [];
-  const sentAlready = opts.dryRun ? new Set<string>() : await alreadySent(examDate);
+  const sendOpts: EveSendOptions = { correction: !!opts.resend };
+  const onlyClasses = new Set(
+    (opts.onlyClasses ?? []).map((c) => c.trim().toUpperCase()).filter(Boolean),
+  );
+  // A resend is deliberate: the ledger says "already sent", and that is
+  // exactly the case it exists for.
+  const sentAlready =
+    opts.dryRun || opts.resend ? new Set<string>() : await alreadySent(examDate);
   const mobiles = households.map((h) => householdWhatsApp(h) || h.mobile || "").filter(Boolean);
   const optedOut = await listOptedOutSet(mobiles);
 
@@ -191,7 +215,13 @@ export async function runExamEveSweep(opts: {
     // the number is not a person.
     if (isReviewDemoHousehold(hh)) continue;
     const family = eveFamilyFor(hh, setup.academicYearCode);
-    const vars = examEveVariables(family, setup.slots, setup.subjectNames, examDate);
+    if (
+      onlyClasses.size > 0 &&
+      !family.children.some((c) => onlyClasses.has((c.className || "").trim().toUpperCase()))
+    ) {
+      continue;
+    }
+    const vars = examEveVariables(family, setup.slots, setup.subjectNames, examDate, sendOpts);
     if (vars.empty) continue;
     result.families += 1;
 
@@ -212,7 +242,7 @@ export async function runExamEveSweep(opts: {
     }
 
     const inWindow = await isWithin24HourWindow(family.mobile);
-    const freeText = examEveFreeText(family, setup.slots, setup.subjectNames, examDate);
+    const freeText = examEveFreeText(family, setup.slots, setup.subjectNames, examDate, sendOpts);
     const language = family.hindi ? "hi" : "en";
 
     if (opts.dryRun) {
@@ -229,13 +259,16 @@ export async function runExamEveSweep(opts: {
 
     // The ledger marker: the exam date in the preview, so the dedupe read
     // above can tell this evening's send from last evening's.
-    const marker = `[${examDate}] `;
+    const marker = `[${examDate}] ${opts.resend ? "[correction] " : ""}`;
+    // A resend reuses neither the ledger row nor the send claim: same family,
+    // same date, different message.
+    const sendKey = `exameve:${examDate}:${hh.id}${opts.resend ? ":correction" : ""}`;
 
     if (inWindow) {
       const send = await sendWhatsAppText({
         toMobile: family.mobile,
         body: freeText,
-        clientMessageId: `exameve:${examDate}:${hh.id}`,
+        clientMessageId: sendKey,
       });
       await logHouseholdWaSend({
         mobile: family.mobile,
@@ -286,7 +319,7 @@ export async function runExamEveSweep(opts: {
             .map((k) => ({ type: "text", text: positions[k]! })),
         },
       ],
-      clientMessageId: `exameve:${examDate}:${hh.id}`,
+      clientMessageId: sendKey,
     });
     await logHouseholdWaSend({
       mobile: family.mobile,
