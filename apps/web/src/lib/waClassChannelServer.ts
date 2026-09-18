@@ -49,6 +49,10 @@ export type ClassChannelDraft = {
   dueAt: string;
   eventDate: string;
   mediaNote: string;
+  /** The same message in Hindi, written when the draft was expanded. */
+  bodyHi?: string;
+  /** "Ch 6 — Multiples and Factors" when the shorthand resolved to a chapter. */
+  chapterHint?: string;
   status: "pending" | "confirmed" | "cancelled" | "applied";
   createdAt: string;
   createdByStaffId: string;
@@ -905,10 +909,35 @@ export async function handleWaClassChannelInbound(msg: {
           broadcastCount: 0,
           erpTarget: erpTargetFor(parsed.kind),
         };
+        // Written out for parents before the teacher is shown it, so what
+        // they confirm is what the parents will read. Homework and classwork
+        // only — a notice or a holiday has no chapter to resolve.
+        let expandNote = "";
+        if (draft.kind === "homework" || draft.kind === "classwork") {
+          try {
+            const { expandHomeworkForParents } = await import("@/lib/homeworkExpand.server");
+            const x = await expandHomeworkForParents({
+              classLabel: ch.label,
+              className: ch.label,
+              subjectLabel: subjectName,
+              teacherText: draft.body,
+              dueAt: draft.dueAt,
+            });
+            draft.title = x.title || draft.title;
+            draft.body = x.bodyEn;
+            draft.bodyHi = x.bodyHi;
+            draft.chapterHint = x.chapterHint;
+            expandNote = x.note;
+          } catch (e) {
+            // The teacher's own words go out unchanged. A homework post is
+            // never worth losing to an expansion that would not run.
+            console.warn("[class-channel] homework not expanded", (e as Error)?.message);
+          }
+        }
         store.drafts.unshift(draft);
         thread.pendingDraftId = draft.id;
         thread.channelId = ch.id;
-        replyText = composeDraftPreview(draft, ch);
+        replyText = [composeDraftPreview(draft, ch), expandNote].filter(Boolean).join("\n\n");
       }
     }
   } else {

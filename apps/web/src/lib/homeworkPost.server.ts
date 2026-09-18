@@ -44,6 +44,8 @@ export type PostHomeworkInput = {
   date?: string;
   dueAt?: string;
   requiresSubmit?: boolean;
+  /** "Ch 6 — Multiples and Factors" — opens the parent app's tutor on the right chapter. */
+  aiTutorHint?: string;
 };
 
 export type PostHomeworkResult =
@@ -78,6 +80,7 @@ export async function postHomeworkServer(
     bodyHi: input.bodyHi || "",
     dueAt: input.dueAt || "",
     requiresSubmit: !!input.requiresSubmit,
+    aiTutorHint: input.aiTutorHint || "",
   });
   if (!result.ok) return { ok: false, error: result.error };
 

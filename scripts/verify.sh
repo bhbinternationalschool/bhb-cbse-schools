@@ -119,6 +119,7 @@ SELFTESTS=(
   test:erp-reports
   test:fleet-live
   test:udise-doc-intake
+  test:homework-expand
   test:roster-name-case
   test:review-demo-records
   test:wa-template-shape-sync

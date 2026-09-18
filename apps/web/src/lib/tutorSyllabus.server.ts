@@ -153,6 +153,23 @@ const schoolCache = new Map<number, { at: number; value: ClassTextbooks }>();
  * same listing builds from either. A book's subject is carried as its
  * display name ("Mathematics"), which subjectKeyFor reads back.
  */
+/**
+ * The school's own books and chapters for a class, as rows rather than a
+ * prompt block — for callers that need to look a chapter UP rather than
+ * describe the list to a model (homeworkExpand.server.ts). Same cache, same
+ * rule: Classes 1–8 only, and an empty result when nothing is loaded.
+ */
+export async function schoolBooksForClass(className: string | undefined): Promise<{ books: SyllabusBook[]; chapters: SyllabusChapter[] }> {
+  const grade = indexGrade(className);
+  if (grade === null || grade <= 0) return { books: [], chapters: [] };
+  try {
+    return await schoolClassTextbooks(grade);
+  } catch (e) {
+    console.warn("[tutor-textbooks] school books unavailable:", e instanceof Error ? e.message : e);
+    return { books: [], chapters: [] };
+  }
+}
+
 async function schoolClassTextbooks(grade: number): Promise<ClassTextbooks> {
   const hit = schoolCache.get(grade);
   if (hit && Date.now() - hit.at < (hit.value.books.length ? FILLED_TTL_MS : EMPTY_TTL_MS)) return hit.value;
