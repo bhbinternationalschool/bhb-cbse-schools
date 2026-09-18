@@ -1063,6 +1063,29 @@ export async function handleWaSisBotInbound(opts: {
     }
   }
 
+  // ── A revision drill already running on this number ──
+  //
+  // Before exam-eve and before the tutor: while a drill is open, a bare "60"
+  // or "photosynthesis" is an ANSWER to the question we just asked, and both
+  // of those would otherwise be read as something else entirely. It claims
+  // nothing when no drill is open, and nothing at all unless
+  // EXAM_DRILL_ENABLED is set.
+  try {
+    const { continueExamDrill } = await import("@/lib/examDrill.server");
+    const drill = await continueExamDrill({
+      household: hh,
+      mobile10,
+      text,
+      hindi: waTemplateLanguageFor(hh) === "hi",
+    });
+    if (drill.handled) {
+      return finishLanguageFlow(store, thread, parentMsg, drill.replyText);
+    }
+  } catch (e) {
+    // A drill that cannot run must never take fees and receipts with it.
+    console.error("[wa-sis-bot] exam drill failed", e);
+  }
+
   // ── Exam eve: the "Start practice" button and TIMETABLE ──
   //
   // Before study help, because the button's own words ("अभ्यास शुरू करें")

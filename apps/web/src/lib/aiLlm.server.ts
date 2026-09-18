@@ -32,6 +32,18 @@ import {
   type VoiceNoteTranscript,
 } from "@/lib/voiceNote";
 import {
+  DRILL_CHECK_SYSTEM,
+  DRILL_PROMPT_VERSION,
+  DRILL_QUESTION_SYSTEM,
+  buildCheckPrompt,
+  buildQuestionPrompt,
+  parseDrillCheck,
+  parseDrillQuestion,
+  type DrillCheck,
+  type DrillChapter,
+  type DrillQuestion,
+} from "@/lib/examDrill";
+import {
   HOMEWORK_EXPAND_PROMPT_VERSION,
   HOMEWORK_EXPAND_SYSTEM,
   buildHomeworkExpandPrompt,
@@ -1525,6 +1537,75 @@ export async function expandHomeworkJson(opts: {
       meta: { route: "homework-expand", promptVersion: HOMEWORK_EXPAND_PROMPT_VERSION },
     },
     (text) => parseHomeworkExpansion(text, opts.facts),
+  );
+  if (r.ok) return { ok: true, draft: r.data, engine: r.engine, generationId: r.generationId };
+  return { ok: false, error: r.error || "No AI engine configured", engine: r.engine };
+}
+
+/**
+ * One revision question, from the chapters the class has actually covered.
+ *
+ * `parseDrillQuestion` throws away a question the model itself places beyond
+ * that scope, so the caller gets nothing rather than a question about a
+ * chapter the child has never been taught — the night before their paper.
+ *
+ * Not cacheable: the point is a different question each time, and the
+ * questions already asked are in the prompt.
+ */
+export async function drillQuestionJson(opts: {
+  className: string;
+  subjectLabel: string;
+  chapters: DrillChapter[];
+  scope: number;
+  retrySkill: string | null;
+  avoid: string[];
+  number: number;
+}): Promise<
+  | { ok: true; draft: DrillQuestion; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const r = await callLlmJson(
+    {
+      system: DRILL_QUESTION_SYSTEM,
+      userMessage: buildQuestionPrompt(opts),
+      maxTokens: 400,
+      // A revision question should vary between children and between
+      // attempts; this is the one place in the drill that wants some spread.
+      temperature: 0.8,
+      meta: { route: "exam-drill-question", promptVersion: DRILL_PROMPT_VERSION },
+    },
+    (text) => parseDrillQuestion(text, opts.scope),
+  );
+  if (r.ok) return { ok: true, draft: r.data, engine: r.engine, generationId: r.generationId };
+  return { ok: false, error: r.error || "No AI engine configured", engine: r.engine };
+}
+
+/**
+ * Mark one answer.
+ *
+ * Cold, deliberately: a child sits the paper tomorrow, and a model warmed up
+ * to be encouraging marks a wrong method "close". `parseDrillCheck` refuses a
+ * reading that calls an answer wrong and then says nothing about why.
+ */
+export async function drillCheckJson(opts: {
+  className: string;
+  subjectLabel: string;
+  question: string;
+  skill: string;
+  answer: string;
+}): Promise<
+  | { ok: true; draft: DrillCheck; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const r = await callLlmJson(
+    {
+      system: DRILL_CHECK_SYSTEM,
+      userMessage: buildCheckPrompt(opts),
+      maxTokens: 400,
+      temperature: 0.1,
+      meta: { route: "exam-drill-check", promptVersion: DRILL_PROMPT_VERSION },
+    },
+    parseDrillCheck,
   );
   if (r.ok) return { ok: true, draft: r.data, engine: r.engine, generationId: r.generationId };
   return { ok: false, error: r.error || "No AI engine configured", engine: r.engine };

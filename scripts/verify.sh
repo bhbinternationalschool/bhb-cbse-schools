@@ -121,6 +121,7 @@ SELFTESTS=(
   test:udise-doc-intake
   test:homework-expand
   test:homework-submission
+  test:exam-drill
   test:roster-name-case
   test:review-demo-records
   test:wa-template-shape-sync
