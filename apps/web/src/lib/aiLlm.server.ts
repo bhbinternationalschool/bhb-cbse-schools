@@ -1531,8 +1531,14 @@ export async function expandHomeworkJson(opts: {
     {
       system: `${HOMEWORK_EXPAND_SYSTEM}\nThe school is ${opts.schoolName}.`,
       userMessage: buildHomeworkExpandPrompt(opts.facts),
-      // Two short bodies, one of them Hindi (~1.6x the tokens of English).
-      maxTokens: 900,
+      // gemini-3.6-flash is a THINKING model: its reasoning is billed against
+      // maxOutputTokens before a single visible character is emitted. A budget
+      // sized for the answer alone comes back finishReason MAX_TOKENS with the
+      // JSON cut mid-string, the parser refuses it, and the feature silently
+      // falls back. Measured against the live model on 18 Sep 2026: this
+      // prompt needs 2000 for two bodies, one of them Hindi (~1.6x the tokens
+      // of English).
+      maxTokens: 2000,
       temperature: 0.3,
       meta: { route: "homework-expand", promptVersion: HOMEWORK_EXPAND_PROMPT_VERSION },
     },
@@ -1568,7 +1574,14 @@ export async function drillQuestionJson(opts: {
     {
       system: DRILL_QUESTION_SYSTEM,
       userMessage: buildQuestionPrompt(opts),
-      maxTokens: 400,
+      // gemini-3.6-flash is a THINKING model: its reasoning is billed against
+      // maxOutputTokens before a single visible character is emitted. A budget
+      // sized for the answer alone comes back finishReason MAX_TOKENS with the
+      // JSON cut mid-string, the parser refuses it, and the feature silently
+      // falls back. Measured against the live model on 18 Sep 2026: this
+      // prompt needs 1200 (it truncated at 400, and a child got "I could not set the
+      // next question").
+      maxTokens: 1200,
       // A revision question should vary between children and between
       // attempts; this is the one place in the drill that wants some spread.
       temperature: 0.8,
@@ -1601,7 +1614,13 @@ export async function drillCheckJson(opts: {
     {
       system: DRILL_CHECK_SYSTEM,
       userMessage: buildCheckPrompt(opts),
-      maxTokens: 400,
+      // gemini-3.6-flash is a THINKING model: its reasoning is billed against
+      // maxOutputTokens before a single visible character is emitted. A budget
+      // sized for the answer alone comes back finishReason MAX_TOKENS with the
+      // JSON cut mid-string, the parser refuses it, and the feature silently
+      // falls back. Measured against the live model on 18 Sep 2026: this
+      // prompt needs 1200 (at 400 no answer could be marked at all).
+      maxTokens: 1200,
       temperature: 0.1,
       meta: { route: "exam-drill-check", promptVersion: DRILL_PROMPT_VERSION },
     },
@@ -2318,7 +2337,12 @@ export async function readParentDocument(opts: {
     // card, and the reply is JSON with an address in it. At 700 the model
     // ran out mid-object, the JSON would not parse, and a truncated reading
     // was indistinguishable from an unreadable document.
-    maxTokens: 1400,
+    //
+    // Raised again to 2500 on 18 Sep 2026 with the three text routes above:
+    // the same thinking-token budget applies, and this reply carries a dozen
+    // fields. NOT measured against a real photograph — unlike those three —
+    // so this is headroom, not a fix for an observed failure.
+    maxTokens: 2500,
   });
   const latencyMs = Date.now() - t0;
 
