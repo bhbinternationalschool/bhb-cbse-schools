@@ -443,7 +443,9 @@ export async function handleRelayReply(msg: {
 
   const { data: relay } = await ctx.sb
     .from("wa_relay_messages")
-    .select("id, code, sender_mobile10, sender_name, household_id")
+    // inbound_text and category ride along so an office reply can be kept as a
+    // proposed answer-book entry (answerBook.server.ts).
+    .select("id, code, category, inbound_text, sender_mobile10, sender_name, household_id")
     .eq("id", relayId)
     .single();
   if (!relay) return { handled: false };
@@ -494,6 +496,27 @@ export async function handleRelayReply(msg: {
     .eq("id", claim.id);
 
   if (send.ok) {
+    // The office has just answered a question the bot could not. That pair —
+    // what a parent asked, what the school said — is the only teaching signal
+    // this system has, and until 19 Sep 2026 it was thrown away: 15 questions
+    // handed over, 0 kept. It is captured as PROPOSED; nobody is answered
+    // from it until someone with the authority approves the wording.
+    void (async () => {
+      try {
+        const { captureAnswerPair } = await import("@/lib/answerBook.server");
+        await captureAnswerPair({
+          question: String(relay.inbound_text || ""),
+          answer: body,
+          category: String(relay.category || "general"),
+          source: "office_reply",
+          sourceRef: `relay:${relay.code}`,
+        });
+      } catch (e) {
+        // Learning is a bonus; the parent's answer has already gone.
+        console.warn("[answerBook] could not capture the office reply", (e as Error)?.message);
+      }
+    })();
+
     await ctx.sb
       .from("wa_relay_messages")
       .update({ status: "replied", replied_at: new Date().toISOString() })

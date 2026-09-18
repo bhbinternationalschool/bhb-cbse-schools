@@ -366,6 +366,7 @@ jobs:
           npm run test:diksha-index
           npm run test:teacher-contact
           npm run test:parent-profile
+          npm run test:answer-book
           npm run test:syllabus-from-books
           npm run test:tutor-syllabus
           npm run test:parent-tickets

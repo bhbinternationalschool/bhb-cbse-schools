@@ -27,6 +27,7 @@
     "test:school-whatsapp": "npx tsx src/lib/schoolWhatsApp.selftest.ts",
     "test:upload-validation": "npx tsx src/lib/uploadValidation.selftest.ts",
     "test:parent-profile": "npx tsx src/lib/parentProfile.selftest.ts",
+    "test:answer-book": "npx tsx src/lib/answerBook.selftest.ts",
     "test:syllabus-from-books": "npx tsx src/lib/syllabusFromBooks.selftest.ts",
     "test:tutor-syllabus": "npx tsx src/lib/tutorSyllabus.selftest.ts",
     "test:drive-archive": "npx tsx src/lib/driveArchive.selftest.ts",
