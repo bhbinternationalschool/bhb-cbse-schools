@@ -153,6 +153,18 @@ async function teacherFor(postId: string): Promise<{ name: string; mobile: strin
   return alt ? { name: alt.fullName, mobile: waNormalizeLocal10(alt.mobile) } : null;
 }
 
+export type InsertOutcome = "saved" | "duplicate" | "failed";
+
+/**
+ * One submission row.
+ *
+ * `homework_desk_submissions` is UNIQUE on (post_id, student_id), so a
+ * webhook Meta delivers twice — which it does whenever it does not get a
+ * prompt 200 — races the desk read that filters out work already submitted.
+ * The loser gets a 23505, and that is not a failure: the child's homework
+ * IS recorded. Telling the family "we could not save it, please send it
+ * again" would be false, and would invite a third copy.
+ */
 async function insertSubmission(row: {
   id: string;
   postId: string;
@@ -160,9 +172,9 @@ async function insertSubmission(row: {
   note: string;
   driveNote: string;
   code: string;
-}): Promise<boolean> {
+}): Promise<InsertOutcome> {
   const ctx = await getServerTenantContext();
-  if (!ctx) return false;
+  if (!ctx) return "failed";
   const { error } = await ctx.sb.from("homework_desk_submissions").insert({
     id: row.id,
     tenant_id: ctx.tenantId,
@@ -183,10 +195,13 @@ async function insertSubmission(row: {
   // bundle: a webhook that rewrites every homework row is how this codebase
   // has lost a book of records before.
   if (error) {
+    if (String((error as { code?: string }).code || "") === "23505") {
+      return "duplicate";
+    }
     console.error("[homeworkSubmit] could not save the submission", error.message);
-    return false;
+    return "failed";
   }
-  return true;
+  return "saved";
 }
 
 /**
@@ -261,7 +276,21 @@ export async function captureHomeworkSubmissionFromWhatsApp(input: {
       driveNote,
       code,
     });
-    if (!saved) {
+    if (saved === "duplicate") {
+      // Already recorded — a re-delivered webhook, or the family sending the
+      // same photo twice. Thank them and stop: a second copy to the teacher
+      // would be the school, not the parent, repeating itself.
+      await sendWhatsAppText({
+        toMobile: input.mobile10,
+        body:
+          language === "hi"
+            ? "✅ यह पहले ही मिल चुका है, धन्यवाद 🙏 शिक्षक तक पहुँच गया है।"
+            : "✅ We already have this, thank you 🙏 It has reached the teacher.",
+        clientMessageId: `hw_submit_dup_${input.waMessageId || input.mediaId}`,
+      }).catch(() => null);
+      return { handled: true, ok: true, reason: "already_submitted" };
+    }
+    if (saved === "failed") {
       // Say so rather than thanking them for something we did not keep.
       await sendWhatsAppText({
         toMobile: input.mobile10,
