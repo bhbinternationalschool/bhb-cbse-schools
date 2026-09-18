@@ -29,22 +29,21 @@ import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { patchMirrorHousehold } from "@/lib/parentHousehold.server";
 import { fetchServerBlob } from "@/lib/serverBlob";
 import { getServerTenantContext } from "@/lib/serverTenant";
-import { loadSis, normalizeStudent, type Household, type SisStudent, type StudentDocFile } from "@/lib/sis";
+import { childrenOfHousehold, loadSis, normalizeStudent, type Household, type SisStudent, type StudentDocFile } from "@/lib/sis";
 import { pushSisToDb, rowToStudent } from "@/lib/sisNormalized.server";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { updateHouseholdContactInDb, updateStudentDocsInDb } from "@/lib/sisProfile.server";
 import { TENANT } from "@/lib/types";
 import {
   DOC_TYPE_LABEL,
-  UDISE_DOC_EXTRACT_PROMPT,
-  UDISE_DOC_EXTRACT_SYSTEM,
-  compareNames,
-  parseUdiseDocExtract,
+  documentRouteFor,
   planUdiseCorrections,
+  resolveTargetChildren,
+  renderUnreadableAck,
+  renderUnrecognisedAck,
   renderOfficeAlert,
   renderParentAck,
   type UdiseCorrectionPlan,
-  type UdiseDocExtract,
   matchPaymentToReceipts,
   renderPaymentProofAck,
   renderPaymentProofOfficeAlert,
@@ -79,31 +78,6 @@ function classLabel(s: SisStudent, masters: Awaited<ReturnType<typeof loadServer
   const c = (masters.classes ?? []).find((x) => x.id === s.classId)?.name ?? "—";
   const sec = (masters.sections ?? []).find((x) => x.id === s.sectionId)?.name ?? "";
   return sec ? `${c}-${sec}` : c;
-}
-
-/**
- * Which child the document is about. Returns [] when it cannot be decided —
- * the office is told, the parent is asked to add the child's name.
- * A parent's own Aadhaar belongs to every child of the family.
- */
-export function resolveTargetChildren(input: { children: SisStudent[]; extract: UdiseDocExtract; caption: string }): SisStudent[] {
-  const { children, extract, caption } = input;
-  if (!children.length) return [];
-  if (extract.person === "father" || extract.person === "mother") return children;
-  if (children.length === 1) return children;
-  const byName = (name: string) => children.filter((c) => compareNames(c.fullName, name) !== "different");
-  if (extract.nameOnDoc) {
-    const hit = byName(extract.nameOnDoc);
-    if (hit.length === 1) return hit;
-  }
-  if (caption) {
-    const hit = children.filter((c) => {
-      const first = (c.fullName || "").split(/\s+/)[0]?.toLowerCase() ?? "";
-      return first.length >= 3 && caption.toLowerCase().includes(first);
-    });
-    if (hit.length === 1) return hit;
-  }
-  return [];
 }
 
 /** The student as the database holds it right now — revision included, so the guarded push can refuse a stale write. */
@@ -272,6 +246,46 @@ export async function alertOfficeOfUdiseDocument(input: {
 }
 
 /**
+ * Give the file to a person.
+ *
+ * For everything this module cannot act on — a file we failed to read, and a
+ * file that is simply not a document for the child's record. The office
+ * relay is the right destination rather than the ERP inbox: it records the
+ * hand-over, forwards the photograph itself to the office phones by
+ * category, and carries a code the office can reply to, so the parent hears
+ * back from a human on the same thread.
+ *
+ * Never throws — the parent has already been answered by the time this runs.
+ */
+async function handOverFileToOffice(input: {
+  mobile10: string;
+  caption: string;
+  waMessageId?: string;
+  mediaId: string;
+  mimeType: string;
+  fileName?: string;
+  guardianName: string;
+  reason: string;
+}): Promise<void> {
+  try {
+    const { relayEscalation } = await import("@/lib/waRelay.server");
+    const r = await relayEscalation({
+      fromWaId: input.mobile10,
+      text: input.caption,
+      waMessageId: input.waMessageId,
+      profileName: input.guardianName,
+      audience: "sis_parent",
+      mediaNote: input.fileName ? `file: ${input.fileName}` : `file (${input.mimeType})`,
+      media: { mediaId: input.mediaId, mimeType: input.mimeType, filename: input.fileName },
+      reason: input.reason,
+    });
+    if (!r.ok) console.warn("[udise-intake] hand-over to office failed", r.status, r.error);
+  } catch (e) {
+    console.warn("[udise-intake] hand-over to office threw", e);
+  }
+}
+
+/**
  * A photo or PDF from a KNOWN family. Returns `handled: false` only when the
  * message should go on to the ordinary bot (unsupported type, no vision
  * model) — once we have read the file, the parent hears from us here.
@@ -341,7 +355,7 @@ export async function captureUdiseDocumentFromWhatsApp(input: {
   const hinted = (input.mimeType || "").toLowerCase();
   if (hinted && !ALLOWED.test(hinted)) return { ...none, reason: "unsupported_type" };
 
-  const { geminiConfigured, generateGeminiVisionJson } = await import("@/lib/erpAiGemini.server");
+  const { geminiConfigured } = await import("@/lib/erpAiGemini.server");
   if (!geminiConfigured()) return { ...none, reason: "no_vision" };
 
   const { fetchWaMediaAsDataUrl } = await import("@/lib/waInboundMedia.server");
@@ -358,22 +372,91 @@ export async function captureUdiseDocumentFromWhatsApp(input: {
   const masters = await loadServerMasters();
   const hh = input.household;
   const language = waTemplateLanguageFor(hh);
-  const children = loadSis().students.filter((s) => s.householdId === hh.id && s.status === "active");
+  // Each child once, THIS session. `students.filter(s => s.status === "active")`
+  // returns one row per child per academic year — on this school's data 161
+  // of 189 households look like multi-child families, and 98 single-child
+  // families were being asked "which child is this for? (RAHUL / RAHUL)".
+  // Worse, resolveTargetChildren only accepts a name that matches exactly
+  // one row, so with the duplicates a correctly-read name could never
+  // decide anything. See childrenOfHousehold.
+  const { currentAcademicYearCode } = await import("@/lib/masters");
+  const children = childrenOfHousehold(loadSis(), hh.id, currentAcademicYearCode(masters));
   const refId = `${input.waMessageId || input.mediaId}`.replace(/[^A-Za-z0-9_-]/g, "").slice(-40) || String(Date.now());
 
-  let extract: UdiseDocExtract | null = null;
+  let read: Awaited<ReturnType<typeof import("@/lib/aiLlm.server").readParentDocument>>;
   try {
-    const r = await generateGeminiVisionJson({ system: UDISE_DOC_EXTRACT_SYSTEM, prompt: UDISE_DOC_EXTRACT_PROMPT, base64, mimeType, maxTokens: 700 });
-    if (r.ok) extract = parseUdiseDocExtract(r.text);
+    const { readParentDocument } = await import("@/lib/aiLlm.server");
+    read = await readParentDocument({
+      base64,
+      mimeType,
+      byteLength: Math.floor((base64.length * 3) / 4),
+      waMessageId: input.waMessageId,
+    });
   } catch (e) {
-    console.warn("[udise-intake] vision failed", e);
-  }
-  if (!extract) {
-    extract = { docType: "other", person: "unknown", nameOnDoc: "", dob: "", aadhaarNumber: "", gender: "", fatherName: "", motherName: "", address: "", pincode: "", payment: null, missing: ["all"], notes: "The document could not be read." };
+    read = { ok: false, failure: "read-failed", error: e instanceof Error ? e.message : "vision call threw" };
   }
 
+  // We could not read it. That is a fact about US, not about the document,
+  // and it must not be dressed up as one: no "could not be recognised", no
+  // UDISE+ wording, no question put to the parent. The file goes to a person
+  // through the office relay, which forwards the photograph itself.
+  if (!read.ok) {
+    console.warn("[udise-intake] document unread", input.waMessageId, read.failure, read.error);
+    await sendWhatsAppText({
+      toMobile: input.mobile10,
+      body: renderUnreadableAck(language),
+      clientMessageId: `udise_ack_${refId}`,
+    }).catch((e) => console.warn("[udise-intake] unreadable ack failed", e));
+    await handOverFileToOffice({
+      mobile10: input.mobile10,
+      caption: input.caption || "",
+      waMessageId: input.waMessageId,
+      mediaId: input.mediaId,
+      mimeType,
+      fileName: input.fileName,
+      guardianName: hh.guardianName,
+      reason:
+        read.failure === "budget"
+          ? "a file the school could not read today (AI budget spent) — please open it yourself"
+          : "a file the school could not read (the reading failed) — please open it yourself",
+    });
+    return { handled: true, ok: false, reason: `unread_${read.failure}`, studentIds: [], applied: 0, held: 0 };
+  }
+
+  const extract = read.result;
+  const route = documentRouteFor(extract.docType);
   const targets = resolveTargetChildren({ children, extract, caption: input.caption || "" });
   const label = DOC_TYPE_LABEL[extract.docType];
+
+  // Read, and it is not a document for the child's record. Nothing here is
+  // a UDISE+ matter, so nothing is said in UDISE+ terms and the family's
+  // children are not listed back at them — the old code asked "which child
+  // is this for?" about a fee receipt, which is how this was reported.
+  if (route === "unrecognised") {
+    // The parent wrote something with it. That sentence is the message; the
+    // file is an attachment to it. Hand the whole thing to the ordinary bot,
+    // which answers the question and escalates to the office itself when it
+    // cannot — answering the caption beats acknowledging the file.
+    if ((input.caption || "").trim().length >= 3) {
+      return { ...none, reason: "not_a_record_document_with_caption" };
+    }
+    await sendWhatsAppText({
+      toMobile: input.mobile10,
+      body: renderUnrecognisedAck(language),
+      clientMessageId: `udise_ack_${refId}`,
+    }).catch((e) => console.warn("[udise-intake] unrecognised ack failed", e));
+    await handOverFileToOffice({
+      mobile10: input.mobile10,
+      caption: input.caption || "",
+      waMessageId: input.waMessageId,
+      mediaId: input.mediaId,
+      mimeType,
+      fileName: input.fileName,
+      guardianName: hh.guardianName,
+      reason: "sent a file that is not an Aadhaar, birth certificate, address proof or receipt",
+    });
+    return { handled: true, ok: true, reason: "not_a_record_document", studentIds: [], applied: 0, held: 0 };
+  }
 
   // ── A payment the parent is showing us ──
   //
@@ -382,7 +465,12 @@ export async function captureUdiseDocumentFromWhatsApp(input: {
   // and asking would be a silly reply to "I have already paid". Nothing is
   // ever posted to the fee book from a photograph — the office is told
   // where to look and a person decides.
-  if (extract.docType === "payment_proof" && extract.payment) {
+  if (route === "payment") {
+    // Total by construction: a receipt whose figures were all unreadable
+    // still belongs here, and is answered by asking the parent to type the
+    // amount and the UTR — never by falling through to the UDISE+ path and
+    // asking which child their receipt is about.
+    const payment = extract.payment ?? { amountPaise: 0, dateIso: "", reference: "", method: "", payeeName: "" };
     const first = targets[0] ?? children[0];
     const fileUrl = await fileDocumentInDrive({
       base64,
@@ -392,20 +480,20 @@ export async function captureUdiseDocumentFromWhatsApp(input: {
     });
     const { receipts, openDuesPaise } = await householdReceiptsAndDues(hh.id);
     const match = matchPaymentToReceipts({
-      amountPaise: extract.payment.amountPaise,
-      dateIso: extract.payment.dateIso,
-      reference: extract.payment.reference,
+      amountPaise: payment.amountPaise,
+      dateIso: payment.dateIso,
+      reference: payment.reference,
       receipts,
     });
     const childName = first?.fullName || hh.guardianName || "your child";
     await sendWhatsAppText({
       toMobile: input.mobile10,
-      body: renderPaymentProofAck({ payment: extract.payment, match, childName, language }),
+      body: renderPaymentProofAck({ payment, match, childName, language }),
       clientMessageId: `udise_ack_${refId}`,
     }).catch((e) => console.warn("[udise-intake] payment ack failed", e));
 
     const alert = renderPaymentProofOfficeAlert({
-      payment: extract.payment,
+      payment,
       match,
       childName,
       classLabel: first ? classLabel(first, masters) : "—",

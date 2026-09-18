@@ -16,8 +16,14 @@ import {
   matchPaymentToReceipts,
   renderPaymentProofAck,
   renderPaymentProofOfficeAlert,
+  documentRouteFor,
+  renderUnreadableAck,
+  renderUnrecognisedAck,
+  udiseDocAuditDescriptor,
+  resolveTargetChildren,
   type UdiseDocExtract,
 } from "./udiseDocIntakeAi";
+import { childrenOfHousehold, type SisState, type SisStudent } from "./sis";
 
 console.log("udiseDocIntake.selftest.ts");
 
@@ -250,5 +256,71 @@ assert.match(po.text, /never books money/);
 assert.match(po.oneLine, /₹2,500/);
 const po2 = renderPaymentProofOfficeAlert({ payment: pay.payment!, match: { kind: "by_amount_and_date", receiptNo: "RCV-00502" }, childName: "A", classLabel: "I", guardianName: "R", openDuesPaise: 0, fileUrl: null });
 assert.match(po2.text, /CONFIRM before replying/, "a likely match must be labelled as likely");
+
+/* ── Where a file goes, decided by what it IS ─────────────────────── */
+//
+// The defect this guards: a parent photographed a fee receipt from the
+// school's old software and was answered "which child is this for?", with
+// the family's children listed twice each. Only three document types belong
+// to the UDISE+ path; money has its own; everything else goes to a person.
+assert.equal(documentRouteFor("aadhaar"), "record");
+assert.equal(documentRouteFor("birth_certificate"), "record");
+assert.equal(documentRouteFor("address_proof"), "record");
+assert.equal(documentRouteFor("payment_proof"), "payment");
+assert.equal(documentRouteFor("other"), "unrecognised", "an unrecognised file never enters the UDISE+ path");
+
+for (const lang of ["en", "hi"] as const) {
+  for (const msg of [renderUnreadableAck(lang), renderUnrecognisedAck(lang)]) {
+    assert.doesNotMatch(msg, /UDISE|यूडाइस/i, "nothing about UDISE+ is said about a file we cannot act on");
+    assert.doesNotMatch(msg, /\?|किस बच्चे/, "the parent is asked nothing");
+    assert.match(msg, /office|कार्यालय/, "a person is promised");
+  }
+}
+// "Could not read it" is about us; "not recognised" would be a claim about
+// the document. See renderUnreadableAck.
+assert.match(renderUnreadableAck("en"), /could not read it/);
+assert.doesNotMatch(renderUnreadableAck("en"), /not recognis|not a valid/i);
+
+// The photograph never reaches the audit row.
+const desc = udiseDocAuditDescriptor({ mimeType: "image/jpeg", byteLength: 512 * 1024, waMessageId: "wamid.X" });
+assert.equal(desc, "[document image/jpeg 512KB wa=wamid.X]");
+
+/* ── One row per child, or the family is asked a silly question ───── */
+//
+// SIS keeps a row per child per academic year and leaves them all active.
+// HH-142 has two children and four active rows; the intake used to greet
+// its parent with "(AAROHI / AAROHI / AARUSH / AARUSH)".
+const kid = (id: string, fullName: string, admissionNo: string, academicYearCode: string): SisStudent =>
+  ({ id, fullName, admissionNo, academicYearCode, householdId: "hh_1", status: "active", docs: {} } as unknown as SisStudent);
+const hh142 = {
+  students: [
+    kid("s1", "AAROHI KUMARI", "BHB-2025-26-1071", "2025-26"),
+    kid("s2", "AAROHI KUMARI", "BHB-2025-26-1071", "2026-27"),
+    kid("s3", "AARUSH KUMAR", "BHB-2025-26-1075", "2025-26"),
+    kid("s4", "AARUSH KUMAR", "BHB-2025-26-1075", "2026-27"),
+  ],
+} as unknown as SisState;
+const thisSession = childrenOfHousehold(hh142, "hh_1", "2026-27");
+assert.equal(thisSession.length, 2, "two children, not four rows");
+assert.deepEqual(thisSession.map((c) => c.id).sort(), ["s2", "s4"], "this session's rows");
+
+// And with one row each, a name on the document can finally decide.
+const aadhaarFor = (name: string): UdiseDocExtract =>
+  ({ ...base, nameOnDoc: name, docType: "aadhaar", person: "child" } as unknown as UdiseDocExtract);
+assert.deepEqual(
+  resolveTargetChildren({ children: thisSession, extract: aadhaarFor("Aarohi Kumari"), caption: "" }).map((c) => c.id),
+  ["s2"],
+  "the name on the card picks the child",
+);
+assert.equal(
+  resolveTargetChildren({ children: hh142.students, extract: aadhaarFor("Aarohi Kumari"), caption: "" }).length,
+  0,
+  "with duplicate year rows the same name matches twice and decides nothing — the bug",
+);
+// A single-child family is never asked which child.
+assert.equal(
+  resolveTargetChildren({ children: [thisSession[0]!], extract: aadhaarFor("Someone Else"), caption: "" }).length,
+  1,
+);
 
 console.log("ok");
