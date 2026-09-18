@@ -130,8 +130,8 @@ export function newDrill(input: {
 
 export type DrillStep =
   | { kind: "ask_scope" }
-  /** Write a question. `avoid` are the ideas already covered, `retry` the one to re-teach. */
-  | { kind: "ask_question"; retrySkill: string | null; avoid: string[]; number: number }
+  /** Write a question. `avoid` are questions already asked, `avoidSkills` the ideas already tested, `retrySkill` the one to re-teach. */
+  | { kind: "ask_question"; retrySkill: string | null; avoid: string[]; avoidSkills: string[]; number: number }
   | { kind: "finish"; reason: "mastered" | "ceiling" };
 
 /**
@@ -147,6 +147,9 @@ export function nextDrillStep(state: DrillState): DrillStep {
     // A wrong answer is followed by a NEW question on the same idea.
     retrySkill: last && last.verdict && last.verdict !== "right" ? last.skill : null,
     avoid: state.asked.map((a) => a.question),
+    // Ideas already tested this session, so a drill covers the chapter
+    // instead of asking antonyms five times.
+    avoidSkills: [...new Set(state.asked.map((a) => a.skill).filter(Boolean))],
     number: state.asked.length + 1,
   };
 }
@@ -172,11 +175,20 @@ export function drillScore(state: DrillState): { right: number; asked: number } 
 export const DRILL_PROMPT_VERSION = "exam-drill/2026-09-18";
 
 export const DRILL_QUESTION_SYSTEM = [
-  "You set ONE revision question for a school child the evening before their exam. You are given the class, the subject, and the chapters the class has actually covered.",
+  "You set ONE revision question for a school child the evening before their exam. You are given the class, the subject, the chapters the class has actually covered, and what those chapters teach.",
   "Set the question ONLY from those chapters. Never from a later one, never from general knowledge of the subject: a question on something the class has not been taught, the night before a paper, does harm.",
   "One question, answerable in a sentence or a short working. No multi-part questions, no 'explain in detail'. A child answers this on a phone keypad.",
-  "Match the class: a Class 3 question uses Class 3 numbers and Class 3 words.",
-  "When a skill to revisit is given, set a DIFFERENT question testing that same idea — never repeat the question they just got wrong, because that teaches them to recall an answer rather than to do the work.",
+  // Measured failure, 18 Sep 2026: asked for Class III Hindi, the model
+  // produced सकारात्मक, चिंता and जीवित — words an eight-year-old has not
+  // met — and 'पानी' का विलोम, which has no answer at all. A child sitting
+  // a paper tomorrow reads that as their own failure.
+  "LEVEL IS NOT OPTIONAL. Use only words and numbers a child of THIS class meets in their own reader — everyday, concrete, the kind of example their textbook itself would use. Class 3 means an eight-year-old. If you would have to explain the words of the question before the child could attempt it, the question is wrong.",
+  "Every question must have ONE clear short answer that a child of this class can actually give. Never ask for the opposite, the plural or the meaning of a word that has no clear one.",
+  // Measured failure, same run: five questions in a row were all विलोम,
+  // while the chapter also taught संज्ञा, वचन and क्रिया. Revision that
+  // drills one idea five times is not revision.
+  "COVER THE CHAPTER, not one corner of it. You are told which ideas have already been tested this session — pick a DIFFERENT one from the chapter's topics unless you are explicitly asked to revisit a skill.",
+  "When a skill to revisit is given, set a different and EASIER question on that same idea — never repeat the question they just got wrong, and never make the second attempt harder than the first. They got it wrong; the next one is a way back in, not a second hurdle.",
   "skill: three or four words naming what the question tests, e.g. 'unitary method' or 'plural nouns'.",
   "Write the question in the language the child is being taught in, as the class and subject imply: a Hindi paper is asked in Hindi, a Sanskrit paper in Sanskrit, everything else in simple English.",
   'Respond with JSON only: {"question":"","skill":"","chapter":0}',
@@ -202,6 +214,7 @@ export function buildQuestionPrompt(input: {
   scope: number;
   retrySkill: string | null;
   avoid: string[];
+  avoidSkills?: string[];
   number: number;
 }): string {
   const inScope = input.chapters.filter((c) => c.position <= input.scope);
@@ -214,7 +227,13 @@ export function buildQuestionPrompt(input: {
     `This is question ${input.number} of the session.`,
   ];
   if (input.retrySkill) {
-    lines.push(`They just got a question on "${input.retrySkill}" wrong. Set a DIFFERENT question on that same idea.`);
+    lines.push(
+      `They just got a question on "${input.retrySkill}" wrong. Set a DIFFERENT and EASIER question on that same idea.`,
+    );
+  } else if ((input.avoidSkills ?? []).length > 0) {
+    lines.push(
+      `Already tested this session: ${(input.avoidSkills ?? []).join(", ")}. Pick a different idea from the chapters above.`,
+    );
   }
   if (input.avoid.length) {
     lines.push("", "Already asked — do not repeat any of these:", ...input.avoid.slice(-6).map((q) => `  - ${q}`));

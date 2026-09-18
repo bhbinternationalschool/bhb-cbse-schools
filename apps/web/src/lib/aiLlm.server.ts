@@ -1565,6 +1565,7 @@ export async function drillQuestionJson(opts: {
   scope: number;
   retrySkill: string | null;
   avoid: string[];
+  avoidSkills?: string[];
   number: number;
 }): Promise<
   | { ok: true; draft: DrillQuestion; engine: LlmEngine; generationId: string }

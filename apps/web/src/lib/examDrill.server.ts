@@ -291,6 +291,7 @@ export async function continueExamDrill(input: {
       scope: state.scope,
       retrySkill: step.retrySkill,
       avoid: step.avoid,
+      avoidSkills: step.avoidSkills,
       number: step.number,
     });
     if (!q.ok) {

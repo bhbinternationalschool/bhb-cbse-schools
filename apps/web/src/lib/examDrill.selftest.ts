@@ -57,6 +57,12 @@ assert.equal(parseScopeAnswer("0", 9), null);
 assert.equal(parseScopeAnswer("dunno", 9), null);
 
 /* ── The loop ─────────────────────────────────────────────────────── */
+const s2Base: DrillState = {
+  ...newDrill({ studentId: "stu_1", subjectLabel: "Hindi", paperLabel: "Hindi", paperDate: "2026-09-19", nowIso: "2026-09-18T15:00:00Z" }),
+  scope: 6,
+  phase: "asking",
+};
+
 let s: DrillState = newDrill({
   studentId: "stu_1", subjectLabel: "Mathematics", paperLabel: "Mathematics",
   paperDate: "2026-09-19", nowIso: "2026-09-18T15:00:00Z",
@@ -118,7 +124,7 @@ const qPrompt = buildQuestionPrompt({
 });
 assert.match(qPrompt, /5\. More about Operations on Numbers/);
 assert.doesNotMatch(qPrompt, /9\. Decimals/, "a chapter past the scope never reaches the prompt");
-assert.match(qPrompt, /DIFFERENT question on that same idea/);
+assert.match(qPrompt, /DIFFERENT and EASIER question on that same idea/);
 
 const good = JSON.stringify({ question: "A pen costs ₹12. What do 5 cost?", skill: "unitary method", chapter: 5 });
 assert.deepEqual(parseDrillQuestion(good, 6), {
@@ -129,6 +135,37 @@ assert.deepEqual(parseDrillQuestion(good, 6), {
 assert.equal(parseDrillQuestion(JSON.stringify({ question: "Add 0.5 and 0.25", skill: "decimals", chapter: 9 }), 6), null);
 assert.equal(parseDrillQuestion(JSON.stringify({ question: "", skill: "x", chapter: 1 }), 6), null);
 assert.equal(parseDrillQuestion("not json", 6), null);
+
+// Measured failures of 18 Sep, now written into the prompt: five viलोम
+// questions in a row, and words an eight-year-old has never met.
+const varied = buildQuestionPrompt({
+  className: "III", subjectLabel: "Hindi", chapters, scope: 6,
+  retrySkill: null, avoid: ["q1"], avoidSkills: ["विलोम शब्द", "संज्ञा"], number: 3,
+});
+assert.match(varied, /Already tested this session: विलोम शब्द, संज्ञा/);
+assert.match(varied, /Pick a different idea/);
+// A retry names the skill and asks for EASIER, and does not also nag about
+// variety — the two instructions would contradict each other.
+const retryPrompt = buildQuestionPrompt({
+  className: "III", subjectLabel: "Hindi", chapters, scope: 6,
+  retrySkill: "विलोम शब्द", avoid: [], avoidSkills: ["विलोम शब्द"], number: 2,
+});
+assert.match(retryPrompt, /EASIER question on that same idea/);
+assert.doesNotMatch(retryPrompt, /Pick a different idea/);
+// The step hands the skills up so the prompt can use them.
+const afterTwo = nextDrillStep({
+  ...s2Base,
+  asked: [
+    { question: "a", skill: "विलोम शब्द", chapterPosition: 2, verdict: "right" },
+    { question: "b", skill: "संज्ञा", chapterPosition: 2, verdict: "right" },
+  ],
+  streak: 2,
+});
+assert.equal(afterTwo.kind, "ask_question");
+if (afterTwo.kind === "ask_question") {
+  assert.deepEqual(afterTwo.avoidSkills, ["विलोम शब्द", "संज्ञा"]);
+  assert.equal(afterTwo.retrySkill, null, "after a right answer nothing is being revisited");
+}
 
 assert.match(buildCheckPrompt({ className: "5", subjectLabel: "Maths", question: "Q", skill: "k", answer: "60" }), /The child answered:\n60/);
 
