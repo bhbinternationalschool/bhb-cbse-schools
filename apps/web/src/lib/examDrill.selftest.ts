@@ -24,6 +24,8 @@ import {
   SCOPE_LIST_MAX,
   type DrillChapter,
   type DrillState,
+  classifyDrillReply,
+  readScopeAnswer,
 } from "./examDrill";
 
 console.log("examDrill.selftest.ts");
@@ -238,5 +240,103 @@ let bare: DrillState = { ...taught, asked: [{ question: "q", skill: "k", chapter
 bare = recordAnswer(bare, "right");
 assert.equal(bare.asked[0]!.verdict, "right");
 assert.equal(bare.asked[0]!.answer, undefined);
+
+/* ── the scope answer: a name is an answer too (19 Sep 2026) ────────── */
+{
+  const hindiChapters = [
+    { position: 1, name: "कोशिश करने वालों की हार नहीं होती", topics: [] },
+    { position: 2, name: "यह मेरा, यह मीत का", topics: [] },
+    { position: 3, name: "मेरी सोनचिरैया", topics: [] },
+    { position: 4, name: "माँ, मुझे अपने आँचल में", topics: [] },
+    { position: 5, name: "ईमानदार बालक", topics: [] },
+    { position: 6, name: "सूरज और चाँद", topics: [] },
+  ];
+
+  // The number still wins — it is what the message asks for.
+  assert.deepEqual(readScopeAnswer("5", hindiChapters), { kind: "position", position: 5 });
+  assert.deepEqual(readScopeAnswer("६", hindiChapters), { kind: "position", position: 6 });
+
+  // The actual message that stalled nine drills: the chapter's name, typed
+  // in Latin letters because that is the keyboard the family has.
+  assert.deepEqual(
+    readScopeAnswer("Imandar balak", hindiChapters),
+    { kind: "position", position: 5 },
+    "a chapter read back by name is an answer",
+  );
+  // The same name in its own script, and with noise around it.
+  assert.deepEqual(readScopeAnswer("ईमानदार बालक", hindiChapters), { kind: "position", position: 5 });
+  assert.deepEqual(readScopeAnswer("imandar balak tak padha hai", hindiChapters), {
+    kind: "position",
+    position: 5,
+  });
+  // A title of short words is still a title read back.
+  assert.deepEqual(readScopeAnswer("yah mera yah meet ka", hindiChapters), {
+    kind: "position",
+    position: 2,
+  });
+  // Half a name is enough when only one chapter can be meant.
+  assert.deepEqual(readScopeAnswer("sonchiraiya", hindiChapters), { kind: "position", position: 3 });
+  // "All of it" is the last chapter, in either language.
+  assert.deepEqual(readScopeAnswer("पूरा", hindiChapters), { kind: "position", position: 6 });
+  assert.deepEqual(readScopeAnswer("all", hindiChapters), { kind: "position", position: 6 });
+
+  // What must still be refused: nothing to go on, and a chapter past the end.
+  assert.equal(readScopeAnswer("", hindiChapters).kind, "unclear");
+  assert.equal(readScopeAnswer("हाँ", hindiChapters).kind, "unclear");
+  assert.equal(readScopeAnswer("12", hindiChapters).kind, "unclear", "past the end of the book");
+  // Guessing between two chapters would set questions from the wrong one.
+  const twins = [
+    { position: 1, name: "पानी की कहानी", topics: [] },
+    { position: 2, name: "पानी की कहानी", topics: [] },
+  ];
+  assert.equal(readScopeAnswer("pani ki kahani", twins).kind, "unclear", "a tie is not a reading");
+}
+
+/* ── asking is not answering, and good night is not a wrong answer ──── */
+{
+  for (const t of ["Lekin kaise", "कैसे करें", "samajh nahi aaya", "पता नहीं", "I don't know", "batao", "help", ""]) {
+    assert.equal(classifyDrillReply(t), "help", t || "(blank)");
+  }
+  for (const t of ["Sorry 😔 bye bye", "bye", "bas", "अब नहीं", "so raha hoon", "good night", "कल करेंगे"]) {
+    assert.equal(classifyDrillReply(t), "stop", t);
+  }
+  // Real answers must not be mistaken for either.
+  for (const t of ["चित्रकार", "Darji", "कुम्हार", "42", "कि", "सैनिक"]) {
+    assert.equal(classifyDrillReply(t), "answer", t);
+  }
+}
+
+/* ── what the child reads back ──────────────────────────────────────── */
+{
+  // Asking for help is answered with teaching, not with ❌.
+  const helped = renderCheck({
+    check: { verdict: "close", whatWentWrong: "", howToDoIt: "देश की रक्षा करने वाले को 'सैनिक' कहते हैं।", praise: "" },
+    hindi: true,
+    askedForHelp: true,
+  });
+  assert.ok(helped.startsWith("🤝"), "a question gets help, not a cross");
+  assert.ok(!helped.includes("❌") && !helped.includes("सही नहीं"), helped);
+  assert.ok(helped.includes("सैनिक"), "and the answer is actually taught");
+
+  // A right answer written in Latin letters keeps its tick and carries the
+  // one line about the exam.
+  const script = renderCheck({
+    check: { verdict: "right", whatWentWrong: "", howToDoIt: "परीक्षा में इसे हिंदी में 'दर्जी' लिखिए।", praise: "सही उत्तर" },
+    hindi: true,
+  });
+  assert.ok(script.startsWith("✅"), script);
+  assert.ok(script.includes("दर्जी"), "the exam note is still said");
+
+  // Stopping is thanked, not scored as a failure.
+  const fresh: DrillState = {
+    ...newDrill({ studentId: "s", subjectLabel: "हिंदी", paperLabel: "हिंदी", paperDate: "2026-09-19", nowIso: "n" }),
+    scope: 5,
+    phase: "asking",
+  };
+  const stopped = renderFinish({ state: fresh, reason: "stopped", hindi: true });
+  assert.ok(stopped.includes("शुभकामनाएँ"), stopped);
+  assert.ok(!stopped.includes("में से"), "no score when nothing was marked");
+}
+
 
 console.log("ok");

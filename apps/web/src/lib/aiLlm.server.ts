@@ -1607,6 +1607,8 @@ export async function drillCheckJson(opts: {
   question: string;
   skill: string;
   answer: string;
+  /** The child asked for help instead of attempting it. */
+  askedForHelp?: boolean;
 }): Promise<
   | { ok: true; draft: DrillCheck; engine: LlmEngine; generationId: string }
   | { ok: false; error: string; engine: LlmEngine }
