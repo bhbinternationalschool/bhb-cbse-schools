@@ -114,6 +114,57 @@ homework path that broadcast now goes to the co-teachers only, and the families
 are reached through the template — with the old text broadcast kept as a
 fallback for the case where the ERP write itself fails.
 
+## The work comes back the same way
+
+The message ends with "send a photo of the work to this number — it goes
+straight to the subject teacher", and that is literally what happens.
+
+1. **A parent photographs the finished work** and sends it. The webhook tries
+   homework *before* the document intake, and only when homework is actually
+   open for that family — the same gate the transport pin uses. Without it,
+   every Aadhaar card a parent sends would be filed as somebody's classwork.
+2. **Which homework** is decided by `chooseSubmissionTarget`: one candidate is
+   obvious; a caption naming one child or one subject decides; a bare number
+   answers the list we just sent. Anything else **asks**. Filing a child's work
+   against their sibling's homework is a small humiliation for both of them and
+   the teacher cannot tell it happened.
+3. **It is filed** — one row in `homework_desk_submissions`, `channel`
+   `whatsapp`, the photo to the child's Drive folder — and the desk shows it as
+   received, with the code the teacher can reply with.
+4. **The subject teacher gets it** on WhatsApp: the child, the class, the
+   homework, the parent's own words, the photo itself, and a four-character
+   code.
+5. **The teacher replies `#A7K2 well done`** and the family reads exactly
+   those words. Nothing is graded or marked by this; it is a remark.
+
+### Why this matters more than convenience
+
+Meta delivers free-form text only to a family that has messaged the school
+within 24 hours. That single rule is why this ERP leans on approved templates
+for everything and waits on Meta's queue to change a sentence. **A family that
+has just sent their child's homework has opened that window themselves** — so
+for the rest of that day the school can simply talk to them, and the teacher's
+remark goes as plain text with no template at all. A loop the parents start
+keeps the door open.
+
+### What it will not do
+
+Guess which child; accept a photo when no homework is open (it hands the image
+back to the document intake, which is the right reader for an Aadhaar card);
+mark or grade anything; rewrite a teacher's words. And a code that matches no
+submission is handed on to the office relay, which uses the same code shape —
+homework is checked first so the answer never depends on which table was read
+first.
+
+### A wipe this had to avoid
+
+`pushHomeworkDeskToDb` upserts whole submission rows, so a column the desk
+state does not carry is a column the next desk save resets to its default.
+`channel`, `replyCode`, `teacherRemark`, `remarkAt` and `driveNote` are
+therefore on the `HomeworkSubmission` type, in both row mappers **and** in
+`normalizeSubmission` — the normaliser that sits between the read and the push.
+This is the shape of the fee-line wipes of September 2026.
+
 ## The known gap
 
 Nothing in the ERP knows where a class currently *is* in its book. Positional

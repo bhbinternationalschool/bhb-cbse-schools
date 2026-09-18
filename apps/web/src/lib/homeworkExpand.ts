@@ -397,6 +397,8 @@ export function resolutionNoteForTeacher(r: HomeworkResolution, ref: HomeworkRef
   return "";
 }
 
+import { submitInviteLine } from "@/lib/homeworkSubmission";
+
 /* ── 5. the same thing on WhatsApp ───────────────────────────────── */
 
 /**
@@ -487,5 +489,9 @@ export function homeworkWaBody(input: {
     input.language === "hi"
       ? `\n\nमदद चाहिए? इसी नंबर पर *TUTOR* लिखकर भेजें। 🎓\n— ${input.schoolName}`
       : `\n\nNeeds a hand with it? Reply *TUTOR* on this number. 🎓\n— ${input.schoolName}`;
-  return `${body}${tail}`;
+  // Always offered, and always true: a photograph of finished work is
+  // accepted against the most likely homework for that child, whether or not
+  // the teacher ticked "requires submission". See submittablePostsFor.
+  const invite = `\n\n${submitInviteLine(input.language)}`;
+  return `${body}${invite}${tail}`;
 }

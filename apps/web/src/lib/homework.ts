@@ -85,6 +85,25 @@ export type HomeworkSubmission = {
   submittedAt: string;
   teacherAckAt: string;
   teacherAckBy: string;
+  /**
+   * How it arrived. "whatsapp" when the family photographed the work and
+   * sent it to the school's number; "app" for the parent app's own upload,
+   * which is every row written before September 2026.
+   *
+   * These four fields must stay on the type even though the desk UI barely
+   * shows them: `pushHomeworkDeskToDb` upserts whole rows, so a field the
+   * desk does not carry is a field the next desk save sets back to its
+   * default — which is how this codebase has erased a book of records
+   * before. See homeworkSubmission.server.ts.
+   */
+  channel?: "app" | "whatsapp";
+  /** The four characters the teacher replies with. "" once answered. */
+  replyCode?: string;
+  /** What the teacher wrote back, in their own words, and when. */
+  teacherRemark?: string;
+  remarkAt?: string;
+  /** Where the photograph was filed. */
+  driveNote?: string;
 };
 
 export type HomeworkSeen = {
@@ -211,6 +230,14 @@ function normalizeSubmission(s: Partial<HomeworkSubmission>): HomeworkSubmission
     submittedAt: s.submittedAt || nowIso(),
     teacherAckAt: s.teacherAckAt || "",
     teacherAckBy: s.teacherAckBy || "",
+    // Carried, not dropped. This normaliser sits between the read and the
+    // push: a field it forgets is a field every desk save erases from the
+    // database, which is how a whole book of fee lines went once.
+    channel: s.channel === "whatsapp" ? "whatsapp" : "app",
+    replyCode: s.replyCode || "",
+    teacherRemark: s.teacherRemark || "",
+    remarkAt: s.remarkAt || "",
+    driveNote: s.driveNote || "",
   };
 }
 

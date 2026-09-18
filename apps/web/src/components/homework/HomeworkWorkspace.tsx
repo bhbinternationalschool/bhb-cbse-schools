@@ -1169,8 +1169,24 @@ export function HomeworkWorkspace() {
                       </p>
                       <p className="text-xs text-[var(--muted)]">
                         {s.submittedAt.slice(0, 16).replace("T", " ")}
+                        {s.channel === "whatsapp" ? " · 📷 sent on WhatsApp" : ""}
                         {s.note ? ` · ${s.note}` : ""}
                       </p>
+                      {s.channel === "whatsapp" && !s.teacherRemark && s.replyCode ? (
+                        <p className="text-xs text-[var(--muted)]">
+                          The teacher can reply on WhatsApp with{" "}
+                          <span className="font-semibold">#{s.replyCode}</span>
+                        </p>
+                      ) : null}
+                      {s.teacherRemark ? (
+                        <p className="mt-1 rounded-lg bg-[var(--surface-2,transparent)] text-xs text-[var(--brand-deep)]">
+                          📝 {s.teacherRemark}
+                          {s.teacherAckBy ? ` — ${s.teacherAckBy}` : ""}
+                        </p>
+                      ) : null}
+                      {s.driveNote ? (
+                        <p className="text-[10px] text-[var(--muted)]">{s.driveNote}</p>
+                      ) : null}
                       {s.photoUrl ? (
                         isPhoto ? (
                           // eslint-disable-next-line @next/next/no-img-element

@@ -966,9 +966,9 @@ const SEED_DEFS: SeedDef[] = [
     headerTextEn: "New homework",
     headerTextHi: "नया गृहकार्य",
     bodyEn:
-      "Namaste 🙏 New homework for *{{classLabel}}*:\n\n📘 {{chapterLine}}\n✏️ {{homeworkTitle}}\n📅 Due: *{{dueDate}}*\n\nNeeds a hand with it? Reply *TUTOR* on this number and we will help your child through it. 🎓\n\n— {{schoolName}}, with thanks 🙏",
+      "Namaste 🙏 New homework for *{{classLabel}}*:\n\n📘 {{chapterLine}}\n✏️ {{homeworkTitle}}\n📅 Due: *{{dueDate}}*\n\n✅ When it is done, send a photo of the work to this number — it goes straight to the subject teacher.\n🎓 Needs a hand with it? Reply *TUTOR* and we will help your child through it.\n\n— {{schoolName}}, with thanks 🙏",
     bodyHi:
-      "नमस्ते 🙏 *{{classLabel}}* का नया गृहकार्य:\n\n📘 {{chapterLine}}\n✏️ {{homeworkTitle}}\n📅 अंतिम तिथि: *{{dueDate}}*\n\nमदद चाहिए? इसी नंबर पर *TUTOR* लिखकर भेजें, हम बच्चे की सहायता करेंगे। 🎓\n\n— {{schoolName}}, सधन्यवाद 🙏",
+      "नमस्ते 🙏 *{{classLabel}}* का नया गृहकार्य:\n\n📘 {{chapterLine}}\n✏️ {{homeworkTitle}}\n📅 अंतिम तिथि: *{{dueDate}}*\n\n✅ पूरा होने पर कॉपी की फ़ोटो इसी नंबर पर भेज दें — वह सीधे विषय शिक्षक तक पहुँचेगी।\n🎓 मदद चाहिए? *TUTOR* लिखकर भेजें, हम बच्चे की सहायता करेंगे।\n\n— {{schoolName}}, सधन्यवाद 🙏",
     footerEn: "Class teacher · Reply TUTOR for help",
     footerHi: "कक्षा शिक्षक · मदद हेतु TUTOR भेजें",
   },

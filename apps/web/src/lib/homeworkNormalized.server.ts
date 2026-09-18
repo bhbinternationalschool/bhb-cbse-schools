@@ -223,6 +223,13 @@ function submissionToRow(
     submitted_at: s.submittedAt || new Date().toISOString(),
     teacher_ack_at: s.teacherAckAt || "",
     teacher_ack_by: s.teacherAckBy || "",
+    // Carried explicitly. An upsert writes the whole row, so anything left
+    // out here is reset to its column default on the next desk save.
+    channel: s.channel === "whatsapp" ? "whatsapp" : "app",
+    reply_code: s.replyCode || "",
+    teacher_remark: s.teacherRemark || "",
+    remark_at: s.remarkAt || "",
+    drive_note: s.driveNote || "",
   };
 }
 
@@ -236,6 +243,11 @@ function rowToSubmission(r: Record<string, unknown>): HomeworkSubmission {
     submittedAt: String(r.submitted_at),
     teacherAckAt: String(r.teacher_ack_at || ""),
     teacherAckBy: String(r.teacher_ack_by || ""),
+    channel: r.channel === "whatsapp" ? "whatsapp" : "app",
+    replyCode: String(r.reply_code || ""),
+    teacherRemark: String(r.teacher_remark || ""),
+    remarkAt: String(r.remark_at || ""),
+    driveNote: String(r.drive_note || ""),
   };
 }
 
