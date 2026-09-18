@@ -78,7 +78,26 @@ export type DrillAsked = {
   skill: string;
   chapterPosition: number;
   verdict?: DrillVerdict;
+  /**
+   * What the child typed, and what they were told about it.
+   *
+   * The verdict alone says a child got something wrong; it does not say what
+   * they were taught, or whether the marking was fair. Reading back a
+   * session without these is reading a scoreboard, not a lesson — and the
+   * first thing anyone asks about a drill that upset a child is "what did it
+   * actually say to them?".
+   *
+   * Capped, because this sits in a jsonb column that grows with every
+   * question and nobody needs a thousand-word answer preserved.
+   */
+  answer?: string;
+  whatWentWrong?: string;
+  howToDoIt?: string;
+  praise?: string;
 };
+
+export const DRILL_ANSWER_MAX = 300;
+export const DRILL_NOTE_MAX = 400;
 
 export type DrillPhase = "need_scope" | "asking" | "done";
 
@@ -154,10 +173,30 @@ export function nextDrillStep(state: DrillState): DrillStep {
   };
 }
 
-/** Record how the child did, and move the streak. */
-export function recordAnswer(state: DrillState, verdict: DrillVerdict): DrillState {
+/**
+ * Record how the child did, and move the streak.
+ *
+ * `detail` is what they typed and what they were told — kept on the question
+ * so a session can be read back as a lesson rather than a scoreboard.
+ */
+export function recordAnswer(
+  state: DrillState,
+  verdict: DrillVerdict,
+  detail?: { answer?: string; check?: Pick<DrillCheck, "whatWentWrong" | "howToDoIt" | "praise"> },
+): DrillState {
   const asked = [...state.asked];
-  if (asked.length) asked[asked.length - 1] = { ...asked[asked.length - 1]!, verdict };
+  const cut = (v: string | undefined, max: number) =>
+    (v || "").replace(/\s+/g, " ").trim().slice(0, max) || undefined;
+  if (asked.length) {
+    asked[asked.length - 1] = {
+      ...asked[asked.length - 1]!,
+      verdict,
+      answer: cut(detail?.answer, DRILL_ANSWER_MAX),
+      whatWentWrong: cut(detail?.check?.whatWentWrong, DRILL_NOTE_MAX),
+      howToDoIt: cut(detail?.check?.howToDoIt, DRILL_NOTE_MAX),
+      praise: cut(detail?.check?.praise, DRILL_NOTE_MAX),
+    };
+  }
   // "Close" keeps the streak where it is: it is not a win, and treating it as
   // a loss would punish a child who had the method right and the arithmetic
   // wrong.

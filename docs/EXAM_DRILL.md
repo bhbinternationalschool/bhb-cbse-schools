@@ -66,6 +66,20 @@ one is luck, two is a coin — and a ceiling of twelve questions either way. A
 child who cannot get three in a row at ten at night needs sleep and a teacher
 in the morning, not a thirteenth question, and the drill says so kindly.
 
+## What a session keeps
+
+Each question stores what the child typed and what they were told about it —
+`answer`, `whatWentWrong`, `howToDoIt`, `praise` — alongside the verdict.
+
+The verdict alone says a child got something wrong. It does not say what they
+were taught, or whether the marking was fair, and "what did it actually say to
+them?" is the first question anyone asks about a drill that upset a child. A
+session without these reads as a scoreboard rather than a lesson.
+
+Both are capped (answer 300 characters, each note 400) because this lives in a
+jsonb column that grows with every question of every child, and nobody needs a
+thousand-word answer preserved.
+
 ## Off by default
 
 `EXAM_DRILL_ENABLED` must be set. The half-yearly was running when this was
