@@ -145,7 +145,7 @@ const eng: ExamSubject = { id: "sub_eng", code: "ENG", name: "English", classIds
 
   // The save enforces the scheme.
   const policy = normalizeExamPolicy({ ...defaultExamPolicy(), schemes: [middle] });
-  const state: ExamsState = { version: 1, terms: [term("HY", 80), term("UT1", 40)], subjects: [eng], dateSheet: [], sheets: [], policy, promotions: [] };
+  const state: ExamsState = { version: 1, terms: [term("HY", 80), term("UT1", 40)], subjects: [eng], dateSheet: [], sheets: [], policy, promotions: [], rooms: [], seating: [] };
   const deps = { state, masters: defaultMasters(), sis: { version: 1, households: [], students: [student], curriculumRequests: [] } as never };
   const base = { academicYearCode: "2026-27", examTermId: "term_hy", classId: "cls_vi", sectionId: "sec_1", enteredBy: "T" };
   const whole = prepareMarkSheet({ ...base, marks: [{ studentId: "stu_1", subjectId: "sub_eng", component: "", marksObtained: 70, grade: "", remark: "", remarkSource: "manual" }] }, state, undefined, deps);

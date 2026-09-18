@@ -68,6 +68,8 @@ const state: ExamsState = {
   sheets: [],
   policy: defaultExamPolicy(),
   promotions: [],
+    rooms: [],
+    seating: [],
 };
 
 const masters = defaultMasters();
@@ -197,6 +199,8 @@ const deps = { state, masters, sis: { version: 1, households: [], students: [stu
     sheets: [theirsOlder, other],
     policy: defaultExamPolicy(),
     promotions: [],
+    rooms: [],
+    seating: [],
   };
 
   const dropped = mergeDbDeskIntoExamsState(local, bundle, { preferDb: true });

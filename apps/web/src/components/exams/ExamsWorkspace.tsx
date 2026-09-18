@@ -97,6 +97,7 @@ import {
 } from "@/components/exams/ClassResultSheet";
 import { useHoldDecisions } from "@/lib/useHoldDecisions";
 import { ExamDateSheetGrid } from "@/components/exams/ExamDateSheetGrid";
+import { ExamSeatingPanel } from "@/components/exams/ExamSeatingPanel";
 import { InvigilationPanel } from "@/components/exams/InvigilationPanel";
 import { ExamPapersPanel } from "@/components/exams/ExamPapersPanel";
 import { AdmitCardsPanel } from "@/components/exams/AdmitCardsPanel";
@@ -114,6 +115,7 @@ type Tab =
   | "atrisk"
   | "remarks"
   | "datesheet"
+  | "seating"
   | "invigilation"
   | "papers"
   | "admitcards"
@@ -1253,6 +1255,7 @@ export function ExamsWorkspace() {
           { id: "atrisk", label: "At-risk", tone: "coral" },
           { id: "remarks", label: "Remarks", tone: "teal" },
           { id: "datesheet", label: "Date-sheet", tone: "violet" },
+          { id: "seating", label: "Seating", tone: "navy" },
           { id: "invigilation", label: "Invigilation", tone: "coral" },
           { id: "papers", label: "Question papers", tone: "rose" },
           { id: "admitcards", label: "Admit cards", tone: "sky" },
@@ -1279,6 +1282,7 @@ export function ExamsWorkspace() {
       {tab !== "setup" &&
       tab !== "dashboard" &&
       tab !== "datesheet" &&
+      tab !== "seating" &&
       tab !== "invigilation" &&
       tab !== "papers" &&
       tab !== "admitcards" ? (
@@ -1352,6 +1356,14 @@ export function ExamsWorkspace() {
           masters={masters}
           terms={terms}
           onChanged={refresh}
+        />
+      ) : null}
+
+      {tab === "seating" && masters ? (
+        <ExamSeatingPanel
+          academicYearCode={ay}
+          masters={masters}
+          terms={terms}
         />
       ) : null}
 

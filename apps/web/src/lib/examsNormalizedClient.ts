@@ -165,6 +165,8 @@ export async function hydrateExamsDeskFromDb(
         sheets: [],
         policy: defaultExamPolicy(),
         promotions: [],
+        rooms: [],
+        seating: [],
       },
       changed: false,
       ok: false,
@@ -189,6 +191,8 @@ export async function hydrateExamsDeskFromDb(
         sheets: [],
         policy: defaultExamPolicy(),
         promotions: [],
+        rooms: [],
+        seating: [],
       },
       changed: false,
       ok: true,
@@ -203,6 +207,8 @@ export async function hydrateExamsDeskFromDb(
   return {
     bundle: {
       version: 1,
+      rooms: [],
+      seating: [],
       ...remote.bundle,
     },
     changed: true,

@@ -40,7 +40,8 @@ export function mergeDbDeskIntoExamsState(
     bundle.terms.length > 0 ||
     bundle.subjects.length > 0 ||
     remoteSheets.length > 0 ||
-    bundle.promotions.length > 0;
+    bundle.promotions.length > 0 ||
+    (bundle.rooms?.length ?? 0) > 0;
 
   if (!hasRemoteData) return state;
 
@@ -90,5 +91,12 @@ export function mergeDbDeskIntoExamsState(
     policy: bundle.policy ?? state.policy,
     promotions:
       bundle.promotions.length > 0 ? bundle.promotions : state.promotions,
+    // Same rule as the date sheet: the server's copy when it has one,
+    // otherwise whatever this browser holds. Leaving these out of the merge
+    // would drop the rooms on every hydrate and take the seating plan built
+    // on them with it.
+    rooms: (bundle.rooms?.length ?? 0) > 0 ? bundle.rooms : state.rooms ?? [],
+    seating:
+      (bundle.seating?.length ?? 0) > 0 ? bundle.seating : state.seating ?? [],
   };
 }
