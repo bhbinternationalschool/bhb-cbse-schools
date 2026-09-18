@@ -278,6 +278,43 @@ assert.equal(readSetNumber("Paper - Set II"), 2);
   assert.match(body.sections[0]!.questions[0]!.text, /a\) How many in row three\?/);
 }
 
+{
+  // A numbered list inside a question is content, not the next question.
+  // This cost 121 phantom questions across the school's 88 papers: they
+  // carried no marks, so every paper still totalled correctly and nothing
+  // looked wrong until the publisher's answer keys disagreed on the count.
+  const body = parsePaperBody(
+    [
+      "Section A",
+      "Answer the following.",
+      "(1×2=2 marks)",
+      "1)",
+      "Which of these describe a living thing?",
+      "1. Grow, age and become old",
+      "2. Eat food and drink water",
+      "(1 mark)",
+      "2)",
+      "Name two fruits.",
+      "(1 mark)",
+    ],
+    ids,
+  );
+  assert.equal(body.questionCount, 2, "two questions, not four");
+  assert.match(body.sections[0]!.questions[0]!.text, /1\. Grow, age and become old/);
+  assert.equal(body.parsedMarks, 2);
+}
+
+{
+  // Numbering only ascends. A "1)" after "12)" is a restarted list inside a
+  // question, not question one coming round again.
+  const body = parsePaperBody(
+    ["Section A", "(1×2=2 marks)", "12)", "Choose one.", "(1 mark)", "1)", "the first option line", "13)", "And this?", "(1 mark)"],
+    ids,
+  );
+  assert.equal(body.questionCount, 2);
+  assert.match(body.sections[0]!.questions[0]!.text, /the first option line/);
+}
+
 assert.deepEqual(splitInlineOptions("(i) red (ii) blue (iii) green"), ["red", "blue", "green"]);
 assert.deepEqual(
   splitInlineOptions("Choose (i) carefully"),

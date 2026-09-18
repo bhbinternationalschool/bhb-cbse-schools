@@ -183,6 +183,8 @@ export async function storeImportedPaper(input: {
       importedAt: new Date().toISOString(),
       importedBy: meta.importedBy,
     },
+    // The key is imported separately, from the publisher's own answer-key file.
+    answerKey: null,
   };
 
   return {

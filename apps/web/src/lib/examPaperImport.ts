@@ -363,7 +363,20 @@ export function setCodeForNumber(n: number): string {
 /* -------------------------------------------------------------------------- */
 
 const RE_SECTION = /^section\s+([A-Za-z0-9]+)\s*$/i;
-const RE_QUESTION_NO = /^(\d{1,3})[).]\s*(.*)$/;
+/**
+ * A question number, and only a question number.
+ *
+ * This used to accept `1.` as well as `1)`, which cost the school 121 phantom
+ * questions across 88 papers: every numbered line *inside* a question — "1.
+ * Grow, age and become old", "2. Used to make fabric for clothes" — opened a
+ * new one. The papers still totalled correctly, because a fragment carries no
+ * marks, so nothing looked wrong until the publisher's answer keys disagreed
+ * about how many questions each paper had.
+ *
+ * Across all 88 papers the publisher numbers questions `N)` exactly 2,341
+ * times, always ascending within a paper, and never `N.`.
+ */
+const RE_QUESTION_NO = /^(\d{1,3})\)\s*(.*)$/;
 const RE_SUBPART_NO = /^([a-eA-E])[).]\s*(.*)$/;
 const RE_OPTION_NO = /^\(\s*([ivx]{1,4}|[a-dA-D])\s*\)\s*(.*)$/i;
 
@@ -451,6 +464,13 @@ export function parsePaperBody(
   let pendingOption: string | null = null;
   /** `a)` in its own table cell, waiting for the line that follows it. */
   let pendingSubpart: string | null = null;
+  /**
+   * The highest question number opened so far. Numbering only ever ascends
+   * within a paper, so a lower number is content that happens to look like a
+   * heading — a second line of options, a restarted list — and must not open
+   * a question.
+   */
+  let lastNumber = 0;
   let started = false;
   let seq = 0;
 
@@ -483,10 +503,11 @@ export function parsePaperBody(
     }
 
     const qNo = RE_QUESTION_NO.exec(line);
-    if (qNo && (started || drafts.length)) {
+    if (qNo && (started || drafts.length) && Number(qNo[1]) > lastNumber) {
       // A bare number closes the previous question and opens the next.
       if (!current) current = newSection("Section A");
       pushQuestion();
+      lastNumber = Number(qNo[1]);
       seq += 1;
       question = blankQuestion(opts.questionId(seq));
       const trailing = (qNo[2] ?? "").trim();
