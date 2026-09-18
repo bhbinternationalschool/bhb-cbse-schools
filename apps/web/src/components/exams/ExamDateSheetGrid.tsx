@@ -40,7 +40,15 @@ type Props = {
   onChanged: () => void;
 };
 
-type CellKey = { classId: string; date: string };
+/**
+ * Which cell is open, and which paper inside it.
+ *
+ * `entryId` is empty when a NEW paper is being added to the cell. A class
+ * sitting two papers in one morning is unusual but legal, and a grid that
+ * keyed one entry per cell would show the first and silently swallow the
+ * second — an exam nobody is told about.
+ */
+type CellKey = { classId: string; date: string; entryId: string };
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -107,10 +115,14 @@ export function ExamDateSheetGrid({
     [rows],
   );
 
-  /** classId|date → the sitting, for an O(1) cell lookup. */
+  /** classId|date → every sitting in that cell, earliest first. */
   const byCell = useMemo(() => {
-    const map = new Map<string, ExamDateSheetEntry>();
-    for (const r of rows) map.set(`${r.classId}|${r.date}`, r);
+    const map = new Map<string, ExamDateSheetEntry[]>();
+    for (const r of rows) {
+      const key = `${r.classId}|${r.date}`;
+      map.set(key, [...(map.get(key) ?? []), r]);
+    }
+    for (const list of map.values()) list.sort((a, b) => a.startTime.localeCompare(b.startTime));
     return map;
   }, [rows]);
 
@@ -136,9 +148,11 @@ export function ExamDateSheetGrid({
     }
   }
 
-  function openCell(classId: string, date: string) {
-    const existing = byCell.get(`${classId}|${date}`);
-    setEditing({ classId, date });
+  function openCell(classId: string, date: string, entryId = "") {
+    const existing = entryId
+      ? (byCell.get(`${classId}|${date}`) ?? []).find((e) => e.id === entryId)
+      : undefined;
+    setEditing({ classId, date, entryId });
     setDraftSubjectId(existing?.subjectId ?? "");
     setDraftDate(existing?.date ?? date);
     setDraftStart(existing?.startTime ?? term?.note?.match(/(\d{2}:\d{2})/)?.[1] ?? "09:00");
@@ -149,7 +163,9 @@ export function ExamDateSheetGrid({
 
   function saveCell() {
     if (!editing) return;
-    const existing = byCell.get(`${editing.classId}|${editing.date}`);
+    const existing = editing.entryId
+      ? (byCell.get(`${editing.classId}|${editing.date}`) ?? []).find((e) => e.id === editing.entryId)
+      : undefined;
     const result = saveExamDateSheetEntry({
       id: existing?.id,
       academicYearCode,
@@ -171,7 +187,9 @@ export function ExamDateSheetGrid({
 
   function clearCell() {
     if (!editing) return;
-    const existing = byCell.get(`${editing.classId}|${editing.date}`);
+    const existing = editing.entryId
+      ? (byCell.get(`${editing.classId}|${editing.date}`) ?? []).find((e) => e.id === editing.entryId)
+      : undefined;
     if (!existing) {
       setEditing(null);
       return;
@@ -377,12 +395,9 @@ export function ExamDateSheetGrid({
                     {cls.name}
                   </th>
                   {dates.map((d) => {
-                    const entry = byCell.get(`${cls.id}|${d}`);
+                    const entries = byCell.get(`${cls.id}|${d}`) ?? [];
                     const open =
                       editing?.classId === cls.id && editing?.date === d;
-                    const subject = entry
-                      ? exams.subjects.find((s) => s.id === entry.subjectId)
-                      : null;
                     return (
                       <td
                         key={d}
@@ -450,7 +465,7 @@ export function ExamDateSheetGrid({
                               >
                                 Cancel
                               </button>
-                              {entry ? (
+                              {editing?.entryId ? (
                                 <button
                                   type="button"
                                   className="rounded-lg border border-[var(--border)] px-2 py-1 text-xs font-semibold text-[var(--danger)]"
@@ -462,39 +477,47 @@ export function ExamDateSheetGrid({
                             </div>
                           </div>
                         ) : (
-                          <button
-                            type="button"
-                            className="w-full rounded-lg p-1.5 text-left hover:bg-[var(--surface-sunken)]"
-                            onClick={() => openCell(cls.id, d)}
-                            aria-label={
-                              entry
-                                ? `Change ${subject?.name ?? "paper"} for ${cls.name} on ${dayLabel(d)}`
-                                : `Add a paper for ${cls.name} on ${dayLabel(d)}`
-                            }
-                          >
-                            {entry ? (
-                              <>
-                                <div className="font-semibold text-[var(--brand-deep)]">
-                                  {subject?.name ?? "—"}
-                                </div>
-                                <div className="text-[11px] text-[var(--muted)]">
-                                  {entry.startTime}–{examEntryEndTime(entry)}
-                                </div>
-                                {entry.note ? (
-                                  <div className="text-[10px] text-[var(--muted)]">
-                                    {entry.note}
+                          <div className="grid gap-1">
+                            {entries.map((entry) => {
+                              const subject = exams.subjects.find(
+                                (s) => s.id === entry.subjectId,
+                              );
+                              return (
+                                <button
+                                  key={entry.id}
+                                  type="button"
+                                  className="w-full rounded-lg p-1.5 text-left hover:bg-[var(--surface-sunken)]"
+                                  onClick={() => openCell(cls.id, d, entry.id)}
+                                  aria-label={`Change ${subject?.name ?? "paper"} for ${cls.name} on ${dayLabel(d)}`}
+                                >
+                                  <div className="font-semibold text-[var(--brand-deep)]">
+                                    {subject?.name ?? "—"}
                                   </div>
-                                ) : null}
-                                {periods.some((p) => examOverlapsBellPeriod(entry, p)) ? null : (
-                                  <div className="text-[10px] font-semibold text-[var(--warning)]">
-                                    Outside bell periods
+                                  <div className="text-[11px] text-[var(--muted)]">
+                                    {entry.startTime}–{examEntryEndTime(entry)}
                                   </div>
-                                )}
-                              </>
-                            ) : (
-                              <span className="text-[var(--muted)]">+</span>
-                            )}
-                          </button>
+                                  {entry.note ? (
+                                    <div className="text-[10px] text-[var(--muted)]">
+                                      {entry.note}
+                                    </div>
+                                  ) : null}
+                                  {periods.some((p) => examOverlapsBellPeriod(entry, p)) ? null : (
+                                    <div className="text-[10px] font-semibold text-[var(--warning)]">
+                                      Outside bell periods
+                                    </div>
+                                  )}
+                                </button>
+                              );
+                            })}
+                            <button
+                              type="button"
+                              className="w-full rounded-lg p-1.5 text-left text-[var(--muted)] hover:bg-[var(--surface-sunken)]"
+                              onClick={() => openCell(cls.id, d)}
+                              aria-label={`Add a paper for ${cls.name} on ${dayLabel(d)}`}
+                            >
+                              +
+                            </button>
+                          </div>
                         )}
                       </td>
                     );
