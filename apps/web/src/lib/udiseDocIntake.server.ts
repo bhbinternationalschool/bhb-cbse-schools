@@ -433,6 +433,13 @@ export async function captureUdiseDocumentFromWhatsApp(input: {
   // children are not listed back at them — the old code asked "which child
   // is this for?" about a fee receipt, which is how this was reported.
   if (route === "unrecognised") {
+    // The parent wrote something with it. That sentence is the message; the
+    // file is an attachment to it. Hand the whole thing to the ordinary bot,
+    // which answers the question and escalates to the office itself when it
+    // cannot — answering the caption beats acknowledging the file.
+    if ((input.caption || "").trim().length >= 3) {
+      return { ...none, reason: "not_a_record_document_with_caption" };
+    }
     await sendWhatsAppText({
       toMobile: input.mobile10,
       body: renderUnrecognisedAck(language),

@@ -75,7 +75,9 @@ Now:
   that a person will look, and is asked for nothing;
 - a file we *did* read but cannot act on gets a plain "received, the office
   will look at it" — no UDISE+ wording, no question, and no list of the
-  family's children;
+  family's children. Unless the parent wrote something with it: a caption is
+  the message and the file its attachment, so that goes to the ordinary bot,
+  which answers the sentence and escalates by itself;
 - both go to the office relay (`relayEscalation`, category by sender), which
   forwards the photograph itself to the office phones with a reply code.
 
