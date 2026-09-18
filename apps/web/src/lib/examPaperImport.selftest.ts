@@ -65,6 +65,30 @@ const mappings = defaultImportMappings();
   assert.equal(p.paperFolder, "Formative Assessment 1 - Set 2");
 }
 
+{
+  // A browser puts the picked folder's own name in front of every path. The
+  // class is found by what the school has mapped, not by counting segments.
+  const knows = (w: string) => !!mappings.classes[w.toLowerCase().replace(/\s+/g, "")];
+  const p = parseImportPath(
+    "Lead Assessments 2/Class6/Division A/Math/Editable/MOY/Summative Assessment 1 - Set 1/x.docx",
+    knows,
+  );
+  assert.ok(p);
+  assert.equal(p.classFolder, "Class6", "not the folder the office happened to pick");
+  assert.equal(p.subjectFolder, "Math");
+  assert.equal(p.paperFolder, "Summative Assessment 1 - Set 1");
+
+  // Picking one class folder instead must still read the same way.
+  const q = parseImportPath("Class6/Division A/Math/Editable/MOY/Set 1/x.docx", knows);
+  assert.equal(q?.classFolder, "Class6");
+  assert.equal(q?.subjectFolder, "Math");
+
+  // Nothing recognisable: the first segment is reported, so the school can
+  // see the word it has to map rather than the file vanishing.
+  const r = parseImportPath("Downloads/Std 6/Math/Set 1/x.docx", knows);
+  assert.equal(r?.classFolder, "Downloads");
+}
+
 assert.equal(parseImportPath("Class6/Math/notes.pdf"), null, "only .docx");
 assert.equal(parseImportPath("paper.docx"), null, "a loose file has no class");
 

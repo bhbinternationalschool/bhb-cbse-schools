@@ -190,16 +190,37 @@ export type ImportPath = {
   fileName: string;
 };
 
+/** Folders that sit between the ones that mean something. */
+function isWrapperFolder(name: string): boolean {
+  const n = normalizeWord(name);
+  return (
+    /^division\b/.test(n) ||
+    /^section\b/.test(n) ||
+    n === "editable" ||
+    n === "printable" ||
+    n === "pdf"
+  );
+}
+
 /**
  * Read the tree positions out of a relative path.
  *
  * The shape is `<class>/<division>/<subject>/<editable|printable>/<bucket>/<paper>/<file>`,
- * but publishers drop levels (no division, no Editable), so the reader works
- * from both ends: class is the first segment, subject is the first segment
- * after any `Division …` that is not an `Editable`/`Printable` wrapper, and
- * the paper folder is the one holding the file.
+ * but two things move it around. Publishers drop levels — no division, no
+ * `Editable`. And a browser reports a picked folder's own name at the front
+ * of every path, so the same tree arrives as `Lead Assessments 2/Class6/…`
+ * when the school picks the download and as `Class6/…` when it picks a class.
+ *
+ * So the class is not "the first segment": it is the first segment the school
+ * has a class mapping for, which is true in both cases. When `knowsClass` is
+ * not supplied, or recognises nothing in the path, the first segment is used
+ * and will be reported as an unmapped class word — visible, and mappable,
+ * rather than silently filed under a folder name.
  */
-export function parseImportPath(relPath: string): ImportPath | null {
+export function parseImportPath(
+  relPath: string,
+  knowsClass?: (folderWord: string) => boolean,
+): ImportPath | null {
   const parts = String(relPath ?? "")
     .split(/[\\/]+/)
     .map((p) => p.trim())
@@ -210,18 +231,14 @@ export function parseImportPath(relPath: string): ImportPath | null {
   if (!/\.docx$/i.test(fileName)) return null;
 
   const dirs = parts.slice(0, -1);
-  const classFolder = dirs[0] ?? "";
+  let classAt = 0;
+  if (knowsClass) {
+    const found = dirs.findIndex((d) => !isWrapperFolder(d) && knowsClass(d));
+    if (found >= 0) classAt = found;
+  }
+  const classFolder = dirs[classAt] ?? "";
 
-  const rest = dirs.slice(1).filter((d) => {
-    const n = normalizeWord(d);
-    return (
-      !/^division\b/.test(n) &&
-      !/^section\b/.test(n) &&
-      n !== "editable" &&
-      n !== "printable" &&
-      n !== "pdf"
-    );
-  });
+  const rest = dirs.slice(classAt + 1).filter((d) => !isWrapperFolder(d));
 
   const subjectFolder = rest[0] ?? "";
   const paperFolder = rest.length > 1 ? rest[rest.length - 1]! : "";
@@ -853,8 +870,10 @@ export function planPaperImport(input: {
   /** groupKey → setCode → hash, so two files cannot claim the same set. */
   const takenSets = new Map<string, Map<string, string>>();
 
+  const knowsClass = (word: string) => !!mappings.classes[normalizeWord(word)];
+
   for (const file of input.files) {
-    const path = parseImportPath(file.relPath);
+    const path = parseImportPath(file.relPath, knowsClass);
     const fileName = path?.fileName ?? file.relPath.split(/[\\/]/).pop() ?? file.relPath;
     const header = file.header;
     const reasons: string[] = [];
