@@ -58,6 +58,7 @@ import { loadTeaching, type SyllabusUnit } from "@/lib/teaching";
 import { BlueprintPanel } from "@/components/exams/BlueprintPanel";
 import { ExamPaperImportPanel } from "@/components/exams/ExamPaperImportPanel";
 import { BankPicker } from "@/components/exams/BankPicker";
+import { PaperImagePicker } from "@/components/exams/PaperImagePicker";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import {
   catalogFor,
@@ -75,7 +76,6 @@ import {
   printExamPaper,
 } from "@/components/exams/ExamPaperPrintSheet";
 
-const IMG_MAX = 800_000;
 
 type Props = {
   masters: MastersState;
@@ -644,23 +644,35 @@ export function ExamPapersPanel({
     );
   }
 
-  function readImageFile(
-    file: File,
-    onDone: (dataUrl: string) => void,
-  ) {
+  /**
+   * Put a picture in storage and give the question its URL.
+   *
+   * This used to read the file into a base64 `data:` URL and hand that
+   * straight to the question, which put the image itself inside the desk
+   * blob — every browser then carried it, every sync pushed it, and the
+   * 800 KB ceiling existed only to stop that becoming unworkable. The
+   * imported papers proved the alternative: 839 pictures cost the desk
+   * nothing but their URLs.
+   *
+   * It uploads, or it says why it could not. There is no third outcome and
+   * no fallback that quietly stores the bytes instead.
+   */
+  async function readImageFile(file: File, onDone: (url: string) => void) {
     if (!file.type.startsWith("image/")) {
       onError("Choose an image file");
       return;
     }
-    if (file.size > IMG_MAX) {
-      onError("Image must be under 800 KB");
+    const { uploadMedia } = await import("@/lib/mediaUpload");
+    const result = await uploadMedia({
+      file,
+      pathPrefix: `exam-papers/${ay}/uploads`,
+      visibility: "private",
+    });
+    if (!result.ok) {
+      onError(result.error);
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") onDone(reader.result);
-    };
-    reader.readAsDataURL(file);
+    onDone(result.url);
   }
 
   if (editingId && draft) {
@@ -1408,7 +1420,8 @@ function SectionEditor(props: {
     excludeTexts: string[];
     onAdd: (q: ExamPaperQuestion) => void;
   };
-  readImageFile: (file: File, onDone: (dataUrl: string) => void) => void;
+  /** Stores the file and calls back with its URL — never with the bytes. */
+  readImageFile: (file: File, onDone: (url: string) => void) => void;
   unitLabel: (unitId: string) => string;
 }) {
   const { section, canEdit } = props;
@@ -1505,6 +1518,8 @@ function SectionEditor(props: {
             canEdit={canEdit}
             subjectLabel={props.subjectLabel}
             unitLabel={props.unitLabel}
+            classId={props.bankPicker.classId}
+            subjectId={props.bankPicker.subjectId}
             onBank={() => props.onBankQuestion(q)}
             onChange={(patch) => patchQuestion(q.id, patch)}
             onRemove={() =>
@@ -1539,15 +1554,20 @@ function QuestionEditor(props: {
   subjectLabel: string;
   onChange: (patch: Partial<ExamPaperQuestion>) => void;
   onRemove: () => void;
-  readImageFile: (file: File, onDone: (dataUrl: string) => void) => void;
+  /** Stores the file and calls back with its URL — never with the bytes. */
+  readImageFile: (file: File, onDone: (url: string) => void) => void;
   /** "Ch 3 · Quadrilaterals" for a unitId, "" when unknown / unlinked */
   unitLabel: (unitId: string) => string;
   onBank: () => void;
+  /** Scopes the school's picture library to this paper's class × subject. */
+  classId: string;
+  subjectId: string;
 }) {
   const { question: q, canEdit } = props;
   const [showIcons, setShowIcons] = useState(false);
   const [showFormulas, setShowFormulas] = useState(false);
   const [showPictureSearch, setShowPictureSearch] = useState(false);
+  const [showSchoolPictures, setShowSchoolPictures] = useState(false);
   const [labelling, setLabelling] = useState<string | null>(null);
   const [converting, setConverting] = useState<"hi" | "sa" | null>(null);
   const [convertError, setConvertError] = useState("");
@@ -1862,13 +1882,13 @@ function QuestionEditor(props: {
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 if (!file) return;
-                props.readImageFile(file, (dataUrl) => {
+                props.readImageFile(file, (url) => {
                   props.onChange({
                     images: [
                       ...q.images,
                       {
                         id: `img_${Math.random().toString(36).slice(2, 8)}`,
-                        dataUrl,
+                        dataUrl: url,
                         caption: "",
                         labels: [],
                       },
@@ -1886,6 +1906,14 @@ function QuestionEditor(props: {
             title="Find a free, licensed picture (Wikimedia Commons)"
           >
             Search pictures
+          </button>
+          <button
+            type="button"
+            className="rounded border border-[var(--border)] px-2 py-0.5 text-[11px] font-semibold"
+            onClick={() => setShowSchoolPictures((v) => !v)}
+            title="Reuse a picture the school already has — no second copy is stored"
+          >
+            School pictures
           </button>
           <button
             type="button"
@@ -1995,6 +2023,31 @@ function QuestionEditor(props: {
             })
           }
           onAddLine={(line) => props.onChange({ formulas: [...q.formulas, line] })}
+        />
+      ) : null}
+
+      {showSchoolPictures && canEdit ? (
+        <PaperImagePicker
+          classId={props.classId}
+          subjectId={props.subjectId}
+          usedUrls={q.images.map((i) => i.dataUrl)}
+          onClose={() => setShowSchoolPictures(false)}
+          onPick={(picked) => {
+            // The same stored file, pointed at again — never re-uploaded and
+            // never copied into the desk.
+            props.onChange({
+              images: [
+                ...q.images,
+                {
+                  id: `img_${Math.random().toString(36).slice(2, 8)}`,
+                  dataUrl: picked.url,
+                  caption: picked.caption,
+                  labels: [],
+                },
+              ],
+            });
+            setShowSchoolPictures(false);
+          }}
         />
       ) : null}
 

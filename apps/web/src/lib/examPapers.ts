@@ -1712,3 +1712,102 @@ export function bankImportedQuestions(
   }
   return { state: next, added };
 }
+
+/* -------------------------------------------------------------------------- */
+/* The school's own picture library                                           */
+/* -------------------------------------------------------------------------- */
+
+/** One stored picture, with the question it currently illustrates. */
+export type PaperImageRef = {
+  /** The stored URL — an `/api/file/...` path. This is what gets reused. */
+  url: string;
+  caption: string;
+  /** The question it was found on, for searching and for recognising it. */
+  questionText: string;
+  classId: string;
+  subjectId: string;
+  /** Where it came from: paper code, or "" when found on a bank item. */
+  paperCode: string;
+  /** How many questions across the desk point at this same file. */
+  uses: number;
+};
+
+/**
+ * Every picture the school already has, found by walking what it has written.
+ *
+ * Reusing a picture must never mean uploading it again. Once a paper is
+ * imported, its diagrams are stored files with stable URLs, and any question —
+ * in any paper, in any later year — can point at the same file. So the library
+ * is not a separate store to maintain: it is the set of URLs already in the
+ * papers and the bank, which is exactly the set of pictures the school owns.
+ *
+ * Keyed by URL, so the same diagram used on Set A, Set B and a bank item is
+ * one entry with a use count, not three. Pictures the school uploaded by hand
+ * and pictures that arrived inside a Word file are indistinguishable here,
+ * which is the point.
+ *
+ * `data:` URLs are left out deliberately: an image pasted into the desk blob
+ * is not a file anyone can point at, and offering it for reuse would spread
+ * the copy rather than the reference.
+ */
+export function listPaperImages(
+  state: ExamPapersState,
+  filters?: { classId?: string; subjectId?: string; search?: string },
+): PaperImageRef[] {
+  const byUrl = new Map<string, PaperImageRef>();
+
+  const add = (
+    img: ExamPaperImage,
+    q: ExamPaperQuestion,
+    classId: string,
+    subjectId: string,
+    paperCode: string,
+  ) => {
+    const url = (img.dataUrl || "").trim();
+    if (!url || url.startsWith("data:") || url.startsWith("blob:")) return;
+    const found = byUrl.get(url);
+    if (found) {
+      found.uses += 1;
+      // Keep the first caption that says something.
+      if (!found.caption && img.caption) found.caption = img.caption;
+      return;
+    }
+    byUrl.set(url, {
+      url,
+      caption: img.caption || "",
+      questionText: q.text || "",
+      classId,
+      subjectId,
+      paperCode,
+      uses: 1,
+    });
+  };
+
+  for (const paper of state.papers) {
+    for (const set of paper.sets) {
+      for (const section of set.sections) {
+        for (const q of section.questions) {
+          for (const img of q.images) {
+            add(img, q, paper.classId, paper.subjectId, paper.paperCode);
+          }
+        }
+      }
+    }
+  }
+  for (const item of state.bank) {
+    for (const img of item.question.images) {
+      add(img, item.question, item.classId, item.subjectId, "");
+    }
+  }
+
+  const needle = normText(filters?.search || "");
+  return [...byUrl.values()]
+    .filter((x) => !filters?.classId || x.classId === filters.classId)
+    .filter((x) => !filters?.subjectId || x.subjectId === filters.subjectId)
+    .filter(
+      (x) =>
+        !needle ||
+        normText(`${x.caption} ${x.questionText} ${x.paperCode}`).includes(needle),
+    )
+    .sort((a, b) => b.uses - a.uses || a.questionText.localeCompare(b.questionText));
+}
