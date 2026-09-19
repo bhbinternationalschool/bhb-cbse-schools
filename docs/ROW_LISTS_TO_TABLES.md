@@ -55,6 +55,8 @@ two export buttons on one panel is worse than either.
 | `transport/TransportOpsPanels.tsx` | routes, the fleet | a vehicle's compliance / fuel / job sub-lists (a handful of lines inside one vehicle's card) |
 | `masters/ConcessionsPanel.tsx` | the grants under a policy | the policy rail on the left (a master-detail picker, not a grid) |
 | `accounts/AccountsPanels.tsx` | recurring expenses, recent journals | vendor bills (nested inside a vendor drawer); the report launcher |
+| `masters/FoundationPanels.tsx` | academic years, terms, departments, designations | — |
+| `rte/RteWorkspace.tsx` | quota seat rows | enrolled students (each row expands in place) |
 
 ### Judged and skipped, so nobody re-opens them
 
@@ -62,6 +64,7 @@ two export buttons on one panel is worse than either.
 |---|---|
 | `homework/HomeworkWorkspace.tsx` | All three lists are content, not records. A submission is a photograph of a child's work with the teacher's remark under it; a diary entry and a homework post are paragraphs the parent reads. A table would hide the very thing the teacher acts on. |
 | `staff/StaffDutiesPanel.tsx` | Four link lists inside a staff member's edit drawer, three rows each. DataTable's pagination and export weigh more than the list does. |
+| `fees/FeeTakeWorkspace.tsx` | None of its four lists are record grids: `hits` is the search dropdown, `tenderLines` is the payment split being composed, `v.tenders` is the tender breakdown inside one receipt, `unsettledStore` is the dues being pulled into the current take. All are parts of a single transaction in progress. |
 
 ## The queue
 

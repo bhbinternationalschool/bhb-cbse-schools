@@ -55,6 +55,8 @@ import {
   type RteState,
 } from "@/lib/rteEws";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
+import type { RowAction } from "@/components/ui/erp-grid";
 
 type RteTab =
   | "dashboard"
@@ -248,6 +250,36 @@ export function RteWorkspace({
     );
   }
 
+  /**
+   * Quota seats as a table. Filled, remaining, what SIS says and what was
+   * allotted are four numbers that only mean anything next to each other,
+   * and they were packed into one grey line where no column could be added
+   * up or sorted.
+   */
+  const seatCols: DataTableColumn<(typeof seatRows)[number]>[] = [
+    { key: "class", header: "Class", sortable: true, value: (r) => r.className },
+    { key: "type", header: "Quota", sortable: true, value: (r) => quotaTypeLabel(r.type) },
+    { key: "total", header: "Seats", align: "right", sortable: true, value: (r) => r.total },
+    { key: "filled", header: "Filled", align: "right", sortable: true, value: (r) => r.filled },
+    { key: "remaining", header: "Left", align: "right", sortable: true, value: (r) => r.remaining },
+    { key: "enrolled", header: "In SIS", align: "right", sortable: true, value: (r) => r.enrolled },
+    { key: "allotted", header: "Allotted", align: "right", sortable: true, value: (r) => r.allotted },
+  ];
+
+  const seatActions: RowAction<(typeof seatRows)[number]>[] = [
+    {
+      id: "remove", label: "Remove", tone: "danger",
+      onSelect: (row) => {
+        const r = deleteQuotaSeat(row.id);
+        if (!r.ok) setError(r.error);
+        else {
+          refresh();
+          flash("Removed");
+        }
+      },
+    },
+  ];
+
   return (
     <ErpWorkspaceShell
       embedded={embedded}
@@ -394,44 +426,17 @@ export function RteWorkspace({
             </button>
           </div>
 
-          <ul className="space-y-2">
-            {seatRows.length === 0 ? (
-              <li className="text-sm text-[var(--muted)]">
-                No seat rows yet — seed from strength or add manually.
-              </li>
-            ) : (
-              seatRows.map((row) => (
-                <li
-                  key={row.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3"
-                >
-                  <div>
-                    <p className="text-sm font-semibold text-[var(--brand-deep)]">
-                      {row.className} · {quotaTypeLabel(row.type)}
-                    </p>
-                    <p className="text-xs text-[var(--muted)]">
-                      {row.filled}/{row.total} filled · {row.remaining} left ·
-                      SIS {row.enrolled} · allotted {row.allotted}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    className="text-xs text-[var(--danger)] underline"
-                    onClick={() => {
-                      const r = deleteQuotaSeat(row.id);
-                      if (!r.ok) setError(r.error);
-                      else {
-                        refresh();
-                        flash("Removed");
-                      }
-                    }}
-                  >
-                    Remove
-                  </button>
-                </li>
-              ))
-            )}
-          </ul>
+          <DataTable
+            columns={seatCols}
+            rows={seatRows}
+            rowKey={(r) => r.id}
+            rowActions={seatActions}
+            rowActionsLabel="Seat row actions"
+            minWidth="min-w-[720px]"
+            exportFileBaseName="rte-quota-seats"
+            exportTitle="RTE / EWS quota seats"
+            emptyTitle="No seat rows yet — seed from strength or add manually."
+          />
         </section>
       ) : null}
 
