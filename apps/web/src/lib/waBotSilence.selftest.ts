@@ -173,6 +173,19 @@ for (const t of [
     assert.equal(r.ok, false, `"${t}" must not become a name`);
     if (!r.ok) assert.equal(r.reason, reason, `"${t}" → ${r.reason}, expected ${reason}`);
   };
+  // A document's file name is not a person. 19 Sep 2026: a teacher sent
+  // their CV as the opening message, WhatsApp delivered the file name as
+  // the text, and the school addressed them — and told its own office —
+  // that the applicant was called "Rajnish_Kumar_Mishra_Resume.pdf".
+  bad("Rajnish_Kumar_Mishra_Resume.pdf", "file");
+  bad("Rajnish_Kumar_Mishra_Resume", "file");
+  bad("CV_Anita_Devi.docx", "file");
+  bad("IMG_20260919_0931.jpg", "file");
+  bad("biodata.pdf", "file");
+  // …but a real name with a full stop or one underscore still reads.
+  assert.equal(ok("Md. Arif Ansari"), "Md. Arif Ansari");
+  assert.equal(ok("Anita Devi"), "Anita Devi");
+
   // The exact string that was live in production for three weeks.
   bad("https://www.facebook.com/share/r/1BkJUpZ93g/good morning have a glorious day", "link");
   bad("www.abc.com", "link");

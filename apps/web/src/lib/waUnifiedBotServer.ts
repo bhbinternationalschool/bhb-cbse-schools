@@ -92,6 +92,16 @@ export type WaUnifiedSession = {
   /** Pending gate check-in (VISIT keyword / poster WhatsApp QR). */
   gate?: WaGateVisitPending | null;
   /**
+   * A document that arrived before this person chose what they wanted.
+   *
+   * 19 Sep 2026: a teacher sent their CV as the opening message. The bot
+   * was collecting a name, the document was not the job flow's yet, and
+   * the CV was never filed — the office learned of it only because the
+   * applicant then typed HUMAN four times. Held here so that choosing JOB
+   * files the CV they already sent, instead of asking them to send it again.
+   */
+  pendingDocument?: { mediaId: string; mimeType?: string; fileName?: string; at: string } | null;
+  /**
    * Until when the staff keyword bot answers this person, ISO. Unset or
    * past means the desk answers their commands and nothing answers the
    * rest — which is the point: on a number staff also use to talk to the
@@ -642,15 +652,36 @@ async function delegateActiveFlow(
     // than a page, a CRM thread and somebody's phone. The CRM thread below
     // still gets the message either way — this adds a record, it does not
     // take the conversation away from the humans.
-    if (flow === "job" && opts.document?.mediaId) {
+    // The CV may have arrived with this message, or before the menu — a
+    // person sending a resume sends the resume first and reads the menu
+    // afterwards.
+    const cv = opts.document?.mediaId
+      ? { mediaId: opts.document.mediaId }
+      : session.pendingDocument?.mediaId
+        ? { mediaId: session.pendingDocument.mediaId }
+        : null;
+    if (flow === "job" && cv) {
       const { captureWhatsAppJobCv } = await import(
         "@/lib/jobApplicationsIntake.server"
       );
       const captured = await captureWhatsAppJobCv({
-        mediaId: opts.document.mediaId,
+        mediaId: cv.mediaId,
         mobile10,
         applicantName: name,
       });
+      // Used, or unusable — either way it is not pending any more, so a
+      // later message cannot file the same CV a second time.
+      {
+        const store = await readStore();
+        const base = store.sessions[mobile10] ?? session;
+        await writeStore({
+          ...store,
+          sessions: {
+            ...store.sessions,
+            [mobile10]: { ...base, pendingDocument: null, updatedAt: nowIso() },
+          },
+        });
+      }
       await sendBotReply({
         mobile10,
         displayName: name,
@@ -1091,6 +1122,16 @@ export async function handleWaUnifiedInbound(opts: {
         inbound: inboundLog,
       });
       return { replied: false, escalate: false, audience: "visitor_forward", stub: false };
+    }
+    // A document arriving here is the thing they came to send, not their
+    // name. Keep it, so JOB can file it in a moment.
+    if (opts.document?.mediaId) {
+      session.pendingDocument = {
+        mediaId: opts.document.mediaId,
+        mimeType: opts.document.mimeType,
+        fileName: opts.document.fileName,
+        at: nowIso(),
+      };
     }
     const read = readVisitorName(text);
     if (!read.ok) {

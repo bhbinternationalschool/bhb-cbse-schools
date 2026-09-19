@@ -175,7 +175,7 @@ export function looksLikeForward(text: string): boolean {
 
 export type VisitorNameRead =
   | { ok: true; name: string }
-  | { ok: false; reason: "empty" | "too_short" | "too_long" | "link" | "not_a_name" };
+  | { ok: false; reason: "empty" | "too_short" | "too_long" | "link" | "file" | "not_a_name" };
 
 /**
  * Read a reply as somebody's name, or refuse it.
@@ -186,10 +186,27 @@ export type VisitorNameRead =
  * for three weeks. A name the office cannot use is worse than no name:
  * it looks like a record and is not one.
  */
+/**
+ * A document's file name, arriving where a name was asked for.
+ *
+ * 19 Sep 2026: a teacher sent their CV before choosing anything from the
+ * menu. WhatsApp delivers a document with its file name as the message
+ * text, the bot was waiting for a name, and from then on the school
+ * addressed them — and told its own office — that the applicant was called
+ * "Rajnish_Kumar_Mishra_Resume.pdf".
+ */
+const FILE_NAME_LIKE = /\.(pdf|docx?|jpe?g|png|webp|xlsx?|pptx?|txt|zip)$/i;
+
 export function readVisitorName(text: string): VisitorNameRead {
   const t = (text || "").replace(/\s+/g, " ").trim();
   if (!t) return { ok: false, reason: "empty" };
   if (URL_LIKE.test(t)) return { ok: false, reason: "link" };
+  if (FILE_NAME_LIKE.test(t)) return { ok: false, reason: "file" };
+  // "Rajnish_Kumar_Mishra_Resume" — underscores instead of spaces is a file
+  // name with its extension stripped, not how anyone writes their name.
+  if (!t.includes(" ") && (t.match(/_/g) || []).length >= 2) {
+    return { ok: false, reason: "file" };
+  }
   if (t.length < 2) return { ok: false, reason: "too_short" };
   if (t.length > VISITOR_NAME_MAX) return { ok: false, reason: "too_long" };
   const words = t.split(" ").filter(Boolean);
@@ -213,6 +230,9 @@ export function visitorNameRetryText(
   switch (reason) {
     case "link":
       return "Please send your *name* first (e.g. Rajesh Kumar), then tell us what you need.";
+    case "file":
+      // The file is kept; what is missing is who sent it.
+      return "Thank you — we have the file. Please reply with your *full name* (e.g. Rajesh Kumar) so we know whose it is.";
     case "too_long":
       return "Please send just your *full name* (e.g. Rajesh Kumar) — you can tell us the rest next.";
     default:
