@@ -177,8 +177,10 @@ export function parseScopeAnswer(text: string, maxPosition: number): number | nu
 export type DrillReplyKind =
   /** An attempt at the question, right or wrong. */
   | "answer"
-  /** "how?", "I don't know", "batao" — a question, not a wrong answer. */
+  /** "how?", "I don't know", "batao" — about THIS question. */
   | "help"
+  /** A question of their own, about the subject — not an attempt at ours. */
+  | "question"
   /** "bye", "बस", "so raha hoon" — the child is done for tonight. */
   | "stop";
 
@@ -187,6 +189,40 @@ const HELP_RE =
 
 const STOP_RE =
   /^\s*(?:(?:bye|stop|quit|exit|enough|bas|khatam)\b)|bye ?bye|good ?night|shubh ratri|शुभ रात्रि|बंद कर|band kar|अब नहीं|ab nahi|nahi karna|नहीं करना|सो (?:रहा|रही|जा)|so raha|so rahi|रहने दो|rehne do|बस करो|kal karenge|कल करेंगे|^\s*बस\s*$/i;
+
+/**
+ * A question word, in either language. Used ONLY together with the length
+ * rule below — "क्या" alone is how half of Hindi's yes/no answers start.
+ */
+const ASKS_SOMETHING =
+  /\b(what|why|how|which|when|where|who|whose|meaning|means|explain|define|difference)\b|\b(kya|kyu|kyun|kyon|kaun|kab|kahan|kahaan|matlab|arth|antar|kitna|kitne|samjhao|samjhaiye)\b|क्या|क्यों|कैसे|कौन|कब|कहाँ|कहां|किसे|किस|मतलब|अर्थ|समझाइए|समझाओ|बताइए|अंतर/i;
+
+/**
+ * Is the child asking something of their own, rather than answering ours?
+ *
+ * WHY (director, 19 Sep 2026): "when tutor asked question and if student is
+ * asking any other question from class subject syllabus then should be get
+ * right answer of their questions". Until now every reply was marked
+ * against the question we had asked, so a child who paused to ask "समुच्चयबोधक
+ * का मतलब क्या है?" was told they were wrong and moved on. The one moment a
+ * child actually wants to learn something was the moment the drill refused
+ * to teach.
+ *
+ * The length rule is what keeps this safe. An answer to a revision question
+ * is a word or two — "चित्रकार", "सैनिक", "42". A question is a sentence.
+ * So a short reply is always treated as an attempt, even if it contains a
+ * question word, and only a longer one with a question mark or a question
+ * word is treated as an ask.
+ */
+export function looksLikeOwnQuestion(text: string): boolean {
+  const t = String(text || "").trim();
+  if (!t) return false;
+  const words = t.split(/\s+/).filter(Boolean);
+  // Two words cannot be a question and are very often the answer.
+  if (words.length < 3) return false;
+  const asksMark = /[?？]\s*$/.test(t);
+  return asksMark || ASKS_SOMETHING.test(t);
+}
 
 /**
  * Is this an answer at all?
@@ -202,7 +238,9 @@ export function classifyDrillReply(text: string): DrillReplyKind {
   const t = String(text || "").trim();
   if (!t) return "help";
   if (STOP_RE.test(t)) return "stop";
+  // "I don't know" is about OUR question, so it is help, not a new ask.
   if (HELP_RE.test(t)) return "help";
+  if (looksLikeOwnQuestion(t)) return "question";
   return "answer";
 }
 
@@ -251,6 +289,8 @@ export type DrillState = {
   asked: DrillAsked[];
   /** Consecutive right answers. The bar is STREAK_TO_FINISH. */
   streak: number;
+  /** Their own questions, answered inside this drill (capped at MAX_ASIDES). */
+  asides?: number;
   startedAt: string;
   endedAt?: string;
 };
@@ -265,6 +305,15 @@ export type DrillState = {
  */
 export const STREAK_TO_FINISH = 3;
 export const MAX_QUESTIONS = 12;
+/**
+ * How many of their own questions get answered inside one drill.
+ *
+ * Generous, but not unlimited: the drill exists to get a child ready for a
+ * paper tomorrow, and a night that becomes a free chat costs the school
+ * money and the child their revision. Past this, the question is noted and
+ * they are pointed at their teacher.
+ */
+export const MAX_ASIDES = 6;
 
 export function newDrill(input: {
   studentId: string;
@@ -563,6 +612,32 @@ export function renderFinish(input: {
   return input.hindi
     ? `🌙 आज इतना बहुत है। ${score}\n\nजो छूट गया है उसे कल सुबह शिक्षक से पूछ लीजिए — अभी सो जाइए, नींद सबसे ज़रूरी है 🙏\n\nदोबारा अभ्यास के लिए *PRACTICE* लिखें।`
     : `🌙 That is enough for tonight. ${score}\n\nAsk your teacher in the morning about what did not go well — sleep matters more now 🙏\n\nSend *PRACTICE* any time to go again.`;
+}
+
+/**
+ * The child's own question, answered, and then the drill's question put
+ * back — so they can see where they were without scrolling.
+ */
+export function renderAside(input: {
+  answer: string;
+  question: string;
+  number: number;
+  hindi: boolean;
+}): string {
+  return [
+    input.answer.trim(),
+    "",
+    input.hindi ? "— अब वापस अभ्यास पर 👇" : "— now back to the practice 👇",
+    "",
+    renderQuestion({ number: input.number, question: input.question, hindi: input.hindi }),
+  ].join("\n");
+}
+
+/** When the model could not answer the child's own question. */
+export function renderAsideFailed(hindi: boolean): string {
+  return hindi
+    ? "इस सवाल का जवाब अभी नहीं दे पा रहा 🙏 कल शिक्षक से ज़रूर पूछिए। तब तक अभ्यास जारी रखें:"
+    : "I could not answer that one just now 🙏 Do ask your teacher tomorrow. Meanwhile, back to the practice:";
 }
 
 /** The scope answer we could not read. Asked once more, never in a loop. */
