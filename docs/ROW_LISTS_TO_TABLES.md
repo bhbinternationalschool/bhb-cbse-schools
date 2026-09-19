@@ -46,10 +46,19 @@ two export buttons on one panel is worse than either.
 
 ## Done
 
-| Screen | Lists converted |
+| Screen | Lists converted | Left as lists, and why |
+|---|---|---|
+| `health/HealthWorkspace.tsx` | visits, medications, vaccinations | student picker; the per-child timeline (a story, read in order) |
+| `visitors/VisitorsWorkspace.tsx` | gate register, gate passes | student picker; today's gate duty (two fields, four rows) |
+| `comms/CommsWorkspace.tsx` | notices, scheduled queue, social cross-post log | news stories — each leads with a cover photograph |
+| `library/LibraryWorkspace.tsx` | overdue loans, the e-book shelf | open loans (each row opens a return form inside itself); procurement docs (each is a photo of a bill) |
+
+### Judged and skipped, so nobody re-opens them
+
+| Screen | Why it stays as it is |
 |---|---|
-| `health/HealthWorkspace.tsx` | visits, medications, vaccinations |
-| `visitors/VisitorsWorkspace.tsx` | gate register, gate passes |
+| `homework/HomeworkWorkspace.tsx` | All three lists are content, not records. A submission is a photograph of a child's work with the teacher's remark under it; a diary entry and a homework post are paragraphs the parent reads. A table would hide the very thing the teacher acts on. |
+| `staff/StaffDutiesPanel.tsx` | Four link lists inside a staff member's edit drawer, three rows each. DataTable's pagination and export weigh more than the list does. |
 
 ## The queue
 
