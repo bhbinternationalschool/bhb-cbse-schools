@@ -19,7 +19,7 @@
  * press the button.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { MastersState } from "@/lib/masters";
 import type { ExamTerm } from "@/lib/exams";
 import {
@@ -31,6 +31,7 @@ import {
   type ImportedPaperInput,
 } from "@/lib/examPapers";
 import { mergeImportMappings, type ImportCatalog } from "@/lib/examPaperImport";
+import { announceReady, readHandoffMessage } from "@/lib/nucleusHandoff";
 import {
   planNucleusCapture,
   readNucleusManifest,
@@ -106,11 +107,59 @@ export function NucleusCapturePanel({
     [ay, masters, terms],
   );
 
-  function read() {
-    const result = readNucleusManifest(paste);
+  /**
+   * Take a capture that arrives on its own.
+   *
+   * The bookmark opens this tab when it is clicked and posts the reading in
+   * when it finishes, so the office does not copy, switch tab or paste. What
+   * arrives is treated exactly as a paste would be — read, planned, and only
+   * then fetched — because a message is not more trustworthy than a person.
+   *
+   * The listener is installed once and calls through a ref, so it always runs
+   * the current render's `read` and `fetchAll`. Installed with the closure it
+   * was born with, it would plan against whichever catalog existed when the
+   * screen first opened.
+   */
+  const onCaptureRef = useRef<(e: MessageEvent) => void>(() => {});
+  useEffect(() => {
+    onCaptureRef.current = (e: MessageEvent) => {
+      const arriving = readHandoffMessage(e.origin, e.data, "papers");
+      if (!arriving.ok) {
+        if (arriving.speak) onError(`Nucleus sent a capture this screen could not take: ${arriving.why}`);
+        return;
+      }
+      setOpen(true);
+      setPaste(arriving.payload);
+      const planned = read(arriving.payload);
+      if (!planned) return;
+      if (!canEdit) {
+        onNotice("A capture arrived from Nucleus. You do not have permission to add papers, so it is only shown.");
+        return;
+      }
+      if (busy) {
+        onNotice("A capture arrived while this screen was still fetching. Press Get when it finishes.");
+        return;
+      }
+      if (!planned.counts.fetch) {
+        onNotice(`The capture arrived: all ${planned.rows.length} papers in it are already here.`);
+        return;
+      }
+      void fetchAll(planned);
+    };
+  });
+
+  useEffect(() => {
+    announceReady();
+    const listener = (e: MessageEvent) => onCaptureRef.current(e);
+    window.addEventListener("message", listener);
+    return () => window.removeEventListener("message", listener);
+  }, []);
+
+  function read(text: string = paste): CapturePlan | null {
+    const result = readNucleusManifest(text);
     if (!result.ok) {
       onError(result.error);
-      return;
+      return null;
     }
     const state = loadExamPapers();
     const existing = state.papers.flatMap((p) =>
@@ -126,19 +175,20 @@ export function NucleusCapturePanel({
     setIgnored(result.ignored);
     setProblems([]);
     setDone(0);
-    setPlan(
-      planNucleusCapture({
-        rows: result.rows,
-        catalog,
-        mappings: mergeImportMappings(state.importMappings),
-        existing,
-      }),
-    );
+    const planned = planNucleusCapture({
+      rows: result.rows,
+      catalog,
+      mappings: mergeImportMappings(state.importMappings),
+      existing,
+    });
+    setPlan(planned);
+    return planned;
   }
 
-  async function fetchAll() {
-    if (!plan || !canEdit || busy) return;
-    const wanted = plan.rows.filter((r) => r.verdict === "fetch");
+  async function fetchAll(use?: CapturePlan) {
+    const active = use ?? plan;
+    if (!active || !canEdit || busy) return;
+    const wanted = active.rows.filter((r) => r.verdict === "fetch");
     if (!wanted.length) {
       onError("Nothing in this capture is new");
       return;
@@ -306,7 +356,7 @@ export function NucleusCapturePanel({
               type="button"
               className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-semibold"
               disabled={!paste.trim() || busy}
-              onClick={read}
+              onClick={() => void read()}
             >
               Read capture
             </button>

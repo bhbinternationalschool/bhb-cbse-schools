@@ -6,13 +6,24 @@ cannot do is find the addresses, because they live behind the Nucleus login,
 and that login is behind a captcha with no API to go around it.
 
 So one person does the one thing only a signed-in person can: opens Nucleus
-and clicks a bookmark. It reads whichever page it is on, copies the reading to
-the clipboard, and downloads nothing.
+and clicks a bookmark. That click is the whole job. The bookmark opens the ERP
+in its own tab, reads whichever Nucleus page it is on, and hands the reading
+across when it is finished; the ERP then files the papers and fetches their
+answer keys on its own. Nothing is downloaded, copied or pasted.
 
-| Page | What it reads | Where it is pasted |
+A button on the ERP could not do this. The browser will not let one site read
+another's pages — Nucleus's own console shows it blocking exactly that — so
+only code running inside the signed-in Nucleus tab can read it. The click has
+to begin on that side; everything after it has been removed.
+
+| Page | What it reads | Where it lands |
 |---|---|---|
-| Assessments & Answer key | every paper's question-paper and answer-key address, plus what the publisher has and has not prepared | Exams → Question papers → **Get papers from Nucleus** |
-| Teacher Timeliness | the day-plan table, cell by cell | Teaching → Nucleus → the timeliness box |
+| Assessments & Answer key | every paper's question-paper and answer-key address, plus what the publisher has and has not prepared | Exams → Question papers, which starts fetching by itself |
+| Teacher Timeliness | the day-plan table, cell by cell | Teaching → Nucleus, imported by itself |
+
+If the ERP tab cannot take it — nobody signed in, or the tab was blocked — the
+bookmark falls back to the clipboard and says so, and the paste boxes on both
+screens still work exactly as before.
 
 The timeliness reading is worth taking this way rather than copying the table:
 the bookmark hands over the numbers themselves — 50 required, 10 done, out of
@@ -51,19 +62,19 @@ Three files, one program:
 | File | What it is |
 |---|---|
 | `nucleus-capture.js` | the readable source — comments and indentation |
-| `nucleus-capture-bookmarklet.txt` | the same program stripped and percent-encoded; **this is what the office installs** |
+| `nucleus-capture-bookmarklet.txt` | generated; the same program percent-encoded — **this is what the office installs** |
 | `nucleus-capture-install.html` | generated; carries the .txt as a draggable link |
 
-The .txt is not generated from the .js — it was stripped by hand — so edit the
-.js, rebuild the .txt, and then run:
+Edit the .js and run:
 
 ```
 node scripts/build-nucleus-install-page.mjs
 ```
 
-which rebuilds the page from the .txt and refuses to write one if the
-bookmarklet does not parse. Never generate the page from the .js: it would hand
-the office a bookmark nobody has run.
+which rebuilds the other two and refuses to write anything if the script does
+not parse. The .txt was stripped by hand until 19 Sep 2026, and by then it had
+drifted about 1,200 characters from the .js with nobody the wiser; both are
+generated now, so what the office runs is what this repository says it runs.
 
 ## Using it
 

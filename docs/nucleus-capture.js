@@ -13,8 +13,10 @@
  *                               pulled back out of "36% Course (50/140 day
  *                               plans)" at the other end.
  *
- * It downloads nothing and changes nothing; the only output is a reading on
- * the clipboard, which is pasted into the ERP.
+ * It downloads nothing and changes nothing. When it is done it hands the
+ * reading straight to the ERP, which opens in its own tab the moment this is
+ * clicked and starts work on its own; the clipboard is only the fallback for
+ * when that tab cannot be opened or nobody is signed in there.
  *
  * The check that matters: after opening a paper it waits until the page is
  * really showing THAT paper before reading anything. Without it the page still
@@ -33,6 +35,58 @@
   const say = (t) => { box.textContent = t; };
   say("Starting…");
   document.body.appendChild(box);
+
+  /* ---------------------------------------------------------------------- */
+  /* Handing the reading over                                               */
+  /* ---------------------------------------------------------------------- */
+
+  const ERP_ORIGIN = "https://bhbinternational.school";
+  const onTimeliness = /timeliness/i.test(location.pathname);
+  const PAGE = onTimeliness ? "timeliness" : "papers";
+  const DESK = onTimeliness ? "/teaching?tab=nucleus" : "/exams?tab=papers";
+
+  // Opened now, while this click is still a user gesture the browser will
+  // honour. Opening it when the reading finishes — twelve minutes later on the
+  // papers page — is refused as a pop-up, and the reading would have nowhere
+  // to go but the clipboard again.
+  let erp = null;
+  try {
+    erp = window.open(ERP_ORIGIN + DESK, "bhb-erp-capture");
+  } catch (e) {
+    erp = null;
+  }
+
+  // The ERP speaks first, when its screen is listening. A message posted to a
+  // window that is still loading is dropped without a sound, so waiting for it
+  // to say so is the difference between arriving and vanishing.
+  let erpReady = false;
+  window.addEventListener("message", (e) => {
+    if (e.origin === ERP_ORIGIN && e.data && e.data.kind === "nucleus-capture-ready") erpReady = true;
+  });
+
+  async function deliver(payload, what) {
+    if (erp && !erp.closed) {
+      // Thirty seconds. The papers reading takes twelve minutes, by which
+      // time the ERP has long since answered — but a timeliness reading is
+      // finished before the ERP tab has even loaded, and that is the one that
+      // would otherwise fall back to the clipboard for no reason.
+      for (let n = 0; n < 120 && !erpReady; n++) await sleep(250);
+      if (erpReady) {
+        // Named origin, never "*": this reading is nobody else's business.
+        erp.postMessage({ kind: "nucleus-capture", page: PAGE, payload }, ERP_ORIGIN);
+        try { erp.focus(); } catch (e) {}
+        say("Done — " + what + " sent to the ERP. Nothing to paste.");
+        return;
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(payload);
+      say("Done — " + what + " copied. Paste into the ERP.");
+    } catch (e) {
+      window.__nucleusCapture = payload;
+      say("Done. Clipboard blocked — copy window.__nucleusCapture from the console.");
+    }
+  }
 
   /** The list the page is showing, read from its own data. */
   function readList() {
@@ -119,13 +173,7 @@
     const timeliness = readTimeliness();
     if (!timeliness.length) { say("No timeliness table on screen."); return; }
     const payload = JSON.stringify({ capturedOn, timeliness }, null, 1);
-    try {
-      await navigator.clipboard.writeText(payload);
-      say(`Done — ${timeliness.length} teacher rows copied. Paste into the ERP.`);
-    } catch {
-      window.__nucleusCapture = payload;
-      say("Done. Clipboard blocked — copy window.__nucleusCapture from the console.");
-    }
+    await deliver(payload, `${timeliness.length} teacher rows`);
     setTimeout(() => box.remove(), 30000);
     return;
   }
@@ -173,12 +221,6 @@
   }));
 
   const payload = JSON.stringify({ capturedOn, papers: rows, assessments }, null, 1);
-  try {
-    await navigator.clipboard.writeText(payload);
-    say(`Done — ${rows.length} papers copied. Paste into the ERP.`);
-  } catch {
-    window.__nucleusCapture = payload;
-    say("Done. Clipboard blocked — copy window.__nucleusCapture from the console.");
-  }
+  await deliver(payload, `${rows.length} papers`);
   setTimeout(() => box.remove(), 30000);
 })();
