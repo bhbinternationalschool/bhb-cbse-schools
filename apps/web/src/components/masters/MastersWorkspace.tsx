@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — rows carry EditControl (which shows which row is open in the form beside it) and RemoveControl (which holds the check explaining why a row cannot be deleted); neither survives being folded into a menu
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";

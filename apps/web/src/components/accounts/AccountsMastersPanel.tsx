@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — every row carries MasterRowActions, which holds the removal check that says WHY a category or vendor cannot be deleted; a menu item would swallow that message
 
 import { useMemo, useState } from "react";
 import {
