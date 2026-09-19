@@ -20,6 +20,7 @@
  * press the button.
  */
 
+import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { MastersState } from "@/lib/masters";
 import type { ExamTerm } from "@/lib/exams";
@@ -389,9 +390,9 @@ export function NucleusCapturePanel({
                 </p>
               ) : null}
 
-              <div className="max-h-72 overflow-auto">
-                <table className="w-full border-collapse text-left text-[12px]">
-                  <thead>
+              <ErpTableShell className="max-h-72 overflow-auto" density="compact">
+                <ErpTable minWidth="min-w-[640px]">
+                  <ErpTableHead sticky>
                     <tr>
                       {["Paper", "Class", "Subject", "Exam", "Set", ""].map((h) => (
                         <th
@@ -402,8 +403,8 @@ export function NucleusCapturePanel({
                         </th>
                       ))}
                     </tr>
-                  </thead>
-                  <tbody>
+                  </ErpTableHead>
+                  <ErpTableBody zebra>
                     {plan.rows.map((r) => (
                       <tr key={`${r.row.paperId}-${r.row.title}`}>
                         <td className="border border-[var(--border)] p-2">{r.row.title}</td>
@@ -429,9 +430,9 @@ export function NucleusCapturePanel({
                         </td>
                       </tr>
                     ))}
-                  </tbody>
-                </table>
-              </div>
+                  </ErpTableBody>
+                </ErpTable>
+              </ErpTableShell>
 
               <button
                 type="button"

@@ -16,8 +16,8 @@
  * it needs the same right as writing off a bill, and it says so on the button.
  */
 
+import { ErpPanel, ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ErpPanel, ErpTableShell } from "@/components/ui/erp-roster";
 import {
   BulkActionBar,
   RowCheckbox,
@@ -377,8 +377,8 @@ export function DefaulterHoldPanel() {
         ) : (
           <>
             <ErpTableShell density="compact">
-              <table className="w-full text-sm">
-                <thead>
+              <ErpTableShell><ErpTable minWidth="min-w-[640px]">
+                <ErpTableHead>
                   <tr>
                     <th className="px-2 py-2 text-left">Service</th>
                     <th className="px-2 py-2 text-left">How it runs</th>
@@ -386,8 +386,8 @@ export function DefaulterHoldPanel() {
                     <th className="px-2 py-2 text-right">Least owed (₹)</th>
                     <th className="px-2 py-2 text-right">Least days late</th>
                   </tr>
-                </thead>
-                <tbody>
+                </ErpTableHead>
+                <ErpTableBody>
                   {GATE_ORDER.map((code) => {
                     const g = policy.gates.find((x) => x.holdCode === code);
                     if (!g) return null;
@@ -466,8 +466,8 @@ export function DefaulterHoldPanel() {
                       </tr>
                     );
                   })}
-                </tbody>
-              </table>
+                </ErpTableBody>
+              </ErpTable></ErpTableShell>
             </ErpTableShell>
 
             <p className="mt-3 text-xs text-muted-foreground">
@@ -587,8 +587,8 @@ export function DefaulterHoldPanel() {
             ) : null}
 
             <ErpTableShell className="mt-3" exportAs="defaulter-round">
-              <table className="w-full text-sm">
-                <thead>
+              <ErpTableShell><ErpTable minWidth="min-w-[640px]">
+                <ErpTableHead>
                   <tr>
                     {isDraft ? (
                       <th className="w-8 px-2 py-2">
@@ -621,8 +621,8 @@ export function DefaulterHoldPanel() {
                     </ErpSortTh>
                     <th className="px-2 py-2 text-left">Reason</th>
                   </tr>
-                </thead>
-                <tbody>
+                </ErpTableHead>
+                <ErpTableBody>
                   {sorted.map((r) => (
                     <tr
                       key={r.studentId}
@@ -662,8 +662,8 @@ export function DefaulterHoldPanel() {
                       </td>
                     </tr>
                   ))}
-                </tbody>
-              </table>
+                </ErpTableBody>
+              </ErpTable></ErpTableShell>
             </ErpTableShell>
 
             {isDraft ? (
@@ -731,8 +731,8 @@ export function DefaulterHoldPanel() {
               />
             </label>
             <ErpTableShell density="compact" exportAs="withheld-now">
-              <table className="w-full text-sm">
-                <thead>
+              <ErpTableShell><ErpTable minWidth="min-w-[640px]">
+                <ErpTableHead>
                   <tr>
                     <th className="w-8 px-2 py-2" />
                     <th className="px-2 py-2 text-left">Child</th>
@@ -741,8 +741,8 @@ export function DefaulterHoldPanel() {
                     <th className="px-2 py-2 text-left">By</th>
                     <th className="px-2 py-2 text-left">Reason</th>
                   </tr>
-                </thead>
-                <tbody>
+                </ErpTableHead>
+                <ErpTableBody>
                   {standingHere.map((d) => (
                     <tr
                       key={`${d.studentId}-${d.holdCode}`}
@@ -770,8 +770,8 @@ export function DefaulterHoldPanel() {
                       </td>
                     </tr>
                   ))}
-                </tbody>
-              </table>
+                </ErpTableBody>
+              </ErpTable></ErpTableShell>
             </ErpTableShell>
           </>
         )}
