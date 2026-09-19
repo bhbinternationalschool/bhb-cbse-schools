@@ -37,6 +37,9 @@ import {
   type DrillState,
   classifyDrillReply,
   readScopeAnswer,
+  MAX_ASIDES,
+  renderAside,
+  renderAsideFailed,
 } from "@/lib/examDrill";
 
 export function examDrillEnabled(): boolean {
@@ -56,6 +59,7 @@ type Row = {
   phase: DrillState["phase"];
   asked: DrillState["asked"];
   streak: number;
+  asides?: number | null;
   started_at: string;
   ended_at: string | null;
 };
@@ -70,6 +74,7 @@ function rowToState(r: Row): DrillState {
     phase: r.phase,
     asked: Array.isArray(r.asked) ? r.asked : [],
     streak: Number(r.streak) || 0,
+    asides: Number(r.asides) || 0,
     startedAt: r.started_at,
     endedAt: r.ended_at ?? undefined,
   };
@@ -149,6 +154,7 @@ async function saveDrill(id: string, state: DrillState, mobile10: string): Promi
       phase: state.phase,
       asked: state.asked,
       streak: state.streak,
+      asides: state.asides ?? 0,
       started_at: state.startedAt,
       ended_at: state.endedAt ?? null,
       updated_at: new Date().toISOString(),
@@ -277,6 +283,69 @@ export async function continueExamDrill(input: {
       return {
         handled: true,
         replyText: renderFinish({ state, reason: "stopped", hindi: input.hindi }),
+      };
+    }
+
+    // 0b. A question of their own, about their own subject. The drill
+    //     answers it from their own textbook and then puts its question
+    //     back — until 19 Sep 2026 this was marked wrong and the child was
+    //     moved on, which is the opposite of teaching.
+    const pendingQ = state.asked[state.asked.length - 1];
+    if (
+      said === "question" &&
+      state.phase === "asking" &&
+      pendingQ &&
+      !pendingQ.verdict
+    ) {
+      const usedAsides = state.asides ?? 0;
+      if (usedAsides >= MAX_ASIDES) {
+        // Answered plenty already: the paper is tomorrow and sleep matters.
+        return {
+          handled: true,
+          replyText: [
+            input.hindi
+              ? "यह सवाल कल शिक्षक से पूछिए 🙏 अभी पेपर की तैयारी पूरी कर लेते हैं:"
+              : "Ask your teacher that one tomorrow 🙏 Let's finish the practice first:",
+            "",
+            renderQuestion({
+              number: state.asked.length,
+              question: pendingQ.question,
+              hindi: input.hindi,
+            }),
+          ].join("\n"),
+        };
+      }
+      const { replyHomeworkTutor } = await import("@/lib/homeworkTutor.server");
+      const answered = await replyHomeworkTutor({
+        message: input.text.slice(0, 600),
+        mode: "hint",
+        language: input.hindi ? "hi" : "en",
+        context: {
+          childName: child.fullName.split(/\s+/)[0] || child.fullName,
+          className,
+          subjectLabel: state.subjectLabel,
+        },
+      });
+      state = { ...state, asides: usedAsides + 1 };
+      await saveDrill(open.id, state, input.mobile10);
+      return {
+        handled: true,
+        replyText: answered.ok
+          ? renderAside({
+              answer: answered.text,
+              question: pendingQ.question,
+              number: state.asked.length,
+              hindi: input.hindi,
+            })
+          : [
+              renderAsideFailed(input.hindi),
+              "",
+              renderQuestion({
+                number: state.asked.length,
+                question: pendingQ.question,
+                hindi: input.hindi,
+              }),
+            ].join("\n"),
       };
     }
 

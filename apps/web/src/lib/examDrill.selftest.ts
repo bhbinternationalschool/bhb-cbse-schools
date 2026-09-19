@@ -25,7 +25,9 @@ import {
   type DrillChapter,
   type DrillState,
   classifyDrillReply,
+  looksLikeOwnQuestion,
   readScopeAnswer,
+  renderAside,
 } from "./examDrill";
 
 console.log("examDrill.selftest.ts");
@@ -304,6 +306,47 @@ assert.equal(bare.asked[0]!.answer, undefined);
   for (const t of ["चित्रकार", "Darji", "कुम्हार", "42", "कि", "सैनिक"]) {
     assert.equal(classifyDrillReply(t), "answer", t);
   }
+}
+
+/* ── a child's own question is answered, not marked wrong ───────────── */
+//
+// 19 Sep 2026, the director: a child who asks something from their own
+// syllabus in the middle of the drill must get a real answer. Before this
+// the question was marked against the drill's question and they were told
+// they were wrong.
+{
+  for (const q of [
+    "समुच्चयबोधक का मतलब क्या है?",
+    "photosynthesis kya hai",
+    "what is a synonym",
+    "sangya kitne prakar ki hoti hai",
+    "noun kya hota hai",
+    "meaning of noun please",
+  ]) {
+    assert.equal(classifyDrillReply(q), "question", q);
+    assert.equal(looksLikeOwnQuestion(q), true, q);
+  }
+
+  // The length rule is what protects the answers: an attempt is a word or
+  // two, even when it happens to contain a question word.
+  for (const a of ["चित्रकार", "कुम्हार", "42", "42 kg", "kya", "क्या", "दो शब्द", "Darji"]) {
+    assert.equal(classifyDrillReply(a), "answer", a);
+    assert.equal(looksLikeOwnQuestion(a), false, a);
+  }
+
+  // "I don't know" is about OUR question — help, never a new ask.
+  assert.equal(classifyDrillReply("mujhe nahi pata ye kaise hota hai"), "help");
+
+  // The drill's question comes back underneath the answer, with its number.
+  const aside = renderAside({
+    answer: "समुच्चयबोधक दो शब्दों को जोड़ता है, जैसे 'और'।",
+    question: "'राधा और मीना खेल रही हैं।' में समुच्चयबोधक कौन-सा है?",
+    number: 7,
+    hindi: true,
+  });
+  assert.ok(aside.startsWith("समुच्चयबोधक दो शब्दों"), "their answer comes first");
+  assert.ok(aside.includes("वापस अभ्यास पर"), "then the way back");
+  assert.ok(aside.includes("प्रश्न 7"), "and the question they were on");
 }
 
 /* ── what the child reads back ──────────────────────────────────────── */
