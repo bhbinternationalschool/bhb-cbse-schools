@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import { Check, ChevronDown, ChevronRight, CircleDashed, Clock, Eraser, Trash2 } from "lucide-react";
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import { loadMasters } from "@/lib/masters";
+import { Sparkles } from "lucide-react";
+import type { LessonPlanDraft, LessonPlanLanguage } from "@/lib/lessonPlanAi";
 import {
   addResourceLink,
   computeSyllabusProgress,
@@ -11,6 +13,7 @@ import {
   removeResourceLink,
   removeSyllabusUnit,
   syllabusCoverage,
+  upsertLessonPlan,
   upsertSyllabusUnit,
   type ResourceKind,
   type SyllabusImportChapter,
@@ -81,6 +84,9 @@ export function SyllabusPlanPanel(props: {
   academicYearCode: string;
   classId: string;
   subjectId: string;
+  /** As the teacher reads them — the model is told the class and subject. */
+  classLabel?: string;
+  subjectName?: string;
   canEdit: boolean;
   createdBy: string;
   onError: (msg: string | null) => void;
@@ -294,6 +300,122 @@ export function SyllabusPlanPanel(props: {
     );
   }
 
+  const [planning, setPlanning] = useState<string | null>(null);
+  const [planLanguage, setPlanLanguage] = useState<LessonPlanLanguage>("en");
+
+  /**
+   * One lesson plan, drafted from a chapter of THIS syllabus.
+   *
+   * The model is handed the chapter, its topics, their learning outcomes and
+   * the periods the plan allots — and the server adds the school's own book
+   * for the class and subject, so the plan follows the real chapter rather
+   * than a generic one.
+   *
+   * It is SAVED as `source: "ai"`, unedited and plainly labelled, so the
+   * teacher opens a plan that exists rather than a blank page. That is the
+   * point of drafting from the syllabus: twelve chapters are twelve blank
+   * pages otherwise, and nobody writes twelve.
+   */
+  async function draftPlanFor(chapter: UnitProgress): Promise<string | null> {
+    const topics = chapter.topics.map((t) => t.unit);
+    const units = [chapter.unit, ...topics].slice(0, 20).map((u) => ({
+      level: u.level,
+      code: u.code,
+      title: u.title,
+      learningOutcomes: u.learningOutcomes,
+      plannedPeriods: u.plannedPeriods,
+    }));
+    const periods =
+      chapter.unit.plannedPeriods ||
+      topics.reduce((sum, t) => sum + t.plannedPeriods, 0) ||
+      1;
+    const res = await fetch("/api/ai/lesson-plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        classLabel: props.classLabel ?? "",
+        subjectName: props.subjectName ?? "",
+        periods,
+        language: planLanguage,
+        units,
+        existing: {
+          title: chapter.unit.title,
+          objectives: chapter.unit.learningOutcomes,
+          teachingAids: "",
+          activities: "",
+          assessment: "",
+          homework: "",
+        },
+        teacherNote: "",
+      }),
+    });
+    const body = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      draft?: LessonPlanDraft;
+      model?: string;
+    };
+    if (!res.ok || !body.draft) return body.error || `Draft failed (${res.status})`;
+    const d = body.draft;
+    const saved = upsertLessonPlan(state, {
+      academicYearCode: ay,
+      classId,
+      subjectId,
+      sectionId: "",
+      unitIds: [chapter.unit.id, ...topics.map((t) => t.id)],
+      title: d.title || chapter.unit.title,
+      plannedPeriods: periods,
+      objectives: d.objectives,
+      teachingAids: d.teachingAids,
+      activities: d.activities,
+      assessment: d.assessment,
+      homework: d.homework,
+      source: "ai",
+      aiModel: body.model || "",
+      createdBy: props.createdBy,
+    });
+    if (!saved.ok) return saved.error;
+    onChange(saved.value.state);
+    return null;
+  }
+
+  async function draftOne(chapter: UnitProgress) {
+    if (planning) return;
+    props.onError(null);
+    props.onNotice(null);
+    setPlanning(chapter.unit.id);
+    const err = await draftPlanFor(chapter);
+    setPlanning(null);
+    if (err) return props.onError(err);
+    props.onNotice(`Lesson plan drafted for "${chapter.unit.title}" — open Lesson plans to read and edit it`);
+  }
+
+  /** Every chapter that has no plan yet, one after another. */
+  async function draftMissing() {
+    if (planning) return;
+    const planned = new Set(
+      (state.lessonPlans ?? [])
+        .filter((pl) => pl.classId === classId && pl.subjectId === subjectId && pl.academicYearCode === ay)
+        .flatMap((pl) => pl.unitIds),
+    );
+    const todo = progress?.units.filter((c) => !planned.has(c.unit.id)) ?? [];
+    if (!todo.length) return props.onNotice("Every chapter already has a lesson plan");
+    props.onError(null);
+    let done = 0;
+    for (const chapter of todo) {
+      setPlanning(chapter.unit.id);
+      const err = await draftPlanFor(chapter);
+      if (err) {
+        setPlanning(null);
+        props.onError(`Stopped after ${done}: ${err}`);
+        return;
+      }
+      done += 1;
+      props.onNotice(`Drafting… ${done} of ${todo.length}`);
+    }
+    setPlanning(null);
+    props.onNotice(`${done} lesson plan${done === 1 ? "" : "s"} drafted — every one needs a teacher's eye before class`);
+  }
+
   function drop(unitId: string, label: string) {
     onChange(removeSyllabusUnit(state, unitId));
     props.onNotice(`${label} removed`);
@@ -418,6 +540,8 @@ export function SyllabusPlanPanel(props: {
               onToggle={() => toggle(chapter.unit.id)}
               canEdit={canEdit}
               onMark={mark}
+              onDraftPlan={draftOne}
+              planning={planning}
               topicDraft={topicDraft}
               setTopicDraft={setTopicDraft}
               onAddTopic={() => addTopic(chapter.unit.id)}
@@ -444,6 +568,25 @@ export function SyllabusPlanPanel(props: {
               disabled={fillingFromBooks}
             >
               {fillingFromBooks ? "Reading…" : "Fill from the book"}
+            </button>
+            <select
+              className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1"
+              value={planLanguage}
+              onChange={(e) => setPlanLanguage(e.target.value as LessonPlanLanguage)}
+              aria-label="Lesson plan language"
+            >
+              <option value="en">English</option>
+              <option value="hi">हिंदी</option>
+            </select>
+            <button
+              type="button"
+              className="rounded-lg border border-[var(--border)] px-2 py-1 font-semibold disabled:opacity-50"
+              onClick={draftMissing}
+              disabled={!!planning || !progress?.units.length}
+              title="Draft a lesson plan for every chapter that has none"
+            >
+              <Sparkles className="mr-1 inline size-3" aria-hidden />
+              {planning ? "Drafting…" : "Draft the missing lesson plans"}
             </button>
           </div>
         </div>
@@ -642,6 +785,8 @@ function ChapterRow({
   onDetach,
   onSaveOutcomes,
   onMark,
+  onDraftPlan,
+  planning,
 }: {
   index: number;
   chapter: UnitProgress;
@@ -649,6 +794,8 @@ function ChapterRow({
   onToggle: () => void;
   canEdit: boolean;
   onMark: (unit: SyllabusUnit, status: "not_started" | "in_progress" | "complete" | null) => void;
+  onDraftPlan: (chapter: UnitProgress) => void;
+  planning: string | null;
   topicDraft: { parentId: string; title: string; plannedPeriods: string };
   setTopicDraft: (d: {
     parentId: string;
@@ -721,7 +868,16 @@ function ChapterRow({
             row={u}
             label="Chapter actions"
             className="shrink-0"
-            actions={markActions(onMark, (unit) => onDrop(unit.id, "Chapter"))}
+            actions={[
+              {
+                id: "plan",
+                label: planning ? "Drafting…" : "Draft a lesson plan",
+                icon: <Sparkles className="size-4" aria-hidden />,
+                disabled: () => !!planning,
+                onSelect: () => onDraftPlan(chapter),
+              },
+              ...markActions(onMark, (unit) => onDrop(unit.id, "Chapter")),
+            ]}
           />
         ) : null}
       </div>
