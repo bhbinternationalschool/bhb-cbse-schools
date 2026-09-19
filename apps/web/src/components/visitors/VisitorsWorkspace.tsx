@@ -6,7 +6,8 @@ import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionCo
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { field } from "@/components/ui/erp-ui";
-import { ExportMenu, RowActionMenu } from "@/components/ui/erp-grid";
+import { ExportMenu, type RowAction } from "@/components/ui/erp-grid";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import { openWaMe } from "@/lib/waMe";
 import { DEFAULT_AY, loadMasters, type MastersState, currentAcademicYearCode} from "@/lib/masters";
 import { classSectionLabel } from "@/lib/timetable";
@@ -353,6 +354,156 @@ export function VisitorsWorkspace() {
     [state],
   );
 
+  /* ------------------------------------------------------------------ */
+  /* The register, as a register                                         */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * The gate register and the gate passes were cards: a name in bold, then
+   * purpose, person, mobile, in-time and out-time run together in one grey
+   * line. A gate register is a book with columns — that is what it has always
+   * been — and a card cannot be sorted by time in, filtered down to who is
+   * still on campus, or handed to anyone as a file.
+   *
+   * Today's gate duty and the student search stay lists. Two fields and a
+   * handful of rows is a note, not a table.
+   */
+  const visitorCols: DataTableColumn<(typeof visitorRows)[number]>[] = [
+    {
+      key: "no", header: "No.", sortable: true,
+      value: (v) => v.visitorNo || "",
+      render: (v) =>
+        v.visitorNo ? (
+          <span className="rounded-md bg-[var(--brand-deep)]/10 px-1.5 py-0.5 font-mono text-[11px] font-black text-[var(--brand-deep)]">
+            {v.visitorNo}
+          </span>
+        ) : (
+          <span className="text-[var(--muted)]">—</span>
+        ),
+    },
+    {
+      key: "name", header: L.name, sortable: true,
+      value: (v) => v.visitorName,
+      render: (v) => (
+        <span>
+          <span className="font-semibold">{v.visitorName}</span>
+          {v.source === "gate_qr" || v.source === "whatsapp" ? (
+            <span className="ml-2 inline-block whitespace-nowrap rounded-md bg-[var(--success-soft)] px-1.5 py-0.5 text-[10px] font-black uppercase text-[var(--success)]">
+              {v.source === "whatsapp" ? "WhatsApp" : L.gateQr}
+            </span>
+          ) : null}
+          {v.linkedTo ? (
+            <div className="text-[11px] text-[var(--muted)]">{v.linkedTo}</div>
+          ) : null}
+        </span>
+      ),
+    },
+    {
+      key: "purpose", header: L.purpose, sortable: true,
+      value: (v) => (lang === "hi" ? VISITOR_PURPOSE_HI[v.purpose] || v.purpose : visitorPurposeLabel(v.purpose)),
+    },
+    { key: "meet", header: L.meet, value: (v) => v.personToMeet || "—" },
+    { key: "mobile", header: L.mobile, value: (v) => v.mobile || "—" },
+    {
+      key: "in", header: L.inWord, sortable: true,
+      value: (v) => v.inTime,
+      render: (v) => new Date(v.inTime).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
+    },
+    {
+      key: "out", header: L.out, sortable: true,
+      value: (v) => v.outTime || "",
+      render: (v) =>
+        v.outTime ? (
+          new Date(v.outTime).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
+        ) : (
+          <span className="whitespace-nowrap rounded-md bg-[var(--warning-soft,var(--surface-sunken))] px-1.5 py-0.5 text-[10px] font-black uppercase">
+            {L.onCampus}
+          </span>
+        ),
+    },
+  ];
+
+  const visitorActions: RowAction<(typeof visitorRows)[number]>[] = [
+    {
+      id: "checkout",
+      label: L.checkOut,
+      onSelect: (v) => onCheckOut(v.id),
+      disabled: (v) => readOnly || !!v.outTime,
+    },
+    { id: "pass", label: L.printPass, onSelect: (v) => setPrintEntry(v) },
+    {
+      id: "wa",
+      label: "Send WhatsApp",
+      disabled: (v) => !v.mobile,
+      onSelect: (v) => openWaMe(v.mobile ?? "", `Namaste ${v.visitorName}, this is BHB International School.`),
+    },
+    {
+      id: "del", label: L.del, tone: "danger", separatorAbove: true,
+      hidden: () => readOnly,
+      onSelect: (v) => onDeleteEntry(v.id),
+    },
+  ];
+
+  const gatePassCols: DataTableColumn<(typeof gatePassRows)[number]>[] = [
+    { key: "student", header: "Student", value: (g) => studentName(g.studentId), sortable: true },
+    { key: "date", header: "Date", value: (g) => g.date, sortable: true },
+    { key: "pickup", header: "Pickup", value: (g) => g.requestedPickupTime || "—", sortable: true },
+    { key: "status", header: "Status", value: (g) => gatePassStatusLabel(g.status), sortable: true },
+    { key: "reason", header: "Reason", value: (g) => g.reason || "—" },
+    {
+      key: "parent", header: "Parent told", sortable: true,
+      value: (g) => (g.notifiedParentAt ? g.notifiedParentAt : ""),
+      render: (g) =>
+        g.notifiedParentAt ? (
+          <span className="text-[var(--ok)]">Notified</span>
+        ) : (
+          <span className="text-[var(--muted)]">Not yet</span>
+        ),
+    },
+    {
+      key: "pickedup", header: "Picked up by",
+      value: (g) => (g.status === "picked_up" ? g.pickedUpByName || "—" : ""),
+      render: (g) =>
+        g.status === "picked_up" ? (
+          <span>
+            {g.pickedUpByName || "—"}
+            {g.actualPickupTime ? (
+              <span className="text-[var(--muted)]">
+                {" "}
+                {new Date(g.actualPickupTime).toLocaleTimeString()}
+              </span>
+            ) : null}
+          </span>
+        ) : (
+          <span className="text-[var(--muted)]">—</span>
+        ),
+    },
+  ];
+
+  const gatePassActions: RowAction<(typeof gatePassRows)[number]>[] = [
+    {
+      id: "notify", label: "Notify parent",
+      onSelect: (g) => void onNotifyGatePass(g),
+      disabled: (g) => readOnly || !!g.notifiedParentAt,
+    },
+    {
+      id: "approve", label: "Approve",
+      onSelect: (g) => onApproveGatePass(g),
+      // Only an approved pass can be released at the gate.
+      disabled: (g) => readOnly || g.status !== "requested",
+    },
+    {
+      id: "pickedup", label: "Mark picked up",
+      onSelect: (g) => onMarkPickedUp(g),
+      disabled: (g) => readOnly || g.status === "picked_up" || g.status === "cancelled",
+    },
+    {
+      id: "del", label: "Delete", tone: "danger", separatorAbove: true,
+      onSelect: (g) => onDeleteGatePass(g.id),
+      disabled: () => readOnly,
+    },
+  ];
+
   // --- Gate duty today ---
   const todayDutyAssignments = useMemo(
     () => (dutyRoster ? onGateDutyNow(dutyRoster, todayIso()) : []),
@@ -454,65 +605,15 @@ export function VisitorsWorkspace() {
               />
             </div>
           ) : null}
-          {visitorRows.length === 0 ? (
-            <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-8 text-center text-sm text-[var(--muted)]">
-              {L.noVisitors}
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {visitorRows.map((v) => (
-                <li key={v.id} className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      {v.visitorNo ? <span className="mr-2 rounded-md bg-[var(--brand-deep)]/10 px-1.5 py-0.5 font-mono text-[11px] font-black text-[var(--brand-deep)]">{v.visitorNo}</span> : null}
-                      <span className="font-semibold">{v.visitorName}</span>
-                      {v.source === "gate_qr" || v.source === "whatsapp" ? <span className="ml-2 inline-block whitespace-nowrap rounded-md bg-[var(--success-soft)] px-1.5 py-0.5 text-[10px] font-black uppercase text-[var(--success)]">{v.source === "whatsapp" ? "WhatsApp" : lang === "hi" ? "गेट QR" : "Gate QR"}</span> : null}
-                      {!v.outTime ? <span className="ml-2 inline-block whitespace-nowrap rounded-md bg-[var(--warning-soft,var(--surface-sunken))] px-1.5 py-0.5 text-[10px] font-black uppercase">{L.onCampus}</span> : null}
-                      <span className="ml-2 text-xs text-[var(--muted)]">
-                        {lang === "hi" ? VISITOR_PURPOSE_HI[v.purpose] || v.purpose : visitorPurposeLabel(v.purpose)}
-                        {v.personToMeet ? ` · ${L.meeting} ${v.personToMeet}` : ""}
-                        {v.mobile ? ` · ${v.mobile}` : ""} · {L.inWord} {new Date(v.inTime).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
-                        {v.outTime ? ` · ${L.out} ${new Date(v.outTime).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}` : ""}
-                      </span>
-                      {v.linkedTo ? <div className="text-[11px] text-[var(--muted)]">{v.linkedTo}</div> : null}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs font-semibold disabled:opacity-50"
-                        disabled={readOnly || !!v.outTime}
-                        onClick={() => onCheckOut(v.id)}
-                      >
-                        {v.outTime ? L.checkedOut : L.checkOut}
-                      </button>
-                      <RowActionMenu
-                        row={v}
-                        label={`Actions for ${v.visitorName}`}
-                        actions={[
-                          { id: "pass", label: L.printPass, onSelect: (r) => setPrintEntry(r) },
-                          {
-                            id: "wa",
-                            label: "Send WhatsApp",
-                            disabled: (r) => !r.mobile,
-                            onSelect: (r) =>
-                              openWaMe(r.mobile ?? "", `Namaste ${r.visitorName}, this is BHB International School.`),
-                          },
-                          {
-                            id: "del",
-                            label: L.del,
-                            tone: "danger",
-                            separatorAbove: true,
-                            hidden: () => readOnly,
-                            onSelect: (r) => onDeleteEntry(r.id),
-                          },
-                        ]}
-                      />
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
+          <DataTable
+            columns={visitorCols}
+            rows={visitorRows}
+            rowKey={(v) => v.id}
+            rowActions={visitorActions}
+            rowActionsLabel="Visitor actions"
+            minWidth="min-w-[980px]"
+            emptyTitle={L.noVisitors}
+          />
 
           {printEntry ? (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 print-hide">
@@ -572,68 +673,17 @@ export function VisitorsWorkspace() {
             </button>
           </div>
 
-          {gatePassRows.length === 0 ? (
-            <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-8 text-center text-sm text-[var(--muted)]">
-              No gate passes logged yet.
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {gatePassRows.map((g) => (
-                <li key={g.id} className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <span className="font-semibold">{studentName(g.studentId)}</span>
-                      <span className="ml-2 text-xs text-[var(--muted)]">
-                        {g.date}{g.requestedPickupTime ? ` · ${g.requestedPickupTime}` : ""} · {gatePassStatusLabel(g.status)}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs font-semibold disabled:opacity-50"
-                        disabled={readOnly || !!g.notifiedParentAt}
-                        onClick={() => onNotifyGatePass(g)}
-                      >
-                        {g.notifiedParentAt ? "Notified" : "Notify parent"}
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs font-semibold disabled:opacity-50"
-                        disabled={readOnly || g.status !== "requested"}
-                        onClick={() => onApproveGatePass(g)}
-                        title="Only an approved pass can be released at the gate"
-                      >
-                        {g.status === "requested" ? "Approve" : "Approved"}
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs font-semibold disabled:opacity-50"
-                        disabled={readOnly || g.status === "picked_up" || g.status === "cancelled"}
-                        onClick={() => onMarkPickedUp(g)}
-                      >
-                        Mark picked up
-                      </button>
-                      <button
-                        type="button"
-                        className="text-xs font-bold text-[var(--danger)]"
-                        disabled={readOnly}
-                        onClick={() => onDeleteGatePass(g.id)}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                  <p className="mt-1 text-sm text-[var(--muted)]">{g.reason}</p>
-                  {g.status === "picked_up" ? (
-                    <p className="mt-1 text-xs text-[var(--muted)]">
-                      Picked up by {g.pickedUpByName || "—"}
-                      {g.actualPickupTime ? ` at ${new Date(g.actualPickupTime).toLocaleTimeString()}` : ""}
-                    </p>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          )}
+          <DataTable
+            columns={gatePassCols}
+            rows={gatePassRows}
+            rowKey={(g) => g.id}
+            rowActions={gatePassActions}
+            rowActionsLabel="Gate pass actions"
+            minWidth="min-w-[1040px]"
+            exportFileBaseName="gate-passes"
+            exportTitle="Gate passes"
+            emptyTitle="No gate passes logged yet."
+          />
         </div>
       ) : null}
 
