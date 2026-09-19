@@ -111,6 +111,8 @@ import {
 } from "@/lib/salarySetup";
 import { completeMastersSetup } from "@/lib/mastersCompleteSetup";
 import { forgetSchoolIdentity } from "@/lib/schoolIdentity";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
+import type { RowAction } from "@/components/ui/erp-grid";
 
 type Commit = (s: MastersState, msg?: string) => void;
 
@@ -602,6 +604,61 @@ export function AcademicPanel({
     setLabel("");
   }
 
+
+  /**
+   * The year and term registers, as registers. Four rows each, but they are
+   * read across — which year is current, when each term starts and ends —
+   * and that is a table's job even when it is short.
+   */
+  const sortedTerms = state.academicTerms
+    .slice()
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+
+  const yearCols: DataTableColumn<(typeof state.academicYears)[number]>[] = [
+    {
+      key: "label", header: "Year", sortable: true,
+      value: (y) => y.label,
+      render: (y) => <span className="font-semibold text-[var(--brand-deep)]">{y.label}</span>,
+    },
+    {
+      key: "status", header: "Status", sortable: true,
+      value: (y) => y.status,
+      render: (y) =>
+        y.status === "current" ? (
+          <span className="rounded bg-[rgba(197,160,40,0.2)] px-2 py-0.5 text-[10px] font-bold text-[var(--brand-deep)]">
+            CURRENT
+          </span>
+        ) : (
+          <span className="text-[var(--muted)]">{y.status}</span>
+        ),
+    },
+    { key: "from", header: "Starts", sortable: true, value: (y) => y.startsOn },
+    { key: "to", header: "Ends", sortable: true, value: (y) => y.endsOn },
+  ];
+
+  const yearActions: RowAction<(typeof state.academicYears)[number]>[] = [
+    {
+      id: "current", label: "Set current",
+      hidden: (y) => y.status === "current",
+      onSelect: (y) => setCurrent(y.id),
+    },
+  ];
+
+  const termCols: DataTableColumn<(typeof sortedTerms)[number]>[] = [
+    { key: "year", header: "Year", sortable: true, value: (t) => t.academicYearCode },
+    {
+      key: "code", header: "Term", sortable: true,
+      value: (t) => t.code,
+      render: (t) => (
+        <span>
+          <span className="font-semibold text-[var(--brand-deep)]">{t.code}</span> {t.label}
+        </span>
+      ),
+    },
+    { key: "from", header: "Starts", sortable: true, value: (t) => t.startsOn },
+    { key: "to", header: "Ends", sortable: true, value: (t) => t.endsOn },
+  ];
+
   function setCurrent(id: string) {
     const years = state.academicYears.map((y) => ({
       ...y,
@@ -648,62 +705,24 @@ export function AcademicPanel({
       tables={
         <MastersTablesRow>
           <MastersTableCard title="Academic years">
-            <ul className="divide-y divide-[var(--border)]">
-              {state.academicYears.map((y) => (
-                <li
-                  key={y.id}
-                  className="flex flex-wrap items-center justify-between gap-2 px-4 py-3"
-                >
-                  <div>
-                    <div className="text-sm font-semibold text-[var(--brand-deep)]">
-                      {y.label}{" "}
-                      <span className="text-[11px] font-medium text-[var(--muted)]">
-                        {y.status}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-[var(--muted)]">
-                      {y.startsOn} → {y.endsOn}
-                    </p>
-                  </div>
-                  {y.status !== "current" ? (
-                    <button
-                      type="button"
-                      className="text-[11px] font-semibold text-[var(--brand-deep)]"
-                      onClick={() => setCurrent(y.id)}
-                    >
-                      Set current
-                    </button>
-                  ) : (
-                    <span className="rounded bg-[rgba(197,160,40,0.2)] px-2 py-0.5 text-[10px] font-bold text-[var(--brand-deep)]">
-                      CURRENT
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
+            <DataTable
+              columns={yearCols}
+              rows={state.academicYears}
+              rowKey={(y) => y.id}
+              rowActions={yearActions}
+              rowActionsLabel="Year actions"
+              minWidth="min-w-[440px]"
+              emptyTitle="No academic years"
+            />
           </MastersTableCard>
           <MastersTableCard title="Terms">
-            <ul className="divide-y divide-[var(--border)]">
-              {state.academicTerms
-                .slice()
-                .sort((a, b) => a.sortOrder - b.sortOrder)
-                .map((t) => (
-                  <li key={t.id} className="px-4 py-3 text-sm">
-                    <span className="font-semibold text-[var(--brand-deep)]">
-                      {t.academicYearCode} · {t.code}
-                    </span>{" "}
-                    {t.label}
-                    <span className="ml-2 text-[11px] text-[var(--muted)]">
-                      {t.startsOn} → {t.endsOn}
-                    </span>
-                  </li>
-                ))}
-              {state.academicTerms.length === 0 ? (
-                <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">
-                  No academic terms yet
-                </li>
-              ) : null}
-            </ul>
+            <DataTable
+              columns={termCols}
+              rows={sortedTerms}
+              rowKey={(t) => t.id}
+              minWidth="min-w-[480px]"
+              emptyTitle="No terms"
+            />
           </MastersTableCard>
         </MastersTablesRow>
       }
@@ -3059,50 +3078,49 @@ export function StaffMastersPanel({
     setDesName("");
   }
 
+  const deptCols: DataTableColumn<(typeof activeDepts)[number]>[] = [
+    {
+      key: "code", header: "Code", sortable: true,
+      value: (d) => d.code,
+      render: (d) => <span className="font-semibold text-[var(--brand-deep)]">{d.code}</span>,
+    },
+    { key: "name", header: "Department", sortable: true, value: (d) => d.name },
+  ];
+
+  const desigCols: DataTableColumn<(typeof activeDes)[number]>[] = [
+    {
+      key: "code", header: "Code", sortable: true,
+      value: (d) => d.code,
+      render: (d) => <span className="font-semibold">{d.code}</span>,
+    },
+    { key: "name", header: "Designation", sortable: true, value: (d) => d.name },
+    {
+      key: "dept", header: "Department", sortable: true,
+      value: (d) => state.departments.find((x) => x.id === d.departmentId)?.name ?? "—",
+    },
+  ];
+
   return (
     <MastersTabStack
       tables={
         <MastersTablesRow cols={2}>
           <MastersTableCard title="Departments">
-            <ul className="divide-y divide-[var(--border)]">
-              {activeDepts.map((d) => (
-                <li key={d.id} className="px-4 py-2.5 text-sm">
-                  <span className="font-semibold text-[var(--brand-deep)]">
-                    {d.code}
-                  </span>{" "}
-                  {d.name}
-                </li>
-              ))}
-              {activeDepts.length === 0 ? (
-                <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">
-                  No active departments
-                </li>
-              ) : null}
-            </ul>
+            <DataTable
+              columns={deptCols}
+              rows={activeDepts}
+              rowKey={(d) => d.id}
+              minWidth="min-w-[320px]"
+              emptyTitle="No active departments"
+            />
           </MastersTableCard>
           <MastersTableCard title="Designations">
-            <ul className="divide-y divide-[var(--border)]">
-              {activeDes.map((d) => {
-                const dep = state.departments.find(
-                  (x) => x.id === d.departmentId,
-                );
-                return (
-                  <li key={d.id} className="px-4 py-2 text-sm">
-                    <span className="font-semibold">{d.code}</span> {d.name}
-                    {dep ? (
-                      <span className="ml-2 text-[11px] text-[var(--muted)]">
-                        {dep.name}
-                      </span>
-                    ) : null}
-                  </li>
-                );
-              })}
-              {activeDes.length === 0 ? (
-                <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">
-                  No active designations
-                </li>
-              ) : null}
-            </ul>
+            <DataTable
+              columns={desigCols}
+              rows={activeDes}
+              rowKey={(d) => d.id}
+              minWidth="min-w-[380px]"
+              emptyTitle="No active designations"
+            />
           </MastersTableCard>
         </MastersTablesRow>
       }

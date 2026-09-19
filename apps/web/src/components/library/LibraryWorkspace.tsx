@@ -67,6 +67,8 @@ import {
   runLibraryProcurementOcrApi,
   type LibraryProcurementOcrSuggestion,
 } from "@/lib/ocrClient";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
+import type { RowAction } from "@/components/ui/erp-grid";
 
 type LibTab =
   | "dashboard"
@@ -224,6 +226,32 @@ export function LibraryWorkspace() {
   const stats = libraryStats(state);
   const titles = listActiveTitles(state);
   const overdue = overdueIssues(state);
+
+  /**
+   * Overdue loans as a table: what is out, who has it, how late. A list could
+   * not be sorted by how overdue a book was, which is the only order this is
+   * ever read in.
+   *
+   * Open loans keep their list — each row opens a return form inside itself,
+   * with a date, a condition and damage notes — and the procurement shelf
+   * keeps its cards, because each is a photograph of a bill.
+   */
+  const overdueCols: DataTableColumn<(typeof overdue)[number]>[] = [
+    { key: "title", header: "Item", value: (i) => titleForIssue(i), sortable: true },
+    {
+      key: "borrower", header: "With", sortable: true,
+      value: (i) => borrowerLabel(i, { students: sis?.students, staff: staffRoster }),
+    },
+    { key: "due", header: "Due", value: (i) => i.dueOn, sortable: true },
+    {
+      key: "remind", header: "",
+      render: () => (
+        <Link href="/comms" className="text-xs font-semibold text-[var(--brand-deep)] underline">
+          Remind on WA
+        </Link>
+      ),
+    },
+  ];
 
   const filteredTitles = useMemo(() => {
     const q = catalogSearch.trim().toLowerCase();
@@ -1424,24 +1452,15 @@ export function LibraryWorkspace() {
               <h3 className="text-sm font-semibold text-[var(--brand-deep)]">
                 Overdue reminders
               </h3>
-              <ul className="mt-2 divide-y divide-[var(--border)] text-sm">
-                {overdue.map((issue) => (
-                  <li key={issue.id} className="py-2">
-                    <span className="font-medium">{titleForIssue(issue)}</span>
-                    <span className="text-[var(--muted)]">
-                      {" "}
-                      · {borrowerLabel(issue, { students: sis?.students, staff: staffRoster })}{" "}
-                      · due {issue.dueOn}
-                    </span>
-                    <Link
-                      href="/comms"
-                      className="ml-2 text-xs font-semibold text-[var(--brand-deep)] underline"
-                    >
-                      Remind on WA
-                    </Link>
-                  </li>
-                ))}
-              </ul>
+              <DataTable
+                columns={overdueCols}
+                rows={overdue}
+                rowKey={(i) => i.id}
+                minWidth="min-w-[640px]"
+                exportFileBaseName="library-overdue"
+                exportTitle="Overdue loans"
+                emptyTitle="Nothing overdue"
+              />
             </div>
           ) : null}
         </div>
@@ -1759,6 +1778,51 @@ function EbooksPanel({
     );
   }
 
+  const ebookCols: DataTableColumn<LibraryEbook>[] = [
+    {
+      key: "title", header: "E-book", sortable: true,
+      value: (b) => b.title || bookcaseCode(b.url) || "",
+      render: (b) => (
+        <span className={b.isActive ? undefined : "opacity-50"}>
+          <span className="font-medium text-[var(--brand-deep)]">
+            {b.title || `Untitled (${bookcaseCode(b.url) || "?"})`}
+          </span>
+          {!b.title ? (
+            <span className="ml-2 rounded-full bg-[rgba(197,160,40,0.18)] px-2 py-0.5 text-[10px] font-bold text-[#8a5a10]">
+              needs a name
+            </span>
+          ) : null}
+        </span>
+      ),
+    },
+    { key: "subject", header: "Subject", value: (b) => b.subject || "—", sortable: true },
+    {
+      key: "classes", header: "Classes",
+      value: (b) => (b.classLabels.length ? b.classLabels.join(", ") : "—"),
+    },
+    {
+      key: "visible", header: "On the shelf", sortable: true,
+      value: (b) => (b.isActive ? "Visible" : "Hidden"),
+      render: (b) =>
+        b.isActive ? (
+          <span className="text-[var(--ok)]">Visible</span>
+        ) : (
+          <span className="text-[var(--muted)]">Hidden</span>
+        ),
+    },
+  ];
+
+  const ebookActions: RowAction<LibraryEbook>[] = [
+    { id: "open", label: "Open", onSelect: (b) => window.open(b.url, "_blank", "noopener,noreferrer") },
+    { id: "edit", label: "Edit", hidden: () => readOnly, onSelect: (b) => beginEdit(b) },
+    {
+      id: "toggle",
+      label: "Hide from readers",
+      hidden: () => readOnly,
+      onSelect: (b) => toggleActive(b),
+    },
+  ];
+
   function toggleActive(b: LibraryEbook) {
     saveLibrary({
       ...state,
@@ -1864,63 +1928,15 @@ function EbooksPanel({
             the school&rsquo;s FlipHTML5 cases in one go; then name each one.
           </p>
         ) : (
-          <ul className="mt-3 divide-y divide-[var(--border)]">
-            {state.ebooks.map((b) => (
-              <li
-                key={b.id}
-                className={`flex flex-wrap items-center justify-between gap-2 py-2 ${
-                  b.isActive ? "" : "opacity-50"
-                }`}
-              >
-                <div className="min-w-0">
-                  <span className="text-sm font-medium text-[var(--brand-deep)]">
-                    {b.title || `Untitled (${bookcaseCode(b.url) || "?"})`}
-                  </span>
-                  <span className="ml-2 text-xs text-[var(--muted)]">
-                    {[
-                      b.subject,
-                      b.classLabels.length ? b.classLabels.join(", ") : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" · ") || "no subject / class set"}
-                  </span>
-                  {!b.title ? (
-                    <span className="ml-2 rounded-full bg-[rgba(197,160,40,0.18)] px-2 py-0.5 text-[10px] font-bold text-[#8a5a10]">
-                      needs a name
-                    </span>
-                  ) : null}
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <a
-                    href={b.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs font-semibold text-[var(--brand-deep)] underline"
-                  >
-                    Open
-                  </a>
-                  {!readOnly ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => beginEdit(b)}
-                        className="text-xs font-semibold text-[var(--brand-deep)] underline"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => toggleActive(b)}
-                        className="text-xs font-semibold text-[var(--muted)] underline"
-                      >
-                        {b.isActive ? "Hide" : "Show"}
-                      </button>
-                    </>
-                  ) : null}
-                </div>
-              </li>
-            ))}
-          </ul>
+          <DataTable
+            columns={ebookCols}
+            rows={state.ebooks}
+            rowKey={(b) => b.id}
+            rowActions={ebookActions}
+            rowActionsLabel="E-book actions"
+            minWidth="min-w-[720px]"
+            emptyTitle="No e-books on the shelf yet"
+          />
         )}
       </div>
     </div>

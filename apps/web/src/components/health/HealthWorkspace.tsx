@@ -6,6 +6,8 @@ import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionCo
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { field } from "@/components/ui/erp-ui";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
+import type { RowAction } from "@/components/ui/erp-grid";
 import { DEFAULT_AY, loadMasters, type MastersState, currentAcademicYearCode} from "@/lib/masters";
 import { classSectionLabel } from "@/lib/timetable";
 import { loadSis, type SisState, type SisStudent, studentsInSession} from "@/lib/sis";
@@ -348,6 +350,135 @@ export function HealthWorkspace() {
   const [byStudent, setByStudent] = useState<SisStudent | null>(null);
   const timeline = byStudent ? listHealthRecordsForStudent(state, byStudent.id) : [];
 
+  /* ------------------------------------------------------------------ */
+  /* The three registers, as registers                                   */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * These were cards in a list: the student's name in bold and everything
+   * else run together in one grey line — reason, date, time, referral — so
+   * nothing could be sorted, scanned down a column, or exported. A school
+   * nurse's registers are the oldest table in the building; this is that
+   * table. The narrative timeline on the student tab stays a list, because
+   * it is read as a story and not compared column by column.
+   */
+  const visitCols: DataTableColumn<(typeof visitRows)[number]>[] = [
+    { key: "student", header: "Student", value: (v) => studentName(v.studentId), sortable: true },
+    { key: "reason", header: "Reason", value: (v) => healthVisitReasonLabel(v.reason), sortable: true },
+    {
+      key: "when", header: "When", sortable: true,
+      value: (v) => `${v.date}${v.time ? ` ${v.time}` : ""}`,
+    },
+    { key: "symptoms", header: "Symptoms", value: (v) => v.symptoms || "—" },
+    { key: "action", header: "Action taken", value: (v) => v.actionTaken || "—" },
+    {
+      key: "referred", header: "Referred", sortable: true,
+      value: (v) => (v.referredToHospital ? "Hospital" : ""),
+      render: (v) =>
+        v.referredToHospital ? (
+          <span className="rounded-full bg-[var(--danger)]/15 px-2 py-0.5 text-[10px] font-bold text-[var(--danger)]">
+            Hospital
+          </span>
+        ) : (
+          <span className="text-[var(--muted)]">—</span>
+        ),
+    },
+    {
+      key: "parent", header: "Parent told", sortable: true,
+      value: (v) => (v.notifiedParentAt ? v.notifiedParentAt : ""),
+      render: (v) =>
+        v.notifiedParentAt ? (
+          <span className="text-[var(--ok)]">Notified</span>
+        ) : (
+          <span className="text-[var(--muted)]">Not yet</span>
+        ),
+    },
+  ];
+
+  const visitActions: RowAction<(typeof visitRows)[number]>[] = [
+    {
+      id: "notify",
+      label: "Notify parent",
+      onSelect: (v) => void onNotifyParent(v.id),
+      disabled: (v) => readOnly || !!v.notifiedParentAt,
+    },
+    {
+      id: "delete",
+      label: "Delete",
+      tone: "danger",
+      separatorAbove: true,
+      onSelect: (v) => onDeleteVisit(v.id),
+      disabled: () => readOnly,
+    },
+  ];
+
+  const medicationCols: DataTableColumn<(typeof medicationRows)[number]>[] = [
+    { key: "student", header: "Student", value: (m) => studentName(m.studentId), sortable: true },
+    { key: "medicine", header: "Medicine", value: (m) => m.medicineName, sortable: true },
+    { key: "dosage", header: "Dosage", value: (m) => m.dosage },
+    { key: "schedule", header: "Schedule", value: (m) => m.schedule },
+    { key: "from", header: "From", value: (m) => m.startDate, sortable: true },
+    { key: "to", header: "To", value: (m) => m.endDate || "ongoing", sortable: true },
+    {
+      key: "active", header: "Active", sortable: true,
+      value: (m) => (m.active ? "Active" : "Stopped"),
+      render: (m) => (
+        <label className="flex items-center gap-1 text-xs">
+          <input
+            type="checkbox"
+            checked={m.active}
+            disabled={readOnly}
+            onChange={(e) => onToggleMedicationActive(m.id, e.target.checked)}
+          />
+          {m.active ? "Active" : "Stopped"}
+        </label>
+      ),
+    },
+    { key: "notes", header: "Notes", value: (m) => m.notes || "—" },
+  ];
+
+  const medicationActions: RowAction<(typeof medicationRows)[number]>[] = [
+    {
+      id: "delete",
+      label: "Delete",
+      tone: "danger",
+      onSelect: (m) => onDeleteMedication(m.id),
+      disabled: () => readOnly,
+    },
+  ];
+
+  const vaccinationCols: DataTableColumn<(typeof vaccinationRows)[number]>[] = [
+    { key: "student", header: "Student", value: (v) => studentName(v.studentId), sortable: true },
+    { key: "vaccine", header: "Vaccine", value: (v) => v.vaccineName, sortable: true },
+    { key: "dose", header: "Dose", value: (v) => v.doseNumber, sortable: true },
+    { key: "given", header: "Given", value: (v) => v.dateGiven, sortable: true },
+    {
+      key: "due", header: "Next due", sortable: true,
+      value: (v) => v.nextDueDate || "",
+      render: (v) =>
+        v.nextDueDate ? (
+          <span className={isVaccinationOverdue(v) ? "font-semibold text-[var(--danger)]" : undefined}>
+            {v.nextDueDate}
+            {isVaccinationOverdue(v) ? " · overdue" : ""}
+          </span>
+        ) : (
+          <span className="text-[var(--muted)]">—</span>
+        ),
+    },
+    { key: "notes", header: "Notes", value: (v) => v.notes || "—" },
+  ];
+
+  const vaccinationActions: RowAction<(typeof vaccinationRows)[number]>[] = [
+    {
+      id: "delete",
+      label: "Delete",
+      tone: "danger",
+      onSelect: (v) => onDeleteVaccination(v.id),
+      disabled: () => readOnly,
+    },
+  ];
+
+
   return (
     <ErpWorkspaceShell
       title="Health / infirmary"
@@ -443,48 +574,16 @@ export function HealthWorkspace() {
             </label>
           </div>
 
-          {visitRows.length === 0 ? (
-            <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-8 text-center text-sm text-[var(--muted)]">
-              No visits match this filter.
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {visitRows.map((v) => (
-                <li key={v.id} className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <span className="font-semibold">{studentName(v.studentId)}</span>
-                      <span className="ml-2 text-xs text-[var(--muted)]">
-                        {healthVisitReasonLabel(v.reason)} · {v.date}
-                        {v.time ? ` ${v.time}` : ""}
-                        {v.referredToHospital ? " · Referred to hospital" : ""}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs font-semibold disabled:opacity-50"
-                        disabled={readOnly || !!v.notifiedParentAt}
-                        onClick={() => onNotifyParent(v.id)}
-                      >
-                        {v.notifiedParentAt ? "Notified" : "Notify parent"}
-                      </button>
-                      <button
-                        type="button"
-                        className="text-xs font-bold text-[var(--danger)]"
-                        disabled={readOnly}
-                        onClick={() => onDeleteVisit(v.id)}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                  {v.symptoms ? <p className="mt-1 text-sm text-[var(--muted)]">Symptoms: {v.symptoms}</p> : null}
-                  {v.actionTaken ? <p className="text-sm text-[var(--muted)]">Action: {v.actionTaken}</p> : null}
-                </li>
-              ))}
-            </ul>
-          )}
+          <DataTable
+            columns={visitCols}
+            rows={visitRows}
+            rowKey={(v) => v.id}
+            rowActions={visitActions}
+            minWidth="min-w-[980px]"
+            exportFileBaseName="health-visits"
+            exportTitle="Infirmary visits"
+            emptyTitle="No visits match this filter."
+          />
         </div>
       ) : null}
 
@@ -538,47 +637,16 @@ export function HealthWorkspace() {
             </button>
           </div>
 
-          {medicationRows.length === 0 ? (
-            <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-8 text-center text-sm text-[var(--muted)]">
-              No medication records yet.
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {medicationRows.map((m) => (
-                <li key={m.id} className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <span className="font-semibold">{studentName(m.studentId)}</span>
-                      <span className="ml-2 text-xs text-[var(--muted)]">
-                        {m.medicineName} · {m.dosage} · {m.schedule} · from {m.startDate}
-                        {m.endDate ? ` to ${m.endDate}` : " · ongoing"}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <label className="flex items-center gap-1 text-xs">
-                        <input
-                          type="checkbox"
-                          checked={m.active}
-                          disabled={readOnly}
-                          onChange={(e) => onToggleMedicationActive(m.id, e.target.checked)}
-                        />
-                        Active
-                      </label>
-                      <button
-                        type="button"
-                        className="text-xs font-bold text-[var(--danger)]"
-                        disabled={readOnly}
-                        onClick={() => onDeleteMedication(m.id)}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                  {m.notes ? <p className="mt-1 text-sm text-[var(--muted)]">{m.notes}</p> : null}
-                </li>
-              ))}
-            </ul>
-          )}
+          <DataTable
+            columns={medicationCols}
+            rows={medicationRows}
+            rowKey={(m) => m.id}
+            rowActions={medicationActions}
+            minWidth="min-w-[980px]"
+            exportFileBaseName="health-medications"
+            exportTitle="Medication records"
+            emptyTitle="No medication records yet."
+          />
         </div>
       ) : null}
 
@@ -628,41 +696,16 @@ export function HealthWorkspace() {
             </button>
           </div>
 
-          {vaccinationRows.length === 0 ? (
-            <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-8 text-center text-sm text-[var(--muted)]">
-              No vaccination records yet.
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {vaccinationRows.map((v) => (
-                <li key={v.id} className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <span className="font-semibold">{studentName(v.studentId)}</span>
-                      <span className="ml-2 text-xs text-[var(--muted)]">
-                        {v.vaccineName} · dose {v.doseNumber} · given {v.dateGiven}
-                        {v.nextDueDate ? ` · next due ${v.nextDueDate}` : ""}
-                      </span>
-                      {isVaccinationOverdue(v) ? (
-                        <span className="ml-2 rounded-full bg-[var(--danger)]/15 px-2 py-0.5 text-[10px] font-bold text-[var(--danger)]">
-                          Overdue
-                        </span>
-                      ) : null}
-                    </div>
-                    <button
-                      type="button"
-                      className="text-xs font-bold text-[var(--danger)]"
-                      disabled={readOnly}
-                      onClick={() => onDeleteVaccination(v.id)}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                  {v.notes ? <p className="mt-1 text-sm text-[var(--muted)]">{v.notes}</p> : null}
-                </li>
-              ))}
-            </ul>
-          )}
+          <DataTable
+            columns={vaccinationCols}
+            rows={vaccinationRows}
+            rowKey={(v) => v.id}
+            rowActions={vaccinationActions}
+            minWidth="min-w-[900px]"
+            exportFileBaseName="health-vaccinations"
+            exportTitle="Vaccination records"
+            emptyTitle="No vaccination records yet."
+          />
         </div>
       ) : null}
 

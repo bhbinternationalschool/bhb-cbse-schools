@@ -64,6 +64,8 @@ import { ConcessionPolicyDraftCard } from "@/components/masters/ConcessionPolicy
 import { ConcessionCaseFileInline } from "@/components/masters/ConcessionCaseFileInline";
 import { RemoveControl } from "@/components/masters/RemoveControl";
 import { useDemoSessionOptional } from "@/components/shell/SessionContext";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
+import type { RowAction } from "@/components/ui/erp-grid";
 
 type Commit = (s: MastersState, msg?: string) => void;
 
@@ -1329,6 +1331,92 @@ function GrantStudentsCard({
     );
   }
 
+  /**
+   * The grants under a policy, as a table.
+   *
+   * The ground a concession was given on is a column of its own and stays
+   * editable in the row, because the ground is what 69 of these are missing
+   * and a column of blanks is the only thing that gets them filled. A grey
+   * run-on line hid them.
+   */
+  const grantCols: DataTableColumn<(typeof grants)[number]>[] = [
+    {
+      key: "student", header: "Student", sortable: true,
+      value: (g) => sis.students.find((s) => s.id === g.studentId)?.fullName ?? "Student",
+      render: (g) => {
+        const st = sis.students.find((s) => s.id === g.studentId);
+        return (
+          <span>
+            <span className="font-medium text-[var(--brand-deep)]">
+              {st?.fullName ?? "Student"}
+            </span>
+            <span className="block text-[11px] text-[var(--muted)]">
+              {st?.admissionNo ?? g.studentId}
+              {st ? ` · ${classLabel(st)}` : ""}
+            </span>
+          </span>
+        );
+      },
+    },
+    { key: "status", header: "Status", value: (g) => g.status, sortable: true },
+    { key: "from", header: "From", value: (g) => g.effectiveFrom, sortable: true },
+    {
+      key: "child", header: "Child",
+      value: (g) => (g.siblingChildNo ? ordinalChildLabel(g.siblingChildNo) : "—"),
+    },
+    { key: "reason", header: "Reason", value: (g) => g.reason || "—" },
+    {
+      key: "ground", header: "Ground", sortable: true,
+      // A grant whose ground nobody recorded should look unfinished, because
+      // it is — that is how the missing ones get filled in.
+      value: (g) => g.ground || "",
+      render: (g) => (
+        <label className="flex items-center gap-1.5 text-[11px]">
+          <select
+            className={`rounded border border-[var(--line)] bg-transparent px-1 py-0.5 text-[11px] ${
+              g.ground ? "" : "font-semibold text-[var(--warning,#a86b00)]"
+            }`}
+            value={g.ground}
+            onChange={(e) => setGrantGround(g.id, e.target.value as ConcessionGround | "")}
+          >
+            <option value="">Not recorded</option>
+            {CONCESSION_GROUNDS.map((x) => (
+              <option key={x.id} value={x.id}>
+                {x.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      ),
+    },
+    {
+      key: "case", header: "",
+      render: (g) => (
+        <ConcessionCaseFileInline
+          studentId={g.studentId}
+          studentName={sis.students.find((s) => s.id === g.studentId)?.fullName ?? "Student"}
+        />
+      ),
+    },
+  ];
+
+  const grantActions: RowAction<(typeof grants)[number]>[] = [
+    {
+      id: "approve", label: "Approve",
+      hidden: (g) => g.status === "approved",
+      onSelect: (g) => setStatus(g.id, "approved"),
+    },
+    {
+      id: "reject", label: "Reject",
+      hidden: (g) => g.status !== "pending",
+      onSelect: (g) => setStatus(g.id, "rejected"),
+    },
+    {
+      id: "remove", label: "Remove", tone: "danger", separatorAbove: true,
+      onSelect: (g) => removeGrant(g.id),
+    },
+  ];
+
   function removeGrant(grantId: string) {
     // Removing an approved grant is a change to what a family is charged,
     // so it sits on the same side of the line as approving one.
@@ -1781,103 +1869,17 @@ function GrantStudentsCard({
         </div>
       </form>
 
-      <ul className="mt-4 divide-y divide-[var(--border)]">
-        {grants.map((g) => {
-          const st = sis.students.find((s) => s.id === g.studentId);
-          return (
-            <li
-              key={g.id}
-              className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"
-            >
-              <div>
-                <div className="font-medium text-[var(--brand-deep)]">
-                  {st?.fullName ?? "Student"}
-                  <span className="ml-2 text-xs font-normal text-[var(--muted)]">
-                    {st?.admissionNo ?? g.studentId}
-                    {st ? ` · ${classLabel(st)}` : ""}
-                  </span>
-                </div>
-                <div className="text-[11px] text-[var(--muted)]">
-                  {g.status} · from {g.effectiveFrom}
-                  {g.siblingChildNo
-                    ? ` · ${ordinalChildLabel(g.siblingChildNo)} child`
-                    : ""}
-                  {g.reason ? ` · ${g.reason}` : ""}
-                </div>
-                {/*
-                  Said in its own line, and said even when it is missing.
-                  A grant whose ground nobody recorded should look unfinished,
-                  because it is — that is how the 108 get filled in.
-                */}
-                <label className="mt-1 flex items-center gap-1.5 text-[11px]">
-                  <span
-                    className={
-                      g.ground
-                        ? "text-[var(--muted)]"
-                        : "font-semibold text-[var(--warning,#a86b00)]"
-                    }
-                  >
-                    {g.ground ? "Ground" : "Ground not recorded"}
-                  </span>
-                  <select
-                    className="rounded border border-[var(--line)] bg-transparent px-1 py-0.5 text-[11px]"
-                    value={g.ground}
-                    onChange={(e) =>
-                      setGrantGround(
-                        g.id,
-                        e.target.value as ConcessionGround | "",
-                      )
-                    }
-                  >
-                    <option value="">Choose…</option>
-                    {CONCESSION_GROUNDS.map((x) => (
-                      <option key={x.id} value={x.id}>
-                        {x.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {g.status !== "approved" ? (
-                  <button
-                    type="button"
-                    className="text-[11px] font-semibold text-[var(--success)]"
-                    onClick={() => setStatus(g.id, "approved")}
-                  >
-                    Approve
-                  </button>
-                ) : null}
-                {g.status === "pending" ? (
-                  <button
-                    type="button"
-                    className="text-[11px] font-semibold text-[var(--warning)]"
-                    onClick={() => setStatus(g.id, "rejected")}
-                  >
-                    Reject
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  className="text-[11px] font-semibold text-[var(--danger)]"
-                  onClick={() => removeGrant(g.id)}
-                >
-                  Remove
-                </button>
-                <ConcessionCaseFileInline
-                  studentId={g.studentId}
-                  studentName={st?.fullName ?? "Student"}
-                />
-              </div>
-            </li>
-          );
-        })}
-        {grants.length === 0 ? (
-          <li className="py-4 text-center text-xs text-[var(--muted)]">
-            No grants yet for this policy
-          </li>
-        ) : null}
-      </ul>
+      <DataTable
+        columns={grantCols}
+        rows={grants}
+        rowKey={(g) => g.id}
+        rowActions={grantActions}
+        rowActionsLabel="Grant actions"
+        minWidth="min-w-[1040px]"
+        exportFileBaseName={`concession-grants-${concession.code}`}
+        exportTitle={`Grants · ${concession.name}`}
+        emptyTitle="No grants yet for this policy"
+      />
     </div>
   );
 }

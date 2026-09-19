@@ -30,6 +30,8 @@ import {
   type IncidentStatus,
 } from "@/lib/discipline";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
+import type { RowAction } from "@/components/ui/erp-grid";
 
 type Tab = "log" | "all" | "student";
 
@@ -227,6 +229,69 @@ export function DisciplineWorkspace() {
   const byStudentSuggestion = suggestEscalationLevel(byStudentTotal, byStudentRecent);
   const byStudent = sis?.students.find((s) => s.id === byStudentId) || null;
 
+  /**
+   * The incident register as a register. A child's name, what happened, when,
+   * and what it cost them in points belong in columns — this is the list a
+   * head of school reads down when deciding whether a pattern is forming,
+   * and a run-on grey line cannot be sorted by date or by points.
+   *
+   * Escalation stays an editable cell rather than moving into the row menu:
+   * changing it is the common act here, and burying a one-click change two
+   * clicks deep would be a step backwards.
+   */
+  const incidentCols: DataTableColumn<(typeof allRows)[number]>[] = [
+    { key: "student", header: "Student", sortable: true, value: (i) => studentName(i.studentId) },
+    { key: "category", header: "Category", sortable: true, value: (i) => disciplineCategoryLabel(i.category) },
+    { key: "date", header: "Date", sortable: true, value: (i) => i.date },
+    {
+      key: "points", header: "Points", align: "right", sortable: true,
+      value: (i) => i.pointsDelta,
+      render: (i) => `${i.pointsDelta >= 0 ? "+" : ""}${i.pointsDelta}`,
+    },
+    { key: "what", header: "What happened", value: (i) => i.description || "—" },
+    {
+      key: "escalation", header: "Escalation", sortable: true,
+      value: (i) => i.escalationLevel,
+      render: (i) => (
+        <select
+          className="rounded-lg border border-[var(--border)] px-2 py-1 text-xs"
+          value={i.escalationLevel}
+          onChange={(e) => onSetEscalation(i, e.target.value as EscalationLevel)}
+          disabled={readOnly}
+        >
+          {ESCALATION_LEVELS.map((e) => (
+            <option key={e.value} value={e.value}>
+              {e.label}
+            </option>
+          ))}
+        </select>
+      ),
+    },
+    {
+      key: "parent", header: "Parent told", sortable: true,
+      value: (i) => (i.notifiedParentAt ? i.notifiedParentAt : ""),
+      render: (i) =>
+        i.notifiedParentAt ? (
+          <span className="text-[var(--ok)]">Notified</span>
+        ) : (
+          <span className="text-[var(--muted)]">Not yet</span>
+        ),
+    },
+  ];
+
+  const incidentActions: RowAction<(typeof allRows)[number]>[] = [
+    {
+      id: "notify", label: "Notify parent",
+      onSelect: (i) => onNotifyParent(i),
+      disabled: (i) => readOnly || !!i.notifiedParentAt,
+    },
+    {
+      id: "delete", label: "Delete", tone: "danger", separatorAbove: true,
+      onSelect: (i) => onDelete(i.id),
+      disabled: () => readOnly,
+    },
+  ];
+
   return (
     <ErpWorkspaceShell
       title="Discipline / behavior"
@@ -387,50 +452,17 @@ export function DisciplineWorkspace() {
               No incidents match this filter.
             </p>
           ) : (
-            <ul className="space-y-2">
-              {allRows.map((i) => (
-                <li key={i.id} className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <span className="font-semibold">{studentName(i.studentId)}</span>
-                      <span className="ml-2 text-xs text-[var(--muted)]">
-                        {disciplineCategoryLabel(i.category)} · {i.date} ·{" "}
-                        {i.pointsDelta >= 0 ? "+" : ""}{i.pointsDelta} pt
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <select
-                        className="rounded-lg border border-[var(--border)] px-2 py-1 text-xs"
-                        value={i.escalationLevel}
-                        onChange={(e) => onSetEscalation(i, e.target.value as EscalationLevel)}
-                        disabled={readOnly}
-                      >
-                        {ESCALATION_LEVELS.map((e) => (
-                          <option key={e.value} value={e.value}>{e.label}</option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs font-semibold disabled:opacity-50"
-                        disabled={readOnly || !!i.notifiedParentAt}
-                        onClick={() => onNotifyParent(i)}
-                      >
-                        {i.notifiedParentAt ? "Notified" : "Notify parent"}
-                      </button>
-                      <button
-                        type="button"
-                        className="text-xs font-bold text-[var(--danger)]"
-                        disabled={readOnly}
-                        onClick={() => onDelete(i.id)}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                  <p className="mt-1 text-sm text-[var(--muted)]">{i.description}</p>
-                </li>
-              ))}
-            </ul>
+            <DataTable
+              columns={incidentCols}
+              rows={allRows}
+              rowKey={(i) => i.id}
+              rowActions={incidentActions}
+              rowActionsLabel="Incident actions"
+              minWidth="min-w-[980px]"
+              exportFileBaseName="discipline-incidents"
+              exportTitle="Discipline incidents"
+              emptyTitle="No incidents match this filter."
+            />
           )}
         </div>
       ) : null}

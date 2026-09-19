@@ -65,6 +65,8 @@ import {
 import { TENANT } from "@/lib/types";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import { DeskListActions } from "@/components/ui/desk-list-actions";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
+import type { RowAction } from "@/components/ui/erp-grid";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 
 type CommsTab =
@@ -417,6 +419,136 @@ export function CommsWorkspace() {
     () => (comms ? listScheduledComms(comms) : []),
     [comms],
   );
+
+  /* ------------------------------------------------------------------ */
+  /* Notices, the schedule and the cross-post log, as tables             */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * A notice board is a register: who it went to, whether it is published,
+   * when. As cards, the office could not sort by status, see at a glance
+   * which drafts were still unpublished, or hand anyone a file of what was
+   * sent this term.
+   *
+   * The news list stays cards. A story leads with its cover photograph, and
+   * a table would drop the one thing the website shows.
+   */
+  const noticeCols: DataTableColumn<(typeof noticesFiltered)[number]>[] = [
+    {
+      key: "title", header: "Notice", sortable: true,
+      value: (n) => n.title,
+      render: (n) => (
+        <span>
+          <span className="font-semibold text-[var(--brand-deep)]">
+            {n.pinned ? "📌 " : ""}
+            {n.title}
+          </span>
+          <span className="line-clamp-2 whitespace-pre-wrap text-[11px] text-[var(--muted)]">
+            {n.body}
+          </span>
+        </span>
+      ),
+    },
+    { key: "audience", header: "Audience", value: (n) => audienceLabel(n.audience), sortable: true },
+    { key: "status", header: "Status", value: (n) => n.status, sortable: true },
+    {
+      key: "published", header: "Published", sortable: true,
+      value: (n) => n.publishedAt || "",
+      render: (n) =>
+        n.publishedAt ? (
+          new Date(n.publishedAt).toLocaleString()
+        ) : (
+          <span className="text-[var(--muted)]">—</span>
+        ),
+    },
+  ];
+
+  const noticeActions: RowAction<(typeof noticesFiltered)[number]>[] = [
+    { id: "edit", label: "Edit", hidden: () => readOnly, onSelect: (n) => beginEditNotice(n) },
+    {
+      id: "publish", label: "Publish",
+      hidden: (n) => readOnly || n.status === "published",
+      onSelect: (n) => {
+        const r = setNoticeStatus(n.id, "published");
+        if (r.ok) {
+          setComms(r.state);
+          flash("Published");
+          const notice = r.state.notices.find((x) => x.id === n.id);
+          if (notice) crossPostNotice(notice);
+        } else setError(r.error);
+      },
+    },
+    {
+      id: "archive", label: "Archive",
+      hidden: (n) => readOnly || n.status !== "published",
+      onSelect: (n) => {
+        const r = setNoticeStatus(n.id, "archived");
+        if (r.ok) {
+          setComms(r.state);
+          flash("Archived");
+        } else setError(r.error);
+      },
+    },
+    {
+      id: "social", label: "Post to social",
+      hidden: (n) =>
+        socialBusy || n.status !== "published" || !(n.audience === "all" || n.audience === "parents"),
+      onSelect: (n) => crossPostNotice(n, true),
+    },
+    {
+      id: "delete", label: "Delete", tone: "danger", separatorAbove: true,
+      hidden: () => readOnly,
+      onSelect: (n) => {
+        const r = deleteNotice(n.id);
+        if (r.ok) {
+          setComms(r.state);
+          if (editNoticeId === n.id) resetNoticeForm();
+          flash("Notice deleted");
+        } else setError(r.error);
+      },
+    },
+  ];
+
+  const scheduledCols: DataTableColumn<(typeof scheduledItems)[number]>[] = [
+    { key: "title", header: "Item", value: (i) => i.title, sortable: true },
+    { key: "kind", header: "Kind", value: (i) => i.kind, sortable: true },
+    {
+      key: "when", header: "Goes out", sortable: true,
+      value: (i) => i.scheduledPublishAt,
+      render: (i) => new Date(i.scheduledPublishAt).toLocaleString(),
+    },
+  ];
+
+  const socialLogCols: DataTableColumn<SocialCrossPostLogEntry>[] = [
+    { key: "title", header: "Content", value: (l) => l.title || l.contentId, sortable: true },
+    { key: "platform", header: "Platform", value: (l) => l.platform, sortable: true },
+    {
+      key: "status", header: "Status", sortable: true,
+      value: (l) => l.status,
+      render: (l) => (
+        <span>
+          {l.status}
+          {l.error ? (
+            <span className="block text-[11px] text-[var(--danger)]">{l.error}</span>
+          ) : null}
+        </span>
+      ),
+    },
+    {
+      key: "postedAt", header: "Posted", sortable: true,
+      value: (l) => l.postedAt,
+      render: (l) => new Date(l.postedAt).toLocaleString(),
+    },
+    {
+      key: "link", header: "",
+      render: (l) =>
+        l.postUrl ? (
+          <a href={l.postUrl} target="_blank" rel="noreferrer" className="text-[11px] text-[var(--tone-teal)]">
+            View post
+          </a>
+        ) : null,
+    },
+  ];
   const notifications = useMemo(
     () =>
       inbox
@@ -797,88 +929,17 @@ export function CommsWorkspace() {
               </p>
             ) : (
               <ErpTableShell>
-                <ul className="divide-y divide-[var(--border)]">
-                {noticesFiltered.map((n) => (
-                  <li key={n.id} className="p-3">
-                <article>
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <h3 className="text-sm font-semibold text-[var(--brand-deep)]">
-                        {n.pinned ? "📌 " : ""}
-                        {n.title}
-                      </h3>
-                      <p className="mt-0.5 text-[11px] text-[var(--muted)]">
-                        {audienceLabel(n.audience)} · {n.status}
-                        {n.publishedAt
-                          ? ` · ${new Date(n.publishedAt).toLocaleString()}`
-                          : ""}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-1">
-                      <DeskListActions
-                        readOnly={readOnly}
-                        onEdit={() => beginEditNotice(n)}
-                        onDelete={() => {
-                          const r = deleteNotice(n.id);
-                          if (r.ok) {
-                            setComms(r.state);
-                            if (editNoticeId === n.id) resetNoticeForm();
-                            flash("Notice deleted");
-                          } else setError(r.error);
-                        }}
-                        deleteConfirm={`Delete notice "${n.title}"?`}
-                      />
-                      {!readOnly && n.status !== "published" ? (
-                        <button
-                          type="button"
-                          className="text-[11px] font-semibold text-[var(--tone-teal)]"
-                          onClick={() => {
-                            const r = setNoticeStatus(n.id, "published");
-                            if (r.ok) {
-                              setComms(r.state);
-                              flash("Published");
-                              const notice = r.state.notices.find((x) => x.id === n.id);
-                              if (notice) crossPostNotice(notice);
-                            } else setError(r.error);
-                          }}
-                        >
-                          Publish
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          className="text-[11px] font-semibold text-[var(--muted)]"
-                          onClick={() => {
-                            const r = setNoticeStatus(n.id, "archived");
-                            if (r.ok) {
-                              setComms(r.state);
-                              flash("Archived");
-                            } else setError(r.error);
-                          }}
-                        >
-                          Archive
-                        </button>
-                      )}
-                      {n.status === "published" &&
-                      (n.audience === "all" || n.audience === "parents") ? (
-                        <button
-                          type="button"
-                          className="text-[11px] font-semibold text-[#7c3aed]"
-                          disabled={socialBusy}
-                          onClick={() => crossPostNotice(n, true)}
-                        >
-                          Post to social
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
-                  <p className="mt-2 whitespace-pre-wrap text-sm text-[var(--brand-deep)]">
-                    {n.body}
-                  </p>
-                </article>
-                  </li>
-                ))}
-                </ul>
+                <DataTable
+                  columns={noticeCols}
+                  rows={noticesFiltered}
+                  rowKey={(n) => n.id}
+                  rowActions={noticeActions}
+                  rowActionsLabel="Notice actions"
+                  minWidth="min-w-[860px]"
+                  exportFileBaseName="notices"
+                  exportTitle="Notices"
+                  emptyTitle="No notices"
+                />
               </ErpTableShell>
             )}
           </section>
@@ -1231,22 +1292,13 @@ export function CommsWorkspace() {
               <p className="mt-3 text-sm text-[var(--muted)]">No scheduled posts.</p>
             ) : (
               <ErpTableShell className="mt-3">
-                <ul className="divide-y divide-[var(--border)]">
-                {scheduledItems.map((item) => (
-                  <li
-                    key={`${item.kind}-${item.id}`}
-                    className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-sm"
-                  >
-                    <span className="font-medium text-[var(--brand-deep)]">
-                      {item.title}
-                    </span>
-                    <span className="text-[11px] text-[var(--muted)]">
-                      {item.kind} ·{" "}
-                      {new Date(item.scheduledPublishAt).toLocaleString()}
-                    </span>
-                  </li>
-                ))}
-                </ul>
+                <DataTable
+                  columns={scheduledCols}
+                  rows={scheduledItems}
+                  rowKey={(item) => `${item.kind}-${item.id}`}
+                  minWidth="min-w-[620px]"
+                  emptyTitle="Nothing scheduled"
+                />
               </ErpTableShell>
             )}
           </section>
@@ -1265,37 +1317,13 @@ export function CommsWorkspace() {
               </p>
             ) : (
               <ErpTableShell>
-                <ul className="divide-y divide-[var(--border)]">
-                {socialLogs.map((log) => (
-                  <li
-                    key={`${log.contentId}-${log.platform}-${log.postedAt}`}
-                    className="px-4 py-2.5 text-sm"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="font-medium text-[var(--brand-deep)]">
-                        {log.title || log.contentId}
-                      </span>
-                      <span className="text-[11px] text-[var(--muted)]">
-                        {log.platform} · {log.status} ·{" "}
-                        {new Date(log.postedAt).toLocaleString()}
-                      </span>
-                    </div>
-                    {log.postUrl ? (
-                      <a
-                        href={log.postUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mt-1 inline-block text-[11px] text-[var(--tone-teal)]"
-                      >
-                        View post
-                      </a>
-                    ) : null}
-                    {log.error ? (
-                      <p className="mt-1 text-[11px] text-[var(--danger)]">{log.error}</p>
-                    ) : null}
-                  </li>
-                ))}
-                </ul>
+                <DataTable
+                  columns={socialLogCols}
+                  rows={socialLogs}
+                  rowKey={(log) => `${log.contentId}-${log.platform}-${log.postedAt}`}
+                  minWidth="min-w-[720px]"
+                  emptyTitle="No cross-posts yet"
+                />
               </ErpTableShell>
             )}
           </section>
