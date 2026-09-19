@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — the gate table is a settings editor — each row is one hold's policy with its own selects, not a record to act on
 
 /**
  * The defaulter policy, and the round the office approves before anybody

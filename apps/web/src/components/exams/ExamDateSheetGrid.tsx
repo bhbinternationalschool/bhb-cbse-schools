@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — the date sheet grid — cells are exam slots, not records (same as the timetable grid)
 
 /**
  * The date sheet as a date sheet — classes down, exam days across.

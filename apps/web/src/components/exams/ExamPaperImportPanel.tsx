@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — import preview — rows are the papers about to be brought in, chosen with the pickers above; the action is the import itself
 
 /**
  * Import a publisher's folder of question papers.

@@ -53,6 +53,15 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # The ratchets: patterns being retired may not regrow.
+      #
+      # Until 19 Sep 2026 this ran ONLY inside scripts/verify.sh, which is a
+      # local pre-push script — so nothing on GitHub enforced it, and seven
+      # grids drifted past a row-menu standard that was reported as met.
+      # A guard nobody's machine runs is a guard that does not exist.
+      - name: Ratchets — retired patterns may not regrow
+        run: bash scripts/check-ratchets.sh
+
       # Self-test harnesses (no test framework in this repo by design —
       # these run as plain tsx scripts and exit non-zero on failure).
       - name: Test — session cookie cannot be forged

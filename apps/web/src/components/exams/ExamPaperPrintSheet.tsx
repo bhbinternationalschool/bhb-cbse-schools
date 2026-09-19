@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: raw_table — a printed question paper: ErpTableShell is theme-aware and a sheet following dark mode would print white ink on white paper
 
 import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {

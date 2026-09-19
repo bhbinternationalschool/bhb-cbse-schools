@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — a capture preview of what the publisher's portal returned; the one action, Send papers to ERP, applies to the whole batch
 
 /**
  * Get papers and answer keys from the publisher, without leaving this screen.

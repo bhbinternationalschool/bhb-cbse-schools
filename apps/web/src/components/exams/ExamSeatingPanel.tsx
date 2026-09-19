@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — rooms are edited as inputs and the bench plan is a seating diagram; neither row is a record with actions
 
 /**
  * Seating — the rooms, the plan, and the slips that get pasted on benches.

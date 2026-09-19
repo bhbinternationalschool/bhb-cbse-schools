@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — report output — the worst-10 rows are a reading of someone else's portal on a date, with nothing on this side to act on
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { announceReady, readHandoffMessage } from "@/lib/nucleusHandoff";

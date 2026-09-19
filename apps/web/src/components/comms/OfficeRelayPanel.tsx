@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — the hand-off log is a permanent record — the office replies from their own WhatsApp (swipe, or the #code), never from this screen; a row expands to show its forwards and replies
 
 /**
  * Office relay: which office phone receives which kind of message the bot
