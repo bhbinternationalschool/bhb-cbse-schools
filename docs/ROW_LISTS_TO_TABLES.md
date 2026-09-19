@@ -57,6 +57,7 @@ two export buttons on one panel is worse than either.
 | `accounts/AccountsPanels.tsx` | recurring expenses, recent journals | vendor bills (nested inside a vendor drawer); the report launcher |
 | `masters/FoundationPanels.tsx` | academic years, terms, departments, designations | — |
 | `rte/RteWorkspace.tsx` | quota seat rows | enrolled students (each row expands in place) |
+| `discipline/DisciplineWorkspace.tsx` | the incident register | the two student-search pickers |
 
 ### Judged and skipped, so nobody re-opens them
 
@@ -64,6 +65,8 @@ two export buttons on one panel is worse than either.
 |---|---|
 | `homework/HomeworkWorkspace.tsx` | All three lists are content, not records. A submission is a photograph of a child's work with the teacher's remark under it; a diary entry and a homework post are paragraphs the parent reads. A table would hide the very thing the teacher acts on. |
 | `staff/StaffDutiesPanel.tsx` | Four link lists inside a staff member's edit drawer, three rows each. DataTable's pagination and export weigh more than the list does. |
+| `payroll/ApprovalsInboxPanel.tsx` | Each row carries a decision-note textarea. It is an approval form, not a register. |
+| `attendance/AttendanceExceptionsPanel.tsx` | Each row carries a resolve-note input, for the same reason. |
 | `fees/FeeTakeWorkspace.tsx` | None of its four lists are record grids: `hits` is the search dropdown, `tenderLines` is the payment split being composed, `v.tenders` is the tender breakdown inside one receipt, `unsettledStore` is the dues being pulled into the current take. All are parts of a single transaction in progress. |
 
 ## The queue
@@ -222,3 +225,20 @@ row menu removes the most clutter.
 | 146 | `payroll/AdvancesPanel.tsx` | 1 | 3 | no | a.recoveries |
 | 147 | `payroll/StaffSelfService.tsx` | 1 | 3 | no | a.recoveries |
 | 148 | `students/CurriculumOfficePanel.tsx` | 1 | 3 | no | students |
+
+## What is actually left, measured
+
+A second pass over the remaining sites (19 Sep, after ten screens) sorts them
+by the thing that decides whether a table is possible at all:
+
+| | Sites | |
+|---:|---|---|
+| **193** | **convertible** | ordinary record rows — the bulk of the work |
+| 21 | in-row editor | the row holds an input or textarea: a decision note, a resolve note. It is a form, not a register |
+| 9 | master-detail rail | a narrow list whose click selects what the pane beside it shows |
+| 3 | carries an image | a homework photo, a bill, a document scan |
+| 1 | expands in place | the row opens beneath itself |
+
+So the remaining work is mostly mechanical. The four categories below the
+first are 34 sites that should be left alone, and each one has been checked
+by hand rather than by the heuristic above.
