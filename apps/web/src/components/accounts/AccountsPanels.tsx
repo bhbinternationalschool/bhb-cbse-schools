@@ -1,15 +1,8 @@
 "use client";
-// ratchet-allow: grids_without_row_menu — four panels here are LIVE (Banks,
-// Bills & AP, Owner loans, Day close), so "being retired" is no longer the
-// reason (corrected 2026-09-06). Each is a card list with its own controls:
-// clicking a card loads it into the editor above, which is where Save and
-// Delete live. A "…" menu duplicating a click that already selects the row
-// would be a second way to do one thing. Balances shown here come from the
-// server book — see lib/accountsServerBook.ts.
-
 /* ratchet-allow: raw_table — the <table> here is inside an HTML string written into a print popup, not JSX — there is no component to shell */
 
 import Link from "next/link";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { DayClosePanel } from "@/components/fees/DayClosePanel";
 import {
@@ -1044,12 +1037,42 @@ export function BanksPanel({
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {state.bankAccounts.map((b) => (
-          <button
-            key={b.id}
-            type="button"
-            className={`${CARD} text-left ${editId === b.id ? "ring-2 ring-[var(--brand-gold)]" : ""} ${b.isActive === false ? "opacity-60" : ""}`}
-            onClick={() => loadBank(b.id)}
-          >
+          /*
+            The card stays clickable — that is the fast path — and the "…"
+            sits beside it rather than inside it, because a button inside a
+            button is not a thing a browser will render (director's row-menu
+            standard, 19 Sep 2026).
+          */
+          <div key={b.id} className="relative">
+            <RowActionMenu
+              row={b}
+              label="Bank actions"
+              className="absolute right-2 top-2 z-10"
+              actions={[
+                {
+                  id: "edit",
+                  label: "Edit this account",
+                  onSelect: (row) => loadBank(row.id),
+                },
+                {
+                  id: "delete",
+                  label: "Delete this account",
+                  tone: "danger",
+                  separatorAbove: true,
+                  onSelect: (row) => {
+                    // removeBank acts on the loaded account, so the row is
+                    // loaded first and the confirm names it.
+                    loadBank(row.id);
+                    window.setTimeout(() => removeBank(), 0);
+                  },
+                },
+              ]}
+            />
+            <button
+              type="button"
+              className={`${CARD} w-full text-left ${editId === b.id ? "ring-2 ring-[var(--brand-gold)]" : ""} ${b.isActive === false ? "opacity-60" : ""}`}
+              onClick={() => loadBank(b.id)}
+            >
             <div className="flex items-start justify-between gap-2">
               <div className="font-semibold text-[var(--brand-deep)]">{b.name}</div>
               {b.isActive === false ? (
@@ -1085,7 +1108,8 @@ export function BanksPanel({
                 </span>
               ))}
             </div>
-          </button>
+            </button>
+          </div>
         ))}
         {state.bankAccounts.length === 0 ? (
           <div className={`${CARD} text-sm text-[var(--muted)]`}>
@@ -1995,54 +2019,49 @@ export function ExpensesPanel({
                     <td className="px-4 py-2 text-right">{formatInr(v.paidPaise)}</td>
                     <td className="px-4 py-2 text-right">{formatInr(v.duePaise)}</td>
                     <td className="px-4 py-2">
-                    <div className="flex flex-wrap gap-1">
-                      {v.paymentStatus === "pending_approval" ? (
-                        <button
-                          type="button"
-                          className={BTN_OUTLINE}
-                          onClick={() => {
-                            const r = approveExpenseVoucher(v.id, actorName);
+                    {/* The row-menu standard, 19 Sep 2026: four buttons
+                        whose set changed with the voucher's state became one
+                        "…" that is always in the same place. */}
+                    <RowActionMenu
+                      row={v}
+                      label="Voucher actions"
+                      actions={[
+                        {
+                          id: "approve",
+                          label: "Approve",
+                          hidden: (row) => row.paymentStatus !== "pending_approval",
+                          onSelect: (row) => {
+                            const r = approveExpenseVoucher(row.id, actorName);
                             if (!r.ok) onError(r.error);
                             else {
                               onFlash("Approved");
                               onRefresh();
                             }
-                          }}
-                        >
-                          Approve
-                        </button>
-                      ) : null}
-                      {v.paymentStatus === "draft" ||
-                      v.paymentStatus === "partial" ? (
-                        <button
-                          type="button"
-                          className={BTN_OUTLINE}
-                          onClick={() =>
-                            payVoucher(v.id, v.mode, v.duePaise)
-                          }
-                        >
-                          Pay due
-                        </button>
-                      ) : null}
-                      {!isExpenseVoucherCancelled(v) ? (
-                        <button
-                          type="button"
-                          className={BTN_OUTLINE}
-                          onClick={() => cancelVoucher(v.id)}
-                        >
-                          Cancel
-                        </button>
-                      ) : null}
-                      {v.paidPaise > 0 ? (
-                        <button
-                          type="button"
-                          className={BTN_OUTLINE}
-                          onClick={() => printExpenseVoucher(v, state)}
-                        >
-                          Print
-                        </button>
-                      ) : null}
-                    </div>
+                          },
+                        },
+                        {
+                          id: "pay",
+                          label: "Pay what is due",
+                          hidden: (row) =>
+                            !(row.paymentStatus === "draft" || row.paymentStatus === "partial"),
+                          onSelect: (row) => payVoucher(row.id, row.mode, row.duePaise),
+                        },
+                        {
+                          id: "print",
+                          label: "Print the voucher",
+                          hidden: (row) => !(row.paidPaise > 0),
+                          onSelect: (row) => printExpenseVoucher(row, state),
+                        },
+                        {
+                          id: "cancel",
+                          label: "Cancel this voucher",
+                          tone: "danger",
+                          separatorAbove: true,
+                          hidden: (row) => isExpenseVoucherCancelled(row),
+                          onSelect: (row) => cancelVoucher(row.id),
+                        },
+                      ]}
+                    />
                   </td>
                 </tr>
               ))}
@@ -3327,9 +3346,18 @@ export function OwnerLoansPanel({
                 <td className="py-2">{r.installmentNo}</td>
                 <td className="py-2 text-right">{formatInr(r.amountPaise)}</td>
                 <td className="py-2">
-                  <button type="button" className={BTN_OUTLINE} onClick={() => payEmi(r.id)}>
-                    Pay EMI
-                  </button>
+                  {/* The row-menu standard, 19 Sep 2026. */}
+                  <RowActionMenu
+                    row={r}
+                    label="EMI actions"
+                    actions={[
+                      {
+                        id: "pay",
+                        label: "Pay this EMI",
+                        onSelect: (row) => payEmi(row.id),
+                      },
+                    ]}
+                  />
                 </td>
               </tr>
             ))}

@@ -1,7 +1,6 @@
 "use client";
-// ratchet-allow: grids_without_row_menu — rows are AppTableRow components with their own per-row controls
-
 import { useEffect, useMemo, useState } from "react";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 import Link from "next/link";
 import { Accessibility } from "lucide-react";
 import { useDemoSession } from "@/components/shell/SessionContext";
@@ -1203,78 +1202,72 @@ function AppTableRow({
         </td>
         <td className={`${td} max-w-[120px] whitespace-normal`}>{feeText}</td>
         <td className="px-2 py-2 align-top">
-          <div className="flex min-w-[140px] flex-col gap-1">
-            {canAdmit ? (
-              <>
-                <button
-                  type="button"
-                  className={btn}
-                  onClick={() => setShowAdmit((v) => !v)}
-                >
-                  {showAdmit ? "Cancel" : "Take admission"}
-                </button>
-                <button
-                  type="button"
-                  className={btnOutline}
-                  onClick={() => setStatus("waitlist")}
-                >
-                  Waitlist
-                </button>
-                <button
-                  type="button"
-                  className="text-left text-[11px] text-[var(--danger)] underline"
-                  onClick={() => setStatus("rejected")}
-                >
-                  Reject
-                </button>
-              </>
-            ) : null}
-            {needsFee ? (
-              <button
-                type="button"
-                className={btnOutline}
-                onClick={() => {
-                  const r = markRteRegistrationFeePaid(app.id);
+          {/*
+            The same "…" as every other list (director, 19 Sep 2026).
+            "Take admission" still opens the fee panel below the row — a
+            menu item can start a form; it just should not BE the form.
+          */}
+          <RowActionMenu
+            row={app}
+            label="Application actions"
+            actions={[
+              {
+                id: "admit",
+                label: showAdmit ? "Close the admission panel" : "Take admission",
+                hidden: () => !canAdmit,
+                onSelect: () => setShowAdmit((v) => !v),
+              },
+              {
+                id: "waitlist",
+                label: "Move to the waitlist",
+                hidden: () => !canAdmit,
+                onSelect: () => setStatus("waitlist"),
+              },
+              {
+                id: "fee-paid",
+                label: "Mark the registration fee paid",
+                hidden: () => !needsFee,
+                onSelect: (a) => {
+                  const r = markRteRegistrationFeePaid(a.id);
                   if (!r.ok) return onError(r.error);
                   onRefresh();
                   onFlash("Registration fee marked paid");
-                }}
-              >
-                Mark fee paid
-              </button>
-            ) : null}
-            {isAdmitted && !needsFee ? (
-              <button
-                type="button"
-                className={btn}
-                onClick={() => {
-                  const r = sendAllottedRteToSis({
-                    applicationId: app.id,
-                    by: actorName,
-                  });
+                },
+              },
+              {
+                id: "to-sis",
+                label: "Send to SIS",
+                hidden: () => !(isAdmitted && !needsFee),
+                onSelect: (a) => {
+                  const r = sendAllottedRteToSis({ applicationId: a.id, by: actorName });
                   if (!r.ok) return onError(r.error);
                   onRefresh();
                   onFlash(`SIS ${r.admissionNo} · RTE/EWS tags`);
-                }}
-              >
-                Send to SIS
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className="text-left text-[11px] text-[var(--danger)] underline"
-              onClick={() => {
-                const r = deleteQuotaApplication(app.id);
-                if (!r.ok) onError(r.error);
-                else {
-                  onRefresh();
-                  onFlash("Deleted");
-                }
-              }}
-            >
-              Delete
-            </button>
-          </div>
+                },
+              },
+              {
+                id: "reject",
+                label: "Reject",
+                tone: "danger",
+                separatorAbove: true,
+                hidden: () => !canAdmit,
+                onSelect: () => setStatus("rejected"),
+              },
+              {
+                id: "delete",
+                label: "Delete this application",
+                tone: "danger",
+                onSelect: (a) => {
+                  const r = deleteQuotaApplication(a.id);
+                  if (!r.ok) onError(r.error);
+                  else {
+                    onRefresh();
+                    onFlash("Deleted");
+                  }
+                },
+              },
+            ]}
+          />
         </td>
       </tr>
       {showAdmit && canAdmit ? (

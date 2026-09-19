@@ -1,5 +1,4 @@
 "use client";
-// ratchet-allow: grids_without_row_menu — worklist rows carry bespoke reminder / verify controls tied to gap state
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -38,6 +37,7 @@ import { useDemoSession } from "@/components/shell/SessionContext";
 import { hasPermission } from "@/lib/rbac";
 import { ComplianceFactsPanel } from "@/components/students/ComplianceFactsPanel";
 import { currentAcademicYearCode } from "@/lib/masters";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 import {
   ErpTable,
   ErpTableBody,
@@ -1305,40 +1305,48 @@ export function UdiseComplianceWorkspace({
                     <div>APAAR: {row.student.apaarId || "—"}</div>
                   </td>
                   <td className="px-2 py-2">
-                    <div className="flex min-w-[120px] flex-col gap-1">
-                      {row.primaryCallTelHref ? (
-                        <a
-                          href={row.primaryCallTelHref}
-                          className="rounded-lg bg-[var(--success)] px-2 py-1 text-center text-[11px] font-semibold text-white"
-                        >
-                          Call {row.callContacts[0]?.label ?? ""}
-                        </a>
-                      ) : (
-                        <span className="text-[10px] text-[#8b1a12]">
-                          No phone on file
-                        </span>
-                      )}
-                      <button
-                        type="button"
-                        className="rounded-lg bg-[var(--primary)] px-2 py-1 text-[11px] font-medium text-[var(--primary-foreground)] disabled:opacity-40"
-                        disabled={!row.whatsappMobile}
-                        onClick={() => sendReminder(row)}
-                      >
-                        WhatsApp
-                      </button>
-                      <a
-                        className="text-[10px] text-[var(--brand-deep)] underline"
-                        href={row.nearestCenterMapsUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        Nearest Aadhaar centre
-                      </a>
+                    {/*
+                      The same "…" as every other list (director, 19 Sep
+                      2026). Call, WhatsApp and the Aadhaar centre used to
+                      be three differently-shaped controls stacked in the
+                      cell; the actions are the same, the gesture is now
+                      the one used everywhere else.
+                    */}
+                    <div className="flex min-w-[120px] items-center gap-2">
                       {row.lastReminded ? (
                         <span className="text-[10px] text-[var(--muted)]">
                           Last: {row.lastReminded.slice(0, 10)}
                         </span>
                       ) : null}
+                      <RowActionMenu
+                        row={row}
+                        label="Row actions"
+                        className="ml-auto"
+                        actions={[
+                          {
+                            id: "call",
+                            label: `Call ${row.callContacts[0]?.label ?? "family"}`,
+                            hidden: (r) => !r.primaryCallTelHref,
+                            onSelect: (r) => {
+                              window.location.href = r.primaryCallTelHref;
+                            },
+                          },
+                          {
+                            id: "whatsapp",
+                            label: "Send the WhatsApp reminder",
+                            disabled: (r) => !r.whatsappMobile,
+                            onSelect: (r) => sendReminder(r),
+                          },
+                          {
+                            id: "centre",
+                            label: "Nearest Aadhaar centre",
+                            separatorAbove: true,
+                            onSelect: (r) => {
+                              window.open(r.nearestCenterMapsUrl, "_blank", "noreferrer");
+                            },
+                          },
+                        ]}
+                      />
                     </div>
                   </td>
                 </tr>

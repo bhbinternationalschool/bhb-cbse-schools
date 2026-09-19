@@ -1,6 +1,4 @@
 "use client";
-// ratchet-allow: grids_without_row_menu — the counter's sales list opens each receipt on click and has its own void / print controls
-
 /**
  * Counter — sell to a student, staff member or walk-in.
  *
@@ -25,6 +23,7 @@ import {
   paymentModeForTender,
 } from "@/lib/paymentChannels";
 import { Button } from "@/components/ui/button";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 import {
   ErpTable,
   ErpTableBody,
@@ -1951,55 +1950,57 @@ function SalesSection({
                     >
                       {saleStatusLabel(s.status)}
                     </Pill>
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      onClick={() => setReceiptOf(s)}
-                    >
-                      Receipt
-                    </Button>
-                    {s.status !== "void" && s.balancePaise > 0 ? (
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => {
-                          setCollect(s);
-                          setCollectChannel("cash");
-                          setCollectRef("");
-                          setCollectInput(paiseToInput(s.balancePaise));
-                          setCollectOn(new Date().toISOString().slice(0, 10));
-                        }}
-                      >
-                        Collect
-                      </Button>
-                    ) : null}
-                    {s.status !== "void" ? (
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => {
-                          setRet(s);
-                          setRetQty({});
-                          setRetReason("");
-                          setRetOn(new Date().toISOString().slice(0, 10));
-                        }}
-                      >
-                        Return
-                      </Button>
-                    ) : null}
-                    {s.status !== "void" ? (
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        className="text-destructive"
-                        onClick={() => {
-                          setVoidSale(s);
-                          setVoidReason("");
-                        }}
-                      >
-                        Cancel
-                      </Button>
-                    ) : null}
+                    {/*
+                      One "…" instead of four ghost buttons whose set
+                      changed per row (director, 19 Sep 2026): a voided sale
+                      showed one, an unpaid one showed four, and the column
+                      jumped about as the day's list filled up.
+                    */}
+                    <RowActionMenu
+                      row={s}
+                      label="Sale actions"
+                      actions={[
+                        {
+                          id: "receipt",
+                          label: "Receipt",
+                          onSelect: (r) => setReceiptOf(r),
+                        },
+                        {
+                          id: "collect",
+                          label: "Collect the balance",
+                          hidden: (r) => !(r.status !== "void" && r.balancePaise > 0),
+                          onSelect: (r) => {
+                            setCollect(r);
+                            setCollectChannel("cash");
+                            setCollectRef("");
+                            setCollectInput(paiseToInput(r.balancePaise));
+                            setCollectOn(new Date().toISOString().slice(0, 10));
+                          },
+                        },
+                        {
+                          id: "return",
+                          label: "Return items",
+                          hidden: (r) => r.status === "void",
+                          onSelect: (r) => {
+                            setRet(r);
+                            setRetQty({});
+                            setRetReason("");
+                            setRetOn(new Date().toISOString().slice(0, 10));
+                          },
+                        },
+                        {
+                          id: "void",
+                          label: "Cancel this sale",
+                          tone: "danger",
+                          separatorAbove: true,
+                          hidden: (r) => r.status === "void",
+                          onSelect: (r) => {
+                            setVoidSale(r);
+                            setVoidReason("");
+                          },
+                        },
+                      ]}
+                    />
                   </td>
                 </tr>
               ))}
