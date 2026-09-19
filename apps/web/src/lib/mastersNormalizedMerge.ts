@@ -1,5 +1,9 @@
 import type { MastersState } from "@/lib/masters";
 import { mastersReadFromDbEnabled } from "@/lib/mastersDbConfig";
+import {
+  STAFF_OWNED_MASTERS_SLICES,
+  staffReadFromDbEnabled,
+} from "@/lib/staffDbConfig";
 import type { MastersDeskBundle, MastersSliceKey } from "@/lib/mastersNormalized.server";
 import { MASTERS_OBJECT_SLICES } from "@/lib/mastersNormalized.server";
 
@@ -20,6 +24,16 @@ export function mergeDbDeskIntoMastersState(
   }
   const next: MastersState = { ...state, version: 2 };
 
+  // departments / designations / staff are stripped on the way out
+  // (stripStaffFromMastersForBlob), so the bundle reports them as [] whatever
+  // the school's roster actually is. Letting preferDb write that [] back is
+  // how a desk with 35 staff ended up with none: the Exams invigilator picker
+  // had nobody to offer, and Masters re-seeded 6 placeholder departments over
+  // the school's 10. The Staff module hydrates these three itself.
+  const staffOwned = staffReadFromDbEnabled()
+    ? new Set<string>(STAFF_OWNED_MASTERS_SLICES)
+    : new Set<string>();
+
   for (const key of MASTERS_OBJECT_SLICES) {
     const remote = bundle[key];
     if (remote == null) continue;
@@ -30,6 +44,7 @@ export function mergeDbDeskIntoMastersState(
 
   for (const key of Object.keys(bundle) as MastersSliceKey[]) {
     if (MASTERS_OBJECT_SLICES.includes(key)) continue;
+    if (staffOwned.has(key)) continue;
     const local = state[key];
     const remote = bundle[key];
     if (!Array.isArray(local) || !Array.isArray(remote)) continue;

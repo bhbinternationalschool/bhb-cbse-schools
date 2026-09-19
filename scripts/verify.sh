@@ -264,6 +264,7 @@ SELFTESTS=(
   test:answer-book
   test:syllabus-from-books
   test:tutor-syllabus
+  test:masters-staff-slices
   test:drive-archive
   test:receipt-pdf
   test:fee-due-future

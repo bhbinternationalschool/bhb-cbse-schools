@@ -466,19 +466,41 @@ export function ExamsWorkspace() {
     return () => window.removeEventListener("bhb-desk-sync-failed", onFailed);
   }, []);
 
+  // Masters is read once at mount, and the staff roster is the slice that
+  // arrives last: it has its own hydrate, kicked from whichever desk asked for
+  // it. This desk never asked, so a browser that opened on Exams held masters
+  // with no staff and the invigilator picker had nobody to offer. Repaint
+  // whenever a hydrate reports masters changed.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onMasters = () => setMasters(loadMasters());
+    window.addEventListener("bhb-masters-updated", onMasters);
+    return () => window.removeEventListener("bhb-masters-updated", onMasters);
+  }, []);
+
   useEffect(() => {
     // Paint immediately from localStorage, then refresh after remote hydrate
     refresh();
     void (async () => {
-      const [{ ensureSisHydrated }, { ensureExamsHydrated }, { withHydrationSlot }] =
-        await Promise.all([
-          import("@/lib/sisPersistence"),
-          import("@/lib/examsPersistence"),
-          import("@/lib/deskHydrateGuard"),
-        ]);
+      const [
+        { ensureSisHydrated },
+        { ensureExamsHydrated },
+        { ensureMastersHydrated },
+        { ensureStaffHydrated },
+        { withHydrationSlot },
+      ] = await Promise.all([
+        import("@/lib/sisPersistence"),
+        import("@/lib/examsPersistence"),
+        import("@/lib/mastersPersistence"),
+        import("@/lib/staffPersistence"),
+        import("@/lib/deskHydrateGuard"),
+      ]);
       await Promise.all([
         withHydrationSlot(() => ensureSisHydrated()),
         withHydrationSlot(() => ensureExamsHydrated()),
+        withHydrationSlot(() => ensureMastersHydrated()),
+        // Invigilation, seating and admit cards all read masters.staff.
+        withHydrationSlot(() => ensureStaffHydrated()),
       ]);
       refresh();
     })();

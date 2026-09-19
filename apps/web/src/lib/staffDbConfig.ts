@@ -13,3 +13,19 @@ export function staffReadFromDbEnabled(): boolean {
   if (flag === "false" || flag === "0") return false;
   return true;
 }
+
+/**
+ * The masters slices the Staff module owns, not the Masters desk.
+ *
+ * `pushMastersDeskToDb()` strips these three before writing
+ * masters_desk_slices (they live in their own departments / designations /
+ * staff tables), so the masters-desk GET always reports them as `[]`. That
+ * empty array means "this desk does not carry staff", never "this school has
+ * no staff" — a reader that takes it as authoritative wipes the roster.
+ * Both the strip and the merge read this list so the two can never drift.
+ */
+export const STAFF_OWNED_MASTERS_SLICES = [
+  "departments",
+  "designations",
+  "staff",
+] as const;
