@@ -1,10 +1,20 @@
 /*
- * "Send papers to ERP" — the one click an office user makes on Nucleus.
+ * "Send to ERP" — the one click an office user makes on Nucleus.
  *
- * It walks the Assessments & Answer key list, opens each ready paper the way a
- * person would, and reads the addresses of its question paper and answer key.
- * It downloads nothing and changes nothing; the only output is a list on the
- * clipboard, which is pasted into the ERP.
+ * It reads whichever page it is on:
+ *
+ *   Assessments & Answer key  — walks the list, opens each ready paper the way
+ *                               a person would, and reads the addresses of its
+ *                               question paper and answer key. Also records
+ *                               what the publisher has prepared and what it
+ *                               has not.
+ *   Teacher Timeliness        — reads the table cell by cell, so the day-plan
+ *                               numbers arrive as numbers rather than being
+ *                               pulled back out of "36% Course (50/140 day
+ *                               plans)" at the other end.
+ *
+ * It downloads nothing and changes nothing; the only output is a reading on
+ * the clipboard, which is pasted into the ERP.
  *
  * The check that matters: after opening a paper it waits until the page is
  * really showing THAT paper before reading anything. Without it the page still
@@ -75,8 +85,53 @@
     return out;
   }
 
+  /** The Teacher Timeliness table, read cell by cell. */
+  function readTimeliness() {
+    const rows = [...document.querySelectorAll("table tr")]
+      .map((tr) => [...tr.querySelectorAll("td")].map((td) => (td.textContent || "").replace(/\s+/g, " ").trim()))
+      .filter((c) => c.length >= 5 && /^\d+$/.test(c[0] || ""));
+    const plans = (cell) => {
+      // "36% Course (50/140 day plans)" — the two numbers, not the sentence.
+      const m = /\((\d+)\s*\/\s*(\d+)/.exec(cell || "");
+      return m ? { done: Number(m[1]), total: Number(m[2]) } : { done: 0, total: 0 };
+    };
+    return rows.map((c) => {
+      const required = plans(c[3]);
+      const current = plans(c[4]);
+      // "Class1-Propel Hindi" is how they spell one class and one subject.
+      const at = (c[2] || "").indexOf("-");
+      return {
+        position: Number(c[0]),
+        teacherName: c[1] || "",
+        classLabel: at > 0 ? c[2].slice(0, at).trim() : c[2] || "",
+        subjectLabel: at > 0 ? c[2].slice(at + 1).trim() : "",
+        totalPlans: current.total || required.total,
+        requiredPlans: required.done,
+        currentPlans: current.done,
+        statusText: c[5] || "",
+      };
+    });
+  }
+
+  const capturedOn = new Date().toISOString().slice(0, 10);
+
+  if (/timeliness/i.test(location.pathname)) {
+    const timeliness = readTimeliness();
+    if (!timeliness.length) { say("No timeliness table on screen."); return; }
+    const payload = JSON.stringify({ capturedOn, timeliness }, null, 1);
+    try {
+      await navigator.clipboard.writeText(payload);
+      say(`Done — ${timeliness.length} teacher rows copied. Paste into the ERP.`);
+    } catch {
+      window.__nucleusCapture = payload;
+      say("Done. Clipboard blocked — copy window.__nucleusCapture from the console.");
+    }
+    setTimeout(() => box.remove(), 30000);
+    return;
+  }
+
   const list = readList();
-  if (!list) { say("Open Assessments & Answer key first."); return; }
+  if (!list) { say("Open Assessments & Answer key or Teacher Timeliness first."); return; }
   const ready = list.filter((r) => r.assessmentState === "PUBLISHED");
   say(`${ready.length} papers to read…`);
 
@@ -106,7 +161,18 @@
     say(`Reading ${i + 1} of ${ready.length}…`);
   }
 
-  const payload = JSON.stringify({ capturedOn: new Date().toISOString().slice(0, 10), rows }, null, 1);
+  // What the publisher has prepared and what it has not — the same list, in
+  // the words Nucleus uses, for the screen that shows what is still missing.
+  const assessments = list.map((r) => ({
+    classLabel: r.className,
+    division: r.divisionName || "A",
+    subject: r.subjectName,
+    title: r.asmName,
+    chapters: "",
+    statusText: r.assessmentState === "PUBLISHED" ? "Ready to Download" : "Not Created",
+  }));
+
+  const payload = JSON.stringify({ capturedOn, papers: rows, assessments }, null, 1);
   try {
     await navigator.clipboard.writeText(payload);
     say(`Done — ${rows.length} papers copied. Paste into the ERP.`);
