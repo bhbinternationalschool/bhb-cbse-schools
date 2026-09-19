@@ -69,6 +69,25 @@ two export buttons on one panel is worse than either.
 | `attendance/AttendanceExceptionsPanel.tsx` | Each row carries a resolve-note input, for the same reason. |
 | `fees/FeeTakeWorkspace.tsx` | None of its four lists are record grids: `hits` is the search dropdown, `tenderLines` is the payment split being composed, `v.tenders` is the tender breakdown inside one receipt, `unsettledStore` is the dues being pulled into the current take. All are parts of a single transaction in progress. |
 
+## The check that catches a dropped control
+
+Converting a list means re-typing its row's buttons into a column, and it is
+easy to leave one behind. On 19 Sep the campus list lost its **Remove**
+control that way: the table looked right, nothing failed to compile, and the
+office would simply have found that campuses could no longer be deleted.
+
+What caught it was `npx next lint` reporting `checkCampusRemoval` and
+`removeCampus` as newly unused imports. So, after every conversion:
+
+```
+npx next lint --file <the file>
+```
+
+and treat a **newly** unused import as a dropped row control until proven
+otherwise — compare against `git show HEAD:<file>` before dismissing it. A
+warning that was already there is noise; one that appeared with the
+conversion is a missing button.
+
 ## The queue
 
 Ordered by weight — the number of fields a row carries, plus a bonus where

@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — every row carries MasterRowActions, which holds the removal check that says WHY a category or vendor cannot be deleted; a menu item would swallow that message
 
 import { useMemo, useState } from "react";
 import {
@@ -31,6 +32,7 @@ import {
 import { formatInr } from "@/lib/fees";
 import type { AccountsPanelProps } from "@/components/accounts/AccountsPanels";
 import { RemoveControl } from "@/components/masters/RemoveControl";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 
 const CARD =
   "rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4";
@@ -396,6 +398,73 @@ export function AccountsMastersPanel({
     );
   }
 
+  /**
+   * The three masters, as tables.
+   *
+   * MasterRowActions stays in a column of its own rather than moving into a
+   * row menu: it carries the removal check, which is what tells the office
+   * *why* a category cannot be deleted — something a generic menu item
+   * would swallow.
+   */
+  const categoryCols: DataTableColumn<(typeof rootCategories)[number]>[] = [
+    { key: "name", header: "Category", sortable: true, value: (c) => c.name },
+    { key: "coa", header: "Ledger code", sortable: true, value: (c) => c.coaCode },
+    { key: "vendors", header: "Vendors", value: (c) => vendorLabelSummary(c.vendorIds) || "—" },
+    {
+      key: "actions", header: "",
+      render: (c) => (
+        <MasterRowActions
+          onEdit={() => startEditCategory(c)}
+          removeCheck={checkExpenseCategoryRemoval(c.id, state)}
+          onRemove={() => removeCategory(c.id)}
+        />
+      ),
+    },
+  ];
+
+  const subcategoryCols: DataTableColumn<(typeof subcategories)[number]>[] = [
+    {
+      key: "parent", header: "Under", sortable: true,
+      value: (c) => state.expenseCategories.find((p) => p.id === c.parentId)?.name ?? "—",
+    },
+    { key: "name", header: "Sub-category", sortable: true, value: (c) => c.name },
+    { key: "coa", header: "Ledger code", sortable: true, value: (c) => c.coaCode },
+    { key: "vendors", header: "Vendors", value: (c) => vendorLabelSummary(c.vendorIds) || "—" },
+    {
+      key: "actions", header: "",
+      render: (c) => (
+        <MasterRowActions
+          onEdit={() => startEditSubcategory(c)}
+          removeCheck={checkExpenseCategoryRemoval(c.id, state)}
+          onRemove={() => removeSubcategory(c.id)}
+        />
+      ),
+    },
+  ];
+
+  const vendorCols: DataTableColumn<(typeof state.vendors)[number]>[] = [
+    {
+      key: "name", header: "Vendor", sortable: true,
+      value: (v) => v.name,
+      render: (v) => <span className={v.isActive === false ? "opacity-60" : undefined}>{v.name}</span>,
+    },
+    { key: "phone", header: "Phone", value: (v) => v.phone || "—" },
+    {
+      key: "status", header: "Status", sortable: true,
+      value: (v) => (v.isActive === false ? "Inactive" : "Active"),
+    },
+    {
+      key: "actions", header: "",
+      render: (v) => (
+        <MasterRowActions
+          onEdit={() => startEditVendor(v)}
+          removeCheck={checkVendorRemoval(v.id, state)}
+          onRemove={() => removeVendor(v.id)}
+        />
+      ),
+    },
+  ];
+
   return (
     <div className="mt-4 space-y-4">
       <p className="text-sm text-[var(--muted)]">
@@ -526,33 +595,13 @@ export function AccountsMastersPanel({
             <h3 className="mb-2 text-sm font-bold text-[var(--brand-deep)]">
               Categories ({rootCategories.length})
             </h3>
-            <ul className="max-h-72 space-y-1 overflow-y-auto text-sm">
-              {rootCategories.map((c) => {
-                const active = editingCatId === c.id;
-                return (
-                  <li
-                    key={c.id}
-                    className={`flex items-start justify-between gap-2 border-b border-[var(--border)] py-1.5 ${
-                      active ? "rounded-lg bg-[rgba(15,39,68,0.06)] px-2" : ""
-                    }`}
-                  >
-                    <span className="min-w-0 pt-0.5">
-                      {c.name}
-                      <span className="text-[var(--muted)]">
-                        {" "}
-                        · {c.coaCode}
-                        {vendorLabelSummary(c.vendorIds)}
-                      </span>
-                    </span>
-                    <MasterRowActions
-                      onEdit={() => startEditCategory(c)}
-                      removeCheck={checkExpenseCategoryRemoval(c.id, state)}
-                      onRemove={() => removeCategory(c.id)}
-                    />
-                  </li>
-                );
-              })}
-            </ul>
+            <DataTable
+              columns={categoryCols}
+              rows={rootCategories}
+              rowKey={(c) => c.id}
+              minWidth="min-w-[520px]"
+              emptyTitle="No categories yet"
+            />
           </section>
         </div>
       ) : null}
@@ -602,36 +651,13 @@ export function AccountsMastersPanel({
             <h3 className="mb-2 text-sm font-bold text-[var(--brand-deep)]">
               Sub-categories ({subcategories.length})
             </h3>
-            <ul className="max-h-72 space-y-1 overflow-y-auto text-sm">
-              {subcategories.map((c) => {
-                const parent = state.expenseCategories.find(
-                  (p) => p.id === c.parentId,
-                );
-                const active = editingSubId === c.id;
-                return (
-                  <li
-                    key={c.id}
-                    className={`flex items-start justify-between gap-2 border-b border-[var(--border)] py-1.5 ${
-                      active ? "rounded-lg bg-[rgba(15,39,68,0.06)] px-2" : ""
-                    }`}
-                  >
-                    <span className="min-w-0 pt-0.5">
-                      {parent?.name} → {c.name}
-                      <span className="text-[var(--muted)]">
-                        {" "}
-                        · {c.coaCode}
-                        {vendorLabelSummary(c.vendorIds)}
-                      </span>
-                    </span>
-                    <MasterRowActions
-                      onEdit={() => startEditSubcategory(c)}
-                      removeCheck={checkExpenseCategoryRemoval(c.id, state)}
-                      onRemove={() => removeSubcategory(c.id)}
-                    />
-                  </li>
-                );
-              })}
-            </ul>
+            <DataTable
+              columns={subcategoryCols}
+              rows={subcategories}
+              rowKey={(c) => c.id}
+              minWidth="min-w-[620px]"
+              emptyTitle="No sub-categories yet"
+            />
             {subParent ? (
               <p className="mt-2 text-[11px] text-[var(--muted)]">
                 Under{" "}
@@ -690,31 +716,15 @@ export function AccountsMastersPanel({
             <h3 className="mb-2 text-sm font-bold text-[var(--brand-deep)]">
               Vendors ({state.vendors.length})
             </h3>
-            <ul className="max-h-72 space-y-1 overflow-y-auto text-sm">
-              {state.vendors.map((v) => {
-                const active = editingVendorId === v.id;
-                return (
-                  <li
-                    key={v.id}
-                    className={`flex items-start justify-between gap-2 border-b border-[var(--border)] py-1.5 ${
-                      active ? "rounded-lg bg-[rgba(15,39,68,0.06)] px-2" : ""
-                    } ${v.isActive === false ? "opacity-60" : ""}`}
-                  >
-                    <span className="min-w-0 pt-0.5">
-                      {v.name}
-                      {v.phone ? (
-                        <span className="text-[var(--muted)]"> · {v.phone}</span>
-                      ) : null}
-                    </span>
-                    <MasterRowActions
-                      onEdit={() => startEditVendor(v)}
-                      removeCheck={checkVendorRemoval(v.id, state)}
-                      onRemove={() => removeVendor(v.id)}
-                    />
-                  </li>
-                );
-              })}
-            </ul>
+            <DataTable
+              columns={vendorCols}
+              rows={state.vendors}
+              rowKey={(v) => v.id}
+              minWidth="min-w-[480px]"
+              exportFileBaseName="vendors"
+              exportTitle="Vendors"
+              emptyTitle="No vendors yet"
+            />
           </section>
         </div>
       ) : null}

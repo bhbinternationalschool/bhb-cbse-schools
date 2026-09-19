@@ -37,6 +37,8 @@ import {
   ErpTableHead,
 } from "@/components/ui/erp-roster";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
+import type { RowAction } from "@/components/ui/erp-grid";
 
 const CARD = "rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4";
 const BTN =
@@ -587,6 +589,117 @@ function PayrollLedgerCard({
 
   if (!rows || rows.length === 0) return null;
 
+  /**
+   * What payroll has actually reached the book. A month's run, what it cost,
+   * and — the point of the screen — whether its accrual and its payment
+   * voucher exist. Those two facts were buried in a grey second line where
+   * "not in the book" read the same as everything else.
+   */
+  const payrollPostingCols: DataTableColumn<(typeof rows)[number]>[] = [
+    { key: "month", header: "Month", sortable: true, value: (r) => r.month },
+    { key: "status", header: "Status", sortable: true, value: (r) => r.status },
+    { key: "staff", header: "Staff", align: "right", sortable: true, value: (r) => r.staff },
+    {
+      key: "gross", header: "Gross", align: "right", sortable: true,
+      value: (r) => r.grossPaise,
+      render: (r) => <span className="tabular-nums">{formatInr(r.grossPaise)}</span>,
+    },
+    {
+      key: "net", header: "Net", align: "right", sortable: true,
+      value: (r) => r.netPaise,
+      render: (r) => <span className="tabular-nums">{formatInr(r.netPaise)}</span>,
+    },
+    {
+      key: "accrual", header: "Accrual", sortable: true,
+      value: (r) => r.accrualVoucherNo || "",
+      render: (r) =>
+        r.accrualVoucherNo ? (
+          <b className="font-mono text-[var(--brand-deep)]">{r.accrualVoucherNo}</b>
+        ) : (
+          <span className="text-[var(--danger)]">not in the book</span>
+        ),
+    },
+    {
+      key: "payment", header: "Payment", sortable: true,
+      value: (r) => r.paymentVoucherNo || "",
+      render: (r) =>
+        r.paymentVoucherNo ? (
+          <b className="font-mono text-[var(--brand-deep)]">{r.paymentVoucherNo}</b>
+        ) : r.status === "paid" ? (
+          <span className="text-[var(--muted)]">—</span>
+        ) : (
+          <span className="text-[var(--muted)]">not paid yet</span>
+        ),
+    },
+    {
+      key: "overlap", header: "March overlap",
+      value: (r) => (r.overlap.total > 0 ? `${r.overlap.total - r.overlap.reclassified} to reclassify` : ""),
+      render: (r) =>
+        r.overlap.total > 0 ? (
+          <span className="text-[11px] text-[var(--muted)]">
+            {r.overlap.total} voucher(s), {formatInr(r.overlap.salaryPaise)},{" "}
+            {r.overlap.reclassified} reclassified
+            {r.overlap.mixed
+              ? ` (${r.overlap.mixed} mixed with other expenses — only the salary lines move)`
+              : ""}
+          </span>
+        ) : (
+          <span className="text-[var(--muted)]">—</span>
+        ),
+    },
+    {
+      key: "blocked", header: "Blocked",
+      value: (r) => r.blocked || "",
+      render: (r) =>
+        r.blocked ? (
+          <span className="text-[11px] font-semibold text-[var(--danger)]">{r.blocked}</span>
+        ) : (
+          <span className="text-[var(--muted)]">—</span>
+        ),
+    },
+  ];
+
+  const payrollPostingActions: RowAction<(typeof rows)[number]>[] = [
+    {
+      id: "reclass",
+      // The count lives in the "March overlap" column; a row menu label
+      // cannot carry it and still be the same label on every row.
+      label: "Reclassify the overlap and post",
+      hidden: (r) => !r.blocked || !canApprove || r.overlap.total <= r.overlap.reclassified,
+      disabled: (r) => busy === r.month,
+      onSelect: (r) => {
+        void (async () => {
+          setBusy(r.month);
+          setNotice("");
+          try {
+            const res = await ledgerApi<{
+              reclassified: number;
+              skipped: number;
+              skippedNos: string[];
+              posted: { accrual?: string; payment?: string; refused?: string }[];
+            }>({ action: "payroll-overlap-reclass", month: r.month });
+            if (!res.ok) {
+              setNotice(res.error || "The book refused the reclassification");
+            } else {
+              const p = res.posted?.[0];
+              setNotice(
+                `Reclassified ${res.reclassified} voucher(s)` +
+                  (res.skipped ? `, ${res.skipped} skipped (${res.skippedNos.join(", ")})` : "") +
+                  (p?.accrual ? ` · payroll posted as ${p.accrual}` : "") +
+                  (p?.payment ? ` · payment ${p.payment}` : "") +
+                  (p?.refused ? ` · still refused: ${p.refused}` : ""),
+              );
+              await load();
+              onChanged?.();
+            }
+          } finally {
+            setBusy("");
+          }
+        })();
+      },
+    },
+  ];
+
   return (
     <section className={CARD}>
       <h4 className="text-sm font-bold text-[var(--brand-deep)]">Payroll in the book</h4>
@@ -602,80 +715,17 @@ function PayrollLedgerCard({
           {notice}
         </p>
       ) : null}
-      <ul className="mt-2 space-y-1.5">
-        {rows.map((r) => (
-          <li
-            key={r.runId}
-            className="rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-xs"
-          >
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-sm font-semibold">
-                {r.month} · {r.status} · {r.staff} staff
-              </span>
-              <span className="tabular-nums">
-                gross {formatInr(r.grossPaise)} · net {formatInr(r.netPaise)}
-              </span>
-            </div>
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--muted)]">
-              <span>
-                Accrual: {r.accrualVoucherNo ? <b className="font-mono text-[var(--brand-deep)]">{r.accrualVoucherNo}</b> : "not in the book"}
-              </span>
-              <span>
-                Payment: {r.paymentVoucherNo ? <b className="font-mono text-[var(--brand-deep)]">{r.paymentVoucherNo}</b> : r.status === "paid" ? "—" : "not paid yet"}
-              </span>
-              {r.overlap.total > 0 ? (
-                <span>
-                  Reconstructed salary for this month&apos;s pay: {r.overlap.total} voucher(s),{" "}
-                  {formatInr(r.overlap.salaryPaise)}, {r.overlap.reclassified} reclassified
-                  {r.overlap.mixed ? ` (${r.overlap.mixed} mixed with other expenses — only the salary lines move)` : ""}
-                </span>
-              ) : null}
-            </div>
-            {r.blocked ? (
-              <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2">
-                <span className="text-[11px] font-semibold text-[var(--danger)]">Blocked: {r.blocked}</span>
-                {canApprove && r.overlap.total > r.overlap.reclassified ? (
-                  <button
-                    type="button"
-                    className={BTN_OUTLINE}
-                    disabled={busy === r.month}
-                    onClick={async () => {
-                      setBusy(r.month);
-                      setNotice("");
-                      try {
-                        const res = await ledgerApi<{
-                          reclassified: number;
-                          skipped: number;
-                          skippedNos: string[];
-                          posted: { accrual?: string; payment?: string; refused?: string }[];
-                        }>({ action: "payroll-overlap-reclass", month: r.month });
-                        if (!res.ok) {
-                          setNotice(res.error || "The book refused the reclassification");
-                        } else {
-                          const p = res.posted?.[0];
-                          setNotice(
-                            `Reclassified ${res.reclassified} voucher(s)` +
-                              (res.skipped ? `, ${res.skipped} skipped (${res.skippedNos.join(", ")})` : "") +
-                              (p?.accrual ? ` · payroll posted as ${p.accrual}` : "") +
-                              (p?.payment ? ` · payment ${p.payment}` : "") +
-                              (p?.refused ? ` · still refused: ${p.refused}` : ""),
-                          );
-                          await load();
-                          onChanged?.();
-                        }
-                      } finally {
-                        setBusy("");
-                      }
-                    }}
-                  >
-                    Reclassify {r.overlap.total - r.overlap.reclassified} voucher(s) and post
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
-          </li>
-        ))}
-      </ul>
+      <DataTable
+        columns={payrollPostingCols}
+        rows={rows}
+        rowKey={(r) => r.runId}
+        rowActions={payrollPostingActions}
+        rowActionsLabel="Posting actions"
+        minWidth="min-w-[1080px]"
+        exportFileBaseName="payroll-postings"
+        exportTitle="Payroll in the book"
+        emptyTitle="No payroll runs"
+      />
     </section>
   );
 }
@@ -698,6 +748,50 @@ function FeeAdvancesCard({ onChanged }: { onChanged?: () => void }) {
 
   if (!rows || rows.length === 0) return null;
 
+  const feeAdvanceCols: DataTableColumn<(typeof rows)[number]>[] = [
+    {
+      key: "session", header: "Session", sortable: true,
+      value: (r) => r.academicYearCode,
+      render: (r) => <span className="font-semibold">Session {r.academicYearCode}</span>,
+    },
+    {
+      key: "balance", header: "Held", align: "right", sortable: true,
+      value: (r) => r.balancePaise,
+      render: (r) => <span className="font-bold tabular-nums">{formatInr(r.balancePaise)}</span>,
+    },
+  ];
+
+  const feeAdvanceActions: RowAction<(typeof rows)[number]>[] = [
+    {
+      id: "release",
+      label: "Release into income",
+      disabled: () => busy,
+      onSelect: (r) => {
+        void (async () => {
+          setBusy(true);
+          setNotice("");
+          try {
+            const res = await ledgerApi<{ voucherNo?: string; amountPaise?: number }>({
+              action: "release-fee-advances",
+              academicYearCode: r.academicYearCode,
+            });
+            setNotice(
+              res.ok
+                ? `Released ${formatInr(res.amountPaise ?? 0)} into fee income — ${res.voucherNo}`
+                : res.error || "The book refused the release",
+            );
+            if (res.ok) {
+              await load();
+              onChanged?.();
+            }
+          } finally {
+            setBusy(false);
+          }
+        })();
+      },
+    },
+  ];
+
   return (
     <section className={CARD}>
       <h4 className="text-sm font-bold text-[var(--brand-deep)]">
@@ -713,45 +807,15 @@ function FeeAdvancesCard({ onChanged }: { onChanged?: () => void }) {
           {notice}
         </p>
       ) : null}
-      <ul className="mt-2 space-y-1.5">
-        {rows.map((r) => (
-          <li
-            key={r.academicYearCode}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-sm"
-          >
-            <span className="font-semibold">Session {r.academicYearCode}</span>
-            <span className="font-bold tabular-nums">{formatInr(r.balancePaise)}</span>
-            <button
-              type="button"
-              className={BTN_OUTLINE}
-              disabled={busy}
-              onClick={async () => {
-                setBusy(true);
-                setNotice("");
-                try {
-                  const res = await ledgerApi<{ voucherNo?: string; amountPaise?: number }>({
-                    action: "release-fee-advances",
-                    academicYearCode: r.academicYearCode,
-                  });
-                  setNotice(
-                    res.ok
-                      ? `Released ${formatInr(res.amountPaise ?? 0)} into fee income — ${res.voucherNo}`
-                      : res.error || "The book refused the release",
-                  );
-                  if (res.ok) {
-                    await load();
-                    onChanged?.();
-                  }
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              Release into income
-            </button>
-          </li>
-        ))}
-      </ul>
+      <DataTable
+        columns={feeAdvanceCols}
+        rows={rows}
+        rowKey={(r) => r.academicYearCode}
+        rowActions={feeAdvanceActions}
+        rowActionsLabel="Advance actions"
+        minWidth="min-w-[440px]"
+        emptyTitle="No fees received in advance"
+      />
     </section>
   );
 }

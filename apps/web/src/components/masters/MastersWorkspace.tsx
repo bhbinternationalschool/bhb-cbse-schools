@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — rows carry EditControl (which shows which row is open in the form beside it) and RemoveControl (which holds the check explaining why a row cannot be deleted); neither survives being folded into a menu
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -79,6 +80,7 @@ import {
   canConfigureRbac,
   loadRbac,
 } from "@/lib/rbac";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 
 type Tab =
   | "overview"
@@ -647,78 +649,78 @@ function CampusesPanel({
     resetForm();
   }
 
+  const campusCols: DataTableColumn<(typeof state.campuses)[number]>[] = [
+    {
+      key: "name", header: "Campus", sortable: true,
+      value: (c) => c.name,
+      render: (c) => (
+        <span>
+          <span className="font-medium text-[var(--brand-deep)]">{c.name}</span>
+          {c.isPrimary ? (
+            <span className="ml-2 rounded bg-[rgba(197,160,40,0.2)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--brand-deep)]">
+              Primary
+            </span>
+          ) : null}
+        </span>
+      ),
+    },
+    { key: "code", header: "Code", sortable: true, value: (c) => c.code },
+    { key: "address", header: "Address", value: (c) => c.address || "—" },
+    {
+      key: "status", header: "Status", sortable: true,
+      value: (c) => (c.isActive ? "Active" : "Inactive"),
+    },
+    {
+      key: "actions", header: "",
+      render: (c) => (
+        <div className="flex items-center justify-end gap-1.5">
+          <EditControl active={editingId === c.id} onEdit={() => startEdit(c)} />
+          <button
+            type="button"
+            className="text-xs font-medium text-[var(--brand-mid)]"
+            onClick={() =>
+              commit(
+                {
+                  ...state,
+                  campuses: state.campuses.map((x) =>
+                    x.id === c.id ? { ...x, isActive: !x.isActive } : x,
+                  ),
+                },
+                c.isActive ? "Campus inactivated" : "Campus activated",
+              )
+            }
+          >
+            {c.isActive ? "Inactivate" : "Activate"}
+          </button>
+          <RemoveControl
+            check={checkCampusRemoval(state, c.id)}
+            onRemove={() => {
+              const result = removeCampus(state, c.id);
+              if (!result.ok) {
+                commit(state, result.reason);
+                return;
+              }
+              if (editingId === c.id) resetForm();
+              commit(result.state, "Campus removed");
+            }}
+          />
+        </div>
+      ),
+    },
+  ];
+
   return (
     <MastersTabStack
       tables={
         <MastersTablesRow cols={1}>
           <MastersTableCard title="Campuses">
-            <ul className="divide-y divide-[var(--border)]">
-              {state.campuses.map((c) => (
-                <li
-                  key={c.id}
-                  className="flex items-center justify-between gap-3 px-4 py-3"
-                >
-                  <div>
-                    <div className="font-medium text-[var(--brand-deep)]">
-                      {c.name}{" "}
-                      <span className="text-xs font-normal text-[var(--muted)]">
-                        {c.code}
-                      </span>
-                      {c.isPrimary ? (
-                        <span className="ml-2 rounded bg-[rgba(197,160,40,0.2)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--brand-deep)]">
-                          Primary
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="text-xs text-[var(--muted)]">
-                      {c.address || "—"} · {c.isActive ? "Active" : "Inactive"}
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 flex-col items-end gap-1.5 sm:flex-row sm:items-center">
-                    <EditControl
-                      active={editingId === c.id}
-                      onEdit={() => startEdit(c)}
-                    />
-                    <button
-                      type="button"
-                      className="text-xs font-medium text-[var(--brand-mid)]"
-                      onClick={() =>
-                        commit(
-                          {
-                            ...state,
-                            campuses: state.campuses.map((x) =>
-                              x.id === c.id
-                                ? { ...x, isActive: !x.isActive }
-                                : x,
-                            ),
-                          },
-                          c.isActive ? "Campus inactivated" : "Campus activated",
-                        )
-                      }
-                    >
-                      {c.isActive ? "Inactivate" : "Activate"}
-                    </button>
-                    <RemoveControl
-                      check={checkCampusRemoval(state, c.id)}
-                      onRemove={() => {
-                        const result = removeCampus(state, c.id);
-                        if (!result.ok) {
-                          commit(state, result.reason);
-                          return;
-                        }
-                        if (editingId === c.id) resetForm();
-                        commit(result.state, "Campus removed");
-                      }}
-                    />
-                  </div>
-                </li>
-              ))}
-              {state.campuses.length === 0 ? (
-                <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">
-                  No campuses yet
-                </li>
-              ) : null}
-            </ul>
+            <DataTable
+              columns={campusCols}
+              rows={state.campuses}
+              rowKey={(c) => c.id}
+              minWidth="min-w-[640px]"
+              emptyTitle="No campuses yet"
+            />
           </MastersTableCard>
         </MastersTablesRow>
       }
@@ -1372,78 +1374,78 @@ function FeeHeadsPanel({
     resetForm();
   }
 
+  /**
+   * Fee-head categories as a table. "3 fee heads · inactive" was a grey line;
+   * how many heads hang off a category is the number that decides whether it
+   * can be removed at all, so it gets a column.
+   *
+   * EditControl and RemoveControl stay in a column rather than moving into a
+   * row menu: EditControl shows which row is currently open in the form
+   * beside it, and RemoveControl carries the check that says why a category
+   * cannot be deleted.
+   */
+  const feeCategoryCols: DataTableColumn<(typeof categories)[number]>[] = [
+    { key: "label", header: "Category", sortable: true, value: (c) => c.label },
+    { key: "code", header: "Code", sortable: true, value: (c) => c.code },
+    {
+      key: "used", header: "Fee heads", align: "right", sortable: true,
+      value: (c) => state.feeHeads.filter((h) => h.category === c.code).length,
+    },
+    {
+      key: "active", header: "Status", sortable: true,
+      value: (c) => (c.isActive ? "Active" : "Inactive"),
+    },
+    {
+      key: "actions", header: "",
+      render: (c) => (
+        <div className="flex items-center justify-end gap-1.5">
+          <EditControl active={catEditingId === c.id} onEdit={() => startEditCategory(c)} />
+          <button
+            type="button"
+            className="text-xs font-medium text-[var(--brand-mid)]"
+            onClick={() =>
+              commit(
+                {
+                  ...state,
+                  feeHeadCategories: resolveFeeHeadCategories(state).map((x) =>
+                    x.id === c.id ? { ...x, isActive: !x.isActive } : x,
+                  ),
+                },
+                c.isActive ? "Category inactivated" : "Category activated",
+              )
+            }
+          >
+            {c.isActive ? "Inactivate" : "Activate"}
+          </button>
+          <RemoveControl
+            check={checkFeeHeadCategoryRemoval(state, c.id)}
+            onRemove={() => {
+              const result = removeFeeHeadCategory(state, c.id);
+              if (!result.ok) {
+                commit(state, result.reason);
+                return;
+              }
+              if (catEditingId === c.id) resetCatForm();
+              commit(result.state, "Category removed");
+            }}
+          />
+        </div>
+      ),
+    },
+  ];
+
   return (
     <MastersTabStack
       tables={
         <MastersTablesRow cols={2}>
           <MastersTableCard title="Fee head categories">
-            <ul className="divide-y divide-[var(--border)]">
-              {categories.map((c) => {
-                const used = state.feeHeads.filter(
-                  (h) => h.category === c.code,
-                ).length;
-                return (
-                  <li
-                    key={c.id}
-                    className="flex items-center justify-between gap-3 px-4 py-3"
-                  >
-                    <div>
-                      <div className="font-medium text-[var(--brand-deep)]">
-                        {c.label}{" "}
-                        <span className="text-xs font-normal text-[var(--muted)]">
-                          {c.code}
-                        </span>
-                      </div>
-                      <div className="text-xs text-[var(--muted)]">
-                        {used} fee head{used === 1 ? "" : "s"}
-                        {!c.isActive ? " · inactive" : ""}
-                      </div>
-                    </div>
-                    <div className="flex shrink-0 flex-col items-end gap-1.5 sm:flex-row sm:items-start">
-                      <EditControl
-                        active={catEditingId === c.id}
-                        onEdit={() => startEditCategory(c)}
-                      />
-                      <button
-                        type="button"
-                        className="text-xs font-medium text-[var(--brand-mid)]"
-                        onClick={() =>
-                          commit(
-                            {
-                              ...state,
-                              feeHeadCategories: resolveFeeHeadCategories(
-                                state,
-                              ).map((x) =>
-                                x.id === c.id
-                                  ? { ...x, isActive: !x.isActive }
-                                  : x,
-                              ),
-                            },
-                            c.isActive
-                              ? "Category inactivated"
-                              : "Category activated",
-                          )
-                        }
-                      >
-                        {c.isActive ? "Inactivate" : "Activate"}
-                      </button>
-                      <RemoveControl
-                        check={checkFeeHeadCategoryRemoval(state, c.id)}
-                        onRemove={() => {
-                          const result = removeFeeHeadCategory(state, c.id);
-                          if (!result.ok) {
-                            commit(state, result.reason);
-                            return;
-                          }
-                          if (catEditingId === c.id) resetCatForm();
-                          commit(result.state, "Category removed");
-                        }}
-                      />
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+            <DataTable
+              columns={feeCategoryCols}
+              rows={categories}
+              rowKey={(c) => c.id}
+              minWidth="min-w-[620px]"
+              emptyTitle="No fee-head categories yet"
+            />
           </MastersTableCard>
           <MastersTableCard title="Fee heads">
             <ul className="divide-y divide-[var(--border)]">
