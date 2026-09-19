@@ -1,6 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { childrenOfHousehold, loadSis, studentsInSession } from "@/lib/sis";
+import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
+import { classLabelForStudent } from "@/lib/parentPortal";
+import { householdCandidateNumbers } from "@/lib/waHouseholdNumbers";
 import {
   WA_CHAT_CATEGORIES,
   type WaChatCategory,
@@ -109,6 +113,7 @@ export function WaChatHubPanel({
   canEdit: boolean;
 }) {
   const [category, setCategory] = useState<WaChatCategory | "all">("all");
+  const [classFilter, setClassFilter] = useState("all");
   const [threads, setThreads] = useState<HubThread[]>([]);
   const [stats, setStats] = useState<HubStats | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -298,6 +303,66 @@ export function WaChatHubPanel({
 
   const selected = threads.find((t) => t.id === selectedId) || null;
 
+  /**
+   * Whose family each number belongs to, and which children.
+   *
+   * A hub thread carries a mobile, not a household — so the family is found
+   * the same way the bot finds it: through every number the school has for
+   * a household, including the father's and mother's own
+   * (householdCandidateNumbers), not just the one field somebody typed
+   * into "WhatsApp".
+   */
+  const familyFor = useMemo(() => {
+    const sis = loadSis();
+    const masters = loadMasters();
+    const ay = currentAcademicYearCode(masters);
+    const inYear = studentsInSession(sis, ay).filter((s) => s.status === "active");
+    const kidsByHousehold = new Map<string, typeof inYear>();
+    for (const s of inYear) {
+      const list = kidsByHousehold.get(s.householdId) ?? [];
+      list.push(s);
+      kidsByHousehold.set(s.householdId, list);
+    }
+    const byMobile = new Map<string, { name: string; classId: string; label: string }[]>();
+    for (const hh of sis.households ?? []) {
+      const kids = kidsByHousehold.get(hh.id) ?? childrenOfHousehold(sis, hh.id, ay);
+      if (!kids.length) continue;
+      const shown = kids.map((c) => ({
+        name: c.fullName,
+        classId: c.classId,
+        label: classLabelForStudent(c, masters),
+      }));
+      for (const cand of householdCandidateNumbers({ household: hh, students: kids })) {
+        if (cand.mobile10 && !byMobile.has(cand.mobile10)) byMobile.set(cand.mobile10, shown);
+      }
+    }
+    return byMobile;
+  }, []);
+
+  const childrenOfThread = useCallback(
+    (mobile: string) => familyFor.get((mobile || "").replace(/\D/g, "").slice(-10)) ?? [],
+    [familyFor],
+  );
+
+  const classOptions = useMemo(() => {
+    const masters = loadMasters();
+    const seen = new Map<string, string>();
+    for (const t of threads) {
+      for (const c of childrenOfThread(t.mobile)) {
+        if (c.classId) seen.set(c.classId, c.label.split("-")[0] || c.label);
+      }
+    }
+    const order = new Map((masters.classes ?? []).map((c, i) => [c.id, i]));
+    return [...seen.entries()].sort((a, b) => (order.get(a[0]) ?? 99) - (order.get(b[0]) ?? 99));
+  }, [threads, childrenOfThread]);
+
+  const visibleThreads = useMemo(() => {
+    if (classFilter === "all") return threads;
+    return threads.filter((t) =>
+      childrenOfThread(t.mobile).some((c) => c.classId === classFilter),
+    );
+  }, [threads, classFilter, childrenOfThread]);
+
   const categoryChips = useMemo(() => {
     const chips: { id: WaChatCategory | "all"; label: string; unread: number }[] =
       [
@@ -471,6 +536,29 @@ export function WaChatHubPanel({
             {c.unread > 0 ? ` · ${c.unread}` : ""}
           </button>
         ))}
+        {classOptions.length ? (
+          <label className="ml-auto flex items-center gap-1 text-[11px] text-[var(--muted)]">
+            Class
+            <select
+              className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-[11px]"
+              value={classFilter}
+              onChange={(e) => {
+                setClassFilter(e.target.value);
+                setSelectedId(null);
+              }}
+            >
+              <option value="all">All</option>
+              {classOptions.map(([id, label]) => (
+                <option key={id} value={id}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <span>
+              {visibleThreads.length} of {threads.length}
+            </span>
+          </label>
+        ) : null}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -479,9 +567,13 @@ export function WaChatHubPanel({
             <div className="px-4 py-10 text-center text-sm text-[var(--muted)]">
               No WhatsApp threads yet — parents/staff message +91 94519 38805.
             </div>
+          ) : visibleThreads.length === 0 ? (
+            <div className="px-4 py-10 text-center text-sm text-[var(--muted)]">
+              No chats from that class in this category.
+            </div>
           ) : (
             <ul className="divide-y divide-[var(--border)]">
-              {threads.map((t) => (
+              {visibleThreads.map((t) => (
                 <li key={`${t.category}-${t.id}`}>
                   <button
                     type="button"
@@ -500,6 +592,13 @@ export function WaChatHubPanel({
                         </span>
                       ) : null}
                     </span>
+                    {childrenOfThread(t.mobile).length ? (
+                      <span className="text-[11px] text-[var(--brand-deep)]">
+                        {childrenOfThread(t.mobile)
+                          .map((c) => `${c.name} (${c.label})`)
+                          .join(" · ")}
+                      </span>
+                    ) : null}
                     <span className="text-[10px] font-medium text-[var(--tone-teal)]">
                       {t.categoryLabel} · {t.status}
                     </span>
@@ -535,6 +634,14 @@ export function WaChatHubPanel({
             </p>
           ) : (
             <div className="space-y-3">
+              {childrenOfThread(selected.mobile).length ? (
+                // Who the office is actually talking about, while they reply.
+                <p className="text-[11px] text-[var(--brand-deep)]">
+                  {childrenOfThread(selected.mobile)
+                    .map((c) => `${c.name} (${c.label})`)
+                    .join(" · ")}
+                </p>
+              ) : null}
               <div className="flex items-center justify-between gap-2">
                 <button
                   type="button"

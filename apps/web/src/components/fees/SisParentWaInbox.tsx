@@ -1,7 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { SIS_BOT_QUICK_PROMPTS } from "@/lib/sisParentBotEngine";
+import { childrenOfHousehold, loadSis } from "@/lib/sis";
+import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
+import { classLabelForStudent } from "@/lib/parentPortal";
 import {
   MastersEmptyRow,
   MastersTableCard,
@@ -36,6 +39,59 @@ export function SisParentWaInbox({
   canEdit?: boolean;
 }) {
   const [threads, setThreads] = useState<WaThread[]>([]);
+  const [classFilter, setClassFilter] = useState("all");
+
+  /**
+   * Who each thread is actually about.
+   *
+   * A chat list of guardian names and mobile numbers tells the office
+   * nothing they can act on — "MR. SINGH · 94xxxxxx21" could be any of
+   * eleven families. The children, with their class, are the thing the
+   * office is holding in their head when they open this screen.
+   *
+   * childrenOfHousehold with the running year, never a raw status filter:
+   * most children carry a row per academic year and the old ones would
+   * show the class they were in two years ago ([[erp-stale-academic-year-rows]]).
+   */
+  const { childrenFor, classOptions } = useMemo(() => {
+    const sis = loadSis();
+    const masters = loadMasters();
+    const ay = currentAcademicYearCode(masters);
+    const byHousehold = new Map<string, { name: string; classId: string; label: string }[]>();
+    for (const t of threads) {
+      if (!t.householdId || byHousehold.has(t.householdId)) continue;
+      byHousehold.set(
+        t.householdId,
+        childrenOfHousehold(sis, t.householdId, ay)
+          .filter((c) => c.status === "active")
+          .map((c) => ({
+            name: c.fullName,
+            classId: c.classId,
+            label: classLabelForStudent(c, masters),
+          })),
+      );
+    }
+    // Only the classes that actually have a chat — a filter listing twelve
+    // classes when three families have written is a filter nobody uses.
+    const seen = new Map<string, string>();
+    for (const kids of byHousehold.values()) {
+      for (const k of kids) if (k.classId) seen.set(k.classId, k.label.split("-")[0] || k.label);
+    }
+    const order = new Map((masters.classes ?? []).map((c, i) => [c.id, i]));
+    return {
+      childrenFor: byHousehold,
+      classOptions: [...seen.entries()].sort(
+        (a, b) => (order.get(a[0]) ?? 99) - (order.get(b[0]) ?? 99),
+      ),
+    };
+  }, [threads]);
+
+  const visible = useMemo(() => {
+    if (classFilter === "all") return threads;
+    return threads.filter((t) =>
+      (childrenFor.get(t.householdId) ?? []).some((c) => c.classId === classFilter),
+    );
+  }, [threads, classFilter, childrenFor]);
   const [configured, setConfigured] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [reply, setReply] = useState("");
@@ -112,11 +168,34 @@ export function SisParentWaInbox({
 
       <div className="grid gap-4 lg:grid-cols-2">
         <MastersTableCard title="SIS parent WhatsApp threads">
+          <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-[12px]">
+            <label htmlFor="wa-class-filter" className="text-[var(--muted)]">
+              Class
+            </label>
+            <select
+              id="wa-class-filter"
+              className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2 py-1 text-[12px]"
+              value={classFilter}
+              onChange={(e) => setClassFilter(e.target.value)}
+            >
+              <option value="all">All classes</option>
+              {classOptions.map(([id, label]) => (
+                <option key={id} value={id}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <span className="text-[var(--muted)]">
+              {visible.length} of {threads.length} chat{threads.length === 1 ? "" : "s"}
+            </span>
+          </div>
           {threads.length === 0 ? (
             <MastersEmptyRow label="No SIS parent chats yet — parents text your Business number from a mobile saved on the household." />
+          ) : visible.length === 0 ? (
+            <MastersEmptyRow label="No chats from that class yet." />
           ) : (
             <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
-              {threads.map((t) => (
+              {visible.map((t) => (
                 <li key={t.id}>
                   <button
                     type="button"
@@ -134,6 +213,11 @@ export function SisParentWaInbox({
                           {t.unreadStaff}
                         </span>
                       ) : null}
+                    </span>
+                    <span className="text-[11px] text-[var(--brand-deep)]">
+                      {(childrenFor.get(t.householdId) ?? [])
+                        .map((c) => `${c.name} (${c.label})`)
+                        .join(" · ") || "No child on record for this number"}
                     </span>
                     <span className="text-[11px] text-[var(--muted)]">
                       {t.status} · {t.updatedAt.slice(0, 16).replace("T", " ")}
@@ -159,6 +243,13 @@ export function SisParentWaInbox({
             </p>
           ) : (
             <div className="space-y-3">
+              <p className="text-[11px] text-[var(--muted)]">
+                {(childrenFor.get(selected.householdId) ?? [])
+                  .map((c) => `${c.name} (${c.label})`)
+                  .join(" · ") || "No child on record for this number"}
+                {" · "}
+                {selected.mobile}
+              </p>
               <div className="max-h-72 space-y-2 overflow-y-auto rounded-lg border border-[rgba(32,48,80,0.1)] bg-[rgba(248,248,240,0.6)] p-2">
                 {selected.messages.map((m) => (
                   <div
