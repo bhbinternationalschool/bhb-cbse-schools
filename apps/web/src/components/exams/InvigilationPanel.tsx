@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — the duty chart is a grid of exam slots: a cell holds the invigilators for one class on one day, and is edited in the panel it opens, not as a row
 
 /**
  * Invigilation duty as a duty chart — classes down, exam days across.
@@ -21,6 +22,7 @@
  * Director's instruction, 19 Sep 2026.
  */
 
+import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { useMemo, useState } from "react";
 import { listExamDateSheet, loadExams, type ExamTerm } from "@/lib/exams";
 import { examEntryEndTime } from "@/lib/examTimetable";
@@ -259,8 +261,8 @@ export function InvigilationPanel({ academicYearCode, masters, terms }: Props) {
           </p>
 
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-left text-sm">
-              <thead>
+            <ErpTableShell><ErpTable minWidth="min-w-[860px]">
+              <ErpTableHead sticky>
                 <tr>
                   <th className="sticky left-0 z-10 border border-[var(--border)] bg-[var(--surface-sunken)] p-2 text-left">
                     Class
@@ -287,8 +289,8 @@ export function InvigilationPanel({ academicYearCode, masters, terms }: Props) {
                     );
                   })}
                 </tr>
-              </thead>
-              <tbody>
+              </ErpTableHead>
+              <ErpTableBody>
                 {grid.classIds.map((classId) => (
                   <tr key={classId}>
                     <th
@@ -431,8 +433,8 @@ export function InvigilationPanel({ academicYearCode, masters, terms }: Props) {
                     })}
                   </tr>
                 ))}
-              </tbody>
-            </table>
+              </ErpTableBody>
+            </ErpTable></ErpTableShell>
           </div>
         </>
       )}
