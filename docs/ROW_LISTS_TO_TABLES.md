@@ -53,6 +53,8 @@ two export buttons on one panel is worse than either.
 | `comms/CommsWorkspace.tsx` | notices, scheduled queue, social cross-post log | news stories — each leads with a cover photograph |
 | `library/LibraryWorkspace.tsx` | overdue loans, the e-book shelf | open loans (each row opens a return form inside itself); procurement docs (each is a photo of a bill) |
 | `transport/TransportOpsPanels.tsx` | routes, the fleet | a vehicle's compliance / fuel / job sub-lists (a handful of lines inside one vehicle's card) |
+| `masters/ConcessionsPanel.tsx` | the grants under a policy | the policy rail on the left (a master-detail picker, not a grid) |
+| `accounts/AccountsPanels.tsx` | recurring expenses, recent journals | vendor bills (nested inside a vendor drawer); the report launcher |
 
 ### Judged and skipped, so nobody re-opens them
 

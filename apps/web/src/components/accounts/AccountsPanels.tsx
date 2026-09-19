@@ -119,6 +119,7 @@ import {
   ErpTableShell,
 } from "@/components/ui/erp-roster";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 
 export type AccountsPanelProps = {
   state: AccountsState;
@@ -1218,6 +1219,20 @@ export function ExpensesPanel({
   onError,
   actorName,
 }: AccountsPanelProps) {
+
+  /** Recurring expenses as a table: the day, what it costs, what it is. */
+  const recurringCols: DataTableColumn<(typeof state.recurringRules)[number]>[] = [
+    { key: "day", header: "Day", align: "right", sortable: true, value: (r) => r.dayOfMonth },
+    {
+      key: "amount", header: "Amount", align: "right", sortable: true,
+      value: (r) => r.amountPaise,
+      render: (r) => formatInr(r.amountPaise),
+    },
+    {
+      key: "category", header: "Category", sortable: true,
+      value: (r) => getExpenseCategory(r.categoryId, state)?.name ?? "—",
+    },
+  ];
   const rootCategories = useMemo(
     () => listRootExpenseCategories(state),
     [state.expenseCategories],
@@ -2110,14 +2125,13 @@ export function ExpensesPanel({
             Generate for month
           </button>
         </div>
-        <ul className="text-sm text-[var(--muted)]">
-          {state.recurringRules.map((r) => (
-            <li key={r.id}>
-              Day {r.dayOfMonth} · {formatInr(r.amountPaise)} ·{" "}
-              {getExpenseCategory(r.categoryId, state)?.name}
-            </li>
-          ))}
-        </ul>
+        <DataTable
+          columns={recurringCols}
+          rows={state.recurringRules}
+          rowKey={(r) => r.id}
+          minWidth="min-w-[420px]"
+          emptyTitle="No recurring expenses set"
+        />
       </section>
     </div>
   );
@@ -3459,6 +3473,16 @@ export function BooksPanel({
   const bs = useMemo(() => balanceSheet(bsAsOf, state), [bsAsOf, state]);
   const journals = listJournals(state).slice(0, 20);
 
+  /**
+   * Recent journals as a table. Date, narration and line count were one grey
+   * run-on line; a book is read by date, and a list could not be sorted by it.
+   */
+  const journalCols: DataTableColumn<(typeof journals)[number]>[] = [
+    { key: "date", header: "Date", sortable: true, value: (j) => j.date },
+    { key: "narration", header: "Narration", sortable: true, value: (j) => j.narration || j.sourceType },
+    { key: "lines", header: "Lines", align: "right", sortable: true, value: (j) => j.lines.length },
+  ];
+
   function postJv() {
     const lines: JournalLine[] = jvLines
       .filter((l) => l.coaId)
@@ -3647,13 +3671,15 @@ export function BooksPanel({
             </button>
           </div>
           <h4 className="text-sm font-semibold text-[var(--brand-deep)]">Recent journals</h4>
-          <ul className="text-sm text-[var(--muted)]">
-            {journals.map((j) => (
-              <li key={j.id}>
-                {j.date} · {j.narration || j.sourceType} · {j.lines.length} line(s)
-              </li>
-            ))}
-          </ul>
+          <DataTable
+            columns={journalCols}
+            rows={journals}
+            rowKey={(j) => j.id}
+            minWidth="min-w-[560px]"
+            exportFileBaseName="recent-journals"
+            exportTitle="Recent journals"
+            emptyTitle="No journals yet"
+          />
         </section>
       ) : null}
 
