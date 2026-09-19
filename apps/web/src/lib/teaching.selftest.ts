@@ -40,6 +40,7 @@ import {
   upsertTeachingLog,
   type TeachingLog,
   type TeachingState,
+  syllabusCoverage,
 } from "./teaching";
 
 console.log("teaching.selftest.ts");
@@ -1630,6 +1631,34 @@ assert.equal(expectedAll.periods[0]!.isSubstituted, false);
     summary.unlogged,
     1,
     "an unlogged period is not evidence about anybody's location",
+  );
+}
+
+/* ── coverage, and whose claim it is (19 Sep 2026) ──────────────────── */
+{
+  const rows = (...st: ("complete" | "in_progress" | "not_started" | "unknown")[]) =>
+    st.map((status) => ({ status }));
+
+  assert.deepEqual(syllabusCoverage(rows()), {
+    percent: 0,
+    complete: 0,
+    partial: 0,
+    notStarted: 0,
+    total: 0,
+  }, "an empty plan is 0%, never NaN");
+
+  assert.equal(syllabusCoverage(rows("complete", "complete")).percent, 100);
+  assert.equal(syllabusCoverage(rows("not_started", "not_started")).percent, 0);
+  // A half-taught chapter counts a half.
+  assert.equal(syllabusCoverage(rows("complete", "in_progress", "not_started", "not_started")).percent, 38);
+  // "Taught, but nobody estimated it" is half too — calling it finished
+  // would be the screen inventing a fact.
+  assert.equal(syllabusCoverage(rows("unknown", "not_started")).percent, 25);
+  const counted = syllabusCoverage(rows("complete", "in_progress", "unknown", "not_started"));
+  assert.deepEqual(
+    { c: counted.complete, p: counted.partial, n: counted.notStarted },
+    { c: 1, p: 2, n: 1 },
+    "the three bands add up to the whole plan",
   );
 }
 

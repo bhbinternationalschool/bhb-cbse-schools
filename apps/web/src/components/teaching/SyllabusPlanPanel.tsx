@@ -1,13 +1,16 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, CircleDashed, Clock, Eraser, Trash2 } from "lucide-react";
+import { RowActionMenu } from "@/components/ui/erp-grid";
+import { loadMasters } from "@/lib/masters";
 import {
   addResourceLink,
   computeSyllabusProgress,
   importSyllabusUnits,
   removeResourceLink,
   removeSyllabusUnit,
+  syllabusCoverage,
   upsertSyllabusUnit,
   type ResourceKind,
   type SyllabusImportChapter,
@@ -19,6 +22,44 @@ import {
 import { AddResourceForm, ResourceList } from "@/components/teaching/ResourceLinks";
 import { SyllabusOcrImport } from "@/components/teaching/SyllabusOcrImport";
 import { applyOutcomesImport, parseOutcomesCsv } from "@/lib/syllabusOutcomesImport";
+
+/**
+ * Three coloured lines and one number: done, part-done, not started.
+ *
+ * The director asked for this on every subject — a head of school wants to
+ * see where a class is without reading twelve rows. The number is generous
+ * on purpose (a part-taught chapter counts a half), and the tooltip says
+ * what it is made of, so nobody reads 60% as "sixty percent of the periods".
+ */
+function CoverageBar({
+  rows,
+  compact = false,
+}: {
+  rows: { status: UnitStatus }[];
+  compact?: boolean;
+}) {
+  const c = syllabusCoverage(rows);
+  if (!c.total) return null;
+  const pct = (n: number) => `${(n / c.total) * 100}%`;
+  return (
+    <span className={`flex items-center gap-2 ${compact ? "text-[11px]" : "text-xs"}`}>
+      <span
+        className={`flex ${compact ? "h-1.5 w-24" : "h-2 w-40"} overflow-hidden rounded-full bg-[var(--surface-sunken)]`}
+        title={`${c.complete} complete · ${c.partial} part-taught · ${c.notStarted} not started`}
+      >
+        <span style={{ width: pct(c.complete) }} className="bg-[var(--success)]" />
+        <span style={{ width: pct(c.partial) }} className="bg-[var(--warning)]" />
+        <span style={{ width: pct(c.notStarted) }} className="bg-transparent" />
+      </span>
+      <strong className="text-[var(--brand-deep)]">{c.percent}%</strong>
+      {compact ? null : (
+        <span className="text-[var(--muted)]">
+          {c.complete} done · {c.partial} part · {c.notStarted} left
+        </span>
+      )}
+    </span>
+  );
+}
 
 const STATUS_LABEL: Record<UnitStatus, string> = {
   not_started: "Not started",
@@ -55,6 +96,8 @@ export function SyllabusPlanPanel(props: {
   } = props;
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  /** Show every chapter's topics at once — the default after a fill. */
+  const [expandAll, setExpandAll] = useState(false);
   const [chapterDraft, setChapterDraft] = useState({
     code: "",
     title: "",
@@ -76,6 +119,35 @@ export function SyllabusPlanPanel(props: {
       subjectId,
     });
   }, [state, ay, classId, subjectId]);
+
+  /**
+   * The same measure for every subject this class has a plan for.
+   *
+   * The director asked to see coverage "on every subject" — one subject at a
+   * time answers a teacher's question, not a head of school's. Subjects with
+   * no chapters at all are left out: a row reading 0% would be read as
+   * "nobody has taught it" when it means "nobody has entered it".
+   */
+  const subjectCoverage = useMemo(() => {
+    if (!classId) return [];
+    const masters = loadMasters();
+    const name = (id: string) =>
+      (masters.subjects ?? []).find((x) => x.id === id)?.nameEn || "Subject";
+    const ids = [
+      ...new Set(
+        (state.units ?? [])
+          .filter((u) => u.classId === classId && u.academicYearCode === ay && u.isActive)
+          .map((u) => u.subjectId),
+      ),
+    ];
+    return ids
+      .map((id) => {
+        const p = computeSyllabusProgress({ state, academicYearCode: ay, classId, subjectId: id });
+        return { id, label: name(id), cover: syllabusCoverage(p.units), units: p.units };
+      })
+      .filter((row) => row.cover.total > 0)
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [state, ay, classId]);
 
   function toggle(id: string) {
     setExpanded((prev) => {
@@ -169,6 +241,9 @@ export function SyllabusPlanPanel(props: {
         return props.onError(found?.reason || "No book is loaded for this class and subject");
       }
       importChapters(found.chapters);
+      // Show what arrived: a filled plan whose chapters are all collapsed
+      // looks exactly like an empty one.
+      setExpandAll(true);
       if (found.book) props.onNotice(`From ${found.book} · check it against your own plan before teaching`);
     } catch (e) {
       props.onError((e as Error)?.message || "Could not read the school's books");
@@ -204,6 +279,19 @@ export function SyllabusPlanPanel(props: {
     if (!result.ok) return props.onError(result.error);
     onChange(result.value.state);
     props.onNotice("Learning outcomes saved");
+  }
+
+  /** The teacher's own word on a chapter or topic. Their mark wins. */
+  function mark(unit: SyllabusUnit, status: "not_started" | "in_progress" | "complete" | null) {
+    props.onError(null);
+    const result = upsertSyllabusUnit(state, { ...unit, markedStatus: status });
+    if (!result.ok) return props.onError(result.error);
+    onChange(result.value.state);
+    props.onNotice(
+      status === null
+        ? "Mark cleared — back to counting periods"
+        : `Marked ${STATUS_LABEL[status].toLowerCase()}`,
+    );
   }
 
   function drop(unitId: string, label: string) {
@@ -277,6 +365,44 @@ export function SyllabusPlanPanel(props: {
         </span>
       </div>
 
+      {subjectCoverage.length > 1 ? (
+        <div className="space-y-1 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-3">
+          <p className="text-xs font-semibold text-[var(--brand-deep)]">
+            Coverage across this class
+          </p>
+          <ul className="grid gap-1 sm:grid-cols-2">
+            {subjectCoverage.map((row) => (
+              <li key={row.id} className="flex items-center gap-2 text-xs">
+                <span
+                  className={`min-w-[8rem] truncate ${
+                    row.id === subjectId ? "font-semibold text-[var(--brand-deep)]" : ""
+                  }`}
+                >
+                  {row.label}
+                </span>
+                <CoverageBar rows={row.units} compact />
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      <div className="flex flex-wrap items-center gap-3 px-1">
+        <CoverageBar rows={progress.units} />
+        {progress.units.length > 0 ? (
+          <button
+            type="button"
+            className="ml-auto text-xs underline text-[var(--muted)]"
+            onClick={() => {
+              setExpandAll((v) => !v);
+              setExpanded(new Set());
+            }}
+          >
+            {expandAll ? "Collapse all" : "Show every topic"}
+          </button>
+        ) : null}
+      </div>
+
       {progress.units.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">
           No chapters yet. Add the first one below.
@@ -288,9 +414,10 @@ export function SyllabusPlanPanel(props: {
               key={chapter.unit.id}
               index={i + 1}
               chapter={chapter}
-              open={expanded.has(chapter.unit.id)}
+              open={expandAll !== expanded.has(chapter.unit.id)}
               onToggle={() => toggle(chapter.unit.id)}
               canEdit={canEdit}
+              onMark={mark}
               topicDraft={topicDraft}
               setTopicDraft={setTopicDraft}
               onAddTopic={() => addTopic(chapter.unit.id)}
@@ -451,6 +578,56 @@ function StatusPill({ status }: { status: UnitStatus }) {
   );
 }
 
+/**
+ * The same three dots every other module's rows carry, with the words a
+ * teacher would use: done, part done, not started — and "clear" to hand the
+ * row back to the period log.
+ */
+function markActions(
+  onMark: (unit: SyllabusUnit, status: "not_started" | "in_progress" | "complete" | null) => void,
+  onRemove: (unit: SyllabusUnit) => void,
+) {
+  return [
+    {
+      id: "complete",
+      label: "Mark complete",
+      icon: <Check className="size-4" aria-hidden />,
+      onSelect: (u: SyllabusUnit) => onMark(u, "complete"),
+      hidden: (u: SyllabusUnit) => u.markedStatus === "complete",
+    },
+    {
+      id: "partial",
+      label: "Mark part done",
+      icon: <Clock className="size-4" aria-hidden />,
+      onSelect: (u: SyllabusUnit) => onMark(u, "in_progress"),
+      hidden: (u: SyllabusUnit) => u.markedStatus === "in_progress",
+    },
+    {
+      id: "due",
+      label: "Mark not started",
+      icon: <CircleDashed className="size-4" aria-hidden />,
+      onSelect: (u: SyllabusUnit) => onMark(u, "not_started"),
+      hidden: (u: SyllabusUnit) => u.markedStatus === "not_started",
+    },
+    {
+      id: "clear",
+      label: "Clear mark (count periods)",
+      icon: <Eraser className="size-4" aria-hidden />,
+      onSelect: (u: SyllabusUnit) => onMark(u, null),
+      hidden: (u: SyllabusUnit) => !u.markedStatus,
+      separatorAbove: true,
+    },
+    {
+      id: "remove",
+      label: "Remove",
+      icon: <Trash2 className="size-4" aria-hidden />,
+      tone: "danger" as const,
+      onSelect: (u: SyllabusUnit) => onRemove(u),
+      separatorAbove: true,
+    },
+  ];
+}
+
 function ChapterRow({
   index,
   chapter,
@@ -464,12 +641,14 @@ function ChapterRow({
   onAttach,
   onDetach,
   onSaveOutcomes,
+  onMark,
 }: {
   index: number;
   chapter: UnitProgress;
   open: boolean;
   onToggle: () => void;
   canEdit: boolean;
+  onMark: (unit: SyllabusUnit, status: "not_started" | "in_progress" | "complete" | null) => void;
   topicDraft: { parentId: string; title: string; plannedPeriods: string };
   setTopicDraft: (d: {
     parentId: string;
@@ -525,20 +704,25 @@ function ChapterRow({
               ? ` · ${chapter.topics.filter((t) => t.status === "complete").length}/${chapter.topics.length} topics`
               : ""}
             {u.targetEndDate ? ` · target ${u.targetEndDate}` : ""}
+            {chapter.statusSource === "marked" ? " · marked by a teacher" : ""}
           </p>
+          {chapter.topics.length > 0 ? (
+            <div className="mt-1">
+              <CoverageBar rows={chapter.topics} compact />
+            </div>
+          ) : null}
           <ResourceList
             resources={u.resources}
             onRemove={canEdit ? (rid) => onDetach(u.id, rid) : undefined}
           />
         </div>
         {canEdit ? (
-          <button
-            type="button"
-            onClick={() => onDrop(u.id, "Chapter")}
-            className="shrink-0 text-xs font-semibold text-[var(--danger)] underline"
-          >
-            Remove
-          </button>
+          <RowActionMenu
+            row={u}
+            label="Chapter actions"
+            className="shrink-0"
+            actions={markActions(onMark, (unit) => onDrop(unit.id, "Chapter"))}
+          />
         ) : null}
       </div>
 
@@ -575,6 +759,7 @@ function ChapterRow({
                         {topic.lastTaughtOn
                           ? ` · last taught ${topic.lastTaughtOn}`
                           : ""}
+                        {topic.statusSource === "marked" ? " · marked by a teacher" : ""}
                       </p>
                       <ResourceList
                         resources={topic.unit.resources}
@@ -592,13 +777,12 @@ function ChapterRow({
                       ) : null}
                     </div>
                     {canEdit ? (
-                      <button
-                        type="button"
-                        onClick={() => onDrop(topic.unit.id, "Topic")}
-                        className="shrink-0 text-xs font-semibold text-[var(--danger)] underline"
-                      >
-                        Remove
-                      </button>
+                      <RowActionMenu
+                        row={topic.unit}
+                        label="Topic actions"
+                        className="shrink-0"
+                        actions={markActions(onMark, (unit) => onDrop(unit.id, "Topic"))}
+                      />
                     ) : null}
                   </div>
                 </li>

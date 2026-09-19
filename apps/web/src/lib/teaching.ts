@@ -98,6 +98,20 @@ export type SyllabusUnit = {
   competencyCodes: string[];
   /** E-book / video / worksheet links for this chapter or topic */
   resources: ResourceLink[];
+  /**
+   * What the TEACHER says about this chapter, when they say it.
+   *
+   * Status is otherwise counted from the period log — periods taught
+   * against periods planned — which is honest but blind: a chapter finished
+   * in three periods instead of five reads as half done forever, and a
+   * chapter taught before this desk existed reads as untouched.
+   *
+   * So a teacher can mark it, and their mark wins. The screen then says the
+   * mark came from a person, because a coverage figure built from marks is
+   * a claim somebody made, not a count of what happened
+   * ([[erp-unknown-must-not-become-fact]]).
+   */
+  markedStatus?: "not_started" | "in_progress" | "complete" | null;
   isActive: boolean;
   updatedAt: string;
 };
@@ -1132,6 +1146,9 @@ export function summarizeByTeacher(
 
 export type UnitStatus = "not_started" | "in_progress" | "complete" | "unknown";
 
+/** Did a person say this, or did the period log? */
+export type StatusSource = "logged" | "marked";
+
 export type UnitProgress = {
   unit: SyllabusUnit;
   /**
@@ -1150,6 +1167,8 @@ export type UnitProgress = {
    * no plannedPeriods to measure against — never "complete".
    */
   status: UnitStatus;
+  /** "marked" when a teacher set it by hand; "logged" when counted. */
+  statusSource: StatusSource;
   /** Topics inside this chapter; empty for a topic */
   topics: UnitProgress[];
 };
@@ -1175,6 +1194,33 @@ export type SyllabusProgress = {
    */
   pace: { status: "ahead" | "on_track" | "behind"; unitsBehind: number } | null;
 };
+
+/**
+ * How much of a subject is covered, as one number a head of school can read.
+ *
+ * A half-taught chapter counts a half. That is a rougher measure than
+ * periods — and deliberately so: periods are only planned on some chapters,
+ * so a period-weighted figure silently ignores every chapter nobody
+ * estimated, which is most of them on a freshly filled plan.
+ *
+ * "unknown" (taught, but nobody said how many periods it needs) counts as
+ * half too: something happened, and claiming it as finished would be the
+ * screen inventing a fact.
+ */
+export function syllabusCoverage(rows: { status: UnitStatus }[]): {
+  percent: number;
+  complete: number;
+  partial: number;
+  notStarted: number;
+  total: number;
+} {
+  const total = rows.length;
+  const complete = rows.filter((r) => r.status === "complete").length;
+  const partial = rows.filter((r) => r.status === "in_progress" || r.status === "unknown").length;
+  const notStarted = total - complete - partial;
+  const percent = total === 0 ? 0 : Math.round(((complete + partial * 0.5) / total) * 100);
+  return { percent, complete, partial, notStarted, total };
+}
 
 export function computeSyllabusProgress(input: {
   state: TeachingState;
@@ -1234,6 +1280,15 @@ export function computeSyllabusProgress(input: {
     return taught >= unit.plannedPeriods ? "complete" : "in_progress";
   }
 
+  /** The teacher's mark if there is one, otherwise the count. */
+  function statusOf(
+    unit: SyllabusUnit,
+    taught: number,
+  ): { status: UnitStatus; statusSource: StatusSource } {
+    if (unit.markedStatus) return { status: unit.markedStatus, statusSource: "marked" };
+    return { status: statusByPeriods(unit, taught), statusSource: "logged" };
+  }
+
   const chapters = units.filter((u) => u.level === "chapter");
   const topicsByParent = new Map<string, SyllabusUnit[]>();
   for (const u of units) {
@@ -1255,7 +1310,7 @@ export function computeSyllabusProgress(input: {
         periodsTaught: s.periodsTaught,
         firstTaughtOn: s.firstTaughtOn,
         lastTaughtOn: s.lastTaughtOn,
-        status: statusByPeriods(topic, s.periodsTaught),
+        ...statusOf(topic, s.periodsTaught),
         topics: [],
       };
     });
@@ -1268,7 +1323,13 @@ export function computeSyllabusProgress(input: {
     const s = summarize(chapterLogs);
 
     let status: UnitStatus;
-    if (topics.length === 0) {
+    let statusSource: StatusSource = "logged";
+    // A chapter the teacher has marked is what they said it is, whatever
+    // its topics say — they are the one standing in front of the class.
+    if (chapter.markedStatus) {
+      status = chapter.markedStatus;
+      statusSource = "marked";
+    } else if (topics.length === 0) {
       status = statusByPeriods(chapter, s.periodsTaught);
     } else if (topics.every((t) => t.status === "complete")) {
       status = "complete";
@@ -1286,6 +1347,7 @@ export function computeSyllabusProgress(input: {
       firstTaughtOn: s.firstTaughtOn,
       lastTaughtOn: s.lastTaughtOn,
       status,
+      statusSource,
       topics,
     };
   });
