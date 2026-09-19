@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — the hand-off log is a permanent record — the office replies from their own WhatsApp (swipe, or the #code), never from this screen; a row expands to show its forwards and replies
 
 /**
  * Office relay: which office phone receives which kind of message the bot
@@ -9,8 +10,8 @@
  * the record wants to see who was meant to receive it.
  */
 
+import { ErpPanel, ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { ErpPanel, ErpTableShell } from "@/components/ui/erp-roster";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import {
   RELAY_CATEGORIES,
@@ -362,8 +363,8 @@ export function OfficeRelayPanel({ readOnly }: { readOnly: boolean }) {
           <p className="mt-3 text-sm text-muted-foreground">Nothing handed to the office in this period.</p>
         ) : (
           <ErpTableShell className="mt-3" exportAs="office-relay-record">
-            <table className="w-full text-sm">
-              <thead>
+            <ErpTableShell><ErpTable minWidth="min-w-[900px]">
+              <ErpTableHead>
                 <tr>
                   <th className="px-2 py-2 text-left">When</th>
                   <th className="px-2 py-2 text-left">Code</th>
@@ -373,8 +374,8 @@ export function OfficeRelayPanel({ readOnly }: { readOnly: boolean }) {
                   <th className="px-2 py-2 text-left">Sent to</th>
                   <th className="px-2 py-2 text-left">Status</th>
                 </tr>
-              </thead>
-              <tbody>
+              </ErpTableHead>
+              <ErpTableBody>
                 {rows.map((r) => (
                   <Fragment key={r.id}>
                     <tr
@@ -434,8 +435,8 @@ export function OfficeRelayPanel({ readOnly }: { readOnly: boolean }) {
                     ) : null}
                   </Fragment>
                 ))}
-              </tbody>
-            </table>
+              </ErpTableBody>
+            </ErpTable></ErpTableShell>
           </ErpTableShell>
         )}
       </ErpPanel>

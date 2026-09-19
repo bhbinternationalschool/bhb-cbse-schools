@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — import preview — rows are the papers about to be brought in, chosen with the pickers above; the action is the import itself
 
 /**
  * Import a publisher's folder of question papers.
@@ -20,6 +21,7 @@
  * papers, so next term's download goes through on its own.
  */
 
+import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { useMemo, useRef, useState } from "react";
 import type { MastersState } from "@/lib/masters";
 import type { ExamTerm } from "@/lib/exams";
@@ -470,8 +472,8 @@ export function ExamPaperImportPanel({
           ) : null}
 
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-left text-[12px]">
-              <thead>
+            <ErpTableShell><ErpTable minWidth="min-w-[640px]">
+              <ErpTableHead>
                 <tr>
                   {["File", "Class", "Subject", "Exam", "Set", "Questions", "Marks", "Verdict"].map(
                     (h) => (
@@ -484,8 +486,8 @@ export function ExamPaperImportPanel({
                     ),
                   )}
                 </tr>
-              </thead>
-              <tbody>
+              </ErpTableHead>
+              <ErpTableBody zebra>
                 {rowsToShow.map((row) => (
                   <PlanRow key={row.relPath} row={row} />
                 ))}
@@ -500,8 +502,8 @@ export function ExamPaperImportPanel({
                     </td>
                   </tr>
                 ) : null}
-              </tbody>
-            </table>
+              </ErpTableBody>
+            </ErpTable></ErpTableShell>
           </div>
 
           {canEdit ? (

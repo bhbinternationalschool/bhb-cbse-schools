@@ -1,5 +1,7 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — report output — the worst-10 rows are a reading of someone else's portal on a date, with nothing on this side to act on
 
+import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { announceReady, readHandoffMessage } from "@/lib/nucleusHandoff";
 import { ExternalLink, RefreshCw } from "lucide-react";
@@ -206,17 +208,17 @@ export function NucleusProgressPanel({ academicYearCode }: { academicYearCode: s
           </div>
 
           {snapshot.summary.worst.length > 0 ? (
-            <div className="overflow-hidden rounded-xl border border-[var(--border)]">
-              <table className="w-full text-sm">
-                <thead className="bg-[var(--surface-sunken)] text-left text-[11px] uppercase tracking-wide text-[var(--muted)]">
+            <ErpTableShell density="compact">
+              <ErpTable minWidth="min-w-[520px]">
+                <ErpTableHead>
                   <tr>
                     <th className="px-3 py-2 font-bold">Teacher</th>
                     <th className="px-3 py-2 font-bold">Class · subject</th>
                     <th className="px-3 py-2 font-bold">Marked done</th>
                     <th className="px-3 py-2 font-bold">Behind by</th>
                   </tr>
-                </thead>
-                <tbody>
+                </ErpTableHead>
+                <ErpTableBody>
                   {snapshot.summary.worst.map((r) => (
                     <tr key={r.position} className="border-t border-[var(--border)]">
                       <td className="px-3 py-2 font-semibold text-[var(--brand-deep)]">
@@ -233,9 +235,9 @@ export function NucleusProgressPanel({ academicYearCode }: { academicYearCode: s
                       </td>
                     </tr>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </ErpTableBody>
+              </ErpTable>
+            </ErpTableShell>
           ) : null}
 
           <p className="text-xs text-[var(--muted)]">
@@ -255,16 +257,16 @@ export function NucleusProgressPanel({ academicYearCode }: { academicYearCode: s
         </p>
 
         {assessments && assessments.summary.gaps.length > 0 ? (
-          <div className="mt-3 overflow-hidden rounded-xl border border-[var(--border)]">
-            <table className="w-full text-sm">
-              <thead className="bg-[var(--surface-sunken)] text-left text-[11px] uppercase tracking-wide text-[var(--muted)]">
+          <ErpTableShell className="mt-3" density="compact">
+            <ErpTable minWidth="min-w-[520px]">
+              <ErpTableHead>
                 <tr>
                   <th className="px-3 py-2 font-bold">Class</th>
                   <th className="px-3 py-2 font-bold">Subject</th>
                   <th className="px-3 py-2 font-bold">Papers not created</th>
                 </tr>
-              </thead>
-              <tbody>
+              </ErpTableHead>
+              <ErpTableBody>
                 {assessments.summary.gaps.slice(0, 15).map((g) => (
                   <tr key={`${g.classLabel}|${g.division}|${g.subject}`} className="border-t border-[var(--border)]">
                     <td className="px-3 py-2 font-semibold text-[var(--brand-deep)]">
@@ -278,9 +280,9 @@ export function NucleusProgressPanel({ academicYearCode }: { academicYearCode: s
                     </td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </ErpTableBody>
+            </ErpTable>
+          </ErpTableShell>
         ) : null}
 
         <details className="mt-3 rounded-xl border border-[var(--border)] px-4 py-3">

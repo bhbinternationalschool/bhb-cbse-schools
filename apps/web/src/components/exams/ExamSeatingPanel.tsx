@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — rooms are edited as inputs and the bench plan is a seating diagram; neither row is a record with actions
 
 /**
  * Seating — the rooms, the plan, and the slips that get pasted on benches.
@@ -12,6 +13,7 @@
  * match the sheet in the invigilator's hand.
  */
 
+import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { useCallback, useMemo, useState } from "react";
 import {
   deleteExamRoom,
@@ -500,8 +502,8 @@ export function ExamSeatingPanel({ academicYearCode, masters, terms }: Props) {
 
             {plan.tallies.length > 0 ? (
               <div className="mt-4 overflow-x-auto">
-                <table className="w-full border-collapse text-left text-sm">
-                  <thead>
+                <ErpTableShell><ErpTable minWidth="min-w-[640px]">
+                  <ErpTableHead>
                     <tr>
                       {["Class", "Group", "Children", "Seated", "Rooms"].map((h) => (
                         <th
@@ -512,8 +514,8 @@ export function ExamSeatingPanel({ academicYearCode, masters, terms }: Props) {
                         </th>
                       ))}
                     </tr>
-                  </thead>
-                  <tbody>
+                  </ErpTableHead>
+                  <ErpTableBody>
                     {plan.tallies.map((t) => (
                       <tr key={t.classId}>
                         <td className="border border-[var(--border)] p-2 font-semibold">
@@ -534,8 +536,8 @@ export function ExamSeatingPanel({ academicYearCode, masters, terms }: Props) {
                         </td>
                       </tr>
                     ))}
-                  </tbody>
-                </table>
+                  </ErpTableBody>
+                </ErpTable></ErpTableShell>
               </div>
             ) : null}
 
@@ -551,8 +553,8 @@ export function ExamSeatingPanel({ academicYearCode, masters, terms }: Props) {
                   </span>
                 </h3>
                 <div className="mt-2 overflow-x-auto">
-                  <table className="w-full border-collapse text-left text-sm">
-                    <thead>
+                  <ErpTableShell><ErpTable minWidth="min-w-[640px]">
+                    <ErpTableHead>
                       <tr>
                         <th className="border border-[var(--border)] bg-[var(--surface-sunken)] p-2">
                           Bench
@@ -566,8 +568,8 @@ export function ExamSeatingPanel({ academicYearCode, masters, terms }: Props) {
                           </th>
                         ))}
                       </tr>
-                    </thead>
-                    <tbody>
+                    </ErpTableHead>
+                    <ErpTableBody>
                       {room.benches.map((bench) => (
                         <tr key={bench.number}>
                           <td className="border border-[var(--border)] p-2 font-semibold">
@@ -589,8 +591,8 @@ export function ExamSeatingPanel({ academicYearCode, masters, terms }: Props) {
                           ))}
                         </tr>
                       ))}
-                    </tbody>
-                  </table>
+                    </ErpTableBody>
+                  </ErpTable></ErpTableShell>
                 </div>
               </div>
             ))}

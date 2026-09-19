@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — the date sheet grid — cells are exam slots, not records (same as the timetable grid)
 
 /**
  * The date sheet as a date sheet — classes down, exam days across.
@@ -19,6 +20,7 @@
  * Director's instruction, 18 Sep 2026.
  */
 
+import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { useMemo, useState } from "react";
 import {
   deleteExamDateSheetEntry,
@@ -359,8 +361,8 @@ export function ExamDateSheetGrid({
         </p>
       ) : (
         <div className="mt-4 overflow-x-auto">
-          <table className="w-full border-collapse text-left text-sm">
-            <thead>
+          <ErpTableShell><ErpTable minWidth="min-w-[720px]">
+            <ErpTableHead>
               <tr>
                 <th className="sticky left-0 z-10 border border-[var(--border)] bg-[var(--surface-sunken)] p-2 text-left">
                   Class
@@ -384,8 +386,8 @@ export function ExamDateSheetGrid({
                   </th>
                 ))}
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody>
               {classes.map((cls) => (
                 <tr key={cls.id}>
                   <th
@@ -524,8 +526,8 @@ export function ExamDateSheetGrid({
                   })}
                 </tr>
               ))}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable></ErpTableShell>
         </div>
       )}
     </section>
