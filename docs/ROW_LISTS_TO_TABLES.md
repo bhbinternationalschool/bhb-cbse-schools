@@ -52,6 +52,7 @@ two export buttons on one panel is worse than either.
 | `visitors/VisitorsWorkspace.tsx` | gate register, gate passes | student picker; today's gate duty (two fields, four rows) |
 | `comms/CommsWorkspace.tsx` | notices, scheduled queue, social cross-post log | news stories — each leads with a cover photograph |
 | `library/LibraryWorkspace.tsx` | overdue loans, the e-book shelf | open loans (each row opens a return form inside itself); procurement docs (each is a photo of a bill) |
+| `transport/TransportOpsPanels.tsx` | routes, the fleet | a vehicle's compliance / fuel / job sub-lists (a handful of lines inside one vehicle's card) |
 
 ### Judged and skipped, so nobody re-opens them
 

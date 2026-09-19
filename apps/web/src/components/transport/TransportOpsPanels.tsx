@@ -39,6 +39,8 @@ import {
   type TransportRoute,
   type TransportState,
 } from "@/lib/transport";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
+import type { RowAction } from "@/components/ui/erp-grid";
 
 export function RoutesPanel({
   state,
@@ -104,6 +106,58 @@ export function RoutesPanel({
     }
     return out;
   }, [editId, sis, masters, state.assignments, academicYearCode]);
+
+  /**
+   * Routes as a table. A route's code, bus, monthly fee, stop count and
+   * shifts were four lines of grey text under a bold name; the office reads
+   * this to answer "which routes cost what" and "which bus runs which
+   * route", and neither could be sorted.
+   */
+  const routeCols: DataTableColumn<TransportRoute>[] = [
+    {
+      key: "code", header: "Route", sortable: true,
+      value: (r) => `${r.code} ${r.name}`,
+      render: (r) => (
+        <span className={r.isActive ? undefined : "opacity-50"}>
+          <span className="font-bold text-[var(--brand-deep)]">{r.code}</span>
+          <span className="ml-1">{r.name}</span>
+        </span>
+      ),
+    },
+    { key: "bus", header: "Bus", value: (r) => r.busNo || "—", sortable: true },
+    {
+      key: "fee", header: "Fee / month", align: "right", sortable: true,
+      value: (r) => r.monthlyFeePaise,
+      render: (r) => formatInr(r.monthlyFeePaise),
+    },
+    {
+      key: "stops", header: "Stops", align: "right", sortable: true,
+      value: (r) => r.stops.length,
+    },
+    { key: "shifts", header: "Shifts", value: (r) => describeRouteShifts(r.shifts ?? []) },
+    {
+      key: "active", header: "Status", sortable: true,
+      value: (r) => (r.isActive ? "Running" : "Off"),
+      render: (r) =>
+        r.isActive ? (
+          <span className="text-[var(--ok)]">Running</span>
+        ) : (
+          <span className="text-[var(--muted)]">Off</span>
+        ),
+    },
+  ];
+
+  const routeActions: RowAction<TransportRoute>[] = [
+    { id: "edit", label: "Edit", onSelect: (r) => loadRoute(r) },
+    {
+      id: "off", label: "Take off the road", tone: "danger", separatorAbove: true,
+      hidden: (r) => !r.isActive,
+      onSelect: (r) => {
+        deactivateTransportRoute(r.id);
+        onRefresh();
+      },
+    },
+  ];
 
   function loadRoute(r: TransportRoute) {
     setEditId(r.id);
@@ -797,47 +851,17 @@ export function RoutesPanel({
             </label>
           </div>
         </div>
-        <ul className="mt-2 max-h-[32rem] divide-y overflow-y-auto text-sm">
-          {state.routes.map((r) => (
-            <li key={r.id} className={`py-2 ${r.isActive ? "" : "opacity-50"}`}>
-              <div className="flex justify-between gap-2">
-                <div>
-                  <div className="font-bold text-[var(--brand-deep)]">
-                    {r.code} · {r.name}
-                  </div>
-                  <div className="text-[10px] text-[var(--muted)]">
-                    {r.busNo} · {formatInr(r.monthlyFeePaise)}/mo ·{" "}
-                    {r.stops.length} stops
-                  </div>
-                  <div className="text-[10px] text-[var(--muted)]">
-                    {describeRouteShifts(r.shifts ?? [])}
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    className="text-[11px] font-semibold"
-                    onClick={() => loadRoute(r)}
-                  >
-                    Edit
-                  </button>
-                  {r.isActive ? (
-                    <button
-                      type="button"
-                      className="text-[11px] font-semibold text-[var(--danger)]"
-                      onClick={() => {
-                        deactivateTransportRoute(r.id);
-                        onRefresh();
-                      }}
-                    >
-                      Off
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            </li>
-          ))}
-        </ul>
+        <DataTable
+          columns={routeCols}
+          rows={state.routes}
+          rowKey={(r) => r.id}
+          rowActions={routeActions}
+          rowActionsLabel="Route actions"
+          minWidth="min-w-[760px]"
+          exportFileBaseName="transport-routes"
+          exportTitle="Transport routes"
+          emptyTitle="No routes yet"
+        />
       </div>
     </div>
   );
@@ -905,6 +929,49 @@ export function FleetPanel({
     onRefresh();
     onFlash("Vehicle saved");
   }
+
+  function beginEditVehicle(v: FleetVehicle) {
+    setEditId(v.id);
+    setReg(v.registrationNo);
+    setVname(v.name);
+    setFuelType(v.fuelType === "cng" || v.fuelType === "petrol" ? v.fuelType : "diesel");
+    setOdo(String(v.odometerKm));
+    setSeats(v.seatCapacity && v.seatCapacity > 0 ? String(v.seatCapacity) : "");
+    setDriverName(v.driverName || "");
+    setDriverMobile(v.driverMobile || "");
+    setDriverStaffId(v.driverStaffId || "");
+  }
+
+  /**
+   * The fleet as a table. Registration, name, fuel, status, odometer and
+   * driver were one grey line under the number plate; clicking the row still
+   * opens the vehicle's 360 view, which is what the row used to do.
+   *
+   * Seat capacity is deliberately absent here: every vehicle in this school
+   * carries 40 because that was an old default, not because anyone counted,
+   * and a column of confident 40s reads as a fact.
+   */
+  const vehicleCols: DataTableColumn<FleetVehicle>[] = [
+    {
+      key: "reg", header: "Registration", sortable: true,
+      value: (v) => v.registrationNo,
+      render: (v) => <span className="font-semibold text-[var(--brand-deep)]">{v.registrationNo}</span>,
+    },
+    { key: "name", header: "Name", value: (v) => v.name || "—", sortable: true },
+    { key: "fuel", header: "Fuel", value: (v) => v.fuelType, sortable: true },
+    { key: "status", header: "Status", value: (v) => v.status, sortable: true },
+    {
+      key: "odo", header: "Odometer", align: "right", sortable: true,
+      value: (v) => v.odometerKm,
+      render: (v) => `${v.odometerKm} km`,
+    },
+    { key: "driver", header: "Driver", value: (v) => v.driverName || "—", sortable: true },
+  ];
+
+  const vehicleActions: RowAction<FleetVehicle>[] = [
+    { id: "view", label: "Open vehicle", onSelect: (v) => setSelectedId(v.id) },
+    { id: "edit", label: "Edit", onSelect: (v) => beginEditVehicle(v) },
+  ];
 
   return (
     <div className="mt-4 grid gap-4 lg:grid-cols-2">
@@ -1063,50 +1130,18 @@ export function FleetPanel({
         >
           Save vehicle
         </button>
-        <ul className="mt-4 max-h-80 divide-y overflow-y-auto text-sm">
-          {state.vehicles.map((v) => (
-            <li key={v.id} className="flex justify-between gap-2 py-2">
-              <button
-                type="button"
-                className="text-left"
-                onClick={() => setSelectedId(v.id)}
-              >
-                <div className="font-semibold text-[var(--brand-deep)]">
-                  {v.registrationNo}
-                </div>
-                <div className="text-[10px] text-[var(--muted)]">
-                  {v.name} · {v.fuelType} · {v.status} · {v.odometerKm} km
-                  {v.driverName ? ` · ${v.driverName}` : ""}
-                </div>
-              </button>
-              <button
-                type="button"
-                className="text-[11px] font-semibold"
-                onClick={() => {
-                  setEditId(v.id);
-                  setReg(v.registrationNo);
-                  setVname(v.name);
-                  setFuelType(
-                    v.fuelType === "cng" || v.fuelType === "petrol"
-                      ? v.fuelType
-                      : "diesel",
-                  );
-                  setOdo(String(v.odometerKm));
-                  setSeats(
-                    v.seatCapacity && v.seatCapacity > 0
-                      ? String(v.seatCapacity)
-                      : "",
-                  );
-                  setDriverName(v.driverName || "");
-                  setDriverMobile(v.driverMobile || "");
-                  setDriverStaffId(v.driverStaffId || "");
-                }}
-              >
-                Edit
-              </button>
-            </li>
-          ))}
-        </ul>
+        <DataTable
+          columns={vehicleCols}
+          rows={state.vehicles}
+          rowKey={(v) => v.id}
+          rowActions={vehicleActions}
+          rowActionsLabel="Vehicle actions"
+          onRowClick={(v) => setSelectedId(v.id)}
+          minWidth="min-w-[760px]"
+          exportFileBaseName="transport-vehicles"
+          exportTitle="Vehicles"
+          emptyTitle="No vehicles yet"
+        />
       </div>
       <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">
