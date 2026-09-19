@@ -181,6 +181,9 @@ export async function handleWaTutorInbound(opts: {
     id: s.id,
     name: s.fullName,
     classLabel: childLabel(s),
+    // Carried so a free window or discount set for a CLASS covers this
+    // child on WhatsApp too, not only in the app.
+    classId: s.classId,
   }));
   const activeIndex = session
     ? Math.max(0, childRefs.findIndex((c) => c.id === session.studentId))

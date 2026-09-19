@@ -34,9 +34,21 @@ export async function POST(request: Request) {
     const householdId = requireParentHousehold(ctx);
     const body = (await request.json().catch(() => ({}))) as { planCode?: string; studentId?: string };
     const planCode = (body.planCode ?? "").trim();
-    const plan = tutorPlans().find((p) => p.code === planCode);
-    if (!plan) throw new ApiError("bad_request", "Unknown tutor pass", 400);
     const student = await resolveTutorStudent(householdId, (body.studentId ?? "").trim());
+    // The price is the school's own, after whatever discount this child's
+    // class or family has been given — the same number the app showed them.
+    // A family inside a free window is not sent to a payment page at all.
+    const { tutorAccessFor, tutorPlansFor } = await import("@/lib/tutorAccess.server");
+    const access = await tutorAccessFor({ studentId: student.id, classId: student.classId ?? "" });
+    if (access.free) {
+      throw new ApiError("conflict", "The tutor is already free for this child — no payment is needed.", 409);
+    }
+    const priced = await tutorPlansFor({ studentId: student.id, classId: student.classId ?? "" });
+    const plan = priced.plans.find((p) => p.code === planCode);
+    if (!plan) throw new ApiError("bad_request", "Unknown tutor pass", 400);
+    if (plan.pricePaise <= 0) {
+      throw new ApiError("conflict", "This pass costs nothing right now — no payment is needed.", 409);
+    }
     if (!shouldUseCashfreeCheckout()) {
       throw new ApiError("conflict", "Online payment is not enabled yet. Please ask the school office.", 409);
     }

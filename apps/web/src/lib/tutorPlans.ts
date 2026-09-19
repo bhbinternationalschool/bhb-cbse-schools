@@ -196,6 +196,12 @@ export type TutorAllowance = {
   /** Fair-use ceiling on a pass, and how much of it today has used. */
   passMessagesPerDay: number;
   passUsedToday: number;
+  /**
+   * The school has made the tutor free for this child until this date
+   * (inclusive, IST) — an exam week, a class, one family. Set from the desk
+   * (lib/tutorAccess.ts), not from an environment variable.
+   */
+  schoolFreeUntil?: string | null;
 };
 
 export type TutorVerdict =
@@ -210,6 +216,19 @@ export type TutorVerdict =
  */
 export function tutorVerdict(mode: TutorMode, a: TutorAllowance, now = new Date()): TutorVerdict {
   const info = tutorMode(mode);
+  // The school's own free window comes first: while it runs, every mode is
+  // open and the daily hint cap does not apply — the school has decided
+  // this child is not being charged, and a cap would be the ERP arguing
+  // with that decision. The fair-use ceiling still holds, because free to
+  // the family is not free to the school.
+  if (schoolFreeIsLive(a, now)) {
+    if (a.passUsedToday < a.passMessagesPerDay) return { allowed: true, charge: "free" };
+    return {
+      allowed: false,
+      needsPass: false,
+      reason: `Today's tutor limit (${a.passMessagesPerDay} messages) is reached. It resets at midnight.`,
+    };
+  }
   if (!info.paid && a.freeUsedToday < a.freeHintsPerDay) {
     return { allowed: true, charge: "free" };
   }
@@ -234,6 +253,17 @@ export function tutorVerdict(mode: TutorMode, a: TutorAllowance, now = new Date(
     needsPass: true,
     reason: `${info.label} is part of the full tutor. Get a tutor pass — a day, a week or a month — to unlock it.`,
   };
+}
+
+/** Is the school's own free window open for this child right now? */
+export function schoolFreeIsLive(
+  a: Pick<TutorAllowance, "schoolFreeUntil">,
+  now = new Date(),
+): boolean {
+  if (!a.schoolFreeUntil) return false;
+  // Inclusive of the last day, read in IST: "free till the 26th" means the
+  // 26th is free, all of it.
+  return now.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }) <= a.schoolFreeUntil;
 }
 
 /**

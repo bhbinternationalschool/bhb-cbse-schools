@@ -18,6 +18,7 @@ import {
   TUTOR_MODES,
   tutorMode,
   tutorVerdict,
+  schoolFreeIsLive,
   type TutorAllowance,
 } from "@/lib/tutorPlans";
 
@@ -169,5 +170,50 @@ const dead = { ...live, endsAt: "2026-09-04T18:29:59.999Z" };
   assert.equal(videoSearchQuery("counting", "", "en"), "counting CBSE NCERT explained for kids", "no class → no empty level word");
   assert.ok(videoSearchQuery("x".repeat(200), "LKG", "en").length < 80 + 50, "topic is capped at 80 chars");
 }
+
+/* ── the school's own free window (19 Sep 2026) ─────────────────────── */
+//
+// The director asked for the tutor to be free until the exam date, and for
+// a screen to decide that without a deploy. While the window is open every
+// mode is open and the daily hint cap does not apply — but the fair-use
+// ceiling still holds, because free to the family is not free to the school.
+{
+  const spent: TutorAllowance = {
+    studentId: "s1",
+    studentName: "Rishabh",
+    classLabel: "V",
+    freeHintsPerDay: 20,
+    freeUsedToday: 20,
+    pass: null,
+    passMessagesPerDay: 60,
+    passUsedToday: 0,
+    schoolFreeUntil: "2026-09-26",
+  };
+  const during = new Date("2026-09-19T12:00:00Z");
+  const after = new Date("2026-09-27T12:00:00Z");
+
+  assert.equal(schoolFreeIsLive(spent, during), true);
+  assert.equal(schoolFreeIsLive({ schoolFreeUntil: null }, during), false);
+
+  // A paid-only mode opens, with the free hints already used up.
+  assert.deepEqual(tutorVerdict("exam", spent, during), { allowed: true, charge: "free" });
+  assert.deepEqual(tutorVerdict("hint", spent, during), { allowed: true, charge: "free" });
+
+  // The ceiling is still the ceiling — and hitting it is not a sales pitch.
+  const hammering = { ...spent, passUsedToday: 60 };
+  const capped = tutorVerdict("exam", hammering, during);
+  assert.equal(capped.allowed, false);
+  assert.equal(capped.allowed === false && capped.needsPass, false);
+
+  // The day after the window, the ordinary rules are back.
+  const closed = tutorVerdict("exam", spent, after);
+  assert.equal(closed.allowed, false);
+  assert.equal(closed.allowed === false && closed.needsPass, true);
+
+  // Inclusive of the last day, read in IST (this is 00:00 IST on the 27th
+  // minus a few hours — still the 26th in Kolkata).
+  assert.equal(schoolFreeIsLive(spent, new Date("2026-09-26T18:00:00Z")), true);
+}
+
 
 console.log("tutorPlans.selftest: ok");

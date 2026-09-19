@@ -34,6 +34,7 @@ import {
   classesInGroup,
   classGroupCodeForName,
 } from "@/lib/masters";
+import { TutorPassesPanel } from "@/components/masters/TutorPassesPanel";
 import { EditControl } from "@/components/masters/EditControl";
 import { RemoveControl } from "@/components/masters/RemoveControl";
 import { SectionTeachersPanel } from "@/components/masters/SectionTeachersPanel";
@@ -100,6 +101,7 @@ type Tab =
   | "installments"
   | "late-fee"
   | "mid-year"
+  | "tutor-passes"
   | "wa-templates"
   | "automation"
   | "wa-chatbot"
@@ -151,6 +153,7 @@ const TAB_GROUPS: ModuleTabGroup[] = [
       { id: "installments", label: "Due dates", tone: "amber" },
       { id: "late-fee", label: "Late fee", tone: "rose" },
       { id: "mid-year", label: "Fee rules", tone: "rose" },
+      { id: "tutor-passes", label: "Tutor passes", tone: "teal" },
     ],
   },
   {
@@ -206,6 +209,7 @@ export function MastersWorkspace() {
       "installments",
       "late-fee",
       "mid-year",
+      "tutor-passes",
       "wa-templates",
       "automation",
       "wa-chatbot",
@@ -368,6 +372,9 @@ export function MastersWorkspace() {
             <MidYearFeePolicyPanel state={state} commit={commit} />
             <FeeBackdatePolicyPanel state={state} commit={commit} />
           </div>
+        ) : null}
+        {tab === "tutor-passes" ? (
+          <TutorPassesPanel state={state} canEdit={!readOnly} />
         ) : null}
         {tab === "wa-templates" ? (
           canAccessMastersTab(session, state, "wa-templates", rbac ?? undefined) ? (
