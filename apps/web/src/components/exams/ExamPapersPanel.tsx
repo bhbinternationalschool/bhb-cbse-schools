@@ -57,6 +57,7 @@ import {
 import { loadTeaching, type SyllabusUnit } from "@/lib/teaching";
 import { BlueprintPanel } from "@/components/exams/BlueprintPanel";
 import { ExamPaperImportPanel } from "@/components/exams/ExamPaperImportPanel";
+import { NucleusCapturePanel } from "@/components/exams/NucleusCapturePanel";
 import { BankPicker } from "@/components/exams/BankPicker";
 import { PaperImagePicker } from "@/components/exams/PaperImagePicker";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
@@ -1159,6 +1160,17 @@ export function ExamPapersPanel({
   // List view
   return (
     <div className="mt-5 space-y-4">
+      <NucleusCapturePanel
+        masters={masters}
+        academicYearCode={ay}
+        terms={terms}
+        canEdit={canEdit}
+        actorName={actorName}
+        onError={onError}
+        onNotice={onNotice}
+        onImported={refresh}
+      />
+
       <ExamPaperImportPanel
         masters={masters}
         academicYearCode={ay}

@@ -45,6 +45,13 @@ RUN set -a \
   && npm run build -w web
 
 FROM node:22-bookworm-slim AS runner
+
+# poppler-utils gives `pdftotext`, which the exams desk uses to read the
+# publisher's answer-key PDFs and put each answer on its question. Without it
+# a key is still stored and still opens — it just fills nothing, and says so.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends poppler-utils \
+ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
