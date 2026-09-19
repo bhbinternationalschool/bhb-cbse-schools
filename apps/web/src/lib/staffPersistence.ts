@@ -17,7 +17,11 @@ import {
   STAFF_DOC_LABELS,
 } from "@/lib/foundationMasters";
 import type { MastersState } from "@/lib/masters";
-import { staffDualWriteDbEnabled, staffReadFromDbEnabled } from "@/lib/staffDbConfig";
+import {
+  STAFF_OWNED_MASTERS_SLICES,
+  staffDualWriteDbEnabled,
+  staffReadFromDbEnabled,
+} from "@/lib/staffDbConfig";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 import {
   isDeskHydrated,
@@ -590,12 +594,11 @@ export function stripStaffFromMastersForBlob(
   state: MastersState,
 ): MastersState {
   if (!staffReadFromDbEnabled()) return state;
-  return {
-    ...state,
-    departments: [],
-    designations: [],
-    staff: [],
-  };
+  const stripped = { ...state };
+  for (const key of STAFF_OWNED_MASTERS_SLICES) {
+    (stripped as Record<string, unknown>)[key] = [];
+  }
+  return stripped;
 }
 
 export function scheduleStaffSync(state: MastersState) {

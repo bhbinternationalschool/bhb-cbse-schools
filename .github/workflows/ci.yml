@@ -382,6 +382,7 @@ jobs:
           npm run test:answer-book
           npm run test:syllabus-from-books
           npm run test:tutor-syllabus
+          npm run test:masters-staff-slices
           npm run test:parent-tickets
           npm run test:payroll-register
           npm run test:ptm-brief-ai

@@ -170,7 +170,14 @@ async function hydrateMastersOnce(): Promise<boolean> {
     // Local edits never reached DB (tab closed, failed push) — push now.
     scheduleMastersSync(loadMasters());
   }
-  return mirrorChanged || normChanged;
+  const changedAnything = mirrorChanged || normChanged;
+  // Tell the screens already painted from the old copy. Until now only
+  // saveMasters() and the staff hydrate raised this, so a workspace that
+  // mounted before this hydrate kept showing what localStorage held then.
+  if (changedAnything && typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("bhb-masters-updated"));
+  }
+  return changedAnything;
 }
 
 export function resetMastersPersistenceCache() {

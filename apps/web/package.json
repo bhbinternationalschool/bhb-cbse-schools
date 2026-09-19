@@ -38,6 +38,7 @@
     "test:tutor-plans": "npx tsx src/lib/tutorPlans.selftest.ts",
     "test:tutor-video-sources": "npx tsx src/lib/tutorVideoSources.selftest.ts",
     "test:staff-home-kind": "npx tsx src/lib/staffHomeKind.selftest.ts",
+    "test:masters-staff-slices": "npx tsx src/lib/mastersStaffSlices.selftest.ts",
     "test:mobile-features": "npx tsx src/lib/mobileFeatures.selftest.ts",
     "test:cashfree-checkout": "npx tsx src/lib/cashfreeCheckout.selftest.ts",
     "test:diksha-index": "npx tsx src/lib/dikshaIndex.selftest.ts",
