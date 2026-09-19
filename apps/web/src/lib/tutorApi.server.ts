@@ -87,7 +87,14 @@ export const TUTOR_MESSAGE_MAX = 3000;
  * Response: a stream when asked for, JSON otherwise, and a 402 with
  * `needsPass` when the allowance is spent so the client can offer passes.
  */
-export type TutorStudent = { id: string; name: string; classLabel: string };
+export type TutorStudent = {
+  id: string;
+  name: string;
+  classLabel: string;
+  /** The class's id, so a free window or discount set for a CLASS can find
+   * this child. Without it a class-scoped grant silently covers nobody. */
+  classId?: string;
+};
 
 export async function answerParentTutor(opts: {
   householdId: string;
@@ -198,5 +205,6 @@ export async function resolveTutorStudent(householdId: string, studentId: string
     id: student.id,
     name: student.fullName,
     classLabel: [className, sectionName].filter(Boolean).join(" ") || "their class",
+    classId: student.classId,
   };
 }

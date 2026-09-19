@@ -191,17 +191,24 @@ export async function startTutorTrial(opts: {
  */
 export async function tutorAllowance(
   householdId: string,
-  student: { id: string; name: string; classLabel: string },
+  student: { id: string; name: string; classLabel: string; classId?: string },
 ): Promise<TutorAllowance> {
   const ctx = await getServerTenantContext();
   const cap = freeHintsPerDay();
   const ceiling = passMessagesPerDay();
+  // The school's own free window — an exam week, a class, one family.
+  const { tutorAccessFor } = await import("@/lib/tutorAccess.server");
+  const access = await tutorAccessFor({
+    studentId: student.id,
+    classId: student.classId ?? "",
+  });
   const base = {
     studentId: student.id,
     studentName: student.name,
     classLabel: student.classLabel,
     freeHintsPerDay: cap,
     passMessagesPerDay: ceiling,
+    schoolFreeUntil: access.free ? access.freeUntil : null,
   };
   if (!ctx) return { ...base, freeUsedToday: 0, pass: null, passUsedToday: 0 };
   const since = istDayStartIso();

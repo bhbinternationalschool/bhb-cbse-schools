@@ -258,6 +258,7 @@ SELFTESTS=(
   test:school-whatsapp
   test:upload-validation
   test:parent-profile
+  test:tutor-access
   test:answer-book
   test:syllabus-from-books
   test:tutor-syllabus

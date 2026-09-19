@@ -23,6 +23,9 @@ export async function GET(request: Request) {
     const householdId = requireParentHousehold(ctx);
     const studentId = new URL(request.url).searchParams.get("studentId") ?? "";
     const student = await resolveTutorStudent(householdId, studentId);
+    const { tutorAccessFor, tutorPlansFor } = await import("@/lib/tutorAccess.server");
+    const child = { studentId: student.id, classId: student.classId ?? "" };
+    const [access, priced] = await Promise.all([tutorAccessFor(child), tutorPlansFor(child)]);
     const [allowance, allOrders] = await Promise.all([
       tutorAllowance(householdId, student),
       listTutorPassOrders(householdId, 30),
@@ -51,7 +54,12 @@ export async function GET(request: Request) {
         ...allowance,
         passValidLabel: allowance.pass ? passValidLabel(allowance.pass.endsAt) : "",
       },
-      plans: tutorPlans().map((p) => ({ ...p, priceLabel: formatPaise(p.pricePaise) })),
+      // The school's own prices, after this child's discount — the app must
+      // never show a price the buy route will not honour.
+      plans: priced.plans.map((p) => ({ ...p, priceLabel: formatPaise(p.pricePaise) })),
+      discountPercent: priced.discountPercent,
+      schoolFree: access.free,
+      schoolFreeUntil: access.freeUntil,
       orders: orders.map((o) => ({
         id: o.id,
         planCode: o.planCode,
