@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { announceReady, readHandoffMessage } from "@/lib/nucleusHandoff";
 import { ExternalLink, RefreshCw } from "lucide-react";
 import {
   BEHIND_THRESHOLD,
@@ -71,8 +72,37 @@ export function NucleusProgressPanel({ academicYearCode }: { academicYearCode: s
     void load();
   }, [load]);
 
-  async function importPaste(kind: "timeliness" | "assessments" = "timeliness") {
-    const text = kind === "assessments" ? papersPaste : paste;
+  /**
+   * Take a timeliness reading the bookmark posts in, rather than making the
+   * office copy it out of Nucleus and paste it here. Same route, same checks
+   * as the papers desk: a message is read, not believed.
+   */
+  const onCaptureRef = useRef<(e: MessageEvent) => void>(() => {});
+  useEffect(() => {
+    onCaptureRef.current = (e: MessageEvent) => {
+      const arriving = readHandoffMessage(e.origin, e.data, "timeliness");
+      if (!arriving.ok) {
+        if (arriving.speak) setError(`Nucleus sent a reading this screen could not take: ${arriving.why}`);
+        return;
+      }
+      setPaste(arriving.payload);
+      void importPaste("timeliness", arriving.payload);
+    };
+  });
+
+  useEffect(() => {
+    announceReady();
+    const listener = (e: MessageEvent) => onCaptureRef.current(e);
+    window.addEventListener("message", listener);
+    return () => window.removeEventListener("message", listener);
+  }, []);
+
+  async function importPaste(
+    kind: "timeliness" | "assessments" = "timeliness",
+    /** A capture handed straight over, which no box has been rendered with yet. */
+    arriving?: string,
+  ) {
+    const text = arriving ?? (kind === "assessments" ? papersPaste : paste);
     if (busy || !text.trim()) return;
     setBusy(true);
     setError(null);

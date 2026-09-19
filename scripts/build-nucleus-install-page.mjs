@@ -8,11 +8,13 @@
  * 19 Sep 2026 and cost an afternoon. A page with the bookmark already on it,
  * dragged once, avoids the first and names the second.
  *
- * The page is built from `nucleus-capture-bookmarklet.txt` — the artefact the
- * office actually installs — and never from `nucleus-capture.js`, which is the
- * same program kept readable. Generating from the readable copy would let the
- * page offer a bookmark nobody has tested. If you change the script, rebuild
- * the .txt first, then run this.
+ * It also builds the bookmarklet itself. That used to be stripped of comments
+ * and indentation by hand, which meant `nucleus-capture.js` and the address
+ * people installed could drift apart with nobody the wiser — and they had, by
+ * about 1,200 characters, before this script existed. Both now come from the
+ * one readable source. The address carries the comments with it, which costs
+ * a few kilobytes in a bookmark nobody reads and buys the guarantee that what
+ * the office runs is what the repository says it runs.
  *
  *   node scripts/build-nucleus-install-page.mjs
  */
@@ -22,20 +24,23 @@ import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 
 const docs = join(dirname(fileURLToPath(import.meta.url)), "..", "docs");
-const SRC = join(docs, "nucleus-capture-bookmarklet.txt");
+const SRC = join(docs, "nucleus-capture.js");
+const BOOKMARKLET = join(docs, "nucleus-capture-bookmarklet.txt");
 const OUT = join(docs, "nucleus-capture-install.html");
 
-const href = readFileSync(SRC, "utf8").trim();
-if (!href.startsWith("javascript:")) {
-  throw new Error(`${SRC} does not begin with javascript: — it cannot be a bookmarklet`);
-}
+const source = readFileSync(SRC, "utf8").trim();
 // A page that installs a broken bookmark is worse than no page: the failure
 // surfaces later, on the Nucleus tab, as silence.
 try {
-  new vm.Script(decodeURIComponent(href.slice("javascript:".length)));
+  new vm.Script(source);
 } catch (e) {
-  throw new Error(`the bookmarklet does not parse as JavaScript: ${e.message}`);
+  throw new Error(`${SRC} does not parse as JavaScript: ${e.message}`);
 }
+const href = `javascript:${encodeURIComponent(source)}`;
+if (decodeURIComponent(href.slice("javascript:".length)) !== source) {
+  throw new Error("the encoded bookmarklet does not decode back to the source");
+}
+writeFileSync(BOOKMARKLET, `${href}\n`);
 
 const esc = (s) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -76,15 +81,19 @@ Nucleus page. On this page, clicking it does nothing at all.</div>
   <li>Open <a href="https://nucleus.leadgroup.co.in">nucleus.leadgroup.co.in</a> and sign in.</li>
   <li>Go to <strong>Assessments &amp; Answer key</strong> or <strong>Teacher Timeliness</strong>, and
       let the page finish loading.</li>
-  <li>Click <strong>Send to ERP</strong> on the bookmarks bar.</li>
-  <li>A panel appears at the top right. On the papers page it counts through the list
-      (<em>Reading 14 of 108&hellip;</em>) and takes about twelve minutes; on the timeliness page it is
-      instant. Leave that tab in front until it says it has copied.</li>
-  <li>In the ERP, paste into <strong>Exams &rarr; Question papers &rarr; Get papers from Nucleus</strong>,
-      or into the timeliness box under <strong>Teaching &rarr; Nucleus</strong>.</li>
+  <li>Click <strong>Send to ERP</strong> on the bookmarks bar. <strong>That is the last thing you
+      do.</strong></li>
 </ol>
-<p>Nothing is downloaded to the computer, nothing in Nucleus is changed, and nothing is sent anywhere:
-the only output is text on the clipboard. Closing the tab part-way through is always safe.</p>
+<p>The ERP opens in its own tab straight away and waits. The Nucleus tab counts through the list
+(<em>Reading 14 of 108&hellip;</em>) &mdash; about twelve minutes for a full term, instant for
+timeliness &mdash; then hands the reading across by itself. The ERP files the new papers, fetches
+their answer keys and writes the answers in, without being asked. Nothing is copied and nothing is
+pasted.</p>
+<p>Leave the Nucleus tab in front while it counts. Nothing is downloaded to the computer, nothing in
+Nucleus is changed, and closing the tab part-way through is always safe.</p>
+<div class="note"><strong>Stay signed in to the ERP in the same browser.</strong> If the ERP tab lands
+on the login screen it cannot take the reading, so the bookmark falls back to copying it &mdash; sign
+in, then paste it in by hand.</div>
 
 <h2>If the bookmark will not install</h2>
 <div class="fallback">You can run it without a bookmark. On the Nucleus page press
@@ -95,4 +104,5 @@ Return, and paste again &mdash; it asks only once. Then press Return.</div>
 </body></html>
 `,
 );
-console.log(`wrote ${OUT} (${readFileSync(OUT).length} bytes) from a ${href.length}-character bookmarklet`);
+console.log(`wrote ${BOOKMARKLET} (${href.length} characters)`);
+console.log(`wrote ${OUT} (${readFileSync(OUT).length} bytes)`);

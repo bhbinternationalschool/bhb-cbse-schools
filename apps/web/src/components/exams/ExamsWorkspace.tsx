@@ -2,6 +2,7 @@
 // ratchet-allow: grids_without_row_menu — the marks-entry grid and the promotion summary — cells are inputs, not a record list
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { urlAsksForTab } from "@/lib/nucleusHandoff";
 import { ClipboardList } from "lucide-react";
 import {
   absenceKey,
@@ -385,6 +386,13 @@ export function ExamsWorkspace() {
   useHoldDecisions();
   const session = useDemoSession();
   const [tab, setTab] = useState<Tab>("dashboard");
+
+  // The Nucleus bookmark opens this workspace straight at the question papers desk, so the
+  // office never hunts for the tab. Read once, on the client, and never
+  // written back to the URL.
+  useEffect(() => {
+    if (urlAsksForTab(window.location.search, "papers")) setTab("papers");
+  }, []);
   const [masters, setMasters] = useState<MastersState | null>(() =>
     typeof window !== "undefined" ? loadMasters() : null,
   );

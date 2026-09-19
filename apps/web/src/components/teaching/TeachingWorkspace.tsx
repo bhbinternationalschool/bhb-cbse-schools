@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { urlAsksForTab } from "@/lib/nucleusHandoff";
 import { BookMarked } from "lucide-react";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
 import {
@@ -69,6 +70,13 @@ function pct(v: number | null): string {
 export function TeachingWorkspace() {
   const session = useDemoSession();
   const [tab, setTab] = useState<TeachTab>("today");
+
+  // The Nucleus bookmark opens this workspace straight at Nucleus progress, so the
+  // office never hunts for the tab. Read once, on the client, and never
+  // written back to the URL.
+  useEffect(() => {
+    if (urlAsksForTab(window.location.search, "nucleus")) setTab("nucleus");
+  }, []);
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [timetable, setTimetable] = useState<TimetableState | null>(null);
   const [state, setState] = useState<TeachingState | null>(null);

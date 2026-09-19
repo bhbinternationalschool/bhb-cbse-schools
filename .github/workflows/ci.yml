@@ -341,6 +341,7 @@ jobs:
           npm run test:desk-shrink-guard
           npm run test:nucleus-manifest
           npm run test:nucleus-capture
+          npm run test:nucleus-handoff
           npm run test:lead-extract-ai
           npm run test:lead-followup-ai
           npm run test:lead-quality
