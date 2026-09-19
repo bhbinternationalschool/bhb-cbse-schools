@@ -13,7 +13,7 @@
  * books.json — an array, one entry per book:
  *   {
  *     "grade": 4,                          // 1..8 (Nursery -2, LKG -1, UKG 0)
- *     "subject": "maths",                  // maths science evs social english hindi sanskrit arts pe vocational
+ *     "subject": "maths",                  // maths science evs social english hindi sanskrit arts pe vocational gk computer
  *     "name": "Propel New Prime Mathematics 4",
  *     "series": "Propel New Prime",        // optional
  *     "publisher": "Propel",               // optional, default "Propel"
@@ -40,7 +40,7 @@ import { getServerTenantContext } from "../src/lib/serverTenant";
 const APPLY = process.argv.includes("--apply");
 const file = process.argv.slice(2).find((a) => !a.startsWith("--"));
 
-const SUBJECTS = ["maths", "science", "evs", "social", "english", "hindi", "sanskrit", "arts", "pe", "vocational"];
+const SUBJECTS = ["maths", "science", "evs", "social", "english", "hindi", "sanskrit", "arts", "pe", "vocational", "gk", "computer"];
 
 type ChapterIn = string | { name: string; exams?: string[]; topics?: string[] };
 type BookIn = {

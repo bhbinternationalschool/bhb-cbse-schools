@@ -24,7 +24,7 @@ import {
   indexGrade,
   subjectDisplayName,
   outcomesListing,
-  outcomesPromptBlock,
+  preschoolPromptBlock,
   textbooksListing,
   textbooksPromptBlock,
   type SyllabusBook,
@@ -35,6 +35,7 @@ const FILLED_TTL_MS = 6 * 60 * 60 * 1000;
 const EMPTY_TTL_MS = 10 * 60 * 1000;
 
 type ClassTextbooks = { books: SyllabusBook[]; chapters: SyllabusChapter[] };
+const EMPTY_CLASS: ClassTextbooks = { books: [], chapters: [] };
 const cache = new Map<number, { at: number; value: ClassTextbooks }>();
 
 export async function tutorTextbooksBlock(ctx: { className?: string; subjectLabel?: string }): Promise<string> {
@@ -42,9 +43,14 @@ export async function tutorTextbooksBlock(ctx: { className?: string; subjectLabe
   if (grade === null) return "";
   try {
     if (grade <= 0) {
-      // Nursery–UKG: NCERT's learning outcomes as a minimum (#240).
-      const value = await classTextbooks(grade);
-      return outcomesPromptBlock({ grade, books: value.books, chapters: value.chapters, subjectLabel: ctx.subjectLabel });
+      // Nursery–UKG: the school's own books (Propel Little Wonder), then
+      // NCERT's learning outcomes as a minimum (#240). One failing read never
+      // takes the other with it.
+      const [school, ncert] = await Promise.all([
+        schoolClassTextbooks(grade).catch(() => EMPTY_CLASS),
+        classTextbooks(grade).catch(() => EMPTY_CLASS),
+      ]);
+      return preschoolPromptBlock({ grade, school, ncert, subjectLabel: ctx.subjectLabel });
     }
     // Classes 1–8: the school's own books, or nothing.
     const school = await schoolClassTextbooks(grade);
@@ -78,8 +84,16 @@ export async function ncertTextbooksListing(ctx: {
   if (grade === null) return { text: "", kind: "none" };
   try {
     if (grade <= 0) {
-      const value = await classTextbooks(grade);
-      const text = outcomesListing({ grade, books: value.books, chapters: value.chapters, subjectLabel: ctx.subjectLabel, coreFallback: ctx.coreFallback });
+      const [school, ncert] = await Promise.all([
+        schoolClassTextbooks(grade).catch(() => EMPTY_CLASS),
+        classTextbooks(grade).catch(() => EMPTY_CLASS),
+      ]);
+      const text = [
+        textbooksListing({ grade, books: school.books, chapters: school.chapters, subjectLabel: ctx.subjectLabel, coreFallback: ctx.coreFallback, source: "school" }),
+        outcomesListing({ grade, books: ncert.books, chapters: ncert.chapters, subjectLabel: ctx.subjectLabel, coreFallback: ctx.coreFallback }),
+      ]
+        .filter(Boolean)
+        .join("\n");
       return { text, kind: text ? "outcomes" : "none" };
     }
     // Classes 1–8: the school's own books (Propel), never NCERT's.
