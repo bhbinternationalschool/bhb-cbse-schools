@@ -1,5 +1,4 @@
 "use client";
-// ratchet-allow: grids_without_row_menu — reconciliation rows carry bespoke Apply / Promote / Verify controls tied to match state
 
 import { useEffect, useMemo, useState } from "react";
 import { getSessionActor } from "@/lib/sessionActor";
@@ -50,6 +49,7 @@ import {
   loadServerSheet,
   saveServerSheet,
 } from "@/lib/udiseUploadServer";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 import {
   ErpTable,
   ErpTableBody,
@@ -1666,148 +1666,128 @@ export function UdisePenApaarImportPanel({
                                 />
                               );
                             })()}
-                            {p.studentId && p.sisInactive ? (
-                              <button
-                                type="button"
-                                className="rounded-lg bg-[#8a5a10] px-2 py-1 text-[11px] font-semibold text-white"
-                                onClick={() =>
-                                  applyRowToStudent(
-                                    p.udise,
-                                    p.studentId!,
-                                    p.matchedName,
-                                    true,
-                                    isConfidentUdiseMatch(p.method),
-                                  )
-                                }
-                                title="Reactivate this student and fill UDISE data"
-                              >
-                                Reactivate & apply
-                              </button>
-                            ) : null}
-                            {p.studentId &&
-                            !p.sisInactive &&
-                            ayNorm(p.sisSession) !==
-                              ayNorm(academicYearCode || "") ? (
-                              <>
-                                <button
-                                  type="button"
-                                  className="rounded-lg bg-[var(--brand-deep)] px-2 py-1 text-[11px] font-semibold text-white"
-                                  onClick={() =>
-                                    promoteToSession(
-                                      p.udise,
-                                      p.studentId!,
-                                      p.matchedName,
-                                    )
-                                  }
-                                  title={`Create a ${academicYearCode} enrollment for this student and apply UDISE data`}
-                                >
-                                  Promote to {academicYearCode || "current"} &
-                                  apply
-                                </button>
-                                <button
-                                  type="button"
-                                  className="rounded-lg border border-[#8a5a10] px-2 py-1 text-[11px] font-semibold text-[#8a5a10]"
-                                  onClick={() =>
+                            {/*
+                              Every per-row action lives behind the same "…"
+                              as the rest of the ERP (director, 19 Sep 2026).
+                              This worklist used to carry up to six inline
+                              buttons whose wording changed with the row's
+                              state, so no two rows looked alike and nobody
+                              could learn where anything was.
+                            */}
+                            <RowActionMenu
+                              row={p}
+                              label="Row actions"
+                              actions={[
+                                {
+                                  id: "reactivate-apply",
+                                  label: "Reactivate & apply UDISE data",
+                                  hidden: (r) => !(r.studentId && r.sisInactive),
+                                  onSelect: (r) =>
                                     applyRowToStudent(
-                                      p.udise,
-                                      p.studentId!,
-                                      p.matchedName,
+                                      r.udise,
+                                      r.studentId!,
+                                      r.matchedName,
+                                      true,
+                                      isConfidentUdiseMatch(r.method),
+                                    ),
+                                },
+                                {
+                                  id: "promote-apply",
+                                  label: `Promote to ${academicYearCode || "current"} & apply`,
+                                  hidden: (r) =>
+                                    !(
+                                      r.studentId &&
+                                      !r.sisInactive &&
+                                      ayNorm(r.sisSession) !== ayNorm(academicYearCode || "")
+                                    ),
+                                  onSelect: (r) =>
+                                    promoteToSession(r.udise, r.studentId!, r.matchedName),
+                                },
+                                {
+                                  id: "apply-other-session",
+                                  label: "Apply to the other-session record only",
+                                  hidden: (r) =>
+                                    !(
+                                      r.studentId &&
+                                      !r.sisInactive &&
+                                      ayNorm(r.sisSession) !== ayNorm(academicYearCode || "")
+                                    ),
+                                  onSelect: (r) =>
+                                    applyRowToStudent(
+                                      r.udise,
+                                      r.studentId!,
+                                      r.matchedName,
                                       false,
-                                      isConfidentUdiseMatch(p.method),
-                                    )
-                                  }
-                                  title="Write UDISE data onto the existing other-session record (does not move the student to this year)"
-                                >
-                                  Apply to {p.sisSession || "this"} record only
-                                </button>
-                              </>
-                            ) : null}
-                            {p.studentId &&
-                            !p.sisInactive &&
-                            p.fillLabels.length &&
-                            ayNorm(p.sisSession) ===
-                              ayNorm(academicYearCode || "") ? (
-                              <button
-                                type="button"
-                                className="rounded-lg bg-[var(--brand-deep)] px-2 py-1 text-[11px] font-medium text-white"
-                                onClick={() =>
-                                  applyRowToStudent(
-                                    p.udise,
-                                    p.studentId!,
-                                    p.matchedName,
-                                    false,
-                                    isConfidentUdiseMatch(p.method),
-                                  )
-                                }
-                                title="Write UDISE data onto this student"
-                              >
-                                Apply UDISE here
-                              </button>
-                            ) : null}
-                            {p.studentId &&
-                            !p.sisInactive &&
-                            (p.tone === "verify" ||
-                              p.tone === "fill" ||
-                              p.tone === "ok" ||
-                              p.tone === "mbu_age") ? (
-                              <button
-                                type="button"
-                                className="rounded-lg border border-[rgba(15,122,76,0.4)] bg-white px-2 py-1 text-[11px] font-medium text-[var(--success)]"
-                                onClick={() => tickVerified(p)}
-                              >
-                                ✓ Tick verified
-                              </button>
-                            ) : null}
-                            {p.tone === "suspect" ? (
-                              <button
-                                type="button"
-                                className="rounded-lg bg-[var(--brand-deep)] px-2 py-1 text-[11px] font-medium text-white"
-                                onClick={() => migrate(p)}
-                              >
-                                Migrate to SIS
-                              </button>
-                            ) : null}
-                            {p.studentId ? (
-                              p.sisInactive ? (
-                                <button
-                                  type="button"
-                                  className="rounded-lg border border-[var(--success)] px-2 py-1 text-[11px] font-semibold text-[var(--success)]"
-                                  onClick={() =>
-                                    setStudentStatus(
-                                      p.studentId!,
-                                      p.matchedName,
-                                      "active",
-                                    )
-                                  }
-                                  title="Reactivate this student in SIS"
-                                >
-                                  Make active
-                                </button>
-                              ) : (
-                                <button
-                                  type="button"
-                                  className="rounded-lg border border-[#b0344b] px-2 py-1 text-[11px] font-semibold text-[#b0344b]"
-                                  onClick={() =>
-                                    setStudentStatus(
-                                      p.studentId!,
-                                      p.matchedName,
-                                      "inactive",
-                                    )
-                                  }
-                                  title="Mark this student inactive in SIS (left / TC / not enrolled)"
-                                >
-                                  Make inactive
-                                </button>
-                              )
-                            ) : null}
-                            {p.studentId ? (
-                              <Link
-                                href={`/students/${p.studentId}/edit?tab=ids`}
-                                className="text-[10px] text-[var(--brand-deep)] underline"
-                              >
-                                Open in SIS
-                              </Link>
-                            ) : null}
+                                      isConfidentUdiseMatch(r.method),
+                                    ),
+                                },
+                                {
+                                  id: "apply-here",
+                                  label: "Apply UDISE data here",
+                                  hidden: (r) =>
+                                    !(
+                                      r.studentId &&
+                                      !r.sisInactive &&
+                                      r.fillLabels.length > 0 &&
+                                      ayNorm(r.sisSession) === ayNorm(academicYearCode || "")
+                                    ),
+                                  onSelect: (r) =>
+                                    applyRowToStudent(
+                                      r.udise,
+                                      r.studentId!,
+                                      r.matchedName,
+                                      false,
+                                      isConfidentUdiseMatch(r.method),
+                                    ),
+                                },
+                                {
+                                  id: "tick-verified",
+                                  label: "Tick verified",
+                                  hidden: (r) =>
+                                    !(
+                                      r.studentId &&
+                                      !r.sisInactive &&
+                                      (r.tone === "verify" ||
+                                        r.tone === "fill" ||
+                                        r.tone === "ok" ||
+                                        r.tone === "mbu_age")
+                                    ),
+                                  onSelect: (r) => tickVerified(r),
+                                },
+                                {
+                                  id: "migrate",
+                                  label: "Migrate to SIS as a new student",
+                                  hidden: (r) => r.tone !== "suspect",
+                                  onSelect: (r) => migrate(r),
+                                },
+                                {
+                                  id: "open",
+                                  label: "Open in SIS",
+                                  separatorAbove: true,
+                                  hidden: (r) => !r.studentId,
+                                  onSelect: (r) => {
+                                    window.location.href = `/students/${r.studentId}/edit?tab=ids`;
+                                  },
+                                },
+                                {
+                                  id: "make-active",
+                                  label: "Make active in SIS",
+                                  separatorAbove: true,
+                                  hidden: (r) => !(r.studentId && r.sisInactive),
+                                  onSelect: (r) =>
+                                    setStudentStatus(r.studentId!, r.matchedName, "active"),
+                                },
+                                {
+                                  id: "make-inactive",
+                                  label: "Make inactive in SIS",
+                                  tone: "danger",
+                                  separatorAbove: true,
+                                  hidden: (r) => !(r.studentId && !r.sisInactive),
+                                  onSelect: (r) =>
+                                    setStudentStatus(r.studentId!, r.matchedName, "inactive"),
+                                },
+                              ]}
+                            />
                           </div>
                         </td>
                       </tr>
