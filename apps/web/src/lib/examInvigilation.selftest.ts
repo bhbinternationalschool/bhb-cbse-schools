@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 
 import { defaultExamPolicy, type ExamsState, type ExamDateSheetEntry } from "./exams";
 import {
+  buildInvigilationGrid,
   emptyInvigilationState,
   invigilationCandidates,
   invigilationConflictsFor,
@@ -250,6 +251,90 @@ let state: InvigilationState = emptyInvigilationState();
     firstConflictedIndex === -1 || lastFreeIndex < firstConflictedIndex,
     "every conflict-free candidate must sort ahead of every conflicted one",
   );
+}
+
+
+/* -------------------------------------------------------------------------- */
+/* The duty chart                                                             */
+/* -------------------------------------------------------------------------- */
+
+{
+  const mk = (
+    id: string,
+    classId: string,
+    date: string,
+    startTime: string,
+  ): ExamDateSheetEntry => ({
+    ...entryA,
+    id,
+    classId,
+    date,
+    startTime,
+  });
+
+  const entries = [
+    mk("e_c6_t2", "cls_6", "2026-09-16", "11:00"),
+    mk("e_c6_t1", "cls_6", "2026-09-16", "09:00"),
+    mk("e_c6_m", "cls_6", "2026-09-15", "09:00"),
+    mk("e_c7_m", "cls_7", "2026-09-15", "09:00"),
+  ];
+
+  let state: InvigilationState = emptyInvigilationState();
+  state = upsertInvigilationAssignment(state, {
+    academicYearCode: AY,
+    examEntryId: "e_c6_m",
+    roomLabel: "Hall A",
+    teacherId: "stf_1",
+    createdBy: "test",
+  }).state;
+  state = upsertInvigilationAssignment(state, {
+    academicYearCode: AY,
+    examEntryId: "e_gone",
+    roomLabel: "",
+    teacherId: "stf_2",
+    createdBy: "test",
+  }).state;
+
+  const grid = buildInvigilationGrid({
+    state,
+    entries,
+    classOrder: ["cls_5", "cls_6", "cls_7"],
+  });
+
+  assert.deepEqual(grid.dates, ["2026-09-15", "2026-09-16"], "days ascend");
+  assert.deepEqual(
+    grid.classIds,
+    ["cls_6", "cls_7"],
+    "masters order, and only classes that actually sit a paper",
+  );
+
+  // Two papers in one morning: both kept, earliest first. A chart that keyed
+  // one entry per cell would show one and swallow the other — an exam nobody
+  // is told about.
+  const twoInADay = grid.cells.get("cls_6|2026-09-16") ?? [];
+  assert.equal(twoInADay.length, 2);
+  assert.deepEqual(twoInADay.map((c) => c.entry.startTime), ["09:00", "11:00"]);
+
+  const watched = grid.cells.get("cls_6|2026-09-15") ?? [];
+  assert.equal(watched[0]!.assignments.length, 1);
+  assert.equal(watched[0]!.assignments[0]!.roomLabel, "Hall A");
+
+  assert.equal(grid.sittings, 4);
+  assert.equal(grid.unwatched, 3, "only one of the four has an invigilator");
+  assert.equal(grid.unwatchedByDate.get("2026-09-15"), 1);
+  assert.equal(grid.unwatchedByDate.get("2026-09-16"), 2);
+
+  // A duty left pointing at a deleted paper is counted, never silently
+  // dropped: a teacher who believes they are on duty is worse than one who
+  // knows they are not.
+  assert.equal(grid.orphans.length, 1);
+  assert.equal(grid.orphans[0]!.teacherId, "stf_2");
+
+  const empty = buildInvigilationGrid({ state: emptyInvigilationState(), entries: [] });
+  assert.deepEqual(empty.dates, []);
+  assert.deepEqual(empty.classIds, []);
+  assert.equal(empty.unwatched, 0);
+  assert.equal(empty.orphans.length, 0);
 }
 
 console.log("OK — examInvigilation.selftest.ts");

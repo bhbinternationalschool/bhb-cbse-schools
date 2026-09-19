@@ -299,3 +299,100 @@ export function invigilationCandidates(input: {
 }
 
 export type { AbsentTeacher };
+
+/* -------------------------------------------------------------------------- */
+/* The duty chart                                                             */
+/* -------------------------------------------------------------------------- */
+
+export type InvigilationCell = {
+  entry: ExamDateSheetEntry;
+  assignments: InvigilationAssignment[];
+};
+
+export type InvigilationGrid = {
+  /** Exam days, ascending — the columns. */
+  dates: string[];
+  /** Classes that actually sit a paper, in the order given — the rows. */
+  classIds: string[];
+  /** Keyed `classId|date`. A list, because one class can sit two papers in a day. */
+  cells: Map<string, InvigilationCell[]>;
+  /** Sittings with nobody watching them, per date. */
+  unwatchedByDate: Map<string, number>;
+  sittings: number;
+  unwatched: number;
+  /**
+   * Duties whose sitting no longer exists — a paper was deleted or moved to
+   * another term after someone was put on it. They are invisible in a chart
+   * drawn from the date sheet, so they are counted here rather than quietly
+   * dropped: a teacher who thinks they are on duty is worse than one who
+   * knows they are not.
+   */
+  orphans: InvigilationAssignment[];
+};
+
+/**
+ * Arrange invigilation duty the way a date sheet is read: a class per row, an
+ * exam day per column, who is watching in the cell.
+ *
+ * The flat list this replaces was one row per sitting — 103 of them for this
+ * school's half-yearly — which cannot answer the two questions the office
+ * actually asks: is anybody watching Tuesday, and is one teacher on duty all
+ * day. Both are visible at a glance in a chart and in neither in a list.
+ */
+export function buildInvigilationGrid(input: {
+  state: InvigilationState;
+  entries: ExamDateSheetEntry[];
+  /** Class order from masters, so the chart reads like the date sheet. */
+  classOrder?: string[];
+}): InvigilationGrid {
+  const { state, entries, classOrder = [] } = input;
+
+  const byEntry = new Map<string, InvigilationAssignment[]>();
+  for (const a of state.assignments) {
+    const list = byEntry.get(a.examEntryId);
+    if (list) list.push(a);
+    else byEntry.set(a.examEntryId, [a]);
+  }
+
+  const dates = [...new Set(entries.map((e) => e.date))].sort();
+  const seen = new Set(entries.map((e) => e.classId));
+  const classIds = [
+    ...classOrder.filter((id) => seen.has(id)),
+    ...[...seen].filter((id) => !classOrder.includes(id)),
+  ];
+
+  const cells = new Map<string, InvigilationCell[]>();
+  const unwatchedByDate = new Map<string, number>();
+  let unwatched = 0;
+
+  for (const entry of entries) {
+    const assignments = byEntry.get(entry.id) ?? [];
+    const key = `${entry.classId}|${entry.date}`;
+    const cell = cells.get(key);
+    if (cell) cell.push({ entry, assignments });
+    else cells.set(key, [{ entry, assignments }]);
+    if (!assignments.length) {
+      unwatched += 1;
+      unwatchedByDate.set(entry.date, (unwatchedByDate.get(entry.date) ?? 0) + 1);
+    }
+  }
+
+  // Two papers in one morning are shown in the order they start, not the
+  // order they were typed.
+  for (const cell of cells.values()) {
+    cell.sort((a, b) => a.entry.startTime.localeCompare(b.entry.startTime));
+  }
+
+  const live = new Set(entries.map((e) => e.id));
+  const orphans = state.assignments.filter((a) => !live.has(a.examEntryId));
+
+  return {
+    dates,
+    classIds,
+    cells,
+    unwatchedByDate,
+    sittings: entries.length,
+    unwatched,
+    orphans,
+  };
+}
