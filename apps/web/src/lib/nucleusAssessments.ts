@@ -11,6 +11,8 @@
  * them, so nothing here has to guess what "Ready to Download" implies.
  */
 
+import { readCapture, str } from "@/lib/nucleusCapture";
+
 export type AssessmentStatus = "ready" | "not_created" | "other";
 
 export type NucleusAssessmentRow = {
@@ -55,7 +57,43 @@ function cell(value: string | undefined): string {
  * several lines, so a row is gathered from the first cell until the next line
  * that looks like the start of one (a class label followed by a division).
  */
+/**
+ * The same list, read by the bookmark instead of copied.
+ *
+ * Nucleus's own wording for a status is kept verbatim here exactly as it is
+ * for a pasted table — the screen shows the publisher's words, and a capture
+ * must not quietly translate them.
+ */
+function fromCapture(rows: unknown[]): AssessmentParseResult {
+  const out: NucleusAssessmentRow[] = [];
+  const errors: string[] = [];
+  for (const [i, raw] of rows.entries()) {
+    const r = (raw ?? {}) as Record<string, unknown>;
+    const classLabel = str(r.classLabel, 40);
+    const subject = str(r.subject, 60);
+    const title = str(r.title, 200);
+    const statusText = str(r.statusText, 60);
+    if (!classLabel || !subject || !title) {
+      errors.push(`row ${i + 1}: missing class, subject or title`);
+      continue;
+    }
+    out.push({
+      classLabel,
+      division: str(r.division, 20),
+      subject,
+      title,
+      chapters: str(r.chapters, 40),
+      statusText,
+      status: classifyStatus(statusText),
+    });
+  }
+  return { rows: out, errors };
+}
+
 export function parseNucleusAssessments(text: string): AssessmentParseResult {
+  const capture = readCapture(text);
+  if (capture?.assessments) return fromCapture(capture.assessments);
+
   const rows: NucleusAssessmentRow[] = [];
   const errors: string[] = [];
 

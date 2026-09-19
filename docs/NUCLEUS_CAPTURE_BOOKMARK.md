@@ -1,14 +1,23 @@
-# The "Send papers to ERP" bookmark
+# The "Send to ERP" bookmark
 
 The publisher's papers and answer keys are public files: once the ERP knows a
 file's address it fetches it itself, for as long as that file exists. What it
 cannot do is find the addresses, because they live behind the Nucleus login,
 and that login is behind a captcha with no API to go around it.
 
-So one person, once a term, does the one thing only a signed-in person can:
-opens Nucleus and clicks a bookmark. The bookmark reads the addresses of every
-paper the school has, copies them to the clipboard, and downloads nothing. The
-ERP does the rest — see **Exams → Question papers → Get papers from Nucleus**.
+So one person does the one thing only a signed-in person can: opens Nucleus
+and clicks a bookmark. It reads whichever page it is on, copies the reading to
+the clipboard, and downloads nothing.
+
+| Page | What it reads | Where it is pasted |
+|---|---|---|
+| Assessments & Answer key | every paper's question-paper and answer-key address, plus what the publisher has and has not prepared | Exams → Question papers → **Get papers from Nucleus** |
+| Teacher Timeliness | the day-plan table, cell by cell | Teaching → Nucleus → the timeliness box |
+
+The timeliness reading is worth taking this way rather than copying the table:
+the bookmark hands over the numbers themselves — 50 required, 10 done, out of
+140 — instead of the sentence "36% Course (50/140 day plans)" for the ERP to
+pull them back out of. Both still work; the paste box takes either.
 
 It takes about twelve minutes for a full term of 108 papers, and far less when
 only a few are new. It is safe to stop it at any point by closing the tab:
@@ -18,7 +27,7 @@ nothing in Nucleus is changed and nothing is saved to the computer.
 
 1. In Chrome, show the bookmarks bar (⇧⌘B).
 2. Right-click the bar → **Add page…**
-3. Name: `Send papers to ERP`
+3. Name: `Send to ERP`
 4. URL: paste the whole line from `nucleus-capture-bookmarklet.txt` — it begins
    `javascript:` and is one very long line.
 5. Save.
@@ -29,17 +38,19 @@ does nothing, edit it and check that the address still starts with `javascript:`
 ## Using it
 
 1. Open <https://nucleus.leadgroup.co.in> and sign in.
-2. Go to **Assessments & Answer key** and let the table finish loading.
-3. Click **Send papers to ERP** in the bookmarks bar.
-4. A small panel appears at the top right with progress: *Reading 14 of 108…*
-   Leave the tab in front until it says it has copied.
-5. Switch to the ERP → **Exams → Question papers → Get papers from Nucleus →
-   Paste a capture**, paste (⌘V), press **Read capture**, check the table, then
-   press **Get**.
+2. Go to the page you want — **Assessments & Answer key** or **Teacher
+   Timeliness** — and let it finish loading.
+3. Click **Send to ERP** in the bookmarks bar.
+4. A small panel appears at the top right. On the papers page it walks the
+   list (*Reading 14 of 108…*) and takes about twelve minutes; on the
+   timeliness page it is instant. Leave the tab in front until it says it has
+   copied.
+5. Paste into the ERP and press the button there.
 
 ## What it does, and does not do
 
-It visits each paper's own page in the same tab — exactly what a person would
+On the timeliness page it only reads the table already on screen. On the
+papers page it visits each paper's own page in the same tab — exactly what a person would
 do by hand — and reads the addresses the page already holds. It never downloads
 a paper, never saves a file, and never sends anything anywhere: the only output
 is text on the clipboard.

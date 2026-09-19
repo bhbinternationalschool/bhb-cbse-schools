@@ -13,6 +13,8 @@
  * week's.
  */
 
+import { num, readCapture, str } from "@/lib/nucleusCapture";
+
 export type NucleusProgressRow = {
   /** Nucleus's own row number, kept so two readings can be diffed in order. */
   position: number;
@@ -95,7 +97,54 @@ function namesFrom(head: string): { teacherName: string; classSubject: string } 
  * number stored — if its arithmetic disagrees with (current − required), the
  * row is rejected and named, rather than quietly trusting one of them.
  */
+/**
+ * A reading captured by the bookmark, rather than copied as a table.
+ *
+ * The bookmark reads the same table cell by cell, so the numbers arrive as
+ * numbers. A row missing them is still refused by name: a capture is easier
+ * to trust than a clipboard, not exempt from being checked.
+ */
+function fromCapture(rows: unknown[]): NucleusParseResult {
+  const out: NucleusProgressRow[] = [];
+  const errors: string[] = [];
+  for (const [i, raw] of rows.entries()) {
+    const r = (raw ?? {}) as Record<string, unknown>;
+    const teacherName = str(r.teacherName, 120);
+    const classLabel = str(r.classLabel, 60);
+    const subjectLabel = str(r.subjectLabel, 80);
+    const totalPlans = num(r.totalPlans);
+    const requiredPlans = num(r.requiredPlans);
+    const currentPlans = num(r.currentPlans);
+    const who = [classLabel, subjectLabel].filter(Boolean).join(" ") || `row ${i + 1}`;
+
+    if (!teacherName || !classLabel || !subjectLabel) {
+      errors.push(`${who}: missing teacher, class or subject`);
+      continue;
+    }
+    if (!totalPlans) {
+      errors.push(`${who}: no day-plan total`);
+      continue;
+    }
+    out.push({
+      position: num(r.position) || i + 1,
+      teacherName,
+      classLabel,
+      subjectLabel,
+      totalPlans,
+      requiredPlans,
+      currentPlans,
+      // Trust the arithmetic over a sentence: "40 Day Plans Behind" is the
+      // same fact as current minus required, and one of them can be stale.
+      gapPlans: currentPlans - requiredPlans,
+    });
+  }
+  return { rows: out, errors };
+}
+
 export function parseNucleusTimeliness(text: string): NucleusParseResult {
+  const capture = readCapture(text);
+  if (capture?.timeliness) return fromCapture(capture.timeliness);
+
   const rows: NucleusProgressRow[] = [];
   const errors: string[] = [];
   const seen = new Set<number>();

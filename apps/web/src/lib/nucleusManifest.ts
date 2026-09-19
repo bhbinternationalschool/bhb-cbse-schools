@@ -76,8 +76,15 @@ export function readNucleusManifest(raw: string): ReadManifestResult {
     };
   }
 
-  const body = parsed as { capturedOn?: unknown; rows?: unknown };
-  const list = Array.isArray(body?.rows) ? body.rows : null;
+  // The bookmark may hand over one object carrying several readings; papers
+  // are the section this one wants, and `rows` is what the first version of
+  // the capture called them.
+  const body = parsed as { capturedOn?: unknown; rows?: unknown; papers?: unknown };
+  const list = Array.isArray(body?.papers)
+    ? body.papers
+    : Array.isArray(body?.rows)
+      ? body.rows
+      : null;
   if (!list) {
     return { ok: false, error: "The capture has no rows in it" };
   }
