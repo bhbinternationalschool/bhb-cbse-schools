@@ -14,8 +14,18 @@
  *   --mode=as-is      (default) Re-express only staff who are ALREADY whole.
  *                     Nobody's take-home changes by a single rupee. The six
  *                     who are short stay short and are listed for a decision.
- *   --mode=make-whole Turn the flag on for every PF member, so all 13 land on
- *                     their agreed salary. This RAISES pay — see the report.
+ *   --mode=make-whole Turn the flag on for every PF member. DO NOT RUN THIS.
+ *                     It was written on the belief that the school bears every
+ *                     staff member's cut. The old ERP's payment vouchers
+ *                     (/Inventory/GetPaymentVoucharReport) disprove that: staff
+ *                     paid by UPI have EPF and ESI deducted from their pay and
+ *                     take home less than their basic — Vishal Mishra 10,470 on
+ *                     a 12,000 basic, Kiran Patel 5,040 on 6,000 — and our
+ *                     computed net already matches those payouts to the rupee.
+ *                     Only the CASH-paid group is grossed up, and those links
+ *                     already carry the right additionalAmount. Running this
+ *                     would raise six people's pay by 6,708/month for no reason.
+ *                     It is kept only so the reasoning is on the record.
  *
  * Dry run unless --commit. Writes nothing on a dry run.
  *
