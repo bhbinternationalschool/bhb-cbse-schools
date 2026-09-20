@@ -5,9 +5,13 @@
  * are indexed today — policies/fee circulars/CBSE circulars have no
  * structured source in this codebase yet to embed.
  *
- * Indexing is staff-triggered (a "Sync to AI" action), not automatic on
- * publish — keeps this additive and out of the notices save/desk-sync
- * path entirely.
+ * Indexing stays out of the notices save/desk-sync path entirely — it is
+ * the "Sync to AI" action, and since 21 Sep 2026 a nightly Cloud Scheduler
+ * job as well. It was staff-triggered ONLY until then, and so had never run:
+ * the shelf held zero chunks with two notices published, and the parent bot
+ * was correctly answering "I don't have that information" to every question
+ * outside a family's own dues. A shelf that fills only when somebody
+ * remembers to press a button is an empty shelf.
  */
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { fetchSchoolCommsDeskFromDb } from "@/lib/schoolCommsNormalized.server";
