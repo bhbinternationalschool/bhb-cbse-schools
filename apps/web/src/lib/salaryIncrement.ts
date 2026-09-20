@@ -785,8 +785,13 @@ export function applyIncrementBatch(
       basicOverride: line.newBasic,
       statutoryCover: existing?.statutoryCover || "both",
       // Increments move basic only; the additional amount is left as set.
+      // This is exactly how a hand-typed PF/ESIC top-up went stale before
+      // 2026-09-20 — a raise moved the basic, the typed top-up stayed put and
+      // the staff member quietly went short. statutoryGrossUp carries through
+      // instead, and recomputes itself off the new basic's own deductions.
       additionalAmount: existing?.additionalAmount || 0,
       additionalLabel: existing?.additionalLabel || "",
+      statutoryGrossUp: existing?.statutoryGrossUp === true,
       effectiveFrom: batch.effectiveFrom,
       salaryAccountNote: existing?.salaryAccountNote || "",
     };

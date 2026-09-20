@@ -222,6 +222,7 @@
     "test:admissions-kb": "npx tsx src/lib/admissionsKb.selftest.ts",
     "test:admissions-enquiry-form": "npx tsx src/lib/admissionsEnquiryForm.selftest.ts",
     "test:salary-additional": "npx tsx src/lib/salaryAdditional.selftest.ts",
+    "test:salary-gross-up": "npx tsx src/lib/salaryGrossUp.selftest.ts",
     "test:lead-followup-ai": "npx tsx src/lib/leadFollowupAi.selftest.ts",
     "test:lead-quality": "npx tsx src/lib/leadQuality.selftest.ts",
     "test:marketing-content-ai": "npx tsx src/lib/marketingContentAi.selftest.ts",
