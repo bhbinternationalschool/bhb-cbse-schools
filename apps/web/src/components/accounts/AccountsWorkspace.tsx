@@ -33,6 +33,7 @@ import {
 } from "@/components/accounts/AccountsPanels";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { hasPermission } from "@/lib/rbac";
+import { ClosingBalancePanel } from "@/components/accounts/ClosingBalancePanel";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { SkeletonModulePage } from "@/components/ui/skeleton";
@@ -53,7 +54,8 @@ type AccountsTab =
   | "masters"
   | "bills"
   | "owner"
-  | "dayclose";
+  | "dayclose"
+  | "closing";
 
 /**
  * Where a retired browser-book tab now lives in the server book. Deep links
@@ -79,6 +81,7 @@ const TABS: ModuleTabItem[] = [
   { id: "bills", label: "Bills & AP", tone: "violet" },
   { id: "owner", label: "Owner loans", tone: "coral" },
   { id: "dayclose", label: "Day close", tone: "rose" },
+  { id: "closing", label: "Closing balances", tone: "rose" },
 ];
 
 export function AccountsWorkspace() {
@@ -101,6 +104,7 @@ export function AccountsWorkspace() {
       "bills",
       "owner",
       "dayclose",
+      "closing",
     ];
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as AccountsTab);
     else if (raw && LEGACY_TAB_MAP[raw]) setTab(LEGACY_TAB_MAP[raw]);
@@ -287,6 +291,8 @@ export function AccountsWorkspace() {
         </>
       ) : tab === "dayclose" ? (
         <DayCloseAccountsPanel {...panelProps} />
+      ) : tab === "closing" ? (
+        <ClosingBalancePanel {...panelProps} />
       ) : null}
     </ErpWorkspaceShell>
   );
