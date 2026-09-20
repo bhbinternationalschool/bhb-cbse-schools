@@ -297,6 +297,7 @@ SELFTESTS=(
   test:report-export
   test:report-remark-ai
   test:salary-additional
+  test:salary-gross-up
   test:school-receipt-no
   test:session-cookie-edge
   test:staff-geo

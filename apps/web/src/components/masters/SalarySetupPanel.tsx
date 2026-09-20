@@ -14,6 +14,7 @@ import {
   buildStructureLinesFromPack,
   cloneSalaryStructure,
   additionalFromLink,
+  grossUpFromLink,
   computeStructureAmounts,
   loadSalarySetup,
   newSalaryId,
@@ -1000,6 +1001,7 @@ function AssignPanel({
     statutoryCover: StatutoryCover;
     additionalAmount: string;
     additionalLabel: string;
+    statutoryGrossUp: boolean;
   };
 
   const roster = (masters.staff ?? [])
@@ -1036,6 +1038,7 @@ function AssignPanel({
       statutoryCover: normalizeStatutoryCover(link?.statutoryCover),
       additionalAmount: link && link.additionalAmount > 0 ? String(link.additionalAmount) : "",
       additionalLabel: link?.additionalLabel || "",
+      statutoryGrossUp: link?.statutoryGrossUp === true,
     };
   }
 
@@ -1052,7 +1055,8 @@ function AssignPanel({
       d.basicOverride !== s.basicOverride ||
       d.statutoryCover !== s.statutoryCover ||
       d.additionalAmount !== s.additionalAmount ||
-      d.additionalLabel !== s.additionalLabel
+      d.additionalLabel !== s.additionalLabel ||
+      d.statutoryGrossUp !== s.statutoryGrossUp
     );
   }
 
@@ -1095,6 +1099,7 @@ function AssignPanel({
       statutoryCover: normalizeStatutoryCover(d.statutoryCover),
       additionalAmount: Math.max(0, Math.round(Number(d.additionalAmount) || 0)),
       additionalLabel: d.additionalLabel.trim().slice(0, 60),
+      statutoryGrossUp: d.statutoryGrossUp === true,
       effectiveFrom:
         existing?.effectiveFrom || new Date().toISOString().slice(0, 10),
       salaryAccountNote: existing?.salaryAccountNote || "",
@@ -1126,7 +1131,11 @@ function AssignPanel({
         revert. PF / ESIC: both, PF only, ESIC only, or neither.{" "}
         <strong className="text-[var(--brand-deep)]">Additional</strong> is paid
         and printed on the payslip but stays outside PF wages and ESIC — those
-        are computed on the structure alone.
+        are computed on the structure alone. Tick{" "}
+        <strong className="text-[var(--brand-deep)]">School pays the PF/ESIC cut</strong>{" "}
+        when the staff member is to take home the agreed figure — the amount is
+        worked out from that month&rsquo;s own deductions, so it never goes stale when
+        the basic changes.
         {dirtyCount > 0 ? (
           <span className="ml-1 font-semibold text-[var(--warning)]">
             · {dirtyCount} unsaved row{dirtyCount > 1 ? "s" : ""}
@@ -1167,6 +1176,7 @@ function AssignPanel({
                     Number(draft.additionalAmount) > 0
                       ? { amount: Number(draft.additionalAmount), label: draft.additionalLabel }
                       : null,
+                    draft.statutoryGrossUp,
                   )
                 : null;
               const savedLabel = link
@@ -1186,6 +1196,7 @@ function AssignPanel({
                     normalizeStatutoryCover(link?.statutoryCover),
                     masters.statutoryConfig,
                     additionalFromLink(link),
+                    grossUpFromLink(link),
                   )
                 : null;
               const sumBy = (rows: { head: { code: string }; amount: number }[], test: (c: string) => boolean) =>
@@ -1222,6 +1233,9 @@ function AssignPanel({
                       : ""}
                     {link?.additionalAmount
                       ? ` · + ₹${link.additionalAmount.toLocaleString("en-IN")} ${link.additionalLabel || "additional"} (outside PF/ESIC)`
+                      : ""}
+                    {saved && saved.statutoryGrossUpAmount > 0
+                      ? ` · + ₹${saved.statutoryGrossUpAmount.toLocaleString("en-IN")} PF/ESIC borne by school`
                       : ""}
                     <div className="mt-0.5 space-y-0.5 text-[10px]">
                       {savedCover === "none" ? (
@@ -1305,8 +1319,27 @@ function AssignPanel({
                     />
                   </td>
                   <td className="px-3 py-2">
+                    <label className="flex cursor-pointer items-start gap-1.5 text-[10px] leading-tight text-[var(--muted)]">
+                      <input
+                        type="checkbox"
+                        className="mt-[1px]"
+                        checked={draft.statutoryGrossUp}
+                        onChange={(e) =>
+                          patchDraft(s.id, { statutoryGrossUp: e.target.checked })
+                        }
+                      />
+                      <span>
+                        School pays the PF/ESIC cut
+                        {preview && preview.employeeStatutoryCut > 0 ? (
+                          <span className="ml-0.5 font-semibold text-[var(--brand-deep)]">
+                            {" "}
+                            (+{inr(preview.employeeStatutoryCut)})
+                          </span>
+                        ) : null}
+                      </span>
+                    </label>
                     <select
-                      className="field !py-1 text-[11px]"
+                      className="field mt-1 !py-1 text-[11px]"
                       value={draft.statutoryCover}
                       onChange={(e) =>
                         patchDraft(s.id, {

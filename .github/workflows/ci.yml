@@ -406,6 +406,7 @@ jobs:
           npm run test:report-export
           npm run test:report-remark-ai
           npm run test:salary-additional
+          npm run test:salary-gross-up
           npm run test:school-receipt-no
           npm run test:session-cookie-edge
           npm run test:staff-geo

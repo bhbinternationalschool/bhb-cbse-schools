@@ -80,6 +80,15 @@ export type StaffSalaryLink = {
   additionalAmount: number;
   /** Label printed for the additional line, e.g. "Additional allowance" */
   additionalLabel: string;
+  /**
+   * The school pays this staff member's own PF and ESIC share on top of the
+   * salary, so what reaches their hand is the agreed figure. The amount is
+   * DERIVED from the deductions actually computed for the month — never
+   * typed — because a typed one goes stale the moment the basic moves.
+   * Like additionalAmount it sits outside every statutory base, so grossing
+   * up never widens PF wages or ESIC eligibility.
+   */
+  statutoryGrossUp: boolean;
   effectiveFrom: string;
   salaryAccountNote: string;
 };
@@ -95,6 +104,20 @@ export function additionalHead(label?: string): SalaryHead {
     tallyLedger: "Additional Allowance",
     isActive: true,
     sortOrder: 99,
+  };
+}
+
+/** Virtual earning head for the derived PF/ESIC gross-up (no master row). */
+export const GROSS_UP_HEAD_CODE = "SGUP";
+export function statutoryGrossUpHead(): SalaryHead {
+  return {
+    id: "sgup",
+    code: GROSS_UP_HEAD_CODE,
+    name: "PF/ESIC paid by school",
+    kind: "earning",
+    tallyLedger: "Staff Statutory Gross-up",
+    isActive: true,
+    sortOrder: 98,
   };
 }
 
@@ -526,6 +549,7 @@ function normalizeLink(l: Partial<StaffSalaryLink>): StaffSalaryLink {
     statutoryCover: normalizeStatutoryCover(l.statutoryCover),
     additionalAmount: Math.max(0, Math.round(Number(l.additionalAmount) || 0)),
     additionalLabel: String(l.additionalLabel || "").trim().slice(0, 60),
+    statutoryGrossUp: l.statutoryGrossUp === true,
     effectiveFrom: String(l.effectiveFrom || "").slice(0, 10),
     salaryAccountNote: String(l.salaryAccountNote || ""),
   };
@@ -703,17 +727,23 @@ export function computeStructureAmounts(
   statutory?: Partial<StatutoryCeilings> | null,
   /** Per-staff additional ₹/month — paid, shown, but outside PF/ESIC bases */
   additional?: { amount: number; label?: string } | null,
+  /** Pay this staff member's own PF + ESIC share on top (see StaffSalaryLink) */
+  statutoryGrossUp = false,
 ): {
   basic: number;
   earnings: { head: SalaryHead; amount: number }[];
   deductions: { head: SalaryHead; amount: number }[];
   employer: { head: SalaryHead; amount: number }[];
-  /** Everything paid, additional included */
+  /** Everything paid, additional and gross-up included */
   gross: number;
   /** Structure earnings only — the wage the statutory rules looked at */
   statutoryGross: number;
   /** The additional line, 0 when none */
   additionalAmount: number;
+  /** The derived gross-up line, 0 when the school does not bear the cut */
+  statutoryGrossUpAmount: number;
+  /** The staff member's own PF + ESIC share this month, gross-up or not */
+  employeeStatutoryCut: number;
   totalDeductions: number;
 } {
   const cover = normalizeStatutoryCover(statutoryCover);
@@ -776,7 +806,22 @@ export function computeStructureAmounts(
   if (additionalAmount > 0) {
     earnings.push({ head: additionalHead(additional?.label), amount: additionalAmount });
   }
-  const gross = statutoryGross + additionalAmount;
+
+  // The gross-up is the staff member's OWN share, read back off the
+  // deductions just computed — so it tracks the basic, the ₹15,000 PF
+  // ceiling and every ESIC exemption automatically. It is appended here,
+  // beside the additional, for the same reason: it must not widen any
+  // statutory base. Employer-side heads live in `employer` and are the
+  // school's cost either way, so they are not part of this.
+  const employeeStatutoryCut = deductions.reduce(
+    (s, d) => (isPfHeadCode(d.head.code) || isEsicHeadCode(d.head.code) ? s + d.amount : s),
+    0,
+  );
+  const statutoryGrossUpAmount = statutoryGrossUp ? employeeStatutoryCut : 0;
+  if (statutoryGrossUpAmount > 0) {
+    earnings.push({ head: statutoryGrossUpHead(), amount: statutoryGrossUpAmount });
+  }
+  const gross = statutoryGross + additionalAmount + statutoryGrossUpAmount;
 
   const totalDeductions = deductions.reduce((s, e) => s + e.amount, 0);
   return {
@@ -787,6 +832,8 @@ export function computeStructureAmounts(
     gross,
     statutoryGross,
     additionalAmount,
+    statutoryGrossUpAmount,
+    employeeStatutoryCut,
     totalDeductions,
   };
 }
@@ -797,6 +844,13 @@ export function additionalFromLink(
 ): { amount: number; label?: string } | null {
   if (!link || !(link.additionalAmount > 0)) return null;
   return { amount: link.additionalAmount, label: link.additionalLabel };
+}
+
+/** The gross-up flag for computeStructureAmounts from a staff link. */
+export function grossUpFromLink(
+  link?: Pick<StaffSalaryLink, "statutoryGrossUp"> | null,
+): boolean {
+  return link?.statutoryGrossUp === true;
 }
 
 export function salarySetupCompleteness(state: SalarySetupState): {

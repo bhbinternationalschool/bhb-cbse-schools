@@ -39,6 +39,7 @@ import {
 import {
   additionalFromLink,
   computeStructureAmounts,
+  grossUpFromLink,
   loadSalarySetup,
   normalizeSalarySettings,
   resolveStructureForStaff,
@@ -407,6 +408,7 @@ export function buildPayrollDraft(opts: BuildPayrollOpts): PayrollRun {
       link?.statutoryCover || "both",
       opts.masters.statutoryConfig,
       additionalFromLink(link),
+      grossUpFromLink(link),
     );
 
     let daysPresent = 0;
