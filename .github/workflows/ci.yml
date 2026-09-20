@@ -356,6 +356,8 @@ jobs:
           npm run test:lead-quality
           npm run test:lead-timeline
           npm run test:ledger
+          npm run test:closing-balance
+          npm run test:accounts-position-rbac
           npm run test:voucher-filter
           npm run test:voucher-amend
           npm run test:lesson-plan-ai

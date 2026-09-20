@@ -27,6 +27,7 @@ export type RbacModule =
   | "purchase"
   | "transport"
   | "accounts"
+  | "accounts_position"
   | "trust"
   | "fees"
   | "attendance"
@@ -182,6 +183,15 @@ export const RBAC_MODULES: {
   { id: "purchase", label: "Purchase · PO · GRN", href: "/store?tab=purchase" },
   { id: "transport", label: "Transport", href: "/transport" },
   { id: "accounts", label: "Accounts", href: "/accounts" },
+  // Split out of `accounts` on 2026-09-20 so the office can key vouchers and
+  // run the day sheet without seeing what the school is worth. The counter
+  // needs today's collection and today's expense; the cash and bank balance,
+  // and income and expenditure for the whole session, are the management's.
+  {
+    id: "accounts_position",
+    label: "Accounts — balances & session totals",
+    href: "/accounts",
+  },
   { id: "trust", label: "Trust · Construction", href: "/trust" },
   { id: "fees", label: "Fees", href: "/fees" },
   { id: "attendance", label: "Attendance", href: "/attendance" },
@@ -419,6 +429,7 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("purchase", ops),
         grant("transport", ["view", "edit"]),
         grant("accounts", ops),
+        grant("accounts_position", ["view", "export"]),
         grant("trust", ops),
         grant("fees", feesOps),
         grant("attendance", ops),
@@ -528,6 +539,7 @@ export function defaultBuiltInRoles(): RbacRole[] {
         // statements and the reconciliation without holding any right that
         // could alter what they are auditing.
         grant("accounts", ["view", "export"]),
+        grant("accounts_position", ["view", "export"]),
         grant("fees", ["view", "export"]),
         grant("payroll", ["view", "export"]),
         grant("purchase", ["view", "export"]),

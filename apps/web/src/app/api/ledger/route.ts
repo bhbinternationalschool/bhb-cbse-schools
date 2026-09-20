@@ -44,6 +44,11 @@ import {
 } from "@/lib/inventory/procurement.server";
 import { InvError } from "@/lib/inventory/db.server";
 import type { InvPaymentMode } from "@/lib/inventory/types";
+import { readDaySheet } from "@/lib/ledger/daySheet.server";
+import {
+  postClosingBalances,
+  readClosingPosition,
+} from "@/lib/ledger/closingBalance.server";
 import {
   feeAdvanceBalances,
   ledgerReconciliation,
@@ -128,6 +133,14 @@ type PostBody =
       rows: { accountCode: string; debitPaise: number; creditPaise: number }[];
     }
   | { action: "close-year"; fyCode: string; surplusAccountCode?: string }
+  | { action: "closing-position"; asOn: string }
+  | { action: "day-sheet"; date: string }
+  | {
+      action: "closing-balances";
+      asOn: string;
+      actualCashPaise: number;
+      actualBankPaise: number;
+    }
   | { action: "ensure-masters" }
   | { action: "project"; limit?: number }
   | { action: "payroll-ledger-status" }
@@ -235,7 +248,10 @@ export async function POST(req: Request) {
     body.action === "project" ||
     // Reclassifying the reconstructed salary rewrites what the book says
     // about five months of pay. Same rights as the projection.
-    body.action === "payroll-overlap-reclass";
+    body.action === "payroll-overlap-reclass" ||
+    // Moving the book onto counted cash and a bank statement writes off a
+    // difference nobody has explained. Same class as opening balances.
+    body.action === "closing-balances";
 
   // Reports read the book and change nothing, so they need only view rights —
   // which is what makes a read-only auditor login possible at all. Requiring
@@ -268,7 +284,49 @@ export async function POST(req: Request) {
     "cost-centres",
     "recent-tags",
     "spend-by-centre",
+    "closing-position",
+    // One day only, so the counter may run it without seeing any balance.
+    "day-sheet",
   ]);
+
+  /**
+   * What the school is worth, as opposed to what the counter did today.
+   *
+   * Cash and bank balances and income and expenditure for the whole session
+   * are management figures. The office keys vouchers and runs the day sheet
+   * without them — see the `accounts_position` module, which the director can
+   * grant to anyone from Settings → Roles.
+   *
+   * Enforced here and not only in the UI: hiding a tab hides nothing from
+   * anyone who can open the network tab.
+   */
+  const POSITION_ACTIONS = new Set([
+    "position",
+    "cockpit",
+    "parity",
+    "trial-balance",
+    "income-expenditure",
+    "balance-sheet",
+    "receipts-payments",
+    "monthly-cash",
+    "ca-pack",
+    "account-statement",
+    "bank-recon",
+    "spend-by-centre",
+    "closing-position",
+    "closing-balances",
+  ]);
+
+  if (POSITION_ACTIONS.has(body.action)) {
+    const posAuth = await requireStaffPermission(
+      req,
+      "accounts_position",
+      // Writing a closing is still a decision about the book, so it needs
+      // approval rights on top of being allowed to see a balance at all.
+      body.action === "closing-balances" ? "approve" : "view",
+    );
+    if (!posAuth.ok) return posAuth.response;
+  }
 
   const auth = await requireStaffPermission(
     req,
@@ -312,6 +370,23 @@ export async function POST(req: Request) {
       const res = await ledgerOpenBalances({
         fyCode: body.fyCode,
         rows: body.rows,
+        createdBy: actor,
+      });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "day-sheet": {
+      const res = await readDaySheet(body.date);
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "closing-position": {
+      const res = await readClosingPosition(body.asOn);
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
+    case "closing-balances": {
+      const res = await postClosingBalances({
+        asOn: body.asOn,
+        actualCashPaise: body.actualCashPaise,
+        actualBankPaise: body.actualBankPaise,
         createdBy: actor,
       });
       return NextResponse.json(res, { status: res.ok ? 200 : 422 });

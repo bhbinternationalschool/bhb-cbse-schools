@@ -100,6 +100,8 @@
     "test:accounts": "npx tsx src/lib/accounts.selftest.ts",
     "test:desk-sync-status": "npx tsx src/lib/deskSyncStatus.selftest.ts",
     "test:ledger": "npx tsx src/lib/ledger/ledger.selftest.ts",
+    "test:closing-balance": "npx tsx src/lib/ledger/closingBalance.selftest.ts",
+    "test:accounts-position-rbac": "npx tsx src/lib/accountsPositionRbac.selftest.ts",
     "test:voucher-filter": "npx tsx src/lib/ledger/voucherFilter.selftest.ts",
     "test:voucher-amend": "npx tsx src/lib/ledger/voucherAmend.selftest.ts",
     "test:wa-templates-automation": "npx tsx src/lib/waTemplatesAutomation.selftest.ts",

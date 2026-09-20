@@ -64,6 +64,14 @@ export const L_STOCK_WRITTEN_OFF = "5066";
 export const L_PG_CLEARING = "1100";
 /** The gateway's own fee. GST on it goes to 1080 and is claimable. */
 export const L_PG_CHARGES = "5080";
+/**
+ * Where a counted-cash or bank-statement difference lands when the book and
+ * reality disagree. Deliberately its own expense head rather than corpus: a
+ * difference is a real gain or loss and an auditor must be able to see it and
+ * ask about it. Folding it into 3000 would make it disappear from the Income
+ * & Expenditure account entirely.
+ */
+export const L_BALANCE_DIFFERENCE = "5910";
 
 export const SCHEDULE_GROUPS = {
   currentAssets: "Current assets",
@@ -155,6 +163,13 @@ export function defaultLedgerAccounts(): LedgerAccountSeed[] {
     { code: L_FEE_CONCESSION, name: "Fee Concessions & RTE", kind: "expense", parentCode: "5", scheduleGroup: G.feeIncome },
     { code: L_DEPRECIATION, name: "Depreciation", kind: "expense", parentCode: "5", scheduleGroup: G.depreciation },
     { code: "5900", name: "Other Expenses", kind: "expense", parentCode: "5", scheduleGroup: G.administrative },
+    {
+      code: L_BALANCE_DIFFERENCE,
+      name: "Cash & Bank Difference (unexplained)",
+      kind: "expense",
+      parentCode: "5",
+      scheduleGroup: G.administrative,
+    },
   ];
 }
 

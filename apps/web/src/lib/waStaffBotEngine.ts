@@ -7,6 +7,7 @@ import {
   composeAdmissionsWhatsAppSnapshot,
   composeFeeWhatsAppSnapshot,
   composeLeadershipWhatsAppReport,
+  leadershipBankBalancePaise,
   composeStaffAttendanceWhatsAppSnapshot,
 } from "@/lib/waLeadershipReports.server";
 import { generateTutorText } from "@/lib/aiLlm.server";
@@ -154,6 +155,16 @@ export async function replyStaffBotIntentWithAi(
   text: string,
   ctx: { fullName: string; isOwner: boolean },
 ): Promise<{ text: string; escalate: boolean }> {
+  // The leadership report carries a bank balance, so it is fetched here —
+  // where we can await — and only for the owner. Everyone else gets the same
+  // report without that line.
+  if (intent === "reports") {
+    const bankBalancePaise = ctx.isOwner ? await leadershipBankBalancePaise() : null;
+    return {
+      escalate: false,
+      text: composeLeadershipWhatsAppReport({ bankBalancePaise }),
+    };
+  }
   const base = replyStaffBotIntent(intent, ctx);
   const trimmed = text.trim();
   if (
