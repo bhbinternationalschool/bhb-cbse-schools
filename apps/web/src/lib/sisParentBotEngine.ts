@@ -94,6 +94,87 @@ export function sisBotWelcomeText(
   ].join("\n");
 }
 
+/**
+ * Edit distance counting a swapped pair of letters as ONE mistake.
+ *
+ * Plain Levenshtein charges two for a transposition, which is the single
+ * commonest typo on a phone keyboard and the one that started this:
+ * "Recipets". `cap` stops the work early — nothing above it is a near miss
+ * and the exact number stops mattering.
+ */
+function typoDistance(a: string, b: string, cap: number): number {
+  if (a === b) return 0;
+  if (Math.abs(a.length - b.length) > cap) return cap + 1;
+  const prev2: number[] = [];
+  let prev: number[] = [];
+  let row: number[] = [];
+  for (let j = 0; j <= b.length; j++) prev[j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    row = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      let v = Math.min(row[j - 1]! + 1, prev[j]! + 1, prev[j - 1]! + cost);
+      // The swap: "pe" where "ep" was meant.
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        v = Math.min(v, prev2[j - 2]! + 1);
+      }
+      row[j] = v;
+      if (v < best) best = v;
+    }
+    if (best > cap) return cap + 1;
+    prev2.length = 0;
+    prev2.push(...prev);
+    prev = row;
+  }
+  return prev[b.length]!;
+}
+
+/**
+ * The keyword a parent nearly typed.
+ *
+ * WHY (21 Sep 2026): a father replied "Recipets" and was told "I don't have
+ * that information 🙏", and his question was queued for the office to answer
+ * by hand — something the bot already knows and answers in a second. Every
+ * match above is literal: the exact keyword, a "KEYWORD " prefix, or a regex
+ * holding the word spelled correctly. One transposed pair of letters made
+ * the whole menu invisible.
+ *
+ * Two deliberate limits, because a confidently wrong menu item is worse than
+ * asking ([[erp-unknown-must-not-become-fact]]):
+ *
+ *  - ONE word only. A keyword is what a parent sends on its own, and a
+ *    sentence gives far too many chances to land one letter from something.
+ *  - Keywords of five letters or more, so PAY, BUS, KIDS, DUES and INFO are
+ *    never guessed at — "day", "does" and "into" are words a parent may
+ *    really send, and each is one edit from a menu item.
+ *
+ * A tie between two keywords is not a guess either: it returns null.
+ */
+export function nearestSisKeyword(text: string): SisBotQuickId | null {
+  const word = (text || "").trim().toLowerCase().replace(/[^a-z]/g, "");
+  if (word.length < 4) return null;
+  if (/\s/.test((text || "").trim())) return null;
+  let best: { id: SisBotQuickId; dist: number } | null = null;
+  let tied = false;
+  for (const q of SIS_BOT_QUICK_PROMPTS) {
+    const keyword = q.waKeyword.toLowerCase();
+    if (keyword.length < 5) continue;
+    // A longer word can carry a second slip; a five-letter one cannot,
+    // because at two edits it is nearer to nothing in particular.
+    const cap = keyword.length >= 7 ? 2 : 1;
+    const dist = typoDistance(word, keyword, cap);
+    if (dist > cap) continue;
+    if (!best || dist < best.dist) {
+      best = { id: q.id, dist };
+      tied = false;
+    } else if (dist === best.dist && q.id !== best.id) {
+      tied = true;
+    }
+  }
+  return best && !tied ? best.id : null;
+}
+
 export function detectSisBotIntent(text: string): SisBotQuickId | "unknown" {
   const t = (text || "").trim();
   const upper = t.toUpperCase();
@@ -110,11 +191,16 @@ export function detectSisBotIntent(text: string): SisBotQuickId | "unknown" {
   if (/complain|complaint|grievance|shikayat/.test(low)) return "complaint";
   if (/^pay\b|upi|payment link|clear due/.test(low)) return "pay";
   if (/due|outstanding|balance|arrear|fee/.test(low)) return "dues";
-  if (/receipt|paid|voucher/.test(low)) return "receipts";
+  // The school's own Hindi menu offers "हाल की रसीदें", so the word it
+  // invites has to be a word it can read.
+  if (/receipt|paid|voucher|रसीद|raseed|rasid/.test(low)) return "receipts";
   if (/child|kid|son|daughter|student|class/.test(low)) return "kids";
   if (/info|address|timing|contact|phone|office/.test(low)) return "info";
   if (/human|staff|office|help|counsellor|call me|agent/.test(low))
     return "human";
+  // Last, and only for a single near-miss word: "Recipets".
+  const near = nearestSisKeyword(t);
+  if (near) return near;
   return "unknown";
 }
 
