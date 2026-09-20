@@ -34,6 +34,7 @@ import {
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { hasPermission } from "@/lib/rbac";
 import { ClosingBalancePanel } from "@/components/accounts/ClosingBalancePanel";
+import { DaySheetPanel } from "@/components/accounts/DaySheetPanel";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { SkeletonModulePage } from "@/components/ui/skeleton";
@@ -55,6 +56,7 @@ type AccountsTab =
   | "bills"
   | "owner"
   | "dayclose"
+  | "daysheet"
   | "closing";
 
 /**
@@ -80,6 +82,7 @@ const TABS: ModuleTabItem[] = [
   { id: "masters", label: "Masters", tone: "violet" },
   { id: "bills", label: "Bills & AP", tone: "violet" },
   { id: "owner", label: "Owner loans", tone: "coral" },
+  { id: "daysheet", label: "Day sheet", tone: "green" },
   { id: "dayclose", label: "Day close", tone: "rose" },
   { id: "closing", label: "Closing balances", tone: "rose" },
 ];
@@ -89,6 +92,14 @@ export function AccountsWorkspace() {
   // Running the projection is a bulk write to the book; the button only
   // renders for someone the API would let through anyway.
   const canApprove = hasPermission(session, null, "accounts", "approve");
+  /**
+   * What the school is worth, as against what the counter did today. Cash and
+   * bank balances, and income and expenditure for the session, are management
+   * figures — the office keys vouchers and runs the day sheet without them.
+   * The API enforces the same split, so hiding a tab is a courtesy, not the
+   * control.
+   */
+  const canSeePosition = hasPermission(session, null, "accounts_position", "view");
   const [tab, setTab] = useState<AccountsTab>("dashboard");
 
   useEffect(() => {
@@ -104,6 +115,7 @@ export function AccountsWorkspace() {
       "bills",
       "owner",
       "dayclose",
+      "daysheet",
       "closing",
     ];
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as AccountsTab);
@@ -167,7 +179,9 @@ export function AccountsWorkspace() {
 
   const dayCloseBadge = dayCloseNeedsAttention() ? "!" : undefined;
 
-  const tabsWithBadge = TABS.map((t) =>
+  // Tabs that show a balance or a session total at all.
+  const POSITION_TABS = new Set(["dashboard", "book", "bookreports", "recon", "closing"]);
+  const tabsWithBadge = TABS.filter((t) => canSeePosition || !POSITION_TABS.has(t.id)).map((t) =>
     t.id === "dayclose" ? { ...t, badge: dayCloseBadge } : t,
   );
 
@@ -289,6 +303,8 @@ export function AccountsWorkspace() {
           <LegacyBookNotice tab="Owner loans — use the owner-loan presets in Vouchers" />
           <OwnerLoansPanel {...panelProps} />
         </>
+      ) : tab === "daysheet" ? (
+        <DaySheetPanel {...panelProps} />
       ) : tab === "dayclose" ? (
         <DayCloseAccountsPanel {...panelProps} />
       ) : tab === "closing" ? (

@@ -248,6 +248,7 @@ SELFTESTS=(
   test:lead-timeline
   test:ledger
   test:closing-balance
+  test:accounts-position-rbac
   test:voucher-filter
   test:voucher-amend
   test:lesson-plan-ai

@@ -8,8 +8,6 @@ import {
   loadAdmissions,
   type AdmissionStage,
 } from "@/lib/admissions";
-import { totalBankBalancePaise } from "@/lib/accountsCashBank";
-import { loadAccounts } from "@/lib/accountsStore";
 import { loadAttendance, summarizeMarks } from "@/lib/attendance";
 import { computeFeeKpis } from "@/lib/feeFinance";
 import { formatInr, loadFees } from "@/lib/fees";
@@ -34,8 +32,27 @@ function todayIso(): string {
  * defect class this rebuild exists to remove — the line is simply omitted
  * unless a caller supplies the number.
  */
+/**
+ * The bank balance this report may print.
+ *
+ * Read from the server book, never from the accounts desk. `loadAccounts()`
+ * returns EMPTY on the server, so `totalBankBalancePaise` off it reported a
+ * flat ₹0 here — a wrong number sent to the director's phone every time, and
+ * fed to the ERP assistant as fact. See dailyBrief.server.ts, which documents
+ * the same trap for the rest of this file's inputs.
+ */
+export async function leadershipBankBalancePaise(): Promise<number | null> {
+  const today = todayIso();
+  const d = new Date(today);
+  const fyFrom = `${d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1}-04-01`;
+  const { ledgerPosition } = await import("@/lib/ledger/controls.server");
+  const pos = await ledgerPosition({ asOf: today, fyFrom });
+  // Unknown is not zero: a failed read prints no Bank line at all.
+  return pos.ok ? pos.bankPaise : null;
+}
+
 export function composeLeadershipWhatsAppReport(
-  opts: { lowStockSkus?: number } = {},
+  opts: { lowStockSkus?: number; bankBalancePaise?: number | null } = {},
 ): string {
   const masters = loadMasters();
   const ay = currentAcademicYearCode(masters);
@@ -92,7 +109,13 @@ export function composeLeadershipWhatsAppReport(
 
   const activeStaff = (masters.staff ?? []).filter((s) => s.status === "active")
     .length;
-  const bankBal = totalBankBalancePaise(loadAccounts());
+  // Supplied by the caller, and only for someone allowed to see a balance —
+  // this report goes to any staff member who types REPORTS. When it is not
+  // supplied the line is omitted rather than printed as zero.
+  const bankBal =
+    typeof opts.bankBalancePaise === "number" && Number.isFinite(opts.bankBalancePaise)
+      ? opts.bankBalancePaise
+      : null;
   const lowStock = opts.lowStockSkus;
   const transport = loadTransport();
   const activeRoutes = (transport.routes ?? []).filter((r) => r.isActive !== false)
@@ -117,7 +140,7 @@ export function composeLeadershipWhatsAppReport(
     ...(typeof lowStock === "number"
       ? [`*Store* — ${lowStock} low-stock SKUs`]
       : []),
-    `*Bank* — ${formatInr(bankBal)}`,
+    ...(bankBal === null ? [] : [`*Bank* — ${formatInr(bankBal)}`]),
     "",
     "Reply *FEE* · *ADMISSIONS* · *STAFF* · *MENU*",
   ];
