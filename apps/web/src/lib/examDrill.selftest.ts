@@ -28,7 +28,9 @@ import {
   looksLikeOwnQuestion,
   readScopeAnswer,
   renderAside,
+  drillIsForAPastPaper,
 } from "./examDrill";
+import { isPracticeTap, PRACTICE_BUTTON_EN, PRACTICE_BUTTON_HI } from "./examEve";
 
 console.log("examDrill.selftest.ts");
 
@@ -381,5 +383,54 @@ assert.equal(bare.asked[0]!.answer, undefined);
   assert.ok(!stopped.includes("में से"), "no score when nothing was marked");
 }
 
+/* ── A drill dies with its paper ─────────────────────────────────── */
+{
+  // The 20 Sep 2026 night, exactly: a session for the 19 Sep paper, a
+  // parent tapping practice for the 21 Sep one.
+  assert.equal(drillIsForAPastPaper("2026-09-19", "2026-09-21"), true);
+  // The day of the paper it is still alive — the exam is in the morning and
+  // the drill ran the evening before.
+  assert.equal(drillIsForAPastPaper("2026-09-21", "2026-09-21"), false);
+  assert.equal(drillIsForAPastPaper("2026-09-22", "2026-09-21"), false);
+  // An ISO timestamp, not just a date, still reads as its day.
+  assert.equal(drillIsForAPastPaper("2026-09-19T00:00:00Z", "2026-09-21"), true);
+  // A date nobody can read says nothing about the paper, so it says nothing.
+  assert.equal(drillIsForAPastPaper("", "2026-09-21"), false);
+  assert.equal(drillIsForAPastPaper("19/09/2026", "2026-09-21"), false);
+  assert.equal(drillIsForAPastPaper("2026-09-19", ""), false);
+}
+
+/* ── The practice button is never an answer ──────────────────────── */
+{
+  // `continueExamDrill` hands these straight back so exam-eve can pick the
+  // paper that is actually next. If this ever stops being true, the button
+  // is graded against whatever question the drill was holding — which is
+  // what six families got on 20 Sep 2026.
+  for (const tap of [PRACTICE_BUTTON_EN, PRACTICE_BUTTON_HI, "practice", "अभ्यास"]) {
+    assert.ok(isPracticeTap(tap), `the button must be recognised: ${tap}`);
+  }
+  // And the words of the button are not something a child would ever write
+  // as an answer, so nothing is lost by letting them through.
+  assert.equal(classifyDrillReply(PRACTICE_BUTTON_HI), "answer");
+}
+
+/* ── Politeness and "not now" are not wrong answers ──────────────── */
+{
+  // 20 Sep 2026: "बेटा कोचिंग गया है आएगा तो करेगा" was marked ❌ and the
+  // father was taught the preposition his son had got wrong.
+  assert.equal(classifyDrillReply("बेटा कोचिंग गया है आएगा तो करेगा"), "stop");
+  assert.equal(classifyDrillReply("abhi nahi, baad me"), "stop");
+  assert.equal(classifyDrillReply("बाहर गया है"), "stop");
+
+  for (const ack of ["Ok", "ok.", "ठीक है", "thik hai", "धन्यवाद", "🙏", "Thanks"]) {
+    assert.equal(classifyDrillReply(ack), "chatter", `acknowledgement: ${ack}`);
+  }
+
+  // The narrowness is the point: these are attempts, and marking one as
+  // small talk would lose a child's real answer.
+  for (const real of ["haan", "yes", "ji", "two", "दो", "night", "tall"]) {
+    assert.equal(classifyDrillReply(real), "answer", `a real attempt: ${real}`);
+  }
+}
 
 console.log("ok");
