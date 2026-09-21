@@ -39,6 +39,7 @@ import {
 } from "@/lib/jobApplications";
 import {
   alertLeadershipOfJobApplication,
+  archiveJobCv,
   createJobApplication,
   recentApplicationFor,
 } from "@/lib/jobApplications.server";
@@ -271,6 +272,9 @@ export async function POST(req: Request) {
 
   // The applicant does not wait on the alert.
   void trackServerWork(alertLeadershipOfJobApplication(created.application).catch(() => {}));
+  // And into the school's Drive, one folder per job seeker, as for a CV
+  // sent on WhatsApp. An archive: its failure never fails the application.
+  void trackServerWork(archiveJobCv(created.application, buffer).then(() => {}));
 
   return NextResponse.json({ ok: true, received: true });
 }

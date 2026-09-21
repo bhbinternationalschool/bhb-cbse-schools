@@ -17,6 +17,8 @@
 
 import { parseReportQuery } from "@/lib/erpReports";
 import { namesPeriodBeyondDay } from "@/lib/erpAsk";
+import { hasDevanagari, nameSoundKey } from "@/lib/nameSound";
+import { parseJobApplicantsQuery } from "@/lib/jobDesk";
 import type { WaTemplateButton } from "@/lib/waTemplates";
 import type { MastersState } from "@/lib/masters";
 import type { RbacAction, RbacModule } from "@/lib/rbac";
@@ -632,6 +634,112 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
     scope: "own_sections",
   },
   {
+    id: "class_roster",
+    title: "A class list",
+    kind: "read",
+    module: "students",
+    action: "view",
+    description:
+      "The children in one class (all sections) or one section, numbered by roll, with the count of boys and girls. What staff get for typing a class on its own.",
+    examples: ["5A", "Class 5", "IV", "LKG", "class 3 list", "5A ke bachche"],
+    fields: [
+      {
+        name: "section",
+        type: "section",
+        required: true,
+        description: "Class, or class and section, e.g. 'class 5' (all sections) or '5A'",
+      },
+    ],
+    scope: "any",
+  },
+  {
+    id: "top_dues",
+    title: "Top dues — who to call",
+    kind: "read",
+    module: "fees",
+    action: "view",
+    description:
+      "The school's biggest dues family by family, largest first: every child in the family, fees + bus + store, days overdue, and the parent's number to call. 'store dues' / 'transport dues' rank by that part alone. Office, accounts and leadership only.",
+    examples: [
+      "top 10 defaulters",
+      "defaulters",
+      "top 20 dues with number",
+      "sabse jyada baki",
+      "store dues",
+      "transport due list",
+    ],
+    fields: [],
+    scope: "any",
+  },
+  {
+    id: "job_applicants",
+    title: "Job applicants and CVs",
+    kind: "read",
+    module: "staff",
+    action: "view",
+    description:
+      "Teaching-job applicants who sent a CV (WhatsApp, careers page): filter by subject and by class or band (pre-primary, primary, middle, secondary). Each with subjects, classes, qualification, experience and the number to call; a number sends that CV.",
+    examples: [
+      "kya koi maths ke liye apply kiya hai",
+      "koi resume hai",
+      "primary ke liye cv",
+      "english teacher applications",
+      "naye biodata",
+    ],
+    fields: [{ name: "text", type: "text", required: false, description: "The question as asked" }],
+    scope: "any",
+  },
+  {
+    id: "family_card",
+    title: "A family by parent's name",
+    kind: "read",
+    module: "students",
+    action: "view",
+    description:
+      "Everything about one family found by the father's, mother's or guardian's name: every child with class and roll, each child's dues (fees + bus + store) and the family total, and the parents' numbers to call.",
+    examples: ["Ramesh Singh ke bachche", "parent Ramesh Singh", "father Ramesh Singh", "Ramesh Singh ka parivar"],
+    // "text", not "student": the name is a parent's, and must not go through
+    // the child-name lookup the desk runs for every "student" field.
+    fields: [{ name: "student", type: "text", required: true, description: "The parent's name as written" }],
+    scope: "any",
+  },
+  {
+    id: "store_summary",
+    title: "The store today",
+    kind: "read",
+    module: "store",
+    action: "view",
+    description:
+      "The store's day: sold and collected today, this month, what students owe the store, what the store owes vendors, stock value and how many items are running low.",
+    examples: ["store", "store report", "aaj ki bikri", "store sale today"],
+    fields: [],
+    scope: "any",
+  },
+  {
+    id: "inventory_stock",
+    title: "Stock and low stock",
+    kind: "read",
+    module: "store",
+    action: "view",
+    description:
+      "What is on the store's shelf: stock value, items below their reorder level (what to reorder), or one item's quantity when an item is named.",
+    examples: ["inventory", "low stock", "stock report", "notebook stock", "stock of tie", "uniform ka stock"],
+    fields: [{ name: "text", type: "text", required: false, description: "An item name, when one is asked about" }],
+    scope: "any",
+  },
+  {
+    id: "fee_help",
+    title: "How to take a fee",
+    kind: "read",
+    module: "fees",
+    action: "view",
+    description:
+      "A fee message with no child named — 'collect fee', 'take fee', 'store due', 'transport due': how to take the fee at the counter or by payment link, and how to ask for one child's dues.",
+    examples: ["Collect fee", "Take fee", "How to collect fee", "Store due", "Transport due"],
+    fields: [],
+    scope: "any",
+  },
+  {
     id: "commands_digest",
     title: "Today's command desk report (director)",
     kind: "read",
@@ -726,6 +834,30 @@ export function classKey(name: string): string | null {
   const m = /^(\d{1,2}|[ivx]{1,4}|nursery|lkg|ukg|kg|pg)\b/.exec(stripped);
   if (m) return classKey(m[1]!);
   return null;
+}
+
+/**
+ * Does a class reference as typed ("4", "5A", "class 4", "IV", "LKG", "कक्षा 5")
+ * name this class and section of Masters?
+ *
+ * WHY (21 Sep 2026): the ask desk compared letters — "4" against the label
+ * "IV A" — and this school's classes are all Roman numerals, so "Class 4 में
+ * कितने बच्चे हैं?" was answered "no active students found". Both sides go
+ * through classKey, which already knows IV is 4. Null ref = matches all;
+ * an unreadable ref matches nothing.
+ */
+export function classRefMatches(ref: string, className: string, sectionName: string): boolean {
+  const r = (ref || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^(class|grade|std|standard|kaksha|कक्षा)\s*/u, "")
+    .replace(/[\s-]+/g, "");
+  if (!r) return true;
+  const m = /^(\d{1,2}|[ivx]{1,4}|nursery|prenursery|playgroup|prekg|lkg|ukg|kg|pg)(?:st|nd|rd|th)?([a-h])?$/.exec(r);
+  if (!m) return false;
+  const want = classKey(m[1]!);
+  if (!want || want !== classKey(className)) return false;
+  return !m[2] || (sectionName || "").trim().toLowerCase() === m[2];
 }
 
 /**
@@ -902,6 +1034,31 @@ const DIGEST_WORDS =
  * decides whether the message is worth an LLM parse.
  */
 export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
+  // School-wide call lists and the store come before the report parse:
+  // "store due list" is not the fee defaulters PDF, and "top 10 defaulters
+  // with number" is a list to call from, not a document. A pdf/print word
+  // still goes to the report (parseTopDuesQuery refuses it).
+  const top = parseTopDuesQuery(text);
+  if (top) {
+    return { commandId: "top_dues", fields: { text: top.focus, date: String(top.limit) }, source: "local" };
+  }
+  // "kya koi maths ke liye apply kiya hai", "primary ke liye cv" — before
+  // the report parse, which reads "list" as a document request.
+  const jobQ = parseJobApplicantsQuery(text);
+  if (jobQ) {
+    return { commandId: "job_applicants", fields: { text: (text || "").trim() }, source: "local" };
+  }
+  // "Ramesh Singh ke bachche", "parent Ramesh Singh" — the whole family.
+  const familyQ = parseFamilyQuery(text);
+  if (familyQ) {
+    return { commandId: "family_card", fields: { student: familyQ }, source: "local" };
+  }
+  const storeQ = parseStoreQuery(text);
+  if (storeQ) {
+    return storeQ.kind === "inventory"
+      ? { commandId: "inventory_stock", fields: { text: storeQ.item }, source: "local" }
+      : { commandId: "store_summary", fields: {}, source: "local" };
+  }
   // A report request first: "class 5 defaulters report pdf" must not be read
   // as the class_defaulters reading, nor "5A attendance register" as the
   // absent list. The kind travels in `text`; class and date are resolved by
@@ -1043,7 +1200,7 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
   const feesQ = parseStudentFeesQuery(t);
   // A class plus a defaulter word is the class list — unless a name is also
   // there ("Amay Gupta 4B fees pending" is one student).
-  if (refs.length && DEFAULTER_WORDS.test(t) && !feesQ?.name) {
+  if (refs.length && (DEFAULTER_WORDS.test(t) || (TOP_DUES_DUE.test(t) && TOP_DUES_LIST.test(t))) && !feesQ?.name) {
     const r = refs[0]!;
     return {
       commandId: "class_defaulters",
@@ -1058,9 +1215,19 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
         student: [feesQ.name, feesQ.section ? `${feesQ.section.classKey}${feesQ.section.sectionName}` : "", feesQ.rollNo ? `roll ${feesQ.rollNo}` : ""]
           .filter(Boolean)
           .join(" "),
+        ...(feesQ.focus ? { text: feesQ.focus } : {}),
       },
       source: "local",
     };
+  }
+  const feeHelp = parseFeeHelpQuery(t);
+  if (feeHelp) {
+    return { commandId: "fee_help", fields: { text: feeHelp.focus }, source: "local" };
+  }
+  // Nothing but a class: "5A", "Class 5", "IV", "LKG". The class list.
+  const bareClass = parseBareClassQuery(t);
+  if (bareClass) {
+    return { commandId: "class_roster", fields: { section: bareClass }, source: "local" };
   }
   if (!refs.length && ATTENDANCE_SUMMARY_WORDS.test(t) && !FEE_WORDS.test(t)) {
     return { commandId: "attendance_summary", fields: { date: "" }, source: "local" };
@@ -1796,7 +1963,23 @@ export type StudentFeesQuery = {
   name: string;
   section?: { classKey: string; sectionName: string };
   rollNo?: string;
+  /** "Aarav store due", "Aarav ka bus fee" — the part of the dues asked about. */
+  focus?: FeeFocus;
 };
+
+export type FeeFocus = "store" | "transport";
+
+const STORE_FOCUS =
+  /(?<![\p{L}\p{M}\p{N}])(store|stationery|books?|copy|copies|uniform|sell|sale|sales|sold|kitab|kitaab|स्टोर|किताब|ड्रेस)(?![\p{L}\p{M}\p{N}])/iu;
+const TRANSPORT_FOCUS =
+  /(?<![\p{L}\p{M}\p{N}])(transport|bus|van|gaadi|gadi|vehicle|ट्रांसपोर्ट|बस|गाड़ी)(?![\p{L}\p{M}\p{N}])/iu;
+
+/** Which part of the dues a message is about, when it names one. */
+export function feeFocusOf(text: string): FeeFocus | undefined {
+  if (STORE_FOCUS.test(text)) return "store";
+  if (TRANSPORT_FOCUS.test(text)) return "transport";
+  return undefined;
+}
 
 const FEE_WORDS =
   /(?<![\p{L}\p{M}\p{N}])(fees?|dues?|pending|baki|bakaya|bakaaya|balance|outstanding|ledger|बकाया|फीस|बाकी)(?![\p{L}\p{M}\p{N}])/iu;
@@ -1816,6 +1999,22 @@ const FEE_STOP_WORDS = new Set([
   "this", "last", "previous", "week", "hafte", "hafta", "month", "mahine", "mahina", "maheene",
   "session", "year", "saal", "today", "yesterday", "aaj", "kal", "is", "iss", "pichle", "pichhle",
   "इस", "पिछले", "हफ्ते", "हफ़्ते", "महीने", "सप्ताह", "आज", "कल", "आया", "आई",
+  // What someone wants DONE with the fee. "Sujit kumar ka fees lena hai"
+  // searched for a child called "Sujit Kumar Lena"; "Collect fee" and
+  // "Take fee" for children called Collect and Take (21 Sep 2026).
+  "collect", "collecting", "take", "taking", "receive", "deposit", "submit", "pay", "paid",
+  "lena", "leni", "lene", "lelo", "jama", "karna", "karni", "karne", "karo", "kar", "karwana",
+  "bharna", "bharni", "bhar", "bhara", "bhari", "to", "wala", "wali", "abhi", "want", "wants",
+  "kaise", "kese", "kaisa", "kare", "karen", "karein", "kahan", "kaha", "कैसे", "कहाँ", "करें", "करे",
+  // Ranking and calling words: "class 10 top dues with number" is a class
+  // list, not a child called Top.
+  "top", "highest", "biggest", "sabse", "jyada", "zyada", "most", "with", "number", "numbers",
+  "mobile", "mobiles", "phone", "phones", "contact", "contacts", "call", "calling", "नंबर", "मोबाइल",
+  "लेना", "लेनी", "लेने", "जमा", "करना", "करनी", "करो", "भरना", "हैं", "में", "मे", "कितने",
+  // The part of the dues — read by feeFocusOf, never a name.
+  "store", "stationery", "book", "books", "copy", "copies", "uniform", "sell", "sale", "sales", "sold",
+  "kitab", "kitaab", "transport", "bus", "van", "gaadi", "gadi", "vehicle", "tuition", "school",
+  "स्टोर", "किताब", "ड्रेस", "ट्रांसपोर्ट", "बस", "गाड़ी",
 ]);
 
 /**
@@ -1847,10 +2046,464 @@ export function parseStudentFeesQuery(text: string): StudentFeesQuery | null {
     .map((w) => w.replace(/^[.'-]+|[.'-]+$/g, ""))
     .filter((w) => w && !FEE_STOP_WORDS.has(w) && !/^\d+$/.test(w));
   const name = words.join(" ").trim();
+  const focus = feeFocusOf(t);
   if (!name || !/[\p{L}\p{M}]{2,}/u.test(name)) {
-    return rollNo && section ? { name: "", section, rollNo } : null;
+    return rollNo && section ? { name: "", section, rollNo, ...(focus ? { focus } : {}) } : null;
   }
-  return { name, ...(section ? { section } : {}), ...(rollNo ? { rollNo } : {}) };
+  return { name, ...(section ? { section } : {}), ...(rollNo ? { rollNo } : {}), ...(focus ? { focus } : {}) };
+}
+
+/**
+ * A fee message with no child in it: "Collect fee", "Take fee", "How to
+ * collect fee", "Store due", "Transport due", "Sell due".
+ *
+ * Every one of these was answered "I couldn't find an active student
+ * matching 'collect'" — a lookup for a child who does not exist, which reads
+ * as the desk being broken. They are asking how to do something, so they
+ * get the how. Returns what they asked about, or null when the message is
+ * about something else (a class, a period, a named child).
+ */
+export function parseFeeHelpQuery(text: string): { focus: FeeFocus | "collect" } | null {
+  const t = (text || "").trim();
+  if (!t || t.length > 80) return null;
+  if (parseStudentFeesQuery(t)) return null;
+  if (extractSectionRefs(t).length) return null;
+  // "fees collected this week" is a question about collections, not a how.
+  if (detectPastOrPeriod(t)) return null;
+  const words = t
+    .toLowerCase()
+    .replace(/[^\p{L}\p{M}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!words.length || !words.every((w) => FEE_STOP_WORDS.has(w) || FEE_HELP_EXTRA.has(w))) return null;
+  const focus = feeFocusOf(t);
+  const dueWord = FEE_WORDS.test(t);
+  const collectWord = COLLECT_WORDS.test(t);
+  if (focus && (dueWord || collectWord)) return { focus };
+  if (collectWord && (dueWord || /(?<![\p{L}\p{M}])(fees?|फीस)(?![\p{L}\p{M}])/iu.test(t))) return { focus: "collect" };
+  return null;
+}
+
+const FEE_HELP_EXTRA = new Set(["where", "can", "i", "we", "do", "a"]);
+
+const COLLECT_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(collect|take|receive|deposit|submit|lena|leni|lene|lelo|jama|bharna|bharni|लेना|लेनी|जमा|भरना)(?![\p{L}\p{M}\p{N}])/iu;
+
+function detectPastOrPeriod(t: string): boolean {
+  return /(?<![\p{L}\p{M}\p{N}])(collected|collection|came|received|aaya|aayi|aya|mila|mili|today|aaj|yesterday|kal|week|hafte|month|mahine|session|आज|कल|आया)(?![\p{L}\p{M}\p{N}])/iu.test(t);
+}
+
+/** The how-to for a fee message with no child in it. */
+export function formatFeeHelpReply(focus: FeeFocus | "collect", firstName = ""): string {
+  const hi = firstName ? `${firstName}, ` : "";
+  if (focus === "store") {
+    return [
+      `${hi}store dues are kept per child. Send the child's name with it:`,
+      "_Aarav Sharma store due_",
+      "",
+      "The reply shows the store bill with the fee and bus dues, and the fee counter collects all three on one receipt.",
+      "Whole class: _5A defaulters_",
+    ].join("\n");
+  }
+  if (focus === "transport") {
+    return [
+      `${hi}transport dues are kept per child. Send the child's name with it:`,
+      "_Aarav Sharma bus due_",
+      "",
+      "Whole class: _5A defaulters_ · a bus's riders: _bus 3 list_",
+    ].join("\n");
+  }
+  return [
+    `${hi}to take a fee:`,
+    "• *At the counter* — ERP → Fees, search the child, tick the months, save. The receipt goes to the family on WhatsApp by itself.",
+    "• *Online* — send _payment link for Aarav Sharma_ and the family gets a link to pay the exact amount due.",
+    "",
+    "To see what a child owes first (fees, bus and store): _Aarav Sharma ka bakaya_",
+  ].join("\n");
+}
+
+// ─── A class on its own ───────────────────────────────────────────────
+
+const BARE_CLASS_TAIL =
+  /\s+(?:ki\s+list|ke\s+bachch?e|ke\s+students?|ke\s+chhatra|list|students?|roster|strength|bachch?e|dikhao|batao|details|info|की\s+सूची|के\s+बच्चे|सूची|बच्चे)$/iu;
+
+const BARE_CLASS_RE =
+  /^(class|grade|std|standard|kaksha|कक्षा)?\s*(\d{1,2}|[ivx]{1,4}|nursery|nur|pre\s?-?nursery|lkg|ukg|kg|pg|play\s?group)(?:st|nd|rd|th)?\s*(?:-|\s)?\s*(?:section|sec\.?)?\s*([a-h])?$/iu;
+
+/**
+ * "5A", "Class 5", "IV", "LKG", "5A list", "class 3 ke bachche" — a message
+ * that is a class and nothing else. Returns the class (and section) as the
+ * desk's section field, or null.
+ *
+ * WHY (21 Sep 2026): staff typed "5A", "4A", "Class 5" and got silence —
+ * the desk answers commands and a class alone was not one. It is the most
+ * natural thing to type when you want to see a class.
+ *
+ * Deliberately narrow. A bare number is not a class ("2" answers the desk's
+ * own numbered lists), and neither is a lone "I", "V" or "X" with no
+ * "class" in front — those are words and roll numbers as often as classes.
+ */
+export function parseBareClassQuery(text: string): string | null {
+  let t = (text || "").trim().toLowerCase().replace(/[?.!।]+$/u, "").trim();
+  if (!t || t.length > 40) return null;
+  for (let i = 0; i < 2; i += 1) t = t.replace(BARE_CLASS_TAIL, "").trim();
+  const m = BARE_CLASS_RE.exec(t);
+  if (!m) return null;
+  const hasClassWord = !!m[1];
+  const token = m[2]!.replace(/\s|-/g, "");
+  const section = (m[3] || "").toUpperCase();
+  if (!hasClassWord && !section && /^\d+$/.test(token)) return null;
+  if (!hasClassWord && /^[ivx]$/.test(token)) return null;
+  const ck = classKey(token === "nur" ? "nursery" : token);
+  if (!ck) return null;
+  return `${ck}${section}`;
+}
+
+export type ClassRosterRow = {
+  studentId: string;
+  fullName: string;
+  rollNo: string;
+  sectionLabel: string;
+  gender: string;
+};
+
+export type ClassRosterInput = {
+  title: string;
+  rows: ClassRosterRow[];
+  /** The class spans more than one section — each row says which. */
+  wholeClass: boolean;
+};
+
+const ROSTER_MAX = 60;
+
+function rosterOrder(rows: ClassRosterRow[]): ClassRosterRow[] {
+  return [...rows].sort((a, b) => {
+    const s = a.sectionLabel.localeCompare(b.sectionLabel, "en", { numeric: true });
+    if (s) return s;
+    const ra = parseInt(a.rollNo, 10);
+    const rb = parseInt(b.rollNo, 10);
+    if (Number.isFinite(ra) && Number.isFinite(rb) && ra !== rb) return ra - rb;
+    if (Number.isFinite(ra) !== Number.isFinite(rb)) return Number.isFinite(ra) ? -1 : 1;
+    return a.fullName.localeCompare(b.fullName);
+  });
+}
+
+/** The class list as WhatsApp text — numbered, so a number answers it. */
+export function formatClassRosterReply(input: ClassRosterInput): string {
+  const rows = rosterOrder(input.rows);
+  if (!rows.length) return `*${input.title}*: no active students in this session.`;
+  const boys = rows.filter((r) => /^(m|male|boy)$/i.test(r.gender)).length;
+  const girls = rows.filter((r) => /^(f|female|girl)$/i.test(r.gender)).length;
+  const split = boys + girls ? ` (${boys} boys, ${girls} girls${boys + girls < rows.length ? `, ${rows.length - boys - girls} not recorded` : ""})` : "";
+  const lines = [`*${input.title}* · ${rows.length} student${rows.length === 1 ? "" : "s"}${split}`, ""];
+  rows.slice(0, ROSTER_MAX).forEach((r, i) => {
+    const roll = r.rollNo ? ` · Roll ${r.rollNo}` : "";
+    const where = input.wholeClass ? ` · ${r.sectionLabel}` : "";
+    lines.push(`${i + 1}. ${r.fullName}${roll}${where}`);
+  });
+  if (rows.length > ROSTER_MAX) lines.push(`…and ${rows.length - ROSTER_MAX} more — send the section, e.g. _5A_.`);
+  lines.push("", "Send a number or a name for that child's details · _defaulters_ or _absent_ with the class for those lists.");
+  return lines.join("\n");
+}
+
+// ─── Who to call: the school's biggest dues ────────────────────────────
+
+/** "+91 98765 43210" — WhatsApp turns this into a tap-to-call link. */
+export function formatCallNumber(m: string): string {
+  let d = (m || "").replace(/\D/g, "");
+  if (d.length === 12 && d.startsWith("91")) d = d.slice(2);
+  if (d.length === 11 && d.startsWith("0")) d = d.slice(1);
+  return d.length === 10 ? `+91 ${d.slice(0, 5)} ${d.slice(5)}` : d;
+}
+
+const TOP_DUES_DUE =
+  /(?<![\p{L}\p{M}\p{N}])(defaulters?|bakayedar|bakaayedar|बकायेदार|dues?|baki|baaki|bakaya|bakaaya|बकाया|बाकी|overdue|outstanding|pending|owe|owes|owing)(?![\p{L}\p{M}\p{N}])/iu;
+const TOP_DUES_LIST =
+  /(?<![\p{L}\p{M}\p{N}])(top|highest|biggest|largest|sabse|सबसे|all|school|poore|pure|whole|most|call|calling|numbers?|mobiles?|phones?|contacts?|नंबर|मोबाइल)(?![\p{L}\p{M}\p{N}])/iu;
+const TOP_DUES_DOC = /(?<![\p{L}\p{M}])(pdf|print|printout|sheet|register|document)(?![\p{L}\p{M}])/iu;
+const TOP_DUES_VOCAB = new Set([
+  "top", "highest", "biggest", "largest", "sabse", "jyada", "zyada", "jada", "adhik", "all", "school",
+  "poore", "pure", "whole", "the", "of", "with", "and", "their", "parent", "parents", "call", "calling",
+  "number", "numbers", "mobile", "mobiles", "phone", "phones", "contact", "contacts", "list", "show",
+  "me", "send", "give", "batao", "dikhao", "bhejo", "do", "ke", "ki", "ka", "saath", "sath", "wale",
+  "wali", "log", "families", "family", "students", "student", "children", "bachche", "parivar",
+  "defaulter", "defaulters", "bakayedar", "bakaayedar", "due", "dues", "baki", "baaki", "bakaya",
+  "bakaaya", "overdue", "outstanding", "pending", "fee", "fees", "amount", "hai", "hain", "kaun",
+  "kis", "kiska", "kiske", "who", "owe", "owes", "owing", "most", "in", "total", "for", "please", "pls",
+  "store", "stationery", "books", "uniform", "sell", "sale", "sales", "transport", "bus", "van",
+  "सबसे", "ज्यादा", "ज़्यादा", "बकाया", "बाकी", "बकायेदार", "नंबर", "मोबाइल", "के", "की", "का",
+  "साथ", "वाले", "सूची", "list", "सारे", "सभी",
+]);
+
+/**
+ * "top 10 defaulters", "defaulters", "sabse jyada baki", "top 20 dues with
+ * number", "store dues", "transport due list" — the school's biggest dues,
+ * family by family, with the number to call. Null for one class (that is
+ * class_defaulters), one child (student_fees), or a document (the report).
+ */
+export function parseTopDuesQuery(text: string): { limit: number; focus: FeeFocus | "" } | null {
+  const t = (text || "").trim();
+  if (!t || t.length > 120) return null;
+  if (TOP_DUES_DOC.test(t)) return null;
+  if (!TOP_DUES_DUE.test(t)) return null;
+  const low = t.toLowerCase().replace(/[?.!।,]+/gu, " ");
+  // "top 10" is a count, not class X. Take the count out before looking
+  // for a class, so "top 10 defaulters" is never read as class 10.
+  const nm =
+    /(?<![\p{L}\p{N}])(?:top|sabse|सबसे)?\s*(\d{1,2})(?![\p{L}\p{N}])/u.exec(low);
+  const limit = nm ? Math.min(25, Math.max(1, parseInt(nm[1]!, 10))) : 10;
+  if (extractSectionRefs(low).length) return null;
+  const rest = nm ? low.replace(nm[0], " ") : low;
+  const words = rest.split(/\s+/).filter(Boolean);
+  // Anything left over is a name: "Aarav store due" is one child's dues.
+  if (!words.every((w) => TOP_DUES_VOCAB.has(w))) return null;
+  const focus = feeFocusOf(t) ?? "";
+  const bare = words.every((w) => /^(defaulters?|bakayedar|bakaayedar|बकायेदार|all|school|sabhi|सभी|सारे)$/.test(w));
+  // A bare "store due" / "transport dues" is the list too — nothing else
+  // could be meant by it.
+  if (!(TOP_DUES_LIST.test(rest) || nm || bare || focus)) return null;
+  // "pending" alone ("leave pending") is not about money.
+  if (!/(defaulter|bakayedar|bakaayedar|बकायेदार|due|baki|baaki|bakaya|bakaaya|बकाया|बाकी|overdue|outstanding|fee|owe)/iu.test(rest)) return null;
+  return { limit, focus };
+}
+
+export type TopDuesFamily = {
+  /** The child the number opens (the one owing most). */
+  studentId: string;
+  children: { name: string; classLabel: string }[];
+  feesPaise: number;
+  transportPaise: number;
+  storePaise: number;
+  overdueDays: number;
+  guardian: string;
+  mobile: string;
+};
+
+export type TopDuesInput = {
+  todayIso: string;
+  focus: FeeFocus | "";
+  limit: number;
+  families: TopDuesFamily[];
+  storeUnread: boolean;
+  formatInr: (paise: number) => string;
+};
+
+function familyAmount(f: TopDuesFamily, focus: FeeFocus | ""): number {
+  if (focus === "store") return f.storePaise;
+  if (focus === "transport") return f.transportPaise;
+  return f.feesPaise + f.transportPaise + f.storePaise;
+}
+
+function topDuesInOrder(input: TopDuesInput): TopDuesFamily[] {
+  return input.families
+    .filter((f) => familyAmount(f, input.focus) > 0)
+    .sort((a, b) => familyAmount(b, input.focus) - familyAmount(a, input.focus) || b.overdueDays - a.overdueDays)
+    .slice(0, input.limit);
+}
+
+/** The families to call, biggest debt first, with the number to call. */
+export function formatTopDuesReply(input: TopDuesInput): string {
+  const inr = input.formatInr;
+  const what = input.focus === "store" ? "store dues" : input.focus === "transport" ? "transport dues" : "dues";
+  const owing = input.families.filter((f) => familyAmount(f, input.focus) > 0);
+  const total = owing.reduce((s, f) => s + familyAmount(f, input.focus), 0);
+  const lines = [`*Top ${Math.min(input.limit, owing.length) || input.limit} ${what}* · ${shortDate(input.todayIso)}`];
+  if (input.focus === "store" && input.storeUnread) {
+    return [...lines, "The store's dues couldn't be read just now. Try again in a minute."].join("\n");
+  }
+  if (!owing.length) return [...lines, `No family has ${what} overdue. ✅`].join("\n");
+  lines.push(`${owing.length} famil${owing.length === 1 ? "y owes" : "ies owe"} *${inr(total)}* in all`);
+  topDuesInOrder(input).forEach((f, i) => {
+    const kids = f.children.map((c) => `${c.name} (${c.classLabel})`).join(", ");
+    const parts: string[] = [];
+    if (!input.focus) {
+      if (f.feesPaise > 0) parts.push(`fees ${inr(f.feesPaise)}`);
+      if (f.transportPaise > 0) parts.push(`bus ${inr(f.transportPaise)}`);
+      if (f.storePaise > 0) parts.push(`store ${inr(f.storePaise)}`);
+    }
+    lines.push(
+      "",
+      `*${i + 1}.* ${kids}`,
+      `   *${inr(familyAmount(f, input.focus))}*${f.overdueDays > 0 ? ` · ${f.overdueDays}d` : ""}${parts.length > 1 ? ` · ${parts.join(" + ")}` : ""}`,
+      f.mobile
+        ? `   📞 ${f.guardian ? `${f.guardian} ` : ""}${formatCallNumber(f.mobile)}`
+        : "   📞 no number on record",
+    );
+  });
+  if (input.storeUnread) lines.push("", "Store bills couldn't be read just now, so they are not in these totals.");
+  lines.push("", "Send a number for that child's full dues · _5A defaulters_ for one class.");
+  return lines.join("\n");
+}
+
+export function topDuesPicks(input: TopDuesInput): PickOption[] {
+  return topDuesInOrder(input).map((f, i) => ({
+    n: i + 1,
+    label: f.children[0]?.name ?? "",
+    commandId: "student_fees",
+    studentId: f.studentId,
+    rerunText: f.children[0]?.name ?? "",
+  }));
+}
+
+// ─── The store and its stock ───────────────────────────────────────────
+
+const STORE_SUMMARY_RE =
+  /^(?:(?:show|send|give)\s+)?(?:the\s+)?(?:store|shop|dukaan|dukan|स्टोर)(?:\s+(?:report|summary|status|today|aaj|sale|sales|bikri|collection|ka\s+hisab|ka\s+hisaab|hisab|kaisa|kitna|ki\s+bikri))*$|^(?:aaj\s+ki\s+)?(?:bikri|store\s+sale)$/iu;
+
+const INVENTORY_RE =
+  /^(?:(?:show|send|give|check)\s+)?(?:the\s+)?(?:inventory|stock|low\s+stock|stock\s+report|stock\s+list|stock\s+status|reorder(?:\s+list)?|out\s+of\s+stock|kya\s+khatam\s+hai|khatam\s+saman|inventory\s+report|स्टॉक)(?:\s+(?:report|status|list|kitna|kya\s+hai|hai|batao|dikhao))*$/iu;
+
+/**
+ * "store", "store report", "aaj ki bikri" → the store's day; "inventory",
+ * "stock", "low stock" → what is on the shelf and what is running out;
+ * "notebook stock", "stock of tie", "uniform ka stock" → that item.
+ */
+export function parseStoreQuery(text: string): { kind: "store" } | { kind: "inventory"; item: string } | null {
+  const t = (text || "").trim().replace(/[?.!।]+$/u, "").trim();
+  if (!t || t.length > 60) return null;
+  if (STORE_SUMMARY_RE.test(t)) return { kind: "store" };
+  if (INVENTORY_RE.test(t)) return { kind: "inventory", item: "" };
+  const item =
+    /^(?:stock\s+(?:of|for)\s+)(.{2,40})$/iu.exec(t)?.[1] ??
+    /^(.{2,40}?)\s+(?:ka|ki|ke)?\s*(?:stock|स्टॉक)(?:\s+(?:kitna|kitni|kitne|hai|batao|kya\s+hai|left|bacha|bachi))*$/iu.exec(t)?.[1] ??
+    /^how\s+(?:many|much)\s+(.{2,40}?)\s+(?:in\s+stock|left|do\s+we\s+have)$/iu.exec(t)?.[1];
+  if (item && !/^(low|the|all|school)$/i.test(item.trim())) return { kind: "inventory", item: item.trim() };
+  return null;
+}
+
+export type StoreSummaryInput = {
+  todayIso: string;
+  salesTodayPaise: number;
+  collectedTodayPaise: number;
+  marginTodayPaise: number;
+  monthSalesPaise: number;
+  monthMarginPaise: number;
+  studentOutstandingPaise: number;
+  vendorOutstandingPaise: number;
+  vendorOverduePaise: number;
+  stockValuePaise: number;
+  lowStockCount: number;
+  itemCount: number;
+  /** Margins are for the director and accounts only. */
+  showMargin: boolean;
+  formatInr: (paise: number) => string;
+};
+
+export function formatStoreSummaryReply(input: StoreSummaryInput): string {
+  const inr = input.formatInr;
+  const lines = [
+    `*Store* · ${shortDate(input.todayIso)}`,
+    `Sold today: *${inr(input.salesTodayPaise)}* · collected ${inr(input.collectedTodayPaise)}${input.showMargin ? ` · margin ${inr(input.marginTodayPaise)}` : ""}`,
+    `This month: ${inr(input.monthSalesPaise)}${input.showMargin ? ` · margin ${inr(input.monthMarginPaise)}` : ""}`,
+    "",
+    `Students owe the store: *${inr(input.studentOutstandingPaise)}*`,
+    `Store owes vendors: ${inr(input.vendorOutstandingPaise)}${input.vendorOverduePaise > 0 ? ` (${inr(input.vendorOverduePaise)} overdue)` : ""}`,
+    `Stock: ${input.itemCount} items · ${inr(input.stockValuePaise)}${input.lowStockCount ? ` · *${input.lowStockCount} running low*` : ""}`,
+    "",
+    "_store dues_ for who owes the store · _low stock_ for what to reorder · _notebook stock_ for one item",
+  ];
+  return lines.join("\n");
+}
+
+export type InventoryRow = {
+  itemName: string;
+  categoryName: string;
+  uomName: string;
+  qtyOnHand: number;
+  reorderLevel: number;
+  belowReorder: boolean;
+  valuePaise: number;
+};
+
+export type InventoryInput = {
+  item: string;
+  rows: InventoryRow[];
+  totals: { valuePaise: number; lines: number; belowReorder: number };
+  formatInr: (paise: number) => string;
+};
+
+const INVENTORY_SHOWN = 20;
+
+function qty(n: number, uom: string): string {
+  const v = Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/\.?0+$/, "");
+  return uom ? `${v} ${uom}` : v;
+}
+
+/** Items matching every word typed, by name or category. */
+export function matchInventoryRows<T extends { itemName: string; categoryName: string }>(rows: T[], item: string): T[] {
+  const words = item.toLowerCase().split(/\s+/).filter((w) => w.length >= 2);
+  if (!words.length) return rows;
+  return rows.filter((r) => {
+    const hay = `${r.itemName} ${r.categoryName}`.toLowerCase();
+    return words.every((w) => hay.includes(w) || hay.includes(w.replace(/s$/, "")));
+  });
+}
+
+export function formatInventoryReply(input: InventoryInput): string {
+  const inr = input.formatInr;
+  if (input.item) {
+    const hits = matchInventoryRows(input.rows, input.item);
+    if (!hits.length) return `No store item matches "${input.item}". Try a shorter word — e.g. _notebook stock_.`;
+    const lines = [`*Stock · ${input.item}*`];
+    for (const r of hits.slice(0, INVENTORY_SHOWN)) {
+      lines.push(
+        `${r.itemName}: *${qty(r.qtyOnHand, r.uomName)}*${r.reorderLevel > 0 ? ` (reorder at ${qty(r.reorderLevel, "")})` : ""}${r.belowReorder ? " ⚠️ low" : ""}`,
+      );
+    }
+    if (hits.length > INVENTORY_SHOWN) lines.push(`+${hits.length - INVENTORY_SHOWN} more — add a word to narrow it.`);
+    return lines.join("\n");
+  }
+  const low = input.rows
+    .filter((r) => r.belowReorder)
+    .sort((a, b) => a.qtyOnHand - a.reorderLevel - (b.qtyOnHand - b.reorderLevel));
+  // Out of stock is a fact whatever the reorder levels say.
+  const out = input.rows.filter((r) => r.qtyOnHand <= 0 && !r.belowReorder);
+  const lines = [
+    `*Inventory* · ${input.totals.lines} items · stock worth *${inr(input.totals.valuePaise)}*`,
+  ];
+  if (out.length) {
+    lines.push("", `*${out.length} out of stock:*`);
+    for (const r of out.slice(0, INVENTORY_SHOWN)) lines.push(`• ${r.itemName}`);
+  }
+  // No reorder level anywhere is not "nothing is low" — nobody has said
+  // what low is (21 Sep 2026: 0 of 30 items had a level). Show the
+  // smallest quantities instead and say why.
+  const levelsSet = input.rows.some((r) => r.reorderLevel > 0);
+  if (!levelsSet) {
+    const least = input.rows
+      .filter((r) => r.qtyOnHand > 0)
+      .sort((a, b) => a.qtyOnHand - b.qtyOnHand)
+      .slice(0, 10);
+    lines.push("", "No item has a reorder level set, so what is *running low* can't be judged — set one per item in the Store.");
+    if (least.length) {
+      lines.push("", "*Lowest quantities:*");
+      for (const r of least) lines.push(`• ${r.itemName}: ${qty(r.qtyOnHand, r.uomName)}`);
+    }
+  } else if (!low.length) {
+    lines.push("", "Nothing below its reorder level. ✅");
+  } else {
+    lines.push("");
+    lines.push(`*${low.length} running low* — reorder:`, "");
+    for (const r of low.slice(0, INVENTORY_SHOWN)) {
+      lines.push(`• ${r.itemName}: ${qty(r.qtyOnHand, r.uomName)} left (reorder at ${qty(r.reorderLevel, "")})`);
+    }
+    if (low.length > INVENTORY_SHOWN) lines.push(`+${low.length - INVENTORY_SHOWN} more — open Store in the ERP.`);
+  }
+  lines.push("", "_notebook stock_ for one item · _store_ for today's sales");
+  return lines.join("\n");
+}
+
+/** Each printed number opens that child's details. */
+export function classRosterPicks(input: ClassRosterInput): PickOption[] {
+  return rosterOrder(input.rows)
+    .slice(0, ROSTER_MAX)
+    .map((r, i) => ({
+      n: i + 1,
+      label: r.fullName,
+      commandId: "student_details",
+      studentId: r.studentId,
+      rerunText: r.fullName,
+    }));
 }
 
 export type StudentLike = {
@@ -1977,6 +2630,21 @@ export function matchStudents<T extends StudentLike>(
   }
   // Only when nothing spelled correctly matched at all.
   if (!out.length && fuzzy.length) out.push(...fuzzy);
+  // Still nothing: compare how the names sound. This is what finds
+  // "वैभव पांडे" as Vaibhav Pandey — the name typed in Hindi, stored in
+  // English — and "Siddharth" as Sidharth. Last, so it can never beat a
+  // spelling that matched.
+  if (!out.length) {
+    const qs = q.map(nameSoundKey).filter(Boolean);
+    if (qs.length === q.length) {
+      for (const s of pool) {
+        const ns = nameTokens(s.fullName).map(nameSoundKey);
+        if (qs.every((w) => ns.some((n) => n.startsWith(w) || fuzzyWordMatch(w, n)))) {
+          out.push({ student: s, score: 0 });
+        }
+      }
+    }
+  }
   out.sort(
     (a, b) =>
       b.score - a.score ||
@@ -2011,6 +2679,14 @@ export type StudentFeesInput = {
   /** full: fee desk / leadership — concession names and sibling line. */
   detail: "full" | "basic";
   formatInr: (paise: number) => string;
+  /** The part asked about ("Aarav store due") — said first, on its own line. */
+  focus?: FeeFocus;
+  /** The store could not be read, so its bills are missing from the total. */
+  storeUnread?: boolean;
+  /** Numbers to call, in order ("Father Ramesh Singh"); shown in full only when callable. */
+  contacts?: { label: string; mobile: string }[];
+  /** The asker may see the numbers in full: office, accounts, the child's own teachers. */
+  callable?: boolean;
 };
 
 function maskMobile(m: string): string {
@@ -2036,6 +2712,15 @@ export function formatStudentFeesReply(input: StudentFeesInput): string {
   const ahead = input.dues.filter((d) => d.future && d.balancePaise > 0);
   const total = now.reduce((s, d) => s + d.balancePaise, 0);
   const lines: string[] = [head];
+  if (input.focus) {
+    const part = now.filter((d) => d.kind === input.focus).reduce((s, d) => s + d.balancePaise, 0);
+    const what = input.focus === "store" ? "Store" : "Transport";
+    if (input.focus === "store" && input.storeUnread) {
+      lines.push("Store dues: couldn't be read just now — try again in a minute.");
+    } else {
+      lines.push(part > 0 ? `${what} due: *${inr(part)}*` : `${what}: nothing due ✅`, "");
+    }
+  }
 
   if (!now.length) {
     lines.push("No dues pending today. ✅");
@@ -2087,6 +2772,9 @@ export function formatStudentFeesReply(input: StudentFeesInput): string {
     lines.push("", `Pay-ahead, not yet due: ${span}, ${inr(aheadTotal)}`);
   }
 
+  if (input.storeUnread && input.focus !== "store") {
+    lines.push("Store bills couldn't be read just now, so they are not in this total.");
+  }
   if (input.lastReceipt) {
     const r = input.lastReceipt;
     lines.push(
@@ -2095,7 +2783,17 @@ export function formatStudentFeesReply(input: StudentFeesInput): string {
   } else {
     lines.push("No receipt on record this session.");
   }
-  if (input.parentMobile) lines.push(`Parent: ${maskMobile(input.parentMobile)}`);
+  if (input.callable && input.contacts?.length) {
+    const seen = new Set<string>();
+    for (const c of input.contacts) {
+      const key = (c.mobile || "").replace(/\D/g, "").slice(-10);
+      if (key.length < 10 || seen.has(key)) continue;
+      seen.add(key);
+      lines.push(`📞 ${c.label}: ${formatCallNumber(c.mobile)}`);
+    }
+  } else if (input.parentMobile) {
+    lines.push(`Parent: ${maskMobile(input.parentMobile)}`);
+  }
 
   if (input.detail === "full" && input.siblings.length) {
     for (const sib of input.siblings) {
@@ -2502,6 +3200,9 @@ export type DefaulterRow = {
   earliestDueOn: string;
   onPlan: boolean;
   studentId?: string;
+  /** The number to call the family on, and who answers it. */
+  mobile?: string;
+  guardian?: string;
 };
 
 export type ClassDefaultersInput = {
@@ -2571,7 +3272,8 @@ export function formatClassDefaultersReply(input: ClassDefaultersInput): string 
   const row = (r: DefaulterRow, i: number) => {
     const since = r.earliestDueOn ? shortDate(r.earliestDueOn) : "";
     const name = asRoll || !r.rollNo ? r.fullName : `${r.fullName} (roll ${r.rollNo})`;
-    return `*${ns[i]}.* ${name}  ${inr(r.overdueAmountPaise)} · ${r.overdueDays}d${since ? ` (${since})` : ""}${r.onPlan ? " · plan" : ""}`;
+    const head = `*${ns[i]}.* ${name}  ${inr(r.overdueAmountPaise)} · ${r.overdueDays}d${since ? ` (${since})` : ""}${r.onPlan ? " · plan" : ""}`;
+    return r.mobile ? `${head}\n    📞 ${r.guardian ? `${r.guardian} ` : ""}${formatCallNumber(r.mobile)}` : head;
   };
   if (input.wholeClass) {
     let i = 0;
@@ -4922,7 +5624,7 @@ const FOLLOW_UP_STOP_WORDS = new Set([
  * digits, no punctuation beyond what names carry, and nothing from the
  * keyword vocabulary the other bots own.
  */
-export function looksLikeBareName(text: string): boolean {
+export function looksLikeBareName(text: string, opts: { minSingle?: number } = {}): boolean {
   const t = (text || "").trim();
   if (!t || t.length > 60) return false;
   if (/[0-9]/.test(t)) return false;
@@ -4932,8 +5634,49 @@ export function looksLikeBareName(text: string): boolean {
   if (FOLLOW_UP_STOP_WORDS.has(t.toLowerCase())) return false;
   if (words.every((w) => FOLLOW_UP_STOP_WORDS.has(w.toLowerCase()))) return false;
   // A single word has to look like a name rather than an interjection.
-  if (words.length === 1 && t.length < 3) return false;
+  if (words.length === 1 && t.length < (opts.minSingle ?? 3)) return false;
   return true;
+}
+
+/** What people say to each other — never a child's name, whatever the roster holds. */
+const CHAT_WORDS = new Set([
+  "good", "morning", "evening", "afternoon", "night", "noon", "sir", "mam", "maam", "madam", "ma'am",
+  "ji", "jee", "thanks", "thank", "you", "thankyou", "ty", "done", "noted", "ok", "okay", "haan",
+  "han", "ha", "nahi", "nahin", "theek", "thik", "accha", "acha", "achha", "hmm", "hm", "sorry",
+  "please", "welcome", "bye", "namaste", "namaskar", "pranam", "pranaam", "sure", "fine", "great",
+  "nice", "test", "testing", "tutor", "inventory", "map", "live", "hello", "hi", "hey",
+  "जी", "नमस्ते", "नमस्कार", "प्रणाम", "धन्यवाद", "ठीक", "हाँ", "हां", "नहीं", "अच्छा", "सर", "मैडम",
+]);
+
+/**
+ * A name typed with nothing before it — which of the roster's matches may
+ * be answered without being asked.
+ *
+ * WHY (21 Sep 2026): staff typed "Sujit kumar", "Aarav singh", "Om" and got
+ * silence; the desk only read a bare name right after it had printed a list.
+ * Answering every bare word is the opposite failure — "Sir" would open
+ * Sirisha's record — so a name on its own is answered only when it is
+ * plainly a child's:
+ *  - one word must BE one of the child's names, not the start of one;
+ *  - two or more words must each start one (matchStudents already asks
+ *    this), so "Good morning" never finds anyone;
+ *  - a name typed in Hindi is compared by sound (वैभव is Vaibhav).
+ * Anything else returns nothing and the desk stays quiet, as before.
+ */
+export function unpromptedNameMatches<T extends StudentLike>(
+  text: string,
+  matches: StudentMatch<T>[],
+): StudentMatch<T>[] {
+  const words = nameTokens(text);
+  if (!words.length || !matches.length) return [];
+  if (words.every((w) => CHAT_WORDS.has(w) || FOLLOW_UP_STOP_WORDS.has(w))) return [];
+  if (words.length > 1) return matches;
+  const w = words[0]!;
+  const key = nameSoundKey(w);
+  const dev = hasDevanagari(w);
+  return matches.filter((m) =>
+    nameTokens(m.student.fullName).some((n) => n === w || (dev && !!key && nameSoundKey(n) === key)),
+  );
 }
 
 /**
@@ -5016,4 +5759,173 @@ export function followUpIsFresh(atIso: string, nowMs: number): boolean {
   if (!Number.isFinite(at)) return false;
   const age = nowMs - at;
   return age >= 0 && age <= FOLLOW_UP_WINDOW_MINUTES * 60 * 1000;
+}
+
+// ─── A parent's name: the whole family ─────────────────────────────────
+
+const FAMILY_TAIL =
+  /\s+(?:ke|ki|ka|के|की|का)\s+(?:bachche|bachhe|bacche|bachcho|baccho|bachon|children|kids|parivar|pariwar|family|बच्चे|बच्चों|परिवार)(?:\s+(?:ki|ke|ka|की|के|का)?\s*(?:details?|jankari|jaankari|जानकारी|dues?|bakaya|बकाया|list|dikhao|batao|दिखाओ|बताओ))*$|\s+(?:family|parivar|pariwar|परिवार)(?:\s+(?:details?|dues?|list))?$/iu;
+const FAMILY_HEAD =
+  /^(?:(?:show\s+)?(?:parent|parents|father|mother|guardian|papa|pita|mata|abhibhavak|पिता|माता|अभिभावक)\s*(?:name\s*)?[:-]?\s+)(.+)$/iu;
+
+/**
+ * "Ramesh Singh ke bachche", "Ramesh Singh ka parivar", "parent Ramesh
+ * Singh", "father Ramesh Singh", "पिता रमेश सिंह" — the parent's name, or
+ * null. A bare parent name is handled by the server after no child
+ * matched (see familyNameMatches).
+ */
+export function parseFamilyQuery(text: string): string | null {
+  const t = (text || "").trim().replace(/[?.!।]+$/u, "").trim();
+  if (!t || t.length > 80) return null;
+  // A number picked from "which family?" — the household itself.
+  const pinned = /^family\s+(hh:\S+)$/i.exec(t);
+  if (pinned) return pinned[1]!;
+  let name = "";
+  const head = FAMILY_HEAD.exec(t);
+  if (head) name = head[1]!;
+  else if (FAMILY_TAIL.test(t)) name = t.replace(FAMILY_TAIL, "");
+  name = name.replace(/^(mr|mrs|ms|shri|smt|श्री|श्रीमती)\.?\s+/iu, "").trim();
+  if (!name || /\d/.test(name) || name.split(/\s+/).length > 4) return null;
+  if (!/[\p{L}]{2,}/u.test(name)) return null;
+  return name;
+}
+
+export type ParentLike = StudentLike & {
+  householdId?: string;
+  fatherName?: string;
+  motherName?: string;
+};
+
+export type FamilyMatch = {
+  householdId: string;
+  /** Who the name is, in this family: "Father Ramesh Singh". */
+  asWho: string;
+  childIds: string[];
+};
+
+/**
+ * Families whose father, mother or guardian carries every word typed —
+ * each word starting one of the parent's names, or sounding like it when
+ * typed in Hindi. One row per family, not per child.
+ *
+ * A single word is never enough on its own ("Singh" is half the school);
+ * the explicit form ("Ramesh ke bachche") is allowed one word because the
+ * asker said it is a parent.
+ */
+export function familyNameMatches<T extends ParentLike>(
+  name: string,
+  students: T[],
+  opts: { academicYearCode: string; guardianOf?: (householdId: string) => string; allowSingleWord?: boolean },
+): FamilyMatch[] {
+  const q = nameTokens(name.replace(/^(mr|mrs|ms|shri|smt|श्री|श्रीमती)\.?\s+/iu, ""));
+  if (!q.length || (q.length < 2 && !opts.allowSingleWord)) return [];
+  if (q.every((w) => CHAT_WORDS.has(w))) return [];
+  const qs = q.map(nameSoundKey);
+  const dev = q.some(hasDevanagari);
+  const fits = (full: string) => {
+    const nt = nameTokens(full);
+    if (!nt.length) return false;
+    if (q.every((w) => nt.some((n) => n.startsWith(w)))) return true;
+    // Spelling slack is for Hindi-typed names only. Ramesh and Rakesh are
+    // one letter apart and two different fathers: opening the wrong
+    // family's dues and numbers is worse than finding none. Latin needs
+    // the same sound (Pandey / Pande), not a near miss.
+    const ns = nt.map(nameSoundKey);
+    if (!dev) return qs.every((w) => !!w && w.length >= 3 && ns.some((n) => n === w || n.startsWith(w)));
+    return qs.every((w) => !!w && ns.some((n) => n.startsWith(w) || fuzzyWordMatch(w, n)));
+  };
+  const byHh = new Map<string, FamilyMatch>();
+  for (const s of students) {
+    if (s.status !== "active" || s.academicYearCode !== opts.academicYearCode) continue;
+    const hh = s.householdId || `solo:${s.id}`;
+    let asWho = "";
+    if (s.fatherName && fits(s.fatherName)) asWho = `Father ${s.fatherName}`;
+    else if (s.motherName && fits(s.motherName)) asWho = `Mother ${s.motherName}`;
+    else {
+      const g = s.householdId && opts.guardianOf ? opts.guardianOf(s.householdId) : "";
+      if (g && fits(g)) asWho = `Guardian ${g}`;
+    }
+    const cur = byHh.get(hh);
+    if (asWho) {
+      if (cur) {
+        if (!cur.childIds.includes(s.id)) cur.childIds.push(s.id);
+      } else byHh.set(hh, { householdId: hh, asWho, childIds: [s.id] });
+    }
+  }
+  return [...byHh.values()];
+}
+
+export type FamilyChild = {
+  studentId: string;
+  name: string;
+  classLabel: string;
+  rollNo: string;
+  admissionNo: string;
+  feesPaise: number;
+  transportPaise: number;
+  storePaise: number;
+  aheadPaise: number;
+};
+
+export type FamilyCardInput = {
+  asWho: string;
+  contacts: { label: string; mobile: string }[];
+  /** Numbers in full: office, accounts, a teacher of one of these children. */
+  callable: boolean;
+  /** Dues are a fee reading; without fees · view they are left out. */
+  showDues: boolean;
+  children: FamilyChild[];
+  locality: string;
+  storeUnread: boolean;
+  formatInr: (paise: number) => string;
+};
+
+export function formatFamilyCard(input: FamilyCardInput): string {
+  const inr = input.formatInr;
+  const lines = [`*Family* · ${input.asWho}`];
+  if (input.locality) lines.push(input.locality);
+  const seen = new Set<string>();
+  for (const c of input.contacts) {
+    const key = (c.mobile || "").replace(/\D/g, "").slice(-10);
+    if (key.length < 10 || seen.has(key)) continue;
+    seen.add(key);
+    lines.push(`📞 ${c.label}: ${input.callable ? formatCallNumber(c.mobile) : maskMobile(c.mobile)}`);
+  }
+  if (!input.callable && seen.size) lines.push("(numbers are shown in full to the office and the children's teachers)");
+  lines.push("", `*Children (${input.children.length})*`);
+  let total = 0;
+  input.children.forEach((c, i) => {
+    const due = c.feesPaise + c.transportPaise + c.storePaise;
+    total += due;
+    const who = `*${i + 1}.* ${c.name} · ${c.classLabel}${c.rollNo ? ` · Roll ${c.rollNo}` : ""}${c.admissionNo ? ` · Adm ${c.admissionNo}` : ""}`;
+    lines.push(who);
+    if (input.showDues) {
+      const parts: string[] = [];
+      if (c.feesPaise > 0) parts.push(`fees ${inr(c.feesPaise)}`);
+      if (c.transportPaise > 0) parts.push(`bus ${inr(c.transportPaise)}`);
+      if (c.storePaise > 0) parts.push(`store ${inr(c.storePaise)}`);
+      lines.push(due > 0 ? `   Due now *${inr(due)}*${parts.length > 1 ? ` (${parts.join(" + ")})` : ""}` : "   Nothing due ✅");
+    }
+  });
+  if (input.showDues) {
+    lines.push("", total > 0 ? `Family total due now: *${inr(total)}*` : "The family owes nothing today. ✅");
+    const ahead = input.children.reduce((s, c) => s + c.aheadPaise, 0);
+    if (ahead > 0) lines.push(`Not yet due (later months): ${inr(ahead)}`);
+    if (input.storeUnread) lines.push("Store bills couldn't be read just now, so they are not in these totals.");
+  }
+  lines.push("", "Send a number for that child's full dues and receipts.");
+  return lines.join("\n");
+}
+
+export function familyCardPicks(children: FamilyChild[]): PickOption[] {
+  return children.map((c, i) => ({ n: i + 1, label: c.name, commandId: "student_fees", studentId: c.studentId, rerunText: c.name }));
+}
+
+/** "Which Ramesh Singh?" — several families answer to the name. */
+export function formatFamilyChoice(name: string, rows: { asWho: string; childNames: string[] }[]): string {
+  const lines = [`More than one family matches *${name}*:`, ""];
+  rows.slice(0, 9).forEach((r, i) => lines.push(`*${i + 1}.* ${r.asWho} — ${r.childNames.join(", ")}`));
+  if (rows.length > 9) lines.push(`+${rows.length - 9} more — add the surname or a child's name.`);
+  lines.push("", "Send the number.");
+  return lines.join("\n");
 }

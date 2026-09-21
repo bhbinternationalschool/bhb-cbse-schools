@@ -265,6 +265,8 @@ jobs:
           npm run test:exam-eve
           npm run test:tutor-guide
           npm run test:wa-parent-guide
+          npm run test:staff-chat-bare
+          npm run test:job-desk
           npm run test:fee-adjustments-merge
           npm run test:parent-bot-clarify
           npm run test:office-backlog

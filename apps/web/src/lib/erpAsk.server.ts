@@ -35,7 +35,8 @@ import { classLabel } from "@/lib/homework";
 import { formatInr, loadMasters, type MastersState } from "@/lib/masters";
 import { hasPermission, type RbacState } from "@/lib/rbac";
 import { getServerTenantContext } from "@/lib/serverTenant";
-import { loadSis } from "@/lib/sis";
+import { classRefMatches } from "@/lib/erpCommands";
+import { loadSis, studentsInSession } from "@/lib/sis";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
 
 export type ErpAskReaders = {
@@ -84,18 +85,6 @@ async function readOpenDues(ay: string): Promise<DueRow[] | null> {
   return rows;
 }
 
-function normalizeClassRef(s: string): string {
-  return s.toLowerCase().replace(/\b(class|kaksha|std|grade)\b/g, "").replace(/[^a-z0-9]/g, "");
-}
-
-function classMatches(label: string, ref: string): boolean {
-  const l = normalizeClassRef(label);
-  const r = normalizeClassRef(ref);
-  if (!r) return true;
-  // "5" matches "Class 5 A" and "Class 5 B"; "5a" matches only "Class 5 A".
-  return l === r || l.startsWith(r) && /^[a-z]?$/.test(l.slice(r.length));
-}
-
 async function collections(tool: ErpAskPlanTool, session: DemoSession, todayIso: string): Promise<ErpAskFact> {
   await ensureFeesHydratedServer();
   const ay = session.academicYearCode;
@@ -128,8 +117,15 @@ async function duesAgeing(tool: ErpAskPlanTool, input: ErpAskInput): Promise<Erp
   if (!rows) return { tool: "dues_ageing", text: "*Dues ageing*: not available right now (the dues book could not be read)." };
   const sis = loadSis();
   const masters = input.masters;
-  const studentClass = new Map(sis.students.map((s) => [s.id, { name: s.fullName, classLabel: classLabel(masters, s.classId, s.sectionId) }]));
-  const scoped = tool.classRef ? rows.filter((r) => classMatches(studentClass.get(r.student_id)?.classLabel ?? "", tool.classRef!)) : rows;
+  const studentClass = new Map(sis.students.map((s) => [s.id, { name: s.fullName, classLabel: classLabel(masters, s.classId, s.sectionId), classId: s.classId, sectionId: s.sectionId }]));
+  const className = new Map((masters.classes ?? []).map((c) => [c.id, c.name]));
+  const sectionName = new Map((masters.sections ?? []).map((s) => [s.id, s.name]));
+  const scoped = tool.classRef
+    ? rows.filter((r) => {
+        const st = studentClass.get(r.student_id);
+        return !!st && classRefMatches(tool.classRef!, className.get(st.classId) ?? "", sectionName.get(st.sectionId) ?? "");
+      })
+    : rows;
   const dues = scoped.map((r) => ({ studentId: r.student_id, dueOn: r.due_on || input.todayIso, balancePaise: Number(r.balance_paise) || 0 }));
   const a = buildAgeing(dues, input.todayIso);
   const bandOrder: Exclude<AgeingBand, never>[] = ["over90", "d31to90", "d0to30", "notDue"];
@@ -181,11 +177,14 @@ async function duesAgeing(tool: ErpAskPlanTool, input: ErpAskInput): Promise<Erp
 function classStrength(tool: ErpAskPlanTool, input: ErpAskInput): ErpAskFact {
   const sis = loadSis();
   const ay = input.session.academicYearCode;
-  const active = sis.students.filter((s) => s.status === "active" && (!s.academicYearCode || s.academicYearCode === ay));
+  // One row per child — SIS keeps a row per child per year, all "active".
+  const active = studentsInSession(sis, ay).filter((s) => s.status === "active");
+  const className = new Map((input.masters.classes ?? []).map((c) => [c.id, c.name]));
+  const sectionName = new Map((input.masters.sections ?? []).map((s) => [s.id, s.name]));
   const byLabel = new Map<string, number>();
   for (const s of active) {
     const label = classLabel(input.masters, s.classId, s.sectionId) || "Unassigned";
-    if (tool.classRef && !classMatches(label, tool.classRef)) continue;
+    if (tool.classRef && !classRefMatches(tool.classRef, className.get(s.classId) ?? "", sectionName.get(s.sectionId) ?? "")) continue;
     byLabel.set(label, (byLabel.get(label) ?? 0) + 1);
   }
   const rows = [...byLabel.entries()].sort((a, b) => a[0].localeCompare(b[0], "en", { numeric: true })).map(([label, count]) => ({ label, count }));
@@ -334,6 +333,4 @@ export async function answerErpAsk(input: ErpAskInput): Promise<ErpAskOutcome | 
   return { text: factsText, toolsUsed: used, planSource, answerSource: "facts", generationIds };
 }
 
-/** Exposed for the self-test of the class matcher; not used elsewhere. */
-export const _classMatches = classMatches;
 export const _formatInr = formatInr;
