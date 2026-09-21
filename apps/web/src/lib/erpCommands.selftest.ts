@@ -376,7 +376,9 @@ const masters = {
   assert.equal(parseErpCommandLocal("AI report")?.commandId, "commands_digest");
   assert.equal(parseErpCommandLocal("?")?.commandId, "help");
   assert.equal(parseErpCommandLocal("hello sir"), null);
-  assert.equal(parseErpCommandLocal("5A"), null, "a bare section with no ask is not a command");
+  // A class on its own is the class list (21 Sep 2026: "5A" got silence).
+  assert.equal(parseErpCommandLocal("5A")?.commandId, "class_roster", "a bare section is the class list");
+  assert.equal(parseErpCommandLocal("5"), null, "a bare number answers a numbered list, it is not a class");
   assert.equal(parseErpCommandLocal("absent"), null, "absent with no section is not a command");
   assert.equal(parseErpCommandLocal("IN"), null, "punch keyword stays with the attendance bot");
   // "help" belongs to the desk now. It used to be ceded to the office

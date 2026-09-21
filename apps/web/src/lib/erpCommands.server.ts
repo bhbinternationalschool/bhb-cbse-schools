@@ -68,7 +68,7 @@ import {
   pendingApproverHint,
   writeStudentLeaveLocalRaw,
 } from "@/lib/studentLeave";
-import { householdWhatsApp, loadSis, type SisStudent } from "@/lib/sis";
+import { householdWhatsApp, loadSis, studentsInSession, type SisStudent } from "@/lib/sis";
 import { computeHouseholdDues, getDayCloseForDate, loadFees, openFeeDues } from "@/lib/fees";
 import { flagFutureDues } from "@/lib/feeDueFuture";
 import { listLiveDefaulters } from "@/lib/playbook";
@@ -93,6 +93,9 @@ import {
   formatAbsentListReply,
   formatAttendanceSummaryReply,
   formatClassDefaultersReply,
+  formatClassRosterReply,
+  classRosterPicks,
+  formatFeeHelpReply,
   formatCollectionReply,
   formatFreeTeachersReply,
   formatHelpReply,
@@ -141,6 +144,7 @@ import {
   noteCommandUse,
   parseCommandsSwitch,
   looksLikeBareName,
+  unpromptedNameMatches,
   followUpCommandFor,
   followUpIsFresh,
   isFollowUpPronoun,
@@ -480,6 +484,7 @@ function random(): string {
 const FOLLOW_UP_LIST_COMMANDS = new Set([
   "absent_list",
   "class_defaulters",
+  "class_roster",
   "pending_leaves",
 ]);
 
@@ -716,6 +721,24 @@ export async function handleErpStaffCommand(
     }
   }
 
+  // 4c. A child's name on its own, with no list before it — "Sujit kumar",
+  // "Aarav singh", "Om". Answered only when the roster plainly has that
+  // child (unpromptedNameMatches); anything else stays quiet as before.
+  let onlyStudentIds: Set<string> | null = null;
+  if (!parsed && inbound.staff && looksLikeBareName(text, { minSingle: 2 })) {
+    const masters = await loadServerMasters();
+    const ay = staffSessionFor(inbound.staff, masters).academicYearCode;
+    const found = unpromptedNameMatches(
+      text,
+      matchStudents({ name: text.trim() }, loadSis().students, { academicYearCode: ay, limit: 12 }),
+    );
+    if (found.length) {
+      parsed = { commandId: "student_details", fields: { student: text.trim() }, source: "local" };
+      if (found.length === 1) pinnedStudentId = found[0]!.student.id;
+      else onlyStudentIds = new Set(found.map((m) => m.student.id));
+    }
+  }
+
   if (!parsed) {
     // Not a command. If it reads as a question about the school's data,
     // answer it from the records; otherwise stay quiet as before.
@@ -850,11 +873,24 @@ export async function handleErpStaffCommand(
       };
     }
   }
-  if (command.id === "class_defaulters") {
+  if (command.id === "class_defaulters" || command.id === "class_roster") {
     const askedRaw = parsed.fields.section || "";
-    const refs = extractSectionRefs(askedRaw || text);
+    // The bare-class parse hands over the class already keyed ("4", "5A",
+    // "lkg"), which extractSectionRefs would not read back: a lone "4" is
+    // not a class to it.
+    const keyed = /^(\d{1,2}|nursery|prenursery|playgroup|lkg|ukg|kg)([A-H]?)$/.exec(askedRaw);
+    const refs = keyed
+      ? [{ classKey: keyed[1]!, sectionName: keyed[2] || "" }]
+      : extractSectionRefs(askedRaw || text);
     if (!refs.length) {
-      return { handled: true, audience: "erp_command_ask", text: "Which class? e.g. _class 3 defaulters_ or _5A defaulters_." };
+      return {
+        handled: true,
+        audience: "erp_command_ask",
+        text:
+          command.id === "class_roster"
+            ? "Which class? e.g. _5A_ or _class 5_."
+            : "Which class? e.g. _class 3 defaulters_ or _5A defaulters_.",
+      };
     }
     const res = resolveClassOrSectionRef(refs[0]!, masters);
     if (!res.ok) {
@@ -867,7 +903,9 @@ export async function handleErpStaffCommand(
     const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
     let sections = res.sections;
     let limitedTo: string[] | undefined;
-    if (!isOfficeLike(roleCodes) && !roleCodes.includes("accounts")) {
+    // Who is in a class is not a fee reading: any staff member with
+    // students · view may see the names, as student details already allow.
+    if (command.id === "class_defaulters" && !isOfficeLike(roleCodes) && !roleCodes.includes("accounts")) {
       const mine = new Set(
         staffAllowedSections(inbound.staff, masters, session.academicYearCode, roleCodes).map((s) => s.sectionId),
       );
@@ -888,7 +926,10 @@ export async function handleErpStaffCommand(
       sections = allowed;
     }
     resolved.classId = res.classId;
-    resolved.title = res.wholeClass ? `Class ${res.className}` : res.sections[0]!.label;
+    resolved.title =
+      res.wholeClass && !(command.id === "class_roster" && res.sections.length === 1)
+        ? `Class ${res.className}`
+        : res.sections[0]!.label;
     resolved.wholeClass = res.wholeClass ? "1" : "";
     resolved.sectionIds = sections.map((s) => s.sectionId).join(",");
     if (limitedTo) resolved.limitedTo = limitedTo.join("|");
@@ -995,7 +1036,9 @@ export async function handleErpStaffCommand(
     // of a right one.
     const pool = resolvedFollowUpSections
       ? sis.students.filter((st) => resolvedFollowUpSections!.includes(st.sectionId))
-      : sis.students;
+      : onlyStudentIds
+        ? sis.students.filter((st) => onlyStudentIds!.has(st.id))
+        : sis.students;
     const label = (st: SisStudent) => classLabel(masters, st.classId, st.sectionId);
     // A number already answered this question — the choice was made from a
     // list this desk printed, so there is nothing left to match.
@@ -2176,6 +2219,11 @@ export async function handleErpStaffCommand(
     };
   }
 
+  // The part of the dues asked about ("store due", "bus fee").
+  if ((command.id === "student_fees" || command.id === "fee_help") && parsed.fields.text) {
+    resolved.focus = parsed.fields.text;
+  }
+
   // 8. Read commands run at once.
   const reply = await runReadCommand(command, resolved, session, todayIso);
 
@@ -2259,6 +2307,10 @@ async function runReadCommand(
       return busManifest(resolved, session, todayIso);
     case "student_details":
       return plain(studentDetails(resolved, session));
+    case "class_roster":
+      return classRoster(resolved, session);
+    case "fee_help":
+      return plain(formatFeeHelpReply(resolved.focus === "store" || resolved.focus === "transport" ? resolved.focus : "collect"));
     case "school_snapshot":
       return plain(schoolSnapshot(session, todayIso));
     case "admissions_week":
@@ -2989,6 +3041,27 @@ async function collectionToday(
   });
 }
 
+async function classRoster(
+  resolved: Record<string, string>,
+  session: DemoSession,
+): Promise<ReadReply> {
+  const sis = loadSis();
+  const masters = loadMasters();
+  const want = new Set((resolved.sectionIds || "").split(",").filter(Boolean));
+  // One row per child: SIS keeps a row per child per year, all "active".
+  const rows = studentsInSession(sis, session.academicYearCode)
+    .filter((s) => s.status === "active" && want.has(s.sectionId))
+    .map((s) => ({
+      studentId: s.id,
+      fullName: s.fullName,
+      rollNo: s.rollNo || "",
+      sectionLabel: classLabel(masters, s.classId, s.sectionId).replace(" · ", " "),
+      gender: s.gender || "",
+    }));
+  const input = { title: resolved.title || "Class", rows, wholeClass: want.size > 1 };
+  return { text: formatClassRosterReply(input), picks: classRosterPicks(input) };
+}
+
 async function classDefaulters(
   resolved: Record<string, string>,
   session: DemoSession,
@@ -3042,10 +3115,25 @@ async function studentFees(
   if (!student) return "That student record has gone missing. Please try again.";
   const label = (st: SisStudent) => classLabel(masters, st.classId, st.sectionId);
   const detail = resolved.detail === "full" ? "full" : "basic";
+  // Store bills (books, uniform) are not in the fee engine unless the caller
+  // passes them — only the counter did, so "Aarav ka bakaya" left them out
+  // and "Aarav store due" had nothing to show. Read from the store's own
+  // balances; a store that cannot be read is said, not counted as zero.
+  const household = student.householdId
+    ? studentsInSession(sis, session.academicYearCode).filter((s) => s.householdId === student.householdId)
+    : [student];
+  let storeUnread = false;
+  const { storeDuesForStudents } = await import("@/lib/inventory/sales.server");
+  const storeDues = await storeDuesForStudents(household.map((s) => s.id)).catch((e) => {
+    console.warn("[erpCommands] store dues unreadable", (e as Error)?.message);
+    storeUnread = true;
+    return [];
+  });
   const rows = student.householdId
     ? computeHouseholdDues(student.householdId, sis, masters, fees, {
         includeFuture: true,
         academicYearCode: session.academicYearCode,
+        storeDues,
       })
     : [{ student, dues: [] }];
   const mine = rows.find((r) => r.student.id === student.id)?.dues ?? [];
@@ -3102,6 +3190,8 @@ async function studentFees(
     siblings,
     detail,
     formatInr,
+    focus: resolved.focus === "store" || resolved.focus === "transport" ? resolved.focus : undefined,
+    storeUnread,
   });
 }
 
