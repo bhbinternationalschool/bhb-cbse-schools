@@ -188,6 +188,9 @@ export async function releaseSendClaim(
   if (!claimKey) return { ok: false, error: "Empty claim key" };
   const ctx = await getServerTenantContext();
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
+  // ratchet-allow: unguarded_replace — releases ONE claim by its key; the
+  // insert later in this file (claimInboundOnce) claims a different key.
+  // Nothing is deleted in order to be re-inserted.
   const { error } = await ctx.sb
     .from("wa_send_claims")
     .delete()
