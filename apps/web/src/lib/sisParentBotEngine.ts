@@ -1018,6 +1018,52 @@ export function composeSisUngroundedReply(hindi: boolean): string {
     : "I don't have that information 🙏 Your question has been sent to the school office — they will reply on this WhatsApp soon.";
 }
 
+/**
+ * What the model said it was doing, read safely.
+ *
+ * Three outcomes reach a parent differently: an answer is sent in the
+ * model's own words, a clarifying question is sent in the model's own words
+ * because it states no facts, and everything else sends the school's fixed
+ * line and fetches a person.
+ *
+ * So anything that is not one of the two permissive words is "unknown". A
+ * model that returns nothing, a truncated reply, a new word someone adds to
+ * the prompt later, a null — none of them are permission to speak
+ * ([[erp-unknown-must-not-become-fact]]).
+ */
+export type ParentBotReplyKind = "answer" | "clarify" | "unknown";
+
+export function readParentBotReplyKind(raw: unknown): ParentBotReplyKind {
+  const t = String(raw ?? "").trim().toLowerCase();
+  return t === "answer" || t === "clarify" ? t : "unknown";
+}
+
+/**
+ * When the bot cannot answer YET, but the parent is asking about something
+ * the school keeps for them — put the one question back.
+ *
+ * WHY (director, 21 Sep 2026): "if can not not provide answer then ask and
+ * guide how they can ask". A parent who wrote "Transport ka" was told the
+ * school did not have that information and queued for the office; the
+ * question they meant — the transport fee — is one the bot answers every
+ * day. Two keystrokes and a question back would have finished it.
+ *
+ * The model's question comes first, because it is about what THEY wrote.
+ * The keywords come second, small, so the next message needs no guessing at
+ * all. The full list stays behind MENU — a wall of options is not guidance,
+ * and this arrives when a parent is already not being understood.
+ *
+ * Asked once per conversation, never twice in a row: see `pendingAsk` in
+ * waSisBotServer. A bot that keeps asking is stalling, not helping.
+ */
+export function composeSisClarifyReply(question: string, hindi: boolean): string {
+  const asked = (question || "").trim();
+  if (!asked) return composeSisUngroundedReply(hindi);
+  return hindi
+    ? `${asked}\n\n_या सीधे लिखें: *DUES* (बकाया) · *RECEIPTS* (रसीदें) · *PAY* (भुगतान) · *HUMAN* (ऑफिस से बात) — पूरी सूची के लिए *MENU*._`
+    : `${asked}\n\n_Or reply: *DUES* · *RECEIPTS* · *PAY* · *HUMAN* to talk to the office — *MENU* for everything this number does._`;
+}
+
 /* ── "Already paid" → show them the record ─────────────────────────────
  *
  * The director's rule (14 Sep 2026): when a parent says "jama ho gaya",
