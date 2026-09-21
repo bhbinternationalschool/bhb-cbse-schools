@@ -152,6 +152,19 @@ function matchesUdiseQuery(
   return needle.split(/\s+/).every((tok) => hay.includes(tok));
 }
 
+/**
+ * The APAAR cell: the ID when it exists, else the parent's WhatsApp answer
+ * (lib/apaarConsent) — "consent ✓" is the office's cue to create the ID on
+ * the portal, "refused" is a final answer not to chase.
+ */
+function apaarCell(s: { apaarId?: string; apaarConsent?: string; apaarConsentAt?: string }): string {
+  if (s.apaarId) return s.apaarId;
+  const on = s.apaarConsentAt ? ` ${new Date(s.apaarConsentAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" })}` : "";
+  if (s.apaarConsent === "given") return `Consent ✓${on} — create on portal`;
+  if (s.apaarConsent === "refused") return `Parent declined${on}`;
+  return "—";
+}
+
 function gapRowsToList(rows: UdiseComplianceRow[]): UdiseListRow[] {
   return rows.map((r) => ({
     _studentId: r.student.id,
@@ -161,7 +174,7 @@ function gapRowsToList(rows: UdiseComplianceRow[]): UdiseListRow[] {
     entryStatus: udiseEntryStatusLabel(r.student),
     missing: r.missingLabels.join("; "),
     pen: r.student.pen || "—",
-    apaar: r.student.apaarId || "—",
+    apaar: apaarCell(r.student),
     aadhaar: r.aadhaarDisplay,
     mobile: r.primaryCallMobile || "—",
   }));
@@ -175,7 +188,7 @@ function registeredRowsToList(rows: UdiseRegisteredRow[]): UdiseListRow[] {
     classLabel: r.classLabel,
     entryStatus: udiseEntryStatusLabel(r.student),
     pen: r.pen || "—",
-    apaar: r.apaarId || "—",
+    apaar: r.apaarId || apaarCell(r.student),
     aadhaar: r.aadhaarDisplay,
     verified: r.aadhaarVerified ? "Yes" : "No",
     compliant: r.compliant ? "Yes" : "No",

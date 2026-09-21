@@ -266,6 +266,7 @@ jobs:
           npm run test:tutor-guide
           npm run test:wa-parent-guide
           npm run test:udise-nudge
+          npm run test:apaar-consent
           npm run test:aadhaar-certificate
           npm run test:staff-chat-bare
           npm run test:job-desk

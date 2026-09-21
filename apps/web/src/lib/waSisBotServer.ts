@@ -1119,6 +1119,26 @@ export async function handleWaSisBotInbound(opts: {
     }
   }
 
+  // ── APAAR ID consent: the parent's tap on "✅ हाँ, सहमति है" / "❌ नहीं",
+  // or "APAAR" to be asked (again). Before the drill and the tutor: the tap
+  // is a decision about the child's data, never an answer to a question. ──
+  try {
+    const { handleApaarConsentInbound } = await import("@/lib/apaarConsent.server");
+    const apaar = await handleApaarConsentInbound({
+      household: hh,
+      children: childrenOf(hh),
+      mobile10,
+      text,
+      hindi: waTemplateLanguageFor(hh) === "hi",
+      waMessageId: opts.waMessageId,
+    });
+    if (apaar !== null) {
+      return finishLanguageFlow(store, thread, parentMsg, apaar);
+    }
+  } catch (e) {
+    console.error("[wa-sis-bot] APAAR consent failed", e);
+  }
+
   // ── A revision drill already running on this number ──
   //
   // Before exam-eve and before the tutor: while a drill is open, a bare "60"

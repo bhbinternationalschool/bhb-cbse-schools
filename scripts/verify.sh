@@ -112,6 +112,7 @@ SELFTESTS=(
   test:tutor-guide
   test:wa-parent-guide
   test:udise-nudge
+  test:apaar-consent
   test:aadhaar-certificate
   test:staff-chat-bare
   test:job-desk

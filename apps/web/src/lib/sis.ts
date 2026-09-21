@@ -238,6 +238,16 @@ export type SisStudent = {
   udiseComplianceRemindedAt: string;
   /** Last sync from UDISE+ Students_Details */
   udiseAadhaarValidationStatus: string;
+  /**
+   * The parent's APAAR ID answer, given on WhatsApp (lib/apaarConsent).
+   * "" = not asked or not answered. APAAR is voluntary: "refused" is a
+   * valid, final answer, not a gap to chase.
+   */
+  apaarConsent: "" | "given" | "refused";
+  /** When the answer was given (ISO). */
+  apaarConsentAt: string;
+  /** Who gave it and how: "<guardian> · WhatsApp +91… · <message id>". */
+  apaarConsentBy: string;
   udiseMbuStatus: string;
   /** Portal class label (informational — never overwrites SIS class) */
   udisePortalClassHint: string;
@@ -677,6 +687,9 @@ export const STUDENT_PROFILE_KEYS = [
   "motherAadhaarVerification",
   "udiseComplianceRemindedAt",
   "udiseAadhaarValidationStatus",
+  "apaarConsent",
+  "apaarConsentAt",
+  "apaarConsentBy",
   "udiseMbuStatus",
   "udisePortalClassHint",
   "udiseAgeBelowClassAlert",
@@ -840,6 +853,9 @@ export function normalizeStudent(s: Partial<SisStudent> & { id: string }): SisSt
     previousUdise: s.previousUdise ?? "",
     udiseComplianceRemindedAt: s.udiseComplianceRemindedAt ?? "",
     udiseAadhaarValidationStatus: s.udiseAadhaarValidationStatus ?? "",
+    apaarConsent: s.apaarConsent === "given" || s.apaarConsent === "refused" ? s.apaarConsent : "",
+    apaarConsentAt: s.apaarConsentAt ?? "",
+    apaarConsentBy: s.apaarConsentBy ?? "",
     udiseMbuStatus: s.udiseMbuStatus ?? "",
     udisePortalClassHint: s.udisePortalClassHint ?? "",
     udiseAgeBelowClassAlert: !!s.udiseAgeBelowClassAlert,

@@ -38,6 +38,8 @@ export type NudgeChildInput = {
   aadhaarFailed?: { dob: string; gender: string; last4: string } | null;
   /** ISO date of birth, for how a child without Aadhaar enrols (under 5 or not). */
   dob?: string;
+  /** The parent already answered the APAAR consent question (yes or no) — never asked again. */
+  apaarAnswered?: boolean;
 };
 
 export type NudgeChildNeed = {
@@ -76,7 +78,7 @@ export function udiseNudgeNeeds(
           : "a clear photo of the child's Aadhaar card — front and back (for a re-check)",
       );
     }
-    const consent = c.gaps.includes("apaar");
+    const consent = c.gaps.includes("apaar") && !c.apaarAnswered;
     if (!docs.length && !consent) continue;
     const enrol = c.gaps.includes("student_aadhaar") && !recheck ? { under5: under5(c.dob, todayIso) } : null;
     out.push({ name: c.name, classLabel: c.classLabel, docs, consent, recheck, enrol });
@@ -241,7 +243,12 @@ export function composeUdiseNudge(input: {
   guardianName: string;
   needs: NudgeChildNeed[];
   language: "en" | "hi";
-  consentAttached: boolean;
+  /**
+   * The APAAR consent question (two buttons, lib/apaarConsent) follows this
+   * message. False when it was sent this week: the parent is told how to
+   * get it again instead.
+   */
+  consentButtonsFollow: boolean;
   /** Aadhaar centres near the family, for a child with no Aadhaar. */
   centres?: AadhaarCentre[];
   /** What the distances were measured from: the family's home when it is located, else the school. */
@@ -260,7 +267,7 @@ export function composeUdiseNudge(input: {
     for (const n of input.needs) {
       lines.push("", `*${n.name}* (${n.classLabel})`);
       for (const d of n.docs) lines.push(`• ${d}`);
-      if (n.consent) lines.push(`• APAAR सहमति फ़ॉर्म — भरकर व हस्ताक्षर करके${input.consentAttached ? " (साथ में भेजा है)" : ""}`);
+      if (n.consent) lines.push("• APAAR ID के लिए आपकी सहमति — बस एक बटन दबाइए (कोई फ़ॉर्म नहीं)");
     }
     lines.push(...recheckSection(input.needs, true));
     lines.push(...enrolSection(input.needs, true, input.centres ?? [], input.centresNear ?? "school"));
@@ -276,7 +283,12 @@ export function composeUdiseNudge(input: {
       "• छात्रवृत्ति पोर्टल जैसी सेवाओं में सुविधा (आपकी सहमति से)",
     );
     if (anyConsent) {
-      lines.push("", "APAAR ID आपकी सहमति से बनती है — शिक्षा मंत्रालय का सहमति फ़ॉर्म (Annexure-1) भरकर उसकी फ़ोटो भेजें।");
+      lines.push(
+        "",
+        input.consentButtonsFollow
+          ? "APAAR ID आपकी सहमति से ही बनती है — *नीचे के संदेश में* एक बटन दबाकर हाँ या नहीं बताइए। कोई फ़ॉर्म प्रिंट या हस्ताक्षर करने की ज़रूरत नहीं।"
+          : "APAAR ID आपकी सहमति से ही बनती है — *APAAR* लिखकर भेजें और एक बटन दबाकर हाँ या नहीं बताइए। कोई फ़ॉर्म प्रिंट या हस्ताक्षर करने की ज़रूरत नहीं।",
+      );
     }
     lines.push(
       "",
@@ -294,7 +306,7 @@ export function composeUdiseNudge(input: {
   for (const n of input.needs) {
     lines.push("", `*${n.name}* (${n.classLabel})`);
     for (const d of n.docs) lines.push(`• ${d}`);
-    if (n.consent) lines.push(`• APAAR consent form — filled in and signed${input.consentAttached ? " (attached)" : ""}`);
+    if (n.consent) lines.push("• Your consent for the APAAR ID — just tap a button (no form)");
   }
   lines.push(...recheckSection(input.needs, false));
   lines.push(...enrolSection(input.needs, false, input.centres ?? [], input.centresNear ?? "school"));
@@ -310,7 +322,12 @@ export function composeUdiseNudge(input: {
     "• Easier access to services such as scholarship portals (with your consent)",
   );
   if (anyConsent) {
-    lines.push("", "An APAAR ID is made only with your consent — please fill in the Ministry of Education's consent form (Annexure-1) and send a photo of it.");
+    lines.push(
+      "",
+      input.consentButtonsFollow
+        ? "An APAAR ID is made only with your consent — tap a button *in the next message* to say yes or no. No form to print or sign."
+        : "An APAAR ID is made only with your consent — send *APAAR* and tap a button to say yes or no. No form to print or sign.",
+    );
   }
   lines.push(
     "",
@@ -323,7 +340,7 @@ export function composeUdiseNudge(input: {
 /** What goes in the family's message log: the list, so "what did we ask for?" has an answer. */
 export function udiseNudgeLogLine(needs: NudgeChildNeed[]): string {
   return needs
-    .map((n) => `${n.name}: ${[...n.docs, ...(n.consent ? ["APAAR consent form"] : [])].join(", ")}`)
+    .map((n) => `${n.name}: ${[...n.docs, ...(n.consent ? ["APAAR consent (buttons)"] : [])].join(", ")}`)
     .join(" · ")
     .slice(0, 400);
 }

@@ -189,17 +189,17 @@ assert.match(l4.changes.find((c) => c.field === "aadhaarNumber")!.reason, /compl
   assert.ok(!newNo.includes(GOOD), "never the full Aadhaar number");
   assert.match(newNo, /Added to the record:/);
 
-  // APAAR asked in the same reply — consent-based, never "compulsory".
-  const ap = renderParentAck({ plan, childName: "VIDHI SINGH", language: "hi", portalValidationFailed: true, apaarPending: { childNames: ["VIDHI SINGH", "RUDRANSH SINGH"], formAttached: true } });
+  // APAAR asked in the same reply — by buttons, never a form to print.
+  const ap = renderParentAck({ plan, childName: "VIDHI SINGH", language: "hi", portalValidationFailed: true, apaarPending: { childNames: ["VIDHI SINGH", "RUDRANSH SINGH"], askFollows: true } });
   assert.match(ap, /APAAR ID अभी नहीं बनी है/);
   assert.match(ap, /VIDHI SINGH, RUDRANSH SINGH/);
-  assert.match(ap, /\*सहमति\*/);
-  assert.match(ap, /साथ में भेजा है/);
+  assert.match(ap, /नीचे के संदेश में/);
+  assert.match(ap, /प्रिंट या हस्ताक्षर करने की ज़रूरत नहीं/);
   assert.ok(!/अनिवार्य|compulsory|mandatory/i.test(ap), "APAAR is voluntary");
-  assert.ok(!/कुछ और नहीं करना है/.test(ap), "not 'nothing more needed' while the form is asked for");
-  const apEn = renderParentAck({ plan, childName: "VIDHI SINGH", language: "en", apaarPending: { childNames: ["VIDHI SINGH"], formAttached: false } });
+  assert.ok(!/कुछ और नहीं करना है/.test(ap), "not 'nothing more needed' while APAAR is asked");
+  const apEn = renderParentAck({ plan, childName: "VIDHI SINGH", language: "en", apaarPending: { childNames: ["VIDHI SINGH"], askFollows: false } });
   assert.match(apEn, /VIDHI SINGH does not have an APAAR ID yet/);
-  assert.ok(!/attached/.test(apEn), "no form this week: it is not claimed as attached");
+  assert.match(apEn, /Send \*APAAR\*/, "asked this week already: how to get the buttons again");
   assert.ok(!/APAAR/.test(renderParentAck({ plan, childName: "VIDHI SINGH", language: "en" })), "no pending child, no ask");
 }
 

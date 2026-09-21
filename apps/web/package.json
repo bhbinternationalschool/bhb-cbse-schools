@@ -127,6 +127,7 @@
     "test:nucleus-assessments": "npx tsx src/lib/nucleusAssessments.selftest.ts",
     "test:wa-parent-guide": "npx tsx src/lib/waParentGuide.selftest.ts",
     "test:udise-nudge": "npx tsx src/lib/udiseNudge.selftest.ts",
+    "test:apaar-consent": "npx tsx src/lib/apaarConsent.selftest.ts",
     "test:aadhaar-certificate": "npx tsx src/lib/aadhaarCertificate.selftest.ts",
     "test:staff-chat-bare": "npx tsx src/lib/staffChatBare.selftest.ts",
     "test:job-desk": "npx tsx src/lib/jobDesk.selftest.ts",
