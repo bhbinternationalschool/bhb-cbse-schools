@@ -76,6 +76,10 @@ export async function runParentChatCloseSweep(opts: { dryRun?: boolean; now?: Da
     return out;
   }
   out.midAnswer = 0;
+  // The tutor's own practice is a conversation too (21 Sep 2026: fifteen
+  // closings landed straight after one of its exam-eve questions).
+  const { mobilesInTutorSession } = await import("@/lib/waTutorBot.server");
+  const inTutor = await mobilesInTutorSession(now);
 
   for (const t of await listWaSisBotThreads()) {
     out.checked += 1;
@@ -83,7 +87,11 @@ export async function runParentChatCloseSweep(opts: { dryRun?: boolean; now?: Da
     const d = shouldCloseThread(
       guided && (!t.closingSentAt || guided > t.closingSentAt) ? { ...t, closingSentAt: new Date(guided).toISOString() } : t,
       now,
-      { awaitingAnswer: awaitingAnswer.has(waNormalizeLocal10(t.mobile)) },
+      {
+        awaitingAnswer:
+          awaitingAnswer.has(waNormalizeLocal10(t.mobile)) ||
+          inTutor.has(waNormalizeLocal10(t.mobile)),
+      },
     );
     if (!d.close) {
       if (d.reason === "mid_answer") out.midAnswer += 1;

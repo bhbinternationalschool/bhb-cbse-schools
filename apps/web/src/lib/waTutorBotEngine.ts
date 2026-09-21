@@ -48,6 +48,45 @@ export type WaTutorState = {
   turns?: WaTutorTurn[];
 };
 
+/**
+ * How long after its last turn a tutor session still counts as a child at
+ * work. The same half-day `mobilesAwaitingDrillReply` uses, for the same
+ * reason: long enough to fetch a book or finish dinner, short enough that
+ * one unanswered question does not silence a family for good.
+ */
+export const TUTOR_SESSION_LIVE_HOURS = 12;
+
+/**
+ * The numbers the tutor is in the middle of a conversation with.
+ *
+ * WHY (21 Sep 2026): the chat-close sweep — "thank you for your chat, here
+ * is everything this number can do" — already waited for the revision
+ * drill, but not for the tutor, which runs the older classes' exam-eve
+ * practice as a free chat: "we will ask five practice questions, one at a
+ * time". Fifteen closings on 18–21 Sep landed straight after one of those
+ * questions; on the 18th and 20th, 39 and 65 minutes later on average — the
+ * same evening, while the child was presumably still working on it. One
+ * more arrived 39 minutes after a father typed TUTOR and was shown the
+ * menu, before he had picked anything.
+ *
+ * Pure: keyed by the bare ten digits, whatever form the session stored.
+ */
+export function tutorSessionsInProgress(
+  sessions: Pick<WaTutorState, "mobile10" | "updatedAt">[],
+  now: Date,
+): Set<string> {
+  const since = now.getTime() - TUTOR_SESSION_LIVE_HOURS * 3_600_000;
+  const out = new Set<string>();
+  for (const s of sessions) {
+    const at = Date.parse(String(s.updatedAt ?? ""));
+    // An undated session is not evidence of a child at work right now.
+    if (!Number.isFinite(at) || at < since) continue;
+    const ten = String(s.mobile10 ?? "").replace(/\D/g, "").slice(-10);
+    if (ten.length === 10) out.add(ten);
+  }
+  return out;
+}
+
 /** Enough for a practice set in progress; bounded because every session is saved in one bundle. */
 export const WA_TUTOR_MAX_TURNS = 10;
 export const WA_TUTOR_TURN_MAX_CHARS = 1200;
