@@ -136,10 +136,15 @@ for (const no of ["practice karwao maths ka", "DUES", "", "PAY"]) {
   assert.equal(isPracticeTap(no), false, `not a tap: ${no}`);
 }
 
-for (const yes of ["TIMETABLE", "time table", "date sheet", "exam kab hai timetable", "टाइम टेबल भेजिए", "पेपर कब है"]) {
+for (const yes of [
+  "TIMETABLE", "time table", "date sheet", "exam kab hai timetable", "टाइम टेबल भेजिए", "पेपर कब है",
+  // 21 Sep 2026: "Next exam" went to the office instead of the date sheet.
+  "Next exam", "next exam kab hai", "agla paper kaun sa hai", "kal ka paper", "when is the exam", "Exam?",
+  "exam date", "tomorrow paper", "अगला पेपर", "कल कौन सा पेपर है", "आज का पेपर",
+]) {
   assert.ok(isTimetableRequest(yes), yes);
 }
-for (const no of ["fees kab jama kare", "DUES", "school kaha hai", ""]) {
+for (const no of ["fees kab jama kare", "DUES", "school kaha hai", "", "exam result kab aayega", "exam fees", "admit card", "exam ke marks", "परीक्षा का रिजल्ट", "next week fees"]) {
   assert.equal(isTimetableRequest(no), false, `not a timetable ask: ${no}`);
 }
 

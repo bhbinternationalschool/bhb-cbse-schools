@@ -269,11 +269,19 @@ export function isTimetableRequest(text: string): boolean {
   const raw = (text || "").trim();
   const t = raw.toLowerCase();
   if (!t) return false;
+  // A question about results, marks, fees or an admit card is not a
+  // question about WHEN — those have their own answers.
+  if (/\b(result|marks?|number|fee|fees|admit|roll)\b|रिजल्ट|परिणाम|अंक|फीस|प्रवेश ?पत्र/.test(raw.toLowerCase())) return false;
   return (
     /^(time ?table|date ?sheet|timetable|datesheet)$/.test(t) ||
-    /\b(exam|paper|pariksha)\b.*\b(time ?table|date ?sheet|schedule|kab)\b/.test(t) ||
+    /\b(exam|exams|paper|papers|pariksha|test)\b.*\b(time ?table|date ?sheet|schedule|kab|date|dates|when)\b/.test(t) ||
     /\b(time ?table|date ?sheet)\b/.test(t) ||
-    /समय.?सारणी|टाइम ?टेबल|डेट ?शीट|परीक्षा.*(कब|कार्यक्रम)|पेपर कब/.test(raw)
+    // "Next exam" (21 Sep 2026: a parent wrote exactly that and was handed
+    // to the office), "agla paper", "kal ka paper", "when is the exam".
+    /\b(next|upcoming|agla|agle|agli|kal|tomorrow|aaj|today)\b.{0,20}\b(exam|exams|paper|papers|pariksha)\b/.test(t) ||
+    /\b(when|kab)\b.{0,20}\b(exam|exams|paper|papers|pariksha)\b/.test(t) ||
+    /^(exam|exams|paper|pariksha)\s*\??$/.test(t) ||
+    /समय.?सारणी|टाइम ?टेबल|डेट ?शीट|परीक्षा.*(कब|कार्यक्रम)|पेपर कब|(अगला|अगली|अगले|कल|आज).{0,15}(पेपर|परीक्षा|एग्जाम)|कौन ?सा पेपर/.test(raw)
   );
 }
 
