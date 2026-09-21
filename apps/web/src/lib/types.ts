@@ -39,6 +39,12 @@ export const TENANT = {
   officePhone: "",
   whatsappNumber: "",
   officeEmail: "director@bhbinternational.school",
+  /**
+   * Where job seekers are told to email a CV (the WhatsApp job flow and the
+   * staff "who applied" reply). The school's own inbox — change it here if
+   * a separate jobs mailbox is created.
+   */
+  careersEmail: "director@bhbinternational.school",
   /** Campus — Google Maps: Piyamilan chauraha, Baniyavapar, Ayar 221202 */
   schoolAddress:
     "Piyamilan Chauraha, Baniyavapar, Ayar, Varanasi, Uttar Pradesh 221202",

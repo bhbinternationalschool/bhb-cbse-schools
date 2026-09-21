@@ -113,6 +113,8 @@ SELFTESTS=(
   test:wa-parent-guide
   test:udise-nudge
   test:aadhaar-certificate
+  test:staff-chat-bare
+  test:job-desk
   test:fee-adjustments-merge
   test:parent-bot-clarify
   test:office-backlog

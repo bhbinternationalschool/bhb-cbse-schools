@@ -376,7 +376,9 @@ const masters = {
   assert.equal(parseErpCommandLocal("AI report")?.commandId, "commands_digest");
   assert.equal(parseErpCommandLocal("?")?.commandId, "help");
   assert.equal(parseErpCommandLocal("hello sir"), null);
-  assert.equal(parseErpCommandLocal("5A"), null, "a bare section with no ask is not a command");
+  // A class on its own is the class list (21 Sep 2026: "5A" got silence).
+  assert.equal(parseErpCommandLocal("5A")?.commandId, "class_roster", "a bare section is the class list");
+  assert.equal(parseErpCommandLocal("5"), null, "a bare number answers a numbered list, it is not a class");
   assert.equal(parseErpCommandLocal("absent"), null, "absent with no section is not a command");
   assert.equal(parseErpCommandLocal("IN"), null, "punch keyword stays with the attendance bot");
   // "help" belongs to the desk now. It used to be ceded to the office
@@ -643,7 +645,8 @@ const masters = {
   assert.equal(parseErpCommandLocal("class 3 me kisne fees nahi di")?.commandId, "class_defaulters");
   assert.equal(parseErpCommandLocal("कक्षा 3 के बकायेदार")?.commandId, "class_defaulters");
   assert.equal(parseErpCommandLocal("Amay Gupta 4B fees pending")?.commandId, "student_fees", "a name with a section is still one student");
-  assert.equal(parseErpCommandLocal("defaulters"), null, "no class → not a command");
+  // No class: the school-wide list to call from (21 Sep 2026; it used to be silence).
+  assert.equal(parseErpCommandLocal("defaulters")?.commandId, "top_dues", "no class → the whole school");
   // Model JSON carries the student too.
   const llm = parseErpCommandLlmJson('{"command":"student_fees","student":"Amay Gupta","confidence":0.9}');
   assert.equal(llm?.student, "Amay Gupta");

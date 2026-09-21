@@ -2,6 +2,7 @@
  * Unified school WhatsApp entry — role-aware greeting + visitor onboarding + flow delegation.
  */
 
+import { TENANT } from "@/lib/types";
 import { handleWaGateVisit, type WaGateVisitPending } from "@/lib/waGateVisit.server";
 import { handleLeaveCommand } from "@/lib/leaveCommand.server";
 import {
@@ -101,6 +102,12 @@ export type WaUnifiedSession = {
    * files the CV they already sent, instead of asking them to send it again.
    */
   pendingDocument?: { mediaId: string; mimeType?: string; fileName?: string; at: string } | null;
+  /**
+   * A job seeker we asked for what their CV did not say (subject, classes,
+   * qualification). Their next message is read as the answer and saved on
+   * this application; after JOB_ASK_LIMIT asks the bot stops asking.
+   */
+  jobAsk?: { applicationId: string; asks: number; at: string } | null;
   /**
    * Until when the staff keyword bot answers this person, ISO. Unset or
    * past means the desk answers their commands and nothing answers the
@@ -670,67 +677,132 @@ async function delegateActiveFlow(
     };
   }
 
-  if (flow === "job" || flow === "meeting" || flow === "other") {
+  // The job desk. Not the admissions bot: handing a job seeker's message
+  // to it filed them as an admission enquiry (18 Sep 2026: ENQ-2026-3709,
+  // "Child — Rajnish_Kumar_Mishra_Resume.pdf") and told them they were
+  // being connected to the admission office. Everything here stays in the
+  // job applications inbox, and a person is reached through the office
+  // relay's "Job applications" phone when it matters.
+  if (flow === "job") {
     const name = session.visitorName || session.displayName || "Guest";
+    const hindi = unifiedHindiFor(identity);
     const note = opts.text.trim();
-
-    // A CV sent after choosing JOB is the application. Capture it into the
-    // same inbox the careers page fills, so the office has one pile rather
-    // than a page, a CRM thread and somebody's phone. The CRM thread below
-    // still gets the message either way — this adds a record, it does not
-    // take the conversation away from the humans.
-    // The CV may have arrived with this message, or before the menu — a
-    // person sending a resume sends the resume first and reads the menu
-    // afterwards.
-    const cv = opts.document?.mediaId
-      ? { mediaId: opts.document.mediaId }
-      : session.pendingDocument?.mediaId
-        ? { mediaId: session.pendingDocument.mediaId }
-        : null;
-    if (flow === "job" && cv) {
-      const { captureWhatsAppJobCv } = await import(
-        "@/lib/jobApplicationsIntake.server"
-      );
-      const captured = await captureWhatsAppJobCv({
-        mediaId: cv.mediaId,
-        mobile10,
-        applicantName: name,
+    const jobDesk = await import("@/lib/jobDesk");
+    const saveJobSession = async (patch: Partial<WaUnifiedSession>) => {
+      const store = await readStore();
+      const base = store.sessions[mobile10] ?? session;
+      await writeStore({
+        ...store,
+        sessions: { ...store.sessions, [mobile10]: { ...base, ...patch, updatedAt: nowIso() } },
       });
-      // Used, or unusable — either way it is not pending any more, so a
-      // later message cannot file the same CV a second time.
-      {
-        const store = await readStore();
-        const base = store.sessions[mobile10] ?? session;
-        await writeStore({
-          ...store,
-          sessions: {
-            ...store.sessions,
-            [mobile10]: { ...base, pendingDocument: null, updatedAt: nowIso() },
-          },
-        });
-      }
-      await sendBotReply({
+    };
+    const reply = async (text: string, escalate: boolean) => {
+      const ok = await sendBotReply({
         mobile10,
         displayName: name,
         category: categoryForUnifiedAudience("visitor_job", "job"),
         audience: "visitor_job",
         flow,
-        text: unifiedHindiFor(identity)
-          ? captured.ok
-            ? "धन्यवाद 🙏 आपका बायोडाटा स्कूल ऑफिस को मिल गया है। किसी पद से मेल खाने पर आपको कॉल किया जाएगा।"
-            : "धन्यवाद। यह फ़ाइल पढ़ी नहीं जा सकी — कृपया बायोडाटा PDF या साफ़ फ़ोटो में भेजें, या अपना विषय और आप कौन-सी कक्षाएँ पढ़ाते हैं, लिखें।"
-          : captured.ok
-            ? "Thank you — the school office has your CV. If it matches a vacancy, someone will call you."
-            : "Thank you. We could not read that file, so please send your CV as a PDF or a clear photo, or reply with your subject and the classes you teach.",
-        inbound: { text: opts.text || "[CV]", waMessageId: opts.waMessageId },
+        text,
+        inbound: { text: opts.text || (opts.document ? "[CV]" : ""), waMessageId: opts.waMessageId },
       });
-      return {
-        replied: true,
-        escalate: captured.ok,
-        audience: "visitor_job",
-        stub: false,
-      };
+      return { replied: ok, escalate, audience: "visitor_job", stub: !ok };
+    };
+    const cvReminder = hindi
+      ? "\n\nबायोडाटा (CV) भी यहीं PDF या फ़ोटो में भेज दें" + (TENANT.careersEmail ? ` या *${TENANT.careersEmail}* पर ईमेल करें।` : "।")
+      : "\n\nPlease also send your CV here as a PDF or photo" + (TENANT.careersEmail ? `, or email it to *${TENANT.careersEmail}*.` : ".");
+
+    // A CV sent after choosing JOB is the application. It may have arrived
+    // with this message, or before the menu — a person sending a resume
+    // sends the resume first and reads the menu afterwards.
+    const cv = opts.document?.mediaId
+      ? { mediaId: opts.document.mediaId }
+      : session.pendingDocument?.mediaId
+        ? { mediaId: session.pendingDocument.mediaId }
+        : null;
+    if (cv) {
+      const { captureWhatsAppJobCv } = await import("@/lib/jobApplicationsIntake.server");
+      const captured = await captureWhatsAppJobCv({ mediaId: cv.mediaId, mobile10, applicantName: name });
+      // Used, or unusable — either way it is not pending any more, so a
+      // later message cannot file the same CV a second time.
+      await saveJobSession({ pendingDocument: null });
+      if (!captured.ok || !captured.application) {
+        return reply(
+          hindi
+            ? "धन्यवाद। यह फ़ाइल पढ़ी नहीं जा सकी — कृपया बायोडाटा PDF या साफ़ फ़ोटो में भेजें, या अपना विषय, कक्षाएँ और योग्यता लिखें।"
+            : "Thank you. We could not read that file, so please send your CV as a PDF or a clear photo, or reply with your subject, the classes you teach and your qualification.",
+          false,
+        );
+      }
+      // Whatever the CV did not say is asked for now, while they are here.
+      const missing = jobDesk.jobMissingFields(captured.application);
+      if (missing.length) {
+        await saveJobSession({ jobAsk: { applicationId: captured.application.id, asks: 1, at: nowIso() } });
+        return reply(jobDesk.composeJobAsk(missing, hindi, true), captured.reason !== "duplicate");
+      }
+      await saveJobSession({ jobAsk: null });
+      return reply(
+        hindi
+          ? "धन्यवाद 🙏 आपका बायोडाटा स्कूल ऑफिस को मिल गया है। किसी पद से मेल खाने पर आपको कॉल किया जाएगा।"
+          : "Thank you — the school office has your CV. If it matches a vacancy, someone will call you.",
+        captured.reason !== "duplicate",
+      );
     }
+
+    // They want a person. The relay forwards it to the job-applications phone.
+    if (/^(human|office|call|call me|staff|baat karni hai|बात करनी है)$/i.test(note)) {
+      return reply(
+        hindi
+          ? "आपका संदेश स्कूल ऑफिस को भेज दिया गया है। स्टाफ इसी WhatsApp पर जवाब देगा।"
+          : "Your message has gone to the school office. Someone will reply on this WhatsApp.",
+        true,
+      );
+    }
+
+    // Typed details — the answer to our question, or offered unasked.
+    const details = jobDesk.parseJobDetailsReply(note);
+    const ask = session.jobAsk ?? null;
+    if (jobDesk.jobDetailsFound(details)) {
+      const { captureWhatsAppJobDetails } = await import("@/lib/jobApplicationsIntake.server");
+      const saved = await captureWhatsAppJobDetails({
+        mobile10,
+        applicantName: name,
+        details,
+        applicationId: ask?.applicationId,
+      });
+      if (!saved.ok || !saved.application) {
+        return reply(jobDesk.composeJobDone(hindi), true);
+      }
+      const missing = jobDesk.jobMissingFields(saved.application);
+      const asks = (ask?.asks ?? 0) + 1;
+      const needCv = !saved.application.cvPath;
+      if (missing.length && asks <= jobDesk.JOB_ASK_LIMIT) {
+        await saveJobSession({ jobAsk: { applicationId: saved.application.id, asks, at: nowIso() } });
+        return reply(jobDesk.composeJobAsk(missing, hindi, !needCv) + (needCv ? cvReminder : ""), !!saved.created);
+      }
+      await saveJobSession({ jobAsk: null });
+      return reply(jobDesk.composeJobDone(hindi) + (needCv ? cvReminder : ""), !!saved.created);
+    }
+    if (ask) {
+      // Asked, and the reply had none of it. Ask once more, then stop —
+      // a question repeated forever is the bot being broken, not thorough.
+      const asks = ask.asks + 1;
+      const current = await (await import("@/lib/jobApplications.server")).getJobApplication(ask.applicationId);
+      const missing = current ? jobDesk.jobMissingFields(current) : [];
+      if (missing.length && asks <= jobDesk.JOB_ASK_LIMIT) {
+        await saveJobSession({ jobAsk: { ...ask, asks, at: nowIso() } });
+        return reply(jobDesk.composeJobAsk(missing, hindi, !!current?.cvPath), false);
+      }
+      await saveJobSession({ jobAsk: null });
+      return reply(jobDesk.composeJobDone(hindi), !!note);
+    }
+    // Anything else: where to send the CV, and a person sees the question.
+    return reply(composeActiveFlowHint("job", name, hindi), !!note);
+  }
+
+  if (flow === "meeting" || flow === "other") {
+    const name = session.visitorName || session.displayName || "Guest";
+    const note = opts.text.trim();
     await handleWaCrmBotInbound({
       ...inbound,
       text: note ? `[${flow.toUpperCase()}] ${note}` : `HUMAN`,
