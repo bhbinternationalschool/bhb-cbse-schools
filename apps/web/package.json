@@ -126,6 +126,7 @@
     "test:nucleus-reminder": "npx tsx src/lib/nucleusReminder.selftest.ts",
     "test:nucleus-assessments": "npx tsx src/lib/nucleusAssessments.selftest.ts",
     "test:wa-parent-guide": "npx tsx src/lib/waParentGuide.selftest.ts",
+    "test:office-backlog": "npx tsx src/lib/officeBacklog.selftest.ts",
     "test:fleet-keep-rule": "npx tsx src/lib/fleetKeepRule.selftest.ts",
     "test:server-work-tracker": "npx tsx src/lib/serverWorkTracker.selftest.ts",
     "test:concession-review-ai": "npx tsx src/lib/concessionReviewAi.selftest.ts",

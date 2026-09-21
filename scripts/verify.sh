@@ -111,6 +111,7 @@ SELFTESTS=(
   test:exam-eve
   test:tutor-guide
   test:wa-parent-guide
+  test:office-backlog
   test:fleet-keep-rule
   test:server-work-tracker
   test:concession-review-ai
