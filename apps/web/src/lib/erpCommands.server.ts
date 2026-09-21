@@ -94,6 +94,12 @@ import {
   formatAttendanceSummaryReply,
   formatClassDefaultersReply,
   formatClassRosterReply,
+  formatTopDuesReply,
+  topDuesPicks,
+  formatStoreSummaryReply,
+  formatInventoryReply,
+  type TopDuesFamily,
+  type FeeFocus,
   classRosterPicks,
   formatFeeHelpReply,
   formatCollectionReply,
@@ -1120,6 +1126,33 @@ export async function handleErpStaffCommand(
         : isOfficeLike(roleCodes) || roleCodes.includes("accounts")
           ? "full"
           : "basic";
+    // Who may see the number to call, in full: the office and accounts,
+    // and the child's own teachers — the same line student details draw.
+    resolved.callable =
+      isOfficeLike(roleCodes) || roleCodes.includes("accounts") || mineIds.has(student.sectionId) ? "1" : "";
+  }
+  if (command.id === "top_dues") {
+    const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
+    if (!isOfficeLike(roleCodes) && !roleCodes.includes("accounts")) {
+      void trackServerWork(audit(session, command, parsed.fields, text, "denied", {
+        reason: "scope",
+        channel: inbound.channel,
+      }));
+      return {
+        handled: true,
+        audience: "erp_command_denied",
+        text: "The school-wide dues list with parents' numbers is for the fee desk, office and leadership. For your own class send e.g. _5A defaulters_.",
+      };
+    }
+    resolved.limit = parsed.fields.date || "10";
+    resolved.focus = parsed.fields.text || "";
+  }
+  if (command.id === "store_summary") {
+    const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
+    resolved.showMargin = isOfficeLike(roleCodes) || roleCodes.includes("accounts") ? "1" : "";
+  }
+  if (command.id === "inventory_stock") {
+    resolved.item = (parsed.fields.text || "").trim().slice(0, 40);
   }
   if (command.id === "collection_today") {
     const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
@@ -2309,6 +2342,12 @@ async function runReadCommand(
       return plain(studentDetails(resolved, session));
     case "class_roster":
       return classRoster(resolved, session);
+    case "top_dues":
+      return topDues(resolved, session, todayIso);
+    case "store_summary":
+      return plain(storeSummary(resolved, todayIso));
+    case "inventory_stock":
+      return plain(inventoryStock(resolved));
     case "fee_help":
       return plain(formatFeeHelpReply(resolved.focus === "store" || resolved.focus === "transport" ? resolved.focus : "collect"));
     case "school_snapshot":
@@ -3062,6 +3101,126 @@ async function classRoster(
   return { text: formatClassRosterReply(input), picks: classRosterPicks(input) };
 }
 
+/** The number to call a family on: the household's WhatsApp, then its phone, then a parent's. */
+function familyCallNumber(
+  hh: ReturnType<typeof loadSis>["households"][number] | undefined,
+  student: SisStudent,
+): { mobile: string; guardian: string } {
+  const hhMobile = hh ? householdWhatsApp(hh) || hh.mobile || "" : "";
+  if (hhMobile) return { mobile: hhMobile, guardian: hh?.guardianName || student.fatherName || "" };
+  if (student.fatherMobile) return { mobile: student.fatherMobile, guardian: student.fatherName || "Father" };
+  if (student.motherMobile) return { mobile: student.motherMobile, guardian: student.motherName || "Mother" };
+  return { mobile: "", guardian: hh?.guardianName || student.fatherName || "" };
+}
+
+async function topDues(
+  resolved: Record<string, string>,
+  session: DemoSession,
+  todayIso: string,
+): Promise<ReadReply> {
+  await ensureFeesHydratedServer();
+  const sis = loadSis();
+  const masters = loadMasters();
+  const ay = session.academicYearCode;
+  const focus = resolved.focus === "store" || resolved.focus === "transport" ? resolved.focus : "";
+  const limit = Math.min(25, Math.max(1, parseInt(resolved.limit || "10", 10) || 10));
+  const inSession = studentsInSession(sis, ay).filter((s) => s.status === "active");
+  const byId = new Map(inSession.map((s) => [s.id, s]));
+  const label = (s: SisStudent) => classLabel(masters, s.classId, s.sectionId).replace(" · ", " ");
+
+  type Acc = TopDuesFamily & { top: number };
+  const fams = new Map<string, Acc>();
+  const accFor = (s: SisStudent): Acc => {
+    const key = s.householdId || `solo:${s.id}`;
+    let a = fams.get(key);
+    if (!a) {
+      const hh = s.householdId ? sis.households.find((h) => h.id === s.householdId) : undefined;
+      const call = familyCallNumber(hh, s);
+      a = { studentId: s.id, children: [], feesPaise: 0, transportPaise: 0, storePaise: 0, overdueDays: 0, guardian: call.guardian, mobile: call.mobile, top: 0 };
+      fams.set(key, a);
+    }
+    if (!a.children.some((c) => c.name === s.fullName)) a.children.push({ name: s.fullName, classLabel: label(s) });
+    return a;
+  };
+
+  if (focus !== "store") {
+    for (const d of listLiveDefaulters({ asOf: todayIso, academicYearCode: ay, sis, masters })) {
+      const s = byId.get(d.student.id);
+      if (!s || d.overdueAmountPaise <= 0) continue;
+      const transport = d.overdueDues
+        .filter((l) => l.kind === "transport")
+        .reduce((sum, l) => sum + Math.max(0, l.balancePaise), 0);
+      const fees = Math.max(0, d.overdueAmountPaise - transport);
+      if (focus === "transport" && transport <= 0) continue;
+      const a = accFor(s);
+      a.feesPaise += fees;
+      a.transportPaise += transport;
+      a.overdueDays = Math.max(a.overdueDays, d.overdueDays);
+      if (fees + transport > a.top) {
+        a.top = fees + transport;
+        a.studentId = s.id;
+      }
+    }
+  }
+  // Store bills from the store's own balances — the fee engine does not
+  // hold them. Unreadable is said in the reply, never counted as zero.
+  let storeUnread = false;
+  if (focus !== "transport") {
+    const { storeDuesForStudents } = await import("@/lib/inventory/sales.server");
+    const storeDues = await storeDuesForStudents(inSession.map((s) => s.id)).catch((e) => {
+      console.warn("[erpCommands] store dues unreadable", (e as Error)?.message);
+      storeUnread = true;
+      return [];
+    });
+    for (const sd of storeDues) {
+      const s = byId.get(sd.studentId);
+      if (!s || sd.balancePaise <= 0) continue;
+      const a = accFor(s);
+      a.storePaise += sd.balancePaise;
+      const day = (sd.saleDate || "").slice(0, 10);
+      if (day && day < todayIso) {
+        const days = Math.floor((Date.parse(todayIso) - Date.parse(day)) / 86_400_000);
+        if (Number.isFinite(days)) a.overdueDays = Math.max(a.overdueDays, days);
+      }
+      if (focus === "store" && sd.balancePaise > a.top) {
+        a.top = sd.balancePaise;
+        a.studentId = s.id;
+      }
+    }
+  }
+  const input = {
+    todayIso,
+    focus: focus as FeeFocus | "",
+    limit,
+    families: [...fams.values()].map(({ top: _top, ...f }) => f),
+    storeUnread,
+    formatInr,
+  };
+  return { text: formatTopDuesReply(input), picks: topDuesPicks(input) };
+}
+
+async function storeSummary(resolved: Record<string, string>, todayIso: string): Promise<string> {
+  const { dashboard } = await import("@/lib/inventory/reports.server");
+  try {
+    const d = await dashboard();
+    return formatStoreSummaryReply({ ...d, todayIso, showMargin: resolved.showMargin === "1", formatInr });
+  } catch (e) {
+    console.warn("[erpCommands] store dashboard unreadable", (e as Error)?.message);
+    return "The store couldn't be read just now. Try again in a minute, or open Store in the ERP.";
+  }
+}
+
+async function inventoryStock(resolved: Record<string, string>): Promise<string> {
+  const { stockReport } = await import("@/lib/inventory/reports.server");
+  try {
+    const r = await stockReport();
+    return formatInventoryReply({ item: resolved.item || "", rows: r.rows, totals: r.totals, formatInr });
+  } catch (e) {
+    console.warn("[erpCommands] stock report unreadable", (e as Error)?.message);
+    return "The stock couldn't be read just now. Try again in a minute, or open Store in the ERP.";
+  }
+}
+
 async function classDefaulters(
   resolved: Record<string, string>,
   session: DemoSession,
@@ -3087,6 +3246,12 @@ async function classDefaulters(
       earliestDueOn: d.earliestDueOn,
       onPlan: !!d.planCode,
       studentId: d.student.id,
+      // The list exists to be called from. Only the office, accounts and
+      // the class's own teachers reach it (the section gate above).
+      ...familyCallNumber(
+        d.student.householdId ? sis.households.find((h) => h.id === d.student.householdId) : undefined,
+        d.student,
+      ),
     }));
   const input = {
     title: resolved.title || "Class",
@@ -3192,6 +3357,12 @@ async function studentFees(
     formatInr,
     focus: resolved.focus === "store" || resolved.focus === "transport" ? resolved.focus : undefined,
     storeUnread,
+    callable: resolved.callable === "1",
+    contacts: [
+      { label: hh?.guardianName ? `Guardian ${hh.guardianName}` : "Family", mobile: hh ? householdWhatsApp(hh) || hh.mobile || "" : "" },
+      { label: student.fatherName ? `Father ${student.fatherName}` : "Father", mobile: student.fatherMobile || "" },
+      { label: student.motherName ? `Mother ${student.motherName}` : "Mother", mobile: student.motherMobile || "" },
+    ],
   });
 }
 

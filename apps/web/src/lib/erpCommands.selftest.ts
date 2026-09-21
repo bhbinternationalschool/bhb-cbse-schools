@@ -645,7 +645,8 @@ const masters = {
   assert.equal(parseErpCommandLocal("class 3 me kisne fees nahi di")?.commandId, "class_defaulters");
   assert.equal(parseErpCommandLocal("कक्षा 3 के बकायेदार")?.commandId, "class_defaulters");
   assert.equal(parseErpCommandLocal("Amay Gupta 4B fees pending")?.commandId, "student_fees", "a name with a section is still one student");
-  assert.equal(parseErpCommandLocal("defaulters"), null, "no class → not a command");
+  // No class: the school-wide list to call from (21 Sep 2026; it used to be silence).
+  assert.equal(parseErpCommandLocal("defaulters")?.commandId, "top_dues", "no class → the whole school");
   // Model JSON carries the student too.
   const llm = parseErpCommandLlmJson('{"command":"student_fees","student":"Amay Gupta","confidence":0.9}');
   assert.equal(llm?.student, "Amay Gupta");
