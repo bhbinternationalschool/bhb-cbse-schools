@@ -2112,13 +2112,10 @@ export async function handleErpStaffCommand(
   if (command.id === "mark_attendance" && resolved.sectionId) {
     const ay = session.academicYearCode;
     const date = resolveCommandDate(text, todayIso);
-    const roster = loadSis()
-      .students.filter(
-        (st) =>
-          st.status === "active" &&
-          st.sectionId === resolved.sectionId &&
-          st.academicYearCode === ay,
-      )
+    // One row per child (studentsInSession): a register marked against a
+    // duplicate per-year row would mark a child who is not on the roll.
+    const roster = studentsInSession(loadSis(), ay)
+      .filter((st) => st.status === "active" && st.sectionId === resolved.sectionId)
       .sort((a, b) => (parseInt(a.rollNo, 10) || 9999) - (parseInt(b.rollNo, 10) || 9999));
     if (!roster.length) {
       return {
@@ -2139,7 +2136,16 @@ export async function handleErpStaffCommand(
       };
     }
     const spec = parseAttendanceSpec(parsed.fields.text || text);
-    const byRoll = new Map(roster.map((st) => [String(parseInt(st.rollNo, 10)), st]));
+    // A roll number can belong to two children (21 Sep 2026: LKG roll 1
+    // and Nursery roll 6 each did). A Map of one would keep whichever came
+    // last and mark that child absent without a word; two children behind
+    // one number is a question, never a guess.
+    const byRoll = new Map<string, typeof roster>();
+    for (const st of roster) {
+      const n = parseInt(st.rollNo, 10);
+      if (!Number.isFinite(n)) continue;
+      byRoll.set(String(n), [...(byRoll.get(String(n)) ?? []), st]);
+    }
     const picked = new Map<string, "A" | "LE" | "L" | "HD">();
     const unresolved: string[] = [];
     const ambiguous: { token: string; options: string[] }[] = [];
@@ -2148,9 +2154,11 @@ export async function handleErpStaffCommand(
         const token = raw.trim();
         if (!token) continue;
         if (/^\d{1,3}$/.test(token)) {
-          const st = byRoll.get(String(parseInt(token, 10)));
-          if (!st) unresolved.push(`roll ${token}`);
-          else picked.set(st.id, status);
+          const same = byRoll.get(String(parseInt(token, 10))) ?? [];
+          if (!same.length) unresolved.push(`roll ${token}`);
+          else if (same.length > 1) {
+            ambiguous.push({ token: `roll ${token}`, options: same.map((h) => h.fullName) });
+          } else picked.set(same[0]!.id, status);
           continue;
         }
         const hits = matchStudents({ name: token }, roster, { academicYearCode: ay });
@@ -2179,7 +2187,9 @@ export async function handleErpStaffCommand(
       return {
         handled: true,
         audience: "erp_command_ask",
-        text: `"${a.token}" matches ${a.options.join(", ")}. Nothing was marked — say the roll number instead.`,
+        text: a.token.startsWith("roll ")
+          ? `${a.token} belongs to ${a.options.length} children — ${a.options.join(", ")}. Nothing was marked — write that child's name instead, and ask the office to fix the roll numbers.`
+          : `"${a.token}" matches ${a.options.join(", ")}. Nothing was marked — say the roll number instead.`,
       };
     }
     if (!picked.size && !spec.allPresent) {
