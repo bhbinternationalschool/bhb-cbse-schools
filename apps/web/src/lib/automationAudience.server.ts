@@ -507,15 +507,17 @@ async function udiseRecipients(todayIso: string): Promise<AutomationRecipient[]>
 
   type Need = { student: (typeof sis.students)[number]; gaps: string[]; hasDob: boolean; hasAddress: boolean };
   const byHousehold = new Map<string, Need[]>();
-  for (const s of sis.students ?? []) {
+  // One row per child: the raw status filter reads every per-year row
+  // SIS keeps, and a sibling list built from it names the same child twice.
+  for (const s of studentsInSession(sis, academicYearCode)) {
     if (s.status !== "active" || !s.householdId) continue;
-    if (s.academicYearCode && s.academicYearCode !== academicYearCode) continue;
     const hh = householdOf(sis.households ?? [], s.householdId);
     const gaps = computeStudentUdiseGaps(s);
     const hasDob = !!s.dob;
     const hasAddress = !!(hh?.address && hh?.pincode) || !!s.permanentAddress;
-    const askable = gaps.some((g) => g === "student_aadhaar" || g === "parent_aadhaar") || !hasDob || !hasAddress;
-    if (!askable) continue;
+    // Asked only for what the parent can actually send — never for a
+    // complete child, never for a portal-side gap (PEN/APAAR) alone.
+    if (!missingDocsFor({ gaps, hasDob, hasAddress, language: "en" })) continue;
     const list = byHousehold.get(s.householdId) ?? [];
     list.push({ student: s, gaps, hasDob, hasAddress });
     byHousehold.set(s.householdId, list);

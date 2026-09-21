@@ -174,6 +174,10 @@ assert.equal(missingDocsFor({ gaps: ["student_aadhaar", "pen"], hasDob: true, ha
 assert.equal(missingDocsFor({ gaps: ["parent_aadhaar"], hasDob: false, hasAddress: false, language: "en" }), "father's or mother's Aadhaar card, birth certificate, address proof (ration card / electricity bill)");
 assert.match(missingDocsFor({ gaps: ["student_aadhaar"], hasDob: true, hasAddress: true, language: "hi" }), /आधार/);
 assert.equal(missingDocsFor({ gaps: ["pen", "apaar"], hasDob: true, hasAddress: true, language: "en" }), "", "a portal-side gap asks the parent for nothing");
+// A complete child (PEN + APAAR, so no gaps) is never chased for paperwork
+// our own record lacks — five families would have been, on 21 Sep 2026.
+assert.equal(missingDocsFor({ gaps: [], hasDob: false, hasAddress: false, language: "en" }), "", "nothing to ask for a complete child");
+assert.equal(missingDocsFor({ gaps: ["apaar"], hasDob: false, hasAddress: true, language: "en" }), "birth certificate", "an open child still gets the record's own gaps");
 
 /* ── A payment the parent is showing us ──────────────────────────────
  *

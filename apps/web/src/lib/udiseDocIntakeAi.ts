@@ -674,8 +674,17 @@ export function renderOfficeAlert(input: { plan: UdiseCorrectionPlan; childName:
   return { text: lines.join("\n"), oneLine, portalChanges };
 }
 
-/** The "please send" list for a family, from the child's gaps and record. */
+/**
+ * The "please send" list for a family, from the child's gaps and record.
+ *
+ * Empty when the child has no UDISE+ gap at all: PEN + APAAR is the whole
+ * of compliance (see isUdiseFullyCompliant), so a family whose child has
+ * both is never asked for a birth certificate or an address proof just
+ * because our own record lacks a date or a pincode. On 21 Sep 2026 five
+ * complete children's families would have been asked exactly that.
+ */
 export function missingDocsFor(input: { gaps: string[]; hasDob: boolean; hasAddress: boolean; language: "en" | "hi" }): string {
+  if (!input.gaps.length) return "";
   const out: string[] = [];
   const hi = input.language === "hi";
   if (input.gaps.includes("student_aadhaar") || input.gaps.includes("student_aadhaar_unverified")) out.push(hi ? "बच्चे का आधार कार्ड" : "child's Aadhaar card");
