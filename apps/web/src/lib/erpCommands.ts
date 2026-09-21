@@ -4139,6 +4139,12 @@ export function formatFeeReminderCard(input: {
   send: FeeReminderCardRow[];
   tooSoon: { studentName: string; daysAgo: number }[];
   optedOut: number;
+  /**
+   * Families with no number that can receive WhatsApp — every number the
+   * school holds for them is known dead, or is not a mobile at all. Named,
+   * because "3 could not be reached" gives the office nothing to fix.
+   */
+  unreachable?: string[];
   formatInr: (paise: number) => string;
 }): string {
   const inr = input.formatInr;
@@ -4172,6 +4178,15 @@ export function formatFeeReminderCard(input: {
   }
   if (input.optedOut) {
     lines.push(`${input.optedOut} opted out of WhatsApp and will not receive it.`);
+  }
+  const unreachable = input.unreachable ?? [];
+  if (unreachable.length) {
+    lines.push(
+      "",
+      `*Will NOT get this — no number on WhatsApp:* ${unreachable.slice(0, 8).join(", ")}${
+        unreachable.length > 8 ? ` +${unreachable.length - 8} more` : ""
+      }. Call them, and update their number in Students → Family.`,
+    );
   }
   return lines.join("\n");
 }

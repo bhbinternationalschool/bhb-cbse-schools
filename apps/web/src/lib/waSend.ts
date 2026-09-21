@@ -2,7 +2,7 @@
  * WhatsApp Business send helpers — Meta Cloud API and/or generic BSP URL.
  */
 
-import { isOptedOut, isWithin24HourWindow } from "@/lib/waContactState.server";
+import { isWithin24HourWindow, sendBlockFor } from "@/lib/waContactState.server";
 import { SCHOOL_DEFAULT_WA_LANGUAGE } from "@/lib/householdPrefs";
 
 export function waDigitsToE164India(mobile: string): string {
@@ -75,8 +75,10 @@ export async function sendWhatsAppText(opts: {
   if (!text) {
     return { ok: false, error: "Empty body", mode: "none" };
   }
-  if (await isOptedOut(to)) {
-    return { ok: false, error: "Contact has opted out (STOP)", mode: "none" };
+  {
+    // Opted out, or known not to be on WhatsApp — see sendBlockFor.
+    const blocked = await sendBlockFor(to);
+    if (blocked) return { ok: false, error: blocked.error, mode: "none" };
   }
   if (!(await isWithin24HourWindow(to))) {
     return {
@@ -205,8 +207,10 @@ export async function sendWhatsAppLocation(opts: {
   if (!Number.isFinite(opts.latitude) || !Number.isFinite(opts.longitude)) {
     return { ok: false, error: "No coordinates", mode: "none" };
   }
-  if (await isOptedOut(to)) {
-    return { ok: false, error: "Contact has opted out (STOP)", mode: "none" };
+  {
+    // Opted out, or known not to be on WhatsApp — see sendBlockFor.
+    const blocked = await sendBlockFor(to);
+    if (blocked) return { ok: false, error: blocked.error, mode: "none" };
   }
   if (!(await isWithin24HourWindow(to))) {
     return {
@@ -286,7 +290,10 @@ export async function sendWhatsAppDocument(opts: {
 }): Promise<{ ok: boolean; providerId?: string; mediaId?: string; error?: string; mode: string }> {
   const to = waDigitsToE164India(opts.toMobile);
   if (!to || to.length < 10) return { ok: false, error: "Invalid destination", mode: "none" };
-  if (await isOptedOut(to)) return { ok: false, error: "Contact has opted out (STOP)", mode: "none" };
+  {
+    const blocked = await sendBlockFor(to);
+    if (blocked) return { ok: false, error: blocked.error, mode: "none" };
+  }
   if (!(await isWithin24HourWindow(to))) {
     return { ok: false, error: "Outside Meta's 24h session window — a document needs an open conversation", mode: "none" };
   }
@@ -346,8 +353,10 @@ export async function sendWaFlowMessage(opts: {
   if (!opts.flowId) {
     return { ok: false, error: "Missing flowId — flow not published yet", mode: "none" };
   }
-  if (await isOptedOut(to)) {
-    return { ok: false, error: "Contact has opted out (STOP)", mode: "none" };
+  {
+    // Opted out, or known not to be on WhatsApp — see sendBlockFor.
+    const blocked = await sendBlockFor(to);
+    if (blocked) return { ok: false, error: blocked.error, mode: "none" };
   }
   if (!(await isWithin24HourWindow(to))) {
     return {
@@ -461,8 +470,10 @@ export async function sendWhatsAppTemplate(opts: {
   if (!opts.name) {
     return { ok: false, error: "Missing template name", mode: "none" };
   }
-  if (await isOptedOut(to)) {
-    return { ok: false, error: "Contact has opted out (STOP)", mode: "none" };
+  {
+    // Opted out, or known not to be on WhatsApp — see sendBlockFor.
+    const blocked = await sendBlockFor(to);
+    if (blocked) return { ok: false, error: blocked.error, mode: "none" };
   }
 
   const phoneNumberId = resolvePhoneNumberId(opts.fromPhoneNumberId);
