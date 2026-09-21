@@ -50,8 +50,8 @@ const since = new Date(now.getTime() - 24 * 3600_000).toISOString();
 type Win = { mobile_e164: string; last_inbound_at: string; opted_out_at: string | null };
 const win = (await all<Win>((a, b) => sb.from("wa_contact_state").select("mobile_e164,last_inbound_at,opted_out_at").eq("tenant_id", TENANT).gt("last_inbound_at", since).range(a, b)))
   .filter((w) => !w.opted_out_at);
-type Stu = { id: string; full_name: string; household_id: string; class_id: string; section_id: string; pen: string; apaar_id: string; aadhaar_last4: string; father_aadhaar_last4: string; mother_aadhaar_last4: string; dob: string | null; father_mobile: string; mother_mobile: string; profile: Record<string, string> | null; status: string };
-const students = await all<Stu>((a, b) => sb.from("sis_students").select("id,full_name,household_id,class_id,section_id,pen,apaar_id,aadhaar_last4,father_aadhaar_last4,mother_aadhaar_last4,dob,father_mobile,mother_mobile,profile,status").eq("tenant_id", TENANT).eq("academic_year_code", AY).eq("status", "active").range(a, b));
+type Stu = { id: string; full_name: string; household_id: string; class_id: string; section_id: string; pen: string; apaar_id: string; aadhaar_last4: string; father_aadhaar_last4: string; mother_aadhaar_last4: string; dob: string | null; gender: string; father_mobile: string; mother_mobile: string; profile: Record<string, string> | null; status: string };
+const students = await all<Stu>((a, b) => sb.from("sis_students").select("id,full_name,household_id,class_id,section_id,pen,apaar_id,aadhaar_last4,father_aadhaar_last4,mother_aadhaar_last4,dob,gender,father_mobile,mother_mobile,profile,status").eq("tenant_id", TENANT).eq("academic_year_code", AY).eq("status", "active").range(a, b));
 type Hh = { id: string; guardian_name: string; mobile: string; whatsapp_mobile: string; alt_mobile: string; address: string; pincode: string; preferred_language: string };
 const households = await all<Hh>((a, b) => sb.from("sis_households").select("id,guardian_name,mobile,whatsapp_mobile,alt_mobile,address,pincode,preferred_language").eq("tenant_id", TENANT).range(a, b));
 const classes = await all<{ id: string; name: string }>((a, b) => sb.from("masters_desk_classes").select("id,name").eq("tenant_id", TENANT).range(a, b));
@@ -108,6 +108,9 @@ for (const [hhId, w] of byHh) {
       gaps: gapsOf(s),
       hasDob: !!s.dob,
       hasAddress: !!(h?.address && h?.pincode) || !!(s.profile?.permanentAddress),
+      aadhaarFailed: /validation failed/i.test(s.profile?.udiseAadhaarValidationStatus || "")
+        ? { dob: s.dob || "", gender: s.gender || "", last4: s.aadhaar_last4 || "" }
+        : null,
     })),
     lang,
   );
@@ -128,6 +131,43 @@ console.log(`In window: ${win.length} numbers · families with an open child: ${
 for (const p of plans.filter((x) => x.skip)) console.log(`  SKIP ${p.guardian} (${p.mobile}): ${p.skip}`);
 for (const p of toSend) console.log(`  ${p.mobile} · window closes ${p.closesIst} IST · ${p.lang} · ${p.log}`);
 console.log("\n--- sample ---\n" + (toSend[0]?.text ?? ""));
+
+// Aadhaar rejected by the portal, family OUTSIDE the 24-hour window: only an
+// approved template reaches them. bhb_udise_docs_request (approved, en + hi)
+// asks for a clear photo in reply; their reply opens the window, and the
+// live path then sends the full "why and what to do" message.
+type Contact = { mobile_e164: string; opted_out_at: string | null; on_whatsapp: boolean | null };
+const contacts = await all<Contact>((a, b) => sb.from("wa_contact_state").select("mobile_e164,opted_out_at,on_whatsapp").eq("tenant_id", TENANT).range(a, b));
+const contactBy = new Map(contacts.map((c) => [last10(c.mobile_e164), c]));
+type TplPlan = { hh: string; mobile: string; lang: "en" | "hi"; params: string[]; log: string; skip: string };
+const tplPlans: TplPlan[] = [];
+const failedByHh = new Map<string, Stu[]>();
+for (const s of students) {
+  if (!/validation failed/i.test(s.profile?.udiseAadhaarValidationStatus || "")) continue;
+  failedByHh.set(s.household_id, [...(failedByHh.get(s.household_id) ?? []), s]);
+}
+const due = new Date(now.getTime() + 7 * 86400_000);
+for (const [hhId, kids] of failedByHh) {
+  if (byHh.has(hhId)) continue; // inside the window: the full message above covers them
+  const h = hhById.get(hhId);
+  const lang: "en" | "hi" = h?.preferred_language === "en" ? "en" : "hi";
+  const candidates = [h?.whatsapp_mobile, h?.mobile, kids[0]?.father_mobile, kids[0]?.mother_mobile].map(last10).filter((n) => n.length === 10);
+  const mobile = candidates.find((n) => contactBy.get(n)?.on_whatsapp !== false && !contactBy.get(n)?.opted_out_at) ?? "";
+  const skip = !mobile ? "no reachable WhatsApp number" : recentlyAsked.has(hhId) ? "asked in the last 7 days" : "";
+  const guardian = (h?.guardian_name || (lang === "hi" ? "अभिभावक" : "Parent")).replace(/^(MR|MRS|MS)\.?\s+/i, "").replace(/\s+/g, " ").trim();
+  const childName = kids.map((k) => k.full_name).join(", ");
+  const classLabel = kids.map((k) => `${cls.get(k.class_id) ?? ""} ${sec.get(k.section_id) ?? ""}`.trim()).join(", ");
+  const missingDocs = lang === "hi"
+    ? "बच्चे के आधार कार्ड की साफ़ फ़ोटो (आगे-पीछे) — UDISE+ पोर्टल पर आधार सत्यापित नहीं हुआ, दोबारा जाँच के लिए"
+    : "a clear photo of the child's Aadhaar card (front and back) — it could not be verified on the UDISE+ portal; for a re-check";
+  const dueDate = lang === "hi"
+    ? `${due.getUTCDate()} ${["जनवरी", "फ़रवरी", "मार्च", "अप्रैल", "मई", "जून", "जुलाई", "अगस्त", "सितंबर", "अक्टूबर", "नवंबर", "दिसंबर"][due.getUTCMonth()]}`
+    : `${due.getUTCDate()} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][due.getUTCMonth()]}`;
+  tplPlans.push({ hh: hhId, mobile, lang, params: [guardian, childName, classLabel, missingDocs, dueDate], log: `${childName}: Aadhaar re-check (portal validation failed)`, skip });
+}
+const tplSend = tplPlans.filter((p) => !p.skip);
+console.log(`\nAadhaar rejected, outside the window (template bhb_udise_docs_request): ${tplPlans.length} families · to send: ${tplSend.length}`);
+for (const p of tplPlans) console.log(`  ${p.skip ? `SKIP (${p.skip})` : p.mobile} · ${p.lang} · ${p.params[1]} (${p.params[2]})`);
 
 if (!SEND) {
   console.log("\nDry run. Nothing sent. Re-run with --send.");
@@ -174,4 +214,23 @@ for (const p of toSend) {
   console.log(`${ok ? "SENT" : "FAIL"} ${p.mobile}${p.attach ? (docOk ? " + form" : " (form failed)") : ""}${ok ? "" : ` — ${j.error?.message}`}`);
   await new Promise((res) => setTimeout(res, 400));
 }
+const tplResults: { hh: string; mobile: string; ok: boolean; id: string; error: string; log: string }[] = [];
+for (const p of tplSend) {
+  const r = await graph("messages", JSON.stringify({
+    messaging_product: "whatsapp",
+    to: `91${p.mobile}`,
+    type: "template",
+    template: {
+      name: "bhb_udise_docs_request",
+      language: { code: p.lang },
+      components: [{ type: "body", parameters: p.params.map((text) => ({ type: "text", text })) }],
+    },
+  }));
+  const j = (await r.json()) as { messages?: { id: string }[]; error?: { message: string } };
+  const ok = r.ok && !!j.messages?.[0]?.id;
+  tplResults.push({ hh: p.hh, mobile: p.mobile, ok, id: j.messages?.[0]?.id ?? "", error: j.error?.message ?? "", log: p.log });
+  console.log(`${ok ? "SENT" : "FAIL"} template ${p.mobile}${ok ? "" : ` — ${j.error?.message}`}`);
+  await new Promise((res) => setTimeout(res, 400));
+}
 console.log("\nRESULTS_JSON " + JSON.stringify(results));
+console.log("TEMPLATE_RESULTS_JSON " + JSON.stringify(tplResults));

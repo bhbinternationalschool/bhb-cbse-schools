@@ -72,8 +72,33 @@ console.log("udiseNudge.selftest.ts");
     assert.ok(t.length < 4096, "one WhatsApp message");
   }
   // Without an APAAR gap the consent paragraph goes too.
-  const noConsent = composeUdiseNudge({ guardianName: "", needs: [{ name: "A", classLabel: "I", docs: ["birth certificate"], consent: false }], language: "en", consentAttached: false });
+  const noConsent = composeUdiseNudge({ guardianName: "", needs: [{ name: "A", classLabel: "I", docs: ["birth certificate"], consent: false, recheck: null }], language: "en", consentAttached: false });
   assert.doesNotMatch(noConsent, /consent form/);
+}
+
+/* ── Aadhaar rejected by the portal: why, and what to do ──────────── */
+{
+  // Rudrans Singh, 21 Sep 2026: Aadhaar on file, portal said "Validation failed".
+  const needs = udiseNudgeNeeds(
+    [{ name: "RUDRANS SINGH", classLabel: "VI A", gaps: ["student_aadhaar_unverified", "apaar"], hasDob: true, hasAddress: true, aadhaarFailed: { dob: "2016-06-09", gender: "M", last4: "6648" } }],
+    "hi",
+  );
+  assert.deepEqual(needs[0]!.docs, ["बच्चे के आधार कार्ड की साफ़ फ़ोटो — आगे और पीछे (दोबारा जाँच के लिए)"], "a card we hold IS asked for again when the portal rejected it");
+  const hi = composeUdiseNudge({ guardianName: "Sujeet Singh", needs, language: "hi", consentAttached: true });
+  assert.match(hi, /⚠️ \*आधार सत्यापन नहीं हुआ\*\n\*RUDRANS SINGH\* का आधार UDISE\+ पोर्टल पर सत्यापित नहीं हो सका \("Validation failed"\)। स्कूल के रिकॉर्ड में: जन्म तिथि 09-06-2016 · लिंग पुरुष · आधार के अंतिम 4 अंक 6648/);
+  assert.match(hi, /नाम, जन्म तिथि और लिंग बिल्कुल वैसे ही/, "why: what the portal compares");
+  assert.match(hi, /दोबारा जाँच/, "asks for it again, for a re-check");
+  assert.match(hi, /₹75/);
+  assert.match(hi, /30 सितंबर 2026 तक निःशुल्क/);
+  assert.match(hi, /appointments\.uidai\.gov\.in/);
+  assert.match(hi, /UIDAI — uidai\.gov\.in \(Aadhaar Update Charges\)/, "the UIDAI source is cited when the fees are");
+  assert.ok(hi.length < 4096, `one WhatsApp message (${hi.length})`);
+  assert.doesNotMatch(hi, /\d{4} \d{4} \d{4}/, "never a full Aadhaar number");
+  const en = composeUdiseNudge({ guardianName: "", needs: udiseNudgeNeeds([{ name: "Vidhi", classLabel: "VII A", gaps: [], hasDob: true, hasAddress: true, aadhaarFailed: { dob: "", gender: "F", last4: "" } }], "en"), language: "en", consentAttached: false });
+  assert.match(en, /\*Vidhi\*'s Aadhaar could not be verified on the UDISE\+ portal \("Validation failed"\)\. The school's record: date of birth — · gender Female\n/);
+  assert.match(en, /a clear photo of the child's Aadhaar card — front and back \(for a re-check\)/, "asked even when nothing else is missing");
+  // No failure, no section.
+  assert.doesNotMatch(composeUdiseNudge({ guardianName: "", needs: udiseNudgeNeeds([{ name: "X", classLabel: "I", gaps: ["apaar"], hasDob: true, hasAddress: true }], "en"), language: "en", consentAttached: false }), /not verified|uidai/i);
 }
 
 /* ── How often ───────────────────────────────────────────────────── */

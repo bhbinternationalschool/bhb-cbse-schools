@@ -665,7 +665,14 @@ export async function captureUdiseDocumentFromWhatsApp(input: {
     }
 
     held += plan.changes.filter((c) => !c.apply).length;
-    const alert = renderOfficeAlert({ plan, childName: current.fullName, classLabel: classLabel(current, masters), guardianName: hh.guardianName, fileUrl });
+    const alert = renderOfficeAlert({
+      plan,
+      childName: current.fullName,
+      classLabel: classLabel(current, masters),
+      guardianName: hh.guardianName,
+      fileUrl,
+      portalValidationFailed: /validation failed/i.test(current.udiseAadhaarValidationStatus || ""),
+    });
     officeTexts.unshift(alert.text);
     portalAll.push(...alert.portalChanges);
   }

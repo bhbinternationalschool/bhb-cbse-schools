@@ -30,6 +30,11 @@ export type NudgeChildInput = {
   gaps: string[];
   hasDob: boolean;
   hasAddress: boolean;
+  /**
+   * The UDISE+ portal rejected this child's Aadhaar ("Validation failed").
+   * With it, what the school holds — so the parent can see what must match.
+   */
+  aadhaarFailed?: { dob: string; gender: string; last4: string } | null;
 };
 
 export type NudgeChildNeed = {
@@ -38,6 +43,8 @@ export type NudgeChildNeed = {
   docs: string[];
   /** APAAR not yet made: the signed consent / refusal form is needed. */
   consent: boolean;
+  /** Aadhaar rejected by the portal: a fresh photo of the card, for a re-check. */
+  recheck: { dob: string; gender: string; last4: string } | null;
 };
 
 /** What each child still needs from the family. Children needing nothing are left out. */
@@ -45,9 +52,17 @@ export function udiseNudgeNeeds(children: NudgeChildInput[], language: "en" | "h
   const out: NudgeChildNeed[] = [];
   for (const c of children) {
     const docs = missingDocsList({ gaps: c.gaps, hasDob: c.hasDob, hasAddress: c.hasAddress, language });
+    const recheck = c.aadhaarFailed ?? null;
+    if (recheck && !docs.some((d) => /aadhaar|आधार/i.test(d) && !/father|mother|पिता|माता/i.test(d))) {
+      docs.unshift(
+        language === "hi"
+          ? "बच्चे के आधार कार्ड की साफ़ फ़ोटो — आगे और पीछे (दोबारा जाँच के लिए)"
+          : "a clear photo of the child's Aadhaar card — front and back (for a re-check)",
+      );
+    }
     const consent = c.gaps.includes("apaar");
     if (!docs.length && !consent) continue;
-    out.push({ name: c.name, classLabel: c.classLabel, docs, consent });
+    out.push({ name: c.name, classLabel: c.classLabel, docs, consent, recheck });
   }
   return out;
 }
@@ -78,6 +93,70 @@ export function udiseNudgeDue(input: {
   return { due: true, reason: "" };
 }
 
+
+function ddmmyyyy(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || "");
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : "";
+}
+
+/**
+ * Why a child's Aadhaar was not verified on UDISE+, and what to do.
+ *
+ * The portal gives no reason beyond "Validation failed". It checks the
+ * Aadhaar number against UIDAI with the child's name, date of birth and
+ * gender, so the cause is one of those not matching what UIDAI holds, or a
+ * wrong digit. The school's own record is shown so the parent can spot it.
+ * Fees are UIDAI's published charges (uidai.gov.in, "Aadhaar Update
+ * Charges", checked 21 Sep 2026): name / DOB / gender ₹75; a child's
+ * biometric update free at 5–7 and 15–17, and at 7–15 until 30 Sep 2026.
+ */
+function recheckSection(needs: NudgeChildNeed[], hi: boolean): string[] {
+  const failed = needs.filter((n) => n.recheck);
+  if (!failed.length) return [];
+  const g = (x: string) => (hi ? (x === "M" ? "पुरुष" : x === "F" ? "महिला" : "—") : x === "M" ? "Male" : x === "F" ? "Female" : "—");
+  const lines: string[] = [""];
+  if (hi) {
+    lines.push("⚠️ *आधार सत्यापन नहीं हुआ*");
+    for (const n of failed) {
+      lines.push(
+        `*${n.name}* का आधार UDISE+ पोर्टल पर सत्यापित नहीं हो सका ("Validation failed")। स्कूल के रिकॉर्ड में: जन्म तिथि ${ddmmyyyy(n.recheck!.dob) || "—"} · लिंग ${g(n.recheck!.gender)}${n.recheck!.last4 ? ` · आधार के अंतिम 4 अंक ${n.recheck!.last4}` : ""}`,
+      );
+    }
+    lines.push(
+      "",
+      "*ऐसा क्यों होता है:* पोर्टल आधार नंबर को UIDAI के रिकॉर्ड से मिलाता है — नाम, जन्म तिथि और लिंग बिल्कुल वैसे ही होने चाहिए जैसे आधार में दर्ज हैं। नाम की स्पेलिंग, जन्म तिथि या लिंग अलग होने पर, या नंबर का एक भी अंक गलत होने पर सत्यापन नहीं होता।",
+      "",
+      "*आप क्या करें:*",
+      "1️⃣ आधार कार्ड की साफ़ फ़ोटो (आगे-पीछे) यहीं भेजें — स्कूल रिकॉर्ड को कार्ड से मिलाकर पोर्टल पर *दोबारा जाँच* के लिए भेजेगा।",
+      "2️⃣ अगर गलती आधार कार्ड में ही है, तो नज़दीकी आधार केंद्र पर सुधार कराएँ:",
+      "   • नाम / जन्म तिथि / लिंग सुधार — ₹75 (जन्म तिथि के लिए जन्म प्रमाणपत्र साथ ले जाएँ)",
+      "   • बच्चे का बायोमेट्रिक अपडेट — 5–7 और 15–17 वर्ष में निःशुल्क; 7–15 वर्ष में *30 सितंबर 2026 तक निःशुल्क*",
+      "   केंद्र खोजें / समय लें: appointments.uidai.gov.in",
+      "   सुधार के बाद नए आधार की फ़ोटो यहीं भेजें।",
+    );
+  } else {
+    lines.push("⚠️ *Aadhaar not verified*");
+    for (const n of failed) {
+      lines.push(
+        `*${n.name}*'s Aadhaar could not be verified on the UDISE+ portal ("Validation failed"). The school's record: date of birth ${ddmmyyyy(n.recheck!.dob) || "—"} · gender ${g(n.recheck!.gender)}${n.recheck!.last4 ? ` · Aadhaar ending ${n.recheck!.last4}` : ""}`,
+      );
+    }
+    lines.push(
+      "",
+      "*Why this happens:* the portal checks the Aadhaar number with UIDAI, and the name, date of birth and gender must be exactly as they are on the Aadhaar. A different spelling, date or gender — or one wrong digit — and it fails.",
+      "",
+      "*What to do:*",
+      "1️⃣ Send a clear photo of the Aadhaar card (front and back) here — the school matches the record to the card and submits it to the portal *for a re-check*.",
+      "2️⃣ If the mistake is on the Aadhaar itself, correct it at the nearest Aadhaar centre:",
+      "   • name / date of birth / gender correction — ₹75 (take the birth certificate for a date of birth)",
+      "   • child's biometric update — free at 5–7 and 15–17 years; at 7–15 years *free until 30 Sep 2026*",
+      "   Find a centre / book: appointments.uidai.gov.in",
+      "   After the correction, send a photo of the new Aadhaar here.",
+    );
+  }
+  return lines;
+}
+
 /** The message. Hindi by default, as every parent message is. */
 export function composeUdiseNudge(input: {
   guardianName: string;
@@ -100,6 +179,7 @@ export function composeUdiseNudge(input: {
       for (const d of n.docs) lines.push(`• ${d}`);
       if (n.consent) lines.push(`• APAAR सहमति फ़ॉर्म — भरकर व हस्ताक्षर करके${input.consentAttached ? " (साथ में भेजा है)" : ""}`);
     }
+    lines.push(...recheckSection(input.needs, true));
     lines.push(
       "",
       "*यह क्यों ज़रूरी है*",
@@ -116,7 +196,7 @@ export function composeUdiseNudge(input: {
     }
     lines.push(
       "",
-      "📎 संदर्भ: शिक्षा मंत्रालय, भारत सरकार — apaar.education.gov.in",
+      `📎 संदर्भ: शिक्षा मंत्रालय, भारत सरकार — apaar.education.gov.in${input.needs.some((n) => n.recheck) ? " · UIDAI — uidai.gov.in (Aadhaar Update Charges)" : ""}`,
       "आधार नंबर चैट में टाइप न करें — कार्ड की फ़ोटो भेजें, बच्चे के रिकॉर्ड में अपने-आप दर्ज हो जाएगा।",
     );
     return lines.join("\n");
@@ -132,6 +212,7 @@ export function composeUdiseNudge(input: {
     for (const d of n.docs) lines.push(`• ${d}`);
     if (n.consent) lines.push(`• APAAR consent form — filled in and signed${input.consentAttached ? " (attached)" : ""}`);
   }
+  lines.push(...recheckSection(input.needs, false));
   lines.push(
     "",
     "*Why it is needed*",
@@ -148,7 +229,7 @@ export function composeUdiseNudge(input: {
   }
   lines.push(
     "",
-    "📎 Reference: Ministry of Education, Government of India — apaar.education.gov.in",
+    `📎 Reference: Ministry of Education, Government of India — apaar.education.gov.in${input.needs.some((n) => n.recheck) ? " · UIDAI — uidai.gov.in (Aadhaar Update Charges)" : ""}`,
     "Please don't type the Aadhaar number in chat — send a photo of the card and it is entered in the child's record automatically.",
   );
   return lines.join("\n");

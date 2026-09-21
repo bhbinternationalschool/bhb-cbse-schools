@@ -94,6 +94,11 @@ export async function maybeSendUdiseNudge(
         gaps: computeStudentUdiseGaps(s),
         hasDob: !!s.dob,
         hasAddress: hasHhAddress || !!s.permanentAddress,
+        // The portal rejected the Aadhaar we hold: ask for the card again,
+        // and say why (udiseNudge.ts, recheckSection).
+        aadhaarFailed: /validation failed/i.test(s.udiseAadhaarValidationStatus || "")
+          ? { dob: s.dob || "", gender: s.gender || "", last4: s.aadhaarLast4 || "" }
+          : null,
       })),
       language,
     );

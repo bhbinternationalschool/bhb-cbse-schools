@@ -693,7 +693,15 @@ function ddmmyyyy(iso: string): string {
   return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
 }
 
-export function renderOfficeAlert(input: { plan: UdiseCorrectionPlan; childName: string; classLabel: string; guardianName: string; fileUrl: string | null }): { text: string; oneLine: string; portalChanges: string[] } {
+export function renderOfficeAlert(input: {
+  plan: UdiseCorrectionPlan;
+  childName: string;
+  classLabel: string;
+  guardianName: string;
+  fileUrl: string | null;
+  /** The portal rejected this child's Aadhaar ("Validation failed") — the card is the re-check. */
+  portalValidationFailed?: boolean;
+}): { text: string; oneLine: string; portalChanges: string[] } {
   const label = DOC_TYPE_LABEL[input.plan.docType];
   const applied = input.plan.changes.filter((c) => c.apply);
   const held = input.plan.changes.filter((c) => !c.apply);
@@ -707,7 +715,18 @@ export function renderOfficeAlert(input: { plan: UdiseCorrectionPlan; childName:
   if (held.length) lines.push("", "*Needs your decision:*", ...held.map((c) => `• ${FIELD_LABEL_EN[c.field]}: record "${display(c.before, c.field)}" vs document "${display(c.after, c.field)}" — ${c.reason}`));
   if (input.plan.flags.length) lines.push("", ...input.plan.flags.map((f) => `⚠️ ${f}`));
   if (portalChanges.length) lines.push("", "*Change in UDISE+ portal:*", ...portalChanges.map((p) => `• ${p}`));
-  else if (applied.length === 0 && held.length === 0) lines.push("", "UDISE+: nothing to change from this document.");
+  const recheck = input.portalValidationFailed && input.plan.docType === "aadhaar" && input.plan.person === "child";
+  if (recheck) {
+    // Sent because the portal rejected this Aadhaar. Even a card that
+    // matches our record needs the office to submit it again — the portal
+    // does not re-check by itself.
+    lines.push(
+      "",
+      "⚠️ *UDISE+ had rejected this child's Aadhaar (Validation failed).* Open the student on the UDISE+ portal, make the name, date of birth and gender exactly as printed on this card, check the 12 digits, and submit the Aadhaar for validation again.",
+    );
+  } else if (!portalChanges.length && applied.length === 0 && held.length === 0) {
+    lines.push("", "UDISE+: nothing to change from this document.");
+  }
   if (input.fileUrl) lines.push("", `Document: ${input.fileUrl}`);
   const oneLine = `${label} for ${input.childName}: ${applied.length} field${applied.length === 1 ? "" : "s"} updated${held.length ? `, ${held.length} for review` : ""}`;
   return { text: lines.join("\n"), oneLine, portalChanges };
