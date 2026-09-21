@@ -108,9 +108,20 @@ assert.equal(wrongChild.changes.find((c) => c.field === "fullName")?.apply, fals
 assert.ok(wrongChild.flags.some((f) => /does not match/.test(f)));
 
 // Gender disagreement is never overwritten silently.
+// Gender: the child's own Aadhaar card wins; any other document only asks.
 const g = planUdiseCorrections({ extract: p1, student: { ...student, gender: "F" }, household });
 assert.equal(by.call(null, "x"), undefined);
-assert.equal(g.changes.find((c) => c.field === "gender")?.apply, false);
+assert.equal(g.changes.find((c) => c.field === "gender")?.apply, true, "the Aadhaar card is what UDISE+ validates against");
+const gb = planUdiseCorrections({ extract: { ...p1, docType: "birth_certificate" }, student: { ...student, gender: "F" }, household });
+assert.equal(gb.changes.find((c) => c.field === "gender")?.apply, false, "a birth certificate never silently flips gender");
+
+// The name exactly as on the card (21 Sep 2026: RUDRANS vs Rudransh; and a
+// dropped middle name UDISE+ would reject).
+const rud = planUdiseCorrections({ extract: { ...p1, nameOnDoc: "Rudransh Singh" }, student: { ...student, fullName: "RUDRANS SINGH" }, household });
+assert.deepEqual([rud.changes.find((c) => c.field === "fullName")?.after, rud.changes.find((c) => c.field === "fullName")?.apply], ["RUDRANSH SINGH", true]);
+const mid = planUdiseCorrections({ extract: { ...p1, nameOnDoc: "Priyanshu Kumar Yadav" }, student: { ...student, fullName: "PRIYANSHU YADAV" }, household });
+assert.equal(mid.changes.find((c) => c.field === "fullName")?.after, "PRIYANSHU KUMAR YADAV");
+assert.equal(mid.changes.find((c) => c.field === "fullName")?.apply, true);
 
 // Only last-4 on record and the card agrees: "completed", still applied.
 const l4 = planUdiseCorrections({ extract: p1, student: { ...student, aadhaarLast4: "0124" }, household });
@@ -157,7 +168,8 @@ assert.equal(fp.changes.find((c) => c.field === "fatherAadhaarNumber")?.after, G
 assert.equal(fp.changes.find((c) => c.field === "dob"), undefined, "a parent's DOB never touches the child");
 assert.equal(fp.changes.find((c) => c.field === "aadhaarNumber"), undefined);
 assert.equal(fp.changes.find((c) => c.field === "fullName"), undefined, "the parent's name never overwrites the child's");
-assert.equal(fp.changes.find((c) => c.field === "fatherName"), undefined, "Rakesh Kumar Sharma == Rakesh Sharma");
+assert.equal(fp.changes.find((c) => c.field === "fatherName")?.after, "RAKESH KUMAR SHARMA", "the same man — his name as on his own Aadhaar card");
+assert.equal(fp.changes.find((c) => c.field === "fatherName")?.apply, true);
 assert.equal(fp.docKey, "aadhaar");
 
 // Father's card but the name is somebody else: held.

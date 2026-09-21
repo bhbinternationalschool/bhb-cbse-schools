@@ -615,6 +615,11 @@ export async function captureUdiseDocumentFromWhatsApp(input: {
         if (saved.ok) {
           current.docs = docs;
           fileUrl = entry.fileUrl;
+          // Filing the document is itself a write: without the new version
+          // the corrections below are refused as "changed by someone else"
+          // (21 Sep 2026: a name and a date of birth held back this way).
+          const reread = await freshStudent(current.id);
+          if (reread?.revisionAt) current.revisionAt = reread.revisionAt;
         } else officeTexts.push(`⚠️ Vault entry not saved (${saved.error}); the file is in Drive.`);
       } else officeTexts.push(`📁 Filed in Drive under students/${current.id} as ${fileName}.`);
     }

@@ -465,6 +465,12 @@ export function planUdiseCorrections(input: {
     nameRelation = nameTarget.current ? compareNames(nameTarget.current, e.nameOnDoc) : "spelling";
     if (nameRelation === "spelling") {
       put({ field: nameTarget.field, target: "student", before: nameTarget.current, after: e.nameOnDoc, apply: true, reason: nameTarget.current ? "spelling corrected from the document" : "filled from the document" });
+    } else if (nameRelation === "same" && e.docType === "aadhaar") {
+      // The same name to our matching ("Priyanshu Yadav" = "Priyanshu Kumar
+      // Yadav"), but UDISE+ validates against UIDAI letter for letter — so
+      // the record takes the card's exact name. A case-only difference is
+      // dropped by put().
+      put({ field: nameTarget.field, target: "student", before: nameTarget.current, after: e.nameOnDoc, apply: true, reason: "written exactly as on the Aadhaar card" });
     } else if (nameRelation === "different") {
       put({ field: nameTarget.field, target: "student", before: nameTarget.current, after: e.nameOnDoc, apply: false, reason: "the name on the document is a different name — office to confirm whose document this is" });
       flags.push(`Name on document "${e.nameOnDoc}" does not match "${nameTarget.current}" on record. Nothing else from this document was applied.`);
@@ -492,7 +498,10 @@ export function planUdiseCorrections(input: {
     }
     if (e.gender && !s.gender) put({ field: "gender", target: "student", before: s.gender, after: e.gender, apply: true, reason: "filled from the document" });
     else if (e.gender && s.gender && s.gender.toUpperCase()[0] !== e.gender) {
-      put({ field: "gender", target: "student", before: s.gender, after: e.gender, apply: false, reason: "document and record disagree on gender — office to confirm" });
+      // The child's own Aadhaar is what UDISE+ validates against: it wins
+      // (the school's rule, 21 Sep 2026). Any other document is a question.
+      const byAadhaar = e.docType === "aadhaar";
+      put({ field: "gender", target: "student", before: s.gender, after: e.gender, apply: byAadhaar, reason: byAadhaar ? "gender as on the Aadhaar card" : "document and record disagree on gender — office to confirm" });
     }
     if (e.docType === "birth_certificate") {
       for (const [field, cur, val] of [["fatherName", s.fatherName, e.fatherName], ["motherName", s.motherName, e.motherName]] as const) {
