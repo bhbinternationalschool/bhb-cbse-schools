@@ -188,6 +188,19 @@ assert.match(l4.changes.find((c) => c.field === "aadhaarNumber")!.reason, /compl
   const newNo = renderParentAck({ plan: planUdiseCorrections({ extract: p1, student, household }), childName: "Aarav Sharma", language: "en" });
   assert.ok(!newNo.includes(GOOD), "never the full Aadhaar number");
   assert.match(newNo, /Added to the record:/);
+
+  // APAAR asked in the same reply — consent-based, never "compulsory".
+  const ap = renderParentAck({ plan, childName: "VIDHI SINGH", language: "hi", portalValidationFailed: true, apaarPending: { childNames: ["VIDHI SINGH", "RUDRANSH SINGH"], formAttached: true } });
+  assert.match(ap, /APAAR ID अभी नहीं बनी है/);
+  assert.match(ap, /VIDHI SINGH, RUDRANSH SINGH/);
+  assert.match(ap, /\*सहमति\*/);
+  assert.match(ap, /साथ में भेजा है/);
+  assert.ok(!/अनिवार्य|compulsory|mandatory/i.test(ap), "APAAR is voluntary");
+  assert.ok(!/कुछ और नहीं करना है/.test(ap), "not 'nothing more needed' while the form is asked for");
+  const apEn = renderParentAck({ plan, childName: "VIDHI SINGH", language: "en", apaarPending: { childNames: ["VIDHI SINGH"], formAttached: false } });
+  assert.match(apEn, /VIDHI SINGH does not have an APAAR ID yet/);
+  assert.ok(!/attached/.test(apEn), "no form this week: it is not claimed as attached");
+  assert.ok(!/APAAR/.test(renderParentAck({ plan, childName: "VIDHI SINGH", language: "en" })), "no pending child, no ask");
 }
 
 /* ── Plan: the father's Aadhaar ───────────────────────────────────── */

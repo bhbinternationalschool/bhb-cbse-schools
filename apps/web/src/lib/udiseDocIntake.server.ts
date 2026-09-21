@@ -1,5 +1,8 @@
 import "server-only";
 
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
 /**
  * UDISE+ documents over WhatsApp — the side that touches the world.
  *
@@ -82,6 +85,38 @@ function classLabel(s: SisStudent, masters: Awaited<ReturnType<typeof loadServer
 }
 
 /** The student as the database holds it right now — revision included, so the guarded push can refuse a stale write. */
+const APAAR_FORM_PURPOSE = "apaar_consent_form";
+
+let consentFormCache: Buffer | null | undefined;
+function apaarConsentForm(): Buffer | null {
+  if (consentFormCache !== undefined) return consentFormCache;
+  try {
+    consentFormCache = readFileSync(path.join(process.cwd(), "public", "docs", "apaar-consent-refusal-form.pdf"));
+  } catch (e) {
+    console.warn("[udise-intake] APAAR consent form not found", (e as Error)?.message);
+    consentFormCache = null;
+  }
+  return consentFormCache;
+}
+
+/** The form went to this family in the last 7 days — by this reply or the UDISE+ nudge. Unreadable counts as sent. */
+async function consentFormDue(householdId: string): Promise<boolean> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return false;
+  const since = new Date(Date.now() - 7 * 86_400_000).toISOString();
+  const { data, error } = await ctx.sb
+    .from("household_message_log")
+    .select("id")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("household_id", householdId)
+    .in("purpose", [APAAR_FORM_PURPOSE, "udise_nudge"])
+    .eq("status", "sent")
+    .gte("created_at", since)
+    .limit(1);
+  if (error) return false;
+  return !(data ?? []).length;
+}
+
 async function freshStudent(studentId: string): Promise<SisStudent | null> {
   const ctx = await getServerTenantContext();
   if (!ctx) return null;
@@ -694,13 +729,45 @@ export async function captureUdiseDocumentFromWhatsApp(input: {
   if (householdUpdated || updatedStudents.length) patchMirrorHousehold(householdUpdated ?? hh, updatedStudents);
 
   // 4. The parent, in their language, inside the window they just opened.
+  // Any child of the family still without an APAAR ID: the same reply asks
+  // for the consent form (the school's request, 21 Sep 2026), and the form
+  // itself follows — at most once a week, so three documents in a row do
+  // not bring three PDFs.
+  const apaarKids = children.filter((c) => c.status === "active" && !(c.apaarId || "").trim());
+  const consentPdf = apaarKids.length && (await consentFormDue(hh.id)) ? apaarConsentForm() : null;
   const ack = renderParentAck({
     plan: firstPlan!,
     childName: targets.length > 1 && (firstPlan!.person === "father" || firstPlan!.person === "mother") ? targets.map((t) => t.fullName.split(/\s+/)[0]).join(", ") : firstChild.fullName,
     language,
     portalValidationFailed: /validation failed/i.test(firstChild.udiseAadhaarValidationStatus || ""),
+    apaarPending: apaarKids.length ? { childNames: apaarKids.map((c) => c.fullName), formAttached: !!consentPdf } : undefined,
   });
-  await sendWhatsAppText({ toMobile: input.mobile10, body: ack, clientMessageId: `udise_ack_${refId}` }).catch((e) => console.warn("[udise-intake] parent ack failed", e));
+  const ackSent = await sendWhatsAppText({ toMobile: input.mobile10, body: ack, clientMessageId: `udise_ack_${refId}` }).catch((e) => {
+    console.warn("[udise-intake] parent ack failed", e);
+    return null;
+  });
+  if (consentPdf && ackSent?.ok) {
+    const { sendWhatsAppDocument } = await import("@/lib/waSend");
+    const doc = await sendWhatsAppDocument({
+      toMobile: input.mobile10,
+      bytes: consentPdf,
+      filename: "APAAR-Consent-Refusal-Form.pdf",
+      mimeType: "application/pdf",
+      caption:
+        language === "hi"
+          ? "शिक्षा मंत्रालय — APAAR ID सहमति / असहमति फ़ॉर्म (Annexure-1)। भरकर, हस्ताक्षर करके इसकी फ़ोटो भेजें।"
+          : "Ministry of Education — APAAR ID consent / refusal form (Annexure-1). Please fill in, sign and send a photo.",
+    }).catch((e) => ({ ok: false as const, error: (e as Error)?.message }));
+    const { logHouseholdWaSend } = await import("@/lib/householdMessageLog.server");
+    await logHouseholdWaSend({
+      mobile: input.mobile10,
+      purpose: APAAR_FORM_PURPOSE,
+      via: "text",
+      preview: `APAAR consent form: ${apaarKids.map((c) => c.fullName).join(", ")}`,
+      status: doc.ok ? "sent" : "failed",
+      error: doc.ok ? undefined : doc.error,
+    }).catch(() => undefined);
+  }
 
   // 5. The office.
   const summary = `${label} for ${targets.map((t) => t.fullName).join(", ")}: ${applied} field${applied === 1 ? "" : "s"} updated${held ? `, ${held} for review` : ""}`;

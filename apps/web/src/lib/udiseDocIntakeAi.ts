@@ -707,6 +707,11 @@ export function renderParentAck(input: {
   language: "en" | "hi";
   /** UDISE+ had rejected this child's Aadhaar ("Validation failed"). */
   portalValidationFailed?: boolean;
+  /**
+   * The family's children with no APAAR ID yet. APAAR is voluntary and made
+   * only with the parent's consent — the ask says so, and never "compulsory".
+   */
+  apaarPending?: { childNames: string[]; formAttached: boolean };
 }): string {
   const hi = input.language === "hi";
   const { plan } = input;
@@ -772,12 +777,31 @@ export function renderParentAck(input: {
   } else if (plan.flags.length) {
     lines.push("", hi ? "कार्यालय एक बात की जाँच करेगा और ज़रूरत हो तो आपसे संपर्क करेगा।" : "The office will check one detail and contact you if needed.");
   }
+  const apaar = input.apaarPending?.childNames.filter(Boolean) ?? [];
   if (recheck) {
     lines.push(
       "",
       hi
-        ? "अब स्कूल UDISE+ पोर्टल पर आधार को दोबारा सत्यापन के लिए भेजेगा। आपको कुछ और नहीं करना है।"
-        : "The school will now send the Aadhaar for validation on UDISE+ again. Nothing more is needed from you.",
+        ? `अब स्कूल UDISE+ पोर्टल पर आधार को दोबारा सत्यापन के लिए भेजेगा।${apaar.length ? "" : " आपको कुछ और नहीं करना है।"}`
+        : `The school will now send the Aadhaar for validation on UDISE+ again.${apaar.length ? "" : " Nothing more is needed from you."}`,
+    );
+  }
+  if (apaar.length) {
+    const names = apaar.join(", ");
+    const form = input.apaarPending!.formAttached;
+    lines.push(
+      "",
+      hi
+        ? [
+            `🆔 *APAAR ID:* ${names} की APAAR ID अभी नहीं बनी है।`,
+            "APAAR (\"One Nation One Student ID\", शिक्षा मंत्रालय) में बच्चे के अंक-पत्र, प्रमाणपत्र और पढ़ाई का पूरा रिकॉर्ड DigiLocker में एक ही जगह सुरक्षित रहता है — स्कूल बदलने पर भी।",
+            `यह आपकी *सहमति* से ही बनती है। कृपया शिक्षा मंत्रालय का सहमति फ़ॉर्म${form ? " (साथ में भेजा है)" : ""} भरकर, हस्ताक्षर करके उसकी फ़ोटो यहीं भेजें।`,
+          ].join("\n")
+        : [
+            `🆔 *APAAR ID:* ${names} ${apaar.length === 1 ? "does" : "do"} not have an APAAR ID yet.`,
+            "APAAR (\"One Nation One Student ID\", Ministry of Education) keeps the child's marksheets, certificates and full study record together in DigiLocker — even across a change of school.",
+            `It is made only with your *consent*. Please fill in and sign the Ministry of Education's consent form${form ? " (attached)" : ""} and send a photo of it here.`,
+          ].join("\n"),
     );
   }
   return lines.join("\n");
