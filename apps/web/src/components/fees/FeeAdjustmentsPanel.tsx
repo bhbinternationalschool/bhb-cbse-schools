@@ -9,9 +9,12 @@ import {
   type FeeDueLine,
 } from "@/lib/fees";
 import {
+  FEE_ADJUST_AUTO_LIMIT_PAISE,
   FEE_ADJUST_REASONS,
+  createBulkWaiver,
   createFeeAdjustment,
   decideFeeAdjustment,
+  decideFeeAdjustmentBatch,
   feeAdjustmentTypeLabel,
   formatAdjustLimitHint,
   loadFeeAdjustments,
@@ -30,6 +33,7 @@ import { PreviousDuesImportPanel } from "@/components/fees/PreviousDuesImportPan
 import { ManualPreviousDuePanel } from "@/components/fees/ManualPreviousDuePanel";
 import { BulkPreviousDueByClassPanel } from "@/components/fees/BulkPreviousDueByClassPanel";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
+import { bulkWaiverPlan } from "@/lib/feeAdjustmentsMerge";
 
 export function FeeAdjustmentsPanel({
   onChanged,
@@ -45,7 +49,12 @@ export function FeeAdjustmentsPanel({
   const [rows, setRows] = useState<FeeAdjustment[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const [type, setType] = useState<FeeAdjustmentType>("waiver");
+  /** "bulk_waiver" is a form mode, not a stored type: it writes many waivers. */
+  const [type, setType] = useState<FeeAdjustmentType | "bulk_waiver">("waiver");
+  /** Due lines ticked for a bulk waiver. */
+  const [picked, setPicked] = useState<Set<string>>(() => new Set());
+  /** Waiving everything is not leaving: the child stays on the roll unless the office says so. */
+  const [statusAfter, setStatusAfter] = useState<"active" | "inactive">("active");
   const [dueKey, setDueKey] = useState("");
   const [amount, setAmount] = useState("");
   const [reasonCode, setReasonCode] =
@@ -99,7 +108,47 @@ export function FeeAdjustmentsPanel({
     );
   }, [student, masters, rows]);
 
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const waivable = useMemo(
+    () => dues.map((d) => ({ dueKey: d.dueKey, label: d.label, balancePaise: d.balancePaise, dueOn: d.dueOn })),
+    [dues],
+  );
+  const plan = useMemo(
+    () => bulkWaiverPlan(waivable, picked, { limitPaise: FEE_ADJUST_AUTO_LIMIT_PAISE, todayIso }),
+    [waivable, picked, todayIso],
+  );
+  // A tick belongs to the student it was made for.
+  useEffect(() => {
+    setPicked(new Set());
+    setStatusAfter("active");
+  }, [studentId]);
+  function pick(which: "all" | "now" | "future" | "none") {
+    setPicked(
+      new Set(
+        which === "none"
+          ? []
+          : waivable
+              .filter((l) => which === "all" || (which === "future" ? l.dueOn > todayIso : l.dueOn <= todayIso))
+              .map((l) => l.dueKey),
+      ),
+    );
+  }
+  function togglePick(dueKey: string) {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(dueKey)) next.delete(dueKey);
+      else next.add(dueKey);
+      return next;
+    });
+  }
+
   const pending = rows.filter((r) => r.status === "pending_approval");
+  // A bulk waiver waits as ONE item: one decision for one reason.
+  const pendingBatches = [...new Set(pending.map((r) => r.batchId).filter(Boolean) as string[])].map((batchId) => {
+    const items = pending.filter((r) => r.batchId === batchId);
+    return { batchId, items, totalPaise: items.reduce((s, r) => s + r.amountPaise, 0), first: items[0]! };
+  });
+  const pendingSingles = pending.filter((r) => !r.batchId);
   const groups =
     masters?.feeGroups.filter(
       (g) => g.isActive && g.academicYearCode === ay,
@@ -114,6 +163,47 @@ export function FeeAdjustmentsPanel({
     e.preventDefault();
     if (!studentId) {
       flash("Select a student");
+      return;
+    }
+    if (type === "bulk_waiver") {
+      if (!plan.lines.length) {
+        flash("Tick at least one due line to waive");
+        return;
+      }
+      const ok = window.confirm(
+        [
+          `Waive ${plan.lines.length} line(s) · ${formatInr(plan.totalPaise)} for ${student?.fullName ?? "this student"}?`,
+          `${plan.current} due now, ${plan.future} in the future.`,
+          plan.needsApproval
+            ? `Over ${formatInr(FEE_ADJUST_AUTO_LIMIT_PAISE)} — this goes to the Principal for approval first.`
+            : "Posts now.",
+          statusAfter === "active"
+            ? "The student stays ACTIVE."
+            : "The student will be marked INACTIVE.",
+        ].join("\n"),
+      );
+      if (!ok) return;
+      const r = createBulkWaiver({
+        studentId,
+        lines: plan.lines,
+        reasonCode,
+        reason,
+        createdBy: session.fullName,
+        markInactive: statusAfter === "inactive",
+        todayIso,
+      });
+      if (!r.ok) {
+        flash(r.error);
+        return;
+      }
+      flash(
+        r.pending
+          ? `${r.created} line(s) · ${formatInr(r.totalPaise)} sent to the Principal as one approval`
+          : `${r.created} line(s) · ${formatInr(r.totalPaise)} waived — Fee Take updated`,
+      );
+      setPicked(new Set());
+      setReason("");
+      refresh();
       return;
     }
     const selectedDue = dues.find((d) => d.dueKey === dueKey);
@@ -207,10 +297,46 @@ export function FeeAdjustmentsPanel({
       {pending.length > 0 ? (
         <div className="rounded-xl border border-[rgba(197,160,40,0.4)] bg-[rgba(197,160,40,0.08)] p-4">
           <h3 className="text-sm font-semibold text-[var(--brand-deep)]">
-            Principal approval queue · {pending.length}
+            Principal approval queue · {pendingBatches.length + pendingSingles.length}
           </h3>
           <ul className="mt-2 divide-y divide-[rgba(32,48,80,0.08)]">
-            {pending.map((a) => (
+            {pendingBatches.map((b) => (
+              <li key={b.batchId} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+                <div>
+                  <div className="font-medium text-[var(--brand-deep)]">
+                    Bulk waiver · {b.items.length} line(s) · {formatInr(b.totalPaise)}
+                  </div>
+                  <div className="text-xs text-[var(--muted)]">
+                    {sis?.students.find((s) => s.id === b.first.studentId)?.fullName} · {b.first.reason} · by {b.first.createdBy}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className="btn-accent rounded-lg px-2.5 py-1 text-[11px] font-semibold"
+                    onClick={() => {
+                      const r = decideFeeAdjustmentBatch({ batchId: b.batchId, approve: true, decidedBy: session.fullName });
+                      flash(r.ok ? `Approved ${r.decided} line(s)` : r.error);
+                      refresh();
+                    }}
+                  >
+                    Approve all
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-[rgba(32,48,80,0.2)] px-2.5 py-1 text-[11px] font-semibold"
+                    onClick={() => {
+                      const r = decideFeeAdjustmentBatch({ batchId: b.batchId, approve: false, decidedBy: session.fullName });
+                      flash(r.ok ? `Rejected ${r.decided} line(s)` : r.error);
+                      refresh();
+                    }}
+                  >
+                    Reject all
+                  </button>
+                </div>
+              </li>
+            ))}
+            {pendingSingles.map((a) => (
               <li
                 key={a.id}
                 className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"
@@ -316,6 +442,7 @@ export function FeeAdjustmentsPanel({
                   }
                 >
                   <option value="waiver">Waive line</option>
+                  <option value="bulk_waiver">Waive many lines / waive all (incl. future)</option>
                   <option value="write_off">Write-off</option>
                   <option value="stop_future">Stop future installments</option>
                   <option value="change_group">Change fee group</option>
@@ -358,6 +485,74 @@ export function FeeAdjustmentsPanel({
                 </select>
               </label>
             )}
+
+            {type === "bulk_waiver" ? (
+              <div className="mt-3 space-y-3 text-sm">
+                {!student ? (
+                  <p className="text-[var(--muted)]">Select a student first.</p>
+                ) : waivable.length === 0 ? (
+                  <p className="text-[var(--muted)]">Nothing open to waive for this student.</p>
+                ) : (
+                  <>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" className="rounded-lg border border-[rgba(32,48,80,0.2)] px-2.5 py-1 text-xs font-semibold" onClick={() => pick("all")}>
+                        Select all ({waivable.length})
+                      </button>
+                      <button type="button" className="rounded-lg border border-[rgba(32,48,80,0.2)] px-2.5 py-1 text-xs font-semibold" onClick={() => pick("now")}>
+                        Due now only
+                      </button>
+                      <button type="button" className="rounded-lg border border-[rgba(32,48,80,0.2)] px-2.5 py-1 text-xs font-semibold" onClick={() => pick("future")}>
+                        Future only
+                      </button>
+                      <button type="button" className="rounded-lg border border-[rgba(32,48,80,0.2)] px-2.5 py-1 text-xs font-semibold" onClick={() => pick("none")}>
+                        Clear
+                      </button>
+                    </div>
+                    <ul className="max-h-64 overflow-auto rounded-lg border border-[rgba(32,48,80,0.1)] divide-y divide-[rgba(32,48,80,0.06)]">
+                      {waivable.map((l) => (
+                        <li key={l.dueKey}>
+                          <label className="flex cursor-pointer items-center gap-2 px-2 py-1.5">
+                            <input type="checkbox" checked={picked.has(l.dueKey)} onChange={() => togglePick(l.dueKey)} />
+                            <span className="flex-1">
+                              {l.label}
+                              <span className="ml-1 text-[11px] text-[var(--muted)]">
+                                · due {l.dueOn}
+                                {l.dueOn > todayIso ? " · future" : ""}
+                              </span>
+                            </span>
+                            <span className="tabular-nums">{formatInr(l.balancePaise)}</span>
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="rounded-lg bg-[rgba(32,48,80,0.05)] px-3 py-2">
+                      <strong>{plan.lines.length}</strong> line(s) · <strong>{formatInr(plan.totalPaise)}</strong>
+                      {plan.lines.length ? ` · ${plan.current} due now, ${plan.future} future` : ""}
+                      {plan.needsApproval ? (
+                        <span className="block text-xs text-[var(--warning)]">
+                          Over {formatInr(FEE_ADJUST_AUTO_LIMIT_PAISE)} in total — goes to the Principal as one approval.
+                        </span>
+                      ) : null}
+                    </p>
+                    <fieldset className="space-y-1">
+                      <legend className="mb-1 text-[var(--muted)]">After waiving, the student is</legend>
+                      <label className="flex items-center gap-2">
+                        <input type="radio" name="statusAfter" checked={statusAfter === "active"} onChange={() => setStatusAfter("active")} />
+                        <span>Active — stays on the roll with nothing due (RTE, staff ward, free seat)</span>
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input type="radio" name="statusAfter" checked={statusAfter === "inactive"} onChange={() => setStatusAfter("inactive")} />
+                        <span>Inactive — leaving the school</span>
+                      </label>
+                    </fieldset>
+                    <p className="text-xs text-[var(--muted)]">
+                      Covers the lines listed here. A fee added later (a new head, next session) is not waived by this — for a child who
+                      studies free for good, a 100% concession in Masters covers future fees too. Store (books, uniform) is settled in the Store.
+                    </p>
+                  </>
+                )}
+              </div>
+            ) : null}
 
             {type === "stop_future" || type === "write_off" ? (
               <label className="mt-3 block text-sm">
@@ -443,7 +638,9 @@ export function FeeAdjustmentsPanel({
                 className="btn-accent rounded-xl px-4 py-2.5 text-sm font-semibold"
                 disabled={!studentId}
               >
-                Save adjustment
+                {type === "bulk_waiver"
+                  ? `Waive ${plan.lines.length} line(s) · ${formatInr(plan.totalPaise)}`
+                  : "Save adjustment"}
               </button>
               {student ? (
                 <button
