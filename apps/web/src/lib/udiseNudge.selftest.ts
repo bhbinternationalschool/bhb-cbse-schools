@@ -42,6 +42,8 @@ console.log("udiseNudge.selftest.ts");
   assert.deepEqual(needs[1]!.docs, ["birth certificate"]);
   assert.equal(needs[1]!.consent, true, "no APAAR yet: the consent form is needed even when every card is on file");
   assert.equal(udiseNudgeLogLine(needs), "Aarav Singh: child's Aadhaar card, father's or mother's Aadhaar card, APAAR consent form · Riya Singh: birth certificate, APAAR consent form");
+  // Aadhaar received but not yet verified on the portal: the school's job, not the parent's.
+  assert.deepEqual(udiseNudgeNeeds([{ name: "Shruti", classLabel: "VII A", gaps: ["student_aadhaar_unverified", "apaar"], hasDob: true, hasAddress: true }], "en")[0]!.docs, [], "never asked to resend a card we hold");
   // A PEN missing on the portal side, APAAR already made: nothing the parent can send.
   assert.deepEqual(udiseNudgeNeeds([{ name: "X", classLabel: "I", gaps: ["pen"], hasDob: true, hasAddress: true }], "en"), []);
 }

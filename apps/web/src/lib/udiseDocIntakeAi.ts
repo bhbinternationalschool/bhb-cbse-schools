@@ -731,7 +731,11 @@ export function missingDocsList(input: { gaps: string[]; hasDob: boolean; hasAdd
   if (!input.gaps.length) return [];
   const out: string[] = [];
   const hi = input.language === "hi";
-  if (input.gaps.includes("student_aadhaar") || input.gaps.includes("student_aadhaar_unverified")) out.push(hi ? "बच्चे का आधार कार्ड" : "child's Aadhaar card");
+  // Only when the school has no Aadhaar for the child. "Unverified" means we
+  // HAVE it and the portal check is the school's own job — asking the parent
+  // to send it again (21 Sep 2026: families whose card was "received") is
+  // asking them for something they already gave.
+  if (input.gaps.includes("student_aadhaar")) out.push(hi ? "बच्चे का आधार कार्ड" : "child's Aadhaar card");
   if (input.gaps.includes("parent_aadhaar")) out.push(hi ? "पिता या माता का आधार कार्ड" : "father's or mother's Aadhaar card");
   if (!input.hasDob) out.push(hi ? "जन्म प्रमाणपत्र" : "birth certificate");
   if (!input.hasAddress) out.push(hi ? "पते का प्रमाण (राशन कार्ड / बिजली बिल)" : "address proof (ration card / electricity bill)");
