@@ -366,7 +366,19 @@ export function compareNames(sis: string, doc: string): NameRelation {
 
 export type UdiseFieldChange = {
   /** SIS field on the student or household. */
-  field: "fullName" | "dob" | "gender" | "aadhaarNumber" | "fatherName" | "motherName" | "fatherAadhaarNumber" | "motherAadhaarNumber" | "address" | "pincode";
+  field:
+    | "fullName"
+    | "dob"
+    | "gender"
+    | "aadhaarNumber"
+    | "fatherName"
+    | "motherName"
+    | "fatherAadhaarNumber"
+    | "motherAadhaarNumber"
+    | "address"
+    | "pincode"
+    | "permanentAddress"
+    | "permanentPincode";
   target: "student" | "household";
   before: string;
   after: string;
@@ -386,6 +398,9 @@ export type StudentLike = {
   motherName: string;
   fatherAadhaarNumber: string;
   motherAadhaarNumber: string;
+  /** Native / permanent address, per child (the household holds where the family lives now). */
+  permanentAddress?: string;
+  permanentPincode?: string;
 };
 
 export type HouseholdLike = { address: string; pincode: string };
@@ -407,8 +422,16 @@ function display(v: string, field: UdiseFieldChange["field"]): string {
  * Decide the writes. Deterministic; the model's output is only an input.
  * `person` decides whose record a name or Aadhaar belongs to.
  */
-export function planUdiseCorrections(input: { extract: UdiseDocExtract; student: StudentLike; household: HouseholdLike | null }): UdiseCorrectionPlan {
+export function planUdiseCorrections(input: {
+  extract: UdiseDocExtract;
+  student: StudentLike;
+  /** Written on the first child's pass only; null on the others. */
+  household: HouseholdLike | null;
+  /** Where the family lives now, on every pass — decides present vs permanent. */
+  presentAddress?: string;
+}): UdiseCorrectionPlan {
   const { extract: e, student: s, household: h } = input;
+  const present = (input.presentAddress ?? h?.address ?? "").trim();
   const changes: UdiseFieldChange[] = [];
   const flags: string[] = [];
   const person: UdiseDocPerson = e.person === "unknown" && e.docType === "birth_certificate" ? "child" : e.person;
@@ -418,7 +441,7 @@ export function planUdiseCorrections(input: { extract: UdiseDocExtract; student:
     // say so in the same words, or the office is told one thing and the
     // record shows another.
     const cased: UdiseFieldChange =
-      c.field === "aadhaarNumber" || c.field === "fatherAadhaarNumber" || c.field === "motherAadhaarNumber" || c.field === "dob" || c.field === "pincode" || c.field === "gender"
+      c.field === "aadhaarNumber" || c.field === "fatherAadhaarNumber" || c.field === "motherAadhaarNumber" || c.field === "dob" || c.field === "pincode" || c.field === "permanentPincode" || c.field === "gender"
         ? c
         : { ...c, after: toRosterCase(c.after) };
     // A difference of case alone is not something the document taught us —
@@ -442,6 +465,12 @@ export function planUdiseCorrections(input: { extract: UdiseDocExtract; student:
     nameRelation = nameTarget.current ? compareNames(nameTarget.current, e.nameOnDoc) : "spelling";
     if (nameRelation === "spelling") {
       put({ field: nameTarget.field, target: "student", before: nameTarget.current, after: e.nameOnDoc, apply: true, reason: nameTarget.current ? "spelling corrected from the document" : "filled from the document" });
+    } else if (nameRelation === "same" && e.docType === "aadhaar") {
+      // The same name to our matching ("Priyanshu Yadav" = "Priyanshu Kumar
+      // Yadav"), but UDISE+ validates against UIDAI letter for letter — so
+      // the record takes the card's exact name. A case-only difference is
+      // dropped by put().
+      put({ field: nameTarget.field, target: "student", before: nameTarget.current, after: e.nameOnDoc, apply: true, reason: "written exactly as on the Aadhaar card" });
     } else if (nameRelation === "different") {
       put({ field: nameTarget.field, target: "student", before: nameTarget.current, after: e.nameOnDoc, apply: false, reason: "the name on the document is a different name — office to confirm whose document this is" });
       flags.push(`Name on document "${e.nameOnDoc}" does not match "${nameTarget.current}" on record. Nothing else from this document was applied.`);
@@ -469,7 +498,10 @@ export function planUdiseCorrections(input: { extract: UdiseDocExtract; student:
     }
     if (e.gender && !s.gender) put({ field: "gender", target: "student", before: s.gender, after: e.gender, apply: true, reason: "filled from the document" });
     else if (e.gender && s.gender && s.gender.toUpperCase()[0] !== e.gender) {
-      put({ field: "gender", target: "student", before: s.gender, after: e.gender, apply: false, reason: "document and record disagree on gender — office to confirm" });
+      // The child's own Aadhaar is what UDISE+ validates against: it wins
+      // (the school's rule, 21 Sep 2026). Any other document is a question.
+      const byAadhaar = e.docType === "aadhaar";
+      put({ field: "gender", target: "student", before: s.gender, after: e.gender, apply: byAadhaar, reason: byAadhaar ? "gender as on the Aadhaar card" : "document and record disagree on gender — office to confirm" });
     }
     if (e.docType === "birth_certificate") {
       for (const [field, cur, val] of [["fatherName", s.fatherName, e.fatherName], ["motherName", s.motherName, e.motherName]] as const) {
@@ -481,7 +513,25 @@ export function planUdiseCorrections(input: { extract: UdiseDocExtract; student:
     }
   }
 
-  if ((e.docType === "aadhaar" || e.docType === "address_proof") && e.address && e.pincode && h) {
+  // An Aadhaar card carries the address it was made at — for most of our
+  // families the native village (21 Sep 2026: a Jaunpur card replaced
+  // "SEMARI, PUARI KHURD", where the family lives, and the office was told
+  // to change UDISE+ to Jaunpur). So an Aadhaar address somewhere else is
+  // the child's PERMANENT address; the present one stays. It fills the
+  // present address only when there is none, or when it is the same place.
+  const elsewhere = e.docType === "aadhaar" && !!e.address && !!e.pincode && !!present && !samePlace(present, e.address);
+  if (elsewhere) {
+    const cur = (s.permanentAddress || "").trim();
+    // An empty permanent address, or one that is only a copy of the present
+    // one (the old ERP put the village in both), is filled; a different
+    // permanent address on record is the office's call.
+    const free = !cur || samePlace(present, cur) || samePlace(cur, e.address);
+    const reason = free
+      ? `the card's address is not where the family lives now (${present}) — kept as the permanent address; present address unchanged`
+      : "the card shows a different permanent address from the one on record — office to confirm";
+    put({ field: "permanentAddress", target: "student", before: cur, after: e.address, apply: free, reason });
+    put({ field: "permanentPincode", target: "student", before: s.permanentPincode || "", after: e.pincode, apply: free, reason });
+  } else if ((e.docType === "aadhaar" || e.docType === "address_proof") && e.address && e.pincode && h) {
     put({ field: "address", target: "household", before: h.address, after: e.address, apply: true, reason: h.address ? "address updated from the document" : "address filled from the document" });
     put({ field: "pincode", target: "household", before: h.pincode, after: e.pincode, apply: true, reason: h.pincode ? "PIN updated from the document" : "PIN filled from the document" });
   } else if (e.address && !e.pincode && h) {
@@ -662,6 +712,8 @@ export const FIELD_LABEL_EN: Record<UdiseFieldChange["field"], string> = {
   motherAadhaarNumber: "Mother's Aadhaar",
   address: "Address",
   pincode: "PIN code",
+  permanentAddress: "Permanent address",
+  permanentPincode: "Permanent PIN",
 };
 export const FIELD_LABEL_HI: Record<UdiseFieldChange["field"], string> = {
   fullName: "छात्र का नाम",
@@ -674,7 +726,32 @@ export const FIELD_LABEL_HI: Record<UdiseFieldChange["field"], string> = {
   motherAadhaarNumber: "माता का आधार",
   address: "पता",
   pincode: "पिन कोड",
+  permanentAddress: "स्थायी पता",
+  permanentPincode: "स्थायी पिन कोड",
 };
+
+/** Words that name a district, state or the parts of an address, not the place. */
+const NOT_A_PLACE = new Set(["VILL", "VILLAGE", "POST", "DIST", "DISTRICT", "NEAR", "WARD", "TEHSIL", "BLOCK", "HOUSE", "UTTAR", "PRADESH", "INDIA", "VARANASI", "JAUNPUR", "BHADOHI", "CHANDAULI", "GHAZIPUR", "MIRZAPUR", "SINGH", "KUMAR"]);
+
+function placeWords(a: string): string[] {
+  return String(a || "")
+    .toUpperCase()
+    .replace(/C\/O\s*:?[^,]*/g, " ")
+    .split(/[^A-Z]+/)
+    .filter((w) => w.length >= 4 && !NOT_A_PLACE.has(w));
+}
+
+/**
+ * The same place, read loosely: a village or locality word of the one
+ * address appears in the other. "SEMARI, PUARI KHURD" and a card reading
+ * "Semari, Puari Khurd, Varanasi 221202" are one place; a card from
+ * Devarai, Jaunpur is not.
+ */
+export function samePlace(a: string, b: string): boolean {
+  const wa = placeWords(a);
+  const wb = new Set(placeWords(b));
+  return wa.some((w) => wb.has(w));
+}
 
 /** Fields the UDISE+ portal holds, in the words the portal uses. */
 const PORTAL_FIELD: Partial<Record<UdiseFieldChange["field"], string>> = {

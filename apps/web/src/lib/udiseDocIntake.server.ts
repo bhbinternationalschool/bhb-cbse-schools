@@ -110,6 +110,12 @@ function applyPlanToStudent(s: SisStudent, plan: UdiseCorrectionPlan): SisStuden
       case "motherName":
         patch.motherName = c.after;
         break;
+      case "permanentAddress":
+        patch.permanentAddress = c.after;
+        break;
+      case "permanentPincode":
+        patch.permanentPincode = c.after;
+        break;
       case "aadhaarNumber":
         patch.aadhaarNumber = c.after;
         patch.aadhaarLast4 = c.after.slice(-4);
@@ -565,9 +571,12 @@ export async function captureUdiseDocumentFromWhatsApp(input: {
         motherName: current.motherName,
         fatherAadhaarNumber: current.fatherAadhaarNumber,
         motherAadhaarNumber: current.motherAadhaarNumber,
+        permanentAddress: current.permanentAddress,
+        permanentPincode: current.permanentPincode,
       },
       // The address is written once, on the household, from the first pass.
       household: idx === 0 ? { address: hh.address, pincode: hh.pincode } : null,
+      presentAddress: hh.address,
     });
     if (idx === 0) {
       firstPlan = plan;
@@ -606,6 +615,11 @@ export async function captureUdiseDocumentFromWhatsApp(input: {
         if (saved.ok) {
           current.docs = docs;
           fileUrl = entry.fileUrl;
+          // Filing the document is itself a write: without the new version
+          // the corrections below are refused as "changed by someone else"
+          // (21 Sep 2026: a name and a date of birth held back this way).
+          const reread = await freshStudent(current.id);
+          if (reread?.revisionAt) current.revisionAt = reread.revisionAt;
         } else officeTexts.push(`⚠️ Vault entry not saved (${saved.error}); the file is in Drive.`);
       } else officeTexts.push(`📁 Filed in Drive under students/${current.id} as ${fileName}.`);
     }
