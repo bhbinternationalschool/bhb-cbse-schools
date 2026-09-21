@@ -68,8 +68,31 @@ export async function POST(req: Request, ctx: RouteCtx) {
     if (!merged) return NextResponse.json({ ok: false, error: "Merge write failed" }, { status: 502 });
     return NextResponse.json({ ok: true, updatedAt: now });
   }
+  let state: unknown = body.state;
+  if (module === "fee_adjustments") {
+    // Union by id, never overwrite (lib/feeAdjustmentsMerge). A browser that
+    // opened the fee desk this morning and saves one adjustment this
+    // afternoon used to erase every adjustment another PC posted in between.
+    const { data: current, error: readErr } = await tctx.sb
+      .from("module_local_state")
+      .select("state")
+      .eq("tenant_id", tctx.tenantId)
+      .eq("module_key", module)
+      .maybeSingle();
+    if (readErr) {
+      // Unreadable is not empty: writing now could erase the whole book.
+      return NextResponse.json({ ok: false, error: `Could not read the current adjustments: ${readErr.message}` }, { status: 503 });
+    }
+    const { mergeFeeAdjustmentRows } = await import("@/lib/feeAdjustmentsMerge");
+    const rowsOf = (v: unknown) =>
+      Array.isArray((v as { rows?: unknown })?.rows) ? ((v as { rows: never[] }).rows) : [];
+    state = {
+      ...(body.state as Record<string, unknown>),
+      rows: mergeFeeAdjustmentRows(rowsOf(current?.state), rowsOf(body.state)),
+    };
+  }
   const { error } = await tctx.sb.from("module_local_state").upsert(
-    { tenant_id: tctx.tenantId, module_key: module, state: body.state, updated_at: now },
+    { tenant_id: tctx.tenantId, module_key: module, state, updated_at: now },
     { onConflict: "tenant_id,module_key" },
   );
   if (error) {

@@ -126,6 +126,7 @@
     "test:nucleus-reminder": "npx tsx src/lib/nucleusReminder.selftest.ts",
     "test:nucleus-assessments": "npx tsx src/lib/nucleusAssessments.selftest.ts",
     "test:wa-parent-guide": "npx tsx src/lib/waParentGuide.selftest.ts",
+    "test:fee-adjustments-merge": "npx tsx src/lib/feeAdjustmentsMerge.selftest.ts",
     "test:parent-bot-clarify": "npx tsx src/lib/parentBotClarify.selftest.ts",
     "test:office-backlog": "npx tsx src/lib/officeBacklog.selftest.ts",
     "test:automation-send-rules": "npx tsx src/lib/automationSendRules.selftest.ts",
