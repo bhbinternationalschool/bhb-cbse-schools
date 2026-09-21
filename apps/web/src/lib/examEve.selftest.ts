@@ -132,7 +132,11 @@ assert.ok(free.includes("TIMETABLE"));
 for (const yes of [PRACTICE_BUTTON_EN, PRACTICE_BUTTON_HI, "practice", "अभ्यास"]) {
   assert.ok(isPracticeTap(yes), yes);
 }
-for (const no of ["practice karwao maths ka", "DUES", "", "PAY"]) {
+// 21 Sep 2026: typed, not tapped — every one of these went to the office.
+for (const yes of ["Abhyas shuru Karen", "Abhyas suru kre", "करो शुरू", "SST ka rivision kare", "अभ्यास शुरू करें।", "revision start", "Science ki taiyari shuru karo"]) {
+  assert.ok(isPracticeTap(yes), `typed start: ${yes}`);
+}
+for (const no of ["practice karwao maths ka", "DUES", "", "PAY", "Hindi", "abhyas ka matlab kya hai", "kal ka paper"]) {
   assert.equal(isPracticeTap(no), false, `not a tap: ${no}`);
 }
 

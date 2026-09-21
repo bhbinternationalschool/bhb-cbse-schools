@@ -246,6 +246,19 @@ assert.match(shown, /You added instead of multiplying/);
 assert.match(shown, /💡 One pen is ₹12/);
 assert.doesNotMatch(shown, /^❌ Not quite$/m, "never just 'wrong'");
 
+/* ── 21 Sep 2026: what tonight's families actually wrote ─────────── */
+{
+  assert.equal(classifyDrillReply("Nhi malum"), "help", "'don't know' is a request for teaching, not 'method right, one slip'");
+  assert.equal(classifyDrillReply("pta nhi"), "help");
+  assert.equal(classifyDrillReply("Hello sir online registration"), "school", "a message to the school is never marked");
+  assert.equal(classifyDrillReply("फीस कब जमा करनी है"), "school");
+  for (const answer of ["means of transport", "by bus", "Vah", "Kitab", "leaves", "प्रवेश"]) {
+    assert.notEqual(classifyDrillReply(answer), "school", `an answer, not school business: ${answer}`);
+  }
+  assert.equal(subjectNameForModel("सामाजिक विज्ञान"), "Social Science", "SST is not the Science book");
+  assert.equal(paperLanguageFor("सामाजिक विज्ञान"), "english");
+}
+
 /* ── Videos: the missed idea, and every chapter of the portion ─────── */
 {
   assert.equal(renderTopicVideo(null, true), "", "no video found: no made-up link");

@@ -186,10 +186,25 @@ export type DrillReplyKind =
   /** "bye", "बस", "so raha hoon" — the child is done for tonight. */
   | "stop"
   /** "ok", "ठीक है", a lone 🙏 — politeness, not an attempt at the question. */
-  | "chatter";
+  | "chatter"
+  /** "Hello sir online registration" — a message to the school, for the ordinary bot. */
+  | "school";
 
 const HELP_RE =
-  /^\s*(?:(?:help|hint|idk|dunno)\b)|don'?t know|do not know|no idea|kaise|kese|कैसे|समझ (?:नहीं|nahi)|samajh (?:nahi|nhi)|पता नहीं|pata nahi|nahi pata|नहीं आता|batao|बताओ|बताइए|बता दीजिए|sikha|सिखा|mushkil|मुश्किल/i;
+  /^\s*(?:(?:help|hint|idk|dunno)\b)|don'?t know|do not know|no idea|kaise|kese|कैसे|समझ (?:नहीं|nahi)|samajh (?:nahi|nhi)|पता नहीं|pata nahi|nahi pata|pta nhi|nhi pta|nahi pta|नहीं आता|nahi aata|nhi aata|malum|maloom|मालूम|batao|बताओ|बताइए|बता दीजिए|sikha|सिखा|mushkil|मुश्किल/i;
+
+/**
+ * A message to the SCHOOL, not an answer to our question.
+ *
+ * 21 Sep 2026: mid-drill, a parent wrote "Hello sir online registration" and
+ * it was marked ❌ as a wrong answer to a question on pronouns. Messages
+ * about the school's own business go to the ordinary bot; the question
+ * waits for them.
+ */
+// Narrow on purpose: words a child could give as an ANSWER ("bus",
+// "transport", "leave", "प्रवेश") are not here.
+const SCHOOL_BUSINESS_RE =
+  /\b(?:sir|madam|mam|ma'am|hello|registration|admission|fees?|dues|receipt|tc|holiday|chutti|marksheet|admit card|uniform|timetable|date ?sheet|payment)\b|फीस|रसीद|छुट्टी|एडमिशन|रजिस्ट्रेशन|रिज़ल्ट|रिजल्ट|सर जी|मैडम/i;
 
 /**
  * Done for tonight — including the parent telling us where the child is.
@@ -261,6 +276,7 @@ export function classifyDrillReply(text: string): DrillReplyKind {
   const t = String(text || "").trim();
   if (!t) return "help";
   if (STOP_RE.test(t)) return "stop";
+  if (SCHOOL_BUSINESS_RE.test(t) && t.split(/\s+/).length >= 2) return "school";
   // "I don't know" is about OUR question, so it is help, not a new ask.
   if (HELP_RE.test(t)) return "help";
   if (ACK_RE.test(t)) return "chatter";

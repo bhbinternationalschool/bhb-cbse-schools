@@ -253,15 +253,32 @@ export function examEveFreeText(
 }
 
 /** Did the parent tap (or type) the practice button? */
+/**
+ * The button, or a parent typing what the button says.
+ *
+ * On 21 Sep 2026 five families typed it instead of tapping — "Abhyas shuru
+ * Karen", "Abhyas suru kre", "करो शुरू", "SST ka rivision kare" — and every
+ * one was told "इसकी जानकारी मेरे पास नहीं है" and handed to the office. A
+ * start word is required alongside the practice word, so "practice karwao
+ * maths ka" (a request to the tutor) still goes to the tutor.
+ */
 export function isPracticeTap(text: string): boolean {
-  const t = (text || "").trim().toLowerCase();
-  return (
+  const t = (text || "").trim().toLowerCase().replace(/[.!।?]+$/g, "").trim();
+  if (
     t === PRACTICE_BUTTON_EN.toLowerCase() ||
     t === PRACTICE_BUTTON_HI ||
     t === "practice" ||
     t === "abhyas" ||
     t === "अभ्यास"
-  );
+  ) {
+    return true;
+  }
+  if (t.split(/\s+/).length > 7) return false;
+  if (/karwao|karvao|krwao|करवाओ|करवाइए|करवा दो/.test(t)) return false;
+  if (/^(?:karo|kro|करो)\s+(?:shuru|suru|शुरू)$|^(?:shuru|suru|शुरू)\s+(?:karo|kro|kare|karen|करो|करें)$|^start$/.test(t)) return true;
+  const practiceWord = /abh?yaa?s|practi[cs]e|re?vi[sz]ion|rivi[sz]ion|revise|अभ्यास|रिवीजन|रिविजन|रिवीज़न|तैयारी|taiyy?ari/.test(t);
+  const startWord = /shuru|suru|start|\bkare\b|\bkaren\b|\bkarein\b|\bkre\b|\bkrein\b|\bkaro\b|\bkro\b|करें|करे\b|करो|शुरू/.test(t);
+  return practiceWord && startWord;
 }
 
 /** Is the parent asking for the date sheet? */

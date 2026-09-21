@@ -382,6 +382,9 @@ export async function continueExamDrill(input: {
     let state = open.state;
     const parts: string[] = [];
     const said = classifyDrillReply(input.text);
+    // A message to the school ("Hello sir online registration") is not an
+    // answer: the ordinary bot takes it, and the question waits.
+    if (said === "school") return nothing;
 
     // 0. "bye", "बस", "so raha hoon" — the child has finished for tonight.
     //    Ending is a decision they are allowed to make; the old loop marked
