@@ -237,6 +237,45 @@ export function resolveTargetChildren(input: { children: SisStudent[]; extract: 
 }
 
 /**
+ * Whose document this is, decided by the NAME printed on it.
+ *
+ * WHY (21 Sep 2026): an Aadhaar card never prints "father" or "mother".
+ * The reader is told to say `unknown` unless the relation is printed — so
+ * every parent's Aadhaar came back `unknown`, and planUdiseCorrections
+ * then applied nothing ("does not say whose it is"). The name on the card
+ * is the evidence: matched against the child and the parents we hold.
+ *
+ * Exactly one match decides; none, or more than one (a father named like
+ * his son), leaves the reading as it was, for the office. A reading that
+ * named a person the name contradicts is corrected to the name's person —
+ * the printed name is evidence, the model's guess is not.
+ */
+export function resolveDocPerson(extract: UdiseDocExtract, children: SisStudent[]): UdiseDocExtract {
+  if (extract.docType !== "aadhaar" || !extract.nameOnDoc || !children.length) return extract;
+  const doc = extract.nameOnDoc;
+  // Exact first, spelling second: compareNames forgives two letters even in
+  // a four-letter name, so "Sita" is a spelling of "Riya". An exact match
+  // to one person decides before any near miss is counted.
+  const whoAt = (ok: (r: NameRelation) => boolean) => {
+    const who = new Set<UdiseDocPerson>();
+    const m = (name: string) => !!name && ok(compareNames(name, doc));
+    if (children.some((c) => m(c.fullName))) who.add("child");
+    if (children.some((c) => m(c.fatherName))) who.add("father");
+    if (children.some((c) => m(c.motherName))) who.add("mother");
+    return who;
+  };
+  const exact = whoAt((r) => r === "same");
+  const who = exact.size ? exact : whoAt((r) => r !== "different");
+  if (who.size !== 1) return extract;
+  const person = [...who][0]!;
+  if (person === extract.person) return extract;
+  const note = extract.person === "unknown"
+    ? `Whose card: ${person}, by the name "${doc}".`
+    : `The reading said ${extract.person}; the name "${doc}" is the ${person}'s on record.`;
+  return { ...extract, person, notes: [extract.notes, note].filter(Boolean).join(" ").slice(0, 300) };
+}
+
+/**
  * The audit row records what was sent, and a photograph cannot go in it —
  * see voiceNoteAuditDescriptor, same reasoning, same shape.
  */
@@ -654,7 +693,15 @@ function ddmmyyyy(iso: string): string {
   return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
 }
 
-export function renderOfficeAlert(input: { plan: UdiseCorrectionPlan; childName: string; classLabel: string; guardianName: string; fileUrl: string | null }): { text: string; oneLine: string; portalChanges: string[] } {
+export function renderOfficeAlert(input: {
+  plan: UdiseCorrectionPlan;
+  childName: string;
+  classLabel: string;
+  guardianName: string;
+  fileUrl: string | null;
+  /** The portal rejected this child's Aadhaar ("Validation failed") — the card is the re-check. */
+  portalValidationFailed?: boolean;
+}): { text: string; oneLine: string; portalChanges: string[] } {
   const label = DOC_TYPE_LABEL[input.plan.docType];
   const applied = input.plan.changes.filter((c) => c.apply);
   const held = input.plan.changes.filter((c) => !c.apply);
@@ -668,7 +715,18 @@ export function renderOfficeAlert(input: { plan: UdiseCorrectionPlan; childName:
   if (held.length) lines.push("", "*Needs your decision:*", ...held.map((c) => `• ${FIELD_LABEL_EN[c.field]}: record "${display(c.before, c.field)}" vs document "${display(c.after, c.field)}" — ${c.reason}`));
   if (input.plan.flags.length) lines.push("", ...input.plan.flags.map((f) => `⚠️ ${f}`));
   if (portalChanges.length) lines.push("", "*Change in UDISE+ portal:*", ...portalChanges.map((p) => `• ${p}`));
-  else if (applied.length === 0 && held.length === 0) lines.push("", "UDISE+: nothing to change from this document.");
+  const recheck = input.portalValidationFailed && input.plan.docType === "aadhaar" && input.plan.person === "child";
+  if (recheck) {
+    // Sent because the portal rejected this Aadhaar. Even a card that
+    // matches our record needs the office to submit it again — the portal
+    // does not re-check by itself.
+    lines.push(
+      "",
+      "⚠️ *UDISE+ had rejected this child's Aadhaar (Validation failed).* Open the student on the UDISE+ portal, make the name, date of birth and gender exactly as printed on this card, check the 12 digits, and submit the Aadhaar for validation again.",
+    );
+  } else if (!portalChanges.length && applied.length === 0 && held.length === 0) {
+    lines.push("", "UDISE+: nothing to change from this document.");
+  }
   if (input.fileUrl) lines.push("", `Document: ${input.fileUrl}`);
   const oneLine = `${label} for ${input.childName}: ${applied.length} field${applied.length === 1 ? "" : "s"} updated${held.length ? `, ${held.length} for review` : ""}`;
   return { text: lines.join("\n"), oneLine, portalChanges };
@@ -684,12 +742,21 @@ export function renderOfficeAlert(input: { plan: UdiseCorrectionPlan; childName:
  * complete children's families would have been asked exactly that.
  */
 export function missingDocsFor(input: { gaps: string[]; hasDob: boolean; hasAddress: boolean; language: "en" | "hi" }): string {
-  if (!input.gaps.length) return "";
+  return missingDocsList(input).join(", ");
+}
+
+/** The same list, one document per entry — for a message that bullets them. */
+export function missingDocsList(input: { gaps: string[]; hasDob: boolean; hasAddress: boolean; language: "en" | "hi" }): string[] {
+  if (!input.gaps.length) return [];
   const out: string[] = [];
   const hi = input.language === "hi";
-  if (input.gaps.includes("student_aadhaar") || input.gaps.includes("student_aadhaar_unverified")) out.push(hi ? "बच्चे का आधार कार्ड" : "child's Aadhaar card");
+  // Only when the school has no Aadhaar for the child. "Unverified" means we
+  // HAVE it and the portal check is the school's own job — asking the parent
+  // to send it again (21 Sep 2026: families whose card was "received") is
+  // asking them for something they already gave.
+  if (input.gaps.includes("student_aadhaar")) out.push(hi ? "बच्चे का आधार कार्ड" : "child's Aadhaar card");
   if (input.gaps.includes("parent_aadhaar")) out.push(hi ? "पिता या माता का आधार कार्ड" : "father's or mother's Aadhaar card");
   if (!input.hasDob) out.push(hi ? "जन्म प्रमाणपत्र" : "birth certificate");
   if (!input.hasAddress) out.push(hi ? "पते का प्रमाण (राशन कार्ड / बिजली बिल)" : "address proof (ration card / electricity bill)");
-  return out.join(hi ? ", " : ", ");
+  return out;
 }

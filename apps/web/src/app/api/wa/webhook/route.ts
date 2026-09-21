@@ -186,6 +186,9 @@ export async function POST(req: Request) {
         waMessageId: msg.waMessageId,
         replyToWaMessageId: msg.replyToWaMessageId,
         hasMedia: !!msg.media,
+        media: msg.media
+          ? { mediaId: msg.media.mediaId, mimeType: msg.media.mimeType, filename: msg.media.filename }
+          : null,
       });
       if (relayReply.handled) {
         results.push({
@@ -453,6 +456,19 @@ export async function POST(req: Request) {
     }
 
     const r = await handleWaUnifiedInbound(dispatch);
+    // A parent the bot has just answered, whose child still lacks UDISE+
+    // documents: tell them what is needed and why (at most weekly, never
+    // mid-drill, never at night — see udiseNudge.server.ts). After the
+    // reply, so it follows the answer rather than replacing it.
+    if (r.audience === "sis_parent" && r.replied && !msg.media) {
+      void trackServerWork((async () => {
+        const { maybeSendUdiseNudge } = await import("@/lib/udiseNudge.server");
+        const { waNormalizeLocal10 } = await import("@/lib/waSend");
+        await maybeSendUdiseNudge(waNormalizeLocal10(msg.fromWaId)).catch((e) =>
+          console.warn("[wa/webhook] udise nudge failed", e),
+        );
+      })());
+    }
     // The bot handed this over to a person. Forward it to the office phone for
     // its category — after the response, so Meta is answered promptly and a
     // slow forward cannot make it re-deliver the webhook.

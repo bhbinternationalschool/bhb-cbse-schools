@@ -132,6 +132,11 @@ export type RelayEscalationInput = {
   mediaNote?: string | null;
   media?: { mediaId: string; mimeType?: string; filename?: string } | null;
   reason?: string;
+  /**
+   * A file the school made for the office to act on (e.g. a pre-filled
+   * certificate), sent to each office phone after the forward.
+   */
+  attachment?: { bytes: Buffer; filename: string; mimeType: string; caption?: string } | null;
 };
 
 async function uniqueCode(
@@ -340,6 +345,17 @@ export async function relayEscalation(input: RelayEscalationInput): Promise<{
 
       if (res.ok) {
         forwarded += 1;
+        if (input.attachment && via === "text") {
+          const a = input.attachment;
+          const doc = await sendWhatsAppDocument({
+            toMobile: route.mobile10,
+            bytes: a.bytes,
+            filename: a.filename,
+            mimeType: a.mimeType,
+            caption: `#${code} · ${a.caption || a.filename}`.slice(0, 1000),
+          }).catch((e) => ({ ok: false, error: (e as Error)?.message }));
+          if (!doc.ok) console.warn("[wa-relay] attachment not sent", relayId, doc.error);
+        }
         // The photo / voice note / document itself, as a file, while the
         // window is open. Best-effort: the text forward already says what came.
         if (input.media?.mediaId && via === "text") {
@@ -391,6 +407,12 @@ export async function handleRelayReply(msg: {
   waMessageId?: string;
   replyToWaMessageId?: string;
   hasMedia?: boolean;
+  /**
+   * The photo / PDF the office replied with — e.g. the signed certificate.
+   * Forwarded to the family as a document, with the reply text (the
+   * caption) as its caption.
+   */
+  media?: { mediaId: string; mimeType?: string; filename?: string } | null;
 }): Promise<{ handled: boolean; delivered?: boolean; error?: string }> {
   const office10 = waNormalizeLocal10(msg.fromWaId);
   const routesRes = await loadRelayRoutes();
@@ -450,11 +472,11 @@ export async function handleRelayReply(msg: {
     .single();
   if (!relay) return { handled: false };
 
-  if (!body) {
+  if (!body && !msg.media?.mediaId) {
     await sendWhatsAppText({
       toMobile: office10,
       body: msg.hasMedia
-        ? `⚠️ Only a text reply can be sent on for #${relay.code} at the moment. Please type your answer.`
+        ? `⚠️ That file for #${relay.code} could not be read, so nothing was sent. Please send it again.`
         : `⚠️ Your reply for #${relay.code} was empty, so nothing was sent.`,
     });
     return { handled: true, delivered: false, error: "empty reply" };
@@ -480,11 +502,31 @@ export async function handleRelayReply(msg: {
     return { handled: true, delivered: false, error: claimErr.message };
   }
 
-  const send = await sendWhatsAppText({
-    toMobile: relay.sender_mobile10 as string,
-    body,
-    clientMessageId: `relay-reply:${claim.id}`,
-  });
+  // A photo or PDF (a signed certificate, a form) goes as the file itself,
+  // the reply text as its caption; a text reply goes as text.
+  let send: { ok: boolean; providerId?: string; error?: string };
+  if (msg.media?.mediaId) {
+    const got = await fetchWaMediaAsDataUrl(msg.media.mediaId);
+    if (!got.ok) {
+      send = { ok: false, error: `the file could not be read (${got.error})` };
+    } else {
+      const b64 = got.dataUrl.split(",")[1] || "";
+      const ext = (got.mimeType.split("/")[1] || "bin").split(";")[0];
+      send = await sendWhatsAppDocument({
+        toMobile: relay.sender_mobile10 as string,
+        bytes: Buffer.from(b64, "base64"),
+        filename: msg.media.filename || `school-${relay.code}.${ext}`,
+        mimeType: got.mimeType,
+        caption: body || undefined,
+      });
+    }
+  } else {
+    send = await sendWhatsAppText({
+      toMobile: relay.sender_mobile10 as string,
+      body,
+      clientMessageId: `relay-reply:${claim.id}`,
+    });
+  }
 
   await ctx.sb
     .from("wa_relay_replies")
@@ -501,7 +543,8 @@ export async function handleRelayReply(msg: {
     // this system has, and until 19 Sep 2026 it was thrown away: 15 questions
     // handed over, 0 kept. It is captured as PROPOSED; nobody is answered
     // from it until someone with the authority approves the wording.
-    void (async () => {
+    // A file reply (a signed certificate) is not an answer anyone can reuse.
+    if (body && !msg.media?.mediaId) void (async () => {
       try {
         const { captureAnswerPair } = await import("@/lib/answerBook.server");
         await captureAnswerPair({
@@ -528,7 +571,7 @@ export async function handleRelayReply(msg: {
     mobile: relay.sender_mobile10 as string,
     purpose: "office_relay_reply",
     via: "text",
-    preview: `${officeName}: ${body}`.slice(0, 400),
+    preview: `${officeName}: ${msg.media?.mediaId ? "📎 file" : ""}${body ? ` ${body}` : ""}`.slice(0, 400),
     status: send.ok ? "sent" : "failed",
     error: send.ok ? "" : send.error || "",
     waMessageId: send.ok ? send.providerId || "" : "",

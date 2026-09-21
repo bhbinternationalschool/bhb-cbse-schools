@@ -94,6 +94,26 @@ export async function pushDeskSliceToDb(
   const { sb, tenantId } = ctx;
   const now = nowIso();
   const { version: _v, ...rest } = state;
+  // The certificate register is also written by the server (a parent's
+  // WhatsApp request), so a browser's save must add to it, never replace
+  // it: union by id — see certificatesMerge.ts.
+  if (id === "certificates" && Array.isArray(rest.issues)) {
+    const { data: cur, error: curErr } = await sb
+      .from(`${def.deskPrefix}_desk_slices`)
+      .select("payload")
+      .eq("tenant_id", tenantId)
+      .eq("slice_key", "issues")
+      .maybeSingle();
+    if (curErr) return { ok: false, error: curErr.message };
+    const serverIssues = (cur as { payload?: unknown } | null)?.payload;
+    if (Array.isArray(serverIssues) && serverIssues.length) {
+      const { mergeCertificateIssues } = await import("@/lib/certificatesMerge");
+      rest.issues = mergeCertificateIssues(
+        serverIssues as { id: string; createdAt: string; voidedAt: string | null }[],
+        rest.issues as { id: string; createdAt: string; voidedAt: string | null }[],
+      );
+    }
+  }
   const slices = stateToSlices(def, rest);
 
   const rows = slices

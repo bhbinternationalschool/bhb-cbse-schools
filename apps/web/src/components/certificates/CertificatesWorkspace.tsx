@@ -14,10 +14,12 @@ import {
   emptyTcDetails,
   formatCertDate,
   issueCertificate,
+  isUidaiFormKind,
   listCertificates,
   loadCertificates,
   previewFeesPaidForStudent,
   suggestNextCertificateNumber,
+  uidaiFormUrl,
   voidCertificate,
   type CertificateIssue,
   type CertificateKind,
@@ -421,13 +423,17 @@ export function CertificatesWorkspace() {
     setAiGenerationId("");
     refresh();
     setPreviewId(result.issue.id);
-    window.setTimeout(() => printCertificate(result.issue.id), 200);
+    if (isUidaiFormKind(result.issue.kind)) {
+      window.open(uidaiFormUrl(result.issue.studentId, result.issue.issuedOn), "_blank", "noopener");
+    } else {
+      window.setTimeout(() => printCertificate(result.issue.id), 200);
+    }
   }
 
   return (
     <ErpWorkspaceShell
       title="Certificates"
-      subtitle="Issue TC, bonafide, character, fee clearance, and fees-paid certificates for reimbursement — open dues gate TC / no-dues."
+      subtitle="Issue TC, bonafide, character, fee clearance, fees-paid (reimbursement) and Aadhaar (UIDAI format) certificates — open dues gate TC / no-dues."
       icon={<Award className="size-6" aria-hidden />}
       error={error}
       notice={notice}
@@ -1070,7 +1076,28 @@ export function CertificatesWorkspace() {
               </div>
             ) : null}
 
-            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-3">
+            {isUidaiFormKind(kind) ? (
+              <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-3 text-[11px] text-[var(--brand-deep)]">
+                <h3 className="text-xs font-bold">UIDAI&apos;s own form</h3>
+                <p className="mt-1">
+                  Prints UIDAI&apos;s &ldquo;Certificate for Aadhaar Enrolment/
+                  Update&rdquo; filled from the student&apos;s record — name,
+                  address, PIN, New Enrolment or Update, and the Principal as
+                  certifier (Head of recognised educational institution). It is
+                  proof of address, valid for 3 months from the issue date.
+                </p>
+                <p className="mt-1 font-semibold">
+                  After printing: paste the child&apos;s recent colour
+                  photo, cross-sign and cross-stamp it, Principal signs and
+                  stamps, parent/child signs. Blank boxes are filled by pen —
+                  never &ldquo;NA&rdquo;.
+                </p>
+              </div>
+            ) : null}
+
+            <div
+              className={`mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-3 ${isUidaiFormKind(kind) ? "hidden" : ""}`}
+            >
               <h3 className="text-xs font-bold text-[var(--brand-deep)]">
                 Draft with AI (CBSE + UP Basic Education)
               </h3>
@@ -1252,6 +1279,10 @@ export function CertificatesWorkspace() {
                           className="text-[11px] font-semibold text-[var(--brand-mid)]"
                           onClick={() => {
                             setPreviewId(iss.id);
+                            if (isUidaiFormKind(iss.kind)) {
+                              window.open(uidaiFormUrl(iss.studentId, iss.issuedOn), "_blank", "noopener");
+                              return;
+                            }
                             window.setTimeout(
                               () => printCertificate(iss.id),
                               100,
@@ -1287,12 +1318,24 @@ export function CertificatesWorkspace() {
                 <button
                   type="button"
                   className="btn-accent rounded-lg px-3 py-1.5 text-xs font-bold"
-                  onClick={() => printCertificate(preview.id)}
+                  onClick={() =>
+                    isUidaiFormKind(preview.kind)
+                      ? window.open(uidaiFormUrl(preview.studentId, preview.issuedOn), "_blank", "noopener")
+                      : printCertificate(preview.id)
+                  }
                 >
                   Print
                 </button>
               </div>
-              <CertificateSheet issue={preview} />
+              {isUidaiFormKind(preview.kind) ? (
+                <iframe
+                  title={`Aadhaar certificate ${preview.certNo}`}
+                  src={uidaiFormUrl(preview.studentId, preview.issuedOn)}
+                  className="h-[720px] w-full rounded-lg border border-[var(--border)] bg-white"
+                />
+              ) : (
+                <CertificateSheet issue={preview} />
+              )}
             </div>
           ) : null}
         </div>

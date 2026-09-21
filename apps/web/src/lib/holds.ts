@@ -640,8 +640,11 @@ export function listActiveOverrides(
 
 /** Hold code for a certificate kind (fee_clearance uses dues-clear, not hold). */
 export function holdCodeForCertificate(
-  kind: "tc" | "bonafide" | "character" | "fees_paid" | "fee_clearance",
+  kind: "tc" | "bonafide" | "character" | "fees_paid" | "fee_clearance" | "aadhaar_uidai",
 ): HoldCode | null {
+  // A child's Aadhaar is an identity document, not a school favour: a fee
+  // hold never stands between a family and it.
+  if (kind === "aadhaar_uidai") return null;
   if (kind === "tc") return "HOLD_TC";
   if (kind === "fee_clearance") return null;
   if (kind === "bonafide" || kind === "character" || kind === "fees_paid") {

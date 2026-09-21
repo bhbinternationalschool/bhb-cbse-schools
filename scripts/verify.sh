@@ -111,6 +111,8 @@ SELFTESTS=(
   test:exam-eve
   test:tutor-guide
   test:wa-parent-guide
+  test:udise-nudge
+  test:aadhaar-certificate
   test:staff-chat-bare
   test:job-desk
   test:fee-adjustments-merge

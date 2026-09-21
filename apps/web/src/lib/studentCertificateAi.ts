@@ -36,6 +36,8 @@ CBSE: no corporal punishment era; positive discipline. UP: suitable for govt for
 Reference fee ledger, session, class. Suitable for TC processing, employer, or school transfer.`,
   fees_paid: `Fees paid certificate for employer reimbursement / income-tax / HRA claim.
 Covering letter style: period covered, total paid, categories (tuition, transport, etc.) — amounts may be filled from system; write narrative around reimbursement purpose.`,
+  aadhaar_uidai: `UIDAI's fixed "Certificate for Aadhaar Enrolment/ Update" — a boxed government form with no narrative.
+Nothing to draft: say so briefly; the office prints the filled form.`,
 };
 
 export function buildStudentCertificateSystemPrompt(
