@@ -16,6 +16,8 @@ import {
   WA_TUTOR_MAX_TURNS,
   WA_TUTOR_TURN_MAX_CHARS,
   tutorReplyFromPayload,
+  tutorSessionsInProgress,
+  TUTOR_SESSION_LIVE_HOURS,
 } from "./waTutorBotEngine";
 
 console.log("waTutorBotEngine.selftest.ts");
@@ -345,5 +347,37 @@ const closed = (t: string) => parseWaTutorCommand(t, false);
   assert.equal(tutorReplyFromPayload({ data: { reply: "  ok  " } }), "ok");
 }
 
+
+// --- a child mid-practice is not thanked for their chat -----------------
+{
+  // 21 Sep 2026: fifteen closings landed straight after one of the tutor's
+  // exam-eve questions, 39–65 minutes later the same evening.
+  const now = new Date("2026-09-20T14:00:00.000Z");
+  const ago = (h: number) => new Date(now.getTime() - h * 3_600_000).toISOString();
+
+  const live = tutorSessionsInProgress(
+    [
+      { mobile10: "9876500001", updatedAt: ago(0.75) },   // asked a question 45 min ago
+      { mobile10: "919876500002", updatedAt: ago(3) },    // stored with the country code
+      { mobile10: "9876500003", updatedAt: ago(TUTOR_SESSION_LIVE_HOURS + 1) }, // yesterday's
+      { mobile10: "9876500004", updatedAt: "" },          // undated
+      { mobile10: "12", updatedAt: ago(1) },              // not a number
+    ],
+    now,
+  );
+  assert.ok(live.has("9876500001"), "a question asked 45 minutes ago is still open");
+  assert.ok(live.has("9876500002"), "keyed by the bare ten digits, whatever form was stored");
+  assert.ok(!live.has("9876500003"), "a session idle past the window is abandoned, not waiting");
+  assert.ok(!live.has("9876500004"), "an undated session is not evidence of a child at work");
+  assert.equal(live.size, 2);
+
+  // Just inside and just outside the window.
+  assert.ok(tutorSessionsInProgress([{ mobile10: "9876500005", updatedAt: ago(TUTOR_SESSION_LIVE_HOURS - 0.1) }], now).has("9876500005"));
+  assert.equal(tutorSessionsInProgress([{ mobile10: "9876500005", updatedAt: ago(TUTOR_SESSION_LIVE_HOURS + 0.1) }], now).size, 0);
+
+  // Same half-day as the drill guard, on purpose: two rules about "is this
+  // family still working?" that disagree would close one and not the other.
+  assert.equal(TUTOR_SESSION_LIVE_HOURS, 12);
+}
 
 console.log("OK — waTutorBotEngine.selftest.ts");
