@@ -23,6 +23,7 @@ import {
 } from "./udiseNudge";
 import { planUdiseCorrections, resolveDocPerson, type UdiseDocExtract } from "./udiseDocIntakeAi";
 import type { SisStudent } from "./sis";
+import { kmBetween, pickAadhaarCentres } from "./aadhaarCentres";
 
 console.log("udiseNudge.selftest.ts");
 
@@ -72,7 +73,7 @@ console.log("udiseNudge.selftest.ts");
     assert.ok(t.length < 4096, "one WhatsApp message");
   }
   // Without an APAAR gap the consent paragraph goes too.
-  const noConsent = composeUdiseNudge({ guardianName: "", needs: [{ name: "A", classLabel: "I", docs: ["birth certificate"], consent: false, recheck: null }], language: "en", consentAttached: false });
+  const noConsent = composeUdiseNudge({ guardianName: "", needs: [{ name: "A", classLabel: "I", docs: ["birth certificate"], consent: false, recheck: null, enrol: null }], language: "en", consentAttached: false });
   assert.doesNotMatch(noConsent, /consent form/);
 }
 
@@ -91,7 +92,7 @@ console.log("udiseNudge.selftest.ts");
   assert.match(hi, /₹75/);
   assert.match(hi, /30 सितंबर 2026 तक निःशुल्क/);
   assert.match(hi, /appointments\.uidai\.gov\.in/);
-  assert.match(hi, /UIDAI — uidai\.gov\.in \(Aadhaar Update Charges\)/, "the UIDAI source is cited when the fees are");
+  assert.match(hi, /UIDAI — uidai\.gov\.in/, "the UIDAI source is cited when the fees are");
   assert.ok(hi.length < 4096, `one WhatsApp message (${hi.length})`);
   assert.doesNotMatch(hi, /\d{4} \d{4} \d{4}/, "never a full Aadhaar number");
   const en = composeUdiseNudge({ guardianName: "", needs: udiseNudgeNeeds([{ name: "Vidhi", classLabel: "VII A", gaps: [], hasDob: true, hasAddress: true, aadhaarFailed: { dob: "", gender: "F", last4: "" } }], "en"), language: "en", consentAttached: false });
@@ -160,6 +161,59 @@ console.log("udiseNudge.selftest.ts");
     household: null,
   });
   assert.ok(c.changes.some((x) => x.field === "aadhaarNumber" && x.apply), "the child's Aadhaar → aadhaarNumber");
+}
+
+
+
+/* ── No Aadhaar yet: how to enrol, and where ─────────────────────── */
+{
+  const school = { lat: 25.4354328, lng: 82.9439863 };
+  // Shapes as Google Places returned them near the school on 21 Sep 2026.
+  const places = [
+    { place_id: "p1", name: "Aadhar Seva Kendra (आधार संशोधन केंद्र)", formatted_address: "near Sharmila Inter College, Puari Khurd, Uttar Pradesh 221202, India", business_status: "OPERATIONAL", user_ratings_total: 1, geometry: { location: { lat: 25.4446, lng: 82.9465 } } },
+    { place_id: "p2", name: "Aadhar Center", formatted_address: "Sarnath - Munari Rd, Singhpur, Sarnath, Varanasi, India", business_status: "OPERATIONAL", user_ratings_total: 113, geometry: { location: { lat: 25.3925, lng: 83.0237 } } },
+    { place_id: "p3", name: "Aadhaar Seva Kendra - Lahartara", formatted_address: "DLW Rd, Lahartara, Varanasi, India", business_status: "OPERATIONAL", user_ratings_total: 351, geometry: { location: { lat: 25.3070, lng: 82.9710 } } },
+    { place_id: "p3", name: "Aadhaar Seva Kendra - Lahartara", formatted_address: "duplicate from the second query", business_status: "OPERATIONAL", user_ratings_total: 351, geometry: { location: { lat: 25.3070, lng: 82.9710 } } },
+    { place_id: "p4", name: "Closed Aadhaar Point", formatted_address: "x", business_status: "CLOSED_PERMANENTLY", user_ratings_total: 50, geometry: { location: { lat: 25.44, lng: 82.95 } } },
+    { place_id: "p5", name: "Hotel Ganga View", formatted_address: "matched the word, sells rooms", business_status: "OPERATIONAL", user_ratings_total: 900, geometry: { location: { lat: 25.44, lng: 82.95 } } },
+    { place_id: "p6", name: "Aadhaar Seva Kendra", formatted_address: "far away", business_status: "OPERATIONAL", user_ratings_total: 40, geometry: { location: { lat: 26.5, lng: 83.5 } } },
+  ];
+  const picked = pickAadhaarCentres(places, school, { max: 3 });
+  assert.deepEqual(picked.map((c) => c.placeId), ["p2", "p3"], "used centres, nearest first; no 1-review listing while better exist; no closed, hotel, duplicate or far-off one");
+  assert.match(picked[0]!.mapsUrl, /^https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=Aadhar%20Center&query_place_id=p2$/);
+  assert.equal(picked[1]!.address, "DLW Rd, Lahartara, Varanasi", "', India' trimmed");
+  // Nothing well used near: the only listing is still better than none.
+  assert.deepEqual(pickAadhaarCentres([places[0]!], school).map((c) => c.placeId), ["p1"]);
+  assert.ok(Math.abs(kmBetween(school, { lat: 25.3070, lng: 82.9710 }) - 14.8) < 0.5);
+
+  const today = "2026-09-21";
+  const needs = udiseNudgeNeeds(
+    [
+      { name: "NAVYA SINGH", classLabel: "Nursery A", gaps: ["student_aadhaar", "pen", "apaar", "parent_aadhaar"], hasDob: true, hasAddress: true, dob: "2022-05-10" },
+      { name: "SUJIT KUMAR", classLabel: "VIII A", gaps: ["student_aadhaar", "apaar"], hasDob: true, hasAddress: true, dob: "2013-01-01" },
+    ],
+    "hi",
+    today,
+  );
+  assert.deepEqual(needs.map((n) => n.enrol?.under5), [true, false]);
+  const hi = composeUdiseNudge({ guardianName: "Sandesh", needs, language: "hi", consentAttached: true, centres: picked });
+  assert.match(hi, /🆔 \*आधार नहीं बना है\? ऐसे बनवाएँ — नया आधार निःशुल्क है\*/);
+  assert.match(hi, /\*NAVYA SINGH\* \(5 वर्ष से कम\), \*SUJIT KUMAR\* \(5 वर्ष या अधिक\)/);
+  assert.match(hi, /जन्म प्रमाणपत्र\* और \*माता-पिता का आधार कार्ड/);
+  assert.match(hi, /केवल फ़ोटो ली जाती है/, "under 5: photo only");
+  assert.match(hi, /बायोमेट्रिक/, "5 and over: biometrics");
+  assert.match(hi, /स्कूल UIDAI के निर्धारित फ़ॉर्मेट में छात्र का प्रमाणपत्र/, "the school certificate, UIDAI list item 13(v)");
+  assert.match(hi, /📍 \*स्कूल के पास के आधार केंद्र\* \(Google Maps\):\n1\. Aadhar Center — लगभग \d+(\.\d)? किमी\n   https:\/\/www\.google\.com\/maps/);
+  assert.match(hi, /appointments\.uidai\.gov\.in/);
+  assert.ok(hi.length < 4096, `one WhatsApp message (${hi.length})`);
+  // Without centres the section still says how; it never invents a place.
+  const bare = composeUdiseNudge({ guardianName: "", needs, language: "en", consentAttached: false });
+  assert.match(bare, /No Aadhaar yet\? How to get one — new enrolment is free/);
+  assert.doesNotMatch(bare, /centres near/);
+  // Distances from the family's own home only when the home is located.
+  assert.match(composeUdiseNudge({ guardianName: "", needs, language: "en", consentAttached: false, centres: picked, centresNear: "home" }), /Aadhaar centres near you/);
+  // A rejected Aadhaar is a re-check, not a new enrolment.
+  assert.equal(udiseNudgeNeeds([{ name: "R", classLabel: "VI", gaps: ["student_aadhaar_unverified", "apaar"], hasDob: true, hasAddress: true, aadhaarFailed: { dob: "", gender: "M", last4: "" } }], "en")[0]!.enrol, null);
 }
 
 console.log("  ok");

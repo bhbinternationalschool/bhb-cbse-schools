@@ -17,6 +17,7 @@ import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 
 import { composeUdiseNudge, udiseNudgeLogLine, udiseNudgeNeeds } from "../src/lib/udiseNudge";
+import { pickAadhaarCentres, type AadhaarCentre, type PlaceResult } from "../src/lib/aadhaarCentres";
 
 const SEND = process.argv.includes("--send");
 const env = Object.fromEntries(
@@ -52,8 +53,8 @@ const win = (await all<Win>((a, b) => sb.from("wa_contact_state").select("mobile
   .filter((w) => !w.opted_out_at);
 type Stu = { id: string; full_name: string; household_id: string; class_id: string; section_id: string; pen: string; apaar_id: string; aadhaar_last4: string; father_aadhaar_last4: string; mother_aadhaar_last4: string; dob: string | null; gender: string; father_mobile: string; mother_mobile: string; profile: Record<string, string> | null; status: string };
 const students = await all<Stu>((a, b) => sb.from("sis_students").select("id,full_name,household_id,class_id,section_id,pen,apaar_id,aadhaar_last4,father_aadhaar_last4,mother_aadhaar_last4,dob,gender,father_mobile,mother_mobile,profile,status").eq("tenant_id", TENANT).eq("academic_year_code", AY).eq("status", "active").range(a, b));
-type Hh = { id: string; guardian_name: string; mobile: string; whatsapp_mobile: string; alt_mobile: string; address: string; pincode: string; preferred_language: string };
-const households = await all<Hh>((a, b) => sb.from("sis_households").select("id,guardian_name,mobile,whatsapp_mobile,alt_mobile,address,pincode,preferred_language").eq("tenant_id", TENANT).range(a, b));
+type Hh = { id: string; guardian_name: string; mobile: string; whatsapp_mobile: string; alt_mobile: string; address: string; pincode: string; preferred_language: string; geo_lat: number | null; geo_lng: number | null };
+const households = await all<Hh>((a, b) => sb.from("sis_households").select("id,guardian_name,mobile,whatsapp_mobile,alt_mobile,address,pincode,preferred_language,geo_lat,geo_lng").eq("tenant_id", TENANT).range(a, b));
 const classes = await all<{ id: string; name: string }>((a, b) => sb.from("masters_desk_classes").select("id,name").eq("tenant_id", TENANT).range(a, b));
 const sections = await all<{ id: string; name: string }>((a, b) => sb.from("masters_desk_sections").select("id,name").eq("tenant_id", TENANT).range(a, b));
 const today = new Date(now.getTime() + 5.5 * 3600_000).toISOString().slice(0, 10);
@@ -95,7 +96,29 @@ for (const w of win.sort((a, b) => b.last_inbound_at.localeCompare(a.last_inboun
   if (hh && !byHh.has(hh)) byHh.set(hh, w);
 }
 
-type Plan = { hh: string; mobile: string; guardian: string; lang: "en" | "hi"; closesIst: string; text: string; log: string; attach: boolean; skip: string };
+// Aadhaar centres near a family, from Google Places — as the live path does.
+const SCHOOL = { lat: 25.4354328, lng: 82.9439863 };
+const centreCache = new Map<string, AadhaarCentre[]>();
+async function centresNear(from: { lat: number; lng: number }): Promise<AadhaarCentre[]> {
+  const key = `${from.lat.toFixed(2)},${from.lng.toFixed(2)}`;
+  if (centreCache.has(key)) return centreCache.get(key)!;
+  const results: PlaceResult[] = [];
+  for (const query of ["Aadhaar Seva Kendra", "Aadhaar enrolment centre"]) {
+    const u = new URL("https://maps.googleapis.com/maps/api/place/textsearch/json");
+    u.searchParams.set("query", query);
+    u.searchParams.set("location", `${from.lat},${from.lng}`);
+    u.searchParams.set("radius", "15000");
+    u.searchParams.set("region", "in");
+    u.searchParams.set("key", env.GOOGLE_MAPS_API_KEY || "");
+    const d = (await (await fetch(u)).json()) as { status?: string; results?: PlaceResult[] };
+    if (d.status === "OK") results.push(...(d.results ?? []));
+  }
+  const c = pickAadhaarCentres(results, from, { max: 3 });
+  centreCache.set(key, c);
+  return c;
+}
+
+type Plan = { hh: string; mobile: string; guardian: string; lang: "en" | "hi"; closesIst: string; text: string; log: string; attach: boolean; skip: string; centres: AadhaarCentre[] };
 const plans: Plan[] = [];
 for (const [hhId, w] of byHh) {
   const h = hhById.get(hhId);
@@ -111,17 +134,22 @@ for (const [hhId, w] of byHh) {
       aadhaarFailed: /validation failed/i.test(s.profile?.udiseAadhaarValidationStatus || "")
         ? { dob: s.dob || "", gender: s.gender || "", last4: s.aadhaar_last4 || "" }
         : null,
+      dob: s.dob || "",
     })),
     lang,
+    today,
   );
   if (!needs.length) continue;
+  const centres = needs.some((n) => n.enrol)
+    ? await centresNear(typeof h?.geo_lat === "number" && typeof h?.geo_lng === "number" ? { lat: h.geo_lat, lng: h.geo_lng } : SCHOOL)
+    : [];
   const m10 = last10(w.mobile_e164);
   const closes = new Date(Date.parse(w.last_inbound_at) + 24 * 3600_000 + 5.5 * 3600_000).toISOString().slice(11, 16);
   const skip = inDrill.has(m10) ? "exam drill open" : recentlyAsked.has(hhId) ? "asked in the last 7 days" : "";
   const attach = needs.some((n) => n.consent);
   plans.push({
-    hh: hhId, mobile: m10, guardian: h?.guardian_name || "", lang, closesIst: closes, attach, skip,
-    text: composeUdiseNudge({ guardianName: (h?.guardian_name || "").replace(/^(MR|MRS|MS)\.?\s+/i, "").replace(/\s+/g, " ").trim(), needs, language: lang, consentAttached: attach }),
+    hh: hhId, mobile: m10, guardian: h?.guardian_name || "", lang, closesIst: closes, attach, skip, centres,
+    text: composeUdiseNudge({ guardianName: (h?.guardian_name || "").replace(/^(MR|MRS|MS)\.?\s+/i, "").replace(/\s+/g, " ").trim(), needs, language: lang, consentAttached: attach, centres, centresNear: typeof h?.geo_lat === "number" ? "home" : "school" }),
     log: udiseNudgeLogLine(needs),
   });
 }
@@ -129,7 +157,7 @@ for (const [hhId, w] of byHh) {
 const toSend = plans.filter((p) => !p.skip);
 console.log(`In window: ${win.length} numbers · families with an open child: ${plans.length} · to send: ${toSend.length} · skipped: ${plans.length - toSend.length}`);
 for (const p of plans.filter((x) => x.skip)) console.log(`  SKIP ${p.guardian} (${p.mobile}): ${p.skip}`);
-for (const p of toSend) console.log(`  ${p.mobile} · window closes ${p.closesIst} IST · ${p.lang} · ${p.log}`);
+for (const p of toSend) console.log(`  ${p.mobile} · window closes ${p.closesIst} IST · ${p.lang} · ${p.log}${p.centres.length ? ` · centres: ${p.centres.map((c) => `${c.name} (${c.km} km)`).join("; ")}` : ""}`);
 console.log("\n--- sample ---\n" + (toSend[0]?.text ?? ""));
 
 // Aadhaar rejected by the portal, family OUTSIDE the 24-hour window: only an
@@ -210,6 +238,14 @@ for (const p of toSend) {
     const d = await graph("messages", JSON.stringify({ messaging_product: "whatsapp", to: `91${p.mobile}`, type: "document", document: { id: mediaId, filename: "APAAR-Consent-Refusal-Form.pdf", caption } }));
     docOk = d.ok;
   }
+  let pins = 0;
+  if (ok) {
+    for (const c of p.centres.slice(0, 2)) {
+      const pr = await graph("messages", JSON.stringify({ messaging_product: "whatsapp", to: `91${p.mobile}`, type: "location", location: { latitude: c.lat, longitude: c.lng, name: c.name.slice(0, 100), address: c.address.slice(0, 200) } }));
+      if (pr.ok) pins += 1;
+    }
+  }
+  if (pins) console.log(`   + ${pins} centre pin${pins === 1 ? "" : "s"}`);
   results.push({ hh: p.hh, mobile: p.mobile, ok, id: j.messages?.[0]?.id ?? "", docOk, error: j.error?.message ?? "", log: p.log });
   console.log(`${ok ? "SENT" : "FAIL"} ${p.mobile}${p.attach ? (docOk ? " + form" : " (form failed)") : ""}${ok ? "" : ` — ${j.error?.message}`}`);
   await new Promise((res) => setTimeout(res, 400));

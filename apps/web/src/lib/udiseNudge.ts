@@ -22,6 +22,7 @@
  * the ID is compulsory, because the Ministry says it is not.
  */
 
+import type { AadhaarCentre } from "@/lib/aadhaarCentres";
 import { missingDocsList } from "@/lib/udiseDocIntakeAi";
 
 export type NudgeChildInput = {
@@ -35,6 +36,8 @@ export type NudgeChildInput = {
    * With it, what the school holds — so the parent can see what must match.
    */
   aadhaarFailed?: { dob: string; gender: string; last4: string } | null;
+  /** ISO date of birth, for how a child without Aadhaar enrols (under 5 or not). */
+  dob?: string;
 };
 
 export type NudgeChildNeed = {
@@ -45,10 +48,23 @@ export type NudgeChildNeed = {
   consent: boolean;
   /** Aadhaar rejected by the portal: a fresh photo of the card, for a re-check. */
   recheck: { dob: string; gender: string; last4: string } | null;
+  /** No Aadhaar yet: how to enrol. `under5` decides what the centre does. */
+  enrol: { under5: boolean | null } | null;
 };
 
 /** What each child still needs from the family. Children needing nothing are left out. */
-export function udiseNudgeNeeds(children: NudgeChildInput[], language: "en" | "hi"): NudgeChildNeed[] {
+function under5(dobIso: string | undefined, todayIso: string): boolean | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dobIso || "");
+  if (!m) return null;
+  const fifth = `${Number(m[1]) + 5}-${m[2]}-${m[3]}`;
+  return todayIso < fifth;
+}
+
+export function udiseNudgeNeeds(
+  children: NudgeChildInput[],
+  language: "en" | "hi",
+  todayIso: string = new Date().toISOString().slice(0, 10),
+): NudgeChildNeed[] {
   const out: NudgeChildNeed[] = [];
   for (const c of children) {
     const docs = missingDocsList({ gaps: c.gaps, hasDob: c.hasDob, hasAddress: c.hasAddress, language });
@@ -62,7 +78,8 @@ export function udiseNudgeNeeds(children: NudgeChildInput[], language: "en" | "h
     }
     const consent = c.gaps.includes("apaar");
     if (!docs.length && !consent) continue;
-    out.push({ name: c.name, classLabel: c.classLabel, docs, consent, recheck });
+    const enrol = c.gaps.includes("student_aadhaar") && !recheck ? { under5: under5(c.dob, todayIso) } : null;
+    out.push({ name: c.name, classLabel: c.classLabel, docs, consent, recheck, enrol });
   }
   return out;
 }
@@ -157,12 +174,78 @@ function recheckSection(needs: NudgeChildNeed[], hi: boolean): string[] {
   return lines;
 }
 
+/**
+ * A child with no Aadhaar yet: how to get one, and where.
+ *
+ * UIDAI (uidai.gov.in, checked 21 Sep 2026): new enrolment is free; a
+ * child under five enrols with a parent — the parent's Aadhaar, the birth
+ * certificate as proof of relationship, the child's photo only; five and
+ * over, the same documents and the child's own biometrics. A recognised
+ * school may certify its own students on UIDAI's standard certificate
+ * format (List of Acceptable Documents, item 13(v)).
+ * The centres are Google Maps listings near the family, chosen in
+ * aadhaarCentres.ts — never typed in by hand.
+ */
+function enrolSection(needs: NudgeChildNeed[], hi: boolean, centres: AadhaarCentre[], near: "home" | "school"): string[] {
+  const kids = needs.filter((n) => n.enrol);
+  if (!kids.length) return [];
+  const lines: string[] = [""];
+  const who = (n: NudgeChildNeed) =>
+    n.enrol!.under5 === true ? (hi ? " (5 वर्ष से कम)" : " (under 5)") : n.enrol!.under5 === false ? (hi ? " (5 वर्ष या अधिक)" : " (5 or older)") : "";
+  if (hi) {
+    lines.push(
+      "🆔 *आधार नहीं बना है? ऐसे बनवाएँ — नया आधार निःशुल्क है*",
+      `बच्चा: ${kids.map((n) => `*${n.name}*${who(n)}`).join(", ")}`,
+      "• माता या पिता बच्चे को साथ लेकर आधार केंद्र जाएँ",
+      "• साथ ले जाएँ: बच्चे का *जन्म प्रमाणपत्र* और *माता-पिता का आधार कार्ड*",
+    );
+    if (kids.some((n) => n.enrol!.under5 !== false)) lines.push("• 5 वर्ष से छोटे बच्चे की केवल फ़ोटो ली जाती है");
+    if (kids.some((n) => n.enrol!.under5 !== true)) {
+      lines.push(
+        "• 5 वर्ष या बड़े बच्चे के उंगलियों व आँखों के निशान (बायोमेट्रिक) लिए जाते हैं",
+        "• कोई पहचान पत्र न हो तो स्कूल UIDAI के निर्धारित फ़ॉर्मेट में छात्र का प्रमाणपत्र दे सकता है — ऑफिस से माँगें",
+      );
+    }
+    if (centres.length) {
+      lines.push("", near === "home" ? "📍 *आपके पास के आधार केंद्र* (Google Maps):" : "📍 *स्कूल के पास के आधार केंद्र* (Google Maps):");
+      centres.forEach((c, i) => lines.push(`${i + 1}. ${c.name} — लगभग ${c.km} किमी`, `   ${c.mapsUrl}`));
+      lines.push("जाने से पहले Maps पर खुलने का समय देख लें।");
+    }
+    lines.push("सभी केंद्र / समय लेने के लिए: appointments.uidai.gov.in", "आधार बनने के बाद उसकी फ़ोटो यहीं भेजें।");
+    return lines;
+  }
+  lines.push(
+    "🆔 *No Aadhaar yet? How to get one — new enrolment is free*",
+    `Child: ${kids.map((n) => `*${n.name}*${who(n)}`).join(", ")}`,
+    "• The mother or father takes the child to an Aadhaar centre",
+    "• Take the child's *birth certificate* and the *parents' Aadhaar cards*",
+  );
+  if (kids.some((n) => n.enrol!.under5 !== false)) lines.push("• A child under 5 only has a photo taken");
+  if (kids.some((n) => n.enrol!.under5 !== true)) {
+    lines.push(
+      "• A child of 5 or older gives fingerprints and an iris scan",
+      "• If there is no ID document, the school can issue a student certificate on UIDAI's standard format — ask the office",
+    );
+  }
+  if (centres.length) {
+    lines.push("", near === "home" ? "📍 *Aadhaar centres near you* (Google Maps):" : "📍 *Aadhaar centres near the school* (Google Maps):");
+    centres.forEach((c, i) => lines.push(`${i + 1}. ${c.name} — about ${c.km} km`, `   ${c.mapsUrl}`));
+    lines.push("Check the opening hours on Maps before you go.");
+  }
+  lines.push("All centres / book a slot: appointments.uidai.gov.in", "Once the Aadhaar is made, send a photo of it here.");
+  return lines;
+}
+
 /** The message. Hindi by default, as every parent message is. */
 export function composeUdiseNudge(input: {
   guardianName: string;
   needs: NudgeChildNeed[];
   language: "en" | "hi";
   consentAttached: boolean;
+  /** Aadhaar centres near the family, for a child with no Aadhaar. */
+  centres?: AadhaarCentre[];
+  /** What the distances were measured from: the family's home when it is located, else the school. */
+  centresNear?: "home" | "school";
 }): string {
   const hi = input.language === "hi";
   const anyConsent = input.needs.some((n) => n.consent);
@@ -180,6 +263,7 @@ export function composeUdiseNudge(input: {
       if (n.consent) lines.push(`• APAAR सहमति फ़ॉर्म — भरकर व हस्ताक्षर करके${input.consentAttached ? " (साथ में भेजा है)" : ""}`);
     }
     lines.push(...recheckSection(input.needs, true));
+    lines.push(...enrolSection(input.needs, true, input.centres ?? [], input.centresNear ?? "school"));
     lines.push(
       "",
       "*यह क्यों ज़रूरी है*",
@@ -196,7 +280,7 @@ export function composeUdiseNudge(input: {
     }
     lines.push(
       "",
-      `📎 संदर्भ: शिक्षा मंत्रालय, भारत सरकार — apaar.education.gov.in${input.needs.some((n) => n.recheck) ? " · UIDAI — uidai.gov.in (Aadhaar Update Charges)" : ""}`,
+      `📎 संदर्भ: शिक्षा मंत्रालय, भारत सरकार — apaar.education.gov.in${input.needs.some((n) => n.recheck || n.enrol) ? " · UIDAI — uidai.gov.in" : ""}`,
       "आधार नंबर चैट में टाइप न करें — कार्ड की फ़ोटो भेजें, बच्चे के रिकॉर्ड में अपने-आप दर्ज हो जाएगा।",
     );
     return lines.join("\n");
@@ -213,6 +297,7 @@ export function composeUdiseNudge(input: {
     if (n.consent) lines.push(`• APAAR consent form — filled in and signed${input.consentAttached ? " (attached)" : ""}`);
   }
   lines.push(...recheckSection(input.needs, false));
+  lines.push(...enrolSection(input.needs, false, input.centres ?? [], input.centresNear ?? "school"));
   lines.push(
     "",
     "*Why it is needed*",
@@ -229,7 +314,7 @@ export function composeUdiseNudge(input: {
   }
   lines.push(
     "",
-    `📎 Reference: Ministry of Education, Government of India — apaar.education.gov.in${input.needs.some((n) => n.recheck) ? " · UIDAI — uidai.gov.in (Aadhaar Update Charges)" : ""}`,
+    `📎 Reference: Ministry of Education, Government of India — apaar.education.gov.in${input.needs.some((n) => n.recheck || n.enrol) ? " · UIDAI — uidai.gov.in" : ""}`,
     "Please don't type the Aadhaar number in chat — send a photo of the card and it is entered in the child's record automatically.",
   );
   return lines.join("\n");

@@ -99,8 +99,10 @@ export async function maybeSendUdiseNudge(
         aadhaarFailed: /validation failed/i.test(s.udiseAadhaarValidationStatus || "")
           ? { dob: s.dob || "", gender: s.gender || "", last4: s.aadhaarLast4 || "" }
           : null,
+        dob: s.dob || "",
       })),
       language,
+      new Date(now.getTime() + 5.5 * 3_600_000).toISOString().slice(0, 10),
     );
     if (!needs.length) return { sent: false, reason: "nothing_needed" };
 
@@ -128,11 +130,26 @@ export async function maybeSendUdiseNudge(
     if (!due.due) return { sent: false, reason: due.reason };
 
     const pdf = needs.some((n) => n.consent) ? consentForm() : null;
+    // A child with no Aadhaar at all: the centres nearest the family's home
+    // (its geocode), or the school when the home was never located.
+    let centres: import("@/lib/aadhaarCentres").AadhaarCentre[] = [];
+    const located = typeof hh.geoLat === "number" && typeof hh.geoLng === "number";
+    if (needs.some((n) => n.enrol)) {
+      const { nearbyAadhaarCentres } = await import("@/lib/aadhaarCentres.server");
+      const { TENANT } = await import("@/lib/types");
+      const from =
+        typeof hh.geoLat === "number" && typeof hh.geoLng === "number"
+          ? { lat: hh.geoLat, lng: hh.geoLng }
+          : { lat: TENANT.schoolLat, lng: TENANT.schoolLng };
+      centres = await nearbyAadhaarCentres(from, 3).catch(() => []);
+    }
     const text = composeUdiseNudge({
       guardianName: hh.guardianName || "",
       needs,
       language,
       consentAttached: !!pdf,
+      centres,
+      centresNear: located ? "home" : "school",
     });
     const { sendWhatsAppText, sendWhatsAppDocument } = await import("@/lib/waSend");
     const { logHouseholdWaSend } = await import("@/lib/householdMessageLog.server");
@@ -163,6 +180,14 @@ export async function maybeSendUdiseNudge(
             : "Ministry of Education — APAAR ID consent / refusal form (Annexure-1). Please fill in, sign and send a photo.",
       });
       if (!doc.ok) console.warn("[udise-nudge] consent form not sent", hh.id, doc.error);
+    }
+    // The two nearest centres as real map pins — tap for directions.
+    if (centres.length) {
+      const { sendWhatsAppLocation } = await import("@/lib/waSend");
+      for (const c of centres.slice(0, 2)) {
+        const pin = await sendWhatsAppLocation({ toMobile: mobile10, latitude: c.lat, longitude: c.lng, name: c.name, address: c.address });
+        if (!pin.ok) console.warn("[udise-nudge] centre pin not sent", hh.id, pin.error);
+      }
     }
     return { sent: true, reason: "" };
   } finally {
