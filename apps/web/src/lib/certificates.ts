@@ -33,7 +33,9 @@ export type CertificateKind =
   | "bonafide"
   | "character"
   | "fee_clearance"
-  | "fees_paid";
+  | "fees_paid"
+  /** UIDAI's "Certificate for Aadhaar Enrolment/ Update" — printed on UIDAI's own form, not the school sheet. */
+  | "aadhaar_uidai";
 
 export const CERTIFICATE_KINDS: {
   kind: CertificateKind;
@@ -53,7 +55,31 @@ export const CERTIFICATE_KINDS: {
     label: "Fees paid (reimbursement)",
     short: "Fees paid",
   },
+  {
+    kind: "aadhaar_uidai",
+    label: "Aadhaar certificate (UIDAI format)",
+    short: "Aadhaar (UIDAI)",
+  },
 ];
+
+/**
+ * Kinds printed on an official form rather than the school's certificate
+ * sheet. The register still numbers and records them; printing opens the
+ * filled form.
+ */
+export function isUidaiFormKind(kind: CertificateKind): boolean {
+  return kind === "aadhaar_uidai";
+}
+
+/**
+ * The filled UIDAI form for a student, dated the day it was issued — its
+ * three months of validity run from that date, so a reprint keeps it.
+ */
+export function uidaiFormUrl(studentId: string, issuedOn?: string): string {
+  const q = new URLSearchParams({ student: studentId });
+  if (issuedOn && /^\d{4}-\d{2}-\d{2}$/.test(issuedOn)) q.set("date", issuedOn);
+  return `/api/v1/udise/aadhaar-certificate?${q.toString()}`;
+}
 
 /** Receipt lines frozen onto a fees-paid certificate for reimbursement. */
 export type FeesPaidReceiptRow = {
@@ -475,6 +501,8 @@ export function seriesCodeForCertificateKind(kind: CertificateKind): string {
       return "CERT_CLEARANCE";
     case "fees_paid":
       return "CERT_FEES_PAID";
+    case "aadhaar_uidai":
+      return "CERT_AADHAAR";
     default:
       return "TC";
   }
@@ -532,7 +560,9 @@ function legacyCertNo(
           ? "CHR"
           : kind === "fees_paid"
             ? "FEE"
-            : "ND";
+            : kind === "aadhaar_uidai"
+              ? "AAD"
+              : "ND";
   const ayTag = ay.replace(/[^0-9]/g, "").slice(0, 4) || "AY";
   const existing = state.issues.filter(
     (i) => i.kind === kind && i.academicYearCode === ay && !i.voidedAt,

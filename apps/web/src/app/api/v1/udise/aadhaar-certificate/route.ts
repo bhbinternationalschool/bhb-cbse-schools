@@ -27,7 +27,11 @@ export async function GET(req: Request) {
   const studentId = new URL(req.url).searchParams.get("student") || "";
   if (!studentId) return NextResponse.json({ error: "student is required" }, { status: 400 });
   const today = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
-  const r = await buildAadhaarCertificate(studentId, today);
+  // A reprint from the certificates register keeps the date it was issued
+  // on: its three months of validity run from that date. Never a future one.
+  const asked = new URL(req.url).searchParams.get("date") || "";
+  const issueDate = /^\d{4}-\d{2}-\d{2}$/.test(asked) && asked <= today ? asked : today;
+  const r = await buildAadhaarCertificate(studentId, issueDate);
   if (!r.ok) return NextResponse.json({ error: r.error }, { status: 404 });
   return new NextResponse(new Uint8Array(r.pdf), {
     headers: {

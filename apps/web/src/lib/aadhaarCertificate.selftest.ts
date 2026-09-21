@@ -24,6 +24,8 @@ import {
   type CertificateInput,
 } from "./aadhaarCertificate";
 import { renderAadhaarCertificatePdf } from "./aadhaarCertificatePdf";
+import { CERTIFICATE_KINDS, isUidaiFormKind, seriesCodeForCertificateKind, uidaiFormUrl } from "./certificates";
+import { holdCodeForCertificate } from "./holds";
 
 console.log("aadhaarCertificate.selftest.ts");
 
@@ -100,6 +102,18 @@ console.log("aadhaarCertificate.selftest.ts");
   assert.match(hi, /पासपोर्ट साइज़ फ़ोटो/, "the photo the form carries");
   assert.match(hi, /3 महीने/, "valid three months");
   assert.match(composeCertificateRequestAck({ childNames: ["X"], hindi: false, alreadyRequested: true }), /already with the office/);
+}
+
+/* ── In the ERP's certificate register ───────────────────────────── */
+{
+  assert.ok(CERTIFICATE_KINDS.some((k) => k.kind === "aadhaar_uidai" && k.label === "Aadhaar certificate (UIDAI format)"));
+  assert.ok(isUidaiFormKind("aadhaar_uidai"));
+  assert.ok(!isUidaiFormKind("bonafide"), "the school's own certificates keep their sheet");
+  assert.equal(seriesCodeForCertificateKind("aadhaar_uidai"), "CERT_AADHAAR", "its own number series");
+  assert.equal(uidaiFormUrl("stu_1", "2026-09-21"), "/api/v1/udise/aadhaar-certificate?student=stu_1&date=2026-09-21", "a reprint keeps the issue date");
+  assert.equal(uidaiFormUrl("stu_1"), "/api/v1/udise/aadhaar-certificate?student=stu_1");
+  assert.equal(holdCodeForCertificate("aadhaar_uidai"), null, "a fee hold never blocks a child's Aadhaar");
+  assert.equal(holdCodeForCertificate("bonafide"), "HOLD_CERT", "…while the others keep theirs");
 }
 
 console.log("  ok");
