@@ -1410,21 +1410,17 @@ export async function handleErpStaffCommand(
         text: `No overdue fees in ${res.wholeClass ? `Class ${res.className}` : res.sections[0]!.label}. Nothing to send. ✅`,
       };
     }
-    const recipients = defaulters
-      .map((d) => {
-        const hh = sis.households.find((h) => h.id === d.householdId);
-        return {
-          householdId: d.householdId,
-          mobile: hh ? householdWhatsApp(hh) || hh.mobile : "",
-          guardianName: hh?.guardianName || "",
-          language: waTemplateLanguageFor(hh ?? {}),
-          studentName: d.fullName,
-          classLabel: classLabel(masters, d.student.classId, d.student.sectionId).replace(" · ", " "),
-          amountPaise: d.overdueAmountPaise,
-          overdueDays: d.overdueDays,
-        };
+    // The class picks WHICH families; the reminder is about the whole
+    // family — every child owing in any class, with bus and store. It was
+    // one recipient per child, and siblings sharing the family's message id
+    // were swallowed by the send layer's dedupe after the first.
+    const { familyReminderRecipients } = await import("@/lib/feeReminder.server");
+    const recipients = (
+      await familyReminderRecipients({
+        householdIds: [...new Set(defaulters.map((d) => d.householdId))],
+        todayIso,
       })
-      .filter((x) => x.mobile);
+    ).filter((x) => x.mobile);
     const store2 = await readStore();
     // This desk's own ledger only knew what THIS desk had sent. The
     // automation rule sent every fee reminder the school has ever sent — 1,126
@@ -3321,8 +3317,26 @@ async function runConfirmedWrite(
       };
     }
     const today = istDateOf();
+    // Today's dues, not the card's: a family who paid since the card was
+    // built is left out, everyone else is told what they owe now.
+    const { refreshFeeReminderRecipients } = await import("@/lib/feeReminder.server");
+    const fresh = await refreshFeeReminderRecipients(recipients, today);
+    if (!fresh) {
+      return {
+        handled: true,
+        audience: "erp_command_error",
+        text: "Couldn't read today's dues, so nothing was sent — I won't send yesterday's figures. Try again in a few minutes.",
+      };
+    }
+    if (!fresh.recipients.length) {
+      return {
+        handled: true,
+        audience: "erp_command_fee_reminder",
+        text: `Nothing sent — every family on this card has paid since it was prepared. ✅`,
+      };
+    }
     const res = await sendFeeReminders({
-      recipients,
+      recipients: fresh.recipients,
       template: {
         metaName: r.templateMetaName,
         language: r.templateLanguage || "en",
@@ -3346,6 +3360,7 @@ async function runConfirmedWrite(
     }));
     const bits = [`Reminded ${res.sent} famil${res.sent === 1 ? "y" : "ies"} in ${r.title || "that class"}`];
     if (res.failed) bits.push(`${res.failed} failed`);
+    if (fresh.settled) bits.push(`${fresh.settled} had paid since the card and were not messaged`);
     return {
       handled: true,
       audience: "erp_command_fee_reminder",

@@ -190,7 +190,42 @@ export async function dispatchAutomationApproval(opts: {
   originUrl: string;
   dryRun?: boolean;
 }): Promise<AutomationDispatchResult> {
-  const { item, module, originUrl } = opts;
+  const { module, originUrl } = opts;
+  // Fee cards are brought up to the minute before anything is sent: each
+  // family's children, dues and total looked up again, and families who
+  // have paid since the card was built left out (lib/feeFamilyLive.server).
+  let item = opts.item;
+  if (module === "fees") {
+    const { liveFeeCard } = await import("@/lib/feeFamilyLive.server");
+    let live: Awaited<ReturnType<typeof liveFeeCard>>;
+    try {
+      live = await liveFeeCard(item);
+    } catch (e) {
+      // Today's figure could not be read. The card's figure is not a
+      // stand-in for it — that is exactly how a paid family gets chased.
+      return {
+        ok: false,
+        sent: 0,
+        failed: 0,
+        deferred: 0,
+        simulated: 0,
+        simulatedOnly: false,
+        error: `Could not read today's dues (${e instanceof Error ? e.message : "unknown error"}) — nothing sent. Try again in a few minutes.`,
+      };
+    }
+    item = live.item;
+    if (!item.dispatchPayload.length && live.settled > 0) {
+      return {
+        ok: false,
+        sent: 0,
+        failed: 0,
+        deferred: 0,
+        simulated: 0,
+        simulatedOnly: false,
+        error: `Nothing sent — all ${live.settled} famil${live.settled === 1 ? "y has" : "ies have"} paid since this card was made.`,
+      };
+    }
+  }
   if (!item.dispatchPayload.length) {
     return {
       ok: false,

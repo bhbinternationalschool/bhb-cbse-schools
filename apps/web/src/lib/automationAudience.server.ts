@@ -19,7 +19,8 @@ import "server-only";
 
 import type { AutomationRule } from "@/lib/automation";
 import { findAudiencePresetBySummary } from "@/lib/automationAudience";
-import { loadSis, type Household } from "@/lib/sis";
+import { loadSis, studentsInSession, type Household } from "@/lib/sis";
+import { familyReminderValues, type FamilyChildDue } from "@/lib/feeFamilyReminder";
 import { reviewDemoHouseholdIds } from "@/lib/reviewDemoRecords";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { ensureFeesHydratedServer } from "@/lib/feesPersistence.server";
@@ -157,7 +158,15 @@ async function dropUnreachable(
   return { kept, skippedOptOut, skippedNotOnWhatsApp };
 }
 
-/** One recipient per household — siblings must not get the same message twice. */
+/**
+ * One message per phone number.
+ *
+ * Fee reminders are already one per FAMILY before this runs (see
+ * liveFeeFamilies), so for them this only matters when two different
+ * households share a number — none of the families owing on 21 Sep 2026
+ * did. It used to be what turned a per-child list into "one per family",
+ * by keeping the first child and silently dropping the siblings' dues.
+ */
 function dedupeByMobile(recipients: AutomationRecipient[]): AutomationRecipient[] {
   const seen = new Set<string>();
   const out: AutomationRecipient[] = [];
@@ -191,6 +200,102 @@ async function feeRecipients(
   todayIso: string,
   minAmountPaise: number,
 ): Promise<AutomationRecipient[]> {
+  const families = await liveFeeFamilies(kind, todayIso);
+
+  // Every number every family has, asked about in one go — the choice
+  // below needs to know which of them Meta has already refused.
+  const sis = loadSis();
+  const knownBad = await listKnownNotOnWhatsApp(
+    families.flatMap((f) => f.candidates.map((c) => c.mobile10)),
+  ).catch(() => new Set<string>());
+
+  const out: AutomationRecipient[] = [];
+  for (const f of families) {
+    // The floor is the FAMILY's. It used to be each child's, so two
+    // children owing ₹1,500 each — ₹3,000 between them — were never
+    // reminded while one child owing ₹2,000 was.
+    if (f.totalPaise <= 0) continue;
+    if (minAmountPaise > 0 && f.totalPaise < minAmountPaise) continue;
+    // The designated number first, then the guardian's, the father's, the
+    // mother's, the alternate — skipping any Meta has said has no WhatsApp
+    // account. A family whose first number is dead is still reached.
+    const choice = pickWaNumbers(f.candidates, knownBad);
+    if (!choice.primary) continue;
+    const hh = householdOf(sis.households ?? [], f.householdId);
+    out.push({
+      mobile: choice.primary.mobile10,
+      fallbackMobile: choice.fallback?.mobile10,
+      numberLabel: choice.primary.label,
+      language: waTemplateLanguageFor(hh ?? {}),
+      refId: f.householdId,
+      label: `${f.values.childName} · ${f.values.classLabel}`,
+      variables: feeFamilyVariables(f, hh, kind, minAmountPaise),
+    });
+  }
+  return out;
+}
+
+/**
+ * The template values for one family, and the keys the send step needs to
+ * recompute them.
+ *
+ * `householdId` and `feeScope` are not template words — the dispatcher
+ * reads them to fetch this family's dues again at the moment of sending
+ * (see liveFeeCard), because a card is a snapshot and a parent may have
+ * paid between the card and the tap.
+ */
+function feeFamilyVariables(
+  f: LiveFeeFamily,
+  hh: Household | null | undefined,
+  kind: "overdue" | "due_soon",
+  minAmountPaise: number,
+): Record<string, string> {
+  const scope = kind === "overdue" ? "overdue" : "open";
+  return {
+    schoolName: TENANT.nameDisplay,
+    guardianName: hh?.guardianName || "Parent",
+    childName: f.values.childName,
+    classLabel: f.values.classLabel,
+    feeDue: f.values.feeDue,
+    amount: formatInr(f.totalPaise),
+    dueDate: f.earliestDueOn,
+    overdueDays: String(Math.max(0, f.overdueDays)),
+    stage: f.stageLabel,
+    // The whole family's payment link — every child's dues in one checkout,
+    // matching the message. It was each child's own link until 21 Sep 2026,
+    // so a family told about one child could only pay for that one.
+    payLink: duePayUrl(publicOrigin(), { householdId: f.householdId, scope }) || PARENT_PORTAL,
+    duePayToken: duePayTokenFor({ householdId: f.householdId, scope }),
+    householdId: f.householdId,
+    feeScope: kind,
+    minPaise: String(Math.max(0, Math.round(minAmountPaise))),
+  };
+}
+
+export type LiveFeeFamily = {
+  householdId: string;
+  children: FamilyChildDue[];
+  totalPaise: number;
+  values: ReturnType<typeof familyReminderValues>;
+  earliestDueOn: string;
+  overdueDays: number;
+  stageLabel: string;
+  candidates: WaCandidateNumber[];
+};
+
+/**
+ * Every family owing money right now, one entry per household, every child
+ * in it, every kind of due — computed from the live fee engine and the
+ * store's own balances at the moment of the call.
+ *
+ * Exported for the send step, which calls it again when a card is approved
+ * so the amount a parent reads is today's, not the card's.
+ */
+export async function liveFeeFamilies(
+  kind: "overdue" | "due_soon",
+  todayIso: string,
+  onlyHouseholds?: Set<string>,
+): Promise<LiveFeeFamily[]> {
   // Transport and the posted adjustments too, or a reminder quotes school
   // fee only — the bus fee of 157 riders was missing from every one of
   // these messages until 2026-09-16 (lib/feeDuesInputs.server.ts).
@@ -202,101 +307,135 @@ async function feeRecipients(
   const sis = loadSis();
   const masters = await loadServerMasters();
   const academicYearCode = currentAcademicYearCode(masters);
+  const hindiFor = (householdId: string) =>
+    waTemplateLanguageFor(householdOf(sis.households ?? [], householdId) ?? {}) === "hi";
+
   const rows = listLiveDefaulters({
     asOf: todayIso,
     academicYearCode,
     includeUpcoming: kind === "due_soon",
     sis,
     masters,
-  });
+  }).filter((d) => !onlyHouseholds || onlyHouseholds.has(d.householdId));
 
   const horizon = shiftIso(todayIso, 3);
-  const out: AutomationRecipient[] = [];
-
-  // Every number every candidate family has, asked about in one go — the
-  // choice below needs to know which of them Meta has already refused.
-  const allCandidates = new Map<string, WaCandidateNumber[]>();
-  for (const d of rows) {
-    if (allCandidates.has(d.householdId)) continue;
-    const hh = householdOf(sis.households ?? [], d.householdId);
-    allCandidates.set(
-      d.householdId,
-      householdCandidateNumbers({
-        household: hh,
-        students: (sis.students ?? []).filter(
-          (s) => s.householdId === d.householdId && s.status === "active",
-        ),
-      }),
-    );
-  }
-  const knownBad = await listKnownNotOnWhatsApp(
-    [...allCandidates.values()].flat().map((c) => c.mobile10),
-  ).catch(() => new Set<string>());
+  type Acc = {
+    children: Map<string, FamilyChildDue>;
+    earliestDueOn: string;
+    overdueDays: number;
+    stageLabel: string;
+  };
+  const byHousehold = new Map<string, Acc>();
+  const accFor = (householdId: string) => {
+    let a = byHousehold.get(householdId);
+    if (!a) {
+      a = { children: new Map(), earliestDueOn: "", overdueDays: 0, stageLabel: "" };
+      byHousehold.set(householdId, a);
+    }
+    return a;
+  };
 
   for (const d of rows) {
+    if (!d.householdId) continue;
+    let lines;
     if (kind === "overdue") {
       if (d.overdueDays <= 0 || d.overdueAmountPaise <= 0) continue;
+      lines = d.overdueDues;
     } else {
       // Due soon = not yet overdue, but inside the next three days.
       if (d.overdueDays > 0) continue;
       if (!d.earliestDueOn || d.earliestDueOn > horizon) continue;
       if (d.openAmountPaise <= 0) continue;
+      lines = d.openDues;
     }
-    const amountPaise =
-      kind === "overdue" ? d.overdueAmountPaise : d.openAmountPaise;
-    // The rule's own floor. A family under it is not a defaulter worth
-    // chasing on WhatsApp — ₹200 outstanding is a conversation at the
-    // counter, not a reminder that lands on a parent's phone.
-    if (minAmountPaise > 0 && amountPaise < minAmountPaise) continue;
-    const hh = householdOf(sis.households ?? [], d.householdId);
-    // The designated number first, then the guardian's, the father's, the
-    // mother's, the alternate — skipping any Meta has said has no WhatsApp
-    // account. A family whose first number is dead is still reached.
-    const choice = pickWaNumbers(
-      allCandidates.get(d.householdId) ?? [],
-      knownBad,
+    const sum = (k: string) =>
+      lines.filter((l) => l.kind === k).reduce((s, l) => s + Math.max(0, l.balancePaise), 0);
+    const all = lines.reduce((s, l) => s + Math.max(0, l.balancePaise), 0);
+    const transport = sum("transport");
+    const store = sum("store");
+    const a = accFor(d.householdId);
+    a.children.set(d.studentId, {
+      name: d.fullName,
+      classLabel: d.classLabel,
+      feesPaise: all - transport - store,
+      transportPaise: transport,
+      storePaise: store,
+    });
+    // The family is as late as its latest child.
+    if (d.overdueDays >= a.overdueDays) {
+      a.overdueDays = d.overdueDays;
+      a.stageLabel = d.stageLabel;
+    }
+    if (d.earliestDueOn && (!a.earliestDueOn || d.earliestDueOn < a.earliestDueOn)) {
+      a.earliestDueOn = d.earliestDueOn;
+    }
+  }
+
+  // Store credit — books, uniform — owed now, so it belongs in the overdue
+  // reminder and not in a "due in three days" one. Read from the store's own
+  // balances, the same source the fee counter uses; the fee engine is never
+  // asked to guess them. A family that owes the store alone is a family that
+  // owes the school, and is reminded too.
+  if (kind === "overdue") {
+    const inSession = studentsInSession(sis, academicYearCode).filter(
+      (s) => s.status === "active" && s.householdId && (!onlyHouseholds || onlyHouseholds.has(s.householdId)),
     );
-    if (!choice.primary) continue;
-    const mobile = choice.primary.mobile10;
+    const { storeDuesForStudents } = await import("@/lib/inventory/sales.server");
+    // A store that cannot be read is not a store that is owed nothing — but
+    // it must not stop the fee reminder either. The fee part still goes, and
+    // the reason is logged; the store part waits for a run that can read it.
+    const storeDues = await storeDuesForStudents(inSession.map((s) => s.id)).catch((e) => {
+      console.warn("[automationAudience] store dues unreadable — fee dues only this run", (e as Error)?.message);
+      return [];
+    });
+    const studentById = new Map(inSession.map((s) => [s.id, s]));
+    for (const sd of storeDues) {
+      if (sd.balancePaise <= 0) continue;
+      const st = studentById.get(sd.studentId);
+      if (!st?.householdId) continue;
+      const a = accFor(st.householdId);
+      const existing = a.children.get(st.id);
+      if (existing) existing.storePaise += sd.balancePaise;
+      else {
+        a.children.set(st.id, {
+          name: st.fullName,
+          classLabel: classLabelOf(st, masters),
+          feesPaise: 0,
+          transportPaise: 0,
+          storePaise: sd.balancePaise,
+        });
+      }
+      const saleDay = (sd.saleDate || "").slice(0, 10);
+      if (saleDay && (!a.earliestDueOn || saleDay < a.earliestDueOn)) a.earliestDueOn = saleDay;
+    }
+  }
+
+  const out: LiveFeeFamily[] = [];
+  for (const [householdId, a] of byHousehold) {
+    const children = [...a.children.values()];
+    const values = familyReminderValues({ children, hindi: hindiFor(householdId) });
+    if (values.totalPaise <= 0) continue;
     out.push({
-      mobile,
-      fallbackMobile: choice.fallback?.mobile10,
-      numberLabel: choice.primary.label,
-      language: waTemplateLanguageFor(hh ?? {}),
-      refId: d.householdId || d.studentId,
-      label: `${d.fullName} · ${d.classLabel}`,
-      variables: {
-        schoolName: TENANT.nameDisplay,
-        guardianName: hh?.guardianName || "Parent",
-        childName: d.fullName,
-        classLabel: d.classLabel,
-        feeDue: formatInr(amountPaise),
-        amount: formatInr(amountPaise),
-        dueDate: d.earliestDueOn,
-        overdueDays: String(Math.max(0, d.overdueDays)),
-        stage: d.stageLabel,
-        // The family's direct payment link for exactly the dues this reminder
-        // is about — it opens the gateway, not the portal login. Until 14 Sep
-        // 2026 every fee reminder linked to /parent, where a parent had to sign
-        // in before they could pay anything. The portal stays the fallback
-        // only when no link can be signed.
-        payLink:
-          duePayUrl(publicOrigin(), {
-            householdId: d.householdId,
-            studentId: d.studentId,
-            scope: kind === "overdue" ? "overdue" : "open",
-          }) || PARENT_PORTAL,
-        // The same link for the template's "Pay now" button, which can only
-        // carry the part after /pay/due/.
-        duePayToken: duePayTokenFor({
-          householdId: d.householdId,
-          studentId: d.studentId,
-          scope: kind === "overdue" ? "overdue" : "open",
-        }),
-      },
+      householdId,
+      children,
+      totalPaise: values.totalPaise,
+      values,
+      earliestDueOn: a.earliestDueOn,
+      overdueDays: a.overdueDays,
+      stageLabel: a.stageLabel || "S1",
+      candidates: householdCandidateNumbers({
+        household: householdOf(sis.households ?? [], householdId),
+        // This session's children only — an old year's row holds exactly
+        // the kind of parent number that has since changed.
+        students: studentsInSession(sis, academicYearCode).filter(
+          (s) => s.householdId === householdId && s.status === "active",
+        ),
+      }),
     });
   }
-  return out;
+  // Longest overdue first, then largest — the order the old per-child list
+  // used, now for families.
+  return out.sort((x, y) => y.overdueDays - x.overdueDays || y.totalPaise - x.totalPaise);
 }
 
 async function admissionRecipients(
