@@ -267,6 +267,7 @@ jobs:
           npm run test:wa-parent-guide
           npm run test:parent-bot-clarify
           npm run test:office-backlog
+          npm run test:automation-send-rules
           npm run test:fleet-keep-rule
           npm run test:server-work-tracker
           npm run test:concession-review-ai

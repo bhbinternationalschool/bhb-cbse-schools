@@ -18,6 +18,8 @@ import "server-only";
 import { POST as dispatchPost } from "@/app/api/wa/dispatch/route";
 import type { AutomationApprovalItem, AutomationModule } from "@/lib/automation";
 import { loadWaTemplatesServer } from "@/lib/waTemplatesRead.server";
+import { mobileKey, remindedTooRecently } from "@/lib/automationSendRules";
+import { feeLedgerSinceIso, feeRemindersSince } from "@/lib/feeReminderLedger.server";
 import {
   templateButtonComponents,
   resolveTemplateForSend,
@@ -51,6 +53,8 @@ export type AutomationDispatchResult = {
   /** True when nothing really left the building. */
   simulatedOnly: boolean;
   error: string;
+  /** Fee cards only: families left out because they were reminded in the last 7 days. */
+  skippedRecent?: number;
 };
 
 type DispatchMessage = {
@@ -220,7 +224,57 @@ export async function dispatchAutomationApproval(opts: {
     };
   }
 
-  const { messages, skipped } = buildMessages(item, templates);
+  const built = buildMessages(item, templates);
+  const skipped = built.skipped;
+  let messages = built.messages;
+
+  // Once a week per family, for fee messages — on this path too. It had no
+  // cap at all, so on 14 Sep 2026 it reminded 95 families it had reminded
+  // three days before. The send log is the ledger both fee paths write to.
+  let skippedRecent = 0;
+  if (module === "fees" && messages.length) {
+    const now = new Date();
+    const ledger = await feeRemindersSince(feeLedgerSinceIso(now));
+    if (!ledger) {
+      // Unread is not "nobody was reminded". Hold: a reminder that waits a
+      // day costs nothing, a family chased twice in a week is the harm.
+      return {
+        ok: false,
+        sent: 0,
+        failed: 0,
+        deferred: 0,
+        simulated: 0,
+        simulatedOnly: false,
+        error: "Could not check which families were reminded this week — nothing sent. Try again in a few minutes.",
+      };
+    }
+    const todayIst = new Date(now.getTime() + 330 * 60_000).toISOString().slice(0, 10);
+    const lastFor = (mobile?: string) => {
+      const k = mobileKey(mobile);
+      const at = k ? ledger.byMobile.get(k) : undefined;
+      return at ? new Date(Date.parse(at) + 330 * 60_000).toISOString().slice(0, 10) : undefined;
+    };
+    const keep = messages.filter(
+      (m) =>
+        !remindedTooRecently(lastFor(m.mobile), todayIst) &&
+        !remindedTooRecently(lastFor(m.fallbackMobile), todayIst),
+    );
+    skippedRecent = messages.length - keep.length;
+    messages = keep;
+    if (!messages.length) {
+      return {
+        ok: false,
+        sent: 0,
+        failed: 0,
+        deferred: 0,
+        simulated: 0,
+        simulatedOnly: false,
+        skippedRecent,
+        error: `Nothing sent — all ${skippedRecent} famil${skippedRecent === 1 ? "y was" : "ies were"} sent a fee reminder in the last 7 days.`,
+      };
+    }
+  }
+
   if (!messages.length) {
     return {
       ok: false,
@@ -289,6 +343,11 @@ export async function dispatchAutomationApproval(opts: {
       `${skipped.length} recipient${skipped.length === 1 ? "" : "s"} skipped — ${skipped[0]}`,
     );
   }
+  if (skippedRecent) {
+    errors.push(
+      `${skippedRecent} famil${skippedRecent === 1 ? "y" : "ies"} left out — already sent a fee reminder in the last 7 days`,
+    );
+  }
 
   const simulatedOnly = simulated > 0 && sent === 0;
   if (simulatedOnly) {
@@ -308,6 +367,7 @@ export async function dispatchAutomationApproval(opts: {
     deferred,
     simulated,
     simulatedOnly,
+    skippedRecent,
     error: errors.slice(0, 3).join(" · "),
   };
 }
