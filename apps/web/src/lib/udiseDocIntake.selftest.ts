@@ -205,9 +205,9 @@ assert.match(l4.changes.find((c) => c.field === "aadhaarNumber")!.reason, /compl
   // Consent already given: the card that just arrived makes the ID possible.
   const ready = renderParentAck({ plan, childName: "VIDHI SINGH", language: "hi", apaarConsented: { ready: ["VIDHI SINGH"], stillNeeded: [] } });
   assert.match(ready, /सहमति और ज़रूरी दस्तावेज़ दोनों मिल गए/);
-  const waiting = renderParentAck({ plan, childName: "VIDHI SINGH", language: "en", apaarConsented: { ready: [], stillNeeded: [{ name: "AARAV", waitingFor: ["child_aadhaar"] }] } });
+  const waiting = renderParentAck({ plan, childName: "VIDHI SINGH", language: "en", apaarConsented: { ready: [], stillNeeded: [{ name: "AARAV", waitingFor: ["parent_aadhaar"] }] } });
   assert.match(waiting, /For the APAAR ID we still need/);
-  assert.match(waiting, /\*AARAV\*: a clear photo of the child's Aadhaar card/);
+  assert.match(waiting, /parent's own Aadhaar card.*AARAV's APAAR ID/);
 }
 
 /* ── Plan: the father's Aadhaar ───────────────────────────────────── */

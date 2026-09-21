@@ -81,24 +81,21 @@ export function composeApaarConsentAsk(input: { guardianName: string; childNames
   return text.slice(0, 1024);
 }
 
-/** What a child still needs before the school can create the APAAR ID (udiseCompliance.apaarReadiness). */
-export type ApaarStillNeeded = { name: string; waitingFor: ("child_aadhaar" | "aadhaar_recheck" | "parent_aadhaar" | "pen")[] };
+/** What a child's APAAR still needs from the parent (udiseCompliance.apaarReadiness). */
+export type ApaarStillNeeded = { name: string; waitingFor: "parent_aadhaar"[] };
 
 /**
- * The parent's part of what is still missing. The PEN is the school's own
- * work on UDISE+ and is never put to a parent.
+ * The parent's part: the consenting parent's own Aadhaar. One line for the
+ * family, naming the children — it is the same card for all of them.
  */
 export function parentPartOfApaar(items: ApaarStillNeeded[], hindi: boolean): string[] {
-  const out: string[] = [];
-  for (const it of items) {
-    const asks: string[] = [];
-    if (it.waitingFor.includes("child_aadhaar")) asks.push(hindi ? "बच्चे के आधार कार्ड की साफ़ फ़ोटो (आगे और पीछे)" : "a clear photo of the child's Aadhaar card (front and back)");
-    if (it.waitingFor.includes("aadhaar_recheck"))
-      asks.push(hindi ? "बच्चे का आधार कार्ड दोबारा — UDISE+ ने पिछली जाँच में विवरण मेल न खाने से अस्वीकार किया था" : "the child's Aadhaar card again — UDISE+ rejected the last check because the details did not match");
-    if (it.waitingFor.includes("parent_aadhaar")) asks.push(hindi ? "पिता या माता का आधार कार्ड" : "the father's or mother's Aadhaar card");
-    if (asks.length) out.push(`• *${it.name}*: ${asks.join("; ")}`);
-  }
-  return out;
+  const names = items.filter((it) => it.waitingFor.includes("parent_aadhaar")).map((it) => it.name);
+  if (!names.length) return [];
+  return [
+    hindi
+      ? `• सहमति देने वाले *माता या पिता का आधार कार्ड* (आगे और पीछे की फ़ोटो) — ${names.join(", ")} की APAAR ID के लिए`
+      : `• the consenting *parent's own Aadhaar card* (photo of front and back) — for ${names.join(", ")}'s APAAR ID`,
+  ];
 }
 
 /** What the parent is told once the tap is recorded. */
@@ -117,24 +114,24 @@ export function composeApaarConsentThanks(input: {
         ? `🙏 धन्यवाद! ${names} की APAAR ID के लिए आपकी सहमति दर्ज हो गई है। स्कूल UDISE+ पोर्टल पर APAAR ID बनवाएगा — बनने के बाद यह बच्चे के DigiLocker में दिखेगी।`
         : `🙏 Thank you! Your consent for ${names}'s APAAR ID is recorded. The school will create the APAAR ID on UDISE+ — once made, it shows in the child's DigiLocker.`;
     }
-    // A "yes" alone does not make the ID: the portal checks the child's
-    // Aadhaar against UIDAI first. Say so now, while the parent is here.
+    // A "yes" alone does not make the ID: the school needs the consenting
+    // parent's Aadhaar with it. Ask now, while the parent is here.
     return input.hindi
       ? [
           `🙏 धन्यवाद! ${names} की APAAR ID के लिए आपकी सहमति दर्ज हो गई है।`,
           "",
-          "APAAR ID बनाने से पहले UDISE+ पोर्टल बच्चे के आधार की जाँच UIDAI से करता है। इसके लिए अभी यह चाहिए — कृपया इसी चैट में फ़ोटो भेजें:",
+          "APAAR ID बनवाने के लिए अभी यह चाहिए — कृपया इसी चैट में फ़ोटो भेजें:",
           ...asks,
           "",
-          "फ़ोटो मिलते ही रिकॉर्ड अपने-आप अपडेट होगा और स्कूल APAAR ID बनवाएगा। अगर बच्चे का आधार अभी बना ही नहीं है, तो बताइए — हम नज़दीकी आधार केंद्र बता देंगे।",
+          "फ़ोटो मिलते ही रिकॉर्ड अपने-आप अपडेट होगा और स्कूल APAAR ID बनवाएगा।",
         ].join("\n")
       : [
           `🙏 Thank you! Your consent for ${names}'s APAAR ID is recorded.`,
           "",
-          "Before an APAAR ID can be made, UDISE+ checks the child's Aadhaar with UIDAI. For that we still need — please send a photo here in this chat:",
+          "To create the APAAR ID we still need — please send a photo here in this chat:",
           ...asks,
           "",
-          "As soon as it arrives the record updates by itself and the school creates the APAAR ID. If the child has no Aadhaar yet, tell us and we will send the nearest Aadhaar centres.",
+          "As soon as it arrives the record updates by itself and the school creates the APAAR ID.",
         ].join("\n");
   }
   return input.hindi

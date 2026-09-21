@@ -166,15 +166,12 @@ function apaarCell(s: SisStudent): string {
   if (s.apaarConsent !== "given") return "—";
   // A "yes" is not yet an APAAR ID: the portal needs a PEN and an Aadhaar it
   // has validated. Say which, so the list is also the call list.
-  const { ready, waitingFor } = apaarReadiness(s);
+  const { ready, waitingFor, needsPen } = apaarReadiness(s);
   if (ready) return `Consent ✓${on} — READY: create on portal`;
-  const label: Record<string, string> = {
-    child_aadhaar: "child Aadhaar",
-    aadhaar_recheck: "Aadhaar re-validation",
-    parent_aadhaar: "parent Aadhaar",
-    pen: "PEN",
-  };
-  return `Consent ✓${on} — waiting: ${waitingFor.map((w) => label[w] ?? w).join(", ")}`;
+  const label: Record<string, string> = { parent_aadhaar: "parent Aadhaar" };
+  if (waitingFor.length) return `Consent ✓${on} — waiting: ${waitingFor.map((w) => label[w] ?? w).join(", ")}`;
+  // Only the PEN is missing — the school's own step, shown in the PEN column.
+  return needsPen ? `Consent ✓${on} — after PEN is made` : `Consent ✓${on}`;
 }
 
 function gapRowsToList(rows: UdiseComplianceRow[]): UdiseListRow[] {

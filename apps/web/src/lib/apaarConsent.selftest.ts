@@ -15,7 +15,7 @@ import {
   parentPartOfApaar,
   parseApaarConsentReply,
 } from "./apaarConsent";
-import { apaarReadiness } from "./udiseCompliance";
+import { apaarReadiness, computeStudentUdiseGaps, isUdiseFullyCompliant } from "./udiseCompliance";
 import type { SisStudent } from "./sis";
 
 console.log("apaarConsent.selftest.ts");
@@ -58,28 +58,39 @@ assert.match(refused, /send \*APAAR\*/, "how to change their mind");
 /* A "yes" is not yet an ID: what is still missing is said at once. */
 {
   const need = [
-    { name: "VIDHI SINGH", waitingFor: ["aadhaar_recheck" as const, "pen" as const] },
-    { name: "AARAV", waitingFor: ["child_aadhaar" as const] },
-    { name: "RIYA", waitingFor: ["pen" as const] },
+    { name: "VIDHI SINGH", waitingFor: ["parent_aadhaar" as const] },
+    { name: "RUDRANSH SINGH", waitingFor: ["parent_aadhaar" as const] },
   ];
-  const hi = composeApaarConsentThanks({ answer: "given", childNames: ["VIDHI SINGH", "AARAV", "RIYA"], hindi: true, stillNeeded: need });
+  const hi = composeApaarConsentThanks({ answer: "given", childNames: ["VIDHI SINGH", "RUDRANSH SINGH"], hindi: true, stillNeeded: need });
   assert.match(hi, /सहमति दर्ज हो गई/);
-  assert.match(hi, /\*AARAV\*: बच्चे के आधार कार्ड की साफ़ फ़ोटो/);
-  assert.match(hi, /\*VIDHI SINGH\*: बच्चे का आधार कार्ड दोबारा/);
-  assert.ok(!/RIYA\*:/.test(hi), "the PEN is the school's job — never put to a parent");
+  assert.match(hi, /\*माता या पिता का आधार कार्ड\*/, "APAAR asks for the PARENT's Aadhaar");
+  assert.match(hi, /VIDHI SINGH, RUDRANSH SINGH की APAAR ID के लिए/, "one card for the family, not one per child");
+  assert.ok(!/बच्चे के आधार/.test(hi), "never the child's Aadhaar — that belongs to PEN");
   assert.ok(!/PEN/.test(parentPartOfApaar(need, false).join("\n")));
-  assert.match(hi, /नज़दीकी आधार केंद्र/, "a child with no Aadhaar at all");
   const done = composeApaarConsentThanks({ answer: "given", childNames: ["RIYA"], hindi: false, stillNeeded: [] });
   assert.match(done, /will create the APAAR ID/);
 
   // Readiness, as the office sees it.
-  const base = { apaarId: "", pen: "21329329851", aadhaarNumber: "234123412346", aadhaarLast4: "2346", udiseAadhaarValidationStatus: "", apaarConsent: "given", fatherAadhaarNumber: "999988887777" } as unknown as SisStudent;
+  const base = { apaarId: "", pen: "21329329851", aadhaarNumber: "234123412346", aadhaarLast4: "2346", udiseAadhaarValidationStatus: "", apaarConsent: "given", fatherAadhaarNumber: "999988887777", fatherAadhaarLast4: "7777" } as unknown as SisStudent;
   const cfg = { parentAadhaarRequiredForApaar: false } as Parameters<typeof apaarReadiness>[1];
-  assert.deepEqual(apaarReadiness(base, cfg), { ready: true, waitingFor: [] });
-  assert.deepEqual(apaarReadiness({ ...base, aadhaarNumber: "", aadhaarLast4: "" }, cfg).waitingFor, ["child_aadhaar"]);
-  assert.deepEqual(apaarReadiness({ ...base, udiseAadhaarValidationStatus: "Validation failed" }, cfg).waitingFor, ["aadhaar_recheck"]);
-  assert.deepEqual(apaarReadiness({ ...base, pen: "" }, cfg).waitingFor, ["pen"]);
+  assert.deepEqual(apaarReadiness(base, cfg), { ready: true, waitingFor: [], needsPen: false });
+  assert.deepEqual(apaarReadiness({ ...base, fatherAadhaarNumber: "", fatherAadhaarLast4: "" } as SisStudent, cfg).waitingFor, ["parent_aadhaar"], "APAAR waits on the parent's Aadhaar");
+  assert.deepEqual(apaarReadiness({ ...base, aadhaarNumber: "", aadhaarLast4: "" } as SisStudent, cfg).waitingFor, [], "the child's Aadhaar is PEN's business, not APAAR's");
+  // PEN is kept apart from APAAR: not a parent's item, but no ID without it.
+  const noPen = apaarReadiness({ ...base, pen: "" }, cfg);
+  assert.deepEqual([noPen.waitingFor, noPen.needsPen, noPen.ready], [[], true, false]);
   assert.equal(apaarReadiness({ ...base, apaarConsent: "" } as SisStudent, cfg).ready, false, "no consent, never ready");
+
+  // A declined APAAR is a settled answer: PEN alone makes the child complete,
+  // and neither APAAR nor a parent's Aadhaar is chased again.
+
+  const cfgP = { parentAadhaarRequiredForApaar: true } as Parameters<typeof apaarReadiness>[1];
+  const declined = { ...base, apaarConsent: "refused", fatherAadhaarNumber: "", aadhaarVerification: "verified_udise" } as unknown as SisStudent;
+  assert.deepEqual(computeStudentUdiseGaps(declined, cfgP), [], "PEN + declined APAAR = nothing to chase");
+  assert.equal(isUdiseFullyCompliant(declined), true);
+  assert.ok(computeStudentUdiseGaps({ ...declined, pen: "" } as SisStudent, cfgP).includes("pen"), "PEN is still required after a NO");
+  assert.ok(!computeStudentUdiseGaps({ ...declined, pen: "" } as SisStudent, cfgP).includes("apaar"));
+  assert.ok(computeStudentUdiseGaps({ ...declined, apaarConsent: "" } as SisStudent, cfgP).includes("apaar"), "not answered: still a gap");
 }
 
 /* Who is still to be asked. */
