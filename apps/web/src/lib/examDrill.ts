@@ -804,3 +804,30 @@ export function renderScopeUnclear(hindi: boolean): string {
     ? "यह समझ नहीं आया 🙏 ऊपर की सूची में से अध्याय का *नंबर* भेजिए (जैसे *6*) — या अध्याय का *नाम* लिख दीजिए।"
     : "I did not follow that 🙏 Send the chapter *number* from the list above (like *6*) — or just type the chapter's *name*.";
 }
+
+/* ── videos to watch (director, 21 Sep 2026) ────────────────────── */
+
+export type DrillVideo = { title: string; url: string };
+
+/**
+ * The one video after a wrong answer: the idea they missed, to watch
+ * tonight. Nothing when no video was found — never a made-up link.
+ */
+export function renderTopicVideo(video: DrillVideo | null, hindi: boolean): string {
+  if (!video) return "";
+  return `📺 ${hindi ? "यह वीडियो देखिए / Watch this" : "Watch this"}: *${video.title}*\n${video.url}`;
+}
+
+/**
+ * The whole portion, one video per chapter, at the end of the practice —
+ * so the revision covers every chapter in the paper, not only the few ideas
+ * the questions happened to touch.
+ */
+export function renderChapterVideos(rows: { chapter: string; video: DrillVideo | null }[], hindi: boolean, moreUrl: string): string {
+  const found = rows.filter((r) => r.video);
+  if (!found.length) return moreUrl ? `📺 ${hindi ? "पूरे पाठ के वीडियो / Chapter videos" : "Chapter videos"}: ${moreUrl}` : "";
+  return [
+    `📺 *${hindi ? "पूरे पाठ दोहराइए — हर पाठ का एक वीडियो / Revise every chapter" : "Revise every chapter — one video each"}*`,
+    ...found.map((r) => `• ${r.chapter}: ${r.video!.url}`),
+  ].join("\n");
+}

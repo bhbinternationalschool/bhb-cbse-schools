@@ -42,6 +42,10 @@ import {
   renderAsideFailed,
   drillIsForAPastPaper,
   paperLanguageFor,
+  renderChapterVideos,
+  renderTopicVideo,
+  subjectNameForModel,
+  type DrillVideo,
 } from "@/lib/examDrill";
 import { isPracticeTap } from "@/lib/examEve";
 import { istTodayIso } from "@/lib/examEve.server";
@@ -237,6 +241,61 @@ function childClassName(student: SisStudent, masters: Awaited<ReturnType<typeof 
  * Begin a drill for one child and one paper, and ask the first thing — which
  * is never a question, always the scope.
  */
+/**
+ * A video for one topic of this paper — English-medium for every paper but
+ * Hindi/Sanskrit. Bounded: the reply to a child waits for it at most a few
+ * seconds, and a slow or failed search simply sends no video.
+ */
+async function drillVideo(opts: {
+  topic: string;
+  subjectLabel: string;
+  className: string;
+  householdId: string;
+  timeoutMs?: number;
+}): Promise<{ video: DrillVideo | null; searchUrl: string }> {
+  try {
+    const { searchTutorVideos } = await import("@/lib/tutorVideos.server");
+    const lang = paperLanguageFor(opts.subjectLabel) === "english" ? "en" : "hi";
+    const search = searchTutorVideos({
+      topic: `${subjectNameForModel(opts.subjectLabel)}: ${opts.topic}`,
+      classLabel: opts.className,
+      language: lang,
+      formats: ["youtube", "mp4"],
+      requester: `hh:${opts.householdId}`,
+    });
+    const r = await Promise.race([
+      search,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), opts.timeoutMs ?? 6000)),
+    ]);
+    if (!r) return { video: null, searchUrl: "" };
+    const first = r.items[0];
+    return { video: first ? { title: first.title, url: first.url } : null, searchUrl: r.searchUrl };
+  } catch (e) {
+    console.warn("[examDrill] video search failed", (e as Error)?.message);
+    return { video: null, searchUrl: "" };
+  }
+}
+
+/** One video per chapter of the portion, searched together. */
+async function chapterVideos(opts: {
+  chapters: DrillChapter[];
+  scope: number;
+  subjectLabel: string;
+  className: string;
+  householdId: string;
+  hindi: boolean;
+}): Promise<string> {
+  const inScope = opts.chapters.filter((c) => c.position <= opts.scope).slice(0, 6);
+  if (!inScope.length) return "";
+  const rows = await Promise.all(
+    inScope.map(async (c) => ({
+      chapter: c.name,
+      ...(await drillVideo({ topic: c.name, subjectLabel: opts.subjectLabel, className: opts.className, householdId: opts.householdId, timeoutMs: 9000 })),
+    })),
+  );
+  return renderChapterVideos(rows, opts.hindi, rows.find((r) => r.searchUrl)?.searchUrl ?? "");
+}
+
 export async function startExamDrill(input: {
   household: Household;
   studentId: string;
@@ -330,9 +389,13 @@ export async function continueExamDrill(input: {
     if (said === "stop" && state.phase !== "need_scope") {
       state = { ...state, phase: "done", endedAt: new Date().toISOString() };
       await saveDrill(open.id, state, input.mobile10);
+      const stopChapters = state.scope ? await chaptersFor(className, state.subjectLabel) : [];
+      const videos = stopChapters.length
+        ? await chapterVideos({ chapters: stopChapters, scope: state.scope, subjectLabel: state.subjectLabel, className, householdId: input.household.id, hindi: input.hindi })
+        : "";
       return {
         handled: true,
-        replyText: renderFinish({ state, reason: "stopped", hindi: input.hindi }),
+        replyText: [renderFinish({ state, reason: "stopped", hindi: input.hindi }), videos].filter(Boolean).join("\n\n"),
       };
     }
 
@@ -479,6 +542,18 @@ export async function continueExamDrill(input: {
         check: checked.draft,
       });
       parts.push(renderCheck({ check: checked.draft, hindi: input.hindi, askedForHelp }));
+      // Wrong, close or asked for help: a video on the idea they missed.
+      if (verdict !== "right") {
+        const chapterName = chapters.find((c) => c.position === last.chapterPosition)?.name ?? "";
+        const v = await drillVideo({
+          topic: [last.skill, chapterName].filter(Boolean).join(" — "),
+          subjectLabel: state.subjectLabel,
+          className,
+          householdId: input.household.id,
+        });
+        const line = renderTopicVideo(v.video, input.hindi);
+        if (line) parts.push(line);
+      }
     }
 
     // 3. What next — the only place this is decided.
@@ -487,6 +562,8 @@ export async function continueExamDrill(input: {
       state = { ...state, phase: "done", endedAt: new Date().toISOString() };
       await saveDrill(open.id, state, input.mobile10);
       parts.push(renderFinish({ state, reason: step.reason, hindi: input.hindi }));
+      const videos = await chapterVideos({ chapters, scope: state.scope, subjectLabel: state.subjectLabel, className, householdId: input.household.id, hindi: input.hindi });
+      if (videos) parts.push(videos);
       return { handled: true, replyText: parts.join("\n\n") };
     }
     if (step.kind === "ask_scope") {

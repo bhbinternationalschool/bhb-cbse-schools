@@ -12,6 +12,8 @@ import {
   DRILL_CHECK_SYSTEM,
   DRILL_QUESTION_SYSTEM,
   paperLanguageFor,
+  renderChapterVideos,
+  renderTopicVideo,
   subjectNameForModel,
   buildQuestionPrompt,
   drillScore,
@@ -243,6 +245,27 @@ const shown = renderCheck({ check: wrong!, hindi: false });
 assert.match(shown, /You added instead of multiplying/);
 assert.match(shown, /💡 One pen is ₹12/);
 assert.doesNotMatch(shown, /^❌ Not quite$/m, "never just 'wrong'");
+
+/* ── Videos: the missed idea, and every chapter of the portion ─────── */
+{
+  assert.equal(renderTopicVideo(null, true), "", "no video found: no made-up link");
+  const one = renderTopicVideo({ title: "Acids and bases", url: "https://diksha.gov.in/play/content/do_1" }, true);
+  assert.match(one, /📺 .*Acids and bases/);
+  assert.match(one, /https:\/\/diksha\.gov\.in\/play\/content\/do_1/);
+  const all = renderChapterVideos(
+    [
+      { chapter: "Nutrition in Plants", video: { title: "a", url: "https://youtu.be/x1" } },
+      { chapter: "Acids, Bases and Salts", video: null },
+      { chapter: "Physical and Chemical Changes", video: { title: "c", url: "https://youtu.be/x3" } },
+    ],
+    false,
+    "https://www.youtube.com/results?search_query=x",
+  );
+  assert.match(all, /Revise every chapter/);
+  assert.match(all, /• Nutrition in Plants: https:\/\/youtu\.be\/x1/);
+  assert.ok(!all.includes("Acids, Bases"), "a chapter with no video is not listed with a blank link");
+  assert.match(renderChapterVideos([{ chapter: "x", video: null }], false, "https://s"), /Chapter videos: https:\/\/s/, "nothing found: the search page instead");
+}
 
 /* ── A session must read back as a lesson, not a scoreboard ───────── */
 //
