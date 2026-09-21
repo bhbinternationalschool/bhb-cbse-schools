@@ -18,6 +18,7 @@
 import { parseReportQuery } from "@/lib/erpReports";
 import { namesPeriodBeyondDay } from "@/lib/erpAsk";
 import { hasDevanagari, nameSoundKey } from "@/lib/nameSound";
+import { parseJobApplicantsQuery } from "@/lib/jobDesk";
 import type { WaTemplateButton } from "@/lib/waTemplates";
 import type { MastersState } from "@/lib/masters";
 import type { RbacAction, RbacModule } from "@/lib/rbac";
@@ -671,6 +672,38 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
     scope: "any",
   },
   {
+    id: "job_applicants",
+    title: "Job applicants and CVs",
+    kind: "read",
+    module: "staff",
+    action: "view",
+    description:
+      "Teaching-job applicants who sent a CV (WhatsApp, careers page): filter by subject and by class or band (pre-primary, primary, middle, secondary). Each with subjects, classes, qualification, experience and the number to call; a number sends that CV.",
+    examples: [
+      "kya koi maths ke liye apply kiya hai",
+      "koi resume hai",
+      "primary ke liye cv",
+      "english teacher applications",
+      "naye biodata",
+    ],
+    fields: [{ name: "text", type: "text", required: false, description: "The question as asked" }],
+    scope: "any",
+  },
+  {
+    id: "family_card",
+    title: "A family by parent's name",
+    kind: "read",
+    module: "students",
+    action: "view",
+    description:
+      "Everything about one family found by the father's, mother's or guardian's name: every child with class and roll, each child's dues (fees + bus + store) and the family total, and the parents' numbers to call.",
+    examples: ["Ramesh Singh ke bachche", "parent Ramesh Singh", "father Ramesh Singh", "Ramesh Singh ka parivar"],
+    // "text", not "student": the name is a parent's, and must not go through
+    // the child-name lookup the desk runs for every "student" field.
+    fields: [{ name: "student", type: "text", required: true, description: "The parent's name as written" }],
+    scope: "any",
+  },
+  {
     id: "store_summary",
     title: "The store today",
     kind: "read",
@@ -1008,6 +1041,17 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
   const top = parseTopDuesQuery(text);
   if (top) {
     return { commandId: "top_dues", fields: { text: top.focus, date: String(top.limit) }, source: "local" };
+  }
+  // "kya koi maths ke liye apply kiya hai", "primary ke liye cv" — before
+  // the report parse, which reads "list" as a document request.
+  const jobQ = parseJobApplicantsQuery(text);
+  if (jobQ) {
+    return { commandId: "job_applicants", fields: { text: (text || "").trim() }, source: "local" };
+  }
+  // "Ramesh Singh ke bachche", "parent Ramesh Singh" — the whole family.
+  const familyQ = parseFamilyQuery(text);
+  if (familyQ) {
+    return { commandId: "family_card", fields: { student: familyQ }, source: "local" };
   }
   const storeQ = parseStoreQuery(text);
   if (storeQ) {
@@ -5715,4 +5759,173 @@ export function followUpIsFresh(atIso: string, nowMs: number): boolean {
   if (!Number.isFinite(at)) return false;
   const age = nowMs - at;
   return age >= 0 && age <= FOLLOW_UP_WINDOW_MINUTES * 60 * 1000;
+}
+
+// ─── A parent's name: the whole family ─────────────────────────────────
+
+const FAMILY_TAIL =
+  /\s+(?:ke|ki|ka|के|की|का)\s+(?:bachche|bachhe|bacche|bachcho|baccho|bachon|children|kids|parivar|pariwar|family|बच्चे|बच्चों|परिवार)(?:\s+(?:ki|ke|ka|की|के|का)?\s*(?:details?|jankari|jaankari|जानकारी|dues?|bakaya|बकाया|list|dikhao|batao|दिखाओ|बताओ))*$|\s+(?:family|parivar|pariwar|परिवार)(?:\s+(?:details?|dues?|list))?$/iu;
+const FAMILY_HEAD =
+  /^(?:(?:show\s+)?(?:parent|parents|father|mother|guardian|papa|pita|mata|abhibhavak|पिता|माता|अभिभावक)\s*(?:name\s*)?[:-]?\s+)(.+)$/iu;
+
+/**
+ * "Ramesh Singh ke bachche", "Ramesh Singh ka parivar", "parent Ramesh
+ * Singh", "father Ramesh Singh", "पिता रमेश सिंह" — the parent's name, or
+ * null. A bare parent name is handled by the server after no child
+ * matched (see familyNameMatches).
+ */
+export function parseFamilyQuery(text: string): string | null {
+  const t = (text || "").trim().replace(/[?.!।]+$/u, "").trim();
+  if (!t || t.length > 80) return null;
+  // A number picked from "which family?" — the household itself.
+  const pinned = /^family\s+(hh:\S+)$/i.exec(t);
+  if (pinned) return pinned[1]!;
+  let name = "";
+  const head = FAMILY_HEAD.exec(t);
+  if (head) name = head[1]!;
+  else if (FAMILY_TAIL.test(t)) name = t.replace(FAMILY_TAIL, "");
+  name = name.replace(/^(mr|mrs|ms|shri|smt|श्री|श्रीमती)\.?\s+/iu, "").trim();
+  if (!name || /\d/.test(name) || name.split(/\s+/).length > 4) return null;
+  if (!/[\p{L}]{2,}/u.test(name)) return null;
+  return name;
+}
+
+export type ParentLike = StudentLike & {
+  householdId?: string;
+  fatherName?: string;
+  motherName?: string;
+};
+
+export type FamilyMatch = {
+  householdId: string;
+  /** Who the name is, in this family: "Father Ramesh Singh". */
+  asWho: string;
+  childIds: string[];
+};
+
+/**
+ * Families whose father, mother or guardian carries every word typed —
+ * each word starting one of the parent's names, or sounding like it when
+ * typed in Hindi. One row per family, not per child.
+ *
+ * A single word is never enough on its own ("Singh" is half the school);
+ * the explicit form ("Ramesh ke bachche") is allowed one word because the
+ * asker said it is a parent.
+ */
+export function familyNameMatches<T extends ParentLike>(
+  name: string,
+  students: T[],
+  opts: { academicYearCode: string; guardianOf?: (householdId: string) => string; allowSingleWord?: boolean },
+): FamilyMatch[] {
+  const q = nameTokens(name.replace(/^(mr|mrs|ms|shri|smt|श्री|श्रीमती)\.?\s+/iu, ""));
+  if (!q.length || (q.length < 2 && !opts.allowSingleWord)) return [];
+  if (q.every((w) => CHAT_WORDS.has(w))) return [];
+  const qs = q.map(nameSoundKey);
+  const dev = q.some(hasDevanagari);
+  const fits = (full: string) => {
+    const nt = nameTokens(full);
+    if (!nt.length) return false;
+    if (q.every((w) => nt.some((n) => n.startsWith(w)))) return true;
+    // Spelling slack is for Hindi-typed names only. Ramesh and Rakesh are
+    // one letter apart and two different fathers: opening the wrong
+    // family's dues and numbers is worse than finding none. Latin needs
+    // the same sound (Pandey / Pande), not a near miss.
+    const ns = nt.map(nameSoundKey);
+    if (!dev) return qs.every((w) => !!w && w.length >= 3 && ns.some((n) => n === w || n.startsWith(w)));
+    return qs.every((w) => !!w && ns.some((n) => n.startsWith(w) || fuzzyWordMatch(w, n)));
+  };
+  const byHh = new Map<string, FamilyMatch>();
+  for (const s of students) {
+    if (s.status !== "active" || s.academicYearCode !== opts.academicYearCode) continue;
+    const hh = s.householdId || `solo:${s.id}`;
+    let asWho = "";
+    if (s.fatherName && fits(s.fatherName)) asWho = `Father ${s.fatherName}`;
+    else if (s.motherName && fits(s.motherName)) asWho = `Mother ${s.motherName}`;
+    else {
+      const g = s.householdId && opts.guardianOf ? opts.guardianOf(s.householdId) : "";
+      if (g && fits(g)) asWho = `Guardian ${g}`;
+    }
+    const cur = byHh.get(hh);
+    if (asWho) {
+      if (cur) {
+        if (!cur.childIds.includes(s.id)) cur.childIds.push(s.id);
+      } else byHh.set(hh, { householdId: hh, asWho, childIds: [s.id] });
+    }
+  }
+  return [...byHh.values()];
+}
+
+export type FamilyChild = {
+  studentId: string;
+  name: string;
+  classLabel: string;
+  rollNo: string;
+  admissionNo: string;
+  feesPaise: number;
+  transportPaise: number;
+  storePaise: number;
+  aheadPaise: number;
+};
+
+export type FamilyCardInput = {
+  asWho: string;
+  contacts: { label: string; mobile: string }[];
+  /** Numbers in full: office, accounts, a teacher of one of these children. */
+  callable: boolean;
+  /** Dues are a fee reading; without fees · view they are left out. */
+  showDues: boolean;
+  children: FamilyChild[];
+  locality: string;
+  storeUnread: boolean;
+  formatInr: (paise: number) => string;
+};
+
+export function formatFamilyCard(input: FamilyCardInput): string {
+  const inr = input.formatInr;
+  const lines = [`*Family* · ${input.asWho}`];
+  if (input.locality) lines.push(input.locality);
+  const seen = new Set<string>();
+  for (const c of input.contacts) {
+    const key = (c.mobile || "").replace(/\D/g, "").slice(-10);
+    if (key.length < 10 || seen.has(key)) continue;
+    seen.add(key);
+    lines.push(`📞 ${c.label}: ${input.callable ? formatCallNumber(c.mobile) : maskMobile(c.mobile)}`);
+  }
+  if (!input.callable && seen.size) lines.push("(numbers are shown in full to the office and the children's teachers)");
+  lines.push("", `*Children (${input.children.length})*`);
+  let total = 0;
+  input.children.forEach((c, i) => {
+    const due = c.feesPaise + c.transportPaise + c.storePaise;
+    total += due;
+    const who = `*${i + 1}.* ${c.name} · ${c.classLabel}${c.rollNo ? ` · Roll ${c.rollNo}` : ""}${c.admissionNo ? ` · Adm ${c.admissionNo}` : ""}`;
+    lines.push(who);
+    if (input.showDues) {
+      const parts: string[] = [];
+      if (c.feesPaise > 0) parts.push(`fees ${inr(c.feesPaise)}`);
+      if (c.transportPaise > 0) parts.push(`bus ${inr(c.transportPaise)}`);
+      if (c.storePaise > 0) parts.push(`store ${inr(c.storePaise)}`);
+      lines.push(due > 0 ? `   Due now *${inr(due)}*${parts.length > 1 ? ` (${parts.join(" + ")})` : ""}` : "   Nothing due ✅");
+    }
+  });
+  if (input.showDues) {
+    lines.push("", total > 0 ? `Family total due now: *${inr(total)}*` : "The family owes nothing today. ✅");
+    const ahead = input.children.reduce((s, c) => s + c.aheadPaise, 0);
+    if (ahead > 0) lines.push(`Not yet due (later months): ${inr(ahead)}`);
+    if (input.storeUnread) lines.push("Store bills couldn't be read just now, so they are not in these totals.");
+  }
+  lines.push("", "Send a number for that child's full dues and receipts.");
+  return lines.join("\n");
+}
+
+export function familyCardPicks(children: FamilyChild[]): PickOption[] {
+  return children.map((c, i) => ({ n: i + 1, label: c.name, commandId: "student_fees", studentId: c.studentId, rerunText: c.name }));
+}
+
+/** "Which Ramesh Singh?" — several families answer to the name. */
+export function formatFamilyChoice(name: string, rows: { asWho: string; childNames: string[] }[]): string {
+  const lines = [`More than one family matches *${name}*:`, ""];
+  rows.slice(0, 9).forEach((r, i) => lines.push(`*${i + 1}.* ${r.asWho} — ${r.childNames.join(", ")}`));
+  if (rows.length > 9) lines.push(`+${rows.length - 9} more — add the surname or a child's name.`);
+  lines.push("", "Send the number.");
+  return lines.join("\n");
 }

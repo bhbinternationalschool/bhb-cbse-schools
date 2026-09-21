@@ -8,11 +8,13 @@ import {
   parseJobCvExtract,
   type JobCvExtract,
 } from "@/lib/jobCvExtractAi";
-import type { JobApplicationOcrStatus } from "@/lib/jobApplications";
+import type { JobApplication, JobApplicationOcrStatus } from "@/lib/jobApplications";
 import {
   alertLeadershipOfJobApplication,
+  archiveJobCv,
   createJobApplication,
   recentApplicationFor,
+  updateJobApplicationDetails,
 } from "@/lib/jobApplications.server";
 import { trackServerWork } from "@/lib/serverWork";
 
@@ -44,15 +46,18 @@ export async function captureWhatsAppJobCv(input: {
   mediaId: string;
   mobile10: string;
   applicantName: string;
-}): Promise<{ ok: boolean; reason?: string }> {
+}): Promise<{ ok: boolean; reason?: string; application?: JobApplication }> {
   const ctx = await getServerTenantContext();
   if (!ctx) return { ok: false, reason: "no_tenant" };
 
-  if (await recentApplicationFor(input.mobile10)) {
-    // Already have one from this number today. Say thank you, store
+  const recent = await recentApplicationFor(input.mobile10);
+  if (recent?.cvPath) {
+    // Already have a CV from this number today. Say thank you, store
     // nothing: four copies of the same CV help nobody.
-    return { ok: true, reason: "duplicate" };
+    return { ok: true, reason: "duplicate", application: recent };
   }
+  // A job seeker who typed their details first and sends the CV after is
+  // one application, not two: the CV joins the record they already have.
 
   const { fetchWaMediaAsDataUrl } = await import("@/lib/waInboundMedia.server");
   const media = await fetchWaMediaAsDataUrl(input.mediaId);
@@ -103,6 +108,26 @@ export async function captureWhatsAppJobCv(input: {
   }
   if (fields) ocrStatus = jobCvExtractIsUsable(fields) ? "ok" : "unreadable";
 
+  const bytesBuf = Buffer.from(base64, "base64");
+  if (recent) {
+    const upd = await updateJobApplicationDetails(recent.id, {
+      applicantName: fields?.fullName || "",
+      email: fields?.email ?? "",
+      cvPath: path,
+      cvMime: mimeType,
+      subjectWords: fields?.subjects ?? [],
+      classWords: fields?.classes ?? [],
+      qualification: fields?.qualification ?? "",
+      experienceYears: fields?.experienceYears ?? "",
+      currentEmployer: fields?.currentEmployer ?? "",
+      ocrStatus,
+      ocrNotes: (fields?.notes ?? "").slice(0, 300),
+    });
+    if (!upd.ok) return { ok: false, reason: "save_failed" };
+    void trackServerWork(archiveJobCv(upd.application, bytesBuf).then(() => {}));
+    return { ok: true, application: upd.application };
+  }
+
   const created = await createJobApplication({
     source: "whatsapp",
     // The CV's name beats the WhatsApp profile name, which is whatever
@@ -127,5 +152,49 @@ export async function captureWhatsAppJobCv(input: {
   }
 
   void trackServerWork(alertLeadershipOfJobApplication(created.application).catch(() => {}));
-  return { ok: true };
+  // Into the school's Drive as well, one folder per job seeker. Never
+  // blocks the application: a failed copy is a drive_archive row to retry.
+  void trackServerWork(archiveJobCv(created.application, bytesBuf).then(() => {}));
+  return { ok: true, application: created.application };
+}
+
+/**
+ * A job seeker typed their details without a CV ("Maths, 6-8, B.Ed").
+ * Saved as an application straight away so the school can find them,
+ * joined to any application from the same number today, and the CV can
+ * follow later.
+ */
+export async function captureWhatsAppJobDetails(input: {
+  mobile10: string;
+  applicantName: string;
+  details: { subjectWords: string[]; classWords: string[]; qualification: string; experienceYears: string };
+  applicationId?: string;
+}): Promise<{ ok: boolean; application?: JobApplication; created?: boolean }> {
+  const existing = input.applicationId
+    ? { id: input.applicationId }
+    : await recentApplicationFor(input.mobile10);
+  if (existing) {
+    const upd = await updateJobApplicationDetails(existing.id, {
+      subjectWords: input.details.subjectWords,
+      classWords: input.details.classWords,
+      qualification: input.details.qualification,
+      experienceYears: input.details.experienceYears,
+    });
+    return upd.ok ? { ok: true, application: upd.application, created: false } : { ok: false };
+  }
+  const created = await createJobApplication({
+    source: "whatsapp",
+    applicantName: input.applicantName || "",
+    mobile: input.mobile10,
+    subjectWords: input.details.subjectWords,
+    classWords: input.details.classWords,
+    qualification: input.details.qualification,
+    experienceYears: input.details.experienceYears,
+    // Nothing was read: there is no CV yet.
+    ocrStatus: "pending",
+    ocrNotes: "Details typed on WhatsApp; no CV yet.",
+  });
+  if (!created.ok) return { ok: false };
+  void trackServerWork(alertLeadershipOfJobApplication(created.application).catch(() => {}));
+  return { ok: true, application: created.application, created: true };
 }

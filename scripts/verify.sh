@@ -112,6 +112,7 @@ SELFTESTS=(
   test:tutor-guide
   test:wa-parent-guide
   test:staff-chat-bare
+  test:job-desk
   test:fee-adjustments-merge
   test:parent-bot-clarify
   test:office-backlog

@@ -94,6 +94,12 @@ import {
   formatAttendanceSummaryReply,
   formatClassDefaultersReply,
   formatClassRosterReply,
+  formatCallNumber,
+  formatFamilyCard,
+  formatFamilyChoice,
+  familyCardPicks,
+  familyNameMatches,
+  type FamilyChild,
   formatTopDuesReply,
   topDuesPicks,
   formatStoreSummaryReply,
@@ -742,6 +748,22 @@ export async function handleErpStaffCommand(
       parsed = { commandId: "student_details", fields: { student: text.trim() }, source: "local" };
       if (found.length === 1) pinnedStudentId = found[0]!.student.id;
       else onlyStudentIds = new Set(found.map((m) => m.student.id));
+    } else {
+      // No child by that name — a parent's, then: "Ramesh Singh" opens
+      // the whole family. Two words at least; one surname is half the school.
+      const sis = loadSis();
+      const hhGuardian = new Map(sis.households.map((h) => [h.id, h.guardianName || ""]));
+      const families = familyNameMatches(text.trim(), studentsInSession(sis, ay), {
+        academicYearCode: ay,
+        guardianOf: (id) => hhGuardian.get(id) || "",
+      });
+      if (families.length) {
+        parsed = {
+          commandId: "family_card",
+          fields: { student: families.length === 1 ? `hh:${families[0]!.householdId}` : text.trim() },
+          source: "local",
+        };
+      }
     }
   }
 
@@ -832,6 +854,12 @@ export async function handleErpStaffCommand(
 
   if (command.id === "report") {
     return runReportCommand(inbound, text, parsed, session, masters, rbac, todayIso);
+  }
+  if (command.id === "job_applicants") {
+    return runJobApplicants(inbound, parsed.fields.text || text, session, masters, actor);
+  }
+  if (command.id === "family_card") {
+    return runFamilyCard(inbound, parsed.fields.student || "", text, session, masters, rbac, actor, todayIso);
   }
 
   // 6. Resolve fields.
@@ -4337,4 +4365,216 @@ async function audit(
   } catch (e) {
     console.warn("[erpCommands] audit failed", e);
   }
+}
+
+
+// ─── Job applicants: "koi maths ke liye CV hai?" ───────────────────────
+
+async function runJobApplicants(
+  inbound: ErpCommandInbound,
+  asked: string,
+  session: DemoSession,
+  masters: MastersState,
+  actor: string,
+): Promise<ErpCommandResult> {
+  const audience = "erp_command_job_applicants";
+  const jobDesk = await import("@/lib/jobDesk");
+  const jobs = await import("@/lib/jobApplications.server");
+  const { matchClassWords, matchSubjectWords, subjectLabelsFor, classLabelsFor, shortClassRange } = await import("@/lib/jobApplications");
+  const q = jobDesk.parseJobApplicantsQuery(asked) ?? { subjectWords: [], classWords: [], statuses: [] };
+
+  // A number picked from the list: send that CV.
+  if (q.cvFor) {
+    const app = await jobs.getJobApplication(q.cvFor);
+    if (!app) return { handled: true, audience, text: "That application isn't there any more. Send the question again for a fresh list." };
+    void trackServerWork(audit(session, findErpCommand("job_applicants")!, {}, asked, "ok", { channel: inbound.channel, cv: app.id }));
+    const who = `${app.applicantName || "Applicant"}${app.mobile ? ` · 📞 ${formatCallNumber(app.mobile)}` : ""}`;
+    if (!app.cvPath) return { handled: true, audience, text: `${who}\nNo CV yet — they sent their details only. Call them, or ask them to send it on WhatsApp.` };
+    const drive = (await jobs.jobCvDriveUrls([app.id])).get(app.id) || "";
+    if (inbound.channel === "whatsapp") {
+      const bytes = await jobs.jobCvBytes(app);
+      const toMobile = /^\d{10}$/.test(inbound.actorKey) ? inbound.actorKey : inbound.staff?.mobile || "";
+      if (bytes) {
+        const { sendWhatsAppDocument } = await import("@/lib/waSend");
+        const { jobCvArchiveFileName } = jobDesk;
+        const sent = await sendWhatsAppDocument({
+          toMobile,
+          bytes,
+          filename: jobCvArchiveFileName(app.applicantName, app.cvMime, new Date(app.createdAt || Date.now())),
+          mimeType: app.cvMime || undefined,
+          caption: `${app.applicantName || "Applicant"} — CV`,
+        });
+        if (sent.ok) return { handled: true, audience, text: `📄 Sent: CV of ${who}${drive ? `\nDrive: ${drive}` : ""}` };
+      }
+    }
+    return {
+      handled: true,
+      audience,
+      text: [`CV of ${who}`, drive ? `Drive: ${drive}` : "", "ERP: Staff → Job applications"].filter(Boolean).join("\n"),
+    };
+  }
+
+  const listed = await jobs.listJobApplications(300);
+  if (!listed.ok) return { handled: true, audience, text: "The job applications couldn't be read just now. Try again in a minute, or open Staff → Job applications." };
+  const subjectIds = matchSubjectWords(q.subjectWords, masters.subjects ?? []).ids;
+  const classIds = matchClassWords(q.classWords, masters.classes ?? []).ids;
+  const { rows, classUnknown } = jobDesk.filterJobApplicants(listed.rows, {
+    subjectIds,
+    subjectWords: q.subjectWords,
+    classIds,
+    statuses: q.statuses,
+  });
+  const titleParts = [...q.subjectWords, ...q.classWords, ...q.statuses];
+  const shown = rows.slice(0, 10);
+  const drive = await jobs.jobCvDriveUrls(shown.map((r) => r.id));
+  const out = shown.map((a) => ({
+    id: a.id,
+    name: a.applicantName,
+    subjects: subjectLabelsFor(a.subjectIds, masters.subjects ?? []).join(", ") || a.subjectWords.join(", "),
+    classes: shortClassRange(classLabelsFor(a.classIds, masters.classes ?? [])) || a.classWords.join(", "),
+    qualification: a.qualification,
+    experienceYears: a.experienceYears,
+    mobile: a.mobile,
+    appliedOn: a.createdAt,
+    status: a.status,
+    hasCv: !!a.cvPath,
+    driveUrl: drive.get(a.id) || "",
+  }));
+  const picks = jobDesk.jobApplicantPicks(out).map((p) => ({ ...p, commandId: "job_applicants" }));
+  await rememberPick(actor, "job_applicants", asked, picks);
+  void trackServerWork(audit(session, findErpCommand("job_applicants")!, {}, asked, "ok", { channel: inbound.channel, found: rows.length }));
+  return {
+    handled: true,
+    audience,
+    text: jobDesk.formatJobApplicantsReply({
+      title: titleParts.join(" · "),
+      rows: out,
+      total: rows.length,
+      classUnknown,
+      careersEmail: TENANT.careersEmail,
+    }),
+  };
+}
+
+// ─── A family by a parent's name ───────────────────────────────────────
+
+async function runFamilyCard(
+  inbound: ErpCommandInbound,
+  asked: string,
+  text: string,
+  session: DemoSession,
+  masters: MastersState,
+  rbac: Awaited<ReturnType<typeof loadServerRbac>>,
+  actor: string,
+  todayIso: string,
+): Promise<ErpCommandResult> {
+  const audience = "erp_command_family_card";
+  const sis = loadSis();
+  const ay = session.academicYearCode;
+  const inSession = studentsInSession(sis, ay).filter((s) => s.status === "active");
+  const hhById = new Map(sis.households.map((h) => [h.id, h]));
+  let householdId = "";
+  let asWho = "";
+  if (asked.startsWith("hh:")) {
+    householdId = asked.slice(3);
+    const kid = inSession.find((s) => s.householdId === householdId);
+    const hh = hhById.get(householdId);
+    asWho = hh?.guardianName ? `Guardian ${hh.guardianName}` : kid?.fatherName ? `Father ${kid.fatherName}` : "this family";
+  } else {
+    const matches = familyNameMatches(asked, inSession, {
+      academicYearCode: ay,
+      guardianOf: (id) => hhById.get(id)?.guardianName || "",
+      allowSingleWord: true,
+    });
+    if (!matches.length) {
+      return { handled: true, audience, text: `No family in this session has a parent called *${asked}*. Try the full name, or a child's name.` };
+    }
+    if (matches.length > 1) {
+      const byId = new Map(inSession.map((s) => [s.id, s]));
+      const rows = matches.map((m) => ({ asWho: m.asWho, childNames: m.childIds.map((id) => byId.get(id)?.fullName || "").filter(Boolean) }));
+      await rememberPick(
+        actor,
+        "family_card",
+        text,
+        matches.slice(0, 9).map((m, i) => ({ n: i + 1, label: m.asWho, commandId: "family_card", rerunText: `family hh:${m.householdId}` })),
+      );
+      return { handled: true, audience: "erp_command_ask", text: formatFamilyChoice(asked, rows) };
+    }
+    householdId = matches[0]!.householdId;
+    asWho = matches[0]!.asWho;
+  }
+
+  const kids = householdId.startsWith("solo:")
+    ? inSession.filter((s) => s.id === householdId.slice(5))
+    : inSession.filter((s) => s.householdId === householdId);
+  if (!kids.length) return { handled: true, audience, text: "That family has no children on this session's register." };
+  const hh = hhById.get(householdId);
+  const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
+  const mine = new Set(staffAllowedSections(inbound.staff!, masters, ay, roleCodes).map((s) => s.sectionId));
+  const callable = isOfficeLike(roleCodes) || roleCodes.includes("accounts") || kids.some((k) => mine.has(k.sectionId));
+  const showDues = hasPermission(session, masters, "fees", "view", rbac);
+
+  let storeUnread = false;
+  const children: FamilyChild[] = kids.map((k) => ({
+    studentId: k.id,
+    name: k.fullName,
+    classLabel: classLabel(masters, k.classId, k.sectionId).replace(" · ", " "),
+    rollNo: k.rollNo || "",
+    admissionNo: k.admissionNo || "",
+    feesPaise: 0,
+    transportPaise: 0,
+    storePaise: 0,
+    aheadPaise: 0,
+  }));
+  if (showDues) {
+    await ensureFeesHydratedServer();
+    const { storeDuesForStudents } = await import("@/lib/inventory/sales.server");
+    const storeDues = await storeDuesForStudents(kids.map((k) => k.id)).catch((e) => {
+      console.warn("[erpCommands] store dues unreadable", (e as Error)?.message);
+      storeUnread = true;
+      return [];
+    });
+    const fees = loadFees();
+    const rows = hh
+      ? computeHouseholdDues(hh.id, sis, masters, fees, { includeFuture: true, academicYearCode: ay, storeDues })
+      : [];
+    for (const c of children) {
+      const dues = rows.find((r) => r.student.id === c.studentId)?.dues ?? [];
+      for (const d of flagFutureDues(openFeeDues(dues).filter((x) => x.balancePaise > 0), todayIso)) {
+        if (d.future) c.aheadPaise += d.balancePaise;
+        else if (d.kind === "store") c.storePaise += d.balancePaise;
+        else if (d.kind === "transport") c.transportPaise += d.balancePaise;
+        else c.feesPaise += d.balancePaise;
+      }
+    }
+  }
+  const first = kids[0]!;
+  const contacts = [
+    { label: hh?.guardianName ? `Guardian ${hh.guardianName}` : "Family", mobile: hh ? householdWhatsApp(hh) || hh.mobile || "" : "" },
+    { label: first.fatherName ? `Father ${first.fatherName}` : "Father", mobile: first.fatherMobile || "" },
+    { label: first.motherName ? `Mother ${first.motherName}` : "Mother", mobile: first.motherMobile || "" },
+  ];
+  await rememberPick(actor, "family_card", text, familyCardPicks(children));
+  {
+    const st = await readStore();
+    await writeStore({
+      ...st,
+      lastStudent: { ...(st.lastStudent ?? {}), [actor]: { at: new Date().toISOString(), studentId: first.id, name: first.fullName } },
+    });
+  }
+  void trackServerWork(audit(session, findErpCommand("family_card")!, {}, text, "ok", { channel: inbound.channel, householdId, children: kids.length }));
+  return {
+    handled: true,
+    audience,
+    text: formatFamilyCard({
+      asWho,
+      contacts,
+      callable,
+      showDues,
+      children,
+      locality: [hh?.locality, hh?.city].filter(Boolean).join(", "),
+      storeUnread,
+      formatInr,
+    }),
+  };
 }

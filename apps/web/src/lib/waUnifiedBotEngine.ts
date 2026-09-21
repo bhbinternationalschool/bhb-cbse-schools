@@ -3,6 +3,7 @@
  */
 
 import { TENANT } from "@/lib/types";
+import { composeJobWelcome } from "@/lib/jobDesk";
 import type { WaResolvedIdentity, WaResolvedRole, WaRoleKind } from "@/lib/waRoleResolver";
 import { CRM_BOT_QUICK_PROMPTS } from "@/lib/crmAdmissionBotEngine";
 import { SIS_BOT_QUICK_PROMPTS } from "@/lib/sisParentBotEngine";
@@ -399,12 +400,7 @@ export function composeActiveFlowHint(
     case "admission_lead":
       return `*Admission mode* — ${name}\n\nReply *FEE* · *REGISTER* · *DOCS* · *STATUS* · *VISIT* · *HUMAN* · *MENU*`;
     case "job":
-      return [
-        `*Job / career* — ${name}`,
-        "",
-        "Share qualification & role interest in your next message.",
-        "HR will contact you. Reply *HUMAN* for office.",
-      ].join("\n");
+      return composeJobWelcome(name, TENANT.careersEmail, TENANT.shortName, false);
     case "vendor":
       return [
         `*Vendor / supplier* — ${name}`,
@@ -462,12 +458,7 @@ function activeFlowHintHi(flow: WaRoleKind | WaVisitorPurpose, name: string): st
     case "admission_lead":
       return `*एडमिशन जानकारी* — ${name}\n\nलिखें *FEE* · *REGISTER* · *DOCS* · *STATUS* · *VISIT* · *HUMAN* · *MENU*`;
     case "job":
-      return [
-        `*नौकरी* — ${name}`,
-        "",
-        "अगले संदेश में अपनी योग्यता और किस पद में रुचि है, लिखें।",
-        "स्कूल आपसे संपर्क करेगा। ऑफिस से बात के लिए *HUMAN* लिखें।",
-      ].join("\n");
+      return composeJobWelcome(name, TENANT.careersEmail, TENANT.shortName, true);
     case "transport":
       return [
         `*बस / परिवहन* — ${name}`,

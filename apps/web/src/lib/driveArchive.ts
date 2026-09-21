@@ -4,7 +4,7 @@
  * receipt that lands in the wrong year's folder is a filing error that
  * nobody notices until an auditor asks for March.
  */
-export type ArchiveKind = "media" | "receipt";
+export type ArchiveKind = "media" | "receipt" | "job_cv";
 
 /** https://drive.google.com/file/d/<id>/view — opens for anyone the school shares it with. */
 export function driveViewUrl(driveFileId: string): string {

@@ -168,6 +168,133 @@ export async function listJobApplications(
   return { ok: true, rows: ((data ?? []) as Row[]).map(fromRow) };
 }
 
+export async function getJobApplication(id: string): Promise<JobApplication | null> {
+  const ctx = await getServerTenantContext();
+  if (!ctx || !id) return null;
+  const { data } = await ctx.sb.from(TABLE).select("*").eq("tenant_id", ctx.tenantId).eq("id", id).maybeSingle();
+  return data ? fromRow(data as Row) : null;
+}
+
+/**
+ * Add what the applicant told us afterwards — the subject, classes or
+ * qualification the CV did not say — or a CV sent after the details.
+ *
+ * Words are merged, never replaced: "Maths" from the CV and "Science"
+ * typed later are both kept. Ids are re-resolved from the merged words
+ * against the school's masters, as on create.
+ */
+export async function updateJobApplicationDetails(
+  id: string,
+  add: {
+    subjectWords?: string[];
+    classWords?: string[];
+    qualification?: string;
+    experienceYears?: string;
+    applicantName?: string;
+    email?: string;
+    cvPath?: string;
+    cvMime?: string;
+    ocrStatus?: JobApplicationOcrStatus;
+    ocrNotes?: string;
+    currentEmployer?: string;
+  },
+): Promise<{ ok: true; application: JobApplication } | { ok: false; error: string }> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "Database unavailable" };
+  const cur = await getJobApplication(id);
+  if (!cur) return { ok: false, error: "Application not found" };
+  await ensureSchoolMirrorHydrated();
+  const masters = loadMasters();
+  const merge = (a: string[], b: string[] | undefined) => {
+    const out = [...a];
+    for (const w of b ?? []) if (w && !out.some((x) => x.toLowerCase() === w.toLowerCase())) out.push(w);
+    return out;
+  };
+  const subjectWords = merge(cur.subjectWords, add.subjectWords);
+  const classWords = merge(cur.classWords, add.classWords);
+  const patch: Record<string, unknown> = {
+    subject_words: subjectWords,
+    class_words: classWords,
+    subject_ids: matchSubjectWords(subjectWords, masters.subjects).ids,
+    class_ids: matchClassWords(classWords, masters.classes).ids,
+  };
+  if (!cur.qualification && add.qualification) patch.qualification = add.qualification.slice(0, 200);
+  if (!cur.experienceYears && add.experienceYears) patch.experience_years = add.experienceYears;
+  if (!cur.currentEmployer && add.currentEmployer) patch.current_employer = add.currentEmployer.slice(0, 120);
+  if (!cur.email && add.email) patch.email = add.email.slice(0, 120);
+  if (add.applicantName && (!cur.applicantName || cur.applicantName === "Guest")) patch.applicant_name = add.applicantName.slice(0, 80);
+  if (!cur.cvPath && add.cvPath) {
+    patch.cv_path = add.cvPath;
+    patch.cv_mime = add.cvMime || "";
+    if (add.ocrStatus) patch.ocr_status = add.ocrStatus;
+    if (add.ocrNotes) patch.ocr_notes = add.ocrNotes.slice(0, 300);
+  }
+  const { data, error } = await ctx.sb
+    .from(TABLE)
+    .update(patch)
+    .eq("tenant_id", ctx.tenantId)
+    .eq("id", id)
+    .select("*")
+    .maybeSingle();
+  if (error || !data) return { ok: false, error: error?.message || "Could not update the application" };
+  return { ok: true, application: fromRow(data as Row) };
+}
+
+/**
+ * Copy a CV into the school's Google Drive, one folder per job seeker.
+ * An archive, not the serving copy: failing here never fails the
+ * application — the drive_archive row records the error for a retry.
+ */
+export async function archiveJobCv(
+  app: JobApplication,
+  data: Buffer,
+): Promise<{ ok: boolean; driveUrl?: string; error?: string }> {
+  if (!app.cvPath) return { ok: false, error: "no CV" };
+  try {
+    const { archiveToDrive } = await import("@/lib/driveArchive.server");
+    const { jobCvArchiveFileName, jobCvArchiveFolder } = await import("@/lib/jobDesk");
+    const at = new Date(app.createdAt || Date.now());
+    const r = await archiveToDrive({
+      kind: "job_cv",
+      ref: app.id,
+      folderPath: jobCvArchiveFolder(app.applicantName, app.mobile, at),
+      fileName: jobCvArchiveFileName(app.applicantName, app.cvMime, at),
+      mimeType: app.cvMime || "application/octet-stream",
+      data,
+    });
+    return r.ok ? { ok: true, driveUrl: r.driveUrl } : { ok: false, error: r.error };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** The CV file itself, from private storage — for sending it to the school's own staff. */
+export async function jobCvBytes(app: JobApplication): Promise<Buffer | null> {
+  const ctx = await getServerTenantContext();
+  if (!ctx || !app.cvPath) return null;
+  const { data, error } = await ctx.sb.storage.from("school-files").download(app.cvPath);
+  if (error || !data) return null;
+  return Buffer.from(await data.arrayBuffer());
+}
+
+/** Drive links for these applications' CVs, where they have been archived. */
+export async function jobCvDriveUrls(ids: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const ctx = await getServerTenantContext();
+  if (!ctx || !ids.length) return out;
+  const { data } = await ctx.sb
+    .from("drive_archive")
+    .select("ref, drive_file_id")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("kind", "job_cv")
+    .in("ref", ids.slice(0, 200));
+  const { driveViewUrl } = await import("@/lib/driveArchive");
+  for (const r of (data ?? []) as { ref: string; drive_file_id: string }[]) {
+    if (r.drive_file_id) out.set(r.ref, driveViewUrl(r.drive_file_id));
+  }
+  return out;
+}
+
 export async function setJobApplicationStatus(input: {
   id: string;
   status: JobApplication["status"];
