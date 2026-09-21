@@ -10,8 +10,10 @@
  *   - The office relay had forwarded 11 hand-offs to office phones and
  *     received 0 answers; 10 more had reached nobody at all.
  *   - 47 photos, voice notes and documents from parents, 46 never opened.
- *   - The last fee reminder had gone out eight days before, and nothing
- *     schedules them — they go when somebody sends the command.
+ *   - The last fee reminder had gone out eight days before. Every one the
+ *     school has sent came from the "Fee stage reminders" automation, which
+ *     raises a card twice a week that a person must approve — and the card
+ *     raised on 14 Sep sat unapproved for a week.
  *
  * None of that is a fault code can fix: someone has to answer. What code
  * can do is make sure it cannot sit unnoticed. Each part is a count and,
@@ -101,7 +103,7 @@ export function formatOfficeBacklog(b: OfficeBacklog): string {
   }
 
   if (b.daysSinceFeeReminder !== null && b.daysSinceFeeReminder >= FEE_REMINDER_QUIET_DAYS) {
-    lines.push(`💰 No fee reminder sent for ${plural(b.daysSinceFeeReminder, "day", "days")}. They go only when someone sends the command.`);
+    lines.push(`💰 No fee reminder sent for ${plural(b.daysSinceFeeReminder, "day", "days")}. Fee reminders need someone to approve the card in Masters → Automation.`);
   }
 
   if (!lines.length) return "";

@@ -55,6 +55,10 @@ const clear: OfficeBacklog = {
   assert.match(text, /10 messages reached nobody/);
   assert.match(text, /26 photos, 15 voice notes, 5 other files/);
   assert.match(text, /No fee reminder sent for 8 days/);
+  // Every fee reminder the school has sent came from the automation card,
+  // so the line points at the card — not at the ERP command, which has
+  // never sent one (an earlier draft of this line said the opposite).
+  assert.match(text, /approve the card in Masters → Automation/);
   assert.equal(backlogIsEmpty(tonight), false);
 
   const line = formatOfficeBacklogOneLine(tonight);
