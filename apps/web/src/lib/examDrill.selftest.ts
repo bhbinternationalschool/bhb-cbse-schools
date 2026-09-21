@@ -10,7 +10,9 @@ import {
   STREAK_TO_FINISH,
   buildCheckPrompt,
   DRILL_CHECK_SYSTEM,
-  familyLanguageRule,
+  DRILL_QUESTION_SYSTEM,
+  paperLanguageFor,
+  subjectNameForModel,
   buildQuestionPrompt,
   drillScore,
   newDrill,
@@ -179,41 +181,46 @@ if (afterTwo.kind === "ask_question") {
 
 assert.match(buildCheckPrompt({ className: "5", subjectLabel: "Maths", question: "Q", skill: "k", answer: "60" }), /The child answered:\n60/);
 
-/* ── The marking is written for whoever is holding the phone ─────── */
+/* ── English medium: the paper decides the language (21 Sep 2026) ── */
 {
-  // 20 Sep 2026: a Hindi family was told, inside a Hindi frame, "You chose
-  // 'won', which is the action verb, instead of the describing word." The
-  // old rule followed the child's answer or the question, and an English
-  // paper answered "Won" points at English twice over.
+  // The drill was handed "विज्ञान" and a Hindi family, set a Science question
+  // in Hindi and told the child to write the exam answer in Hindi.
+  for (const label of ["विज्ञान", "Science", "गणित", "Mathematics", "सामाजिक विज्ञान", "पर्यावरण अध्ययन", "अंग्रेज़ी", "English", "G.K."]) {
+    assert.equal(paperLanguageFor(label), "english", `${label} is written in English`);
+  }
+  assert.equal(paperLanguageFor("हिंदी"), "hindi");
+  assert.equal(paperLanguageFor("Hindi"), "hindi");
+  assert.equal(paperLanguageFor("संस्कृत"), "sanskrit");
+  assert.equal(subjectNameForModel("विज्ञान"), "Science", "the model is told the English name, never the Hindi display one");
+
+  const sci = buildQuestionPrompt({ className: "VII", subjectLabel: "विज्ञान", chapters, scope: 6, retrySkill: null, avoid: [], number: 1 });
+  assert.match(sci, /Subject: Science/);
+  assert.match(sci, /Paper language: ENGLISH/);
+  assert.match(sci, /NEVER tell the child to write anything in Hindi/);
+  assert.ok(!/Subject: विज्ञान/.test(sci));
+  const hin = buildQuestionPrompt({ className: "VII", subjectLabel: "हिंदी", chapters, scope: 6, retrySkill: null, avoid: [], number: 1 });
+  assert.match(hin, /Paper language: HINDI/);
+
+  // Marking follows the paper, not the phone: an English paper is marked in
+  // English with Hindi alongside, for a Hindi family too.
   const english = { className: "6", subjectLabel: "अंग्रेज़ी", question: "Which word is the adjective: The tall boy won the race?", skill: "adjectives", answer: "Won" };
-
-  const forHindiFamily = buildCheckPrompt({ ...english, hindi: true });
-  assert.match(forHindiFamily, /family's language is HINDI/i, forHindiFamily);
-  assert.ok(!/family's language is ENGLISH/i.test(forHindiFamily));
-
-  const forEnglishFamily = buildCheckPrompt({ ...english, hindi: false });
-  assert.match(forEnglishFamily, /family's language is ENGLISH/i);
-
-  // The subject is still told to the marker — it is the question's language,
-  // and the question is NOT translated. Only the teaching follows the family.
-  assert.match(forHindiFamily, /Subject: अंग्रेज़ी/);
-  assert.match(forHindiFamily, /Which word is the adjective/, "the question goes as it was asked");
-
-  // A caller that forgets the flag gets the school's own default, which is
-  // Hindi — never English by accident ([[erp-parent-hindi-default]]).
-  assert.match(buildCheckPrompt(english), /family's language is HINDI/i);
-
-  // And the system prompt carries the rule the per-request line leans on,
-  // including the one exception that keeps 'tall' as 'tall'.
-  assert.match(DRILL_CHECK_SYSTEM, /MARK IN THE FAMILY'S LANGUAGE/);
+  assert.match(buildCheckPrompt({ ...english, hindi: true }), /Paper language: ENGLISH/);
+  assert.match(buildCheckPrompt({ ...english, subjectLabel: "हिंदी", hindi: false }), /Paper language: HINDI/);
+  assert.match(DRILL_CHECK_SYSTEM, /NEVER tell the child to write in Hindi/);
   assert.match(DRILL_CHECK_SYSTEM, /quoted FROM the question or FROM the child's answer stay exactly as they are/);
-  assert.ok(
-    !/same language the child answered in/i.test(DRILL_CHECK_SYSTEM),
-    "the rule that produced the mixed reply is gone, not merely outvoted",
-  );
+  assert.ok(!/asking them to write it in Hindi in the exam/.test(DRILL_CHECK_SYSTEM), "the line behind 'write in Hindi' is gone");
+  assert.ok(!/An English paper is still explained to a Hindi family in Hindi/.test(DRILL_CHECK_SYSTEM));
+  assert.match(DRILL_QUESTION_SYSTEM, /ENGLISH MEDIUM/);
 
-  assert.equal(familyLanguageRule(true).includes("Devanagari"), true);
-  assert.equal(familyLanguageRule(false).includes("simple English"), true);
+  // Both languages reach the child, English first.
+  const q = parseDrillQuestion(JSON.stringify({ question: "What colour does blue litmus turn in an acid?", questionHi: "अम्ल में नीला लिटमस किस रंग का हो जाता है?", skill: "litmus test", chapter: 2 }), 6)!;
+  const shownQ = renderQuestion({ number: 1, question: q.question, questionHi: q.questionHi, hindi: true });
+  assert.ok(shownQ.indexOf("What colour") < shownQ.indexOf("अम्ल में"), shownQ);
+  assert.match(shownQ, /Question 1 \/ प्रश्न 1/);
+  const c = parseDrillCheck(JSON.stringify({ verdict: "wrong", whatWentWrong: "Blue litmus turns red in an acid, not blue.", howToDoIt: "Acids turn blue litmus red.", praise: "", whatWentWrongHi: "अम्ल में नीला लिटमस लाल हो जाता है।", howToDoItHi: "अम्ल नीले लिटमस को लाल कर देता है।", praiseHi: "" }))!;
+  const shownC = renderCheck({ check: c, hindi: true });
+  assert.match(shownC, /Blue litmus turns red[\s\S]*अम्ल में नीला/);
+  assert.match(shownC, /Acids turn blue litmus red\.\nअम्ल नीले/);
 }
 
 const wrong = parseDrillCheck(JSON.stringify({

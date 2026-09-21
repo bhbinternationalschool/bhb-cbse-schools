@@ -28,6 +28,8 @@
  *   not to do the work.
  */
 
+import { subjectKeyFor } from "@/lib/tutorSyllabus";
+
 /* ── how far the class has got ───────────────────────────────────── */
 
 export type DrillChapter = { position: number; name: string; topics: string[] };
@@ -273,6 +275,8 @@ export type DrillVerdict = "right" | "close" | "wrong";
 export type DrillAsked = {
   /** The question as the child read it. */
   question: string;
+  /** The same question in Hindi, for an English-medium paper (renderQuestion). */
+  questionHi?: string;
   /** The idea it tests, in a few words — so a re-ask stays on the same idea. */
   skill: string;
   chapterPosition: number;
@@ -293,6 +297,9 @@ export type DrillAsked = {
   whatWentWrong?: string;
   howToDoIt?: string;
   praise?: string;
+  whatWentWrongHi?: string;
+  howToDoItHi?: string;
+  praiseHi?: string;
 };
 
 export const DRILL_ANSWER_MAX = 300;
@@ -425,7 +432,7 @@ export function nextDrillStep(state: DrillState): DrillStep {
 export function recordAnswer(
   state: DrillState,
   verdict: DrillVerdict,
-  detail?: { answer?: string; check?: Pick<DrillCheck, "whatWentWrong" | "howToDoIt" | "praise"> },
+  detail?: { answer?: string; check?: Pick<DrillCheck, "whatWentWrong" | "howToDoIt" | "praise" | "whatWentWrongHi" | "howToDoItHi" | "praiseHi"> },
 ): DrillState {
   const asked = [...state.asked];
   const cut = (v: string | undefined, max: number) =>
@@ -438,6 +445,9 @@ export function recordAnswer(
       whatWentWrong: cut(detail?.check?.whatWentWrong, DRILL_NOTE_MAX),
       howToDoIt: cut(detail?.check?.howToDoIt, DRILL_NOTE_MAX),
       praise: cut(detail?.check?.praise, DRILL_NOTE_MAX),
+      whatWentWrongHi: cut(detail?.check?.whatWentWrongHi, DRILL_NOTE_MAX),
+      howToDoItHi: cut(detail?.check?.howToDoItHi, DRILL_NOTE_MAX),
+      praiseHi: cut(detail?.check?.praiseHi, DRILL_NOTE_MAX),
     };
   }
   // "Close" keeps the streak where it is: it is not a win, and treating it as
@@ -456,7 +466,59 @@ export function drillScore(state: DrillState): { right: number; asked: number } 
 
 // 19 Sep 2026: script no longer counts against an answer, and a child
 // who asks instead of answering is taught rather than marked wrong.
-export const DRILL_PROMPT_VERSION = "exam-drill/2026-09-21";
+export const DRILL_PROMPT_VERSION = "exam-drill/2026-09-21b";
+
+/**
+ * The language a paper is written in.
+ *
+ * WHY (director, 21 Sep 2026): the school is ENGLISH MEDIUM. Only the Hindi
+ * paper (and Sanskrit) is written in Hindi. The drill was handed the
+ * subject's Hindi display name ("विज्ञान") and a Hindi family, and set a
+ * Science question in Hindi — then told the child "परीक्षा में उत्तर हिंदी
+ * में लिखें" for a paper they will write in English. So the paper language
+ * comes from what the subject IS, never from its display name or from the
+ * family's language.
+ */
+export type PaperLanguage = "english" | "hindi" | "sanskrit";
+
+export function paperLanguageFor(subjectLabel: string): PaperLanguage {
+  const key = subjectKeyFor(subjectLabel);
+  if (key === "hindi") return "hindi";
+  if (key === "sanskrit") return "sanskrit";
+  return "english";
+}
+
+const SUBJECT_NAME_EN: Record<string, string> = {
+  maths: "Mathematics",
+  science: "Science",
+  social: "Social Science",
+  evs: "Environmental Studies (EVS)",
+  english: "English",
+  gk: "General Knowledge",
+  computer: "Computer",
+  hindi: "Hindi",
+  sanskrit: "Sanskrit",
+  arts: "Art",
+  pe: "Physical Education",
+  vocational: "Vocational skills",
+};
+
+/** The subject as the model is told it: the English name, never "विज्ञान". */
+export function subjectNameForModel(subjectLabel: string): string {
+  const key = subjectKeyFor(subjectLabel);
+  return (key && SUBJECT_NAME_EN[key]) || subjectLabel;
+}
+
+/** The instruction that fixes the language of the question and of the marking. */
+export function paperLanguageRule(lang: PaperLanguage): string {
+  if (lang === "hindi") {
+    return "Paper language: HINDI. This is the Hindi paper: write the question and all marking in Hindi (Devanagari) only. Leave every *Hi field empty.";
+  }
+  if (lang === "sanskrit") {
+    return "Paper language: SANSKRIT. Write the question in Sanskrit; write the marking in Hindi (Devanagari). Leave every *Hi field empty.";
+  }
+  return "Paper language: ENGLISH. The school is English medium and this paper is written in English. Write the question and the marking in simple English, and give the SAME text in simple Hindi (Devanagari) in the matching *Hi field for the parent — keep subject terms in English inside the Hindi, e.g. 'प्रकाश संश्लेषण (photosynthesis)'. NEVER tell the child to write anything in Hindi.";
+}
 
 export const DRILL_QUESTION_SYSTEM = [
   "You set ONE revision question for a school child the evening before their exam. You are given the class, the subject, the chapters the class has actually covered, and what those chapters teach.",
@@ -474,8 +536,9 @@ export const DRILL_QUESTION_SYSTEM = [
   "COVER THE CHAPTER, not one corner of it. You are told which ideas have already been tested this session — pick a DIFFERENT one from the chapter's topics unless you are explicitly asked to revisit a skill.",
   "When a skill to revisit is given, set a different and EASIER question on that same idea — never repeat the question they just got wrong, and never make the second attempt harder than the first. They got it wrong; the next one is a way back in, not a second hurdle.",
   "skill: three or four words naming what the question tests, e.g. 'unitary method' or 'plural nouns'.",
-  "Write the question in the language the child is being taught in, as the class and subject imply: a Hindi paper is asked in Hindi, a Sanskrit paper in Sanskrit, everything else in simple English.",
-  'Respond with JSON only: {"question":"","skill":"","chapter":0}',
+  "LANGUAGE — you are told the paper language below. The school is ENGLISH MEDIUM: every paper except Hindi and Sanskrit is taught and written in English, whatever language the subject's name or the chapters are given in. ENGLISH paper: `question` in simple English as the child's English-medium textbook words it, and `questionHi` the same question in simple Hindi for the parent. HINDI paper: `question` in Hindi, `questionHi` empty. SANSKRIT paper: `question` in Sanskrit, `questionHi` empty.",
+  "skill is always in English.",
+  'Respond with JSON only: {"question":"","questionHi":"","skill":"","chapter":0}',
 ].join("\n");
 
 export const DRILL_CHECK_SYSTEM = [
@@ -485,7 +548,10 @@ export const DRILL_CHECK_SYSTEM = [
   // 18 Sep 2026: a child wrote "Darji" for दर्जी — the right answer, typed
   // on the Latin keyboard every family actually has — and was marked as
   // having made a mistake. Script is not the skill being tested.
-  "SCRIPT IS NOT THE ANSWER. A Hindi or Sanskrit answer typed in Latin letters — 'darji' for दर्जी, 'kumhar' for कुम्हार, 'kavi' for कवि — is the SAME answer: mark it 'right'. Put one short line in howToDoIt asking them to write it in Hindi in the exam. Never mark it down for the keyboard they own.",
+  "SCRIPT AND LANGUAGE ARE NOT THE ANSWER. Mark the idea. A Hindi or Sanskrit answer typed in Latin letters — 'darji' for दर्जी — is the SAME answer: mark it 'right'. An ENGLISH-paper answer typed in Hindi or Hinglish ('red ho jayega') is marked on its idea too.",
+  // 21 Sep 2026: a Science answer was followed by "परीक्षा में उत्तर हिंदी में
+  // लिखें" — in an English-medium school.
+  "WHICH LANGUAGE TO WRITE IN THE EXAM: only for a HINDI or SANSKRIT paper, when the child typed Latin letters, add one short line asking them to write it in Devanagari in the exam. For EVERY other paper NEVER tell the child to write in Hindi — the school is English medium; if they answered in Hindi or Hinglish, add one short line reminding them to write the answer in English in the exam.",
   // Same evening: a child who asked "but how?" was marked wrong and asked
   // the next question instead of being taught.
   "WHEN THE CHILD ASKS INSTEAD OF ANSWERING — you are told so — they have not got it wrong. verdict is 'close', whatWentWrong stays EMPTY, and howToDoIt teaches the idea and gives this question's answer plainly, so they can see how it is done.",
@@ -495,40 +561,12 @@ export const DRILL_CHECK_SYSTEM = [
   // 20 Sep 2026: a Hindi family was told, inside a Hindi frame, "You chose
   // 'won', which is the action verb, instead of the describing word." See
   // `familyLanguageRule` for why the old rule produced that.
-  "MARK IN THE FAMILY'S LANGUAGE — you are told which, below. It is the language of the phone this is read on, and it does NOT change with the subject or with what the child happened to type. An English paper is still explained to a Hindi family in Hindi.",
-  "The one exception: words quoted FROM the question or FROM the child's answer stay exactly as they are — 'tall' is the adjective whichever language you explain that in. Quote them, do not translate them.",
-  'Respond with JSON only: {"verdict":"right","whatWentWrong":"","howToDoIt":"","praise":""}',
+  "LANGUAGE OF THE MARKING follows the paper language given below — never the family's phone, never what the child happened to type. ENGLISH paper: whatWentWrong, howToDoIt and praise in simple English, and the same in simple Hindi in whatWentWrongHi, howToDoItHi and praiseHi (empty where the English is empty). HINDI or SANSKRIT paper: Hindi only, every *Hi field empty.",
+  "Words quoted FROM the question or FROM the child's answer stay exactly as they are — 'tall' is the adjective whichever language you explain that in. Quote them, do not translate them.",
+  'Respond with JSON only: {"verdict":"right","whatWentWrong":"","howToDoIt":"","praise":"","whatWentWrongHi":"","howToDoItHi":"","praiseHi":""}',
 ].join("\n");
 
-/**
- * The line that tells the marker whose language to write in.
- *
- * WHY (director, 21 Sep 2026): the rule used to be "write in the same
- * language the child answered in, or the question's language when their
- * answer is too short to tell". For an English paper both halves point at
- * English — the question is in English and a one-word answer like "Won" is
- * too short to say anything — so a Hindi family got English teaching inside
- * Hindi frames:
- *
- *     ❌ यह सही नहीं है — देखिए क्यों:
- *     You chose 'won', which is the action verb, instead of the describing
- *     word.
- *
- * and, two messages later in the same drill, Hindi — because that time the
- * child had typed Hindi. The parent reading it never knew which they would
- * get.
- *
- * The question itself is NOT covered by this and must not be: an English
- * paper is revised in English, a Sanskrit paper in Sanskrit. It is the
- * teaching around the question that belongs to whoever is holding the phone.
- */
-export function familyLanguageRule(hindi: boolean): string {
-  return hindi
-    ? "The family's language is HINDI. Write whatWentWrong, howToDoIt and praise in Hindi (Devanagari), in plain words a child understands."
-    : "The family's language is ENGLISH. Write whatWentWrong, howToDoIt and praise in simple English.";
-}
-
-export type DrillQuestion = { question: string; skill: string; chapter: number };
+export type DrillQuestion = { question: string; skill: string; chapter: number; questionHi?: string };
 
 export function buildQuestionPrompt(input: {
   className: string;
@@ -543,7 +581,8 @@ export function buildQuestionPrompt(input: {
   const inScope = input.chapters.filter((c) => c.position <= input.scope);
   const lines = [
     `Class: ${input.className}`,
-    `Subject: ${input.subjectLabel}`,
+    `Subject: ${subjectNameForModel(input.subjectLabel)}`,
+    paperLanguageRule(paperLanguageFor(input.subjectLabel)),
     "Chapters the class has covered:",
     ...inScope.map((c) => `  ${c.position}. ${c.name}${c.topics.length ? ` — ${c.topics.slice(0, 4).join(", ")}` : ""}`),
     "",
@@ -574,7 +613,13 @@ export function parseDrillQuestion(text: string, scope: number): DrillQuestion |
   // A question the model attributes to a chapter beyond what the child has
   // been taught is refused outright rather than shown and apologised for.
   if (Number.isFinite(chapter) && chapter > scope) return null;
-  return { question, skill, chapter: Number.isFinite(chapter) && chapter > 0 ? chapter : 0 };
+  const questionHi = clean(o.questionHi, 400);
+  return {
+    question,
+    skill,
+    chapter: Number.isFinite(chapter) && chapter > 0 ? chapter : 0,
+    ...(questionHi && questionHi !== question ? { questionHi } : {}),
+  };
 }
 
 export type DrillCheck = {
@@ -582,6 +627,10 @@ export type DrillCheck = {
   whatWentWrong: string;
   howToDoIt: string;
   praise: string;
+  /** The same in Hindi, for an English-medium paper (empty for the Hindi paper). */
+  whatWentWrongHi?: string;
+  howToDoItHi?: string;
+  praiseHi?: string;
 };
 
 export function buildCheckPrompt(input: {
@@ -597,8 +646,8 @@ export function buildCheckPrompt(input: {
 }): string {
   return [
     `Class: ${input.className}`,
-    `Subject: ${input.subjectLabel}`,
-    familyLanguageRule(input.hindi !== false),
+    `Subject: ${subjectNameForModel(input.subjectLabel)}`,
+    paperLanguageRule(paperLanguageFor(input.subjectLabel)),
     `Question: ${input.question}`,
     `What it tests: ${input.skill}`,
     "",
@@ -619,7 +668,16 @@ export function parseDrillCheck(text: string): DrillCheck | null {
   // A wrong answer with nothing said about it is the failure this whole
   // module exists to prevent, so it is not accepted as a reading.
   if (verdict !== "right" && !whatWentWrong && !howToDoIt) return null;
-  return { verdict, whatWentWrong, howToDoIt, praise: clean(o.praise, 80) };
+  const hi = (k: string, max: number) => clean(o[k], max) || undefined;
+  return {
+    verdict,
+    whatWentWrong,
+    howToDoIt,
+    praise: clean(o.praise, 80),
+    ...(hi("whatWentWrongHi", 300) ? { whatWentWrongHi: hi("whatWentWrongHi", 300) } : {}),
+    ...(hi("howToDoItHi", 400) ? { howToDoItHi: hi("howToDoItHi", 400) } : {}),
+    ...(hi("praiseHi", 80) ? { praiseHi: hi("praiseHi", 80) } : {}),
+  };
 }
 
 function safeJson(text: string): Record<string, unknown> | null {
@@ -637,9 +695,14 @@ function clean(v: unknown, max: number): string {
 
 /* ── what the child reads ────────────────────────────────────────── */
 
-export function renderQuestion(input: { number: number; question: string; hindi: boolean }): string {
-  const head = input.hindi ? `प्रश्न ${input.number}` : `Question ${input.number}`;
-  return `❓ *${head}*\n\n${input.question}`;
+/**
+ * The question as the child reads it. An English-medium paper's question
+ * comes in English with the same question in Hindi below it for the parent
+ * (the director's rule, 21 Sep 2026); the Hindi paper's comes in Hindi only.
+ */
+export function renderQuestion(input: { number: number; question: string; questionHi?: string; hindi: boolean }): string {
+  const head = input.questionHi ? `Question ${input.number} / प्रश्न ${input.number}` : input.hindi ? `प्रश्न ${input.number}` : `Question ${input.number}`;
+  return [`❓ *${head}*`, "", input.question, ...(input.questionHi ? ["", `🇮🇳 ${input.questionHi}`] : [])].join("\n");
 }
 
 /**
@@ -654,12 +717,13 @@ export function renderCheck(input: {
   askedForHelp?: boolean;
 }): string {
   const { check } = input;
+  const both = (en: string, hi?: string) => (hi && hi !== en ? `${en}\n${hi}` : en);
   if (check.verdict === "right") {
     return [
-      `✅ ${check.praise || (input.hindi ? "बिलकुल सही।" : "That's right.")}`,
+      `✅ ${both(check.praise || (check.praiseHi ? "That's right." : input.hindi ? "बिलकुल सही।" : "That's right."), check.praiseHi)}`,
       // Right, but written in the other script: said once, gently, and never
       // as a mark against the answer.
-      check.howToDoIt ? `✍️ ${check.howToDoIt}` : "",
+      check.howToDoIt ? `✍️ ${both(check.howToDoIt, check.howToDoItHi)}` : "",
     ]
       .filter(Boolean)
       .join("\n");
@@ -675,7 +739,11 @@ export function renderCheck(input: {
       : input.hindi
         ? "❌ यह सही नहीं है — देखिए क्यों:"
         : "❌ Not quite — here is why:";
-  return [head, check.whatWentWrong ? `\n${check.whatWentWrong}` : "", check.howToDoIt ? `\n💡 ${check.howToDoIt}` : ""]
+  return [
+    head,
+    check.whatWentWrong ? `\n${both(check.whatWentWrong, check.whatWentWrongHi)}` : "",
+    check.howToDoIt ? `\n💡 ${both(check.howToDoIt, check.howToDoItHi)}` : "",
+  ]
     .filter(Boolean)
     .join("\n");
 }

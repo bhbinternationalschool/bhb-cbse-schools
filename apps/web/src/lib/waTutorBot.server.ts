@@ -203,7 +203,10 @@ export async function handleWaTutorInbound(opts: {
   const activeIndex = session
     ? Math.max(0, childRefs.findIndex((c) => c.id === session.studentId))
     : 0;
-  const language = waTemplateLanguageFor(opts.household);
+  // A Hindi family gets English with Hindi alongside: the school is English
+  // medium, and the English is what the child writes in the exam
+  // (director, 21 Sep 2026). The prompt keeps Hindi-only for a Hindi paper.
+  const language = waTemplateLanguageFor(opts.household) === "hi" ? "both" : "en";
 
   const statusFor = async (
     index: number,

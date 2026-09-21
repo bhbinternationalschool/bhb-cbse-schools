@@ -41,6 +41,7 @@ import {
   renderAside,
   renderAsideFailed,
   drillIsForAPastPaper,
+  paperLanguageFor,
 } from "@/lib/examDrill";
 import { isPracticeTap } from "@/lib/examEve";
 import { istTodayIso } from "@/lib/examEve.server";
@@ -360,6 +361,7 @@ export async function continueExamDrill(input: {
           replyText: renderQuestion({
             number: state.asked.length,
             question: pendingQ.question,
+            questionHi: pendingQ.questionHi,
             hindi: input.hindi,
           }),
         };
@@ -390,6 +392,7 @@ export async function continueExamDrill(input: {
             renderQuestion({
               number: state.asked.length,
               question: pendingQ.question,
+              questionHi: pendingQ.questionHi,
               hindi: input.hindi,
             }),
           ].join("\n"),
@@ -399,7 +402,9 @@ export async function continueExamDrill(input: {
       const answered = await replyHomeworkTutor({
         message: input.text.slice(0, 600),
         mode: "hint",
-        language: input.hindi ? "hi" : "en",
+        // English medium: every paper but Hindi/Sanskrit is answered in
+        // English with Hindi alongside (director, 21 Sep 2026).
+        language: paperLanguageFor(state.subjectLabel) === "english" ? "both" : "hi",
         context: {
           childName: child.fullName.split(/\s+/)[0] || child.fullName,
           className,
@@ -423,6 +428,7 @@ export async function continueExamDrill(input: {
               renderQuestion({
                 number: state.asked.length,
                 question: pendingQ.question,
+                questionHi: pendingQ.questionHi,
                 hindi: input.hindi,
               }),
             ].join("\n"),
@@ -520,10 +526,18 @@ export async function continueExamDrill(input: {
 
     state = {
       ...state,
-      asked: [...state.asked, { question: q.draft.question, skill: q.draft.skill, chapterPosition: q.draft.chapter }],
+      asked: [
+        ...state.asked,
+        {
+          question: q.draft.question,
+          ...(q.draft.questionHi ? { questionHi: q.draft.questionHi } : {}),
+          skill: q.draft.skill,
+          chapterPosition: q.draft.chapter,
+        },
+      ],
     };
     await saveDrill(open.id, state, input.mobile10);
-    parts.push(renderQuestion({ number: state.asked.length, question: q.draft.question, hindi: input.hindi }));
+    parts.push(renderQuestion({ number: state.asked.length, question: q.draft.question, questionHi: q.draft.questionHi, hindi: input.hindi }));
     return { handled: true, replyText: parts.join("\n\n") };
   } catch (e) {
     console.error("[examDrill] turn failed", (e as Error)?.message);

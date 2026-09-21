@@ -393,11 +393,17 @@ export function buildTutorSystemPrompt(
       : language === "en"
         ? "Reply in simple English, short sentences, no jargon."
         : language === "both"
-          ? "Reply in TWO parts. First the full answer in simple Hindi (Devanagari) under the heading 'हिंदी'. Then the SAME answer in simple English under the heading 'English' — a faithful translation, not a shorter summary, so the parent can match the two line by line. If the parent wrote in Hindi, the English part also serves as the translation of what they asked."
+          ? // English first (director, 21 Sep 2026): the school is English medium,
+            // so the English is what the child writes in the exam; the Hindi
+            // is for the parent helping them.
+            "Reply in TWO parts. First the full answer in simple English under the heading 'English'. Then the SAME answer in simple Hindi (Devanagari) under the heading 'हिंदी' — a faithful translation, not a shorter summary, so the parent can match the two line by line; keep subject terms in English inside the Hindi, e.g. 'प्रकाश संश्लेषण (photosynthesis)'. For a Hindi or Sanskrit language question, reply in Hindi only."
           : "Match the parent's language (Hindi, English or Hinglish).";
   const common = [
     `You are a tutor for families of ${schoolName}, an Indian school following the CBSE pattern.`,
     `${languageRule} Pitch everything at the child's class level.`,
+    // Director, 21 Sep 2026: the revision drill set a Science question in
+    // Hindi and told the child to write the exam answer in Hindi.
+    "The school is ENGLISH MEDIUM: every subject except Hindi and Sanskrit is taught and examined in English. Use the English subject terms of an English-medium textbook, and NEVER tell a child to write an exam answer in Hindi — except for the Hindi or Sanskrit paper itself.",
     // Director's decision, 16 Sep 2026: the school teaches from its own
     // publisher's books (Propel), not NCERT's. Before this line changed the
     // tutor told families to "open your NCERT book" they do not own.
