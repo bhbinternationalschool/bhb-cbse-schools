@@ -21,7 +21,10 @@ import { sendWaWithFailover, buildWaTemplateBodyComponent } from "@/lib/waSend";
 import { templateButtonComponents } from "@/lib/waTemplates";
 import { duePayTokenFor, duePayUrl } from "@/lib/duePayToken.server";
 import { listOptedOutSet, toE164India } from "@/lib/waContactState.server";
-import { formatInr } from "@/lib/masters";
+import { listKnownNotOnWhatsApp } from "@/lib/waNumberHealth.server";
+import { householdCandidateNumbers, liveNumberInstead } from "@/lib/waHouseholdNumbers";
+import { childrenOfHousehold, loadSis } from "@/lib/sis";
+import { currentAcademicYearCode, formatInr, loadMasters } from "@/lib/masters";
 import { TENANT } from "@/lib/types";
 import { feeReminderTooSoon, istHourOf, templateForFamily } from "@/lib/erpCommands";
 
@@ -56,6 +59,8 @@ export type FeeReminderPlan = {
   /** Reminded within the last week — householdId → days ago. */
   tooSoon: { recipient: FeeReminderRecipient; daysAgo: number }[];
   optedOut: FeeReminderRecipient[];
+  /** No number the school holds for them can receive WhatsApp. Shown on the card by name. */
+  unreachable: FeeReminderRecipient[];
 };
 
 /**
@@ -67,10 +72,42 @@ export async function planFeeReminders(opts: {
   lastRemindedByHousehold: Record<string, string>;
   todayIso: string;
 }): Promise<FeeReminderPlan> {
-  const mobiles = opts.recipients.map((r) => r.mobile).filter(Boolean);
-  const optedOutSet = await listOptedOutSet(mobiles).catch(() => new Set<string>());
-  const plan: FeeReminderPlan = { send: [], tooSoon: [], optedOut: [] };
+  // Every number each family has, so a dead designated number falls to the
+  // other parent's phone. WHY (21 Sep 2026): a fee reminder to a number Meta
+  // calls undeliverable is ACCEPTED and only fails later by webhook, so the
+  // card said "sent" and nobody ever knew to try the second parent — and
+  // families with no working number at all simply vanished from view.
+  const sis = loadSis();
+  // This session's children only: a raw status filter returns every year's
+  // row, and an old row's parent number is exactly the kind that is dead.
+  const ay = currentAcademicYearCode(loadMasters());
+  const candidatesFor = (householdId: string) =>
+    householdCandidateNumbers({
+      household: (sis.households ?? []).find((h) => h.id === householdId) ?? null,
+      students: childrenOfHousehold(sis, householdId, ay),
+    });
+  const candidates = new Map(opts.recipients.map((r) => [r.householdId, candidatesFor(r.householdId)]));
+  const knownDead = await listKnownNotOnWhatsApp([
+    ...opts.recipients.map((r) => r.mobile),
+    ...[...candidates.values()].flat().map((c) => c.mobile10),
+  ].filter(Boolean)).catch(() => new Set<string>());
+
+  const plan: FeeReminderPlan = { send: [], tooSoon: [], optedOut: [], unreachable: [] };
+  const withLive: FeeReminderRecipient[] = [];
   for (const r of opts.recipients) {
+    const live = liveNumberInstead(r.mobile, candidates.get(r.householdId) ?? [], knownDead);
+    if (!live) {
+      // A family with no number at all was always dropped here; one whose
+      // only number is dead is now named on the card instead of vanishing.
+      if (r.mobile) plan.unreachable.push(r);
+      continue;
+    }
+    withLive.push(live.replaced ? { ...r, mobile: live.mobile10 } : r);
+  }
+
+  const mobiles = withLive.map((r) => r.mobile).filter(Boolean);
+  const optedOutSet = await listOptedOutSet(mobiles).catch(() => new Set<string>());
+  for (const r of withLive) {
     if (!r.mobile) continue;
     if (optedOutSet.has(toE164India(r.mobile))) {
       plan.optedOut.push(r);

@@ -1460,6 +1460,7 @@ export async function handleErpStaffCommand(
       })),
       tooSoon: plan.tooSoon.map((x) => ({ studentName: x.recipient.studentName, daysAgo: x.daysAgo })),
       optedOut: plan.optedOut.length,
+      unreachable: plan.unreachable.map((x) => x.studentName),
       formatInr,
     });
   }

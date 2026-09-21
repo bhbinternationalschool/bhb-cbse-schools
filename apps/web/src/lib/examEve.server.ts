@@ -32,6 +32,8 @@ import {
 } from "@/lib/waContactState.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { isReviewDemoHousehold } from "@/lib/reviewDemoRecords";
+import { householdCandidateNumbers, liveNumberInstead, type WaCandidateNumber } from "@/lib/waHouseholdNumbers";
+import { listKnownNotOnWhatsApp } from "@/lib/waNumberHealth.server";
 import {
   examEveFreeText,
   examEveVariables,
@@ -204,7 +206,23 @@ export async function runExamEveSweep(opts: {
   // exactly the case it exists for.
   const sentAlready =
     opts.dryRun || opts.resend ? new Set<string>() : await alreadySent(examDate);
-  const mobiles = households.map((h) => householdWhatsApp(h) || h.mobile || "").filter(Boolean);
+  // Every number each family has, so a family whose designated number is
+  // not on WhatsApp still gets tomorrow's paper on the other parent's phone.
+  // One lookup for the whole school, not one per family.
+  const inSession = studentsInSession(sis, setup.academicYearCode).filter((s) => s.status === "active");
+  const candidatesByHousehold = new Map<string, WaCandidateNumber[]>();
+  for (const h of households) {
+    candidatesByHousehold.set(
+      h.id,
+      householdCandidateNumbers({ household: h, students: inSession.filter((s) => s.householdId === h.id) }),
+    );
+  }
+  const allCandidates = [...candidatesByHousehold.values()].flat().map((c) => c.mobile10);
+  const knownDead = await listKnownNotOnWhatsApp(allCandidates).catch(() => new Set<string>());
+  const mobiles = [
+    ...households.map((h) => householdWhatsApp(h) || h.mobile || ""),
+    ...allCandidates,
+  ].filter(Boolean);
   const optedOut = await listOptedOutSet(mobiles);
 
   const templates = opts.dryRun ? null : await loadWaTemplatesServer();
@@ -226,10 +244,21 @@ export async function runExamEveSweep(opts: {
     result.families += 1;
 
     const who = `${family.guardianName || hh.id}`;
-    if (!family.mobile) {
-      result.skipped.push(`${who}: no WhatsApp number`);
+    // WHY (21 Sep 2026): 23 children this session sat behind a number Meta
+    // had already called undeliverable — 229 failures, not one delivery —
+    // and seven of them had a second parent on WhatsApp who heard nothing.
+    // A template to a dead number is ACCEPTED and only fails later, so
+    // nothing downstream ever knew to try the other phone.
+    const live = liveNumberInstead(family.mobile, candidatesByHousehold.get(hh.id) ?? [], knownDead);
+    if (!live) {
+      result.skipped.push(
+        family.mobile
+          ? `${who}: no number on WhatsApp — update the family's number`
+          : `${who}: no WhatsApp number`,
+      );
       continue;
     }
+    family.mobile = live.mobile10;
     // The opt-out set is keyed "91XXXXXXXXXX", not by the stored 10 digits.
     const e164 = toE164India(family.mobile);
     if (e164 && optedOut.has(e164)) {
