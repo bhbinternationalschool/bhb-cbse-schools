@@ -389,7 +389,7 @@ assert.match(po2.text, /CONFIRM/, "a likely match must be labelled as likely");
 
   const hiAck = renderPaymentProofAck({ payment: { amountPaise: 1000000, dateIso: "2026-07-23", reference: "620451387319", method: "Google Pay", payeeName: "" }, match: u, childName: "ARADHYA", language: "hi" });
   assert.match(hiAck, /मेल खाता है/);
-  assert.match(hiAck, /हमारी रसीद \*RCV-00319\* \(पुरानी रसीद नं\. 1513\) · 23\/07\/2026 · ₹10,000 · UPI/);
+  assert.match(hiAck, /फीस रसीद \*RCV-00319\* \(रसीद नं\. 1513\) · 23\/07\/2026 · ₹10,000 · UPI/);
   assert.match(hiAck, /UTR\/संदर्भ …387319 — ✅ वही है/);
   assert.match(hiAck, /राशि ₹10,000 — ✅ वही है/);
   assert.match(hiAck, /बच्चों में ऐसे बँटी/, "two children: the split is shown");
@@ -401,6 +401,24 @@ assert.match(po2.text, /CONFIRM/, "a likely match must be labelled as likely");
   assert.match(diff, /difference of ₹500/, "an amount that does not agree is said, not glossed");
   assert.match(diff, /the amount is different/, "and the opening line does not say it matches");
   assert.doesNotMatch(diff, /matches our record/);
+  // 21 Sep 2026, the real case: one UPI payment of ₹10,285 = fee RCV-00430
+  // ₹7,000 + store SL/2026-27/0179 ₹3,285, both carrying UTR …515620.
+  const both = [
+    { kind: "fee" as const, receiptNo: "RCV-00430", collectionDate: "2026-06-29", totalPaise: 700000, refs: ["618034515620"], modes: ["upi"], lines: [{ studentName: "ARADHYA UPADHYAY", label: "Tuition Fee · July", amountPaise: 150000 }] },
+    { kind: "store" as const, receiptNo: "SL/2026-27/0179", collectionDate: "2026-06-29", totalPaise: 328500, refs: ["618034515620"], schoolReceiptNos: ["2151"], modes: ["upi"], lines: [{ studentName: "ARADHYA UPADHYAY", label: "Notebook × 6 (store)", amountPaise: 30000 }] },
+  ];
+  const fs = matchPaymentToReceipts({ amountPaise: 1028500, dateIso: "2026-06-29", reference: "618034515620", receipts: both });
+  assert.equal(fs.kind === "by_reference" && fs.recordPaise, 1028500, "the fee receipt and the store bill together make the payment");
+  const fsAck = renderPaymentProofAck({ payment: { amountPaise: 1028500, dateIso: "2026-06-29", reference: "618034515620", method: "Google Pay", payeeName: "" }, match: fs, childName: "ARADHYA", language: "hi" });
+  assert.match(fsAck, /मेल खाता है/);
+  assert.match(fsAck, /🧾 फीस रसीद \*RCV-00430\*/);
+  assert.match(fsAck, /🛍️ स्टोर बिल \*SL\/2026-27\/0179\* \(रसीद नं\. 2151\)/);
+  assert.match(fsAck, /कुल: \*₹10,285\*/);
+  assert.match(fsAck, /राशि ₹10,285 — ✅ वही है/);
+  assert.doesNotMatch(fsAck, /अंतर/, "no false 'difference' when the store bill is counted");
+  // A store bill number printed on the paper matches too.
+  assert.equal(matchPaymentToReceipts({ amountPaise: 0, dateIso: "", reference: "", receiptNo: "2151", receipts: both }).kind, "by_reference");
+
   const likely = renderPaymentProofAck({ payment: { amountPaise: 380000, dateIso: "2026-09-18", reference: "", method: "cash", payeeName: "" }, match: two, childName: "VIDHI", language: "en" });
   assert.match(likely, /probably/, "an amount-and-date match is never called certain");
   assert.match(likely, /RUDRANSH SINGH[\s\S]*VIDHI SINGH/);

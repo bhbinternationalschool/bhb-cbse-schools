@@ -568,6 +568,8 @@ export type ReceiptLineForMatch = { studentName: string; label: string; amountPa
 
 /** One receipt, as much of it as matching and the parent's reply need. */
 export type ReceiptForMatch = {
+  /** A fee receipt, or a store bill (books, uniform) — one UPI payment often covers both. */
+  kind?: "fee" | "store";
   receiptNo: string;
   collectionDate: string;
   totalPaise: number;
@@ -769,11 +771,16 @@ export function renderPaymentProofAck(input: {
     ];
     for (const r of rs) {
       const old = (r.schoolReceiptNos ?? []).filter(Boolean).join(", ");
+      const store = r.kind === "store";
+      const what = hi ? (store ? "🛍️ स्टोर बिल" : "🧾 फीस रसीद") : store ? "🛍️ Store bill" : "🧾 Fee receipt";
       lines.push(
         hi
-          ? `🧾 हमारी रसीद *${r.receiptNo}*${old ? ` (पुरानी रसीद नं. ${old})` : ""} · ${ddmmyyyy(r.collectionDate)} · ${inr(r.totalPaise)}${r.modes?.length ? ` · ${r.modes.join(" + ").toUpperCase()}` : ""}`
-          : `🧾 Our receipt *${r.receiptNo}*${old ? ` (old receipt no. ${old})` : ""} · ${ddmmyyyy(r.collectionDate)} · ${inr(r.totalPaise)}${r.modes?.length ? ` · ${r.modes.join(" + ").toUpperCase()}` : ""}`,
+          ? `${what} *${r.receiptNo}*${old ? ` (रसीद नं. ${old})` : ""} · ${ddmmyyyy(r.collectionDate)} · ${inr(r.totalPaise)}${r.modes?.length ? ` · ${r.modes.join(" + ").toUpperCase()}` : ""}`
+          : `${what} *${r.receiptNo}*${old ? ` (receipt no. ${old})` : ""} · ${ddmmyyyy(r.collectionDate)} · ${inr(r.totalPaise)}${r.modes?.length ? ` · ${r.modes.join(" + ").toUpperCase()}` : ""}`,
       );
+    }
+    if (rs.length > 1) {
+      lines.push(hi ? `➕ कुल: *${inr(match.recordPaise)}*` : `➕ Total: *${inr(match.recordPaise)}*`);
     }
     if (certain && match.on === "utr" && p.reference) {
       lines.push(hi ? `🔢 UTR/संदर्भ ${tailOf(p.reference)} — ✅ वही है` : `🔢 UTR / reference ${tailOf(p.reference)} — ✅ the same`);
