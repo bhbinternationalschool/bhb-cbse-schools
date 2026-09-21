@@ -694,7 +694,12 @@ export async function captureUdiseDocumentFromWhatsApp(input: {
   if (householdUpdated || updatedStudents.length) patchMirrorHousehold(householdUpdated ?? hh, updatedStudents);
 
   // 4. The parent, in their language, inside the window they just opened.
-  const ack = renderParentAck({ plan: firstPlan!, childName: targets.length > 1 && (firstPlan!.person === "father" || firstPlan!.person === "mother") ? targets.map((t) => t.fullName.split(/\s+/)[0]).join(", ") : firstChild.fullName, language });
+  const ack = renderParentAck({
+    plan: firstPlan!,
+    childName: targets.length > 1 && (firstPlan!.person === "father" || firstPlan!.person === "mother") ? targets.map((t) => t.fullName.split(/\s+/)[0]).join(", ") : firstChild.fullName,
+    language,
+    portalValidationFailed: /validation failed/i.test(firstChild.udiseAadhaarValidationStatus || ""),
+  });
   await sendWhatsAppText({ toMobile: input.mobile10, body: ack, clientMessageId: `udise_ack_${refId}` }).catch((e) => console.warn("[udise-intake] parent ack failed", e));
 
   // 5. The office.

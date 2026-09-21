@@ -187,6 +187,14 @@ export const DOC_TYPE_LABEL: Record<UdiseDocType, string> = {
   other: "Document",
 };
 
+export const DOC_TYPE_LABEL_HI: Record<UdiseDocType, string> = {
+  aadhaar: "आधार कार्ड",
+  birth_certificate: "जन्म प्रमाणपत्र",
+  address_proof: "पते का प्रमाण",
+  payment_proof: "भुगतान का प्रमाण",
+  other: "दस्तावेज़",
+};
+
 /* ── where a file goes ───────────────────────────────────────────── */
 
 /**
@@ -683,21 +691,95 @@ export function renderPaymentProofOfficeAlert(input: {
 
 /* ── what people read ────────────────────────────────────────────── */
 
-export function renderParentAck(input: { plan: UdiseCorrectionPlan; childName: string; language: "en" | "hi" }): string {
-  const applied = input.plan.changes.filter((c) => c.apply);
-  const label = DOC_TYPE_LABEL[input.plan.docType];
-  const who = input.plan.person === "father" ? (input.language === "hi" ? "पिता" : "father") : input.plan.person === "mother" ? (input.language === "hi" ? "माता" : "mother") : input.childName;
-  if (input.language === "hi") {
-    const lines = [`📄 मिल गया: ${input.childName} के लिए ${label}${input.plan.person === "father" || input.plan.person === "mother" ? ` (${who})` : ""}। धन्यवाद 🙏`];
-    if (applied.length) lines.push("", "रिकॉर्ड में अपडेट:", ...applied.map((c) => `• ${FIELD_LABEL_HI[c.field]}: ${display(c.after, c.field)}`));
-    else if (input.plan.docType !== "other") lines.push("", "रिकॉर्ड पहले से सही था; कोई बदलाव नहीं।");
-    if (input.plan.flags.length) lines.push("", "कार्यालय एक बात की जाँच करेगा और ज़रूरत हो तो आपसे संपर्क करेगा।");
-    return lines.join("\n");
+/**
+ * The parent's reply once the document has been read and the record
+ * written: received, thank you, and — field by field — what our record said,
+ * what it says now, and what the office still has to look at. Written after
+ * the writes, from `apply` as it stands then, so a correction that failed to
+ * save is never announced as done.
+ *
+ * The school's rule (21 Sep 2026): a parent who sends a document is told
+ * what was wrong and what has been fixed, not just "received".
+ */
+export function renderParentAck(input: {
+  plan: UdiseCorrectionPlan;
+  childName: string;
+  language: "en" | "hi";
+  /** UDISE+ had rejected this child's Aadhaar ("Validation failed"). */
+  portalValidationFailed?: boolean;
+}): string {
+  const hi = input.language === "hi";
+  const { plan } = input;
+  const applied = plan.changes.filter((c) => c.apply);
+  const held = plan.changes.filter((c) => !c.apply);
+  const label = hi ? DOC_TYPE_LABEL_HI[plan.docType] : DOC_TYPE_LABEL[plan.docType].toLowerCase();
+  const parentDoc = plan.person === "father" || plan.person === "mother";
+  const who = plan.person === "father" ? (hi ? "पिता" : "father") : plan.person === "mother" ? (hi ? "माता" : "mother") : "";
+  const L = hi ? FIELD_LABEL_HI : FIELD_LABEL_EN;
+  const show = (v: string, f: UdiseFieldChange["field"]) => (f === "dob" ? ddmmyyyy(v) : display(v, f));
+  const recheck = !!input.portalValidationFailed && plan.docType === "aadhaar" && plan.person === "child";
+
+  const lines = [
+    hi
+      ? `📄 *${input.childName}* का ${label}${parentDoc ? ` (${who})` : ""} मिल गया। बहुत धन्यवाद 🙏`
+      : `📄 We have received ${input.childName}'s ${label}${parentDoc ? ` (${who}'s)` : ""}. Thank you 🙏`,
+  ];
+  if (recheck) {
+    lines.push(
+      "",
+      hi
+        ? "UDISE+ पोर्टल पर बच्चे का आधार सत्यापन *विफल* था — स्कूल रिकॉर्ड और आधार कार्ड के विवरण मेल नहीं खा रहे थे।"
+        : "UDISE+ had *rejected* your child's Aadhaar — the details in the school record did not match the Aadhaar card.",
+    );
   }
-  const lines = [`📄 Received: ${label} for ${input.childName}${input.plan.person === "father" || input.plan.person === "mother" ? ` (${who})` : ""}. Thank you 🙏`];
-  if (applied.length) lines.push("", "Updated in the school record:", ...applied.map((c) => `• ${FIELD_LABEL_EN[c.field]}: ${display(c.after, c.field)}`));
-  else if (input.plan.docType !== "other") lines.push("", "The record already matched; nothing changed.");
-  if (input.plan.flags.length) lines.push("", "The office will check one detail and contact you if needed.");
+
+  // The permanent-address move is said in words: "what was wrong" is not the
+  // right frame for a family whose card simply carries their village.
+  const moved = applied.filter((c) => c.field === "permanentAddress" || c.field === "permanentPincode");
+  const fixes = applied.filter((c) => !moved.includes(c));
+  const corrected = fixes.filter((c) => (c.before || "").trim());
+  const filled = fixes.filter((c) => !(c.before || "").trim());
+
+  if (corrected.length) {
+    lines.push("", hi ? "*जो गलत था, अब ठीक कर दिया गया है:*" : "*What was wrong, and is now corrected:*");
+    for (const c of corrected) lines.push(`• ${L[c.field]}: ${show(c.before, c.field)} → *${show(c.after, c.field)}*`);
+  }
+  if (filled.length) {
+    lines.push("", hi ? "*रिकॉर्ड में जोड़ा गया:*" : "*Added to the record:*");
+    for (const c of filled) lines.push(`• ${L[c.field]}: *${show(c.after, c.field)}*`);
+  }
+  const pa = moved.find((c) => c.field === "permanentAddress");
+  if (pa) {
+    lines.push(
+      "",
+      hi
+        ? `🏠 आधार पर लिखा पता (*${pa.after}*) *स्थायी पते* में दर्ज किया गया है। आपका वर्तमान पता वही रहेगा।`
+        : `🏠 The address on the Aadhaar card (*${pa.after}*) is saved as the *permanent address*. Your present address stays as it is.`,
+    );
+  }
+  if (!applied.length && plan.docType !== "other" && !held.length) {
+    lines.push("", hi ? "✅ स्कूल रिकॉर्ड पहले से इस दस्तावेज़ से मेल खाता है — कोई बदलाव नहीं करना पड़ा।" : "✅ The school record already matches this document — nothing needed changing.");
+  }
+  if (held.length) {
+    lines.push("", hi ? "*कार्यालय जाँच करेगा:*" : "*The office will check:*");
+    for (const c of held) {
+      lines.push(
+        hi
+          ? `• ${L[c.field]}: रिकॉर्ड में "${show(c.before, c.field)}", दस्तावेज़ में "${show(c.after, c.field)}"`
+          : `• ${L[c.field]}: record says "${show(c.before, c.field)}", the document says "${show(c.after, c.field)}"`,
+      );
+    }
+  } else if (plan.flags.length) {
+    lines.push("", hi ? "कार्यालय एक बात की जाँच करेगा और ज़रूरत हो तो आपसे संपर्क करेगा।" : "The office will check one detail and contact you if needed.");
+  }
+  if (recheck) {
+    lines.push(
+      "",
+      hi
+        ? "अब स्कूल UDISE+ पोर्टल पर आधार को दोबारा सत्यापन के लिए भेजेगा। आपको कुछ और नहीं करना है।"
+        : "The school will now send the Aadhaar for validation on UDISE+ again. Nothing more is needed from you.",
+    );
+  }
   return lines.join("\n");
 }
 
