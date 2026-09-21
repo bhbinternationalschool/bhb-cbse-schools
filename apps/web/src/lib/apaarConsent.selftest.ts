@@ -12,8 +12,11 @@ import {
   composeApaarConsentAsk,
   composeApaarConsentThanks,
   isApaarConsentRequest,
+  parentPartOfApaar,
   parseApaarConsentReply,
 } from "./apaarConsent";
+import { apaarReadiness } from "./udiseCompliance";
+import type { SisStudent } from "./sis";
 
 console.log("apaarConsent.selftest.ts");
 
@@ -51,6 +54,33 @@ assert.match(composeApaarConsentThanks({ answer: "given", childNames: ["VIDHI SI
 const refused = composeApaarConsentThanks({ answer: "refused", childNames: ["VIDHI SINGH"], hindi: false });
 assert.match(refused, /no APAAR ID will be made/);
 assert.match(refused, /send \*APAAR\*/, "how to change their mind");
+
+/* A "yes" is not yet an ID: what is still missing is said at once. */
+{
+  const need = [
+    { name: "VIDHI SINGH", waitingFor: ["aadhaar_recheck" as const, "pen" as const] },
+    { name: "AARAV", waitingFor: ["child_aadhaar" as const] },
+    { name: "RIYA", waitingFor: ["pen" as const] },
+  ];
+  const hi = composeApaarConsentThanks({ answer: "given", childNames: ["VIDHI SINGH", "AARAV", "RIYA"], hindi: true, stillNeeded: need });
+  assert.match(hi, /सहमति दर्ज हो गई/);
+  assert.match(hi, /\*AARAV\*: बच्चे के आधार कार्ड की साफ़ फ़ोटो/);
+  assert.match(hi, /\*VIDHI SINGH\*: बच्चे का आधार कार्ड दोबारा/);
+  assert.ok(!/RIYA\*:/.test(hi), "the PEN is the school's job — never put to a parent");
+  assert.ok(!/PEN/.test(parentPartOfApaar(need, false).join("\n")));
+  assert.match(hi, /नज़दीकी आधार केंद्र/, "a child with no Aadhaar at all");
+  const done = composeApaarConsentThanks({ answer: "given", childNames: ["RIYA"], hindi: false, stillNeeded: [] });
+  assert.match(done, /will create the APAAR ID/);
+
+  // Readiness, as the office sees it.
+  const base = { apaarId: "", pen: "21329329851", aadhaarNumber: "234123412346", aadhaarLast4: "2346", udiseAadhaarValidationStatus: "", apaarConsent: "given", fatherAadhaarNumber: "999988887777" } as unknown as SisStudent;
+  const cfg = { parentAadhaarRequiredForApaar: false } as Parameters<typeof apaarReadiness>[1];
+  assert.deepEqual(apaarReadiness(base, cfg), { ready: true, waitingFor: [] });
+  assert.deepEqual(apaarReadiness({ ...base, aadhaarNumber: "", aadhaarLast4: "" }, cfg).waitingFor, ["child_aadhaar"]);
+  assert.deepEqual(apaarReadiness({ ...base, udiseAadhaarValidationStatus: "Validation failed" }, cfg).waitingFor, ["aadhaar_recheck"]);
+  assert.deepEqual(apaarReadiness({ ...base, pen: "" }, cfg).waitingFor, ["pen"]);
+  assert.equal(apaarReadiness({ ...base, apaarConsent: "" } as SisStudent, cfg).ready, false, "no consent, never ready");
+}
 
 /* Who is still to be asked. */
 const kids = [

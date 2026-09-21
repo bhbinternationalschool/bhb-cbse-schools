@@ -562,6 +562,33 @@ export function computeStudentUdiseGaps(
   return gaps;
 }
 
+/** What still stands between a child and an APAAR ID the school can create. */
+export type ApaarWaitingFor = "child_aadhaar" | "aadhaar_recheck" | "parent_aadhaar" | "pen";
+
+/**
+ * Can the office create this child's APAAR ID on UDISE+ today?
+ *
+ * Consent is the parent's half. The portal also needs the child's PEN (the
+ * school's own job on UDISE+) and an Aadhaar it has VALIDATED — the name,
+ * date of birth and gender on UDISE+ matching UIDAI. So a "yes" with no
+ * Aadhaar card, or with one the portal rejected, is not yet an APAAR ID: the
+ * parent is told what is missing (lib/apaarConsent) and the office sees
+ * "waiting for …", not "create on portal".
+ */
+export function apaarReadiness(
+  s: SisStudent,
+  settings?: UdiseComplianceSettings,
+): { ready: boolean; waitingFor: ApaarWaitingFor[] } {
+  const cfg = settings ?? loadUdiseComplianceSettings();
+  const waitingFor: ApaarWaitingFor[] = [];
+  if (hasApaar(s)) return { ready: false, waitingFor };
+  if (!hasStoredAadhaar({ number: s.aadhaarNumber, last4: s.aadhaarLast4 })) waitingFor.push("child_aadhaar");
+  else if (/validation failed/i.test(s.udiseAadhaarValidationStatus || "")) waitingFor.push("aadhaar_recheck");
+  if (cfg.parentAadhaarRequiredForApaar && !hasParentAadhaar(s)) waitingFor.push("parent_aadhaar");
+  if (!hasPen(s)) waitingFor.push("pen");
+  return { ready: s.apaarConsent === "given" && waitingFor.length === 0, waitingFor };
+}
+
 function priorityOf(gaps: UdiseGapCode[]): number {
   let p = 0;
   if (gaps.includes("student_aadhaar")) p += 100;

@@ -123,6 +123,7 @@ export async function handleApaarConsentInbound(input: {
     .filter(Boolean)
     .join(" · ");
   const recorded: string[] = [];
+  const saved: SisStudent[] = [];
   for (const child of targets) {
     // The stored row, not the in-memory copy: its version is what the
     // guarded push checks, and a stale one is refused as a conflict.
@@ -136,6 +137,7 @@ export async function handleApaarConsentInbound(input: {
       continue;
     }
     recorded.push(child.fullName);
+    saved.push(next);
     await writeAudit({
       module: "sis",
       action: "edit",
@@ -149,5 +151,10 @@ export async function handleApaarConsentInbound(input: {
   if (!recorded.length) {
     return input.hindi ? "क्षमा करें, अभी दर्ज नहीं हो सका। थोड़ी देर बाद बटन फिर दबाएँ।" : "Sorry — that could not be recorded just now. Please tap the button again in a few minutes.";
   }
-  return composeApaarConsentThanks({ answer, childNames: recorded, hindi: input.hindi });
+  let stillNeeded: { name: string; waitingFor: import("@/lib/udiseCompliance").ApaarWaitingFor[] }[] = [];
+  if (answer === "given") {
+    const { apaarReadiness } = await import("@/lib/udiseCompliance");
+    stillNeeded = saved.map((s) => ({ name: s.fullName, waitingFor: apaarReadiness(s).waitingFor })).filter((x) => x.waitingFor.length);
+  }
+  return composeApaarConsentThanks({ answer, childNames: recorded, hindi: input.hindi, stillNeeded });
 }

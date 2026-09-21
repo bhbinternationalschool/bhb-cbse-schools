@@ -17,6 +17,7 @@
  * is what the office reads on WhatsApp and what goes to the UDISE+ portal.
  */
 
+import { parentPartOfApaar } from "@/lib/apaarConsent";
 import { aadhaarChecksumValid, aadhaarDigits, maskAadhaar } from "@/lib/aadhaar";
 import { toRosterCase, type SisStudent, type StudentDocKey } from "@/lib/sis";
 
@@ -712,6 +713,11 @@ export function renderParentAck(input: {
    * only with the parent's consent — the ask says so, and never "compulsory".
    */
   apaarPending?: { childNames: string[]; askFollows: boolean };
+  /**
+   * Children whose parent already said YES to APAAR: whether the school can
+   * now create the ID, or what the parent still has to send.
+   */
+  apaarConsented?: { ready: string[]; stillNeeded: import("@/lib/apaarConsent").ApaarStillNeeded[] };
 }): string {
   const hi = input.language === "hi";
   const { plan } = input;
@@ -778,6 +784,8 @@ export function renderParentAck(input: {
     lines.push("", hi ? "कार्यालय एक बात की जाँच करेगा और ज़रूरत हो तो आपसे संपर्क करेगा।" : "The office will check one detail and contact you if needed.");
   }
   const apaar = input.apaarPending?.childNames.filter(Boolean) ?? [];
+  const consented = input.apaarConsented;
+  const stillAsks = consented ? parentPartOfApaar(consented.stillNeeded, hi) : [];
   if (recheck) {
     lines.push(
       "",
@@ -785,6 +793,17 @@ export function renderParentAck(input: {
         ? `अब स्कूल UDISE+ पोर्टल पर आधार को दोबारा सत्यापन के लिए भेजेगा।${apaar.length ? "" : " आपको कुछ और नहीं करना है।"}`
         : `The school will now send the Aadhaar for validation on UDISE+ again.${apaar.length ? "" : " Nothing more is needed from you."}`,
     );
+  }
+  if (consented?.ready.length) {
+    lines.push(
+      "",
+      hi
+        ? `🆔 *${consented.ready.join(", ")}*: APAAR के लिए आपकी सहमति और ज़रूरी दस्तावेज़ दोनों मिल गए — स्कूल अब UDISE+ पर APAAR ID बनवाएगा — बनने के बाद यह बच्चे के DigiLocker में दिखेगी।`
+        : `🆔 *${consented.ready.join(", ")}*: we now have both your APAAR consent and the documents — the school will create the APAAR ID on UDISE+ — once made, it shows in the child's DigiLocker.`,
+    );
+  }
+  if (stillAsks.length) {
+    lines.push("", hi ? "🆔 *APAAR ID के लिए अभी यह भी चाहिए* (इसी चैट में फ़ोटो भेजें):" : "🆔 *For the APAAR ID we still need* (send a photo here):", ...stillAsks);
   }
   if (apaar.length) {
     const names = apaar.join(", ");

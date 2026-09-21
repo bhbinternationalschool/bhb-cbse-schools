@@ -700,6 +700,19 @@ export async function captureUdiseDocumentFromWhatsApp(input: {
   const { apaarConsentPending } = await import("@/lib/apaarConsent");
   const { apaarAskedRecently, sendApaarConsentAsk } = await import("@/lib/apaarConsent.server");
   const apaarKids = apaarConsentPending(children);
+  // Children whose parent already said yes: can the ID be made now? A card
+  // that arrived in THIS message is the answer to "child Aadhaar" / "re-check"
+  // — the office re-submits it; the parent is not asked for it again.
+  const { apaarReadiness } = await import("@/lib/udiseCompliance");
+  const justSent = new Set(firstPlan!.docType === "aadhaar" && firstPlan!.person === "child" ? targets.map((t) => t.id) : []);
+  const latest = new Map(updatedStudents.map((s) => [s.id, s]));
+  const consentedKids = children
+    .map((c) => latest.get(c.id) ?? c)
+    .filter((c) => c.status === "active" && c.apaarConsent === "given" && !(c.apaarId || "").trim());
+  const consentedView = consentedKids.map((c) => ({
+    name: c.fullName,
+    waitingFor: apaarReadiness(c).waitingFor.filter((w) => w !== "pen" && !(justSent.has(c.id) && (w === "child_aadhaar" || w === "aadhaar_recheck"))),
+  }));
   const askNow = apaarKids.length > 0 && !(await apaarAskedRecently(hh.id));
   const ack = renderParentAck({
     plan: firstPlan!,
@@ -707,6 +720,9 @@ export async function captureUdiseDocumentFromWhatsApp(input: {
     language,
     portalValidationFailed: /validation failed/i.test(firstChild.udiseAadhaarValidationStatus || ""),
     apaarPending: apaarKids.length ? { childNames: apaarKids.map((c) => c.fullName), askFollows: askNow } : undefined,
+    apaarConsented: consentedView.length
+      ? { ready: consentedView.filter((c) => !c.waitingFor.length).map((c) => c.name), stillNeeded: consentedView.filter((c) => c.waitingFor.length) }
+      : undefined,
   });
   const ackSent = await sendWhatsAppText({ toMobile: input.mobile10, body: ack, clientMessageId: `udise_ack_${refId}` }).catch((e) => {
     console.warn("[udise-intake] parent ack failed", e);
