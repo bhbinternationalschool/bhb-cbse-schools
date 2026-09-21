@@ -13,6 +13,8 @@ import {
   DRILL_QUESTION_SYSTEM,
   paperLanguageFor,
   renderChapterVideos,
+  renderAside,
+  renderAsideFailed,
   renderTopicVideo,
   subjectNameForModel,
   buildQuestionPrompt,
@@ -33,7 +35,6 @@ import {
   classifyDrillReply,
   looksLikeOwnQuestion,
   readScopeAnswer,
-  renderAside,
   drillIsForAPastPaper,
 } from "./examDrill";
 import { isPracticeTap, PRACTICE_BUTTON_EN, PRACTICE_BUTTON_HI } from "./examEve";
@@ -257,6 +258,18 @@ assert.doesNotMatch(shown, /^❌ Not quite$/m, "never just 'wrong'");
   }
   assert.equal(subjectNameForModel("सामाजिक विज्ञान"), "Social Science", "SST is not the Science book");
   assert.equal(paperLanguageFor("सामाजिक विज्ञान"), "english");
+}
+
+/* ── Anything asked mid-question is answered, never marked (21 Sep) ─ */
+{
+  const off = parseDrillCheck(JSON.stringify({ notAnAnswer: true, verdict: "", whatWentWrong: "", howToDoIt: "", praise: "" }));
+  assert.ok(off && off.notAnAnswer, "the marker's 'not an answer' survives parsing, though every field is empty");
+  assert.match(DRILL_CHECK_SYSTEM, /ATTEMPT at this question at all/);
+  const a = renderAside({ answer: "The capital of India is New Delhi.", question: "What is 3 × 4?", questionHi: "3 × 4 कितना होता है?", number: 2, hindi: true });
+  assert.ok(a.startsWith("The capital of India"), "the answer comes first");
+  assert.match(a, /now back to the practice \/ अब वापस अभ्यास पर/);
+  assert.match(a, /3 × 4 कितना होता है/, "and the pending question is put back, in both languages");
+  assert.ok(!/शिक्षक से|ask your teacher/i.test(renderAsideFailed(true) + renderAsideFailed(false)), "never 'ask your teacher tomorrow'");
 }
 
 /* ── Videos: the missed idea, and every chapter of the portion ─────── */

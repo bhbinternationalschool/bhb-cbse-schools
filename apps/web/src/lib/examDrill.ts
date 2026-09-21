@@ -358,7 +358,7 @@ export const MAX_QUESTIONS = 12;
  * money and the child their revision. Past this, the question is noted and
  * they are pointed at their teacher.
  */
-export const MAX_ASIDES = 6;
+export const MAX_ASIDES = 30;
 
 export function newDrill(input: {
   studentId: string;
@@ -560,7 +560,9 @@ export const DRILL_QUESTION_SYSTEM = [
 export const DRILL_CHECK_SYSTEM = [
   "You mark one school child's answer to one revision question, the evening before their exam. You are given the question, the expected idea, the child's answer and their class.",
   "verdict: right | close | wrong. 'close' is the right method with a slip — an arithmetic error, a spelling, a missing unit. Do not mark a wrong method 'close' to be kind: the child sits the paper tomorrow.",
-  "An answer to a DIFFERENT question, or a blank, is 'wrong'.",
+  // Director, 21 Sep 2026: a question or request typed mid-practice was
+  // marked a wrong answer to the pending question. It is not an answer.
+  "FIRST decide whether the message is an ATTEMPT at this question at all. If it is not — a different question, a request, a greeting, something meant for the school, or anything unrelated — set notAnAnswer true and leave every other field empty: it is answered separately and nothing is marked. A real attempt, even one word and even wrong, is marked. A blank is 'wrong'.",
   // 18 Sep 2026: a child wrote "Darji" for दर्जी — the right answer, typed
   // on the Latin keyboard every family actually has — and was marked as
   // having made a mistake. Script is not the skill being tested.
@@ -579,7 +581,7 @@ export const DRILL_CHECK_SYSTEM = [
   // `familyLanguageRule` for why the old rule produced that.
   "LANGUAGE OF THE MARKING follows the paper language given below — never the family's phone, never what the child happened to type. ENGLISH paper: whatWentWrong, howToDoIt and praise in simple English, and the same in simple Hindi in whatWentWrongHi, howToDoItHi and praiseHi (empty where the English is empty). HINDI or SANSKRIT paper: Hindi only, every *Hi field empty.",
   "Words quoted FROM the question or FROM the child's answer stay exactly as they are — 'tall' is the adjective whichever language you explain that in. Quote them, do not translate them.",
-  'Respond with JSON only: {"verdict":"right","whatWentWrong":"","howToDoIt":"","praise":"","whatWentWrongHi":"","howToDoItHi":"","praiseHi":""}',
+  'Respond with JSON only: {"notAnAnswer":false,"verdict":"right","whatWentWrong":"","howToDoIt":"","praise":"","whatWentWrongHi":"","howToDoItHi":"","praiseHi":""}',
 ].join("\n");
 
 export type DrillQuestion = { question: string; skill: string; chapter: number; questionHi?: string };
@@ -643,6 +645,8 @@ export type DrillCheck = {
   whatWentWrong: string;
   howToDoIt: string;
   praise: string;
+  /** Not an attempt at the question at all — answer it, mark nothing. */
+  notAnAnswer?: boolean;
   /** The same in Hindi, for an English-medium paper (empty for the Hindi paper). */
   whatWentWrongHi?: string;
   howToDoItHi?: string;
@@ -677,6 +681,9 @@ export function buildCheckPrompt(input: {
 export function parseDrillCheck(text: string): DrillCheck | null {
   const o = safeJson(text);
   if (!o) return null;
+  if (o.notAnAnswer === true || o.notAnAnswer === "true") {
+    return { verdict: "wrong", whatWentWrong: "", howToDoIt: "", praise: "", notAnAnswer: true };
+  }
   const v = clean(o.verdict, 12).toLowerCase();
   const verdict: DrillVerdict = v === "right" ? "right" : v === "close" ? "close" : "wrong";
   const whatWentWrong = clean(o.whatWentWrong, 300);
@@ -795,23 +802,24 @@ export function renderFinish(input: {
 export function renderAside(input: {
   answer: string;
   question: string;
+  questionHi?: string;
   number: number;
   hindi: boolean;
 }): string {
   return [
     input.answer.trim(),
     "",
-    input.hindi ? "— अब वापस अभ्यास पर 👇" : "— now back to the practice 👇",
+    input.questionHi ? "— now back to the practice / अब वापस अभ्यास पर 👇" : input.hindi ? "— अब वापस अभ्यास पर 👇" : "— now back to the practice 👇",
     "",
-    renderQuestion({ number: input.number, question: input.question, hindi: input.hindi }),
+    renderQuestion({ number: input.number, question: input.question, questionHi: input.questionHi, hindi: input.hindi }),
   ].join("\n");
 }
 
 /** When the model could not answer the child's own question. */
 export function renderAsideFailed(hindi: boolean): string {
   return hindi
-    ? "इस सवाल का जवाब अभी नहीं दे पा रहा 🙏 कल शिक्षक से ज़रूर पूछिए। तब तक अभ्यास जारी रखें:"
-    : "I could not answer that one just now 🙏 Do ask your teacher tomorrow. Meanwhile, back to the practice:";
+    ? "इस सवाल का जवाब अभी नहीं दे पा रहा 🙏 थोड़ी देर बाद फिर पूछिए। तब तक अभ्यास जारी रखें:"
+    : "I could not answer that one just now 🙏 Please ask again in a little while. Meanwhile, back to the practice:";
 }
 
 /** The scope answer we could not read. Asked once more, never in a loop. */

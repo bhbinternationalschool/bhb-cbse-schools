@@ -34,6 +34,7 @@ import {
   renderScopeQuestion,
   renderScopeUnclear,
   type DrillChapter,
+  type DrillAsked,
   type DrillState,
   classifyDrillReply,
   readScopeAnswer,
@@ -296,6 +297,56 @@ async function chapterVideos(opts: {
   return renderChapterVideos(rows, opts.hindi, rows.find((r) => r.searchUrl)?.searchUrl ?? "");
 }
 
+/**
+ * Anything asked in the middle of the practice — a question of their own, a
+ * request, general knowledge — answered in full, then the practice question
+ * put back. Never marked (director, 21 Sep 2026: "treat it as an AI search
+ * engine").
+ */
+async function answerAside(opts: {
+  text: string;
+  state: DrillState;
+  pendingQ: DrillAsked;
+  child: SisStudent;
+  className: string;
+  mobile10: string;
+  drillId: string;
+  hindi: boolean;
+}): Promise<DrillTurn> {
+  const used = opts.state.asides ?? 0;
+  const back = renderQuestion({ number: opts.state.asked.length, question: opts.pendingQ.question, questionHi: opts.pendingQ.questionHi, hindi: opts.hindi });
+  if (used >= MAX_ASIDES) {
+    return {
+      handled: true,
+      replyText: [
+        opts.hindi ? "आज के लिए बहुत सवाल हो गए 🙏 पेपर कल है — अभ्यास पूरा कर लेते हैं:" : "That's plenty of questions for tonight 🙏 The paper is tomorrow — let's finish the practice:",
+        "",
+        back,
+      ].join("\n"),
+    };
+  }
+  const { replyHomeworkTutor } = await import("@/lib/homeworkTutor.server");
+  const answered = await replyHomeworkTutor({
+    message: opts.text.slice(0, 600),
+    mode: "teach",
+    language: paperLanguageFor(opts.state.subjectLabel) === "english" ? "both" : "hi",
+    context: {
+      childName: opts.child.fullName.split(/\s+/)[0] || opts.child.fullName,
+      className: opts.className,
+      subjectLabel: opts.state.subjectLabel,
+      openQuestion: true,
+    },
+  });
+  const state = { ...opts.state, asides: used + 1 };
+  await saveDrill(opts.drillId, state, opts.mobile10);
+  return {
+    handled: true,
+    replyText: answered.ok
+      ? renderAside({ answer: answered.text, question: opts.pendingQ.question, questionHi: opts.pendingQ.questionHi, number: state.asked.length, hindi: opts.hindi })
+      : [renderAsideFailed(opts.hindi), "", back].join("\n"),
+  };
+}
+
 export async function startExamDrill(input: {
   household: Household;
   studentId: string;
@@ -445,60 +496,7 @@ export async function continueExamDrill(input: {
       pendingQ &&
       !pendingQ.verdict
     ) {
-      const usedAsides = state.asides ?? 0;
-      if (usedAsides >= MAX_ASIDES) {
-        // Answered plenty already: the paper is tomorrow and sleep matters.
-        return {
-          handled: true,
-          replyText: [
-            input.hindi
-              ? "यह सवाल कल शिक्षक से पूछिए 🙏 अभी पेपर की तैयारी पूरी कर लेते हैं:"
-              : "Ask your teacher that one tomorrow 🙏 Let's finish the practice first:",
-            "",
-            renderQuestion({
-              number: state.asked.length,
-              question: pendingQ.question,
-              questionHi: pendingQ.questionHi,
-              hindi: input.hindi,
-            }),
-          ].join("\n"),
-        };
-      }
-      const { replyHomeworkTutor } = await import("@/lib/homeworkTutor.server");
-      const answered = await replyHomeworkTutor({
-        message: input.text.slice(0, 600),
-        mode: "hint",
-        // English medium: every paper but Hindi/Sanskrit is answered in
-        // English with Hindi alongside (director, 21 Sep 2026).
-        language: paperLanguageFor(state.subjectLabel) === "english" ? "both" : "hi",
-        context: {
-          childName: child.fullName.split(/\s+/)[0] || child.fullName,
-          className,
-          subjectLabel: state.subjectLabel,
-        },
-      });
-      state = { ...state, asides: usedAsides + 1 };
-      await saveDrill(open.id, state, input.mobile10);
-      return {
-        handled: true,
-        replyText: answered.ok
-          ? renderAside({
-              answer: answered.text,
-              question: pendingQ.question,
-              number: state.asked.length,
-              hindi: input.hindi,
-            })
-          : [
-              renderAsideFailed(input.hindi),
-              "",
-              renderQuestion({
-                number: state.asked.length,
-                question: pendingQ.question,
-                questionHi: pendingQ.questionHi,
-                hindi: input.hindi,
-              }),
-            ].join("\n"),
-      };
+      return await answerAside({ text: input.text, state, pendingQ, child, className, mobile10: input.mobile10, drillId: open.id, hindi: input.hindi });
     }
 
     // 1. The scope, if we are still waiting for it.
@@ -535,6 +533,13 @@ export async function continueExamDrill(input: {
             ? "अभी जाँच नहीं हो पा रही 🙏 थोड़ी देर बाद उत्तर दोबारा भेजिए।"
             : "I could not check that just now 🙏 Please send your answer again in a moment.",
         };
+      }
+      // Not an attempt at the question at all — a question of their own, a
+      // request, anything else (director, 21 Sep 2026). Answer it properly
+      // and put the practice question back; nothing is marked.
+      if (checked.draft.notAnAnswer && !askedForHelp) {
+        if (classifyDrillReply(input.text) === "school") return nothing;
+        return await answerAside({ text: input.text, state, pendingQ: last, child, className, mobile10: input.mobile10, drillId: open.id, hindi: input.hindi });
       }
       // A child who asked for help has not got it wrong, whatever the model
       // returns: 'close' holds the streak where it is, so asking costs them
