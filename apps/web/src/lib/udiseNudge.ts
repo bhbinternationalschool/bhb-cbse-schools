@@ -203,7 +203,7 @@ function enrolSection(needs: NudgeChildNeed[], hi: boolean, centres: AadhaarCent
     if (kids.some((n) => n.enrol!.under5 !== true)) {
       lines.push(
         "• 5 वर्ष या बड़े बच्चे के उंगलियों व आँखों के निशान (बायोमेट्रिक) लिए जाते हैं",
-        "• कोई पहचान पत्र न हो तो स्कूल UIDAI के निर्धारित फ़ॉर्मेट में छात्र का प्रमाणपत्र दे सकता है — ऑफिस से माँगें",
+        "• कोई पहचान पत्र न हो तो स्कूल UIDAI के निर्धारित फ़ॉर्मेट में छात्र का प्रमाणपत्र दे सकता है — इसी WhatsApp पर *आधार सर्टिफिकेट* लिखें",
       );
     }
     if (centres.length) {
@@ -224,7 +224,7 @@ function enrolSection(needs: NudgeChildNeed[], hi: boolean, centres: AadhaarCent
   if (kids.some((n) => n.enrol!.under5 !== true)) {
     lines.push(
       "• A child of 5 or older gives fingerprints and an iris scan",
-      "• If there is no ID document, the school can issue a student certificate on UIDAI's standard format — ask the office",
+      "• If there is no ID document, the school can issue a student certificate on UIDAI's standard format — reply *Aadhaar certificate* here",
     );
   }
   if (centres.length) {

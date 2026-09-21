@@ -504,6 +504,33 @@ async function delegateActiveFlow(
   }
 
   if (flow === "parent") {
+    // "आधार सर्टिफिकेट" — the school's UIDAI certificate, prepared for the
+    // office to sign (aadhaarCertificateRequest.server.ts). Ahead of the
+    // parent bot, which would read it as a question it cannot answer.
+    const { isAadhaarCertificateRequest } = await import("@/lib/aadhaarCertificate");
+    if (isAadhaarCertificateRequest(opts.text)) {
+      const { handleAadhaarCertificateRequest } = await import("@/lib/aadhaarCertificateRequest.server");
+      const cert = await handleAadhaarCertificateRequest({
+        mobile10,
+        fromWaId: opts.fromWaId,
+        text: opts.text,
+        waMessageId: opts.waMessageId,
+        profileName: opts.profileName,
+        hindi: unifiedHindiFor(identity),
+      });
+      if (cert.handled) {
+        const ok = await sendBotReply({
+          mobile10,
+          displayName: session.displayName || identity.displayName,
+          category: categoryForUnifiedAudience("sis_parent", "parent"),
+          audience: "sis_parent_aadhaar_certificate",
+          flow,
+          text: cert.reply,
+          inbound: { text: opts.text, waMessageId: opts.waMessageId },
+        });
+        return { replied: ok, escalate: false, audience: "sis_parent_aadhaar_certificate", stub: !ok };
+      }
+    }
     const r = await handleWaSisBotInbound(inbound);
     return {
       replied: r.replied,

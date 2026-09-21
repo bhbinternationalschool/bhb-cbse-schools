@@ -112,6 +112,7 @@ SELFTESTS=(
   test:tutor-guide
   test:wa-parent-guide
   test:udise-nudge
+  test:aadhaar-certificate
   test:fee-adjustments-merge
   test:parent-bot-clarify
   test:office-backlog

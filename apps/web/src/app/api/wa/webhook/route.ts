@@ -186,6 +186,9 @@ export async function POST(req: Request) {
         waMessageId: msg.waMessageId,
         replyToWaMessageId: msg.replyToWaMessageId,
         hasMedia: !!msg.media,
+        media: msg.media
+          ? { mediaId: msg.media.mediaId, mimeType: msg.media.mimeType, filename: msg.media.filename }
+          : null,
       });
       if (relayReply.handled) {
         results.push({
