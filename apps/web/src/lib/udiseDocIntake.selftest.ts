@@ -116,6 +116,40 @@ assert.equal(g.changes.find((c) => c.field === "gender")?.apply, false);
 const l4 = planUdiseCorrections({ extract: p1, student: { ...student, aadhaarLast4: "0124" }, household });
 assert.match(l4.changes.find((c) => c.field === "aadhaarNumber")!.reason, /completed/);
 
+/* ── An Aadhaar made somewhere else: permanent, not present (21 Sep 2026) ── */
+{
+  // The real case: a family living at Semari sends cards made at their
+  // native village in Jaunpur. The present address must stay.
+  const jaunpur: UdiseDocExtract = { ...p1, address: "C/O: Sujeet Singh, Devarai, Bhainsa, PO: Bhaisa, DIST: Jaunpur, Uttar Pradesh - 222129", pincode: "222129" };
+  const oldErp = { ...student, permanentAddress: "Semari, Puari Khurd", permanentPincode: "" };
+  const jp = planUdiseCorrections({ extract: jaunpur, student: oldErp, household: { address: "SEMARI, PUARI KHURD", pincode: "" } });
+  assert.equal(jp.changes.find((c) => c.field === "address"), undefined, "the present address is never replaced by a native-village card");
+  assert.equal(jp.changes.find((c) => c.field === "pincode"), undefined);
+  const pa = jp.changes.find((c) => c.field === "permanentAddress")!;
+  assert.equal(pa.target, "student");
+  assert.equal(pa.apply, true, "a permanent address that only copied the present one is filled");
+  assert.match(pa.after, /JAUNPUR/);
+  assert.equal(jp.changes.find((c) => c.field === "permanentPincode")?.after, "222129");
+  const office = renderOfficeAlert({ plan: jp, childName: "VIDHI SINGH", classLabel: "VII-A", guardianName: "SUJEET SINGH", fileUrl: null });
+  assert.deepEqual(office.portalChanges.filter((p) => /Address|Pin Code/.test(p)), [], "the office is never told to move UDISE+ to the native village");
+  assert.match(office.text, /Permanent address/);
+
+  // The second child's pass has no household but still knows where they live.
+  const second = planUdiseCorrections({ extract: jaunpur, student: oldErp, household: null, presentAddress: "SEMARI, PUARI KHURD" });
+  assert.equal(second.changes.find((c) => c.field === "permanentAddress")?.apply, true);
+
+  // A different permanent address already on record: the office decides.
+  const other = planUdiseCorrections({ extract: jaunpur, student: { ...student, permanentAddress: "Gram Kothari, Ghazipur" }, household: { address: "SEMARI, PUARI KHURD", pincode: "" } });
+  assert.equal(other.changes.find((c) => c.field === "permanentAddress")?.apply, false);
+
+  // The same place, spelled out more fully: the present address is updated as before.
+  const here = planUdiseCorrections({ extract: { ...p1, address: "Semari, Puari Khurd, Varanasi", pincode: "221202" }, student, household: { address: "SEMARI, PUARI KHURD", pincode: "" } });
+  assert.equal(here.changes.find((c) => c.field === "address")?.apply, true);
+  assert.equal(here.changes.find((c) => c.field === "permanentAddress"), undefined);
+  // No present address at all: the card fills it (unchanged behaviour).
+  assert.equal(plan.changes.find((c) => c.field === "address")?.target, "household");
+}
+
 /* ── Plan: the father's Aadhaar ───────────────────────────────────── */
 const fatherDoc: UdiseDocExtract = { ...p1, person: "father", nameOnDoc: "Rakesh Kumar Sharma", dob: "1988-01-01", aadhaarNumber: GOOD2, gender: "M" };
 const fp = planUdiseCorrections({ extract: fatherDoc, student, household });

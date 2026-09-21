@@ -110,6 +110,12 @@ function applyPlanToStudent(s: SisStudent, plan: UdiseCorrectionPlan): SisStuden
       case "motherName":
         patch.motherName = c.after;
         break;
+      case "permanentAddress":
+        patch.permanentAddress = c.after;
+        break;
+      case "permanentPincode":
+        patch.permanentPincode = c.after;
+        break;
       case "aadhaarNumber":
         patch.aadhaarNumber = c.after;
         patch.aadhaarLast4 = c.after.slice(-4);
@@ -565,9 +571,12 @@ export async function captureUdiseDocumentFromWhatsApp(input: {
         motherName: current.motherName,
         fatherAadhaarNumber: current.fatherAadhaarNumber,
         motherAadhaarNumber: current.motherAadhaarNumber,
+        permanentAddress: current.permanentAddress,
+        permanentPincode: current.permanentPincode,
       },
       // The address is written once, on the household, from the first pass.
       household: idx === 0 ? { address: hh.address, pincode: hh.pincode } : null,
+      presentAddress: hh.address,
     });
     if (idx === 0) {
       firstPlan = plan;
