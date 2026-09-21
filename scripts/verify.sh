@@ -112,6 +112,7 @@ SELFTESTS=(
   test:tutor-guide
   test:wa-parent-guide
   test:parent-bot-clarify
+  test:office-backlog
   test:fleet-keep-rule
   test:server-work-tracker
   test:concession-review-ai
