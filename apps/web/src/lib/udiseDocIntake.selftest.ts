@@ -304,6 +304,8 @@ assert.equal(parseUdiseDocExtract(payJson({ amount: "0" }))!.payment?.amountPais
 assert.ok(parseUdiseDocExtract(payJson({ amount: "0" }))!.missing.includes("amount"));
 assert.equal(parseUdiseDocExtract(payJson({ amount: "99999999" }))!.payment?.amountPaise, 0, "larger than any school fee — refused");
 assert.equal(parseUdiseDocExtract(payJson({ reference: "12" }))!.payment?.reference, "", "a two-character scrap is not a reference");
+assert.equal(parseUdiseDocExtract(payJson({ reference: "1369" }))!.payment?.receiptNo, "1369", "a short number on a receipt is the receipt's own number");
+assert.equal(parseUdiseDocExtract(payJson({ reference: "", receiptNo: "RCV-00430" }))!.payment?.receiptNo, "RCV-00430");
 assert.equal(parseUdiseDocExtract(payJson({ dateIso: "2031-01-01" }))!.payment?.dateIso, "", "a future date is not a payment date");
 assert.equal(parseUdiseDocExtract(payJson({ dateIso: "10/09/2026" }))!.payment?.dateIso, "");
 /* A non-payment document carries no payment block at all. */
@@ -314,16 +316,13 @@ const receipts = [
   { receiptNo: "RCV-00501", collectionDate: "2026-09-10", totalPaise: 250000, refs: ["4288 1234 5678"] },
   { receiptNo: "RCV-00502", collectionDate: "2026-09-02", totalPaise: 180000, refs: ["AXIS9911"] },
 ];
-assert.deepEqual(
-  matchPaymentToReceipts({ amountPaise: 250000, dateIso: "2026-09-10", reference: "428812345678", receipts }),
-  { kind: "by_reference", receiptNo: "RCV-00501" },
-  "a UTR match ignores spacing and case",
-);
-assert.deepEqual(
-  matchPaymentToReceipts({ amountPaise: 180000, dateIso: "2026-09-03", reference: "", receipts }),
-  { kind: "by_amount_and_date", receiptNo: "RCV-00502" },
-  "same amount within three days is a likely match",
-);
+{
+  const m = matchPaymentToReceipts({ amountPaise: 250000, dateIso: "2026-09-10", reference: "428812345678", receipts });
+  assert.equal(m.kind, "by_reference", "a UTR match ignores spacing and case");
+  assert.equal(m.kind === "by_reference" && m.receiptNo, "RCV-00501");
+  const l = matchPaymentToReceipts({ amountPaise: 180000, dateIso: "2026-09-03", reference: "", receipts });
+  assert.equal(l.kind === "by_amount_and_date" && l.receiptNo, "RCV-00502", "same amount within three days is a likely match");
+}
 assert.equal(
   matchPaymentToReceipts({ amountPaise: 180000, dateIso: "2026-08-01", reference: "", receipts }).kind,
   "none",
@@ -338,8 +337,8 @@ assert.equal(matchPaymentToReceipts({ amountPaise: 999900, dateIso: "2026-09-10"
 assert.equal(matchPaymentToReceipts({ amountPaise: 0, dateIso: "", reference: "AXIS", receipts }).kind, "none");
 
 /* ── What the parent and the office read ── */
-const already = renderPaymentProofAck({ payment: pay.payment!, match: { kind: "by_reference", receiptNo: "RCV-00501" }, childName: "Aarav", language: "en" });
-assert.match(already, /already in our records/);
+const already = renderPaymentProofAck({ payment: pay.payment!, match: { kind: "by_reference", on: "utr", receiptNo: "RCV-00501", receipts: [receipts[0]!], recordPaise: 250000 }, childName: "Aarav", language: "en" });
+assert.match(already, /matches our record/);
 assert.match(already, /RCV-00501/);
 const hiAck = renderPaymentProofAck({ payment: pay.payment!, match: { kind: "none", reason: "no_receipt_matches" }, childName: "Aarav", language: "hi" });
 assert.match(hiAck, /₹2,500/);
@@ -353,8 +352,59 @@ assert.match(po.text, /No receipt matches/);
 assert.match(po.text, /Open dues on record: \*₹5,150\*/);
 assert.match(po.text, /never books money/);
 assert.match(po.oneLine, /₹2,500/);
-const po2 = renderPaymentProofOfficeAlert({ payment: pay.payment!, match: { kind: "by_amount_and_date", receiptNo: "RCV-00502" }, childName: "A", classLabel: "I", guardianName: "R", openDuesPaise: 0, fileUrl: null });
-assert.match(po2.text, /CONFIRM before replying/, "a likely match must be labelled as likely");
+const po2 = renderPaymentProofOfficeAlert({ payment: pay.payment!, match: { kind: "by_amount_and_date", receiptNo: "RCV-00502", receipts: [receipts[1]!], recordPaise: 180000 }, childName: "A", classLabel: "I", guardianName: "R", openDuesPaise: 0, fileUrl: null });
+assert.match(po2.text, /CONFIRM/, "a likely match must be labelled as likely");
+
+/* ── The director's rule (21 Sep 2026): match field by field, show the split ── */
+{
+  // The real shapes in the fee book: two UTRs in one field, paper-book
+  // numbers "1373,1374", and one receipt covering two siblings.
+  const book = [
+    {
+      receiptNo: "RCV-00319", collectionDate: "2026-07-23", totalPaise: 1000000,
+      refs: ["620451393208, 620451387319"], schoolReceiptNos: ["1513"], modes: ["upi"],
+      lines: [
+        { studentName: "ARADHYA UPADHYAY", label: "Tuition Fee (July)", amountPaise: 280000 },
+        { studentName: "ARADHYA UPADHYAY", label: "Transport (July)", amountPaise: 120000 },
+        { studentName: "ANSH UPADHYAY", label: "Tuition Fee (June, July)", amountPaise: 600000, concessionPaise: 50000 },
+      ],
+    },
+    { receiptNo: "RCV-00112", collectionDate: "2026-04-30", totalPaise: 879500, refs: ["2026-04-29"], schoolReceiptNos: ["1373", "1374"], modes: ["cash"], lines: [{ studentName: "ANSH UPADHYAY", label: "Admission", amountPaise: 879500 }] },
+    { receiptNo: "RCV-00601", collectionDate: "2026-09-18", totalPaise: 180000, refs: ["0"], modes: ["cash"], lines: [{ studentName: "RUDRANSH SINGH", label: "Tuition Fee (August)", amountPaise: 180000 }] },
+    { receiptNo: "RCV-00602", collectionDate: "2026-09-18", totalPaise: 200000, refs: ["0"], modes: ["cash"], lines: [{ studentName: "VIDHI SINGH", label: "Tuition Fee (August)", amountPaise: 200000 }] },
+  ];
+  // The second UTR of a two-UTR field matches.
+  const u = matchPaymentToReceipts({ amountPaise: 1000000, dateIso: "2026-07-23", reference: "620451387319", receipts: book });
+  assert.equal(u.kind === "by_reference" && u.on, "utr");
+  // An old paper receipt number, one of two on our receipt.
+  const r = matchPaymentToReceipts({ amountPaise: 879500, dateIso: "", reference: "", receiptNo: "1374", receipts: book });
+  assert.equal(r.kind === "by_reference" && r.receiptNo, "RCV-00112");
+  // Our own number, printed differently.
+  assert.equal(matchPaymentToReceipts({ amountPaise: 0, dateIso: "", reference: "", receiptNo: "rcv 319", receipts: book }).kind, "by_reference");
+  // A "0" reference is no reference: it never matches every cash receipt.
+  assert.equal(matchPaymentToReceipts({ amountPaise: 5, dateIso: "", reference: "000000", receipts: book }).kind, "none");
+  // One cash payment, a receipt per child the same day — added up.
+  const two = matchPaymentToReceipts({ amountPaise: 380000, dateIso: "2026-09-18", reference: "", receipts: book });
+  assert.equal(two.kind === "by_amount_and_date" && two.receiptNo, "RCV-00601, RCV-00602");
+
+  const hiAck = renderPaymentProofAck({ payment: { amountPaise: 1000000, dateIso: "2026-07-23", reference: "620451387319", method: "Google Pay", payeeName: "" }, match: u, childName: "ARADHYA", language: "hi" });
+  assert.match(hiAck, /मेल खाता है/);
+  assert.match(hiAck, /हमारी रसीद \*RCV-00319\* \(पुरानी रसीद नं\. 1513\) · 23\/07\/2026 · ₹10,000 · UPI/);
+  assert.match(hiAck, /UTR\/संदर्भ …387319 — ✅ वही है/);
+  assert.match(hiAck, /राशि ₹10,000 — ✅ वही है/);
+  assert.match(hiAck, /बच्चों में ऐसे बँटी/, "two children: the split is shown");
+  assert.match(hiAck, /\*ARADHYA UPADHYAY\* — ₹4,000/);
+  assert.match(hiAck, /Transport \(July\) ₹1,200/);
+  assert.match(hiAck, /\*ANSH UPADHYAY\* — ₹6,000/);
+  assert.match(hiAck, /छूट: ₹500/);
+  const diff = renderPaymentProofAck({ payment: { amountPaise: 1050000, dateIso: "", reference: "620451393208", method: "", payeeName: "" }, match: u, childName: "A", language: "en" });
+  assert.match(diff, /difference of ₹500/, "an amount that does not agree is said, not glossed");
+  assert.match(diff, /the amount is different/, "and the opening line does not say it matches");
+  assert.doesNotMatch(diff, /matches our record/);
+  const likely = renderPaymentProofAck({ payment: { amountPaise: 380000, dateIso: "2026-09-18", reference: "", method: "cash", payeeName: "" }, match: two, childName: "VIDHI", language: "en" });
+  assert.match(likely, /probably/, "an amount-and-date match is never called certain");
+  assert.match(likely, /RUDRANSH SINGH[\s\S]*VIDHI SINGH/);
+}
 
 /* ── Where a file goes, decided by what it IS ─────────────────────── */
 //

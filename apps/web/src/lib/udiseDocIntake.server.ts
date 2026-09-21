@@ -332,12 +332,20 @@ async function householdReceiptsAndDues(householdId: string): Promise<{ receipts
         receiptNo: v.receiptNo,
         collectionDate: v.collectionDate,
         totalPaise: v.totalPaise,
-        refs: [
-          ...(v.tenders ?? []).map((t) => t.ref).filter(Boolean),
-          v.transactionId,
-          v.receiptNo,
-          v.schoolReceiptNo,
-        ].filter(Boolean) as string[],
+        refs: [...(v.tenders ?? []).map((t) => t.ref).filter(Boolean), v.transactionId].filter(Boolean) as string[],
+        // Old ERP / paper-book numbers: "1373,1374" is two receipts.
+        schoolReceiptNos: String(v.schoolReceiptNo || "")
+          .split(/[,;/]+/)
+          .map((x) => x.trim())
+          .filter(Boolean),
+        modes: [...new Set((v.tenders ?? []).filter((t) => t.amountPaise > 0 || t.ref).map((t) => t.mode))],
+        // Every child on the receipt — how one family payment was split.
+        lines: (v.lines ?? []).map((l) => ({
+          studentName: l.studentName,
+          label: l.label,
+          amountPaise: l.amountPaise,
+          concessionPaise: l.concessionPaise,
+        })),
       }));
     const dues = openFeeDues(
       computeHouseholdDues(householdId, loadSis(), masters, fees, { includeFuture: false, academicYearCode: ay }).flatMap((r) => r.dues),
@@ -492,6 +500,7 @@ export async function captureUdiseDocumentFromWhatsApp(input: {
       amountPaise: payment.amountPaise,
       dateIso: payment.dateIso,
       reference: payment.reference,
+      receiptNo: payment.receiptNo,
       receipts,
     });
     const childName = first?.fullName || hh.guardianName || "your child";

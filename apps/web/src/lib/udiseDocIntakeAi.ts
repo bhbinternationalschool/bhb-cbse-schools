@@ -49,6 +49,13 @@ export type UdiseDocExtract = {
     dateIso: string;
     /** UTR / transaction id / receipt number, "" when unreadable. */
     reference: string;
+    /**
+     * A receipt number printed on the paper — one of ours ("RCV-00430"), the
+     * old ERP's or the paper book's ("1369") — "" when there is none. Kept
+     * apart from `reference`, which must be a UTR-length id: a four-digit
+     * book number is a receipt, not a transaction.
+     */
+    receiptNo?: string;
     /** "UPI", "PhonePe", "cash", "bank transfer"… as printed. */
     method: string;
     /** Who the money went to, as printed — the check that it came to us. */
@@ -75,7 +82,7 @@ export const UDISE_DOC_EXTRACT_SYSTEM = [
   "nameOnDoc: the holder's name exactly as printed (Latin letters; transliterate Devanagari). dob: YYYY-MM-DD only when day, month and year are all printed; a 'Year of Birth' alone is NOT a dob — leave it empty and add 'dob' to missing.",
   "aadhaarNumber: the 12 digits only when all twelve are clearly legible; otherwise empty and add 'aadhaarNumber' to missing. Never output a partial number.",
   "gender: M or F when printed, else empty. fatherName / motherName: only from a birth certificate that prints them. address and pincode: only from the document's own address block.",
-  "payment (payment_proof only, else null): amount (the rupee figure paid, digits only), dateIso (YYYY-MM-DD, empty if the screenshot shows no full date), reference (UTR / transaction id / UPI ref / receipt no, exactly as printed, empty if unreadable), method (UPI, PhonePe, Google Pay, cash, NEFT…), payeeName (who received it, as printed). Never guess an amount or a reference: a wrong figure here becomes a wrong claim about money.",
+  "payment (payment_proof only, else null): amount (the rupee figure paid, digits only), dateIso (YYYY-MM-DD, empty if the screenshot shows no full date), reference (the UTR / UPI transaction id / bank reference, exactly as printed, empty if there is none), receiptNo (a receipt number printed on a fee RECEIPT — ours like RCV-00430, or an old/paper receipt number like 1369 — exactly as printed, empty if there is none; a cash receipt usually has only this), method (UPI, PhonePe, Google Pay, cash, NEFT…), payeeName (who received it, as printed). Never guess an amount or a reference: a wrong figure here becomes a wrong claim about money.",
   "missing: names of fields you could not read. notes: one short line — quality issues, a hidden corner, a mismatch you noticed.",
   'Respond with JSON only: {"docType":"aadhaar","person":"child","nameOnDoc":"","dob":"","aadhaarNumber":"","gender":"","fatherName":"","motherName":"","address":"","pincode":"","payment":null,"missing":[],"notes":""}'
 ].join("\n");
@@ -159,14 +166,18 @@ function parsePaymentBlock(raw: unknown, docType: UdiseDocType, missing: Set<str
     dateIso = "";
   }
   let reference = clean(o.reference, 40).replace(/\s+/g, "");
+  let receiptNo = clean(o.receiptNo, 30).replace(/\s+/g, "");
   if (reference.length < 6) {
-    if (reference) missing.add("reference");
+    // A short "reference" on a receipt is the receipt's own number.
+    if (reference && !receiptNo) receiptNo = reference;
+    else if (reference) missing.add("reference");
     reference = "";
   }
   return {
     amountPaise,
     dateIso,
     reference,
+    ...(receiptNo ? { receiptNo } : {}),
     method: clean(o.method, 30),
     payeeName: clean(o.payeeName, 80),
   };
@@ -552,22 +563,66 @@ export function planUdiseCorrections(input: {
 
 /* ── a payment the parent is showing us ──────────────────────────── */
 
-/** One receipt, as much of it as matching needs. */
+/** One line of a receipt: which child, which fee, how much. */
+export type ReceiptLineForMatch = { studentName: string; label: string; amountPaise: number; concessionPaise?: number };
+
+/** One receipt, as much of it as matching and the parent's reply need. */
 export type ReceiptForMatch = {
   receiptNo: string;
   collectionDate: string;
   totalPaise: number;
-  /** Every tender reference on the receipt: UTR, cheque no, auth code. */
+  /** Every tender reference on the receipt: UTR, cheque no, auth code — a field may hold several. */
   refs: string[];
+  /** Old ERP / paper-book receipt numbers carried by this receipt ("1373,1374"). */
+  schoolReceiptNos?: string[];
+  /** How it was paid: "upi", "cash"… */
+  modes?: string[];
+  /** Every line, every child — a family payment is split across siblings here. */
+  lines?: ReceiptLineForMatch[];
 };
 
 export type PaymentMatch =
-  | { kind: "by_reference"; receiptNo: string }
-  | { kind: "by_amount_and_date"; receiptNo: string }
+  | {
+      kind: "by_reference";
+      /** Our receipt number(s), comma-joined — for the office alert. */
+      receiptNo: string;
+      /** What matched: the UTR, or a receipt number printed on the paper. */
+      on: "utr" | "receipt_no";
+      receipts: ReceiptForMatch[];
+      /** What our receipts add up to — compared with the screenshot's amount. */
+      recordPaise: number;
+    }
+  | { kind: "by_amount_and_date"; receiptNo: string; receipts: ReceiptForMatch[]; recordPaise: number }
   | { kind: "none"; reason: "no_receipt_matches" | "nothing_readable" };
 
 function normRef(s: string): string {
   return String(s || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+}
+
+/** "620451393208, 620451387319" is two references: split before comparing. */
+function refTokens(refs: string[], min: number): string[] {
+  return refs
+    .flatMap((r) => String(r || "").split(/[,;/|]+/))
+    .map(normRef)
+    .filter((t) => t.length >= min && !/^0+$/.test(t));
+}
+
+/** The same UTR, allowing an app that prints only its last digits. */
+function sameUtr(a: string, b: string): boolean {
+  if (a === b) return true;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  return short.length >= 10 && /^\d+$/.test(short) && long.endsWith(short);
+}
+
+/** A receipt number as printed — "RCV-430", "rcv 00430", "1369". */
+function sameReceiptNo(printed: string, ours: string): boolean {
+  const p = normRef(printed);
+  const o = normRef(ours);
+  if (!p || !o) return false;
+  if (p === o) return true;
+  const pn = p.replace(/^[A-Z]+0*/, "");
+  const on = o.replace(/^[A-Z]+0*/, "");
+  return /^RCV/.test(p) && /^RCV/.test(o) && pn === on;
 }
 
 function daysApart(a: string, b: string): number {
@@ -577,37 +632,58 @@ function daysApart(a: string, b: string): number {
   return Math.abs(t1 - t2) / 86_400_000;
 }
 
+const joinNos = (rs: ReceiptForMatch[]) => rs.map((r) => r.receiptNo).join(", ");
+const sumOf = (rs: ReceiptForMatch[]) => rs.reduce((s, r) => s + r.totalPaise, 0);
+
 /**
  * Is this payment already in the fee book?
  *
- * The reference decides when there is one: a UTR is unique, and a match on
- * it is the only kind worth calling certain. Failing that, the same amount
- * within three days of the same family is offered as a likely match — and
- * labelled as likely, because two siblings' fees are often equal and a
- * parent who paid twice in a week would otherwise be told their second
- * payment was already recorded.
+ * A UTR or a receipt number printed on the paper decides when there is one —
+ * and every receipt carrying it is returned, because a family's one payment
+ * is often split into a receipt per child. Failing that, the same amount
+ * within three days — one receipt, or the receipts of one day added up — is
+ * offered as a LIKELY match, labelled so: two siblings' fees are often
+ * equal.
  *
- * It never decides anything. Booking money stays a person's job; this only
- * tells the office where to look.
+ * It never decides anything. Booking money stays a person's job.
  */
 export function matchPaymentToReceipts(input: {
   amountPaise: number;
   dateIso: string;
   reference: string;
+  receiptNo?: string;
   receipts: ReceiptForMatch[];
 }): PaymentMatch {
   const ref = normRef(input.reference);
+  const byDate = (a: ReceiptForMatch, b: ReceiptForMatch) => a.collectionDate.localeCompare(b.collectionDate) || a.receiptNo.localeCompare(b.receiptNo);
   if (ref.length >= 6) {
-    const hit = input.receipts.find((r) => r.refs.some((x) => normRef(x) === ref));
-    if (hit) return { kind: "by_reference", receiptNo: hit.receiptNo };
+    const hits = input.receipts.filter((r) => refTokens(r.refs, 6).some((t) => sameUtr(t, ref))).sort(byDate);
+    if (hits.length) return { kind: "by_reference", on: "utr", receiptNo: joinNos(hits), receipts: hits, recordPaise: sumOf(hits) };
+  }
+  const printed = String(input.receiptNo || "").trim();
+  if (printed) {
+    const hits = input.receipts
+      .filter(
+        (r) =>
+          sameReceiptNo(printed, r.receiptNo) ||
+          (r.schoolReceiptNos ?? []).flatMap((x) => x.split(/[,;/\s]+/)).some((x) => normRef(x) && normRef(x) === normRef(printed)),
+      )
+      .sort(byDate);
+    if (hits.length) return { kind: "by_reference", on: "receipt_no", receiptNo: joinNos(hits), receipts: hits, recordPaise: sumOf(hits) };
   }
   if (input.amountPaise > 0 && input.dateIso) {
-    const hit = input.receipts.find(
-      (r) => r.totalPaise === input.amountPaise && daysApart(r.collectionDate, input.dateIso) <= 3,
-    );
-    if (hit) return { kind: "by_amount_and_date", receiptNo: hit.receiptNo };
+    const one = input.receipts.find((r) => r.totalPaise === input.amountPaise && daysApart(r.collectionDate, input.dateIso) <= 3);
+    if (one) return { kind: "by_amount_and_date", receiptNo: one.receiptNo, receipts: [one], recordPaise: one.totalPaise };
+    // One payment, a receipt per child on the same day.
+    const days = [...new Set(input.receipts.map((r) => r.collectionDate))].filter((d) => daysApart(d, input.dateIso) <= 3);
+    for (const d of days) {
+      const same = input.receipts.filter((r) => r.collectionDate === d).sort(byDate);
+      if (same.length > 1 && sumOf(same) === input.amountPaise) {
+        return { kind: "by_amount_and_date", receiptNo: joinNos(same), receipts: same, recordPaise: sumOf(same) };
+      }
+    }
   }
-  if (!input.amountPaise && !ref) return { kind: "none", reason: "nothing_readable" };
+  if (!input.amountPaise && !ref && !printed) return { kind: "none", reason: "nothing_readable" };
   return { kind: "none", reason: "no_receipt_matches" };
 }
 
@@ -615,10 +691,48 @@ function inr(paise: number): string {
   return "₹" + Math.round(paise / 100).toLocaleString("en-IN");
 }
 
+/** "129855881245" → "…881245": enough for the parent to recognise, not the whole id. */
+function tailOf(ref: string): string {
+  const r = String(ref || "").replace(/\s+/g, "");
+  return r.length > 8 ? `…${r.slice(-6)}` : r;
+}
+
 /**
- * What the parent hears. Never "your payment is recorded" — we have seen a
- * picture, not the bank. What it promises is that a person will check, and
- * by when.
+ * How the money was put to use, child by child — the part a family with
+ * two or three children cannot see from a bank screenshot (the director,
+ * 21 Sep 2026: "if payment split in siblings tell them how their amount
+ * adjusted on that day with all siblings").
+ */
+export function renderPaymentSplit(receipts: ReceiptForMatch[], hindi: boolean): string[] {
+  const byChild = new Map<string, { total: number; lines: ReceiptLineForMatch[] }>();
+  let concession = 0;
+  for (const r of receipts) {
+    for (const l of r.lines ?? []) {
+      const k = l.studentName || (hindi ? "परिवार" : "Family");
+      const e = byChild.get(k) ?? { total: 0, lines: [] };
+      e.total += l.amountPaise;
+      e.lines.push(l);
+      byChild.set(k, e);
+      concession += l.concessionPaise ?? 0;
+    }
+  }
+  if (!byChild.size) return [];
+  const out = [hindi ? (byChild.size > 1 ? "*यह राशि बच्चों में ऐसे बँटी:*" : "*यह राशि इन फीस में जमा हुई:*") : byChild.size > 1 ? "*How this amount was split between the children:*" : "*What this amount paid for:*"];
+  for (const [name, e] of byChild) {
+    out.push(`👤 *${name}* — ${inr(e.total)}`);
+    for (const l of e.lines.slice(0, 8)) out.push(`   • ${l.label} ${inr(l.amountPaise)}`);
+    if (e.lines.length > 8) out.push(hindi ? `   • …और ${e.lines.length - 8}` : `   • …and ${e.lines.length - 8} more`);
+  }
+  if (concession > 0) out.push(hindi ? `(इसमें छूट: ${inr(concession)})` : `(concession included: ${inr(concession)})`);
+  return out;
+}
+
+/**
+ * What the parent hears: whether their proof matches our record, field by
+ * field — our receipt, the UTR or receipt number, the amount — and how the
+ * payment was spread across their children. Never "your payment is
+ * recorded" on a guess: an amount-and-date match is said to be LIKELY and
+ * left for the office to confirm.
  */
 export function renderPaymentProofAck(input: {
   payment: NonNullable<UdiseDocExtract["payment"]>;
@@ -631,27 +745,67 @@ export function renderPaymentProofAck(input: {
   const bits: string[] = [];
   if (p.amountPaise) bits.push(hi ? `राशि ${inr(p.amountPaise)}` : `${inr(p.amountPaise)}`);
   if (p.dateIso) bits.push(hi ? `तारीख ${ddmmyyyy(p.dateIso)}` : `on ${ddmmyyyy(p.dateIso)}`);
-  if (p.reference) bits.push(hi ? `संदर्भ ${p.reference}` : `ref ${p.reference}`);
+  if (p.reference) bits.push(hi ? `UTR ${p.reference}` : `UTR ${p.reference}`);
+  if (p.receiptNo) bits.push(hi ? `रसीद ${p.receiptNo}` : `receipt ${p.receiptNo}`);
   const read = bits.join(hi ? ", " : " · ");
 
-  if (match.kind === "by_reference") {
-    return hi
-      ? `धन्यवाद 🙏 यह भुगतान हमारे रिकॉर्ड में पहले से दर्ज है — रसीद *${match.receiptNo}*.\n\nयदि आपको रसीद नहीं मिली हो तो बताइए, हम दोबारा भेज देंगे।`
-      : `Thank you 🙏 This payment is already in our records — receipt *${match.receiptNo}*.\n\nIf you did not get the receipt, tell us and we will send it again.`;
-  }
-  if (match.kind === "by_amount_and_date") {
-    return hi
-      ? `धन्यवाद 🙏 ${read ? read + " — " : ""}संभवतः यह रसीद *${match.receiptNo}* वाला ही भुगतान है। कार्यालय पुष्टि करके आपको बताएगा।`
-      : `Thank you 🙏 ${read ? read + " — " : ""}this looks like receipt *${match.receiptNo}*. The office will confirm and come back to you.`;
+  if (match.kind === "by_reference" || match.kind === "by_amount_and_date") {
+    const certain = match.kind === "by_reference";
+    const rs = match.receipts;
+    const amountDiffers = !!p.amountPaise && p.amountPaise !== match.recordPaise;
+    const lines: string[] = [
+      certain && amountDiffers
+        ? hi
+          ? `⚠️ धन्यवाद 🙏 आपका ${match.on === "utr" ? "UTR" : "रसीद नं."} हमारी रसीद से मेल खाता है, पर *राशि अलग है* — नीचे देखिए।`
+          : `⚠️ Thank you 🙏 Your ${match.on === "utr" ? "UTR" : "receipt number"} matches our receipt, but *the amount is different* — see below.`
+        : certain
+        ? hi
+          ? "✅ धन्यवाद 🙏 आपका भुगतान हमारे रिकॉर्ड से *मेल खाता है*।"
+          : "✅ Thank you 🙏 Your payment *matches our record*."
+        : hi
+          ? "🔎 धन्यवाद 🙏 यह भुगतान *संभवतः* हमारी इस रसीद का है — राशि और तारीख मेल खाते हैं, पर UTR रसीद में दर्ज नहीं है। कार्यालय पुष्टि करेगा।"
+          : "🔎 Thank you 🙏 This payment *probably* matches this receipt — the amount and date agree, but the UTR is not on the receipt. The office will confirm.",
+      "",
+    ];
+    for (const r of rs) {
+      const old = (r.schoolReceiptNos ?? []).filter(Boolean).join(", ");
+      lines.push(
+        hi
+          ? `🧾 हमारी रसीद *${r.receiptNo}*${old ? ` (पुरानी रसीद नं. ${old})` : ""} · ${ddmmyyyy(r.collectionDate)} · ${inr(r.totalPaise)}${r.modes?.length ? ` · ${r.modes.join(" + ").toUpperCase()}` : ""}`
+          : `🧾 Our receipt *${r.receiptNo}*${old ? ` (old receipt no. ${old})` : ""} · ${ddmmyyyy(r.collectionDate)} · ${inr(r.totalPaise)}${r.modes?.length ? ` · ${r.modes.join(" + ").toUpperCase()}` : ""}`,
+      );
+    }
+    if (certain && match.on === "utr" && p.reference) {
+      lines.push(hi ? `🔢 UTR/संदर्भ ${tailOf(p.reference)} — ✅ वही है` : `🔢 UTR / reference ${tailOf(p.reference)} — ✅ the same`);
+    }
+    if (certain && match.on === "receipt_no" && p.receiptNo) {
+      lines.push(hi ? `🔢 रसीद नं. ${p.receiptNo} — ✅ वही है` : `🔢 Receipt no. ${p.receiptNo} — ✅ the same`);
+    }
+    if (p.amountPaise) {
+      const diff = p.amountPaise - match.recordPaise;
+      lines.push(
+        diff === 0
+          ? hi
+            ? `💰 राशि ${inr(p.amountPaise)} — ✅ वही है`
+            : `💰 Amount ${inr(p.amountPaise)} — ✅ the same`
+          : hi
+            ? `💰 आपकी रसीद/स्क्रीनशॉट में ${inr(p.amountPaise)}, हमारी रसीद में ${inr(match.recordPaise)} — अंतर ${inr(Math.abs(diff))}। कार्यालय इसे देखकर आपको बताएगा।`
+            : `💰 Your proof shows ${inr(p.amountPaise)}, our receipt ${inr(match.recordPaise)} — a difference of ${inr(Math.abs(diff))}. The office will look into it and tell you.`,
+      );
+    }
+    const split = renderPaymentSplit(rs, hi);
+    if (split.length) lines.push("", ...split);
+    lines.push("", hi ? "रसीद दोबारा चाहिए तो *RECEIPTS* लिखें।" : "Need the receipt again? Send *RECEIPTS*.");
+    return lines.join("\n");
   }
   if (!read) {
     return hi
-      ? "धन्यवाद 🙏 स्क्रीनशॉट मिल गया, पर उसमें राशि/संदर्भ पढ़ा नहीं जा सका।\n\nकृपया *राशि*, *तारीख* और *UTR/संदर्भ संख्या* लिख भेजें — कार्यालय तुरंत जाँच कर देगा।"
-      : "Thank you 🙏 We have the screenshot, but could not read the amount or reference from it.\n\nPlease type the *amount*, the *date* and the *UTR / reference number* — the office will check straight away.";
+      ? "धन्यवाद 🙏 फ़ोटो मिल गई, पर उसमें राशि/UTR/रसीद नं. पढ़ा नहीं जा सका।\n\nकृपया *राशि*, *तारीख* और *UTR या रसीद नं.* लिख भेजें — कार्यालय तुरंत जाँच कर देगा।"
+      : "Thank you 🙏 We have the picture, but could not read the amount, UTR or receipt number from it.\n\nPlease type the *amount*, the *date* and the *UTR or receipt number* — the office will check straight away.";
   }
   return hi
-    ? `धन्यवाद 🙏 मिल गया: ${read}।\n\nयह भुगतान अभी हमारी रसीदों में नहीं मिला — कार्यालय बैंक से मिलान करके आज ही आपसे संपर्क करेगा। तब तक कोई स्मरण संदेश नहीं आएगा।`
-    : `Thank you 🙏 Received: ${read}.\n\nWe could not find this payment in our receipts yet — the office will check it against the bank and come back to you today. No reminders will go out meanwhile.`;
+    ? `धन्यवाद 🙏 मिल गया: ${read}।\n\nयह भुगतान अभी हमारी रसीदों में नहीं मिला — कार्यालय बैंक और रसीद-बुक से मिलान करके आज ही आपसे संपर्क करेगा। तब तक कोई स्मरण संदेश नहीं आएगा।`
+    : `Thank you 🙏 Received: ${read}.\n\nWe could not find this payment in our receipts yet — the office will check it against the bank and the receipt book and come back to you today. No reminders will go out meanwhile.`;
 }
 
 /** What the office reads: the figures, the match, and what to do. */
@@ -672,13 +826,14 @@ export function renderPaymentProofOfficeAlert(input: {
     `Amount: *${p.amountPaise ? inr(p.amountPaise) : "not readable"}*`,
     `Date: ${p.dateIso ? ddmmyyyy(p.dateIso) : "not readable"}`,
     `Reference: ${p.reference || "not readable"}${p.method ? ` · ${p.method}` : ""}`,
+    ...(p.receiptNo ? [`Receipt no. printed: ${p.receiptNo}`] : []),
   ];
   if (p.payeeName) lines.push(`Paid to: ${p.payeeName}`);
   lines.push("", `Open dues on record: *${inr(input.openDuesPaise)}*`);
   if (match.kind === "by_reference") {
-    lines.push("", `✅ Already booked — receipt *${match.receiptNo}* carries this reference. Nothing to do beyond telling the family.`);
+    lines.push("", `✅ Already booked — receipt *${match.receiptNo}* carries this ${match.on === "utr" ? "UTR" : "receipt number"}${p.amountPaise && p.amountPaise !== match.recordPaise ? ` — but the amount differs (proof ${inr(p.amountPaise)}, record ${inr(match.recordPaise)}): check` : ""}. The family has been sent the match and the split.`);
   } else if (match.kind === "by_amount_and_date") {
-    lines.push("", `🔎 Probably receipt *${match.receiptNo}* (same amount, within three days). CONFIRM before replying — siblings' fees are often equal.`);
+    lines.push("", `🔎 Probably receipt *${match.receiptNo}* (same amount, within three days${match.receipts.length > 1 ? `, ${match.receipts.length} receipts of one day added up` : ""}). CONFIRM and reply — siblings' fees are often equal; the family was told it is likely, not certain.`);
   } else if (match.reason === "nothing_readable") {
     lines.push("", "⚠️ Neither an amount nor a reference could be read. The parent has been asked to type them.");
   } else {
