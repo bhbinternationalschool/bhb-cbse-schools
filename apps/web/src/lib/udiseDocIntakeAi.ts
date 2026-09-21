@@ -719,7 +719,16 @@ export function renderPaymentSplit(receipts: ReceiptForMatch[], hindi: boolean):
     }
   }
   if (!byChild.size) return [];
-  const out = [hindi ? (byChild.size > 1 ? "*यह राशि बच्चों में ऐसे बँटी:*" : "*यह राशि इन फीस में जमा हुई:*") : byChild.size > 1 ? "*How this amount was split between the children:*" : "*What this amount paid for:*"];
+  const store = receipts.some((r) => r.kind === "store");
+  const out = [
+    hindi
+      ? byChild.size > 1
+        ? `*यह राशि बच्चों में ऐसे बँटी${store ? " (फीस और स्टोर)" : ""}:*`
+        : `*यह राशि ${store ? "फीस और स्टोर में" : "इन फीस में"} जमा हुई:*`
+      : byChild.size > 1
+        ? `*How this amount was split between the children${store ? " (fees and store)" : ""}:*`
+        : `*What this amount paid for${store ? " (fees and store)" : ""}:*`,
+  ];
   for (const [name, e] of byChild) {
     out.push(`👤 *${name}* — ${inr(e.total)}`);
     for (const l of e.lines.slice(0, 8)) out.push(`   • ${l.label} ${inr(l.amountPaise)}`);
