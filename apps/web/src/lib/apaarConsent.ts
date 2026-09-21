@@ -51,6 +51,18 @@ export function apaarConsentButtons(hindi: boolean): { id: string; title: string
 }
 
 /**
+ * The consent sentence itself, in English — the same words the message
+ * carries and the printed record (apaarConsentPdf) quotes, so the record
+ * says exactly what the parent agreed to.
+ */
+export function consentSentenceEn(guardianName: string, childNames: string): string {
+  const guardian = guardianName.trim();
+  return `I${guardian ? `, ${guardian},` : ""} parent/guardian of ${childNames}, consent to an APAAR ID being created for my child, and to the child's name, date of birth, gender, Aadhaar and school details being shared with the Ministry of Education / UDISE+ / DigiLocker for it.`;
+}
+
+export const CONSENT_VOLUNTARY_EN = "This is entirely your choice, and consent can be withdrawn at any time.";
+
+/**
  * The question, carrying what Annexure-1 asks the parent to agree to: an
  * APAAR ID for the child, and the child's details shared with the Ministry
  * of Education / UDISE+ / DigiLocker for it. At most 1024 characters (Meta's
@@ -74,9 +86,9 @@ export function composeApaarConsentAsk(input: { guardianName: string; childNames
         "",
         `${names} ${input.childNames.length === 1 ? "does" : "do"} not have an APAAR ID ("One Nation One Student ID", Ministry of Education) yet. It keeps the child's marksheets, certificates and study record together in DigiLocker — even across a change of school.`,
         "",
-        `*Consent:* I${guardian ? `, ${guardian},` : ""} parent/guardian of ${names}, consent to an APAAR ID being created for my child, and to the child's name, date of birth, gender, Aadhaar and school details being shared with the Ministry of Education / UDISE+ / DigiLocker for it.`,
+        `*Consent:* ${consentSentenceEn(guardian, names)}`,
         "",
-        "This is entirely your choice, and consent can be withdrawn at any time. No form to print or sign — just tap a button below.",
+        `${CONSENT_VOLUNTARY_EN} No form to print or sign — just tap a button below.`,
       ].join("\n");
   return text.slice(0, 1024);
 }

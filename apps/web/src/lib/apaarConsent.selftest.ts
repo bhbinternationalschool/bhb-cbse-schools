@@ -17,6 +17,7 @@ import {
 } from "./apaarConsent";
 import { apaarReadiness, computeStudentUdiseGaps, isUdiseFullyCompliant } from "./udiseCompliance";
 import type { SisStudent } from "./sis";
+import { apaarConsentRecordFileName, consentStatementEn, renderApaarConsentRecordPdf } from "./apaarConsentPdf";
 
 console.log("apaarConsent.selftest.ts");
 
@@ -102,5 +103,27 @@ const kids = [
   { status: "left", apaarId: "", apaarConsent: "" },
 ];
 assert.equal(apaarConsentPending(kids).length, 1, "no ID, no answer, still here");
+
+/* The printable record: the parent's own words, and a real PDF. */
+{
+  // The record quotes the sentence the message carried, not a paraphrase.
+  const ask = composeApaarConsentAsk({ guardianName: "SUJEET SINGH", childNames: ["VIDHI SINGH"], hindi: false });
+  const stmt = consentStatementEn("SUJEET SINGH", "VIDHI SINGH");
+  assert.ok(ask.includes(stmt.split(" This is")[0]!), "the record's statement is the message's sentence");
+  for (const answer of ["given", "refused"] as const) {
+    const pdf = renderApaarConsentRecordPdf({
+      schoolName: "BHB INTERNATIONAL SCHOOL",
+      schoolPlace: "Varanasi, Uttar Pradesh",
+      udiseCode: "",
+      student: { name: "VIDHI SINGH", classLabel: "VII A", admissionNo: "BHB-1096", dob: "2014-10-02", gender: "F", pen: "", fatherName: "SUJEET SINGH", motherName: "JYOTI SINGH" },
+      answer,
+      at: "2026-09-21T13:05:00.000Z",
+      by: "SUJEET SINGH · WhatsApp +918303976426 · msg ABC",
+      shownIn: "hi",
+    });
+    assert.equal(pdf.subarray(0, 5).toString(), "%PDF-");
+  }
+  assert.equal(apaarConsentRecordFileName("VIDHI SINGH", "2026-09-21T13:05:00.000Z"), "APAAR-consent-VIDHI-SINGH-2026-09-21.pdf");
+}
 
 console.log("  ok");

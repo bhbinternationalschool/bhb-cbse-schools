@@ -21,6 +21,58 @@ import {
 
 export const APAAR_ASK_PURPOSE = "apaar_consent_ask";
 
+/** The record's inputs, from a stored student and its answer — also used to reprint. */
+export async function apaarConsentRecordInput(
+  s: SisStudent,
+  answer: "given" | "refused",
+  at: string,
+  by: string,
+  hindi: boolean,
+): Promise<import("@/lib/apaarConsentPdf").ApaarConsentRecordInput> {
+  const { loadServerMasters } = await import("@/lib/api/v1/auth");
+  const { classLabel } = await import("@/lib/homework");
+  const { TENANT } = await import("@/lib/types");
+  const masters = await loadServerMasters();
+  return {
+    schoolName: TENANT.nameDisplay,
+    schoolPlace: [TENANT.city, TENANT.state].filter(Boolean).join(", "),
+    udiseCode: TENANT.udiseCode || "",
+    student: {
+      name: s.fullName,
+      classLabel: classLabel(masters, s.classId, s.sectionId).replace(" · ", " "),
+      admissionNo: s.admissionNo || "",
+      dob: s.dob || "",
+      gender: s.gender || "",
+      pen: s.pen || "",
+      fatherName: s.fatherName || "",
+      motherName: s.motherName || "",
+    },
+    answer,
+    at,
+    by,
+    shownIn: hindi ? "hi" : "en",
+  };
+}
+
+async function fileConsentRecord(s: SisStudent, answer: "given" | "refused", at: string, by: string, hindi: boolean): Promise<string> {
+  try {
+    const { renderApaarConsentRecordPdf, apaarConsentRecordFileName } = await import("@/lib/apaarConsentPdf");
+    const pdf = renderApaarConsentRecordPdf(await apaarConsentRecordInput(s, answer, at, by, hindi));
+    const { uploadFileToDrive } = await import("@/lib/googleDrive.server");
+    const up = await uploadFileToDrive({
+      folderPath: ["students", s.id],
+      fileName: apaarConsentRecordFileName(s.fullName, at),
+      mimeType: "application/pdf",
+      data: pdf,
+    });
+    if (up.ok) return up.driveFileId;
+    console.warn("[apaar-consent] record not filed in Drive", s.id, up.error);
+  } catch (e) {
+    console.warn("[apaar-consent] record not made", s.id, (e as Error)?.message);
+  }
+  return "";
+}
+
 /** Asked this family in the last 7 days (by any path). Unreadable counts as asked. */
 export async function apaarAskedRecently(householdId: string): Promise<boolean> {
   const ctx = await getServerTenantContext();
@@ -130,7 +182,12 @@ export async function handleApaarConsentInbound(input: {
     const { data } = await ctx.sb.from("sis_students").select("*").eq("tenant_id", ctx.tenantId).eq("id", child.id).maybeSingle();
     if (!data) continue;
     const current = rowToStudent(data as Parameters<typeof rowToStudent>[0]);
-    const next: SisStudent = { ...current, apaarConsent: answer, apaarConsentAt: at, apaarConsentBy: by };
+    // The printable record, filed in the child's Drive folder before the
+    // answer is saved, so the answer and its record arrive together. A
+    // record that cannot be filed does not lose the answer: the student
+    // card re-renders it from the saved fields.
+    const fileId = await fileConsentRecord(current, answer, at, by, input.hindi);
+    const next: SisStudent = { ...current, apaarConsent: answer, apaarConsentAt: at, apaarConsentBy: by, apaarConsentFileId: fileId };
     const push = await pushSisToDb({ households: [], students: [next] });
     if (!push.ok || push.studentCount < 1) {
       console.warn("[apaar-consent] not saved", child.id, push.ok ? "conflict" : push.error);

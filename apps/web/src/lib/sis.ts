@@ -248,6 +248,8 @@ export type SisStudent = {
   apaarConsentAt: string;
   /** Who gave it and how: "<guardian> · WhatsApp +91… · <message id>". */
   apaarConsentBy: string;
+  /** Drive file id of the printable record made at the tap (lib/apaarConsentPdf). */
+  apaarConsentFileId: string;
   udiseMbuStatus: string;
   /** Portal class label (informational — never overwrites SIS class) */
   udisePortalClassHint: string;
@@ -690,6 +692,7 @@ export const STUDENT_PROFILE_KEYS = [
   "apaarConsent",
   "apaarConsentAt",
   "apaarConsentBy",
+  "apaarConsentFileId",
   "udiseMbuStatus",
   "udisePortalClassHint",
   "udiseAgeBelowClassAlert",
@@ -856,6 +859,7 @@ export function normalizeStudent(s: Partial<SisStudent> & { id: string }): SisSt
     apaarConsent: s.apaarConsent === "given" || s.apaarConsent === "refused" ? s.apaarConsent : "",
     apaarConsentAt: s.apaarConsentAt ?? "",
     apaarConsentBy: s.apaarConsentBy ?? "",
+    apaarConsentFileId: s.apaarConsentFileId ?? "",
     udiseMbuStatus: s.udiseMbuStatus ?? "",
     udisePortalClassHint: s.udisePortalClassHint ?? "",
     udiseAgeBelowClassAlert: !!s.udiseAgeBelowClassAlert,
