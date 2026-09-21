@@ -42,7 +42,7 @@ console.log("udiseNudge.selftest.ts");
   assert.equal(needs[0]!.consent, true);
   assert.deepEqual(needs[1]!.docs, ["birth certificate"]);
   assert.equal(needs[1]!.consent, true, "no APAAR yet: the consent form is needed even when every card is on file");
-  assert.equal(udiseNudgeLogLine(needs), "Aarav Singh: child's Aadhaar card, father's or mother's Aadhaar card, APAAR consent form · Riya Singh: birth certificate, APAAR consent form");
+  assert.equal(udiseNudgeLogLine(needs), "Aarav Singh: child's Aadhaar card, father's or mother's Aadhaar card, APAAR consent (buttons) · Riya Singh: birth certificate, APAAR consent (buttons)");
   // Aadhaar received but not yet verified on the portal: the school's job, not the parent's.
   assert.deepEqual(udiseNudgeNeeds([{ name: "Shruti", classLabel: "VII A", gaps: ["student_aadhaar_unverified", "apaar"], hasDob: true, hasAddress: true }], "en")[0]!.docs, [], "never asked to resend a card we hold");
   // A PEN missing on the portal side, APAAR already made: nothing the parent can send.
@@ -52,19 +52,22 @@ console.log("udiseNudge.selftest.ts");
 /* ── The message ─────────────────────────────────────────────────── */
 {
   const needs = udiseNudgeNeeds([{ name: "Aarav Singh", classLabel: "V A", gaps: ["student_aadhaar", "apaar"], hasDob: true, hasAddress: true }], "hi");
-  const hi = composeUdiseNudge({ guardianName: "Ramesh Singh", needs, language: "hi", consentAttached: true });
+  const hi = composeUdiseNudge({ guardianName: "Ramesh Singh", needs, language: "hi", consentButtonsFollow: true });
   assert.match(hi, /^📋 \*UDISE\+ \/ APAAR ID — ज़रूरी दस्तावेज़\*\nनमस्ते Ramesh Singh जी/);
-  assert.match(hi, /\*Aarav Singh\* \(V A\)\n• बच्चे का आधार कार्ड\n• APAAR सहमति फ़ॉर्म — भरकर व हस्ताक्षर करके \(साथ में भेजा है\)/);
+  assert.match(hi, /\*Aarav Singh\* \(V A\)\n• बच्चे का आधार कार्ड\n• APAAR ID के लिए आपकी सहमति — बस एक बटन दबाइए \(कोई फ़ॉर्म नहीं\)/);
+  assert.match(hi, /\*नीचे के संदेश में\* एक बटन/, "the buttons follow");
+  assert.doesNotMatch(hi, /हस्ताक्षर करके|Annexure/, "no printed form (21 Sep 2026)");
   assert.match(hi, /जल्द से जल्द/, "urgent, as the school asked");
   assert.match(hi, /PEN\* \(Permanent Education Number\)/);
   assert.match(hi, /One Nation One Student ID/);
   assert.match(hi, /apaar\.education\.gov\.in/, "the source is named");
-  assert.match(hi, /आपकी सहमति से बनती है/, "consent is said, as the Ministry says it");
+  assert.match(hi, /आपकी सहमति से ही बनती है/, "consent is said, as the Ministry says it");
   assert.match(hi, /आधार नंबर चैट में टाइप न करें/, "a full Aadhaar never in chat");
 
-  const en = composeUdiseNudge({ guardianName: "", needs: udiseNudgeNeeds([{ name: "Riya", classLabel: "II A", gaps: ["apaar"], hasDob: false, hasAddress: true }], "en"), language: "en", consentAttached: false });
+  const en = composeUdiseNudge({ guardianName: "", needs: udiseNudgeNeeds([{ name: "Riya", classLabel: "II A", gaps: ["apaar"], hasDob: false, hasAddress: true }], "en"), language: "en", consentButtonsFollow: false });
   assert.match(en, /^📋 \*UDISE\+ \/ APAAR ID — documents needed\*\nDear Parent/);
-  assert.match(en, /• birth certificate\n• APAAR consent form — filled in and signed\n/, "no '(attached)' when the form could not be attached");
+  assert.match(en, /• birth certificate\n• Your consent for the APAAR ID — just tap a button \(no form\)\n/);
+  assert.match(en, /send \*APAAR\* and tap a button/, "asked this week already: how to get the buttons again");
   assert.match(en, /made only with your consent/);
   // Never more than the sources say.
   for (const t of [hi, en]) {
@@ -73,8 +76,10 @@ console.log("udiseNudge.selftest.ts");
     assert.ok(t.length < 4096, "one WhatsApp message");
   }
   // Without an APAAR gap the consent paragraph goes too.
-  const noConsent = composeUdiseNudge({ guardianName: "", needs: [{ name: "A", classLabel: "I", docs: ["birth certificate"], consent: false, recheck: null, enrol: null }], language: "en", consentAttached: false });
-  assert.doesNotMatch(noConsent, /consent form/);
+  const noConsent = composeUdiseNudge({ guardianName: "", needs: [{ name: "A", classLabel: "I", docs: ["birth certificate"], consent: false, recheck: null, enrol: null }], language: "en", consentButtonsFollow: false });
+  assert.doesNotMatch(noConsent, /tap a button|consent form/i);
+  // A parent who already answered — yes or no — is never asked again.
+  assert.equal(udiseNudgeNeeds([{ name: "R", classLabel: "I", gaps: ["apaar"], hasDob: true, hasAddress: true, apaarAnswered: true }], "en").length, 0);
 }
 
 /* ── Aadhaar rejected by the portal: why, and what to do ──────────── */
@@ -85,7 +90,7 @@ console.log("udiseNudge.selftest.ts");
     "hi",
   );
   assert.deepEqual(needs[0]!.docs, ["बच्चे के आधार कार्ड की साफ़ फ़ोटो — आगे और पीछे (दोबारा जाँच के लिए)"], "a card we hold IS asked for again when the portal rejected it");
-  const hi = composeUdiseNudge({ guardianName: "Sujeet Singh", needs, language: "hi", consentAttached: true });
+  const hi = composeUdiseNudge({ guardianName: "Sujeet Singh", needs, language: "hi", consentButtonsFollow: true });
   assert.match(hi, /⚠️ \*आधार सत्यापन नहीं हुआ\*\n\*RUDRANS SINGH\* का आधार UDISE\+ पोर्टल पर सत्यापित नहीं हो सका \("Validation failed"\)। स्कूल के रिकॉर्ड में: जन्म तिथि 09-06-2016 · लिंग पुरुष · आधार के अंतिम 4 अंक 6648/);
   assert.match(hi, /नाम, जन्म तिथि और लिंग बिल्कुल वैसे ही/, "why: what the portal compares");
   assert.match(hi, /दोबारा जाँच/, "asks for it again, for a re-check");
@@ -95,11 +100,11 @@ console.log("udiseNudge.selftest.ts");
   assert.match(hi, /UIDAI — uidai\.gov\.in/, "the UIDAI source is cited when the fees are");
   assert.ok(hi.length < 4096, `one WhatsApp message (${hi.length})`);
   assert.doesNotMatch(hi, /\d{4} \d{4} \d{4}/, "never a full Aadhaar number");
-  const en = composeUdiseNudge({ guardianName: "", needs: udiseNudgeNeeds([{ name: "Vidhi", classLabel: "VII A", gaps: [], hasDob: true, hasAddress: true, aadhaarFailed: { dob: "", gender: "F", last4: "" } }], "en"), language: "en", consentAttached: false });
+  const en = composeUdiseNudge({ guardianName: "", needs: udiseNudgeNeeds([{ name: "Vidhi", classLabel: "VII A", gaps: [], hasDob: true, hasAddress: true, aadhaarFailed: { dob: "", gender: "F", last4: "" } }], "en"), language: "en", consentButtonsFollow: false });
   assert.match(en, /\*Vidhi\*'s Aadhaar could not be verified on the UDISE\+ portal \("Validation failed"\)\. The school's record: date of birth — · gender Female\n/);
   assert.match(en, /a clear photo of the child's Aadhaar card — front and back \(for a re-check\)/, "asked even when nothing else is missing");
   // No failure, no section.
-  assert.doesNotMatch(composeUdiseNudge({ guardianName: "", needs: udiseNudgeNeeds([{ name: "X", classLabel: "I", gaps: ["apaar"], hasDob: true, hasAddress: true }], "en"), language: "en", consentAttached: false }), /not verified|uidai/i);
+  assert.doesNotMatch(composeUdiseNudge({ guardianName: "", needs: udiseNudgeNeeds([{ name: "X", classLabel: "I", gaps: ["apaar"], hasDob: true, hasAddress: true }], "en"), language: "en", consentButtonsFollow: false }), /not verified|uidai/i);
 }
 
 /* ── How often ───────────────────────────────────────────────────── */
@@ -196,7 +201,7 @@ console.log("udiseNudge.selftest.ts");
     today,
   );
   assert.deepEqual(needs.map((n) => n.enrol?.under5), [true, false]);
-  const hi = composeUdiseNudge({ guardianName: "Sandesh", needs, language: "hi", consentAttached: true, centres: picked });
+  const hi = composeUdiseNudge({ guardianName: "Sandesh", needs, language: "hi", consentButtonsFollow: true, centres: picked });
   assert.match(hi, /🆔 \*आधार नहीं बना है\? ऐसे बनवाएँ — नया आधार निःशुल्क है\*/);
   assert.match(hi, /\*NAVYA SINGH\* \(5 वर्ष से कम\), \*SUJIT KUMAR\* \(5 वर्ष या अधिक\)/);
   assert.match(hi, /जन्म प्रमाणपत्र\* और \*माता-पिता का आधार कार्ड/);
@@ -207,11 +212,11 @@ console.log("udiseNudge.selftest.ts");
   assert.match(hi, /appointments\.uidai\.gov\.in/);
   assert.ok(hi.length < 4096, `one WhatsApp message (${hi.length})`);
   // Without centres the section still says how; it never invents a place.
-  const bare = composeUdiseNudge({ guardianName: "", needs, language: "en", consentAttached: false });
+  const bare = composeUdiseNudge({ guardianName: "", needs, language: "en", consentButtonsFollow: false });
   assert.match(bare, /No Aadhaar yet\? How to get one — new enrolment is free/);
   assert.doesNotMatch(bare, /centres near/);
   // Distances from the family's own home only when the home is located.
-  assert.match(composeUdiseNudge({ guardianName: "", needs, language: "en", consentAttached: false, centres: picked, centresNear: "home" }), /Aadhaar centres near you/);
+  assert.match(composeUdiseNudge({ guardianName: "", needs, language: "en", consentButtonsFollow: false, centres: picked, centresNear: "home" }), /Aadhaar centres near you/);
   // A rejected Aadhaar is a re-check, not a new enrolment.
   assert.equal(udiseNudgeNeeds([{ name: "R", classLabel: "VI", gaps: ["student_aadhaar_unverified", "apaar"], hasDob: true, hasAddress: true, aadhaarFailed: { dob: "", gender: "M", last4: "" } }], "en")[0]!.enrol, null);
 }

@@ -18,8 +18,6 @@ import "server-only";
  * UDISE_PARENT_NUDGE=off stops it without a deploy.
  */
 
-import { readFileSync } from "node:fs";
-import path from "node:path";
 
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { childrenOfHousehold, loadSis } from "@/lib/sis";
@@ -38,22 +36,8 @@ import {
 } from "@/lib/udiseNudge";
 
 const PURPOSE = "udise_nudge";
-const CONSENT_FILE = "apaar-consent-refusal-form.pdf";
-
 /** Two messages from one parent a second apart must not buy two nudges. */
 const inFlight = new Set<string>();
-
-let consentCache: Buffer | null | undefined;
-function consentForm(): Buffer | null {
-  if (consentCache !== undefined) return consentCache;
-  try {
-    consentCache = readFileSync(path.join(process.cwd(), "public", "docs", CONSENT_FILE));
-  } catch (e) {
-    console.warn("[udise-nudge] consent form not found", (e as Error)?.message);
-    consentCache = null;
-  }
-  return consentCache;
-}
 
 export async function maybeSendUdiseNudge(
   mobile10: string,
@@ -94,6 +78,7 @@ export async function maybeSendUdiseNudge(
         gaps: computeStudentUdiseGaps(s),
         hasDob: !!s.dob,
         hasAddress: hasHhAddress || !!s.permanentAddress,
+        apaarAnswered: !!s.apaarConsent,
         // The portal rejected the Aadhaar we hold: ask for the card again,
         // and say why (udiseNudge.ts, recheckSection).
         aadhaarFailed: /validation failed/i.test(s.udiseAadhaarValidationStatus || "")
@@ -129,7 +114,8 @@ export async function maybeSendUdiseNudge(
     });
     if (!due.due) return { sent: false, reason: due.reason };
 
-    const pdf = needs.some((n) => n.consent) ? consentForm() : null;
+    const { apaarAskedRecently, sendApaarConsentAsk } = await import("@/lib/apaarConsent.server");
+    const askApaar = needs.some((n) => n.consent) && !(await apaarAskedRecently(hh.id));
     // A child with no Aadhaar at all: the centres nearest the family's home
     // (its geocode), or the school when the home was never located.
     let centres: import("@/lib/aadhaarCentres").AadhaarCentre[] = [];
@@ -147,11 +133,11 @@ export async function maybeSendUdiseNudge(
       guardianName: hh.guardianName || "",
       needs,
       language,
-      consentAttached: !!pdf,
+      consentButtonsFollow: askApaar,
       centres,
       centresNear: located ? "home" : "school",
     });
-    const { sendWhatsAppText, sendWhatsAppDocument } = await import("@/lib/waSend");
+    const { sendWhatsAppText } = await import("@/lib/waSend");
     const { logHouseholdWaSend } = await import("@/lib/householdMessageLog.server");
     const sent = await sendWhatsAppText({
       toMobile: mobile10,
@@ -168,18 +154,10 @@ export async function maybeSendUdiseNudge(
       waMessageId: sent.providerId,
     });
     if (!sent.ok) return { sent: false, reason: `send_failed: ${sent.error || ""}` };
-    if (pdf) {
-      const doc = await sendWhatsAppDocument({
-        toMobile: mobile10,
-        bytes: pdf,
-        filename: "APAAR-Consent-Refusal-Form.pdf",
-        mimeType: "application/pdf",
-        caption:
-          language === "hi"
-            ? "शिक्षा मंत्रालय — APAAR ID सहमति / असहमति फ़ॉर्म (Annexure-1)। भरकर, हस्ताक्षर करके इसकी फ़ोटो भेजें।"
-            : "Ministry of Education — APAAR ID consent / refusal form (Annexure-1). Please fill in, sign and send a photo.",
-      });
-      if (!doc.ok) console.warn("[udise-nudge] consent form not sent", hh.id, doc.error);
+    if (askApaar) {
+      await sendApaarConsentAsk({ mobile10, household: hh, children: kids, hindi: language === "hi" }).catch((e) =>
+        console.warn("[udise-nudge] APAAR ask failed", hh.id, (e as Error)?.message),
+      );
     }
     // The two nearest centres as real map pins — tap for directions.
     if (centres.length) {

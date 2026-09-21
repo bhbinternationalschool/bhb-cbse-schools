@@ -455,6 +455,16 @@ function hasApaar(s: SisStudent): boolean {
   return isRealPortalId(s.apaarId);
 }
 
+/**
+ * The parent answered NO to APAAR (lib/apaarConsent). APAAR is voluntary;
+ * PEN is not. So a declined APAAR is a settled answer, not a gap — the
+ * child is complete once the PEN exists, and the family is never chased
+ * for APAAR (or for a parent's Aadhaar, which only APAAR needs) again.
+ */
+function apaarDeclined(s: SisStudent): boolean {
+  return !hasApaar(s) && s.apaarConsent === "refused";
+}
+
 export type UdisePenApaarCode = "ok" | "pen_only" | "apaar_only" | "none";
 
 /**
@@ -505,7 +515,8 @@ export function isUdiseFullyCompliant(
   s: SisStudent,
   _settings?: UdiseComplianceSettings,
 ): boolean {
-  return hasPen(s) && hasApaar(s);
+  // PEN is required of every child; APAAR only with the parent's consent.
+  return hasPen(s) && (hasApaar(s) || apaarDeclined(s));
 }
 
 function hasParentAadhaar(s: SisStudent): boolean {
@@ -531,7 +542,7 @@ export function computeStudentUdiseGaps(
   // Both ids issued: the portal has everything it needed and there is nothing
   // to call a parent about. Reported as no gaps rather than as a shorter list,
   // so every counter, export and call list agrees with the "UDISE OK" badge.
-  if (hasPen(s) && hasApaar(s)) return gaps;
+  if (hasPen(s) && (hasApaar(s) || apaarDeclined(s))) return gaps;
 
   const aadhaarOnFile = hasStoredAadhaar({
     number: s.aadhaarNumber,
@@ -543,12 +554,15 @@ export function computeStudentUdiseGaps(
     gaps.push("student_aadhaar_unverified");
   }
   if (!hasPen(s)) gaps.push("pen");
-  if (!hasApaar(s)) gaps.push("apaar");
-  // Parent Aadhaar is a prerequisite for GENERATING the APAAR, so it is only
-  // a gap while the APAAR is still missing.
+  if (!hasApaar(s) && !apaarDeclined(s)) gaps.push("apaar");
+  // Parent Aadhaar is for the APAAR alone (the consenting parent's own ID —
+  // the director's rule, 21 Sep 2026), so it is a gap only once the parent
+  // has said YES and while the APAAR is still missing. Before an answer the
+  // family is asked for consent, not for a parent's card.
   if (
     cfg.parentAadhaarRequiredForApaar &&
     !hasApaar(s) &&
+    s.apaarConsent === "given" &&
     !hasParentAadhaar(s)
   ) {
     gaps.push("parent_aadhaar");
@@ -560,6 +574,43 @@ export function computeStudentUdiseGaps(
     gaps.push("inbound_transfer");
   }
   return gaps;
+}
+
+/**
+ * What the PARENT still has to give before the school can create the APAAR
+ * ID: the consenting parent's own Aadhaar (the director's rule, 21 Sep 2026 —
+ * "for APAAR ask the parent's ID, not the student's").
+ *
+ * The child's Aadhaar and the PEN are deliberately not here. They belong to
+ * the PEN / UDISE+ record, which every child needs whether or not the family
+ * consents to APAAR, and are tracked and asked for on that side.
+ */
+export type ApaarWaitingFor = "parent_aadhaar";
+
+/**
+ * Can the office create this child's APAAR ID on UDISE+ today?
+ *
+ * Consent is the parent's half. The portal also needs the child's PEN (the
+ * school's own job on UDISE+) and an Aadhaar it has VALIDATED — the name,
+ * date of birth and gender on UDISE+ matching UIDAI. So a "yes" with no
+ * Aadhaar card, or with one the portal rejected, is not yet an APAAR ID: the
+ * parent is told what is missing (lib/apaarConsent) and the office sees
+ * "waiting for …", not "create on portal".
+ */
+export function apaarReadiness(
+  s: SisStudent,
+  settings?: UdiseComplianceSettings,
+): { ready: boolean; waitingFor: ApaarWaitingFor[]; needsPen: boolean } {
+  const cfg = settings ?? loadUdiseComplianceSettings();
+  const waitingFor: ApaarWaitingFor[] = [];
+  const needsPen = !hasPen(s);
+  if (hasApaar(s)) return { ready: false, waitingFor, needsPen };
+  void cfg;
+  if (!hasParentAadhaar(s)) waitingFor.push("parent_aadhaar");
+  // The portal makes an APAAR ID on top of a PEN (itself built on the
+  // child's validated Aadhaar), so "ready" also needs one — but that is the
+  // PEN side's work, shown on its own.
+  return { ready: s.apaarConsent === "given" && waitingFor.length === 0 && !needsPen, waitingFor, needsPen };
 }
 
 function priorityOf(gaps: UdiseGapCode[]): number {

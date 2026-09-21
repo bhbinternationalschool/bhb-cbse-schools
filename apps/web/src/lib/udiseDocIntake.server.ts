@@ -694,8 +694,45 @@ export async function captureUdiseDocumentFromWhatsApp(input: {
   if (householdUpdated || updatedStudents.length) patchMirrorHousehold(householdUpdated ?? hh, updatedStudents);
 
   // 4. The parent, in their language, inside the window they just opened.
-  const ack = renderParentAck({ plan: firstPlan!, childName: targets.length > 1 && (firstPlan!.person === "father" || firstPlan!.person === "mother") ? targets.map((t) => t.fullName.split(/\s+/)[0]).join(", ") : firstChild.fullName, language });
-  await sendWhatsAppText({ toMobile: input.mobile10, body: ack, clientMessageId: `udise_ack_${refId}` }).catch((e) => console.warn("[udise-intake] parent ack failed", e));
+  // Any child of the family with no APAAR ID and no answer yet: the reply
+  // says so, and the consent question follows with its two buttons — at
+  // most once a week (lib/apaarConsent: no printed form, 21 Sep 2026).
+  const { apaarConsentPending } = await import("@/lib/apaarConsent");
+  const { apaarAskedRecently, sendApaarConsentAsk } = await import("@/lib/apaarConsent.server");
+  const apaarKids = apaarConsentPending(children);
+  // Children whose parent already said yes: can the ID be made now? A
+  // parent's card that arrived in THIS message is the answer to "parent
+  // Aadhaar" — it is not asked for again in the same reply.
+  const { apaarReadiness } = await import("@/lib/udiseCompliance");
+  const justSent = new Set(firstPlan!.docType === "aadhaar" && (firstPlan!.person === "father" || firstPlan!.person === "mother") ? targets.map((t) => t.id) : []);
+  const latest = new Map(updatedStudents.map((s) => [s.id, s]));
+  const consentedKids = children
+    .map((c) => latest.get(c.id) ?? c)
+    .filter((c) => c.status === "active" && c.apaarConsent === "given" && !(c.apaarId || "").trim());
+  const consentedView = consentedKids.map((c) => ({
+    name: c.fullName,
+    waitingFor: apaarReadiness(c).waitingFor.filter((w) => !(justSent.has(c.id) && w === "parent_aadhaar")),
+  }));
+  const askNow = apaarKids.length > 0 && !(await apaarAskedRecently(hh.id));
+  const ack = renderParentAck({
+    plan: firstPlan!,
+    childName: targets.length > 1 && (firstPlan!.person === "father" || firstPlan!.person === "mother") ? targets.map((t) => t.fullName.split(/\s+/)[0]).join(", ") : firstChild.fullName,
+    language,
+    portalValidationFailed: /validation failed/i.test(firstChild.udiseAadhaarValidationStatus || ""),
+    apaarPending: apaarKids.length ? { childNames: apaarKids.map((c) => c.fullName), askFollows: askNow } : undefined,
+    apaarConsented: consentedView.length
+      ? { ready: consentedView.filter((c) => !c.waitingFor.length).map((c) => c.name), stillNeeded: consentedView.filter((c) => c.waitingFor.length) }
+      : undefined,
+  });
+  const ackSent = await sendWhatsAppText({ toMobile: input.mobile10, body: ack, clientMessageId: `udise_ack_${refId}` }).catch((e) => {
+    console.warn("[udise-intake] parent ack failed", e);
+    return null;
+  });
+  if (askNow && ackSent?.ok) {
+    await sendApaarConsentAsk({ mobile10: input.mobile10, household: hh, children, hindi: language === "hi" }).catch((e) =>
+      console.warn("[udise-intake] APAAR ask failed", (e as Error)?.message),
+    );
+  }
 
   // 5. The office.
   const summary = `${label} for ${targets.map((t) => t.fullName).join(", ")}: ${applied} field${applied === 1 ? "" : "s"} updated${held ? `, ${held} for review` : ""}`;

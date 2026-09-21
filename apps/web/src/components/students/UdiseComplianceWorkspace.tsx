@@ -25,7 +25,9 @@ import {
   type UdisePortalSearchRow,
   type UdiseRegisteredRow,
   type UdiseUnregisteredRow,
+  apaarReadiness,
 } from "@/lib/udiseCompliance";
+import type { SisStudent } from "@/lib/sis";
 import { UdisePenApaarImportPanel } from "@/components/students/UdisePenApaarImportPanel";
 import {
   UdiseStudentListModal,
@@ -152,6 +154,26 @@ function matchesUdiseQuery(
   return needle.split(/\s+/).every((tok) => hay.includes(tok));
 }
 
+/**
+ * The APAAR cell: the ID when it exists, else the parent's WhatsApp answer
+ * (lib/apaarConsent) and, for a "yes", whether the office can create the ID
+ * now or what it is still waiting for. "Declined" is final — not to chase.
+ */
+function apaarCell(s: SisStudent): string {
+  if (s.apaarId) return s.apaarId;
+  const on = s.apaarConsentAt ? ` ${new Date(s.apaarConsentAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" })}` : "";
+  if (s.apaarConsent === "refused") return `Parent declined${on}`;
+  if (s.apaarConsent !== "given") return "—";
+  // A "yes" is not yet an APAAR ID: the portal needs a PEN and an Aadhaar it
+  // has validated. Say which, so the list is also the call list.
+  const { ready, waitingFor, needsPen } = apaarReadiness(s);
+  if (ready) return `Consent ✓${on} — READY: create on portal`;
+  const label: Record<string, string> = { parent_aadhaar: "parent Aadhaar" };
+  if (waitingFor.length) return `Consent ✓${on} — waiting: ${waitingFor.map((w) => label[w] ?? w).join(", ")}`;
+  // Only the PEN is missing — the school's own step, shown in the PEN column.
+  return needsPen ? `Consent ✓${on} — after PEN is made` : `Consent ✓${on}`;
+}
+
 function gapRowsToList(rows: UdiseComplianceRow[]): UdiseListRow[] {
   return rows.map((r) => ({
     _studentId: r.student.id,
@@ -161,7 +183,7 @@ function gapRowsToList(rows: UdiseComplianceRow[]): UdiseListRow[] {
     entryStatus: udiseEntryStatusLabel(r.student),
     missing: r.missingLabels.join("; "),
     pen: r.student.pen || "—",
-    apaar: r.student.apaarId || "—",
+    apaar: apaarCell(r.student),
     aadhaar: r.aadhaarDisplay,
     mobile: r.primaryCallMobile || "—",
   }));
@@ -175,7 +197,7 @@ function registeredRowsToList(rows: UdiseRegisteredRow[]): UdiseListRow[] {
     classLabel: r.classLabel,
     entryStatus: udiseEntryStatusLabel(r.student),
     pen: r.pen || "—",
-    apaar: r.apaarId || "—",
+    apaar: r.apaarId || apaarCell(r.student),
     aadhaar: r.aadhaarDisplay,
     verified: r.aadhaarVerified ? "Yes" : "No",
     compliant: r.compliant ? "Yes" : "No",

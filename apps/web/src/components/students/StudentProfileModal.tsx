@@ -352,6 +352,7 @@ export function StudentProfileModal({
               <Section title="Compliance IDs">
                 <Field label="PEN" value={student.pen || student.penStatus || "—"} />
                 <Field label="APAAR" value={student.apaarId || "—"} />
+                <ApaarConsentField student={student} />
                 <Field label="SRN" value={student.srn || "—"} />
                 <Field
                   label="Aadhaar"
@@ -862,6 +863,61 @@ function Section({
         {title}
       </h4>
       <dl className="grid gap-x-4 gap-y-3 sm:grid-cols-2">{children}</dl>
+    </div>
+  );
+}
+
+/**
+ * The parent's APAAR ID answer, given on WhatsApp (lib/apaarConsent):
+ * received or not, YES or NO, when and from whom — and the printable record
+ * the school keeps in place of a signed form.
+ */
+function ApaarConsentField({ student }: { student: SisStudent }) {
+  const answered = student.apaarConsent === "given" || student.apaarConsent === "refused";
+  const when = student.apaarConsentAt
+    ? new Date(student.apaarConsentAt).toLocaleString("en-IN", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: "Asia/Kolkata",
+      })
+    : "";
+  const who = (student.apaarConsentBy || "").split(" · ").slice(0, 2).join(" · ");
+  return (
+    <div className="sm:col-span-2">
+      <dt className="text-[11px] uppercase tracking-wide text-[var(--muted)]">APAAR consent</dt>
+      <dd className="mt-0.5 text-sm font-medium text-[var(--brand-deep)]">
+        {!answered ? (
+          <span>
+            Not received{student.apaarId ? " (APAAR ID already exists)" : ""}
+          </span>
+        ) : (
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span>Received —</span>
+            <span
+              className={
+                student.apaarConsent === "given"
+                  ? "rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200"
+                  : "rounded bg-rose-100 px-1.5 py-0.5 text-rose-800 dark:bg-rose-900/40 dark:text-rose-200"
+              }
+            >
+              {student.apaarConsent === "given" ? "YES" : "NO"}
+            </span>
+            {when ? <span className="font-normal text-[var(--muted)]">{when}</span> : null}
+            {who ? <span className="font-normal text-[var(--muted)]">· {who}</span> : null}
+            <a
+              href={`/api/v1/udise/apaar-consent?student=${encodeURIComponent(student.id)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs font-semibold text-[var(--brand-mid)]"
+            >
+              Print record
+            </a>
+          </span>
+        )}
+      </dd>
     </div>
   );
 }

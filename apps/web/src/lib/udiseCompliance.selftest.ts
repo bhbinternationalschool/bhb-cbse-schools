@@ -83,9 +83,12 @@ function student(patch: Partial<SisStudent>): SisStudent {
   const gaps = computeStudentUdiseGaps(s, CFG);
   assert.ok(gaps.includes("apaar"), "APAAR is missing");
   assert.ok(!gaps.includes("pen"), "PEN is not missing");
+  // A parent's Aadhaar is for the APAAR alone: asked only after the parent
+  // says YES on WhatsApp (lib/apaarConsent), never before an answer.
+  assert.ok(!gaps.includes("parent_aadhaar"), "no answer yet: consent is asked, not a parent's card");
   assert.ok(
-    gaps.includes("parent_aadhaar"),
-    "parent Aadhaar is still needed — it is what generates the APAAR",
+    computeStudentUdiseGaps({ ...s, apaarConsent: "given" }, CFG).includes("parent_aadhaar"),
+    "after a YES the consenting parent's Aadhaar is needed for the APAAR",
   );
   assert.equal(udisePenApaarStatus(s).code, "pen_only");
   assert.equal(udisePenApaarStatus(s).label, "PEN ok · APAAR missing");

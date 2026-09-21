@@ -149,7 +149,7 @@ for (const [hhId, w] of byHh) {
   const attach = needs.some((n) => n.consent);
   plans.push({
     hh: hhId, mobile: m10, guardian: h?.guardian_name || "", lang, closesIst: closes, attach, skip, centres,
-    text: composeUdiseNudge({ guardianName: (h?.guardian_name || "").replace(/^(MR|MRS|MS)\.?\s+/i, "").replace(/\s+/g, " ").trim(), needs, language: lang, consentAttached: attach, centres, centresNear: typeof h?.geo_lat === "number" ? "home" : "school" }),
+    text: composeUdiseNudge({ guardianName: (h?.guardian_name || "").replace(/^(MR|MRS|MS)\.?\s+/i, "").replace(/\s+/g, " ").trim(), needs, language: lang, consentButtonsFollow: false, centres, centresNear: typeof h?.geo_lat === "number" ? "home" : "school" }),
     log: udiseNudgeLogLine(needs),
   });
 }

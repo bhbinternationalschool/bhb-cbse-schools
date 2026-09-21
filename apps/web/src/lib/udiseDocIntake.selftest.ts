@@ -99,7 +99,7 @@ assert.equal(plan.changes.filter((c) => !c.apply).length, 0);
 // Same record already correct: nothing to do, and the parent is told so.
 const same = planUdiseCorrections({ extract: p1, student: { ...student, fullName: "Aarav Sharma", dob: "2019-05-12", gender: "M", aadhaarNumber: GOOD, aadhaarLast4: "0124" }, household: { address: "Vill Ayar, Varanasi", pincode: "221007" } });
 assert.equal(same.changes.length, 0);
-assert.match(renderParentAck({ plan: same, childName: "Aarav Sharma", language: "en" }), /already matched/);
+assert.match(renderParentAck({ plan: same, childName: "Aarav Sharma", language: "en" }), /already matches/);
 
 // A different child's card: NOTHING is applied, the office decides.
 const wrongChild = planUdiseCorrections({ extract: { ...p1, nameOnDoc: "Riya Sharma" }, student, household });
@@ -159,6 +159,55 @@ assert.match(l4.changes.find((c) => c.field === "aadhaarNumber")!.reason, /compl
   assert.equal(here.changes.find((c) => c.field === "permanentAddress"), undefined);
   // No present address at all: the card fills it (unchanged behaviour).
   assert.equal(plan.changes.find((c) => c.field === "address")?.target, "household");
+}
+
+/* ── The parent is told what was wrong and what is fixed (21 Sep 2026) ── */
+{
+  // Vidhi's real card: DOB wrong in our record, card made at the Jaunpur village.
+  const vidhi: UdiseDocExtract = { ...p1, nameOnDoc: "Vidhi Singh", dob: "2014-10-02", gender: "F", address: "C/O: Sujeet Singh, Devarai, Bhainsa, Jaunpur, Uttar Pradesh - 222129", pincode: "222129" };
+  const rec = { ...student, fullName: "VIDHI SINGH", dob: "2010-04-09", gender: "F", aadhaarNumber: GOOD, aadhaarLast4: GOOD.slice(-4), permanentAddress: "Semari, Puari Khurd" };
+  const plan = planUdiseCorrections({ extract: { ...vidhi, aadhaarNumber: GOOD }, student: rec, household: { address: "SEMARI, PUARI KHURD", pincode: "" } });
+  const hi = renderParentAck({ plan, childName: "VIDHI SINGH", language: "hi", portalValidationFailed: true });
+  assert.match(hi, /मिल गया। बहुत धन्यवाद/, "received and thank you");
+  assert.match(hi, /सत्यापन \*विफल\* था/, "why the school asked: UDISE+ rejected it");
+  assert.match(hi, /जन्म तिथि: 09\/04\/2010 → \*02\/10\/2014\*/, "what was wrong → what it is now, in dd/mm/yyyy");
+  assert.match(hi, /स्थायी पते/, "the village address is explained, not listed as an error");
+  assert.match(hi, /दोबारा सत्यापन/, "what happens next");
+  assert.ok(!/कार्यालय जाँच करेगा/.test(hi), "nothing held, so no office check");
+  const en = renderParentAck({ plan, childName: "VIDHI SINGH", language: "en", portalValidationFailed: true });
+  assert.match(en, /What was wrong, and is now corrected:/);
+  assert.match(en, /Date of birth: 09\/04\/2010 → \*02\/10\/2014\*/);
+
+  // A correction that could not be saved is never announced as done.
+  const failed = { ...plan, changes: plan.changes.map((c) => ({ ...c, apply: false })) };
+  const f = renderParentAck({ plan: failed, childName: "VIDHI SINGH", language: "en" });
+  assert.ok(!/now corrected/.test(f));
+  assert.match(f, /The office will check:/);
+
+  // Aadhaar numbers stay masked in a WhatsApp message.
+  const newNo = renderParentAck({ plan: planUdiseCorrections({ extract: p1, student, household }), childName: "Aarav Sharma", language: "en" });
+  assert.ok(!newNo.includes(GOOD), "never the full Aadhaar number");
+  assert.match(newNo, /Added to the record:/);
+
+  // APAAR asked in the same reply — by buttons, never a form to print.
+  const ap = renderParentAck({ plan, childName: "VIDHI SINGH", language: "hi", portalValidationFailed: true, apaarPending: { childNames: ["VIDHI SINGH", "RUDRANSH SINGH"], askFollows: true } });
+  assert.match(ap, /APAAR ID अभी नहीं बनी है/);
+  assert.match(ap, /VIDHI SINGH, RUDRANSH SINGH/);
+  assert.match(ap, /नीचे के संदेश में/);
+  assert.match(ap, /प्रिंट या हस्ताक्षर करने की ज़रूरत नहीं/);
+  assert.ok(!/अनिवार्य|compulsory|mandatory/i.test(ap), "APAAR is voluntary");
+  assert.ok(!/कुछ और नहीं करना है/.test(ap), "not 'nothing more needed' while APAAR is asked");
+  const apEn = renderParentAck({ plan, childName: "VIDHI SINGH", language: "en", apaarPending: { childNames: ["VIDHI SINGH"], askFollows: false } });
+  assert.match(apEn, /VIDHI SINGH does not have an APAAR ID yet/);
+  assert.match(apEn, /Send \*APAAR\*/, "asked this week already: how to get the buttons again");
+  assert.ok(!/APAAR/.test(renderParentAck({ plan, childName: "VIDHI SINGH", language: "en" })), "no pending child, no ask");
+
+  // Consent already given: the card that just arrived makes the ID possible.
+  const ready = renderParentAck({ plan, childName: "VIDHI SINGH", language: "hi", apaarConsented: { ready: ["VIDHI SINGH"], stillNeeded: [] } });
+  assert.match(ready, /सहमति और ज़रूरी दस्तावेज़ दोनों मिल गए/);
+  const waiting = renderParentAck({ plan, childName: "VIDHI SINGH", language: "en", apaarConsented: { ready: [], stillNeeded: [{ name: "AARAV", waitingFor: ["parent_aadhaar"] }] } });
+  assert.match(waiting, /For the APAAR ID we still need/);
+  assert.match(waiting, /parent's own Aadhaar card.*AARAV's APAAR ID/);
 }
 
 /* ── Plan: the father's Aadhaar ───────────────────────────────────── */
