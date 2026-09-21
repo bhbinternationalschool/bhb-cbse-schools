@@ -856,6 +856,19 @@ export async function handleErpStaffCommand(
     return runReportCommand(inbound, text, parsed, session, masters, rbac, todayIso);
   }
   if (command.id === "job_applicants") {
+    // Every teacher holds staff · view, but a CV is a stranger's personal
+    // document: the same people who are alerted to a new application — the
+    // owner, principal, admin and the office — and nobody else.
+    const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
+    const leadership = ["owner", "principal", "admin"].some((c) => roleCodes.includes(c)) || isOfficeLike(roleCodes);
+    if (!leadership) {
+      void trackServerWork(audit(session, command, parsed.fields, text, "denied", { reason: "scope", channel: inbound.channel }));
+      return {
+        handled: true,
+        audience: "erp_command_denied",
+        text: "Job applications and CVs are for the principal and the office.",
+      };
+    }
     return runJobApplicants(inbound, parsed.fields.text || text, session, masters, actor);
   }
   if (command.id === "family_card") {
