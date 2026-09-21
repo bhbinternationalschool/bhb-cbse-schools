@@ -38,6 +38,7 @@ import {
   DOC_TYPE_LABEL,
   documentRouteFor,
   planUdiseCorrections,
+  resolveDocPerson,
   resolveTargetChildren,
   renderUnreadableAck,
   renderUnrecognisedAck,
@@ -423,7 +424,9 @@ export async function captureUdiseDocumentFromWhatsApp(input: {
     return { handled: true, ok: false, reason: `unread_${read.failure}`, studentIds: [], applied: 0, held: 0 };
   }
 
-  const extract = read.result;
+  // Whose card it is, from the printed name — before the child is chosen,
+  // since a parent's Aadhaar belongs on every sibling's record.
+  const extract = resolveDocPerson(read.result, children);
   const route = documentRouteFor(extract.docType);
   const targets = resolveTargetChildren({ children, extract, caption: input.caption || "" });
   const label = DOC_TYPE_LABEL[extract.docType];

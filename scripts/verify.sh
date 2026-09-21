@@ -111,6 +111,7 @@ SELFTESTS=(
   test:exam-eve
   test:tutor-guide
   test:wa-parent-guide
+  test:udise-nudge
   test:fee-adjustments-merge
   test:parent-bot-clarify
   test:office-backlog
