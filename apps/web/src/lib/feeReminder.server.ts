@@ -49,6 +49,12 @@ export type FeeReminderRecipient = {
   payLink?: string;
   /** The family's own WhatsApp template language, "en" or "hi". */
   language?: string;
+  /**
+   * The amount line as the parent reads it — "₹5,500 — AARAV ₹3,500 ·
+   * ANAYA ₹2,000; इसमें बस ₹1,000". Absent on a recipient built before
+   * reminders were per family; then the bare total is sent, as it was.
+   */
+  feeDueText?: string;
 };
 
 export type FeeReminderPlan = {
@@ -108,7 +114,7 @@ export async function sendFeeReminders(opts: {
       guardianName: r.guardianName || "Parent",
       childName: r.studentName,
       classLabel: r.classLabel,
-      feeDue: formatInr(r.amountPaise),
+      feeDue: r.feeDueText || formatInr(r.amountPaise),
       amount: formatInr(r.amountPaise),
       overdueDays: String(Math.max(0, r.overdueDays)),
       // The family's direct payment for what is overdue, not the portal login.
@@ -147,4 +153,91 @@ export async function sendFeeReminders(opts: {
     }
   }
   return out;
+}
+
+/**
+ * One recipient per FAMILY, for the households a command picked out.
+ *
+ * WHY (director, 21 Sep 2026): "give it the same treatment" as the
+ * automation. The command built one recipient per defaulting child in the
+ * chosen class, and every one of them was sent with the same message id —
+ * `feerem_<date>_<household>` — so for two siblings in one class the send
+ * layer's own dedupe kept the first and swallowed the second, and a sibling
+ * in another class was never mentioned at all.
+ *
+ * Now the class decides WHICH families are reminded; the message is about
+ * the whole family: every child owing, in any class, with bus and store,
+ * from the same live builder the automation uses (liveFeeFamilies).
+ */
+export async function familyReminderRecipients(opts: {
+  householdIds: string[];
+  todayIso: string;
+}): Promise<FeeReminderRecipient[]> {
+  const ids = new Set(opts.householdIds.filter(Boolean));
+  if (!ids.size) return [];
+  const { liveFeeFamilies } = await import("@/lib/automationAudience.server");
+  const { loadSis, householdWhatsApp } = await import("@/lib/sis");
+  const { waTemplateLanguageFor } = await import("@/lib/householdPrefs");
+  const families = await liveFeeFamilies("overdue", opts.todayIso, ids);
+  const sis = loadSis();
+  const out: FeeReminderRecipient[] = [];
+  for (const f of families) {
+    const hh = (sis.households ?? []).find((h) => h.id === f.householdId);
+    out.push({
+      householdId: f.householdId,
+      mobile: hh ? householdWhatsApp(hh) || hh.mobile || "" : "",
+      guardianName: hh?.guardianName || "",
+      language: waTemplateLanguageFor(hh ?? {}),
+      studentName: f.values.childName,
+      classLabel: f.values.classLabel,
+      amountPaise: f.totalPaise,
+      overdueDays: f.overdueDays,
+      feeDueText: f.values.feeDue,
+    });
+  }
+  return out;
+}
+
+/**
+ * The recipients a confirm card was built with, brought up to the minute.
+ *
+ * A card can sit — "a card can sit past 8 pm before anyone taps it", as the
+ * quiet-hours check below it says. A family who paid in between is left
+ * out, and everyone else is sent today's children, kinds and total.
+ *
+ * `null` when today's dues cannot be read: the card's figure is not a
+ * stand-in for today's, and the caller sends nothing.
+ */
+export async function refreshFeeReminderRecipients(
+  recipients: FeeReminderRecipient[],
+  todayIso: string,
+): Promise<{ recipients: FeeReminderRecipient[]; settled: number } | null> {
+  let fresh: FeeReminderRecipient[];
+  try {
+    fresh = await familyReminderRecipients({
+      householdIds: recipients.map((r) => r.householdId),
+      todayIso,
+    });
+  } catch (e) {
+    console.warn("[feeReminder] could not read today's dues", (e as Error)?.message);
+    return null;
+  }
+  const byHousehold = new Map(fresh.map((r) => [r.householdId, r]));
+  const out: FeeReminderRecipient[] = [];
+  let settled = 0;
+  // One per family even if the card held a family twice (a card built
+  // before this change listed each child).
+  const seen = new Set<string>();
+  for (const r of recipients) {
+    if (seen.has(r.householdId)) continue;
+    seen.add(r.householdId);
+    const now = byHousehold.get(r.householdId);
+    if (!now || now.amountPaise <= 0) {
+      settled += 1;
+      continue;
+    }
+    // Keep the number the card chose (and the office saw); take today's dues.
+    out.push({ ...now, mobile: r.mobile || now.mobile, payLink: r.payLink });
+  }
+  return { recipients: out, settled };
 }
