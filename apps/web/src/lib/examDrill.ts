@@ -456,7 +456,7 @@ export function drillScore(state: DrillState): { right: number; asked: number } 
 
 // 19 Sep 2026: script no longer counts against an answer, and a child
 // who asks instead of answering is taught rather than marked wrong.
-export const DRILL_PROMPT_VERSION = "exam-drill/2026-09-19";
+export const DRILL_PROMPT_VERSION = "exam-drill/2026-09-21";
 
 export const DRILL_QUESTION_SYSTEM = [
   "You set ONE revision question for a school child the evening before their exam. You are given the class, the subject, the chapters the class has actually covered, and what those chapters teach.",
@@ -492,9 +492,41 @@ export const DRILL_CHECK_SYSTEM = [
   "whatWentWrong (empty when right): ONE sentence naming the actual mistake, in plain words a child understands. Never 'incorrect' — say what they did.",
   "howToDoIt (empty when right): ONE or two short sentences showing the method, with the step they missed. Not the answer to a new question; the way to get this one.",
   "praise (right or close only): four or five words, specific to what they did well. No exclamation storms.",
-  "Write in the same language the child answered in, or the question's language when their answer is too short to tell.",
+  // 20 Sep 2026: a Hindi family was told, inside a Hindi frame, "You chose
+  // 'won', which is the action verb, instead of the describing word." See
+  // `familyLanguageRule` for why the old rule produced that.
+  "MARK IN THE FAMILY'S LANGUAGE — you are told which, below. It is the language of the phone this is read on, and it does NOT change with the subject or with what the child happened to type. An English paper is still explained to a Hindi family in Hindi.",
+  "The one exception: words quoted FROM the question or FROM the child's answer stay exactly as they are — 'tall' is the adjective whichever language you explain that in. Quote them, do not translate them.",
   'Respond with JSON only: {"verdict":"right","whatWentWrong":"","howToDoIt":"","praise":""}',
 ].join("\n");
+
+/**
+ * The line that tells the marker whose language to write in.
+ *
+ * WHY (director, 21 Sep 2026): the rule used to be "write in the same
+ * language the child answered in, or the question's language when their
+ * answer is too short to tell". For an English paper both halves point at
+ * English — the question is in English and a one-word answer like "Won" is
+ * too short to say anything — so a Hindi family got English teaching inside
+ * Hindi frames:
+ *
+ *     ❌ यह सही नहीं है — देखिए क्यों:
+ *     You chose 'won', which is the action verb, instead of the describing
+ *     word.
+ *
+ * and, two messages later in the same drill, Hindi — because that time the
+ * child had typed Hindi. The parent reading it never knew which they would
+ * get.
+ *
+ * The question itself is NOT covered by this and must not be: an English
+ * paper is revised in English, a Sanskrit paper in Sanskrit. It is the
+ * teaching around the question that belongs to whoever is holding the phone.
+ */
+export function familyLanguageRule(hindi: boolean): string {
+  return hindi
+    ? "The family's language is HINDI. Write whatWentWrong, howToDoIt and praise in Hindi (Devanagari), in plain words a child understands."
+    : "The family's language is ENGLISH. Write whatWentWrong, howToDoIt and praise in simple English.";
+}
 
 export type DrillQuestion = { question: string; skill: string; chapter: number };
 
@@ -560,10 +592,13 @@ export function buildCheckPrompt(input: {
   answer: string;
   /** The child asked for help rather than attempting it (classifyDrillReply). */
   askedForHelp?: boolean;
+  /** The family's own language — whose phone this is read on. */
+  hindi?: boolean;
 }): string {
   return [
     `Class: ${input.className}`,
     `Subject: ${input.subjectLabel}`,
+    familyLanguageRule(input.hindi !== false),
     `Question: ${input.question}`,
     `What it tests: ${input.skill}`,
     "",

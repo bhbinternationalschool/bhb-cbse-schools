@@ -9,6 +9,8 @@ import {
   MAX_QUESTIONS,
   STREAK_TO_FINISH,
   buildCheckPrompt,
+  DRILL_CHECK_SYSTEM,
+  familyLanguageRule,
   buildQuestionPrompt,
   drillScore,
   newDrill,
@@ -176,6 +178,43 @@ if (afterTwo.kind === "ask_question") {
 }
 
 assert.match(buildCheckPrompt({ className: "5", subjectLabel: "Maths", question: "Q", skill: "k", answer: "60" }), /The child answered:\n60/);
+
+/* ── The marking is written for whoever is holding the phone ─────── */
+{
+  // 20 Sep 2026: a Hindi family was told, inside a Hindi frame, "You chose
+  // 'won', which is the action verb, instead of the describing word." The
+  // old rule followed the child's answer or the question, and an English
+  // paper answered "Won" points at English twice over.
+  const english = { className: "6", subjectLabel: "अंग्रेज़ी", question: "Which word is the adjective: The tall boy won the race?", skill: "adjectives", answer: "Won" };
+
+  const forHindiFamily = buildCheckPrompt({ ...english, hindi: true });
+  assert.match(forHindiFamily, /family's language is HINDI/i, forHindiFamily);
+  assert.ok(!/family's language is ENGLISH/i.test(forHindiFamily));
+
+  const forEnglishFamily = buildCheckPrompt({ ...english, hindi: false });
+  assert.match(forEnglishFamily, /family's language is ENGLISH/i);
+
+  // The subject is still told to the marker — it is the question's language,
+  // and the question is NOT translated. Only the teaching follows the family.
+  assert.match(forHindiFamily, /Subject: अंग्रेज़ी/);
+  assert.match(forHindiFamily, /Which word is the adjective/, "the question goes as it was asked");
+
+  // A caller that forgets the flag gets the school's own default, which is
+  // Hindi — never English by accident ([[erp-parent-hindi-default]]).
+  assert.match(buildCheckPrompt(english), /family's language is HINDI/i);
+
+  // And the system prompt carries the rule the per-request line leans on,
+  // including the one exception that keeps 'tall' as 'tall'.
+  assert.match(DRILL_CHECK_SYSTEM, /MARK IN THE FAMILY'S LANGUAGE/);
+  assert.match(DRILL_CHECK_SYSTEM, /quoted FROM the question or FROM the child's answer stay exactly as they are/);
+  assert.ok(
+    !/same language the child answered in/i.test(DRILL_CHECK_SYSTEM),
+    "the rule that produced the mixed reply is gone, not merely outvoted",
+  );
+
+  assert.equal(familyLanguageRule(true).includes("Devanagari"), true);
+  assert.equal(familyLanguageRule(false).includes("simple English"), true);
+}
 
 const wrong = parseDrillCheck(JSON.stringify({
   verdict: "wrong", whatWentWrong: "You added instead of multiplying.",

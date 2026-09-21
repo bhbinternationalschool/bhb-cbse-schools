@@ -449,6 +449,10 @@ export async function continueExamDrill(input: {
         skill: last.skill,
         answer: input.text.slice(0, 600),
         askedForHelp,
+        // Whose phone this is read on. The frames around the marking have
+        // always been in this language; until 21 Sep 2026 the marking
+        // itself followed the subject instead, so the two disagreed.
+        hindi: input.hindi,
       });
       if (!checked.ok) {
         // Say nothing rather than guess a verdict about a child's work.
