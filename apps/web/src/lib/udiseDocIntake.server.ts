@@ -317,6 +317,54 @@ async function fileDocumentInDrive(input: { base64: string; mimeType: string; st
  * This family's receipts, flattened for matching, and what they still owe.
  * Read-only; the fee book is never touched from here.
  */
+/**
+ * The household's store bills as receipts: one per payment on a sale, with
+ * its UTR, the paper receipt number and the items. Unreadable is empty —
+ * the fee receipts still answer, and the office alert says no match.
+ */
+async function storeReceiptsFor(studentIds: string[]): Promise<ReceiptForMatch[]> {
+  const ids = [...new Set(studentIds.filter(Boolean))];
+  if (!ids.length) return [];
+  try {
+    const ctx = await getServerTenantContext();
+    if (!ctx) return [];
+    const { data: sales, error } = await ctx.sb
+      .from("inv_sales")
+      .select("id, sale_no, sale_date, buyer_name, manual_receipt_no, total_paise, voided_at")
+      .eq("tenant_id", ctx.tenantId)
+      .in("student_id", ids)
+      .is("voided_at", null);
+    if (error || !sales?.length) return [];
+    const saleIds = sales.map((s) => s.id as string);
+    const [{ data: pays }, { data: lines }] = await Promise.all([
+      ctx.sb.from("inv_sale_payments").select("sale_id, receipt_no, paid_on, amount_paise, mode, reference, external_ref, reversed_at").eq("tenant_id", ctx.tenantId).in("sale_id", saleIds).is("reversed_at", null),
+      ctx.sb.from("inv_sale_lines").select("sale_id, item_name, qty, line_total_paise").eq("tenant_id", ctx.tenantId).in("sale_id", saleIds),
+    ]);
+    const bySale = new Map(sales.map((s) => [s.id as string, s]));
+    return ((pays ?? []) as Record<string, unknown>[]).map((p) => {
+      const sale = bySale.get(String(p.sale_id))!;
+      const items = ((lines ?? []) as Record<string, unknown>[]).filter((l) => l.sale_id === p.sale_id);
+      return {
+        kind: "store" as const,
+        receiptNo: String(sale.sale_no || ""),
+        collectionDate: String(p.paid_on || sale.sale_date || ""),
+        totalPaise: Number(p.amount_paise) || 0,
+        refs: [String(p.reference || ""), String(p.external_ref || "")].filter(Boolean),
+        schoolReceiptNos: [String(sale.manual_receipt_no || ""), String(p.receipt_no || "")].filter(Boolean),
+        modes: p.mode ? [String(p.mode)] : [],
+        lines: items.map((l) => ({
+          studentName: String(sale.buyer_name || ""),
+          label: `${String(l.item_name || "")}${Number(l.qty) > 1 ? ` × ${Number(l.qty)}` : ""} (store)`,
+          amountPaise: Number(l.line_total_paise) || 0,
+        })),
+      };
+    });
+  } catch (e) {
+    console.warn("[udise-intake] store lookup failed", (e as Error)?.message);
+    return [];
+  }
+}
+
 async function householdReceiptsAndDues(householdId: string): Promise<{ receipts: ReceiptForMatch[]; openDuesPaise: number }> {
   try {
     const { ensureFeesHydratedServer } = await import("@/lib/feesPersistence.server");
@@ -332,13 +380,27 @@ async function householdReceiptsAndDues(householdId: string): Promise<{ receipts
         receiptNo: v.receiptNo,
         collectionDate: v.collectionDate,
         totalPaise: v.totalPaise,
-        refs: [
-          ...(v.tenders ?? []).map((t) => t.ref).filter(Boolean),
-          v.transactionId,
-          v.receiptNo,
-          v.schoolReceiptNo,
-        ].filter(Boolean) as string[],
+        refs: [...(v.tenders ?? []).map((t) => t.ref).filter(Boolean), v.transactionId].filter(Boolean) as string[],
+        // Old ERP / paper-book numbers: "1373,1374" is two receipts.
+        schoolReceiptNos: String(v.schoolReceiptNo || "")
+          .split(/[,;/]+/)
+          .map((x) => x.trim())
+          .filter(Boolean),
+        modes: [...new Set((v.tenders ?? []).filter((t) => t.amountPaise > 0 || t.ref).map((t) => t.mode))],
+        // Every child on the receipt — how one family payment was split.
+        lines: (v.lines ?? []).map((l) => ({
+          studentName: l.studentName,
+          label: l.label,
+          amountPaise: l.amountPaise,
+          concessionPaise: l.concessionPaise,
+        })),
       }));
+    // The store too: one UPI payment often pays the fee AND the books, and
+    // the store bill carries the same UTR (21 Sep 2026: ₹10,285 = fee
+    // RCV-00430 ₹7,000 + store SL/2026-27/0179 ₹3,285).
+    // Every row of every child, all years: a sale is booked against whichever
+    // year's row the counter had open.
+    receipts.push(...(await storeReceiptsFor(loadSis().students.filter((s) => s.householdId === householdId).map((s) => s.id))));
     const dues = openFeeDues(
       computeHouseholdDues(householdId, loadSis(), masters, fees, { includeFuture: false, academicYearCode: ay }).flatMap((r) => r.dues),
     ).filter((d) => d.balancePaise > 0);
@@ -492,6 +554,7 @@ export async function captureUdiseDocumentFromWhatsApp(input: {
       amountPaise: payment.amountPaise,
       dateIso: payment.dateIso,
       reference: payment.reference,
+      receiptNo: payment.receiptNo,
       receipts,
     });
     const childName = first?.fullName || hh.guardianName || "your child";
