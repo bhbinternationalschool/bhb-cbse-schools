@@ -1426,9 +1426,29 @@ export async function handleErpStaffCommand(
       })
       .filter((x) => x.mobile);
     const store2 = await readStore();
+    // This desk's own ledger only knew what THIS desk had sent. The
+    // automation rule sent every fee reminder the school has ever sent — 1,126
+    // by 21 Sep 2026 — and none of them counted here. The send log is the
+    // one record both paths write to, so the week is read from it as well.
+    const { feeLedgerSinceIso, feeRemindersSince } = await import("@/lib/feeReminderLedger.server");
+    const ledger = await feeRemindersSince(feeLedgerSinceIso(new Date()));
+    if (!ledger) {
+      return {
+        handled: true,
+        audience: "erp_command_error",
+        text: "Could not check which families were reminded this week, so nothing was prepared. Try again in a few minutes.",
+      };
+    }
+    const lastRemindedByHousehold: Record<string, string> = { ...(store2.feeRemindedOn ?? {}) };
+    for (const [householdId, at] of ledger.byHousehold) {
+      const istDay = new Date(Date.parse(at) + 330 * 60_000).toISOString().slice(0, 10);
+      if (!lastRemindedByHousehold[householdId] || istDay > lastRemindedByHousehold[householdId]!) {
+        lastRemindedByHousehold[householdId] = istDay;
+      }
+    }
     const plan = await planFeeReminders({
       recipients,
-      lastRemindedByHousehold: store2.feeRemindedOn ?? {},
+      lastRemindedByHousehold,
       todayIso,
     });
     if (!plan.send.length) {

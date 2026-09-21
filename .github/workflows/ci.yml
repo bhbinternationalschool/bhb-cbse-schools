@@ -265,6 +265,7 @@ jobs:
           npm run test:exam-eve
           npm run test:tutor-guide
           npm run test:wa-parent-guide
+          npm run test:automation-send-rules
           npm run test:fleet-keep-rule
           npm run test:server-work-tracker
           npm run test:concession-review-ai
