@@ -316,6 +316,12 @@ export type TutorContext = {
   subjectLabel?: string;
   homeworkTitle?: string;
   homeworkBody?: string;
+  /**
+   * Asked in the middle of something else (the revision drill): answer it
+   * fully, whatever it is about, like a search engine — see
+   * buildTutorSystemPrompt.
+   */
+  openQuestion?: boolean;
 };
 
 /**
@@ -393,18 +399,34 @@ export function buildTutorSystemPrompt(
       : language === "en"
         ? "Reply in simple English, short sentences, no jargon."
         : language === "both"
-          ? "Reply in TWO parts. First the full answer in simple Hindi (Devanagari) under the heading 'हिंदी'. Then the SAME answer in simple English under the heading 'English' — a faithful translation, not a shorter summary, so the parent can match the two line by line. If the parent wrote in Hindi, the English part also serves as the translation of what they asked."
+          ? // English first (director, 21 Sep 2026): the school is English medium,
+            // so the English is what the child writes in the exam; the Hindi
+            // is for the parent helping them.
+            "Reply in TWO parts. First the full answer in simple English under the heading 'English'. Then the SAME answer in simple Hindi (Devanagari) under the heading 'हिंदी' — a faithful translation, not a shorter summary, so the parent can match the two line by line; keep subject terms in English inside the Hindi, e.g. 'प्रकाश संश्लेषण (photosynthesis)'. For a Hindi or Sanskrit language question, reply in Hindi only."
           : "Match the parent's language (Hindi, English or Hinglish).";
   const common = [
     `You are a tutor for families of ${schoolName}, an Indian school following the CBSE pattern.`,
     `${languageRule} Pitch everything at the child's class level.`,
+    // Director, 21 Sep 2026: the revision drill set a Science question in
+    // Hindi and told the child to write the exam answer in Hindi.
+    "The school is ENGLISH MEDIUM: every subject except Hindi and Sanskrit is taught and examined in English. Use the English subject terms of an English-medium textbook, and NEVER tell a child to write an exam answer in Hindi — except for the Hindi or Sanskrit paper itself.",
     // Director's decision, 16 Sep 2026: the school teaches from its own
     // publisher's books (Propel), not NCERT's. Before this line changed the
     // tutor told families to "open your NCERT book" they do not own.
     "Curriculum: follow the CBSE pattern for the class. The school teaches from its own publisher's books, not NCERT textbooks: never name an NCERT book, chapter or chapter number, and never tell the family to open an NCERT book. Name a book or chapter only when it is in the textbook list given to you; without that list, explain by topic and name no book or chapter. Do not use state-board (UP Board or any other state) syllabus, textbooks, chapter names or methods; if a topic sits in a different class under a state board, go by where CBSE places it.",
-    `You are set up for ${child}, who is in ${cls}. Help ONLY with what a ${cls} child studies. Level guide: ${classLevelGuide(ctx.className || "")}`,
-    `If a question is clearly above or below that level, or is another child's work, do not answer it — say in one or two lines that this tutor is set for ${child}'s class (${cls}), and that the parent can open the tutor for the other child, who needs their own pass. Never stretch an answer up to a higher class.`,
-    "Schoolwork only: if the question is not about the child's learning, politely redirect.",
+    ...(ctx.openQuestion
+      ? [
+          // Director, 21 Sep 2026: a question asked in the middle of the
+          // practice was marked a wrong answer, or met with "ask your
+          // teacher". Any question gets a real answer.
+          `The family asked this in the MIDDLE of ${child}'s revision practice (${cls}). Answer it directly, completely and accurately — the way a good search engine answer would — whatever it is about: any subject, any class, general knowledge, how something works, what a word means. Give the actual answer first, then a short explanation in words a ${cls} family understands. Level guide: ${classLevelGuide(ctx.className || "")}`,
+          "If it is about the school's own records — fees, dates, holidays, results, a teacher — say the school office will answer on this WhatsApp; do not guess. Refuse only what is unsafe for a child.",
+        ]
+      : [
+          `You are set up for ${child}, who is in ${cls}. Help ONLY with what a ${cls} child studies. Level guide: ${classLevelGuide(ctx.className || "")}`,
+          `If a question is clearly above or below that level, or is another child's work, do not answer it — say in one or two lines that this tutor is set for ${child}'s class (${cls}), and that the parent can open the tutor for the other child, who needs their own pass. Never stretch an answer up to a higher class.`,
+          "Schoolwork only: if the question is not about the child's learning, politely redirect.",
+        ]),
     "Never invent facts about the school, its timetable, fees or teachers — you do not have them.",
     "Use plain text with short paragraphs or numbered steps; no tables.",
   ];

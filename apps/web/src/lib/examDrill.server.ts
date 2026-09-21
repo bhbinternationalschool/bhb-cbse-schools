@@ -34,6 +34,7 @@ import {
   renderScopeQuestion,
   renderScopeUnclear,
   type DrillChapter,
+  type DrillAsked,
   type DrillState,
   classifyDrillReply,
   readScopeAnswer,
@@ -41,6 +42,11 @@ import {
   renderAside,
   renderAsideFailed,
   drillIsForAPastPaper,
+  paperLanguageFor,
+  renderChapterVideos,
+  renderTopicVideo,
+  subjectNameForModel,
+  type DrillVideo,
 } from "@/lib/examDrill";
 import { isPracticeTap } from "@/lib/examEve";
 import { istTodayIso } from "@/lib/examEve.server";
@@ -236,6 +242,111 @@ function childClassName(student: SisStudent, masters: Awaited<ReturnType<typeof 
  * Begin a drill for one child and one paper, and ask the first thing — which
  * is never a question, always the scope.
  */
+/**
+ * A video for one topic of this paper — English-medium for every paper but
+ * Hindi/Sanskrit. Bounded: the reply to a child waits for it at most a few
+ * seconds, and a slow or failed search simply sends no video.
+ */
+async function drillVideo(opts: {
+  topic: string;
+  subjectLabel: string;
+  className: string;
+  householdId: string;
+  timeoutMs?: number;
+}): Promise<{ video: DrillVideo | null; searchUrl: string }> {
+  try {
+    const { searchTutorVideos } = await import("@/lib/tutorVideos.server");
+    const lang = paperLanguageFor(opts.subjectLabel) === "english" ? "en" : "hi";
+    const search = searchTutorVideos({
+      topic: `${subjectNameForModel(opts.subjectLabel)}: ${opts.topic}`,
+      classLabel: opts.className,
+      language: lang,
+      formats: ["youtube", "mp4"],
+      requester: `hh:${opts.householdId}`,
+    });
+    const r = await Promise.race([
+      search,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), opts.timeoutMs ?? 6000)),
+    ]);
+    if (!r) return { video: null, searchUrl: "" };
+    const first = r.items[0];
+    return { video: first ? { title: first.title, url: first.url } : null, searchUrl: r.searchUrl };
+  } catch (e) {
+    console.warn("[examDrill] video search failed", (e as Error)?.message);
+    return { video: null, searchUrl: "" };
+  }
+}
+
+/** One video per chapter of the portion, searched together. */
+async function chapterVideos(opts: {
+  chapters: DrillChapter[];
+  scope: number;
+  subjectLabel: string;
+  className: string;
+  householdId: string;
+  hindi: boolean;
+}): Promise<string> {
+  const inScope = opts.chapters.filter((c) => c.position <= opts.scope).slice(0, 6);
+  if (!inScope.length) return "";
+  const rows = await Promise.all(
+    inScope.map(async (c) => ({
+      chapter: c.name,
+      ...(await drillVideo({ topic: c.name, subjectLabel: opts.subjectLabel, className: opts.className, householdId: opts.householdId, timeoutMs: 9000 })),
+    })),
+  );
+  return renderChapterVideos(rows, opts.hindi, rows.find((r) => r.searchUrl)?.searchUrl ?? "");
+}
+
+/**
+ * Anything asked in the middle of the practice — a question of their own, a
+ * request, general knowledge — answered in full, then the practice question
+ * put back. Never marked (director, 21 Sep 2026: "treat it as an AI search
+ * engine").
+ */
+async function answerAside(opts: {
+  text: string;
+  state: DrillState;
+  pendingQ: DrillAsked;
+  child: SisStudent;
+  className: string;
+  mobile10: string;
+  drillId: string;
+  hindi: boolean;
+}): Promise<DrillTurn> {
+  const used = opts.state.asides ?? 0;
+  const back = renderQuestion({ number: opts.state.asked.length, question: opts.pendingQ.question, questionHi: opts.pendingQ.questionHi, hindi: opts.hindi });
+  if (used >= MAX_ASIDES) {
+    return {
+      handled: true,
+      replyText: [
+        opts.hindi ? "आज के लिए बहुत सवाल हो गए 🙏 पेपर कल है — अभ्यास पूरा कर लेते हैं:" : "That's plenty of questions for tonight 🙏 The paper is tomorrow — let's finish the practice:",
+        "",
+        back,
+      ].join("\n"),
+    };
+  }
+  const { replyHomeworkTutor } = await import("@/lib/homeworkTutor.server");
+  const answered = await replyHomeworkTutor({
+    message: opts.text.slice(0, 600),
+    mode: "teach",
+    language: paperLanguageFor(opts.state.subjectLabel) === "english" ? "both" : "hi",
+    context: {
+      childName: opts.child.fullName.split(/\s+/)[0] || opts.child.fullName,
+      className: opts.className,
+      subjectLabel: opts.state.subjectLabel,
+      openQuestion: true,
+    },
+  });
+  const state = { ...opts.state, asides: used + 1 };
+  await saveDrill(opts.drillId, state, opts.mobile10);
+  return {
+    handled: true,
+    replyText: answered.ok
+      ? renderAside({ answer: answered.text, question: opts.pendingQ.question, questionHi: opts.pendingQ.questionHi, number: state.asked.length, hindi: opts.hindi })
+      : [renderAsideFailed(opts.hindi), "", back].join("\n"),
+  };
+}
+
 export async function startExamDrill(input: {
   household: Household;
   studentId: string;
@@ -322,6 +433,9 @@ export async function continueExamDrill(input: {
     let state = open.state;
     const parts: string[] = [];
     const said = classifyDrillReply(input.text);
+    // A message to the school ("Hello sir online registration") is not an
+    // answer: the ordinary bot takes it, and the question waits.
+    if (said === "school") return nothing;
 
     // 0. "bye", "बस", "so raha hoon" — the child has finished for tonight.
     //    Ending is a decision they are allowed to make; the old loop marked
@@ -329,9 +443,13 @@ export async function continueExamDrill(input: {
     if (said === "stop" && state.phase !== "need_scope") {
       state = { ...state, phase: "done", endedAt: new Date().toISOString() };
       await saveDrill(open.id, state, input.mobile10);
+      const stopChapters = state.scope ? await chaptersFor(className, state.subjectLabel) : [];
+      const videos = stopChapters.length
+        ? await chapterVideos({ chapters: stopChapters, scope: state.scope, subjectLabel: state.subjectLabel, className, householdId: input.household.id, hindi: input.hindi })
+        : "";
       return {
         handled: true,
-        replyText: renderFinish({ state, reason: "stopped", hindi: input.hindi }),
+        replyText: [renderFinish({ state, reason: "stopped", hindi: input.hindi }), videos].filter(Boolean).join("\n\n"),
       };
     }
 
@@ -360,6 +478,7 @@ export async function continueExamDrill(input: {
           replyText: renderQuestion({
             number: state.asked.length,
             question: pendingQ.question,
+            questionHi: pendingQ.questionHi,
             hindi: input.hindi,
           }),
         };
@@ -377,56 +496,7 @@ export async function continueExamDrill(input: {
       pendingQ &&
       !pendingQ.verdict
     ) {
-      const usedAsides = state.asides ?? 0;
-      if (usedAsides >= MAX_ASIDES) {
-        // Answered plenty already: the paper is tomorrow and sleep matters.
-        return {
-          handled: true,
-          replyText: [
-            input.hindi
-              ? "यह सवाल कल शिक्षक से पूछिए 🙏 अभी पेपर की तैयारी पूरी कर लेते हैं:"
-              : "Ask your teacher that one tomorrow 🙏 Let's finish the practice first:",
-            "",
-            renderQuestion({
-              number: state.asked.length,
-              question: pendingQ.question,
-              hindi: input.hindi,
-            }),
-          ].join("\n"),
-        };
-      }
-      const { replyHomeworkTutor } = await import("@/lib/homeworkTutor.server");
-      const answered = await replyHomeworkTutor({
-        message: input.text.slice(0, 600),
-        mode: "hint",
-        language: input.hindi ? "hi" : "en",
-        context: {
-          childName: child.fullName.split(/\s+/)[0] || child.fullName,
-          className,
-          subjectLabel: state.subjectLabel,
-        },
-      });
-      state = { ...state, asides: usedAsides + 1 };
-      await saveDrill(open.id, state, input.mobile10);
-      return {
-        handled: true,
-        replyText: answered.ok
-          ? renderAside({
-              answer: answered.text,
-              question: pendingQ.question,
-              number: state.asked.length,
-              hindi: input.hindi,
-            })
-          : [
-              renderAsideFailed(input.hindi),
-              "",
-              renderQuestion({
-                number: state.asked.length,
-                question: pendingQ.question,
-                hindi: input.hindi,
-              }),
-            ].join("\n"),
-      };
+      return await answerAside({ text: input.text, state, pendingQ, child, className, mobile10: input.mobile10, drillId: open.id, hindi: input.hindi });
     }
 
     // 1. The scope, if we are still waiting for it.
@@ -464,6 +534,13 @@ export async function continueExamDrill(input: {
             : "I could not check that just now 🙏 Please send your answer again in a moment.",
         };
       }
+      // Not an attempt at the question at all — a question of their own, a
+      // request, anything else (director, 21 Sep 2026). Answer it properly
+      // and put the practice question back; nothing is marked.
+      if (checked.draft.notAnAnswer && !askedForHelp) {
+        if (classifyDrillReply(input.text) === "school") return nothing;
+        return await answerAside({ text: input.text, state, pendingQ: last, child, className, mobile10: input.mobile10, drillId: open.id, hindi: input.hindi });
+      }
       // A child who asked for help has not got it wrong, whatever the model
       // returns: 'close' holds the streak where it is, so asking costs them
       // nothing but does not count as having done it either.
@@ -473,6 +550,18 @@ export async function continueExamDrill(input: {
         check: checked.draft,
       });
       parts.push(renderCheck({ check: checked.draft, hindi: input.hindi, askedForHelp }));
+      // Wrong, close or asked for help: a video on the idea they missed.
+      if (verdict !== "right") {
+        const chapterName = chapters.find((c) => c.position === last.chapterPosition)?.name ?? "";
+        const v = await drillVideo({
+          topic: [last.skill, chapterName].filter(Boolean).join(" — "),
+          subjectLabel: state.subjectLabel,
+          className,
+          householdId: input.household.id,
+        });
+        const line = renderTopicVideo(v.video, input.hindi);
+        if (line) parts.push(line);
+      }
     }
 
     // 3. What next — the only place this is decided.
@@ -481,6 +570,8 @@ export async function continueExamDrill(input: {
       state = { ...state, phase: "done", endedAt: new Date().toISOString() };
       await saveDrill(open.id, state, input.mobile10);
       parts.push(renderFinish({ state, reason: step.reason, hindi: input.hindi }));
+      const videos = await chapterVideos({ chapters, scope: state.scope, subjectLabel: state.subjectLabel, className, householdId: input.household.id, hindi: input.hindi });
+      if (videos) parts.push(videos);
       return { handled: true, replyText: parts.join("\n\n") };
     }
     if (step.kind === "ask_scope") {
@@ -520,10 +611,18 @@ export async function continueExamDrill(input: {
 
     state = {
       ...state,
-      asked: [...state.asked, { question: q.draft.question, skill: q.draft.skill, chapterPosition: q.draft.chapter }],
+      asked: [
+        ...state.asked,
+        {
+          question: q.draft.question,
+          ...(q.draft.questionHi ? { questionHi: q.draft.questionHi } : {}),
+          skill: q.draft.skill,
+          chapterPosition: q.draft.chapter,
+        },
+      ],
     };
     await saveDrill(open.id, state, input.mobile10);
-    parts.push(renderQuestion({ number: state.asked.length, question: q.draft.question, hindi: input.hindi }));
+    parts.push(renderQuestion({ number: state.asked.length, question: q.draft.question, questionHi: q.draft.questionHi, hindi: input.hindi }));
     return { handled: true, replyText: parts.join("\n\n") };
   } catch (e) {
     console.error("[examDrill] turn failed", (e as Error)?.message);

@@ -217,3 +217,15 @@ const dead = { ...live, endsAt: "2026-09-04T18:29:59.999Z" };
 
 
 console.log("tutorPlans.selftest: ok");
+
+/* ── A question asked mid-practice is answered like a search engine (21 Sep 2026) ── */
+{
+  const open = buildTutorSystemPrompt("teach", { childName: "Arnav", className: "VII", openQuestion: true }, "BHB", "both");
+  if (!/MIDDLE of Arnav's revision practice/.test(open) || /Schoolwork only/.test(open) || /Help ONLY with/.test(open)) {
+    throw new Error("openQuestion must lift the schoolwork-only and class-only limits");
+  }
+  const normal = buildTutorSystemPrompt("teach", { childName: "Arnav", className: "VII" }, "BHB", "both");
+  if (!/Schoolwork only/.test(normal)) throw new Error("the ordinary tutor keeps its limits");
+  console.log("tutorPlans.selftest: open question ok");
+}
+

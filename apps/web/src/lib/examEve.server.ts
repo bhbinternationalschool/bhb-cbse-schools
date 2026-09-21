@@ -418,6 +418,15 @@ export async function handleExamEveInbound(opts: {
   const family = eveFamilyFor(opts.household, setup.academicYearCode);
   const hindi = family.hindi;
 
+  // No child of this session on this number is not "all papers are done".
+  // 21 Sep 2026: a father whose number was on an old household was told
+  // exactly that the night before his son's Maths paper.
+  if (!family.children.length) {
+    return hindi
+      ? "🙏 इस WhatsApp नंबर से इस सत्र (2026-27) का कोई बच्चा जुड़ा नहीं मिला, इसलिए अभ्यास शुरू नहीं हो सका। कृपया स्कूल ऑफिस को अपना सही नंबर बताइए — ऑफिस इसे ठीक कर देगा।\n\nNo child of this session is linked to this WhatsApp number, so the practice could not start. Please tell the school office — they will correct it."
+      : "🙏 No child of this session (2026-27) is linked to this WhatsApp number, so the practice could not start. Please tell the school office your correct number — they will fix it.";
+  }
+
   if (timetable) {
     return timetableReply(family, setup.slots, setup.subjectNames, today);
   }

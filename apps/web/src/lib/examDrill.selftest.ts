@@ -10,7 +10,13 @@ import {
   STREAK_TO_FINISH,
   buildCheckPrompt,
   DRILL_CHECK_SYSTEM,
-  familyLanguageRule,
+  DRILL_QUESTION_SYSTEM,
+  paperLanguageFor,
+  renderChapterVideos,
+  renderAside,
+  renderAsideFailed,
+  renderTopicVideo,
+  subjectNameForModel,
   buildQuestionPrompt,
   drillScore,
   newDrill,
@@ -29,7 +35,6 @@ import {
   classifyDrillReply,
   looksLikeOwnQuestion,
   readScopeAnswer,
-  renderAside,
   drillIsForAPastPaper,
 } from "./examDrill";
 import { isPracticeTap, PRACTICE_BUTTON_EN, PRACTICE_BUTTON_HI } from "./examEve";
@@ -179,41 +184,46 @@ if (afterTwo.kind === "ask_question") {
 
 assert.match(buildCheckPrompt({ className: "5", subjectLabel: "Maths", question: "Q", skill: "k", answer: "60" }), /The child answered:\n60/);
 
-/* ── The marking is written for whoever is holding the phone ─────── */
+/* ── English medium: the paper decides the language (21 Sep 2026) ── */
 {
-  // 20 Sep 2026: a Hindi family was told, inside a Hindi frame, "You chose
-  // 'won', which is the action verb, instead of the describing word." The
-  // old rule followed the child's answer or the question, and an English
-  // paper answered "Won" points at English twice over.
+  // The drill was handed "विज्ञान" and a Hindi family, set a Science question
+  // in Hindi and told the child to write the exam answer in Hindi.
+  for (const label of ["विज्ञान", "Science", "गणित", "Mathematics", "सामाजिक विज्ञान", "पर्यावरण अध्ययन", "अंग्रेज़ी", "English", "G.K."]) {
+    assert.equal(paperLanguageFor(label), "english", `${label} is written in English`);
+  }
+  assert.equal(paperLanguageFor("हिंदी"), "hindi");
+  assert.equal(paperLanguageFor("Hindi"), "hindi");
+  assert.equal(paperLanguageFor("संस्कृत"), "sanskrit");
+  assert.equal(subjectNameForModel("विज्ञान"), "Science", "the model is told the English name, never the Hindi display one");
+
+  const sci = buildQuestionPrompt({ className: "VII", subjectLabel: "विज्ञान", chapters, scope: 6, retrySkill: null, avoid: [], number: 1 });
+  assert.match(sci, /Subject: Science/);
+  assert.match(sci, /Paper language: ENGLISH/);
+  assert.match(sci, /NEVER tell the child to write anything in Hindi/);
+  assert.ok(!/Subject: विज्ञान/.test(sci));
+  const hin = buildQuestionPrompt({ className: "VII", subjectLabel: "हिंदी", chapters, scope: 6, retrySkill: null, avoid: [], number: 1 });
+  assert.match(hin, /Paper language: HINDI/);
+
+  // Marking follows the paper, not the phone: an English paper is marked in
+  // English with Hindi alongside, for a Hindi family too.
   const english = { className: "6", subjectLabel: "अंग्रेज़ी", question: "Which word is the adjective: The tall boy won the race?", skill: "adjectives", answer: "Won" };
-
-  const forHindiFamily = buildCheckPrompt({ ...english, hindi: true });
-  assert.match(forHindiFamily, /family's language is HINDI/i, forHindiFamily);
-  assert.ok(!/family's language is ENGLISH/i.test(forHindiFamily));
-
-  const forEnglishFamily = buildCheckPrompt({ ...english, hindi: false });
-  assert.match(forEnglishFamily, /family's language is ENGLISH/i);
-
-  // The subject is still told to the marker — it is the question's language,
-  // and the question is NOT translated. Only the teaching follows the family.
-  assert.match(forHindiFamily, /Subject: अंग्रेज़ी/);
-  assert.match(forHindiFamily, /Which word is the adjective/, "the question goes as it was asked");
-
-  // A caller that forgets the flag gets the school's own default, which is
-  // Hindi — never English by accident ([[erp-parent-hindi-default]]).
-  assert.match(buildCheckPrompt(english), /family's language is HINDI/i);
-
-  // And the system prompt carries the rule the per-request line leans on,
-  // including the one exception that keeps 'tall' as 'tall'.
-  assert.match(DRILL_CHECK_SYSTEM, /MARK IN THE FAMILY'S LANGUAGE/);
+  assert.match(buildCheckPrompt({ ...english, hindi: true }), /Paper language: ENGLISH/);
+  assert.match(buildCheckPrompt({ ...english, subjectLabel: "हिंदी", hindi: false }), /Paper language: HINDI/);
+  assert.match(DRILL_CHECK_SYSTEM, /NEVER tell the child to write in Hindi/);
   assert.match(DRILL_CHECK_SYSTEM, /quoted FROM the question or FROM the child's answer stay exactly as they are/);
-  assert.ok(
-    !/same language the child answered in/i.test(DRILL_CHECK_SYSTEM),
-    "the rule that produced the mixed reply is gone, not merely outvoted",
-  );
+  assert.ok(!/asking them to write it in Hindi in the exam/.test(DRILL_CHECK_SYSTEM), "the line behind 'write in Hindi' is gone");
+  assert.ok(!/An English paper is still explained to a Hindi family in Hindi/.test(DRILL_CHECK_SYSTEM));
+  assert.match(DRILL_QUESTION_SYSTEM, /ENGLISH MEDIUM/);
 
-  assert.equal(familyLanguageRule(true).includes("Devanagari"), true);
-  assert.equal(familyLanguageRule(false).includes("simple English"), true);
+  // Both languages reach the child, English first.
+  const q = parseDrillQuestion(JSON.stringify({ question: "What colour does blue litmus turn in an acid?", questionHi: "अम्ल में नीला लिटमस किस रंग का हो जाता है?", skill: "litmus test", chapter: 2 }), 6)!;
+  const shownQ = renderQuestion({ number: 1, question: q.question, questionHi: q.questionHi, hindi: true });
+  assert.ok(shownQ.indexOf("What colour") < shownQ.indexOf("अम्ल में"), shownQ);
+  assert.match(shownQ, /Question 1 \/ प्रश्न 1/);
+  const c = parseDrillCheck(JSON.stringify({ verdict: "wrong", whatWentWrong: "Blue litmus turns red in an acid, not blue.", howToDoIt: "Acids turn blue litmus red.", praise: "", whatWentWrongHi: "अम्ल में नीला लिटमस लाल हो जाता है।", howToDoItHi: "अम्ल नीले लिटमस को लाल कर देता है।", praiseHi: "" }))!;
+  const shownC = renderCheck({ check: c, hindi: true });
+  assert.match(shownC, /Blue litmus turns red[\s\S]*अम्ल में नीला/);
+  assert.match(shownC, /Acids turn blue litmus red\.\nअम्ल नीले/);
 }
 
 const wrong = parseDrillCheck(JSON.stringify({
@@ -236,6 +246,52 @@ const shown = renderCheck({ check: wrong!, hindi: false });
 assert.match(shown, /You added instead of multiplying/);
 assert.match(shown, /💡 One pen is ₹12/);
 assert.doesNotMatch(shown, /^❌ Not quite$/m, "never just 'wrong'");
+
+/* ── 21 Sep 2026: what tonight's families actually wrote ─────────── */
+{
+  assert.equal(classifyDrillReply("Nhi malum"), "help", "'don't know' is a request for teaching, not 'method right, one slip'");
+  assert.equal(classifyDrillReply("pta nhi"), "help");
+  assert.equal(classifyDrillReply("Hello sir online registration"), "school", "a message to the school is never marked");
+  assert.equal(classifyDrillReply("फीस कब जमा करनी है"), "school");
+  for (const answer of ["means of transport", "by bus", "Vah", "Kitab", "leaves", "प्रवेश"]) {
+    assert.notEqual(classifyDrillReply(answer), "school", `an answer, not school business: ${answer}`);
+  }
+  assert.equal(subjectNameForModel("सामाजिक विज्ञान"), "Social Science", "SST is not the Science book");
+  assert.equal(paperLanguageFor("सामाजिक विज्ञान"), "english");
+}
+
+/* ── Anything asked mid-question is answered, never marked (21 Sep) ─ */
+{
+  const off = parseDrillCheck(JSON.stringify({ notAnAnswer: true, verdict: "", whatWentWrong: "", howToDoIt: "", praise: "" }));
+  assert.ok(off && off.notAnAnswer, "the marker's 'not an answer' survives parsing, though every field is empty");
+  assert.match(DRILL_CHECK_SYSTEM, /ATTEMPT at this question at all/);
+  const a = renderAside({ answer: "The capital of India is New Delhi.", question: "What is 3 × 4?", questionHi: "3 × 4 कितना होता है?", number: 2, hindi: true });
+  assert.ok(a.startsWith("The capital of India"), "the answer comes first");
+  assert.match(a, /now back to the practice \/ अब वापस अभ्यास पर/);
+  assert.match(a, /3 × 4 कितना होता है/, "and the pending question is put back, in both languages");
+  assert.ok(!/शिक्षक से|ask your teacher/i.test(renderAsideFailed(true) + renderAsideFailed(false)), "never 'ask your teacher tomorrow'");
+}
+
+/* ── Videos: the missed idea, and every chapter of the portion ─────── */
+{
+  assert.equal(renderTopicVideo(null, true), "", "no video found: no made-up link");
+  const one = renderTopicVideo({ title: "Acids and bases", url: "https://diksha.gov.in/play/content/do_1" }, true);
+  assert.match(one, /📺 .*Acids and bases/);
+  assert.match(one, /https:\/\/diksha\.gov\.in\/play\/content\/do_1/);
+  const all = renderChapterVideos(
+    [
+      { chapter: "Nutrition in Plants", video: { title: "a", url: "https://youtu.be/x1" } },
+      { chapter: "Acids, Bases and Salts", video: null },
+      { chapter: "Physical and Chemical Changes", video: { title: "c", url: "https://youtu.be/x3" } },
+    ],
+    false,
+    "https://www.youtube.com/results?search_query=x",
+  );
+  assert.match(all, /Revise every chapter/);
+  assert.match(all, /• Nutrition in Plants: https:\/\/youtu\.be\/x1/);
+  assert.ok(!all.includes("Acids, Bases"), "a chapter with no video is not listed with a blank link");
+  assert.match(renderChapterVideos([{ chapter: "x", video: null }], false, "https://s"), /Chapter videos: https:\/\/s/, "nothing found: the search page instead");
+}
 
 /* ── A session must read back as a lesson, not a scoreboard ───────── */
 //

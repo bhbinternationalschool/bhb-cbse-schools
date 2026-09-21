@@ -104,7 +104,9 @@ export function subjectKeyFor(label: string | undefined): SubjectKey | null {
   // "Computer Science" is not the science book.
   if (/general knowledge|\bg\.?\s?k\b|सामान्य ज्ञान/.test(s)) return "gk";
   if (/computer|\bict\b|information technology|coding|artificial intelligence|\bai\b|कंप्यूटर|कम्प्यूटर/.test(s)) return "computer";
-  if (/social|history|geograph|politic|civics|\bsst\b|समाज|इतिहास|भूगोल/.test(s)) return "social";
+  // "सामाजिक विज्ञान" before science: it contains "विज्ञान", and on 21 Sep
+  // 2026 a Social Science drill listed the Science book's chapters.
+  if (/social|history|geograph|politic|civics|\bsst\b|समाज|सामाजिक|इतिहास|भूगोल/.test(s)) return "social";
   if (/environment|world around|\bevs\b|पर्यावरण|आस-पास|अद्भुत संसार/.test(s)) return "evs";
   if (/physical|sport|yoga|खेल|शारीरिक/.test(s)) return "pe";
   if (/vocation|skill|work education|kaushal|कौशल/.test(s)) return "vocational";
