@@ -188,6 +188,9 @@ export async function releaseSendClaim(
   if (!claimKey) return { ok: false, error: "Empty claim key" };
   const ctx = await getServerTenantContext();
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
+  // ratchet-allow: unguarded_replace — releases ONE claim by its key; the
+  // insert later in this file (claimInboundOnce) claims a different key.
+  // Nothing is deleted in order to be re-inserted.
   const { error } = await ctx.sb
     .from("wa_send_claims")
     .delete()
@@ -204,3 +207,35 @@ export async function releaseSendClaim(
 export function automationApprovalClaimKey(approvalId: string): string {
   return `automation-approval:${approvalId}`;
 }
+
+/**
+ * Handle one inbound WhatsApp message once, whatever Meta re-delivers.
+ *
+ * WHY (21 Sep 2026): Meta re-sends a webhook it did not get a prompt 200
+ * for. Reading a payment screenshot takes 19-25 s, and the response is held
+ * for that work (lib/serverWork), so Meta delivered the same screenshot
+ * three times — and the director and principal each got the same "Payment
+ * proof" alert three times (19 Sep: twice). Every message is claimed by its
+ * WhatsApp id before anything acts on it; a second delivery is dropped.
+ *
+ * Unlike claimSendOnce there is no staleness: a message id is handled once,
+ * ever. `true` = first delivery, go ahead. A database that cannot be reached
+ * says `true` too — a message answered twice is better than one never
+ * answered.
+ */
+export async function claimInboundOnce(waMessageId: string | undefined): Promise<boolean> {
+  const id = String(waMessageId || "").trim();
+  if (!id) return true;
+  const ctx = await getServerTenantContext();
+  if (!ctx) return true;
+  const { error } = await ctx.sb.from("wa_send_claims").insert({
+    tenant_id: ctx.tenantId,
+    claim_key: `inbound:${id}`,
+    claimed_at: new Date().toISOString(),
+    claimed_by: "wa webhook",
+    note: "inbound message",
+  });
+  if (!error) return true;
+  return String((error as { code?: string }).code || "") !== "23505";
+}
+
