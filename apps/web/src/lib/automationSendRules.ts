@@ -93,6 +93,30 @@ export function quietHoursRefusal(
   return null;
 }
 
+/**
+ * When a card's CONTENTS were last built — which is not always when the
+ * card was raised.
+ *
+ * "Run evaluation now" on a rule that already has an open card refreshes
+ * that card in place: new families, new amounts, the same card and the same
+ * `createdAt`. Only its run's `startedAt` moves. Timing staleness from
+ * `createdAt` alone would therefore refuse a card the office had refreshed
+ * a minute ago — the one move that fixes a stale card would be the thing
+ * that blocks it.
+ */
+export function cardBuiltAt(
+  item: Pick<AutomationApprovalItem, "id" | "createdAt">,
+  runs: { approvalId?: string; startedAt?: string }[],
+): string {
+  let best = Date.parse(item.createdAt || "");
+  for (const r of runs) {
+    if (r.approvalId !== item.id) continue;
+    const t = Date.parse(r.startedAt || "");
+    if (Number.isFinite(t) && (!Number.isFinite(best) || t > best)) best = t;
+  }
+  return Number.isFinite(best) ? new Date(best).toISOString() : "";
+}
+
 export type ApproveRefusal =
   /** The card's contents are out of date: close it, a fresh one comes next. */
   | { kind: "stale"; message: string }
@@ -124,7 +148,7 @@ export function approveRefusal(input: {
       : "an unknown time";
     return {
       kind: "stale",
-      message: `Not sent — this card was raised ${when}, more than ${APPROVAL_STALE_AFTER_MS / 3_600_000} hours ago, and its amounts may be out of date. Run the evaluation again for today's list.`,
+      message: `Not sent — this card's list was made ${when}, more than ${APPROVAL_STALE_AFTER_MS / 3_600_000} hours ago, and its amounts may be out of date. Run the evaluation again for today's list.`,
     };
   }
   const quiet = quietHoursRefusal(input.rule, input.now);

@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 
 import {
   approveRefusal,
+  cardBuiltAt,
   mobileKey,
   quietHoursRefusal,
   remindedTooRecently,
@@ -62,6 +63,31 @@ const ist = (s: string) => new Date(`${s}+05:30`);
 
   // An unreadable creation date is not a fresh card.
   assert.equal(approveRefusal({ rule: fees, item: { createdAt: "" }, now: ist("2026-09-21T10:00:00") })?.kind, "stale");
+}
+
+/* ── A refreshed card is as new as its refresh ───────────────────── */
+{
+  // "Run evaluation now" refreshes an open card in place: same card, same
+  // createdAt, new amounts — only the run's startedAt moves. Timing from
+  // createdAt would refuse the very card the office just brought up to date.
+  const card = { id: "appr_1", createdAt: "2026-09-14T02:30:06.401Z" };
+  const runs = [
+    { approvalId: "appr_other", startedAt: "2026-09-21T05:00:00.000Z" },
+    { approvalId: "appr_1", startedAt: "2026-09-21T04:59:00.000Z" },
+  ];
+  const built = cardBuiltAt(card, runs);
+  assert.equal(built, "2026-09-21T04:59:00.000Z", "the refresh, not the first raising — and only its own run");
+  assert.equal(
+    approveRefusal({ rule: fees, item: { createdAt: built }, now: new Date("2026-09-21T05:05:00.000Z") }),
+    null,
+    "refreshed at 10:29, approved at 10:35: it goes",
+  );
+  // Never refreshed: the card's own time stands.
+  assert.equal(cardBuiltAt(card, []), card.createdAt);
+  // A run with an unreadable time cannot make a card younger.
+  assert.equal(cardBuiltAt(card, [{ approvalId: "appr_1", startedAt: "junk" }]), card.createdAt);
+  // Nothing readable at all → "" → stale, never fresh.
+  assert.equal(cardBuiltAt({ id: "x", createdAt: "" }, []), "");
 }
 
 /* ── A fresh card in the daytime goes ────────────────────────────── */

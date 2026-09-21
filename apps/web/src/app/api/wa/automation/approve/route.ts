@@ -18,7 +18,7 @@ import {
   markApprovalDispatched,
   pendingApprovals,
 } from "@/lib/automation";
-import { approveRefusal } from "@/lib/automationSendRules";
+import { approveRefusal, cardBuiltAt } from "@/lib/automationSendRules";
 import { dispatchAutomationApproval } from "@/lib/automationDispatch.server";
 import {
   loadAutomationFromDb,
@@ -85,7 +85,12 @@ export async function POST(req: Request) {
   */
   if (decision === "approved") {
     const rule = before.rules.find((r) => r.id === item.ruleId);
-    const refusal = approveRefusal({ rule, item, now: new Date() });
+    // Timed from the last refresh, not first raising — see cardBuiltAt.
+    const refusal = approveRefusal({
+      rule,
+      item: { createdAt: cardBuiltAt(item, before.runs) },
+      now: new Date(),
+    });
     if (refusal?.kind === "stale") {
       const closed = markApprovalDispatched(before, approvalId, false, refusal.message, {
         sent: 0,
