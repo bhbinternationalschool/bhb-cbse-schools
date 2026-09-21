@@ -76,8 +76,19 @@ export async function handleAadhaarCertificateRequest(input: {
   const { buildAadhaarCertificate } = await import("@/lib/aadhaarCertificate.server");
   const { relayEscalation } = await import("@/lib/waRelay.server");
   const today = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
+  const { recordAadhaarCertificateIssue } = await import("@/lib/certificateRegister.server");
   for (const k of targets) {
     const cert = await buildAadhaarCertificate(k.id, today);
+    // On the school's numbered certificate register, like one issued from
+    // the Certificates screen. A register that cannot be written does not
+    // stop the request — the office is told there is no number yet.
+    const reg = cert.ok
+      ? await recordAadhaarCertificateIssue({
+          student: k,
+          issuedOn: today,
+          requestedBy: `${hh.guardianName || input.profileName || "parent"} (${input.mobile10})`,
+        }).catch((e) => ({ ok: false as const, error: (e as Error)?.message || "failed" }))
+      : { ok: false as const, error: "not built" };
     const gaps = cert.ok
       ? [
           ...cert.blank.filter((b) => !/House|Street|Landmark/.test(b)).map((b) => `${b} (blank — write by pen)`),
@@ -88,6 +99,9 @@ export async function handleAadhaarCertificateRequest(input: {
       fromWaId: input.fromWaId,
       text: [
         `${REASON} requested for ${k.fullName} (${classLabel(masters, k.classId, k.sectionId).replace(" · ", " ")}).`,
+        reg.ok
+          ? `Register no. ${reg.certNo} (Certificates → Recent issues).`
+          : `⚠️ Not on the certificate register (${reg.error}) — issue it from Certificates → Aadhaar certificate.`,
         `Parent's message: "${input.text.slice(0, 200)}"`,
         "To do: print the attached form on plain A4 · paste the child's recent colour photo and cross-sign + cross-stamp it · principal signs and stamps · parent/child signs in the box.",
         gaps.length ? `Check: ${gaps.join("; ")}.` : "",

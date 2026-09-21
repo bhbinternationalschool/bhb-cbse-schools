@@ -26,6 +26,7 @@ import {
 import { renderAadhaarCertificatePdf } from "./aadhaarCertificatePdf";
 import { CERTIFICATE_KINDS, isUidaiFormKind, seriesCodeForCertificateKind, uidaiFormUrl } from "./certificates";
 import { holdCodeForCertificate } from "./holds";
+import { mergeCertificateIssues, nextCertNoFor } from "./certificatesMerge";
 
 console.log("aadhaarCertificate.selftest.ts");
 
@@ -114,6 +115,36 @@ console.log("aadhaarCertificate.selftest.ts");
   assert.equal(uidaiFormUrl("stu_1"), "/api/v1/udise/aadhaar-certificate?student=stu_1");
   assert.equal(holdCodeForCertificate("aadhaar_uidai"), null, "a fee hold never blocks a child's Aadhaar");
   assert.equal(holdCodeForCertificate("bonafide"), "HOLD_CERT", "…while the others keep theirs");
+}
+
+/* ── One register, written from two places ───────────────────────── */
+{
+  const row = (id: string, createdAt: string, voidedAt: string | null = null) => ({ id, createdAt, voidedAt });
+  // An office PC opened the Certificates screen this morning; a parent's
+  // WhatsApp request added AAD-2026-0001 at noon; the PC saves a bonafide.
+  const server = [row("wa_1", "2026-09-21T06:30:00Z"), row("bnf_old", "2026-08-11T09:40:00Z")];
+  const stalePc = [row("bnf_new", "2026-09-21T09:00:00Z"), row("bnf_old", "2026-08-11T09:40:00Z")];
+  assert.deepEqual(mergeCertificateIssues(server, stalePc).map((r) => r.id), ["bnf_new", "wa_1", "bnf_old"], "the WhatsApp certificate survives the stale save");
+  // A void stands, whichever copy is older.
+  const voided = [row("x", "2026-09-01T00:00:00Z", "2026-09-10T00:00:00Z")];
+  const stale = [row("x", "2026-09-01T00:00:00Z", null)];
+  assert.equal(mergeCertificateIssues(voided, stale)[0]!.voidedAt, "2026-09-10T00:00:00Z", "a stale copy does not un-void");
+  assert.equal(mergeCertificateIssues(stale, voided)[0]!.voidedAt, "2026-09-10T00:00:00Z", "a void from the screen applies");
+  assert.equal(mergeCertificateIssues(server, []).length, 2, "an empty save erases nothing");
+
+  // Numbering: the screen's own fallback series, never a number in use.
+  const issues = [
+    { kind: "aadhaar_uidai" as const, academicYearCode: "2026-27", certNo: "AAD-2026-0001", voidedAt: null },
+    { kind: "bonafide" as const, academicYearCode: "2026-27", certNo: "BNF-2026-0001", voidedAt: null },
+  ];
+  assert.equal(nextCertNoFor("aadhaar_uidai", "2026-27", []), "AAD-2026-0001");
+  assert.equal(nextCertNoFor("aadhaar_uidai", "2026-27", issues), "AAD-2026-0002");
+  // A voided certificate keeps its number: the next one skips it.
+  assert.equal(
+    nextCertNoFor("aadhaar_uidai", "2026-27", [{ ...issues[0]!, voidedAt: "2026-09-02" }]),
+    "AAD-2026-0002",
+    "a voided number is never reused",
+  );
 }
 
 console.log("  ok");
