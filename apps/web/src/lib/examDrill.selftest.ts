@@ -9,6 +9,8 @@ import {
   MAX_QUESTIONS,
   STREAK_TO_FINISH,
   buildCheckPrompt,
+  DRILL_CHECK_SYSTEM,
+  familyLanguageRule,
   buildQuestionPrompt,
   drillScore,
   newDrill,
@@ -28,7 +30,9 @@ import {
   looksLikeOwnQuestion,
   readScopeAnswer,
   renderAside,
+  drillIsForAPastPaper,
 } from "./examDrill";
+import { isPracticeTap, PRACTICE_BUTTON_EN, PRACTICE_BUTTON_HI } from "./examEve";
 
 console.log("examDrill.selftest.ts");
 
@@ -174,6 +178,43 @@ if (afterTwo.kind === "ask_question") {
 }
 
 assert.match(buildCheckPrompt({ className: "5", subjectLabel: "Maths", question: "Q", skill: "k", answer: "60" }), /The child answered:\n60/);
+
+/* ── The marking is written for whoever is holding the phone ─────── */
+{
+  // 20 Sep 2026: a Hindi family was told, inside a Hindi frame, "You chose
+  // 'won', which is the action verb, instead of the describing word." The
+  // old rule followed the child's answer or the question, and an English
+  // paper answered "Won" points at English twice over.
+  const english = { className: "6", subjectLabel: "अंग्रेज़ी", question: "Which word is the adjective: The tall boy won the race?", skill: "adjectives", answer: "Won" };
+
+  const forHindiFamily = buildCheckPrompt({ ...english, hindi: true });
+  assert.match(forHindiFamily, /family's language is HINDI/i, forHindiFamily);
+  assert.ok(!/family's language is ENGLISH/i.test(forHindiFamily));
+
+  const forEnglishFamily = buildCheckPrompt({ ...english, hindi: false });
+  assert.match(forEnglishFamily, /family's language is ENGLISH/i);
+
+  // The subject is still told to the marker — it is the question's language,
+  // and the question is NOT translated. Only the teaching follows the family.
+  assert.match(forHindiFamily, /Subject: अंग्रेज़ी/);
+  assert.match(forHindiFamily, /Which word is the adjective/, "the question goes as it was asked");
+
+  // A caller that forgets the flag gets the school's own default, which is
+  // Hindi — never English by accident ([[erp-parent-hindi-default]]).
+  assert.match(buildCheckPrompt(english), /family's language is HINDI/i);
+
+  // And the system prompt carries the rule the per-request line leans on,
+  // including the one exception that keeps 'tall' as 'tall'.
+  assert.match(DRILL_CHECK_SYSTEM, /MARK IN THE FAMILY'S LANGUAGE/);
+  assert.match(DRILL_CHECK_SYSTEM, /quoted FROM the question or FROM the child's answer stay exactly as they are/);
+  assert.ok(
+    !/same language the child answered in/i.test(DRILL_CHECK_SYSTEM),
+    "the rule that produced the mixed reply is gone, not merely outvoted",
+  );
+
+  assert.equal(familyLanguageRule(true).includes("Devanagari"), true);
+  assert.equal(familyLanguageRule(false).includes("simple English"), true);
+}
 
 const wrong = parseDrillCheck(JSON.stringify({
   verdict: "wrong", whatWentWrong: "You added instead of multiplying.",
@@ -381,5 +422,54 @@ assert.equal(bare.asked[0]!.answer, undefined);
   assert.ok(!stopped.includes("में से"), "no score when nothing was marked");
 }
 
+/* ── A drill dies with its paper ─────────────────────────────────── */
+{
+  // The 20 Sep 2026 night, exactly: a session for the 19 Sep paper, a
+  // parent tapping practice for the 21 Sep one.
+  assert.equal(drillIsForAPastPaper("2026-09-19", "2026-09-21"), true);
+  // The day of the paper it is still alive — the exam is in the morning and
+  // the drill ran the evening before.
+  assert.equal(drillIsForAPastPaper("2026-09-21", "2026-09-21"), false);
+  assert.equal(drillIsForAPastPaper("2026-09-22", "2026-09-21"), false);
+  // An ISO timestamp, not just a date, still reads as its day.
+  assert.equal(drillIsForAPastPaper("2026-09-19T00:00:00Z", "2026-09-21"), true);
+  // A date nobody can read says nothing about the paper, so it says nothing.
+  assert.equal(drillIsForAPastPaper("", "2026-09-21"), false);
+  assert.equal(drillIsForAPastPaper("19/09/2026", "2026-09-21"), false);
+  assert.equal(drillIsForAPastPaper("2026-09-19", ""), false);
+}
+
+/* ── The practice button is never an answer ──────────────────────── */
+{
+  // `continueExamDrill` hands these straight back so exam-eve can pick the
+  // paper that is actually next. If this ever stops being true, the button
+  // is graded against whatever question the drill was holding — which is
+  // what six families got on 20 Sep 2026.
+  for (const tap of [PRACTICE_BUTTON_EN, PRACTICE_BUTTON_HI, "practice", "अभ्यास"]) {
+    assert.ok(isPracticeTap(tap), `the button must be recognised: ${tap}`);
+  }
+  // And the words of the button are not something a child would ever write
+  // as an answer, so nothing is lost by letting them through.
+  assert.equal(classifyDrillReply(PRACTICE_BUTTON_HI), "answer");
+}
+
+/* ── Politeness and "not now" are not wrong answers ──────────────── */
+{
+  // 20 Sep 2026: "बेटा कोचिंग गया है आएगा तो करेगा" was marked ❌ and the
+  // father was taught the preposition his son had got wrong.
+  assert.equal(classifyDrillReply("बेटा कोचिंग गया है आएगा तो करेगा"), "stop");
+  assert.equal(classifyDrillReply("abhi nahi, baad me"), "stop");
+  assert.equal(classifyDrillReply("बाहर गया है"), "stop");
+
+  for (const ack of ["Ok", "ok.", "ठीक है", "thik hai", "धन्यवाद", "🙏", "Thanks"]) {
+    assert.equal(classifyDrillReply(ack), "chatter", `acknowledgement: ${ack}`);
+  }
+
+  // The narrowness is the point: these are attempts, and marking one as
+  // small talk would lose a child's real answer.
+  for (const real of ["haan", "yes", "ji", "two", "दो", "night", "tall"]) {
+    assert.equal(classifyDrillReply(real), "answer", `a real attempt: ${real}`);
+  }
+}
 
 console.log("ok");

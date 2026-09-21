@@ -62,6 +62,21 @@ async function readSessions(): Promise<Slice> {
   return s?.version === 1 && Array.isArray(s.sessions) ? s : EMPTY;
 }
 
+/**
+ * Every number the tutor is mid-conversation with — for the chat-close
+ * sweep, alongside mobilesAwaitingDrillReply. See tutorSessionsInProgress.
+ *
+ * No separate "unreadable" answer: sessions come from the same bot bundle
+ * as the parent threads the sweep walks, so a bundle that cannot be read
+ * leaves the sweep with no threads to close at all. It cannot fail towards
+ * thanking a child mid-practice.
+ */
+export async function mobilesInTutorSession(now: Date = new Date()): Promise<Set<string>> {
+  const { tutorSessionsInProgress } = await import("@/lib/waTutorBotEngine");
+  const { sessions } = await readSessions();
+  return tutorSessionsInProgress(sessions, now);
+}
+
 async function writeSession(next: WaTutorState | null, mobile10: string) {
   const cur = await readSessions();
   const others = cur.sessions.filter((s) => s.mobile10 !== mobile10);

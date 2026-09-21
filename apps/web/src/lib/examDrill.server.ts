@@ -40,7 +40,10 @@ import {
   MAX_ASIDES,
   renderAside,
   renderAsideFailed,
+  drillIsForAPastPaper,
 } from "@/lib/examDrill";
+import { isPracticeTap } from "@/lib/examEve";
+import { istTodayIso } from "@/lib/examEve.server";
 
 export function examDrillEnabled(): boolean {
   return /^(1|true|yes|on)$/i.test(process.env.EXAM_DRILL_ENABLED || "");
@@ -80,16 +83,25 @@ function rowToState(r: Row): DrillState {
   };
 }
 
-/** The drill still running on this number, if any. */
+/**
+ * The drill still running on this number, if any.
+ *
+ * "Still running" means two things, and until 21 Sep 2026 it only checked
+ * one of them: not finished, AND about a paper that has not been written
+ * yet. See `drillIsForAPastPaper` for the thirty-one families that proved
+ * the second half was needed.
+ */
 export async function openDrillFor(mobile10: string): Promise<{ id: string; state: DrillState } | null> {
   const ctx = await getServerTenantContext();
   if (!ctx) return null;
+  const today = istTodayIso();
   const { data, error } = await ctx.sb
     .from("exam_drill_sessions")
     .select("*")
     .eq("tenant_id", ctx.tenantId)
     .eq("mobile10", mobile10)
     .neq("phase", "done")
+    .gte("paper_date", today)
     .order("updated_at", { ascending: false })
     .limit(1);
   if (error) {
@@ -97,7 +109,31 @@ export async function openDrillFor(mobile10: string): Promise<{ id: string; stat
     return null;
   }
   const row = (data ?? [])[0] as Row | undefined;
-  return row ? { id: row.id, state: rowToState(row) } : null;
+  if (!row) return null;
+  // The query above should have excluded it; this is the belt to that
+  // braces, because the cost of being wrong is a child marked wrong.
+  if (drillIsForAPastPaper(row.paper_date, today)) return null;
+  return { id: row.id, state: rowToState(row) };
+}
+
+/**
+ * Close every open drill on this number except `keepId`.
+ *
+ * A drill's id is `drl_<student>_<paperDate>`, so each paper gets a row of
+ * its own and the previous one was simply abandoned where it stood. Those
+ * abandoned rows are what `openDrillFor` kept finding.
+ */
+async function closeOtherDrills(mobile10: string, keepId: string): Promise<void> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return;
+  const { error } = await ctx.sb
+    .from("exam_drill_sessions")
+    .update({ phase: "done", ended_at: new Date().toISOString() })
+    .eq("tenant_id", ctx.tenantId)
+    .eq("mobile10", mobile10)
+    .neq("phase", "done")
+    .neq("id", keepId);
+  if (error) console.warn("[examDrill] could not close the earlier drills", error.message);
 }
 
 /**
@@ -126,6 +162,8 @@ export async function mobilesAwaitingDrillReply(
     .select("mobile10")
     .eq("tenant_id", ctx.tenantId)
     .neq("phase", "done")
+    // A drill for a paper already written is not waiting on anybody either.
+    .gte("paper_date", istTodayIso())
     .gte("updated_at", since);
   if (error) {
     console.warn("[examDrill] could not read open drills", error.message);
@@ -231,6 +269,10 @@ export async function startExamDrill(input: {
   });
   const id = `drl_${child.id}_${input.paperDate}`.replace(/[^A-Za-z0-9_-]/g, "");
   await saveDrill(id, state, input.mobile10);
+  // Tonight's paper is the only one being revised. Anything still open on
+  // this number is last paper's, and leaving it open is what let it come
+  // back to haunt the family two days later.
+  await closeOtherDrills(input.mobile10, id);
 
   return {
     handled: true,
@@ -257,6 +299,13 @@ export async function continueExamDrill(input: {
 }): Promise<DrillTurn> {
   const nothing: DrillTurn = { handled: false, replyText: "" };
   if (!examDrillEnabled()) return nothing;
+  // The practice button is never an answer. It is a parent starting again,
+  // so it belongs to exam-eve, which knows which paper is next — and this
+  // handler runs first. On 20 Sep 2026 thirteen of the forty-six taps were
+  // eaten here: six graded ❌ against a question from a paper already
+  // written, seven answered with "send the chapter number" for a syllabus
+  // nobody had asked about.
+  if (isPracticeTap(input.text)) return nothing;
   try {
     const open = await openDrillFor(input.mobile10);
     if (!open) return nothing;
@@ -286,11 +335,42 @@ export async function continueExamDrill(input: {
       };
     }
 
+    const pendingQ = state.asked[state.asked.length - 1];
+
+    // 0a. "ok", "ठीक है", a folded-hands emoji. Politeness, not an attempt.
+    //     Put the question back rather than marking it wrong — and ask the
+    //     scope again in full, which is more use than "that was not a
+    //     chapter number".
+    if (said === "chatter") {
+      if (state.phase === "need_scope") {
+        return {
+          handled: true,
+          replyText: renderScopeQuestion({
+            childName: child.fullName.split(/\s+/)[0] || child.fullName,
+            subjectLabel: state.subjectLabel,
+            paperLabel: state.paperLabel,
+            chapters,
+            hindi: input.hindi,
+          }),
+        };
+      }
+      if (pendingQ && !pendingQ.verdict) {
+        return {
+          handled: true,
+          replyText: renderQuestion({
+            number: state.asked.length,
+            question: pendingQ.question,
+            hindi: input.hindi,
+          }),
+        };
+      }
+      return nothing;
+    }
+
     // 0b. A question of their own, about their own subject. The drill
     //     answers it from their own textbook and then puts its question
     //     back — until 19 Sep 2026 this was marked wrong and the child was
     //     moved on, which is the opposite of teaching.
-    const pendingQ = state.asked[state.asked.length - 1];
     if (
       said === "question" &&
       state.phase === "asking" &&
@@ -369,6 +449,10 @@ export async function continueExamDrill(input: {
         skill: last.skill,
         answer: input.text.slice(0, 600),
         askedForHelp,
+        // Whose phone this is read on. The frames around the marking have
+        // always been in this language; until 21 Sep 2026 the marking
+        // itself followed the subject instead, so the two disagreed.
+        hindi: input.hindi,
       });
       if (!checked.ok) {
         // Say nothing rather than guess a verdict about a child's work.

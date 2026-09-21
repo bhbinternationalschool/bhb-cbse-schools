@@ -18,6 +18,7 @@ import {
   isSisAcknowledgement,
   isSisGreeting,
   looksLikeAutoReply,
+  nearestSisKeyword,
 } from "./sisParentBotEngine";
 import { parseWaTutorCommand } from "./waTutorBotEngine";
 
@@ -192,5 +193,34 @@ assert.equal(clear.escalate, false, "the record agrees with the parent — nobod
 const none = composeSisPaidStatement({ hindi: false, guardianName: "X", academicYear: "2026-27", receipts: [], openDues: [{ studentName: "A", label: "Tuition Fee · April", amountPaise: 100, dueOn: "2026-04-10" }] });
 assert.match(none.text, /No receipt for this session/);
 assert.equal(none.escalate, true);
+
+/* ── A keyword one slip away is still that keyword ───────────────── */
+
+// 20 Sep 2026: "Recipets" got "I don't have that information 🙏" and was
+// queued for the office, which had to answer by hand what the bot knows.
+for (const typo of ["Recipets", "reciepts", "recipts", "receipt", "RECIEPTS"]) {
+  assert.equal(detectSisBotIntent(typo), "receipts", `near miss: "${typo}"`);
+}
+assert.equal(detectSisBotIntent("compliant"), "complaint", "the commonest one of all");
+assert.equal(detectSisBotIntent("tutar"), "tutor");
+assert.equal(detectSisBotIntent("humen"), "human");
+
+// The Hindi menu says "हाल की रसीदें", so the Hindi word has to work.
+for (const hi of ["रसीद", "रसीदें", "raseed"]) {
+  assert.equal(detectSisBotIntent(hi), "receipts", `Hindi receipt: "${hi}"`);
+}
+
+// And what must NOT be guessed at. Each of these is one edit from a menu
+// keyword; answering the wrong menu item confidently is worse than passing
+// it to the model, which can ask.
+for (const t of ["day", "does", "into", "kids?"]) {
+  assert.notEqual(detectSisBotIntent(t), "pay", `not PAY: "${t}"`);
+}
+assert.equal(nearestSisKeyword("day"), null, "three-letter keywords are never guessed");
+assert.equal(nearestSisKeyword("does"), null, "four-letter keywords are never guessed");
+assert.equal(nearestSisKeyword("bhej dijiye receipt"), null, "a sentence is not a keyword");
+assert.equal(nearestSisKeyword("hai"), null, "too short to be anything");
+// Two edits from an eight-letter word is not a near miss worth acting on.
+assert.equal(nearestSisKeyword("request"), null);
 
 console.log("  ok");

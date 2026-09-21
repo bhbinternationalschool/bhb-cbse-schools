@@ -1515,6 +1515,24 @@ const masters = {
     title: "V A", templateLabel: "t", send: [], tooSoon: [], optedOut: 0, formatInr: inr,
   });
   assert.ok(none.includes("Nobody to remind right now."), none);
+
+  // 21 Sep 2026: families whose every number is dead used to vanish from
+  // the card. They are named now, with what to do, so the office can call.
+  const unreachable = formatFeeReminderCard({
+    title: "V A", templateLabel: "t", send: [], tooSoon: [], optedOut: 0,
+    unreachable: ["NUTAN MISHRA", "AARAV YADAV"], formatInr: inr,
+  });
+  assert.ok(unreachable.includes("*Will NOT get this — no number on WhatsApp:* NUTAN MISHRA, AARAV YADAV"), unreachable);
+  assert.ok(unreachable.includes("Students → Family"), "and where to fix it");
+
+  const many = formatFeeReminderCard({
+    title: "V A", templateLabel: "t", send: [], tooSoon: [], optedOut: 0,
+    unreachable: Array.from({ length: 11 }, (_, i) => `Child ${i + 1}`), formatInr: inr,
+  });
+  assert.ok(many.includes("+3 more"), "a long list is cut, and says so");
+
+  // Absent or empty: no line at all, and older callers still compile.
+  assert.ok(!none.includes("Will NOT get this"), none);
 }
 
 // ─── fee reminder guards: quiet hours and the weekly cap ───────────────

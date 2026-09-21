@@ -23,6 +23,13 @@ import {
   type CommandDigestStats,
 } from "@/lib/erpCommands";
 import { markCommandDigestSent, readCommandDeskState } from "@/lib/erpCommands.server";
+import {
+  backlogIsEmpty,
+  formatOfficeBacklog,
+  formatOfficeBacklogOneLine,
+  type OfficeBacklog,
+} from "@/lib/officeBacklog";
+import { readOfficeBacklog } from "@/lib/officeBacklog.server";
 
 const IST_OFFSET_MIN = 330;
 
@@ -70,16 +77,24 @@ export async function readCommandAuditRows(opts: {
 
 export async function composeCommandDigestForDate(
   date: string,
-): Promise<{ text: string; oneLine: string; stats: CommandDigestStats }> {
-  const [rows, state] = await Promise.all([
+): Promise<{ text: string; oneLine: string; stats: CommandDigestStats; backlog: OfficeBacklog }> {
+  const [rows, state, backlog] = await Promise.all([
     readCommandAuditRows(istDayBoundsUtc(date)),
     readCommandDeskState(),
+    readOfficeBacklog(),
   ]);
   const stats = summarizeCommandAudit(rows);
+  // What is waiting on a person rides along in the one message the director
+  // already reads every evening (21 Sep 2026: 23 parents, the oldest for ten
+  // days, none ever answered — and nothing anywhere said so).
+  const section = formatOfficeBacklog(backlog);
+  const commandsText = formatCommandDigest(stats, { date, paused: state.paused, pausedBy: state.pausedBy });
+  const backlogLine = formatOfficeBacklogOneLine(backlog);
   return {
-    text: formatCommandDigest(stats, { date, paused: state.paused, pausedBy: state.pausedBy }),
-    oneLine: formatCommandDigestOneLine(stats, date),
+    text: section ? `${commandsText}\n\n${section}` : commandsText,
+    oneLine: [formatCommandDigestOneLine(stats, date), backlogLine].filter(Boolean).join(" "),
     stats,
+    backlog,
   };
 }
 
@@ -106,10 +121,13 @@ export async function runCommandDigest(opts: {
     return { date: opts.date, skipped: "already sent today", total: 0, recipients: [], text: "" };
   }
   const digest = await composeCommandDigestForDate(opts.date);
-  if (digest.stats.total === 0 && !opts.force) {
+  // A quiet day on the command desk is not a quiet day at the school. The
+  // digest used to skip itself whenever nobody had used a command — exactly
+  // the days a waiting parent was most likely to go unnoticed.
+  if (digest.stats.total === 0 && backlogIsEmpty(digest.backlog) && !opts.force) {
     // Nothing to report — and nothing marked, so a later tick still sends
     // if the desk is used after this one.
-    return { date: opts.date, skipped: "no commands today", total: 0, recipients: [], text: digest.text };
+    return { date: opts.date, skipped: "no commands and nothing waiting", total: 0, recipients: [], text: digest.text };
   }
 
   const masters = await loadServerMasters();
@@ -153,7 +171,7 @@ export async function runCommandDigest(opts: {
         wa = "no mobile";
       }
       const p = await sendPushToSubject("staff", s.id, {
-        title: "ERP commands today",
+        title: digest.stats.total ? "ERP commands today" : "Waiting for the office",
         body: digest.oneLine,
         url: "/",
         data: { kind: "erp_commands_digest" },

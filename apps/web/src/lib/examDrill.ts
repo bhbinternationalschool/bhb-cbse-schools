@@ -182,13 +182,34 @@ export type DrillReplyKind =
   /** A question of their own, about the subject — not an attempt at ours. */
   | "question"
   /** "bye", "बस", "so raha hoon" — the child is done for tonight. */
-  | "stop";
+  | "stop"
+  /** "ok", "ठीक है", a lone 🙏 — politeness, not an attempt at the question. */
+  | "chatter";
 
 const HELP_RE =
   /^\s*(?:(?:help|hint|idk|dunno)\b)|don'?t know|do not know|no idea|kaise|kese|कैसे|समझ (?:नहीं|nahi)|samajh (?:nahi|nhi)|पता नहीं|pata nahi|nahi pata|नहीं आता|batao|बताओ|बताइए|बता दीजिए|sikha|सिखा|mushkil|मुश्किल/i;
 
+/**
+ * Done for tonight — including the parent telling us where the child is.
+ *
+ * On 20 Sep 2026 a father wrote "बेटा कोचिंग गया है आएगा तो करेगा" — *he has
+ * gone to coaching, he will do it when he gets back* — and the drill marked
+ * it ❌ and explained the preposition he had got wrong. He had not got
+ * anything wrong; he had told us his son was out. "Not now" belongs with
+ * the good-nights: end kindly, never grade it.
+ */
 const STOP_RE =
-  /^\s*(?:(?:bye|stop|quit|exit|enough|bas|khatam)\b)|bye ?bye|good ?night|shubh ratri|शुभ रात्रि|बंद कर|band kar|अब नहीं|ab nahi|nahi karna|नहीं करना|सो (?:रहा|रही|जा)|so raha|so rahi|रहने दो|rehne do|बस करो|kal karenge|कल करेंगे|^\s*बस\s*$/i;
+  /^\s*(?:(?:bye|stop|quit|exit|enough|bas|khatam)\b)|bye ?bye|good ?night|shubh ratri|शुभ रात्रि|बंद कर|band kar|अब नहीं|ab nahi|nahi karna|नहीं करना|सो (?:रहा|रही|जा)|so raha|so rahi|रहने दो|rehne do|बस करो|kal karenge|कल करेंगे|^\s*बस\s*$|कोचिंग|coaching|आएगा तो|aayega to|आकर करेग|aakar kareg|अभी नहीं|abhi nahi|बाहर (?:गया|गयी|गई|है)|bahar (?:gaya|gayi|hai)/i;
+
+/**
+ * "ok", "ठीक है", a lone 🙏 — the parent acknowledging us.
+ *
+ * Deliberately narrow. "haan", "ji" and "yes" are NOT here: a drill question
+ * can have yes for an answer, and reading a real attempt as small talk is
+ * the worse mistake of the two.
+ */
+const ACK_RE =
+  /^\s*(?:ok(?:ay)?|kk?|hmm+|thik ?hai|theek ?hai|thk|sahi hai|ठीक(?: है)?|अच्छा|accha|thanks?|thank ?you|dhanyavad|धन्यवाद|शुक्रिया|🙏|👍|✅|😊)[\s.!।]*$/i;
 
 /**
  * A question word, in either language. Used ONLY together with the length
@@ -240,6 +261,7 @@ export function classifyDrillReply(text: string): DrillReplyKind {
   if (STOP_RE.test(t)) return "stop";
   // "I don't know" is about OUR question, so it is help, not a new ask.
   if (HELP_RE.test(t)) return "help";
+  if (ACK_RE.test(t)) return "chatter";
   if (looksLikeOwnQuestion(t)) return "question";
   return "answer";
 }
@@ -335,6 +357,39 @@ export function newDrill(input: {
   };
 }
 
+/**
+ * Has the paper this drill was for already been written?
+ *
+ * WHY (director, 21 Sep 2026): "if bot is stucked on any question in last
+ * dated paper then it is not recognising yesterday paper and still demanding
+ * earlier question answer which exam date has been passed". He was right.
+ * `paperDate` was written once at the start and never read again, so a
+ * session stayed open for ever. On the night of 20 Sep there were 31 of
+ * them, every one pinned to the 19 Sep papers, and every one of those
+ * children had a different paper coming: Science, Art Education, EVS.
+ *
+ * Worse, the trap baited itself. `openDrillFor` takes the most recently
+ * touched open session, and each hijacked reply wrote the dead row back —
+ * so the more a parent tried to escape it, the more firmly it held. A
+ * mother tapping "अभ्यास शुरू करें" for her daughter's Science paper was
+ * handed Friday's Hindi question, "'तारा' शब्द का बहुवचन रूप लिखिए", and
+ * told she was wrong when she asked what was happening.
+ *
+ * The day of the paper is the last day the drill is alive. After that the
+ * next paper is a different subject and exam-eve will start its own drill.
+ *
+ * An unparseable date is not a fact about the paper, so it is left alone
+ * ([[erp-unknown-must-not-become-fact]]) — the ceiling and the finish
+ * rules still end it.
+ */
+export function drillIsForAPastPaper(paperDate: string, todayIso: string): boolean {
+  const paper = String(paperDate || "").slice(0, 10);
+  const today = String(todayIso || "").slice(0, 10);
+  const iso = /^\d{4}-\d{2}-\d{2}$/;
+  if (!iso.test(paper) || !iso.test(today)) return false;
+  return paper < today;
+}
+
 export type DrillStep =
   | { kind: "ask_scope" }
   /** Write a question. `avoid` are questions already asked, `avoidSkills` the ideas already tested, `retrySkill` the one to re-teach. */
@@ -401,7 +456,7 @@ export function drillScore(state: DrillState): { right: number; asked: number } 
 
 // 19 Sep 2026: script no longer counts against an answer, and a child
 // who asks instead of answering is taught rather than marked wrong.
-export const DRILL_PROMPT_VERSION = "exam-drill/2026-09-19";
+export const DRILL_PROMPT_VERSION = "exam-drill/2026-09-21";
 
 export const DRILL_QUESTION_SYSTEM = [
   "You set ONE revision question for a school child the evening before their exam. You are given the class, the subject, the chapters the class has actually covered, and what those chapters teach.",
@@ -437,9 +492,41 @@ export const DRILL_CHECK_SYSTEM = [
   "whatWentWrong (empty when right): ONE sentence naming the actual mistake, in plain words a child understands. Never 'incorrect' — say what they did.",
   "howToDoIt (empty when right): ONE or two short sentences showing the method, with the step they missed. Not the answer to a new question; the way to get this one.",
   "praise (right or close only): four or five words, specific to what they did well. No exclamation storms.",
-  "Write in the same language the child answered in, or the question's language when their answer is too short to tell.",
+  // 20 Sep 2026: a Hindi family was told, inside a Hindi frame, "You chose
+  // 'won', which is the action verb, instead of the describing word." See
+  // `familyLanguageRule` for why the old rule produced that.
+  "MARK IN THE FAMILY'S LANGUAGE — you are told which, below. It is the language of the phone this is read on, and it does NOT change with the subject or with what the child happened to type. An English paper is still explained to a Hindi family in Hindi.",
+  "The one exception: words quoted FROM the question or FROM the child's answer stay exactly as they are — 'tall' is the adjective whichever language you explain that in. Quote them, do not translate them.",
   'Respond with JSON only: {"verdict":"right","whatWentWrong":"","howToDoIt":"","praise":""}',
 ].join("\n");
+
+/**
+ * The line that tells the marker whose language to write in.
+ *
+ * WHY (director, 21 Sep 2026): the rule used to be "write in the same
+ * language the child answered in, or the question's language when their
+ * answer is too short to tell". For an English paper both halves point at
+ * English — the question is in English and a one-word answer like "Won" is
+ * too short to say anything — so a Hindi family got English teaching inside
+ * Hindi frames:
+ *
+ *     ❌ यह सही नहीं है — देखिए क्यों:
+ *     You chose 'won', which is the action verb, instead of the describing
+ *     word.
+ *
+ * and, two messages later in the same drill, Hindi — because that time the
+ * child had typed Hindi. The parent reading it never knew which they would
+ * get.
+ *
+ * The question itself is NOT covered by this and must not be: an English
+ * paper is revised in English, a Sanskrit paper in Sanskrit. It is the
+ * teaching around the question that belongs to whoever is holding the phone.
+ */
+export function familyLanguageRule(hindi: boolean): string {
+  return hindi
+    ? "The family's language is HINDI. Write whatWentWrong, howToDoIt and praise in Hindi (Devanagari), in plain words a child understands."
+    : "The family's language is ENGLISH. Write whatWentWrong, howToDoIt and praise in simple English.";
+}
 
 export type DrillQuestion = { question: string; skill: string; chapter: number };
 
@@ -505,10 +592,13 @@ export function buildCheckPrompt(input: {
   answer: string;
   /** The child asked for help rather than attempting it (classifyDrillReply). */
   askedForHelp?: boolean;
+  /** The family's own language — whose phone this is read on. */
+  hindi?: boolean;
 }): string {
   return [
     `Class: ${input.className}`,
     `Subject: ${input.subjectLabel}`,
+    familyLanguageRule(input.hindi !== false),
     `Question: ${input.question}`,
     `What it tests: ${input.skill}`,
     "",

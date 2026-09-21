@@ -20,7 +20,7 @@ import {
   classifyWaFailure,
   type WaFailureKind,
 } from "@/lib/waFailureReason";
-import { toE164India } from "@/lib/waContactState.server";
+import { toE164India, unreachableVerdictApplies } from "@/lib/waContactState.server";
 import { loadSis, householdWhatsApp, type Household } from "@/lib/sis";
 import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
@@ -420,7 +420,7 @@ export async function listKnownNotOnWhatsApp(
     for (let i = 0; i < e164s.length; i += CHUNK) {
       const { data, error } = await ctx.sb
         .from("wa_contact_state")
-        .select("mobile_e164, on_whatsapp")
+        .select("mobile_e164, on_whatsapp, wa_checked_at, last_inbound_at")
         .eq("tenant_id", ctx.tenantId)
         .eq("on_whatsapp", false)
         .in("mobile_e164", e164s.slice(i, i + CHUNK));
@@ -428,7 +428,22 @@ export async function listKnownNotOnWhatsApp(
         console.warn("[waNumberHealth] not-on-whatsapp read failed", error.message);
         continue;
       }
-      for (const r of data || []) out.add(String(r.mobile_e164 || ""));
+      // The same rule the send path applies (sendBlockFor), so the picker
+      // and the sender can never disagree about whether a number is dead: a
+      // stale verdict expires, and a number that has written to us since is
+      // on WhatsApp whatever the verdict said.
+      const now = new Date().toISOString();
+      for (const r of data || []) {
+        const row = r as { mobile_e164?: string; on_whatsapp?: boolean | null; wa_checked_at?: string | null; last_inbound_at?: string | null };
+        if (
+          unreachableVerdictApplies(
+            { onWhatsApp: row.on_whatsapp, checkedAt: row.wa_checked_at, lastInboundAt: row.last_inbound_at },
+            now,
+          )
+        ) {
+          out.add(String(row.mobile_e164 || ""));
+        }
+      }
     }
   } catch (e) {
     console.warn("[waNumberHealth] listKnownNotOnWhatsApp threw", e);

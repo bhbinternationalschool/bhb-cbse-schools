@@ -329,6 +329,15 @@ create_job "bhb-wa-answer-expiry" "20 6 * * *" \
   "${APP_URL}/api/wa/answer-book/expiry-tick" \
   "Asia/Kolkata" "120s"
 
+# Index published notices into the shelf the parent bot reads. Until 21 Sep
+# 2026 this ran only when a member of staff pressed a button, so it had never
+# run at all: the bot held zero chunks with notices published, and answered
+# "I don't have that information" to everything outside a family's own dues.
+# Just after the expiry sweep, so the shelf is tidied and then refilled.
+create_job "bhb-ai-kb-sync" "30 6 * * *" \
+  "${APP_URL}/api/ai/kb-sync" \
+  "Asia/Kolkata" "300s"
+
 # Cashfree settlement sweep: pulls what the gateway actually paid into the
 # bank, with its event-level breakdown, and posts it to the ledger.
 #

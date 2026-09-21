@@ -18,6 +18,7 @@ import {
   markApprovalDispatched,
   pendingApprovals,
 } from "@/lib/automation";
+import { approveRefusal, cardBuiltAt } from "@/lib/automationSendRules";
 import { dispatchAutomationApproval } from "@/lib/automationDispatch.server";
 import {
   loadAutomationFromDb,
@@ -69,6 +70,54 @@ export async function POST(req: Request) {
     auth.ctx.session.fullName || auth.ctx.session.roleCode || "masters";
 
   /*
+    The same rules the scheduled tick keeps, before anything is claimed.
+
+    On 14 September 2026 a run was started at 00:28 IST and approved at
+    00:30, and 104 families were sent a fee reminder after midnight: the
+    rule's 20:00–08:00 setting only ever stopped the SCHEDULER, never this
+    button. And the tick already refused a card older than 12 hours — its
+    amounts are a snapshot — but this button did not, so a card from 14 Sep
+    sat pending for a week, 51 of its families having paid since.
+
+    Stale: the card is closed with the reason, as the tick closes one, and
+    the next evaluation raises a fresh list. Quiet hours: the card is left
+    exactly as it was, to approve in the morning.
+  */
+  if (decision === "approved") {
+    const rule = before.rules.find((r) => r.id === item.ruleId);
+    // Timed from the last refresh, not first raising — see cardBuiltAt.
+    const refusal = approveRefusal({
+      rule,
+      item: { createdAt: cardBuiltAt(item, before.runs) },
+      now: new Date(),
+    });
+    if (refusal?.kind === "stale") {
+      const closed = markApprovalDispatched(before, approvalId, false, refusal.message, {
+        sent: 0,
+        failed: 0,
+      });
+      const saved = await saveAutomationToDb(closed);
+      return NextResponse.json(
+        {
+          ok: false,
+          stale: true,
+          error: refusal.message,
+          pendingApprovals: pendingApprovals(closed).length,
+          persisted: saved.ok,
+          state: closed,
+        },
+        { status: 409 },
+      );
+    }
+    if (refusal?.kind === "quiet") {
+      return NextResponse.json(
+        { ok: false, quietHours: true, error: refusal.message },
+        { status: 409 },
+      );
+    }
+  }
+
+  /*
     Claim the send BEFORE deciding, and only for a real send.
 
     The pending check above is a read. On 11 September 2026 seven presses
@@ -113,6 +162,7 @@ export async function POST(req: Request) {
   let failed = 0;
   let deferred = 0;
   let simulated = 0;
+  let skippedRecent = 0;
   let error = "";
 
   if (decision === "approved") {
@@ -127,6 +177,7 @@ export async function POST(req: Request) {
     failed = result.failed;
     deferred = result.deferred;
     simulated = result.simulated;
+    skippedRecent = result.skippedRecent ?? 0;
     error = result.error;
     // A dry run, or a school with no WhatsApp provider configured, must not
     // retire the card: it stays approved so a real send can still happen.
@@ -169,6 +220,7 @@ export async function POST(req: Request) {
     failed,
     deferred,
     simulated,
+    skippedRecent,
     error: error || undefined,
     pendingApprovals: pendingApprovals(state).length,
     locked: claimed,

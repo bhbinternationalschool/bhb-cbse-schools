@@ -62,6 +62,7 @@ import {
   composeSisAcknowledgement,
   composeSisFeeStructureReply,
   composeSisUngroundedReply,
+  composeSisClarifyReply,
   detectSisFeeQuestion,
   isSisAcknowledgement,
   isSisGreeting,
@@ -128,8 +129,14 @@ export type WaSisBotThread = {
   createdAt: string;
   updatedAt: string;
   unreadStaff: number;
-  /** The bot asked a question whose answer the next message is: "ptp" = how much and by when. */
-  pendingAsk?: "ptp";
+  /**
+   * The bot asked a question whose answer the next message is.
+   *  - "ptp"     — how much, and by when.
+   *  - "clarify" — the bot did not understand and asked back. Set so it can
+   *                never ask twice running: the next message that still
+   *                lands nowhere goes to the office.
+   */
+  pendingAsk?: "ptp" | "clarify";
   /** How many times the ptp question has been put without a usable answer. */
   ptpAsks?: number;
   /** Last promise to pay the parent made on WhatsApp. */
@@ -266,7 +273,8 @@ function dueStudentName(due: FeeDueLine): string {
 async function tryAiFallbackReply(
   hh: Household,
   text: string,
-): Promise<{ text: string; grounded: boolean } | null> {
+  opts: { mayClarify: boolean },
+): Promise<{ text: string; grounded: boolean; clarified: boolean } | null> {
   const masters = loadMasters();
   const kids = childrenOf(hh);
   const dues = flattenOpenDues(hh.id);
@@ -307,7 +315,7 @@ async function tryAiFallbackReply(
   const system = `You are a WhatsApp assistant for parents of ${TENANT.nameDisplay}.
 ${langRule}
 You may discuss ONLY: (1) the household data given below (their children, dues), and (2) the school notices given below, if any are given — you do NOT know this school's policies, dates, timings, curriculum, transport, uniform, or any other fact beyond what's given here, even if it seems like common knowledge for a school. Do not state or confirm anything outside the data given.
-For ANY question neither the household data nor the notices below answer, reply that you don't have that information and to reply *HUMAN* to talk to the school office — do not attempt to answer it a different way.
+For ANY question neither the household data nor the notices below answer, do not attempt to answer it a different way — either ask the one question that would let you answer it (see "clarify" below) or say you don't have that information.
 Keep the reply under 300 characters, warm and simple, plain text (no markdown headers).`;
 
   const userMessage = `Guardian: ${hh.guardianName || "Parent"}
@@ -315,43 +323,74 @@ Children: ${kidsLine}
 Open dues: total ${formatInr(totalDuePaise)} — ${duesLine}
 ${kbContext ? `Relevant school notices:\n${kbContext}\n` : ""}Parent's message: "${text}"`;
 
+  const hindi = waTemplateLanguageFor(hh) === "hi";
   try {
     const r = await generateParentBotReplyJson({ system, userMessage });
     if (!r.ok) return null;
+
+    // The middle outcome: the bot cannot answer yet, but the parent is
+    // plainly asking about something the school holds for them. Ask the one
+    // question back instead of handing them to a queue — but only when the
+    // caller says we have not just asked (see `mayClarify`). A bot that asks
+    // twice is not helping, it is stalling.
+    if (r.kind === "clarify" && opts.mayClarify) {
+      const question = r.reply.trim();
+      if (question) {
+        const rendered = await renderForFamily(question, sarvamTarget);
+        return { text: composeSisClarifyReply(rendered, hindi), grounded: false, clarified: true };
+      }
+    }
+
     // Hard gate: an ungrounded answer never reaches the parent verbatim.
     // Already escalated by the caller, so the parent is told it has gone to
     // the office — not asked to type HUMAN — and in their own language. It
     // was English for every family until 2026-09-14.
-    if (!r.grounded) {
-      // The bot could not answer this. That question is the whole point of
-      // the answer book: it goes in as PROPOSED, with no answer, so the
-      // office can see what parents keep asking and write the school's reply
-      // once. Nobody is answered from it until it is approved.
-      void (async () => {
-        try {
-          const { worthRecording } = await import("@/lib/answerBook");
-          if (!worthRecording(text)) return;
-          const { captureAnswerPair } = await import("@/lib/answerBook.server");
-          await captureAnswerPair({ question: text, source: "unanswered", sourceRef: `household:${hh.id}` });
-        } catch (e) {
-          // Learning is a bonus; the parent has already been handed to the office.
-          console.warn("[answerBook] could not record the question", (e as Error)?.message);
-        }
-      })();
-      return { text: composeSisUngroundedReply(waTemplateLanguageFor(hh) === "hi"), grounded: false };
+    if (r.kind !== "answer") {
+      recordUnansweredQuestion(hh, text);
+      return { text: composeSisUngroundedReply(hindi), grounded: false, clarified: false };
     }
     const reply = r.reply.trim();
     if (!reply) return null;
-    // Regional preference: render the Hindi draft in the family's language
-    // when Sarvam can; otherwise the Hindi text goes as-is.
-    if (sarvamTarget && sarvamConfigured()) {
-      const t = await sarvamTranslate({ text: reply, from: "hi-IN", to: sarvamTarget as SarvamLang, mode: "modern-colloquial" });
-      if (t.ok && t.text.trim()) return { text: t.text.trim(), grounded: true };
-    }
-    return { text: reply, grounded: true };
+    return { text: await renderForFamily(reply, sarvamTarget), grounded: true, clarified: false };
   } catch {
     return null;
   }
+}
+
+/**
+ * Regional preference: render a Hindi draft in the family's own language
+ * when Sarvam can; otherwise the Hindi goes as it is.
+ */
+async function renderForFamily(text: string, sarvamTarget: string | null): Promise<string> {
+  if (!sarvamTarget || !sarvamConfigured()) return text;
+  const t = await sarvamTranslate({ text, from: "hi-IN", to: sarvamTarget as SarvamLang, mode: "modern-colloquial" });
+  return t.ok && t.text.trim() ? t.text.trim() : text;
+}
+
+/**
+ * A question the school could not answer goes into the answer book.
+ *
+ * PROPOSED, with no answer: the office sees what parents keep asking and
+ * writes the school's reply once, and nobody is answered from it until it is
+ * approved. Never awaited and never allowed to throw — the parent has
+ * already been handed to a person, and learning is the bonus.
+ *
+ * Called from the caller's own `unknown` path too, so an hour when the model
+ * is unreachable still leaves the office the questions. Before 21 Sep 2026
+ * this only ran when the model had answered and declined, so a failed call
+ * lost the question entirely.
+ */
+function recordUnansweredQuestion(hh: Household, text: string): void {
+  void (async () => {
+    try {
+      const { worthRecording } = await import("@/lib/answerBook");
+      if (!worthRecording(text)) return;
+      const { captureAnswerPair } = await import("@/lib/answerBook.server");
+      await captureAnswerPair({ question: text, source: "unanswered", sourceRef: `household:${hh.id}` });
+    } catch (e) {
+      console.warn("[answerBook] could not record the question", (e as Error)?.message);
+    }
+  })();
 }
 
 /** Record parent + bot turns for the language flow, send the bot text, and return. */
@@ -1260,11 +1299,25 @@ export async function handleWaSisBotInbound(opts: {
   }
   let escalateUngrounded = false;
   if (intent === "unknown" && !isGreeting && text.trim().length > 3) {
-    const aiReply = await tryAiFallbackReply(hh, text);
+    // Ask back at most once per conversation. If the bot's own question did
+    // not land, the parent has now been misunderstood twice and wants a
+    // person, not a third try.
+    const alreadyAsked = thread.pendingAsk === "clarify";
+    const aiReply = await tryAiFallbackReply(hh, text, { mayClarify: !alreadyAsked });
     if (aiReply) {
       replyText = aiReply.text;
-      // Not answerable from what we know → the office should see it.
-      escalateUngrounded = !aiReply.grounded;
+      if (aiReply.clarified) {
+        // The bot is waiting on an answer, not the office.
+        nextPendingAsk = "clarify";
+      } else {
+        // Not answerable from what we know → the office should see it.
+        escalateUngrounded = !aiReply.grounded;
+      }
+    } else {
+      // No model, or the call failed. It is still a question the school
+      // could not answer, and the office still wants to see it — before
+      // 21 Sep 2026 an unreachable model lost the question entirely.
+      recordUnansweredQuestion(hh, text);
     }
   }
 

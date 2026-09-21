@@ -7,6 +7,7 @@
  * (see waTransportBotPrompts.ts) — never from here.
  */
 import "server-only";
+import { readParentBotReplyKind, type ParentBotReplyKind } from "@/lib/sisParentBotEngine";
 import { buildLeadExtractSystemPrompt, buildLeadExtractUserPrompt, parseLeadExtract, type LeadExtract } from "@/lib/leadExtractAi";
 import {
   buildVideoTermsSystemPrompt,
@@ -1609,6 +1610,8 @@ export async function drillCheckJson(opts: {
   answer: string;
   /** The child asked for help instead of attempting it. */
   askedForHelp?: boolean;
+  /** The family's own language, which the marking is written in. */
+  hindi?: boolean;
 }): Promise<
   | { ok: true; draft: DrillCheck; engine: LlmEngine; generationId: string }
   | { ok: false; error: string; engine: LlmEngine }
@@ -1901,35 +1904,70 @@ export async function generateMeetingMinutesJson(opts: {
  * say whether its reply is grounded in the household data / notices it was
  * given. Ungrounded → the caller sends the fixed "reply HUMAN" text and
  * escalates the thread; the model's own words never reach the parent.
+ *
+ * THREE OUTCOMES, not two (21 Sep 2026). The director asked whether the bot
+ * could "provide answer or if can not not provide answer then ask and guide
+ * how they can ask". Until now it could only answer or give up, so a father
+ * who wrote "Transport ka" — three keystrokes from a question the school
+ * answers every day — was told the school did not have that information and
+ * his message was queued for the office. `clarify` is the missing middle:
+ * the model puts back the ONE question that would let it answer.
+ *
+ * A clarifying question is still bound by the grounding gate, because it
+ * states no facts. That is exactly why it is safe to send in the model's own
+ * words when an answer would not be.
  */
 export async function generateParentBotReplyJson(opts: {
   system: string;
   userMessage: string;
 }): Promise<
-  | { ok: true; grounded: boolean; reply: string; engine: LlmEngine; generationId: string }
+  | { ok: true; kind: ParentBotReplyKind; grounded: boolean; reply: string; engine: LlmEngine; generationId: string }
   | { ok: false; error: string; engine: LlmEngine }
 > {
   const r = await callLlmJson(
     {
-      system: `${opts.system}\n\nRespond with JSON only: {"grounded": true|false, "reply": "…"}. grounded=true ONLY if every fact in reply comes from the household data or notices given; if the parent asked something those do not answer, set grounded=false and put a short "please reply HUMAN" message in reply.`,
+      system: `${opts.system}
+
+Respond with JSON only: {"kind": "answer"|"clarify"|"unknown", "reply": "…"}
+
+"answer" — you can answer, and EVERY fact in reply comes from the household data or the notices given above. If any part of it does not, this is not an answer.
+
+"clarify" — you cannot answer yet, but the parent is plainly asking about something this school keeps for them: their own children, fees, dues, payments, receipts, transport or the bus, attendance, exams, or a notice given above. Their message is too short, or could mean two different things. Put ONE short question in reply — the single question whose answer would let you answer theirs. Ask it warmly, in one line. State no facts of your own, quote no amount, date or rule.
+
+"unknown" — anything else: a question about something the school has not told you, a complaint, a message that is not a question. Put a short "please reply HUMAN" line in reply.
+
+When in doubt between "clarify" and "unknown", choose "unknown" — a parent handed to a person is helped, a parent asked a pointless question is not.`,
       userMessage: opts.userMessage,
       maxTokens: 400,
       temperature: 0.3,
       geminiMaxTokens: 1024,
-      meta: { route: "wa-parent-bot", promptVersion: "v2" },
+      meta: { route: "wa-parent-bot", promptVersion: "v3" },
     },
     (text) => {
       try {
-        const j = JSON.parse(text) as { grounded?: unknown; reply?: unknown };
+        const j = JSON.parse(text) as { kind?: unknown; grounded?: unknown; reply?: unknown };
         const reply = String(j.reply ?? "").trim();
         if (!reply) return null;
-        return { grounded: j.grounded === true, reply: reply.slice(0, 600) };
+        // An unreadable `kind` is not permission to speak — see
+        // readParentBotReplyKind for why anything unexpected is "unknown".
+        return { kind: readParentBotReplyKind(j.kind), reply: reply.slice(0, 600) };
       } catch {
         return null;
       }
     },
   );
-  if (r.ok) return { ok: true, grounded: r.data.grounded, reply: r.data.reply, engine: r.engine, generationId: r.generationId };
+  if (r.ok) {
+    return {
+      ok: true,
+      kind: r.data.kind,
+      // Kept for every caller that only ever asked "may these words be sent
+      // to a parent as an answer?". A clarifying question is not one.
+      grounded: r.data.kind === "answer",
+      reply: r.data.reply,
+      engine: r.engine,
+      generationId: r.generationId,
+    };
+  }
   return { ok: false, error: r.error, engine: r.engine };
 }
 
