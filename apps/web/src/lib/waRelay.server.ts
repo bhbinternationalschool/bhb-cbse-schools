@@ -236,7 +236,18 @@ export async function relayEscalation(input: RelayEscalationInput): Promise<{
       });
     const { householdId, context } = senderContextFor(identity.roles);
     const senderName = identity.displayName || input.profileName || "";
-    const reason = input.reason || relayReasonFor(input.audience, !!input.media);
+    // "भुगतान हो गया" / "Already paid" is answered — the bot shows the family
+    // its own fee record — and handed over so a person checks for a payment
+    // not yet entered. It was labelled "the bot could not answer" (21 Sep
+    // 2026), which read to the office as a failure and a duplicate.
+    const feeIntent = detectSisFeeReplyIntent(input.text || "");
+    const reason =
+      input.reason ||
+      (feeIntent === "claims_paid" && !input.media
+        ? "parent says the fee is already paid — the bot showed them their record; check for a payment not yet entered"
+        : feeIntent === "need_time" && !input.media
+          ? "parent asks for more time to pay"
+          : relayReasonFor(input.audience, !!input.media));
     const code = await uniqueCode(ctx.sb, ctx.tenantId);
 
     const { data: inserted, error: insErr } = await ctx.sb

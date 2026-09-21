@@ -138,7 +138,14 @@ export async function POST(req: Request) {
   }
 
   const results = [];
+  const { claimInboundOnce } = await import("@/lib/waSendClaim.server");
   for (const msg of inbound) {
+    // Meta re-delivers anything it did not get a prompt 200 for; the same
+    // message must never be acted on twice (see claimInboundOnce).
+    if (!(await claimInboundOnce(msg.waMessageId))) {
+      results.push({ audience: "duplicate_delivery", from: msg.fromWaId, escalate: false, replied: false, stub: false });
+      continue;
+    }
     await recordInboundMessage(msg.fromWaId, msg.text);
 
     // A teacher answering a child's homework: "#A7K2 well done".
