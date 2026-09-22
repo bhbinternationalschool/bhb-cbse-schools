@@ -15,7 +15,7 @@ import { childrenOfHousehold, loadSis } from "@/lib/sis";
 import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
 import { classLabelForStudent } from "@/lib/parentPortal";
 import { resolveWaIdentityServer } from "@/lib/waRoleResolver.server";
-import { detectSisFeeReplyIntent } from "@/lib/sisParentBotEngine";
+import { detectSisFeeReplyIntent, isFeeWhyQuestion } from "@/lib/sisParentBotEngine";
 import { logHouseholdWaSend } from "@/lib/householdMessageLog.server";
 import { fetchWaMediaAsDataUrl } from "@/lib/waInboundMedia.server";
 import {
@@ -247,7 +247,11 @@ export async function relayEscalation(input: RelayEscalationInput): Promise<{
         ? "parent says the fee is already paid — the bot showed them their record; check for a payment not yet entered"
         : feeIntent === "need_time" && !input.media
           ? "parent asks for more time to pay"
-          : relayReasonFor(input.audience, !!input.media));
+          : /^\s*human\s*$/i.test(input.text || "")
+            ? "parent asked to talk to a person"
+            : isFeeWhyQuestion(input.text || "") && !input.media
+              ? "parent asks what a fee is for — please explain the fee head"
+              : relayReasonFor(input.audience, !!input.media));
     const code = await uniqueCode(ctx.sb, ctx.tenantId);
 
     const { data: inserted, error: insErr } = await ctx.sb

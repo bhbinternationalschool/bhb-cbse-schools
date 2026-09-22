@@ -209,9 +209,31 @@ export async function handleApaarConsentInbound(input: {
     return input.hindi ? "क्षमा करें, अभी दर्ज नहीं हो सका। थोड़ी देर बाद बटन फिर दबाएँ।" : "Sorry — that could not be recorded just now. Please tap the button again in a few minutes.";
   }
   let stillNeeded: { name: string; waitingFor: import("@/lib/udiseCompliance").ApaarWaitingFor[] }[] = [];
+  let parentIdLines: string[] = [];
   if (answer === "given") {
+    // Whose Aadhaar goes with this consent: the one who gave it, not merely
+    // "a parent's card is on file".
+    const { apaarParentIdState, renderApaarParentIdLines } = await import("@/lib/apaarConsent");
+    const consenter = input.household.guardianName || "";
+    const last4 = (full: string, l4: string) => (String(full || "").replace(/\D/g, "").slice(-4) || String(l4 || "").replace(/\D/g, "").slice(-4));
+    const rows = saved.map((s) => ({
+      child: s.fullName,
+      state: apaarParentIdState(
+        {
+          father: last4(s.fatherAadhaarNumber, s.fatherAadhaarLast4) ? { name: s.fatherName || "", last4: last4(s.fatherAadhaarNumber, s.fatherAadhaarLast4) } : null,
+          mother: last4(s.motherAadhaarNumber, s.motherAadhaarLast4) ? { name: s.motherName || "", last4: last4(s.motherAadhaarNumber, s.motherAadhaarLast4) } : null,
+        },
+        consenter,
+      ),
+    }));
+    parentIdLines = renderApaarParentIdLines(rows.filter((r) => r.state.kind !== "none"), consenter, input.hindi);
     const { apaarReadiness } = await import("@/lib/udiseCompliance");
-    stillNeeded = saved.map((s) => ({ name: s.fullName, waitingFor: apaarReadiness(s).waitingFor })).filter((x) => x.waitingFor.length);
+    // A child whose record holds the other parent's card is already asked
+    // for the consenter's own, above — not twice.
+    const askedAbove = new Set(rows.filter((r) => r.state.kind === "other_parent_on_file").map((r) => r.child));
+    stillNeeded = saved
+      .map((s) => ({ name: s.fullName, waitingFor: apaarReadiness(s).waitingFor }))
+      .filter((x) => x.waitingFor.length && !askedAbove.has(x.name));
   }
-  return composeApaarConsentThanks({ answer, childNames: recorded, hindi: input.hindi, stillNeeded });
+  return composeApaarConsentThanks({ answer, childNames: recorded, hindi: input.hindi, stillNeeded, parentIdLines });
 }

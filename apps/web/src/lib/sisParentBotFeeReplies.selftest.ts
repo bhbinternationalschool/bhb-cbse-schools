@@ -15,6 +15,7 @@ import {
   promiseSummaryForOffice,
   promiseIsEmpty,
   composeSisPromiseUnclear,
+  isFeeWhyQuestion,
 } from "./sisParentBotEngine";
 
 console.log("sisParentBotFeeReplies.selftest.ts");
@@ -109,5 +110,29 @@ assert.equal(promiseIsEmpty(parseSisPromiseToPay("kal", T)), false, "a date alon
 assert.match(composeSisPromiseUnclear(true), /राशि/);
 assert.match(composeSisPromiseUnclear(false), /amount/);
 for (const s of [composeSisPromiseUnclear(true), composeSisPromiseUnclear(false)]) assert.doesNotMatch(s, /KIDS|DUES/);
+
+/* ── 22 Sep 2026: what parents actually wrote ── */
+{
+  // A father asking what ₹3,500 was FOR, read three times as "already paid".
+  const why = [
+    "Monthly fees ham jama kar rahe hain activity fees bhi jama karte Hain har EK chij ke liye ₹1000 jama kiye Hain FIR yah kis chij ka ₹3500 hai",
+    "Ab humko detail bataiye mis brillion fish mein kis chij ka Paisa ₹3500 jama Kiya ja raha hai",
+    "Computer class bacchon Ko le Jaya nahin jata hai lab hai nahin to to miscellation kis chij ka Paisa hai 3500",
+    "यह ₹3500 किस चीज़ का शुल्क है?",
+  ];
+  for (const t of why) {
+    assert.equal(detectSisFeeReplyIntent(t), null, `a question, not a payment claim: ${t.slice(0, 40)}`);
+    assert.ok(isFeeWhyQuestion(t), `a what-is-this-fee-for question: ${t.slice(0, 40)}`);
+  }
+  for (const t of ["2000 jama kar diya", "1500 dina", "फीस जमा कर दी", "भुगतान हो गया"]) {
+    assert.equal(detectSisFeeReplyIntent(t), "claims_paid", t);
+    assert.equal(isFeeWhyQuestion(t), false, t);
+  }
+  // "by the end of this month" — and voice typing's "mantra" for "month".
+  for (const t of ["Is mantra ke last mein", "is mahine ke end tak", "महीने के अंत तक 3000", "month end"]) {
+    assert.equal(parseSisPromiseToPay(t, "2026-09-22").byDate, "2026-09-30", t);
+  }
+  assert.equal(parseSisPromiseToPay("month end", "2026-02-10").byDate, "2026-02-28", "the month's own last day");
+}
 
 console.log("ok");

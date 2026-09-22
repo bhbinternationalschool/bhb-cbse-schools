@@ -611,7 +611,24 @@ const NEED_TIME =
  */
 const CLAIMS_PAID_LOOSE =
   /\b(daal|dal)\s*(di|diya|diye|de|chuke|chuki)\b|\bjama\s*(h|hai|he|ho\s*chuka|ho\s*chuki)\b|\b\d{3,6}\s*(rs|rupaye|rupees|₹)?\s*(dina|diya|diye|di|de\s*di|de\s*diya|jama\s*kiya|jama\s*kiye)\b|\b(de|bhar)\s*(di|diya|diye)\s*(hu|hun|hoon|hai|h|he)\b|\bpay(ment)?\s*kar\s*(di|diya|diye)\b|डाल\s*(दी|दिया|दिए)|जमा\s*(है|हो\s*चुका|हो\s*चुकी)|दे\s*(दी|दिया|दिए)\s*(हूँ|हूं|है|हैं)/i;
-const IS_QUESTION = /\?|\b(kab|kitna|kitni|kaise|kahan|kya|when|how|where)\b|कब|कितना|कितनी|कैसे|कहाँ|क्या/i;
+// "kis chij ka", "kyon", "detail bataiye" (22 Sep 2026): a father asking what
+// ₹3,500 of fee was FOR was read three times as "already paid", because
+// "₹1000 jama kiye hain" in his question matched the loose paid pattern.
+const IS_QUESTION = /\?|\b(kab|kitna|kitni|kaise|kahan|kya|kis|kisliye|kyon|kyo|kyu|kyun|kaun|bataiye|batao|batayen|detail|when|how|where|why|what)\b|कब|कितना|कितनी|कैसे|कहाँ|क्या|किस|क्यों|किसलिए|बताइए|बताओ/i;
+
+/**
+ * "What is this ₹3,500 for?" — a question about WHAT a fee is, not what is
+ * owed or paid. Answered from the school's own answer book when it has one,
+ * and handed to the office when it does not — never with the dues list,
+ * which answers a different question.
+ */
+export function isFeeWhyQuestion(text: string): boolean {
+  const t = (text || "").trim();
+  if (!t) return false;
+  const feeWord = /\b(fees?|fee|paisa|paise|charge|miscell\w*|misc\w*|amenity|activity|communication|computer|lab|₹\s*\d)|₹|फीस|शुल्क|पैसा|पैसे|सुविधा|विविध|संचार/i.test(t);
+  const why = /\b(kis\s*(chij|cheez|chiz|cheej|liye)|kisliye|kyon|kyo|kyu|kyun|kaisa|kis\s*baat|detail|what\s*for|why)\b|किस\s*(चीज़|चीज|लिए|बात)|किसलिए|क्यों/i.test(t);
+  return feeWord && why;
+}
 
 export function detectSisFeeReplyIntent(text: string): SisFeeReplyIntent | null {
   const t = (text || "").trim();
@@ -683,6 +700,15 @@ export function parseSisPromiseToPay(text: string, todayIso: string): SisPromise
   if (!out.byDate && nWeeks) out.byDate = shift(todayIso, 7 * Number(nWeeks[1]));
   if (!out.byDate && (/agle\s*(hafte|week)|next\s*week|ek\s*hafte|एक\s*हफ्ते|अगले\s*(हफ्ते|हफ़्ते|सप्ताह)/i.test(raw))) out.byDate = shift(todayIso, 7);
   if (!out.byDate && (/agle\s*(mahine|month)|next\s*month|ek\s*mahine|अगले\s*महीने|एक\s*महीने/i.test(raw))) out.byDate = shift(todayIso, 30);
+  // "is mahine ke last mein", "month end", "महीने के अंत तक" — and "mantra",
+  // which is how voice typing heard "month" on 22 Sep 2026.
+  if (
+    !out.byDate &&
+    /(month|mahine|mahina|maheene|mantra|manth|मंथ|महीने|माह)\s*(ke|ki|k|का|के|की)?\s*(last|end|ant|aakhir|akhir|aakhri|akhri|antim|अंत|आखिर|आख़िर|आखरी|आख़िरी|लास्ट)|month\s*end|\bmonth\s*last/i.test(raw)
+  ) {
+    const last = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 0));
+    out.byDate = last.toISOString().slice(0, 10);
+  }
   if (!out.byDate) {
     for (const [re, dow] of WEEKDAYS) {
       if (re.test(raw)) {

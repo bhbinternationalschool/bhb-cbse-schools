@@ -440,7 +440,9 @@ export async function continueExamDrill(input: {
     // 0. "bye", "बस", "so raha hoon" — the child has finished for tonight.
     //    Ending is a decision they are allowed to make; the old loop marked
     //    the goodbye wrong and asked the next question.
-    if (said === "stop" && state.phase !== "need_scope") {
+    // Also while the chapter is still being asked for (22 Sep 2026: "मैं
+    // तुमसे सुबह पूछूंगी" got "यह समझ नहीं आया" — the drill had not started).
+    if (said === "stop") {
       state = { ...state, phase: "done", endedAt: new Date().toISOString() };
       await saveDrill(open.id, state, input.mobile10);
       const stopChapters = state.scope ? await chaptersFor(className, state.subjectLabel) : [];
@@ -503,6 +505,42 @@ export async function continueExamDrill(input: {
     if (state.phase === "need_scope") {
       const scope = readScopeAnswer(input.text, chapters);
       if (scope.kind !== "position") {
+        // A question of their own before the practice starts ("Maths ka
+        // first chapter ascending order kaise karein?", 22 Sep 2026) is
+        // answered, then the chapter question is asked again — it used to
+        // get "यह समझ नहीं आया" three times running.
+        if (said === "question" || said === "help" || input.text.trim().split(/\s+/).length >= 4) {
+          const { replyHomeworkTutor } = await import("@/lib/homeworkTutor.server");
+          const answered = await replyHomeworkTutor({
+            message: input.text.slice(0, 600),
+            mode: "teach",
+            language: paperLanguageFor(state.subjectLabel) === "english" ? "both" : "hi",
+            context: {
+              childName: child.fullName.split(/\s+/)[0] || child.fullName,
+              className,
+              subjectLabel: state.subjectLabel,
+              openQuestion: true,
+            },
+          });
+          if (answered.ok) {
+            return {
+              handled: true,
+              replyText: [
+                answered.text.trim(),
+                "",
+                input.hindi ? "— अब अभ्यास के लिए 👇" : "— now for the practice 👇",
+                "",
+                renderScopeQuestion({
+                  childName: child.fullName.split(/\s+/)[0] || child.fullName,
+                  subjectLabel: state.subjectLabel,
+                  paperLabel: state.paperLabel,
+                  chapters,
+                  hindi: input.hindi,
+                }),
+              ].join("\n"),
+            };
+          }
+        }
         return { handled: true, replyText: renderScopeUnclear(input.hindi) };
       }
       state = { ...state, scope: scope.position, phase: "asking" };
