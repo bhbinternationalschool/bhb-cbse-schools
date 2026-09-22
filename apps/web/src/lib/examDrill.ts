@@ -482,7 +482,7 @@ export function drillScore(state: DrillState): { right: number; asked: number } 
 
 // 19 Sep 2026: script no longer counts against an answer, and a child
 // who asks instead of answering is taught rather than marked wrong.
-export const DRILL_PROMPT_VERSION = "exam-drill/2026-09-21b";
+export const DRILL_PROMPT_VERSION = "exam-drill/2026-09-22";
 
 /**
  * The language a paper is written in.
@@ -567,6 +567,10 @@ export const DRILL_CHECK_SYSTEM = [
   // on the Latin keyboard every family actually has — and was marked as
   // having made a mistake. Script is not the skill being tested.
   "SCRIPT AND LANGUAGE ARE NOT THE ANSWER. Mark the idea. A Hindi or Sanskrit answer typed in Latin letters — 'darji' for दर्जी — is the SAME answer: mark it 'right'. An ENGLISH-paper answer typed in Hindi or Hinglish ('red ho jayega') is marked on its idea too.",
+  // 22 Sep 2026: "आघात वर्धनीयता" — malleability, the right answer, in
+  // Hindi and slightly misspelt — was marked ❌ "You answered in Hindi
+  // instead of English".
+  "The Hindi NAME of the right term IS the right answer: आघातवर्धनीयता = malleability, तन्यता = ductility, प्रकाश संश्लेषण = photosynthesis. Mark it 'right' (a misspelling of it too), give the English term, and add the one line about writing it in English in the exam. Answering in Hindi is NEVER itself the mistake — never write 'you answered in Hindi' as whatWentWrong.",
   // 21 Sep 2026: a Science answer was followed by "परीक्षा में उत्तर हिंदी में
   // लिखें" — in an English-medium school.
   "WHICH LANGUAGE TO WRITE IN THE EXAM: only for a HINDI or SANSKRIT paper, when the child typed Latin letters, add one short line asking them to write it in Devanagari in the exam. For EVERY other paper NEVER tell the child to write in Hindi — the school is English medium; if they answered in Hindi or Hinglish, add one short line reminding them to write the answer in English in the exam.",

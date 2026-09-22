@@ -38,6 +38,7 @@ import {
   schoolLocationPin,
 } from "@/lib/schoolLocationReply";
 import {
+  isFeeWhyQuestion,
   composeSisDuesReply,
   composeSisHumanReply,
   composeSisInfoReply,
@@ -1220,12 +1221,14 @@ export async function handleWaSisBotInbound(opts: {
   // matcher, which would file "paid" under RECEIPTS and "time" under nothing.
   const hindi = waTemplateLanguageFor(hh) === "hi";
   const paidButton = !!quickReply && /paid|भुगतान/i.test(quickReply.label);
-  const feeReply = paidButton ? ("claims_paid" as const) : detectSisFeeReplyIntent(text);
+  // "What is this ₹3,500 for?" is neither a payment claim nor a dues query.
+  const feeWhy = !paidButton && !quickReply && isFeeWhyQuestion(text);
+  const feeReply = paidButton ? ("claims_paid" as const) : feeWhy ? null : detectSisFeeReplyIntent(text);
   // "1500 dina" in answer to "how much and by when" says it is already paid,
   // not a promise — read the payment first.
   const answeringPtp =
     thread.pendingAsk === "ptp" && !quickReply && feeReply !== "claims_paid" && detectSisBotIntent(text) === "unknown";
-  const feeQuestion = !quickReply && !feeReply ? detectSisFeeQuestion(text) : null;
+  const feeQuestion = !quickReply && !feeReply && !feeWhy ? detectSisFeeQuestion(text) : null;
   let nextPendingAsk: WaSisBotThread["pendingAsk"] = undefined;
   let nextPtpAsks: number | undefined;
   let lastPromise = thread.lastPromise;
@@ -1303,7 +1306,7 @@ export async function handleWaSisBotInbound(opts: {
   } else {
     intent = quickReply
       ? ("human" as const)
-      : isGreeting
+      : isGreeting || feeWhy
         ? ("unknown" as const)
         : detectSisBotIntent(text);
     bot = quickReply
@@ -1311,14 +1314,17 @@ export async function handleWaSisBotInbound(opts: {
       : await buildBotReply(hh, intent, text);
   }
   let replyText = bot.text;
-  if (opts.fromUnified && intent === "unknown" && !isGreeting) {
+  // An answer to "how much and by when" that could not be read already has
+  // its reply (ask again, then a person). Until 22 Sep 2026 the two
+  // fallbacks below overwrote it with "इसकी जानकारी मेरे पास नहीं है".
+  if (opts.fromUnified && intent === "unknown" && !isGreeting && !answeringPtp) {
     replyText =
       waTemplateLanguageFor(hh) === "hi"
         ? "*KIDS* · *DUES* · *PAY* (ऑनलाइन भुगतान) · *PAY 1* · *RECEIPTS* · *HUMAN* में से कोई शब्द लिखें — या स्कूल के मुख्य मेनू के लिए *MENU*।"
         : "Reply *KIDS* · *DUES* · *PAY* (online payment) · *PAY 1* · *RECEIPTS* · *HUMAN* — or *MENU* for the main school menu.";
   }
   let escalateUngrounded = false;
-  if (intent === "unknown" && !isGreeting && text.trim().length > 3) {
+  if (intent === "unknown" && !isGreeting && !answeringPtp && text.trim().length > 3) {
     // Ask back at most once per conversation. If the bot's own question did
     // not land, the parent has now been misunderstood twice and wants a
     // person, not a third try.
