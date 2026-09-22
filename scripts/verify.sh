@@ -273,6 +273,7 @@ SELFTESTS=(
   test:upload-validation
   test:parent-profile
   test:tutor-access
+  test:chapter-standards
   test:answer-book
   test:syllabus-from-books
   test:tutor-syllabus

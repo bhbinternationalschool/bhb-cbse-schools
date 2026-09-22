@@ -29,6 +29,7 @@ import { resolveSessionStaff } from "@/lib/staffResolve";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { SyllabusPlanPanel } from "@/components/teaching/SyllabusPlanPanel";
 import { LessonPlansPanel } from "@/components/teaching/LessonPlansPanel";
+import { ChapterOutcomesPanel } from "@/components/teaching/ChapterOutcomesPanel";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import { NucleusProgressPanel } from "@/components/teaching/NucleusProgressPanel";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
@@ -36,7 +37,7 @@ import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
-type TeachTab = "today" | "plan" | "lessons" | "coverage" | "nucleus";
+type TeachTab = "today" | "plan" | "lessons" | "coverage" | "outcomes" | "nucleus";
 
 const STATUS_LABEL: Record<PeriodDelivery["status"], string> = {
   delivered: "Taught",
@@ -130,6 +131,13 @@ export function TeachingWorkspace() {
   );
   const canSeeEveryone = useMemo(
     () => hasPermission(session, masters, "teaching", "export"),
+    [session, masters],
+  );
+  // Agreeing with a chapter's learning outcomes is not an edit to one lesson:
+  // it puts a sentence in front of every lesson plan for that chapter. Only
+  // the role that holds `approve` may do it; everyone else reads the list.
+  const canApproveOutcomes = useMemo(
+    () => hasPermission(session, masters, "teaching", "approve"),
     [session, masters],
   );
 
@@ -367,6 +375,7 @@ export function TeachingWorkspace() {
             { id: "plan", label: "Syllabus" },
             { id: "lessons", label: "Lesson plans" },
             { id: "coverage", label: "Coverage" },
+            { id: "outcomes", label: "Learning outcomes" },
             { id: "nucleus", label: "Nucleus progress" },
           ]}
           value={tab}
@@ -650,6 +659,8 @@ export function TeachingWorkspace() {
           )}
         </section>
       ) : null}
+
+      {tab === "outcomes" ? <ChapterOutcomesPanel canApprove={canApproveOutcomes} /> : null}
 
       {tab === "nucleus" ? <NucleusProgressPanel academicYearCode={ay} /> : null}
 
