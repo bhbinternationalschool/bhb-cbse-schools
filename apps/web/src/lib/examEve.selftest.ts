@@ -145,10 +145,18 @@ for (const yes of [
   // 21 Sep 2026: "Next exam" went to the office instead of the date sheet.
   "Next exam", "next exam kab hai", "agla paper kaun sa hai", "kal ka paper", "when is the exam", "Exam?",
   "exam date", "tomorrow paper", "अगला पेपर", "कल कौन सा पेपर है", "आज का पेपर",
+  // 22 Sep 2026: written half in Devanagari, half in Latin — the father's
+  // own words, twice, while the drill was waiting for a chapter number. Both
+  // times he was told "यह समझ नहीं आया" instead of being given the date sheet.
+  "कल मेरा SST का paper है", "यार आज क्या मेरा SST का paper कल है",
+  "कल exam hai kya", "paper कब है",
 ]) {
   assert.ok(isTimetableRequest(yes), yes);
 }
-for (const no of ["fees kab jama kare", "DUES", "school kaha hai", "", "exam result kab aayega", "exam fees", "admit card", "exam ke marks", "परीक्षा का रिजल्ट", "next week fees"]) {
+for (const no of ["fees kab jama kare", "DUES", "school kaha hai", "", "exam result kab aayega", "exam fees", "admit card", "exam ke marks", "परीक्षा का रिजल्ट", "next week fees",
+  // The mixed-script branch must not swallow the questions that already have
+  // their own answers — money and marks are not "when".
+  "कल exam fees jama karni hai", "paper के marks कब आएंगे", "आज exam ka result kab aayega"]) {
   assert.equal(isTimetableRequest(no), false, `not a timetable ask: ${no}`);
 }
 
