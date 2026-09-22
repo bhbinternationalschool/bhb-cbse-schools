@@ -30,13 +30,17 @@ node scripts/greeting-card.mjs \
   --name "Vishnu Om Tripathi" \
   --role "Teacher · BHB International School" \
   --wish "Thank you for the care you bring to our classrooms every day." \
-  --from "With warm regards — Director, BHB International School" \
+  --signer "<the director's name>" \
   --format square --format story
 ```
 
 - Writes PNGs to `out/greeting-cards/` (gitignored) — Square 1:1 for a WhatsApp
   chat, Story 9:16 for a status. Send the file by hand; nothing is stored and no
   message goes out on its own.
+- Who signs it follows who receives it: `--audience staff` (the default) signs
+  from the **Director**, `--audience student` from the **Principal** — the
+  person the school puts in front of children and their families. `--signer`
+  is the name above that office; `--from` replaces the whole line.
 - `--occasion` changes the headline ("Happy Birthday" by default), so the same
   card serves a farewell or a thank-you. `--date` overrides the printed date,
   which otherwise is today in IST.

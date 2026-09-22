@@ -10,10 +10,13 @@
  *
  * Usage:
  *   node scripts/greeting-card.mjs --name "Vishnu Om Tripathi" \
- *     --role "Teacher" --wish "..." --from "Director, BHB International School"
+ *     --role "Teacher" --wish "..." --signer "A Name"
  *
- * Options: --occasion (default "Happy Birthday"), --date (default today, IST),
- *   --format square|story (default square, repeatable), --out <dir>.
+ * Options: --audience staff|student (who it is signed by — Director for staff,
+ *   Principal for students; default staff), --signer (the name above that
+ *   office), --from (replaces the whole signature line), --occasion (default
+ *   "Happy Birthday"), --date (default today, IST), --format square|story
+ *   (default square, repeatable), --out <dir>.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -25,6 +28,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 /** Colours sampled from the official crest — kept in step with lib/types.ts TENANT. */
 const BRAND = {
   school: "BHB INTERNATIONAL SCHOOL",
+  schoolTitle: "BHB International School",
   tagline: "Tradition of excellence",
   navy: "#203050",
   navyMid: "#384870",
@@ -36,6 +40,24 @@ const FORMATS = {
   square: { width: 1080, height: 1080, label: "Square 1:1 (WhatsApp / Instagram)" },
   story: { width: 1080, height: 1920, label: "Story 9:16 (WhatsApp status)" },
 };
+
+/**
+ * Who a card is signed by depends on who receives it, which is a decision
+ * rather than a preference: a card for a colleague comes from the Director,
+ * a card for a child and their family comes from the Principal — the person
+ * the school itself puts in front of students. --signer names them; --from
+ * still overrides the whole line when an occasion needs different words.
+ */
+const AUDIENCES = {
+  staff: { office: "Director", lead: "With warm regards" },
+  student: { office: "Principal", lead: "With warm wishes" },
+};
+
+function signatureLine(audience, signer) {
+  const a = AUDIENCES[audience];
+  const who = [signer, a.office].filter(Boolean).join(", ");
+  return `${a.lead} — ${who}, ${BRAND.schoolTitle}`;
+}
 
 /**
  * Chromium ships with the image; --chrome overrides it on a different machine.
@@ -213,12 +235,17 @@ function main() {
     return [f, size];
   });
   const iso = args.date && args.date !== "true" ? args.date : istToday();
+  const audience = args.audience && args.audience !== "true" ? args.audience : "staff";
+  if (!AUDIENCES[audience]) {
+    throw new Error(`Unknown --audience "${audience}". Use: ${Object.keys(AUDIENCES).join(" | ")}`);
+  }
+  const signer = args.signer && args.signer !== "true" ? args.signer : "";
   const card = {
     name,
     role: args.role && args.role !== "true" ? args.role : "",
     occasion: args.occasion && args.occasion !== "true" ? args.occasion : "Happy Birthday",
     wish: args.wish && args.wish !== "true" ? args.wish : "",
-    from: args.from && args.from !== "true" ? args.from : "",
+    from: args.from && args.from !== "true" ? args.from : signatureLine(audience, signer),
     dateLabel: dateLabel(iso),
     crest: crestDataUri(),
   };
