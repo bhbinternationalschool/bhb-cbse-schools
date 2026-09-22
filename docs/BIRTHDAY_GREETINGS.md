@@ -18,3 +18,26 @@
 - Card URLs are public but signed (HMAC over student · date · design · format with `CRON_SECRET`); a tampered URL is 403. Cards for staff previews need a session.
 - No AI anywhere in this flow — the wish text is a template the school edits.
 - Module state `birthday_settings` (settings + log) syncs like every other module; nothing is stored in localStorage only.
+
+## Staff & teacher cards (offline)
+
+The flow above is **students only** — it reads dates of birth from the student
+register and messages families. A teacher's birthday has no such record behind
+it, so staff cards are made offline instead of being added to the register:
+
+```bash
+node scripts/greeting-card.mjs \
+  --name "Vishnu Om Tripathi" \
+  --role "Teacher · BHB International School" \
+  --wish "Thank you for the care you bring to our classrooms every day." \
+  --from "With warm regards — Director, BHB International School" \
+  --format square --format story
+```
+
+- Writes PNGs to `out/greeting-cards/` (gitignored) — Square 1:1 for a WhatsApp
+  chat, Story 9:16 for a status. Send the file by hand; nothing is stored and no
+  message goes out on its own.
+- `--occasion` changes the headline ("Happy Birthday" by default), so the same
+  card serves a farewell or a thank-you. `--date` overrides the printed date,
+  which otherwise is today in IST.
+- Needs a Chromium on the machine; it finds the usual paths, or pass `--chrome`.
