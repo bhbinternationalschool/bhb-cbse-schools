@@ -24,10 +24,9 @@ import {
   waTemplateLanguageFor,
 } from "@/lib/householdPrefs";
 import {
-  sarvamConfigured,
-  sarvamTranslateMany,
   type SarvamLang,
 } from "@/lib/sarvam.server";
+import { translateMany, translationConfigured } from "@/lib/translate.server";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -85,8 +84,8 @@ export async function POST(req: Request) {
   let renderedLanguage: string = draftLanguage;
   const warnings: string[] = [];
   if (sarvamTarget) {
-    if (sarvamConfigured()) {
-      const t = await sarvamTranslateMany({
+    if (translationConfigured()) {
+      const t = await translateMany({
         texts: [draft.observations, draft.concerns, draft.suggestions],
         from: draftLanguage === "hi" ? "hi-IN" : "en-IN",
         to: sarvamTarget as SarvamLang,
@@ -99,7 +98,7 @@ export async function POST(req: Request) {
         warnings.push(...t.errors.slice(0, 2));
       }
     } else {
-      warnings.push(`Family prefers ${preferred}; SARVAM_API_KEY not set — brief in ${draftLanguage}`);
+      warnings.push(`Family prefers ${preferred}; no translation engine configured — brief in ${draftLanguage}`);
     }
   }
 

@@ -14,7 +14,8 @@ import {
   type MarketingVariant,
 } from "@/lib/marketingContentAi";
 import { HOUSEHOLD_LANGUAGES } from "@/lib/householdPrefs";
-import { sarvamConfigured, sarvamTranslate, type SarvamLang } from "@/lib/sarvam.server";
+import { type SarvamLang } from "@/lib/sarvam.server";
+import { translateText, translationConfigured, translationEngines } from "@/lib/translate.server";
 import { TENANT } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -33,7 +34,7 @@ export async function GET() {
     service: "marketing-content",
     configured: s.tutorEngine !== "none",
     engine: s.tutorEngine,
-    sarvam: sarvamConfigured(),
+    translation: translationEngines(),
     kinds: MARKETING_KINDS.map((k) => k.id),
     note: "POST { kind, facts: MarketingFacts, audiences: [{language, register}], positioning?: boolean }",
   });
@@ -66,14 +67,14 @@ export async function POST(req: Request) {
 
   let variants: MarketingVariant[] = r.variants;
   // Regional variants: translate the Hindi draft with Sarvam (formal mode only).
-  if (viaSarvam.length && sarvamConfigured()) {
+  if (viaSarvam.length && translationConfigured()) {
     const hi = variants.find((v) => v.language === "hi");
     if (hi) {
       for (const a of viaSarvam) {
         const to = HOUSEHOLD_LANGUAGES.find((l) => l.id === a.language)?.sarvam as SarvamLang | null | undefined;
         if (!to) continue;
-        const t = await sarvamTranslate({ text: hi.text, from: "hi-IN", to, mode: "formal" });
-        const subj = hi.subject ? await sarvamTranslate({ text: hi.subject, from: "hi-IN", to, mode: "formal" }) : null;
+        const t = await translateText({ text: hi.text, from: "hi-IN", to, mode: "formal" });
+        const subj = hi.subject ? await translateText({ text: hi.subject, from: "hi-IN", to, mode: "formal" }) : null;
         if (t.ok && t.text.trim()) {
           variants.push({ language: a.language, register: a.register, text: t.text, subject: subj && subj.ok ? subj.text : hi.subject });
         }

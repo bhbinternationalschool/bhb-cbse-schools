@@ -14,7 +14,8 @@ import {
 import { concernLabel } from "@/lib/admissionsEnquiryForm";
 import { retrieveRelevantKb } from "@/lib/schoolKb.server";
 import { PROSPECT_AUDIENCE } from "@/lib/admissionsKb.server";
-import { sarvamConfigured, sarvamTranslate, type SarvamLang } from "@/lib/sarvam.server";
+import { type SarvamLang } from "@/lib/sarvam.server";
+import { translateText, translationConfigured, translationEngines } from "@/lib/translate.server";
 import { HOUSEHOLD_LANGUAGES } from "@/lib/householdPrefs";
 import { TENANT } from "@/lib/types";
 import { SCHOOL_DEFAULT_WA_LANGUAGE } from "@/lib/householdPrefs";
@@ -34,7 +35,7 @@ export async function GET() {
     service: "lead-followup-draft",
     configured: s.tutorEngine !== "none",
     engine: s.tutorEngine,
-    sarvam: sarvamConfigured(),
+    translation: translationEngines(),
     note: "POST { facts: LeadFollowupFacts (minus kbSnippets), tone?, language? }",
   });
 }
@@ -80,12 +81,12 @@ export async function POST(req: Request) {
 
   let draft: LeadFollowupDraft = r.draft;
   let translated = false;
-  if (translateTo && sarvamConfigured()) {
+  if (translateTo && translationConfigured()) {
     const to = HOUSEHOLD_LANGUAGES.find((l) => l.id === translateTo)?.sarvam as SarvamLang | null | undefined;
     if (to) {
       const tr = async (t: string) => {
         if (!t.trim()) return t;
-        const x = await sarvamTranslate({ text: t, from: "hi-IN", to, mode: "formal" });
+        const x = await translateText({ text: t, from: "hi-IN", to, mode: "formal" });
         return x.ok && x.text.trim() ? x.text : t;
       };
       draft = {

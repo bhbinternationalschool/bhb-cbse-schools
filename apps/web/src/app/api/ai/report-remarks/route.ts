@@ -25,7 +25,7 @@ import {
   llmStatus,
   translateRemarksToHindiJson,
 } from "@/lib/aiLlm.server";
-import { sarvamConfigured, sarvamTranslateMany } from "@/lib/sarvam.server";
+import { translateMany, translationConfigured, translationEngines } from "@/lib/translate.server";
 import { geminiModel } from "@/lib/erpAiGemini.server";
 import { openAiModel } from "@/lib/openAi.server";
 import {
@@ -46,8 +46,9 @@ export async function GET() {
     service: "report-remarks-ai",
     llmConfigured: status.primaryEngine !== "none",
     primaryEngine: status.primaryEngine,
-    hindiEngine: sarvamConfigured()
-      ? "sarvam"
+    // Free Bhashini first, then the Sarvam key, then a second LLM pass.
+    hindiEngine: translationEngines()[0]
+      ? translationEngines()[0]
       : status.primaryEngine !== "none"
         ? status.primaryEngine
         : "none",
@@ -187,8 +188,8 @@ export async function POST(req: Request) {
   // 2. Hindi rendering — same content, translated; never authored separately.
   let hindiEngine: string = "none";
   if (language !== "en") {
-    if (sarvamConfigured()) {
-      const t = await sarvamTranslateMany({
+    if (translationConfigured()) {
+      const t = await translateMany({
         texts: drafts.map((d) => d.overall),
         from: "en-IN",
         to: "hi-IN",
@@ -197,7 +198,10 @@ export async function POST(req: Request) {
       drafts.forEach((d, i) => {
         d.overallHi = t.texts[i] ?? "";
       });
-      hindiEngine = "sarvam";
+      // A batch can legitimately be part free and part paid — Bhashini
+      // answering most of it and Sarvam catching the two that timed out is
+      // the system working, so report both rather than pick one.
+      hindiEngine = t.engines.join("+") || "none";
       errors.push(...t.errors.slice(0, 3));
     } else {
       const t = await translateRemarksToHindiJson({

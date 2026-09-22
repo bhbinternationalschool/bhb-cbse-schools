@@ -163,6 +163,7 @@ SELFTESTS=(
   test:puter-ai
   test:open-lookups
   test:free-routing
+  test:bhashini
   test:wa-sender-routing
   test:receipt-repair
   test:projection-double-post
