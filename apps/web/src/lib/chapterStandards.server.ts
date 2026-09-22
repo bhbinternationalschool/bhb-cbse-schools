@@ -1,19 +1,28 @@
 /**
- * Reading and deciding the outcomes proposed for a book's chapters.
+ * Reading and deciding the outcomes proposed for a book's chapters, and
+ * handing the agreed ones to whatever wants to use them.
  *
- * THIS FILE READS THE BASE TABLE, NOT THE VIEW, and that is deliberate.
- * `learning_chapter_outcomes` exists so no other screen can see a match a
- * teacher has not agreed with. The review screen is the one place that must
- * see exactly those — an unreviewed row is its whole subject — so it reads
- * `textbook_chapter_standards` directly. Every OTHER caller should read the
- * view; if a second file ever selects from this table, that is the thing to
- * question.
+ * THIS FILE SITS ON BOTH SIDES OF ONE LINE, on purpose, and which side a
+ * function is on is the most important thing about it:
+ *
+ *   `loadBookOutcomes` and `decideChapterStandard` read and write the BASE
+ *   TABLE, because the review screen's whole subject is rows nobody has
+ *   decided yet. It is the one screen that must see them.
+ *
+ *   `loadAgreedOutcomesByPosition` reads the VIEW, because everything that
+ *   USES an outcome — a lesson plan today, a revision drill later — may only
+ *   ever see what a teacher agreed with. `learning_chapter_outcomes` cannot
+ *   show it anything else, so that guarantee holds even if this file is
+ *   edited carelessly.
+ *
+ * A third function reading the base table is the thing to question.
  *
  * The standard's `code` is never selected. See lib/chapterStandards.ts for why
  * the type has no field for it.
  */
 
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { indexGrade, subjectKeyFor } from "@/lib/tutorSyllabus";
 import type { ChapterOutcomes, ProposedOutcome, ReviewVerdict } from "@/lib/chapterStandards";
 
 /** A row of textbook_chapter_standards as it comes back. */
@@ -227,4 +236,67 @@ export async function decideChapterStandard(input: {
       reviewedAt: row.reviewed_at,
     },
   };
+}
+
+/**
+ * The outcomes a teacher has AGREED WITH, for one class and subject, by chapter.
+ *
+ * THIS READS THE VIEW, and it is the first caller that should. Everything above
+ * reads the base table because the review screen's whole subject is rows nobody
+ * has decided yet; this is the other side of that line — a lesson plan may only
+ * ever see what somebody agreed with, and `learning_chapter_outcomes` cannot
+ * show it anything else. That is the guarantee, and it is enforced by the view
+ * rather than by this function remembering to filter.
+ *
+ * Returns an empty map rather than throwing for every ordinary "nothing here"
+ * — no database, a class we hold no book for, a subject nobody has reviewed.
+ * Drafting a lesson plan must not fail because this is empty; the prompt has
+ * always coped with a unit that has no outcomes, and it still does.
+ */
+export async function loadAgreedOutcomesByPosition(input: {
+  classLabel: string;
+  subjectName: string;
+}): Promise<Map<number, string[]>> {
+  const empty = new Map<number, string[]>();
+
+  const grade = indexGrade(input.classLabel);
+  const subjectKey = subjectKeyFor(input.subjectName);
+  if (grade === null || !subjectKey) return empty;
+
+  const ctx = await getServerTenantContext();
+  if (!ctx) return empty;
+  const { sb, tenantId } = ctx;
+
+  const { data: book } = await sb
+    .from("school_textbooks")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("grade", grade)
+    .eq("subject_key", subjectKey)
+    .is("retired_at", null)
+    .maybeSingle();
+  if (!book?.id) return empty;
+
+  const { data, error } = await sb
+    .from("learning_chapter_outcomes")
+    .select("position, statement")
+    .eq("tenant_id", tenantId)
+    .eq("textbook_id", book.id);
+  // A failed read is not an empty syllabus. Returning the empty map either way
+  // is right here — the plan is simply drafted the way it was before any of
+  // this existed — but it must not be mistaken for "nothing is agreed".
+  if (error) {
+    console.warn("[chapterStandards] agreed outcomes read failed", error.message);
+    return empty;
+  }
+
+  const byPosition = new Map<number, string[]>();
+  for (const row of (data ?? []) as { position: number; statement: string }[]) {
+    const list = byPosition.get(row.position) ?? [];
+    list.push(row.statement);
+    byPosition.set(row.position, list);
+  }
+  // Sorted so two drafts of the same chapter put the same sentence first.
+  for (const [k, v] of byPosition) byPosition.set(k, v.sort((a, b) => a.localeCompare(b)));
+  return byPosition;
 }
