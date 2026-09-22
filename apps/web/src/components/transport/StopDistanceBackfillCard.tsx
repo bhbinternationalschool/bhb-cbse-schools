@@ -52,7 +52,7 @@ export function StopDistanceBackfillCard({
           stopId: stop.id,
           stopName: stop.name,
         };
-        if (stop.distanceSource === "google") done.push(ref);
+        if (stop.distanceSource === "google" || stop.distanceSource === "free") done.push(ref);
         else if (stopHasGeo(stop)) measurable.push(ref);
         else unpinned.push(ref);
       }
@@ -86,7 +86,7 @@ export function StopDistanceBackfillCard({
     for (const [routeId, refs] of byRoute) {
       const route = state.routes.find((r) => r.id === routeId);
       if (!route) continue;
-      const kmByStop = new Map<string, number>();
+      const kmByStop = new Map<string, { km: number; source: "google" | "free" }>();
 
       for (const ref of refs) {
         const stop = route.stops.find((s) => s.id === ref.stopId);
@@ -100,7 +100,7 @@ export function StopDistanceBackfillCard({
           address: stop.geoAddress || stop.name,
         });
         if (res.ok) {
-          kmByStop.set(stop.id, res.km);
+          kmByStop.set(stop.id, { km: res.km, source: res.source });
           ok += 1;
         } else {
           failed.push(`${ref.routeLabel} · ${ref.stopName}: ${res.error}`);
@@ -109,10 +109,10 @@ export function StopDistanceBackfillCard({
 
       if (kmByStop.size === 0) continue;
       const next = route.stops.map((s) => {
-        const km = kmByStop.get(s.id);
-        return km == null
+        const measured = kmByStop.get(s.id);
+        return measured == null
           ? s
-          : { ...s, distanceKm: km, distanceSource: "google" as const };
+          : { ...s, distanceKm: measured.km, distanceSource: measured.source };
       });
       const write = setRouteStops(routeId, next);
       if (!write.ok) failed.push(`${route.code}: ${write.error}`);

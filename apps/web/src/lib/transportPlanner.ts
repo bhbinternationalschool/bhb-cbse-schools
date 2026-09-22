@@ -639,7 +639,7 @@ export async function fetchRoadDistanceKm(
   origin: string,
   destination: string = SCHOOL_GEO.address,
   originLatLng?: { lat: number; lng: number },
-): Promise<{ km: number; source: "google" | "estimate" }> {
+): Promise<{ km: number; source: "google" | "free" | "estimate" }> {
   try {
     const q = new URLSearchParams({ origin, destination });
     if (originLatLng) {
@@ -650,7 +650,11 @@ export async function fetchRoadDistanceKm(
     if (!res.ok) throw new Error("distance api failed");
     const data = (await res.json()) as { km?: number; source?: string };
     if (typeof data.km === "number" && data.km > 0) {
-      return { km: data.km, source: data.source === "google" ? "google" : "estimate" };
+      const source =
+        data.source === "google" || data.source === "free"
+          ? data.source
+          : "estimate";
+      return { km: data.km, source };
     }
   } catch {
     /* fallback */
@@ -672,7 +676,7 @@ export async function fetchStopRoadDistanceKm(input: {
   lng?: number;
   address?: string;
 }): Promise<
-  { ok: true; km: number } | { ok: false; error: string }
+  { ok: true; km: number; source: "google" | "free" } | { ok: false; error: string }
 > {
   const hasLatLng =
     typeof input.lat === "number" &&
@@ -697,12 +701,23 @@ export async function fetchStopRoadDistanceKm(input: {
       source?: string;
       error?: string;
     };
-    if (data.source === "google" && typeof data.km === "number" && data.km > 0) {
-      return { ok: true, km: Math.round(data.km * 10) / 10 };
+    // The route decides which sources may bill — Google always, and a free
+    // OSM engine only once the school has compared it and set
+    // ROUTING_FREE_BILLABLE. A `strict` request is never answered from a
+    // source the school has not accepted, so anything with a km here has
+    // already passed that gate and this need not re-litigate it.
+    if (typeof data.km === "number" && data.km > 0) {
+      return {
+        ok: true,
+        km: Math.round(data.km * 10) / 10,
+        // The stop record keeps WHICH engine measured it, so a fee can be
+        // defended later without guessing.
+        source: data.source === "free" ? "free" : "google",
+      };
     }
     return {
       ok: false,
-      error: data.error || "Google returned no road distance",
+      error: data.error || "No road distance for this stop",
     };
   } catch {
     return { ok: false, error: "Could not reach the distance service" };
