@@ -56,7 +56,7 @@ const AUDIENCES = {
 function signatureLine(audience, signer) {
   const a = AUDIENCES[audience];
   const who = [signer, a.office].filter(Boolean).join(", ");
-  return `${a.lead} — ${who}, ${BRAND.schoolTitle}`;
+  return `${a.lead} — ${who}`;
 }
 
 /**
@@ -174,7 +174,7 @@ function buildHtml(card, size) {
     color: rgba(248, 248, 240, 0.9);
   }
   .foot {
-    margin-top: ${px(44)}; display: flex; flex-direction: column; gap: ${px(8)};
+    margin-top: ${px(44)}; display: flex; flex-direction: column; gap: ${px(6)};
     font-size: ${px(21)}; letter-spacing: ${px(2)}; color: rgba(248, 248, 240, 0.66);
   }
   .from { color: ${BRAND.gold}; letter-spacing: ${px(3)}; }
@@ -192,6 +192,7 @@ function buildHtml(card, size) {
     ${card.wish ? `<div class="wish">${escapeHtml(card.wish)}</div>` : ""}
     <div class="foot">
       ${card.from ? `<div class="from">${escapeHtml(card.from)}</div>` : ""}
+      ${card.fromSchool ? `<div class="from">${escapeHtml(card.fromSchool)}</div>` : ""}
       ${card.dateLabel ? `<div>${escapeHtml(card.dateLabel)}</div>` : ""}
     </div>
   </div>
@@ -246,6 +247,7 @@ function main() {
     occasion: args.occasion && args.occasion !== "true" ? args.occasion : "Happy Birthday",
     wish: args.wish && args.wish !== "true" ? args.wish : "",
     from: args.from && args.from !== "true" ? args.from : signatureLine(audience, signer),
+    fromSchool: args.from && args.from !== "true" ? "" : BRAND.schoolTitle,
     dateLabel: dateLabel(iso),
     crest: crestDataUri(),
   };
