@@ -286,6 +286,7 @@ jobs:
           npm run test:homework-expand
           npm run test:homework-submission
           npm run test:exam-drill
+          npm run test:drill-skills
           npm run test:exam-seating
           npm run test:roster-name-case
           npm run test:review-demo-records

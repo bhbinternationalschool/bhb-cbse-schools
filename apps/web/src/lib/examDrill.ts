@@ -295,6 +295,17 @@ export type DrillAsked = {
   questionHi?: string;
   /** The idea it tests, in a few words — so a re-ask stays on the same idea. */
   skill: string;
+  /**
+   * The agreed micro-skill it was set from (a CASE component uuid), when the
+   * model picked one off the menu — see lib/drillSkills.ts.
+   *
+   * Optional, and absent far more often than present: Classes 1–2, Science
+   * and English have no components at all, and a chapter nobody has agreed
+   * outcomes for has no menu. `skill` above stays the thing every reader
+   * uses; this is what lets a wrong answer be walked back to the idea
+   * underneath it, which a sentence the model wrote cannot be.
+   */
+  componentId?: string;
   chapterPosition: number;
   verdict?: DrillVerdict;
   /**
@@ -416,7 +427,17 @@ export function drillIsForAPastPaper(paperDate: string, todayIso: string): boole
 export type DrillStep =
   | { kind: "ask_scope" }
   /** Write a question. `avoid` are questions already asked, `avoidSkills` the ideas already tested, `retrySkill` the one to re-teach. */
-  | { kind: "ask_question"; retrySkill: string | null; avoid: string[]; avoidSkills: string[]; number: number }
+  | {
+      kind: "ask_question";
+      retrySkill: string | null;
+      /** The agreed micro-skill behind `retrySkill`, when there was one — the way in to its prerequisites. */
+      retryComponentId: string | null;
+      avoid: string[];
+      avoidSkills: string[];
+      /** Agreed micro-skills already tested this session, as stored ids. */
+      askedComponentIds: string[];
+      number: number;
+    }
   | { kind: "finish"; reason: "mastered" | "ceiling" };
 
 /**
@@ -431,10 +452,17 @@ export function nextDrillStep(state: DrillState): DrillStep {
     kind: "ask_question",
     // A wrong answer is followed by a NEW question on the same idea.
     retrySkill: last && last.verdict && last.verdict !== "right" ? last.skill : null,
+    // The same condition, so the hint about what is missing underneath can
+    // never arrive for a question they actually got right.
+    retryComponentId:
+      last && last.verdict && last.verdict !== "right" ? (last.componentId ?? null) : null,
     avoid: state.asked.map((a) => a.question),
     // Ideas already tested this session, so a drill covers the chapter
     // instead of asking antonyms five times.
     avoidSkills: [...new Set(state.asked.map((a) => a.skill).filter(Boolean))],
+    // The same thing said exactly: two questions on one idea are two names
+    // for it in `avoidSkills` and one id here.
+    askedComponentIds: [...new Set(state.asked.map((a) => a.componentId).filter((x): x is string => !!x))],
     number: state.asked.length + 1,
   };
 }
@@ -482,7 +510,7 @@ export function drillScore(state: DrillState): { right: number; asked: number } 
 
 // 19 Sep 2026: script no longer counts against an answer, and a child
 // who asks instead of answering is taught rather than marked wrong.
-export const DRILL_PROMPT_VERSION = "exam-drill/2026-09-22";
+export const DRILL_PROMPT_VERSION = "exam-drill/2026-09-22b";
 
 /**
  * The language a paper is written in.
@@ -552,9 +580,13 @@ export const DRILL_QUESTION_SYSTEM = [
   "COVER THE CHAPTER, not one corner of it. You are told which ideas have already been tested this session — pick a DIFFERENT one from the chapter's topics unless you are explicitly asked to revisit a skill.",
   "When a skill to revisit is given, set a different and EASIER question on that same idea — never repeat the question they just got wrong, and never make the second attempt harder than the first. They got it wrong; the next one is a way back in, not a second hurdle.",
   "skill: three or four words naming what the question tests, e.g. 'unitary method' or 'plural nouns'.",
+  // The menu (lib/drillSkills.ts) is only present for chapters whose outcomes
+  // a teacher has agreed with; most drills are given none and this rule then
+  // has nothing to bite on.
+  "skillRef: when you are given a numbered list of ideas this school has agreed are worth testing, and you set the question from one of them, put ITS NUMBER here. Copy the number exactly; never invent one. If the chapter you chose has no idea listed, or you set the question from the chapter's topics instead, skillRef is 0. Never change the question to fit a number.",
   "LANGUAGE — you are told the paper language below. The school is ENGLISH MEDIUM: every paper except Hindi and Sanskrit is taught and written in English, whatever language the subject's name or the chapters are given in. ENGLISH paper: `question` in simple English as the child's English-medium textbook words it, and `questionHi` the same question in simple Hindi for the parent. HINDI paper: `question` in Hindi, `questionHi` empty. SANSKRIT paper: `question` in Sanskrit, `questionHi` empty.",
   "skill is always in English.",
-  'Respond with JSON only: {"question":"","questionHi":"","skill":"","chapter":0}',
+  'Respond with JSON only: {"question":"","questionHi":"","skill":"","chapter":0,"skillRef":0}',
 ].join("\n");
 
 export const DRILL_CHECK_SYSTEM = [
@@ -588,7 +620,14 @@ export const DRILL_CHECK_SYSTEM = [
   'Respond with JSON only: {"notAnAnswer":false,"verdict":"right","whatWentWrong":"","howToDoIt":"","praise":"","whatWentWrongHi":"","howToDoItHi":"","praiseHi":""}',
 ].join("\n");
 
-export type DrillQuestion = { question: string; skill: string; chapter: number; questionHi?: string };
+export type DrillQuestion = {
+  question: string;
+  skill: string;
+  chapter: number;
+  /** Which numbered idea off the agreed menu it was set from; 0 for none. */
+  skillRef: number;
+  questionHi?: string;
+};
 
 export function buildQuestionPrompt(input: {
   className: string;
@@ -599,6 +638,12 @@ export function buildQuestionPrompt(input: {
   avoid: string[];
   avoidSkills?: string[];
   number: number;
+  /** The agreed micro-skills, already rendered (lib/drillSkills.ts). "" when there are none. */
+  skillMenu?: string;
+  /** Menu numbers already tested this session — the precise half of `avoidSkills`. */
+  avoidRefs?: number[];
+  /** What sits underneath the idea they just got wrong, already rendered. "" when unknown. */
+  retryFoundation?: string;
 }): string {
   const inScope = input.chapters.filter((c) => c.position <= input.scope);
   const lines = [
@@ -607,17 +652,26 @@ export function buildQuestionPrompt(input: {
     paperLanguageRule(paperLanguageFor(input.subjectLabel)),
     "Chapters the class has covered:",
     ...inScope.map((c) => `  ${c.position}. ${c.name}${c.topics.length ? ` — ${c.topics.slice(0, 4).join(", ")}` : ""}`),
-    "",
-    `This is question ${input.number} of the session.`,
   ];
+  // The agreed menu sits under the chapters it narrows, and is simply absent
+  // when nothing has been agreed — which is the ordinary case and must leave
+  // this prompt exactly as it was.
+  if (input.skillMenu) lines.push("", input.skillMenu);
+  lines.push("", `This is question ${input.number} of the session.`);
   if (input.retrySkill) {
     lines.push(
       `They just got a question on "${input.retrySkill}" wrong. Set a DIFFERENT and EASIER question on that same idea.`,
     );
+    if (input.retryFoundation) lines.push(input.retryFoundation);
   } else if ((input.avoidSkills ?? []).length > 0) {
     lines.push(
       `Already tested this session: ${(input.avoidSkills ?? []).join(", ")}. Pick a different idea from the chapters above.`,
     );
+    if ((input.avoidRefs ?? []).length > 0) {
+      lines.push(
+        `Ideas already used from the list above: ${(input.avoidRefs ?? []).map((n) => `[${n}]`).join(" ")}. Pick another.`,
+      );
+    }
   }
   if (input.avoid.length) {
     lines.push("", "Already asked — do not repeat any of these:", ...input.avoid.slice(-6).map((q) => `  - ${q}`));
@@ -625,7 +679,13 @@ export function buildQuestionPrompt(input: {
   return lines.join("\n");
 }
 
-export function parseDrillQuestion(text: string, scope: number): DrillQuestion | null {
+/**
+ * `menuSize` is how many agreed ideas the prompt actually listed. A skillRef
+ * outside 1..menuSize is read as 0 rather than trusted: the number is used to
+ * attribute the question to a stored component, and a wrong attribution
+ * teaches the wrong prerequisite on the next wrong answer.
+ */
+export function parseDrillQuestion(text: string, scope: number, menuSize = 0): DrillQuestion | null {
   const o = safeJson(text);
   if (!o) return null;
   const question = clean(o.question, 400);
@@ -636,10 +696,13 @@ export function parseDrillQuestion(text: string, scope: number): DrillQuestion |
   // been taught is refused outright rather than shown and apologised for.
   if (Number.isFinite(chapter) && chapter > scope) return null;
   const questionHi = clean(o.questionHi, 400);
+  const ref = Number(o.skillRef);
+  const skillRef = Number.isInteger(ref) && ref >= 1 && ref <= menuSize ? ref : 0;
   return {
     question,
     skill,
     chapter: Number.isFinite(chapter) && chapter > 0 ? chapter : 0,
+    skillRef,
     ...(questionHi && questionHi !== question ? { questionHi } : {}),
   };
 }
