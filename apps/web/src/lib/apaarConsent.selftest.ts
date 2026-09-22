@@ -12,8 +12,11 @@ import {
   composeApaarConsentAsk,
   composeApaarConsentThanks,
   isApaarConsentRequest,
+  apaarParentIdState,
   parentPartOfApaar,
   parseApaarConsentReply,
+  renderApaarParentIdLines,
+  samePersonName,
 } from "./apaarConsent";
 import { apaarReadiness, computeStudentUdiseGaps, isUdiseFullyCompliant } from "./udiseCompliance";
 import type { SisStudent } from "./sis";
@@ -124,6 +127,31 @@ assert.equal(apaarConsentPending(kids).length, 1, "no ID, no answer, still here"
     assert.equal(pdf.subarray(0, 5).toString(), "%PDF-");
   }
   assert.equal(apaarConsentRecordFileName("VIDHI SINGH", "2026-09-21T13:05:00.000Z"), "APAAR-consent-VIDHI-SINGH-2026-09-21.pdf");
+}
+
+/* ── Whose Aadhaar goes with the consent (22 Sep 2026, the real two) ── */
+{
+  assert.ok(samePersonName("MR. SAURABH  DIXIT", "SAURABH DIXIT"));
+  assert.ok(!samePersonName("KISHAN YADAV", "BRIJESH YADAV"), "a shared surname is not the same person");
+  // Saurabh Dixit said yes; his own card (…4894) is on file: nothing to ask.
+  const dixit = apaarParentIdState({ father: { name: "SAURABH DIXIT", last4: "4894" }, mother: null }, "MR. SAURABH  DIXIT");
+  assert.deepEqual(dixit, { kind: "consenter_on_file", last4: "4894" });
+  // Brijesh Yadav said yes for Kriyansh; the card on file is Kishan Yadav's.
+  const yadav = apaarParentIdState({ father: { name: "KISHAN YADAV", last4: "2131" }, mother: null }, "BRIJESH YADAV");
+  assert.equal(yadav.kind, "other_parent_on_file");
+  const lines = renderApaarParentIdLines([{ child: "KRIYANSH YADAV", state: yadav }], "BRIJESH YADAV", true).join("\n");
+  assert.match(lines, /पिता \*KISHAN YADAV\* का आधार \(…2131\)/);
+  assert.match(lines, /\*BRIJESH YADAV\* ने दी है/);
+  assert.match(lines, /अपना आधार कार्ड/);
+  const ok = composeApaarConsentThanks({ answer: "given", childNames: ["AKSHITA DIXIT"], hindi: true, parentIdLines: renderApaarParentIdLines([{ child: "AKSHITA DIXIT", state: dixit }], "SAURABH DIXIT", true) });
+  assert.match(ok, /आपका आधार \(…4894\) हमारे रिकॉर्ड में है/);
+  assert.deepEqual(apaarParentIdState({ father: null, mother: null }, "X"), { kind: "none" });
+
+  // The office sees Kriyansh as waiting, not READY.
+  const kri = { apaarId: "", pen: "23180622640", aadhaarNumber: "", aadhaarLast4: "9952", udiseAadhaarValidationStatus: "", apaarConsent: "given", apaarConsentBy: "BRIJESH YADAV · WhatsApp +919… · msg x", fatherName: "KISHAN YADAV", fatherAadhaarNumber: "111122223333", fatherAadhaarLast4: "3333", motherName: "", motherAadhaarNumber: "", motherAadhaarLast4: "" } as unknown as SisStudent;
+  const cfgA = { parentAadhaarRequiredForApaar: true } as Parameters<typeof apaarReadiness>[1];
+  assert.deepEqual(apaarReadiness(kri, cfgA).waitingFor, ["parent_aadhaar"], "the guardian's own card is still needed");
+  assert.equal(apaarReadiness({ ...kri, apaarConsentBy: "KISHAN YADAV · WhatsApp" } as SisStudent, cfgA).ready, true, "the father's own consent with his card on file is ready");
 }
 
 console.log("  ok");

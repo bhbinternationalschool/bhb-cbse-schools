@@ -117,9 +117,22 @@ export function composeApaarConsentThanks(input: {
   hindi: boolean;
   /** For a "yes": what each child still needs. Empty = the school can create the IDs now. */
   stillNeeded?: ApaarStillNeeded[];
+  /** Whose Aadhaar goes with the consent, already worked out (renderApaarParentIdLines). */
+  parentIdLines?: string[];
 }): string {
   const names = input.childNames.join(", ");
   if (input.answer === "given") {
+    const idLines = input.parentIdLines ?? [];
+    if (idLines.length) {
+      return [
+        input.hindi ? `🙏 धन्यवाद! ${names} की APAAR ID के लिए आपकी सहमति दर्ज हो गई है।` : `🙏 Thank you! Your consent for ${names}'s APAAR ID is recorded.`,
+        "",
+        ...idLines,
+        ...(parentPartOfApaar(input.stillNeeded ?? [], input.hindi).length
+          ? ["", ...parentPartOfApaar(input.stillNeeded ?? [], input.hindi)]
+          : []),
+      ].join("\n");
+    }
     const asks = parentPartOfApaar(input.stillNeeded ?? [], input.hindi);
     if (!asks.length) {
       return input.hindi
@@ -160,3 +173,71 @@ export function isApaarConsentRequest(text: string): boolean {
 export function apaarConsentPending<T extends { status: string; apaarId?: string; apaarConsent?: string }>(children: T[]): T[] {
   return children.filter((c) => c.status === "active" && !(c.apaarId || "").trim() && !c.apaarConsent);
 }
+
+/* ── whose Aadhaar goes with the consent (22 Sep 2026) ───────────── */
+
+/** "MR. KISHAN YADAV" and "Kishan Yadav" are one person; "BRIJESH YADAV" is not. */
+export function samePersonName(a: string, b: string): boolean {
+  const norm = (x: string) =>
+    String(x || "")
+      .toUpperCase()
+      .replace(/\b(MR|MRS|MS|SHRI|SMT|SRI|DR|LATE)\b\.?/g, " ")
+      .replace(/[^A-Z\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  const x = norm(a);
+  const y = norm(b);
+  if (!x || !y) return false;
+  if (x === y || x.includes(y) || y.includes(x)) return true;
+  const fx = x.split(" ")[0]!;
+  const fy = y.split(" ")[0]!;
+  return fx.length >= 3 && fx === fy;
+}
+
+export type ParentAadhaarOnFile = { father: { name: string; last4: string } | null; mother: { name: string; last4: string } | null };
+
+export type ApaarParentIdState =
+  | { kind: "consenter_on_file"; last4: string }
+  | { kind: "other_parent_on_file"; who: "father" | "mother"; name: string; last4: string }
+  | { kind: "none" };
+
+/**
+ * The APAAR ID is made on the consenting parent's own Aadhaar. A father's
+ * card on file does not cover a consent the guardian gave: on 22 Sep 2026
+ * Brijesh Yadav said YES for Kriyansh, whose record holds Kishan Yadav's
+ * Aadhaar, and was asked for nothing.
+ */
+export function apaarParentIdState(onFile: ParentAadhaarOnFile, consenterName: string): ApaarParentIdState {
+  for (const who of ["father", "mother"] as const) {
+    const p = onFile[who];
+    if (p?.last4 && samePersonName(p.name, consenterName)) return { kind: "consenter_on_file", last4: p.last4 };
+  }
+  for (const who of ["father", "mother"] as const) {
+    const p = onFile[who];
+    if (p?.last4) return { kind: "other_parent_on_file", who, name: p.name, last4: p.last4 };
+  }
+  return { kind: "none" };
+}
+
+/** What the parent is told about the Aadhaar that goes with their consent. */
+export function renderApaarParentIdLines(rows: { child: string; state: ApaarParentIdState }[], consenterName: string, hindi: boolean): string[] {
+  const out: string[] = [];
+  const onFile = rows.filter((r) => r.state.kind === "consenter_on_file");
+  const other = rows.filter((r) => r.state.kind === "other_parent_on_file");
+  if (onFile.length) {
+    const l4 = [...new Set(onFile.map((r) => (r.state as { last4: string }).last4))].join(", …");
+    out.push(hindi ? `✅ APAAR के लिए आपका आधार (…${l4}) हमारे रिकॉर्ड में है — कुछ और भेजने की ज़रूरत नहीं।` : `✅ Your Aadhaar (…${l4}) is already in our records for the APAAR ID — nothing more to send.`);
+  }
+  for (const r of other) {
+    const s = r.state as { who: "father" | "mother"; name: string; last4: string };
+    const whoHi = s.who === "father" ? "पिता" : "माता";
+    const whoEn = s.who === "father" ? "father" : "mother";
+    out.push(
+      hindi
+        ? `📄 *${r.child}*: हमारे रिकॉर्ड में ${whoHi} *${s.name}* का आधार (…${s.last4}) है, पर सहमति ${consenterName ? `*${consenterName}*` : "आपने"} ने दी है। APAAR सहमति देने वाले के अपने आधार से बनता है — कृपया *अपना आधार कार्ड* (आगे और पीछे की फ़ोटो) यहीं भेजें। अगर रिकॉर्ड में ${whoHi} का नाम गलत है, तो बता दीजिए।`
+        : `📄 *${r.child}*: our record holds the ${whoEn} *${s.name}*'s Aadhaar (…${s.last4}), but the consent was given by ${consenterName ? `*${consenterName}*` : "you"}. The APAAR ID goes with the consenting parent's own Aadhaar — please send *your Aadhaar card* (photo of front and back) here. If the ${whoEn}'s name in our record is wrong, tell us.`,
+    );
+  }
+  return out;
+}
+

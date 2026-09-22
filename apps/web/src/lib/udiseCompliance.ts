@@ -3,6 +3,7 @@
  * school reminder settings, WhatsApp parent nudges + Aadhaar enrolment guidance.
  */
 
+import { samePersonName } from "@/lib/apaarConsent";
 import {
   isRealPortalId,
   displayAadhaar,
@@ -576,6 +577,17 @@ export function computeStudentUdiseGaps(
   return gaps;
 }
 
+/** The consent's giver ("<name> · WhatsApp …") has their own Aadhaar in the record. */
+function consenterAadhaarOnFile(s: SisStudent): boolean {
+  const who = String(s.apaarConsentBy || "").split(" · ")[0]!.trim();
+  if (!who) return true;
+  const has = (full: string, l4: string) => /\d{4}/.test(String(full || "").replace(/\D/g, "")) || /\d{4}/.test(String(l4 || ""));
+  return (
+    (has(s.fatherAadhaarNumber, s.fatherAadhaarLast4) && samePersonName(s.fatherName, who)) ||
+    (has(s.motherAadhaarNumber, s.motherAadhaarLast4) && samePersonName(s.motherName, who))
+  );
+}
+
 /**
  * What the PARENT still has to give before the school can create the APAAR
  * ID: the consenting parent's own Aadhaar (the director's rule, 21 Sep 2026 —
@@ -607,6 +619,11 @@ export function apaarReadiness(
   if (hasApaar(s)) return { ready: false, waitingFor, needsPen };
   void cfg;
   if (!hasParentAadhaar(s)) waitingFor.push("parent_aadhaar");
+  else if (s.apaarConsent === "given" && !consenterAadhaarOnFile(s)) {
+    // A card is on file, but not the consenting parent's own (the guardian
+    // said yes; the father's card is what we hold).
+    waitingFor.push("parent_aadhaar");
+  }
   // The portal makes an APAAR ID on top of a PEN (itself built on the
   // child's validated Aadhaar), so "ready" also needs one — but that is the
   // PEN side's work, shown on its own.
