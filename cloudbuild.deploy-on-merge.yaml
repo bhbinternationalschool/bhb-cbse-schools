@@ -1,0 +1,126 @@
+# Deploy school-erp-web whenever main moves — i.e. whenever a pull request
+# is merged. The merge IS the approval: nothing reaches production that a
+# person did not merge, and the director can merge from the GitHub app on a
+# phone, with the laptop shut.
+#
+# WHY (2026-09-22): every deploy so far ran scripts/deploy-online.sh on the
+# director's Mac, from a `git archive` export with .env.local copied in. When
+# the gcloud login expired mid-deploy (2026-08-14, 2026-08-23, 2026-09-21) a
+# person had to be at the keyboard, and the deploy-key route is closed: the
+# org policy iam.disableServiceAccountKeyCreation blocks minting keys (see
+# docs/DEPLOY_SERVICE_ACCOUNT.md). A Cloud Build trigger needs no key — it
+# runs as its own service account.
+#
+# WHAT IT RUNS: the same scripts/deploy-online.sh, unchanged, so a merge
+# deploys exactly what a manual deploy does. .env.local comes from Secret
+# Manager (school-erp-deploy-env — refresh it with
+# scripts/update-deploy-env-secret.sh whenever .env.local changes).
+#
+# SAFETY:
+#   * preflight refuses to deploy without the Play review login, the cron
+#     guard and the Supabase keys — the settings a deploy has silently lost
+#     before;
+#   * demo auth is forced OFF;
+#   * the live revision is recorded first, and if the new one fails the smoke
+#     test (reviewer login + /login) traffic goes straight back to it.
+#
+# One-time setup: scripts/setup-deploy-on-merge.sh (docs/DEPLOY_ON_MERGE.md).
+# Skip a deploy for one merge: put [skip ci] in the merge commit message.
+
+steps:
+  - id: env
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    secretEnv: ["DEPLOY_ENV"]
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        umask 077
+        printf '%s\n' "$$DEPLOY_ENV" > apps/web/.env.local
+        echo "apps/web/.env.local written from Secret Manager ($$(wc -l < apps/web/.env.local) lines)"
+
+  - id: preflight
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        missing=""
+        for k in NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_ANON_KEY SUPABASE_SERVICE_ROLE_KEY CRON_SECRET \
+                 REVIEW_LOGIN_MOBILE REVIEW_LOGIN_CODE REVIEW_LOGIN_HOUSEHOLD_ID WHATSAPP_PHONE_ID; do
+          grep -Eq "^$${k}=.+" apps/web/.env.local || missing="$$missing $$k"
+        done
+        if [ -n "$$missing" ]; then
+          echo "REFUSING TO DEPLOY — missing in school-erp-deploy-env:$$missing"
+          echo "Run scripts/update-deploy-env-secret.sh from a checkout with a complete .env.local."
+          exit 1
+        fi
+        gcloud run services describe school-erp-web --region=${_REGION} --project=$PROJECT_ID \
+          --format='value(status.traffic[0].revisionName)' > /workspace/prev-revision.txt
+        echo "Live revision before this deploy: $$(cat /workspace/prev-revision.txt)"
+
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    env:
+      - NEXT_PUBLIC_DEMO_AUTH_OVERRIDE=false
+      # Both need the app's node_modules, which this image does not have;
+      # the manual deploy has always treated them as optional warnings.
+      - SKIP_BOOTSTRAP=1
+      - SKIP_WA_SUBSCRIBE=1
+      # No key file: the build's own service account is the credential.
+      - DEPLOY_SA_KEY=/nonexistent-deploy-key
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        # deploy-online.sh sets the gcloud account to the director's login
+        # when it finds no key; here the right account is this build's own.
+        export GCLOUD_ACCOUNT="$$(gcloud config get-value account 2>/dev/null)"
+        bash scripts/deploy-online.sh 2>&1 | tee /workspace/deploy.log
+        grep -q "Demo auth: false" /workspace/deploy.log
+        grep -q "Play review login: configured" /workspace/deploy.log
+
+  - id: smoke
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -uo pipefail
+        PREV="$$(cat /workspace/prev-revision.txt)"
+        NEW="$$(gcloud run services describe school-erp-web --region=${_REGION} --project=$PROJECT_ID --format='value(status.latestReadyRevisionName)')"
+        echo "New revision: $$NEW (previous: $$PREV)"
+        val() { grep -E "^$$1=" apps/web/.env.local | head -1 | cut -d= -f2- | tr -d '"'"'"; }
+        MOBILE="$$(val REVIEW_LOGIN_MOBILE)"
+        CODE="$$(val REVIEW_LOGIN_CODE)"
+        status() { curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$$@"; }
+        post() { status -X POST -H 'Content-Type: application/json' -d "$$2" "https://bhbinternational.school$$1"; }
+        ok=1
+        sleep 20
+        [ "$$(status https://bhbinternational.school/login)" = "200" ] || { echo "SMOKE FAIL: /login"; ok=0; }
+        [ "$$(post /api/auth/otp/request "{\"mobile\":\"$$MOBILE\"}")" = "200" ] || { echo "SMOKE FAIL: reviewer OTP request"; ok=0; }
+        [ "$$(post /api/auth/otp/verify "{\"mobile\":\"$$MOBILE\",\"code\":\"$$CODE\"}")" = "200" ] || { echo "SMOKE FAIL: reviewer OTP verify"; ok=0; }
+        if [ "$$ok" = "1" ]; then
+          echo "Smoke test passed — $$NEW is live."
+          exit 0
+        fi
+        if [ -n "$$PREV" ] && [ "$$PREV" != "$$NEW" ]; then
+          echo "ROLLING BACK to $$PREV"
+          gcloud run services update-traffic school-erp-web --region=${_REGION} --project=$PROJECT_ID --to-revisions="$$PREV=100"
+        fi
+        exit 1
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/$PROJECT_ID/secrets/school-erp-deploy-env/versions/latest
+      env: DEPLOY_ENV
+
+substitutions:
+  _REGION: asia-southeast1
+
+timeout: 3600s
+options:
+  logging: CLOUD_LOGGING_ONLY
