@@ -33,6 +33,7 @@ import { MARKETING_KINDS, type MarketingKind, type MarketingRegister, type Marke
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { buildCrossPostPayload, requestSocialCrossPost, summarizeCrossPostResult } from "@/lib/socialCrossPost";
+import { MarketingArtwork } from "@/components/admissions/MarketingArtwork";
 import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
 
@@ -451,6 +452,9 @@ export function MarketingPanel({ masters, admissions, canEdit, by }: { masters: 
           </div>
         ) : null}
       </div>
+
+      {/* Artwork — only rendered when the free picture service is switched on */}
+      <MarketingArtwork canEdit={canEdit} defaultOccasion={occasion} />
 
       {/* Spend & attribution */}
       <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
