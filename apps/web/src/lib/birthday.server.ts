@@ -7,6 +7,12 @@ import "server-only";
  * inside the 24h window otherwise), the optional social post, and the
  * settings + send-log kept in module_local_state ("birthday_settings") so a
  * day is never sent twice and the office sees what went out.
+ *
+ * Staff birthdays run the same way with three differences, each of them a
+ * decision rather than an omission: the message goes to the person and not to
+ * a family, so there are no quiet hours and no household language; the card
+ * is signed by the Director rather than the Principal; and nothing is ever
+ * posted on social, because a colleague's birthday is not marketing.
  */
 
 import { createHmac, timingSafeEqual } from "node:crypto";
@@ -19,15 +25,19 @@ import {
   ageOn,
   alreadySent,
   appendBirthdayLog,
+  birthdayCardSignature,
   birthdayMessageFor,
   birthdayMessageLanguageFor,
   DEFAULT_SOCIAL_CAPTION,
   emptyBirthdayState,
   normalizeBirthdayState,
   renderBirthdayMessage,
+  staffBirthdayMessageFor,
+  staffWithBirthday,
   studentsWithBirthday,
   type BirthdayLogEntry,
   type BirthdayState,
+  type BirthdaySubject,
 } from "@/lib/birthdayCards";
 import { isInQuietHours, quietHoursLabel } from "@/lib/householdPrefs";
 import { buildWaTemplateBodyComponent, buildWaTemplateMediaHeader, sendWaWithFailover, type WaTemplateComponent } from "@/lib/waSend";
@@ -55,11 +65,14 @@ export function publicOrigin(): string {
   const host = (TENANT.publicPortal || process.env.NEXT_PUBLIC_APP_URL || "bhbinternational.school").replace(/^https?:\/\//, "").replace(/\/$/, "");
   return `https://${host}`;
 }
-export function birthdayCardUrl(opts: { studentId: string; date: string; design: string; format: string; photo?: boolean; group?: boolean; wish?: string }): string {
-  const id = opts.group ? "group" : opts.studentId;
+export function birthdayCardUrl(opts: { studentId: string; staffId?: string; date: string; design: string; format: string; photo?: boolean; group?: boolean; wish?: string }): string {
+  // The "staff:" prefix keeps the two id spaces apart inside the HMAC, so a
+  // signature minted for a student can never open a staff member's card.
+  const id = opts.group ? "group" : opts.staffId ? `staff:${opts.staffId}` : opts.studentId;
   const sig = signBirthdayCard({ studentId: id, date: opts.date, design: opts.design, format: opts.format });
   const p = new URLSearchParams({ date: opts.date, design: opts.design, format: opts.format, sig });
   if (opts.group) p.set("group", "1");
+  else if (opts.staffId) p.set("staff", opts.staffId);
   else p.set("student", opts.studentId);
   if (opts.photo === false) p.set("photo", "0");
   if (opts.wish) p.set("wish", opts.wish);
@@ -82,11 +95,27 @@ function classLabel(masters: MastersState, s: SisStudent): string {
   return [c?.name ? `Class ${c.name}` : "", sec?.name ? sec.name : ""].filter(Boolean).join(" · ");
 }
 
-export async function findBirthdayCardSubject(opts: { date: string; studentId?: string; group?: boolean }): Promise<
+function designationLabel(masters: MastersState, designationId: string | null): string {
+  if (!designationId) return "";
+  return masters.designations?.find((d) => d.id === designationId)?.name || "";
+}
+
+/** The line at the foot of the card: the Director for staff, the Principal for students. */
+export async function cardSignatureFor(subject: BirthdaySubject): Promise<string> {
+  const st = await readBirthdayState();
+  return birthdayCardSignature(st.settings, subject);
+}
+
+export async function findBirthdayCardSubject(opts: { date: string; studentId?: string; staffId?: string; group?: boolean }): Promise<
   | { ok: true; studentName: string; className: string; photoUrl: string; names: string[] }
   | { ok: false; error: string }
 > {
   const { sis, masters } = await sisAndMasters();
+  if (opts.staffId) {
+    const m = masters.staff?.find((x) => x.id === opts.staffId);
+    if (!m) return { ok: false, error: "Staff member not found" };
+    return { ok: true, studentName: m.fullName, className: designationLabel(masters, m.designationId), photoUrl: m.photoUrl || "", names: [] };
+  }
   if (opts.group) {
     const names = studentsWithBirthday(sis.students, opts.date, currentAcademicYearCode(loadMasters())).map((s) => s.fullName);
     if (!names.length) return { ok: false, error: "No birthdays on this date" };
@@ -133,6 +162,33 @@ export async function birthdaysOn(date: string): Promise<BirthdayToday[]> {
       hasPhoto: !!s.photoUrl,
     };
   });
+}
+
+export type StaffBirthdayToday = {
+  staffId: string;
+  fullName: string;
+  designation: string;
+  age: number | null;
+  mobile: string;
+  hasPhoto: boolean;
+};
+
+/**
+ * Active staff with a birthday on `date`, with the number their greeting would
+ * go to. The roster comes through the mirror: staff are stripped from the
+ * masters BLOB and merged back from `sis_staff` during hydration, so this must
+ * read the hydrated mirror rather than a bare loadMasters().
+ */
+export async function staffBirthdaysOn(date: string): Promise<StaffBirthdayToday[]> {
+  const { masters } = await sisAndMasters();
+  return staffWithBirthday(masters.staff ?? [], date).map((m) => ({
+    staffId: m.id,
+    fullName: m.fullName,
+    designation: designationLabel(masters, m.designationId),
+    age: ageOn(m.dateOfBirth, date),
+    mobile: m.mobile || m.altMobile || "",
+    hasPhoto: !!m.photoUrl,
+  }));
 }
 
 /* ─── Settings + log in module_local_state ─────────────────────────── */
@@ -189,7 +245,7 @@ export async function runBirthdayGreetings(opts: { date: string; dryRun?: boolea
     const key = `${b.studentId}:${opts.date}`;
     const push = (status: BirthdayLogEntry["status"], detail: string, via: string) => {
       result.rows.push({ studentId: b.studentId, fullName: b.fullName, mobile: b.mobile, status, detail, via });
-      if (!opts.dryRun) log.push({ key, studentId: b.studentId, date: opts.date, channel: "whatsapp", status, detail, at: new Date().toISOString() });
+      if (!opts.dryRun) log.push({ key, subjectId: b.studentId, subject: "student", date: opts.date, channel: "whatsapp", status, detail, at: new Date().toISOString() });
       if (status === "sent") result.sent += 1;
       else if (status === "failed") result.failed += 1;
       else if (status === "deferred") result.deferred += 1;
@@ -275,8 +331,95 @@ export async function runBirthdayGreetings(opts: { date: string; dryRun?: boolea
       const r = await crossPostCommsContent({ kind: "marketing", contentId: `bday_${opts.date}`, title: "Happy birthday", body: caption, imageUrl, linkUrl: `${publicOrigin()}/apply?src=social` });
       const detail = r.results.map((x) => `${x.platform}: ${x.ok ? "posted" : x.error || "failed"}`).join(" · ") || r.error || "";
       result.social = { attempted: true, ok: r.ok, detail };
-      for (const b of list) log.push({ key: `${b.studentId}:${opts.date}`, studentId: b.studentId, date: opts.date, channel: "social", status: r.ok ? "sent" : "failed", detail: detail.slice(0, 200), at: new Date().toISOString() });
+      for (const b of list) log.push({ key: `${b.studentId}:${opts.date}`, subjectId: b.studentId, subject: "student", date: opts.date, channel: "social", status: r.ok ? "sent" : "failed", detail: detail.slice(0, 200), at: new Date().toISOString() });
     }
+  }
+
+  await appendLogServer(log);
+  return result;
+}
+
+export type StaffBirthdayRunResult = {
+  date: string;
+  considered: number;
+  sent: number;
+  failed: number;
+  skipped: number;
+  rows: { staffId: string; fullName: string; mobile: string; status: BirthdayLogEntry["status"]; detail: string; via: string }[];
+};
+
+/**
+ * Wish today's staff. Deliberately simpler than the family run: a colleague
+ * has no quiet hours to respect and no household language to look up, and
+ * nothing here ever posts to social.
+ */
+export async function runStaffBirthdayGreetings(opts: { date: string; dryRun?: boolean; staffIds?: string[]; force?: boolean }): Promise<StaffBirthdayRunResult> {
+  const st = await readBirthdayState();
+  const s = st.settings;
+  const list = (await staffBirthdaysOn(opts.date)).filter((b) => !opts.staffIds || opts.staffIds.includes(b.staffId));
+  const result: StaffBirthdayRunResult = { date: opts.date, considered: list.length, sent: 0, failed: 0, skipped: 0, rows: [] };
+  const log: BirthdayLogEntry[] = [];
+  const language = s.defaultLanguage;
+
+  for (const b of list) {
+    const key = `staff:${b.staffId}:${opts.date}`;
+    const push = (status: BirthdayLogEntry["status"], detail: string, via: string) => {
+      result.rows.push({ staffId: b.staffId, fullName: b.fullName, mobile: b.mobile, status, detail, via });
+      if (!opts.dryRun) log.push({ key, subjectId: b.staffId, subject: "staff", date: opts.date, channel: "whatsapp", status, detail, at: new Date().toISOString() });
+      if (status === "sent") result.sent += 1;
+      else if (status === "failed") result.failed += 1;
+      else result.skipped += 1;
+    };
+    if (!opts.force && alreadySent(st, b.staffId, opts.date, "whatsapp", "staff")) {
+      push("skipped", "Already sent today", "log");
+      continue;
+    }
+    if (b.mobile.replace(/\D/g, "").length < 10) {
+      push("skipped", "No mobile on the staff record", "none");
+      continue;
+    }
+    const cardLink = birthdayCardUrl({ studentId: "", staffId: b.staffId, date: opts.date, design: s.design, format: s.format, wish: s.cardWish || undefined });
+    const text = staffBirthdayMessageFor({
+      settings: s,
+      language,
+      name: b.fullName,
+      designation: b.designation,
+      age: b.age,
+      schoolName: TENANT.nameDisplay,
+      cardLink,
+    });
+    if (opts.dryRun) {
+      push("skipped", `dry run · ${s.staffWaTemplateName ? `template ${s.staffWaTemplateName}` : "free text"} · ${text.slice(0, 80)}…`, s.staffWaTemplateName ? "template" : "text");
+      continue;
+    }
+    let r;
+    let via = "text";
+    if (s.staffWaTemplateName) {
+      via = "template";
+      const vars: Record<string, string> = {
+        name: b.fullName,
+        firstName: b.fullName.split(/\s+/)[0] || b.fullName,
+        designation: b.designation,
+        age: b.age != null ? String(b.age) : "",
+        schoolName: TENANT.nameDisplay,
+        cardLink,
+      };
+      const components: WaTemplateComponent[] = [buildWaTemplateMediaHeader("IMAGE", cardLink)];
+      if (s.staffWaTemplateVars.length) components.push(buildWaTemplateBodyComponent(s.staffWaTemplateVars, vars));
+      r = await sendWaWithFailover({
+        primaryMobile: b.mobile,
+        template: { name: s.staffWaTemplateName, language: s.staffWaTemplateLanguage || (language === "hi" ? "hi" : "en"), components },
+        clientMessageId: `bdaystaff_${b.staffId}_${opts.date}`,
+      });
+      if (!r.ok && /template|not found|132001|132012/i.test(r.error || "")) {
+        via = "text-after-template";
+        r = await sendWaWithFailover({ primaryMobile: b.mobile, body: text, clientMessageId: `bdaystaff_${b.staffId}_${opts.date}_t` });
+      }
+    } else {
+      r = await sendWaWithFailover({ primaryMobile: b.mobile, body: text, clientMessageId: `bdaystaff_${b.staffId}_${opts.date}` });
+    }
+    if (r.ok) push("sent", `${r.mode}${r.usedFallback ? " · fallback number" : ""}`, via);
+    else push("failed", r.error || "send failed", via);
   }
 
   await appendLogServer(log);

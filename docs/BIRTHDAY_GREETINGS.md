@@ -1,4 +1,4 @@
-# Student birthday cards & greetings (2026-08-19)
+# Birthday cards & greetings (2026-08-19, staff added 2026-09-22)
 
 **Where:** Students → **Birthdays**.
 
@@ -14,8 +14,38 @@
 2. Turn **Send greetings automatically** on and choose the IST hour. Save.
 3. Cloud Scheduler: `bash scripts/setup-cloud-scheduler.sh` adds `bhb-birthday-tick` (hourly, `POST /api/birthday/tick`, `x-cron-secret`). The tick sends only after the chosen hour, only when auto-send is on, never twice.
 
+## Staff birthdays (Students → Birthdays, same screen)
+
+**What it does**
+- Finds every **active** staff member whose `dateOfBirth` (Staff → HR) falls
+  today, and wishes them on their **own** WhatsApp number (`mobile`, else
+  `altMobile`), with the same card in the same design.
+- Rides the **same daily tick and the same send hour** as the student flow.
+  Auto-send is the master switch; "Wish staff on their birthday too" adds them
+  to it. `force` on the tick overrides the clock but never that opt-in.
+- Manual per staff member: download PNG, open WhatsApp, send now, dry run —
+  a hand send works whether or not automatic staff greetings are on.
+
+**What is deliberately different from the student flow**
+- **No quiet hours and no household language.** Those belong to families; a
+  colleague is their own recipient, so the school default language applies.
+- **Never posted on social.** A colleague's birthday is not marketing.
+- **Its own WhatsApp template.** The students' template body says
+  "{{childName}} of {{className}}", so reusing it would send a teacher a
+  message calling them a student. Pick a separate staff template (or leave it
+  blank for free text inside the 24h window).
+- **Off by default.** Staff dates of birth arrive through HR imports, and a
+  wrong one is a message to a colleague.
+
+**Who signs the card**
+- Student cards: **Principal**. Staff cards: **Director**. Both take an
+  optional name in Students → Birthdays → Card design; blank signs by office
+  alone. The school's name is already in the card header, so the signature
+  line carries only the person and the office.
+
 **Safety**
-- Card URLs are public but signed (HMAC over student · date · design · format with `CRON_SECRET`); a tampered URL is 403. Cards for staff previews need a session.
+- Card URLs are public but signed (HMAC over subject · date · design · format with `CRON_SECRET`); a tampered URL is 403. A staff card signs `staff:<id>`, so a signature minted for a student never opens a colleague's card. Previews from the office need a session.
+- The send log records `subject` ("student" or "staff") beside the id, so the two never collide and a day is never sent twice on either side. Rows written before staff birthdays existed are read from the old `studentId` field and keep counting as sent, so the upgrade re-sends nothing.
 - No AI anywhere in this flow — the wish text is a template the school edits.
 - Module state `birthday_settings` (settings + log) syncs like every other module; nothing is stored in localStorage only.
 

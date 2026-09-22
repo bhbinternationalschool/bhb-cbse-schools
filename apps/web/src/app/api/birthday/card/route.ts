@@ -3,9 +3,11 @@ import { NextResponse } from "next/server";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { getDemoSession } from "@/lib/auth";
+import { loadMasters } from "@/lib/masters";
+import { hasPermission } from "@/lib/rbac";
 import { BIRTHDAY_FORMATS, normalizeDesign, normalizeFormat } from "@/lib/birthdayCards";
 import { renderBirthdayCard } from "@/lib/birthdayCardDesigns";
-import { birthdayCardSigOk, findBirthdayCardSubject } from "@/lib/birthday.server";
+import { birthdayCardSigOk, cardSignatureFor, findBirthdayCardSubject } from "@/lib/birthday.server";
 import { TENANT } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -14,7 +16,7 @@ export const runtime = "nodejs";
  * Birthday card PNG. Two callers:
  *  - staff in the browser (session) — preview / download;
  *  - WhatsApp / Facebook fetching the image link we sent — no session, so the
- *    URL carries an HMAC over (student, date, design, format) signed with
+ *    URL carries an HMAC over (student or staff, date, design, format) signed with
  *    CRON_SECRET / WA_DISPATCH_SECRET. `sample=1` renders a demo card for the
  *    template picker (no student data) and needs a session.
  */
@@ -53,14 +55,22 @@ export async function GET(req: Request) {
   const design = normalizeDesign(q.get("design"));
   const format = normalizeFormat(q.get("format"));
   const studentId = (q.get("student") || "").slice(0, 60);
+  const staffId = (q.get("staff") || "").slice(0, 60);
   const date = /^\d{4}-\d{2}-\d{2}$/.test(q.get("date") || "") ? String(q.get("date")) : new Date().toISOString().slice(0, 10);
   const sample = q.get("sample") === "1";
   const sig = q.get("sig") || "";
   const group = q.get("group") === "1";
 
   const session = await getDemoSession().catch(() => null);
-  const staff = !!session && session.persona === "staff";
-  if (!staff && !birthdayCardSigOk(sig, { studentId: group ? "group" : studentId, date, design, format })) {
+  let staff = !!session && session.persona === "staff";
+  // A colleague's card is Staff-module material: the office preview of one
+  // needs Staff access, not merely a desk login. A signed link still works —
+  // that is what WhatsApp fetches.
+  if (staff && staffId && !hasPermission(session!, loadMasters(), "staff", "view")) staff = false;
+  // Same prefix the URL builder signs with: a student's signature never opens
+  // a staff member's card.
+  const signedId = group ? "group" : staffId ? `staff:${staffId}` : studentId;
+  if (!staff && !birthdayCardSigOk(sig, { studentId: signedId, date, design, format })) {
     return NextResponse.json({ error: "Not allowed" }, { status: 403 });
   }
 
@@ -70,18 +80,25 @@ export async function GET(req: Request) {
   const dateLabel = new Date(`${date}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
   const wish = (q.get("wish") || "").slice(0, 120);
 
+  const signature = await cardSignatureFor(staffId ? "staff" : "student");
+
   let data;
   if (sample) {
-    data = { studentName: "Aarav Sharma", className: "Class VI · A", dateLabel, schoolName: TENANT.nameDisplay, tagline: TENANT.tagline, crestUrl, photoUrl: "", wish };
+    data = { studentName: "Aarav Sharma", className: "Class VI · A", dateLabel, schoolName: TENANT.nameDisplay, tagline: TENANT.tagline, crestUrl, photoUrl: "", wish, signature };
+  } else if (staffId) {
+    const subject = await findBirthdayCardSubject({ date, staffId });
+    if (!subject.ok) return NextResponse.json({ error: subject.error }, { status: 404 });
+    const includePhoto = q.get("photo") !== "0";
+    data = { studentName: subject.studentName, className: subject.className, dateLabel, schoolName: TENANT.nameDisplay, tagline: TENANT.tagline, crestUrl, photoUrl: includePhoto ? subject.photoUrl : "", wish, signature };
   } else if (group) {
     const subjects = await findBirthdayCardSubject({ date, group: true });
     if (!subjects.ok) return NextResponse.json({ error: subjects.error }, { status: 404 });
-    data = { studentName: "", className: "", dateLabel, schoolName: TENANT.nameDisplay, tagline: TENANT.tagline, crestUrl, photoUrl: "", wish, names: subjects.names };
+    data = { studentName: "", className: "", dateLabel, schoolName: TENANT.nameDisplay, tagline: TENANT.tagline, crestUrl, photoUrl: "", wish, signature, names: subjects.names };
   } else {
     const subject = await findBirthdayCardSubject({ date, studentId });
     if (!subject.ok) return NextResponse.json({ error: subject.error }, { status: 404 });
     const includePhoto = q.get("photo") !== "0";
-    data = { studentName: subject.studentName, className: subject.className, dateLabel, schoolName: TENANT.nameDisplay, tagline: TENANT.tagline, crestUrl, photoUrl: includePhoto ? subject.photoUrl : "", wish };
+    data = { studentName: subject.studentName, className: subject.className, dateLabel, schoolName: TENANT.nameDisplay, tagline: TENANT.tagline, crestUrl, photoUrl: includePhoto ? subject.photoUrl : "", wish, signature };
   }
 
   const fonts = await loadFonts(origin);
