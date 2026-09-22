@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { IfscCheck } from "@/components/ui/open-lookup-fields";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import QRCode from "qrcode";
@@ -1131,6 +1132,10 @@ export function StaffProfileForm(props: Props) {
                   {fieldErrors.bankIfsc}
                 </span>
               ) : null}
+              {/* Names the bank and branch behind a WELL-FORMED code — the
+                  failure the format check cannot see, and the one that
+                  bounces the whole salary file. */}
+              <IfscCheck ifsc={draft.bankIfsc} />
             </label>
             <label className={labelCls}>
               UPI ID

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { PincodeFill } from "@/components/ui/open-lookup-fields";
 import { pushToast } from "@/components/shell/Toast";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -2249,6 +2250,23 @@ export function StudentForm({
                     }
                     inputMode="numeric"
                     maxLength={6}
+                  />
+                  {/* Offers the post office's district and state. Offers, not
+                      fills: an address dictated at the counter is not ours to
+                      overwrite, so nothing moves without a press. */}
+                  <PincodeFill
+                    pincode={pincode}
+                    onFill={(d) => {
+                      if (d.district) setCity(d.district.toUpperCase());
+                      if (d.state) setStateName(d.state.toUpperCase());
+                      // Only offer a locality when there is no doubt which
+                      // one — a PIN with twenty post offices is a picker, and
+                      // a picker is not worth putting in front of the office
+                      // for a field they can type.
+                      if (d.localities.length === 1 && !locality.trim()) {
+                        setLocality(d.localities[0]);
+                      }
+                    }}
                   />
                 </Field>
               </div>

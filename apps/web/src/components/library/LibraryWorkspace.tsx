@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { isbnChecksumOk } from "@/lib/openLookups";
+import { lookupIsbnApi } from "@/lib/openLookupsClient";
 import Link from "next/link";
 import {
   BarChart3,
@@ -9,6 +11,7 @@ import {
   FileText,
   LayoutDashboard,
   Library,
+  Loader2,
   Repeat2,
 } from "lucide-react";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
@@ -127,6 +130,57 @@ export function LibraryWorkspace() {
   const [catalogCategory, setCatalogCategory] = useState<LibraryCategory | "all">("all");
   const [editingTitleId, setEditingTitleId] = useState<string | null>(null);
   const [titleForm, setTitleForm] = useState(emptyTitleForm());
+  const [isbnBusy, setIsbnBusy] = useState(false);
+  const [isbnNote, setIsbnNote] = useState<string | null>(null);
+
+  /**
+   * Fill the catalogue row from Open Library, without overwriting work.
+   *
+   * Only empty boxes are touched. The librarian has the physical book in
+   * hand and Open Library does not, so whatever they typed wins over
+   * whatever a stranger catalogued — this saves typing, it does not
+   * correct anybody.
+   */
+  async function fillFromIsbn() {
+    setIsbnNote(null);
+    setIsbnBusy(true);
+    try {
+      const res = await lookupIsbnApi(titleForm.isbn);
+      if (!res.ok) {
+        setIsbnNote(res.message);
+        return;
+      }
+      const b = res.data;
+      const filled: string[] = [];
+      setTitleForm((f) => {
+        const next = { ...f };
+        if (!f.title.trim() && b.title) {
+          next.title = b.title;
+          filled.push("title");
+        }
+        if (!f.author.trim() && b.author) {
+          next.author = b.author;
+          filled.push("author");
+        }
+        if (!f.publisher.trim() && b.publisher) {
+          next.publisher = b.publisher;
+          filled.push("publisher");
+        }
+        if (!f.edition.trim() && b.year) {
+          next.edition = b.year;
+          filled.push("year");
+        }
+        return next;
+      });
+      setIsbnNote(
+        filled.length
+          ? `Filled ${filled.join(", ")} — check against the book.`
+          : `Found "${b.title}" — every box was already filled, so nothing was changed.`,
+      );
+    } finally {
+      setIsbnBusy(false);
+    }
+  }
   const [showTitleForm, setShowTitleForm] = useState(false);
 
   // Issue / return
@@ -753,6 +807,33 @@ export function LibraryWorkspace() {
                     }
                     className={`${field} mt-1`}
                   />
+                  {/* Free Open Library lookup. It fills ONLY the boxes that
+                      are still empty, so a librarian who has already typed
+                      the title they can see on the cover never has it
+                      replaced by a different edition's wording. */}
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={isbnBusy || !isbnChecksumOk(titleForm.isbn)}
+                      onClick={() => void fillFromIsbn()}
+                      className="inline-flex items-center gap-1 rounded-lg border border-[var(--border)] px-2 py-1 text-[11px] font-semibold disabled:opacity-40"
+                      title={
+                        isbnChecksumOk(titleForm.isbn)
+                          ? "Fetch title, author and publisher"
+                          : "Enter a full ISBN first"
+                      }
+                    >
+                      {isbnBusy ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <BookOpen className="h-3 w-3" />
+                      )}
+                      {isbnBusy ? "Looking up…" : "Fetch details"}
+                    </button>
+                    {isbnNote ? (
+                      <span className="text-[11px] text-[var(--muted)]">{isbnNote}</span>
+                    ) : null}
+                  </div>
                 </label>
                 <label className="block text-xs text-[var(--muted)]">
                   Publisher
