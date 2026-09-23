@@ -194,6 +194,26 @@ const HELP_RE =
   /^\s*(?:(?:help|hint|idk|dunno)\b)|don'?t know|do not know|no idea|kaise|kese|कैसे|समझ (?:नहीं|nahi)|samajh (?:nahi|nhi)|पता नहीं|pata nahi|nahi pata|pta nhi|nhi pta|nahi pta|नहीं आता|nahi aata|nhi aata|malum|maloom|मालूम|batao|बताओ|बताइए|बता दीजिए|sikha|सिखा|mushkil|मुश्किल/i;
 
 /**
+ * Asking us for the answer, in English.
+ *
+ * HELP_RE above has the Hindi forms — "batao", "बताइए" — and the English
+ * "I don't know", but not a child who simply asks for it outright.
+ *
+ * 23 Sep 2026, 19:45 IST: MR. GHANSHYAM MAURYA's son RUDRA (VII) was asked
+ * for the third angle of a triangle, wrote "Plz answer", and was told
+ * "🟡 तरीका सही है, पर एक चूक रह गई" — *your method is right, one slip* —
+ * about a method he had never shown. The drill already knows how to teach
+ * instead of mark (renderCheck's askedForHelp); it just did not recognise
+ * the ask. On 18 Sep "Ans que" was marked the same way.
+ *
+ * Narrow on purpose. A request needs a please, an imperative verb or a
+ * question frame around the word: the answer "0,2,3,5,8 answer", which
+ * MR. VINOD KUMAR GUPTA sent the same evening, is an ATTEMPT and is marked.
+ */
+const ASK_FOR_ANSWER_RE =
+  /\b(?:plz|pls|please|kindly)\s+(?:me\s+)?(?:the\s+)?(?:ans(?:wer)?|solution|solve)\b|\b(?:ans(?:wer)?|solution)\s+(?:plz|pls|please)\b|\b(?:tell|give|send|show)\s+(?:me\s+)?(?:the\s+)?(?:ans(?:wer)?|solution)\b|\bwhat(?:'?s| is)\s+the\s+ans(?:wer)?\b|^\s*ans(?:wer)?\s+(?:que|ques|question|q)\b/i;
+
+/**
  * A message to the SCHOOL, not an answer to our question.
  *
  * 21 Sep 2026: mid-drill, a parent wrote "Hello sir online registration" and
@@ -278,7 +298,7 @@ export function classifyDrillReply(text: string): DrillReplyKind {
   if (STOP_RE.test(t)) return "stop";
   if (SCHOOL_BUSINESS_RE.test(t) && t.split(/\s+/).length >= 2) return "school";
   // "I don't know" is about OUR question, so it is help, not a new ask.
-  if (HELP_RE.test(t)) return "help";
+  if (HELP_RE.test(t) || ASK_FOR_ANSWER_RE.test(t)) return "help";
   if (ACK_RE.test(t)) return "chatter";
   if (looksLikeOwnQuestion(t)) return "question";
   return "answer";
