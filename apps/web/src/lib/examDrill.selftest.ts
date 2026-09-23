@@ -300,6 +300,15 @@ assert.match(buildCheckPrompt({ className: "5", subjectLabel: "Maths", question:
   assert.match(buildCheckPrompt({ ...english, hindi: true }), /Paper language: ENGLISH/);
   assert.match(buildCheckPrompt({ ...english, subjectLabel: "हिंदी", hindi: false }), /Paper language: HINDI/);
   assert.match(DRILL_CHECK_SYSTEM, /NEVER tell the child to write in Hindi/);
+  // 23 Sep 2026: ARNAV (VII) wrote "8,6,5,3,1" for the largest 5-digit
+  // number from 3,8,1,6,5 — 86531, right — and was marked 🟡 "You separated
+  // the digits with commas". His next two were right and marked the same.
+  assert.match(DRILL_CHECK_SYSTEM, /HOW A NUMBER IS PUNCTUATED IS NOT THE ANSWER/);
+  assert.match(DRILL_CHECK_SYSTEM, /8,6,5,3,1 are the SAME number/);
+  assert.match(DRILL_CHECK_SYSTEM, /'you used commas' is NEVER whatWentWrong/);
+  // …but a question that is itself about comma placement still marks them:
+  // "Large Numbers around Us" teaches exactly that.
+  assert.match(DRILL_CHECK_SYSTEM, /ITSELF about writing a number with commas/);
   assert.match(DRILL_CHECK_SYSTEM, /quoted FROM the question or FROM the child's answer stay exactly as they are/);
   assert.ok(!/asking them to write it in Hindi in the exam/.test(DRILL_CHECK_SYSTEM), "the line behind 'write in Hindi' is gone");
   assert.ok(!/An English paper is still explained to a Hindi family in Hindi/.test(DRILL_CHECK_SYSTEM));
