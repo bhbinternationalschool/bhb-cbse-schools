@@ -362,6 +362,43 @@ assert.doesNotMatch(shown, /^❌ Not quite$/m, "never just 'wrong'");
   assert.ok(!/शिक्षक से|ask your teacher/i.test(renderAsideFailed(true) + renderAsideFailed(false)), "never 'ask your teacher tomorrow'");
 }
 
+/* ── 23 Sep 2026: the aside's Markdown reached the phone ──────────── */
+{
+  // MR. VIKAL KUMAR GUPTA typed "Jayash" mid-practice at 21:27 IST and
+  // SHREYASH (Grade 1) was sent this, asterisks and all. The standalone
+  // tutor already converted its reply (waTutorBot.server.ts); the aside,
+  // which is the same model writing to the same family, did not.
+  const real = [
+    "English",
+    "",
+    "If you meant **Joystick**, here is a quick lesson for Shreyash!",
+    "",
+    "In **Click Code Connect Grade 1**, **Chapter 2: Parts of a Computer**, we learn about extra devices connected to a computer.",
+    "",
+    "**What it is:** A joystick is a device with a lever or stick that moves in different directions.",
+    "",
+    "***",
+    "",
+    "### हिंदी",
+  ].join("\n");
+  const a = renderAside({ answer: real, question: "Does a computer run on electricity? Write Yes or No.", questionHi: "क्या कंप्यूटर बिजली (electricity) से चलता है?", number: 10, hindi: true });
+  assert.ok(!a.includes("**"), "no double asterisk reaches the phone");
+  assert.ok(!/^\s*\*\*\*\s*$/m.test(a), "no rule line either");
+  assert.ok(!a.includes("###"), "no hash heading either");
+  // Converted, not stripped: the emphasis is the point of the lesson.
+  assert.ok(a.includes("*Joystick*"), "bold survives as WhatsApp bold");
+  assert.ok(a.includes("*Click Code Connect Grade 1*"), "the book's name too");
+  assert.ok(a.includes("*What it is:*"), "a bold run opening a line");
+  assert.ok(a.includes("*हिंदी*"), "the heading becomes a bold line, not a lost one");
+  // The pending question is still put back underneath, untouched.
+  assert.match(a, /now back to the practice \/ अब वापस अभ्यास पर/);
+  assert.match(a, /क्या कंप्यूटर बिजली \(electricity\) से चलता है/);
+  // A reply with no Markdown in it is still passed through unchanged: an
+  // aside is full of maths and an eaten multiplication sign is a wrong sum.
+  const plain = renderAside({ answer: "4 * 5 = 20, so five pens cost ₹20.", question: "What is 12 × 5?", number: 3, hindi: false });
+  assert.ok(plain.startsWith("4 * 5 = 20, so five pens cost ₹20."), plain);
+}
+
 /* ── Videos: the missed idea, and every chapter of the portion ─────── */
 {
   assert.equal(renderTopicVideo(null, true), "", "no video found: no made-up link");

@@ -29,6 +29,7 @@
  */
 
 import { subjectKeyFor } from "@/lib/tutorSyllabus";
+import { whatsappFromMarkdown } from "@/lib/waMarkdown";
 
 /* ── how far the class has got ───────────────────────────────────── */
 
@@ -888,6 +889,13 @@ export function renderFinish(input: {
 /**
  * The child's own question, answered, and then the drill's question put
  * back — so they can see where they were without scrolling.
+ *
+ * The answer is written by the chat model (homeworkTutor), so it arrives in
+ * Markdown and has to be turned into WhatsApp's own formatting on the way
+ * out — see lib/waMarkdown.ts. 23 Sep 2026, 21:27 IST: MR. VIKAL KUMAR GUPTA
+ * asked mid-practice about a joystick and SHREYASH (Grade 1) was sent
+ * "In **Click Code Connect Grade 1**, **Chapter 2: Parts of a Computer**".
+ * The other way out of the tutor already converts; this one did not.
  */
 export function renderAside(input: {
   answer: string;
@@ -897,7 +905,7 @@ export function renderAside(input: {
   hindi: boolean;
 }): string {
   return [
-    input.answer.trim(),
+    whatsappFromMarkdown(input.answer),
     "",
     input.questionHi ? "— now back to the practice / अब वापस अभ्यास पर 👇" : input.hindi ? "— अब वापस अभ्यास पर 👇" : "— now back to the practice 👇",
     "",
