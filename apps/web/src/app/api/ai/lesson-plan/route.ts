@@ -9,9 +9,16 @@
  *   2. adds the school's own books for the class and subject (Propel), when
  *      loaded, so the plan follows the real chapter — never NCERT's books;
  *      for Nursery–UKG, NCERT's learning outcomes as a minimum,
- *   3. asks the LLM router for one draft (English or Hindi),
- *   4. returns it. The teacher edits and saves in the editor;
- *      `LessonPlan.source` records ai / ai_edited / manual on save.
+ *   3. fills the learning outcomes of any ticked CHAPTER the teacher left
+ *      blank with the ones a teacher has AGREED WITH (Teaching → Learning
+ *      outcomes). Without this the prompt tells the model to derive outcomes
+ *      from the chapter title, which is a fresh guess every draft. Agreed
+ *      outcomes only: the read goes through `learning_chapter_outcomes`, which
+ *      cannot show an unreviewed match. Nothing agreed → nothing changes.
+ *   4. asks the LLM router for one draft (English or Hindi),
+ *   5. returns it, saying how many chapters stood on agreed outcomes. The
+ *      teacher edits and saves in the editor; `LessonPlan.source` records
+ *      ai / ai_edited / manual on save.
  */
 
 import { NextResponse } from "next/server";
@@ -29,6 +36,8 @@ import {
   LESSON_PLAN_MAX_PERIODS,
   LESSON_PLAN_MAX_UNITS,
 } from "@/lib/lessonPlanAi";
+import { fillAgreedOutcomes } from "@/lib/chapterStandards";
+import { loadAgreedOutcomesByPosition } from "@/lib/chapterStandards.server";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -85,8 +94,20 @@ export async function POST(req: Request) {
     medium: input.language === "hi" ? "Hindi" : "English",
   });
 
+  // The outcomes somebody agreed with, for the chapters this lesson covers.
+  // Without this the prompt tells the model to "derive sensible ones from its
+  // title" — a guess about what the chapter teaches, made fresh every draft.
+  // Only fills units the teacher left blank; their own words always win, and a
+  // chapter nobody has agreed outcomes for is still left to the guess.
+  const agreed = await loadAgreedOutcomesByPosition({
+    classLabel: input.classLabel,
+    subjectName: input.subjectName,
+  });
+  const grounded = fillAgreedOutcomes(input.units, agreed);
+  const groundedInput = { ...input, units: grounded.units };
+
   const r = await generateLessonPlanJson({
-    input,
+    input: groundedInput,
     schoolName: TENANT.nameDisplay,
     textbooks: ncert.text,
     textbooksKind: ncert.kind,
@@ -106,6 +127,14 @@ export async function POST(req: Request) {
     generationId: r.generationId,
     /** Whether the draft was written with a book list (the school's) or pre-primary outcomes. */
     groundedOnBooks: ncert.kind !== "none",
+    /**
+     * How many ticked chapters were drafted against outcomes a teacher agreed
+     * with, rather than ones the model derived from the chapter title. 0 means
+     * the draft was written exactly as it would have been before the Learning
+     * outcomes tab existed — which is the honest answer until somebody works
+     * through it.
+     */
+    agreedOutcomeUnits: grounded.filled,
     /** "chapters" (Classes 1–8, the school's books), "outcomes" (Nursery–UKG: NCERT's minimum) or "none". */
     booksKind: ncert.kind,
     /** @deprecated same as groundedOnBooks — kept for editors still reading the old name. */

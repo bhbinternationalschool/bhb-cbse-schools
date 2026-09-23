@@ -22,6 +22,7 @@ import type { Household, SisStudent } from "@/lib/sis";
 import { loadMasters } from "@/lib/masters";
 import { classLabel as classLabelOf } from "@/lib/homework";
 import { loadWaBotSlice, saveWaBotSlice } from "@/lib/waBotStore.server";
+import { whatsappFromMarkdown } from "@/lib/waMarkdown";
 import {
   composeBuyLinkText,
   composeNeedsPassText,
@@ -451,7 +452,10 @@ export async function handleWaTutorInbound(opts: {
       },
       opts.mobile10,
     );
-    return { handled: true, replyText: answer.reply };
+    // The model writes Markdown; WhatsApp reads its own, older formatting.
+    // Until 22 Sep 2026 the two were never reconciled, so "**बिल्कुल सही**"
+    // reached the parent with the asterisks showing. See waMarkdown.ts.
+    return { handled: true, replyText: whatsappFromMarkdown(answer.reply) };
   }
 
   return {

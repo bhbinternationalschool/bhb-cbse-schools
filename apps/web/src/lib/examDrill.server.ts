@@ -22,6 +22,18 @@ import { currentAcademicYearCode } from "@/lib/masters";
 import { subjectKeyFor, subjectDisplayName, cleanChapterName } from "@/lib/tutorSyllabus";
 import { schoolBooksForClass } from "@/lib/tutorSyllabus.server";
 import {
+  buildSkillMenu,
+  foundationLine,
+  refsForComponentIds,
+  renderSkillMenu,
+  skillAtRef,
+  type AgreedSkill,
+} from "@/lib/drillSkills";
+import {
+  loadAgreedSkillsByPosition,
+  loadFoundationStatements,
+} from "@/lib/chapterStandards.server";
+import {
   MAX_QUESTIONS,
   STREAK_TO_FINISH,
   newDrill,
@@ -116,9 +128,13 @@ export async function openDrillFor(mobile10: string): Promise<{ id: string; stat
   }
   const row = (data ?? [])[0] as Row | undefined;
   if (!row) return null;
-  // The query above should have excluded it; this is the belt to that
-  // braces, because the cost of being wrong is a child marked wrong.
-  if (drillIsForAPastPaper(row.paper_date, today)) return null;
+  // The query above excludes yesterday's papers; this also ends the drill
+  // for a paper written THIS morning, which the date alone cannot see. The
+  // cost of being wrong is a child marked wrong — or, on 22 Sep 2026, a
+  // father asking about tomorrow's paper and being asked for a chapter
+  // number for a paper already handed in.
+  const istHour = new Date(Date.now() + 330 * 60_000).getUTCHours();
+  if (drillIsForAPastPaper(row.paper_date, today, istHour)) return null;
   return { id: row.id, state: rowToState(row) };
 }
 
@@ -228,6 +244,46 @@ async function chaptersFor(className: string, subjectLabel: string): Promise<Dri
     .filter((c) => c.textbookId === book.id)
     .map((c) => ({ position: c.position, name: cleanChapterName(c.name), topics: c.topics ?? [] }))
     .sort((a, b) => a.position - b.position);
+}
+
+/**
+ * The agreed micro-skills for this paper's chapters, as a numbered menu.
+ *
+ * Empty for most drills, and that is the point: Classes 1–2, Science and
+ * English carry no components, and a chapter nobody has agreed outcomes for
+ * contributes nothing. An empty menu puts nothing in the prompt and the
+ * question is set exactly as it was before any of this existed.
+ *
+ * Never throws. A revision question the night before a paper must not fail
+ * because a lookup did.
+ */
+async function skillMenuFor(
+  className: string,
+  subjectLabel: string,
+  scope: number,
+): Promise<AgreedSkill[]> {
+  if (!(scope >= 1)) return [];
+  try {
+    const byPosition = await loadAgreedSkillsByPosition({
+      classLabel: className,
+      subjectName: subjectLabel,
+    });
+    return buildSkillMenu(byPosition, scope);
+  } catch (e) {
+    console.warn("[examDrill] agreed skills lookup failed", (e as Error)?.message);
+    return [];
+  }
+}
+
+/** What sits underneath the idea they just got wrong. "" whenever unknown. */
+async function foundationFor(componentId: string | null): Promise<string> {
+  if (!componentId) return "";
+  try {
+    return foundationLine(await loadFoundationStatements(componentId));
+  } catch (e) {
+    console.warn("[examDrill] prerequisite lookup failed", (e as Error)?.message);
+    return "";
+  }
 }
 
 /* ── starting, and every turn after ──────────────────────────────── */
@@ -627,6 +683,13 @@ export async function continueExamDrill(input: {
     }
 
     const { drillQuestionJson } = await import("@/lib/aiLlm.server");
+    // Both reads are for the same question, and neither is on the critical
+    // path of the other, so they go together — a child waiting on WhatsApp
+    // should not pay for them twice.
+    const [menu, retryFoundation] = await Promise.all([
+      skillMenuFor(className, state.subjectLabel, state.scope),
+      foundationFor(step.retryComponentId),
+    ]);
     const q = await drillQuestionJson({
       className,
       subjectLabel: state.subjectLabel,
@@ -636,6 +699,10 @@ export async function continueExamDrill(input: {
       avoid: step.avoid,
       avoidSkills: step.avoidSkills,
       number: step.number,
+      skillMenu: renderSkillMenu(menu),
+      menuSize: menu.length,
+      avoidRefs: refsForComponentIds(menu, step.askedComponentIds),
+      retryFoundation,
     });
     if (!q.ok) {
       await saveDrill(open.id, state, input.mobile10);
@@ -647,6 +714,7 @@ export async function continueExamDrill(input: {
       return { handled: true, replyText: parts.join("\n\n") };
     }
 
+    const pickedSkill = skillAtRef(menu, q.draft.skillRef);
     state = {
       ...state,
       asked: [
@@ -655,6 +723,10 @@ export async function continueExamDrill(input: {
           question: q.draft.question,
           ...(q.draft.questionHi ? { questionHi: q.draft.questionHi } : {}),
           skill: q.draft.skill,
+          // Stored only when the model named a menu item we actually listed;
+          // `skillAtRef` refuses anything else, so an invented number leaves
+          // the question unattributed rather than attributed to the wrong idea.
+          ...(pickedSkill ? { componentId: pickedSkill.componentId } : {}),
           chapterPosition: q.draft.chapter,
         },
       ],

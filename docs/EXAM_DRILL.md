@@ -59,6 +59,47 @@ correction is read before anything else is asked.
 The re-ask is a **different** question on the same idea. Repeating the
 identical question teaches a child to recall an answer, not to do the work.
 
+## What the question is set from (agreed outcomes only)
+
+Left to the chapter name alone, the model decides what a chapter teaches, and
+two questions on one idea come back under two names — "unitary method", then
+"value of one" — so "already tested this session" never sees the repeat.
+
+Where a teacher has **agreed** with a chapter's learning outcomes (Teaching →
+Learning outcomes), the drill has something better: the CASE components of
+those standards, a fixed vocabulary of micro-skills. `lib/drillSkills.ts`
+turns them into a numbered menu under the chapter list, the model puts the
+number it used in `skillRef`, and the question is stored against that
+**component id** rather than against a sentence it wrote.
+
+Three things that follow, in the order they matter:
+
+- **Nothing is widened.** The menu only narrows. A chapter nobody has agreed
+  outcomes for contributes nothing, and the prompt is then exactly the one it
+  was before any of this existed. Classes 1–2, Science and English carry no
+  components at all, so for them this is a no-op by construction.
+- **Only agreed outcomes reach it.** The read goes through
+  `learning_chapter_outcomes`, which cannot show a match a teacher has not
+  agreed with. See `docs/` on the Learning outcomes tab.
+- **A number is checked before it is believed.** `parseDrillQuestion` reads a
+  `skillRef` outside the menu it actually listed as 0. A wrong attribution is
+  worse than none — it is what the next wrong answer would be walked back
+  from.
+
+## What sits underneath a wrong answer
+
+A component belongs to a standard, and a standard has prerequisites (the SAP
+Coherence Map edges, seeded in `learning_standard_prereqs`). When a child
+gets a menu-set question wrong, the drill walks **one** step back and hands
+the model those sentences as *what may actually be missing*.
+
+**The retry still comes from the paper's own chapter.** The foundation is
+context for an easier question, never the subject of one: the child sits this
+paper tomorrow, and the drill's first rule is that nothing is asked from
+outside what they have been taught. `foundationLine` puts that instruction in
+the prompt itself, because the model is the thing that would otherwise drop a
+Class 7 child to Class 4. One step back, at most two sentences.
+
 ## Where it stops
 
 "Until the student is perfect" has to be able to end. Three right in a row —
@@ -107,3 +148,9 @@ Devanagari digits and a number past the end of the book), the streak
 including `close`, the mastery finish, the ceiling finish, the refusal of an
 out-of-scope question, the refusal of a verdict with no explanation, and that
 a re-ask never repeats the question just got wrong.
+
+`npm run test:drill-skills`: the agreed-micro-skill menu — that scope is a
+boundary and not advice, that the same data gives the same numbers on every
+turn of a session, the caps, that an empty menu changes nothing at all, that
+a `skillRef` off the end resolves to nothing, and that the prerequisite hint
+carries "stay on the chapters above" with it.

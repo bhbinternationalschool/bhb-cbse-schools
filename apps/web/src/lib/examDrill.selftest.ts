@@ -102,6 +102,8 @@ assert.equal(retry.kind, "ask_question");
 if (retry.kind === "ask_question") {
   assert.equal(retry.retrySkill, "multiplication");
   assert.deepEqual(retry.avoid, ["What is 12 × 4?"], "and not the same question again");
+  // Nothing was set from an agreed idea, so there is no prerequisite to walk.
+  assert.equal(retry.retryComponentId, null);
 }
 
 // "Close" holds the streak: right method, wrong arithmetic is not a loss.
@@ -144,7 +146,22 @@ assert.match(qPrompt, /DIFFERENT and EASIER question on that same idea/);
 const good = JSON.stringify({ question: "A pen costs ₹12. What do 5 cost?", skill: "unitary method", chapter: 5 });
 assert.deepEqual(parseDrillQuestion(good, 6), {
   question: "A pen costs ₹12. What do 5 cost?", skill: "unitary method", chapter: 5,
+  // No agreed menu was given, so nothing can be attributed to one.
+  skillRef: 0,
 });
+
+// skillRef is checked against the menu the prompt ACTUALLY listed. A number
+// past its end is read as 0: the id it would resolve to is what a later wrong
+// answer walks back from, and the wrong idea taught there is worse than none.
+{
+  const withRef = (ref: unknown) =>
+    JSON.stringify({ question: "A pen costs ₹12. What do 5 cost?", skill: "unitary method", chapter: 5, skillRef: ref });
+  assert.equal(parseDrillQuestion(withRef(2), 6, 4)!.skillRef, 2);
+  assert.equal(parseDrillQuestion(withRef(9), 6, 4)!.skillRef, 0, "past the end of the menu");
+  assert.equal(parseDrillQuestion(withRef(2), 6)!.skillRef, 0, "no menu means no reference");
+  assert.equal(parseDrillQuestion(withRef("two"), 6, 4)!.skillRef, 0);
+  assert.equal(parseDrillQuestion(withRef(1.5), 6, 4)!.skillRef, 0);
+}
 // The guard that matters: a question the model itself places beyond what the
 // child has been taught is refused, not shown with an apology.
 assert.equal(parseDrillQuestion(JSON.stringify({ question: "Add 0.5 and 0.25", skill: "decimals", chapter: 9 }), 6), null);
@@ -167,6 +184,40 @@ const retryPrompt = buildQuestionPrompt({
 });
 assert.match(retryPrompt, /EASIER question on that same idea/);
 assert.doesNotMatch(retryPrompt, /Pick a different idea/);
+
+// The agreed menu and the prerequisite hint (lib/drillSkills.ts) are optional
+// parts of this same prompt: absent for every drill that has none, and the
+// prompt is then byte-for-byte the one above.
+{
+  const plain = buildQuestionPrompt({
+    className: "III", subjectLabel: "Hindi", chapters, scope: 6, retrySkill: null, avoid: [], number: 1,
+  });
+  assert.doesNotMatch(plain, /agreed are worth testing/, "no menu, no mention of one");
+
+  const withMenu = buildQuestionPrompt({
+    className: "V", subjectLabel: "Mathematics", chapters, scope: 6, retrySkill: null, avoid: [],
+    avoidSkills: ["unitary method"], number: 3,
+    skillMenu: "Ideas ...\n  [1] (chapter 2) Fluently add within 100",
+    avoidRefs: [1],
+  });
+  assert.match(withMenu, /\[1\] \(chapter 2\) Fluently add within 100/);
+  assert.match(withMenu, /Ideas already used from the list above: \[1\]/);
+
+  // The hint about what is missing underneath belongs to a retry and only to
+  // a retry: on a question they got right it would read as a correction.
+  const withFoundation = buildQuestionPrompt({
+    className: "V", subjectLabel: "Mathematics", chapters, scope: 6,
+    retrySkill: "unitary method", avoid: [], number: 2,
+    retryFoundation: "What usually sits underneath that idea: multiply within 100.",
+  });
+  assert.match(withFoundation, /sits underneath that idea/);
+  const notARetry = buildQuestionPrompt({
+    className: "V", subjectLabel: "Mathematics", chapters, scope: 6,
+    retrySkill: null, avoid: [], number: 2,
+    retryFoundation: "What usually sits underneath that idea: multiply within 100.",
+  });
+  assert.doesNotMatch(notARetry, /sits underneath/, "nothing was got wrong, so nothing is underneath it");
+}
 // The step hands the skills up so the prompt can use them.
 const afterTwo = nextDrillStep({
   ...s2Base,
@@ -180,6 +231,45 @@ assert.equal(afterTwo.kind, "ask_question");
 if (afterTwo.kind === "ask_question") {
   assert.deepEqual(afterTwo.avoidSkills, ["विलोम शब्द", "संज्ञा"]);
   assert.equal(afterTwo.retrySkill, null, "after a right answer nothing is being revisited");
+  assert.deepEqual(afterTwo.askedComponentIds, [], "and none of them came off an agreed menu");
+}
+
+// An agreed micro-skill is carried as a stored id, not as a sentence.
+{
+  const asked = nextDrillStep({
+    ...s2Base,
+    asked: [
+      { question: "a", skill: "unitary method", componentId: "c-1", chapterPosition: 2, verdict: "right" },
+      { question: "b", skill: "value of one", componentId: "c-1", chapterPosition: 2, verdict: "right" },
+      { question: "c", skill: "place value", componentId: "c-2", chapterPosition: 3, verdict: "right" },
+    ],
+    streak: 2,
+  });
+  assert.equal(asked.kind, "ask_question");
+  if (asked.kind === "ask_question") {
+    // THE BUG THIS EXISTS FOR: one idea under two names is two entries in
+    // avoidSkills and one id here, so "already tested" finally means it.
+    assert.equal(asked.avoidSkills.length, 3);
+    assert.deepEqual(asked.askedComponentIds, ["c-1", "c-2"]);
+  }
+
+  // A wrong answer on a question set from an agreed idea hands up the way
+  // into its prerequisites.
+  const wrong = nextDrillStep({
+    ...s2Base,
+    asked: [{ question: "a", skill: "unitary method", componentId: "c-1", chapterPosition: 2, verdict: "wrong" }],
+    streak: 0,
+  });
+  assert.equal(wrong.kind, "ask_question");
+  if (wrong.kind === "ask_question") assert.equal(wrong.retryComponentId, "c-1");
+
+  // And a right answer does not, whatever it was set from.
+  const right = nextDrillStep({
+    ...s2Base,
+    asked: [{ question: "a", skill: "unitary method", componentId: "c-1", chapterPosition: 2, verdict: "right" }],
+    streak: 1,
+  });
+  if (right.kind === "ask_question") assert.equal(right.retryComponentId, null);
 }
 
 assert.match(buildCheckPrompt({ className: "5", subjectLabel: "Maths", question: "Q", skill: "k", answer: "60" }), /The child answered:\n60/);
@@ -487,6 +577,21 @@ assert.equal(bare.asked[0]!.answer, undefined);
   // the drill ran the evening before.
   assert.equal(drillIsForAPastPaper("2026-09-21", "2026-09-21"), false);
   assert.equal(drillIsForAPastPaper("2026-09-22", "2026-09-21"), false);
+
+  // ...until the paper starts. 22 Sep 2026: SHIVANGI's drill was opened at
+  // 23:03 on the 21st for her Maths paper on the 22nd and never got a
+  // chapter number. At 18:19 on the 22nd, with that paper long handed in,
+  // her father sent a voice note about the next one — "कल मेरा SST का paper
+  // है" — and the drill answered it three times with "send me a chapter
+  // number". Papers start at 8:30, so 9 is the cut-off.
+  assert.equal(drillIsForAPastPaper("2026-09-22", "2026-09-22", 7), false, "before the paper");
+  assert.equal(drillIsForAPastPaper("2026-09-22", "2026-09-22", 8), false, "8:30 has not come");
+  assert.equal(drillIsForAPastPaper("2026-09-22", "2026-09-22", 9), true, "it has started");
+  assert.equal(drillIsForAPastPaper("2026-09-22", "2026-09-22", 18), true, "his 18:19");
+  // Tomorrow's paper is never past, whatever the hour is today.
+  assert.equal(drillIsForAPastPaper("2026-09-23", "2026-09-22", 23), false, "tomorrow's drill lives");
+  // No hour given is no claim about the time — the old, date-only answer.
+  assert.equal(drillIsForAPastPaper("2026-09-22", "2026-09-22"), false);
   // An ISO timestamp, not just a date, still reads as its day.
   assert.equal(drillIsForAPastPaper("2026-09-19T00:00:00Z", "2026-09-21"), true);
   // A date nobody can read says nothing about the paper, so it says nothing.

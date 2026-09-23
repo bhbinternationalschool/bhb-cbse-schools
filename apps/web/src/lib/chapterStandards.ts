@@ -161,6 +161,71 @@ export function applyDecision(
   });
 }
 
+/* ── feeding agreed outcomes into a lesson-plan draft ─────────────────
+   lib/lessonPlanAi.ts tells the model, in as many words: "If no outcomes
+   are given for a unit, derive sensible ones from its title at the level
+   of the class." That sentence is the guess this replaces — but only for
+   chapters a teacher has actually agreed with, and only where the teacher
+   has not written outcomes of their own. */
+
+/**
+ * The chapter number a syllabus unit's code refers to, or null.
+ *
+ * lib/syllabusFromBooks.ts sets a unit's code to the chapter's position as a
+ * bare string, so the common case is exactly "7". Hand-made plans write "Ch 7"
+ * or "Chapter 7", which mean the same thing. ANYTHING ELSE RETURNS NULL rather
+ * than guessing: matching the wrong chapter would put another chapter's
+ * outcomes in front of a teacher, which is worse than the honest blank the
+ * prompt already handles.
+ */
+export function chapterPositionOf(code: string): number | null {
+  const m = /^\s*(?:ch(?:apter)?\.?\s*)?(\d{1,3})\s*$/i.exec(code || "");
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/** The shape this needs from a lesson-plan unit; LessonPlanUnitFact satisfies it. */
+export type OutcomeFillable = {
+  level: string;
+  code: string;
+  learningOutcomes: string;
+};
+
+/**
+ * Put the agreed outcomes in front of the model, where there is nothing else.
+ *
+ * Three rules, and each is a decision rather than an implementation detail:
+ *
+ *   THE TEACHER'S OWN WORDS WIN. A unit whose learningOutcomes the teacher has
+ *   filled in is left exactly as it is. This only ever fills a blank.
+ *
+ *   CHAPTERS ONLY. A topic is finer than the chapter it sits in, and a
+ *   chapter's outcome describes more than that topic — attaching it to the
+ *   topic would overstate what the lesson covers.
+ *
+ *   NO MATCH, NO FILL. A unit whose code is not a chapter number, or whose
+ *   chapter nobody has agreed outcomes for, is left blank and the prompt's own
+ *   "derive sensible ones from its title" handles it as before.
+ */
+export function fillAgreedOutcomes<T extends OutcomeFillable>(
+  units: T[],
+  agreedByPosition: Map<number, string[]>,
+): { units: T[]; filled: number } {
+  let filled = 0;
+  const out = units.map((u) => {
+    if (u.level !== "chapter") return u;
+    if (u.learningOutcomes.trim()) return u;
+    const position = chapterPositionOf(u.code);
+    if (position === null) return u;
+    const agreed = agreedByPosition.get(position);
+    if (!agreed || agreed.length === 0) return u;
+    filled += 1;
+    return { ...u, learningOutcomes: agreed.join("\n") };
+  });
+  return { units: out, filled };
+}
+
 /** "12 of 14 chapters agreed" — the line the header shows. */
 export function progressLine(chapters: ChapterOutcomes[]): string {
   const mapped = chapters.filter((c) => c.outcomes.length > 0);

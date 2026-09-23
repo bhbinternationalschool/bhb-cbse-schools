@@ -110,6 +110,7 @@ SELFTESTS=(
   test:weekly-child-digest
   test:exam-eve
   test:tutor-guide
+  test:wa-markdown
   test:wa-parent-guide
   test:udise-nudge
   test:apaar-consent
@@ -132,6 +133,7 @@ SELFTESTS=(
   test:homework-expand
   test:homework-submission
   test:exam-drill
+  test:drill-skills
   test:exam-seating
   test:roster-name-case
   test:review-demo-records

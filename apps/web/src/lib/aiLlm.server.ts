@@ -1568,6 +1568,12 @@ export async function drillQuestionJson(opts: {
   avoid: string[];
   avoidSkills?: string[];
   number: number;
+  /** The agreed micro-skills, rendered by lib/drillSkills.ts. "" for every drill that has none. */
+  skillMenu?: string;
+  /** How many the menu lists — what a returned skillRef is checked against. */
+  menuSize?: number;
+  avoidRefs?: number[];
+  retryFoundation?: string;
 }): Promise<
   | { ok: true; draft: DrillQuestion; engine: LlmEngine; generationId: string }
   | { ok: false; error: string; engine: LlmEngine }
@@ -1589,7 +1595,7 @@ export async function drillQuestionJson(opts: {
       temperature: 0.8,
       meta: { route: "exam-drill-question", promptVersion: DRILL_PROMPT_VERSION },
     },
-    (text) => parseDrillQuestion(text, opts.scope),
+    (text) => parseDrillQuestion(text, opts.scope, opts.menuSize ?? 0),
   );
   if (r.ok) return { ok: true, draft: r.data, engine: r.engine, generationId: r.generationId };
   return { ok: false, error: r.error || "No AI engine configured", engine: r.engine };
