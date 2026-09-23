@@ -114,6 +114,27 @@ export function nextExamDate(slots: EveSlot[], todayIso: string): string | null 
   return dates[0] ?? null;
 }
 
+/**
+ * The first date a "still to come" list may show.
+ *
+ * WHY (22 Sep 2026): a father wrote "Time table" at 19:37 IST and was shown
+ *
+ *   📅 *अर्धवार्षिक परीक्षा — बचे हुए पेपर*
+ *   मंगलवार, 22 सितंबर — गणित
+ *   बुधवार, 23 सितंबर — कंप्यूटर
+ *
+ * The Maths paper had been written that morning, 8:30 to 11:30. Listing a
+ * finished paper under "papers still to come" is how a family ends up
+ * revising the wrong subject the night before.
+ *
+ * Papers start at 8:30, so today counts as still to come until 9 — a parent
+ * asking at 7 am means today's paper, one asking at 7 pm does not. This is
+ * the same rule the practice tap already used inline; both now share it.
+ */
+export function papersFromDate(todayIso: string, istHour: number): string {
+  return istHour < 9 ? todayIso : tomorrowIso(todayIso);
+}
+
 /** The day after `todayIso`, as YYYY-MM-DD. */
 export function tomorrowIso(todayIso: string): string {
   const d = new Date(`${todayIso}T00:00:00Z`);
@@ -298,7 +319,16 @@ export function isTimetableRequest(text: string): boolean {
     /\b(next|upcoming|agla|agle|agli|kal|tomorrow|aaj|today)\b.{0,20}\b(exam|exams|paper|papers|pariksha)\b/.test(t) ||
     /\b(when|kab)\b.{0,20}\b(exam|exams|paper|papers|pariksha)\b/.test(t) ||
     /^(exam|exams|paper|pariksha)\s*\??$/.test(t) ||
-    /समय.?सारणी|टाइम ?टेबल|डेट ?शीट|परीक्षा.*(कब|कार्यक्रम)|पेपर कब|(अगला|अगली|अगले|कल|आज).{0,15}(पेपर|परीक्षा|एग्जाम)|कौन ?सा पेपर/.test(raw)
+    /समय.?सारणी|टाइम ?टेबल|डेट ?शीट|परीक्षा.*(कब|कार्यक्रम)|पेपर कब|(अगला|अगली|अगले|कल|आज).{0,15}(पेपर|परीक्षा|एग्जाम)|कौन ?सा पेपर/.test(raw) ||
+    // HALF IN EACH SCRIPT (22 Sep 2026). A father wrote "यार आज क्या मेरा
+    // SST का paper कल है" and then "कल मेरा SST का paper है". Both branches
+    // above missed it: the Latin one wants "kal", the Devanagari one wants
+    // "पेपर", and he had typed one of each — the phone's keyboard switches
+    // mid-sentence, the words do not. He was mid-drill, so the chapter
+    // question answered him instead: "यह समझ नहीं आया" three times running.
+    // The day word may come before the paper word or after it.
+    /(?:अगला|अगली|अगले|कल|आज|कब)[\s\S]{0,25}\b(?:paper|papers|exam|exams|pariksha|test)\b/i.test(raw) ||
+    /\b(?:paper|papers|exam|exams|pariksha|test)\b[\s\S]{0,25}(?:कब|कल|आज)/i.test(raw)
   );
 }
 

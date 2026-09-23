@@ -398,19 +398,42 @@ export function newDrill(input: {
  * handed Friday's Hindi question, "'तारा' शब्द का बहुवचन रूप लिखिए", and
  * told she was wrong when she asked what was happening.
  *
- * The day of the paper is the last day the drill is alive. After that the
- * next paper is a different subject and exam-eve will start its own drill.
+ * The paper is written on its own morning, 8:30 to 11:30, and the drill ran
+ * the evening before — so the drill is alive up to the moment the paper
+ * starts, and dead from then on.
+ *
+ * WHY THE HOUR AND NOT JUST THE DATE (22 Sep 2026): SHIVANGI's drill was
+ * opened at 23:03 on the 21st for her Maths paper on the 22nd. She never
+ * sent a chapter number, so it sat at the chapter question. At 18:19 on the
+ * 22nd — seven hours after that Maths paper had been handed in — her father
+ * sent a voice note about the NEXT paper, "कल मेरा SST का paper है". The
+ * drill was still counted as open, so it answered for the finished paper:
+ *
+ *   यह समझ नहीं आया 🙏 ऊपर की सूची में से अध्याय का *नंबर* भेजिए
+ *
+ * three times, and the question about the next paper never reached the bot
+ * that could answer it.
+ *
+ * `istHour` defaults to 0, so a caller that knows only the date still gets
+ * the old date-only answer rather than a guess about the time.
  *
  * An unparseable date is not a fact about the paper, so it is left alone
  * ([[erp-unknown-must-not-become-fact]]) — the ceiling and the finish
  * rules still end it.
  */
-export function drillIsForAPastPaper(paperDate: string, todayIso: string): boolean {
+export function drillIsForAPastPaper(
+  paperDate: string,
+  todayIso: string,
+  istHour = 0,
+): boolean {
   const paper = String(paperDate || "").slice(0, 10);
   const today = String(todayIso || "").slice(0, 10);
   const iso = /^\d{4}-\d{2}-\d{2}$/;
   if (!iso.test(paper) || !iso.test(today)) return false;
-  return paper < today;
+  if (paper < today) return true;
+  // Papers start at 8:30; 9 is the same cut-off the exam-eve message uses
+  // to decide whether today's paper is still to come.
+  return paper === today && istHour >= 9;
 }
 
 export type DrillStep =

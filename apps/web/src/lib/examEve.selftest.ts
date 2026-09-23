@@ -28,6 +28,7 @@ import {
   isTimetableRequest,
   nextExamDate,
   paperLabel,
+  papersFromDate,
   practicePrompt,
   prePrimaryTips,
   timetableReply,
@@ -145,10 +146,18 @@ for (const yes of [
   // 21 Sep 2026: "Next exam" went to the office instead of the date sheet.
   "Next exam", "next exam kab hai", "agla paper kaun sa hai", "kal ka paper", "when is the exam", "Exam?",
   "exam date", "tomorrow paper", "अगला पेपर", "कल कौन सा पेपर है", "आज का पेपर",
+  // 22 Sep 2026: written half in Devanagari, half in Latin — the father's
+  // own words, twice, while the drill was waiting for a chapter number. Both
+  // times he was told "यह समझ नहीं आया" instead of being given the date sheet.
+  "कल मेरा SST का paper है", "यार आज क्या मेरा SST का paper कल है",
+  "कल exam hai kya", "paper कब है",
 ]) {
   assert.ok(isTimetableRequest(yes), yes);
 }
-for (const no of ["fees kab jama kare", "DUES", "school kaha hai", "", "exam result kab aayega", "exam fees", "admit card", "exam ke marks", "परीक्षा का रिजल्ट", "next week fees"]) {
+for (const no of ["fees kab jama kare", "DUES", "school kaha hai", "", "exam result kab aayega", "exam fees", "admit card", "exam ke marks", "परीक्षा का रिजल्ट", "next week fees",
+  // The mixed-script branch must not swallow the questions that already have
+  // their own answers — money and marks are not "when".
+  "कल exam fees jama karni hai", "paper के marks कब आएंगे", "आज exam ka result kab aayega"]) {
   assert.equal(isTimetableRequest(no), false, `not a timetable ask: ${no}`);
 }
 
@@ -162,6 +171,23 @@ assert.ok(!tt.includes("Ansh (VII)"), "a child with nothing left is left out");
 
 const done = timetableReply(family, slots, names, "2026-09-30");
 assert.ok(done.includes("सभी पेपर हो चुके"), "after the last paper, say so");
+
+// 22 Sep 2026, 19:37 IST: a father wrote "Time table" and was shown
+// "मंगलवार, 22 सितंबर — गणित" under *बचे हुए पेपर* — a paper his son had
+// written that morning, 8:30 to 11:30. Papers start at 8:30, so today is
+// still to come only until 9.
+assert.equal(papersFromDate("2026-09-22", 7), "2026-09-22", "at 7 am, today's paper is still to come");
+assert.equal(papersFromDate("2026-09-22", 8), "2026-09-22", "at 8 am too — the paper starts at 8:30");
+assert.equal(papersFromDate("2026-09-22", 9), "2026-09-23", "once it has started, it is not to come");
+assert.equal(papersFromDate("2026-09-22", 19), "2026-09-23", "and his 19:37 must not list it");
+assert.equal(papersFromDate("2026-09-30", 23), "2026-10-01", "the month rolls over");
+
+{
+  const evening = timetableReply(family, slots, names, papersFromDate("2026-09-22", 19));
+  assert.ok(!evening.includes("22 सितंबर"), "the paper written this morning is gone");
+  const morning = timetableReply(family, slots, names, papersFromDate("2026-09-22", 7));
+  assert.ok(morning.includes("22 सितंबर"), "but at 7 am it is still listed");
+}
 
 /* ── 9. The tutor prompt and the pre-primary tips ───────────────────── */
 
