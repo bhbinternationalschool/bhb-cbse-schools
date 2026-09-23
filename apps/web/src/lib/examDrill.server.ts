@@ -116,9 +116,13 @@ export async function openDrillFor(mobile10: string): Promise<{ id: string; stat
   }
   const row = (data ?? [])[0] as Row | undefined;
   if (!row) return null;
-  // The query above should have excluded it; this is the belt to that
-  // braces, because the cost of being wrong is a child marked wrong.
-  if (drillIsForAPastPaper(row.paper_date, today)) return null;
+  // The query above excludes yesterday's papers; this also ends the drill
+  // for a paper written THIS morning, which the date alone cannot see. The
+  // cost of being wrong is a child marked wrong — or, on 22 Sep 2026, a
+  // father asking about tomorrow's paper and being asked for a chapter
+  // number for a paper already handed in.
+  const istHour = new Date(Date.now() + 330 * 60_000).getUTCHours();
+  if (drillIsForAPastPaper(row.paper_date, today, istHour)) return null;
   return { id: row.id, state: rowToState(row) };
 }
 
