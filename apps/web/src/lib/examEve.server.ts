@@ -406,7 +406,7 @@ export async function handleExamEveInbound(opts: {
   text: string;
   now?: Date;
 }): Promise<string | null> {
-  const { isPracticeTap, isTimetableRequest, timetableReply, familyPapersOn, isPrePrimary, prePrimaryTips, practicePrompt } =
+  const { isPracticeTap, isTimetableRequest, timetableReply, familyPapersOn, isPrePrimary, prePrimaryTips, practicePrompt, papersFromDate } =
     await import("@/lib/examEve");
   const practice = isPracticeTap(opts.text);
   const timetable = !practice && isTimetableRequest(opts.text);
@@ -427,15 +427,18 @@ export async function handleExamEveInbound(opts: {
       : "🙏 No child of this session (2026-27) is linked to this WhatsApp number, so the practice could not start. Please tell the school office your correct number — they will fix it.";
   }
 
+  // Papers start at 8:30, so today is "still to come" only until 9 — see
+  // papersFromDate. The same cut-off decides what TIMETABLE lists and which
+  // paper the practice tap is about; they must not disagree.
+  const istHour = new Date(now.getTime() + 330 * 60_000).getUTCHours();
+  const fromDate = papersFromDate(today, istHour);
+
   if (timetable) {
-    return timetableReply(family, setup.slots, setup.subjectNames, today);
+    return timetableReply(family, setup.slots, setup.subjectNames, fromDate);
   }
 
-  // The paper the tap is about: the next exam day AFTER today that one of
-  // this family's children sits. Tapped before 8:30 on an exam morning, a
-  // parent still means today's paper — so today counts until the paper starts.
-  const istHour = new Date(now.getTime() + 330 * 60_000).getUTCHours();
-  const fromDate = istHour < 9 ? today : tomorrowIso(today);
+  // The paper the tap is about: the next exam day this family's children sit,
+  // from that same date on.
   const familyDates = [
     ...new Set(
       setup.slots

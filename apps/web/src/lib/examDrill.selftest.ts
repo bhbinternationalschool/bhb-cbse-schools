@@ -577,6 +577,21 @@ assert.equal(bare.asked[0]!.answer, undefined);
   // the drill ran the evening before.
   assert.equal(drillIsForAPastPaper("2026-09-21", "2026-09-21"), false);
   assert.equal(drillIsForAPastPaper("2026-09-22", "2026-09-21"), false);
+
+  // ...until the paper starts. 22 Sep 2026: SHIVANGI's drill was opened at
+  // 23:03 on the 21st for her Maths paper on the 22nd and never got a
+  // chapter number. At 18:19 on the 22nd, with that paper long handed in,
+  // her father sent a voice note about the next one — "कल मेरा SST का paper
+  // है" — and the drill answered it three times with "send me a chapter
+  // number". Papers start at 8:30, so 9 is the cut-off.
+  assert.equal(drillIsForAPastPaper("2026-09-22", "2026-09-22", 7), false, "before the paper");
+  assert.equal(drillIsForAPastPaper("2026-09-22", "2026-09-22", 8), false, "8:30 has not come");
+  assert.equal(drillIsForAPastPaper("2026-09-22", "2026-09-22", 9), true, "it has started");
+  assert.equal(drillIsForAPastPaper("2026-09-22", "2026-09-22", 18), true, "his 18:19");
+  // Tomorrow's paper is never past, whatever the hour is today.
+  assert.equal(drillIsForAPastPaper("2026-09-23", "2026-09-22", 23), false, "tomorrow's drill lives");
+  // No hour given is no claim about the time — the old, date-only answer.
+  assert.equal(drillIsForAPastPaper("2026-09-22", "2026-09-22"), false);
   // An ISO timestamp, not just a date, still reads as its day.
   assert.equal(drillIsForAPastPaper("2026-09-19T00:00:00Z", "2026-09-21"), true);
   // A date nobody can read says nothing about the paper, so it says nothing.
