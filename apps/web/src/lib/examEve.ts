@@ -298,7 +298,16 @@ export function isTimetableRequest(text: string): boolean {
     /\b(next|upcoming|agla|agle|agli|kal|tomorrow|aaj|today)\b.{0,20}\b(exam|exams|paper|papers|pariksha)\b/.test(t) ||
     /\b(when|kab)\b.{0,20}\b(exam|exams|paper|papers|pariksha)\b/.test(t) ||
     /^(exam|exams|paper|pariksha)\s*\??$/.test(t) ||
-    /समय.?सारणी|टाइम ?टेबल|डेट ?शीट|परीक्षा.*(कब|कार्यक्रम)|पेपर कब|(अगला|अगली|अगले|कल|आज).{0,15}(पेपर|परीक्षा|एग्जाम)|कौन ?सा पेपर/.test(raw)
+    /समय.?सारणी|टाइम ?टेबल|डेट ?शीट|परीक्षा.*(कब|कार्यक्रम)|पेपर कब|(अगला|अगली|अगले|कल|आज).{0,15}(पेपर|परीक्षा|एग्जाम)|कौन ?सा पेपर/.test(raw) ||
+    // HALF IN EACH SCRIPT (22 Sep 2026). A father wrote "यार आज क्या मेरा
+    // SST का paper कल है" and then "कल मेरा SST का paper है". Both branches
+    // above missed it: the Latin one wants "kal", the Devanagari one wants
+    // "पेपर", and he had typed one of each — the phone's keyboard switches
+    // mid-sentence, the words do not. He was mid-drill, so the chapter
+    // question answered him instead: "यह समझ नहीं आया" three times running.
+    // The day word may come before the paper word or after it.
+    /(?:अगला|अगली|अगले|कल|आज|कब)[\s\S]{0,25}\b(?:paper|papers|exam|exams|pariksha|test)\b/i.test(raw) ||
+    /\b(?:paper|papers|exam|exams|pariksha|test)\b[\s\S]{0,25}(?:कब|कल|आज)/i.test(raw)
   );
 }
 
