@@ -114,6 +114,27 @@ export function nextExamDate(slots: EveSlot[], todayIso: string): string | null 
   return dates[0] ?? null;
 }
 
+/**
+ * The first date a "still to come" list may show.
+ *
+ * WHY (22 Sep 2026): a father wrote "Time table" at 19:37 IST and was shown
+ *
+ *   📅 *अर्धवार्षिक परीक्षा — बचे हुए पेपर*
+ *   मंगलवार, 22 सितंबर — गणित
+ *   बुधवार, 23 सितंबर — कंप्यूटर
+ *
+ * The Maths paper had been written that morning, 8:30 to 11:30. Listing a
+ * finished paper under "papers still to come" is how a family ends up
+ * revising the wrong subject the night before.
+ *
+ * Papers start at 8:30, so today counts as still to come until 9 — a parent
+ * asking at 7 am means today's paper, one asking at 7 pm does not. This is
+ * the same rule the practice tap already used inline; both now share it.
+ */
+export function papersFromDate(todayIso: string, istHour: number): string {
+  return istHour < 9 ? todayIso : tomorrowIso(todayIso);
+}
+
 /** The day after `todayIso`, as YYYY-MM-DD. */
 export function tomorrowIso(todayIso: string): string {
   const d = new Date(`${todayIso}T00:00:00Z`);
