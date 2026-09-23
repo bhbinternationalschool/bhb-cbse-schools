@@ -154,6 +154,7 @@
     "test:homework-expand": "npx tsx src/lib/homeworkExpand.selftest.ts",
     "test:homework-submission": "npx tsx src/lib/homeworkSubmission.selftest.ts",
     "test:exam-drill": "npx tsx src/lib/examDrill.selftest.ts",
+    "test:drill-skills": "npx tsx src/lib/drillSkills.selftest.ts",
     "test:exam-seating": "npx tsx src/lib/examSeating.selftest.ts",
     "test:rbac-scope": "npx tsx src/lib/rbacScope.selftest.ts",
     "test:rbac-user-grants": "npx tsx src/lib/rbacUserGrants.selftest.ts",

@@ -271,6 +271,8 @@ export function LessonPlansPanel(props: {
         draft?: LessonPlanDraft;
         model?: string;
         generationId?: string;
+        /** Ticked chapters drafted against outcomes a teacher agreed with. */
+        agreedOutcomeUnits?: number;
       };
       if (!res.ok || !body.draft) {
         props.onError(body.error || `AI draft failed (${res.status})`);
@@ -293,8 +295,16 @@ export function LessonPlansPanel(props: {
       if (draft.generationId && draft.generationId !== body.generationId) {
         reportAiOutcome({ ids: [draft.generationId], outcome: "rejected", targetType: "lesson_plan" });
       }
+      // Say when the draft stood on agreed outcomes rather than on the model's
+      // reading of a chapter title. A teacher deciding how hard to check the
+      // objectives deserves to know which of the two they are looking at.
+      const agreedUnits = body.agreedOutcomeUnits ?? 0;
+      const agreedNote =
+        agreedUnits > 0
+          ? ` · on ${agreedUnits === 1 ? "the agreed outcome" : `agreed outcomes for ${agreedUnits} chapters`}`
+          : "";
       props.onNotice(
-        `Draft ready${body.model ? ` · ${body.model}` : ""} — review, edit, then save`,
+        `Draft ready${body.model ? ` · ${body.model}` : ""}${agreedNote} — review, edit, then save`,
       );
     } catch (e) {
       props.onError(e instanceof Error ? e.message : "AI draft failed");

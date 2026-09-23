@@ -1,19 +1,31 @@
 /**
- * Reading and deciding the outcomes proposed for a book's chapters.
+ * Reading and deciding the outcomes proposed for a book's chapters, and
+ * handing the agreed ones to whatever wants to use them.
  *
- * THIS FILE READS THE BASE TABLE, NOT THE VIEW, and that is deliberate.
- * `learning_chapter_outcomes` exists so no other screen can see a match a
- * teacher has not agreed with. The review screen is the one place that must
- * see exactly those — an unreviewed row is its whole subject — so it reads
- * `textbook_chapter_standards` directly. Every OTHER caller should read the
- * view; if a second file ever selects from this table, that is the thing to
- * question.
+ * THIS FILE SITS ON BOTH SIDES OF ONE LINE, on purpose, and which side a
+ * function is on is the most important thing about it:
+ *
+ *   `loadBookOutcomes` and `decideChapterStandard` read and write the BASE
+ *   TABLE, because the review screen's whole subject is rows nobody has
+ *   decided yet. It is the one screen that must see them.
+ *
+ *   `loadAgreedOutcomesByPosition`, `loadAgreedSkillsByPosition` and
+ *   `loadFoundationStatements` are on the other side. Everything that USES an
+ *   outcome — a lesson plan, a child's revision question — may only ever see
+ *   what a teacher agreed with, so the first two read the VIEW and the third
+ *   only ever runs on a component one of them already handed out.
+ *   `learning_chapter_outcomes` cannot show anything else, so that guarantee
+ *   holds even if this file is edited carelessly.
+ *
+ * ANOTHER FUNCTION READING THE BASE TABLE IS THE THING TO QUESTION. Adding
+ * one is how an outcome nobody agreed with reaches a child.
  *
  * The standard's `code` is never selected. See lib/chapterStandards.ts for why
  * the type has no field for it.
  */
 
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { indexGrade, subjectKeyFor } from "@/lib/tutorSyllabus";
 import type { ChapterOutcomes, ProposedOutcome, ReviewVerdict } from "@/lib/chapterStandards";
 
 /** A row of textbook_chapter_standards as it comes back. */
@@ -227,4 +239,204 @@ export async function decideChapterStandard(input: {
       reviewedAt: row.reviewed_at,
     },
   };
+}
+
+/**
+ * The outcomes a teacher has AGREED WITH, for one class and subject, by chapter.
+ *
+ * THIS READS THE VIEW, and it is the first caller that should. Everything above
+ * reads the base table because the review screen's whole subject is rows nobody
+ * has decided yet; this is the other side of that line — a lesson plan may only
+ * ever see what somebody agreed with, and `learning_chapter_outcomes` cannot
+ * show it anything else. That is the guarantee, and it is enforced by the view
+ * rather than by this function remembering to filter.
+ *
+ * Returns an empty map rather than throwing for every ordinary "nothing here"
+ * — no database, a class we hold no book for, a subject nobody has reviewed.
+ * Drafting a lesson plan must not fail because this is empty; the prompt has
+ * always coped with a unit that has no outcomes, and it still does.
+ */
+export async function loadAgreedOutcomesByPosition(input: {
+  classLabel: string;
+  subjectName: string;
+}): Promise<Map<number, string[]>> {
+  const empty = new Map<number, string[]>();
+
+  const found = await bookIdFor(input);
+  if (!found) return empty;
+  const { sb, tenantId, bookId } = found;
+
+  const { data, error } = await sb
+    .from("learning_chapter_outcomes")
+    .select("position, statement")
+    .eq("tenant_id", tenantId)
+    .eq("textbook_id", bookId);
+  // A failed read is not an empty syllabus. Returning the empty map either way
+  // is right here — the plan is simply drafted the way it was before any of
+  // this existed — but it must not be mistaken for "nothing is agreed".
+  if (error) {
+    console.warn("[chapterStandards] agreed outcomes read failed", error.message);
+    return empty;
+  }
+
+  const byPosition = new Map<number, string[]>();
+  for (const row of (data ?? []) as { position: number; statement: string }[]) {
+    const list = byPosition.get(row.position) ?? [];
+    list.push(row.statement);
+    byPosition.set(row.position, list);
+  }
+  // Sorted so two drafts of the same chapter put the same sentence first.
+  for (const [k, v] of byPosition) byPosition.set(k, v.sort((a, b) => a.localeCompare(b)));
+  return byPosition;
+}
+
+/**
+ * The book one class and subject uses, or null. The two view-reading loaders
+ * below both start here, and both mean the same thing by "nothing": no
+ * database, no class we recognise, no loaded book — all of which end with the
+ * caller behaving as it did before any of this existed.
+ */
+type TenantCtx = NonNullable<Awaited<ReturnType<typeof getServerTenantContext>>>;
+
+async function bookIdFor(input: {
+  classLabel: string;
+  subjectName: string;
+}): Promise<{ sb: TenantCtx["sb"]; tenantId: string; bookId: string } | null> {
+  const grade = indexGrade(input.classLabel);
+  const subjectKey = subjectKeyFor(input.subjectName);
+  if (grade === null || !subjectKey) return null;
+
+  const ctx = await getServerTenantContext();
+  if (!ctx) return null;
+  const { sb, tenantId } = ctx;
+
+  const { data: book } = await sb
+    .from("school_textbooks")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("grade", grade)
+    .eq("subject_key", subjectKey)
+    .is("retired_at", null)
+    .maybeSingle();
+  if (!book?.id) return null;
+  return { sb, tenantId, bookId: book.id as string };
+}
+
+/**
+ * The micro-skills of the outcomes a teacher agreed with, by chapter.
+ *
+ * THIS READS THE VIEW, for the same reason `loadAgreedOutcomesByPosition`
+ * does: a revision question a child sits the night before a paper may only be
+ * set from something a teacher agreed with. The components themselves are a
+ * published fact (`learning_standard_components`), but WHICH of them are in
+ * play is decided entirely by which standards reached the view.
+ *
+ * Only CCSS-M carries components, and the seed loaded them for Classes 3–8
+ * only. Everything else — Classes 1–2, Science, English — returns an empty
+ * map, and the drill runs exactly as it did before. That is by construction,
+ * not by a caller remembering to check.
+ *
+ * Returns an empty map rather than throwing for every ordinary "nothing
+ * here"; a drill must not fail because a chapter has no agreed outcomes.
+ */
+export async function loadAgreedSkillsByPosition(input: {
+  classLabel: string;
+  subjectName: string;
+}): Promise<Map<number, { componentId: string; description: string }[]>> {
+  const empty = new Map<number, { componentId: string; description: string }[]>();
+
+  const found = await bookIdFor(input);
+  if (!found) return empty;
+  const { sb, tenantId, bookId } = found;
+
+  const { data: agreed, error } = await sb
+    .from("learning_chapter_outcomes")
+    .select("position, case_uuid")
+    .eq("tenant_id", tenantId)
+    .eq("textbook_id", bookId);
+  if (error) {
+    console.warn("[chapterStandards] agreed skills read failed", error.message);
+    return empty;
+  }
+
+  const rows = (agreed ?? []) as { position: number; case_uuid: string }[];
+  const uuids = [...new Set(rows.map((r) => r.case_uuid))];
+  if (!uuids.length) return empty;
+
+  const { data: comps, error: compError } = await sb
+    .from("learning_standard_components")
+    .select("case_uuid, component_id, description")
+    .in("case_uuid", uuids);
+  if (compError) {
+    console.warn("[chapterStandards] components read failed", compError.message);
+    return empty;
+  }
+
+  const byStandard = new Map<string, { componentId: string; description: string }[]>();
+  for (const c of (comps ?? []) as { case_uuid: string; component_id: string; description: string }[]) {
+    const list = byStandard.get(c.case_uuid) ?? [];
+    list.push({ componentId: c.component_id, description: c.description });
+    byStandard.set(c.case_uuid, list);
+  }
+
+  // One chapter can carry several agreed standards, and two of them can share
+  // a component; deduped by id so the menu never lists the same idea twice.
+  const byPosition = new Map<number, { componentId: string; description: string }[]>();
+  for (const r of rows) {
+    const list = byPosition.get(r.position) ?? [];
+    for (const c of byStandard.get(r.case_uuid) ?? []) {
+      if (!list.some((x) => x.componentId === c.componentId)) list.push(c);
+    }
+    if (list.length) byPosition.set(r.position, list);
+  }
+  return byPosition;
+}
+
+/**
+ * What sits underneath one micro-skill: the statements of the prerequisites
+ * of the standard it belongs to.
+ *
+ * This is the one place the SAP Coherence Map edges are read, and it walks
+ * exactly ONE step back. A transitive walk would reach kindergarten from a
+ * Class 7 standard in four hops, and the caller uses this to make a retry
+ * easier — not to move a child down two classes the night before a paper.
+ *
+ * Empty for everything it cannot answer, including an id that is not a
+ * component of anything we hold.
+ */
+export async function loadFoundationStatements(componentId: string): Promise<string[]> {
+  if (!componentId) return [];
+
+  const ctx = await getServerTenantContext();
+  if (!ctx) return [];
+  const { sb } = ctx;
+
+  const { data: comp } = await sb
+    .from("learning_standard_components")
+    .select("case_uuid")
+    .eq("component_id", componentId)
+    .limit(1)
+    .maybeSingle();
+  if (!comp?.case_uuid) return [];
+
+  const { data: edges } = await sb
+    .from("learning_standard_prereqs")
+    .select("prereq_case_uuid")
+    .eq("case_uuid", comp.case_uuid as string);
+  const prereqs = [...new Set(((edges ?? []) as { prereq_case_uuid: string }[]).map((e) => e.prereq_case_uuid))];
+  if (!prereqs.length) return [];
+
+  // `code` is never selected here either — see the note at the top of this
+  // file. A prerequisite's sentence is the useful half; its US code is the
+  // half that must never reach a child's phone.
+  const { data: standards } = await sb
+    .from("learning_standards")
+    .select("case_uuid, statement")
+    .in("case_uuid", prereqs);
+
+  return ((standards ?? []) as { case_uuid: string; statement: string }[])
+    .map((s) => s.statement)
+    .filter(Boolean)
+    // Sorted so the same wrong answer produces the same hint twice running.
+    .sort((a, b) => a.localeCompare(b));
 }
