@@ -1,11 +1,16 @@
 "use client";
 
 /**
- * Students → Birthdays — today's and upcoming birthdays, the card template
- * gallery (design × format, live previews rendered by /api/birthday/card),
- * the greeting message per language, auto-send settings (hour, WhatsApp
- * template for outside-24h delivery), optional social post, a send log, and
- * per-student actions: download card, open WhatsApp, send now (server).
+ * Students → Birthdays — today's and upcoming birthdays for children AND for
+ * staff, the card template gallery (design × format, live previews rendered
+ * by /api/birthday/card), the greeting message per language, auto-send
+ * settings (hour, WhatsApp template for outside-24h delivery), optional
+ * social post, a send log, and per-row actions: download card, open WhatsApp,
+ * send now (server).
+ *
+ * Staff sit on this screen rather than in their own because the settings are
+ * one set — one design, one send hour, one log — and splitting them across
+ * two desks is how a school ends up with two different birthday cards.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -14,12 +19,16 @@ import {
   BIRTHDAY_DESIGNS,
   BIRTHDAY_FORMATS,
   BIRTHDAY_PLACEHOLDERS,
+  BIRTHDAY_STAFF_PLACEHOLDERS,
   birthdayMessageFor,
   DEFAULT_BIRTHDAY_MESSAGES,
   DEFAULT_SOCIAL_CAPTION,
+  DEFAULT_STAFF_BIRTHDAY_MESSAGES,
   loadBirthdayState,
   saveBirthdayState,
+  staffBirthdayMessageFor,
   upcomingBirthdays,
+  upcomingStaffBirthdays,
   type BirthdayDesignId,
   type BirthdayFormatId,
   type BirthdaySettings,
@@ -38,6 +47,7 @@ import { RowActionMenu } from "@/components/ui/erp-grid";
 const inp = "w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm";
 
 type TodayRow = { studentId: string; fullName: string; className: string; age: number | null; guardianName: string; mobile: string; language: "en" | "hi"; hasPhoto: boolean; cardUrl: string };
+type StaffRow = { staffId: string; fullName: string; designation: string; age: number | null; mobile: string; hasPhoto: boolean; cardUrl: string };
 
 function todayIst(): string {
   return new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10);
@@ -51,6 +61,10 @@ export function BirthdaysPanel({ canEdit }: { canEdit: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [date, setDate] = useState(todayIst());
   const [today, setToday] = useState<TodayRow[]>([]);
+  const [todayStaff, setTodayStaff] = useState<StaffRow[]>([]);
+  // Colleagues' birthdays belong to the Staff module; the API says whether
+  // this person may see them, so the section is simply not drawn otherwise.
+  const [staffAccess, setStaffAccess] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [previewFormat, setPreviewFormat] = useState<BirthdayFormatId>(state.settings.format);
   const [cacheBust, setCacheBust] = useState(0);
@@ -69,14 +83,17 @@ export function BirthdaysPanel({ canEdit }: { canEdit: boolean }) {
   const sis = useMemo(() => loadSis(), []);
   const masters = useMemo(() => loadMasters(), []);
   const upcoming = useMemo(() => upcomingBirthdays(sis.students, todayIst(), 14).filter((u) => u.date !== todayIst()).slice(0, 30), [sis.students]);
+  const upcomingStaff = useMemo(() => upcomingStaffBirthdays(masters.staff ?? [], todayIst(), 30).filter((u) => u.date !== todayIst()).slice(0, 20), [masters.staff]);
   const imageTemplates = useMemo(() => listApprovedTemplates(loadWaTemplates()).filter((t) => t.headerFormat === "IMAGE"), []);
 
   async function loadToday(d: string) {
     try {
       const r = await fetch(`/api/birthday/send?date=${d}&design=${s.design}&format=${s.format}`);
-      const j = (await r.json()) as { ok?: boolean; students?: TodayRow[]; error?: string };
+      const j = (await r.json()) as { ok?: boolean; students?: TodayRow[]; staff?: StaffRow[]; staffAccess?: boolean; error?: string };
       if (!r.ok || !j.ok) return setError(j.error || "Could not load");
       setToday(j.students || []);
+      setTodayStaff(j.staff || []);
+      setStaffAccess(j.staffAccess === true);
     } catch {
       setError("Could not load today's birthdays");
     }
@@ -118,12 +135,35 @@ export function BirthdaysPanel({ canEdit }: { canEdit: boolean }) {
     }
   }
 
+  async function sendStaffNow(ids: string[], dryRun: boolean) {
+    if (busy) return;
+    setBusy(dryRun ? "dry-staff" : "send-staff");
+    setError(null);
+    try {
+      const r = await fetch("/api/birthday/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, staffIds: ids, dryRun }) });
+      const j = (await r.json()) as { ok?: boolean; error?: string; sent?: number; failed?: number; skipped?: number; rows?: { fullName: string; status: string; detail: string }[] };
+      if (!r.ok || !j.ok) return setError(j.error || "Send failed");
+      setNotice(`${dryRun ? "Dry run" : "Sent"} (staff): ${j.sent} sent · ${j.failed} failed · ${j.skipped} skipped`);
+      if (j.rows?.some((x) => x.status === "failed")) setError(j.rows.filter((x) => x.status === "failed").map((x) => `${x.fullName}: ${x.detail}`).join(" · ").slice(0, 400));
+      setState(loadBirthdayState());
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function openWaStaff(row: StaffRow) {
+    const text = staffBirthdayMessageFor({ settings: s, language: s.defaultLanguage, name: row.fullName, designation: row.designation, age: row.age, schoolName: TENANT.nameDisplay, cardLink: row.cardUrl });
+    openWaMe(row.mobile, text);
+  }
+
   function openWa(row: TodayRow) {
     const text = birthdayMessageFor({ settings: s, language: row.language, childName: row.fullName, guardianName: row.guardianName, className: row.className, age: row.age, schoolName: TENANT.nameDisplay, cardLink: row.cardUrl });
     openWaMe(row.mobile, text);
   }
 
   const logToday = state.log.filter((e) => e.date === date);
+  const logName = (subject: "student" | "staff", id: string) =>
+    (subject === "staff" ? masters.staff?.find((x) => x.id === id)?.fullName : sis.students.find((x) => x.id === id)?.fullName) || id;
 
   // Default order is whatever the API returned; the office usually wants
   // "who has not been sent yet" first, which is one click on Status.
@@ -135,7 +175,7 @@ export function BirthdaysPanel({ canEdit }: { canEdit: boolean }) {
       // Sort on whether a greeting went out, not on the rendered channel text.
       sent: (r) =>
         state.log.some(
-          (e) => e.date === date && e.studentId === r.studentId && e.status === "sent",
+          (e) => e.date === date && e.subject === "student" && e.subjectId === r.studentId && e.status === "sent",
         ),
     },
     "name",
@@ -182,7 +222,7 @@ export function BirthdaysPanel({ canEdit }: { canEdit: boolean }) {
                 </ErpTableHead>
                 <ErpTableBody>
                   {todaySort.rows.map((row) => {
-                    const log = logToday.filter((e) => e.studentId === row.studentId);
+                    const log = logToday.filter((e) => e.subject === "student" && e.subjectId === row.studentId);
                     return (
                       <tr key={row.studentId} className="text-xs align-top">
                         <td className="px-2 py-1.5">
@@ -241,6 +281,105 @@ export function BirthdaysPanel({ canEdit }: { canEdit: boolean }) {
         ) : null}
       </div>
 
+      {/* Staff birthdays */}
+      {staffAccess ? (
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Cake className="h-4 w-4 text-[var(--brand-deep)]" />
+          <p className="text-sm font-semibold">Staff birthdays</p>
+          <span className="text-[11px] text-[var(--muted)]">
+            {todayStaff.length} on this date · automatic {s.autoSend && s.staffEnabled ? `ON at ${s.sendHour}:00 IST` : "OFF"} · the card is signed by the Director
+          </span>
+          {canEdit && todayStaff.length ? (
+            <span className="ml-auto flex gap-2">
+              <button type="button" disabled={!!busy} className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold disabled:opacity-50" onClick={() => void sendStaffNow(todayStaff.map((t) => t.staffId), true)}>
+                Dry run
+              </button>
+              <button type="button" disabled={!!busy} className="inline-flex items-center gap-1 rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)] disabled:opacity-50" onClick={() => { if (window.confirm(`Send birthday greetings to ${todayStaff.length} colleague${todayStaff.length === 1 ? "" : "s"} on WhatsApp now?`)) void sendStaffNow(todayStaff.map((t) => t.staffId), false); }}>
+                <Send className="h-3.5 w-3.5" />
+                {busy === "send-staff" ? "Sending…" : "Send all now"}
+              </button>
+            </span>
+          ) : null}
+        </div>
+        {todayStaff.length === 0 ? (
+          <p className="mt-2 text-xs text-[var(--muted)]">No staff birthdays on this date.</p>
+        ) : (
+          <div className="mt-2">
+            <ErpTableShell exportAs="birthdays_staff_today" exportTitle="Staff birthdays">
+              <ErpTable>
+                <ErpTableHead>
+                  <tr>
+                    <th className="px-2 py-2 text-left">Card</th>
+                    <th className="px-2 py-2 text-left">Staff member</th>
+                    <th className="px-2 py-2 text-left">WhatsApp</th>
+                    <th className="px-2 py-2 text-left">Status today</th>
+                    <th className="px-2 py-2" />
+                  </tr>
+                </ErpTableHead>
+                <ErpTableBody>
+                  {todayStaff.map((row) => {
+                    const log = logToday.filter((e) => e.subject === "staff" && e.subjectId === row.staffId);
+                    return (
+                      <tr key={row.staffId} className="text-xs align-top">
+                        <td className="px-2 py-1.5">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={`/api/birthday/card?staff=${encodeURIComponent(row.staffId)}&date=${date}&design=${s.design}&format=square&v=${cacheBust}`} alt="" width={72} height={72} className="rounded-lg border border-[var(--border)] object-cover" />
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <div className="font-semibold">{row.fullName}</div>
+                          <div className="text-[var(--muted)]">{row.designation || "—"}{row.hasPhoto ? "" : " · no photo"}</div>
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <div>{row.mobile || "no mobile on record"}</div>
+                          <div className="text-[var(--muted)]">{s.defaultLanguage === "hi" ? "हिंदी" : "English"}</div>
+                        </td>
+                        <td className="px-2 py-1.5">
+                          {log.length ? log.map((e) => <div key={e.channel} className={e.status === "sent" ? "text-[var(--success)]" : e.status === "failed" ? "text-[var(--danger)]" : "text-[var(--muted)]"}>{e.channel}: {e.status}{e.detail ? ` · ${e.detail.slice(0, 60)}` : ""}</div>) : <span className="text-[var(--muted)]">not sent</span>}
+                        </td>
+                        <td className="px-2 py-1.5 whitespace-nowrap">
+                          <a className="inline-flex items-center gap-1 text-[var(--brand-deep)] underline" href={`/api/birthday/card?staff=${encodeURIComponent(row.staffId)}&date=${date}&design=${s.design}&format=${s.format}`} download={`birthday-${row.fullName.replace(/\s+/g, "_")}.png`}>
+                            <Download className="h-3 w-3" /> PNG
+                          </a>
+                          <RowActionMenu
+                            className="ml-1 align-middle"
+                            row={row}
+                            label={`Actions for ${row.fullName}`}
+                            actions={[
+                              {
+                                id: "wa",
+                                label: "Open WhatsApp",
+                                hidden: () => !canEdit,
+                                disabled: (x) => !x.mobile,
+                                onSelect: (x) => openWaStaff(x),
+                              },
+                              {
+                                id: "send",
+                                label: "Send card now",
+                                hidden: () => !canEdit,
+                                disabled: (x) => !!busy || !x.mobile,
+                                onSelect: (x) => void sendStaffNow([x.staffId], false),
+                              },
+                            ]}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </ErpTableBody>
+              </ErpTable>
+            </ErpTableShell>
+          </div>
+        )}
+        {upcomingStaff.length ? (
+          <p className="mt-2 text-[11px] text-[var(--muted)]">
+            Next 30 days: {upcomingStaff.slice(0, 12).map((u) => `${u.member.fullName} (${u.date.slice(5).replace("-", "/")})`).join(" · ")}{upcomingStaff.length > 12 ? ` · +${upcomingStaff.length - 12} more` : ""}
+          </p>
+        ) : null}
+        <p className="mt-1 text-[10px] text-[var(--muted)]">Dates of birth come from Staff → HR. A staff member with no mobile on their record is skipped and says so in the log.</p>
+      </div>
+      ) : null}
+
       {/* Card template gallery */}
       <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -286,6 +425,19 @@ export function BirthdaysPanel({ canEdit }: { canEdit: boolean }) {
             <input className={`${inp} mt-0.5`} maxLength={120} value={s.cardWish} disabled={!canEdit} onChange={(e) => patch({ cardWish: e.target.value })} placeholder="e.g. With love from your teachers and friends" />
           </label>
         </div>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          <label className="text-[11px] text-[var(--muted)]">
+            Student cards are signed by the Principal — name
+            <input className={`${inp} mt-0.5`} maxLength={80} value={s.principalName} disabled={!canEdit} onChange={(e) => patch({ principalName: e.target.value })} placeholder="Blank = signed by the office alone" />
+          </label>
+          <label className="text-[11px] text-[var(--muted)]">
+            Staff cards are signed by the Director — name
+            <input className={`${inp} mt-0.5`} maxLength={80} value={s.directorName} disabled={!canEdit} onChange={(e) => patch({ directorName: e.target.value })} placeholder="Blank = signed by the office alone" />
+          </label>
+          <p className="text-[10px] text-[var(--muted)] sm:col-span-2">
+            A child and their family hear from the Principal; a colleague hears from the Director. The school&apos;s name is already at the top of every card, so the signature carries only the person and the office.
+          </p>
+        </div>
       </div>
 
       {/* Message templates */}
@@ -317,6 +469,57 @@ export function BirthdaysPanel({ canEdit }: { canEdit: boolean }) {
           </label>
         </div>
       </div>
+
+      {/* Staff greeting */}
+      {staffAccess ? (
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
+        <p className="text-sm font-semibold">Staff greeting</p>
+        <p className="text-[11px] text-[var(--muted)]">
+          Sent to the staff member&apos;s own WhatsApp in the school default language. Placeholders: {BIRTHDAY_STAFF_PLACEHOLDERS.join(" ")}. Quiet hours do not apply — they are for families.
+        </p>
+        <label className="mt-2 inline-flex items-center gap-2 text-xs">
+          <input type="checkbox" checked={s.staffEnabled} disabled={!canEdit} onChange={(e) => patch({ staffEnabled: e.target.checked })} />
+          Wish staff on their birthday too {s.autoSend ? "" : "(needs automatic sending on, below)"}
+        </label>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          {(["en", "hi"] as const).map((lang) => (
+            <div key={lang}>
+              <div className="flex items-center gap-2 text-[11px] text-[var(--muted)]">
+                {lang === "en" ? "English" : "हिंदी"}
+                <span className="ml-auto flex gap-1">
+                  {DEFAULT_STAFF_BIRTHDAY_MESSAGES[lang].map((m) => (
+                    <button key={m.label} type="button" disabled={!canEdit} className="rounded-full border border-[var(--border)] px-2 py-0.5 text-[10px]" onClick={() => patch(lang === "en" ? { staffMessageEn: m.body } : { staffMessageHi: m.body })}>
+                      {m.label}
+                    </button>
+                  ))}
+                </span>
+              </div>
+              <textarea className={`${inp} mt-0.5 min-h-[6rem]`} disabled={!canEdit} value={lang === "en" ? s.staffMessageEn || DEFAULT_STAFF_BIRTHDAY_MESSAGES.en[0].body : s.staffMessageHi || DEFAULT_STAFF_BIRTHDAY_MESSAGES.hi[0].body} onChange={(e) => patch(lang === "en" ? { staffMessageEn: e.target.value } : { staffMessageHi: e.target.value })} lang={lang === "hi" ? "hi" : undefined} />
+            </div>
+          ))}
+          <label className="text-[11px] text-[var(--muted)] sm:col-span-2">
+            WhatsApp template for staff (image header) — its own, never the students&apos; one
+            <select className={`${inp} mt-0.5`} value={s.staffWaTemplateName} disabled={!canEdit} onChange={(e) => { const t = imageTemplates.find((x) => x.metaName === e.target.value); patch({ staffWaTemplateName: e.target.value, staffWaTemplateLanguage: t?.metaLanguage || t?.language || "en", staffWaTemplateVars: t?.variables || [] }); }}>
+              <option value="">Free text only (works inside 24h of their last message to the school)</option>
+              {imageTemplates.map((t) => (
+                <option key={t.id} value={t.metaName}>
+                  {t.name} · {t.metaName} ({t.language})
+                </option>
+              ))}
+            </select>
+          </label>
+          {s.staffWaTemplateName ? (
+            <p className="text-[11px] text-[var(--muted)] sm:col-span-2">
+              Body variables in order: {s.staffWaTemplateVars.length ? s.staffWaTemplateVars.join(", ") : "none"} — values: name · firstName · designation · age · schoolName · cardLink.
+            </p>
+          ) : (
+            <p className="text-[11px] text-[var(--muted)] sm:col-span-2">
+              The students&apos; template says &ldquo;{"{{childName}}"} of {"{{className}}"}&rdquo;, so it is never reused here — it would call a colleague a student. Create a staff one in Masters → WhatsApp templates when greetings need to reach staff outside the 24h window.
+            </p>
+          )}
+        </div>
+      </div>
+      ) : null}
 
       {/* Auto-send + WhatsApp template + social */}
       <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
@@ -397,7 +600,7 @@ export function BirthdaysPanel({ canEdit }: { canEdit: boolean }) {
           <ul className="mt-2 max-h-64 space-y-0.5 overflow-y-auto text-[11px]">
             {[...state.log].reverse().slice(0, 200).map((e) => (
               <li key={`${e.key}|${e.channel}`} className={e.status === "sent" ? "" : e.status === "failed" ? "text-[var(--danger)]" : "text-[var(--muted)]"}>
-                {e.at.slice(0, 16).replace("T", " ")} · {e.date} · {sis.students.find((x) => x.id === e.studentId)?.fullName || e.studentId} · {e.channel} · {e.status}{e.detail ? ` · ${e.detail}` : ""}
+                {e.at.slice(0, 16).replace("T", " ")} · {e.date} · {logName(e.subject, e.subjectId)} · {e.channel} · {e.status}{e.detail ? ` · ${e.detail}` : ""}
               </li>
             ))}
           </ul>

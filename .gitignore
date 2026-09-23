@@ -66,3 +66,6 @@ supabase/.temp/
 # Reviewed-and-acted-on exports of live student/fee data — never committed.
 open-ended-counter-discounts.csv
 concession-grants-closed-2027-03-31.json
+
+# Generated greeting-card PNGs (scripts/greeting-card.mjs) — regenerate, never commit.
+/out/
