@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireJobSecret } from "@/lib/apiRouteAuth.server";
-import { istNow, readBirthdayState, runBirthdayGreetings } from "@/lib/birthday.server";
+import { istNow, readBirthdayState, runBirthdayGreetings, runStaffBirthdayGreetings } from "@/lib/birthday.server";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -10,6 +10,11 @@ export const maxDuration = 120;
  * greetings once the IST clock has reached the configured send hour, only
  * when auto-send is on; the send log makes re-runs idempotent (quiet-hours
  * deferrals are retried by the next tick). `?dryRun=1` previews.
+ *
+ * Staff greetings ride the same tick and the same hour, and go out only when
+ * the school has turned them on as well — auto-send is the master switch, and
+ * `force` overrides the clock but never that opt-in: nobody's colleagues get
+ * messaged because someone re-ran a job by hand.
  */
 export async function GET() {
   return NextResponse.json({ service: "birthday-tick", note: "POST with x-cron-secret; ?dryRun=1 to preview" });
@@ -31,5 +36,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, skipped: `before send hour ${st.settings.sendHour}:00 IST`, date, hour });
   }
   const r = await runBirthdayGreetings({ date, dryRun, includeSocial: true });
-  return NextResponse.json({ ok: true, ...r, hour });
+  const staff = st.settings.staffEnabled || dryRun ? await runStaffBirthdayGreetings({ date, dryRun }) : null;
+  return NextResponse.json({ ok: true, ...r, staff, hour });
 }

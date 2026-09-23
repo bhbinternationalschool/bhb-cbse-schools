@@ -5,12 +5,15 @@
 import assert from "node:assert/strict";
 import {
   applyDecision,
+  chapterPositionOf,
+  fillAgreedOutcomes,
   isSettled,
   nextPending,
   progressLine,
   reviewCounts,
   unmappedReason,
   type ChapterOutcomes,
+  type OutcomeFillable,
   type ProposedOutcome,
   type ReviewVerdict,
 } from "@/lib/chapterStandards";
@@ -190,6 +193,93 @@ const chapter = (
   );
   const verdicts: ReviewVerdict[] = ["pending", "approved", "rejected"];
   assert.equal(verdicts.length, 3);
+}
+
+/* ── which unit code names which chapter ────────────────────────────── */
+{
+  // lib/syllabusFromBooks.ts writes the bare position; hand-made plans write
+  // the long forms. All three mean chapter 7.
+  assert.equal(chapterPositionOf("7"), 7);
+  assert.equal(chapterPositionOf("Ch 7"), 7);
+  assert.equal(chapterPositionOf("Chapter 7"), 7);
+  assert.equal(chapterPositionOf("ch.7"), 7);
+  assert.equal(chapterPositionOf(" 12 "), 12);
+
+  // Anything that is not plainly a chapter number matches nothing. Guessing
+  // here would put one chapter's outcomes under another chapter's lesson.
+  assert.equal(chapterPositionOf(""), null);
+  assert.equal(chapterPositionOf("Unit 2"), null, "a unit is not a chapter");
+  assert.equal(chapterPositionOf("7.2"), null, "a sub-section is not a chapter");
+  assert.equal(chapterPositionOf("7a"), null);
+  assert.equal(chapterPositionOf("Ch 7 — Fractions"), null, "a title is not a code");
+  assert.equal(chapterPositionOf("0"), null, "positions start at 1");
+}
+
+/* ── feeding agreed outcomes into a draft ───────────────────────────── */
+{
+  const unit = (p: Partial<OutcomeFillable>): OutcomeFillable => ({
+    level: p.level ?? "chapter",
+    code: p.code ?? "13",
+    learningOutcomes: p.learningOutcomes ?? "",
+  });
+  const agreed = new Map<number, string[]>([
+    [13, ["Use proportional relationships to solve multistep ratio and percent problems."]],
+    [5, ["Order of operations.", "Unitary method."]],
+  ]);
+
+  // The blank a teacher left is what this fills.
+  {
+    const r = fillAgreedOutcomes([unit({ code: "13" })], agreed);
+    assert.equal(r.filled, 1);
+    assert.match(r.units[0]!.learningOutcomes, /proportional relationships/);
+  }
+
+  // Several agreed outcomes arrive as one per line, which is the shape
+  // buildLessonPlanUserPrompt splits on.
+  {
+    const r = fillAgreedOutcomes([unit({ code: "5" })], agreed);
+    assert.equal(r.units[0]!.learningOutcomes.split("\n").length, 2);
+  }
+
+  // THE TEACHER'S OWN WORDS WIN. This is the rule most worth protecting: a
+  // teacher who wrote their own outcomes must not find them replaced.
+  {
+    const typed = unit({ code: "13", learningOutcomes: "What I actually teach here." });
+    const r = fillAgreedOutcomes([typed], agreed);
+    assert.equal(r.filled, 0);
+    assert.equal(r.units[0]!.learningOutcomes, "What I actually teach here.");
+  }
+
+  // A topic is finer than its chapter; the chapter's outcome overstates it.
+  {
+    const r = fillAgreedOutcomes([unit({ level: "topic", code: "13" })], agreed);
+    assert.equal(r.filled, 0);
+    assert.equal(r.units[0]!.learningOutcomes, "");
+  }
+
+  // No match, no fill — the prompt's own fallback handles these, as before.
+  {
+    assert.equal(fillAgreedOutcomes([unit({ code: "9" })], agreed).filled, 0, "nobody agreed ch 9");
+    assert.equal(fillAgreedOutcomes([unit({ code: "" })], agreed).filled, 0, "no code");
+    assert.equal(fillAgreedOutcomes([unit({ code: "13" })], new Map()).filled, 0, "nothing agreed");
+  }
+
+  // Mixed lesson: only the blank, matched, chapter-level unit is touched, and
+  // the count reports exactly that.
+  {
+    const units = [
+      unit({ code: "13" }),
+      unit({ code: "13", level: "topic" }),
+      unit({ code: "5", learningOutcomes: "mine" }),
+      unit({ code: "9" }),
+    ];
+    const r = fillAgreedOutcomes(units, agreed);
+    assert.equal(r.filled, 1);
+    assert.equal(r.units[1]!.learningOutcomes, "");
+    assert.equal(r.units[2]!.learningOutcomes, "mine");
+    assert.equal(r.units[3]!.learningOutcomes, "");
+    assert.equal(units[0]!.learningOutcomes, "", "the input is not mutated");
+  }
 }
 
 console.log("  ok");

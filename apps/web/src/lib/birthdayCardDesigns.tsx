@@ -18,6 +18,8 @@ export type BirthdayCardData = {
   crestUrl: string;
   photoUrl: string;
   wish: string;
+  /** Who the card is from — "With warm regards — <name>, Director". "" prints nothing. */
+  signature?: string;
   /** Group card: names only, no photo */
   names?: string[];
 };
@@ -148,6 +150,11 @@ export function renderBirthdayCard(design: BirthdayDesignId, format: BirthdayFor
     </div>
   );
   const wishEl = <div style={{ fontSize: bodySize, color: ink, textAlign: "center", maxWidth: Math.round(W * 0.8), lineHeight: 1.35 }}>{wish}</div>;
+  // The school's name is already in the header, so the signature carries only
+  // the person and their office.
+  const signEl = data.signature ? (
+    <div style={{ fontSize: Math.round(bodySize * 0.85), color: sub, textAlign: "center", maxWidth: Math.round(W * 0.8) }}>{data.signature}</div>
+  ) : null;
 
   const body = wide ? (
     <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: pad, width: "100%", height: "100%", padding: pad }}>
@@ -158,6 +165,7 @@ export function renderBirthdayCard(design: BirthdayDesignId, format: BirthdayFor
         {name}
         {meta}
         {wishEl}
+        {signEl}
       </div>
     </div>
   ) : (
@@ -168,6 +176,7 @@ export function renderBirthdayCard(design: BirthdayDesignId, format: BirthdayFor
       {name}
       {meta}
       {wishEl}
+      {signEl}
     </div>
   );
 
