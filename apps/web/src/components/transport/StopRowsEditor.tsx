@@ -353,7 +353,7 @@ function StopRow({
         address: place.formattedAddress,
       });
       if (dist.ok) {
-        onPatch({ ...base, distanceKm: dist.km, distanceSource: "google" });
+        onPatch({ ...base, distanceKm: dist.km, distanceSource: dist.source });
         setNote(null);
       } else {
         // Pinned, but not measured. Keep the pin, leave the distance alone and
@@ -386,7 +386,7 @@ function StopRow({
         address: picked.address || undefined,
       });
       if (dist.ok) {
-        onPatch({ ...base, distanceKm: dist.km, distanceSource: "google" });
+        onPatch({ ...base, distanceKm: dist.km, distanceSource: dist.source });
       } else {
         onPatch(base);
         setNote(`${dist.error} — enter the distance by hand`);
@@ -405,7 +405,7 @@ function StopRow({
       lng: row.geoLng,
       address: row.geoAddress || row.name,
     });
-    if (dist.ok) onPatch({ distanceKm: dist.km, distanceSource: "google" });
+    if (dist.ok) onPatch({ distanceKm: dist.km, distanceSource: dist.source });
     else setNote(dist.error);
     setBusy(false);
   }
@@ -423,9 +423,11 @@ function StopRow({
   const sourceLabel =
     row.distanceSource === "google"
       ? "by road (Google)"
-      : row.distanceSource === "manual"
-        ? "typed"
-        : "not set";
+      : row.distanceSource === "free"
+        ? "by road (OpenStreetMap)"
+        : row.distanceSource === "manual"
+          ? "typed"
+          : "not set";
 
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-2">
@@ -541,7 +543,7 @@ function StopRow({
       <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 pl-7 text-[10px]">
         <span
           className={
-            row.distanceSource === "google"
+            row.distanceSource === "google" || row.distanceSource === "free"
               ? "font-semibold text-[var(--success)]"
               : row.distanceSource === "manual"
                 ? "text-[var(--muted)]"

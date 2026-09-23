@@ -27,7 +27,14 @@ import { trackServerWork } from "@/lib/serverWork";
  * nobody has established it — which is NOT the same as zero kilometres, and
  * must never be quietly treated as such.
  */
-export type StopDistanceSource = "" | "google" | "manual";
+/**
+ * Where a stop's distance came from. This is provenance on a number that
+ * sets what every family at the stop pays, so "free" (an OpenStreetMap
+ * routing engine) is its own value rather than being recorded as "google":
+ * a measurement is allowed to be cheaper, it is not allowed to be
+ * mislabelled in the record the fee is defended from.
+ */
+export type StopDistanceSource = "" | "google" | "free" | "manual";
 
 export type TransportStop = {
   id: string;
@@ -754,7 +761,9 @@ export function normalizeStop(
 ): TransportStop {
   const km = Math.max(0, Number(s.distanceKm) || 0);
   const src: StopDistanceSource =
-    s.distanceSource === "google" || s.distanceSource === "manual"
+    s.distanceSource === "google" ||
+    s.distanceSource === "free" ||
+    s.distanceSource === "manual"
       ? s.distanceSource
       : // Stops saved before distances were sourced carry a hand-typed km and
         // no provenance. Call that `manual` rather than inventing `google`; a

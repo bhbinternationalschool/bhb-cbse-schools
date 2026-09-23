@@ -6,7 +6,10 @@ import {
   parseSyllabusTextApi,
   readFileAsDataUrlForOcr,
   runSyllabusOcrApi,
+  type SyllabusOcrApiResult,
 } from "@/lib/ocrClient";
+import { ocrFirstPassUsable, puterEnabled, puterPathNote } from "@/lib/puterAi";
+import { puterReadImageText } from "@/lib/puterAi.client";
 import type { SyllabusImportChapter } from "@/lib/teaching";
 
 type ReviewTopic = { code: string; title: string; include: boolean };
@@ -43,6 +46,35 @@ export function SyllabusOcrImport(props: {
   const [verdict, setVerdict] = useState<"good" | "partial" | "poor" | null>(
     null,
   );
+  /** Which engine actually read the page — shown so a teacher knows how hard to check. */
+  const [path, setPath] = useState<"puter" | "paid" | null>(null);
+  /** Only set when the free allowance ran out, which is the one failure worth a word. */
+  const [freeNote, setFreeNote] = useState<string | null>(null);
+
+  /**
+   * One review list, whichever engine produced it. Both the free pass and
+   * the paid scan end here, so there is exactly one place that decides what
+   * a teacher sees — and no way for the cheap path to skip a check.
+   */
+  function applyResult(result: SyllabusOcrApiResult) {
+    setRows(
+      (result.chapters ?? []).map((c) => ({
+        code: c.code,
+        title: c.title,
+        include: true,
+        confidence: c.confidence,
+        topics: (c.topics ?? []).map((t) => ({
+          code: t.code,
+          title: t.title,
+          include: true,
+        })),
+      })),
+    );
+    setIgnored(result.ignored ?? []);
+    setRawText(result.rawText ?? "");
+    setVerdict(result.quality?.verdict ?? null);
+    setOpen(true);
+  }
 
   async function onFile(file: File | undefined) {
     if (!file) return;
@@ -50,12 +82,39 @@ export function SyllabusOcrImport(props: {
     setBusy(true);
     setRows(null);
     setVerdict(null);
+    setPath(null);
+    setFreeNote(null);
     try {
       const read = await readFileAsDataUrlForOcr(file);
       if (!read.ok) {
         props.onError(read.error);
         return;
       }
+
+      // Free first pass (puterAi.ts). It reads the photo in the browser at
+      // no cost to the school, then hands its text to the SAME parser the
+      // pasted-list path uses — so the review list, the confidence marks
+      // and the "nothing is saved until you confirm" promise are identical.
+      //
+      // It is a first pass, not a cheaper scan: a thin or garbled read is
+      // discarded by ocrFirstPassUsable and we pay for Vision instead,
+      // because half a contents page presented as a whole one is worse
+      // than no scan at all. A printed textbook page carries no student
+      // data, which is why this surface is cleared and no other OCR is.
+      if (puterEnabled()) {
+        const free = await puterReadImageText(read.url);
+        if (free.ok && ocrFirstPassUsable(free.text)) {
+          const parsed = await parseSyllabusTextApi(free.text);
+          if (parsed.ok) {
+            applyResult(parsed);
+            setPath("puter");
+            return;
+          }
+        } else if (!free.ok && free.kind === "quota") {
+          setFreeNote(free.message);
+        }
+      }
+
       const result = await runSyllabusOcrApi({
         dataUrl: read.url,
         mimeType: read.mimeType,
@@ -68,23 +127,8 @@ export function SyllabusOcrImport(props: {
         );
         return;
       }
-      setRows(
-        (result.chapters ?? []).map((c) => ({
-          code: c.code,
-          title: c.title,
-          include: true,
-          confidence: c.confidence,
-          topics: (c.topics ?? []).map((t) => ({
-            code: t.code,
-            title: t.title,
-            include: true,
-          })),
-        })),
-      );
-      setIgnored(result.ignored ?? []);
-      setRawText(result.rawText ?? "");
-      setVerdict(result.quality?.verdict ?? null);
-      setOpen(true);
+      applyResult(result);
+      setPath("paid");
     } finally {
       setBusy(false);
       if (fileRef.current) fileRef.current.value = "";
@@ -96,6 +140,8 @@ export function SyllabusOcrImport(props: {
     setBusy(true);
     setRows(null);
     setVerdict(null);
+    setPath(null);
+    setFreeNote(null);
     try {
       // Same parser, same review, same no-invention rule as a scan — the only
       // difference is the text arrived clean instead of through a camera.
@@ -104,23 +150,7 @@ export function SyllabusOcrImport(props: {
         props.onError(result.error || "Could not read that list");
         return;
       }
-      setRows(
-        (result.chapters ?? []).map((c) => ({
-          code: c.code,
-          title: c.title,
-          include: true,
-          confidence: c.confidence,
-          topics: (c.topics ?? []).map((t) => ({
-            code: t.code,
-            title: t.title,
-            include: true,
-          })),
-        })),
-      );
-      setIgnored(result.ignored ?? []);
-      setRawText(result.rawText ?? "");
-      setVerdict(result.quality?.verdict ?? null);
-      setOpen(true);
+      applyResult(result);
       setShowPaste(false);
     } finally {
       setBusy(false);
@@ -231,8 +261,15 @@ export function SyllabusOcrImport(props: {
         </div>
       ) : null}
 
+      {freeNote ? (
+        <p className="mt-2 text-[11px] text-[var(--muted)]">{freeNote}</p>
+      ) : null}
+
       {open && rows ? (
         <div className="mt-3 space-y-3 border-t border-[var(--border)] pt-3">
+          {path ? (
+            <p className="text-[11px] text-[var(--muted)]">{puterPathNote(path)}</p>
+          ) : null}
           {verdict === "poor" ? (
             <div className="rounded-lg border border-[var(--danger)]/25 bg-[var(--danger-soft)] px-3 py-2">
               <p className="text-sm font-semibold text-[var(--brand-deep)]">

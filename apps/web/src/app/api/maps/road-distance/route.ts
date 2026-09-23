@@ -1,10 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { TENANT } from "@/lib/types";
 import { mapsRateLimited } from "@/lib/mapsRateLimit";
+import { freeRoutingBillable, validLatLng } from "@/lib/freeRouting";
+import { freeRoadDistanceKm } from "@/lib/freeRouting.server";
 
 /**
  * Road distance (km) from origin address to destination (school by default).
- * Uses Google Distance Matrix when GOOGLE_MAPS_API_KEY is set; otherwise haversine estimate.
+ *
+ * Three answers, in order of how much they can be trusted:
+ *
+ *   "google"   Distance Matrix, when GOOGLE_MAPS_API_KEY is set. Billed.
+ *   "free"     A routing engine on OpenStreetMap data (OpenRouteService or
+ *              a self-hosted OSRM), when the school configured one. Free,
+ *              and a REAL road distance — see lib/freeRouting.ts.
+ *   "estimate" A guess: a ring around the school plus jitter from the
+ *              length of the address. For planning screens only.
+ *
+ * `strict` callers bill families by the kilometre, so they are served only
+ * from a source the school has accepted — Google always, "free" only once
+ * ROUTING_FREE_BILLABLE is set. They get null rather than a guess.
  */
 
 const SCHOOL_LAT = TENANT.schoolLat;
@@ -67,6 +81,28 @@ export async function GET(req: NextRequest) {
       }
     } catch {
       /* fall through */
+    }
+  }
+
+  // Free tier. Reached when Google has no key or could not answer, so it
+  // costs the school nothing and strictly improves on the guess below.
+  //
+  // It needs COORDINATES: neither engine geocodes, so a request carrying
+  // only a typed address skips this and falls through, exactly as before.
+  const billableFree = freeRoutingBillable({
+    ROUTING_FREE_BILLABLE: process.env.ROUTING_FREE_BILLABLE,
+  });
+  const originGeo = originLat && originLng
+    ? { lat: Number(originLat), lng: Number(originLng) }
+    : null;
+  // Only the school is a known destination; a typed one cannot be routed to.
+  const destGeo = destination === `${SCHOOL_LAT},${SCHOOL_LNG}`
+    ? { lat: SCHOOL_LAT, lng: SCHOOL_LNG }
+    : null;
+  if (validLatLng(originGeo) && validLatLng(destGeo) && (!strict || billableFree)) {
+    const km = await freeRoadDistanceKm(originGeo, destGeo);
+    if (km !== null) {
+      return NextResponse.json({ km, source: "free" });
     }
   }
 

@@ -136,6 +136,22 @@ jobs:
         working-directory: apps/web
         run: npm run test:online-class-qa
 
+      - name: Self-test — the free AI service is off by default, and no student identifier can reach it
+        working-directory: apps/web
+        run: npm run test:puter-ai
+
+      - name: Self-test — free public lookups validate locally and never trust the shape
+        working-directory: apps/web
+        run: npm run test:open-lookups
+
+      - name: Self-test — a free road distance never bills a family unless the school said so
+        working-directory: apps/web
+        run: npm run test:free-routing
+
+      - name: Self-test — the free translation engine never answers Bhojpuri in Hindi
+        working-directory: apps/web
+        run: npm run test:bhashini
+
       - name: Test — which number sends which template, and both languages
         working-directory: apps/web
         run: npm run test:wa-sender-routing

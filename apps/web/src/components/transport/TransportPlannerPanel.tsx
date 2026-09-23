@@ -391,7 +391,11 @@ export function TransportPlannerPanel({
                   {roadKm != null ? (
                     <p className="mt-1 text-xs font-semibold text-[var(--brand-mid)]">
                       ~{roadKm} km from school by road
-                      {roadSource === "google" ? " (Google Maps)" : " (estimate)"}
+                      {roadSource === "google"
+                        ? " (Google Maps)"
+                        : roadSource === "free"
+                          ? " (OpenStreetMap)"
+                          : " (estimate)"}
                       {selected.hasGeo ? " · home pinned" : " · geocode home for accuracy"}
                     </p>
                   ) : null}
