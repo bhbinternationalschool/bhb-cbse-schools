@@ -350,6 +350,40 @@ assert.doesNotMatch(shown, /^❌ Not quite$/m, "never just 'wrong'");
   assert.equal(paperLanguageFor("सामाजिक विज्ञान"), "english");
 }
 
+/* ── 23 Sep 2026: asking for the answer, in English ───────────────── */
+{
+  // RUDRA (VII), 19:45 IST, asked for the third angle of a triangle. He
+  // wrote "Plz answer" and was told his method was right — about a method
+  // he had never shown. "Ans que" (18 Sep) is the same ask.
+  for (const asked of [
+    "Plz answer",
+    "Please answer",
+    "answer plz",
+    "Tell me the answer",
+    "Give me the answer",
+    "What is the answer",
+    "Ans que",
+    "pls solve",
+  ]) {
+    assert.equal(classifyDrillReply(asked), "help", `a request for the answer, not an attempt: ${asked}`);
+  }
+  // …and the ask is TEACHING, never "your method was right, one slip".
+  const taught = renderCheck({
+    check: { verdict: "close", whatWentWrong: "", howToDoIt: "The three angles add to 180°, so 180 − 110 = 70°.", praise: "" },
+    hindi: true,
+    askedForHelp: true,
+  });
+  assert.doesNotMatch(taught, /तरीका सही है/, "never credit a method that was never shown");
+  assert.match(taught, /कोई बात नहीं/);
+  assert.match(taught, /180/, "and the answer is actually taught");
+
+  // The other side of the line: these are ATTEMPTS and must still be marked.
+  // MR. VINOD KUMAR GUPTA sent the first of these the same evening.
+  for (const attempt of ["0,2,3,5,8 answer", "852", "Red", "Zebra crossing", "answer 70", "Yes"]) {
+    assert.equal(classifyDrillReply(attempt), "answer", `an attempt, not a request: ${attempt}`);
+  }
+}
+
 /* ── Anything asked mid-question is answered, never marked (21 Sep) ─ */
 {
   const off = parseDrillCheck(JSON.stringify({ notAnAnswer: true, verdict: "", whatWentWrong: "", howToDoIt: "", praise: "" }));
