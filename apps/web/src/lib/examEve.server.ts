@@ -17,6 +17,7 @@ import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { fetchExamDeskFromDb } from "@/lib/examsNormalized.server";
 import { loadSis, householdWhatsApp, studentsInSession, type Household } from "@/lib/sis";
 import { loadMasters, currentAcademicYearCode } from "@/lib/masters";
+import { loadServerMasters } from "@/lib/api/v1/auth";
 import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { sendWhatsAppTemplate, sendWhatsAppText } from "@/lib/waSend";
 import {
@@ -37,6 +38,7 @@ import { listKnownNotOnWhatsApp } from "@/lib/waNumberHealth.server";
 import {
   examEveFreeText,
   examEveVariables,
+  isPrePrimary as isPrePrimaryClass,
   nextExamDate,
   tomorrowIso,
   type EveChild,
@@ -56,19 +58,34 @@ export type ExamSetup = {
   slots: EveSlot[];
   subjectNames: Map<string, string>;
   academicYearCode: string;
+  /** Class id → name, from the database (see loadExamSetup). */
+  classNames: Map<string, string>;
 };
 
 /** The live date sheet, as the parent-facing code needs it. */
 export async function loadExamSetup(): Promise<ExamSetup> {
   await ensureSchoolMirrorHydrated();
-  const masters = loadMasters();
+  // Class names and the session come from the database, not the in-process
+  // mirror. On 22 Sep 2026 (19:27–19:37 IST) the mirror held no class names
+  // on one instance: two families were sent "HARSHIT JAISWAL ()" and
+  // "SHANVI DIXIT ()", and Shanvi — UKG — was taken for a school-age child
+  // and put through a written-paper tutor instead of the rhymes tips. A class
+  // this code cannot name is unknown, and unknown must not decide which flow
+  // a four-year-old gets.
+  const masters = await loadServerMasters().catch(() => loadMasters());
+  const mirrorMasters = loadMasters();
   const ay = currentAcademicYearCode(masters);
+  const classNames = new Map<string, string>();
+  for (const c of [...(mirrorMasters.classes ?? []), ...(masters.classes ?? [])]) {
+    if (c.id && c.name) classNames.set(c.id, c.name);
+  }
   const { bundle } = await fetchExamDeskFromDb();
   const activeTerms = new Set(
     bundle.terms.filter((t) => t.isActive && t.academicYearCode === ay).map((t) => t.id),
   );
   return {
     academicYearCode: ay,
+    classNames,
     subjectNames: new Map(bundle.subjects.map((s) => [s.id, s.name])),
     slots: bundle.dateSheet
       .filter((d) => d.academicYearCode === ay && activeTerms.has(d.examTermId))
@@ -83,10 +100,13 @@ export async function loadExamSetup(): Promise<ExamSetup> {
 }
 
 /** This household's children in the running session, as the exam code sees them. */
-export function eveChildrenOf(householdId: string, academicYearCode: string): EveChild[] {
+export function eveChildrenOf(
+  householdId: string,
+  academicYearCode: string,
+  classNames?: Map<string, string>,
+): EveChild[] {
   const sis = loadSis();
-  const masters = loadMasters();
-  const className = new Map((masters.classes ?? []).map((c) => [c.id, c.name]));
+  const className = classNames ?? new Map((loadMasters().classes ?? []).map((c) => [c.id, c.name]));
   return studentsInSession(sis, academicYearCode)
     .filter((s) => s.householdId === householdId && s.status === "active")
     .map((s) => ({
@@ -97,13 +117,17 @@ export function eveChildrenOf(householdId: string, academicYearCode: string): Ev
     }));
 }
 
-export function eveFamilyFor(hh: Household, academicYearCode: string): EveFamily {
+export function eveFamilyFor(
+  hh: Household,
+  academicYearCode: string,
+  classNames?: Map<string, string>,
+): EveFamily {
   return {
     householdId: hh.id,
     guardianName: hh.guardianName || "",
     mobile: householdWhatsApp(hh) || hh.mobile || "",
     hindi: waTemplateLanguageFor(hh) === "hi",
-    children: eveChildrenOf(hh.id, academicYearCode),
+    children: eveChildrenOf(hh.id, academicYearCode, classNames),
   };
 }
 
@@ -232,7 +256,7 @@ export async function runExamEveSweep(opts: {
     // in SIS so a Google reviewer can sign in. It must never be messaged —
     // the number is not a person.
     if (isReviewDemoHousehold(hh)) continue;
-    const family = eveFamilyFor(hh, setup.academicYearCode);
+    const family = eveFamilyFor(hh, setup.academicYearCode, setup.classNames);
     if (
       onlyClasses.size > 0 &&
       !family.children.some((c) => onlyClasses.has((c.className || "").trim().toUpperCase()))
@@ -399,6 +423,28 @@ function istTimeLabel(iso: string, hindi: boolean): string {
  * after it ends is the tutor's ordinary pass message, said only when the
  * family next asks for something the free hints do not cover.
  */
+/**
+ * "For JAYASH's practice, send *JAYASH*" — the other school-age children
+ * sitting a paper that day, or "" when there are none.
+ */
+export function otherChildrenLine(
+  papers: { child: EveChild; label: string }[],
+  exceptStudentId: string,
+  hindi: boolean,
+): string {
+  const others = papers.filter(
+    (p) => p.child.studentId !== exceptStudentId && !isPrePrimaryClass(p.child.className),
+  );
+  if (others.length === 0) return "";
+  const lines = others.map((p) => {
+    const first = p.child.name.trim().split(/\s+/)[0] || p.child.name;
+    return `• *${first}* — ${p.label}`;
+  });
+  return (hindi
+    ? "दूसरे बच्चे का अभ्यास — उसका नाम लिखें:\n"
+    : "Practice for another child — send their name:\n") + lines.join("\n");
+}
+
 export async function handleExamEveInbound(opts: {
   household: Household;
   children: import("@/lib/sis").SisStudent[];
@@ -406,16 +452,29 @@ export async function handleExamEveInbound(opts: {
   text: string;
   now?: Date;
 }): Promise<string | null> {
-  const { isPracticeTap, isTimetableRequest, timetableReply, familyPapersOn, isPrePrimary, prePrimaryTips, practicePrompt, papersFromDate } =
+  const { isPracticeTap, isTimetableRequest, timetableReply, familyPapersOn, isPrePrimary, prePrimaryTips, practicePrompt, papersFromDate, childNamedForPractice } =
     await import("@/lib/examEve");
-  const practice = isPracticeTap(opts.text);
+  // "PRACTICE JAYASH", or "Jayash" on its own while this number is in the
+  // middle of practice tonight — practice for that child rather than the
+  // first one (see childNamedForPractice). A bare name anywhere else is left
+  // to the ordinary flow: after KIDS it means "tell me about this child".
+  let named = childNamedForPractice(
+    opts.text,
+    opts.children.map((c) => ({ studentId: c.id, name: c.fullName })),
+  );
+  if (named?.bare) {
+    const { drillTouchedToday } = await import("@/lib/examDrill.server");
+    if (!(await drillTouchedToday(opts.mobile10))) named = null;
+  }
+  const practice = !!named || isPracticeTap(opts.text);
   const timetable = !practice && isTimetableRequest(opts.text);
   if (!practice && !timetable) return null;
+  const forStudentId = named?.studentId;
 
   const now = opts.now ?? new Date();
   const today = istTodayIso(now.getTime());
   const setup = await loadExamSetup();
-  const family = eveFamilyFor(opts.household, setup.academicYearCode);
+  const family = eveFamilyFor(opts.household, setup.academicYearCode, setup.classNames);
   const hindi = family.hindi;
 
   // No child of this session on this number is not "all papers are done".
@@ -437,12 +496,13 @@ export async function handleExamEveInbound(opts: {
     return timetableReply(family, setup.slots, setup.subjectNames, fromDate);
   }
 
-  // The paper the tap is about: the next exam day this family's children sit,
-  // from that same date on.
+  // The paper the tap is about: the next exam day this family's children sit
+  // — or the named child sits — from that same date on.
+  const sitting = forStudentId ? family.children.filter((c) => c.studentId === forStudentId) : family.children;
   const familyDates = [
     ...new Set(
       setup.slots
-        .filter((s) => s.date >= fromDate && family.children.some((c) => c.classId === s.classId))
+        .filter((s) => s.date >= fromDate && sitting.some((c) => c.classId === s.classId))
         .map((s) => s.date),
     ),
   ].sort();
@@ -453,7 +513,12 @@ export async function handleExamEveInbound(opts: {
       : "All papers of this exam are done. Well done to the children! 🙏\n\nReply *TUTOR* any time for study help.";
   }
 
-  const papers = familyPapersOn(family, setup.slots, setup.subjectNames, date);
+  const allPapers = familyPapersOn(family, setup.slots, setup.subjectNames, date);
+  // The named child first; the others stay listed so their names can be
+  // offered, but only the first school-age paper is practised.
+  const papers = forStudentId
+    ? allPapers.filter((p) => p.child.studentId === forStudentId)
+    : allPapers;
   const little = papers.filter((p) => isPrePrimary(p.child.className));
   const schoolAge = papers.filter((p) => !isPrePrimary(p.child.className));
 
@@ -552,6 +617,11 @@ export async function handleExamEveInbound(opts: {
     });
     if (drill.handled) {
       parts.push(drill.replyText);
+      // Brothers and sisters sitting a paper the same day: say how to reach
+      // them. Until 23 Sep 2026 nothing did, and the button only ever opened
+      // the first child's practice.
+      const siblings = otherChildrenLine(allPapers, first.child.studentId, hindi);
+      if (siblings) parts.push(siblings);
       parts.push(
         hindi
           ? "उत्तर सीधे यहीं लिखें। रोकने के लिए *TUTOR OFF*।"

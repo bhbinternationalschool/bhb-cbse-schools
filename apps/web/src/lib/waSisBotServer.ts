@@ -198,20 +198,40 @@ async function writeStore(store: Store) {
   }
 }
 
+/**
+ * The household a WhatsApp number belongs to.
+ *
+ * A number can sit on more than one household — a family re-admitted under
+ * a new record keeps the old one too. Until 24 Sep 2026 the first match
+ * won, whichever it was. MR. HARINATH PRASAD PATEL's number is on last
+ * year's household (one Nursery row, 2025-26) and on this year's (two
+ * children): exam-eve messages went out through this year's, but every
+ * reply landed on last year's, so tapping "अभ्यास शुरू करें" told him no
+ * child of this session was linked to his number. Three numbers are shared
+ * like this in prod, each with exactly one household that has children
+ * this session — that one is the family the parent is writing about.
+ *
+ * Order among the rest is unchanged: the household's own numbers, then a
+ * parent's number on a child's record.
+ */
 export function findHouseholdByWaMobile(mobile10: string): Household | null {
   const sis = loadSis();
   const m = mobile10.replace(/\D/g, "").slice(-10);
   if (m.length !== 10) return null;
-  const byHh = sis.households.find(
+  const matches: Household[] = sis.households.filter(
     (h) =>
       h.whatsappMobile === m || h.mobile === m || h.altMobile === m,
   );
-  if (byHh) return byHh;
-  const st = sis.students.find(
-    (s) => s.fatherMobile === m || s.motherMobile === m,
-  );
-  if (!st?.householdId) return null;
-  return sis.households.find((h) => h.id === st.householdId) || null;
+  for (const s of sis.students) {
+    if (!s.householdId || (s.fatherMobile !== m && s.motherMobile !== m)) continue;
+    if (matches.some((h) => h.id === s.householdId)) continue;
+    const hh = sis.households.find((h) => h.id === s.householdId);
+    if (hh) matches.push(hh);
+  }
+  if (matches.length <= 1) return matches[0] ?? null;
+  const ay = currentAcademicYearCode(loadMasters());
+  const current = matches.find((h) => childrenOfHousehold(sis, h.id, ay).length > 0);
+  return current ?? matches[0]!;
 }
 
 export function isSisRegisteredMobile(fromWaId: string): boolean {

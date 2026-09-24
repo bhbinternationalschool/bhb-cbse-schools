@@ -23,6 +23,7 @@ import {
   examDayLabel,
   examEveFreeText,
   examEveVariables,
+  childNamedForPractice,
   isPracticeTap,
   isPrePrimary,
   isTimetableRequest,
@@ -151,14 +152,56 @@ for (const yes of [
   // times he was told "यह समझ नहीं आया" instead of being given the date sheet.
   "कल मेरा SST का paper है", "यार आज क्या मेरा SST का paper कल है",
   "कल exam hai kya", "paper कब है",
+  // 23 Sep 2026: which SUBJECT tomorrow, for the other son, mid-practice.
+  // No paper word at all — the drill's tutor answered "ask the office".
+  "कल अभिषेक मौर्य का कौन सा विषय है किस प्रकार के प्रश्न आएंगे कृपया बताएं",
+  "कल कौन सा विषय है", "kal kaun sa subject hai", "tomorrow which subject",
 ]) {
   assert.ok(isTimetableRequest(yes), yes);
 }
 for (const no of ["fees kab jama kare", "DUES", "school kaha hai", "", "exam result kab aayega", "exam fees", "admit card", "exam ke marks", "परीक्षा का रिजल्ट", "next week fees",
   // The mixed-script branch must not swallow the questions that already have
   // their own answers — money and marks are not "when".
-  "कल exam fees jama karni hai", "paper के marks कब आएंगे", "आज exam ka result kab aayega"]) {
+  "कल exam fees jama karni hai", "paper के marks कब आएंगे", "आज exam ka result kab aayega",
+  // A subject question with no day in it is the tutor's, not the date sheet's.
+  "जनरल नॉलेज किस प्रकार से प्रश्न पूछेगा क्लास टू में अभिषेक का", "which subject is easiest"]) {
   assert.equal(isTimetableRequest(no), false, `not a timetable ask: ${no}`);
+}
+
+/* ── 7b. Which child the practice is for ─────────────────────────────── */
+//
+// 23 Sep 2026, 21:27 IST: the button had opened SHREYASH's practice; when he
+// was done his father typed "Jayash" — the other son — and got a lesson on
+// joysticks. A child's name, with or without a practice word, is theirs.
+{
+  const kids = [
+    { studentId: "stu_shreyash", name: "SHREYASH GUPTA" },
+    { studentId: "stu_jayash", name: "JAYASH GUPTA" },
+  ];
+  const named = (t: string) => childNamedForPractice(t, kids);
+  assert.deepEqual(named("Jayash"), { studentId: "stu_jayash", bare: true });
+  assert.deepEqual(named("jayash gupta"), { studentId: "stu_jayash", bare: true });
+  assert.deepEqual(named("अब जयश"), { studentId: "stu_jayash", bare: true }, "typed in Hindi");
+  assert.deepEqual(named("Jayash ka"), { studentId: "stu_jayash", bare: true });
+  assert.deepEqual(named("PRACTICE JAYASH"), { studentId: "stu_jayash", bare: false });
+  assert.deepEqual(named("Jayash ka abhyas shuru karein"), { studentId: "stu_jayash", bare: false });
+  assert.deepEqual(named("Shreyash"), { studentId: "stu_shreyash", bare: true });
+  // A sentence that mentions a child is not a request to practise.
+  assert.equal(named("Jayash ki fees kitni hai"), null);
+  assert.equal(named("Jayash school nahi jayega"), null);
+  // The surname alone names both, so it names neither.
+  assert.equal(named("Gupta"), null);
+  assert.equal(named("Shreyash Jayash"), null, "two children named — do not guess");
+  assert.equal(named("Joystick"), null);
+  assert.equal(named(""), null);
+  // Two children with one first name: never guess between them.
+  assert.equal(
+    childNamedForPractice("Abhi", [
+      { studentId: "a", name: "ABHI PATEL" },
+      { studentId: "b", name: "ABHI PATEL" },
+    ]),
+    null,
+  );
 }
 
 /* ── 8. TIMETABLE lists only what is still to come ──────────────────── */
