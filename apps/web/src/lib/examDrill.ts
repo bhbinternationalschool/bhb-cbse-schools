@@ -647,6 +647,12 @@ export const DRILL_CHECK_SYSTEM = [
   // Hindi and slightly misspelt — was marked ❌ "You answered in Hindi
   // instead of English".
   "The Hindi NAME of the right term IS the right answer: आघातवर्धनीयता = malleability, तन्यता = ductility, प्रकाश संश्लेषण = photosynthesis. Mark it 'right' (a misspelling of it too), give the English term, and add the one line about writing it in English in the exam. Answering in Hindi is NEVER itself the mistake — never write 'you answered in Hindi' as whatWentWrong.",
+  // 23 Sep 2026: ARNAV (VII) was asked for the largest 5-digit number from
+  // 3,8,1,6,5 and wrote "8,6,5,3,1" — 86531, the right answer, with the
+  // digits spaced out the way the question itself listed them. It was
+  // marked 🟡 "You separated the digits with commas". So were his next two,
+  // both also right. Three correct answers in a row told they were not.
+  "HOW A NUMBER IS PUNCTUATED IS NOT THE ANSWER. 86531, 86,531 and 8,6,5,3,1 are the SAME number: mark the value. Separators, spaces, a trailing full stop, a missing leading zero in a date — none of these is the mistake, and 'you used commas' is NEVER whatWentWrong. Mark it 'right', and if it would lose a mark on the paper add the one short line about writing the digits joined up. The ONE exception is a question that is ITSELF about writing a number with commas or in place-value form — there the commas ARE the skill and are marked.",
   // 21 Sep 2026: a Science answer was followed by "परीक्षा में उत्तर हिंदी में
   // लिखें" — in an English-medium school.
   "WHICH LANGUAGE TO WRITE IN THE EXAM: only for a HINDI or SANSKRIT paper, when the child typed Latin letters, add one short line asking them to write it in Devanagari in the exam. For EVERY other paper NEVER tell the child to write in Hindi — the school is English medium; if they answered in Hindi or Hinglish, add one short line reminding them to write the answer in English in the exam.",
