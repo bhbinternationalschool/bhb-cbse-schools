@@ -50,14 +50,19 @@ export function renderScopeQuestion(input: {
   paperLabel: string;
   chapters: DrillChapter[];
   hindi: boolean;
+  /**
+   * The paper is TODAY, not tomorrow — see `papersFromDate`: a tap before
+   * 9 in the morning is about the paper that starts at 8:30 that day.
+   */
+  isToday: boolean;
 }): string {
   const list = input.chapters
     .slice(0, SCOPE_LIST_MAX)
     .map((c) => `${c.position}. ${c.name}`)
     .join("\n");
   return input.hindi
-    ? `📚 ${input.childName}, कल *${input.paperLabel}* है।\n\nतैयारी शुरू करें? पहले बताइए — कक्षा में कहाँ तक पढ़ा है? आख़िरी अध्याय का नंबर भेजिए:\n\n${list}\n\n(नंबर लिखकर भेजें, जैसे *6*)`
-    : `📚 ${input.childName}, tomorrow is *${input.paperLabel}*.\n\nShall we revise? First — how far has the class done? Send the number of the last chapter:\n\n${list}\n\n(just the number, like *6*)`;
+    ? `📚 ${input.childName}, ${input.isToday ? "आज" : "कल"} *${input.paperLabel}* है।\n\nतैयारी शुरू करें? पहले बताइए — कक्षा में कहाँ तक पढ़ा है? आख़िरी अध्याय का नंबर भेजिए:\n\n${list}\n\n(नंबर लिखकर भेजें, जैसे *6*)`
+    : `📚 ${input.childName}, ${input.isToday ? "today" : "tomorrow"} is *${input.paperLabel}*.\n\nShall we revise? First — how far has the class done? Send the number of the last chapter:\n\n${list}\n\n(just the number, like *6*)`;
 }
 
 /**

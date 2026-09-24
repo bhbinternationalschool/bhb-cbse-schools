@@ -522,10 +522,17 @@ export async function handleExamEveInbound(opts: {
   const little = papers.filter((p) => isPrePrimary(p.child.className));
   const schoolAge = papers.filter((p) => !isPrePrimary(p.child.className));
 
+  // A tap before 9 in the morning is about the paper that starts at 8:30
+  // THAT day (see papersFromDate), so every message about it has to say
+  // "today". 24 Sep 2026, 8:37 IST: MR. AMIT KUMAR MISHRA tapped "अभ्यास
+  // शुरू करें" seven minutes after NUTAN's Maths paper had begun and was
+  // told "NUTAN, कल *गणित* है" — Maths is tomorrow.
+  const isToday = date === today;
+
   const parts: string[] = [];
 
   for (const p of little) {
-    parts.push(prePrimaryTips(p.child, p.label, hindi));
+    parts.push(prePrimaryTips(p.child, p.label, hindi, isToday));
   }
 
   if (schoolAge.length > 0) {
@@ -636,7 +643,7 @@ export async function handleExamEveInbound(opts: {
       children: opts.children,
       mobile10: opts.mobile10,
       studentId: first.child.studentId,
-      prompt: practicePrompt(first.child, first.label, hindi),
+      prompt: practicePrompt(first.child, first.label, hindi, isToday),
     });
     parts.push(
       [

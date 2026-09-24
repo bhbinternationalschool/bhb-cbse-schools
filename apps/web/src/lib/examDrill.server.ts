@@ -530,6 +530,7 @@ export async function startExamDrill(input: {
       paperLabel: input.paperLabel,
       chapters,
       hindi: input.hindi,
+      isToday: input.paperDate === istTodayIso(),
     }),
   };
 }
@@ -577,6 +578,9 @@ export async function continueExamDrill(input: {
     const className = childClassName(child, masters);
     const chapters = await chaptersFor(className, open.state.subjectLabel);
     if (!chapters.length) return nothing;
+    // A drill opened before 9 in the morning is about the paper that starts
+    // at 8:30 that same day, so the scope question must not call it tomorrow.
+    const isToday = open.state.paperDate === istTodayIso();
     if (anotherRound && readScopeAnswer(input.text, chapters).kind !== "position") return nothing;
 
     // Not for this drill at all — the date sheet, or a brother or sister.
@@ -637,6 +641,7 @@ export async function continueExamDrill(input: {
             paperLabel: state.paperLabel,
             chapters,
             hindi: input.hindi,
+            isToday,
           }),
         };
       }
@@ -702,6 +707,7 @@ export async function continueExamDrill(input: {
                   paperLabel: state.paperLabel,
                   chapters,
                   hindi: input.hindi,
+                  isToday,
                 }),
               ].join("\n"),
             };
@@ -791,6 +797,7 @@ export async function continueExamDrill(input: {
           paperLabel: state.paperLabel,
           chapters,
           hindi: input.hindi,
+          isToday,
         }),
       };
     }

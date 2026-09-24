@@ -468,17 +468,29 @@ export function timetableReply(
  * keeps going; a wall of ten questions at 9 pm the night before a paper
  * closes the chat.
  */
-export function practicePrompt(child: EveChild, label: string, hindi: boolean): string {
+export function practicePrompt(
+  child: EveChild,
+  label: string,
+  hindi: boolean,
+  /** The paper is TODAY, not tomorrow — see `papersFromDate`. */
+  isToday: boolean,
+): string {
   return hindi
-    ? `कल कक्षा ${child.className} का ${label} का अर्धवार्षिक पेपर है। कक्षा ${child.className} के स्तर के 5 अभ्यास प्रश्न पूछिए — एक बार में एक, पहला आसान। हर उत्तर के बाद बताइए सही है या नहीं, और क्यों।`
-    : `Tomorrow is the Class ${child.className} ${label} half-yearly paper. Ask 5 practice questions at Class ${child.className} level — one at a time, easiest first. After each answer, say whether it is right and why.`;
+    ? `${isToday ? "आज" : "कल"} कक्षा ${child.className} का ${label} का अर्धवार्षिक पेपर है। कक्षा ${child.className} के स्तर के 5 अभ्यास प्रश्न पूछिए — एक बार में एक, पहला आसान। हर उत्तर के बाद बताइए सही है या नहीं, और क्यों।`
+    : `${isToday ? "Today" : "Tomorrow"} is the Class ${child.className} ${label} half-yearly paper. Ask 5 practice questions at Class ${child.className} level — one at a time, easiest first. After each answer, say whether it is right and why.`;
 }
 
 /**
  * Tips for a parent of a Nursery, LKG or UKG child — no tutor, a parent
  * beside them.
  */
-export function prePrimaryTips(child: EveChild, label: string, hindi: boolean): string {
+export function prePrimaryTips(
+  child: EveChild,
+  label: string,
+  hindi: boolean,
+  /** The paper is TODAY, not tomorrow — see `papersFromDate`. */
+  isToday: boolean,
+): string {
   const lower = label.toLowerCase();
   const rhymes = /rhyme|कविता/.test(lower);
   const drawing = /drawing|चित्र/.test(lower);
@@ -502,8 +514,8 @@ export function prePrimaryTips(child: EveChild, label: string, hindi: boolean): 
   const tips = hindi ? tipsHi : tipsEn;
   return [
     hindi
-      ? `🌱 *${child.name} (${child.className})* — कल: *${label}*`
-      : `🌱 *${child.name} (${child.className})* — tomorrow: *${label}*`,
+      ? `🌱 *${child.name} (${child.className})* — ${isToday ? "आज" : "कल"}: *${label}*`
+      : `🌱 *${child.name} (${child.className})* — ${isToday ? "today" : "tomorrow"}: *${label}*`,
     "",
     ...tips.map((t) => `• ${t}`),
   ].join("\n");
