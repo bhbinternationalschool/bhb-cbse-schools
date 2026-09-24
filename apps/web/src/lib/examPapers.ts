@@ -1070,8 +1070,33 @@ export function buildPaperCode(input: {
   return `EP-${ay}-${exam}-${cls}-${sub}-${set}${rand}`;
 }
 
+/**
+ * The desk as this page last wrote it, when the browser would not keep it.
+ *
+ * WHY (24 Sep 2026): the papers desk grew to 3.9 MB — 96 papers and a
+ * 2,403-item bank — and an office browser that also caches fees and
+ * attendance has no room for it. `writeCacheOrInvalidate` drops the cache
+ * and tells the office the records are "held in memory only". They were
+ * not: the next read went back to localStorage, found nothing, and the
+ * Question papers screen said "0 of 0 papers — No papers yet for this
+ * session" over a database holding 96. Worse, that empty screen then planned
+ * a Nucleus capture as 106 new papers with 0 already here; pressing Get would
+ * have filed every paper a second time.
+ *
+ * So the copy that could not be cached is kept here for the life of the page,
+ * and reads fall back to it. A reload starts empty and re-hydrates from the
+ * database, exactly as the notice promises.
+ */
+let heldInMemory: ExamPapersState | null = null;
+
+function cacheExamPapers(state: ExamPapersState): void {
+  const cached = writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  heldInMemory = cached ? null : state;
+}
+
 export function loadExamPapers(): ExamPapersState {
   if (typeof window === "undefined") return emptyExamPapersState();
+  if (heldInMemory) return heldInMemory;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return emptyExamPapersState();
@@ -1085,7 +1110,7 @@ export function saveExamPapers(state: ExamPapersState) {
   if (!assertModulePermission("exams", "edit", "saveExamPapers")) return;
   if (typeof window === "undefined") return;
   const next = normalizeExamPapersState(state);
-  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
+  cacheExamPapers(next);
   void trackServerWork(import("@/lib/examPapersPersistence").then(
     ({ scheduleExamPapersSync }) => {
       scheduleExamPapersSync(next);
@@ -1095,10 +1120,7 @@ export function saveExamPapers(state: ExamPapersState) {
 
 export function writeExamPapersLocalRaw(state: ExamPapersState) {
   if (typeof window === "undefined") return;
-  writeCacheOrInvalidate(
-    STORAGE_KEY,
-    JSON.stringify(normalizeExamPapersState(state)),
-  );
+  cacheExamPapers(normalizeExamPapersState(state));
 }
 
 export function examPapersStateIsEmpty(state: ExamPapersState): boolean {
