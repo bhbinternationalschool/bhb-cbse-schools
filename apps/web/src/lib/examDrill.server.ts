@@ -182,6 +182,44 @@ async function siblingsLine(household: Household, state: DrillState, hindi: bool
 }
 
 /**
+ * Tonight's most recent drill on this number, if it has finished and its
+ * paper is still to come — the one "another round" restarts.
+ */
+async function finishedDrillTonight(mobile10: string): Promise<{ id: string; state: DrillState } | null> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return null;
+  const today = istTodayIso();
+  const { data, error } = await ctx.sb
+    .from("exam_drill_sessions")
+    .select("*")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("mobile10", mobile10)
+    .gte("paper_date", today)
+    .gte("updated_at", new Date(`${today}T00:00:00+05:30`).toISOString())
+    .order("updated_at", { ascending: false })
+    .limit(1);
+  if (error) {
+    console.warn("[examDrill] could not read tonight's finished drill", error.message);
+    return null;
+  }
+  const row = (data ?? [])[0] as Row | undefined;
+  if (!row || row.phase !== "done") return null;
+  const istHour = new Date(Date.now() + 330 * 60_000).getUTCHours();
+  if (drillIsForAPastPaper(row.paper_date, today, istHour)) return null;
+  const done = rowToState(row);
+  return {
+    id: row.id,
+    state: newDrill({
+      studentId: done.studentId,
+      subjectLabel: done.subjectLabel,
+      paperLabel: done.paperLabel,
+      paperDate: done.paperDate,
+      nowIso: new Date().toISOString(),
+    }),
+  };
+}
+
+/**
  * Close every open drill on this number except `keepId`.
  *
  * A drill's id is `drl_<student>_<paperDate>`, so each paper gets a row of
@@ -506,6 +544,11 @@ export async function continueExamDrill(input: {
   mobile10: string;
   text: string;
   hindi: boolean;
+  /**
+   * The bot's last message on this thread ended a drill with an invitation
+   * to send a chapter for another round (isAnotherRoundInvite).
+   */
+  afterFinish?: boolean;
 }): Promise<DrillTurn> {
   const nothing: DrillTurn = { handled: false, replyText: "" };
   if (!examDrillEnabled()) return nothing;
@@ -517,7 +560,13 @@ export async function continueExamDrill(input: {
   // nobody had asked about.
   if (isPracticeTap(input.text)) return nothing;
   try {
-    const open = await openDrillFor(input.mobile10);
+    let open = await openDrillFor(input.mobile10);
+    // "2" or "Role of computer" straight after "send a chapter number for
+    // another round": a fresh round of the same paper, from that chapter.
+    // Only when the reply actually names a chapter (checked below) — "ok"
+    // after a finished drill is still the end of the evening.
+    const anotherRound = !open && !!input.afterFinish;
+    if (anotherRound) open = await finishedDrillTonight(input.mobile10);
     if (!open) return nothing;
 
     await ensureSisHydratedServer();
@@ -528,6 +577,7 @@ export async function continueExamDrill(input: {
     const className = childClassName(child, masters);
     const chapters = await chaptersFor(className, open.state.subjectLabel);
     if (!chapters.length) return nothing;
+    if (anotherRound && readScopeAnswer(input.text, chapters).kind !== "position") return nothing;
 
     // Not for this drill at all — the date sheet, or a brother or sister.
     //

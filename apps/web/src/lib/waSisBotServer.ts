@@ -39,6 +39,9 @@ import {
 } from "@/lib/schoolLocationReply";
 import {
   isFeeWhyQuestion,
+  detectRecordCorrection,
+  composeRecordCorrectionAck,
+  recordCorrectionLabel,
   composeSisDuesReply,
   composeSisHumanReply,
   composeSisInfoReply,
@@ -1169,11 +1172,14 @@ export async function handleWaSisBotInbound(opts: {
   // EXAM_DRILL_ENABLED is set.
   try {
     const { continueExamDrill } = await import("@/lib/examDrill.server");
+    const { isAnotherRoundInvite } = await import("@/lib/examDrill");
+    const lastBot = [...thread.messages].reverse().find((m) => m.role === "bot");
     const drill = await continueExamDrill({
       household: hh,
       mobile10,
       text,
       hindi: waTemplateLanguageFor(hh) === "hi",
+      afterFinish: isAnotherRoundInvite(lastBot?.text),
     });
     if (drill.handled) {
       return finishLanguageFlow(store, thread, parentMsg, drill.replyText);
@@ -1249,6 +1255,10 @@ export async function handleWaSisBotInbound(opts: {
   const answeringPtp =
     thread.pendingAsk === "ptp" && !quickReply && feeReply !== "claims_paid" && detectSisBotIntent(text) === "unknown";
   const feeQuestion = !quickReply && !feeReply && !feeWhy ? detectSisFeeQuestion(text) : null;
+  // "Father name. KISHAN YADAV" — a correction to the record, not a question
+  // the bot failed to answer (see detectRecordCorrection).
+  const correction =
+    !quickReply && !feeReply && !feeWhy && !feeQuestion && !answeringPtp ? detectRecordCorrection(text) : null;
   let nextPendingAsk: WaSisBotThread["pendingAsk"] = undefined;
   let nextPtpAsks: number | undefined;
   let lastPromise = thread.lastPromise;
@@ -1298,6 +1308,10 @@ export async function handleWaSisBotInbound(opts: {
     nextPendingAsk = "ptp";
     nextPtpAsks = 1;
     bot = { escalate: false, text: composeSisNeedTimeAsk(hindi) };
+  } else if (correction) {
+    intent = "human";
+    officeNote = `Record correction — ${recordCorrectionLabel(correction)}: "${text.slice(0, 200)}". Check against a document before changing the record, then confirm here.`;
+    bot = { escalate: true, text: composeRecordCorrectionAck(correction, hindi) };
   } else if (feeQuestion) {
     // "How much is the fee / the bus / any discount?" — the year's fee from
     // the child's own record, not the dues list (see detectSisFeeQuestion).

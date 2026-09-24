@@ -16,6 +16,8 @@ import {
   promiseIsEmpty,
   composeSisPromiseUnclear,
   isFeeWhyQuestion,
+  detectRecordCorrection,
+  composeRecordCorrectionAck,
 } from "./sisParentBotEngine";
 
 console.log("sisParentBotFeeReplies.selftest.ts");
@@ -133,6 +135,28 @@ for (const s of [composeSisPromiseUnclear(true), composeSisPromiseUnclear(false)
     assert.equal(parseSisPromiseToPay(t, "2026-09-22").byDate, "2026-09-30", t);
   }
   assert.equal(parseSisPromiseToPay("month end", "2026-02-10").byDate, "2026-02-28", "the month's own last day");
+}
+
+/* ── A correction to the record (22 Sep 2026) ────────────────────── */
+{
+  // What MR. BRIJESH YADAV sent — answered "इसकी जानकारी मेरे पास नहीं है".
+  assert.equal(detectRecordCorrection("Father name. KISHAN YADAV"), "father_name");
+  assert.equal(detectRecordCorrection("papa ka naam galat hai"), "father_name");
+  assert.equal(detectRecordCorrection("पिता का नाम गलत लिखा है"), "father_name");
+  assert.equal(detectRecordCorrection("Mother name Sunita Devi"), "mother_name");
+  assert.equal(detectRecordCorrection("DOB 12-03-2019"), "dob");
+  assert.equal(detectRecordCorrection("जन्म तिथि गलत है"), "dob");
+  assert.equal(detectRecordCorrection("mobile number change karna hai"), "mobile");
+  assert.equal(detectRecordCorrection("bache ka naam ki spelling galat hai"), "child_name");
+  // Asking about a field is not correcting it; other messages are untouched.
+  assert.equal(detectRecordCorrection("father name kya hai"), null);
+  assert.equal(detectRecordCorrection("Father name"), null, "a label with nothing after it");
+  assert.equal(detectRecordCorrection("fees kab jama kare"), null);
+  assert.equal(detectRecordCorrection("KRIYANSH YADAV"), null);
+  assert.equal(detectRecordCorrection("DUES"), null);
+  const ack = composeRecordCorrectionAck("father_name", true);
+  assert.ok(ack.includes("पिता का नाम") && !ack.includes("इसकी जानकारी मेरे पास नहीं है"));
+  assert.ok(composeRecordCorrectionAck("mobile", false).includes("mobile number"));
 }
 
 console.log("ok");

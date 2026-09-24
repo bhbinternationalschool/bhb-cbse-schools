@@ -630,6 +630,83 @@ export function isFeeWhyQuestion(text: string): boolean {
   return feeWord && why;
 }
 
+/* ── a correction to the child's record ─────────────────────────── */
+
+export type RecordCorrectionField = "father_name" | "mother_name" | "child_name" | "dob" | "mobile" | "address";
+
+const CORRECTION_FIELDS: { field: RecordCorrectionField; re: RegExp }[] = [
+  { field: "father_name", re: /\bfather'?s?\s*name\b|\bf\/?\s?name\b|\b(?:papa|pita|pitaji)\s*(?:ka|ji\s*ka)?\s*(?:naam|name)\b|पिता\s*(?:जी)?\s*का\s*नाम|पापा\s*का\s*नाम/i },
+  { field: "mother_name", re: /\bmother'?s?\s*name\b|\bm\/?\s?name\b|\b(?:mummy|mata|maa|mother)\s*(?:ka|ji\s*ka)?\s*(?:naam|name)\b|माता\s*(?:जी)?\s*का\s*नाम|माँ\s*का\s*नाम|मम्मी\s*का\s*नाम/i },
+  { field: "dob", re: /\bd\.?o\.?b\b|\bdate\s*of\s*birth\b|\bbirth\s*date\b|\bjanm\s*tithi\b|जन्म\s*(?:तिथि|तारीख|दिनांक)/i },
+  { field: "mobile", re: /\b(?:mobile|phone|whats\s?app|contact)\s*(?:no|number|nmbr)?\b.{0,25}\b(?:change|badal|badlo|update|galat|wrong|naya|new)\b|मोबाइल.{0,20}(?:बदल|गलत|नया)|नंबर\s*(?:बदल|गलत)/i },
+  { field: "address", re: /\baddress\b.{0,25}\b(?:change|badal|update|galat|wrong|naya|new)\b|पता\s*(?:बदल|गलत|नया)/i },
+  { field: "child_name", re: /\b(?:naam|name)\b.{0,20}\b(?:galat|wrong|spelling|sahi\s*kar|correct)\b|\bspelling\b|नाम.{0,15}(?:गलत|सही\s*कर|स्पेलिंग)/i },
+];
+
+const CORRECTION_WORD =
+  /\b(?:galat|wrong|change|badal|badlo|update|correct|correction|sahi\s*kar|sudhar|theek\s*kar|thik\s*kar)\w*|गलत|ग़लत|बदल|सुधार|सही\s*कर|ठीक\s*कर/i;
+
+/**
+ * The parent is correcting something on the child's record.
+ *
+ * WHY (22 Sep 2026): after KIDS, MR. BRIJESH YADAV picked KRIYANSH and
+ * wrote "Father name. KISHAN YADAV" — the father's name as it should read.
+ * It was answered "इसकी जानकारी मेरे पास नहीं है", as if he had asked a
+ * question the bot could not answer. It did reach the office, but under the
+ * wrong words, and the parent was never told his correction was noted.
+ *
+ * A correction is recognised by the field it names plus either a
+ * correcting word ("galat", "change", "सुधार") or a value written after the
+ * label. A question about the field ("father name kya hai?") is not one.
+ * The bot never changes the record itself: the office checks it against a
+ * document and replies.
+ */
+export function detectRecordCorrection(text: string): RecordCorrectionField | null {
+  const t = String(text || "").trim();
+  if (!t || t.length > 300) return null;
+  for (const { field, re } of CORRECTION_FIELDS) {
+    const m = re.exec(t);
+    if (!m) continue;
+    if (CORRECTION_WORD.test(t)) return field;
+    if (IS_QUESTION.test(t)) return null;
+    // "Father name. KISHAN YADAV" / "DOB 12-03-2019": a value after the label.
+    const after = t.slice(m.index + m[0].length);
+    if (/[\p{L}\d]{2,}/u.test(after)) return field;
+    return null;
+  }
+  return null;
+}
+
+const CORRECTION_LABEL: Record<RecordCorrectionField, { hi: string; en: string }> = {
+  father_name: { hi: "पिता का नाम", en: "father's name" },
+  mother_name: { hi: "माता का नाम", en: "mother's name" },
+  child_name: { hi: "नाम", en: "name" },
+  dob: { hi: "जन्म तिथि", en: "date of birth" },
+  mobile: { hi: "मोबाइल नंबर", en: "mobile number" },
+  address: { hi: "पता", en: "address" },
+};
+
+export function recordCorrectionLabel(field: RecordCorrectionField): string {
+  return CORRECTION_LABEL[field].en;
+}
+
+export function composeRecordCorrectionAck(field: RecordCorrectionField, hindi: boolean): string {
+  const l = CORRECTION_LABEL[field];
+  const proof = field === "dob" || field === "child_name" || field === "father_name" || field === "mother_name";
+  if (hindi) {
+    return [
+      `🙏 नोट कर लिया — *${l.hi}* सुधारने का आपका अनुरोध स्कूल ऑफिस को भेज दिया गया है।`,
+      "ऑफिस रिकॉर्ड जाँचकर इसी WhatsApp पर पुष्टि करेगा।",
+      ...(proof ? ["", "अगर आधार या जन्म प्रमाणपत्र पर सही जानकारी है, तो उसकी फ़ोटो यहीं भेज दीजिए — जल्दी ठीक हो जाएगा।"] : []),
+    ].join("\n");
+  }
+  return [
+    `🙏 Noted — your request to correct the *${l.en}* has gone to the school office.`,
+    "The office will check the record and confirm on this WhatsApp.",
+    ...(proof ? ["", "If the Aadhaar or birth certificate shows it correctly, send a photo of it here — that makes it quicker."] : []),
+  ].join("\n");
+}
+
 export function detectSisFeeReplyIntent(text: string): SisFeeReplyIntent | null {
   const t = (text || "").trim();
   if (!t) return null;
