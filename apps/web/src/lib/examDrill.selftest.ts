@@ -36,6 +36,8 @@ import {
   looksLikeOwnQuestion,
   readScopeAnswer,
   drillIsForAPastPaper,
+  isAnotherRoundInvite,
+  looksLikeKeyboardMash,
 } from "./examDrill";
 import { isPracticeTap, PRACTICE_BUTTON_EN, PRACTICE_BUTTON_HI } from "./examEve";
 
@@ -711,6 +713,51 @@ assert.equal(bare.asked[0]!.answer, undefined);
   for (const real of ["haan", "yes", "ji", "two", "दो", "night", "tall"]) {
     assert.equal(classifyDrillReply(real), "answer", `a real attempt: ${real}`);
   }
+}
+
+/* ── Random keys are not an answer (23 Sep 2026) ─────────────────── */
+{
+  assert.ok(looksLikeKeyboardMash("Tdhyhh fb hywu tb y, 475788"), "the pocket-typed message");
+  assert.equal(classifyDrillReply("Tdhyhh fb hywu tb y, 475788"), "chatter", "put the question back, unmarked");
+  for (const real of [
+    "CPU", "RAM and ROM", "the rhythm of the poem", "475788", "Largest is 98765", "LCM of 12 and 18 is 36",
+    "Space bar", "Tux Paint lines tool", "8,6,5,3,1", "HCF LCM 1234", "brb", "rhythm",
+  ]) {
+    assert.equal(looksLikeKeyboardMash(real), false, `a real answer: ${real}`);
+  }
+}
+
+/* ── Another round after a mastered drill (22 Sep 2026) ──────────── */
+{
+  const mastered = renderFinish({
+    state: { ...newDrill({ studentId: "s", subjectLabel: "कंप्यूटर", paperLabel: "कंप्यूटर", paperDate: "2026-09-23", nowIso: "2026-09-22T12:00:00Z" }), phase: "done" },
+    reason: "mastered",
+    hindi: true,
+  });
+  assert.ok(isAnotherRoundInvite(mastered), "the mastered message invites a chapter number");
+  const masteredEn = renderFinish({
+    state: { ...newDrill({ studentId: "s", subjectLabel: "Computer", paperLabel: "Computer", paperDate: "2026-09-23", nowIso: "2026-09-22T12:00:00Z" }), phase: "done" },
+    reason: "mastered",
+    hindi: false,
+  });
+  assert.ok(isAnotherRoundInvite(masteredEn));
+  // Good night is good night: no invitation to keep going.
+  const stopped = renderFinish({
+    state: { ...newDrill({ studentId: "s", subjectLabel: "Computer", paperLabel: "Computer", paperDate: "2026-09-23", nowIso: "2026-09-22T12:00:00Z" }), phase: "done" },
+    reason: "stopped",
+    hindi: true,
+  });
+  assert.equal(isAnotherRoundInvite(stopped), false);
+  assert.equal(isAnotherRoundInvite(undefined), false);
+  // What the father actually sent next.
+  const computer: DrillChapter[] = [
+    { position: 1, name: "Computer—A Smart Machine", topics: [] },
+    { position: 2, name: "Roles of Computers", topics: [] },
+    { position: 3, name: "Working of a Computer", topics: [] },
+  ];
+  assert.deepEqual(readScopeAnswer("2", computer), { kind: "position", position: 2 });
+  assert.deepEqual(readScopeAnswer("Role of computer", computer), { kind: "position", position: 2 });
+  assert.notEqual(readScopeAnswer("ok", computer).kind, "position", "ok ends the evening");
 }
 
 console.log("ok");

@@ -60,8 +60,8 @@ import {
   subjectNameForModel,
   type DrillVideo,
 } from "@/lib/examDrill";
-import { isPracticeTap } from "@/lib/examEve";
-import { istTodayIso } from "@/lib/examEve.server";
+import { childNamedForPractice, familyPapersOn, isPracticeTap, isTimetableRequest } from "@/lib/examEve";
+import { eveFamilyFor, istTodayIso, loadExamSetup, otherChildrenLine } from "@/lib/examEve.server";
 
 export function examDrillEnabled(): boolean {
   return /^(1|true|yes|on)$/i.test(process.env.EXAM_DRILL_ENABLED || "");
@@ -136,6 +136,87 @@ export async function openDrillFor(mobile10: string): Promise<{ id: string; stat
   const istHour = new Date(Date.now() + 330 * 60_000).getUTCHours();
   if (drillIsForAPastPaper(row.paper_date, today, istHour)) return null;
   return { id: row.id, state: rowToState(row) };
+}
+
+/**
+ * Has this number practised tonight — any drill, open or finished, touched
+ * since midnight IST?
+ *
+ * The context that turns a bare child's name into "practise this one now"
+ * (childNamedForPractice). An unreadable table is "no": the name then goes
+ * to the ordinary flow, which is where it went before.
+ */
+export async function drillTouchedToday(mobile10: string): Promise<boolean> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return false;
+  const since = new Date(`${istTodayIso()}T00:00:00+05:30`).toISOString();
+  const { data, error } = await ctx.sb
+    .from("exam_drill_sessions")
+    .select("id")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("mobile10", mobile10)
+    .gte("updated_at", since)
+    .limit(1);
+  if (error) {
+    console.warn("[examDrill] could not read tonight's drills", error.message);
+    return false;
+  }
+  return (data ?? []).length > 0;
+}
+
+/**
+ * Brothers and sisters with a paper the same day as this drill, as the line
+ * that tells the parent how to start theirs — "" when there are none or the
+ * date sheet cannot be read.
+ */
+async function siblingsLine(household: Household, state: DrillState, hindi: boolean): Promise<string> {
+  try {
+    const setup = await loadExamSetup();
+    const family = eveFamilyFor(household, setup.academicYearCode, setup.classNames);
+    const papers = familyPapersOn(family, setup.slots, setup.subjectNames, state.paperDate);
+    return otherChildrenLine(papers, state.studentId, hindi);
+  } catch (e) {
+    console.warn("[examDrill] could not list the other children", (e as Error)?.message);
+    return "";
+  }
+}
+
+/**
+ * Tonight's most recent drill on this number, if it has finished and its
+ * paper is still to come — the one "another round" restarts.
+ */
+async function finishedDrillTonight(mobile10: string): Promise<{ id: string; state: DrillState } | null> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return null;
+  const today = istTodayIso();
+  const { data, error } = await ctx.sb
+    .from("exam_drill_sessions")
+    .select("*")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("mobile10", mobile10)
+    .gte("paper_date", today)
+    .gte("updated_at", new Date(`${today}T00:00:00+05:30`).toISOString())
+    .order("updated_at", { ascending: false })
+    .limit(1);
+  if (error) {
+    console.warn("[examDrill] could not read tonight's finished drill", error.message);
+    return null;
+  }
+  const row = (data ?? [])[0] as Row | undefined;
+  if (!row || row.phase !== "done") return null;
+  const istHour = new Date(Date.now() + 330 * 60_000).getUTCHours();
+  if (drillIsForAPastPaper(row.paper_date, today, istHour)) return null;
+  const done = rowToState(row);
+  return {
+    id: row.id,
+    state: newDrill({
+      studentId: done.studentId,
+      subjectLabel: done.subjectLabel,
+      paperLabel: done.paperLabel,
+      paperDate: done.paperDate,
+      nowIso: new Date().toISOString(),
+    }),
+  };
 }
 
 /**
@@ -463,6 +544,11 @@ export async function continueExamDrill(input: {
   mobile10: string;
   text: string;
   hindi: boolean;
+  /**
+   * The bot's last message on this thread ended a drill with an invitation
+   * to send a chapter for another round (isAnotherRoundInvite).
+   */
+  afterFinish?: boolean;
 }): Promise<DrillTurn> {
   const nothing: DrillTurn = { handled: false, replyText: "" };
   if (!examDrillEnabled()) return nothing;
@@ -474,7 +560,13 @@ export async function continueExamDrill(input: {
   // nobody had asked about.
   if (isPracticeTap(input.text)) return nothing;
   try {
-    const open = await openDrillFor(input.mobile10);
+    let open = await openDrillFor(input.mobile10);
+    // "2" or "Role of computer" straight after "send a chapter number for
+    // another round": a fresh round of the same paper, from that chapter.
+    // Only when the reply actually names a chapter (checked below) — "ok"
+    // after a finished drill is still the end of the evening.
+    const anotherRound = !open && !!input.afterFinish;
+    if (anotherRound) open = await finishedDrillTonight(input.mobile10);
     if (!open) return nothing;
 
     await ensureSisHydratedServer();
@@ -485,6 +577,24 @@ export async function continueExamDrill(input: {
     const className = childClassName(child, masters);
     const chapters = await chaptersFor(className, open.state.subjectLabel);
     if (!chapters.length) return nothing;
+    if (anotherRound && readScopeAnswer(input.text, chapters).kind !== "position") return nothing;
+
+    // Not for this drill at all — the date sheet, or a brother or sister.
+    //
+    // 23 Sep 2026: MR. GHANSHYAM MAURYA asked mid-way through RUDRA's Maths
+    // which subject his other son ABHISHEK had tomorrow, and was told by the
+    // drill's tutor to ask the office. The date sheet is in this bot; the
+    // exam-eve handler right after this one answers it. The same evening
+    // MR. VIKAL KUMAR GUPTA typed "Jayash", his other son's name, and got a
+    // lesson on joysticks. Both go on to exam-eve, which answers the first
+    // and starts the named child's practice for the second. The question
+    // left here waits; the drill for this child is closed only if the other
+    // child's practice starts (startExamDrill closes the rest).
+    if (isTimetableRequest(input.text)) return nothing;
+    const siblings = childrenOfHousehold(sis, input.household.id, currentAcademicYearCode(masters))
+      .filter((s) => s.id !== child.id)
+      .map((s) => ({ studentId: s.id, name: s.fullName }));
+    if (siblings.length && childNamedForPractice(input.text, siblings)) return nothing;
 
     let state = open.state;
     const parts: string[] = [];
@@ -666,6 +776,9 @@ export async function continueExamDrill(input: {
       parts.push(renderFinish({ state, reason: step.reason, hindi: input.hindi }));
       const videos = await chapterVideos({ chapters, scope: state.scope, subjectLabel: state.subjectLabel, className, householdId: input.household.id, hindi: input.hindi });
       if (videos) parts.push(videos);
+      // One child is done; say how to start the next one's.
+      const next = await siblingsLine(input.household, state, input.hindi);
+      if (next) parts.push(next);
       return { handled: true, replyText: parts.join("\n\n") };
     }
     if (step.kind === "ask_scope") {

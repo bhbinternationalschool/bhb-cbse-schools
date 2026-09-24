@@ -143,8 +143,18 @@ export function readScopeAnswer(text: string, chapters: DrillChapter[]): ScopeRe
     // Whole word, or one a real prefix of the other ("imandar" of
     // "imandarbalak"). NOT any substring: "hn" (हाँ) sits inside "chnd"
     // (चाँद), and a yes must never be read as chapter six.
+    // A plural is the same word: "Role of computer" for "Roles of Computers"
+    // (22 Sep 2026) otherwise tied with "Working of a Computer" on "of" and
+    // "computer" alone, and a tie is read as no answer.
+    const singular = (w: string) => (w.length >= 3 ? w.replace(/s$/, "") : w);
     const matched = said.filter((w) =>
-      name.some((t) => t === w || (w.length >= 3 && t.startsWith(w)) || (t.length >= 3 && w.startsWith(t))),
+      name.some(
+        (t) =>
+          t === w ||
+          singular(t) === singular(w) ||
+          (w.length >= 3 && t.startsWith(w)) ||
+          (t.length >= 3 && w.startsWith(t)),
+      ),
     );
     const hits = matched.length;
     // Two consonants can coincide; three are a word. Several short ones
@@ -284,6 +294,33 @@ export function looksLikeOwnQuestion(text: string): boolean {
 }
 
 /**
+ * Keys pressed at random — a phone in a pocket, a toddler — not an attempt.
+ *
+ * 23 Sep 2026, 06:02 IST: "Tdhyhh fb hywu tb y, 475788" arrived on SHREYANSH's
+ * open Computer question and was marked ❌ with "you typed random letters".
+ * Nobody had tried to answer; the question is put back instead.
+ *
+ * Needs TWO signs together, because one alone is an ordinary answer: "CPU",
+ * "RAM" and "rhythm" have no a/e/i/o/u, and "475788" is a number. The signs:
+ * a long vowelless word that is not an abbreviation (not all capitals), a
+ * digit run of four or more in a message that is also letters, and two or
+ * more two-letter vowelless scraps ("fb", "tb").
+ */
+export function looksLikeKeyboardMash(text: string): boolean {
+  const t = String(text || "").trim();
+  if (!t || /[ऀ-ॿ]/.test(t)) return false;
+  const tokens = t.split(/[^A-Za-z0-9]+/).filter(Boolean);
+  if (tokens.length < 3) return false;
+  const letterTokens = tokens.filter((w) => /[A-Za-z]/.test(w));
+  const vowelless = (w: string) => /^[A-Za-z]+$/.test(w) && !/[aeiou]/i.test(w);
+  let signs = 0;
+  if (letterTokens.some((w) => w.length >= 4 && vowelless(w) && w !== w.toUpperCase())) signs += 1;
+  if (letterTokens.length > 0 && tokens.some((w) => /^\d{4,}$/.test(w))) signs += 1;
+  if (letterTokens.filter((w) => w.length === 2 && vowelless(w) && w !== w.toUpperCase()).length >= 2) signs += 1;
+  return signs >= 2;
+}
+
+/**
  * Is this an answer at all?
  *
  * WHY (18 Sep 2026): a child who wrote "Lekin kaise" — *but how?* — was
@@ -301,6 +338,8 @@ export function classifyDrillReply(text: string): DrillReplyKind {
   // "I don't know" is about OUR question, so it is help, not a new ask.
   if (HELP_RE.test(t) || ASK_FOR_ANSWER_RE.test(t)) return "help";
   if (ACK_RE.test(t)) return "chatter";
+  // Random keys are not an attempt either: the question goes back, unmarked.
+  if (looksLikeKeyboardMash(t)) return "chatter";
   if (looksLikeOwnQuestion(t)) return "question";
   return "answer";
 }
@@ -888,6 +927,24 @@ export function renderCheck(input: {
     .join("\n");
 }
 
+/**
+ * The invitation after a drill is mastered — and the marker that says the
+ * next message may be a chapter for another round (isAnotherRoundInvite).
+ *
+ * 22 Sep 2026, 18:19 IST: MR. RAVI KUMAR PAL's son finished Computer with
+ * three in a row, then sent "2" and "Role of computer" — chapter 2, "Roles
+ * of Computers". The drill had closed, so "2" got the fees menu and the
+ * chapter name got "इसकी जानकारी मेरे पास नहीं है".
+ */
+export const ANOTHER_ROUND_HI = "या और अभ्यास के लिए अध्याय का नंबर भेजिए";
+export const ANOTHER_ROUND_EN = "or send a chapter number for another round";
+
+/** Was this bot message the end of a drill that invited another round? */
+export function isAnotherRoundInvite(botText: string | undefined): boolean {
+  const t = botText || "";
+  return t.includes(ANOTHER_ROUND_HI) || t.includes(ANOTHER_ROUND_EN);
+}
+
 export function renderFinish(input: {
   state: DrillState;
   reason: "mastered" | "ceiling" | "stopped";
@@ -904,8 +961,8 @@ export function renderFinish(input: {
   }
   if (input.reason === "mastered") {
     return input.hindi
-      ? `🎉 शाबाश! लगातार ${STREAK_TO_FINISH} सही — ${input.state.subjectLabel} की तैयारी अच्छी है। ${score}\n\nअब आराम कीजिए। कल के पेपर के लिए शुभकामनाएँ 🙏\n\nदोबारा अभ्यास के लिए *PRACTICE* लिखें।`
-      : `🎉 Well done — ${STREAK_TO_FINISH} right in a row. ${input.state.subjectLabel} is in good shape. ${score}\n\nRest now. All the best for tomorrow 🙏\n\nSend *PRACTICE* any time to go again.`;
+      ? `🎉 शाबाश! लगातार ${STREAK_TO_FINISH} सही — ${input.state.subjectLabel} की तैयारी अच्छी है। ${score}\n\nअब आराम कीजिए। कल के पेपर के लिए शुभकामनाएँ 🙏\n\nदोबारा अभ्यास के लिए *PRACTICE* लिखें — ${ANOTHER_ROUND_HI}।`
+      : `🎉 Well done — ${STREAK_TO_FINISH} right in a row. ${input.state.subjectLabel} is in good shape. ${score}\n\nRest now. All the best for tomorrow 🙏\n\nSend *PRACTICE* any time to go again — ${ANOTHER_ROUND_EN}.`;
   }
   return input.hindi
     ? `🌙 आज इतना बहुत है। ${score}\n\nजो छूट गया है उसे कल सुबह शिक्षक से पूछ लीजिए — अभी सो जाइए, नींद सबसे ज़रूरी है 🙏\n\nदोबारा अभ्यास के लिए *PRACTICE* लिखें।`

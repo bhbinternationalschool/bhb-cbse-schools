@@ -26,6 +26,8 @@
  * newline, a tab or four consecutive spaces.
  */
 
+import { nameSoundKey } from "@/lib/nameSound";
+
 export const PRACTICE_BUTTON_EN = "Start practice";
 export const PRACTICE_BUTTON_HI = "अभ्यास शुरू करें";
 
@@ -328,8 +330,93 @@ export function isTimetableRequest(text: string): boolean {
     // question answered him instead: "यह समझ नहीं आया" three times running.
     // The day word may come before the paper word or after it.
     /(?:अगला|अगली|अगले|कल|आज|कब)[\s\S]{0,25}\b(?:paper|papers|exam|exams|pariksha|test)\b/i.test(raw) ||
-    /\b(?:paper|papers|exam|exams|pariksha|test)\b[\s\S]{0,25}(?:कब|कल|आज)/i.test(raw)
+    /\b(?:paper|papers|exam|exams|pariksha|test)\b[\s\S]{0,25}(?:कब|कल|आज)/i.test(raw) ||
+    // WHICH SUBJECT tomorrow (23 Sep 2026). MR. GHANSHYAM MAURYA, mid-way
+    // through RUDRA's Maths practice, asked "कल अभिषेक मौर्य का कौन सा विषय
+    // है" — which subject does his other son have tomorrow. No paper word,
+    // so nothing above saw it; the drill's tutor answered instead and told
+    // him to ask the office for a date sheet this bot holds.
+    /(?:अगला|अगली|अगले|कल|आज)[\s\S]{0,40}(?:कौन|कोन)\s?(?:सा|से|सी)\s?(?:विषय|सब्जेक्ट|पेपर)/.test(raw) ||
+    /\b(?:kal|aaj|agla|agle|tomorrow|today)\b.{0,40}\b(?:kaun ?sa|kon ?sa|konsa|which)\s+(?:subject|vishay|paper)\b/.test(t)
   );
+}
+
+/* ── which child a message is about ──────────────────────────────── */
+
+/**
+ * Words that can sit around a child's name without changing what is asked:
+ * "Jayash ka", "अब जयश", "for Jayash".
+ */
+const NAME_FILLER = new Set(
+  [
+    "ab", "ka", "ke", "ki", "ko", "liye", "bhi", "ji", "for", "now", "and", "also",
+    "अब", "का", "के", "की", "को", "लिए", "भी", "जी",
+  ].map((w) => w.toLowerCase()),
+);
+
+export type ChildNamed = {
+  studentId: string;
+  /**
+   * The message is ONLY the name (and filler). On its own that is not a
+   * request for anything — "KRIYANSH YADAV" typed after KIDS is the parent
+   * picking a child to ask about — so the caller decides whether the context
+   * makes it one.
+   */
+  bare: boolean;
+};
+
+/**
+ * "PRACTICE JAYASH", "Jayash ka abhyas shuru karein", or just "Jayash" —
+ * which of these children does the parent want to practise?
+ *
+ * WHY (23 Sep 2026, 21:27 IST): MR. VIKAL KUMAR GUPTA has two children
+ * sitting papers, SHREYASH (I) and JAYASH (IV). The practice button only
+ * ever opened the first child's drill. When Shreyash was done his father
+ * typed one word — "Jayash" — and the drill, still waiting on Shreyash,
+ * took it as an answer and sent a lesson on joysticks.
+ *
+ * Matched on the first name by how it sounds (nameSoundKey), so "जयश" and
+ * "Jayas" find JAYASH. Nothing is returned when two children share a first
+ * name — the parent is asked by the ordinary flow rather than guessed for.
+ */
+export function childNamedForPractice(
+  text: string,
+  children: { studentId: string; name: string }[],
+): ChildNamed | null {
+  const raw = String(text || "").trim();
+  if (!raw || children.length === 0) return null;
+  const words = raw.split(/[^\p{L}\p{M}]+/u).filter(Boolean);
+  if (words.length === 0 || words.length > 8) return null;
+
+  const firstKeys = new Map<string, string[]>();
+  for (const c of children) {
+    const first = (c.name || "").trim().split(/\s+/)[0] ?? "";
+    const key = nameSoundKey(first);
+    // Two letters is an initial, not a name.
+    if (key.length < 3) continue;
+    firstKeys.set(key, [...(firstKeys.get(key) ?? []), c.studentId]);
+  }
+
+  let hit: { studentId: string; child: { name: string } } | null = null;
+  for (const w of words) {
+    const ids = firstKeys.get(nameSoundKey(w));
+    if (!ids) continue;
+    if (ids.length > 1) return null;
+    const child = children.find((c) => c.studentId === ids[0])!;
+    if (hit && hit.studentId !== child.studentId) return null; // two children named
+    hit = { studentId: child.studentId, child };
+  }
+  if (!hit) return null;
+
+  // What is left once the child's own name words are taken out.
+  const nameKeys = new Set(hit.child.name.split(/\s+/).map(nameSoundKey).filter(Boolean));
+  const rest = words.filter((w) => !nameKeys.has(nameSoundKey(w)));
+  const restText = rest.join(" ");
+  if (rest.every((w) => NAME_FILLER.has(w.toLowerCase()))) {
+    return { studentId: hit.studentId, bare: true };
+  }
+  if (isPracticeTap(restText)) return { studentId: hit.studentId, bare: false };
+  return null;
 }
 
 /**
