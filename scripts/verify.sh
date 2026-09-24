@@ -159,6 +159,7 @@ SELFTESTS=(
   test:wa-known-parent-role
   test:wa-inbound-parse
   test:wa-bot-silence
+  test:sis-bot-thread-merge
   test:job-applications
   test:online-classes
   test:online-class-qa

@@ -123,6 +123,9 @@ jobs:
       - name: Self-test — when the WhatsApp bots speak, and when they stay quiet
         working-directory: apps/web
         run: npm run test:wa-bot-silence
+      - name: "Test — two parents at once: neither family's turns are written over"
+        working-directory: apps/web
+        run: npm run test:sis-bot-thread-merge
 
       - name: Self-test — a CV becomes a routable job application
         working-directory: apps/web
