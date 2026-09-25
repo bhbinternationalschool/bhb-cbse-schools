@@ -234,7 +234,7 @@ assert.equal(papersFromDate("2026-09-30", 23), "2026-10-01", "the month rolls ov
 
 /* ── 9. The tutor prompt and the pre-primary tips ───────────────────── */
 
-const prompt = practicePrompt(family.children[1]!, "गणित", true);
+const prompt = practicePrompt(family.children[1]!, "गणित", true, false);
 assert.ok(prompt.includes("कक्षा IV") && prompt.includes("गणित"), "class and subject reach the tutor");
 assert.ok(prompt.includes("एक बार में एक"), "one question at a time");
 
@@ -242,8 +242,30 @@ const tips = prePrimaryTips(
   { studentId: "n1", name: "Shivansh", classId: "cn", className: "Nursery" },
   "अंग्रेज़ी कविताएँ",
   true,
+  false,
 );
 assert.ok(tips.includes("कविताएँ") && tips.split("\n").filter((l) => l.startsWith("•")).length === 3);
+
+// 24 Sep 2026, 8:37 IST: MR. AMIT KUMAR MISHRA tapped *अभ्यास शुरू करें*
+// seven minutes after NUTAN's Maths paper had started. papersFromDate says
+// the paper still to come is TODAY's until 9 — but every message about it
+// said "कल", telling a father on the morning of the paper that Maths was
+// tomorrow. Whatever papersFromDate picks, the words have to agree with it.
+{
+  assert.ok(
+    practicePrompt(family.children[1]!, "गणित", true, true).startsWith("आज"),
+    "the paper the tap is about is today, so the tutor is told today",
+  );
+  assert.ok(
+    practicePrompt(family.children[1]!, "गणित", false, true).startsWith("Today is"),
+    "and in English too",
+  );
+  const little = { studentId: "n1", name: "Shivansh", classId: "cn", className: "Nursery" };
+  assert.ok(prePrimaryTips(little, "सामान्य ज्ञान — मौखिक", true, true).includes("— आज:"));
+  assert.ok(!prePrimaryTips(little, "सामान्य ज्ञान — मौखिक", true, true).includes("— कल:"));
+  assert.ok(prePrimaryTips(little, "General Knowledge", false, true).includes("— today:"));
+  assert.ok(prePrimaryTips(little, "सामान्य ज्ञान — मौखिक", true, false).includes("— कल:"), "the evening tap is still tomorrow");
+}
 
 /* ── 10. EVS reads as Hindi, and a correction says so ───────────────── */
 

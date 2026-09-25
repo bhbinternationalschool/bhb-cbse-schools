@@ -54,16 +54,35 @@ const chapters: DrillChapter[] = [
 /* ── Nothing is asked from outside what the class has been taught ── */
 const scopeQ = renderScopeQuestion({
   childName: "Aarohi", subjectLabel: "Mathematics", paperLabel: "Mathematics",
-  chapters, hindi: false,
+  chapters, hindi: false, isToday: false,
 });
 assert.match(scopeQ, /how far has the class done/i);
 assert.match(scopeQ, /5\. More about Operations on Numbers/);
 assert.match(scopeQ, /just the number/);
 assert.ok(
-  renderScopeQuestion({ childName: "A", subjectLabel: "M", paperLabel: "M", hindi: false,
+  renderScopeQuestion({ childName: "A", subjectLabel: "M", paperLabel: "M", hindi: false, isToday: false,
     chapters: Array.from({ length: 30 }, (_, i) => ({ position: i + 1, name: `Ch ${i + 1}`, topics: [] })) })
     .split("\n").filter((l) => /^\d+\. /.test(l)).length <= SCOPE_LIST_MAX,
   "a child does not read twenty chapters at nine at night",
+);
+
+// 24 Sep 2026, 8:37 IST: MR. AMIT KUMAR MISHRA tapped *अभ्यास शुरू करें*
+// seven minutes after NUTAN's Maths paper had begun — a paper still "to
+// come" until 9 (papersFromDate) — and the drill opened with
+// "📚 NUTAN, कल *गणित* है।" Maths was that morning, not tomorrow.
+assert.match(
+  renderScopeQuestion({ childName: "NUTAN", subjectLabel: "गणित", paperLabel: "गणित", chapters, hindi: true, isToday: true }),
+  /^📚 NUTAN, आज \*गणित\* है।/,
+  "a paper that starts this morning is today",
+);
+assert.match(
+  renderScopeQuestion({ childName: "NUTAN", subjectLabel: "गणित", paperLabel: "गणित", chapters, hindi: true, isToday: false }),
+  /^📚 NUTAN, कल \*गणित\* है।/,
+  "and the evening tap is still tomorrow",
+);
+assert.match(
+  renderScopeQuestion({ childName: "Aarohi", subjectLabel: "Mathematics", paperLabel: "Mathematics", chapters, hindi: false, isToday: true }),
+  /^📚 Aarohi, today is \*Mathematics\*\./,
 );
 
 assert.equal(parseScopeAnswer("6", 9), 6);
