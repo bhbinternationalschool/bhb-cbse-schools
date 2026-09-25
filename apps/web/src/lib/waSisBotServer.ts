@@ -111,6 +111,7 @@ import { SCHOOL_DEFAULT_WA_LANGUAGE } from "@/lib/householdPrefs";
 import { duePayUrl } from "@/lib/duePayToken.server";
 import { parentChatClosingMessage } from "@/lib/parentBotGuide";
 import { alreadyClosed } from "@/lib/parentChatClose";
+import { mergeThreadTurns } from "@/lib/waSisBotThreadMerge";
 
 export type WaSisBotMsg = {
   id: string;
@@ -419,18 +420,22 @@ function recordUnansweredQuestion(hh: Household, text: string): void {
 
 /** Record parent + bot turns for the language flow, send the bot text, and return. */
 async function finishLanguageFlow(
-  store: Store,
   thread: WaSisBotThread,
   parentMsg: WaSisBotMsg,
   replyText: string,
 ): Promise<{ matched: boolean; replied: boolean; escalate: boolean; replyText: string; stub: boolean; error?: string }> {
   const botMsg: WaSisBotMsg = { id: nid("wsm"), role: "bot", text: replyText, at: nowIso(), by: "SIS parent WA bot" };
+  const turns = [parentMsg, botMsg];
   const next: WaSisBotThread = {
     ...thread,
-    messages: [...thread.messages, parentMsg, botMsg],
+    messages: [...thread.messages, ...turns],
     updatedAt: nowIso(),
   };
-  await writeStore({ ...store, threads: store.threads.map((t) => (t.id === next.id ? next : t)) });
+  // The desk as it stands NOW, not as it stood when this message arrived —
+  // the drill, the syllabus and the model have run since. See
+  // waSisBotThreadMerge.ts.
+  const store = await readStore();
+  await writeStore({ ...store, threads: mergeThreadTurns(store.threads, next, turns) });
   const send = await sendWhatsAppText({ toMobile: next.mobile, body: replyText, clientMessageId: botMsg.id });
   return {
     matched: true,
@@ -498,11 +503,10 @@ export async function staffReplyWaSisBot(opts: {
     updatedAt: nowIso(),
     messages: [...thread.messages, msg],
   };
-  store = {
-    ...store,
-    threads: store.threads.map((t) => (t.id === thread.id ? next : t)),
-  };
-  await writeStore(store);
+  // Re-read: the send above took a round trip to Meta, and a parent's reply
+  // may have been written to the desk in the meantime.
+  store = await readStore();
+  await writeStore({ ...store, threads: mergeThreadTurns(store.threads, next, [msg]) });
   if (!send.ok && send.mode === "stub") {
     return {
       ok: false,
@@ -1026,17 +1030,17 @@ export async function handleWaSisBotInbound(opts: {
     // family chose otherwise.
     const hindi = waTemplateLanguageFor(hh) === "hi";
     if (!child) {
-      return finishLanguageFlow(store, thread, parentMsg, hindi ? "यह बच्चा आपके परिवार में दर्ज नहीं है। कृपया ऐप से दोबारा भेजें।" : "That child is not on your family's record. Please send again from the app.");
+      return finishLanguageFlow(thread, parentMsg, hindi ? "यह बच्चा आपके परिवार में दर्ज नहीं है। कृपया ऐप से दोबारा भेजें।" : "That child is not on your family's record. Please send again from the app.");
     }
     if (!relay.message) {
-      return finishLanguageFlow(store, thread, parentMsg, hindi ? "कृपया अपना संदेश 'Ref' वाली पंक्ति के नीचे लिखकर भेजें।" : "Please type your message below the 'Ref' line and send again.");
+      return finishLanguageFlow(thread, parentMsg, hindi ? "कृपया अपना संदेश 'Ref' वाली पंक्ति के नीचे लिखकर भेजें।" : "Please type your message below the 'Ref' line and send again.");
     }
     const { relayTeacherMessage } = await import("@/lib/teacherContact.server");
     const r = await relayTeacherMessage({ household: hh, student: child, staffId: relay.staffId, body: relay.message, channel: "whatsapp" });
     const ack = r.ok
       ? teacherRelayAck({ teacherName: r.teacherName, open: r.via !== "held", hindi })
       : hindi ? `संदेश नहीं भेजा जा सका: ${r.error}` : `Could not send: ${r.error}`;
-    return finishLanguageFlow(store, thread, parentMsg, ack);
+    return finishLanguageFlow(thread, parentMsg, ack);
   }
 
   // "hlw", "hello sir", "namaskar", "good morning" are greetings too. It
@@ -1081,7 +1085,7 @@ export async function handleWaSisBotInbound(opts: {
         ? ({ action: "pass" } as const)
         : rawGate;
   if (gate.action === "ask") {
-    return finishLanguageFlow(store, thread, parentMsg, languageMenuText());
+    return finishLanguageFlow(thread, parentMsg, languageMenuText());
   }
   if (gate.action === "save") {
     const choice = gate.choice;
@@ -1105,7 +1109,6 @@ export async function handleWaSisBotInbound(opts: {
     // successful one — and the next message still arrived in English with
     // nobody any the wiser. If it did not store, say so and let them retry.
     return finishLanguageFlow(
-      store,
       thread,
       parentMsg,
       saved
@@ -1136,7 +1139,7 @@ export async function handleWaSisBotInbound(opts: {
           mobile10,
           command: linkCmd,
         });
-        return finishLanguageFlow(store, thread, parentMsg, r.replyText);
+        return finishLanguageFlow(thread, parentMsg, r.replyText);
       } catch (e) {
         console.error("[wa-sis-bot] student link failed", e);
       }
@@ -1157,7 +1160,7 @@ export async function handleWaSisBotInbound(opts: {
       waMessageId: opts.waMessageId,
     });
     if (apaar !== null) {
-      return finishLanguageFlow(store, thread, parentMsg, apaar);
+      return finishLanguageFlow(thread, parentMsg, apaar);
     }
   } catch (e) {
     console.error("[wa-sis-bot] APAAR consent failed", e);
@@ -1182,7 +1185,7 @@ export async function handleWaSisBotInbound(opts: {
       afterFinish: isAnotherRoundInvite(lastBot?.text),
     });
     if (drill.handled) {
-      return finishLanguageFlow(store, thread, parentMsg, drill.replyText);
+      return finishLanguageFlow(thread, parentMsg, drill.replyText);
     }
   } catch (e) {
     // A drill that cannot run must never take fees and receipts with it.
@@ -1205,7 +1208,7 @@ export async function handleWaSisBotInbound(opts: {
       text,
     });
     if (exam) {
-      return finishLanguageFlow(store, thread, parentMsg, exam);
+      return finishLanguageFlow(thread, parentMsg, exam);
     }
   } catch (e) {
     // A date-sheet read that fails must never take fees and receipts with it.
@@ -1229,7 +1232,7 @@ export async function handleWaSisBotInbound(opts: {
         text,
       });
       if (tutor.handled) {
-        return finishLanguageFlow(store, thread, parentMsg, tutor.replyText);
+        return finishLanguageFlow(thread, parentMsg, tutor.replyText);
       }
     } catch (e) {
       // Study help failing must never take the fee and receipt bot with
@@ -1390,6 +1393,9 @@ export async function handleWaSisBotInbound(opts: {
   };
 
   const escalate = bot.escalate || escalateUngrounded;
+  const turns: WaSisBotMsg[] = officeNote
+    ? [parentMsg, botMsg, { id: nid("wsm"), role: "bot" as const, text: `📌 ${officeNote}`, at: nowIso(), by: "SIS parent WA bot · note for office" }]
+    : [parentMsg, botMsg];
   thread = {
     ...thread,
     status: escalate
@@ -1398,9 +1404,7 @@ export async function handleWaSisBotInbound(opts: {
         ? "bot"
         : thread.status || "bot",
     unreadStaff: escalate ? thread.unreadStaff + 1 : thread.unreadStaff,
-    messages: officeNote
-      ? [...thread.messages, parentMsg, botMsg, { id: nid("wsm"), role: "bot" as const, text: `📌 ${officeNote}`, at: nowIso(), by: "SIS parent WA bot · note for office" }]
-      : [...thread.messages, parentMsg, botMsg],
+    messages: [...thread.messages, ...turns],
     pendingAsk: nextPendingAsk,
     ptpAsks: nextPtpAsks,
     lastPromise,
@@ -1408,11 +1412,11 @@ export async function handleWaSisBotInbound(opts: {
     closingSentAt: closingNow ? new Date(Date.now() + 1).toISOString() : thread.closingSentAt,
     updatedAt: nowIso(),
   };
-  store = {
-    ...store,
-    threads: store.threads.map((t) => (t.id === thread.id ? thread : t)),
-  };
-  await writeStore(store);
+  // The desk as it stands NOW: answering this message may have taken a
+  // model call, and another family's reply can have landed meanwhile.
+  // See waSisBotThreadMerge.ts.
+  store = await readStore();
+  await writeStore({ ...store, threads: mergeThreadTurns(store.threads, thread, turns) });
 
   if (intent === "complaint") {
     const ensured = await ensureMetaFlowPublished({
