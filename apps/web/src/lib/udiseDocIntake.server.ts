@@ -37,6 +37,7 @@ import { TENANT } from "@/lib/types";
 import {
   DOC_TYPE_LABEL,
   documentRouteFor,
+  officeDocNoticeTitle,
   planUdiseCorrections,
   resolveDocPerson,
   resolveTargetChildren,
@@ -215,7 +216,7 @@ export async function alertOfficeOfUdiseDocument(input: {
       const res = await sendPushToSubjects(
         "staff",
         staff.map((s) => s.id),
-        { title: "UDISE+ document received", body: input.oneLine.slice(0, 160), url: input.href, data: { kind: "udise_doc", id: input.refId } },
+        { title: officeDocNoticeTitle(input.variables.docLabel), body: input.oneLine.slice(0, 160), url: input.href, data: { kind: "udise_doc", id: input.refId } },
       );
       pushed = res.sent;
     }
@@ -233,7 +234,7 @@ export async function alertOfficeOfUdiseDocument(input: {
       if (!already) {
         const item = {
           id: `nf_udise_${input.refId}`,
-          title: "UDISE+ document received",
+          title: officeDocNoticeTitle(input.variables.docLabel),
           body: input.text.slice(0, 280),
           kind: "system" as const,
           href: input.href,

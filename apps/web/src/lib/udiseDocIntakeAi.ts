@@ -199,6 +199,27 @@ export const DOC_TYPE_LABEL: Record<UdiseDocType, string> = {
   other: "Document",
 };
 
+/**
+ * What the office inbox row and the push call this document.
+ *
+ * 25 Sep 2026, 08:27 IST: MR. MANOJ KUMAR CHAUDHARI sent a payment
+ * screenshot for MANAS CHAUDHARI (LKG-A). The row that reached the office
+ * read *"UDISE+ document received"* over a body beginning "💸 *Payment
+ * proof*". Every document a family sends — Aadhaar, birth certificate,
+ * a fee screenshot — arrived under that one title, because
+ * alertOfficeOfUdiseDocument hardcoded it while the WhatsApp message
+ * beside it already used the right `docLabel`. A clerk scanning titles for
+ * portal paperwork sees a payment; one looking for payments sees nothing.
+ *
+ * The label is what the caller already passes; this only stops the title
+ * disagreeing with the body underneath it.
+ */
+export function officeDocNoticeTitle(docLabel?: string | null): string {
+  const label = String(docLabel || "").trim();
+  if (!label) return "Document received";
+  return `${label} received`;
+}
+
 export const DOC_TYPE_LABEL_HI: Record<UdiseDocType, string> = {
   aadhaar: "आधार कार्ड",
   birth_certificate: "जन्म प्रमाणपत्र",
