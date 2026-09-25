@@ -288,14 +288,31 @@ const ASKS_SOMETHING =
  * question word, and only a longer one with a question mark or a question
  * word is treated as an ask.
  */
+/**
+ * "मतलब" / "matlab" opening a reply is "so…", not "what does … mean?".
+ *
+ * 25 Sep 2026, 19:41 IST: SHIVANGI SINGH (V) was on Question 3 — the
+ * smallest state in India by area — and answered "मतलब सबसे छोटा राज्य
+ * सिक्किम है सिक्किम": *so the smallest state is Sikkim, Sikkim*. That is an
+ * attempt, and a wrong one worth teaching. ASKS_SOMETHING saw "मतलब",
+ * the length rule saw seven words, and the drill sent it to the tutor as a
+ * question of her own. Her answer was never marked and Question 3 came
+ * back verbatim — four times over the next three minutes, because every
+ * further reply was read the same way. She never reached Question 4.
+ *
+ * Only the leading word is discounted, and only when there is no question
+ * mark: "मतलब क्या है इसका" still asks, on क्या.
+ */
+const LEADING_DISCOURSE = /^\s*(?:matlab\b|मतलब)[\s,।:-]*/i;
+
 export function looksLikeOwnQuestion(text: string): boolean {
   const t = String(text || "").trim();
   if (!t) return false;
   const words = t.split(/\s+/).filter(Boolean);
   // Two words cannot be a question and are very often the answer.
   if (words.length < 3) return false;
-  const asksMark = /[?？]\s*$/.test(t);
-  return asksMark || ASKS_SOMETHING.test(t);
+  if (/[?？]\s*$/.test(t)) return true;
+  return ASKS_SOMETHING.test(t.replace(LEADING_DISCOURSE, ""));
 }
 
 /**
