@@ -7,6 +7,7 @@ import {
   loadPayments,
   paymentsStateIsEmpty,
   writePaymentsLocalRaw,
+  type PaymentLink,
   type PaymentsState,
 } from "@/lib/payments";
 import {
@@ -110,6 +111,69 @@ async function hydratePaymentsOnce(): Promise<boolean> {
 }
 
 /** Server-side hydrate from blob + normalized DB into school mirror payments slice. */
+/**
+ * Make sure ONE pay-link is present in the server's payments mirror, and
+ * return it.
+ *
+ * Every settlement begins by looking a link up in the mirror. The mirror is
+ * a cache: `hydrateSchoolMirrorFromRemote` skips the whole re-pull while a
+ * 45-second TTL holds and the desk-table fingerprint is unchanged, and its
+ * "does this look empty?" test only asks whether master classes are
+ * present. So a mirror carrying classes but zero pay-links reads as healthy
+ * and is never refreshed — and it cannot refresh itself, because the
+ * fingerprint only moves when `payment_desk_links` is written, which is
+ * exactly what an already-created link does not do.
+ *
+ * On 26 Sep 2026 that cost AADVIK SINGH's family Rs 2,500. Cashfree had
+ * taken the money and reported the order PAID, `payment_desk_links` held
+ * the link, and three settlement attempts — one webhook, two returns —
+ * each recorded `fee_link.settlement_failed / Pay-link not found` and
+ * booked nothing, because the one instance answering had a payments slice
+ * with nothing in it.
+ *
+ * Three steps, cheapest first: the mirror as it stands, then a full
+ * payments re-hydrate from the desk tables, then this single link read
+ * directly and spliced in, so `applyPaymentLink` (which loads the mirror
+ * itself) can see it. The splice keeps every other link untouched.
+ */
+export async function ensurePaymentLinkHydrated(
+  linkId: string,
+): Promise<PaymentLink | null> {
+  const id = linkId.trim();
+  if (!id) return null;
+
+  const { getPaymentLink } = await import("@/lib/payments");
+  const inMirror = () => getPaymentLink(id, loadPayments()) ?? null;
+
+  const already = inMirror();
+  if (already) return already;
+  if (typeof window !== "undefined") return null;
+
+  // A full re-hydrate, unconditionally: this bypasses the mirror's TTL and
+  // fingerprint guards, which are what let the gap persist.
+  await ensurePaymentsHydratedServer();
+  const hydrated = inMirror();
+  if (hydrated) return hydrated;
+
+  const { fetchPaymentLinkFromDb } = await import(
+    "@/lib/paymentsNormalized.server"
+  );
+  const one = await fetchPaymentLinkFromDb(id);
+  if (!one) return null;
+
+  const { setMirrorSlice } = await import("@/lib/schoolDataMirror");
+  const state = loadPayments();
+  setMirrorSlice("payments", {
+    version: 1,
+    links: [one, ...(state.links ?? []).filter((l) => l.id !== one.id)],
+  });
+  console.warn(
+    "[payments-db] pay-link recovered straight from the desk table",
+    id,
+  );
+  return inMirror();
+}
+
 export async function ensurePaymentsHydratedServer(): Promise<boolean> {
   if (typeof window !== "undefined") return false;
 
