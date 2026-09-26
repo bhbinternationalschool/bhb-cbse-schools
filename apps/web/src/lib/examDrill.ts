@@ -180,13 +180,44 @@ export function readScopeAnswer(text: string, chapters: DrillChapter[]): ScopeRe
   return { kind: "position", position: best.position };
 }
 
+/**
+ * A range: "1 to 5", "1-5", "1 se 5". The class has done UP TO the second
+ * number, and the question asks for the last chapter.
+ *
+ * 25 Sep 2026, 19:39 IST: SHIVANGI SINGH (V) answered "1 to 5 3 chapter
+ * आएंगे" and was drilled on chapter 1 alone — the first digit in the line.
+ * Her class had done five. ("3 chapter आएंगे" is how many chapters come in
+ * the paper, not how far the class has got.)
+ *
+ * "tak"/"तक" is deliberately not a separator here: it follows its number
+ * ("5 tak"), so between two numbers it would mean something else.
+ */
+const SCOPE_RANGE = /(\d+)\s*(?:-|–|—|to|se|से)\s*(\d+)/i;
+
 /** "6", "chapter 6", "६" → 6. Anything else → null, and we ask again. */
 export function parseScopeAnswer(text: string, maxPosition: number): number | null {
   const western = String(text || "").replace(/[०-९]/g, (d) => String(d.charCodeAt(0) - 0x0966));
-  const m = /(\d{1,2})/.exec(western);
+  const inRange = (n: number) => Number.isFinite(n) && n >= 1 && n <= maxPosition;
+
+  // A range is answered by its end or not at all: its first number is where
+  // the class STARTED, and drilling a child on chapter 1 because they wrote
+  // "1 to 50" is the very mistake this reads around. Asking again is safe;
+  // inventing a scope is what costs a child their evening.
+  const range = SCOPE_RANGE.exec(western);
+  if (range) {
+    const end = Number(range[2]);
+    return inRange(end) ? end : null;
+  }
+
+  // The WHOLE digit run, never a slice of it. `\d{1,2}` used to cut "303"
+  // down to "30" and hand back chapter 30 as though the child had said it:
+  // 25 Sep 2026, 18:11 IST, MOHIT KUMAR (V) typed "303" at this question and
+  // was drilled across chapters 1-30 of a 69-chapter book. A number that is
+  // not a chapter is not an answer, and the drill asks again.
+  const m = /\d+/.exec(western);
   if (!m) return null;
-  const n = Number(m[1]);
-  if (!Number.isFinite(n) || n < 1 || n > maxPosition) return null;
+  const n = Number(m[0]);
+  if (!inRange(n)) return null;
   return n;
 }
 

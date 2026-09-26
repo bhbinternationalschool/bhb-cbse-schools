@@ -92,6 +92,32 @@ assert.equal(parseScopeAnswer("12", 9), null, "past the end of the book is not a
 assert.equal(parseScopeAnswer("0", 9), null);
 assert.equal(parseScopeAnswer("dunno", 9), null);
 
+// 25 Sep 2026, 18:11 IST: MOHIT KUMAR (V) was asked how far his class had
+// got in *Know and Grow with Derek Grade 5* — a 69-chapter book, of which
+// the drill lists the first twelve — and typed "303". `\d{1,2}` cut that to
+// "30", 30 is inside 69, and he spent the evening before his General
+// Knowledge paper on chapters 1-30, eighteen of which he had never been
+// shown. A number that is not a chapter is not an answer.
+assert.equal(parseScopeAnswer("303", 69), null, "303 is not chapter 30");
+assert.equal(parseScopeAnswer("2026", 69), null, "a year is not a chapter");
+assert.equal(parseScopeAnswer("303", 400), 303, "a real 303 still reads, where the book is that long");
+assert.deepEqual(
+  readScopeAnswer("303", Array.from({ length: 69 }, (_, i) => ({ position: i + 1, name: `Ch ${i + 1}`, topics: [] }))),
+  { kind: "unclear" },
+  "and the drill asks again instead of inventing a scope",
+);
+
+// 25 Sep 2026, 19:39 IST: SHIVANGI SINGH (V) answered the same question with
+// "1 to 5 3 chapter आएंगे" and was drilled on chapter 1 — the first digit on
+// the line. Her class had done five; "3 chapter आएंगे" is how many chapters
+// come in the paper. The end of a range is how far the class has got.
+assert.equal(parseScopeAnswer("1 to 5 3 chapter आएंगे", 69), 5, "a range ends where the class got to");
+assert.equal(parseScopeAnswer("1-5", 9), 5);
+assert.equal(parseScopeAnswer("1 se 5", 9), 5);
+assert.equal(parseScopeAnswer("1 से 5", 9), 5);
+assert.equal(parseScopeAnswer("chapter 6 tak", 9), 6, "'tak' follows its number and is not a range");
+assert.equal(parseScopeAnswer("1 to 50", 9), null, "a range past the end of the book is not chapter 1");
+
 /* ── The loop ─────────────────────────────────────────────────────── */
 const s2Base: DrillState = {
   ...newDrill({ studentId: "stu_1", subjectLabel: "Hindi", paperLabel: "Hindi", paperDate: "2026-09-19", nowIso: "2026-09-18T15:00:00Z" }),
