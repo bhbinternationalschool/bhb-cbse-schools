@@ -27,7 +27,7 @@ import {
   fetchCashfreePaymentStatus,
 } from "@/lib/cashfree.server";
 import { cashfreePayPageUrl, isCashfreeOrderId } from "@/lib/cashfreeCheckout";
-import { getPaymentLink, loadPayments } from "@/lib/payments";
+import { ensurePaymentLinkHydrated } from "@/lib/paymentsPersistence";
 import { settlePaymentLinkWithWhatsApp } from "@/lib/paymentSettlement.server";
 import { recordPaymentGatewayEvent } from "@/lib/paymentsNormalized.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
@@ -260,7 +260,11 @@ export async function settleCashfreeCheckout(opts: {
   if (claimed) {
     switch (row.kind) {
       case "fee_link": {
-        const link = getPaymentLink(row.ref, loadPayments());
+        // Not `getPaymentLink(loadPayments())`: the mirror is a cache that
+        // can answer "no such link" for a link the desk table holds, and
+        // when it does, the money stays unbooked. See
+        // ensurePaymentLinkHydrated.
+        const link = await ensurePaymentLinkHydrated(row.ref);
         if (!link) {
           result = { ok: false, error: "Pay-link not found", kind: row.kind, ref: row.ref };
           break;

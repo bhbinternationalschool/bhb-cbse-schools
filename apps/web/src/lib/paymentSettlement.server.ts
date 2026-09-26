@@ -3,6 +3,7 @@
  */
 
 import { applyPaymentLink } from "@/lib/payments";
+import { ensurePaymentLinkHydrated } from "@/lib/paymentsPersistence";
 import { loadFees } from "@/lib/fees";
 import { pushFeesRemoteServer } from "@/lib/feesPersistence.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
@@ -29,6 +30,15 @@ export async function settlePaymentLinkWithWhatsApp(opts: {
   // Run): a webhook landing on a freshly started instance otherwise finds no
   // payment link and a parent's money is not booked.
   await ensureSchoolMirrorHydrated();
+
+  // The mirror above is a cache, and a stale one still answers "no such
+  // link" — which `applyPaymentLink` can only report as a failure to book
+  // money the gateway has already taken. Re-read this one link from the
+  // desk table when the mirror does not have it.
+  if (!(await ensurePaymentLinkHydrated(opts.linkId))) {
+    return { ok: false, error: "Pay-link not found" };
+  }
+
   const result = applyPaymentLink({
     linkId: opts.linkId,
     cashierName: opts.cashierName,

@@ -125,4 +125,71 @@ function bodyOf(src: string, decl: string): string {
   assert.doesNotMatch(src, /markCheckoutPaid/, "the post-hoc marker is removed");
 }
 
+/* ── a stale mirror can never answer "no such pay-link" ─────────────── */
+{
+  const persistence = read("paymentsPersistence.ts");
+  const normalized = read("paymentsNormalized.server.ts");
+  const checkouts = read("cashfreeCheckouts.server.ts");
+  const settle = read("paymentSettlement.server.ts");
+
+  // THE SECOND FAILURE OF THE SAME ₹2,500. With the voucher push in place,
+  // three settlement attempts still booked nothing: each recorded
+  // `fee_link.settlement_failed / Pay-link not found` while
+  // `payment_desk_links` held the link the whole time. The mirror the lookup
+  // read is a cache behind a 45-second TTL and a desk-table fingerprint, and
+  // its emptiness test only asks after master classes — so a slice with zero
+  // pay-links reads as healthy, and the fingerprint only moves when the table
+  // is written, which an already-created link does not do.
+  const recover = bodyOf(persistence, "export async function ensurePaymentLinkHydrated(");
+
+  const mirrorAt = recover.indexOf("inMirror()");
+  const rehydrateAt = recover.indexOf("ensurePaymentsHydratedServer(");
+  const directAt = recover.indexOf("fetchPaymentLinkFromDb");
+  assert.ok(mirrorAt >= 0, "it looks in the mirror first — the cheap answer");
+  assert.ok(
+    mirrorAt < rehydrateAt,
+    "then re-hydrates payments unconditionally, bypassing the TTL and fingerprint guards",
+  );
+  assert.ok(
+    rehydrateAt < directAt,
+    "and only then reads the single link straight from the desk table",
+  );
+  assert.match(
+    recover,
+    /setMirrorSlice\("payments"/,
+    "a recovered link is spliced INTO the mirror: applyPaymentLink loads the mirror itself, " +
+      "so handing the link back alone would not let it settle",
+  );
+  assert.match(
+    recover,
+    /\.filter\(\(l\) => l\.id !== one\.id\)/,
+    "the splice replaces only this link and keeps every other one",
+  );
+
+  // Scoped to one tenant and one link, lines included: a link settled
+  // without its lines books an amount attributable to no due.
+  const single = bodyOf(normalized, "export async function fetchPaymentLinkFromDb(");
+  assert.match(single, /\.eq\("tenant_id", tenantId\)/, "scoped to the tenant");
+  assert.match(single, /payment_desk_link_lines/, "and reads the link's lines");
+
+  // Both settlement entry points must go through it. A lookup that reads the
+  // mirror directly is the bug.
+  assert.match(
+    checkouts,
+    /const link = await ensurePaymentLinkHydrated\(row\.ref\)/,
+    "settleCashfreeCheckout resolves the link through the recovery, not from the mirror",
+  );
+  assert.doesNotMatch(
+    checkouts,
+    /getPaymentLink\(row\.ref, loadPayments\(\)\)/,
+    "the bare mirror lookup is gone, not merely wrapped",
+  );
+
+  const settleBody = bodyOf(settle, "export async function settlePaymentLinkWithWhatsApp(");
+  const guardAt = settleBody.indexOf("ensurePaymentLinkHydrated(");
+  const applyAt = settleBody.indexOf("applyPaymentLink(");
+  assert.ok(guardAt >= 0, "the shared settle function guards too — the webhook path uses it");
+  assert.ok(guardAt < applyAt, "and guards BEFORE it tries to collect");
+}
+
 console.log("  ok");

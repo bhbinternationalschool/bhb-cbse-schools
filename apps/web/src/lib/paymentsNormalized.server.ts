@@ -404,6 +404,63 @@ export async function fetchPaymentDeskFromDb(): Promise<{
   return fetchPaymentLinksFromDb();
 }
 
+/**
+ * Read ONE pay-link straight from the desk table, lines included.
+ *
+ * The settlement path must never depend on the school mirror having been
+ * hydrated: the mirror is a cache behind a 45-second TTL and a table
+ * fingerprint, and a cache that is merely stale still answers "no such
+ * link". On 26 Sep 2026 that answer lost AADVIK SINGH's Rs 2,500 three
+ * times over — Cashfree had the money, the desk table had the link, and
+ * the only thing between them was a mirror slice with zero links in it
+ * that nothing would refresh because the table had not changed since.
+ *
+ * Returns null only when this link genuinely is not in the table (or the
+ * tenant cannot be resolved, which is indistinguishable from the caller's
+ * point of view and is logged here).
+ */
+export async function fetchPaymentLinkFromDb(
+  linkId: string,
+): Promise<PaymentLink | null> {
+  const id = linkId.trim();
+  if (!id) return null;
+  const ctx = await resolveCtx();
+  if (!ctx) {
+    console.warn("[payments-db] single link fetch: no tenant", id);
+    return null;
+  }
+  const { sb, tenantId } = ctx;
+
+  const { data: header, error: hErr } = await sb
+    .from("payment_desk_links")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .eq("id", id)
+    .maybeSingle();
+  if (hErr) {
+    console.warn("[payments-db] single link fetch failed", id, hErr.message);
+    return null;
+  }
+  if (!header) return null;
+
+  // Lines are not optional: a link settled without them books an amount
+  // that cannot be attributed to any due.
+  const { data: lineRows, error: lErr } = await sb
+    .from("payment_desk_link_lines")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .eq("payment_link_id", id);
+  if (lErr) {
+    console.warn("[payments-db] single link lines failed", id, lErr.message);
+    return null;
+  }
+
+  return rowToLink(
+    header as Record<string, unknown>,
+    (lineRows ?? []) as Record<string, unknown>[],
+  );
+}
+
 export async function pushPaymentLinkToDb(
   link: PaymentLink,
 ): Promise<{ ok: boolean; error?: string }> {
