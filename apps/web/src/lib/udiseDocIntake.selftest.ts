@@ -17,6 +17,8 @@ import {
   renderPaymentProofAck,
   renderPaymentProofOfficeAlert,
   documentRouteFor,
+  officeDocNoticeTitle,
+  DOC_TYPE_LABEL,
   renderUnreadableAck,
   renderUnrecognisedAck,
   udiseDocAuditDescriptor,
@@ -489,5 +491,39 @@ assert.equal(
   resolveTargetChildren({ children: [thisSession[0]!], extract: aadhaarFor("Someone Else"), caption: "" }).length,
   1,
 );
+
+/* ── the title the office reads ───────────────────────────────────── */
+//
+// 25 Sep 2026, 08:27 IST: MR. MANOJ KUMAR CHAUDHARI sent a payment
+// screenshot for MANAS CHAUDHARI (LKG-A). The ERP inbox row said
+// "UDISE+ document received" over a body that began "💸 *Payment proof* ·
+// MANAS CHAUDHARI (LKG-A)". Every document type arrived under that one
+// hardcoded title, while the WhatsApp message beside it used the right one.
+assert.equal(officeDocNoticeTitle("Payment proof"), "Payment proof received");
+assert.equal(officeDocNoticeTitle(DOC_TYPE_LABEL.payment_proof), "Payment proof received");
+assert.equal(officeDocNoticeTitle(DOC_TYPE_LABEL.aadhaar), "Aadhaar card received");
+assert.equal(officeDocNoticeTitle(DOC_TYPE_LABEL.birth_certificate), "Birth certificate received");
+assert.equal(officeDocNoticeTitle(DOC_TYPE_LABEL.address_proof), "Address proof received");
+assert.equal(officeDocNoticeTitle(DOC_TYPE_LABEL.other), "Document received");
+// A missing label must never render "undefined received".
+for (const empty of [undefined, null, "", "   "]) {
+  assert.equal(officeDocNoticeTitle(empty), "Document received", String(empty));
+}
+// The title and the body agree, which is the whole point: the office alert
+// for MANAS's screenshot leads with the same label the title now carries.
+const manas = renderPaymentProofOfficeAlert({
+  payment: pay.payment!,
+  match: { kind: "none", reason: "no_receipt_matches" },
+  childName: "MANAS CHAUDHARI",
+  classLabel: "LKG-A",
+  guardianName: "MR. MANOJ KUMAR CHAUDHARI",
+  openDuesPaise: 0,
+  fileUrl: null,
+});
+assert.ok(
+  manas.text.startsWith(`💸 *${DOC_TYPE_LABEL.payment_proof}* · MANAS CHAUDHARI (LKG-A)`),
+  "the body leads with the label the title now carries",
+);
+assert.equal(officeDocNoticeTitle(DOC_TYPE_LABEL.payment_proof), "Payment proof received");
 
 console.log("ok");
