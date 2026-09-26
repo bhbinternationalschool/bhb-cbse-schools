@@ -651,6 +651,33 @@ assert.equal(bare.asked[0]!.answer, undefined);
   // "I don't know" is about OUR question — help, never a new ask.
   assert.equal(classifyDrillReply("mujhe nahi pata ye kaise hota hai"), "help");
 
+  // 25 Sep 2026, 19:41 IST: SHIVANGI SINGH (V), on Question 3 — the smallest
+  // state in India by area — answered "मतलब सबसे छोटा राज्य सिक्किम है
+  // सिक्किम". *So the smallest state is Sikkim, Sikkim.* An attempt, and a
+  // wrong one worth teaching: "मतलब" opening a sentence is "so", not "what
+  // does it mean". It was read as a question of her own, so it was never
+  // marked and Question 3 came back verbatim — four times in three minutes.
+  // She never reached Question 4.
+  for (const a of [
+    "मतलब सबसे छोटा राज्य सिक्किम है सिक्किम",
+    "matlab iska answer rajasthan hai",
+    "मतलब यह गोवा है",
+  ]) {
+    assert.equal(looksLikeOwnQuestion(a), false, a);
+    assert.equal(classifyDrillReply(a), "answer", a);
+  }
+
+  // A real ask that opens the same way is still an ask — only the leading
+  // word is discounted, and never when a question mark ends the line.
+  for (const q of [
+    "मतलब क्या है इसका",
+    "matlab kya hota hai iska",
+    "मतलब सबसे छोटा राज्य कौन सा है",
+    "मतलब सबसे छोटा राज्य सिक्किम है?",
+  ]) {
+    assert.equal(looksLikeOwnQuestion(q), true, q);
+  }
+
   // The drill's question comes back underneath the answer, with its number.
   const aside = renderAside({
     answer: "समुच्चयबोधक दो शब्दों को जोड़ता है, जैसे 'और'।",
