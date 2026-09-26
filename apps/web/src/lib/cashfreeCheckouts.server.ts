@@ -264,7 +264,12 @@ export async function settleCashfreeCheckout(opts: {
         // can answer "no such link" for a link the desk table holds, and
         // when it does, the money stays unbooked. See
         // ensurePaymentLinkHydrated.
-        const link = await ensurePaymentLinkHydrated(row.ref);
+        // authoritative: the desk table decides whether this link is already
+        // paid, not a cached copy. A stale `paid` in the mirror made the
+        // settlement skip a real payment as already done.
+        const link = await ensurePaymentLinkHydrated(row.ref, {
+          authoritative: true,
+        });
         if (!link) {
           result = { ok: false, error: "Pay-link not found", kind: row.kind, ref: row.ref };
           break;

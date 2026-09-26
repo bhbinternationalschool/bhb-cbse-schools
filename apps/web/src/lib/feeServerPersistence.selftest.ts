@@ -177,7 +177,7 @@ function bodyOf(src: string, decl: string): string {
   // mirror directly is the bug.
   assert.match(
     checkouts,
-    /const link = await ensurePaymentLinkHydrated\(row\.ref\)/,
+    /const link = await ensurePaymentLinkHydrated\(\s*row\.ref/,
     "settleCashfreeCheckout resolves the link through the recovery, not from the mirror",
   );
   assert.doesNotMatch(
@@ -341,6 +341,53 @@ function bodyOf(src: string, decl: string): string {
     /expectedAmountPaise: row\.amountPaise/,
     "settleCashfreeCheckout passes what Cashfree took",
   );
+}
+
+/* ── a cached "paid" can never make a real payment be skipped ────────── */
+{
+  const persistence = read("paymentsPersistence.ts");
+  const checkouts = read("cashfreeCheckouts.server.ts");
+  const settle = read("paymentSettlement.server.ts");
+
+  // THE FIFTH CAUSE. On the fourth replay attempt the settlement recorded
+  // fee_link.already_paid / ignored carrying RCV-00648, while
+  // payment_desk_links plainly read status 'open'. The instance had cached the
+  // link as paid minutes before the row was put back, and the recovery added
+  // earlier only re-reads a link the mirror is MISSING — a stale copy it holds
+  // is served forever, because nothing checks a hit for freshness.
+  //
+  // Settling money reads the desk table and makes that the mirror's copy.
+  const recover = bodyOf(persistence, "export async function ensurePaymentLinkHydrated(");
+  const authAt = recover.indexOf("opts?.authoritative");
+  const mirrorAt = recover.indexOf("const already = inMirror()");
+  assert.ok(authAt >= 0, "the recovery takes an authoritative mode");
+  assert.ok(
+    authAt < mirrorAt,
+    "and in that mode the desk table is read BEFORE the mirror is consulted — " +
+      "after would defeat the point entirely",
+  );
+  assert.match(
+    recover.slice(authAt, mirrorAt),
+    /spliceLinkFromDb\(/,
+    "by reading the row and replacing the mirror's copy with it",
+  );
+  // A failed read must not lose the payment.
+  assert.match(
+    recover.slice(authAt, mirrorAt),
+    /if \(fresh\) return fresh;/,
+    "an unreadable row falls through to the mirror rather than refusing outright",
+  );
+
+  for (const [name, src] of [
+    ["settleCashfreeCheckout", checkouts],
+    ["settlePaymentLinkWithWhatsApp", settle],
+  ] as const) {
+    assert.match(
+      src,
+      /ensurePaymentLinkHydrated\([\s\S]{0,80}authoritative: true/,
+      `${name} resolves the link authoritatively — money is never settled off a cache`,
+    );
+  }
 }
 
 console.log("  ok");

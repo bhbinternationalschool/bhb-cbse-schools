@@ -138,12 +138,37 @@ async function hydratePaymentsOnce(): Promise<boolean> {
  */
 export async function ensurePaymentLinkHydrated(
   linkId: string,
+  opts?: {
+    /**
+     * Take the desk table's row as the truth and replace the mirror's copy
+     * with it, instead of accepting whatever the mirror holds.
+     *
+     * Settling money must do this. The mirror is a per-instance cache with no
+     * freshness check on a link it already has, so a copy taken before the
+     * row changed is served indefinitely — and a stale `paid` makes the
+     * settlement skip a payment as already done.
+     *
+     * On 26 Sep 2026 that ignored AADVIK SINGH's ₹2,500 on the fourth
+     * attempt: the instance had cached the link as paid with RCV-00648
+     * minutes before the row was put back to open, so the replay recorded
+     * fee_link.already_paid and booked nothing, while payment_desk_links
+     * plainly read open.
+     */
+    authoritative?: boolean;
+  },
 ): Promise<PaymentLink | null> {
   const id = linkId.trim();
   if (!id) return null;
 
   const { getPaymentLink } = await import("@/lib/payments");
   const inMirror = () => getPaymentLink(id, loadPayments()) ?? null;
+
+  if (opts?.authoritative && typeof window === "undefined") {
+    const fresh = await spliceLinkFromDb(id);
+    if (fresh) return fresh;
+    // The row could not be read. Fall through rather than refuse: the mirror's
+    // copy, stale or not, is better than losing the payment outright.
+  }
 
   const already = inMirror();
   if (already) return already;
@@ -155,6 +180,18 @@ export async function ensurePaymentLinkHydrated(
   const hydrated = inMirror();
   if (hydrated) return hydrated;
 
+  const recovered = await spliceLinkFromDb(id);
+  if (recovered) {
+    console.warn(
+      "[payments-db] pay-link recovered straight from the desk table",
+      id,
+    );
+  }
+  return recovered;
+}
+
+/** Read one link from the desk table and make it the mirror's copy. */
+async function spliceLinkFromDb(id: string): Promise<PaymentLink | null> {
   const { fetchPaymentLinkFromDb } = await import(
     "@/lib/paymentsNormalized.server"
   );
@@ -167,11 +204,7 @@ export async function ensurePaymentLinkHydrated(
     version: 1,
     links: [one, ...(state.links ?? []).filter((l) => l.id !== one.id)],
   });
-  console.warn(
-    "[payments-db] pay-link recovered straight from the desk table",
-    id,
-  );
-  return inMirror();
+  return one;
 }
 
 export async function ensurePaymentsHydratedServer(): Promise<boolean> {
