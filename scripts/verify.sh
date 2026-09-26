@@ -134,6 +134,7 @@ SELFTESTS=(
   test:homework-submission
   test:exam-drill
   test:drill-skills
+  test:fee-server-persistence
   test:exam-seating
   test:roster-name-case
   test:review-demo-records

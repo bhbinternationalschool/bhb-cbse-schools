@@ -167,15 +167,51 @@ export async function createCashfreeCheckout(input: CreateCheckoutInput): Promis
   };
 }
 
-async function markCheckoutPaid(orderId: string, paymentRef: string): Promise<void> {
+/**
+ * Take the right to settle this order, atomically, BEFORE fulfilling it.
+ *
+ * Cashfree delivers a payment more than once — on 26 Sep 2026 the same
+ * payment arrived twice, 52 milliseconds apart, and both handlers allocated
+ * the SAME receipt number (RCV-00648) because neither could see the other.
+ * Marking the checkout paid AFTER fulfilment, as this used to, cannot stop
+ * that: by then both have already collected the money.
+ *
+ * The `neq` makes the flip to "paid" the claim itself. Postgres serialises
+ * the two updates, so exactly one returns a row and exactly one settles.
+ * Returns false when somebody else holds the claim — the caller then reports
+ * `alreadyPaid` rather than collecting a second time.
+ */
+async function claimCheckoutForSettlement(orderId: string, paymentRef: string): Promise<boolean> {
   const ctx = await getServerTenantContext();
-  if (!ctx) return;
-  await ctx.sb
+  if (!ctx) return false;
+  const { data } = await ctx.sb
     .from("cashfree_checkouts")
     .update({ status: "paid", payment_ref: paymentRef, paid_at: new Date().toISOString() })
     .eq("tenant_id", ctx.tenantId)
     .eq("order_id", orderId)
-    .neq("status", "paid");
+    .neq("status", "paid")
+    .select("order_id");
+  return Array.isArray(data) && data.length > 0;
+}
+
+/**
+ * Give the claim back when fulfilment failed, so a retry can settle.
+ *
+ * Without this a transient failure would leave the checkout marked paid with
+ * nothing collected, and the money would never be booked — the worst of the
+ * two outcomes, because it is silent.
+ */
+async function releaseCheckoutClaim(
+  orderId: string,
+  previousStatus: CashfreeCheckoutRow["status"],
+): Promise<void> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return;
+  await ctx.sb
+    .from("cashfree_checkouts")
+    .update({ status: previousStatus === "paid" ? "active" : previousStatus, paid_at: null })
+    .eq("tenant_id", ctx.tenantId)
+    .eq("order_id", orderId);
 }
 
 export type SettleResult =
@@ -217,69 +253,74 @@ export async function settleCashfreeCheckout(opts: {
   }
 
   await ensureSchoolMirrorHydrated();
-  let result: SettleResult;
-  switch (row.kind) {
-    case "fee_link": {
-      const link = getPaymentLink(row.ref, loadPayments());
-      if (!link) {
-        result = { ok: false, error: "Pay-link not found", kind: row.kind, ref: row.ref };
+
+  // One settlement per order. See claimCheckoutForSettlement.
+  const claimed = await claimCheckoutForSettlement(opts.orderId, paymentRef);
+  let result: SettleResult = { ok: true, alreadyPaid: true, kind: row.kind, ref: row.ref };
+  if (claimed) {
+    switch (row.kind) {
+      case "fee_link": {
+        const link = getPaymentLink(row.ref, loadPayments());
+        if (!link) {
+          result = { ok: false, error: "Pay-link not found", kind: row.kind, ref: row.ref };
+          break;
+        }
+        if (link.status === "paid") {
+          result = { ok: true, alreadyPaid: true, kind: row.kind, ref: row.ref, receiptNo: link.receiptNo ?? undefined };
+          break;
+        }
+        const r = await settlePaymentLinkWithWhatsApp({
+          linkId: link.id,
+          cashierName: opts.source === "webhook" ? "Cashfree webhook" : "Cashfree return",
+          upiRef: paymentRef,
+          sendWhatsApp: true,
+        });
+        result = r.ok
+          ? { ok: true, alreadyPaid: false, kind: row.kind, ref: row.ref, receiptNo: r.receiptNo }
+          : { ok: false, error: r.error, kind: row.kind, ref: row.ref };
         break;
       }
-      if (link.status === "paid") {
-        result = { ok: true, alreadyPaid: true, kind: row.kind, ref: row.ref, receiptNo: link.receiptNo ?? undefined };
+      case "registration": {
+        const state = loadAdmissions();
+        const payment = (state.registrationPayments || []).find((p) => p.id === row.ref);
+        if (!payment) {
+          result = { ok: false, error: "No matching registration payment", kind: row.kind, ref: row.ref };
+          break;
+        }
+        if (payment.status === "paid") {
+          result = { ok: true, alreadyPaid: true, kind: row.kind, ref: row.ref, receiptNo: payment.code };
+          break;
+        }
+        // Gateway money: it waits in clearing until the settlement moves it.
+        const captured = captureRegistrationPayment(state, payment.id, paymentRef, "cashfree");
+        if (!captured.ok) {
+          result = { ok: false, error: captured.reason, kind: row.kind, ref: row.ref };
+          break;
+        }
+        saveAdmissions(captured.state);
+        result = { ok: true, alreadyPaid: false, kind: row.kind, ref: row.ref, receiptNo: payment.code };
         break;
       }
-      const r = await settlePaymentLinkWithWhatsApp({
-        linkId: link.id,
-        cashierName: opts.source === "webhook" ? "Cashfree webhook" : "Cashfree return",
-        upiRef: paymentRef,
-        sendWhatsApp: true,
-      });
-      result = r.ok
-        ? { ok: true, alreadyPaid: false, kind: row.kind, ref: row.ref, receiptNo: r.receiptNo }
-        : { ok: false, error: r.error, kind: row.kind, ref: row.ref };
-      break;
+      case "event_fee": {
+        const { settleEventFee } = await import("@/lib/events/interschool.server");
+        const r = await settleEventFee({ participantId: row.ref, paymentRef, orderId: opts.orderId });
+        result = r.ok
+          ? { ok: true, alreadyPaid: !!r.alreadyPaid, kind: row.kind, ref: row.ref }
+          : { ok: false, error: r.error || "Event fee settle failed", kind: row.kind, ref: row.ref };
+        break;
+      }
+      case "tutor_pass": {
+        const { activateTutorPassOrder } = await import("@/lib/tutorPasses.server");
+        const r = await activateTutorPassOrder({ id: row.ref, paymentRef });
+        result = r.ok
+          ? { ok: true, alreadyPaid: r.alreadyPaid, kind: row.kind, ref: row.ref, endsAt: r.endsAt }
+          : { ok: false, error: r.error, kind: row.kind, ref: row.ref };
+        break;
+      }
     }
-    case "registration": {
-      const state = loadAdmissions();
-      const payment = (state.registrationPayments || []).find((p) => p.id === row.ref);
-      if (!payment) {
-        result = { ok: false, error: "No matching registration payment", kind: row.kind, ref: row.ref };
-        break;
-      }
-      if (payment.status === "paid") {
-        result = { ok: true, alreadyPaid: true, kind: row.kind, ref: row.ref, receiptNo: payment.code };
-        break;
-      }
-      // Gateway money: it waits in clearing until the settlement moves it.
-      const captured = captureRegistrationPayment(state, payment.id, paymentRef, "cashfree");
-      if (!captured.ok) {
-        result = { ok: false, error: captured.reason, kind: row.kind, ref: row.ref };
-        break;
-      }
-      saveAdmissions(captured.state);
-      result = { ok: true, alreadyPaid: false, kind: row.kind, ref: row.ref, receiptNo: payment.code };
-      break;
-    }
-    case "event_fee": {
-      const { settleEventFee } = await import("@/lib/events/interschool.server");
-      const r = await settleEventFee({ participantId: row.ref, paymentRef, orderId: opts.orderId });
-      result = r.ok
-        ? { ok: true, alreadyPaid: !!r.alreadyPaid, kind: row.kind, ref: row.ref }
-        : { ok: false, error: r.error || "Event fee settle failed", kind: row.kind, ref: row.ref };
-      break;
-    }
-    case "tutor_pass": {
-      const { activateTutorPassOrder } = await import("@/lib/tutorPasses.server");
-      const r = await activateTutorPassOrder({ id: row.ref, paymentRef });
-      result = r.ok
-        ? { ok: true, alreadyPaid: r.alreadyPaid, kind: row.kind, ref: row.ref, endsAt: r.endsAt }
-        : { ok: false, error: r.error, kind: row.kind, ref: row.ref };
-      break;
-    }
+    if (!result.ok) await releaseCheckoutClaim(opts.orderId, row.status);
   }
 
-  if (result.ok) await markCheckoutPaid(opts.orderId, paymentRef);
   await recordPaymentGatewayEvent({
     paymentLinkId: row.kind === "fee_link" ? row.ref : null,
     provider: "cashfree",
