@@ -7,6 +7,11 @@ export type AutomationAudiencePreset = {
   /** Shown under the label in the picker */
   hint: string;
   modules: AutomationModule[] | "*";
+  /**
+   * The server can build this list itself (so a scheduled rule really
+   * sends). Presets without it are labels for a human-run send only.
+   */
+  automated?: boolean;
 };
 
 export const AUTOMATION_AUDIENCE_PRESETS: AutomationAudiencePreset[] = [
@@ -14,15 +19,17 @@ export const AUTOMATION_AUDIENCE_PRESETS: AutomationAudiencePreset[] = [
     id: "fee_overdue",
     label: "Overdue fee households",
     summary: "Households with overdue fees (stages S1–S4)",
-    hint: "Parents with unpaid balances past due date",
+    hint: "Parents with unpaid balances past due date — one message per family, from the Fees → Defaulters ledger",
     modules: ["fees"],
+    automated: true,
   },
   {
     id: "fee_due_soon",
     label: "Fees due in next 3 days",
     summary: "Dues within next 3 days",
-    hint: "Soft reminder before due date",
+    hint: "Families with a due date in the next 3 days and nothing overdue",
     modules: ["fees"],
+    automated: true,
   },
   {
     id: "admission_followup",
@@ -135,4 +142,13 @@ export function findAudiencePresetBySummary(
       (p) => p.id !== "custom" && p.summary.toLowerCase() === needle,
     ) || null
   );
+}
+
+export function audiencePresetById(id: string): AutomationAudiencePreset | null {
+  return AUTOMATION_AUDIENCE_PRESETS.find((p) => p.id === id) || null;
+}
+
+/** Can the scheduler build this audience on its own? */
+export function audienceIsAutomated(id: string): boolean {
+  return !!audiencePresetById(id)?.automated;
 }

@@ -15,3 +15,15 @@ export const autoBtnDanger =
 
 export const autoBtnSuccess =
   "rounded-lg bg-emerald-700 px-3 py-1.5 text-[11px] font-semibold text-white";
+
+/** "10 Sept 2026, 10:00 am" in school time, for anything the screen dates. */
+export function formatIst(iso: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return new Intl.DateTimeFormat("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "Asia/Kolkata",
+  }).format(d);
+}

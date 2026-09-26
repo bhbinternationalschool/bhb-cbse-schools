@@ -2,13 +2,13 @@
 
 import { useMemo, useState } from "react";
 import {
-  createAutomationRule,
   moduleLabelAuto,
   type AutomationActionType,
   type AutomationModule,
-  type AutomationState,
   type AutomationTriggerType,
+  type CreateAutomationRuleOpts,
 } from "@/lib/automation";
+import { findAudiencePresetBySummary } from "@/lib/automationAudience";
 import { loadWaTemplates } from "@/lib/waTemplates";
 import { WaTemplateVariablesPicker } from "@/components/masters/WaTemplateVariablesPicker";
 import { AutomationSchedulePicker } from "./AutomationSchedulePicker";
@@ -38,17 +38,17 @@ const MODULES: AutomationModule[] = [
 ];
 
 export function AutomationCreateView({
-  state,
   readOnly,
   notice,
+  busy,
   onBack,
-  onCreated,
+  onCreate,
 }: {
-  state: AutomationState;
   readOnly: boolean;
   notice: string | null;
+  busy: boolean;
   onBack: () => void;
-  onCreated: (nextState: AutomationState, ruleId: string) => void;
+  onCreate: (opts: CreateAutomationRuleOpts) => void | Promise<void>;
 }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -84,7 +84,7 @@ export function AutomationCreateView({
 
   function handleCreate() {
     if (readOnly || !name.trim()) return;
-    const { state: nextState, rule } = createAutomationRule(state, {
+    void onCreate({
       name,
       description,
       module,
@@ -98,12 +98,12 @@ export function AutomationCreateView({
         actionType === "whatsapp_template" ? templateFamilyKey : "",
       templateLanguage,
       audienceSummary,
+      audienceKey: findAudiencePresetBySummary(audienceSummary)?.id || "",
       enabled: false,
     });
-    onCreated(nextState, rule.id);
   }
 
-  const canCreate = !readOnly && name.trim().length > 0;
+  const canCreate = !readOnly && !busy && name.trim().length > 0;
 
   return (
     <div className="space-y-4">
@@ -264,7 +264,7 @@ export function AutomationCreateView({
             className={autoBtnTeal}
             onClick={handleCreate}
           >
-            Create rule
+            {busy ? "Creating…" : "Create rule"}
           </button>
         </div>
 

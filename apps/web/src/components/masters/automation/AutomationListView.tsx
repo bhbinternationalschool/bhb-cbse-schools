@@ -4,12 +4,15 @@ import { useMemo, useState } from "react";
 import {
   moduleLabelAuto,
   pendingApprovals,
+  ruleConfigProblem,
   type AutomationModule,
   type AutomationRule,
   type AutomationState,
 } from "@/lib/automation";
+import { audienceIsAutomated } from "@/lib/automationAudience";
 import { describeCronExpr, describeIntervalMinutes } from "@/lib/automationSchedule";
 import { audienceSummaryLabel } from "./AutomationAudiencePicker";
+import { RecipientList } from "./AutomationPreviewCard";
 import {
   MastersEmptyRow,
   MastersTableCard,
@@ -20,6 +23,7 @@ import {
   autoBtnSuccess,
   autoBtnDanger,
   autoInp,
+  formatIst,
 } from "./automationUi";
 
 type ListTab = "active" | "paused" | "approvals" | "runs";
@@ -37,26 +41,43 @@ function scheduleLabel(r: AutomationRule): string {
   return r.triggerType;
 }
 
+function ruleHealth(r: AutomationRule): { label: string; tone: string } {
+  if (!r.enabled) return { label: "paused", tone: "bg-slate-100 text-slate-600" };
+  const problem = ruleConfigProblem(r);
+  if (problem) return { label: "needs setup", tone: "bg-amber-100 text-amber-800" };
+  if (!audienceIsAutomated(r.audienceKey)) {
+    return { label: "label only", tone: "bg-amber-100 text-amber-800" };
+  }
+  return {
+    label: r.executionMode === "auto" ? "auto-send" : "approval-first",
+    tone: r.executionMode === "auto" ? "bg-emerald-100 text-emerald-800" : "bg-sky-100 text-sky-800",
+  };
+}
+
 export function AutomationListView({
   state,
   readOnly,
   notice,
+  busy,
   onCreate,
   onEdit,
-  onEvaluate,
-  onDispatchApproval,
-  onRejectApproval,
-  onSnoozeApproval,
+  onRefresh,
+  onRunNow,
+  onApprove,
+  onReject,
+  onSnooze,
 }: {
   state: AutomationState;
   readOnly: boolean;
   notice: string | null;
+  busy: string | null;
   onCreate: () => void;
   onEdit: (id: string) => void;
-  onEvaluate: () => void;
-  onDispatchApproval: (id: string) => void;
-  onRejectApproval: (id: string) => void;
-  onSnoozeApproval: (id: string) => void;
+  onRefresh: () => void;
+  onRunNow: () => void;
+  onApprove: (id: string) => void;
+  onReject: (id: string) => void;
+  onSnooze: (id: string) => void;
 }) {
   const [tab, setTab] = useState<ListTab>("active");
   const [moduleFilter, setModuleFilter] = useState<AutomationModule | "all">(
@@ -65,6 +86,7 @@ export function AutomationListView({
   const [q, setQ] = useState("");
 
   const pending = pendingApprovals(state);
+  const decided = state.approvals.filter((a) => a.status !== "pending").slice(0, 15);
   const activeCount = state.rules.filter((r) => r.enabled).length;
   const pausedCount = state.rules.filter((r) => !r.enabled).length;
 
@@ -95,9 +117,11 @@ export function AutomationListView({
             Automation
           </h2>
           <p className="mt-1 max-w-2xl text-[12px] text-[var(--muted)]">
-            Whole-ERP rules. Default execution is{" "}
-            <strong>approval-first</strong>; enable auto-run only after Mark
-            tested. Last tick: {state.lastTickAt || "never"}
+            Scheduled WhatsApp rules, run by the server every 30 minutes
+            (08:00–19:59 IST). <strong>Approval-first</strong> rules put a
+            card in Approvals and wait; <strong>auto-send</strong> rules send
+            by themselves. Last check:{" "}
+            {state.lastTickAt ? `${formatIst(state.lastTickAt)} IST` : "never"}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -114,13 +138,29 @@ export function AutomationListView({
           >
             + New rule
           </button>
+          <button
+            type="button"
+            className={autoBtnOutline}
+            disabled={busy !== null}
+            onClick={onRefresh}
+          >
+            Refresh
+          </button>
           {!readOnly ? (
             <button
               type="button"
               className={autoBtnOutline}
-              onClick={onEvaluate}
+              disabled={busy !== null}
+              onClick={() => {
+                if (
+                  window.confirm(
+                    "Run every enabled rule now? Approval-first rules will raise cards; AUTO rules will SEND immediately.",
+                  )
+                )
+                  onRunNow();
+              }}
             >
-              Run evaluation now
+              {busy === "run" ? "Running…" : "Run enabled rules now"}
             </button>
           ) : null}
         </div>
@@ -211,22 +251,21 @@ export function AutomationListView({
                           <span className="text-[13px] font-semibold text-[var(--brand-deep)]">
                             {r.name}
                           </span>
-                          <span
-                            className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                              r.enabled
-                                ? "bg-emerald-100 text-emerald-800"
-                                : "bg-slate-100 text-slate-600"
-                            }`}
-                          >
-                            {r.enabled ? "ON" : "OFF"}
-                          </span>
-                          <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-slate-600">
-                            {r.executionMode}
-                          </span>
+                          {(() => {
+                            const h = ruleHealth(r);
+                            return (
+                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${h.tone}`}>
+                                {h.label}
+                              </span>
+                            );
+                          })()}
                         </div>
                         <p className="mt-0.5 truncate text-[11px] text-[var(--muted)]">
                           {moduleLabelAuto(r.module)} · {scheduleLabel(r)} ·{" "}
                           {audienceSummaryLabel(r.audienceSummary)}
+                          {r.enabled && r.nextRunAt
+                            ? ` · next ${formatIst(r.nextRunAt)}`
+                            : ""}
                         </p>
                       </div>
                       <span className={autoBtnOutline}>Open</span>
@@ -243,7 +282,7 @@ export function AutomationListView({
         <MastersTableCard title="Approval queue">
           {pending.length === 0 ? (
             <MastersEmptyRow
-              label="No pending approvals. Run evaluation on enabled rules."
+              label="No pending approvals. Approval-first rules add a card here at their scheduled time."
             />
           ) : (
             <ul className="divide-y divide-[var(--border)]">
@@ -254,37 +293,48 @@ export function AutomationListView({
                       {a.ruleName}
                     </p>
                     <p className="text-[11px] text-[var(--muted)]">
-                      {a.templateFamilyKey || "—"} · {a.templateLanguage} ·{" "}
-                      {a.audienceCount} recipients ·{" "}
-                      {new Date(a.createdAt).toLocaleString()}
+                      {a.templateFamilyKey || "—"} · {a.audienceCount} famil
+                      {a.audienceCount === 1 ? "y" : "ies"} · raised{" "}
+                      {formatIst(a.createdAt)} IST
                     </p>
+                    {a.audienceNote ? (
+                      <p className="text-[11px] text-[var(--muted)]">{a.audienceNote}</p>
+                    ) : null}
                   </div>
                   <pre className="whitespace-pre-wrap rounded-lg bg-[var(--surface-sunken)] p-2 text-[11px]">
                     {a.previewBody}
                   </pre>
-                  <p className="text-[10px] text-[var(--muted)]">
-                    Samples: {a.sampleRecipients.join(", ")}
-                  </p>
+                  <RecipientList recipients={a.dispatchPayload} limit={8} />
                   {!readOnly ? (
                     <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
                         className={autoBtnSuccess}
-                        onClick={() => onDispatchApproval(a.id)}
+                        disabled={busy !== null}
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              `Send this WhatsApp to ${a.audienceCount} famil${a.audienceCount === 1 ? "y" : "ies"} now?`,
+                            )
+                          )
+                            onApprove(a.id);
+                        }}
                       >
-                        Approve & send
+                        {busy === "approve" ? "Sending…" : "Approve & send"}
                       </button>
                       <button
                         type="button"
                         className={autoBtnDanger}
-                        onClick={() => onRejectApproval(a.id)}
+                        disabled={busy !== null}
+                        onClick={() => onReject(a.id)}
                       >
                         Reject
                       </button>
                       <button
                         type="button"
                         className={autoBtnOutline}
-                        onClick={() => onSnoozeApproval(a.id)}
+                        disabled={busy !== null}
+                        onClick={() => onSnooze(a.id)}
                       >
                         Snooze 24h
                       </button>
@@ -294,6 +344,48 @@ export function AutomationListView({
               ))}
             </ul>
           )}
+        </MastersTableCard>
+      ) : null}
+
+      {tab === "approvals" && decided.length > 0 ? (
+        <MastersTableCard title="Recently decided">
+          <ul className="divide-y divide-[var(--border)]">
+            {decided.map((a) => (
+              <li key={a.id} className="space-y-1 px-3 py-2 text-[12px]">
+                <p>
+                  <span className="font-semibold text-[var(--brand-deep)]">{a.ruleName}</span>
+                  {" · "}
+                  <span
+                    className={
+                      a.status === "dispatched"
+                        ? "text-emerald-800"
+                        : a.status === "failed"
+                          ? "text-rose-700"
+                          : "text-[var(--muted)]"
+                    }
+                  >
+                    {a.status}
+                  </span>
+                  {a.status === "dispatched" || a.status === "failed"
+                    ? ` · ${a.sentCount} sent${a.failedCount ? `, ${a.failedCount} failed` : ""}`
+                    : ""}
+                  {a.decidedBy ? ` · by ${a.decidedBy}` : ""}
+                  {a.dispatchedAt || a.decidedAt
+                    ? ` · ${formatIst(a.dispatchedAt || a.decidedAt)}`
+                    : ""}
+                  {a.error ? <span className="text-rose-700"> — {a.error}</span> : null}
+                </p>
+                {a.results.length ? (
+                  <details>
+                    <summary className="cursor-pointer text-[11px] text-[var(--muted)]">
+                      Per-family result
+                    </summary>
+                    <RecipientList recipients={a.dispatchPayload} results={a.results} limit={8} />
+                  </details>
+                ) : null}
+              </li>
+            ))}
+          </ul>
         </MastersTableCard>
       ) : null}
 
@@ -307,11 +399,15 @@ export function AutomationListView({
                 const rule = state.rules.find((x) => x.id === r.ruleId);
                 return (
                   <li key={r.id} className="px-3 py-2 text-[12px]">
+                    <span className="text-[var(--muted)]">{formatIst(r.startedAt)}</span>{" · "}
                     <span className="font-semibold text-[var(--brand-deep)]">
                       {rule?.name || r.ruleId}
                     </span>{" "}
-                    · {r.status} · proposed {r.stats.proposed} · dispatched{" "}
-                    {r.stats.dispatched}
+                    · <span className={r.status === "failed" ? "text-rose-700 font-semibold" : ""}>{r.status}</span>
+                    {r.stats.proposed ? ` · ${r.stats.proposed} proposed` : ""}
+                    {r.stats.dispatched ? ` · ${r.stats.dispatched} sent` : ""}
+                    {r.stats.failed ? ` · ${r.stats.failed} failed` : ""}
+                    {r.notes ? <span className="text-[var(--muted)]"> · {r.notes}</span> : null}
                     {r.error ? (
                       <span className="text-rose-700"> — {r.error}</span>
                     ) : null}

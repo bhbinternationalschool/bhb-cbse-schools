@@ -1,31 +1,31 @@
 /**
- * Automation tick — evaluate due rules (approval-first by default).
- * Guard: WA_DISPATCH_SECRET or CRON_SECRET via x-wa-dispatch-secret / x-cron-secret / Authorization Bearer.
- * POST body: { state?: AutomationState, forceRuleIds?: string[] }
- * With no body.state (the Cloud Scheduler path) the tick loads the tenant's
- * automation state from Supabase, evaluates it server-side, and persists the
- * result back — an empty POST must never evaluate an empty ruleset.
+ * Automation tick — the Cloud Scheduler entry point (`bhb-wa-automation-tick`,
+ * every 30 minutes 08:00–19:59 IST; see scripts/setup-cloud-scheduler.sh).
+ *
+ * Guard: WA_DISPATCH_SECRET or CRON_SECRET via x-wa-dispatch-secret /
+ * x-cron-secret / Authorization Bearer.
+ *
+ * POST body (all optional): { forceRuleIds?: string[], dryRun?: boolean }
+ *
+ * Each tick loads the school's rules from Supabase, builds the REAL audience
+ * of every rule that is due (fee defaulters from the Fees desk, etc.), raises
+ * an approval card for approval-first rules, and sends auto-mode rules on
+ * the spot. A read failure returns 500 — Cloud Scheduler then shows the
+ * failure and retries — rather than evaluating an empty rule-set.
  */
 
 import { NextResponse } from "next/server";
 import { requireJobSecret } from "@/lib/apiRouteAuth.server";
-import {
-  evaluateAutomationTick,
-  normalizeAutomationState,
-  pendingApprovals,
-  type AutomationState,
-} from "@/lib/automation";
-import {
-  loadAutomationFromDb,
-  saveAutomationToDb,
-} from "@/lib/automationState.server";
+import { runServerAutomationTick } from "@/lib/automationEngine.server";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 export async function GET() {
   return NextResponse.json({
     service: "wa-automation-tick",
-    note: "POST { state?, forceRuleIds? } — evaluates DB-loaded automation state (or the posted state) and persists the result. Wire Cloud Scheduler / cron every 5–15 min.",
+    note: "POST { forceRuleIds?, dryRun? } — evaluates the school's automation rules from the database, raises approvals, sends auto-mode rules, persists. Wired to Cloud Scheduler every 30 min 08:00–19:59 IST.",
   });
 }
 
@@ -39,38 +39,29 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: { state?: AutomationState; forceRuleIds?: string[] } = {};
+  let body: { forceRuleIds?: unknown; dryRun?: unknown } = {};
   try {
     body = (await req.json()) as typeof body;
   } catch {
     body = {};
   }
 
-  const before = body.state
-    ? normalizeAutomationState(body.state)
-    : await loadAutomationFromDb();
-  const after = evaluateAutomationTick(before, {
+  const result = await runServerAutomationTick({
     forceRuleIds: Array.isArray(body.forceRuleIds)
       ? body.forceRuleIds.map(String)
       : undefined,
+    dryRun: body.dryRun === true,
   });
-  const pending = pendingApprovals(after);
-  const persisted = await saveAutomationToDb(after);
-  if (!persisted.ok) {
-    console.error("[automation-tick] persist failed:", persisted.error);
+
+  if (!result.ok) {
+    console.error("[automation-tick]", result.error);
+    return NextResponse.json({ ok: false, error: result.error }, { status: 500 });
   }
 
+  const { state, ...summary } = result;
   return NextResponse.json({
-    ok: true,
-    lastTickAt: after.lastTickAt,
-    pendingApprovals: pending.length,
-    autoApproved: after.approvals.filter(
-      (a) => a.decidedBy === "auto" && a.createdAt === after.lastTickAt,
-    ).length,
-    stateSource: body.state ? "request" : "db",
-    persisted: persisted.ok,
-    persistError: persisted.ok ? undefined : persisted.error,
-    state: after,
-    hint: "State is persisted server-side. Approve pending items in Masters → Automation.",
+    ...summary,
+    lastTickAt: state?.lastTickAt,
+    hint: "Approval-first rules wait in Masters → Automation → Approvals. Auto rules were sent by this tick.",
   });
 }

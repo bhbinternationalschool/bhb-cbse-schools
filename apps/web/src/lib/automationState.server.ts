@@ -6,7 +6,15 @@
  * slices first, legacy jsonb blob as fallback) and persist the evaluated
  * state back — otherwise scheduled automations evaluate emptyAutomation()
  * and never fire.
+ *
+ * A read that FAILS is not an empty desk. Before 2026-09 a timed-out or
+ * denied read fell through to the seeded defaults, and the tick then saved
+ * those defaults over the school's real rules — every rule off, every
+ * approval gone. `loadAutomationFromDb` now reports the failure and the
+ * callers refuse to evaluate or save anything.
  */
+
+import "server-only";
 
 import {
   emptyAutomation,
@@ -20,17 +28,37 @@ import {
 } from "@/lib/deskSliceNormalized.server";
 import { fetchServerBlob, pushServerBlob } from "@/lib/serverBlob";
 
-export async function loadAutomationFromDb(): Promise<AutomationState> {
-  const { bundle } = await fetchDeskSliceFromDb("automation");
-  if (Array.isArray(bundle.rules) && bundle.rules.length > 0) {
-    return normalizeAutomationState({
-      version: 1,
-      ...bundle,
-    } as Partial<AutomationState>);
+export type AutomationLoadResult =
+  | { ok: true; state: AutomationState; source: "desk" | "blob" | "seed" }
+  | { ok: false; error: string };
+
+export async function loadAutomationFromDb(): Promise<AutomationLoadResult> {
+  const desk = await fetchDeskSliceFromDb("automation");
+  if (!desk.ok) {
+    return { ok: false, error: desk.error || "Could not read automation desk" };
+  }
+  if (Array.isArray(desk.bundle.rules) && desk.bundle.rules.length > 0) {
+    return {
+      ok: true,
+      source: "desk",
+      state: normalizeAutomationState({
+        version: 1,
+        ...desk.bundle,
+      } as Partial<AutomationState>),
+    };
   }
   const remote = await fetchServerBlob<AutomationState>("automation_state");
-  if (remote.state) return normalizeAutomationState(remote.state);
-  return emptyAutomation();
+  if (remote.state) {
+    return { ok: true, source: "blob", state: normalizeAutomationState(remote.state) };
+  }
+  return { ok: true, source: "seed", state: emptyAutomation() };
+}
+
+/** Throwing variant for callers that cannot proceed without the state. */
+export async function requireAutomationFromDb(): Promise<AutomationState> {
+  const read = await loadAutomationFromDb();
+  if (!read.ok) throw new Error(read.error);
+  return read.state;
 }
 
 export async function saveAutomationToDb(

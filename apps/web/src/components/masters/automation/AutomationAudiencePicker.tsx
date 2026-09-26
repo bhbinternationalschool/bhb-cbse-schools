@@ -101,8 +101,10 @@ export function AutomationAudiencePicker({
           Who receives this?
         </p>
         <p className="mt-0.5 text-[10px] text-[var(--muted)]">
-          Shown on approval cards so staff know who will get the message. This
-          does not filter live data yet — it is a clear label for reviewers.
+          Presets marked <strong>automated</strong> are built by the server from
+          live ERP data at send time (e.g. today&apos;s defaulters). Other
+          presets and custom notes are labels only — a rule using them will
+          not send by itself.
         </p>
       </div>
 
@@ -118,6 +120,7 @@ export function AutomationAudiencePicker({
           {presets.map((p) => (
             <option key={p.id} value={p.id}>
               {p.label}
+              {p.automated ? " — automated" : p.id === "custom" ? "" : " — label only"}
             </option>
           ))}
         </select>
@@ -131,6 +134,12 @@ export function AutomationAudiencePicker({
           <p className="mt-0.5 text-[10px] text-[var(--muted)]">
             {selectedPreset.hint}
           </p>
+          {!selectedPreset.automated ? (
+            <p className="mt-1 text-[10px] font-semibold text-amber-800">
+              Not automated yet — the scheduler cannot build this list, so the
+              rule will record a failed run instead of sending.
+            </p>
+          ) : null}
         </div>
       ) : null}
 

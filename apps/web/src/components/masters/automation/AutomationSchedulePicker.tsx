@@ -10,6 +10,7 @@ import {
   describeCronExpr,
   describeIntervalMinutes,
   formatTime24,
+  isValidCronExpr,
   parseCronExpr,
   parseTime24,
   type FriendlySchedule,
@@ -174,6 +175,14 @@ export function AutomationSchedulePicker({
           </div>
           <p className="text-[11px] text-[var(--tone-teal)]">
             {describeCronExpr(cronExpr)}
+            {!isValidCronExpr(cronExpr) && cronExpr.trim() ? (
+              <span className="text-rose-700"> — not a valid schedule</span>
+            ) : null}
+          </p>
+          <p className="text-[10px] text-[var(--muted)]">
+            The scheduler checks every 30 minutes between 08:00 and 19:59 IST,
+            so the message goes out at the first check on or after this time
+            (10:15 → 10:30). Times outside 08:00–20:00 are held until 08:00.
           </p>
           <button
             type="button"

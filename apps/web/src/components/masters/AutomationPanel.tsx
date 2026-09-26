@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { pendingApprovals } from "@/lib/automation";
 import { AutomationListView } from "./automation/AutomationListView";
 import { AutomationCreateView } from "./automation/AutomationCreateView";
 import { AutomationEditView } from "./automation/AutomationEditView";
@@ -13,6 +12,22 @@ export function AutomationPanel() {
   const desk = useAutomationDesk();
   const [screen, setScreen] = useState<Screen>("list");
   const [editId, setEditId] = useState<string | null>(null);
+
+  if (desk.loadError && !desk.state) {
+    return (
+      <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+        <p className="font-semibold">Automation could not be loaded</p>
+        <p className="mt-1 text-[12px]">{desk.loadError}</p>
+        <button
+          type="button"
+          className="mt-3 rounded-lg border border-rose-300 px-3 py-1.5 text-[12px] font-semibold"
+          onClick={() => void desk.refresh()}
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
 
   if (!desk.state) {
     return (
@@ -30,65 +45,50 @@ export function AutomationPanel() {
   function goList() {
     setScreen("list");
     setEditId(null);
+    desk.clearPreview();
   }
 
   function goEdit(id: string) {
     setEditId(id);
     setScreen("edit");
+    desk.clearPreview();
   }
 
   if (screen === "create") {
     return (
       <AutomationCreateView
-        state={automationState}
         readOnly={desk.readOnly}
         notice={desk.notice}
+        busy={desk.busy !== null}
         onBack={goList}
-        onCreated={(nextState, ruleId) => {
-          if (desk.commit(nextState, "Rule created")) goEdit(ruleId);
+        onCreate={async (opts) => {
+          const id = await desk.createRule(opts);
+          if (id) goEdit(id);
         }}
       />
     );
   }
 
-  if (screen === "edit") {
-    if (!selected) {
-      return (
-        <AutomationListView
-          state={automationState}
-          readOnly={desk.readOnly}
-          notice={desk.notice}
-          onCreate={() => setScreen("create")}
-          onEdit={goEdit}
-          onEvaluate={() =>
-            desk.evaluateTick(
-              automationState.rules.filter((r) => r.enabled).map((r) => r.id),
-            )
-          }
-          onDispatchApproval={(id) => {
-            const item = pendingApprovals(automationState).find((a) => a.id === id);
-            if (item) void desk.dispatchApproval(item);
-          }}
-          onRejectApproval={(id) => desk.decideApproval(id, "rejected")}
-          onSnoozeApproval={(id) => desk.decideApproval(id, "snoozed", 24)}
-        />
-      );
-    }
+  if (screen === "edit" && selected) {
     return (
       <AutomationEditView
         rule={selected}
         state={automationState}
         readOnly={desk.readOnly}
         notice={desk.notice}
+        busy={desk.busy}
+        preview={desk.preview?.ruleId === selected.id ? desk.preview : null}
         onBack={goList}
-        onToggle={(enabled) => desk.setEnabled(selected.id, enabled)}
-        onMarkTested={() => desk.markTested(selected.id)}
-        onMode={(mode) => desk.setMode(selected.id, mode)}
-        onSchedule={(patch) => desk.updateSchedule(selected.id, patch)}
-        onUpdate={(patch) => desk.updateRule(selected.id, patch)}
-        onForceEvaluate={() =>
-          desk.evaluateTick([selected.id])
-        }
+        onToggle={(enabled) => void desk.setEnabled(selected.id, enabled)}
+        onMarkTested={() => void desk.markTested(selected.id)}
+        onMode={(mode) => void desk.setMode(selected.id, mode)}
+        onUpdate={(patch) => void desk.updateRule(selected.id, patch)}
+        onPreview={(ignoreCap) => void desk.previewAudience(selected.id, ignoreCap)}
+        onRunNow={() => void desk.runNow([selected.id])}
+        onDelete={async () => {
+          const r = await desk.deleteRule(selected.id);
+          if (r && r.ok !== false) goList();
+        }}
       />
     );
   }
@@ -98,19 +98,18 @@ export function AutomationPanel() {
       state={automationState}
       readOnly={desk.readOnly}
       notice={desk.notice}
+      busy={desk.busy}
       onCreate={() => setScreen("create")}
       onEdit={goEdit}
-      onEvaluate={() =>
-        desk.evaluateTick(
+      onRefresh={() => void desk.refresh()}
+      onRunNow={() =>
+        void desk.runNow(
           automationState.rules.filter((r) => r.enabled).map((r) => r.id),
         )
       }
-      onDispatchApproval={(id) => {
-        const item = pendingApprovals(automationState).find((a) => a.id === id);
-        if (item) void desk.dispatchApproval(item);
-      }}
-      onRejectApproval={(id) => desk.decideApproval(id, "rejected")}
-      onSnoozeApproval={(id) => desk.decideApproval(id, "snoozed", 24)}
+      onApprove={(id) => void desk.approve(id)}
+      onReject={(id) => void desk.reject(id)}
+      onSnooze={(id) => void desk.snooze(id, 24)}
     />
   );
 }

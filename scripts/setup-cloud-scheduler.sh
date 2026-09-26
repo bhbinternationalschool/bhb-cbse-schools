@@ -113,14 +113,22 @@ create_job "bhb-comms-scheduled-publish" "*/10 6-21 * * *" \
   "${APP_URL}/api/comms/scheduled-publish/tick" \
   "Asia/Kolkata" "120s"
 
-# WhatsApp automation rules (approval-first). The automation's own quiet
+# WhatsApp automation rules (Masters → Automation). Each tick builds the real
+# audience of every rule that is due (fee defaulters from the Fees desk),
+# raises an approval card for approval-first rules and SENDS auto-send rules
+# on the spot, one templated message per family. The automation's own quiet
 # hours default to 20:00-08:00, during which it sends nothing anyway, so
 # ticking overnight only ever found "not now". Every 30 minutes, 08:00 to
-# 19:59 (24 a day, from 96); reminders are day-granular, approvals are
-# reviewed by staff in office hours.
+# 19:59 (24 a day, from 96); a rule set for 10:15 goes out at the 10:30
+# check, which the screen says.
+#
+# 300s (Cloud Run's request timeout): an auto rule can send a few hundred
+# messages at ~1s each. Sends are recorded before they start and the rule's
+# next run is advanced first, so a retry after a timeout finds nothing due
+# and never sends twice.
 create_job "bhb-wa-automation-tick" "*/30 8-19 * * *" \
   "${APP_URL}/api/wa/automation/tick" \
-  "Asia/Kolkata" "120s"
+  "Asia/Kolkata" "300s"
 
 create_job "bhb-bigquery-nightly-sync" "0 2 * * *" \
   "${APP_URL}/api/analytics/bigquery-sync/tick" \

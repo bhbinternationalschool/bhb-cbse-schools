@@ -72,9 +72,30 @@ function main() {
   let auto = emptyAutomation();
   assert(auto.rules.length >= 10, "automation seed rules");
   auto = setRuleEnabled(auto, auto.rules[0]!.id, true);
-  auto = evaluateAutomationTick(auto, { forceRuleIds: [auto.rules[0]!.id] });
+  // The evaluator never invents recipients: a forced rule with no
+  // server-resolved preview is a failed run, not a pending card…
+  const noPreview = evaluateAutomationTick(auto, { forceRuleIds: [auto.rules[0]!.id] });
+  assert(pendingApprovals(noPreview).length === 0, "no preview → no approval");
+  assert(noPreview.runs[0]?.status === "failed", "no preview → failed run");
+  // …and with a real preview it raises the card.
+  auto = evaluateAutomationTick(auto, {
+    forceRuleIds: [auto.rules[0]!.id],
+    previews: {
+      [auto.rules[0]!.id]: {
+        supported: true,
+        templateReady: true,
+        previewBody: "Namaste Parent ji",
+        recipients: [
+          { mobile: "9000000001", householdId: "hh1", studentName: "Asha", body: "Namaste" },
+        ],
+        skipped: [],
+        audienceNote: "1 family",
+      },
+    },
+  });
   const pending = pendingApprovals(auto);
-  assert(pending.length >= 1, "approval-first creates pending item");
+  assert(pending.length === 1, "approval-first creates pending item");
+  assert(pending[0]!.dispatchPayload[0]!.mobile === "9000000001", "card carries the real recipient");
 
   const modeBlock = setRuleExecutionMode(auto, auto.rules[0]!.id, "auto");
   assert(!modeBlock.ok, "auto mode blocked before tested");

@@ -1,10 +1,16 @@
 /**
  * Whole-ERP automation catalog — approval-first by default.
- * Store: localStorage `bhb_automation_v1` + Supabase blob `automation_state`.
+ *
+ * Pure rule/approval/run logic shared by the server engine
+ * (automationEngine.server.ts) and the Masters screen. The server's copy in
+ * Supabase (desk slice `automation`, blob `automation_state`) is the source
+ * of truth; the localStorage helpers below are a legacy cache only.
  */
 
 import type { WaTemplateLanguage } from "@/lib/waTemplates";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { findAudiencePresetBySummary } from "@/lib/automationAudience";
+import { isValidCronExpr, nextCronRun } from "@/lib/automationSchedule";
 
 const STORAGE_KEY = "bhb_automation_v1";
 
@@ -70,11 +76,69 @@ export type AutomationRule = {
   templateFamilyKey: string;
   templateLanguage: WaTemplateLanguage;
   audienceSummary: string;
+  /**
+   * Which audience resolver builds the recipient list on the server
+   * (a preset id from automationAudience.ts, e.g. "fee_overdue"). Derived
+   * from audienceSummary for rules saved before this field existed.
+   */
+  audienceKey: string;
+  /** A family is not messaged again by this rule within this many days (0 = no cap). */
+  minDaysBetween: number;
+  /** Safety cap on recipients per run. */
+  maxPerRun: number;
   quietHours: QuietHours;
   executionMode: AutomationExecutionMode;
   testedAt: string;
   createdAt: string;
   updatedAt: string;
+};
+
+/** One family / contact an automation run will message. */
+export type AutomationRecipient = {
+  mobile: string;
+  fallbackMobile?: string;
+  householdId?: string;
+  studentId?: string;
+  studentName?: string;
+  classLabel?: string;
+  amountPaise?: number;
+  /** The family's own template language. */
+  language?: string;
+  /** Plain-text rendering, for the approval card and the text fallback. */
+  body: string;
+  templateName?: string;
+  templateLanguage?: string;
+  /** Ordered variable keys of the template, so the body component positions match. */
+  variableKeys?: string[];
+  variables?: Record<string, string>;
+};
+
+export type AutomationSkipNote = { reason: string; count: number };
+
+export type AutomationSendResult = {
+  mobile: string;
+  householdId?: string;
+  ok: boolean;
+  error?: string;
+  providerId?: string;
+};
+
+/**
+ * What the server's audience resolver found for a rule at tick time. The
+ * pure evaluator turns this into an approval (or a failed run when the
+ * audience cannot be built) — it never invents recipients itself.
+ */
+export type AudiencePreview = {
+  supported: boolean;
+  /** Why the audience could not be built (unsupported preset, data read failed…). */
+  reason?: string;
+  templateReady: boolean;
+  templateError?: string;
+  previewBody: string;
+  recipients: AutomationRecipient[];
+  skipped: AutomationSkipNote[];
+  /** Human line for the approval card, e.g. "12 families · 3 reminded this week". */
+  audienceNote: string;
 };
 
 export type AutomationApprovalItem = {
@@ -91,13 +155,14 @@ export type AutomationApprovalItem = {
   previewBody: string;
   audienceCount: number;
   sampleRecipients: string[];
-  dispatchPayload: {
-    mobile: string;
-    body: string;
-    templateName?: string;
-    templateLanguage?: string;
-    variables?: Record<string, string>;
-  }[];
+  dispatchPayload: AutomationRecipient[];
+  audienceNote: string;
+  skipped: AutomationSkipNote[];
+  /** Filled after dispatch. */
+  results: AutomationSendResult[];
+  sentCount: number;
+  failedCount: number;
+  dispatchedAt: string;
   error: string;
 };
 
@@ -110,6 +175,8 @@ export type AutomationRun = {
   finishedAt: string;
   approvalId: string;
   stats: { proposed: number; approved: number; dispatched: number; failed: number };
+  /** What happened, in one line — "12 families · 2 reminded this week". */
+  notes: string;
   error: string;
 };
 
@@ -120,6 +187,14 @@ export type AutomationState = {
   runs: AutomationRun[];
   lastTickAt: string;
 };
+
+/**
+ * History caps. An approval carries its full recipient list, so 500 of
+ * them would be megabytes in one desk slice; sent/decided ones are kept
+ * for a while as an audit trail and then fall off.
+ */
+const MAX_APPROVALS = 120;
+const MAX_RUNS = 200;
 
 function nid(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -140,7 +215,15 @@ function defaultQuietHours(): QuietHours {
 
 type SeedRule = Omit<
   AutomationRule,
-  "id" | "createdAt" | "updatedAt" | "lastRunAt" | "nextRunAt" | "testedAt"
+  | "id"
+  | "createdAt"
+  | "updatedAt"
+  | "lastRunAt"
+  | "nextRunAt"
+  | "testedAt"
+  | "audienceKey"
+  | "minDaysBetween"
+  | "maxPerRun"
 > & { id: string };
 
 const SEED_RULES: SeedRule[] = [
@@ -362,14 +445,28 @@ function normalizeQuiet(raw: Partial<QuietHours> | null | undefined): QuietHours
   };
 }
 
+export const DEFAULT_MAX_PER_RUN = 300;
+
+/** Fees reminders default to once a week per family; other modules uncapped. */
+export function defaultMinDaysBetween(module: AutomationModule): number {
+  return module === "fees" ? 7 : 0;
+}
+
+function deriveAudienceKey(raw: Partial<AutomationRule>): string {
+  if (raw.audienceKey) return String(raw.audienceKey);
+  const preset = findAudiencePresetBySummary(String(raw.audienceSummary || ""));
+  return preset ? preset.id : "";
+}
+
 function normalizeRule(raw: Partial<AutomationRule> | null): AutomationRule | null {
   if (!raw || !raw.id) return null;
   const now = nowIso();
+  const moduleId = (raw.module as AutomationModule) || "general";
   return {
     id: String(raw.id),
     name: String(raw.name || raw.id),
     description: String(raw.description || ""),
-    module: (raw.module as AutomationModule) || "general",
+    module: moduleId,
     enabled: !!raw.enabled,
     triggerType: (raw.triggerType as AutomationTriggerType) || "schedule",
     cronExpr: String(raw.cronExpr || ""),
@@ -381,6 +478,15 @@ function normalizeRule(raw: Partial<AutomationRule> | null): AutomationRule | nu
     templateFamilyKey: String(raw.templateFamilyKey || ""),
     templateLanguage: raw.templateLanguage === "hi" ? "hi" : "en",
     audienceSummary: String(raw.audienceSummary || ""),
+    audienceKey: deriveAudienceKey(raw),
+    minDaysBetween:
+      raw.minDaysBetween == null || !Number.isFinite(Number(raw.minDaysBetween))
+        ? defaultMinDaysBetween(moduleId)
+        : Math.max(0, Math.round(Number(raw.minDaysBetween))),
+    maxPerRun:
+      raw.maxPerRun == null || !Number.isFinite(Number(raw.maxPerRun))
+        ? DEFAULT_MAX_PER_RUN
+        : Math.max(1, Math.round(Number(raw.maxPerRun))),
     quietHours: normalizeQuiet(raw.quietHours),
     executionMode:
       raw.executionMode === "auto" && raw.testedAt
@@ -389,6 +495,54 @@ function normalizeRule(raw: Partial<AutomationRule> | null): AutomationRule | nu
     testedAt: String(raw.testedAt || ""),
     createdAt: String(raw.createdAt || now),
     updatedAt: String(raw.updatedAt || now),
+  };
+}
+
+function normalizeApproval(raw: Partial<AutomationApprovalItem>): AutomationApprovalItem | null {
+  if (!raw || !raw.id) return null;
+  return {
+    id: String(raw.id),
+    ruleId: String(raw.ruleId || ""),
+    ruleName: String(raw.ruleName || ""),
+    status: (raw.status as AutomationApprovalStatus) || "pending",
+    createdAt: String(raw.createdAt || ""),
+    decidedAt: String(raw.decidedAt || ""),
+    decidedBy: String(raw.decidedBy || ""),
+    snoozeUntil: String(raw.snoozeUntil || ""),
+    templateFamilyKey: String(raw.templateFamilyKey || ""),
+    templateLanguage: raw.templateLanguage === "hi" ? "hi" : "en",
+    previewBody: String(raw.previewBody || ""),
+    audienceCount: Number(raw.audienceCount) || 0,
+    sampleRecipients: Array.isArray(raw.sampleRecipients) ? raw.sampleRecipients.map(String) : [],
+    dispatchPayload: Array.isArray(raw.dispatchPayload) ? raw.dispatchPayload : [],
+    audienceNote: String(raw.audienceNote || ""),
+    skipped: Array.isArray(raw.skipped) ? raw.skipped : [],
+    results: Array.isArray(raw.results) ? raw.results : [],
+    sentCount: Number(raw.sentCount) || 0,
+    failedCount: Number(raw.failedCount) || 0,
+    dispatchedAt: String(raw.dispatchedAt || ""),
+    error: String(raw.error || ""),
+  };
+}
+
+function normalizeRun(raw: Partial<AutomationRun>): AutomationRun | null {
+  if (!raw || !raw.id) return null;
+  return {
+    id: String(raw.id),
+    ruleId: String(raw.ruleId || ""),
+    status: (raw.status as AutomationRun["status"]) || "proposed",
+    scheduledFor: String(raw.scheduledFor || ""),
+    startedAt: String(raw.startedAt || ""),
+    finishedAt: String(raw.finishedAt || ""),
+    approvalId: String(raw.approvalId || ""),
+    stats: {
+      proposed: Number(raw.stats?.proposed) || 0,
+      approved: Number(raw.stats?.approved) || 0,
+      dispatched: Number(raw.stats?.dispatched) || 0,
+      failed: Number(raw.stats?.failed) || 0,
+    },
+    notes: String(raw.notes || ""),
+    error: String(raw.error || ""),
   };
 }
 
@@ -434,9 +588,17 @@ export function normalizeAutomationState(
     version: 1,
     rules: [...byId.values()],
     approvals: Array.isArray(raw.approvals)
-      ? (raw.approvals as AutomationApprovalItem[]).slice(0, 500)
+      ? (raw.approvals as Partial<AutomationApprovalItem>[])
+          .map(normalizeApproval)
+          .filter((a): a is AutomationApprovalItem => !!a)
+          .slice(0, MAX_APPROVALS)
       : [],
-    runs: Array.isArray(raw.runs) ? (raw.runs as AutomationRun[]).slice(0, 200) : [],
+    runs: Array.isArray(raw.runs)
+      ? (raw.runs as Partial<AutomationRun>[])
+          .map(normalizeRun)
+          .filter((r): r is AutomationRun => !!r)
+          .slice(0, MAX_RUNS)
+      : [],
     lastTickAt: String(raw.lastTickAt || ""),
   };
 }
@@ -479,6 +641,53 @@ export function saveAutomation(state: AutomationState): void {
   });
 }
 
+/* ─── Schedule maths ────────────────────────────────────────────────── */
+
+/**
+ * When a rule should next fire, from `from`. Schedules follow their cron in
+ * the rule's timezone; intervals add their minutes. An invalid cron returns
+ * "" — the rule is then reported as misconfigured rather than fired at an
+ * arbitrary moment.
+ */
+export function computeNextRun(rule: AutomationRule, from: Date): string {
+  if (rule.triggerType === "interval") {
+    const mins = rule.intervalMinutes > 0 ? rule.intervalMinutes : 60;
+    return new Date(from.getTime() + mins * 60_000).toISOString();
+  }
+  if (rule.triggerType === "schedule") {
+    if (!rule.cronExpr.trim() || !isValidCronExpr(rule.cronExpr)) return "";
+    return nextCronRun(rule.cronExpr, from, rule.quietHours.timezone) || "";
+  }
+  return "";
+}
+
+/** Human explanation of why a rule will not fire, or "" when it can. */
+export function ruleConfigProblem(rule: AutomationRule): string {
+  if (rule.triggerType === "schedule") {
+    if (!rule.cronExpr.trim()) return "No schedule time set";
+    if (!isValidCronExpr(rule.cronExpr)) return `Schedule "${rule.cronExpr}" is not valid`;
+  }
+  if (rule.triggerType === "interval" && rule.intervalMinutes <= 0) {
+    return "Interval must be at least 1 minute";
+  }
+  if (rule.triggerType === "event") {
+    return "Event-driven rules are raised by their module, not by the scheduler";
+  }
+  if (rule.actionType === "whatsapp_template" && !rule.templateFamilyKey) {
+    return "No WhatsApp template family linked";
+  }
+  if (!rule.audienceKey) {
+    return "Audience is not one the server can build — pick a preset audience";
+  }
+  return "";
+}
+
+function withRecomputedNextRun(rule: AutomationRule, now = new Date()): AutomationRule {
+  return { ...rule, nextRunAt: rule.enabled ? computeNextRun(rule, now) : "" };
+}
+
+/* ─── Rule edits ────────────────────────────────────────────────────── */
+
 export function setRuleEnabled(
   state: AutomationState,
   ruleId: string,
@@ -487,7 +696,9 @@ export function setRuleEnabled(
   return {
     ...state,
     rules: state.rules.map((r) =>
-      r.id === ruleId ? { ...r, enabled, updatedAt: nowIso() } : r,
+      r.id === ruleId
+        ? withRecomputedNextRun({ ...r, enabled, updatedAt: nowIso() })
+        : r,
     ),
   };
 }
@@ -530,40 +741,69 @@ export function markRuleTested(
   };
 }
 
-export function updateRuleSchedule(
+export type AutomationRulePatch = Partial<
+  Pick<
+    AutomationRule,
+    | "name"
+    | "description"
+    | "module"
+    | "triggerType"
+    | "cronExpr"
+    | "intervalMinutes"
+    | "eventKey"
+    | "actionType"
+    | "templateFamilyKey"
+    | "templateLanguage"
+    | "audienceSummary"
+    | "audienceKey"
+    | "minDaysBetween"
+    | "maxPerRun"
+    | "quietHours"
+    | "enabled"
+  >
+>;
+
+/** Apply a patch to one rule; the next run is recomputed when the schedule changed. */
+export function updateAutomationRule(
   state: AutomationState,
   ruleId: string,
-  patch: Partial<
-    Pick<
-      AutomationRule,
-      | "cronExpr"
-      | "intervalMinutes"
-      | "nextRunAt"
-      | "triggerType"
-      | "eventKey"
-      | "templateFamilyKey"
-      | "templateLanguage"
-      | "quietHours"
-      | "audienceSummary"
-      | "enabled"
-    >
-  >,
+  patch: AutomationRulePatch,
 ): AutomationState {
   return {
     ...state,
-    rules: state.rules.map((r) =>
-      r.id === ruleId
-        ? {
-            ...r,
-            ...patch,
-            quietHours: patch.quietHours
-              ? normalizeQuiet(patch.quietHours)
-              : r.quietHours,
-            updatedAt: nowIso(),
-          }
-        : r,
-    ),
+    rules: state.rules.map((r) => {
+      if (r.id !== ruleId) return r;
+      const merged = normalizeRule({
+        ...r,
+        ...patch,
+        // A changed audience summary re-derives the key unless one was given.
+        audienceKey:
+          patch.audienceKey != null
+            ? patch.audienceKey
+            : patch.audienceSummary != null && patch.audienceSummary !== r.audienceSummary
+              ? ""
+              : r.audienceKey,
+        quietHours: patch.quietHours ? normalizeQuiet(patch.quietHours) : r.quietHours,
+        updatedAt: nowIso(),
+      })!;
+      const scheduleChanged =
+        patch.cronExpr != null ||
+        patch.intervalMinutes != null ||
+        patch.triggerType != null ||
+        patch.quietHours != null ||
+        patch.enabled != null;
+      return scheduleChanged ? withRecomputedNextRun(merged) : merged;
+    }),
   };
+}
+
+/** @deprecated use updateAutomationRule — kept for the older edit screens. */
+export function updateRuleSchedule(
+  state: AutomationState,
+  ruleId: string,
+  patch: AutomationRulePatch,
+): AutomationState {
+  return updateAutomationRule(state, ruleId, patch);
 }
 
 export type CreateAutomationRuleOpts = {
@@ -578,6 +818,9 @@ export type CreateAutomationRuleOpts = {
   templateFamilyKey?: string;
   templateLanguage?: WaTemplateLanguage;
   audienceSummary?: string;
+  audienceKey?: string;
+  minDaysBetween?: number;
+  maxPerRun?: number;
   enabled?: boolean;
 };
 
@@ -587,74 +830,69 @@ export function createAutomationRule(
 ): { state: AutomationState; rule: AutomationRule } {
   const now = nowIso();
   const id = nid("auto");
-  const rule = normalizeRule({
-    id,
-    name: opts.name.trim() || "New rule",
-    description: opts.description?.trim() || "",
-    module: opts.module,
-    enabled: !!opts.enabled,
-    triggerType: opts.triggerType,
-    cronExpr: opts.cronExpr || "",
-    intervalMinutes: Math.max(0, opts.intervalMinutes || 0),
-    eventKey: opts.eventKey || "",
-    actionType: opts.actionType,
-    templateFamilyKey: opts.templateFamilyKey || "",
-    templateLanguage: opts.templateLanguage || "en",
-    audienceSummary: opts.audienceSummary || "",
-    quietHours: defaultQuietHours(),
-    executionMode: "approval_first",
-    nextRunAt: "",
-    lastRunAt: "",
-    testedAt: "",
-    createdAt: now,
-    updatedAt: now,
-  })!;
+  const rule = withRecomputedNextRun(
+    normalizeRule({
+      id,
+      name: opts.name.trim() || "New rule",
+      description: opts.description?.trim() || "",
+      module: opts.module,
+      enabled: !!opts.enabled,
+      triggerType: opts.triggerType,
+      cronExpr: opts.cronExpr || "",
+      intervalMinutes: Math.max(0, opts.intervalMinutes || 0),
+      eventKey: opts.eventKey || "",
+      actionType: opts.actionType,
+      templateFamilyKey: opts.templateFamilyKey || "",
+      templateLanguage: opts.templateLanguage || "en",
+      audienceSummary: opts.audienceSummary || "",
+      audienceKey: opts.audienceKey || "",
+      minDaysBetween: opts.minDaysBetween,
+      maxPerRun: opts.maxPerRun,
+      quietHours: defaultQuietHours(),
+      executionMode: "approval_first",
+      nextRunAt: "",
+      lastRunAt: "",
+      testedAt: "",
+      createdAt: now,
+      updatedAt: now,
+    })!,
+  );
   return {
     state: { ...state, rules: [...state.rules, rule] },
     rule,
   };
 }
 
-export function updateAutomationRule(
+export function isSeedRuleId(ruleId: string): boolean {
+  return SEED_RULES.some((s) => s.id === ruleId);
+}
+
+/** Seed rules can only be paused; a rule the school created can be removed. */
+export function deleteAutomationRule(
   state: AutomationState,
   ruleId: string,
-  patch: Partial<
-    Pick<
-      AutomationRule,
-      | "name"
-      | "description"
-      | "module"
-      | "triggerType"
-      | "cronExpr"
-      | "intervalMinutes"
-      | "eventKey"
-      | "actionType"
-      | "templateFamilyKey"
-      | "templateLanguage"
-      | "audienceSummary"
-      | "quietHours"
-      | "enabled"
-    >
-  >,
-): AutomationState {
+): { ok: true; state: AutomationState } | { ok: false; reason: string } {
+  if (isSeedRuleId(ruleId)) {
+    return { ok: false, reason: "Built-in rules can be disabled but not deleted" };
+  }
+  if (!state.rules.some((r) => r.id === ruleId)) {
+    return { ok: false, reason: "Rule not found" };
+  }
   return {
-    ...state,
-    rules: state.rules.map((r) =>
-      r.id === ruleId
-        ? {
-            ...r,
-            ...patch,
-            quietHours: patch.quietHours
-              ? normalizeQuiet(patch.quietHours)
-              : r.quietHours,
-            updatedAt: nowIso(),
-          }
-        : r,
-    ),
+    ok: true,
+    state: {
+      ...state,
+      rules: state.rules.filter((r) => r.id !== ruleId),
+      approvals: state.approvals.filter(
+        (a) => a.ruleId !== ruleId || a.status !== "pending",
+      ),
+    },
   };
 }
 
-function isInQuietHours(qh: QuietHours, at = new Date()): boolean {
+/* ─── Tick evaluation ───────────────────────────────────────────────── */
+
+export function isInQuietHours(qh: QuietHours, at = new Date()): boolean {
   if (!qh.enabled) return false;
   try {
     const hour = Number(
@@ -677,176 +915,303 @@ function isInQuietHours(qh: QuietHours, at = new Date()): boolean {
   }
 }
 
-function ruleIsDue(rule: AutomationRule, now: Date): boolean {
-  if (!rule.enabled) return false;
-  if (rule.triggerType === "event") return false; // event-driven separately
-  if (isInQuietHours(rule.quietHours, now)) return false;
-  if (rule.nextRunAt) {
-    return new Date(rule.nextRunAt).getTime() <= now.getTime();
-  }
-  // Never run → due on first tick so operators see a sample approval
-  return true;
-}
-
-function computeNextRun(rule: AutomationRule, from: Date): string {
-  if (rule.triggerType === "interval" && rule.intervalMinutes > 0) {
-    return new Date(
-      from.getTime() + rule.intervalMinutes * 60_000,
-    ).toISOString();
-  }
-  // Default: next calendar day 10:00 IST approx (+24h)
-  return new Date(from.getTime() + 24 * 60 * 60_000).toISOString();
-}
-
-function demoPreviewForRule(rule: AutomationRule): {
-  previewBody: string;
-  audienceCount: number;
-  sampleRecipients: string[];
-  dispatchPayload: AutomationApprovalItem["dispatchPayload"];
-} {
-  const previewBody = `[Automation] ${rule.name} → template ${rule.templateFamilyKey || "(campaign)"} (${rule.templateLanguage}). Audience: ${rule.audienceSummary}`;
-  const samples = ["9876543210", "9123456780"];
-  return {
-    previewBody,
-    audienceCount: samples.length,
-    sampleRecipients: samples,
-    dispatchPayload: samples.map((mobile) => ({
-      mobile,
-      body: previewBody,
-      templateName: rule.templateFamilyKey
-        ? rule.templateFamilyKey.replace(/_/g, "_")
-        : undefined,
-      templateLanguage: rule.templateLanguage,
-      variables: {
-        guardianName: "Parent",
-        childName: "Student",
-        schoolName: "School",
-      },
-    })),
-  };
-}
+export type RuleDueState =
+  | { due: true }
+  | { due: false; why: "disabled" | "event" | "misconfigured" | "quiet_hours" | "not_yet" | "first_run_scheduled" };
 
 /**
- * Evaluate due rules and create approval items (or auto-dispatch markers).
- * Client and tick API both use this pure function.
+ * Is the rule due at `now`? A schedule rule with no nextRunAt yet is NOT
+ * fired on the spot — its first run is the next cron occurrence, which is
+ * what the person who set "10:00 Mon–Sat" expects. Interval rules run on
+ * their first tick.
  */
-export function evaluateAutomationTick(
+export function ruleDueState(rule: AutomationRule, now: Date): RuleDueState {
+  if (!rule.enabled) return { due: false, why: "disabled" };
+  if (rule.triggerType === "event") return { due: false, why: "event" };
+  if (ruleConfigProblem(rule)) return { due: false, why: "misconfigured" };
+  if (!rule.nextRunAt) {
+    if (rule.triggerType === "interval") return { due: true };
+    return { due: false, why: "first_run_scheduled" };
+  }
+  const at = new Date(rule.nextRunAt).getTime();
+  if (!Number.isFinite(at) || at > now.getTime()) return { due: false, why: "not_yet" };
+  // Due, but inside quiet hours: hold it (nextRunAt stays) so it goes out
+  // at the first tick after the window, rather than being dropped.
+  if (isInQuietHours(rule.quietHours, now)) return { due: false, why: "quiet_hours" };
+  return { due: true };
+}
+
+/** Rules the next tick would act on, so the caller can resolve their audiences first. */
+export function dueRuleIds(
   state: AutomationState,
   opts?: { forceRuleIds?: string[]; now?: Date },
-): AutomationState {
+): string[] {
   const now = opts?.now || new Date();
+  return state.rules
+    .filter((r) => opts?.forceRuleIds?.includes(r.id) || ruleDueState(r, now).due)
+    .map((r) => r.id);
+}
+
+function snoozedUntil(state: AutomationState, ruleId: string, now: Date): string {
+  const s = state.approvals.find(
+    (a) =>
+      a.ruleId === ruleId &&
+      a.status === "snoozed" &&
+      a.snoozeUntil &&
+      new Date(a.snoozeUntil).getTime() > now.getTime(),
+  );
+  return s?.snoozeUntil || "";
+}
+
+export type AutomationTickOutcome = {
+  state: AutomationState;
+  /** Approvals auto-approved this tick — the server dispatches these. */
+  autoApprovalIds: string[];
+  /** Approvals raised for a person to decide. */
+  pendingApprovalIds: string[];
+  /** One line per rule touched, for logs and the response. */
+  notes: string[];
+};
+
+/**
+ * Evaluate due rules against the audiences the server resolved for them.
+ *
+ * Pure: no I/O. `previews` must hold an entry for every due (or forced)
+ * rule; a rule with no preview is recorded as a failed run, never sent to
+ * an invented list. Auto-mode rules get an approved item back in
+ * `autoApprovalIds`; the caller sends those and records the result with
+ * `markApprovalDispatched`.
+ */
+export function runAutomationTick(
+  state: AutomationState,
+  opts: {
+    forceRuleIds?: string[];
+    now?: Date;
+    previews: Record<string, AudiencePreview | undefined>;
+  },
+): AutomationTickOutcome {
+  const now = opts.now || new Date();
+  const nowStr = now.toISOString();
   const rules = [...state.rules];
   let approvals = [...state.approvals];
   let runs = [...state.runs];
+  const autoApprovalIds: string[] = [];
+  const pendingApprovalIds: string[] = [];
+  const notes: string[] = [];
 
   for (let i = 0; i < rules.length; i++) {
     const rule = rules[i]!;
-    const forced = opts?.forceRuleIds?.includes(rule.id);
-    if (!forced && !ruleIsDue(rule, now)) continue;
-    if (!forced && !rule.enabled) continue;
+    const forced = !!opts.forceRuleIds?.includes(rule.id);
+    if (!forced && !ruleDueState(rule, now).due) continue;
 
-    const preview = demoPreviewForRule(rule);
     const runId = nid("run");
-    const approvalId = nid("appr");
-
-    if (rule.executionMode === "auto" && rule.testedAt) {
-      approvals = [
+    const preview = opts.previews[rule.id];
+    const advance = () => {
+      rules[i] = {
+        ...rule,
+        lastRunAt: nowStr,
+        nextRunAt: computeNextRun(rule, now),
+        updatedAt: nowStr,
+      };
+    };
+    const failRun = (error: string) => {
+      runs = [
         {
-          id: approvalId,
+          id: runId,
           ruleId: rule.id,
-          ruleName: rule.name,
-          status: "approved",
-          createdAt: nowIso(),
-          decidedAt: nowIso(),
-          decidedBy: "auto",
-          snoozeUntil: "",
-          templateFamilyKey: rule.templateFamilyKey,
-          templateLanguage: rule.templateLanguage,
-          ...preview,
+          status: "failed",
+          scheduledFor: rule.nextRunAt || nowStr,
+          startedAt: nowStr,
+          finishedAt: nowStr,
+          approvalId: "",
+          stats: { proposed: 0, approved: 0, dispatched: 0, failed: 0 },
+          notes: "",
+          error,
+        },
+        ...runs,
+      ];
+      notes.push(`${rule.name}: ${error}`);
+      advance();
+    };
+
+    const problem = ruleConfigProblem(rule);
+    if (problem && rule.triggerType !== "event") {
+      failRun(problem);
+      continue;
+    }
+    if (!preview) {
+      failRun("No audience was resolved for this rule on this tick");
+      continue;
+    }
+    if (!preview.supported) {
+      failRun(preview.reason || "This audience cannot be built automatically yet");
+      continue;
+    }
+    if (!preview.templateReady) {
+      failRun(preview.templateError || "WhatsApp template is not approved");
+      continue;
+    }
+
+    const snoozed = snoozedUntil(state, rule.id, now);
+    if (snoozed && !forced) {
+      runs = [
+        {
+          id: runId,
+          ruleId: rule.id,
+          status: "cancelled",
+          scheduledFor: rule.nextRunAt || nowStr,
+          startedAt: nowStr,
+          finishedAt: nowStr,
+          approvalId: "",
+          stats: { proposed: preview.recipients.length, approved: 0, dispatched: 0, failed: 0 },
+          notes: `Snoozed until ${snoozed}`,
           error: "",
         },
-        ...approvals,
+        ...runs,
       ];
+      notes.push(`${rule.name}: snoozed until ${snoozed}`);
+      advance();
+      continue;
+    }
+
+    const skippedNote = preview.skipped
+      .filter((s) => s.count > 0)
+      .map((s) => `${s.count} ${s.reason}`)
+      .join(" · ");
+
+    if (preview.recipients.length === 0) {
       runs = [
         {
           id: runId,
           ruleId: rule.id,
           status: "completed",
-          scheduledFor: now.toISOString(),
-          startedAt: now.toISOString(),
-          finishedAt: now.toISOString(),
-          approvalId,
-          stats: {
-            proposed: preview.audienceCount,
-            approved: preview.audienceCount,
-            dispatched: 0,
-            failed: 0,
-          },
+          scheduledFor: rule.nextRunAt || nowStr,
+          startedAt: nowStr,
+          finishedAt: nowStr,
+          approvalId: "",
+          stats: { proposed: 0, approved: 0, dispatched: 0, failed: 0 },
+          notes: preview.audienceNote || (skippedNote ? `Nobody to message · ${skippedNote}` : "Nobody to message today"),
           error: "",
         },
         ...runs,
       ];
-    } else {
-      // Skip if pending approval already exists for this rule
-      const hasPending = approvals.some(
-        (a) => a.ruleId === rule.id && a.status === "pending",
-      );
-      if (!hasPending || forced) {
-        approvals = [
-          {
-            id: approvalId,
-            ruleId: rule.id,
-            ruleName: rule.name,
-            status: "pending",
-            createdAt: nowIso(),
-            decidedAt: "",
-            decidedBy: "",
-            snoozeUntil: "",
-            templateFamilyKey: rule.templateFamilyKey,
-            templateLanguage: rule.templateLanguage,
-            ...preview,
-            error: "",
-          },
-          ...approvals,
-        ];
-        runs = [
-          {
-            id: runId,
-            ruleId: rule.id,
-            status: "proposed",
-            scheduledFor: now.toISOString(),
-            startedAt: now.toISOString(),
-            finishedAt: "",
-            approvalId,
-            stats: {
-              proposed: preview.audienceCount,
-              approved: 0,
-              dispatched: 0,
-              failed: 0,
-            },
-            error: "",
-          },
-          ...runs,
-        ];
-      }
+      notes.push(`${rule.name}: nobody to message${skippedNote ? ` (${skippedNote})` : ""}`);
+      advance();
+      continue;
     }
 
-    rules[i] = {
-      ...rule,
-      lastRunAt: now.toISOString(),
-      nextRunAt: computeNextRun(rule, now),
-      updatedAt: nowIso(),
+    const hasPending = approvals.some(
+      (a) => a.ruleId === rule.id && a.status === "pending",
+    );
+    if (hasPending && !forced && rule.executionMode !== "auto") {
+      // A card is already waiting; raising a second one for the same rule
+      // just doubles the queue. The schedule still advances.
+      notes.push(`${rule.name}: approval already pending`);
+      advance();
+      continue;
+    }
+    if (hasPending && forced) {
+      // "Run now" replaces yesterday's card with today's list rather than
+      // stacking two cards whose recipients overlap.
+      approvals = approvals.map((a) =>
+        a.ruleId === rule.id && a.status === "pending"
+          ? { ...a, status: "rejected" as const, decidedAt: nowStr, decidedBy: "superseded" }
+          : a,
+      );
+      runs = runs.map((r) =>
+        r.ruleId === rule.id && r.status === "proposed"
+          ? { ...r, status: "cancelled" as const, finishedAt: nowStr, notes: "Superseded by a newer run" }
+          : r,
+      );
+    }
+
+    const approvalId = nid("appr");
+    const auto = rule.executionMode === "auto" && !!rule.testedAt;
+    const item: AutomationApprovalItem = {
+      id: approvalId,
+      ruleId: rule.id,
+      ruleName: rule.name,
+      status: auto ? "approved" : "pending",
+      createdAt: nowStr,
+      decidedAt: auto ? nowStr : "",
+      decidedBy: auto ? "auto" : "",
+      snoozeUntil: "",
+      templateFamilyKey: rule.templateFamilyKey,
+      templateLanguage: rule.templateLanguage,
+      previewBody: preview.previewBody,
+      audienceCount: preview.recipients.length,
+      sampleRecipients: preview.recipients
+        .slice(0, 5)
+        .map((r) => r.studentName || r.mobile),
+      dispatchPayload: preview.recipients,
+      audienceNote: preview.audienceNote,
+      skipped: preview.skipped,
+      results: [],
+      sentCount: 0,
+      failedCount: 0,
+      dispatchedAt: "",
+      error: "",
     };
+    approvals = [item, ...approvals];
+    runs = [
+      {
+        id: runId,
+        ruleId: rule.id,
+        status: auto ? "running" : "proposed",
+        scheduledFor: rule.nextRunAt || nowStr,
+        startedAt: nowStr,
+        finishedAt: "",
+        approvalId,
+        stats: {
+          proposed: preview.recipients.length,
+          approved: auto ? preview.recipients.length : 0,
+          dispatched: 0,
+          failed: 0,
+        },
+        notes: preview.audienceNote,
+        error: "",
+      },
+      ...runs,
+    ];
+    if (auto) autoApprovalIds.push(approvalId);
+    else pendingApprovalIds.push(approvalId);
+    notes.push(
+      `${rule.name}: ${preview.recipients.length} recipient(s) ${auto ? "auto-approved" : "waiting for approval"}`,
+    );
+    advance();
   }
 
   return {
-    ...state,
-    rules,
-    approvals: approvals.slice(0, 500),
-    runs: runs.slice(0, 200),
-    lastTickAt: now.toISOString(),
+    state: {
+      ...state,
+      rules,
+      approvals: approvals.slice(0, MAX_APPROVALS),
+      runs: runs.slice(0, MAX_RUNS),
+      lastTickAt: nowStr,
+    },
+    autoApprovalIds,
+    pendingApprovalIds,
+    notes,
   };
 }
+
+/** Compatibility wrapper around runAutomationTick. */
+export function evaluateAutomationTick(
+  state: AutomationState,
+  opts?: {
+    forceRuleIds?: string[];
+    now?: Date;
+    previews?: Record<string, AudiencePreview | undefined>;
+  },
+): AutomationState {
+  return runAutomationTick(state, {
+    forceRuleIds: opts?.forceRuleIds,
+    now: opts?.now,
+    previews: opts?.previews ?? {},
+  }).state;
+}
+
+/* ─── Approvals ─────────────────────────────────────────────────────── */
 
 export function decideApproval(
   state: AutomationState,
@@ -868,24 +1233,54 @@ export function decideApproval(
           : "",
     };
   });
-  return { ...state, approvals };
+  const runs = state.runs.map((r) => {
+    if (r.approvalId !== approvalId) return r;
+    if (decision === "approved") return { ...r, status: "running" as const, stats: { ...r.stats, approved: r.stats.proposed } };
+    return {
+      ...r,
+      status: "cancelled" as const,
+      finishedAt: nowIso(),
+      notes: decision === "rejected" ? `Rejected by ${by}` : `Snoozed by ${by}`,
+    };
+  });
+  return { ...state, approvals, runs };
 }
+
+export type DispatchOutcome = {
+  ok: boolean;
+  error?: string;
+  sent: number;
+  failed: number;
+  /** Not attempted (family quiet hours, opted out at send time…). */
+  skipped: number;
+  results: AutomationSendResult[];
+  note?: string;
+};
 
 export function markApprovalDispatched(
   state: AutomationState,
   approvalId: string,
-  ok: boolean,
-  error = "",
+  outcome: DispatchOutcome | boolean,
+  legacyError = "",
 ): AutomationState {
+  const o: DispatchOutcome =
+    typeof outcome === "boolean"
+      ? { ok: outcome, error: legacyError, sent: 0, failed: 0, skipped: 0, results: [] }
+      : outcome;
+  const finishedAt = nowIso();
   return {
     ...state,
     approvals: state.approvals.map((a) =>
       a.id === approvalId
         ? {
             ...a,
-            status: ok ? "dispatched" : "failed",
-            error: ok ? "" : error,
-            decidedAt: a.decidedAt || nowIso(),
+            status: o.ok ? "dispatched" : "failed",
+            error: o.ok ? "" : o.error || "Dispatch failed",
+            decidedAt: a.decidedAt || finishedAt,
+            dispatchedAt: finishedAt,
+            results: o.results,
+            sentCount: o.sent,
+            failedCount: o.failed,
           }
         : a,
     ),
@@ -893,15 +1288,16 @@ export function markApprovalDispatched(
       r.approvalId === approvalId
         ? {
             ...r,
-            status: ok ? "completed" : "failed",
-            finishedAt: nowIso(),
+            status: o.ok ? "completed" : "failed",
+            finishedAt,
             stats: {
               ...r.stats,
               approved: r.stats.proposed,
-              dispatched: ok ? r.stats.proposed : 0,
-              failed: ok ? 0 : r.stats.proposed,
+              dispatched: o.sent,
+              failed: o.failed,
             },
-            error: ok ? "" : error,
+            notes: [r.notes, o.note].filter(Boolean).join(" · "),
+            error: o.ok ? "" : o.error || "Dispatch failed",
           }
         : r,
     ),

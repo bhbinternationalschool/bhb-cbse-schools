@@ -64,6 +64,24 @@
         "3200"
       ],
       "port": 3200
+    },
+    {
+      "name": "web-dev-smartteach-3300",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd /private/tmp/claude-501/-Users-ashishsingh-CBSE-Schools/4636e50a-11e3-4bd3-ae0b-dec35be69219/scratchpad/wt-smartteach && npm exec -w web -- next dev --turbopack -p 3300"
+      ],
+      "port": 3300
+    },
+    {
+      "name": "web-dev-papers-wt-3100",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd /private/tmp/claude-501/-Users-ashishsingh-CBSE-Schools/02451990-a6f5-4c1e-b5bd-bb8dca6c217f/scratchpad/wt-papers && npm exec -w web -- next dev -p 3100"
+      ],
+      "port": 3100
     }
   ]
 }
