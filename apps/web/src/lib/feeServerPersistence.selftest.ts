@@ -22,6 +22,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { voucherToRows } from "@/lib/feesNormalized.server";
 
 console.log("feeServerPersistence.selftest.ts");
 
@@ -190,6 +191,102 @@ function bodyOf(src: string, decl: string): string {
   const applyAt = settleBody.indexOf("applyPaymentLink(");
   assert.ok(guardAt >= 0, "the shared settle function guards too — the webhook path uses it");
   assert.ok(guardAt < applyAt, "and guards BEFORE it tries to collect");
+}
+
+/* ── one unparseable value cannot refuse the whole book ──────────────── */
+{
+  // BEHAVIOURAL, not source-shape: this is the one assertion in this file that
+  // could have caught the 26 Sep failure by running. `jsonb_populate_recordset`
+  // casts every header in ONE statement, so "" in a timestamp column aborts
+  // the insert and takes all 648 receipts with it — including the one just
+  // collected. Verified against Postgres directly: it answers
+  //   invalid input syntax for type timestamp with time zone: ""
+  const { header } = voucherToRows("tenant", {
+    id: "rcv_probe",
+    receiptNo: "RCV-PROBE",
+    schoolReceiptNo: "",
+    source: "payment_link",
+    manualBookSeries: "",
+    manualBookLeaf: "",
+    householdId: "hh",
+    academicYearCode: "2026-27",
+    collectionDate: "",
+    transactionDate: "null",
+    transactionId: "",
+    collectedAt: "",
+    cashierName: "",
+    lines: [],
+    tenders: [],
+    totalPaise: 0,
+    note: "",
+    voidedAt: "" as unknown as null,
+    whatsappSentAt: "Invalid Date" as unknown as null,
+  } as never);
+
+  assert.equal(header.voided_at, null, 'an empty voided_at must be null, never ""');
+  assert.equal(header.whatsapp_sent_at, null, "an unparseable whatsapp_sent_at must be null");
+  assert.match(
+    String(header.collection_date),
+    /^\d{4}-\d{2}-\d{2}$/,
+    "collection_date is always a real date — the column is NOT NULL",
+  );
+  assert.match(
+    String(header.transaction_date),
+    /^\d{4}-\d{2}-\d{2}$/,
+    'transaction_date falls back to the collection date, never the string "null"',
+  );
+  assert.ok(
+    !Number.isNaN(Date.parse(String(header.collected_at))),
+    "collected_at is always parseable",
+  );
+}
+
+/* ── a refused full push still writes the receipt just collected ─────── */
+{
+  const normalized = read("paymentsNormalized.server.ts");
+  const fees = read("feesNormalized.server.ts");
+  const settle = read("paymentSettlement.server.ts");
+  void normalized;
+
+  const push = bodyOf(fees, "export async function pushFeeVouchersToDb(");
+  assert.match(
+    push,
+    /freshIds/,
+    "a refused whole-book push retries with only the vouchers the server does not hold — " +
+      "history it does not carry cannot refuse the new receipt",
+  );
+  const firstRpc = push.indexOf('rpc("replace_fee_desk_voucher_lines"');
+  const retryRpc = push.indexOf('rpc("replace_fee_desk_voucher_lines"', firstRpc + 1);
+  assert.ok(retryRpc > firstRpc, "the retry is a second call, after the first was refused");
+  assert.match(
+    push.slice(retryRpc),
+    /narrowed push ALSO refused/,
+    "and if the narrowed push fails too, that is reported rather than swallowed",
+  );
+
+  // The settlement must check the table, not the return value: on 26 Sep it
+  // reported RCV-00648 settled three times while no voucher row existed.
+  const body = bodyOf(settle, "export async function settlePaymentLinkWithWhatsApp(");
+  assert.match(body, /feeVoucherExistsInDb\(/, "the voucher is read back from the desk table");
+  assert.match(
+    body,
+    /fee_link\.voucher_push_failed/,
+    "and a missing voucher is recorded in payment_desk_gateway_events — this service's " +
+      "console output never reaches Cloud Logging, so a log line is not a record",
+  );
+  const readBackAt = body.indexOf("feeVoucherExistsInDb(");
+  const waAt = body.indexOf("sendSisFeeReceiptOnWhatsApp(");
+  assert.ok(readBackAt < waAt, "checked before the parent is sent a receipt for it");
+  assert.doesNotMatch(
+    body.slice(readBackAt, waAt),
+    /return \{ ok: false/,
+    "a missing voucher is still not returned as an error — that would make the gateway " +
+      "retry and collect the money twice",
+  );
+
+  // "I could not look" must never be recorded as "the receipt is missing".
+  const exists = bodyOf(fees, "export async function feeVoucherExistsInDb(");
+  assert.match(exists, /return null/, "an unanswerable read-back returns null, not false");
 }
 
 console.log("  ok");

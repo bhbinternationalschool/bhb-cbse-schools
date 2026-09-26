@@ -50,6 +50,29 @@ function unmapLineKind(kind: string, original?: string): VoucherLine["kind"] {
  * what it does: a row the database's own CHECK rejects fails the whole
  * receipt now that header, lines and tenders share one transaction.
  */
+/**
+ * A value Postgres will accept for a date / timestamp column, or null.
+ *
+ * `jsonb_populate_recordset` casts every header in ONE statement, so a single
+ * value it cannot parse — "", "null", "Invalid Date" — aborts the insert and
+ * takes every other receipt in that push with it. The push carries the whole
+ * book, so one malformed row anywhere means no receipt can ever be written
+ * again, silently. Coercing here is the difference between losing one
+ * receipt's metadata and losing the school's fee desk.
+ */
+function tsOrNull(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const t = value.trim();
+  if (!t || t === "null" || t === "undefined" || t === "Invalid Date") return null;
+  return Number.isNaN(Date.parse(t)) ? null : t;
+}
+
+/** Same, for a DATE column, falling back rather than writing nothing. */
+function dateOr(value: unknown, fallback: string): string {
+  const t = tsOrNull(value);
+  return t ? t.slice(0, 10) : fallback;
+}
+
 export function voucherToRows(
   tenantId: string,
   v: CollectionVoucher,
@@ -58,6 +81,11 @@ export function voucherToRows(
   lines: Record<string, unknown>[];
   tenders: Record<string, unknown>[];
 } {
+  const collectionDate = dateOr(
+    v.collectionDate,
+    new Date().toISOString().slice(0, 10),
+  );
+
   const header = {
     id: v.id,
     tenant_id: tenantId,
@@ -68,15 +96,15 @@ export function voucherToRows(
     source: v.source || "counter",
     manual_book_series: v.manualBookSeries || "",
     manual_book_leaf: v.manualBookLeaf || "",
-    collection_date: v.collectionDate,
-    transaction_date: v.transactionDate || v.collectionDate,
+    collection_date: collectionDate,
+    transaction_date: dateOr(v.transactionDate, collectionDate),
     transaction_id: v.transactionId || "",
-    collected_at: v.collectedAt || new Date().toISOString(),
+    collected_at: tsOrNull(v.collectedAt) || new Date().toISOString(),
     cashier_name: v.cashierName || "",
     total_paise: v.totalPaise,
     note: v.note || "",
-    voided_at: v.voidedAt,
-    whatsapp_sent_at: v.whatsappSentAt,
+    voided_at: tsOrNull(v.voidedAt),
+    whatsapp_sent_at: tsOrNull(v.whatsappSentAt),
     voucher_json: {
       source: v.source,
       manualBookSeries: v.manualBookSeries,
@@ -356,9 +384,8 @@ export async function pushFeeVouchersToDb(
       .order("id", { ascending: true })
       .range(from, to),
   );
-  const staleIds = (existingHeaders ?? [])
-    .map((r) => String(r.id))
-    .filter((id) => !idSet.has(id));
+  const existingIdSet = new Set((existingHeaders ?? []).map((r) => String(r.id)));
+  const staleIds = [...existingIdSet].filter((id) => !idSet.has(id));
   // NEVER deleted. A fee receipt is append-only — voiding keeps the row — so
   // a server voucher the pushing browser doesn't know can only mean that
   // browser is unhydrated or partially hydrated. Deleting here is how eight
@@ -463,14 +490,66 @@ export async function pushFeeVouchersToDb(
       // and the reason existed nowhere a person could read it — the body went
       // to the browser and the server said nothing, so diagnosing it meant
       // guessing at constraints. Never again: the message names itself.
+      const describe = (e: { message: string; details?: string; hint?: string }) =>
+        e.message +
+        (e.details ? ` | details: ${e.details}` : "") +
+        (e.hint ? ` | hint: ${e.hint}` : "");
       console.error(
         `[fees-desk] push REFUSED — nothing was written. ` +
           `${headers.length} header(s), ${allLines.length} line(s) over ` +
           `${idsWithLines.length} voucher(s), ${allTenders.length} tender(s). ` +
-          `Postgres said: ${rpcErr.message}` +
-          (rpcErr.details ? ` | details: ${rpcErr.details}` : "") +
-          (rpcErr.hint ? ` | hint: ${rpcErr.hint}` : ""),
+          `Postgres said: ${describe(rpcErr)}`,
       );
+
+      // ONE BAD RECEIPT MUST NOT HOLD A NEW ONE HOSTAGE.
+      //
+      // The whole book goes in one statement, so a value Postgres will not
+      // parse in ANY of the 648 headers refuses all of them — including the
+      // receipt that was just collected. On 26 Sep 2026 that is how AADVIK
+      // SINGH's ₹2,500 stayed unbooked through a webhook and two replays,
+      // with the failure reported as a successful settlement.
+      //
+      // So retry with only the vouchers the server does not already have.
+      // That is the minimum this push exists to write, and it cannot be
+      // refused on account of history it does not carry. Receipts are
+      // append-only, so leaving the existing rows untouched loses nothing.
+      const freshIds = new Set(
+        active.map((v) => v.id).filter((id) => !existingIdSet.has(id)),
+      );
+      if (freshIds.size > 0 && freshIds.size < active.length) {
+        const retryHeaders = headers.filter((h) => freshIds.has(String(h.id)));
+        const retryLines = allLines.filter((l) => freshIds.has(String(l.voucher_id)));
+        const retryTenders = allTenders.filter((t) => freshIds.has(String(t.voucher_id)));
+        const { error: retryErr } = await sb.rpc("replace_fee_desk_voucher_lines", {
+          p_tenant_id: tenantId,
+          p_line_voucher_ids: idsWithLines.filter((id) => freshIds.has(id)),
+          p_tender_voucher_ids: idsWithTenders.filter((id) => freshIds.has(id)),
+          p_lines: retryLines,
+          p_tenders: retryTenders,
+          p_headers: retryHeaders,
+        });
+        if (!retryErr) {
+          console.warn(
+            `[fees-desk] full push refused; wrote the ${retryHeaders.length} new ` +
+              `receipt(s) on their own. The refusal is in stored history: ${describe(rpcErr)}`,
+          );
+          return {
+            ok: true,
+            count: retryHeaders.length,
+            error: `Only the new receipt(s) were written — the full push was refused: ${rpcErr.message}`,
+          };
+        }
+        console.error(
+          `[fees-desk] narrowed push ALSO refused — nothing was written. ` +
+            `Postgres said: ${describe(retryErr)}`,
+        );
+        return {
+          ok: false,
+          count: 0,
+          error: `Fee desk not written (nothing was changed): ${retryErr.message}`,
+        };
+      }
+
       return {
         ok: false,
         count: 0,
@@ -709,6 +788,37 @@ export async function pushFeeDeskToDb(
   }
 
   return { ok: true, voucherCount: voucherResult.count, openDuesCount };
+}
+
+/**
+ * Is this voucher actually in the desk table?
+ *
+ * The settlement path uses this to check its own work rather than believe a
+ * return value: a push that reports success while writing nothing is exactly
+ * the failure that lost AADVIK SINGH's ₹2,500 three times on 26 Sep 2026.
+ *
+ * null = the question could not be answered (no tenant, query error). That is
+ * deliberately NOT false: "I could not look" must never be recorded as "the
+ * receipt is missing".
+ */
+export async function feeVoucherExistsInDb(
+  voucherId: string,
+): Promise<boolean | null> {
+  const id = voucherId?.trim();
+  if (!id) return null;
+  const ctx = await resolveCtx();
+  if (!ctx) return null;
+  const { data, error } = await ctx.sb
+    .from("fee_desk_vouchers")
+    .select("id")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) {
+    console.warn("[fees-desk] voucher read-back failed", id, error.message);
+    return null;
+  }
+  return !!data;
 }
 
 export async function fetchFeeDeskFromDb(): Promise<FeeDeskSnapshot> {
