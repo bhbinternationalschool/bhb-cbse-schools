@@ -278,6 +278,10 @@ export async function settleCashfreeCheckout(opts: {
           cashierName: opts.source === "webhook" ? "Cashfree webhook" : "Cashfree return",
           upiRef: paymentRef,
           sendWhatsApp: true,
+          // What Cashfree actually took. The receipt must come to exactly
+          // this or nothing is booked — a receipt for less than the parent
+          // paid leaves a head unpaid and the bank out by the difference.
+          expectedAmountPaise: row.amountPaise,
         });
         result = r.ok
           ? { ok: true, alreadyPaid: false, kind: row.kind, ref: row.ref, receiptNo: r.receiptNo }
