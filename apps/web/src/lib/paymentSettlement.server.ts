@@ -42,7 +42,9 @@ export async function settlePaymentLinkWithWhatsApp(opts: {
   // link" — which `applyPaymentLink` can only report as a failure to book
   // money the gateway has already taken. Re-read this one link from the
   // desk table when the mirror does not have it.
-  const link = await ensurePaymentLinkHydrated(opts.linkId);
+  const link = await ensurePaymentLinkHydrated(opts.linkId, {
+    authoritative: true,
+  });
   if (!link) {
     return { ok: false, error: "Pay-link not found" };
   }
