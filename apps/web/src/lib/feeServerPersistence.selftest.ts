@@ -289,4 +289,58 @@ function bodyOf(src: string, decl: string): string {
   assert.match(exists, /return null/, "an unanswerable read-back returns null, not false");
 }
 
+/* ── a receipt for less than the parent paid is never booked ─────────── */
+{
+  const settle = read("paymentSettlement.server.ts");
+  const checkouts = read("cashfreeCheckouts.server.ts");
+  const body = bodyOf(settle, "export async function settlePaymentLinkWithWhatsApp(");
+
+  // THE FOURTH DEFECT, and the only one that would have been WRONG rather
+  // than missing. resolveOpenLinesForLink drops any line whose live due it
+  // cannot see, and transport dues hydrate in their own module memory. At
+  // 07:54 UTC on 26 Sep 2026 that resolved ₹2,000 of AADVIK SINGH's ₹2,500
+  // and wrote 200000 onto payment_desk_links (updated_at 07:54:08.23, so the
+  // settlement wrote it, not the link's creation). Booking that would have
+  // left one head unpaid and the bank ₹500 out.
+  assert.match(
+    body,
+    /ensureFeeDuesInputsHydrated\(\{ force: true \}\)/,
+    "the dues inputs are forced fresh BEFORE anything is resolved — a stale " +
+      "transport desk is how the ₹500 line disappeared",
+  );
+
+  const hydrateAt = body.indexOf("ensureFeeDuesInputsHydrated");
+  const resolveAt = body.indexOf("resolveOpenLinesForLink(");
+  const applyAt = body.indexOf("applyPaymentLink(");
+  assert.ok(hydrateAt >= 0 && resolveAt > hydrateAt, "hydrate first, then resolve");
+  assert.ok(
+    resolveAt < applyAt,
+    "and the total is checked BEFORE applyPaymentLink collects anything",
+  );
+
+  assert.match(
+    body,
+    /resolved\.amountPaise !== opts\.expectedAmountPaise/,
+    "the receipt must come to exactly what the gateway took",
+  );
+  assert.match(
+    body,
+    /fee_link\.amount_mismatch/,
+    "a short resolution is recorded in payment_desk_gateway_events, not only logged",
+  );
+  assert.match(
+    body.slice(resolveAt, applyAt),
+    /return \{\s*ok: false/,
+    "and it books NOTHING — unlike a failed push, a wrong amount must stop the " +
+      "collection, so the claim is released and a retry can still collect it",
+  );
+
+  // The caller has to actually supply the figure, or the check is dead code.
+  assert.match(
+    checkouts,
+    /expectedAmountPaise: row\.amountPaise/,
+    "settleCashfreeCheckout passes what Cashfree took",
+  );
+}
+
 console.log("  ok");

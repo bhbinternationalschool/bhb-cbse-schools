@@ -2,7 +2,7 @@
  * Settle a payment link and optionally send WhatsApp fee receipt.
  */
 
-import { applyPaymentLink } from "@/lib/payments";
+import { applyPaymentLink, resolveOpenLinesForLink } from "@/lib/payments";
 import { ensurePaymentLinkHydrated } from "@/lib/paymentsPersistence";
 import { recordPaymentGatewayEvent } from "@/lib/paymentsNormalized.server";
 import { feeVoucherExistsInDb } from "@/lib/feesNormalized.server";
@@ -18,6 +18,11 @@ export async function settlePaymentLinkWithWhatsApp(opts: {
   upiRef?: string;
   collectionDate?: string;
   sendWhatsApp?: boolean;
+  /**
+   * What the gateway actually took, in paise. When given, the receipt must
+   * come to exactly this or nothing is booked. See the amount check below.
+   */
+  expectedAmountPaise?: number;
 }): Promise<
   | ({
       ok: true;
@@ -37,8 +42,74 @@ export async function settlePaymentLinkWithWhatsApp(opts: {
   // link" — which `applyPaymentLink` can only report as a failure to book
   // money the gateway has already taken. Re-read this one link from the
   // desk table when the mirror does not have it.
-  if (!(await ensurePaymentLinkHydrated(opts.linkId))) {
+  const link = await ensurePaymentLinkHydrated(opts.linkId);
+  if (!link) {
     return { ok: false, error: "Pay-link not found" };
+  }
+
+  // A PAY-LINK IS SETTLED AGAINST DUES AS THEY STAND NOW, NOT AS THEY WERE.
+  //
+  // resolveOpenLinesForLink drops any line whose live due it cannot see, and
+  // transport dues live in their own module memory that hydrates separately
+  // from the school mirror. On an instance where that memory is empty the
+  // transport line simply vanishes and the receipt comes to less than the
+  // parent paid.
+  //
+  // That is not hypothetical. At 07:54 UTC on 26 Sep 2026 this path resolved
+  // ₹2,000 of AADVIK SINGH's ₹2,500 and wrote that figure onto the pay-link.
+  // Had the voucher reached the database, the school would have booked ₹2,000
+  // against a ₹2,500 payment: one head still unpaid, the family still chased
+  // for it, and the bank ₹500 out. A receipt that is quietly wrong is worse
+  // than one that is missing — the missing one is still recoverable.
+  //
+  // So the dues inputs are forced fresh BEFORE anything is resolved.
+  try {
+    const { ensureFeeDuesInputsHydrated } = await import(
+      "@/lib/feeDuesInputs.server"
+    );
+    await ensureFeeDuesInputsHydrated({ force: true });
+  } catch (e) {
+    console.warn(
+      "[paymentSettlement] dues inputs hydrate failed",
+      e instanceof Error ? e.message : e,
+    );
+  }
+
+  // And then the total is checked against what the gateway actually took.
+  // Short by any amount: book nothing, say why, and let the claim go so a
+  // retry on a properly hydrated instance can still collect it. Money left
+  // in clearing with a readable reason beats a receipt that is wrong.
+  if (typeof opts.expectedAmountPaise === "number" && opts.expectedAmountPaise > 0) {
+    const resolved = resolveOpenLinesForLink(link);
+    if ("error" in resolved) return { ok: false, error: resolved.error };
+    if (resolved.amountPaise !== opts.expectedAmountPaise) {
+      const detail =
+        `resolved ${resolved.amountPaise} paise over ${resolved.lines.length} line(s) ` +
+        `but the gateway took ${opts.expectedAmountPaise}`;
+      console.error("[paymentSettlement] amount mismatch — nothing booked", {
+        linkId: opts.linkId,
+        detail,
+      });
+      await recordPaymentGatewayEvent({
+        paymentLinkId: opts.linkId,
+        provider: "cashfree",
+        eventType: "fee_link.amount_mismatch",
+        settlementStatus: "failed",
+        amountPaise: opts.expectedAmountPaise,
+        eventJson: {
+          error: detail,
+          resolvedPaise: resolved.amountPaise,
+          expectedPaise: opts.expectedAmountPaise,
+          dueKeys: resolved.lines.map((l) => l.dueKey),
+        },
+      }).catch(() => {});
+      return {
+        ok: false,
+        error:
+          `Dues do not add up to the amount paid (${detail}). Nothing was booked — ` +
+          `the payment can be settled again once the dues are readable.`,
+      };
+    }
   }
 
   const result = applyPaymentLink({
