@@ -4,6 +4,8 @@
 
 import { applyPaymentLink } from "@/lib/payments";
 import { ensurePaymentLinkHydrated } from "@/lib/paymentsPersistence";
+import { recordPaymentGatewayEvent } from "@/lib/paymentsNormalized.server";
+import { feeVoucherExistsInDb } from "@/lib/feesNormalized.server";
 import { loadFees } from "@/lib/fees";
 import { pushFeesRemoteServer } from "@/lib/feesPersistence.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
@@ -66,14 +68,46 @@ export async function settlePaymentLinkWithWhatsApp(opts: {
   // AWAITED, not fired and forgotten: the webhook's reply must not outrun the
   // write, because Cloud Run stops giving this instance CPU once it answers.
   const pushed = await pushFeesRemoteServer(loadFees());
-  if (!pushed.ok) {
-    // The money IS collected in memory and the caller is about to be told so.
-    // Say loudly that it did not reach the desk, rather than returning an
-    // error that would make a gateway retry and collect it twice.
+
+  // TRUST THE TABLE, NOT THE RETURN VALUE.
+  //
+  // On 26 Sep 2026 the settlement reported "paid, receipt RCV-00648" three
+  // times while `fee_desk_vouchers` never gained a row: the push is refused
+  // as a whole if any stored header holds a value Postgres cannot parse, and
+  // the only account of it went to console.error — which on this Cloud Run
+  // service does not reach Cloud Logging at all. Three diagnostic rounds
+  // found the shape of the failure and never its message.
+  //
+  // So the voucher is read back, and whatever happened is written where it
+  // CAN be read: payment_desk_gateway_events, beside the settlement it
+  // belongs to. A lost receipt must never again be invisible.
+  const stored = await feeVoucherExistsInDb(result.voucherId);
+  if (!pushed.ok || stored === false) {
     console.error(
       "[paymentSettlement] voucher not pushed to the fee desk",
-      { linkId: opts.linkId, receiptNo: result.receiptNo, error: pushed.error },
+      {
+        linkId: opts.linkId,
+        receiptNo: result.receiptNo,
+        voucherId: result.voucherId,
+        error: pushed.error,
+        readBack: stored,
+      },
     );
+    // Recorded, never returned as an error: returning one would make the
+    // gateway retry and collect the money a second time.
+    await recordPaymentGatewayEvent({
+      paymentLinkId: opts.linkId,
+      provider: "cashfree",
+      eventType: "fee_link.voucher_push_failed",
+      settlementStatus: "failed",
+      receiptNo: result.receiptNo,
+      voucherId: result.voucherId,
+      eventJson: {
+        error: pushed.error || "voucher absent from fee_desk_vouchers after push",
+        readBack: stored,
+        pushOk: pushed.ok,
+      },
+    }).catch(() => {});
   }
 
   let whatsappReceipt: { ok: boolean; error?: string } | null = null;
