@@ -363,6 +363,7 @@ jobs:
           npm run test:email
           npm run test:exam-invigilation
           npm run test:exams
+          npm run test:exam-date-sheet
           npm run test:exams-sheet-safety
           npm run test:exam-schemes
           npm run test:exam-report-templates

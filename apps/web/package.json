@@ -57,6 +57,7 @@
     "test:nucleus-handoff": "npx tsx src/lib/nucleusHandoff.selftest.ts",
     "test:syllabus-outcomes-import": "npx tsx src/lib/syllabusOutcomesImport.selftest.ts",
     "test:exams": "npx tsx src/lib/exams.selftest.ts",
+    "test:exam-date-sheet": "npx tsx src/lib/examDateSheet.selftest.ts",
     "test:exams-sheet-safety": "npx tsx src/lib/examsSheetSafety.selftest.ts",
     "test:exam-schemes": "npx tsx src/lib/examSchemes.selftest.ts",
     "test:exam-report-templates": "npx tsx src/lib/examReportTemplates.selftest.ts",
