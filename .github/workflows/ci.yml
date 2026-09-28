@@ -410,6 +410,11 @@ jobs:
           npm run test:staff-home-kind
           npm run test:mobile-features
           npm run test:cashfree-checkout
+          npm run test:gateway-fees
+          npm run test:gateway-methods
+          npm run test:cashfree-refund
+          npm run test:secure-id
+          npm run test:payouts
           npm run test:diksha-index
           npm run test:teacher-contact
           npm run test:parent-profile
@@ -514,4 +519,26 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
           NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key
+          # 6144, AND DELIBERATELY THE SAME AS apps/web/Dockerfile.
+          #
+          # On 28 Sep this job failed: compilation succeeded and then "Checking
+          # validity of types" died with SIGABRT at ~2.0 GB. It had no
+          # NODE_OPTIONS at all, so it ran on Node's default while every other
+          # build in the project had an explicit heap.
+          #
+          # Measured on this tree, not guessed: 2048 dies ~2.0 GB, 4096 dies
+          # ~4.0 GB in the Next.js build worker, 6144 and 8192 both complete with
+          # no GC pressure logged.
+          #
+          # 6144 rather than 8192, which is the whole point. The Docker build is
+          # capped at 6144 because cloudbuild.yaml runs on E2_HIGHCPU_8 — 8 GB of
+          # RAM — where a larger heap would be killed by the kernel. If THIS job
+          # had more headroom than that, CI would go green while the production
+          # deploy ran out of memory: exactly the failure that hid here until
+          # today, when the Dockerfile's 4096 was already below what this tree
+          # needs and nothing but an unrelated CI failure revealed it.
+          #
+          # So CI must never be more permissive than the deploy. Raise both
+          # together, and raise the Cloud Build machineType before raising these.
+          NODE_OPTIONS: --max-old-space-size=6144
         run: npm run build

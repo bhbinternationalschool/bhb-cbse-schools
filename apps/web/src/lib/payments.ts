@@ -455,6 +455,13 @@ export function applyPaymentLink(input: {
   cashierName: string;
   upiRef?: string;
   collectionDate?: string;
+  /**
+   * Gateway fee the parent paid on top of the fee, where the school passes it
+   * on. Added to the tender's own surcharge field, never to the receipt: the
+   * receipt is for the fee, and the amount check that refuses a receipt for
+   * the wrong money compares against the fee alone.
+   */
+  gatewaySurchargePaise?: number;
 }):
   | { ok: true; link: PaymentLink; voucherId: string; receiptNo: string }
   | { ok: false; error: string } {
@@ -496,6 +503,13 @@ export function applyPaymentLink(input: {
           link.gatewayMode === "cashfree" || link.gatewayMode === "razorpay"
             ? link.gatewayMode
             : "",
+        // Only where a gateway really captured the money. A demo link holds
+        // nothing in clearing, so there is nothing for a surcharge to sit
+        // against and honouring one would unbalance the receipt.
+        gatewaySurchargePaise:
+          link.gatewayMode === "cashfree" || link.gatewayMode === "razorpay"
+            ? Math.max(0, Math.round(input.gatewaySurchargePaise || 0))
+            : 0,
         realisation: "cleared",
       },
     ],

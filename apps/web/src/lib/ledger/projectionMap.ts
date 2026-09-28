@@ -21,6 +21,7 @@ import {
   L_GST_INPUT,
   L_PG_CHARGES,
   L_PG_CLEARING,
+  L_PG_FEE_RECOVERED,
   L_SALARY_PAYABLE,
   L_STAFF_ADVANCES,
   L_STATUTORY_PAYABLE,
@@ -94,6 +95,20 @@ export type DeskFeeTender = {
    * the reverse.
    */
   gatewayProvider?: string;
+  /**
+   * A gateway fee passed on to the parent, on top of `amountPaise`.
+   *
+   * Deliberately NOT part of `amountPaise`: that is the receipt, and the
+   * receipt is for the fee the school levied. The parent paid more, so the
+   * gateway is holding more, so clearing has to be debited with the whole of
+   * what it holds — otherwise every online payment leaves clearing short by
+   * this amount and the settlement journal, which credits clearing with
+   * Cashfree's gross, drives the account negative.
+   *
+   * Only meaningful with `gatewayProvider` set; a counter tender has no
+   * gateway to charge for.
+   */
+  gatewaySurchargePaise?: number;
 };
 
 export type DeskFeeLine = { kind: string; amountPaise: number };
@@ -139,6 +154,7 @@ export function buildFeeReceiptVoucher(input: {
     : undefined;
 
   const out: LedgerLineInput[] = [];
+  let surchargeTotal = 0;
   for (const t of live) {
     const mode = (t.mode || "").toLowerCase();
     // Gateway money is not in any bank yet. It is held by the gateway, it
@@ -155,9 +171,14 @@ export function buildFeeReceiptVoucher(input: {
           : viaGateway
             ? L_PG_CLEARING
             : L_BANK;
+    // What a passed-on gateway charge adds to this tender. Ignored off the
+    // gateway path: there is no charge to recover on cash at the counter, and
+    // honouring one would debit clearing for money no gateway is holding.
+    const surcharge = viaGateway ? Math.max(0, Math.round(t.gatewaySurchargePaise || 0)) : 0;
+    if (surcharge > 0) surchargeTotal += surcharge;
     out.push({
       accountCode,
-      debitPaise: Math.round(t.amountPaise),
+      debitPaise: Math.round(t.amountPaise) + surcharge,
       creditPaise: 0,
       narration: mode ? mode.toUpperCase() : "Tender",
       // Only tag the sub-ledger where the desk actually recorded which account
@@ -205,6 +226,21 @@ export function buildFeeReceiptVoucher(input: {
         ? `Advance for ${voucher.academicYearCode} — receipt ${voucher.receiptNo || ""}`.trim()
         : `Fee receipt ${voucher.receiptNo || ""}`.trim(),
       ...(isAdvance ? { costCentreCode: voucher.academicYearCode } : {}),
+      ...(party ? { party } : {}),
+    });
+  }
+
+  if (surchargeTotal > 0) {
+    // At par against 5080, and never into 4000: see L_PG_FEE_RECOVERED. The
+    // receipt total and the fee income on it are unchanged by this line —
+    // the parent's fee is what it always was, and this is the school's card
+    // bill coming back, so it nets against the expense rather than reading
+    // as the school having charged more.
+    out.push({
+      accountCode: L_PG_FEE_RECOVERED,
+      debitPaise: 0,
+      creditPaise: surchargeTotal,
+      narration: `Gateway charge recovered — receipt ${voucher.receiptNo || ""}`.trim(),
       ...(party ? { party } : {}),
     });
   }

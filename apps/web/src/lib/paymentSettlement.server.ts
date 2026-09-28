@@ -22,6 +22,15 @@ export async function settlePaymentLinkWithWhatsApp(opts: {
    * come to exactly this or nothing is booked. See the amount check below.
    */
   expectedAmountPaise?: number;
+  /**
+   * Gateway fee the parent paid ON TOP of the fee, where the school passes it
+   * on. Kept out of `expectedAmountPaise` deliberately: that check exists to
+   * refuse a receipt for the wrong money, and it compares the fee the receipt
+   * is written for. Cashfree collected the sum of the two, and the ledger
+   * debits clearing with the sum, which is what keeps clearing reconciling
+   * against the settlement's gross.
+   */
+  gatewaySurchargePaise?: number;
 }): Promise<
   | ({
       ok: true;
@@ -118,6 +127,7 @@ export async function settlePaymentLinkWithWhatsApp(opts: {
     cashierName: opts.cashierName,
     upiRef: opts.upiRef,
     collectionDate: opts.collectionDate,
+    gatewaySurchargePaise: opts.gatewaySurchargePaise,
   });
   if (!result.ok) return result;
 

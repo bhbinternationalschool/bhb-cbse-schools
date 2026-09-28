@@ -65,6 +65,18 @@ export const L_PG_CLEARING = "1100";
 /** The gateway's own fee. GST on it goes to 1080 and is claimable. */
 export const L_PG_CHARGES = "5080";
 /**
+ * The gateway fee recovered from the parent, where the school has chosen to
+ * pass it on rather than absorb it.
+ *
+ * Its own head, and deliberately NOT Fee Income: a convenience charge is not
+ * a fee the school levied for teaching, it is a cost recovered at par. Folding
+ * it into 4000 would overstate fee income — the number the fee regulator, the
+ * trust's accounts and every per-student average are read off — by the size of
+ * the school's card bill. Against 5080 it nets to roughly nil, which is the
+ * whole point of recovering it, and the residue is visible as such.
+ */
+export const L_PG_FEE_RECOVERED = "4110";
+/**
  * Where a counted-cash or bank-statement difference lands when the book and
  * reality disagree. Deliberately its own expense head rather than corpus: a
  * difference is a real gain or loss and an auditor must be able to see it and
@@ -140,6 +152,7 @@ export function defaultLedgerAccounts(): LedgerAccountSeed[] {
     { code: "4", name: "Income", kind: "income", scheduleGroup: "" },
     { code: L_FEE_INCOME, name: "Fee Income", kind: "income", parentCode: "4", scheduleGroup: G.feeIncome },
     { code: L_OTHER_INCOME, name: "Other Income", kind: "income", parentCode: "4", scheduleGroup: G.otherIncome },
+    { code: L_PG_FEE_RECOVERED, name: "Gateway Fee Recovered", kind: "income", parentCode: "4", scheduleGroup: G.otherIncome },
     { code: L_STORE_SALES, name: "Store Sales Income", kind: "income", parentCode: "4", scheduleGroup: G.otherIncome },
 
     /* ─── Expenses ───────────────────────────────────────── */
