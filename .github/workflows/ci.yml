@@ -519,21 +519,26 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
           NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key
-          # THE TYPE-CHECK NEEDS MORE THAN 4 GB, MEASURED NOT GUESSED.
+          # 6144, AND DELIBERATELY THE SAME AS apps/web/Dockerfile.
           #
-          # On 28 Sep this job failed: compilation succeeded in 2.7 minutes and
-          # then "Checking validity of types" died with SIGABRT at ~2.0 GB. This
-          # job had no NODE_OPTIONS at all, so it ran on Node's default.
+          # On 28 Sep this job failed: compilation succeeded and then "Checking
+          # validity of types" died with SIGABRT at ~2.0 GB. It had no
+          # NODE_OPTIONS at all, so it ran on Node's default while every other
+          # build in the project had an explicit heap.
           #
-          # Reproduced locally at 2048 (dies ~2.0 GB) and at 4096 (dies ~4.0 GB
-          # in the Next.js build worker). 8192 completes with no GC pressure
-          # logged at all, so there is real headroom rather than a value that
-          # only just fits. A GitHub ubuntu-latest runner has 16 GB, so this is
-          # comfortable here.
+          # Measured on this tree, not guessed: 2048 dies ~2.0 GB, 4096 dies
+          # ~4.0 GB in the Next.js build worker, 6144 and 8192 both complete with
+          # no GC pressure logged.
           #
-          # NOT copied into apps/web/Dockerfile: cloudbuild.yaml builds on
-          # E2_HIGHCPU_8, which is 8 vCPU and only 8 GB of RAM, and an 8 GB heap
-          # there would be killed by the kernel rather than reported by V8. The
-          # Docker heap is set separately to fit that machine.
-          NODE_OPTIONS: --max-old-space-size=8192
+          # 6144 rather than 8192, which is the whole point. The Docker build is
+          # capped at 6144 because cloudbuild.yaml runs on E2_HIGHCPU_8 — 8 GB of
+          # RAM — where a larger heap would be killed by the kernel. If THIS job
+          # had more headroom than that, CI would go green while the production
+          # deploy ran out of memory: exactly the failure that hid here until
+          # today, when the Dockerfile's 4096 was already below what this tree
+          # needs and nothing but an unrelated CI failure revealed it.
+          #
+          # So CI must never be more permissive than the deploy. Raise both
+          # together, and raise the Cloud Build machineType before raising these.
+          NODE_OPTIONS: --max-old-space-size=6144
         run: npm run build
