@@ -188,7 +188,18 @@ async function call(
 /** What is left in the prefunded wallet. Checked before a run, not during it. */
 export async function payoutBalance(): Promise<{ ok: true; availablePaise: number } | { ok: false; error: string }> {
   if (!payoutKeysPresent()) return { ok: false, error: "Payouts is not configured" };
-  const res = await call("/balance", { method: "GET" });
+  // /v1.2/getBalance, not /balance. Confirmed the hard way on 28 Sep: the live
+  // account answered a /balance read with 400 "paymentInstrumentId is invalid",
+  // which was the useful kind of failure — a 400 only comes back AFTER the
+  // credentials and the 2FA signature have been accepted, so it proved auth
+  // works and named the wrong endpoint in one go.
+  //
+  // paymentInstrumentId selects one fund source. Omitted here on purpose: the
+  // school has one wallet and this is a pre-flight check, so the account-level
+  // balance is what is wanted. If Cashfree insists on the id, the error is
+  // reported rather than swallowed — see the unreadable-balance branch below,
+  // which refuses to call an unknown balance zero.
+  const res = await call("/v1.2/getBalance", { method: "GET" });
   if (!res.ok) return { ok: false, error: res.error };
   const p = (res.payload ?? {}) as Record<string, unknown>;
   const data = (p.data ?? p) as Record<string, unknown>;

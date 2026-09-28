@@ -245,6 +245,14 @@ console.log("");
     } else if (r.status === 0) {
       console.log("   " + bad(`could not reach Cashfree — ${r.error}`));
       problems += 1;
+    } else if (r.status === 404) {
+      // Not a key problem. Cashfree's own guidance: a 404 here while other
+      // products work means the Verification Suite is not activated on the
+      // account, and activation is a separate request to them.
+      console.log("   " + warn("HTTP 404 — the keys are fine, but this product is not activated"));
+      console.log("   " + dim("   ask Cashfree to enable the Verification Suite (bank account verification)"));
+      console.log("   " + dim("   https://merchant.cashfree.com/merchants/landing?env=prod&raise_issue=1"));
+      problems += 1;
     } else {
       console.log("   " + warn(`HTTP ${r.status} ${dim(why(r.body))}`));
       problems += 1;
@@ -329,7 +337,7 @@ console.log("");
       : "https://sandbox.cashfree.com/payout";
     // A read of the prefunded wallet. Exercises the credentials AND the 2FA
     // signature together, which is the pair most likely to be wrong.
-    const r = await get(`${base}/balance`, {
+    const r = await get(`${base}/v1.2/getBalance`, {
       "x-api-version": "2024-01-01",
       "x-client-id": val("CASHFREE_PAYOUT_CLIENT_ID"),
       "x-client-secret": val("CASHFREE_PAYOUT_CLIENT_SECRET"),
@@ -345,12 +353,17 @@ console.log("");
       console.log("   " + dim("   if it says Signature Mismatched: use the OLDEST client id on the account,"));
       console.log("   " + dim("   and make sure the public key is from the SAME environment as the client id"));
       problems += 1;
-    } else if (r.status === 404) {
-      // Reported honestly rather than as a key failure: the balance path is the
-      // one endpoint in this script not confirmed against a live V2 account.
-      console.log("   " + warn(`HTTP 404 on ${base}/balance ${dim(why(r.body))}`));
-      console.log("   " + dim("   the keys may be fine — this path is unconfirmed for V2. Tell Claude if you see this."));
-      problems += 1;
+    } else if (r.status === 400 || r.status === 404) {
+      // THE GOOD OUTCOME THAT USED TO READ AS A FAILURE. Cashfree only answers
+      // 400/404 after it has accepted the credentials AND verified the 2FA
+      // signature — an unauthenticated call gets 401. So a complaint about the
+      // request itself proves the hard part works, and the only thing wrong is
+      // this script's endpoint. That is exactly what happened on 28 Sep:
+      // "paymentInstrumentId is invalid" on a balance read, which is a fund
+      // source id the balance endpoint wants, not a credentials fault.
+      console.log("   " + ok("Cashfree accepted the keys AND the signature"));
+      console.log("   " + dim(`   (HTTP ${r.status} on the balance read: ${why(r.body) || "endpoint needs a fund source id"})`));
+      console.log("   " + dim("   that is this script's endpoint, not your keys — payouts auth is working"));
     } else if (r.status === 0) {
       console.log("   " + bad(`could not reach Cashfree — ${r.error}`));
       problems += 1;

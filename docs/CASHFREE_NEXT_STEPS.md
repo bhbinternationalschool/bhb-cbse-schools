@@ -156,6 +156,8 @@ The most likely failures, and what they mean:
 | `looks like a key FINGERPRINT` | You pasted the hex string. Download the `.pem` instead. |
 | `is a PRODUCTION secret but ... says sandbox` | The two lines disagree. Either change that `_ENV` line to `production`, or use that product's sandbox keys. |
 | `this is the same value as CASHFREE_VERIFICATION_APP_ID` | Payouts and the Verification Suite are different products. Get the Payouts pair from Payouts → Developers → API Keys. |
+| Bank verification `HTTP 404` | The keys are fine — that product is **not activated** on the account. Ask Cashfree to enable the Verification Suite: [raise an issue](https://merchant.cashfree.com/merchants/landing?env=prod&raise_issue=1). |
+| Payouts `HTTP 400 paymentInstrumentId...` | **Good news** — Cashfree only answers 400 after accepting the keys and the 2FA signature. Auth is working; that was a wrong endpoint on our side, fixed 28 Sep. |
 
 ---
 
