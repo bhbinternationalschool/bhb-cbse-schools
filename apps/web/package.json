@@ -43,6 +43,7 @@
     "test:masters-staff-slices": "npx tsx src/lib/mastersStaffSlices.selftest.ts",
     "test:mobile-features": "npx tsx src/lib/mobileFeatures.selftest.ts",
     "test:cashfree-checkout": "npx tsx src/lib/cashfreeCheckout.selftest.ts",
+    "test:gateway-fees": "npx tsx src/lib/gatewayFees.selftest.ts",
     "test:diksha-index": "npx tsx src/lib/dikshaIndex.selftest.ts",
     "test:teacher-contact": "npx tsx src/lib/teacherContact.selftest.ts",
     "test:academic-risk": "npx tsx src/lib/academicRisk.selftest.ts",

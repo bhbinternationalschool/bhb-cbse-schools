@@ -1190,6 +1190,75 @@ function ln(o: Partial<AnomalyFacts["lines"][number]> & { voucherId: string }) {
 }
 
 {
+  // A gateway charge passed on to the parent. ₹5,000 of fee, ₹118 recovered.
+  //
+  // The gateway is holding ₹5,118, so clearing must be debited ₹5,118 — the
+  // settlement journal credits clearing with Cashfree's GROSS, and a receipt
+  // that only debited the ₹5,000 would drive the account ₹118 negative on
+  // every single online payment.
+  const built = buildFeeReceiptVoucher({
+    voucher: {
+      id: "v_gw_sur",
+      householdId: "hh_9",
+      receiptNo: "RC-11",
+      collectionDate: "2026-08-29",
+      totalPaise: 5_000_00,
+      cashierName: "Cashfree webhook",
+      voidedAt: null,
+    },
+    tenders: [
+      {
+        mode: "upi",
+        amountPaise: 5_000_00,
+        ref: "CF_124",
+        instrumentDate: "2026-08-29",
+        bankAccountId: "",
+        gatewayProvider: "cashfree",
+        gatewaySurchargePaise: 118_00,
+      },
+    ],
+    lines: [{ kind: "academic", amountPaise: 5_000_00 }],
+  });
+  assert.ok(built.ok, `surcharged receipt must build: ${built.ok ? "" : built.reason}`);
+  const { by } = shape(built.voucher.lines);
+  assert.equal(by["1100"], 5_118_00, "clearing holds the fee AND the charge the parent paid");
+  assert.equal(by["4110"], -118_00, "the charge is recovery, credited to 4110");
+  // The one that matters for the fee regulator and every per-student average:
+  // passing on a card bill must not make the school look like it charged more.
+  assert.equal(by["4000"], -5_000_00, "fee income is the fee, untouched by the charge");
+
+  // The same amounts at the counter have no gateway holding anything, so there
+  // is nothing to recover and nothing to debit.
+  const atCounter = buildFeeReceiptVoucher({
+    voucher: {
+      id: "v_ctr_sur",
+      householdId: "hh_9",
+      receiptNo: "RC-12",
+      collectionDate: "2026-08-29",
+      totalPaise: 5_000_00,
+      cashierName: "Counter",
+      voidedAt: null,
+    },
+    tenders: [
+      {
+        mode: "upi",
+        amountPaise: 5_000_00,
+        ref: "UTR10",
+        instrumentDate: "2026-08-29",
+        bankAccountId: "bnk_1",
+        gatewaySurchargePaise: 118_00,
+      },
+    ],
+    lines: [{ kind: "academic", amountPaise: 5_000_00 }],
+  });
+  assert.ok(atCounter.ok, "counter receipt must still build");
+  const counterBy = shape(atCounter.voucher.lines).by;
+  assert.equal(counterBy["1010"], 5_000_00, "counter money is the fee and only the fee");
+  assert.equal(counterBy["4110"], undefined, "no gateway, no charge to recover");
+  console.log("  ok  a passed-on gateway charge lands in clearing and 4110, never in fee income");
+}
+
+{
   // ₹100 captured, settled at ₹97.94 after ₹1.75 fee and ₹0.31 GST.
   const built = buildPgSettlementVoucher({
     provider: "cashfree",
