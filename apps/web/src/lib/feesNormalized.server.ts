@@ -161,6 +161,10 @@ export function voucherToRows(
     tender_json: {
       bankAccountId: t.bankAccountId,
       gatewayProvider: t.gatewayProvider || "",
+      // A jsonb bag, so a passed-on gateway charge needs no column. Always
+      // written, including as 0, so a reader can tell "no charge" from "this
+      // row predates the field" if that ever matters.
+      gatewaySurchargePaise: Math.max(0, Math.round(t.gatewaySurchargePaise || 0)),
     },
   }));
 
@@ -209,6 +213,7 @@ function rowToVoucher(
         bankName: String(row.bank_name || ""),
         bankAccountId: tj.bankAccountId as string | undefined,
         gatewayProvider: (tj.gatewayProvider as string | undefined) || "",
+        gatewaySurchargePaise: Math.max(0, Math.round(Number(tj.gatewaySurchargePaise) || 0)),
         realisation:
           (row.realisation as VoucherTender["realisation"]) || "cleared",
       };

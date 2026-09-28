@@ -27,6 +27,12 @@ import {
   fetchCashfreePaymentStatus,
 } from "@/lib/cashfree.server";
 import { cashfreePayPageUrl, isCashfreeOrderId } from "@/lib/cashfreeCheckout";
+import {
+  fallbackGatewayQuote,
+  quoteGatewayFee,
+  type GatewayMethodGroup,
+} from "@/lib/gatewayFees";
+import { loadGatewayFeePolicy } from "@/lib/gatewayFeePolicy.server";
 import { ensurePaymentLinkHydrated } from "@/lib/paymentsPersistence";
 import { settlePaymentLinkWithWhatsApp } from "@/lib/paymentSettlement.server";
 import { recordPaymentGatewayEvent } from "@/lib/paymentsNormalized.server";
@@ -40,6 +46,14 @@ export type CashfreeCheckoutRow = {
   kind: CheckoutKind;
   ref: string;
   amountPaise: number;
+  /**
+   * Gateway fee the parent paid ON TOP of amountPaise. Zero whenever the
+   * school absorbs the fee, which is the default and today's behaviour.
+   * Cashfree collected amountPaise + surchargePaise.
+   */
+  surchargePaise: number;
+  /** The rail the surcharge was quoted for; empty when there was no picker. */
+  methodGroup: string;
   paymentSessionId: string;
   cfOrderId: string;
   afterUrl: string;
@@ -54,6 +68,8 @@ function rowToCheckout(r: Record<string, unknown>): CashfreeCheckoutRow {
     kind: String(r.kind) as CheckoutKind,
     ref: String(r.ref),
     amountPaise: Number(r.amount_paise),
+    surchargePaise: Math.max(0, Math.round(Number(r.surcharge_paise ?? 0))),
+    methodGroup: String(r.method_group ?? ""),
     paymentSessionId: String(r.payment_session_id ?? ""),
     cfOrderId: String(r.cf_order_id ?? ""),
     afterUrl: String(r.after_url ?? ""),
@@ -88,6 +104,14 @@ export type CreateCheckoutInput = {
   /** Used as the Cashfree order id when it is valid for one. */
   preferredId: string;
   amountPaise: number;
+  /**
+   * The rail the parent chose on our pay page, when they were given the
+   * choice. It decides which configured rate the surcharge is quoted at.
+   * Omitted for a WhatsApp pay-link, which has no picker — that falls back to
+   * the policy's fallback rail, which ships as the free one so a link can
+   * never surprise a parent with a card-rate charge they did not choose.
+   */
+  methodGroup?: GatewayMethodGroup;
   purpose: string;
   customerId: string;
   customerName: string;
@@ -108,10 +132,20 @@ export async function createCashfreeCheckout(input: CreateCheckoutInput): Promis
   const origin = input.origin.replace(/\/$/, "");
   const webhookUrl = `${origin}/api/payments/cashfree/webhook`;
 
+  // What the school has decided about who bears the fee. Reading it here, in
+  // the one funnel every online collection goes through, rather than at each
+  // of the four call sites — a rail that forgot to ask would silently absorb
+  // a fee the school meant to pass on, or worse, charge for one it did not.
+  const policy = await loadGatewayFeePolicy();
+  const quote = input.methodGroup
+    ? quoteGatewayFee({ netPaise: input.amountPaise, group: input.methodGroup, policy })
+    : fallbackGatewayQuote({ netPaise: input.amountPaise, policy });
+  const chargeablePaise = quote.chargeablePaise;
+
   if (cashfreeCheckoutMode() === "links") {
     const link = await createCashfreeLink({
       linkId: input.preferredId,
-      amountPaise: input.amountPaise,
+      amountPaise: chargeablePaise,
       purpose: input.purpose,
       customerName: input.customerName,
       customerMobile: input.customerMobile,
@@ -128,7 +162,11 @@ export async function createCashfreeCheckout(input: CreateCheckoutInput): Promis
   const orderId = orderIdFor(input.preferredId);
   const order = await createCashfreeOrder({
     orderId,
-    amountPaise: input.amountPaise,
+    // What Cashfree collects: the fee plus any charge the parent bears. The
+    // row below still records the fee as amount_paise, because that is what
+    // the receipt is written for and what the settle-time amount check
+    // compares against.
+    amountPaise: chargeablePaise,
     customerId: input.customerId,
     customerName: input.customerName,
     customerMobile: input.customerMobile,
@@ -149,6 +187,8 @@ export async function createCashfreeCheckout(input: CreateCheckoutInput): Promis
       kind: input.kind,
       ref: input.ref,
       amount_paise: input.amountPaise,
+      surcharge_paise: quote.surchargePaise,
+      method_group: quote.surchargePaise > 0 ? quote.group : "",
       customer_phone: input.customerMobile.replace(/\D/g, "").slice(-10),
       payment_session_id: order.paymentSessionId,
       cf_order_id: order.cfOrderId,
@@ -246,6 +286,46 @@ export async function settleCashfreeCheckout(opts: {
     return { ok: false, error: live.ok ? `Cashfree order is ${live.status}, not PAID` : live.error, kind: row.kind, ref: row.ref };
   }
 
+  // WHAT CASHFREE SAYS IT TOOK, AGAINST WHAT WE ASKED FOR.
+  //
+  // Nothing compared these before, and a grossed-up order makes the gap
+  // matter: the parent is charged the fee plus the surcharge, so a payment
+  // that came to less than that would have been booked as a full receipt for
+  // the fee, leaving the school short and the fee book saying paid.
+  //
+  // Short pays are refused and recorded. Over-pays are recorded and allowed
+  // through — the money IS there, and refusing to book a receipt for a parent
+  // who paid too much would be the worse failure of the two. The event is the
+  // trail for the office to refund the difference.
+  const expectedPaise = row.amountPaise + row.surchargePaise;
+  const paidPaise = Math.round(live.amountPaidRupees * 100);
+  if (paidPaise > 0 && paidPaise !== expectedPaise) {
+    await recordPaymentGatewayEvent({
+      provider: "cashfree",
+      eventType: `${row.kind}.amount_mismatch`,
+      externalOrderId: opts.orderId,
+      externalPaymentId: opts.paymentRef || "",
+      amountPaise: paidPaise,
+      settlementStatus: paidPaise < expectedPaise ? "failed" : "received",
+      eventJson: {
+        expectedPaise,
+        feePaise: row.amountPaise,
+        surchargePaise: row.surchargePaise,
+        paidPaise,
+        methodGroup: row.methodGroup,
+        source: opts.source,
+      },
+    });
+    if (paidPaise < expectedPaise) {
+      return {
+        ok: false,
+        error: `Cashfree took ${paidPaise} paise but this order is for ${expectedPaise}`,
+        kind: row.kind,
+        ref: row.ref,
+      };
+    }
+  }
+
   let paymentRef = opts.paymentRef || row.paymentRef;
   if (!paymentRef) {
     const p = await fetchCashfreeOrderPayment(opts.orderId);
@@ -287,6 +367,10 @@ export async function settleCashfreeCheckout(opts: {
           // this or nothing is booked — a receipt for less than the parent
           // paid leaves a head unpaid and the bank out by the difference.
           expectedAmountPaise: row.amountPaise,
+          // On top of the fee, and NOT added into the check above. Cashfree
+          // took the sum; the receipt is for the fee; clearing is debited with
+          // both so it still reconciles against the settlement's gross.
+          gatewaySurchargePaise: row.surchargePaise,
         });
         result = r.ok
           ? { ok: true, alreadyPaid: false, kind: row.kind, ref: row.ref, receiptNo: r.receiptNo }

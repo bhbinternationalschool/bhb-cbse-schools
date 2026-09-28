@@ -9,6 +9,8 @@
  * head unpaid; anything much more and a parent has been over-charged.
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   bearerFor,
@@ -268,6 +270,84 @@ console.log("gatewayFees.selftest.ts");
   assert.equal(gatewayGroupFromCashfree("BANK_TRANSFER"), "netbanking");
   assert.equal(gatewayGroupFromCashfree("something_new"), null, "an unknown rail is not guessed");
   assert.equal(gatewayGroupFromCashfree(""), null);
+}
+
+/* ── the wiring, where a silent edit would cost real money ───────────── */
+{
+  const read = (rel: string) =>
+    readFileSync(
+      join(process.cwd(), process.cwd().endsWith("apps/web") ? "src" : "apps/web/src", rel),
+      "utf8",
+    );
+
+  const checkout = read("lib/cashfreeCheckouts.server.ts");
+  // Cashfree is asked for the grossed-up amount...
+  assert.match(
+    checkout,
+    /createCashfreeOrder\(\{[\s\S]*?amountPaise: chargeablePaise,/,
+    "the order is created for the fee PLUS the surcharge, or the school never receives it",
+  );
+  // ...but the row keeps the FEE as amount_paise. This pair is the whole
+  // design: the receipt is for the fee, and the settle-time amount check
+  // compares against it. Folding the surcharge in would make every surcharged
+  // payment look like a mismatch and nothing would be booked at all.
+  assert.match(
+    checkout,
+    /amount_paise: input\.amountPaise,\n\s*surcharge_paise: quote\.surchargePaise,/,
+    "the row records the fee and the surcharge separately",
+  );
+  assert.match(
+    checkout,
+    /expectedAmountPaise: row\.amountPaise,[\s\S]{0,400}?gatewaySurchargePaise: row\.surchargePaise,/,
+    "settlement checks the fee and passes the surcharge on separately",
+  );
+  // The guard that did not exist before: Cashfree's own figure against ours.
+  assert.match(
+    checkout,
+    /const expectedPaise = row\.amountPaise \+ row\.surchargePaise;/,
+    "what Cashfree says it took is compared against what the order was for",
+  );
+  assert.match(
+    checkout,
+    /if \(paidPaise < expectedPaise\) \{[\s\S]{0,200}?ok: false/,
+    "a short payment is refused, not booked as a full receipt",
+  );
+
+  const payPage = read("app/pay/cf/[orderId]/page.tsx");
+  // A parent must never be shown the fee and charged the total.
+  assert.match(
+    payPage,
+    /const chargedPaise = row\.amountPaise \+ row\.surchargePaise;/,
+    "the pay page totals what Cashfree will actually take",
+  );
+  assert.match(
+    payPage,
+    /const amount = formatPaise\(chargedPaise\);/,
+    "and shows that total as the headline figure, not the fee",
+  );
+  assert.doesNotMatch(
+    payPage,
+    /const amount = formatPaise\(row\.amountPaise\);/,
+    "showing the fee as the amount would put ₹2,500 on screen and take ₹2,547",
+  );
+
+  // The tender carries the surcharge all the way to the ledger. Any one of
+  // these three going missing leaves clearing short on every online payment.
+  assert.match(
+    read("lib/payments.ts"),
+    /gatewaySurchargePaise:\s*\n?\s*link\.gatewayMode === "cashfree"/,
+    "applyPaymentLink only honours a surcharge where a gateway really held the money",
+  );
+  assert.match(
+    read("lib/feesNormalized.server.ts"),
+    /gatewaySurchargePaise: Math\.max\(0, Math\.round\(t\.gatewaySurchargePaise \|\| 0\)\)/,
+    "the surcharge is persisted with the tender",
+  );
+  assert.match(
+    read("lib/ledger/project.server.ts"),
+    /gatewaySurchargePaise: Math\.max\(0, Math\.round\(Number\(j\.gatewaySurchargePaise\) \|\| 0\)\)/,
+    "and read back for the ledger projection",
+  );
 }
 
 console.log("  ok");
