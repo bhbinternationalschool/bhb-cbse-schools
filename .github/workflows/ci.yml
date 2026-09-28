@@ -519,4 +519,21 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
           NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key
+          # THE TYPE-CHECK NEEDS MORE THAN 4 GB, MEASURED NOT GUESSED.
+          #
+          # On 28 Sep this job failed: compilation succeeded in 2.7 minutes and
+          # then "Checking validity of types" died with SIGABRT at ~2.0 GB. This
+          # job had no NODE_OPTIONS at all, so it ran on Node's default.
+          #
+          # Reproduced locally at 2048 (dies ~2.0 GB) and at 4096 (dies ~4.0 GB
+          # in the Next.js build worker). 8192 completes with no GC pressure
+          # logged at all, so there is real headroom rather than a value that
+          # only just fits. A GitHub ubuntu-latest runner has 16 GB, so this is
+          # comfortable here.
+          #
+          # NOT copied into apps/web/Dockerfile: cloudbuild.yaml builds on
+          # E2_HIGHCPU_8, which is 8 vCPU and only 8 GB of RAM, and an 8 GB heap
+          # there would be killed by the kernel rather than reported by V8. The
+          # Docker heap is set separately to fit that machine.
+          NODE_OPTIONS: --max-old-space-size=8192
         run: npm run build
