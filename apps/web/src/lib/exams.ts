@@ -1245,9 +1245,28 @@ export function loadExams(): ExamsState {
   }
 }
 
-export function saveExams(state: ExamsState) {
+/**
+ * Returns whether the state was actually stored.
+ *
+ * It used to return void, and every caller read that as success. A refused
+ * write — a closed academic year selected in the header, or a role without
+ * `exams: edit` — returned early here, and the date sheet answered "Paper
+ * updated" while the paper had not moved. The screen said the opposite of
+ * what the data said, which is the one thing a save must never do.
+ *
+ * The refusal itself still raises its own event for the global banner; this
+ * is so the caller can stop and say so in place.
+ */
+export function saveExams(state: ExamsState): { ok: boolean; error?: string } {
   if (typeof window !== "undefined") {
-    if (!assertModulePermission("exams", "edit", "saveExams")) return;
+    if (!assertModulePermission("exams", "edit", "saveExams")) {
+      return {
+        ok: false,
+        error:
+          "This change was not saved — the exams desk is read-only for you, " +
+          "or the academic year selected at the top is closed.",
+      };
+    }
   }
 
   if (typeof window === "undefined") {
@@ -1255,7 +1274,7 @@ export function saveExams(state: ExamsState) {
     void trackServerWork(import("@/lib/examsPersistence").then(({ scheduleExamsSync }) => {
       scheduleExamsSync(state);
     }));
-    return;
+    return { ok: true };
   }
   try {
     writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
@@ -1265,6 +1284,7 @@ export function saveExams(state: ExamsState) {
   void trackServerWork(import("@/lib/examsPersistence").then(({ scheduleExamsSync }) => {
     scheduleExamsSync(state);
   }));
+  return { ok: true };
 }
 
 export function writeExamsLocalRaw(state: ExamsState) {
@@ -1809,12 +1829,16 @@ export function saveExamDateSheetEntry(input: {
       error: "This class already has an overlapping exam sitting",
     };
   }
-  saveExams({
+  // Report what the write did, not what it was asked to do. A refused save
+  // used to come back here as success and the date sheet said "Paper
+  // updated" over an unchanged date.
+  const saved = saveExams({
     ...state,
     dateSheet: state.dateSheet.some((row) => row.id === entry.id)
       ? state.dateSheet.map((row) => (row.id === entry.id ? entry : row))
       : [...state.dateSheet, entry],
   });
+  if (!saved.ok) return { ok: false, error: saved.error ?? "Not saved" };
   return { ok: true, entry };
 }
 
@@ -1825,10 +1849,11 @@ export function deleteExamDateSheetEntry(
   if (!state.dateSheet.some((row) => row.id === entryId)) {
     return { ok: false, error: "Date-sheet entry not found" };
   }
-  saveExams({
+  const saved = saveExams({
     ...state,
     dateSheet: state.dateSheet.filter((row) => row.id !== entryId),
   });
+  if (!saved.ok) return { ok: false, error: saved.error ?? "Not saved" };
   return { ok: true };
 }
 
