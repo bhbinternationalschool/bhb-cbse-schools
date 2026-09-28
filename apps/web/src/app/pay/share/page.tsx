@@ -55,6 +55,9 @@ function payloadFromServerLink(
 
 export default function PaySharePage() {
   const [payload, setPayload] = useState<PaymentSharePayload | null>(null);
+  // Named payment rails for this amount, from Cashfree. Null means it could
+  // not be asked, and the generic line is shown instead of a claim.
+  const [payMethods, setPayMethods] = useState<{ group: string; label: string }[] | null>(null);
   const [serverLink, setServerLink] = useState<ServerLink | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
@@ -108,7 +111,11 @@ export default function PaySharePage() {
           setError("Could not open this payment link. Ask the school to resend.");
           return;
         }
-        const json = (await res.json()) as { link?: ServerLink };
+        const json = (await res.json()) as {
+          link?: ServerLink;
+          payMethods?: { group: string; label: string }[] | null;
+        };
+        setPayMethods(json.payMethods ?? null);
         const link = json.link;
         if (!link) {
           setError("Payment link not found.");
@@ -356,9 +363,24 @@ export default function PaySharePage() {
                   Pay {formatInr(payload.amountPaise)} via {gatewayName}
                 </a>
                 <p className="text-center text-[10px] leading-relaxed text-[var(--muted)]">
-                  UPI / card / netbanking. Ledger &amp; WhatsApp receipt update
-                  automatically — no confirm button needed.
+                  {/* Named from the account rather than hard-coded: "UPI / card
+                      / netbanking" left out EMI, Pay Later and wallets that
+                      have been on the checkout all along, which for an annual
+                      fee is the one option a family most needs to know exists.
+                      Falls back to the generic wording when Cashfree could not
+                      be asked — never a list we are not sure of. */}
+                  {payMethods && payMethods.length > 0
+                    ? payMethods.map((m) => m.label).join(" · ")
+                    : "UPI / card / netbanking"}
+                  . Ledger &amp; WhatsApp receipt update automatically — no
+                  confirm button needed.
                 </p>
+                {payMethods?.some((m) => m.group === "emi" || m.group === "pay_later") ? (
+                  <p className="text-center text-[11px] font-semibold text-[var(--brand-deep)]">
+                    You can pay this in instalments — choose EMI on the payment
+                    screen.
+                  </p>
+                ) : null}
               </div>
             ) : (
               <>

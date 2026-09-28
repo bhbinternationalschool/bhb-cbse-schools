@@ -15,6 +15,8 @@
  * and a parent shown an error cannot.
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { cashfreeFiltersFor, readEligibleGroups } from "@/lib/gatewayMethods";
 import { GATEWAY_METHOD_GROUPS, type GatewayMethodGroup } from "@/lib/gatewayFees";
@@ -141,6 +143,46 @@ console.log("gatewayMethods.selftest.ts");
   }
   assert.deepEqual(cashfreeFiltersFor([]), [], "no choice means no restriction");
   assert.deepEqual(cashfreeFiltersFor(["nope" as GatewayMethodGroup]), [], "an unknown rail adds nothing");
+}
+
+/* ── the parent is told the truth about how they can pay ─────────────── */
+{
+  const read = (rel: string) =>
+    readFileSync(
+      join(process.cwd(), process.cwd().endsWith("apps/web") ? "src" : "apps/web/src", rel),
+      "utf8",
+    );
+
+  const route = read("app/api/payments/parent-pay/route.ts");
+  // Asked per amount, not once: EMI and Pay Later carry issuer minimums, and
+  // naming EMI on a book charge no bank will finance is worse than silence.
+  assert.match(
+    route,
+    /fetchEligibleMethodGroups\(link\.amountPaise\)/,
+    "the rails are fetched for THIS link's amount",
+  );
+  // Only where a gateway checkout actually exists — a demo link has no rails.
+  assert.match(route, /link\.gatewayCheckoutUrl\s*\n?\s*\?/, "and only when there is a gateway to pay through");
+
+  const page = read("app/pay/share/page.tsx");
+  // The old hard-coded line named three rails and left out the EMI the school
+  // has had enabled all along. It survives ONLY as the fallback.
+  assert.match(
+    page,
+    /payMethods && payMethods\.length > 0[\s\S]{0,160}?"UPI \/ card \/ netbanking"/,
+    "the real list is preferred and the hard-coded text is only the fallback",
+  );
+  assert.match(
+    page,
+    /payMethods\?\.some\(\(m\) => m\.group === "emi" \|\| m\.group === "pay_later"\)/,
+    "instalments are called out when the amount actually qualifies",
+  );
+  // Never asserted from nothing: a null list must not render an empty sentence.
+  assert.doesNotMatch(
+    page,
+    /payMethods\.map\(\(m\) => m\.label\)\.join\(" · "\)\s*\}/,
+    "the list is only rendered behind a length check",
+  );
 }
 
 console.log("  ok");
