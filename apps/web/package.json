@@ -45,6 +45,7 @@
     "test:cashfree-checkout": "npx tsx src/lib/cashfreeCheckout.selftest.ts",
     "test:gateway-fees": "npx tsx src/lib/gatewayFees.selftest.ts",
     "test:gateway-methods": "npx tsx src/lib/gatewayMethods.selftest.ts",
+    "test:cashfree-refund": "npx tsx src/lib/cashfreeRefund.selftest.ts",
     "test:diksha-index": "npx tsx src/lib/dikshaIndex.selftest.ts",
     "test:teacher-contact": "npx tsx src/lib/teacherContact.selftest.ts",
     "test:academic-risk": "npx tsx src/lib/academicRisk.selftest.ts",
