@@ -65,6 +65,36 @@ const env = { ...readEnvFile(ENV_PATH), ...process.env };
 const val = (k) => (env[k] ?? "").trim();
 const isProd = (k) => val(k).toLowerCase() === "production";
 
+/**
+ * A secret carries its own environment: Cashfree issues cfsk_ma_prod_... for
+ * production and cfsk_ma_test_... for sandbox. Comparing that against the _ENV
+ * line turns "Client secret belongs to prod environment" — which reads like the
+ * secret is wrong — into "these two lines disagree", which is what it is.
+ *
+ * Inspects the PREFIX only. Nothing is printed.
+ */
+function envMismatch(secretName, envName) {
+  const secret = val(secretName);
+  if (!secret) return "";
+  const prodSecret = /_prod_/.test(secret);
+  const testSecret = /_test_/.test(secret);
+  if (!prodSecret && !testSecret) return "";
+  const prodEnv = isProd(envName);
+  if (prodSecret && !prodEnv) {
+    return `${secretName} is a PRODUCTION secret but ${envName} says sandbox`;
+  }
+  if (testSecret && prodEnv) {
+    return `${secretName} is a SANDBOX secret but ${envName} says production`;
+  }
+  return "";
+}
+
+/** Same value in two places that must differ. Compares, never prints. */
+function sameAs(aName, bName) {
+  const a = val(aName);
+  return !!a && a === val(bName);
+}
+
 function describe(name) {
   const v = val(name);
   if (!v) return { set: false, line: bad(`${name} is EMPTY`) };
@@ -131,6 +161,12 @@ console.log("");
   console.log("   " + id.line);
   console.log("   " + secret.line);
 
+  const pgMismatch = envMismatch("CASHFREE_SECRET_KEY", "CASHFREE_ENV");
+  if (pgMismatch) {
+    console.log("   " + bad(pgMismatch));
+    problems += 1;
+  }
+
   if (!id.set || !secret.set) {
     console.log("   " + warn("skipped the live check — fill both in first"));
     problems += 1;
@@ -181,6 +217,13 @@ console.log("");
     problems += 1;
   }
 
+  const verMismatch = envMismatch("CASHFREE_VERIFICATION_SECRET_KEY", "CASHFREE_VERIFICATION_ENV");
+  if (verMismatch) {
+    console.log("   " + bad(verMismatch));
+    console.log("   " + dim("   set the _ENV line to match the keys, or use the other environment's keys"));
+    problems += 1;
+  }
+
   if (!id.set || !secret.set) {
     console.log("   " + warn("not configured — bank verification is simply off (no error)"));
   } else {
@@ -223,6 +266,27 @@ console.log("");
   if (val("CASHFREE_PAYOUT_CLIENT_ID") && val("CASHFREE_PAYOUT_CLIENT_ID") === val("CASHFREE_APP_ID")) {
     console.log("   " + bad("this is the same value as CASHFREE_APP_ID"));
     console.log("   " + dim("   Payouts has its OWN keys. The gateway's will be rejected."));
+    problems += 1;
+  }
+
+  // THE CHECK THIS SCRIPT WAS MISSING. It compared each id against the PAYMENT
+  // GATEWAY's only, so reusing the VERIFICATION pair for payouts sailed through
+  // and surfaced as "Invalid clientId and clientSecret combination" — which
+  // reads like a typo. These are two different products and cannot share a pair.
+  if (sameAs("CASHFREE_PAYOUT_CLIENT_ID", "CASHFREE_VERIFICATION_APP_ID")) {
+    console.log("   " + bad("this is the same value as CASHFREE_VERIFICATION_APP_ID"));
+    console.log("   " + dim("   Payouts and the Verification Suite are different products with different"));
+    console.log("   " + dim("   keys. Get this pair from Payouts → Developers → API Keys."));
+    problems += 1;
+  }
+  if (sameAs("CASHFREE_PAYOUT_CLIENT_SECRET", "CASHFREE_VERIFICATION_SECRET_KEY")) {
+    console.log("   " + bad("this secret is the same as CASHFREE_VERIFICATION_SECRET_KEY"));
+    problems += 1;
+  }
+  const payMismatch = envMismatch("CASHFREE_PAYOUT_CLIENT_SECRET", "CASHFREE_PAYOUT_ENV");
+  if (payMismatch) {
+    console.log("   " + bad(payMismatch));
+    console.log("   " + dim("   the public key must come from that same environment too"));
     problems += 1;
   }
 

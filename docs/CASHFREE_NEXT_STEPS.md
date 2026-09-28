@@ -154,6 +154,8 @@ The most likely failures, and what they mean:
 | `Cashfree REJECTED these keys` | Wrong product's keys, or sandbox keys against production (or the reverse). |
 | `Signature Mismatched` | Use the **oldest** client id on the Payouts account, and a public key from the same environment. |
 | `looks like a key FINGERPRINT` | You pasted the hex string. Download the `.pem` instead. |
+| `is a PRODUCTION secret but ... says sandbox` | The two lines disagree. Either change that `_ENV` line to `production`, or use that product's sandbox keys. |
+| `this is the same value as CASHFREE_VERIFICATION_APP_ID` | Payouts and the Verification Suite are different products. Get the Payouts pair from Payouts → Developers → API Keys. |
 
 ---
 
