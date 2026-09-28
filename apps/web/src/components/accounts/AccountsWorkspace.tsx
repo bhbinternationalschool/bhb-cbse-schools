@@ -17,6 +17,7 @@ import {
   LedgerBookPanel,
   LedgerReportsPanel,
 } from "@/components/accounts/LedgerPanels";
+import { GatewayFeePolicyPanel } from "@/components/accounts/GatewayFeePolicyPanel";
 import { VendorHistoryPanel } from "@/components/accounts/VendorHistoryPanel";
 import {
   ChequesPanel,
@@ -282,6 +283,11 @@ export function AccountsWorkspace() {
               the bank credits will turn out to be, so they belong beside the
               statement rather than in a tab of their own. */}
           <GatewaySettlementPanel />
+          {/* Beside the settlements deliberately: the fee this sets is the same
+              fee the settlements above deduct, and the reconciliation inside it
+              reads off those very rows. Putting it in a settings tab would
+              separate the decision from its only evidence. */}
+          <GatewayFeePolicyPanel />
         </>
       ) : tab === "masters" ? (
         <div className="space-y-4">

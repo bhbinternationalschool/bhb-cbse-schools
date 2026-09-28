@@ -515,6 +515,22 @@ export type VoucherTender = {
    */
   gatewayProvider?: string;
   /**
+   * Gateway fee passed on to the parent, on top of `amountPaise`, where the
+   * school has chosen not to absorb it.
+   *
+   * NOT part of `amountPaise`, and deliberately so: `amountPaise` is what the
+   * receipt is written for, and the receipt is for the fee the school levied.
+   * The parent paid more than that, so the gateway is holding more than that,
+   * which is why the ledger debits clearing with the sum of the two — the
+   * settlement journal credits clearing with Cashfree's gross, and a receipt
+   * that debited only the fee would drive clearing negative by this amount on
+   * every online payment.
+   *
+   * Meaningless without `gatewayProvider`: there is no gateway charge to
+   * recover on cash at the counter.
+   */
+  gatewaySurchargePaise?: number;
+  /**
    * Cheque (and similar) — receipt issued but bank clearance pending.
    * Non-cheque modes are always "cleared".
    */

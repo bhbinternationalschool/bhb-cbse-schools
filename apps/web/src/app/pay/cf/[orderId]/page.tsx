@@ -41,7 +41,18 @@ export default async function CashfreePayPage({
   }
 
   const label = KIND_LABEL[row.kind];
-  const amount = formatPaise(row.amountPaise);
+  // WHAT CASHFREE WILL ACTUALLY TAKE, not what the fee is.
+  //
+  // row.amountPaise is the fee; where the school passes the gateway charge on,
+  // the order was created for the fee PLUS the surcharge. Showing the fee here
+  // would put ₹2,500 on the screen and take ₹2,547 off the card — the same
+  // shape of failure as a receipt for money that was never booked, pointed the
+  // other way. The breakdown below says where the difference goes.
+  const chargedPaise = row.amountPaise + row.surchargePaise;
+  const amount = formatPaise(chargedPaise);
+  const feeOnly = formatPaise(row.amountPaise);
+  const chargeOnly = formatPaise(row.surchargePaise);
+  const hasSurcharge = row.surchargePaise > 0;
 
   // Already settled, or Cashfree says PAID and we have not settled yet.
   let settled: Awaited<ReturnType<typeof settleCashfreeCheckout>> | null = null;
@@ -66,7 +77,7 @@ export default async function CashfreePayPage({
     return (
       <Shell title={settled.ok ? "Payment received" : "Payment received — being recorded"}>
         <p className="mt-3 text-[15px] leading-relaxed text-[#203050]">
-          {label} · {amount}.{" "}
+          {label} · {hasSurcharge ? `${amount} (${feeOnly} + ${chargeOnly} online payment charge)` : amount}.{" "}
           {settled.ok
             ? row.kind === "tutor_pass"
               ? settled.endsAt
@@ -93,6 +104,11 @@ export default async function CashfreePayPage({
   return (
     <Shell title={label}>
       <p className="mt-2 text-3xl font-bold text-[#203050]">{amount}</p>
+      {hasSurcharge ? (
+        <p className="mt-2 text-[14px] leading-relaxed text-[var(--muted)]">
+          {feeOnly} {label.toLowerCase()} + {chargeOnly} online payment charge.
+        </p>
+      ) : null}
       <CashfreeCheckoutLauncher
         paymentSessionId={row.paymentSessionId}
         mode={cashfreeSdkMode()}

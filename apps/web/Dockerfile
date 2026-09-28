@@ -31,7 +31,16 @@ ENV NEXT_PUBLIC_SCHOOL_NAME=$NEXT_PUBLIC_SCHOOL_NAME
 ENV NEXT_PUBLIC_TENANT_SLUG=$NEXT_PUBLIC_TENANT_SLUG
 ENV NEXT_PUBLIC_VAPID_PUBLIC_KEY=$NEXT_PUBLIC_VAPID_PUBLIC_KEY
 ENV NEXT_PUBLIC_PAYMENT_GATEWAY=$NEXT_PUBLIC_PAYMENT_GATEWAY
-ENV NODE_OPTIONS=--max-old-space-size=4096
+# 6144, measured on 28 Sep 2026. The type-check phase of `next build` OOMs at
+# 4096 on this tree (dies ~4.0 GB in the Next.js build worker) and completes at
+# 6144 with no GC pressure logged. NOT higher: cloudbuild.yaml builds on
+# E2_HIGHCPU_8 — 8 vCPU but only 8 GB of RAM — so a heap near 8 GB would be
+# killed by the kernel, which presents as a hung build rather than V8's clear
+# out-of-memory error. This value leaves ~2 GB for the OS and Docker.
+#
+# Keep this and the same value in .github/workflows/ci.yml EQUAL. See the note
+# there: if CI's heap is larger, CI passes while the deploy fails.
+ENV NODE_OPTIONS=--max-old-space-size=6144
 
 # Track C desk cutover — NEXT_PUBLIC_*_READ_FROM_DB baked into client bundle
 # Committed source of truth (deploy/desk-cutover-build.env), so a Cloud Build

@@ -23,6 +23,7 @@ import {
 } from "@/lib/payments";
 import { cashfreeKeysPresent, fetchCashfreePaymentStatus } from "@/lib/cashfree.server";
 import { readCashfreeOrderEvent } from "@/lib/cashfreeCheckout";
+import { readCashfreeRefundEvent } from "@/lib/cashfreeRefund";
 import { getCashfreeCheckout, settleCashfreeCheckout } from "@/lib/cashfreeCheckouts.server";
 import {
   captureRegistrationPayment,
@@ -249,6 +250,31 @@ export async function POST(req: Request) {
     return res.ok
       ? NextResponse.json({ ok: true, settlement: true, posted: !!res.posted })
       : NextResponse.json({ ok: false, error: res.error }, { status: 400 });
+  }
+
+  // Refund events carry a refund, not a payment, and are handled before the
+  // order lookup for the same reason settlements are: readCashfreeOrderEvent
+  // would find no order_id on them and the whole thing would fall through to
+  // the link handler and be recorded as "ignored" — which is how a refund that
+  // really did reach the parent would leave the fee book still saying paid.
+  if (eventType === "REFUND_STATUS_WEBHOOK" || eventType.startsWith("REFUND_")) {
+    const refundEvent = readCashfreeRefundEvent(event);
+    if (refundEvent) {
+      const { applyRefundOutcome } = await import("@/lib/cashfreeRefunds.server");
+      const res = await applyRefundOutcome(refundEvent);
+      // Always 200. A refund outcome is news, not a request: a non-2xx would
+      // have Cashfree redeliver an event that was received perfectly well, and
+      // the only thing that changes the book — a SUCCESS — is idempotent
+      // anyway. Anything that could not be applied is already on the row and
+      // in payment_desk_gateway_events for the office to see.
+      return NextResponse.json({
+        ok: true,
+        refund: refundEvent.refundId,
+        status: refundEvent.status,
+        applied: res.applied,
+        reason: res.reason,
+      });
+    }
   }
 
   // Orders API events (the default checkout since 2026-09-05). A success is

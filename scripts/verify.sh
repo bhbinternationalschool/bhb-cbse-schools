@@ -300,6 +300,11 @@ SELFTESTS=(
   test:staff-home-kind
   test:mobile-features
   test:cashfree-checkout
+  test:gateway-fees
+  test:gateway-methods
+  test:cashfree-refund
+  test:secure-id
+  test:payouts
   test:diksha-index
   test:teacher-contact
   test:question-bank
