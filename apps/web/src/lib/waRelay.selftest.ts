@@ -12,6 +12,7 @@ import {
   normalizeRelayRoute,
   parseRelayReplyCode,
   relayCategoryFor,
+  relayHandoverReason,
   relayMobile10,
   routesFor,
   templateSafe,
@@ -130,5 +131,112 @@ assert.match(forward, /Swipe right/);
 assert.equal(templateSafe("line one\nline two\t\tx"), "line one / line two / x");
 assert.equal(templateSafe(""), "—");
 assert.ok(!templateSafe("a        b").includes("    "));
+
+/* ── why the office is told it got this (28 Sep 2026) ────────────────
+ *
+ * MR. YOGENDRA KUMAR YADAV and MR. DHARM PRAKASH SINGH both answered the
+ * bot's "how much and by when": "6 अक्टूबर कोई 4500" and "Monday ko ho
+ * jayega". The bot read both, confirmed both to the parent and wrote both
+ * down — then the desk got them labelled "the bot could not answer".
+ */
+{
+  const promise = 'Promise to pay: ₹4,500, by 2026-10-06 — "6 अक्टूबर कोई 4500"';
+  assert.equal(
+    relayHandoverReason({
+      audience: "sis_parent",
+      text: "6 अक्टूबर कोई 4500",
+      hasMedia: false,
+      feeIntent: null,
+      feeWhyQuestion: false,
+      flowReason: promise,
+    }),
+    promise,
+    "the flow knows why it handed over; the guess must not overrule it",
+  );
+  // Without the flow's reason this is exactly the line that went out.
+  assert.equal(
+    relayHandoverReason({
+      audience: "sis_parent",
+      text: "Monday ko ho jayega",
+      hasMedia: false,
+      feeIntent: null,
+      feeWhyQuestion: false,
+    }),
+    "the bot could not answer",
+  );
+
+  /* The reasons already in use keep their wording. */
+  assert.match(
+    relayHandoverReason({
+      audience: "sis_parent",
+      text: "भुगतान हो गया",
+      hasMedia: false,
+      feeIntent: "claims_paid",
+      feeWhyQuestion: false,
+    }),
+    /already paid/,
+  );
+  assert.equal(
+    relayHandoverReason({
+      audience: "sis_parent",
+      text: "थोड़ा समय चाहिए",
+      hasMedia: false,
+      feeIntent: "need_time",
+      feeWhyQuestion: false,
+    }),
+    "parent asks for more time to pay",
+  );
+  assert.equal(
+    relayHandoverReason({
+      audience: "sis_parent",
+      text: "HUMAN",
+      hasMedia: false,
+      feeIntent: null,
+      feeWhyQuestion: false,
+    }),
+    "parent asked to talk to a person",
+  );
+  assert.match(
+    relayHandoverReason({
+      audience: "sis_parent",
+      text: "amenity fee kis liye hai",
+      hasMedia: false,
+      feeIntent: null,
+      feeWhyQuestion: true,
+      }),
+    /what a fee is for/,
+  );
+  // A file still beats the fee wording, and a visitor is still a visitor.
+  assert.equal(
+    relayHandoverReason({
+      audience: "sis_parent",
+      text: "भुगतान हो गया",
+      hasMedia: true,
+      feeIntent: "claims_paid",
+      feeWhyQuestion: false,
+    }),
+    "sent a file the bot cannot act on",
+  );
+  assert.equal(
+    relayHandoverReason({
+      audience: "visitor_fee",
+      text: "fees kitni hai",
+      hasMedia: false,
+      feeIntent: null,
+      feeWhyQuestion: false,
+    }),
+    "number not on the school's records",
+  );
+  assert.equal(
+    relayHandoverReason({
+      audience: "voice_note_handoff",
+      text: "",
+      hasMedia: false,
+      feeIntent: null,
+      feeWhyQuestion: false,
+    }),
+    "voice note the bot could not understand",
+  );
+}
 
 console.log("  ok");

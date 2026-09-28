@@ -242,6 +242,42 @@ export function relayCategoryFor(input: {
   return "general";
 }
 
+/**
+ * The line the office reads at the top of a forward: why this reached them.
+ *
+ * Order matters. A flow that KNOWS why it handed over says so and wins —
+ * without that, a message the bot answered perfectly well arrives labelled
+ * "the bot could not answer", which reads as a failure and gets worked twice.
+ * That happened to "already paid" (fixed 21 Sep 2026) and again on 28 Sep
+ * 2026 to a promise to pay: MR. YOGENDRA KUMAR YADAV's "6 अक्टूबर कोई 4500"
+ * and MR. DHARM PRAKASH SINGH's "Monday ko ho jayega" were both read,
+ * confirmed to the parent and written down — and still forwarded as failures.
+ *
+ * Everything below the flow's own reason is unchanged: what the text says,
+ * then the generic fallback.
+ */
+export function relayHandoverReason(input: {
+  audience: string;
+  text: string;
+  hasMedia: boolean;
+  /** What the fee-reply detector made of the text, if anything. */
+  feeIntent: "claims_paid" | "need_time" | null;
+  /** Does the text read as "what is this fee for?" */
+  feeWhyQuestion: boolean;
+  /** The flow's own account of why it handed over. Wins when present. */
+  flowReason?: string;
+}): string {
+  const text = input.text || "";
+  if (input.flowReason) return input.flowReason;
+  if (input.feeIntent === "claims_paid" && !input.hasMedia) {
+    return "parent says the fee is already paid — the bot showed them their record; check for a payment not yet entered";
+  }
+  if (input.feeIntent === "need_time" && !input.hasMedia) return "parent asks for more time to pay";
+  if (/^\s*human\s*$/i.test(text)) return "parent asked to talk to a person";
+  if (input.feeWhyQuestion && !input.hasMedia) return "parent asks what a fee is for — please explain the fee head";
+  return relayReasonFor(input.audience, input.hasMedia);
+}
+
 /** A human line for the office: why this was handed over. */
 export function relayReasonFor(audience: string, hasMedia: boolean): string {
   if (audience === "voice_note_handoff") return "voice note the bot could not understand";

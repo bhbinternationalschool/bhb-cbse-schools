@@ -487,6 +487,9 @@ export async function POST(req: Request) {
           waMessageId: msg.waMessageId,
           profileName: msg.profileName,
           audience: r.audience,
+          // The flow's own reason when it has one (a recorded promise to
+          // pay), otherwise the relay reads it off the text as before.
+          reason: r.relayReason,
           mediaNote: msg.mediaNote ?? null,
           media: msg.media
             ? { mediaId: msg.media.mediaId, mimeType: msg.media.mimeType, filename: msg.media.filename }

@@ -36,7 +36,7 @@ import {
   parseRelayReplyCode,
   relayCategoryFor,
   relayCategoryLabel,
-  relayReasonFor,
+  relayHandoverReason,
   routesFor,
   templateSafe,
   type RelayCategory,
@@ -236,22 +236,16 @@ export async function relayEscalation(input: RelayEscalationInput): Promise<{
       });
     const { householdId, context } = senderContextFor(identity.roles);
     const senderName = identity.displayName || input.profileName || "";
-    // "भुगतान हो गया" / "Already paid" is answered — the bot shows the family
-    // its own fee record — and handed over so a person checks for a payment
-    // not yet entered. It was labelled "the bot could not answer" (21 Sep
-    // 2026), which read to the office as a failure and a duplicate.
-    const feeIntent = detectSisFeeReplyIntent(input.text || "");
-    const reason =
-      input.reason ||
-      (feeIntent === "claims_paid" && !input.media
-        ? "parent says the fee is already paid — the bot showed them their record; check for a payment not yet entered"
-        : feeIntent === "need_time" && !input.media
-          ? "parent asks for more time to pay"
-          : /^\s*human\s*$/i.test(input.text || "")
-            ? "parent asked to talk to a person"
-            : isFeeWhyQuestion(input.text || "") && !input.media
-              ? "parent asks what a fee is for — please explain the fee head"
-              : relayReasonFor(input.audience, !!input.media));
+    // Why the office is seeing this — see relayHandoverReason, which holds
+    // the order and is covered by waRelay.selftest.ts.
+    const reason = relayHandoverReason({
+      audience: input.audience,
+      text: input.text || "",
+      hasMedia: !!input.media,
+      feeIntent: detectSisFeeReplyIntent(input.text || ""),
+      feeWhyQuestion: isFeeWhyQuestion(input.text || ""),
+      flowReason: input.reason,
+    });
     const code = await uniqueCode(ctx.sb, ctx.tenantId);
 
     const { data: inserted, error: insErr } = await ctx.sb
