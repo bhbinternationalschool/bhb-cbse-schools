@@ -67,6 +67,12 @@ FEE_INTEGRITY_NOTIFY_MOBILE="$(get_env FEE_INTEGRITY_NOTIFY_MOBILE)"
 NEXT_PUBLIC_PAYMENT_GATEWAY="$(get_env NEXT_PUBLIC_PAYMENT_GATEWAY)"
 CASHFREE_APP_ID="$(get_env CASHFREE_APP_ID)"
 CASHFREE_ENV="$(get_env CASHFREE_ENV)"
+# Bank-account verification is a SEPARATE Cashfree product with its own App
+# ID and secret. Reusing CASHFREE_APP_ID here fails with an unhelpful
+# secret-invalid error, which is why it gets its own pair. Blank = the
+# feature is simply off, which is the right default for anyone else.
+CASHFREE_VERIFICATION_APP_ID="$(get_env CASHFREE_VERIFICATION_APP_ID)"
+CASHFREE_VERIFICATION_ENV="$(get_env CASHFREE_VERIFICATION_ENV)"
 # Google Play's reviewer signs in as the demo family without a WhatsApp OTP.
 # These lived ONLY on the live service, typed in by hand, so every deploy
 # replaced the env list and silently locked the reviewer out — found again on
@@ -145,6 +151,16 @@ else
 fi
 if [[ "$NEXT_PUBLIC_PAYMENT_GATEWAY" == "cashfree" && -n "$CASHFREE_APP_ID" ]]; then
   echo "Cashfree: gateway active, env ${CASHFREE_ENV:-production} (secret key must be in Secret Manager as school-erp-cashfree-secret-key)"
+  if [[ -n "$CASHFREE_VERIFICATION_APP_ID" ]]; then
+    echo "Cashfree: bank verification active, env ${CASHFREE_VERIFICATION_ENV:-production}"
+    echo "  NOTE: CASHFREE_VERIFICATION_SECRET_KEY is deliberately NOT in cloudbuild.yaml's"
+    echo "  --set-secrets. A secret named there that does not exist in Secret Manager fails"
+    echo "  the WHOLE deploy, and this feature is off by default, so it must not be able to."
+    echo "  To turn it on: create the secret, then add it to --set-secrets in cloudbuild.yaml:"
+    echo "    printf %s \"<verification secret>\" | gcloud secrets create school-erp-cashfree-verification-secret-key --data-file=-"
+  else
+    echo "Cashfree: bank verification OFF (set CASHFREE_VERIFICATION_APP_ID to enable)"
+  fi
 else
   echo "Cashfree: not active (NEXT_PUBLIC_PAYMENT_GATEWAY=${NEXT_PUBLIC_PAYMENT_GATEWAY:-unset}) — pay-links fall back to Razorpay/demo"
 fi
@@ -271,6 +287,8 @@ SUBSTITUTIONS+="@_FEE_INTEGRITY_NOTIFY_MOBILE=${FEE_INTEGRITY_NOTIFY_MOBILE}"
 SUBSTITUTIONS+="@_NEXT_PUBLIC_PAYMENT_GATEWAY=${NEXT_PUBLIC_PAYMENT_GATEWAY}"
 SUBSTITUTIONS+="@_CASHFREE_APP_ID=${CASHFREE_APP_ID}"
 SUBSTITUTIONS+="@_CASHFREE_ENV=${CASHFREE_ENV:-production}"
+SUBSTITUTIONS+="@_CASHFREE_VERIFICATION_APP_ID=${CASHFREE_VERIFICATION_APP_ID}"
+SUBSTITUTIONS+="@_CASHFREE_VERIFICATION_ENV=${CASHFREE_VERIFICATION_ENV:-production}"
 SUBSTITUTIONS+="@_REVIEW_LOGIN_MOBILE=${REVIEW_LOGIN_MOBILE}"
 SUBSTITUTIONS+="@_REVIEW_LOGIN_CODE=${REVIEW_LOGIN_CODE}"
 SUBSTITUTIONS+="@_REVIEW_LOGIN_HOUSEHOLD_ID=${REVIEW_LOGIN_HOUSEHOLD_ID}"

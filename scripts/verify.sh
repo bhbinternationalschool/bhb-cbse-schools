@@ -303,6 +303,7 @@ SELFTESTS=(
   test:gateway-fees
   test:gateway-methods
   test:cashfree-refund
+  test:secure-id
   test:diksha-index
   test:teacher-contact
   test:question-bank
