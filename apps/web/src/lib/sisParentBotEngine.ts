@@ -194,6 +194,21 @@ export function detectSisBotIntent(text: string): SisBotQuickId | "unknown" {
   // The school's own Hindi menu offers "हाल की रसीदें", so the word it
   // invites has to be a word it can read.
   if (/receipt|paid|voucher|रसीद|raseed|rasid/.test(low)) return "receipts";
+  // A photograph of a child is not the class list.
+  //
+  // 26 Sep 2026, 14:49 IST: MR. KAMLESH KUMAR wrote "Student pic" and was
+  // handed the roster — his children, their classes and their admission
+  // numbers — twice, because "student" matches the rule below wherever it
+  // appears. He had asked for a picture, which this bot cannot send, and
+  // nothing about the reply said so; it read as an answer.
+  //
+  // The Hindi and Hinglish ways of asking ("बच्चे की फोटो भेजिए", "bachche
+  // ki photo bhejo") already fell through to the office. Only the English
+  // ones were caught here, so this makes the two agree rather than teaching
+  // the bot anything new: a photo request goes to a person, who can look.
+  if (/\b(pic|pics|picture|photo|photos|photograph|image)\b/.test(low)) {
+    return "unknown";
+  }
   if (/child|kid|son|daughter|student|class/.test(low)) return "kids";
   if (/info|address|timing|contact|phone|office/.test(low)) return "info";
   if (/human|staff|office|help|counsellor|call me|agent/.test(low))

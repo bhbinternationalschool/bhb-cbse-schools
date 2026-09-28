@@ -223,4 +223,38 @@ assert.equal(nearestSisKeyword("hai"), null, "too short to be anything");
 // Two edits from an eight-letter word is not a near miss worth acting on.
 assert.equal(nearestSisKeyword("request"), null);
 
+/* ── A photograph is not the class list ──────────────────────────── */
+
+// 26 Sep 2026, 14:49 IST: MR. KAMLESH KUMAR wrote "Student pic" and got the
+// roster back — both his children, their classes and their admission
+// numbers — and then wrote it a second time and got the same thing. He was
+// asking for a picture. "student" matched the kids rule wherever it sat in
+// the sentence, so a question the bot cannot answer came back looking
+// answered, and no one in the office ever saw that he had asked.
+for (const t of [
+  "Student pic",
+  "student photo",
+  "send my son's picture",
+  "child photo bhejiye",
+  "my daughter's photograph",
+]) {
+  assert.equal(detectSisBotIntent(t), "unknown", `photo request, not the roster: "${t}"`);
+}
+
+// These already reached the office before the fix and must keep doing so.
+for (const t of ["bachche ki photo bhejo", "बच्चे की फोटो भेजिए"]) {
+  assert.equal(detectSisBotIntent(t), "unknown", `already went to a person: "${t}"`);
+}
+
+// And the roster itself still answers the question it is for.
+for (const t of ["KIDS", "my children", "which class is my child in", "student list"]) {
+  assert.equal(detectSisBotIntent(t), "kids", `still the roster: "${t}"`);
+}
+
+// A photo of something the bot DOES know is still that thing: the fee and
+// receipt rules run before this one, so a parent photographing a receipt is
+// not pushed out to the office.
+assert.equal(detectSisBotIntent("receipt photo"), "receipts");
+assert.equal(detectSisBotIntent("fees ki photo"), "dues");
+
 console.log("  ok");
