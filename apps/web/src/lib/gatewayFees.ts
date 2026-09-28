@@ -321,6 +321,84 @@ export function reconcileQuoteAgainstActual(input: {
   };
 }
 
+/**
+ * Read a stored policy back out of jsonb.
+ *
+ * Nothing here trusts the column. It is edited by a person through a settings
+ * screen and it decides what a parent is charged, so a malformed rate, a
+ * negative percent or a rail nobody recognises must fall back to the school
+ * bearing the cost rather than producing a charge from a bad number. Every
+ * unreadable field degrades towards "the school pays", never towards "the
+ * parent pays more".
+ *
+ * `{}` — the column's default — is a valid policy: today's behaviour.
+ */
+export function parseGatewayFeePolicy(raw: unknown): GatewayFeePolicy {
+  const fallback = defaultGatewayFeePolicy();
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return fallback;
+  const src = raw as Record<string, unknown>;
+
+  const bearer: GatewayFeeBearer = src.bearer === "payer" ? "payer" : "school";
+
+  const perMethod: Partial<Record<GatewayMethodGroup, GatewayFeeBearer>> = {};
+  const rawPer = src.perMethod;
+  if (rawPer && typeof rawPer === "object" && !Array.isArray(rawPer)) {
+    for (const [k, v] of Object.entries(rawPer as Record<string, unknown>)) {
+      if (!GATEWAY_METHOD_GROUPS.includes(k as GatewayMethodGroup)) continue;
+      // Only "payer" is honoured explicitly; anything else means the school,
+      // which is the direction a typo should fail in.
+      perMethod[k as GatewayMethodGroup] = v === "payer" ? "payer" : "school";
+    }
+  }
+
+  const rates = defaultGatewayRates();
+  let ratesWereGiven = false;
+  const rawRates = src.rates;
+  if (rawRates && typeof rawRates === "object" && !Array.isArray(rawRates)) {
+    for (const [k, v] of Object.entries(rawRates as Record<string, unknown>)) {
+      if (!GATEWAY_METHOD_GROUPS.includes(k as GatewayMethodGroup)) continue;
+      const r = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+      const percent = Number(r.percent);
+      const flatPaise = Number(r.flatPaise);
+      // A rate is only taken if it is a real, sane number. 20% is far above
+      // anything Cashfree charges and well below the point where the gross-up
+      // diverges, so it is a generous ceiling that still refuses nonsense.
+      const percentOk = Number.isFinite(percent) && percent >= 0 && percent <= 20;
+      const flatOk = Number.isFinite(flatPaise) && flatPaise >= 0 && flatPaise <= 100_000;
+      // A rail the school PRICED is taken at its word, and a component it
+      // priced unusably becomes zero — NOT the shipped default. Keeping the
+      // default here would charge a parent 1.9% on a rate the school never
+      // set, off the back of a typo. Zero means the school absorbs it, which
+      // is the only direction a misconfiguration may fail in; a rail showing
+      // 0% in the settings screen is also obviously wrong to whoever reads it.
+      // A rail left out of `rates` altogether is a different thing — never
+      // priced, so it keeps its default estimate.
+      rates[k as GatewayMethodGroup] = {
+        percent: percentOk ? percent : 0,
+        flatPaise: flatOk ? Math.round(flatPaise) : 0,
+      };
+      ratesWereGiven = true;
+    }
+  }
+
+  const gst = Number(src.gstPercent);
+  const gstPercent = Number.isFinite(gst) && gst >= 0 && gst <= 50 ? gst : fallback.gstPercent;
+
+  const fb = src.fallbackGroup;
+  const fallbackGroup = GATEWAY_METHOD_GROUPS.includes(fb as GatewayMethodGroup)
+    ? (fb as GatewayMethodGroup)
+    : fallback.fallbackGroup;
+
+  return {
+    bearer,
+    ...(Object.keys(perMethod).length ? { perMethod } : {}),
+    rates,
+    gstPercent,
+    ratesAreDefaults: !ratesWereGiven,
+    fallbackGroup,
+  };
+}
+
 /** Cashfree's `payment_group` strings, mapped onto our groups. */
 export function gatewayGroupFromCashfree(raw: string): GatewayMethodGroup | null {
   const key = (raw || "").trim().toLowerCase();

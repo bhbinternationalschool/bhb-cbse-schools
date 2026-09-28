@@ -301,6 +301,7 @@ SELFTESTS=(
   test:mobile-features
   test:cashfree-checkout
   test:gateway-fees
+  test:gateway-methods
   test:diksha-index
   test:teacher-contact
   test:question-bank

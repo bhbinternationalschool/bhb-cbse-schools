@@ -16,6 +16,7 @@ import {
   fallbackGatewayQuote,
   gatewayFeeOn,
   gatewayGroupFromCashfree,
+  parseGatewayFeePolicy,
   policyChargesParents,
   quoteAllGatewayFees,
   quoteGatewayFee,
@@ -162,6 +163,87 @@ console.log("gatewayFees.selftest.ts");
   const level = reconcileQuoteAgainstActual({ surchargePaise: 620, actualFeePaise: 620 });
   assert.equal(level.shortfallPaise, 0);
   assert.equal(level.overRecoveredPaise, 0);
+}
+
+/* ── a stored policy is read back, and bad input fails towards the school ── */
+{
+  // The column's default. Not "unconfigured, guess" — it is today's behaviour.
+  for (const empty of [{}, null, undefined, [], "", 7, "payer"]) {
+    const p = parseGatewayFeePolicy(empty);
+    assert.equal(p.bearer, "school", `${JSON.stringify(empty)} must read as school-bears`);
+    assert.equal(policyChargesParents(p), false);
+    assert.equal(p.ratesAreDefaults, true);
+  }
+
+  const stored = parseGatewayFeePolicy({
+    bearer: "school",
+    perMethod: { credit_card: "payer", emi: "payer", upi: "school", nonsense_rail: "payer" },
+    rates: {
+      credit_card: { percent: 1.75, flatPaise: 0 },
+      netbanking: { percent: 0, flatPaise: 1200 },
+      not_a_rail: { percent: 9, flatPaise: 0 },
+    },
+    gstPercent: 18,
+    fallbackGroup: "upi",
+  });
+  assert.equal(bearerFor(stored, "credit_card"), "payer");
+  assert.equal(bearerFor(stored, "upi"), "school");
+  assert.equal(stored.rates.credit_card.percent, 1.75, "a configured rate is honoured");
+  assert.equal(stored.rates.netbanking.flatPaise, 1200);
+  assert.equal(stored.rates.upi.percent, 0, "a rail the school did not price keeps its default");
+  assert.equal(stored.ratesAreDefaults, false, "the office is told these are its own rates");
+  assert.equal(
+    (stored.perMethod as Record<string, unknown>).nonsense_rail,
+    undefined,
+    "a rail nobody recognises is dropped, not carried",
+  );
+
+  // EVERY unreadable field degrades towards the school paying. A bad rate must
+  // never become a charge on a parent's card.
+  const junk = parseGatewayFeePolicy({
+    bearer: "payer",
+    perMethod: { credit_card: "PAYER", emi: true, wallet: "payer" },
+    rates: {
+      credit_card: { percent: -5, flatPaise: "abc" },
+      emi: { percent: 999, flatPaise: 0 },
+      wallet: { percent: Number.NaN, flatPaise: Number.POSITIVE_INFINITY },
+      upi: "not an object",
+    },
+    gstPercent: 900,
+    fallbackGroup: "teleport",
+  });
+  assert.equal(
+    bearerFor(junk, "credit_card"),
+    "school",
+    'only the exact string "payer" passes on the cost — "PAYER" is a typo, not consent',
+  );
+  assert.equal(bearerFor(junk, "emi"), "school", "a non-string bearer is the school's");
+  assert.equal(bearerFor(junk, "wallet"), "payer", "a well-formed rail still works");
+  const defaults = defaultGatewayFeePolicy();
+  // A rail the school PRICED unusably goes to zero, not to the shipped
+  // default: keeping 1.9% would charge a parent a rate nobody set, off a typo.
+  assert.deepEqual(
+    junk.rates.credit_card,
+    { percent: 0, flatPaise: 0 },
+    "an unusable rate charges nothing rather than guessing",
+  );
+  assert.deepEqual(
+    junk.rates.emi,
+    { percent: 0, flatPaise: 0 },
+    "a rate above the ceiling is refused, and does not fall back to 2.5%",
+  );
+  assert.deepEqual(junk.rates.wallet, { percent: 0, flatPaise: 0 }, "NaN and Infinity are refused");
+  assert.deepEqual(junk.rates.upi, { percent: 0, flatPaise: 0 }, "so is a rate that is not an object");
+  // A rail left OUT of `rates` was never priced, so it keeps its estimate —
+  // that is a different thing from being priced badly.
+  assert.deepEqual(junk.rates.debit_card, defaults.rates.debit_card, "an unpriced rail keeps its default");
+  assert.equal(junk.gstPercent, defaults.gstPercent, "an absurd GST falls back to 18");
+  assert.equal(junk.fallbackGroup, "upi", "an unknown fallback rail becomes the free one");
+
+  // The one charge that does survive must still net the school whole.
+  const q = quoteGatewayFee({ netPaise: 250000, group: "wallet", policy: junk });
+  const cost = gatewayFeeOn(q.chargeablePaise, junk.rates.wallet, junk.gstPercent);
+  assert.ok(q.chargeablePaise - cost.totalPaise >= 250000);
 }
 
 /* ── Cashfree's payment_group strings map onto our rails ──────────────── */
