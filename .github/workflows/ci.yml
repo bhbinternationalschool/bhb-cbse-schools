@@ -414,6 +414,7 @@ jobs:
           npm run test:gateway-methods
           npm run test:cashfree-refund
           npm run test:secure-id
+          npm run test:payouts
           npm run test:diksha-index
           npm run test:teacher-contact
           npm run test:parent-profile

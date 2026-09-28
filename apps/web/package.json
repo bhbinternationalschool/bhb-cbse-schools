@@ -47,6 +47,7 @@
     "test:gateway-methods": "npx tsx src/lib/gatewayMethods.selftest.ts",
     "test:cashfree-refund": "npx tsx src/lib/cashfreeRefund.selftest.ts",
     "test:secure-id": "npx tsx src/lib/secureId.selftest.ts",
+    "test:payouts": "npx tsx src/lib/payouts.selftest.ts",
     "test:diksha-index": "npx tsx src/lib/dikshaIndex.selftest.ts",
     "test:teacher-contact": "npx tsx src/lib/teacherContact.selftest.ts",
     "test:academic-risk": "npx tsx src/lib/academicRisk.selftest.ts",

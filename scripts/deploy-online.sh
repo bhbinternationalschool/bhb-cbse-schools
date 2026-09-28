@@ -73,6 +73,13 @@ CASHFREE_ENV="$(get_env CASHFREE_ENV)"
 # feature is simply off, which is the right default for anyone else.
 CASHFREE_VERIFICATION_APP_ID="$(get_env CASHFREE_VERIFICATION_APP_ID)"
 CASHFREE_VERIFICATION_ENV="$(get_env CASHFREE_VERIFICATION_ENV)"
+# Payouts is a THIRD Cashfree product, again with its own credentials, plus a
+# 2FA public key because Cloud Run has no static IP to allowlist. ARMED is a
+# separate switch from the keys: the V2 request shapes have not been confirmed
+# against a live call, so having the keys must not be enough to move money.
+CASHFREE_PAYOUT_CLIENT_ID="$(get_env CASHFREE_PAYOUT_CLIENT_ID)"
+CASHFREE_PAYOUT_ENV="$(get_env CASHFREE_PAYOUT_ENV)"
+CASHFREE_PAYOUTS_ARMED="$(get_env CASHFREE_PAYOUTS_ARMED)"
 # Google Play's reviewer signs in as the demo family without a WhatsApp OTP.
 # These lived ONLY on the live service, typed in by hand, so every deploy
 # replaced the env list and silently locked the reviewer out — found again on
@@ -160,6 +167,18 @@ if [[ "$NEXT_PUBLIC_PAYMENT_GATEWAY" == "cashfree" && -n "$CASHFREE_APP_ID" ]]; 
     echo "    printf %s \"<verification secret>\" | gcloud secrets create school-erp-cashfree-verification-secret-key --data-file=-"
   else
     echo "Cashfree: bank verification OFF (set CASHFREE_VERIFICATION_APP_ID to enable)"
+  fi
+  if [[ "$CASHFREE_PAYOUTS_ARMED" == "true" ]]; then
+    echo "Cashfree: PAYOUTS ARMED, env ${CASHFREE_PAYOUT_ENV:-sandbox} — real transfers can be sent"
+  else
+    echo "Cashfree: payouts NOT armed (no transfer can be sent; salary still uses the NEFT bank file)"
+  fi
+  if [[ -n "$CASHFREE_PAYOUT_CLIENT_ID" ]]; then
+    echo "  Payouts secrets are deliberately NOT in cloudbuild.yaml --set-secrets:"
+    echo "  a secret named there that does not exist fails the WHOLE deploy. Create them,"
+    echo "  then add them to --set-secrets yourself:"
+    echo "    school-erp-cashfree-payout-client-secret  -> CASHFREE_PAYOUT_CLIENT_SECRET"
+    echo "    school-erp-cashfree-payout-public-key     -> CASHFREE_PAYOUT_PUBLIC_KEY"
   fi
 else
   echo "Cashfree: not active (NEXT_PUBLIC_PAYMENT_GATEWAY=${NEXT_PUBLIC_PAYMENT_GATEWAY:-unset}) — pay-links fall back to Razorpay/demo"
@@ -289,6 +308,9 @@ SUBSTITUTIONS+="@_CASHFREE_APP_ID=${CASHFREE_APP_ID}"
 SUBSTITUTIONS+="@_CASHFREE_ENV=${CASHFREE_ENV:-production}"
 SUBSTITUTIONS+="@_CASHFREE_VERIFICATION_APP_ID=${CASHFREE_VERIFICATION_APP_ID}"
 SUBSTITUTIONS+="@_CASHFREE_VERIFICATION_ENV=${CASHFREE_VERIFICATION_ENV:-production}"
+SUBSTITUTIONS+="@_CASHFREE_PAYOUT_CLIENT_ID=${CASHFREE_PAYOUT_CLIENT_ID}"
+SUBSTITUTIONS+="@_CASHFREE_PAYOUT_ENV=${CASHFREE_PAYOUT_ENV:-sandbox}"
+SUBSTITUTIONS+="@_CASHFREE_PAYOUTS_ARMED=${CASHFREE_PAYOUTS_ARMED:-false}"
 SUBSTITUTIONS+="@_REVIEW_LOGIN_MOBILE=${REVIEW_LOGIN_MOBILE}"
 SUBSTITUTIONS+="@_REVIEW_LOGIN_CODE=${REVIEW_LOGIN_CODE}"
 SUBSTITUTIONS+="@_REVIEW_LOGIN_HOUSEHOLD_ID=${REVIEW_LOGIN_HOUSEHOLD_ID}"

@@ -304,6 +304,7 @@ SELFTESTS=(
   test:gateway-methods
   test:cashfree-refund
   test:secure-id
+  test:payouts
   test:diksha-index
   test:teacher-contact
   test:question-bank
