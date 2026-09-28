@@ -60,7 +60,7 @@ function bodyOf(src: string, decl: string): string {
   const body = bodyOf(settle, "export async function settlePaymentLinkWithWhatsApp(");
   const applyAt = body.indexOf("applyPaymentLink(");
   const pushAt = body.indexOf("pushFeesRemoteServer(");
-  const waAt = body.indexOf("sendSisFeeReceiptOnWhatsApp(");
+  const waAt = body.indexOf("sendFeeReceiptWhatsApp(");
 
   assert.ok(applyAt >= 0 && pushAt >= 0 && waAt >= 0, "all three steps are present");
   assert.ok(applyAt < pushAt, "the money is collected before it is pushed");
@@ -275,7 +275,7 @@ function bodyOf(src: string, decl: string): string {
       "console output never reaches Cloud Logging, so a log line is not a record",
   );
   const readBackAt = body.indexOf("feeVoucherExistsInDb(");
-  const waAt = body.indexOf("sendSisFeeReceiptOnWhatsApp(");
+  const waAt = body.indexOf("sendFeeReceiptWhatsApp(");
   assert.ok(readBackAt < waAt, "checked before the parent is sent a receipt for it");
   assert.doesNotMatch(
     body.slice(readBackAt, waAt),
@@ -388,6 +388,62 @@ function bodyOf(src: string, decl: string): string {
       `${name} resolves the link authoritatively — money is never settled off a cache`,
     );
   }
+}
+
+/* ── a parent who pays online gets the approved template ─────────────── */
+{
+  const settle = read("paymentSettlement.server.ts");
+  const body = bodyOf(settle, "export async function settlePaymentLinkWithWhatsApp(");
+
+  // Meta delivers a free-form message only inside the 24-hour window that
+  // opens when a parent writes to the school. Paying a link does not open
+  // it, so the plain-text sender silently delivered nothing to any family
+  // that had not messaged the school that day — and swallowed the failure,
+  // the same shape as the lost voucher. feeReceiptAutoWa.server.ts was
+  // written for exactly this reason and the counter has used it since; the
+  // gateway path was left behind on the old sender.
+  assert.match(
+    body,
+    /sendFeeReceiptWhatsApp\(/,
+    "the pay-link receipt goes out through the approved-template sender",
+  );
+  assert.doesNotMatch(
+    body,
+    /sendSisFeeReceiptOnWhatsApp\(/,
+    "and NOT through the plain-text sender, which Meta drops outside the 24-hour window",
+  );
+  assert.doesNotMatch(
+    read("paymentSettlement.server.ts"),
+    /import \{ sendSisFeeReceiptOnWhatsApp/,
+    "the plain-text sender is not even imported here any more",
+  );
+
+  // The template needs the receipt itself, not just its id.
+  assert.match(
+    body,
+    /loadFees\(\)\.vouchers\.find\(/,
+    "the voucher just written is handed to the sender",
+  );
+  assert.match(
+    body,
+    /studentNames/,
+    "with the children's names the template prints",
+  );
+
+  // A receipt that cannot be found must not read as a successful send.
+  assert.match(
+    body,
+    /ok: false, error: "Receipt not found to send"/,
+    "a missing receipt is reported, never silently treated as sent",
+  );
+
+  // Still never thrown back at the settlement: the money is collected.
+  const waAt = body.indexOf("sendFeeReceiptWhatsApp(");
+  assert.doesNotMatch(
+    body.slice(waAt),
+    /return \{ ok: false/,
+    "a failed WhatsApp send never fails the settlement — the money is already collected",
+  );
 }
 
 console.log("  ok");

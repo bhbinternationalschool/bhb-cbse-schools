@@ -245,6 +245,7 @@ SELFTESTS=(
   test:email
   test:exam-invigilation
   test:exams
+  test:exam-date-sheet
   test:exams-sheet-safety
   test:exam-schemes
   test:exam-report-templates

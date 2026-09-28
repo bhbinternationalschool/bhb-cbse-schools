@@ -360,8 +360,20 @@ export function ExamDateSheetGrid({
           <span className="font-semibold">Add exam day</span> to start.
         </p>
       ) : (
-        <div className="mt-4 overflow-x-auto">
-          <ErpTableShell><ErpTable minWidth="min-w-[720px]">
+        /*
+          THE SCROLL HAS TO BE INSIDE THE SHELL.
+          ErpTableShell is `overflow-hidden` (it clips to its rounded
+          corners), so a table wider than the shell was CLIPPED by it and
+          never overflowed the `overflow-x-auto` outside it. With nothing
+          wider than itself to scroll, that outer box showed no scrollbar and
+          answered no wheel, trackpad or touch — the only way to reach a
+          column off the right edge was to Tab into a cell and let the
+          browser scroll it into view. A date sheet is read by dragging
+          across the days; a school with a fortnight of exams could not see
+          past the first week.
+        */
+        <div className="mt-4">
+          <ErpTableShell><div className="overflow-x-auto overscroll-x-contain"><ErpTable minWidth="min-w-[720px]">
             <ErpTableHead>
               <tr>
                 <th className="sticky left-0 z-10 border border-[var(--border)] bg-[var(--surface-sunken)] p-2 text-left">
@@ -527,7 +539,7 @@ export function ExamDateSheetGrid({
                 </tr>
               ))}
             </ErpTableBody>
-          </ErpTable></ErpTableShell>
+          </ErpTable></div></ErpTableShell>
         </div>
       )}
     </section>

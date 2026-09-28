@@ -9,8 +9,7 @@ import { feeVoucherExistsInDb } from "@/lib/feesNormalized.server";
 import { loadFees } from "@/lib/fees";
 import { pushFeesRemoteServer } from "@/lib/feesPersistence.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { householdWhatsApp, loadSis, normalizeMobile } from "@/lib/sis";
-import { sendSisFeeReceiptOnWhatsApp } from "@/lib/waSisBotServer";
+import { householdWhatsApp, loadSis } from "@/lib/sis";
 
 export async function settlePaymentLinkWithWhatsApp(opts: {
   linkId: string;
@@ -183,18 +182,45 @@ export async function settlePaymentLinkWithWhatsApp(opts: {
     }).catch(() => {});
   }
 
+  // THE APPROVED TEMPLATE, NOT PLAIN TEXT.
+  //
+  // Meta delivers a free-form message only inside the 24-hour window that
+  // opens when a parent writes to the school. Paying a link does not open
+  // it, so a family who had not messaged the school that day got nothing —
+  // and the failure was swallowed here exactly as a lost voucher was.
+  //
+  // The counter has used the approved `fees_receipt` template since the
+  // button was replaced (see feeReceiptAutoWa.server.ts, which was written
+  // for this very reason); the gateway path was left behind on the old
+  // plain-text sender. It sends the same template now, in the family's own
+  // language, and records the outcome per receipt so a retry or a replayed
+  // webhook cannot message a family twice about the same money.
   let whatsappReceipt: { ok: boolean; error?: string } | null = null;
   if (opts.sendWhatsApp !== false) {
     const sis = loadSis();
     const hh = sis.households.find((h) => h.id === result.link.householdId);
     const mobile = hh ? householdWhatsApp(hh) || hh.mobile || "" : "";
-    const fallbackMobile = hh ? normalizeMobile(hh.altMobile || "") : "";
     if (mobile) {
-      whatsappReceipt = await sendSisFeeReceiptOnWhatsApp({
-        mobile,
-        fallbackMobile: fallbackMobile || undefined,
-        voucherId: result.voucherId,
-      });
+      // The voucher collectPayment just wrote, for its lines and total.
+      const voucher = loadFees().vouchers.find((v) => v.id === result.voucherId);
+      if (!voucher) {
+        whatsappReceipt = { ok: false, error: "Receipt not found to send" };
+      } else {
+        const studentNames = [...new Set(voucher.lines.map((l) => l.studentId))]
+          .map((id) => sis.students.find((st) => st.id === id)?.fullName || "")
+          .filter(Boolean);
+        const { sendFeeReceiptWhatsApp } = await import(
+          "@/lib/feeReceiptAutoWa.server"
+        );
+        const sent = await sendFeeReceiptWhatsApp({
+          voucher,
+          mobile,
+          studentNames,
+        });
+        whatsappReceipt = sent.sent
+          ? { ok: true }
+          : { ok: false, error: sent.reason };
+      }
     }
   }
 
