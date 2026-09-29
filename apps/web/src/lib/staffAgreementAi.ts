@@ -1,6 +1,13 @@
 /**
- * CBSE-aligned staff employment agreement AI prompts.
- * Drafts follow clauses commonly used in CBSE-affiliated private schools in India.
+ * Staff employment agreement AI prompts.
+ * Drafts follow clauses commonly used in private schools in India.
+ *
+ * The school is recognised by the Government of Uttar Pradesh (Nursery–VIII)
+ * and is NOT CBSE-affiliated. These prompts used to present it as a
+ * "CBSE-affiliated" school and fill "CBSE Affiliation: CBSE" when no number
+ * was on file, inviting agreements that bind staff to "CBSE affiliation
+ * bylaws" the school is not under. The model now gets the recognition line
+ * and a rule never to claim an affiliation.
  */
 
 import type { SchoolDocumentLanguage } from "@/lib/schoolDocumentAi";
@@ -14,16 +21,23 @@ export type StaffAgreementAiType =
   | "conduct";
 
 /** Minimum target length for a full employment agreement body (characters). */
-export const CBSE_AGREEMENT_MIN_BODY_CHARS = 2800;
+export const AGREEMENT_MIN_BODY_CHARS = 2800;
 
-const CBSE_CLAUSE_CATALOG = `
-Mandatory themes for CBSE-affiliated school staff agreements (cover ALL that apply):
+const SCHOOL_STATUS_RULE = `
+School status — follow exactly:
+- Describe the school's standing ONLY with the "Recognition" line in the facts. If it is "—", say nothing about recognition or affiliation.
+- NEVER state or imply that the school is affiliated to CBSE or any other board, and never write an affiliation number or a CBSE school code. The school is recognised by the State Government; it holds no central-board affiliation.
+- "Follows the NCERT/CBSE curriculum framework" is a statement about syllabus and is the furthest you may go.
+`;
+
+const CLAUSE_CATALOG = `
+Mandatory themes for private school staff agreements (cover ALL that apply):
 
 1. APPOINTMENT & PROBATION — designation, department, reporting authority (Principal/Manager), date of joining, probation period (typically 6–12 months), confirmation criteria.
 
-2. DUTIES & RESPONSIBILITIES — classroom teaching per CBSE curriculum, lesson planning, assignments, assessments, remedial classes, co-curricular activities, sports/cultural events, parent-teacher meetings, staff meetings, examination duties (board/internal), invigilation, paper setting/moderation as assigned.
+2. DUTIES & RESPONSIBILITIES — classroom teaching per the school's curriculum (NCERT/CBSE framework), lesson planning, assignments, assessments, remedial classes, co-curricular activities, sports/cultural events, parent-teacher meetings, staff meetings, examination duties (school/internal), invigilation, paper setting/moderation as assigned.
 
-3. ACADEMIC & CBSE COMPLIANCE — adherence to CBSE affiliation bylaws, NEP 2020 where applicable, academic calendar, syllabus completion, CCE/assessment norms, maintaining records (attendance registers, mark sheets), participation in SQAAF/inspection readiness.
+3. ACADEMIC & REGULATORY COMPLIANCE — adherence to UP Basic Education Department norms, the RTE Act and the school's recognition conditions, NEP 2020 where applicable, academic calendar, syllabus completion, assessment norms, maintaining records (attendance registers, mark sheets, UDISE+), inspection readiness.
 
 4. CODE OF CONDUCT & PROFESSIONAL ETHICS — punctuality, dress code, decorum, no corporal punishment, positive discipline, professional boundaries with students, no private tuition without permission, social media policy, conflict of interest.
 
@@ -56,27 +70,28 @@ export function buildStaffAgreementSystemPrompt(
     language === "hi"
       ? `- LANGUAGE: HINDI ONLY. Write the FULL agreement in Devanagari script in bodyHi and titleHi.
 - Leave titleEn and bodyEn as empty strings "".
-- bodyHi must be at least ${Math.round(CBSE_AGREEMENT_MIN_BODY_CHARS * 0.85)} characters for appointment letters.
+- bodyHi must be at least ${Math.round(AGREEMENT_MIN_BODY_CHARS * 0.85)} characters for appointment letters.
 - Use formal Hindi legal-school terminology (नियुक्ति पत्र, कर्मचारी, विद्यालय, शर्तें).`
       : language === "both"
         ? `- LANGUAGE: BILINGUAL English + Hindi (Devanagari).
-- bodyEn: complete English agreement (at least ${CBSE_AGREEMENT_MIN_BODY_CHARS} characters for appointment letters).
-- bodyHi: complete Hindi translation — same clauses, same structure, NOT a summary (at least ${Math.round(CBSE_AGREEMENT_MIN_BODY_CHARS * 0.85)} characters).
+- bodyEn: complete English agreement (at least ${AGREEMENT_MIN_BODY_CHARS} characters for appointment letters).
+- bodyHi: complete Hindi translation — same clauses, same structure, NOT a summary (at least ${Math.round(AGREEMENT_MIN_BODY_CHARS * 0.85)} characters).
 - titleEn and titleHi must both be present.`
         : `- LANGUAGE: ENGLISH ONLY. Write full content in bodyEn and titleEn.
 - Leave titleHi and bodyHi as empty strings "".
-- bodyEn must be at least ${CBSE_AGREEMENT_MIN_BODY_CHARS} characters for appointment letters.`;
+- bodyEn must be at least ${AGREEMENT_MIN_BODY_CHARS} characters for appointment letters.`;
 
-  return `You are a legal drafting assistant for CBSE-affiliated private schools in India (UP and other states).
-You produce comprehensive staff employment agreements matching practices of reputable CBSE schools — detailed, not summary.
+  return `You are a legal drafting assistant for a private school in Uttar Pradesh, India, recognised under the UP Basic Education Department.
+You produce comprehensive staff employment agreements matching practices of reputable private schools in India — detailed, not summary.
 
-${CBSE_CLAUSE_CATALOG}
+${SCHOOL_STATUS_RULE}
+${CLAUSE_CATALOG}
 
 Output rules:
 - Respond with valid JSON only: { "titleEn", "titleHi", "bodyEn", "bodyHi" }
 ${langRules}
 - Use the employee and school facts provided; use [TO BE FILLED] only where data is genuinely missing
-- Tone: formal, enforceable, clear — similar to appointment orders used by established CBSE schools
+- Tone: formal, enforceable, clear — similar to appointment orders used by established private schools
 - No markdown fences in the JSON values`;
 }
 
@@ -87,7 +102,8 @@ export function buildStaffAgreementUserPrompt(opts: {
   schoolName: string;
   displayName: string;
   city?: string;
-  affiliationNo?: string;
+  /** schoolRecognitionLine(): "Recognised by the Government of Uttar Pradesh", or "". */
+  recognition?: string;
   staffContext: string;
   details: string;
   currentTitle?: string;
@@ -119,15 +135,16 @@ export function buildStaffAgreementUserPrompt(opts: {
 
   if (opts.mode === "revise") {
     return `School: ${opts.schoolName} (${opts.displayName})
-City: ${opts.city || "—"} | CBSE Affiliation: ${opts.affiliationNo || "CBSE"}
+City: ${opts.city || "—"} | Recognition: ${opts.recognition || "—"}
 Document: ${typeLabel}
 Language: ${langNote}
 
-TASK: REVISE the draft below to align with CBSE school employment norms and clauses used by other reputed CBSE-affiliated schools in India.
+TASK: REVISE the draft below to align with private-school employment norms and clauses used by other reputed private schools in India.
 - Expand thin or missing sections using the mandatory clause catalog
 - Keep employee-specific facts already correct; improve legal clarity
 - Preserve intent of user edits where reasonable
-- If user noted changes, apply them: ${opts.changeRequest?.trim() || "(general CBSE alignment)"}
+- Remove any statement that the school is affiliated to CBSE or any board, and any affiliation number or CBSE school code
+- If user noted changes, apply them: ${opts.changeRequest?.trim() || "(general alignment)"}
 
 Employee context:
 ${opts.staffContext}
@@ -144,23 +161,23 @@ ${langReturn}`;
   }
 
   return `School: ${opts.schoolName} (${opts.displayName})
-City: ${opts.city || "—"} | CBSE Affiliation: ${opts.affiliationNo || "CBSE"}
+City: ${opts.city || "—"} | Recognition: ${opts.recognition || "—"}
 Document type: ${typeLabel}
 Language: ${langNote}
 
-TASK: CREATE a complete, detailed staff agreement suitable for signature at a CBSE school.
-Match depth and structure of appointment orders issued by established CBSE private schools — NOT a short letter.
+TASK: CREATE a complete, detailed staff agreement suitable for signature at this school.
+Match depth and structure of appointment orders issued by established private schools — NOT a short letter.
 
 Employee facts:
 ${opts.staffContext}
 
 Additional terms from HR (salary, probation, notice, special clauses):
-${opts.details.trim() || "Use standard CBSE private school terms: 6 months probation, 30 days notice, salary as per school pay scale, PF/ESIC as applicable."}
+${opts.details.trim() || "Use standard private school terms: 6 months probation, 30 days notice, salary as per school pay scale, PF/ESIC as applicable."}
 
 ${langReturn}`;
 }
 
-const MIN_HI_BODY = Math.round(CBSE_AGREEMENT_MIN_BODY_CHARS * 0.85);
+const MIN_HI_BODY = Math.round(AGREEMENT_MIN_BODY_CHARS * 0.85);
 
 export function validateAgreementDoc(
   doc: { titleEn: string; titleHi: string; bodyEn: string; bodyHi: string },

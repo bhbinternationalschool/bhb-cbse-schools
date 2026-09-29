@@ -254,6 +254,7 @@ SELFTESTS=(
   test:exam-report-templates
   test:exam-paper-question-types
   test:exam-paper-print-layout
+  test:ai-school-status
   test:exam-formula-catalog
   test:household-prefs
   test:item-analytics
