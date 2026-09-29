@@ -61,6 +61,9 @@ import {
   composeOpenWorkReminder,
   composeRolesFooter,
   composeStaffFeedbackAck,
+  composeFeedbackRecipientAsk,
+  parseFeedbackRecipient,
+  PRIVATE_FEEDBACK_LOG_TEXT,
   composeStaffLinkFound,
   composeStaffLinkIntro,
   composeStaffLinkRequested,
@@ -82,6 +85,28 @@ import {
   type StaffRoleNote,
 } from "@/lib/staffOnboarding";
 import { parseMarkAskReply } from "@/lib/erpCommands";
+import {
+  composeLeaveApproverRequest,
+  composeLeaveAskDates,
+  composeLeaveAskReason,
+  composeLeaveAskType,
+  composeLeaveBalances,
+  composeLeaveLwpOffer,
+  composeLeaveSent,
+  composeLeaveSummary,
+  formatLeaveDates,
+  isLeaveBalanceAsk,
+  leaveDecisionOpen,
+  leaveTypeLabel,
+  leaveUsedInMonth,
+  leaveVerdict,
+  parseLeaveApplyStart,
+  parseLeaveCodeDecision,
+  parseLeaveDates,
+  parseLeaveType,
+  type WaLeaveType,
+} from "@/lib/staffLeaveWa";
+import { isProtectedSuperAdminEmail } from "@/lib/superAdmin";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import { handleErpStaffCommand } from "@/lib/erpCommands.server";
 import { transcribeInboundVoiceNote, voiceNoteTranscriptionEnabled } from "@/lib/voiceNote.server";
@@ -162,6 +187,24 @@ export type WaUnifiedSession = {
   /** IST date the day's guide (your classes, what to type) was sent. */
   guideSentOn?: string;
   /**
+   * A suggestion / requirement / complaint waiting for "who should get it?"
+   * — kept here, never in the inbox, until it is sent to the chosen people.
+   */
+  pendingFeedback?: { kind: "suggestion" | "requirement" | "complaint"; body: string; at: string } | null;
+  /** A leave application being filled in over WhatsApp. */
+  leaveApply?: {
+    step: "type" | "dates" | "reason" | "lwp" | "confirm";
+    typeCode?: WaLeaveType;
+    /** The type asked for, when it is going as Leave Without Pay instead. */
+    askedType?: WaLeaveType;
+    from?: string;
+    to?: string;
+    halfDay?: boolean;
+    reason?: string;
+    lwpWhy?: string;
+    at: string;
+  } | null;
+  /**
    * Questions asked while a job was open — a punch waiting for its pin, a
    * register waiting for its absentees, a draft waiting for YES. Answered
    * as soon as the job is finished or dropped (answerDeferred).
@@ -201,6 +244,13 @@ type WaUnifiedStore = {
    * before this existed loads without it.
    */
   handled?: HandledMap;
+  /**
+   * Leave requests sent to the principal and admins, by the code in the
+   * message ("LEAVE OK 4821"). A stable code, never a list position: the
+   * pending list shifts as requests are decided, and "LEAVE OK 1" could then
+   * approve somebody else's leave.
+   */
+  leaveCodes?: Record<string, { requestId: string; staffId: string; staffMobile10: string; at: string }>;
 };
 
 let memoryStore: WaUnifiedStore = { version: 1, sessions: {} };
@@ -1120,6 +1170,28 @@ async function readOpenWork(opts: {
   staff: StaffRecord | null;
 }): Promise<OpenWork | null> {
   const { todayIso } = istNow();
+  const fb = opts.session.pendingFeedback;
+  if (fb && freshAt(fb.at, FEEDBACK_OPEN_MS)) {
+    return {
+      kind: "feedback_recipient",
+      what: `your ${fb.kind} — who should receive it`,
+      how: "reply *1* Director only, *2* Principal only, or *3* Both",
+    };
+  }
+  const lv = opts.session.leaveApply;
+  if (lv && freshAt(lv.at, LEAVE_APPLY_OPEN_MS)) {
+    const how =
+      lv.step === "type"
+        ? "reply *1* for CL or *2* for ML"
+        : lv.step === "dates"
+          ? "send the date — e.g. _tomorrow_ or _2 Oct to 4 Oct_"
+          : lv.step === "reason"
+            ? "send the reason in a few words"
+            : lv.step === "lwp"
+              ? "reply *YES* to apply as Leave Without Pay, or *NO*"
+              : "reply *YES* to send it for approval, or *NO*";
+    return { kind: "leave_application", what: "your leave application", how };
+  }
   const askedAt = Date.parse(opts.session.morningAskAt || "");
   if (
     opts.staff &&
@@ -1176,6 +1248,12 @@ function answersOpenWork(work: OpenWork, text: string): boolean {
       return parseMarkAskReply(t) !== null;
     case "class_draft":
       return /^(yes|y|ok|okay|confirm|approve|send|broadcast|publish|no|n|cancel|reject|discard|stop|edit)\b/i.test(t);
+    case "feedback_recipient":
+      return parseFeedbackRecipient(t) !== null;
+    case "leave_application":
+      // Its answers are taken before the open-work check (staffLeaveStep);
+      // what reaches here is something else, kept for after.
+      return false;
   }
 }
 
@@ -1257,6 +1335,517 @@ async function sendDayGuide(opts: {
   await patchSession(opts.mobile10, opts.session, { guideSentOn: istNow().todayIso });
 }
 
+/* ── Who leadership is, for private messages and leave approval ───────── */
+
+type LeaderContact = { staffId: string; name: string; mobile10: string };
+
+/**
+ * The owner (director), the principal and the admins, with usable mobiles.
+ *
+ * The owner is the protected super-admin account, or the "owner" role — not
+ * every staff member whose designation says Director: at this school three
+ * people carry that title, and "Director only" means the owner. The
+ * principal is by designation (not vice principal). Admins are whoever holds
+ * the ERP's admin role.
+ */
+async function leadershipContacts(): Promise<{ owner: LeaderContact[]; principal: LeaderContact[]; admin: LeaderContact[] }> {
+  const masters = loadMasters();
+  const { loadServerRbac } = await import("@/lib/api/v1/auth");
+  const rbac = await loadServerRbac();
+  const today = istNow().todayIso;
+  const roleCode = (roleId: string) => rbac.roles.find((r) => r.id === roleId)?.code ?? "";
+  const holders = (code: string) =>
+    new Set(
+      rbac.assignments
+        .filter((a) => roleCode(a.roleId) === code && (!a.expiresOn || a.expiresOn >= today))
+        .map((a) => a.staffId),
+    );
+  const designation = (s: StaffRecord) =>
+    (masters.designations ?? []).find((d) => d.id === s.designationId)?.name ?? "";
+  const active = (masters.staff ?? []).filter(
+    (s) => s.status === "active" && waNormalizeLocal10(s.mobile || "").length === 10,
+  );
+  const contact = (s: StaffRecord): LeaderContact => ({ staffId: s.id, name: s.fullName, mobile10: waNormalizeLocal10(s.mobile) });
+  const ownerIds = holders("owner");
+  let owner = active.filter((s) => isProtectedSuperAdminEmail(s.email) || ownerIds.has(s.id));
+  if (!owner.length) owner = active.filter((s) => /\b(owner|director|chairman|founder|trustee)\b/i.test(designation(s)));
+  const principal = active.filter((s) => /\bprincipal\b/i.test(designation(s)) && !/\bvice\b/i.test(designation(s)));
+  const adminIds = holders("admin");
+  const admin = active.filter((s) => adminIds.has(s.id));
+  return { owner: owner.map(contact), principal: principal.map(contact), admin: admin.map(contact) };
+}
+
+/* ── Staff leave over WhatsApp ──────────────────────────────────────── */
+
+/** How long a half-filled leave application waits. */
+const LEAVE_APPLY_OPEN_MS = 30 * 60_000;
+/** How long "who should get it?" waits for an answer. */
+const FEEDBACK_OPEN_MS = 30 * 60_000;
+
+function freshAt(at: string | undefined, ms: number): boolean {
+  const t = Date.parse(at || "");
+  return Number.isFinite(t) && Date.now() - t < ms;
+}
+
+/** The HR desk, with this staff member's balances for the year in place. */
+async function hrFor(staffId: string) {
+  const { loadStaffHrServer, balancesFor } = await import("@/lib/api/v1/staffLeave");
+  const base = await loadStaffHrServer();
+  const masters = loadMasters();
+  const ay = currentAcademicYearCode(masters);
+  const { state, balances } = balancesFor(base, staffId, ay);
+  return { state, ay, balances };
+}
+
+type LeaveDraft = NonNullable<WaUnifiedSession["leaveApply"]>;
+type StaffAwareReply = { replied: boolean; escalate: boolean; audience: string; stub: boolean };
+
+/** Leftover words after the type, the dates and the leave words — the reason, if they gave one. */
+function leaveReasonFrom(text: string): string {
+  const cleaned = (text || "")
+    .replace(/(?<![\p{L}\p{M}\p{N}])(cl|ml|sl|lwp|casual|medical|sick|leave|chutti|chhutti|apply|need|want|chahiye|chaiye|for|on|mujhe|kal|aaj|today|tomorrow|parso|half\s*day|to|se|till|tak|i|please|pls|hai|ke|ki|ka|liye|a|the|leni|lena)(?![\p{L}\p{M}\p{N}])/giu, " ")
+    .replace(/\b\d{1,2}[/.-]\d{1,2}(?:[/.-]\d{2,4})?\b/g, " ")
+    .replace(/\b\d{1,2}(?:st|nd|rd|th)?\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b/gi, " ")
+    .replace(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat)\b/gi, " ")
+    .replace(/[^\p{L}\p{M}\p{N}\s']/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned.length >= 3 ? cleaned : "";
+}
+
+/**
+ * Take the application one step further: whatever is missing is asked for;
+ * when nothing is, the leave master's verdict decides what comes next.
+ */
+async function advanceLeave(opts: {
+  mobile10: string;
+  session: WaUnifiedSession;
+  staff: StaffRecord;
+  draft: LeaveDraft;
+}): Promise<string> {
+  const { mobile10, session, staff } = opts;
+  const draft: LeaveDraft = { ...opts.draft, at: nowIso() };
+  const save = (d: LeaveDraft | null) => patchSession(mobile10, session, { leaveApply: d });
+  if (!draft.typeCode) {
+    await save({ ...draft, step: "type" });
+    return composeLeaveAskType();
+  }
+  if (!draft.from || !draft.to) {
+    await save({ ...draft, step: "dates" });
+    return composeLeaveAskDates(draft.typeCode);
+  }
+  if (!draft.reason) {
+    await save({ ...draft, step: "reason" });
+    return composeLeaveAskReason();
+  }
+  const { state, ay } = await hrFor(staff.id);
+  const todayIso = istNow().todayIso;
+  const verdict = leaveVerdict({
+    state,
+    staffId: staff.id,
+    academicYearCode: ay,
+    typeCode: draft.typeCode,
+    from: draft.from,
+    to: draft.to,
+    halfDay: !!draft.halfDay,
+    todayIso,
+  });
+  const dates = formatLeaveDates(draft.from, draft.to, !!draft.halfDay);
+  if (verdict.kind === "refuse") {
+    await save(null);
+    return `${verdict.why}\n\nSend _CL tomorrow_ or _ML 2 Oct to 4 Oct_ to start again.`;
+  }
+  if (verdict.kind === "lwp") {
+    await save({ ...draft, step: "lwp", lwpWhy: verdict.why });
+    return composeLeaveLwpOffer({ why: verdict.why, asked: leaveTypeLabel(draft.typeCode), dates });
+  }
+  await save({ ...draft, step: "confirm" });
+  return composeLeaveSummary({ typeCode: draft.typeCode, dates, days: verdict.days, reason: draft.reason });
+}
+
+/** Put the application in the ERP and send it to the principal and admins. */
+async function submitLeave(opts: {
+  mobile10: string;
+  session: WaUnifiedSession;
+  staff: StaffRecord;
+  draft: LeaveDraft;
+}): Promise<string> {
+  const { mobile10, session, staff, draft } = opts;
+  await patchSession(mobile10, session, { leaveApply: null });
+  const { applyLeave } = await import("@/lib/staffHr");
+  const { saveStaffHrServer } = await import("@/lib/api/v1/staffLeave");
+  const { ay } = await hrFor(staff.id);
+  const result = applyLeave({
+    academicYearCode: ay,
+    staffId: staff.id,
+    typeCode: draft.typeCode!,
+    fromDate: draft.from!,
+    toDate: draft.halfDay ? draft.from! : draft.to!,
+    halfDay: !!draft.halfDay,
+    reason: `${draft.reason}${draft.askedType && draft.askedType !== draft.typeCode ? ` (asked as ${draft.askedType}: ${draft.lwpWhy})` : ""} · via WhatsApp`,
+    appliedBy: staff.fullName || "Staff",
+  });
+  if (!result.ok) return `Could not apply: ${result.error}.`;
+  try {
+    await saveStaffHrServer(result.state);
+  } catch {
+    return "The leave could not be saved just now. Please try again in a minute.";
+  }
+  const req = result.request;
+  const dates = formatLeaveDates(req.fromDate, req.toDate, req.halfDay);
+  if (req.status === "approved") {
+    const { markApprovedLeaveOnRegisters } = await import("@/lib/staffAttendance.server");
+    await markApprovedLeaveOnRegisters({ staffId: staff.id, fromDate: req.fromDate, toDate: req.toDate, halfDay: req.halfDay, typeCode: req.typeCode, by: "Leave (auto-approved)" });
+    return `✅ ${leaveTypeLabel(req.typeCode)} on ${dates} is approved and marked.`;
+  }
+
+  // A code the approvers answer with.
+  const store = await readStore();
+  // Codes of long-past leave are dropped, so the list stays small.
+  const keepAfter = Date.now() - 60 * 24 * 60 * 60_000;
+  const codes = Object.fromEntries(
+    Object.entries(store.leaveCodes ?? {}).filter(([, v]) => (Date.parse(v.at) || 0) > keepAfter),
+  );
+  let code = "";
+  for (let i = 0; i < 20 && (!code || codes[code]); i += 1) code = String(1000 + Math.floor(Math.random() * 9000));
+  codes[code] = { requestId: req.id, staffId: staff.id, staffMobile10: mobile10, at: nowIso() };
+  await writeStore({ ...store, leaveCodes: codes });
+
+  const leaders = await leadershipContacts();
+  const approvers = [...leaders.principal, ...leaders.admin].filter((c) => c.staffId !== staff.id);
+  const to = approvers.length ? approvers : leaders.owner.filter((c) => c.staffId !== staff.id);
+  const masters = loadMasters();
+  const designation = (masters.designations ?? []).find((d) => d.id === staff.designationId)?.name ?? "";
+  const { sendLeadershipDirect } = await import("@/lib/waRelay.server");
+  await sendLeadershipDirect({
+    toMobiles: to.map((c) => c.mobile10),
+    label: "Staff leave",
+    senderName: staff.fullName,
+    sender10: mobile10,
+    code,
+    text: composeLeaveApproverRequest({
+      code,
+      staffName: staff.fullName,
+      empCode: staff.empCode,
+      designation,
+      typeCode: req.typeCode,
+      dates,
+      days: req.days,
+      reason: draft.reason || "",
+      lwpWhy: req.typeCode === "LWP" ? draft.lwpWhy : undefined,
+    }),
+    clientKey: `leave:${req.id}`,
+  });
+  return composeLeaveSent(code);
+}
+
+/**
+ * "LEAVE OK 4821" / "LEAVE NO 4821" from the principal, an admin or the
+ * owner. The first decision is posted to the ERP (and the day marked); a
+ * second one is told it is already done. Accepted until the end of the
+ * leave's first day. Returns handled:false for anyone not allowed to decide,
+ * so their message carries on as normal.
+ */
+export async function handleLeaveCodeDecision(opts: { fromWaId: string; text: string }): Promise<{ handled: boolean }> {
+  const decision = parseLeaveCodeDecision(opts.text);
+  if (!decision) return { handled: false };
+  const approver10 = waNormalizeLocal10(opts.fromWaId);
+  const identity = await resolveWaIdentityServer(opts.fromWaId);
+  const approverStaff = identity.roles.find((r) => r.staff)?.staff ?? null;
+  const leaders = await leadershipContacts();
+  const allowed =
+    !!approverStaff &&
+    [...leaders.principal, ...leaders.admin, ...leaders.owner].some((c) => c.staffId === approverStaff.id);
+  if (!allowed) return { handled: false };
+  const say = (body: string) => sendWhatsAppText({ toMobile: approver10, body });
+
+  const store = await readStore();
+  const entry = (store.leaveCodes ?? {})[decision.code];
+  if (!entry) {
+    await say(`No leave request #${decision.code} was found. Check the number, or decide it in the ERP (Staff → Leave).`);
+    return { handled: true };
+  }
+  const { loadStaffHrServer, saveStaffHrServer } = await import("@/lib/api/v1/staffLeave");
+  const state = await loadStaffHrServer();
+  const req = state.leaveRequests.find((r) => r.id === entry.requestId);
+  const masters = loadMasters();
+  const who = (masters.staff ?? []).find((s) => s.id === entry.staffId);
+  const whoName = who?.fullName || "the staff member";
+  if (!req) {
+    await say(`Leave request #${decision.code} is no longer in the ERP.`);
+    return { handled: true };
+  }
+  const dates = formatLeaveDates(req.fromDate, req.toDate, req.halfDay);
+  if (req.status !== "pending" && req.status !== "pending_l2") {
+    await say(
+      `Leave #${decision.code} (${whoName}, ${dates}) was already ${req.status === "approved" ? "approved and posted" : req.status}${req.decidedBy ? ` by ${req.decidedBy}` : ""}. Nothing more to do.`,
+    );
+    return { handled: true };
+  }
+  if (approverStaff!.id === req.staffId) {
+    await say("You cannot decide your own leave.");
+    return { handled: true };
+  }
+  if (!leaveDecisionOpen(req.fromDate, istNow().todayIso)) {
+    await say(`The day of leave #${decision.code} has passed. Please decide it in the ERP (Staff → Leave).`);
+    return { handled: true };
+  }
+
+  const byName = approverStaff!.fullName || "Leadership";
+  // Two approvers answering within seconds of each other both read the
+  // request as pending. Only one may decide it: the claim is a unique row,
+  // so the second is told it is already being settled.
+  const { claimSendOnce, releaseSendClaim } = await import("@/lib/waSendClaim.server");
+  const claimKey = `leave-decision:${req.id}:${req.status}`;
+  const claim = await claimSendOnce(claimKey, byName, `leave #${decision.code}`);
+  if (!claim.ok) {
+    await say(
+      claim.reason === "held"
+        ? `Leave #${decision.code} (${whoName}, ${dates}) was already decided${claim.claimedBy ? ` by ${claim.claimedBy}` : ""} and posted. Nothing more to do.`
+        : "The decision could not be recorded just now. Please try again in a minute.",
+    );
+    return { handled: true };
+  }
+
+  const { decideLeave } = await import("@/lib/staffHr");
+  const result = decideLeave({
+    requestId: req.id,
+    decision: decision.approve ? "approved" : "rejected",
+    decidedBy: byName,
+    decisionNote: `Decided on WhatsApp by ${byName}`,
+  });
+  if (!result.ok) {
+    await releaseSendClaim(claimKey);
+    await say(`Could not record the decision: ${result.error}.`);
+    return { handled: true };
+  }
+  try {
+    await saveStaffHrServer(result.state);
+  } catch {
+    await releaseSendClaim(claimKey);
+    await say("The decision could not be saved just now. Please try again in a minute.");
+    return { handled: true };
+  }
+  const after = result.state.leaveRequests.find((r) => r.id === req.id) ?? req;
+  const label = leaveTypeLabel(req.typeCode);
+
+  if (after.status === "approved") {
+    const { markApprovedLeaveOnRegisters } = await import("@/lib/staffAttendance.server");
+    await markApprovedLeaveOnRegisters({
+      staffId: req.staffId,
+      fromDate: req.fromDate,
+      toDate: req.toDate,
+      halfDay: req.halfDay,
+      typeCode: req.typeCode,
+      by: `Leave approved by ${byName}`,
+    });
+    await say(`✅ Approved and posted to the ERP: ${whoName} · ${label} · ${dates}. The day is marked as leave.`);
+    await sendWhatsAppText({
+      toMobile: entry.staffMobile10,
+      body: `✅ Your ${label} for ${dates} is approved by ${byName}, and marked in attendance.`,
+    });
+  } else if (after.status === "rejected") {
+    await say(`Refused: ${whoName} · ${label} · ${dates}. They have been told.`);
+    await sendWhatsAppText({
+      toMobile: entry.staffMobile10,
+      body: `Your ${label} for ${dates} was not approved by ${byName}. Please speak to them if you need to.`,
+    });
+  } else {
+    await say(`Recorded at the first level: ${whoName} · ${label} · ${dates}. It now needs the final approval in the ERP.`);
+  }
+  return { handled: true };
+}
+
+const YES_WORD = /^(yes|y|haan|ha|han|ok|okay|confirm|send|हाँ|हां|ठीक)$/i;
+const NO_WORD = /^(no|n|nahi|nahin|नहीं)$/i;
+
+/**
+ * A staff member's suggestion, requirement or complaint: first "who should
+ * get it?", then sent privately to exactly the people they chose. Its words
+ * never reach the office inbox or the relay log. Returns null when this
+ * message is not part of it.
+ */
+async function staffFeedbackStep(opts: {
+  mobile10: string;
+  text: string;
+  session: WaUnifiedSession;
+  staff: StaffRecord | null;
+  displayName: string;
+  say: (body: string, audience: string) => Promise<StaffAwareReply>;
+}): Promise<StaffAwareReply | null> {
+  const { mobile10, text, session, staff, say } = opts;
+  const fresh = parseStaffFeedback(text);
+  if (fresh) {
+    await patchSession(mobile10, session, { pendingFeedback: { kind: fresh.kind, body: fresh.body, at: nowIso() } });
+    return say(composeFeedbackRecipientAsk(fresh.kind), "staff_feedback_recipient");
+  }
+  const pending = session.pendingFeedback;
+  if (!pending) return null;
+  if (!freshAt(pending.at, FEEDBACK_OPEN_MS)) {
+    // Never answered: its words are not kept any longer than needed.
+    await patchSession(mobile10, session, { pendingFeedback: null });
+    return null;
+  }
+  if (isCancelOpenWork(text)) {
+    await patchSession(mobile10, session, { pendingFeedback: null });
+    return say(`OK — your ${pending.kind} was dropped. Nobody has seen it.`, "staff_feedback_dropped");
+  }
+  const to = parseFeedbackRecipient(text);
+  if (!to) return null;
+
+  const leaders = await leadershipContacts();
+  const chosen = [
+    ...(to === "principal" ? [] : leaders.owner),
+    ...(to === "director" ? [] : leaders.principal),
+  ].filter((c) => !staff || c.staffId !== staff.id);
+  const masters = loadMasters();
+  const designation = staff ? ((masters.designations ?? []).find((d) => d.id === staff.designationId)?.name ?? "") : "";
+  const kindLabel = pending.kind.charAt(0).toUpperCase() + pending.kind.slice(1);
+  const who = to === "director" ? "the Director" : to === "principal" ? "the Principal" : "the Director and the Principal";
+  const senderName = staff?.fullName || opts.displayName || "Staff";
+  const body = [
+    `📨 *Staff ${pending.kind}* — private, sent only to ${who}`,
+    `From: ${senderName}${staff?.empCode ? ` (${staff.empCode})` : ""}${designation ? ` · ${designation}` : ""} · ${mobile10}`,
+    "",
+    pending.body,
+    "",
+    `_To answer, message ${senderName.split(" ")[0]} directly on ${mobile10}._`,
+  ].join("\n");
+  let delivered = 0;
+  if (chosen.length) {
+    const { sendLeadershipDirect } = await import("@/lib/waRelay.server");
+    const r = await sendLeadershipDirect({
+      toMobiles: chosen.map((c) => c.mobile10),
+      label: `Staff ${kindLabel}`,
+      senderName,
+      sender10: mobile10,
+      code: makeStaffLinkCode(),
+      text: body,
+      clientKey: `feedback:${mobile10}:${Date.parse(pending.at) || Date.now()}`,
+    });
+    delivered = r.delivered;
+  }
+  if (delivered > 0) await patchSession(mobile10, session, { pendingFeedback: null });
+  return say(composeStaffFeedbackAck(pending.kind, to, delivered > 0), "staff_feedback");
+}
+
+/**
+ * CL / ML over WhatsApp: the application a step at a time, the leave
+ * master's verdict, Leave Without Pay when CL for the month is used, then
+ * the principal and admins. Returns null when this message is not part of
+ * it, so it carries on as before.
+ */
+async function staffLeaveStep(opts: {
+  mobile10: string;
+  text: string;
+  session: WaUnifiedSession;
+  staff: StaffRecord | null;
+  flow: string;
+  say: (body: string, audience: string) => Promise<StaffAwareReply>;
+}): Promise<StaffAwareReply | null> {
+  const { mobile10, text, session, staff, say } = opts;
+  if (!staff || !text) return null;
+  const todayIso = istNow().todayIso;
+  const draft = session.leaveApply && freshAt(session.leaveApply.at, LEAVE_APPLY_OPEN_MS) ? session.leaveApply : null;
+  const go = async (d: LeaveDraft) => say(await advanceLeave({ mobile10, session, staff, draft: d }), "staff_leave_apply");
+  const words = text.split(/\s+/).filter(Boolean).length;
+
+  if (draft) {
+    if (isCancelOpenWork(text)) {
+      await patchSession(mobile10, session, { leaveApply: null });
+      return say("OK — the leave application was cancelled. Nothing was sent.", "staff_leave_cancelled");
+    }
+    const t = text.replace(/[.!]+$/, "").trim();
+    switch (draft.step) {
+      case "type": {
+        const typeCode: WaLeaveType | null = t === "1" ? "CL" : t === "2" ? "SL" : parseLeaveType(t);
+        if (typeCode && typeCode !== "LWP") {
+          const dates = draft.from ? null : parseLeaveDates(t, todayIso);
+          return go({
+            ...draft,
+            typeCode,
+            ...(dates ? { from: dates.from, to: dates.to } : {}),
+            halfDay: draft.halfDay || /half\s*day/i.test(t),
+          });
+        }
+        if (words <= 4 && !/[?？]/.test(t)) return say(`Please reply *1* for CL or *2* for ML.\n\n${composeLeaveAskType()}`, "staff_leave_apply");
+        return null;
+      }
+      case "dates": {
+        const dates = parseLeaveDates(t, todayIso);
+        if (dates) return go({ ...draft, from: dates.from, to: dates.to, halfDay: draft.halfDay || /half\s*day/i.test(t) });
+        if (words <= 4 && !/[?？]/.test(t)) {
+          return say(`I couldn't read that date.\n\n${composeLeaveAskDates(draft.typeCode || "CL")}`, "staff_leave_apply");
+        }
+        return null;
+      }
+      case "reason": {
+        if (/[?？]/.test(t) || YES_WORD.test(t) || NO_WORD.test(t) || t.length < 2) return null;
+        return go({ ...draft, reason: t.slice(0, 200) });
+      }
+      case "lwp": {
+        if (YES_WORD.test(t)) {
+          return go({ ...draft, askedType: draft.askedType || draft.typeCode, typeCode: "LWP" });
+        }
+        if (NO_WORD.test(t)) {
+          await patchSession(mobile10, session, { leaveApply: null });
+          return say("OK — not applied. Nothing was sent.", "staff_leave_cancelled");
+        }
+        return null;
+      }
+      case "confirm": {
+        if (YES_WORD.test(t)) {
+          // A draft confirmed after midnight is for a day that has ended.
+          if ((draft.from || "") < todayIso) {
+            await patchSession(mobile10, session, { leaveApply: null });
+            return say("That day has already ended, so it cannot be applied for here — please speak to the office.", "staff_leave_apply");
+          }
+          return say(await submitLeave({ mobile10, session, staff, draft }), "staff_leave_sent");
+        }
+        if (NO_WORD.test(t)) {
+          await patchSession(mobile10, session, { leaveApply: null });
+          return say("OK — not sent. Nothing was applied.", "staff_leave_cancelled");
+        }
+        return null;
+      }
+    }
+    return null;
+  }
+
+  if (isLeaveBalanceAsk(text)) {
+    try {
+      const { state, balances } = await hrFor(staff.id);
+      const ym = todayIso.slice(0, 7);
+      const left: Record<string, number> = {};
+      const usedThisMonth: Record<string, number> = {};
+      for (const b of balances) left[String(b.typeCode)] = Number(b.remaining) || 0;
+      for (const t of state.leaveTypes) usedThisMonth[t.code] = leaveUsedInMonth(state.leaveRequests, staff.id, t.code, ym);
+      return say(composeLeaveBalances({ types: state.leaveTypes, left, usedThisMonth }), "staff_leave_balance");
+    } catch (e) {
+      console.error("[wa-unified] leave balance failed", e);
+      return say("Your leave balance could not be read just now. Please try again in a minute.", "staff_leave_balance");
+    }
+  }
+
+  let start = parseLeaveApplyStart(text, todayIso);
+  // "LEAVE" alone is the approvers' queue; from anyone else it is an application.
+  if (!start && /^\s*leave\s*$/i.test(text)) {
+    const leaders = await leadershipContacts();
+    const approver = [...leaders.principal, ...leaders.admin, ...leaders.owner].some((c) => c.staffId === staff.id);
+    if (!approver) start = { typeCode: null, dates: null, halfDay: false };
+  }
+  if (!start) return null;
+  return go({
+    step: "type",
+    typeCode: start.typeCode ?? undefined,
+    from: start.dates?.from,
+    to: start.dates?.to,
+    halfDay: start.halfDay,
+    reason: leaveReasonFrom(text) || undefined,
+    at: nowIso(),
+  });
+}
+
 const GREETING_ONLY =
   /^(hi+|hello+|hey|hii+|namaste|namaskar|good\s*(morning|afternoon|evening)|gm|pranam|jai\s*hind|नमस्ते|प्रणाम|सुप्रभात)[\s!.🙏]*$/iu;
 const GUIDE_ASK =
@@ -1264,8 +1853,9 @@ const GUIDE_ASK =
 
 /**
  * The staff side of delegateActiveFlow: the morning attendance question,
- * finishing open work before anything new, the day's guide, and messages
- * for the director. Other flows pass straight through.
+ * finishing open work before anything new, the day's guide, private
+ * messages for the director / principal, and CL / ML applications. Other
+ * flows pass straight through.
  */
 async function delegateStaffAware(
   flow: WaUnifiedFlow,
@@ -1280,7 +1870,9 @@ async function delegateStaffAware(
   const text = (opts.text || "").trim();
   const staff = staffRecordFor(identity, flow);
   const displayName = session.displayName || identity.displayName;
-  const reply = async (body: string, audience: string, escalate = false) => {
+  // A private message's words never reach the office inbox.
+  const inboundText = parseStaffFeedback(text) ? PRIVATE_FEEDBACK_LOG_TEXT : text || (opts.audio ? "[voice note]" : "");
+  const reply = async (body: string, audience: string, escalate = false): Promise<StaffAwareReply> => {
     const ok = await sendBotReply({
       mobile10,
       displayName,
@@ -1288,10 +1880,26 @@ async function delegateStaffAware(
       audience,
       flow,
       text: body,
-      inbound: { text: text || (opts.audio ? "[voice note]" : ""), waMessageId: opts.waMessageId },
+      inbound: { text: inboundText, waMessageId: opts.waMessageId },
     });
     return { replied: ok, escalate, audience, stub: !ok };
   };
+
+  // 0. The private message and the leave application answer their own
+  // questions first — they are the open job when they are open.
+  const feedbackStep = await staffFeedbackStep({ mobile10, text, session, staff, displayName, say: reply });
+  if (feedbackStep) {
+    if (!(await readStore()).sessions[mobile10]?.pendingFeedback) await answerDeferred(flow, opts, identity);
+    return feedbackStep;
+  }
+  const leaveDraftOpen = !!session.leaveApply && freshAt(session.leaveApply.at, LEAVE_APPLY_OPEN_MS);
+  if (leaveDraftOpen) {
+    const step = await staffLeaveStep({ mobile10, text, session, staff, flow, say: reply });
+    if (step) {
+      if (!(await readStore()).sessions[mobile10]?.leaveApply) await answerDeferred(flow, opts, identity);
+      return step;
+    }
+  }
 
   // 1. Something is open: finish it first, answer this after.
   const work = await openWorkFor({ mobile10, fromWaId: opts.fromWaId, session, flow, staff });
@@ -1309,6 +1917,13 @@ async function delegateStaffAware(
     return { replied: true, escalate: false, audience: "staff_morning_skip", stub: false };
   }
 
+  // 1b. "CL tomorrow", "ML 2 Oct to 4 Oct fever", "my leave" — before the
+  // morning question: someone applying for today's leave is not coming in.
+  if (!work && !leaveDraftOpen) {
+    const step = await staffLeaveStep({ mobile10, text, session, staff, flow, say: reply });
+    if (step) return step;
+  }
+
   // 2. The first message of a working morning: their own attendance first.
   if (!work && staff && text && !opts.location) {
     const { todayIso, hour } = istNow();
@@ -1319,6 +1934,11 @@ async function delegateStaffAware(
     if (lastAskedOn !== todayIso && hour >= 5 && hour < 15) {
       try {
         dayOn = isStaffWorkingDay(staff, todayIso);
+        if (dayOn) {
+          const { staffAttendanceExempt } = await import("@/lib/staffAttendance.server");
+          // Not asked of those the attendance settings excuse from punching.
+          if (await staffAttendanceExempt(staff.id)) dayOn = false;
+        }
         if (dayOn) {
           const { staffPunchToday } = await import("@/lib/staffAttendance.server");
           punchedIn = !!(await staffPunchToday(staff.id))?.inTime;
@@ -1356,23 +1976,6 @@ async function delegateStaffAware(
   if (text && GUIDE_ASK.test(text)) {
     await sendDayGuide({ mobile10, identity, flow, session, punchedJustNow: false });
     return { replied: true, escalate: false, audience: "staff_day_guide", stub: false };
-  }
-
-  // 4. "Suggestion: …", "Requirement: …", "Complaint: …" — to the director.
-  const feedback = parseStaffFeedback(text);
-  if (feedback) {
-    const { relayEscalation } = await import("@/lib/waRelay.server");
-    const label = feedback.kind === "suggestion" ? "Suggestion" : feedback.kind === "complaint" ? "Complaint" : "Requirement";
-    const relay = await relayEscalation({
-      fromWaId: opts.fromWaId,
-      text: `${label} from ${staff?.fullName || displayName}${staff?.empCode ? ` (${staff.empCode})` : ""}: ${feedback.body}`,
-      waMessageId: opts.waMessageId,
-      profileName: opts.profileName,
-      audience: "staff_feedback",
-      category: "director",
-      reason: `staff ${feedback.kind} for the director`,
-    });
-    return reply(composeStaffFeedbackAck(feedback.kind, relay.ok && relay.forwarded > 0), "staff_feedback");
   }
 
   const r = await delegateActiveFlow(flow, opts, identity, session);

@@ -519,9 +519,15 @@ export function upsertStaffMarkInState(
     input.date,
     input.academicYearCode,
   );
+  // A register created by the day's first punch starts everyone "P". Anyone
+  // on approved leave that day starts as leave instead — before 29 Sep 2026
+  // they were marked present by whoever punched in first, and only a later
+  // save from the desk put the leave back.
   const marks = existing
     ? [...existing.marks]
-    : defaultStaffMarks(input.roster);
+    : normalizeAttendanceSettings(state.settings).syncLeaveToAttendance
+      ? applyApprovedLeaveToMarks(defaultStaffMarks(input.roster), input.date, input.academicYearCode)
+      : defaultStaffMarks(input.roster);
 
   const idx = marks.findIndex((m) => m.staffId === input.staffId);
   const base: StaffAttendanceMark =

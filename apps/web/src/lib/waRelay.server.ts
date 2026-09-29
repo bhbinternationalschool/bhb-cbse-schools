@@ -200,6 +200,55 @@ async function approvedRelayTemplate(): Promise<{ name: string; language: string
 }
 
 /**
+ * A message to named phones only — the director, the principal, the admins
+ * — and NOT through the relay log. For what must stay between the sender and
+ * the people they chose: a complaint about the principal sent to the
+ * director must not sit in an inbox or log the principal can open.
+ *
+ * Text first; outside WhatsApp's 24-hour window, the approved office-relay
+ * template. Returns how many phones it reached.
+ */
+export async function sendLeadershipDirect(input: {
+  toMobiles: string[];
+  label: string;
+  senderName: string;
+  sender10: string;
+  code: string;
+  text: string;
+  clientKey: string;
+}): Promise<{ delivered: number; failed: string[] }> {
+  const failed: string[] = [];
+  let delivered = 0;
+  let template: { name: string; language: string } | null | undefined;
+  const targets = [...new Set(input.toMobiles.map((m) => waNormalizeLocal10(m)).filter((m) => m.length === 10))];
+  for (const to of targets) {
+    let res = await sendWhatsAppText({ toMobile: to, body: input.text, clientMessageId: `${input.clientKey}:${to}` });
+    if (!res.ok && /24h|session window/i.test(res.error || "")) {
+      if (template === undefined) template = await approvedRelayTemplate();
+      if (template) {
+        res = await sendWhatsAppTemplate({
+          toMobile: to,
+          name: template.name,
+          language: template.language,
+          components: [
+            {
+              type: "body",
+              parameters: [input.label, `${input.senderName || "Staff"} (${input.sender10})`, input.code, input.text].map(
+                (t) => ({ type: "text" as const, text: templateSafe(t) }),
+              ),
+            },
+          ],
+          clientMessageId: `${input.clientKey}:${to}:tpl`,
+        });
+      }
+    }
+    if (res.ok || res.mode === "stub") delivered += 1;
+    else failed.push(to);
+  }
+  return { delivered, failed };
+}
+
+/**
  * Record a message the bot could not answer and forward it by category.
  *
  * Never throws: it is called from the webhook after the parent has already

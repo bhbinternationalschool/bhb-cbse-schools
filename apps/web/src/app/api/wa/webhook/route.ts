@@ -205,6 +205,30 @@ export async function POST(req: Request) {
       }
     }
 
+    // "LEAVE OK 4821" — the principal, an admin or the director deciding a
+    // staff member's WhatsApp leave application by its code. Ahead of the
+    // relay for the same reason as LINK above. A four-digit code only: the
+    // 6 PM brief's "LEAVE OK 1" (a list position) carries on to the staff
+    // bot as before, and anyone not allowed to decide falls through.
+    if (/^\s*(leave|lv)\s+\S+\s*#?\s*\d{4}\s*$/i.test(msg.text || "")) {
+      try {
+        const { handleLeaveCodeDecision } = await import("@/lib/waUnifiedBotServer");
+        const decision = await handleLeaveCodeDecision({ fromWaId: msg.fromWaId, text: msg.text });
+        if (decision.handled) {
+          results.push({
+            audience: "staff_leave_decision",
+            from: msg.fromWaId,
+            escalate: false,
+            replied: true,
+            stub: false,
+          });
+          continue;
+        }
+      } catch (e) {
+        console.error("[wa/webhook] staff leave decision failed", msg.waMessageId, e);
+      }
+    }
+
     // An office phone answering a forwarded message. Checked FIRST, before
     // media intake, the transport pin, the staff bots and the unified bot:
     // office phones are usually staff, and "#K7Q2 fees received" read by the

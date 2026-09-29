@@ -153,6 +153,15 @@ export async function applyWhatsAppStaffPunch(opts: {
   earlyOutNote?: string;
 }): Promise<ApplyWaStaffPunchResult> {
   const via = opts.via ?? "whatsapp";
+  // Approved leave is read from the HR desk (applyApprovedLeaveToMarks). On
+  // the server that cache is empty until hydrated, and then a staff member
+  // on approved leave was neither refused a punch nor shown as on leave.
+  try {
+    const { ensureStaffHrHydratedServer } = await import("@/lib/staffHrPersistence");
+    await ensureStaffHrHydratedServer();
+  } catch (e) {
+    console.warn("[staff-attendance] HR hydrate before punch failed", e);
+  }
   let state = await loadStaffAttendanceServer();
   const settings = normalizeAttendanceSettings(state.settings);
   if (via === "whatsapp" && !settings.allowWhatsAppPunch) {
@@ -322,6 +331,55 @@ export async function staffPunchToday(
   const mark = reg?.marks.find((m) => m.staffId === staffId);
   if (!mark) return null;
   return { inTime: mark.inTime || "", outTime: mark.outTime || "" };
+}
+
+/** Is this staff member exempt from attendance (Masters → Attendance settings)? */
+export async function staffAttendanceExempt(staffId: string): Promise<boolean> {
+  const state = await loadStaffAttendanceServer();
+  return normalizeAttendanceSettings(state.settings).exemptStaffIds.includes(staffId);
+}
+
+/**
+ * Approved leave onto the days whose register already exists — today, once
+ * anyone has punched. Days with no register yet need nothing: the register
+ * created on that day starts this person as on leave (upsertStaffMarkInState).
+ * Returns how many days were marked.
+ */
+export async function markApprovedLeaveOnRegisters(opts: {
+  staffId: string;
+  fromDate: string;
+  toDate: string;
+  halfDay: boolean;
+  typeCode: string;
+  by: string;
+}): Promise<number> {
+  let state = await loadStaffAttendanceServer();
+  const masters = loadMasters();
+  const ay = currentAcademicYearCode(masters);
+  const roster = masters.staff ?? [];
+  let marked = 0;
+  const end = opts.halfDay ? opts.fromDate : opts.toDate;
+  for (let d = opts.fromDate; d <= end; ) {
+    if (findStaffRegister(state, d, ay)) {
+      const merged = upsertStaffMarkInState(state, {
+        academicYearCode: ay,
+        date: d,
+        staffId: opts.staffId,
+        status: opts.halfDay ? "HD" : "LE",
+        note: opts.halfDay ? `Half-day leave (${opts.typeCode})` : `On leave (${opts.typeCode})`,
+        punchWay: "leave_sync",
+        markedBy: opts.by,
+        roster,
+      });
+      state = merged.state;
+      marked += 1;
+    }
+    const next = new Date(`${d}T00:00:00Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    d = next.toISOString().slice(0, 10);
+  }
+  if (marked) await saveStaffAttendanceServer(state);
+  return marked;
 }
 
 export async function staffAttendanceStatusForWa(

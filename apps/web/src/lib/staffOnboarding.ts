@@ -251,8 +251,10 @@ export function composeStaffWorkGuide(input: {
 
   lines.push(
     "",
-    "📨 *To the director:*",
-    "• _Suggestion: …_ · _Requirement: …_ · _Complaint: …_",
+    "📨 *To the Director / Principal (privately):*",
+    "• _Suggestion: …_ · _Requirement: …_ · _Complaint: …_ — you choose who receives it",
+    "",
+    "🗓️ *Leave:* _CL tomorrow_ · _ML 2 Oct to 4 Oct fever_ · _my leave_ for your balance",
     "",
     "⏱️ *Your own attendance:* _My attendance_ · to punch, send your location (📎 → Location → Send your current location)",
     "",
@@ -333,7 +335,14 @@ export function isRolesAsk(text: string): boolean {
 /* ── Finish what is open first ───────────────────────────────────────── */
 
 export type OpenWork = {
-  kind: "punch" | "morning_attendance" | "confirm_card" | "register" | "class_draft";
+  kind:
+    | "punch"
+    | "morning_attendance"
+    | "confirm_card"
+    | "register"
+    | "class_draft"
+    | "feedback_recipient"
+    | "leave_application";
   /** What is open, in a few words: "your punch IN — waiting for your location". */
   what: string;
   /** How to finish it: "send your location (📎 → Location → Send your current location)". */
@@ -393,12 +402,44 @@ export function parseStaffFeedback(text: string): StaffFeedback | null {
   return { kind, body };
 }
 
-export function composeStaffFeedbackAck(kind: StaffFeedback["kind"], sent: boolean): string {
-  const what = kind === "suggestion" ? "suggestion" : kind === "complaint" ? "complaint" : "requirement";
-  return sent
-    ? `✅ Your ${what} has been sent to the director. Any reply will come to you here.`
-    : `Your ${what} is saved for the director, but it could not be delivered right now — the office will pass it on.`;
+export type FeedbackRecipient = "director" | "principal" | "both";
+
+/**
+ * Who a staff member's suggestion, requirement or complaint goes to. Asked
+ * every time, because some of it is about the principal — and a complaint
+ * about the principal must reach the director without the principal ever
+ * seeing it. Director's brief, 29 Sep 2026.
+ */
+export function composeFeedbackRecipientAsk(kind: StaffFeedback["kind"]): string {
+  return [
+    `Who should receive your ${kind}?`,
+    "",
+    "*1* — Director only",
+    "*2* — Principal only",
+    "*3* — Both",
+    "",
+    "_It goes only to the person you choose — nobody else sees it._",
+    "Reply 1, 2 or 3 · *CANCEL* to drop it.",
+  ].join("\n");
 }
+
+export function parseFeedbackRecipient(text: string): FeedbackRecipient | null {
+  const t = (text || "").trim().toLowerCase().replace(/[.!]+$/, "");
+  if (/^(1|director|director only|owner|d)$/.test(t)) return "director";
+  if (/^(2|principal|principal only|p)$/.test(t)) return "principal";
+  if (/^(3|both|dono|all|director and principal|principal and director)$/.test(t)) return "both";
+  return null;
+}
+
+export function composeStaffFeedbackAck(kind: StaffFeedback["kind"], to: FeedbackRecipient, delivered: boolean): string {
+  const who = to === "director" ? "the Director" : to === "principal" ? "the Principal" : "the Director and the Principal";
+  return delivered
+    ? `✅ Your ${kind} has been sent to ${who} only.`
+    : `Your ${kind} could not be delivered to ${who} just now. Please try again in a while, or speak to them directly.`;
+}
+
+/** What the office inbox shows instead of a private message's words. */
+export const PRIVATE_FEEDBACK_LOG_TEXT = "[private message for the Director / Principal — not shown]";
 
 /* ── A number that is not on the staff record ────────────────────────── */
 

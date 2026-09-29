@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 import {
   composeMorningAttendanceAsk,
   composeOpenWorkReminder,
+  composeFeedbackRecipientAsk,
   composeRolesFooter,
   composeStaffFeedbackAck,
   composeStaffLinkFound,
@@ -25,9 +26,11 @@ import {
   maskMobile10,
   matchStaffForLink,
   parseRoleSwitch,
+  parseFeedbackRecipient,
   parseSkipOwnAttendance,
   parseStaffFeedback,
   parseStaffLinkDecision,
+  PRIVATE_FEEDBACK_LOG_TEXT,
   shortSection,
   shouldAskMorningAttendance,
   staffWorkProfile,
@@ -235,8 +238,28 @@ assert.equal(parseStaffFeedback("sujhav - library timing badhayein")?.kind, "sug
 // Without the colon it is a sentence, not a message for the director.
 assert.equal(parseStaffFeedback("need 5A class list"), null);
 assert.equal(parseStaffFeedback("complaint"), null);
-assert.ok(composeStaffFeedbackAck("suggestion", true).includes("sent to the director"));
-assert.ok(!composeStaffFeedbackAck("suggestion", false).includes("sent to the director"), "never claims a delivery that failed");
+// Who gets it is asked every time: a complaint about the principal must
+// reach the director alone.
+{
+  const ask = composeFeedbackRecipientAsk("complaint");
+  assert.ok(ask.includes("*1* — Director only") && ask.includes("*2* — Principal only") && ask.includes("*3* — Both"), ask);
+  assert.ok(ask.includes("nobody else sees it"));
+}
+for (const [t, want] of [
+  ["1", "director"], ["Director", "director"], ["director only", "director"], ["2", "principal"], ["Principal.", "principal"],
+  ["3", "both"], ["both", "both"], ["dono", "both"], ["4", null], ["yes", null], ["complaint", null],
+] as const) {
+  assert.equal(parseFeedbackRecipient(t), want, t);
+}
+assert.equal(composeStaffFeedbackAck("complaint", "director", true), "✅ Your complaint has been sent to the Director only.");
+assert.ok(composeStaffFeedbackAck("suggestion", "both", true).includes("the Director and the Principal"));
+assert.ok(!composeStaffFeedbackAck("suggestion", "principal", false).includes("✅"), "never claims a delivery that failed");
+assert.ok(PRIVATE_FEEDBACK_LOG_TEXT.startsWith("[private"), "the inbox shows a placeholder, never the words");
+{
+  const g = composeStaffWorkGuide({ firstName: "A", profile: { classTeacherOf: [], subjects: [] }, office: false });
+  assert.ok(g.includes("Director / Principal (privately)"), "the guide says it is private");
+  assert.ok(g.includes("_CL tomorrow_") && g.includes("_my leave_"), "the guide shows how to apply for leave");
+}
 
 /* ── A number not on the staff record ──────────────────────────────── */
 
