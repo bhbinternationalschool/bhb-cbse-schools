@@ -5,6 +5,7 @@
  */
 
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { loadRbac } from "@/lib/rbac";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import {
   classifyStaffHolidayDay,
@@ -13,7 +14,9 @@ import type { MastersState } from "@/lib/masters";
 import { DEFAULT_AY, loadMasters } from "@/lib/masters";
 import {
   findStaffRegister,
+  attendanceExemptStaffIds,
   loadStaffAttendance,
+  normalizeAttendanceSettings,
   type StaffAttendanceMark,
 } from "@/lib/staffAttendance";
 import { hasEndedSurveyWorkForStaff } from "@/lib/surveyAttendanceBridge";
@@ -349,6 +352,23 @@ function unpaidLeaveDaysForStaff(
   return unpaidLeaveDaysInMonth(staffId, ym, ay);
 }
 
+/** An approved leave request covering this date (any type). */
+function approvedLeaveOn(
+  hr: ReturnType<typeof loadStaffHr>,
+  staffId: string,
+  date: string,
+  ay: string,
+): boolean {
+  return hr.leaveRequests.some(
+    (r) =>
+      r.staffId === staffId &&
+      r.status === "approved" &&
+      (!r.academicYearCode || r.academicYearCode === ay) &&
+      r.fromDate <= date &&
+      r.toDate >= date,
+  );
+}
+
 function markForStaff(
   date: string,
   ay: string,
@@ -396,6 +416,20 @@ export function buildPayrollDraft(opts: BuildPayrollOpts): PayrollRun {
         ? "individual"
         : "bulk");
   const lines: PayrollStaffLine[] = [];
+  // Read once per run: who keeps no attendance, leave, and "today" (IST).
+  const attState = loadStaffAttendance();
+  const exemptIds = attendanceExemptStaffIds(
+    normalizeAttendanceSettings(attState.settings),
+    (() => {
+      try {
+        return loadRbac();
+      } catch {
+        return null;
+      }
+    })(),
+  );
+  const hr = loadStaffHr();
+  const todayIso = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 
   for (const staff of roster) {
     const structure = resolveStructureForStaff(salary, staff);
@@ -437,13 +471,33 @@ export function buildPayrollDraft(opts: BuildPayrollOpts): PayrollRun {
 
       const mark = markForStaff(d, ay, staff.id);
       if (!mark) {
-        // no register — ended field survey still counts as present (outdoor duty)
+        // Staff who keep no attendance (owner/admin by main role, and the
+        // office's exempt list) are never on a register — they are paid.
+        if (exemptIds.has(staff.id)) {
+          daysPresent += 1;
+          continue;
+        }
+        // ended field survey still counts as present (outdoor duty)
         if (hasEndedSurveyWorkForStaff(staff.id, d)) {
           daysPresent += 1;
           continue;
         }
-        // no register — assume present for draft (office may not have marked)
-        daysPresent += 1;
+        // A day still to come in a run built mid-month is not an absence.
+        if (d > todayIso) {
+          daysPresent += 1;
+          continue;
+        }
+        // Approved leave with no register — leave, not absence (unpaid
+        // types are deducted once, by unpaidLeave below).
+        if (approvedLeaveOn(hr, staff.id, d, ay)) {
+          daysLeavePaid += 1;
+          continue;
+        }
+        // No register, no mark, working day: ABSENT. Until 2026-09-29 this
+        // was "assume present", so a month nobody marked paid everyone in
+        // full. The director: a day with no register is absent unless it is
+        // a holiday; anything the office marks before the run counts.
+        daysAbsent += 1;
         continue;
       }
       if (mark.status === "A" && hasEndedSurveyWorkForStaff(staff.id, d)) {
