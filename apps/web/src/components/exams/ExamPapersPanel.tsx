@@ -3107,7 +3107,7 @@ function PrintLayoutCard(props: {
             ))}
           </div>
           <p className="mt-2 text-[11px] text-[var(--muted)]">
-            Affiliation number, school code, paper code and marks stay in figures. Question text converts per question with the Hinglish → {scriptName} button.
+            Paper code and marks stay in figures. Question text converts per question with the Hinglish → {scriptName} button.
           </p>
         </div>
       ) : null}

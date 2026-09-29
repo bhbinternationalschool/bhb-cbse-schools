@@ -264,8 +264,6 @@ export type PrintLabels = {
   maxMarks: string;
   set: string;
   paperCode: string;
-  affiliation: string;
-  schoolCode: string;
   examination: string;
   generalInstructions: string;
   marks: string;
@@ -291,8 +289,6 @@ const LABELS: Record<ResolvedLanguage, PrintLabels> = {
     maxMarks: "Max marks",
     set: "Set",
     paperCode: "Paper code",
-    affiliation: "Aff.",
-    schoolCode: "School code",
     examination: "Examination",
     generalInstructions: "General instructions",
     marks: "marks",
@@ -316,8 +312,6 @@ const LABELS: Record<ResolvedLanguage, PrintLabels> = {
     maxMarks: "पूर्णांक",
     set: "सेट",
     paperCode: "प्रश्नपत्र कोड",
-    affiliation: "संबद्धता क्र.",
-    schoolCode: "विद्यालय कोड",
     examination: "परीक्षा",
     generalInstructions: "सामान्य निर्देश",
     marks: "अंक",
@@ -341,8 +335,6 @@ const LABELS: Record<ResolvedLanguage, PrintLabels> = {
     maxMarks: "पूर्णाङ्काः",
     set: "सेट",
     paperCode: "प्रश्नपत्र-सङ्केतः",
-    affiliation: "सम्बद्धता-सङ्ख्या",
-    schoolCode: "विद्यालय-सङ्केतः",
     examination: "परीक्षा",
     generalInstructions: "सामान्यनिर्देशाः",
     marks: "अङ्काः",
