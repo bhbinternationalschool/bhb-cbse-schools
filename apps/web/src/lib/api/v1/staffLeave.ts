@@ -22,6 +22,20 @@ export async function loadStaffHrServer(): Promise<StaffHrState> {
   return loadStaffHr();
 }
 
+/**
+ * loadStaffHrServer for readers that must say "unknown" rather than "none"
+ * when the desk could not be read — the LEAVE list and the 6 PM brief. It is
+ * also the guard on deciding: a state that did not come from the desk must
+ * never be saved back over it.
+ */
+export async function readStaffHrServer(): Promise<
+  { ok: true; state: StaffHrState } | { ok: false }
+> {
+  await ensureSchoolMirrorHydrated();
+  const deskRead = await ensureStaffHrHydratedServer().catch(() => false);
+  return deskRead ? { ok: true, state: loadStaffHr() } : { ok: false };
+}
+
 export async function saveStaffHrServer(state: StaffHrState): Promise<void> {
   const pushed = await pushStaffHrRemoteServer(state);
   if (!pushed.ok) {

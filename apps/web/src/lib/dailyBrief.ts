@@ -106,6 +106,11 @@ export type BriefStaffAttendance = {
   absentRows: BriefStaffRow[];
   /** Requests awaiting a decision — today's absences and future dates alike. */
   pending: BriefStaffRow[];
+  /**
+   * The Staff HR desk could not be read, so `pending` is empty because
+   * nobody could look — not because nothing is waiting.
+   */
+  leaveUnreadable?: boolean;
   /** As BriefStudentAttendance.lastMarkedOn, for the staff register. */
   lastMarkedOn?: string | null;
 };
@@ -512,6 +517,8 @@ export function composeBriefSummary(b: DailyBrief): string {
     lines.push(
       `📝 ${b.staff.pending.length} leave request${b.staff.pending.length === 1 ? "" : "s"} waiting for you — reply *LEAVE* to see them`,
     );
+  } else if (b.staff.leaveUnreadable) {
+    lines.push("📝 Leave requests could not be read tonight — reply *LEAVE* to check");
   }
 
   if (b.defaulters.rows.length) {
@@ -671,7 +678,9 @@ export function composeBriefTemplateVariables(
     leavePending: oneLine(
       b.staff.pending.length
         ? `${b.staff.pending.length} waiting — reply LEAVE to decide`
-        : "none waiting",
+        : b.staff.leaveUnreadable
+          ? "could not be read — reply LEAVE to check"
+          : "none waiting",
     ),
     defaulters: oneLine(
       b.defaulters.rows.length
