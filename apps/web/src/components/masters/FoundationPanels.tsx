@@ -337,7 +337,9 @@ export function SchoolProfilePanel({
                   ["Legal name", draft.legalName],
                   ["Display", draft.displayName],
                   ["UDISE", draft.udiseCode || "—"],
-                  ["Board", draft.boardMode],
+                  ["Board", `${BOARD_MODES.find((b) => b.value === draft.boardMode)?.label || draft.boardMode}${
+                    draft.cbseAffiliationInProcess ? " · CBSE affiliation under process" : ""
+                  }`],
                   ["Affiliation", draft.affiliationNo || "—"],
                   ["Address", [draft.address, draft.city, draft.state, draft.pincode].filter(Boolean).join(", ") || "—"],
                 ] as const
@@ -418,6 +420,20 @@ export function SchoolProfilePanel({
                       </option>
                     ))}
                   </select>
+                </label>
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={draft.cbseAffiliationInProcess}
+                    onChange={(e) => set("cbseAffiliationInProcess", e.target.checked)}
+                  />
+                  <span>
+                    CBSE affiliation under process
+                    <span className="block text-[11px] text-[var(--muted)]">
+                      Applied for, not yet granted. Certificates say &quot;CBSE affiliation under process&quot; — never &quot;affiliated&quot; — until a real affiliation number is entered.
+                    </span>
+                  </span>
                 </label>
               </div>
             </section>

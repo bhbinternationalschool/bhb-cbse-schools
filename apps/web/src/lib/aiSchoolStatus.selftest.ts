@@ -21,16 +21,23 @@ import {
 } from "./staffAgreementAi";
 import type { CertificateKind } from "./certificates";
 import type { SchoolDocumentLanguage } from "./schoolDocumentAi";
+import { schoolRecognitionLine } from "./schoolIdentity";
+import type { MastersState } from "./masters";
 
 console.log("aiSchoolStatus.selftest.ts");
 
 const LANGS: SchoolDocumentLanguage[] = ["en", "hi", "both"];
 const KINDS: CertificateKind[] = ["tc", "bonafide", "character", "fee_clearance", "fees_paid", "aadhaar_uidai"];
 const TYPES: StaffAgreementAiType[] = ["appointment", "confidentiality", "policy", "conduct"];
-const RECOGNITIONS = ["", "Recognised by the Government of Uttar Pradesh"];
+const RECOGNITIONS = [
+  "",
+  "Recognised by the Basic Education Department, Uttar Pradesh",
+  "Recognised by the Basic Education Department, Uttar Pradesh · CBSE affiliation under process",
+];
 
 /** Lines that may say CBSE: the rule itself, and the syllabus framework. */
-const ALLOWED_CBSE = /NEVER state or imply|NCERT\/CBSE|Remove any statement that the school is affiliated/;
+const ALLOWED_CBSE =
+  /NEVER state or imply|NCERT\/CBSE|Remove any statement that the school is affiliated|"CBSE affiliation under process"|Recognition: [^|]*CBSE affiliation under process( \||$)/;
 
 function check(label: string, prompt: string, recognition: string) {
   assert.match(prompt, /NEVER state or imply that the school is affiliated to CBSE/, `${label}: carries the rule`);
@@ -91,5 +98,37 @@ assert.match(
   }),
   /Remove any statement that the school is affiliated to CBSE or any board/,
 );
+
+// --- the recognition line the prompts and the TC print ------------------
+{
+  const line = (profile: Record<string, unknown>) =>
+    schoolRecognitionLine({ schoolProfile: { state: "Uttar Pradesh", ...profile } } as unknown as MastersState);
+
+  // The live school: UP Basic Education recognition, CBSE applied for.
+  assert.equal(
+    line({ boardMode: "UP_STATE", affiliationNo: "213XXXX", cbseAffiliationInProcess: true }),
+    "Recognised by the Basic Education Department, Uttar Pradesh · CBSE affiliation under process",
+  );
+  assert.equal(
+    line({ boardMode: "UP_STATE", affiliationNo: "", cbseAffiliationInProcess: false }),
+    "Recognised by the Basic Education Department, Uttar Pradesh",
+  );
+  // "Under process" never becomes "affiliated", whatever the board says,
+  // and a placeholder number is not an affiliation.
+  assert.equal(line({ boardMode: "CBSE", affiliationNo: "213XXXX", cbseAffiliationInProcess: true }), "CBSE affiliation under process");
+  assert.equal(line({ boardMode: "CBSE", affiliationNo: "213XXXX", cbseAffiliationInProcess: false }), "");
+  // Once a real number is entered, the affiliation speaks and "under process" goes.
+  assert.equal(
+    line({ boardMode: "DUAL", affiliationNo: "2132456", cbseAffiliationInProcess: true }),
+    "Affiliated to the Central Board of Secondary Education",
+  );
+  // A profile saved before the flag existed reads as not in process.
+  assert.equal(line({ boardMode: "UP_STATE", affiliationNo: "" }), "Recognised by the Basic Education Department, Uttar Pradesh");
+  // Another state keeps the generic wording.
+  assert.equal(
+    schoolRecognitionLine({ schoolProfile: { state: "Bihar", boardMode: "UP_STATE", affiliationNo: "" } } as unknown as MastersState),
+    "Recognised by the Government of Bihar",
+  );
+}
 
 console.log("  ok");

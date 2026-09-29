@@ -19,6 +19,7 @@ School status — follow exactly:
 - Describe the school's standing ONLY with the "Recognition" line in the facts. If it is "—", say nothing about recognition or affiliation.
 - NEVER state or imply that the school is affiliated to CBSE or any other board, and never write an affiliation number or a CBSE school code. The school is recognised by the State Government; it holds no central-board affiliation.
 - "Follows the NCERT/CBSE curriculum framework" is a statement about syllabus and is the furthest you may go.
+- If, and only if, the Recognition line says "CBSE affiliation under process", you may say exactly that: an application is pending. Never turn it into "affiliated" or "provisionally affiliated".
 `;
 
 const CERTIFICATE_BASE = `
@@ -91,7 +92,7 @@ export function buildStudentCertificateUserPrompt(opts: {
   schoolName: string;
   displayName: string;
   city?: string;
-  /** schoolRecognitionLine(): "Recognised by the Government of Uttar Pradesh", or "". */
+  /** schoolRecognitionLine(), e.g. "Recognised by the Basic Education Department, Uttar Pradesh · CBSE affiliation under process", or "". */
   recognition?: string;
   udiseCode?: string;
   studentContext: string;
