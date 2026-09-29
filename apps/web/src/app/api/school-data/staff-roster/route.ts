@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cachedDeskJson, deskJsonResponse } from "@/lib/deskProbeCache.server";
-import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
+import { requireStaffApi, requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import {
   fetchStaffRemoteServer,
   pushStaffRemoteServer,
@@ -15,7 +15,10 @@ export const runtime = "nodejs";
 
 /** GET — pull staff/departments/designations from normalized tables */
 export async function GET(req: Request) {
-  const auth = await requireStaffPermission(req, "staff", "view");
+  // Any member of staff: the directory + their own record (redacted below).
+  // Everyone needs their own record — punch card, leave, payslips, the
+  // teacher home — and staff.view is no longer given to teachers.
+  const auth = await requireStaffApi(req);
   if (!auth.ok) return auth.response;
 
   // staff.view is held by teachers, accounts, transport and the auditor.

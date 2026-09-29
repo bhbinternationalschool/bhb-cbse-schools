@@ -10,7 +10,6 @@ import {
 import { loadMasters, type MastersState } from "@/lib/masters";
 import { loadSis } from "@/lib/sis";
 import {
-  applyLeave,
   computeLeaveDays,
   createStaffRequestTicket,
   loadStaffHr,
@@ -291,18 +290,17 @@ export function StaffBroadcastButton() {
     setBusy(true);
     setError(null);
     try {
-      const r = applyLeave({
-        academicYearCode: session.academicYearCode,
-        staffId: selfStaff.id,
-        typeCode: leaveType,
-        fromDate,
-        toDate,
-        halfDay,
-        reason: reason.trim(),
-        appliedBy: session.fullName,
-      });
-      if (!r.ok) {
-        setError(r.error);
+      // Filed on the server (your own record, from your login). The
+      // browser's HR desk needs staff.edit to save, so a teacher's
+      // application used to be refused there after the screen said "filed".
+      const res = await fetch("/api/v1/staff/leave/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ typeCode: leaveType, fromDate, toDate, halfDay, reason: reason.trim() }),
+      }).catch(() => null);
+      const j = (await res?.json().catch(() => null)) as { ok?: boolean; error?: { message?: string } } | null;
+      if (!res || !res.ok || !j?.ok) {
+        setError(j?.error?.message || "Leave request was NOT filed — please try again.");
         return;
       }
       // Real record is already filed — this is just an FYI ping, so no

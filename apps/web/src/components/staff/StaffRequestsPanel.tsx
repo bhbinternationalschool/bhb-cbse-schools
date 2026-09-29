@@ -81,8 +81,8 @@ export function StaffRequestsPanel() {
 
   const rows = useMemo(() => {
     let list = hr?.staffRequests ?? [];
-    if (!isManager && selfStaff) {
-      list = list.filter((t) => t.staffId === selfStaff.id);
+    if (!isManager) {
+      list = list.filter((t) => !!selfStaff && t.staffId === selfStaff.id);
     }
     if (statusFilter !== "all") list = list.filter((t) => t.status === statusFilter);
     if (typeFilter !== "all") list = list.filter((t) => t.type === typeFilter);
