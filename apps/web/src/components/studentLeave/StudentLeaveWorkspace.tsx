@@ -11,6 +11,8 @@ import {
   List,
 } from "lucide-react";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
+import { isRestrictedTeacher, useMyTeaching } from "@/components/staff/useMyTeaching";
+import { TeacherStudentLeaveView } from "@/components/studentLeave/TeacherStudentLeaveView";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { Badge } from "@/components/ui/badge";
@@ -280,6 +282,37 @@ export function StudentLeaveWorkspace({
   /** When true, hide page chrome (used under Attendance › Student leave). */
   embedded?: boolean;
 }) {
+  // A teacher sees and decides only their own classes, through the server
+  // (2026-09-29). Until the answer is in, show nothing: rendering the office
+  // desk first would flash every class's requests to a teacher.
+  const { my, loading } = useMyTeaching();
+  const schoolWide = my?.unrestricted === true;
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center px-4 py-8 text-sm text-muted-foreground">
+        Loading student leave…
+      </div>
+    );
+  }
+  if (isRestrictedTeacher(my)) {
+    return <TeacherStudentLeaveView embedded={embedded} my={my} />;
+  }
+  return (
+    <OfficeStudentLeaveWorkspace
+      embedded={embedded}
+      pullFromServer={schoolWide}
+    />
+  );
+}
+
+function OfficeStudentLeaveWorkspace({
+  embedded,
+  pullFromServer,
+}: {
+  embedded: boolean;
+  /** Only a confirmed school-wide session pulls the whole desk. */
+  pullFromServer: boolean;
+}) {
   const session = useDemoSession();
   const readOnly = useSessionReadOnly();
   const ay = session.academicYearCode || DEFAULT_AY;
@@ -330,6 +363,27 @@ export function StudentLeaveWorkspace({
   useEffect(() => {
     refresh();
   }, [ay]);
+
+  // The web never pulled this desk: a parent's request made in the app, or
+  // a decision made on a phone, showed here only after something else
+  // happened to rewrite this browser's copy. Pull on open (pull-only — see
+  // ensureStudentLeaveHydrated), then re-read the local copy.
+  useEffect(() => {
+    if (!pullFromServer) return;
+    let alive = true;
+    void (async () => {
+      const [{ ensureStudentLeaveHydrated }, { resetDeskHydrated }] = await Promise.all([
+        import("@/lib/studentLeavePersistence"),
+        import("@/lib/deskHydrateGuard"),
+      ]);
+      resetDeskHydrated("student_leave");
+      await ensureStudentLeaveHydrated().catch(() => false);
+      if (alive) refresh();
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [pullFromServer]);
 
   const activeStudents = useMemo(() => {
     if (!sis) return [];

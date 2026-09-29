@@ -101,11 +101,12 @@ export async function ensureStudentLeaveHydrated(): Promise<boolean> {
     normChanged = true;
   }
 
-  // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
-
-  if (normChanged && !readFromDb) {
-    scheduleStudentLeaveSync(loadStudentLeave());
-  }
+  // Pull-only — hydrate must not re-push (audit 2026-08-18). It used to
+  // re-publish the merge whenever the read-from-DB flag was off, i.e. push
+  // the whole desk (a pruning replace) every time a page merely loaded. That
+  // was dormant because nothing on the web called this until the Student
+  // leave desk started to on 2026-09-29; a teacher's push is now refused
+  // outright, and the office's is a load-time echo it never asked for.
 
   return blobChanged || normChanged;
 }

@@ -42,7 +42,14 @@ export async function GET(request: Request) {
       ctx.masters.sections.find((s) => s.id === id)?.name || "";
 
     const rows = loadStudentLeave()
-      .requests.filter((r) => !r.academicYearCode || r.academicYearCode === ay)
+      // The session's year, or the working year the scope was built for —
+      // a cookie from before 2026-09-06 can still carry the closed year.
+      .requests.filter(
+        (r) =>
+          !r.academicYearCode ||
+          r.academicYearCode === ay ||
+          r.academicYearCode === scope.academicYearCode,
+      )
       .filter((r) => (which === "pending" ? r.status === "pending" : r.status !== "pending"))
       .map((r) => ({ r, st: studentById.get(r.studentId) }))
       .filter(({ st }) => !!st && scopeAllows(scope, st.classId, st.sectionId))

@@ -398,6 +398,59 @@ export async function fetchAttendanceRegistersFromDb(): Promise<{
   };
 }
 
+/**
+ * One section's register for one date, read straight from the database.
+ *
+ * For a server write that changes a single mark (approved student leave,
+ * 2026-09-29): this instance's in-memory desk can be minutes old, and
+ * pushing a register rebuilt from it would put back every other child's
+ * stale mark. `ok: false` means the read failed — never "no register".
+ * `ambiguous` means more than one register row matched; the caller must not
+ * guess which one the school reads.
+ */
+export async function fetchAttendanceRegisterFromDb(
+  academicYearCode: string,
+  sectionId: string,
+  date: string,
+): Promise<
+  | { ok: true; register: AttendanceRegister | null; ambiguous: boolean }
+  | { ok: false; error: string }
+> {
+  const ctx = await resolveCtx();
+  if (!ctx) return { ok: false, error: "No tenant" };
+  const { sb, tenantId } = ctx;
+  const { data: headers, error: hErr } = await sb
+    .from("attendance_desk_registers")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .eq("academic_year_code", academicYearCode)
+    .eq("section_id", sectionId)
+    .eq("attendance_date", date)
+    .limit(2);
+  if (hErr) return { ok: false, error: hErr.message };
+  if (!headers?.length) return { ok: true, register: null, ambiguous: false };
+  if (headers.length > 1) return { ok: true, register: null, ambiguous: true };
+  const header = headers[0] as Record<string, unknown>;
+
+  // A class is far under 1,000 children; paged anyway so a register can
+  // never come back with a silently truncated mark list (2026-09-06).
+  const markRes = await fetchAllPages<Record<string, unknown>>((from, to) =>
+    sb
+      .from("attendance_desk_marks")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .eq("register_id", String(header.id))
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+  if (markRes.error) return { ok: false, error: markRes.error };
+  return {
+    ok: true,
+    register: rowToRegister(header, markRes.rows),
+    ambiguous: false,
+  };
+}
+
 export async function pushAttendanceDeskToDb(
   state: Pick<AttendanceState, "registers"> & Partial<AttendanceDeskAncillary>,
 ): Promise<{

@@ -3,19 +3,19 @@ import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { assertPermission, requestMeta, resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
-import { ensureAttendanceHydratedServer } from "@/lib/attendancePersistence";
-import { findRegister, loadAttendance } from "@/lib/attendance";
 import {
-  ensureStudentLeaveHydratedServer,
-  pushStudentLeaveRemoteServer,
-} from "@/lib/studentLeavePersistence";
-import {
-  decideStudentLeave,
   leaveDayCount,
   leaveTypeLabel,
   loadStudentLeave,
   writeStudentLeaveLocalRaw,
+  type StudentLeaveRequest,
 } from "@/lib/studentLeave";
+import {
+  fetchStudentLeaveRequestFromDb,
+  recordStudentLeaveDecisionInDb,
+  setStudentLeaveAttendanceAppliedInDb,
+} from "@/lib/studentLeaveNormalized.server";
+import { applyApprovedLeaveToRegisters } from "@/lib/studentLeaveAttendance.server";
 import { loadSis } from "@/lib/sis";
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
 import { sendPushToSubject } from "@/lib/webPush.server";
@@ -25,23 +25,23 @@ export const runtime = "nodejs";
 
 type Body = { id?: string; approve?: boolean; note?: string };
 
-function datesInclusive(from: string, to: string): string[] {
-  const out: string[] = [];
-  const start = new Date(`${from}T00:00:00Z`);
-  const end = new Date(`${to}T00:00:00Z`);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return out;
-  for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
-    out.push(d.toISOString().slice(0, 10));
-  }
-  return out;
-}
-
 /**
  * POST /api/v1/staff/student-leave/decide {id, approve, note} — class
  * teacher (≤3 days, not medical/long) or leadership decides a parent's
- * request. Approval writes the leave onto the attendance registers exactly
- * as the desk does; the registers touched are pushed to the DB, and the
- * parent gets a push either way.
+ * request. The staff app and, since 2026-09-29, the web desk in teacher
+ * mode both decide here.
+ *
+ * What changed on 2026-09-29, and why:
+ *  - The decision is written as ONE row, and only while that row is still
+ *    pending in the database. It used to push the whole leave desk from
+ *    this instance's memory (a replace that prunes what it does not hold).
+ *  - Approval puts the leave mark on that one child's EXISTING registers,
+ *    read fresh from the database. It used to run the browser helper,
+ *    which on the server marks every other child present on dates with no
+ *    register — and whose writes to the server cache the push loop then
+ *    read back inconsistently. Dates without a register are reported back
+ *    (`unmarkedDates`) for the teacher to mark; nothing is invented.
+ *  - The parent still gets a push either way.
  */
 export async function POST(request: Request) {
   try {
@@ -58,14 +58,18 @@ export async function POST(request: Request) {
 
     const scope = await staffSectionScope(ctx);
     await ensureSchoolMirrorHydrated();
-    await Promise.all([
-      ensureSisHydratedServer(),
-      ensureStudentLeaveHydratedServer(),
-      ensureAttendanceHydratedServer(),
-    ]);
-    const req = loadStudentLeave().requests.find((r) => r.id === id);
+    await ensureSisHydratedServer();
+    // The request as the database holds it now — not this instance's cached
+    // desk, and without emptying that cache (another request on this
+    // instance may be mid-way through reading it).
+    const found = await fetchStudentLeaveRequestFromDb(id);
+    if (!found.ok) {
+      console.warn("[staff-student-leave-v1] request read failed", found.error);
+      throw new ApiError("server_error", "Could not read the leave request — try again", 503);
+    }
+    const req = found.request;
     if (!req) throw new ApiError("not_found", "Request not found", 404);
-    if (req.status !== "pending") throw new ApiError("bad_request", "Already decided", 400);
+    if (req.status !== "pending") throw new ApiError("bad_request", `Already ${req.status}`, 400);
     const sis = loadSis();
     const student = sis.students.find((s) => s.id === req.studentId);
     if (!student) throw new ApiError("not_found", "Student not found", 404);
@@ -85,38 +89,53 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = decideStudentLeave({
-      id,
-      approve,
-      by: ctx.session.fullName || "Teacher",
-      note,
-    });
-    if (!result.ok) throw new ApiError("bad_request", result.error, 400);
-
-    // decideStudentLeave saves through the browser path, a no-op here.
-    const state = loadStudentLeave();
-    const next = {
-      ...state,
-      requests: state.requests.map((r) => (r.id === id ? result.request : r)),
+    const decided: StudentLeaveRequest = {
+      ...req,
+      status: approve ? "approved" : "rejected",
+      decidedBy: ctx.session.fullName || "Teacher",
+      decidedAt: new Date().toISOString(),
+      decisionNote: note,
+      attendanceApplied: false,
     };
-    writeStudentLeaveLocalRaw(next);
-    const pushed = await pushStudentLeaveRemoteServer(next);
-    if (!pushed.ok) {
-      console.warn("[staff-student-leave-v1] db push failed", pushed.error);
-      throw new ApiError("server_error", "Could not save — try again", 503);
+    const saved = await recordStudentLeaveDecisionInDb(decided);
+    if (!saved.ok) {
+      console.warn("[staff-student-leave-v1] decision not saved", saved.error);
+      throw new ApiError(
+        saved.conflict ? "conflict" : "server_error",
+        saved.conflict ? saved.error : "The decision could not be saved — try again",
+        saved.conflict ? 409 : 503,
+      );
     }
 
-    let registersPushed = 0;
-    if (approve && result.request.attendanceApplied) {
-      const { pushAttendanceRegisterToDb } = await import("@/lib/attendanceNormalized.server");
-      const att = loadAttendance();
-      for (const date of datesInclusive(req.fromDate, req.toDate)) {
-        const reg = findRegister(req.academicYearCode, student.sectionId, date, att);
-        if (!reg) continue;
-        const r = await pushAttendanceRegisterToDb(reg);
-        if (r.ok) registersPushed += 1;
-        else console.warn("[staff-student-leave-v1] register push failed", date, r.error);
+    let appliedDates: string[] = [];
+    let unmarkedDates: string[] = [];
+    let failedDates: string[] = [];
+    if (approve) {
+      const applied = await applyApprovedLeaveToRegisters({
+        request: decided,
+        sectionId: student.sectionId,
+      });
+      ({ appliedDates, unmarkedDates, failedDates } = applied);
+      // "Attendance applied" only when every date of the leave carries the
+      // mark — a leave approved in advance is not applied yet.
+      if (appliedDates.length > 0 && !unmarkedDates.length && !failedDates.length) {
+        decided.attendanceApplied = true;
+        const flag = await setStudentLeaveAttendanceAppliedInDb(id, true);
+        if (!flag.ok) {
+          decided.attendanceApplied = false;
+          console.warn("[staff-student-leave-v1] applied flag not saved", flag.error);
+        }
       }
+    }
+
+    // Keep this instance's cache in step with the row just written (only
+    // when it already holds that row — never seed a cold cache with one).
+    const state = loadStudentLeave();
+    if (state.requests.some((r) => r.id === id)) {
+      writeStudentLeaveLocalRaw({
+        ...state,
+        requests: state.requests.map((r) => (r.id === id ? decided : r)),
+      });
     }
 
     const meta = requestMeta(request);
@@ -126,8 +145,8 @@ export async function POST(request: Request) {
       action: "approve",
       entityType: "leave_request",
       entityId: id,
-      summary: `Leave ${result.request.status} for ${student.fullName}: ${leaveTypeLabel(req.leaveType)} ${req.fromDate}${req.toDate !== req.fromDate ? ` to ${req.toDate}` : ""}`,
-      after: { status: result.request.status, note, registersPushed },
+      summary: `Leave ${decided.status} for ${student.fullName}: ${leaveTypeLabel(req.leaveType)} ${req.fromDate}${req.toDate !== req.fromDate ? ` to ${req.toDate}` : ""}`,
+      after: { status: decided.status, note, appliedDates, unmarkedDates, failedDates },
       ip: meta.ip,
       userAgent: meta.userAgent,
     });
@@ -138,16 +157,20 @@ export async function POST(request: Request) {
         title: approve ? `Leave approved · ${student.fullName}` : `Leave not approved · ${student.fullName}`,
         body: `${leaveTypeLabel(req.leaveType)} ${span}${note ? ` · ${note}` : ""}`,
         url: `/leave?studentId=${encodeURIComponent(student.id)}`,
-        data: { kind: "student_leave_decision", studentId: student.id, status: result.request.status },
+        data: { kind: "student_leave_decision", studentId: student.id, status: decided.status },
       }).catch(() => undefined);
     }
 
     return apiOk({
       id,
-      status: result.request.status,
+      status: decided.status,
       days: leaveDayCount(req),
-      attendanceApplied: result.request.attendanceApplied,
-      registersPushed,
+      attendanceApplied: decided.attendanceApplied,
+      // Kept for the staff app, which reads this count.
+      registersPushed: appliedDates.length,
+      appliedDates,
+      unmarkedDates,
+      failedDates,
     });
   } catch (e) {
     return apiErr(e);
