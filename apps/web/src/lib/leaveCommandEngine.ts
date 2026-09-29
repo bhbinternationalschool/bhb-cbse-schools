@@ -80,6 +80,165 @@ export type LeavePendingLine = {
   days: number;
 };
 
+/**
+ * The fields of a Staff HR desk leave request this module reads. The desk
+ * (staffHr.LeaveRequest) is where leave lives; the staff_leave_requests
+ * table is empty on the live tenant, so a queue read from it was always
+ * "nothing waiting".
+ */
+export type DeskLeave = {
+  id: string;
+  staffId: string;
+  typeCode: string;
+  fromDate: string;
+  toDate: string;
+  days: number;
+  halfDay: boolean;
+  status: string;
+  appliedAt: string;
+  decidedBy: string;
+};
+
+/**
+ * Undecided. pending_l2 cleared level one and still needs the final word;
+ * leaving it out would hide exactly what a principal is being asked to settle.
+ */
+export function isUndecidedLeave(status: string): boolean {
+  return status === "pending" || status === "pending_l2";
+}
+
+/** The undecided queue, oldest start date first — the order LEAVE shows. */
+export function buildLeaveQueue(
+  requests: DeskLeave[],
+  nameOf: (staffId: string) => string,
+  typeLabelOf: (typeCode: string) => string,
+): { line: LeavePendingLine; requestId: string }[] {
+  return requests
+    .filter((r) => isUndecidedLeave(r.status))
+    .sort(
+      (a, b) =>
+        a.fromDate.localeCompare(b.fromDate) ||
+        a.appliedAt.localeCompare(b.appliedAt) ||
+        a.id.localeCompare(b.id),
+    )
+    .map((r, i) => ({
+      requestId: r.id,
+      line: {
+        index: i + 1,
+        name: nameOf(r.staffId) || r.staffId,
+        typeLabel: typeLabelOf(r.typeCode) || r.typeCode,
+        fromDate: r.fromDate,
+        toDate: r.toDate,
+        days: Number(r.days) || 0,
+      },
+    }));
+}
+
+/**
+ * The list a sender was last shown, remembered so "LEAVE OK 1" means the
+ * request that was number 1 ON THAT LIST. Resolving the number against the
+ * queue as it is now would approve somebody else's leave the moment another
+ * approver decided number 1 first — the queue shifts up under them.
+ */
+export type ShownLeaveList = { ids: string[]; at: string };
+
+/** A list older than this is not what the sender is looking at any more. */
+export const SHOWN_LEAVE_LIST_TTL_MS = 24 * 60 * 60_000;
+
+export function resolveShownLeave(
+  shown: ShownLeaveList | null | undefined,
+  index: number,
+  nowMs = Date.now(),
+):
+  | { kind: "no_list" }
+  | { kind: "out_of_range"; count: number }
+  | { kind: "ok"; requestId: string } {
+  const at = Date.parse(shown?.at || "");
+  if (!shown || !Number.isFinite(at) || nowMs - at > SHOWN_LEAVE_LIST_TTL_MS) {
+    return { kind: "no_list" };
+  }
+  const requestId = shown.ids[index - 1];
+  if (!requestId) return { kind: "out_of_range", count: shown.ids.length };
+  return { kind: "ok", requestId };
+}
+
+/** The claim a decision takes — the same key the "LEAVE OK 4821" path uses. */
+export function leaveDecisionClaimKey(requestId: string, status: string): string {
+  return `leave-decision:${requestId}:${status}`;
+}
+
+export type LeaveDecisionResult =
+  | { kind: "decided"; status: string; marked: number }
+  | { kind: "already_decided"; by: string }
+  | { kind: "failed"; error: string };
+
+/**
+ * Decide one desk request: claim it, decide it, save it, then mark the
+ * registers. What handleLeaveCodeDecision does, with the side effects
+ * passed in so the order and the claim release can be tested.
+ *
+ * The claim comes first: two approvers answering within seconds both read
+ * the request as pending, and only one may decide it. A failed decision or
+ * save gives the claim back, so trying again is possible.
+ */
+export async function runLeaveDecision<S extends { leaveRequests: DeskLeave[] }>(
+  req: DeskLeave,
+  decision: "approved" | "rejected",
+  by: string,
+  deps: {
+    claim: (
+      key: string,
+      by: string,
+      note: string,
+    ) => Promise<
+      | { ok: true }
+      | { ok: false; reason: "held"; claimedBy: string }
+      | { ok: false; reason: "unavailable" }
+    >;
+    release: (key: string) => Promise<void>;
+    decide: (input: {
+      requestId: string;
+      decision: "approved" | "rejected";
+      decidedBy: string;
+      decisionNote: string;
+    }) => { ok: true; state: S } | { ok: false; error: string };
+    /** Throws when the desk could not be saved. */
+    save: (state: S) => Promise<void>;
+    markRegisters: (req: DeskLeave, by: string) => Promise<number>;
+  },
+): Promise<LeaveDecisionResult> {
+  const key = leaveDecisionClaimKey(req.id, req.status);
+  const claim = await deps.claim(key, by, `leave list · ${req.id}`);
+  if (!claim.ok) {
+    return claim.reason === "held"
+      ? { kind: "already_decided", by: claim.claimedBy }
+      : { kind: "failed", error: "the decision could not be recorded just now — try again in a minute" };
+  }
+
+  const result = deps.decide({
+    requestId: req.id,
+    decision,
+    decidedBy: by,
+    decisionNote: `Decided on WhatsApp by ${by}`,
+  });
+  if (!result.ok) {
+    await deps.release(key);
+    return { kind: "failed", error: result.error };
+  }
+  try {
+    await deps.save(result.state);
+  } catch {
+    await deps.release(key);
+    return { kind: "failed", error: "the decision could not be saved just now — try again in a minute" };
+  }
+
+  const after = result.state.leaveRequests.find((r) => r.id === req.id);
+  const status = after?.status || decision;
+  const marked =
+    status === "approved" ? await deps.markRegisters(req, `Leave approved by ${by}`) : 0;
+  return { kind: "decided", status, marked };
+}
+
 export function composeLeaveList(lines: LeavePendingLine[]): string {
   if (lines.length === 0) {
     return "No leave request is waiting for a decision. 🙏";
@@ -107,6 +266,8 @@ export function composeLeaveDecisionReply(opts: {
   fromDate: string;
   toDate: string;
   error?: string;
+  /** Two-level approval: the first yes moved it to pending_l2, not approved. */
+  firstLevelOnly?: boolean;
 }): string {
   if (!opts.ok) {
     return `Could not record that — ${opts.error || "please try from the ERP"}.`;
@@ -115,6 +276,9 @@ export function composeLeaveDecisionReply(opts: {
     opts.fromDate === opts.toDate
       ? opts.fromDate
       : `${opts.fromDate} to ${opts.toDate}`;
+  if (opts.firstLevelOnly) {
+    return `Recorded at the first level — ${opts.name}, ${opts.typeLabel}, ${dates}. It now needs the final approval in the ERP (Staff → Leave).`;
+  }
   // Deliberately does NOT say "they have been told". Telling the staff
   // member needs an approved template — their 24-hour window is shut by
   // the evening — and there is no leave-decision template yet. Claiming a
@@ -133,6 +297,38 @@ export function composeLeaveNeedsIndex(
   const word = decision === "approved" ? "OK" : "NO";
   if (count === 0) return "No leave request is waiting for a decision. 🙏";
   return `Which one? Reply *LEAVE ${word} 1* … *LEAVE ${word} ${count}*, or *LEAVE* to see the list again.`;
+}
+
+/** Somebody else decided it — between the list and the reply, or at the same moment. */
+export function composeLeaveAlreadyDecided(opts: {
+  name: string;
+  typeLabel: string;
+  status: string;
+  by: string;
+}): string {
+  const what =
+    opts.status === "approved" || opts.status === "rejected"
+      ? opts.status
+      : "decided";
+  return `${opts.name}'s ${opts.typeLabel} was already ${what}${opts.by ? ` by ${opts.by}` : ""}. Nothing more to do — reply *LEAVE* for the list as it is now.`;
+}
+
+/** The number did not come from a list this sender can still see. */
+export function composeLeaveListFirst(list: string): string {
+  return `Please pick from this list — the numbers change as leave is decided.\n\n${list}`;
+}
+
+/** The desk could not be read: "nothing waiting" would be a guess. */
+export function composeLeaveUnreadable(): string {
+  return "Could not read the leave desk just now. Please try again in a minute, or open Staff → Leave in the ERP.";
+}
+
+export function composeLeaveOwn(): string {
+  return "You cannot decide your own leave.";
+}
+
+export function composeLeaveDayPassed(): string {
+  return "The first day of that leave has passed. Please decide it in the ERP (Staff → Leave).";
 }
 
 /** The sender is not allowed to decide leave. */

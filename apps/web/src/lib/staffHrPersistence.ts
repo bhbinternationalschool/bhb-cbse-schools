@@ -30,6 +30,10 @@ export const pushStaffHrRemoteServer = desk.pushRemoteServer;
  * the web desk saves), the jsonb blob fills in `staffRequests`, which is not
  * a desk slice. Re-read on every call — a mobile decision must see what the
  * office saved a minute ago.
+ *
+ * Returns false when the desk itself could not be read: the cache then holds
+ * the blob alone, and a reader that needs to tell "no leave" from "could not
+ * look" must not treat it as the desk.
  */
 export async function ensureStaffHrHydratedServer(): Promise<boolean> {
   if (typeof window !== "undefined") return false;
@@ -56,5 +60,5 @@ export async function ensureStaffHrHydratedServer(): Promise<boolean> {
     });
   }
   writeStaffHrLocalRaw(state);
-  return true;
+  return deskRead.ok;
 }

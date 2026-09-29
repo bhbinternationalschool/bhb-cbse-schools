@@ -417,4 +417,18 @@ function brief(over: Partial<DailyBrief> = {}): DailyBrief {
   assert.match(composePendingFallback(one), /^One thing is still open: 1 leave request/);
 }
 
+// --- a leave desk nobody could read is not "none waiting" -------------
+{
+  const blind = brief({
+    staff: {
+      marked: true, present: 35, absent: 0, strength: 35, absentRows: [], pending: [],
+      leaveUnreadable: true,
+    },
+  });
+  assert.match(composeBriefSummary(blind), /Leave requests could not be read/);
+  assert.equal(composeBriefTemplateVariables(blind).leavePending, "could not be read — reply LEAVE to check");
+  assert.equal(composeBriefTemplateVariables(brief()).leavePending, "none waiting");
+  assert.doesNotMatch(composeBriefSummary(brief()), /could not be read/);
+}
+
 console.log("  ok");

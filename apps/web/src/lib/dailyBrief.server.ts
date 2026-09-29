@@ -10,8 +10,9 @@
  * EMPTY on the server, and composeLeadershipWhatsAppReport in
  * waLeadershipReports.server.ts is built on exactly those — which is why a
  * report built that way shows a school that collected nothing and marked
- * nobody. The two places here that do use desk state (defaulters, staff
- * names) hydrate it first, the way every other correct server reader does.
+ * nobody. The places here that do use desk state (defaulters, staff names,
+ * staff leave) hydrate it first, the way every other correct server reader
+ * does.
  */
 
 import "server-only";
@@ -22,6 +23,8 @@ import { currentAcademicYearCode, type MastersState } from "@/lib/masters";
 import { loadSis, type SisState } from "@/lib/sis";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { ensureFeesHydratedServer } from "@/lib/feesPersistence.server";
+import { readStaffHrServer } from "@/lib/api/v1/staffLeave";
+import { isUndecidedLeave } from "@/lib/leaveCommandEngine";
 import { listLiveDefaulters } from "@/lib/playbook";
 import {
   householdCandidateNumbers,
@@ -374,31 +377,34 @@ async function readStaffAttendance(
     staff.map((s) => [s.id, { name: s.fullName || s.id, empCode: s.empCode || "" }]),
   );
 
-  const [registers, leaves, types] = await Promise.all([
+  const [registers, hr] = await Promise.all([
     ctx.sb
       .from("staff_attendance_desk_registers")
       .select("id")
       .eq("tenant_id", ctx.tenantId)
       .eq("attendance_date", dateIso),
-    ctx.sb
-      .from("staff_leave_requests")
-      .select("id, staff_id, type_code, from_date, to_date, days, status")
-      .eq("tenant_id", ctx.tenantId)
-      // The real vocabulary from staffHr: a two-level school parks a
-      // request at pending_l2 after the first approval, and it is still
-      // undecided — leaving it out would hide exactly the requests a
-      // principal is being asked to settle.
-      .in("status", ["pending", "pending_l2", "approved"]),
-    ctx.sb
-      .from("staff_leave_types")
-      .select("code, name")
-      .eq("tenant_id", ctx.tenantId),
+    // Leave lives in the Staff HR desk — what Staff → Leave, the staff app
+    // and "LEAVE OK" all decide. The staff_leave_requests table is empty on
+    // the live tenant, so a brief read from it never showed a request.
+    readStaffHrServer(),
   ]);
 
   const typeName = new Map(
-    (types.data || []).map((t) => [String(t.code), String(t.name || t.code)]),
+    (hr.ok ? hr.state.leaveTypes : []).map((t) => [t.code, t.name || t.code]),
   );
-  const leaveRows = (leaves.data || []) as LeaveRow[];
+  // The real vocabulary from staffHr: a two-level school parks a request at
+  // pending_l2 after the first approval, and it is still undecided.
+  const leaveRows: LeaveRow[] = (hr.ok ? hr.state.leaveRequests : [])
+    .filter((r) => isUndecidedLeave(r.status) || r.status === "approved")
+    .map((r) => ({
+      id: r.id,
+      staff_id: r.staffId,
+      type_code: r.typeCode,
+      from_date: r.fromDate,
+      to_date: r.toDate,
+      days: r.days,
+      status: r.status,
+    }));
 
   const coversToday = (l: LeaveRow) =>
     String(l.from_date || "") <= dateIso && dateIso <= String(l.to_date || "");
@@ -475,6 +481,8 @@ async function readStaffAttendance(
     absent: absentRows.length,
     strength: staff.length,
     absentRows,
+    // Not "none waiting": nobody could look.
+    ...(hr.ok ? {} : { leaveUnreadable: true }),
     pending: pendingAny
       .map((l) => rowFor(String(l.staff_id), l, "leave_pending"))
       .sort((a, b) => a.fromDate.localeCompare(b.fromDate) || a.name.localeCompare(b.name)),

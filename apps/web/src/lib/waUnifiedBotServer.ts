@@ -5,6 +5,7 @@
 import { TENANT } from "@/lib/types";
 import { handleWaGateVisit, type WaGateVisitPending } from "@/lib/waGateVisit.server";
 import { handleLeaveCommand } from "@/lib/leaveCommand.server";
+import type { ShownLeaveList } from "@/lib/leaveCommandEngine";
 import {
   composeActiveFlowHint,
   composeCollectPurposePrompt,
@@ -233,6 +234,12 @@ export type WaUnifiedSession = {
    * thread for a person, rather than sending the same menu forever.
    */
   visitorAsks?: number;
+  /**
+   * The pending-leave list this number was last shown by LEAVE, so
+   * "LEAVE OK 1" decides the request that was 1 on that list — not whatever
+   * moved up to first place after somebody else decided the original.
+   */
+  leaveList?: ShownLeaveList | null;
 };
 
 type WaUnifiedStore = {
@@ -425,8 +432,10 @@ async function delegateActiveFlow(
       text: opts.text,
       staff: staffRole?.staff ?? null,
       by: session.displayName || identity.displayName || mobile10,
+      shown: session.leaveList ?? null,
     });
     if (leave.handled) {
+      if (leave.shown) await patchSession(mobile10, session, { leaveList: leave.shown });
       const ok = await sendBotReply({
         mobile10,
         displayName: session.displayName || identity.displayName,
