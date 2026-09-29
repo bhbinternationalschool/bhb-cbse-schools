@@ -78,13 +78,13 @@ export function StaffOutdoorDutyPanel() {
   const active = useMemo(() => {
     if (!attendance) return [];
     const all = listActiveOutdoorDuty(attendance);
-    return isManager || !selfStaff
-      ? all
-      : all.filter((s) => s.staffId === selfStaff.id);
+    // Fail closed: no self record → nothing, not everyone's duties.
+    return isManager ? all : all.filter((s) => !!selfStaff && s.staffId === selfStaff.id);
   }, [attendance, isManager, selfStaff]);
 
   const history = useMemo(() => {
     if (!attendance) return [];
+    if (!isManager && !selfStaff) return [];
     if (isManager || !selfStaff) {
       return [...attendance.outdoorDuty].sort((a, b) =>
         b.startedAt.localeCompare(a.startedAt),

@@ -13,7 +13,7 @@ import type { CalendarCounts, CalendarDay, CalendarDayKind } from "@/lib/staffMo
  * Director, 2026-09-29.
  */
 
-type Tab = "attendance" | "payslips" | "advances";
+type Tab = "attendance" | "leave" | "payslips" | "advances";
 
 const KIND_STYLE: Record<CalendarDayKind, { cell: string; name: string }> = {
   present: { cell: "bg-[var(--success-soft)] text-[var(--success)]", name: "Present" },
@@ -71,12 +71,14 @@ export function MyPayWorkspace() {
         onChange={(id) => setTab(id as Tab)}
         items={[
           { id: "attendance", label: "Attendance", tone: "teal" },
+          { id: "leave", label: "Leave", tone: "violet" },
           { id: "payslips", label: "Payslips", tone: "navy" },
           { id: "advances", label: "Advances", tone: "amber" },
         ]}
       />
       <div className="mt-4">
         {tab === "attendance" ? <MyAttendance /> : null}
+        {tab === "leave" ? <MyLeave /> : null}
         {tab === "payslips" ? <MyPayslips /> : null}
         {tab === "advances" ? <MyAdvances /> : null}
       </div>
@@ -338,6 +340,145 @@ function MyAdvances() {
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+type LeaveData = {
+  autoApprove: boolean;
+  balances: { typeCode: string; typeName: string; allotted: number; used: number; remaining: number }[];
+  requests: {
+    id: string;
+    typeName: string;
+    fromDate: string;
+    toDate: string;
+    days: number;
+    halfDay: boolean;
+    reason: string;
+    status: string;
+    statusLabel: string;
+  }[];
+};
+
+/**
+ * My leave — balances, apply, withdraw a pending request. Everything goes
+ * through /api/v1/staff/leave* (the server uses the login's own staff id);
+ * the browser's HR desk needs staff.edit to save, which staff do not have.
+ */
+function MyLeave() {
+  const [data, setData] = useState<LeaveData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  const [form, setForm] = useState({ typeCode: "", fromDate: today, toDate: today, halfDay: false, reason: "" });
+
+  const load = useCallback(async () => {
+    const r = await getJson<LeaveData>("/api/v1/staff/leave");
+    if (r.ok) {
+      setData(r.data);
+      setError(null);
+      setForm((f) => (f.typeCode ? f : { ...f, typeCode: r.data.balances[0]?.typeCode || "" }));
+    } else setError(r.error);
+  }, []);
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function post(url: string, body: unknown, okText: string) {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const j = (await res.json().catch(() => null)) as { ok?: boolean; error?: { message?: string } } | null;
+      if (!res.ok || !j?.ok) {
+        setMsg({ ok: false, text: j?.error?.message || "Not saved — please try again." });
+        return;
+      }
+      setMsg({ ok: true, text: okText });
+      await load();
+    } catch {
+      setMsg({ ok: false, text: "Not saved — could not reach the school server." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (error) return <p className="rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm text-[var(--danger)]">{error}</p>;
+  if (!data) return <p className="text-sm text-[var(--muted)]">Loading…</p>;
+  const input = "field mt-1 !py-2 w-full";
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-3 gap-2 text-center">
+        {data.balances.map((b) => (
+          <div key={b.typeCode} className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-2">
+            <p className="text-lg font-bold text-[var(--brand-deep)]">{b.remaining}</p>
+            <p className="text-[10px] text-[var(--muted)]">{b.typeName} left (of {b.allotted})</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="space-y-2 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
+        <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted)]">Apply for leave</p>
+        {msg ? (
+          <p className={`rounded-lg px-3 py-2 text-sm ${msg.ok ? "bg-[var(--success-soft)] text-[var(--success)]" : "bg-[var(--danger-soft)] text-[var(--danger)]"}`}>{msg.text}</p>
+        ) : null}
+        <label className="block text-[11px] font-semibold text-[var(--muted)]">
+          Type
+          <select className={input} value={form.typeCode} onChange={(e) => setForm({ ...form, typeCode: e.target.value })}>
+            {data.balances.map((b) => <option key={b.typeCode} value={b.typeCode}>{b.typeName}</option>)}
+          </select>
+        </label>
+        <div className="grid grid-cols-2 gap-2">
+          <label className="block text-[11px] font-semibold text-[var(--muted)]">
+            From
+            <input className={input} type="date" value={form.fromDate} onChange={(e) => setForm({ ...form, fromDate: e.target.value, toDate: e.target.value > form.toDate ? e.target.value : form.toDate })} />
+          </label>
+          <label className="block text-[11px] font-semibold text-[var(--muted)]">
+            To
+            <input className={input} type="date" value={form.halfDay ? form.fromDate : form.toDate} disabled={form.halfDay} onChange={(e) => setForm({ ...form, toDate: e.target.value })} />
+          </label>
+        </div>
+        <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
+          <input type="checkbox" checked={form.halfDay} onChange={(e) => setForm({ ...form, halfDay: e.target.checked })} /> Half day
+        </label>
+        <label className="block text-[11px] font-semibold text-[var(--muted)]">
+          Reason
+          <input className={input} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} />
+        </label>
+        <button
+          type="button"
+          disabled={busy || !form.typeCode}
+          onClick={() => void post("/api/v1/staff/leave/apply", form, data.autoApprove ? "Leave applied and approved" : "Leave applied — waiting for approval")}
+          className="min-h-10 w-full rounded-xl bg-[var(--primary)] px-3 text-sm font-bold text-[var(--primary-foreground)] disabled:opacity-40"
+        >
+          {busy ? "Sending…" : "Apply"}
+        </button>
+      </div>
+
+      <div className="space-y-2">
+        <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted)]">My requests</p>
+        {data.requests.length === 0 ? <p className="text-sm text-[var(--muted)]">No leave requests yet.</p> : null}
+        {data.requests.map((r) => (
+          <div key={r.id} className="flex items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm">
+            <span className="min-w-0">
+              <span className="block font-semibold text-[var(--brand-deep)]">
+                {r.typeName} · {r.fromDate}{r.toDate !== r.fromDate ? ` → ${r.toDate}` : ""} · {r.days} day{r.days === 1 ? "" : "s"}
+              </span>
+              <span className="block text-[11px] text-[var(--muted)]">{r.statusLabel}{r.reason ? ` · ${r.reason}` : ""}</span>
+            </span>
+            {r.status === "pending" ? (
+              <button type="button" disabled={busy} onClick={() => void post("/api/v1/staff/leave/withdraw", { id: r.id }, "Request withdrawn")} className="shrink-0 rounded-lg border border-[var(--border)] px-2 py-1 text-xs font-semibold text-[var(--brand-deep)]">
+                Withdraw
+              </button>
+            ) : null}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

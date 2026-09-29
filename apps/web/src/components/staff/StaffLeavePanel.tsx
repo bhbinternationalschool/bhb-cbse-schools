@@ -170,8 +170,10 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
     let rows = (hr?.leaveRequests ?? []).filter(
       (r) => r.academicYearCode === ay,
     );
-    if (!isManager && selfStaff) {
-      rows = rows.filter((r) => r.staffId === selfStaff.id);
+    // Not a manager: your own rows, or none — never everyone's because your
+    // record could not be found (it failed open until 2026-09-29).
+    if (!isManager) {
+      rows = rows.filter((r) => !!selfStaff && r.staffId === selfStaff.id);
     }
     const filtered =
       statusFilter === "all"
@@ -199,10 +201,9 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
 
   const balances = useMemo(() => {
     if (!hr || !masters) return [];
-    const people =
-      !isManager && selfStaff
-        ? roster.filter((s) => s.id === selfStaff.id)
-        : roster;
+    const people = !isManager
+      ? roster.filter((s) => !!selfStaff && s.id === selfStaff.id)
+      : roster;
     return people.map((s) => {
       const byType = hr.leaveTypes.map((t) => {
         const bal = hr.leaveBalances.find(

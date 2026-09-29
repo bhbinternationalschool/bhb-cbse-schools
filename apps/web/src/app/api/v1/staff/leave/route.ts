@@ -1,3 +1,4 @@
+import { staffWorkingYear } from "@/lib/api/v1/staffScope";
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
 import {
@@ -23,7 +24,7 @@ export async function GET(request: Request) {
     if (!staffId) {
       throw new ApiError("bad_request", "No staff record on this session", 400);
     }
-    const ay = ctx.session.academicYearCode;
+    const ay = staffWorkingYear(ctx);
     const state = await loadStaffHrServer();
     const { state: withBalances, balances } = balancesFor(state, staffId, ay);
     const settings = normalizeLeaveSettings(state.leaveSettings);
