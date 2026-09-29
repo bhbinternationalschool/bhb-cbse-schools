@@ -15,6 +15,7 @@ import { childrenOfHousehold, loadSis } from "@/lib/sis";
 import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
 import { classLabelForStudent } from "@/lib/parentPortal";
 import { resolveWaIdentityServer } from "@/lib/waRoleResolver.server";
+import { staffRolesFor } from "@/lib/waRoleResolver";
 import { detectSisFeeReplyIntent, isFeeWhyQuestion } from "@/lib/sisParentBotEngine";
 import { logHouseholdWaSend } from "@/lib/householdMessageLog.server";
 import { fetchWaMediaAsDataUrl } from "@/lib/waInboundMedia.server";
@@ -199,11 +200,80 @@ async function approvedRelayTemplate(): Promise<{ name: string; language: string
 }
 
 /**
+ * A message to named phones only — the director, the principal, the admins
+ * — and NOT through the relay log. For what must stay between the sender and
+ * the people they chose: a complaint about the principal sent to the
+ * director must not sit in an inbox or log the principal can open.
+ *
+ * Text first; outside WhatsApp's 24-hour window, the approved office-relay
+ * template. Returns how many phones it reached.
+ */
+export async function sendLeadershipDirect(input: {
+  toMobiles: string[];
+  label: string;
+  senderName: string;
+  sender10: string;
+  code: string;
+  text: string;
+  clientKey: string;
+}): Promise<{ delivered: number; failed: string[] }> {
+  const failed: string[] = [];
+  let delivered = 0;
+  let template: { name: string; language: string } | null | undefined;
+  const targets = [...new Set(input.toMobiles.map((m) => waNormalizeLocal10(m)).filter((m) => m.length === 10))];
+  for (const to of targets) {
+    let res = await sendWhatsAppText({ toMobile: to, body: input.text, clientMessageId: `${input.clientKey}:${to}` });
+    if (!res.ok && /24h|session window/i.test(res.error || "")) {
+      if (template === undefined) template = await approvedRelayTemplate();
+      if (template) {
+        res = await sendWhatsAppTemplate({
+          toMobile: to,
+          name: template.name,
+          language: template.language,
+          components: [
+            {
+              type: "body",
+              parameters: [input.label, `${input.senderName || "Staff"} (${input.sender10})`, input.code, input.text].map(
+                (t) => ({ type: "text" as const, text: templateSafe(t) }),
+              ),
+            },
+          ],
+          clientMessageId: `${input.clientKey}:${to}:tpl`,
+        });
+      }
+    }
+    if (res.ok || res.mode === "stub") delivered += 1;
+    else failed.push(to);
+  }
+  return { delivered, failed };
+}
+
+/**
  * Record a message the bot could not answer and forward it by category.
  *
  * Never throws: it is called from the webhook after the parent has already
  * been answered, and a failure here must be recorded, not lost in a log.
  */
+/**
+ * The director and principal, as relay targets, from the staff record —
+ * everyone staffRolesFor grades as leadership, with a usable mobile.
+ */
+function leadershipFallbackRoutes(): RelayRoute[] {
+  const masters = loadMasters();
+  const designations = masters.designations ?? [];
+  const out: RelayRoute[] = [];
+  const seen = new Set<string>();
+  for (const s of masters.staff ?? []) {
+    if (s.status !== "active") continue;
+    if (!staffRolesFor(s, designations).some((r) => r.kind === "owner")) continue;
+    const m = waNormalizeLocal10(s.mobile || "");
+    if (m.length !== 10 || seen.has(m)) continue;
+    seen.add(m);
+    out.push({ id: `leader_${s.id}`, name: s.fullName || "Leadership", mobile10: m, categories: ["director"], active: true });
+  }
+  return out;
+}
+
 export async function relayEscalation(input: RelayEscalationInput): Promise<{
   ok: boolean;
   relayId?: string;
@@ -285,7 +355,11 @@ export async function relayEscalation(input: RelayEscalationInput): Promise<{
     }
     const relayId = inserted.id as string;
 
-    const targets = routesFor(category, routes);
+    let targets = routesFor(category, routes);
+    // Staff write to the director by name ("Suggestion: …"), so with no
+    // phone set for it these go to the director and principal on the staff
+    // record rather than to nobody.
+    if (targets.length === 0 && category === "director") targets = leadershipFallbackRoutes();
     if (targets.length === 0) {
       await ctx.sb.from("wa_relay_messages").update({ status: "no_route" }).eq("id", relayId);
       return { ok: true, relayId, code, forwarded: 0, status: "no_route" };

@@ -425,6 +425,73 @@ export async function applyWhatsAppStaffPunch(opts: {
   };
 }
 
+/**
+ * Today's punch for one staff member — IN and OUT times, "" when missing —
+ * or null when there is no mark at all today.
+ */
+export async function staffPunchToday(
+  staffId: string,
+): Promise<{ inTime: string; outTime: string } | null> {
+  // Fresh: the punch may have been saved by another server a minute ago.
+  const state = await loadStaffAttendanceServer({ fresh: true });
+  const masters = loadMasters();
+  const ay = currentAcademicYearCode(masters);
+  const reg = findStaffRegister(state, todayIst(), ay);
+  const mark = reg?.marks.find((m) => m.staffId === staffId);
+  if (!mark) return null;
+  return { inTime: mark.inTime || "", outTime: mark.outTime || "" };
+}
+
+/** Is this staff member exempt from attendance — the same list the register uses? */
+export async function staffAttendanceExempt(staffId: string): Promise<boolean> {
+  const state = await loadStaffAttendanceServer();
+  return (await exemptStaffIdsServer(normalizeAttendanceSettings(state.settings))).has(staffId);
+}
+
+/**
+ * Approved leave onto the days whose register already exists — today, once
+ * anyone has punched. Days with no register yet need nothing: the register
+ * created on that day starts this person as on leave (upsertStaffMarkInState).
+ * Returns how many days were marked.
+ */
+export async function markApprovedLeaveOnRegisters(opts: {
+  staffId: string;
+  fromDate: string;
+  toDate: string;
+  halfDay: boolean;
+  typeCode: string;
+  by: string;
+}): Promise<number> {
+  let state = await loadStaffAttendanceFresh();
+  const masters = loadMasters();
+  const ay = currentAcademicYearCode(masters);
+  const roster = masters.staff ?? [];
+  let marked = 0;
+  const end = opts.halfDay ? opts.fromDate : opts.toDate;
+  for (let d = opts.fromDate; d <= end; ) {
+    if (findStaffRegister(state, d, ay)) {
+      const merged = upsertStaffMarkInState(state, {
+        academicYearCode: ay,
+        date: d,
+        staffId: opts.staffId,
+        status: opts.halfDay ? "HD" : "LE",
+        note: opts.halfDay ? `Half-day leave (${opts.typeCode})` : `On leave (${opts.typeCode})`,
+        punchWay: "leave_sync",
+        markedBy: opts.by,
+        roster,
+      });
+      state = merged.state;
+      // One day's register at a time, confirmed by the database — the same
+      // way a punch is saved.
+      if ((await saveStaffPunchRegister(state, merged.register)).ok) marked += 1;
+    }
+    const next = new Date(`${d}T00:00:00Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    d = next.toISOString().slice(0, 10);
+  }
+  return marked;
+}
+
 export async function staffAttendanceStatusForWa(
   staffId: string,
 ): Promise<string> {
@@ -435,7 +502,7 @@ export async function staffAttendanceStatusForWa(
   const reg = findStaffRegister(state, date, ay);
   const mark = reg?.marks.find((m) => m.staffId === staffId);
   if (!mark) {
-    return `*Attendance* — ${date}\n\nNo punch yet. Reply *IN* and share your live location pin.`;
+    return `*Attendance* — ${date}\n\nNo punch yet. To punch IN, send your location: 📎 → *Location* → *Send your current location*.`;
   }
   const geo = mark.punchGeo
     ? `📍 last pin ~${formatDistanceLabel(mark.punchGeo.distanceM ?? -1)} from school`
@@ -447,7 +514,7 @@ export async function staffAttendanceStatusForWa(
     mark.note ? `Note: ${mark.note}` : null,
     geo || null,
     "",
-    "Reply *IN* or *OUT* + location pin to update.",
+    "To punch, send your location: 📎 → *Location* → *Send your current location*.",
   ]
     .filter(Boolean)
     .join("\n");

@@ -694,6 +694,26 @@ export async function markClassChannelDraftApplied(
   await writeStore(store);
 }
 
+/**
+ * The class-channel draft this teacher's number is waiting to confirm, or
+ * null. Used to know whether a plain "yes" is for that draft or for
+ * something else, and to tell a teacher who asks something new to finish it.
+ */
+export async function classChannelPendingDraftFor(
+  fromWaId: string,
+): Promise<{ id: string; title: string; label: string; createdAt: string } | null> {
+  const mobile = waNormalizeLocal10(fromWaId);
+  const store = await readStore();
+  for (const t of store.threads) {
+    if (t.mobile !== mobile || !t.pendingDraftId) continue;
+    const d = store.drafts.find((x) => x.id === t.pendingDraftId && x.status === "pending");
+    if (!d) continue;
+    const ch = store.channels.find((c) => c.id === d.channelId);
+    return { id: d.id, title: d.title, label: ch?.label ?? "", createdAt: d.createdAt };
+  }
+  return null;
+}
+
 export async function listClassChannelState() {
   const store = await readStore();
   return {

@@ -528,9 +528,14 @@ export function upsertStaffMarkInState(
     input.date,
     input.academicYearCode,
   );
+  // A register created by the day's first punch starts everyone "Not
+  // punched". Anyone on approved leave that day starts as leave instead, so
+  // the register is right before the desk ever opens it.
   const marks = existing
     ? [...existing.marks]
-    : defaultStaffMarks(input.roster);
+    : normalizeAttendanceSettings(state.settings).syncLeaveToAttendance
+      ? applyApprovedLeaveToMarks(defaultStaffMarks(input.roster), input.date, input.academicYearCode)
+      : defaultStaffMarks(input.roster);
 
   const idx = marks.findIndex((m) => m.staffId === input.staffId);
   const base: StaffAttendanceMark =

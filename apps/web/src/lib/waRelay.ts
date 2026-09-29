@@ -32,6 +32,7 @@ export type RelayCategory =
   | "vendor_enquiry"
   | "meeting"
   | "staff"
+  | "director"
   | "general";
 
 export const RELAY_CATEGORIES: {
@@ -48,6 +49,11 @@ export const RELAY_CATEGORIES: {
   { id: "vendor_enquiry", label: "Vendors", hint: "Suppliers and service providers" },
   { id: "meeting", label: "Meeting requests", hint: "Someone asking to meet the school" },
   { id: "staff", label: "Staff messages", hint: "Teachers and office staff the staff bot could not help" },
+  {
+    id: "director",
+    label: "Director",
+    hint: "Staff suggestions, requirements and complaints, and requests to add a number to a staff record. With no phone set here, these go to the director and principal on the staff record.",
+  },
   {
     id: "general",
     label: "General (catch-all)",
