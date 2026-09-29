@@ -5,6 +5,9 @@ import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensurePtmHydratedServer, pushPtmRemoteServer } from "@/lib/ptmPersistence";
 import { loadPtm, writePtmLocalRaw, type PtmBookingStatus, type PtmFeedback, type PtmState } from "@/lib/ptm";
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
+import { ensureSisHydratedServer } from "@/lib/sisPersistence";
+import { loadSis } from "@/lib/sis";
+import { ptmBookingInScope } from "@/lib/ptmTeacherScope.server";
 
 export const runtime = "nodejs";
 
@@ -21,8 +24,9 @@ function nid(prefix: string) {
 /**
  * POST /api/v1/staff/ptm/booking — the teacher marks a booking met /
  * no-show and, when met, records the meeting note (strengths, areas,
- * follow-up) the desk's PTM feedback form takes. Own slots only, unless
- * leadership.
+ * follow-up) the desk's PTM feedback form takes. Own slots, or a child in
+ * one of the teacher's sections (the web desk's feedback form, 2026-09-29),
+ * unless leadership.
  */
 export async function POST(request: Request) {
   try {
@@ -39,13 +43,20 @@ export async function POST(request: Request) {
 
     const scope = await staffSectionScope(ctx);
     await ensureSchoolMirrorHydrated();
-    await ensurePtmHydratedServer();
+    await Promise.all([ensurePtmHydratedServer(), ensureSisHydratedServer()]);
     const state = loadPtm();
     const booking = state.bookings.find((b) => b.id === bookingId);
     if (!booking) throw new ApiError("not_found", "Booking not found", 404);
-    const slot = state.slots.find((s) => s.id === booking.slotId);
-    if (!scope.unrestricted && slot?.teacherStaffId !== ctx.session.staffId) {
-      throw new ApiError("forbidden", "Not your PTM slot", 403);
+    if (
+      !ptmBookingInScope({
+        state,
+        booking,
+        scope,
+        staffId: ctx.session.staffId || "",
+        sis: loadSis(),
+      })
+    ) {
+      throw new ApiError("forbidden", "Not your PTM slot, and the child is not in one of your classes", 403);
     }
     if (booking.status === "cancelled") {
       throw new ApiError("bad_request", "The parent cancelled this booking", 400);
