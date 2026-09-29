@@ -14,6 +14,7 @@ import { NotificationBell } from "@/components/shell/NotificationBell";
 import { CommsRunningStrip } from "@/components/shell/CommsRunningStrip";
 import { ParentVoiceBar } from "@/components/parent/ParentVoiceBar";
 import { PwaInstallBanner } from "@/components/pwa/PwaInstallBanner";
+import { UpdateBar } from "@/components/pwa/UpdateBar";
 import { ParentBottomNav } from "@/components/pwa/ParentBottomNav";
 import { parentPwaInstallCopy } from "@/lib/pwaApps";
 import { useMobileAppShell, usePwaStandalone } from "@/lib/pwaStandalone";
@@ -172,6 +173,7 @@ export function ParentPortalClient({
               </div>
             </>
           )}
+          <UpdateBar />
           {!standalone ? (
             <PwaInstallBanner appId="parent" {...parentPwaInstallCopy()} />
           ) : null}
