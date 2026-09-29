@@ -39,6 +39,8 @@ const masters = {
     { id: "hin", nameEn: "Hindi" },
     { id: "gk", nameEn: "G.K." },
     { id: "pe", nameEn: "Sports" },
+    { id: "hin", code: "HIN", nameEn: "Hindi" },
+    { id: "hin-oral", code: "HIN-ORAL", nameEn: "Hindi — Oral", parentId: "hin" },
   ],
   classSubjects: [
     { id: "x1", classId: "c2", subjectId: "eng", periodsPerWeek: 6, isActive: true },
@@ -67,6 +69,11 @@ const masters = {
       ],
     }),
     staff("ankita", {}),
+    staff("oral", {
+      subjectTeachingLinks: [
+        { id: "o", classId: "c6", sectionId: "s6a", subjectId: "hin-oral", academicYearCode: "2026-27", periodsPerWeek: 5 },
+      ],
+    }),
   ],
 };
 
@@ -94,6 +101,13 @@ expect(
   teachingSectionsFor({ staffId: "shipra", masters, academicYearCodes: years })
     .find((t) => t.classId === "c9")?.subjects.map((x) => x.code),
   ["ENG"],
+);
+
+// A sub-subject brings its parent (the marks sheet only knows HIN).
+expect(
+  "sub-subject carries parent",
+  teachingSectionsFor({ staffId: "oral", masters, academicYearCodes: years })[0]?.subjects.map((x) => x.code),
+  ["HIN", "HIN-ORAL"],
 );
 
 // Nobody assigned: nothing, never "everything".

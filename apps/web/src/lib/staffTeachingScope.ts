@@ -36,7 +36,14 @@ type MastersLike = {
   staff?: StaffRecord[];
   classes: { id: string; name: string; sortOrder?: number; isActive?: boolean }[];
   sections: { id: string; classId: string; name: string; isActive?: boolean }[];
-  subjects: { id: string; code?: string; nameEn?: string; name?: string; isActive?: boolean }[];
+  subjects: {
+    id: string;
+    code?: string;
+    nameEn?: string;
+    name?: string;
+    parentId?: string | null;
+    isActive?: boolean;
+  }[];
   classSubjects?: ClassSubjectLink[];
 };
 
@@ -96,6 +103,13 @@ export function teachingSectionsFor(opts: {
       .filter((l) => l.classId === classId && l.isActive !== false)
       .map((l) => l.subjectId);
 
+  // Teaching "Hindi — Oral" is teaching Hindi: the marks sheet and the
+  // homework subject list work on the parent (HIN), so it comes along.
+  const withParent = (id: string): string[] => {
+    const parent = subjectById.get(id)?.parentId;
+    return parent && subjectById.has(parent) ? [id, parent] : [id];
+  };
+
   type Acc = { classId: string; sectionId: string; isClassTeacher: boolean; subjects: Set<string> };
   const acc = new Map<string, Acc>();
   const touch = (classId: string, sectionId: string): Acc | null => {
@@ -123,7 +137,7 @@ export function teachingSectionsFor(opts: {
       : masters.sections.filter((s) => s.classId === l.classId).map((s) => s.id);
     for (const sid of sectionIds) {
       const a = touch(l.classId, sid);
-      if (a && l.subjectId) a.subjects.add(l.subjectId);
+      if (a && l.subjectId) for (const id of withParent(l.subjectId)) a.subjects.add(id);
     }
   }
 
@@ -132,7 +146,7 @@ export function teachingSectionsFor(opts: {
     for (const slot of g.slots) {
       if (slot.teacherId !== staffId) continue;
       const a = touch(g.classId, g.sectionId);
-      if (a && slot.subjectId) a.subjects.add(slot.subjectId);
+      if (a && slot.subjectId) for (const id of withParent(slot.subjectId)) a.subjects.add(id);
     }
   }
 

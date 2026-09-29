@@ -117,7 +117,9 @@ async function saveStaffPunchRegister(
   const { pushStaffAttendanceRegisterToDb } = await import(
     "@/lib/staffAttendanceNormalized.server"
   );
-  const pushed = await pushStaffAttendanceRegisterToDb(register);
+  const pushed = await pushStaffAttendanceRegisterToDb(register).catch(
+    (e: unknown) => ({ ok: false as const, error: (e as Error)?.message || String(e) }),
+  );
   if (!pushed.ok) {
     console.error("[staff punch] register push failed", pushed.error);
     return { ok: false, error: pushed.error };

@@ -67,7 +67,9 @@ export async function markAttendanceServer(
   const { pushAttendanceRegisterToDb } = await import(
     "@/lib/attendanceNormalized.server"
   );
-  const dbPush = await pushAttendanceRegisterToDb(result.register);
+  const dbPush = await pushAttendanceRegisterToDb(result.register).catch(
+    (e: unknown) => ({ ok: false as const, error: (e as Error)?.message || String(e) }),
+  );
   if (!dbPush.ok) {
     // Saying "saved" here was the unknown-becomes-fact trap: the register
     // lived only in this server instance's memory and vanished on the next

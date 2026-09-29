@@ -1,5 +1,6 @@
 "use client";
 
+import { isRestrictedTeacher, useMyTeaching } from "@/components/staff/useMyTeaching";
 import {
   useCallback,
   useDeferredValue,
@@ -124,6 +125,18 @@ const TAB_KEY = "bhb_sis_main_tab";
 
 export function StudentsWorkspace() {
   const session = useDemoSession();
+  // A teacher's register is the children of their own sections. The whole
+  // school used to be listed for every login that held students.view.
+  const { my: myTeaching } = useMyTeaching();
+  const teacherMode = isRestrictedTeacher(myTeaching);
+  const mySectionIds = useMemo(
+    () => new Set(teacherMode ? myTeaching.teaching.map((t) => t.sectionId) : []),
+    [teacherMode, myTeaching],
+  );
+  const myClassIds = useMemo(
+    () => new Set(teacherMode ? myTeaching.teaching.map((t) => t.classId) : []),
+    [teacherMode, myTeaching],
+  );
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [state, setState] = useState<SisState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -452,10 +465,15 @@ export function StudentsWorkspace() {
   const sectionsForFilter = useMemo(() => {
     if (!masters || !classFilter) return [];
     return masters.sections
-      .filter((s) => s.classId === classFilter && s.isActive)
+      .filter(
+        (s) =>
+          s.classId === classFilter &&
+          s.isActive &&
+          (!teacherMode || mySectionIds.has(s.id)),
+      )
       .slice()
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [masters, classFilter]);
+  }, [masters, classFilter, teacherMode, mySectionIds]);
 
   const headerAy =
     session.academicYearCode ||
@@ -573,6 +591,7 @@ export function StudentsWorkspace() {
     /** Only filters the user actually set (empty = ignored). */
     type Pred = (s: SisStudent) => boolean;
     const predicates: Pred[] = [];
+    if (teacherMode) predicates.push((s) => mySectionIds.has(s.sectionId));
     if (statusFilter !== "all") {
       predicates.push((s) => s.status === statusFilter);
     }
@@ -661,6 +680,8 @@ export function StudentsWorkspace() {
     matchMode,
     sortBy,
     sortOrder,
+    teacherMode,
+    mySectionIds,
   ]);
 
   function clearFilters() {
@@ -1303,7 +1324,7 @@ export function StudentsWorkspace() {
           >
             <option value="">All classes</option>
             {m.classes
-              .filter((c) => c.isActive)
+              .filter((c) => c.isActive && (!teacherMode || myClassIds.has(c.id)))
               .map((c) => {
                 const n = sis.students.filter(
                   (s) =>

@@ -86,6 +86,15 @@ export function AttendanceWorkspace() {
       return;
     }
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as AttTab);
+    // Opened from a "Your classes" chip on the teacher home.
+    const qs = new URLSearchParams(window.location.search);
+    const qc = qs.get("classId");
+    const qsec = qs.get("sectionId");
+    if (qc && qsec) {
+      setClassId(qc);
+      setSectionId(qsec);
+      setMyClassAutoDone(true);
+    }
   }, []);
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [sis, setSis] = useState<SisState | null>(null);
@@ -217,6 +226,10 @@ export function AttendanceWorkspace() {
 
   useEffect(() => {
     if (!sectionId) return;
+    // Wait for the options to exist: before Masters (or "my classes") has
+    // loaded they are empty, and clearing here dropped a section chosen
+    // from a link.
+    if (sectionOptions.length === 0) return;
     if (!sectionOptions.some((s) => s.id === sectionId)) {
       setSectionId("");
     }
@@ -454,6 +467,9 @@ export function AttendanceWorkspace() {
       }
     >
       <ModuleTabs
+        // A different tab set is a different bar: remount rather than
+        // reconcile the office's seven tabs into a teacher's three.
+        key={teacherMode ? "teacher" : "office"}
         aria-label="Attendance"
         value={tab}
         onChange={(id) => setTab(id as AttTab)}
