@@ -15,7 +15,7 @@ import {
   fetchExamSheetByKeyFromDb,
   pushExamSheetToDb,
 } from "@/lib/examsNormalized.server";
-import { assertSectionScope } from "@/lib/api/v1/staffScope";
+import { assertSectionScope, scopeAllowsSubjectCode } from "@/lib/api/v1/staffScope";
 
 export const runtime = "nodejs";
 
@@ -62,12 +62,22 @@ export async function POST(request: Request) {
         throw new ApiError("bad_request", "Marks must be a number ≥ 0 or blank", 400);
       }
     }
-    await assertSectionScope(ctx, classId, sectionId);
+    const scope = await assertSectionScope(ctx, classId, sectionId);
 
     await ensureSchoolMirrorHydrated();
     await Promise.all([ensureSisHydratedServer(), ensureExamsHydratedServer()]);
-    const ay = ctx.session.academicYearCode;
+    const ay = scope.academicYearCode;
     const state = loadExams();
+    // Exam subjects carry their own ids; the teacher's subjects are matched
+    // by code. A class teacher may enter every subject of their section.
+    const examSubject = state.subjects.find((x) => x.id === subjectId);
+    if (!scopeAllowsSubjectCode(scope, classId, sectionId, examSubject?.code || "")) {
+      throw new ApiError(
+        "forbidden",
+        `${examSubject?.name || "This subject"} is not one of your subjects in this class — ask the office to add it (Staff → Duties)`,
+        403,
+      );
+    }
     // The app enters one number per subject. A class assessed component-wise
     // (80 + 20, theory + practical) or by grades / descriptors is entered on
     // the desk, where those columns exist.

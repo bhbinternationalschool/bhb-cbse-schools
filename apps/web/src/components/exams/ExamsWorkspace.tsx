@@ -1,6 +1,7 @@
 "use client";
 // ratchet-allow: grids_without_row_menu — the marks-entry grid and the promotion summary — cells are inputs, not a record list
 
+import { isRestrictedTeacher, useMyTeaching } from "@/components/staff/useMyTeaching";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { urlAsksForTab } from "@/lib/nucleusHandoff";
 import { ClipboardList } from "lucide-react";
@@ -385,6 +386,9 @@ export function ExamsWorkspace() {
   // unloaded snapshot and every child looks allowed.
   useHoldDecisions();
   const session = useDemoSession();
+  const { my: myTeachingRaw } = useMyTeaching();
+  const teacherMode = isRestrictedTeacher(myTeachingRaw);
+  const myTeaching = myTeachingRaw ?? { unrestricted: true, academicYearCode: "", teaching: [] };
   const [tab, setTab] = useState<Tab>("dashboard");
 
   // The Nucleus bookmark opens this workspace straight at the question papers desk, so the
@@ -541,15 +545,23 @@ export function ExamsWorkspace() {
     if (!masters) return [];
     // Treat missing isActive as active (legacy rows)
     const active = masters.classes.filter((c) => c.isActive !== false);
-    return active.length > 0 ? active : masters.classes;
-  }, [masters]);
+    const all = active.length > 0 ? active : masters.classes;
+    if (!teacherMode) return all;
+    const mine = new Set(myTeaching.teaching.map((t) => t.classId));
+    return all.filter((c) => mine.has(c.id));
+  }, [masters, teacherMode, myTeaching]);
 
   const sectionOptions = useMemo(() => {
     if (!masters || !classId) return [];
     const forClass = masters.sections.filter((s) => s.classId === classId);
     const active = forClass.filter((s) => s.isActive !== false);
-    return active.length > 0 ? active : forClass;
-  }, [masters, classId]);
+    const all = active.length > 0 ? active : forClass;
+    if (!teacherMode) return all;
+    const mine = new Set(
+      myTeaching.teaching.filter((t) => t.classId === classId).map((t) => t.sectionId),
+    );
+    return all.filter((s) => mine.has(s.id));
+  }, [masters, classId, teacherMode, myTeaching]);
 
   useEffect(() => {
     if (!sectionId) return;
@@ -569,8 +581,19 @@ export function ExamsWorkspace() {
 
   const subjects = useMemo(() => {
     if (!classId) return [];
-    return subjectsForMarkEntry(classId, roster, exams, examDeps);
-  }, [classId, roster, exams, examDeps]);
+    const all = subjectsForMarkEntry(classId, roster, exams, examDeps);
+    if (!teacherMode) return all;
+    // A subject teacher enters marks for their own subjects; the class
+    // teacher of the section sees every subject of it.
+    const sec = myTeaching.teaching.find(
+      (t) => t.classId === classId && t.sectionId === sectionId,
+    );
+    if (!sec) return [];
+    if (sec.isClassTeacher) return all;
+    // Exam subjects have their own ids; match the teacher's by code.
+    const codes = new Set(sec.subjects.map((x) => x.code));
+    return all.filter((x) => codes.has(x.code.trim().toUpperCase()));
+  }, [classId, sectionId, roster, exams, examDeps, teacherMode, myTeaching]);
 
   /** How this class is assessed — the school's scheme for it. */
   const scheme = useMemo<AssessmentScheme | null>(

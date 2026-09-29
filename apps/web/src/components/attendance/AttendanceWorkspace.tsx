@@ -46,6 +46,10 @@ import { StaffAttendanceReportsPanel } from "@/components/staff/StaffLeaveReport
 import { StudentAttendanceReportsPanel } from "@/components/attendance/StudentAttendanceReportsPanel";
 import { StudentLeaveWorkspace } from "@/components/studentLeave/StudentLeaveWorkspace";
 import { resolveSessionStaff } from "@/lib/staffResolve";
+import {
+  isRestrictedTeacher,
+  useMyTeaching,
+} from "@/components/staff/useMyTeaching";
 
 type AttTab =
   | "dashboard"
@@ -82,6 +86,15 @@ export function AttendanceWorkspace() {
       return;
     }
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as AttTab);
+    // Opened from a "Your classes" chip on the teacher home.
+    const qs = new URLSearchParams(window.location.search);
+    const qc = qs.get("classId");
+    const qsec = qs.get("sectionId");
+    if (qc && qsec) {
+      setClassId(qc);
+      setSectionId(qsec);
+      setMyClassAutoDone(true);
+    }
   }, []);
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [sis, setSis] = useState<SisState | null>(null);
@@ -104,7 +117,22 @@ export function AttendanceWorkspace() {
     return () => window.clearInterval(t);
   }, []);
 
-  const ay = session.academicYearCode || DEFAULT_AY;
+  // A teacher's own sections, from the same server answer that allows or
+  // refuses the save. Until 2026-09-29 the pickers listed every class and
+  // the save pushed this browser's whole attendance desk.
+  const { my } = useMyTeaching();
+  const teacherMode = isRestrictedTeacher(my);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!teacherMode) return;
+    if (tab !== "students" && tab !== "staff" && tab !== "leave") setTab("students");
+  }, [teacherMode, tab]);
+
+  const ay =
+    (teacherMode ? my.academicYearCode : "") ||
+    session.academicYearCode ||
+    DEFAULT_AY;
 
   function refresh() {
     setMasters(loadMasters());
@@ -127,6 +155,15 @@ export function AttendanceWorkspace() {
 
   /** Sections this staff is class teacher of (for phone/tablet quick mark). */
   const myClassSections = useMemo(() => {
+    if (teacherMode) {
+      return my.teaching.map((t) => ({
+        classId: t.classId,
+        sectionId: t.sectionId,
+        label:
+          `${t.className} · ${t.sectionName}` +
+          (t.isClassTeacher ? " (class teacher)" : ""),
+      }));
+    }
     if (!masters) return [];
     const staff = resolveSessionStaff(session, masters);
     if (!staff) return [];
@@ -143,7 +180,7 @@ export function AttendanceWorkspace() {
       });
     }
     return out;
-  }, [masters, session, ay, tick]);
+  }, [masters, session, ay, tick, teacherMode, my]);
 
   useEffect(() => {
     if (myClassAutoDone || myClassSections.length === 0) return;
@@ -160,6 +197,10 @@ export function AttendanceWorkspace() {
   const classOptions = useMemo(() => {
     if (!masters) return [];
     const active = masters.classes.filter((c) => c.isActive);
+    if (teacherMode) {
+      const mine = new Set(my.teaching.map((t) => t.classId));
+      return active.filter((c) => mine.has(c.id));
+    }
     // A class-scoped assignment (Masters → Roles) restricts which classes
     // this staff member may even pick, not just which one auto-selects —
     // previously any teacher could hand-pick a class outside their scope.
@@ -171,15 +212,24 @@ export function AttendanceWorkspace() {
       loadRbac(),
     );
     return allowed ? active.filter((c) => allowed.includes(c.id)) : active;
-  }, [masters, session]);
+  }, [masters, session, teacherMode, my]);
 
   const sectionOptions = useMemo(() => {
     if (!masters || !classId) return [];
-    return masters.sections.filter((s) => s.classId === classId && s.isActive);
-  }, [masters, classId]);
+    const all = masters.sections.filter((s) => s.classId === classId && s.isActive);
+    if (!teacherMode) return all;
+    const mine = new Set(
+      my.teaching.filter((t) => t.classId === classId).map((t) => t.sectionId),
+    );
+    return all.filter((s) => mine.has(s.id));
+  }, [masters, classId, teacherMode, my]);
 
   useEffect(() => {
     if (!sectionId) return;
+    // Wait for the options to exist: before Masters (or "my classes") has
+    // loaded they are empty, and clearing here dropped a section chosen
+    // from a link.
+    if (sectionOptions.length === 0) return;
     if (!sectionOptions.some((s) => s.id === sectionId)) {
       setSectionId("");
     }
@@ -306,6 +356,10 @@ export function AttendanceWorkspace() {
       setError("No active students in this section");
       return;
     }
+    if (teacherMode) {
+      void saveViaServer();
+      return;
+    }
     const campusId =
       roster[0]?.campusId || masters?.campuses?.[0]?.id || "";
     const result = upsertRegister({
@@ -344,6 +398,63 @@ export function AttendanceWorkspace() {
     );
   }
 
+  /**
+   * A teacher's save: one register, checked by the server against the
+   * teacher's own sections, written straight to the database. Nothing from
+   * this browser's copy of other classes' registers travels with it.
+   */
+  async function saveViaServer() {
+    if (saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/v1/attendance/mark", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          classId,
+          sectionId,
+          date,
+          remark,
+          marks: marks.map((m) => ({
+            studentId: m.studentId,
+            status: m.status,
+            note: m.note || "",
+          })),
+        }),
+      });
+      const body = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        error?: { message?: string };
+      } | null;
+      if (!res.ok || !body?.ok) {
+        setError(
+          body?.error?.message ||
+            "Attendance was NOT saved — please check your connection and try again.",
+        );
+        return;
+      }
+      setDirty(false);
+      const s = summarizeMarks(marks);
+      flash(
+        `Saved ${classLabel(classId, sectionId)} · ${date} — P ${s.present} · A ${s.absent}`,
+      );
+      // Pull the saved register back so "Last saved" reflects the server.
+      const [{ ensureAttendanceHydrated }, { resetDeskHydrated }] =
+        await Promise.all([
+          import("@/lib/attendancePersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
+      resetDeskHydrated("attendance");
+      await ensureAttendanceHydrated().catch(() => false);
+      refresh();
+    } catch {
+      setError("Attendance was NOT saved — could not reach the school server.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <ErpWorkspaceShell
       title="Attendance"
@@ -356,25 +467,39 @@ export function AttendanceWorkspace() {
       }
     >
       <ModuleTabs
+        // A different tab set is a different bar: remount rather than
+        // reconcile the office's seven tabs into a teacher's three.
+        key={teacherMode ? "teacher" : "office"}
         aria-label="Attendance"
         value={tab}
         onChange={(id) => setTab(id as AttTab)}
-        items={[
-          { id: "dashboard", label: "Dashboard", tone: "navy" },
-          { id: "students", label: "Students", tone: "navy" },
-          { id: "staff", label: "Staff", tone: "teal" },
-          { id: "leave", label: "Student leave", tone: "sky" },
-          {
-            id: "exceptions",
-            label:
-              openExceptionCount > 0
-                ? `Exceptions (${openExceptionCount})`
-                : "Exceptions",
-            tone: "amber",
-          },
-          { id: "student-reports", label: "Student reports", tone: "amber" },
-          { id: "staff-reports", label: "Staff reports", tone: "violet" },
-        ]}
+        items={
+          teacherMode
+            ? // A teacher's attendance: their classes, their own punch, leave.
+              // The school-wide dashboard, exceptions and staff reports are
+              // the office's.
+              [
+                { id: "students", label: "My classes", tone: "navy" },
+                { id: "staff", label: "My attendance", tone: "teal" },
+                { id: "leave", label: "Student leave", tone: "sky" },
+              ]
+            : [
+                { id: "dashboard", label: "Dashboard", tone: "navy" },
+                { id: "students", label: "Students", tone: "navy" },
+                { id: "staff", label: "Staff", tone: "teal" },
+                { id: "leave", label: "Student leave", tone: "sky" },
+                {
+                  id: "exceptions",
+                  label:
+                    openExceptionCount > 0
+                      ? `Exceptions (${openExceptionCount})`
+                      : "Exceptions",
+                  tone: "amber",
+                },
+                { id: "student-reports", label: "Student reports", tone: "amber" },
+                { id: "staff-reports", label: "Staff reports", tone: "violet" },
+              ]
+        }
       />
 
       {syncStatus.status === "failed" ? (
@@ -494,6 +619,13 @@ export function AttendanceWorkspace() {
                   Phone/tablet: All present → correct absentees → Save.
                 </p>
               </div>
+            ) : null}
+
+            {teacherMode && my.teaching.length === 0 ? (
+              <p className="mt-3 rounded-lg border border-[rgba(217,119,6,0.45)] bg-[rgba(217,119,6,0.12)] px-3 py-2 text-sm text-[var(--brand-deep)]">
+                No classes are assigned to you yet. Ask the office to add your
+                class or subjects in Staff → Duties, then reopen this page.
+              </p>
             ) : null}
 
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
@@ -801,7 +933,7 @@ export function AttendanceWorkspace() {
                   }
                   onClick={onSave}
                 >
-                  {existing ? "Update register" : "Save register"}
+                  {saving ? "Saving…" : existing ? "Update register" : "Save register"}
                 </button>
 
                 {/* Sticky phone/tablet action bar */}
@@ -838,7 +970,7 @@ export function AttendanceWorkspace() {
                       }
                       onClick={onSave}
                     >
-                      {dirty ? "Save*" : existing ? "Update" : "Save"}
+                      {saving ? "Saving…" : dirty ? "Save*" : existing ? "Update" : "Save"}
                     </button>
                   </div>
                 </div>

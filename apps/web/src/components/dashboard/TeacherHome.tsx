@@ -1,5 +1,6 @@
 "use client";
 
+import { useMyTeaching } from "@/components/staff/useMyTeaching";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -129,11 +130,40 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
   const ay = session.academicYearCode;
   const today = todayIso();
 
+  // What this teacher teaches, from the server: class-teacher sections and
+  // subject sections alike. "Your classes" used to list class-teacher links
+  // only — and only when this browser held Masters, which a teacher's never
+  // did — so it was always empty.
+  const { my } = useMyTeaching();
+
   const mySections = useMemo(() => {
     if (!ready) return [];
+    if (my && !my.unrestricted) {
+      return my.teaching
+        .filter((t) => t.isClassTeacher)
+        .map((t) => ({
+          classId: t.classId,
+          sectionId: t.sectionId,
+          label: `${t.className} · ${t.sectionName}`,
+        }));
+    }
     const masters = loadMasters();
     return listSessionClassTeacherSections(session, masters, ay);
-  }, [ready, session, ay, tick]);
+  }, [ready, session, ay, tick, my]);
+
+  const teachingChips = useMemo(() => {
+    if (my && !my.unrestricted) {
+      return my.teaching.map((t) => ({
+        classId: t.classId,
+        sectionId: t.sectionId,
+        label: `${t.className} · ${t.sectionName}`,
+        detail: t.isClassTeacher
+          ? "Class teacher"
+          : t.subjects.map((x) => x.name).join(", "),
+      }));
+    }
+    return mySections.map((s) => ({ ...s, detail: "" }));
+  }, [my, mySections]);
 
   const pendingAttendance = useMemo(() => {
     if (!ready) return [];
@@ -261,23 +291,33 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
         </Link>
       ) : null}
 
-      {mySections.length > 0 ? (
+      {teachingChips.length > 0 ? (
         <section>
           <h2 className="mb-2 text-xs font-bold uppercase tracking-wide text-[var(--muted)]">
             Your classes
           </h2>
           <div className="flex flex-wrap gap-2">
-            {mySections.map((s) => (
+            {teachingChips.map((s) => (
               <Link
                 key={`${s.classId}-${s.sectionId}`}
-                href="/attendance?tab=students"
-                className="rounded-full border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] shadow-[var(--shadow-1)]"
+                href={`/attendance?tab=students&classId=${encodeURIComponent(s.classId)}&sectionId=${encodeURIComponent(s.sectionId)}`}
+                className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] shadow-[var(--shadow-1)]"
               >
                 {s.label}
+                {s.detail ? (
+                  <span className="block text-[10px] font-medium text-[var(--muted)]">
+                    {s.detail}
+                  </span>
+                ) : null}
               </Link>
             ))}
           </div>
         </section>
+      ) : my && !my.unrestricted ? (
+        <p className="rounded-xl border border-[rgba(217,119,6,0.45)] bg-[rgba(217,119,6,0.12)] px-4 py-3 text-sm text-[var(--brand-deep)]">
+          No classes are assigned to you yet. Ask the office to add your class
+          or subjects in Staff → Duties.
+        </p>
       ) : null}
 
       <section>
@@ -316,10 +356,10 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
           <div className="flex items-center gap-2">
             <LayoutGrid className="h-4 w-4 text-[var(--muted)]" />
             <p className="text-xs text-[var(--muted)]">
-              Fees, exams, reports &amp; admin modules
+              Everything else your role can open is under Modules
             </p>
           </div>
-          {onOpenFullDashboard ? (
+          {onOpenFullDashboard && my?.unrestricted ? (
             <button
               type="button"
               onClick={onOpenFullDashboard}

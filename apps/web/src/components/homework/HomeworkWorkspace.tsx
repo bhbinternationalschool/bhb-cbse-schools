@@ -1,5 +1,6 @@
 "use client";
 
+import { isRestrictedTeacher, useMyTeaching } from "@/components/staff/useMyTeaching";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { BookOpen } from "lucide-react";
@@ -142,6 +143,11 @@ export function HomeworkWorkspace() {
   const [toDate, setToDate] = useState(todayIso);
   const [format, setFormat] = useState<HomeworkReportFormat>("excel");
 
+  // The teacher's own sections and subjects (server answer). Principal and
+  // office still see the whole school.
+  const { my } = useMyTeaching();
+  const teacherMode = isRestrictedTeacher(my);
+
   const teacherName = session.fullName || "Teacher";
   const teacherStaffId = session.staffId || "";
 
@@ -216,26 +222,56 @@ export function HomeworkWorkspace() {
 
   const classOptions = useMemo(() => {
     if (!masters) return [];
-    return masters.classes.filter((c) => c.isActive !== false);
-  }, [masters]);
+    const all = masters.classes.filter((c) => c.isActive !== false);
+    if (!teacherMode) return all;
+    const mine = new Set(my.teaching.map((t) => t.classId));
+    return all.filter((c) => mine.has(c.id));
+  }, [masters, teacherMode, my]);
 
   const sectionOptions = useMemo(() => {
     if (!masters || !classId) return [];
-    return masters.sections.filter(
+    const all = masters.sections.filter(
       (s) => s.classId === classId && s.isActive !== false,
     );
-  }, [masters, classId]);
+    if (!teacherMode) return all;
+    const mine = new Set(
+      my.teaching.filter((t) => t.classId === classId).map((t) => t.sectionId),
+    );
+    return all.filter((s) => mine.has(s.id));
+  }, [masters, classId, teacherMode, my]);
 
   const subjectOptions = useMemo(() => {
     if (!masters) return [];
     const all = (masters.subjects ?? []).filter(
       (s) => s.isActive !== false && !s.parentId,
     );
+    if (teacherMode) {
+      // Exactly the subjects this teacher teaches in the chosen section.
+      const sec = my.teaching.find(
+        (t) => t.classId === classId && t.sectionId === sectionId,
+      );
+      const ids = new Set((sec?.subjects ?? []).map((x) => x.id));
+      return all.filter((s) => ids.has(s.id));
+    }
     const allowed = teacherDefaults?.subjectIds ?? [];
     if (allowed.length === 0) return all;
     const filtered = all.filter((s) => allowed.includes(s.id));
     return filtered.length > 0 ? filtered : all;
-  }, [masters, teacherDefaults]);
+  }, [masters, teacherDefaults, teacherMode, my, classId, sectionId]);
+
+  useEffect(() => {
+    // Keep the chosen subject one the teacher may post for.
+    if (subjectId && subjectOptions.length && !subjectOptions.some((s) => s.id === subjectId)) {
+      setSubjectId(subjectOptions[0]!.id);
+    }
+  }, [subjectId, subjectOptions]);
+
+  useEffect(() => {
+    if (classId && classOptions.length && !classOptions.some((c) => c.id === classId)) {
+      setClassId(classOptions[0]!.id);
+      setSectionId("");
+    }
+  }, [classId, classOptions]);
 
   useEffect(() => {
     if (!classId && classOptions[0]) setClassId(classOptions[0].id);

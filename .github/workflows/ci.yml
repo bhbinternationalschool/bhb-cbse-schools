@@ -409,6 +409,8 @@ jobs:
           npm run test:nucleus-reminder
           npm run test:nucleus-assessments
           npm run test:staff-home-kind
+          npm run test:staff-teaching-scope
+          npm run test:staff-day-status
           npm run test:mobile-features
           npm run test:cashfree-checkout
           npm run test:gateway-fees

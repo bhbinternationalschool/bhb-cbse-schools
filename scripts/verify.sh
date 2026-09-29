@@ -299,6 +299,8 @@ SELFTESTS=(
   test:nucleus-reminder
   test:nucleus-assessments
   test:staff-home-kind
+  test:staff-teaching-scope
+  test:staff-day-status
   test:mobile-features
   test:cashfree-checkout
   test:gateway-fees

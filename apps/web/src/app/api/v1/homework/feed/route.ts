@@ -1,3 +1,4 @@
+import { assertSectionScope } from "@/lib/api/v1/staffScope";
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { assertPermission, resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
@@ -50,6 +51,11 @@ export async function GET(request: Request) {
         throw new ApiError("bad_request", "classId and sectionId required", 400);
       }
     }
+    // Staff: only a section they teach (or school-wide leadership/office).
+    const scope =
+      ctx.session.persona === "staff"
+        ? await assertSectionScope(ctx, classId, sectionId)
+        : null;
 
     const ay = ctx.session.academicYearCode;
     const subjectNameOf = (id: string) =>
@@ -101,7 +107,16 @@ export async function GET(request: Request) {
     // office hasn't mapped yet fall back to the full subject catalogue so
     // teachers aren't blocked while curriculum mapping catches up.
     let subjects: { id: string; name: string }[] | undefined;
-    if (ctx.session.persona === "staff") {
+    const mySection =
+      scope && !scope.unrestricted
+        ? scope.teaching.find((t) => t.classId === classId && t.sectionId === sectionId)
+        : null;
+    if (scope && !scope.unrestricted && !(mySection?.isClassTeacher && !mySection.subjects.length)) {
+      // A teacher composes for the subjects they teach here (a class
+      // teacher: every subject of the class) — the same rule the post
+      // route enforces, so the list never offers what will be refused.
+      subjects = (mySection?.subjects ?? []).map((x) => ({ id: x.id, name: x.name }));
+    } else if (ctx.session.persona === "staff") {
       subjects = ctx.masters.classSubjects
         .filter((l) => l.classId === classId && l.isActive !== false)
         .map((l) => ({ id: l.subjectId, name: subjectNameOf(l.subjectId) }))

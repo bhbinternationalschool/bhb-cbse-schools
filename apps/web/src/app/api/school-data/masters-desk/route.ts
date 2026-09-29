@@ -2,9 +2,10 @@ import { NextResponse } from "next/server";
 import { cachedDeskJson, deskJsonResponse } from "@/lib/deskProbeCache.server";
 import {
   authorizeSchoolDataDesk,
+  requireStaffApi,
   SCHOOL_DATA_DESK_RBAC,
 } from "@/lib/apiRouteAuth.server";
-import type { MastersState } from "@/lib/masters";
+import { emptyMastersShell, type MastersState } from "@/lib/masters";
 import { mastersDualWriteDbEnabled } from "@/lib/mastersDbConfig";
 import {
   fetchMastersDeskFromDb,
@@ -34,9 +35,75 @@ function readFromRowTables(): boolean {
   return flag === "true" || flag === "1";
 }
 
+/**
+ * The parts of Masters every member of staff needs to do their job: the
+ * school's years, terms, classes, sections, subjects, holidays and timings.
+ * Nothing about money (fee heads, structures, concessions and the families
+ * they were granted to), numbering, statutory setup or students.
+ */
+const TEACHING_MASTERS_KEYS = [
+  "academicYears",
+  "academicTerms",
+  "campuses",
+  "classes",
+  "sections",
+  "subjects",
+  "classSubjects",
+  "seniorStreams",
+  "holidays",
+  "schoolTiming",
+  "schoolProfile",
+] as const;
+
+/**
+ * Staff without the Masters grant used to get 403 here — and with it an
+ * EMPTY class list on every screen, because this is the only place a
+ * browser learns the school's classes. Every teacher who signed in on
+ * 2026-09-29 saw "Select class…" with nothing under it. They now get the
+ * teaching subset, marked `teachingOnly` so nothing mistakes it for the
+ * whole desk (and a push of it is refused anyway: POST needs masters.edit).
+ */
+async function teachingMastersResponse() {
+  const { bundle, meta, readFailed } = await fetchMastersDeskFromDb();
+  if (readFailed) {
+    return NextResponse.json(
+      { ok: false, error: "Could not read the school setup — please try again." },
+      { status: 503 },
+    );
+  }
+  // Start from the empty shell so every other key is present but empty —
+  // the client reads e.g. `bundle.feeHeads.length` and must not crash.
+  const { version: _v, ...subset } = emptyMastersShell() as unknown as Record<string, unknown>;
+  for (const k of TEACHING_MASTERS_KEYS) subset[k] = (bundle as Record<string, unknown>)[k];
+  // The Staff module owns these three; an empty list here would be merged
+  // over the roster the browser already holds.
+  delete subset.staff;
+  delete subset.departments;
+  delete subset.designations;
+  return NextResponse.json({
+    ok: true,
+    ...subset,
+    teachingOnly: true,
+    classCount: bundle.classes.length,
+    feeHeadCount: 0,
+    subjectCount: bundle.subjects.length,
+    sliceCount: meta?.sliceCount ?? 0,
+    updatedAt: meta?.updatedAt || new Date().toISOString(),
+    source: "slices",
+  });
+}
+
 export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["masters-desk"], "GET");
-  if (!auth.ok) return auth.response
+  if (!auth.ok) {
+    if (auth.response.status === 403) {
+      const staff = await requireStaffApi(req);
+      if (staff.ok && !staff.viaMirrorSecret && staff.ctx.session.persona === "staff") {
+        return teachingMastersResponse();
+      }
+    }
+    return auth.response;
+  }
 
   if (readFromRowTables()) {
     const cachedRows = await cachedDeskJson({

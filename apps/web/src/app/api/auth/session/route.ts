@@ -1,3 +1,4 @@
+import { staffRoleCodeFor } from "@/lib/staffSessionRole";
 import { NextResponse } from "next/server";
 import { resolveStaffHomeKind } from "@/lib/staffHomeKind.server";
 import { createClient } from "@supabase/supabase-js";
@@ -5,7 +6,6 @@ import { DEMO_USERS, demoSessionCookieName, type DemoSession } from "@/lib/auth"
 import { appSessionCookieOptions } from "@/lib/authCookies.server";
 import { signSession } from "@/lib/sessionCookie.server";
 import { loadServerMasters } from "@/lib/api/v1/auth";
-import { inferRoleCodes } from "@/lib/rbac";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { superAdminRoleCode } from "@/lib/superAdmin";
 import { TENANT, type Persona } from "@/lib/types";
@@ -161,26 +161,31 @@ export async function POST(request: Request) {
   // emails) is preserved untouched — inferRoleCodes never grants "owner"
   // from a designation, by design (see its own comment).
   if (persona === "staff" && !ownerRole) {
-    try {
-      const masters = await loadServerMasters();
-      const codes = inferRoleCodes(
-        { roleCode: "", email, fullName, persona, staffId },
-        masters,
+    // A staff login that matches nobody on the roster used to start from
+    // DEMO_USERS' "principal" and keep it (inferRoleCodes' blank-login
+    // fallback). The school's own emails all match today; anything else is
+    // refused and named, rather than handed the principal's desk.
+    if (!staffId) {
+      return NextResponse.json(
+        {
+          error:
+            "This login is not linked to a staff record. Ask the office to put " +
+            "your email on your staff profile (Staff → Login), then sign in again.",
+        },
+        { status: 403 },
       );
-      const priority = [
-        "principal",
-        "admin",
-        "driver",
-        "accounts",
-        "office",
-        "transport",
-        "teacher",
-        "support",
-      ];
-      const picked = priority.find((c) => codes.includes(c));
-      if (picked) roleCode = picked;
+    }
+    try {
+      roleCode = staffRoleCodeFor(
+        { email, fullName, staffId },
+        await loadServerMasters(),
+      );
     } catch (e) {
-      console.warn("[session] roleCode inference failed, keeping default", e);
+      console.warn("[session] roleCode inference failed", e);
+      return NextResponse.json(
+        { error: "Could not read the staff roster to sign you in — please try again." },
+        { status: 503 },
+      );
     }
   }
 
