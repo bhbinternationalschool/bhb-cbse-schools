@@ -72,6 +72,21 @@ import {
   type PtmState,
 } from "@/lib/ptm";
 import { openWaMe } from "@/lib/waMe";
+import {
+  isRestrictedTeacher,
+  useMyTeaching,
+} from "@/components/staff/useMyTeaching";
+
+/** The message a v1 route put in its error body, if any. */
+function apiMessage(body: unknown): string {
+  const err = (body as { error?: unknown } | null)?.error;
+  if (typeof err === "string") return err;
+  if (err && typeof err === "object") {
+    const m = (err as { message?: unknown }).message;
+    if (typeof m === "string") return m;
+  }
+  return "";
+}
 
 type PtmTab =
   | "dashboard"
@@ -183,13 +198,61 @@ export function PtmWorkspace() {
 
   const actorName = session.fullName || "Staff";
 
+  // A teacher (not principal / office) works on their own classes only
+  // (2026-09-29): the desk is read from /api/v1/staff/ptm/desk already cut
+  // to their sections and slots, and every write goes through a scoped v1
+  // route. This browser's copy of the whole-school desk is neither read nor
+  // pushed — the whole-desk push now refuses teachers anyway.
+  const { my, loading: myLoading } = useMyTeaching();
+  const teacherMode = isRestrictedTeacher(my);
+  const [myStaffId, setMyStaffId] = useState("");
+  const [deskLoadError, setDeskLoadError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
   function flash(msg: string) {
     setNotice(msg);
     setError(null);
     window.setTimeout(() => setNotice(null), 2800);
   }
 
+  async function loadTeacherDesk(): Promise<boolean> {
+    try {
+      const res = await fetch("/api/v1/staff/ptm/desk", { cache: "no-store" });
+      const body = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        data?: { staffId: string; state: PtmState };
+      } | null;
+      if (!res.ok || !body?.ok || !body.data) {
+        const msg = apiMessage(body) || "Could not load your PTM slots and bookings — try again.";
+        setDeskLoadError(msg);
+        setError(msg);
+        return false;
+      }
+      const ptm = body.data.state;
+      setMasters(loadMasters());
+      setSis(loadSis());
+      setState(ptm);
+      setMyStaffId(body.data.staffId || "");
+      setDeskLoadError(null);
+      setEventId((prev) =>
+        prev && ptm.events.some((e) => e.id === prev)
+          ? prev
+          : (ptm.events.find((e) => e.isActive && e.academicYearCode === ay) ?? ptm.events[0])?.id ?? "",
+      );
+      return true;
+    } catch {
+      const msg = "Could not reach the school server to load your PTM.";
+      setDeskLoadError(msg);
+      setError(msg);
+      return false;
+    }
+  }
+
   function refresh() {
+    if (teacherMode) {
+      void loadTeacherDesk();
+      return;
+    }
     setMasters(loadMasters());
     setSis(loadSis());
     const ptm = seedPtmIfEmpty(ay);
@@ -197,13 +260,52 @@ export function PtmWorkspace() {
     if (!eventId && ptm.events[0]) setEventId(ptm.events[0].id);
   }
 
+  /**
+   * A teacher's write: one scoped v1 call the server checks against their
+   * sections and slots. Success is only claimed after the server said so,
+   * and the desk is then re-read from the server.
+   */
+  async function teacherWrite(
+    url: string,
+    init: RequestInit,
+    done: string,
+  ): Promise<boolean> {
+    if (busy) return false;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(url, {
+        ...init,
+        headers: { "Content-Type": "application/json", ...(init.headers || {}) },
+      });
+      const body = (await res.json().catch(() => null)) as { ok?: boolean } | null;
+      if (!res.ok || !body?.ok) {
+        setError(apiMessage(body) || "NOT saved — please try again.");
+        return false;
+      }
+      await loadTeacherDesk();
+      flash(done);
+      return true;
+    } catch {
+      setError("NOT saved — could not reach the school server.");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   useEffect(() => {
+    // Wait for "my classes": until it is known, which desk to show is unknown.
+    if (myLoading) return;
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ay]);
+  }, [ay, myLoading, teacherMode]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    // The teacher's desk comes from the server already scoped; hydrating the
+    // whole-school desk into this browser would only re-push it.
+    if (myLoading || teacherMode) return;
     void (async () => {
       const [{ ensurePtmHydrated }, { withHydrationSlot }] = await Promise.all([
         import("@/lib/ptmPersistence"),
@@ -213,23 +315,54 @@ export function PtmWorkspace() {
       refresh();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ay]);
+  }, [ay, myLoading, teacherMode]);
+
+  useEffect(() => {
+    // The dashboard counts the whole school from this browser's desk copy,
+    // which a teacher no longer loads.
+    if (teacherMode && tab === "dashboard") setTab("bookings");
+  }, [teacherMode, tab, setTab]);
+
+  const tabItems = useMemo(
+    () => (teacherMode ? TAB_ITEMS.filter((t) => t.id !== "dashboard") : TAB_ITEMS),
+    [teacherMode],
+  );
+
+  /** Every class, for naming an event's classes on its card. */
+  const classNameById = useMemo(
+    () => new Map((masters?.classes ?? []).map((c) => [c.id, c.name])),
+    [masters],
+  );
 
   const classOptions = useMemo(() => {
     if (!masters) return [];
-    return masters.classes.filter((c) => c.isActive !== false);
-  }, [masters]);
+    const active = masters.classes.filter((c) => c.isActive !== false);
+    if (!teacherMode) return active;
+    const mine = new Set(my.teaching.map((t) => t.classId));
+    return active.filter((c) => mine.has(c.id));
+  }, [masters, teacherMode, my]);
 
   const staffOptions = useMemo(() => {
     if (!masters) return [];
-    return masters.staff ?? [];
-  }, [masters]);
+    if (!teacherMode) return masters.staff ?? [];
+    // A teacher adds slots for themself only; the server stamps the slot
+    // with the signed-in staff id whatever this picker says.
+    if (!myStaffId) return [];
+    const me = (masters.staff ?? []).find((s) => s.id === myStaffId);
+    return [me ?? { id: myStaffId, fullName: session.fullName || "Me" }];
+  }, [masters, teacherMode, myStaffId, session.fullName]);
 
   useEffect(() => {
+    if (teacherMode) {
+      if (staffOptions[0] && slotTeacherId !== staffOptions[0].id) {
+        setSlotTeacherId(staffOptions[0].id);
+      }
+      return;
+    }
     if (!slotTeacherId && staffOptions[0]) {
       setSlotTeacherId(staffOptions[0].id);
     }
-  }, [slotTeacherId, staffOptions]);
+  }, [slotTeacherId, staffOptions, teacherMode]);
 
   useEffect(() => {
     setFbDigest(null);
@@ -245,8 +378,12 @@ export function PtmWorkspace() {
 
   const eventSlots = useMemo(() => {
     if (!state || !eventId) return [];
-    return state.slots.filter((s) => s.eventId === eventId);
-  }, [state, eventId]);
+    // A teacher's desk also carries the slot behind each visible booking
+    // (for its time); the Slots tab lists only their own.
+    return state.slots.filter(
+      (s) => s.eventId === eventId && (!teacherMode || s.teacherStaffId === myStaffId),
+    );
+  }, [state, eventId, teacherMode, myStaffId]);
 
   const eventBookings = useMemo(() => {
     if (!state || !eventId) return [];
@@ -286,6 +423,11 @@ export function PtmWorkspace() {
   }
 
   function createEvent() {
+    if (teacherMode) {
+      // PTM events are the school's calendar — set by the office.
+      setError("PTM events are set by the office. You can add your own slots to them.");
+      return;
+    }
     if (editingEventId) {
       const r = updatePtmEvent({
         id: editingEventId,
@@ -335,6 +477,21 @@ export function PtmWorkspace() {
       .split(/[,;\s]+/)
       .map((s) => s.trim())
       .filter(Boolean);
+    if (teacherMode) {
+      if (!eventId) {
+        setError("Select a PTM event first");
+        return;
+      }
+      void teacherWrite(
+        "/api/v1/staff/ptm/slots",
+        {
+          method: "POST",
+          body: JSON.stringify({ eventId, starts, roomOrLink: slotRoom }),
+        },
+        `Added ${starts.length} slot(s)`,
+      );
+      return;
+    }
     const r = addPtmSlots({
       eventId,
       teacherStaffId: slotTeacherId,
@@ -354,6 +511,30 @@ export function PtmWorkspace() {
     const booking = state?.bookings.find((b) => b.id === fbBookingId);
     if (!booking) {
       setError("Select a booking");
+      return;
+    }
+    if (teacherMode) {
+      if (!(fbStrengths.trim() || fbAreas.trim() || fbFollowUp.trim())) {
+        setError("Write at least one of strengths, areas or follow-up");
+        return;
+      }
+      void teacherWrite(
+        "/api/v1/staff/ptm/booking",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            bookingId: fbBookingId,
+            feedback: { strengths: fbStrengths, areas: fbAreas, followUp: fbFollowUp },
+          }),
+        },
+        "Feedback saved",
+      ).then((ok) => {
+        if (!ok) return;
+        setFbStrengths("");
+        setFbAreas("");
+        setFbFollowUp("");
+        setFbBookingId("");
+      });
       return;
     }
     const r = savePtmFeedback({
@@ -514,8 +695,17 @@ export function PtmWorkspace() {
 
   if (!state || !masters || !sis) {
     return (
-      <div className="flex items-center justify-center px-4 py-12 text-sm text-muted-foreground">
-        Loading PTM…
+      <div className="flex flex-col items-center justify-center gap-3 px-4 py-12 text-sm text-muted-foreground">
+        {teacherMode && deskLoadError ? (
+          <>
+            <p className="text-[var(--danger)]">{deskLoadError}</p>
+            <Button type="button" variant="outline" size="sm" onClick={() => void loadTeacherDesk()}>
+              Try again
+            </Button>
+          </>
+        ) : (
+          "Loading PTM…"
+        )}
       </div>
     );
   }
@@ -569,16 +759,18 @@ export function PtmWorkspace() {
       <WorkspaceTabs
         value={tab}
         onValueChange={(value) => setTab(value as PtmTab)}
-        items={TAB_ITEMS}
+        items={tabItems}
         aria-label="PTM sections"
       >
 
-        <TabsContent value="dashboard">
-          <ModuleDashboardHost
-            moduleId="ptm"
-            onNavigateTab={(t) => setTab(t as PtmTab)}
-          />
-        </TabsContent>
+        {!teacherMode ? (
+          <TabsContent value="dashboard">
+            <ModuleDashboardHost
+              moduleId="ptm"
+              onNavigateTab={(t) => setTab(t as PtmTab)}
+            />
+          </TabsContent>
+        ) : null}
 
         <TabsContent value="events" className="space-y-6">
           <div className="grid gap-3">
@@ -603,10 +795,7 @@ export function PtmWorkspace() {
                       {" · "}
                       {e.classIds.length
                         ? e.classIds
-                            .map(
-                              (id) =>
-                                classOptions.find((c) => c.id === id)?.name,
-                            )
+                            .map((id) => classNameById.get(id))
                             .filter(Boolean)
                             .join(", ")
                         : "All classes"}
@@ -615,23 +804,25 @@ export function PtmWorkspace() {
                   {e.note ? (
                     <CardContent className="pt-0 text-sm">{e.note}</CardContent>
                   ) : null}
-                  <CardFooter className="border-t-0 pt-0">
-                    <DeskListActions
-                      readOnly={readOnly}
-                      onEdit={() => beginEditEvent(e)}
-                      onDelete={() => {
-                        const r = deletePtmEvent(e.id);
-                        if (!r.ok) setError(r.error);
-                        else {
-                          if (eventId === e.id) setEventId("");
-                          if (editingEventId === e.id) resetEventForm();
-                          refresh();
-                          flash("Event deleted");
-                        }
-                      }}
-                      deleteConfirm={`Delete PTM event "${e.name}"?`}
-                    />
-                  </CardFooter>
+                  {teacherMode ? null : (
+                    <CardFooter className="border-t-0 pt-0">
+                      <DeskListActions
+                        readOnly={readOnly}
+                        onEdit={() => beginEditEvent(e)}
+                        onDelete={() => {
+                          const r = deletePtmEvent(e.id);
+                          if (!r.ok) setError(r.error);
+                          else {
+                            if (eventId === e.id) setEventId("");
+                            if (editingEventId === e.id) resetEventForm();
+                            refresh();
+                            flash("Event deleted");
+                          }
+                        }}
+                        deleteConfirm={`Delete PTM event "${e.name}"?`}
+                      />
+                    </CardFooter>
+                  )}
                 </Card>
               ))
             )}
@@ -639,102 +830,114 @@ export function PtmWorkspace() {
 
           <Separator />
 
-          <Card>
-            <CardHeader>
-              <CardTitle>{editingEventId ? "Edit PTM event" : "New PTM event"}</CardTitle>
-              <CardDescription>
-                Schedule a parent–teacher meeting for selected classes.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="grid max-w-xl gap-4">
-              <div className="grid gap-1.5">
-                <Label htmlFor="ev-name">Name</Label>
-                <Input
-                  id="ev-name"
-                  value={evName}
-                  onChange={(e) => setEvName(e.target.value)}
-                  placeholder="Term PTM"
-                />
-              </div>
-              <div className="grid gap-4 sm:grid-cols-3">
+          {teacherMode ? (
+            <p className="max-w-xl text-sm text-muted-foreground">
+              PTM events are set by the office. You see the ones that include
+              your classes; add your own slots on the Slots tab and record
+              meeting notes on the Feedback tab.
+            </p>
+          ) : (
+            <Card>
+              <CardHeader>
+                <CardTitle>{editingEventId ? "Edit PTM event" : "New PTM event"}</CardTitle>
+                <CardDescription>
+                  Schedule a parent–teacher meeting for selected classes.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="grid max-w-xl gap-4">
                 <div className="grid gap-1.5">
-                  <Label htmlFor="ev-date">Date</Label>
+                  <Label htmlFor="ev-name">Name</Label>
                   <Input
-                    id="ev-date"
-                    type="date"
-                    value={evDate}
-                    onChange={(e) => setEvDate(e.target.value)}
+                    id="ev-name"
+                    value={evName}
+                    onChange={(e) => setEvName(e.target.value)}
+                    placeholder="Term PTM"
                   />
                 </div>
-                <div className="grid gap-1.5">
-                  <Label htmlFor="ev-end">End date</Label>
-                  <Input
-                    id="ev-end"
-                    type="date"
-                    value={evEndDate}
-                    onChange={(e) => setEvEndDate(e.target.value)}
-                  />
-                </div>
-                <div className="grid gap-1.5">
-                  <Label htmlFor="ev-mode">Mode</Label>
-                  <Select
-                    value={evMode}
-                    onValueChange={(v) => setEvMode(v as PtmMode)}
-                  >
-                    <SelectTrigger id="ev-mode" className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="in_person">In person</SelectItem>
-                      <SelectItem value="video">Video</SelectItem>
-                      <SelectItem value="phone">Phone</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="grid gap-2">
-                <Label>Classes</Label>
-                <div className="flex flex-wrap gap-3">
-                  {classOptions.map((c) => (
-                    <label
-                      key={c.id}
-                      className="flex cursor-pointer items-center gap-2 text-sm"
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="ev-date">Date</Label>
+                    <Input
+                      id="ev-date"
+                      type="date"
+                      value={evDate}
+                      onChange={(e) => setEvDate(e.target.value)}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="ev-end">End date</Label>
+                    <Input
+                      id="ev-end"
+                      type="date"
+                      value={evEndDate}
+                      onChange={(e) => setEvEndDate(e.target.value)}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="ev-mode">Mode</Label>
+                    <Select
+                      value={evMode}
+                      onValueChange={(v) => setEvMode(v as PtmMode)}
                     >
-                      <Checkbox
-                        checked={evClassIds.includes(c.id)}
-                        onCheckedChange={() => toggleClass(c.id)}
-                      />
-                      {c.name}
-                    </label>
-                  ))}
+                      <SelectTrigger id="ev-mode" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="in_person">In person</SelectItem>
+                        <SelectItem value="video">Video</SelectItem>
+                        <SelectItem value="phone">Phone</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="ev-note">Note</Label>
-                <Textarea
-                  id="ev-note"
-                  rows={2}
-                  value={evNote}
-                  onChange={(e) => setEvNote(e.target.value)}
-                />
-              </div>
-            </CardContent>
-            <CardFooter className="flex flex-wrap gap-2">
-              <Button type="button" onClick={createEvent} disabled={readOnly}>
-                {editingEventId ? "Save changes" : "Create event"}
-              </Button>
-              {editingEventId ? (
-                <Button type="button" variant="outline" onClick={resetEventForm}>
-                  Cancel
+                <div className="grid gap-2">
+                  <Label>Classes</Label>
+                  <div className="flex flex-wrap gap-3">
+                    {classOptions.map((c) => (
+                      <label
+                        key={c.id}
+                        className="flex cursor-pointer items-center gap-2 text-sm"
+                      >
+                        <Checkbox
+                          checked={evClassIds.includes(c.id)}
+                          onCheckedChange={() => toggleClass(c.id)}
+                        />
+                        {c.name}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="ev-note">Note</Label>
+                  <Textarea
+                    id="ev-note"
+                    rows={2}
+                    value={evNote}
+                    onChange={(e) => setEvNote(e.target.value)}
+                  />
+                </div>
+              </CardContent>
+              <CardFooter className="flex flex-wrap gap-2">
+                <Button type="button" onClick={createEvent} disabled={readOnly}>
+                  {editingEventId ? "Save changes" : "Create event"}
                 </Button>
-              ) : null}
-            </CardFooter>
-          </Card>
+                {editingEventId ? (
+                  <Button type="button" variant="outline" onClick={resetEventForm}>
+                    Cancel
+                  </Button>
+                ) : null}
+              </CardFooter>
+            </Card>
+          )}
         </TabsContent>
 
         <TabsContent value="slots" className="space-y-6">
           {!eventId ? (
-            <p className="text-sm text-muted-foreground">Create an event first.</p>
+            <p className="text-sm text-muted-foreground">
+              {teacherMode
+                ? "No PTM event includes your classes yet — the office sets them."
+                : "Create an event first."}
+            </p>
           ) : (
             <>
               <div className="grid gap-2">
@@ -760,6 +963,14 @@ export function PtmWorkspace() {
                                 className="text-xs font-semibold text-[var(--danger)]"
                                 onClick={() => {
                                   if (!window.confirm("Delete this slot?")) return;
+                                  if (teacherMode) {
+                                    void teacherWrite(
+                                      `/api/v1/staff/ptm/slots?slotId=${encodeURIComponent(s.id)}`,
+                                      { method: "DELETE" },
+                                      "Slot deleted",
+                                    );
+                                    return;
+                                  }
                                   const r = deletePtmSlot(s.id);
                                   if (!r.ok) setError(r.error);
                                   else {
@@ -785,7 +996,11 @@ export function PtmWorkspace() {
                 <CardHeader>
                   <CardTitle>Add slots</CardTitle>
                   <CardDescription>
-                    Comma-separated start times for the selected teacher.
+                    {!teacherMode
+                      ? "Comma-separated start times for the selected teacher."
+                      : myStaffId
+                        ? "Comma-separated start times for your own slots."
+                        : "Your login is not linked to a staff record — ask the office to link it before adding slots."}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="grid max-w-xl gap-4">
@@ -794,6 +1009,7 @@ export function PtmWorkspace() {
                     <Select
                       value={slotTeacherId}
                       onValueChange={(v) => setSlotTeacherId(v ?? "")}
+                      disabled={teacherMode}
                     >
                       <SelectTrigger id="slot-teacher" className="w-full">
                         <SelectValue />
@@ -826,8 +1042,12 @@ export function PtmWorkspace() {
                   </div>
                 </CardContent>
                 <CardFooter>
-                  <Button type="button" onClick={addSlots}>
-                    Add slots
+                  <Button
+                    type="button"
+                    onClick={addSlots}
+                    disabled={teacherMode && (busy || readOnly || !myStaffId)}
+                  >
+                    {teacherMode && busy ? "Saving…" : "Add slots"}
                   </Button>
                 </CardFooter>
               </Card>
@@ -859,10 +1079,12 @@ export function PtmWorkspace() {
                     roomOrLink: slot.roomOrLink,
                   });
                   window.setTimeout(() => openWaMe(mobile, msg, fallbackMobile), n * 500);
-                  markPtmWhatsApp(b.id, "reminded");
+                  // The "reminded" stamp is a whole-desk save — the office's.
+                  // A teacher's WhatsApp still opens; it just isn't stamped.
+                  if (!teacherMode) markPtmWhatsApp(b.id, "reminded");
                   n += 1;
                 }
-                refresh();
+                if (!teacherMode) refresh();
                 if (!n) setError("No booked parents with WhatsApp mobile");
                 else flash(`Opened WhatsApp reminder for ${n} booking(s)`);
               }}
@@ -921,8 +1143,10 @@ export function PtmWorkspace() {
                             roomOrLink: slot.roomOrLink,
                           });
                           openWaMe(mobile, msg, fallbackMobile);
-                          markPtmWhatsApp(b.id, "confirmed");
-                          refresh();
+                          if (!teacherMode) {
+                            markPtmWhatsApp(b.id, "confirmed");
+                            refresh();
+                          }
                           flash("WhatsApp confirm opened");
                         }}
                       >
@@ -952,8 +1176,10 @@ export function PtmWorkspace() {
                             roomOrLink: slot.roomOrLink,
                           });
                           openWaMe(mobile, msg, fallbackMobile);
-                          markPtmWhatsApp(b.id, "reminded");
-                          refresh();
+                          if (!teacherMode) {
+                            markPtmWhatsApp(b.id, "reminded");
+                            refresh();
+                          }
                           flash("WhatsApp reminder opened");
                         }}
                       >
@@ -963,7 +1189,19 @@ export function PtmWorkspace() {
                         type="button"
                         variant="secondary"
                         size="sm"
+                        disabled={teacherMode && (busy || readOnly)}
                         onClick={() => {
+                          if (teacherMode) {
+                            void teacherWrite(
+                              "/api/v1/staff/ptm/booking",
+                              {
+                                method: "POST",
+                                body: JSON.stringify({ bookingId: b.id, status: "completed" }),
+                              },
+                              "Marked completed",
+                            );
+                            return;
+                          }
                           setPtmBookingStatus(b.id, "completed");
                           refresh();
                           flash("Marked completed");
@@ -975,7 +1213,19 @@ export function PtmWorkspace() {
                         type="button"
                         variant="outline"
                         size="sm"
+                        disabled={teacherMode && (busy || readOnly)}
                         onClick={() => {
+                          if (teacherMode) {
+                            void teacherWrite(
+                              "/api/v1/staff/ptm/booking",
+                              {
+                                method: "POST",
+                                body: JSON.stringify({ bookingId: b.id, status: "no_show" }),
+                              },
+                              "Marked no-show",
+                            );
+                            return;
+                          }
                           setPtmBookingStatus(b.id, "no_show");
                           refresh();
                           flash("Marked no-show");
@@ -983,18 +1233,21 @@ export function PtmWorkspace() {
                       >
                         No-show
                       </Button>
-                      <Button
-                        type="button"
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => {
-                          cancelPtmBooking(b.id);
-                          refresh();
-                          flash("Cancelled");
-                        }}
-                      >
-                        Cancel
-                      </Button>
+                      {/* Cancelling a parent's booking is the office's call. */}
+                      {teacherMode ? null : (
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => {
+                            cancelPtmBooking(b.id);
+                            refresh();
+                            flash("Cancelled");
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      )}
                     </CardFooter>
                   ) : null}
                 </Card>
@@ -1064,8 +1317,12 @@ export function PtmWorkspace() {
               </div>
             </CardContent>
             <CardFooter>
-              <Button type="button" onClick={saveFeedback}>
-                Save feedback
+              <Button
+                type="button"
+                onClick={saveFeedback}
+                disabled={teacherMode && (busy || readOnly)}
+              >
+                {teacherMode && busy ? "Saving…" : "Save feedback"}
               </Button>
             </CardFooter>
           </Card>

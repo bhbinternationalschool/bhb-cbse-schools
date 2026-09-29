@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { staffSectionScope } from "@/lib/api/v1/staffScope";
 import {
   authorizeSchoolDataDesk,
   SCHOOL_DATA_DESK_RBAC,
@@ -44,6 +45,25 @@ type PtmDeskPostBody = Pick<
 export async function POST(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["ptm-desk"], "POST");
   if (!auth.ok) return auth.response
+  // This push replaces the whole school's PTM desk (every event, slot,
+  // booking and feedback note). "ptm.edit" alone let a teacher's browser
+  // send it — a stale copy could drop other classes' bookings. Teachers add
+  // their own slots and record feedback through /api/v1/staff/ptm/slots and
+  // /api/v1/staff/ptm/booking; this route is the office's (2026-09-29).
+  if (!auth.viaMirrorSecret) {
+    const scope = await staffSectionScope(auth.ctx).catch(() => null);
+    if (!scope?.unrestricted) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Only the office or principal can save the whole PTM desk. " +
+            "Your own slots and meeting feedback are saved on their own.",
+        },
+        { status: 403 },
+      );
+    }
+  }
   if (!ptmDualWriteDbEnabled()) {
     return NextResponse.json({
       ok: true,

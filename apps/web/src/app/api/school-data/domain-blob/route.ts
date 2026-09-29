@@ -4,6 +4,15 @@ import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import type { DomainBlobTable } from "@/lib/domainBlobPersistence";
 import { domainBlobRbacModule } from "@/lib/domainBlobRbac";
 import { fetchDomainBlobFromDb, pushDomainBlobToDb } from "@/lib/domainBlob.server";
+import { staffSectionScope } from "@/lib/api/v1/staffScope";
+
+/**
+ * Blobs that hold a whole-school desk a teacher now edits piece by piece
+ * through scoped v1 routes. A teacher's push of one would overwrite every
+ * other class's rows, so only school-wide sessions may send it
+ * (2026-09-29, PTM first).
+ */
+const SCHOOL_WIDE_ONLY_BLOBS = new Set<DomainBlobTable>(["ptm_state"]);
 
 export const runtime = "nodejs";
 
@@ -62,6 +71,20 @@ export async function POST(req: Request) {
   const rbacModule = domainBlobRbacModule(table)!;
   const auth = await requireStaffPermission(req, rbacModule, "edit");
   if (!auth.ok) return auth.response;
+  if (SCHOOL_WIDE_ONLY_BLOBS.has(table) && !auth.viaMirrorSecret) {
+    const scope = await staffSectionScope(auth.ctx).catch(() => null);
+    if (!scope?.unrestricted) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Only the office or principal can save the whole PTM desk. " +
+            "Your own slots and meeting feedback are saved on their own.",
+        },
+        { status: 403 },
+      );
+    }
+  }
 
   const result = await pushDomainBlobToDb(table, body.state);
   if (!result.ok) {
