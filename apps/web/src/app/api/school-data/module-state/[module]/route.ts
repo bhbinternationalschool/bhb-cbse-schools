@@ -7,6 +7,9 @@ import { NextResponse } from "next/server";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { isModuleStateKey, MODULE_STATE_DEFS } from "@/lib/moduleStateRegistry";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { complaintScopeFilter } from "@/lib/api/v1/staffComplaints";
+import { staffSectionScope } from "@/lib/api/v1/staffScope";
+import type { ComplaintTicket } from "@/lib/complaints";
 
 export const runtime = "nodejs";
 
@@ -32,9 +35,33 @@ export async function GET(req: Request, ctx: RouteCtx) {
     // Unknown is not empty.
     return NextResponse.json({ ok: false, error: error.message }, { status: 503 });
   }
+  let state: unknown = data?.state ?? null;
+  if (module === "complaints" && !auth.viaMirrorSecret && state) {
+    // complaints.view is held by every teacher, and this row is the whole
+    // school's complaints book. A teacher's browser gets only the tickets
+    // about their own classes or assigned to them — the same set as
+    // /api/v1/staff/complaints (2026-09-29). Pushing it back is refused below.
+    let filter: Awaited<ReturnType<typeof complaintScopeFilter>>;
+    try {
+      filter = await complaintScopeFilter(auth.ctx);
+    } catch (e) {
+      // Unknown scope is not "everything": fail rather than guess.
+      return NextResponse.json(
+        { ok: false, error: e instanceof Error ? e.message : "Could not work out your classes" },
+        { status: 503 },
+      );
+    }
+    if (!filter.unrestricted) {
+      // Filter the stored rows as they are (normalizing would restamp
+      // every updatedAt); a row normalize would drop is dropped here too.
+      const book = state as { tickets?: unknown };
+      const tickets = Array.isArray(book.tickets) ? (book.tickets as ComplaintTicket[]) : [];
+      state = { ...(state as object), tickets: tickets.filter((t) => !!t && filter.allows(t)) };
+    }
+  }
   return NextResponse.json({
     ok: true,
-    state: data?.state ?? null,
+    state,
     updatedAt: data?.updated_at ? String(data.updated_at) : "",
   });
 }
@@ -46,6 +73,26 @@ export async function POST(req: Request, ctx: RouteCtx) {
   }
   const auth = await requireStaffPermission(req, MODULE_STATE_DEFS[module].rbac, "edit");
   if (!auth.ok) return auth.response;
+  if (module === "complaints" && !auth.viaMirrorSecret) {
+    // This push is the whole complaints book, upserted over the office's
+    // copy. "complaints.edit" alone let a teacher's browser send it — a stale
+    // or class-filtered copy would erase the office's triage and every other
+    // class's tickets. Teachers move their own tickets one at a time through
+    // /api/v1/staff/complaints/update; this route is the office's
+    // (2026-09-29, same rule as the attendance register push).
+    const scope = await staffSectionScope(auth.ctx).catch(() => null);
+    if (!scope?.unrestricted) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Only the office or principal can save the complaints book. " +
+            "Your own tickets are updated one at a time on the Complaints page.",
+        },
+        { status: 403 },
+      );
+    }
+  }
 
   let body: { state?: unknown };
   try {
