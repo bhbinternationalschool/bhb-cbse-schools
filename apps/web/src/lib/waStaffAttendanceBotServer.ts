@@ -9,6 +9,7 @@ import { loadMasters } from "@/lib/masters";
 import {
   applyWhatsAppStaffPunch,
   staffAttendanceStatusForWa,
+  staffPunchToday,
 } from "@/lib/staffAttendance.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { findStaffByMobile } from "@/lib/waRoleResolver";
@@ -230,6 +231,8 @@ export async function handleWaStaffAttendanceInbound(opts: {
   replyText: string;
   stub: boolean;
   error?: string;
+  /** A punch was recorded by this message. */
+  punched?: "in" | "out";
 }> {
   await ensureSchoolMirrorHydrated();
   const mobile10 = waNormalizeLocal10(opts.fromWaId);
@@ -286,6 +289,7 @@ export async function handleWaStaffAttendanceInbound(opts: {
 
   let replyText = "";
   let escalate = false;
+  let punched: "in" | "out" | undefined;
   let pending = thread.pending;
   let language: StaffAttLang | "" = thread.language || "";
   // Appended to whatever the bot was going to say, never sent instead of
@@ -363,6 +367,7 @@ export async function handleWaStaffAttendanceInbound(opts: {
     if (!result.ok) {
       replyText = result.error;
     } else {
+      punched = result.kind;
       replyText = composeStaffAttPunchSuccess({
         kind: result.kind,
         time: result.time,
@@ -375,7 +380,41 @@ export async function handleWaStaffAttendanceInbound(opts: {
       });
     }
   } else if (opts.location && !pending) {
-    replyText = staffAttLocationWithoutPendingText(lang);
+    // A pin with no IN typed first is still a punch IN when there has been
+    // none today — there is nothing else it could mean, and "reply IN first,
+    // then send the pin again" is a second trip for no reason. After an IN
+    // it stays a question: a pin sent again in the morning must not clock
+    // anybody out.
+    const today = await staffPunchToday(staff.id);
+    if (!today?.inTime) {
+      const result = await applyWhatsAppStaffPunch({
+        staff,
+        mobile10,
+        kind: "in",
+        geo: {
+          lat: opts.location.lat,
+          lng: opts.location.lng,
+          accuracyM: opts.location.accuracyM,
+          name: opts.location.name,
+          address: opts.location.address,
+        },
+      });
+      if (result.ok) punched = result.kind;
+      replyText = result.ok
+        ? composeStaffAttPunchSuccess({
+            kind: result.kind,
+            time: result.time,
+            distanceM: result.distanceM,
+            staffName: staff.fullName,
+            altMobile: result.altMobile,
+            earlyOut: false,
+            schoolEnd: "",
+            lang,
+          })
+        : result.error;
+    } else {
+      replyText = staffAttLocationWithoutPendingText(lang);
+    }
   } else if (intent === "in") {
     pending = { kind: "punch_in" };
     replyText = staffAttAskLocationText("in", lang);
@@ -435,5 +474,34 @@ export async function handleWaStaffAttendanceInbound(opts: {
     replyText,
     stub: !send.ok,
     error: send.ok ? undefined : send.error,
+    punched,
+  };
+}
+
+/** How long a punch waiting for its pin counts as open work. */
+const PUNCH_OPEN_MS = 20 * 60_000;
+
+/**
+ * The punch this number started and has not finished — IN or OUT waiting
+ * for a location pin, or an early OUT waiting for YES — or null.
+ */
+export async function staffAttendanceOpenWorkFor(
+  fromWaId: string,
+): Promise<{ kind: "punch"; what: string; how: string } | null> {
+  const mobile10 = waNormalizeLocal10(fromWaId);
+  const store = await readStore();
+  const thread = store.threads.find((t) => t.mobile === mobile10 && t.status !== "closed");
+  const pending = thread?.pending;
+  if (!thread || !pending) return null;
+  const at = Date.parse(thread.updatedAt || "");
+  if (!Number.isFinite(at) || Date.now() - at > PUNCH_OPEN_MS) return null;
+  const how = "send your location — 📎 → *Location* → *Send your current location*";
+  if (pending.kind === "punch_out_confirm") {
+    return { kind: "punch", what: "your early check-out", how: "reply *YES* to check out now" };
+  }
+  return {
+    kind: "punch",
+    what: pending.kind === "punch_in" ? "your punch IN — waiting for your location" : "your punch OUT — waiting for your location",
+    how,
   };
 }

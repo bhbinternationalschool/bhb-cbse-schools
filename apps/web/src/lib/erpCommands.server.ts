@@ -199,6 +199,7 @@ import {
   parseBareClassQuery,
   parseMarkAskReply,
 } from "@/lib/erpCommands";
+import { isCancelOpenWork, isClassChannelPostPrefix } from "@/lib/staffOnboarding";
 import { trackServerWork } from "@/lib/serverWork";
 
 export type ErpCommandFlow = "owner" | "staff" | "teacher";
@@ -218,6 +219,13 @@ export type ErpCommandInbound = {
   displayName: string;
   /** Voice note, when the message had no text (WhatsApp only). */
   audio?: { mediaId: string; mimeType?: string } | null;
+  /**
+   * A teacher's plain "yes" / "no" may answer this desk's confirm card:
+   * set when no class-channel draft is waiting for that word. Without it a
+   * teacher who typed YES on the attendance card got nothing — the word was
+   * reserved for class drafts even when there was none.
+   */
+  allowPlainConfirm?: boolean;
 };
 
 export type ErpCommandResult =
@@ -442,6 +450,37 @@ async function rememberPick(
   await writeStore({ ...st, pick: next });
 }
 
+/**
+ * A job this person started on the desk and has not finished — a confirm
+ * card waiting for YES/NO, or a register waiting for its absentees — or
+ * null. The unified bot uses it to finish that first before answering
+ * anything new.
+ */
+export async function commandDeskOpenWork(
+  actor: string,
+): Promise<{ kind: "confirm_card" | "register"; what: string; how: string } | null> {
+  const store = await readStore();
+  const nowMs = Date.now();
+  const card = store.pending[actor];
+  if (card && confirmIsFresh(card, nowMs)) {
+    const what = (card.summary || "").split("\n")[0]!.replace(/[*_]/g, "").trim();
+    return {
+      kind: "confirm_card",
+      what: what ? `confirming — ${what.slice(0, 80)}` : "a confirmation waiting for you",
+      how: "tap *YES* or *NO* on the card above (or reply YES / NO)",
+    };
+  }
+  const ask = (store.markAsk ?? {})[actor];
+  if (ask && markAskIsFresh(ask.at, nowMs)) {
+    return {
+      kind: "register",
+      what: `attendance for ${ask.section.label} — who is absent?`,
+      how: "reply the absent roll numbers, e.g. _4, 11_ — or _all present_",
+    };
+  }
+  return null;
+}
+
 /** Arm "who is absent?" for this person's next message. */
 async function rememberMarkAsk(actor: string, section: SectionMatch, date: string): Promise<void> {
   const st = await readStore();
@@ -631,6 +670,12 @@ export async function handleErpStaffCommand(
   }
   if (!text) return { handled: false };
 
+  // A teacher's class-channel post — "HW 6A Maths: …", "CW …", "Notice 8A:
+  // …" — is the class channel's. 29 Sep 2026: the teacher menu's own
+  // example was read here as a fee lookup ("due" reads as dues). Staff who
+  // are not teachers have no class channel, so for them it stays a command.
+  if (inbound.flow === "teacher" && isClassChannelPostPrefix(text)) return { handled: false };
+
   const actor = inbound.actorKey;
 
   // 2a. Director pause switch.
@@ -663,8 +708,9 @@ export async function handleErpStaffCommand(
   // 3. Pending confirm card (write commands).
   const pending = store.pending[actor] ?? null;
   const decision = parseConfirmReply(text, pending, {
-    // A teacher's plain "yes" belongs to the class-channel draft flow.
-    allowPlainWords: inbound.flow !== "teacher",
+    // A teacher's plain "yes" belongs to the class-channel draft flow —
+    // when there is one waiting (see allowPlainConfirm).
+    allowPlainWords: inbound.flow !== "teacher" || inbound.allowPlainConfirm === true,
   });
   if (decision) {
     if (!pending || pending.token !== decision.token) {
@@ -712,6 +758,16 @@ export async function handleErpStaffCommand(
   // a section to take its register marks THAT section, through the same
   // confirm card as the one-line command.
   const markAsk = (store.markAsk ?? {})[actor];
+  if (markAsk && markAskIsFresh(markAsk.at, nowMs) && isCancelOpenWork(text)) {
+    const rest = { ...(store.markAsk ?? {}) };
+    delete rest[actor];
+    await writeStore({ ...store, markAsk: rest });
+    return {
+      handled: true,
+      audience: "erp_command_confirm",
+      text: `Cancelled — nothing was marked for ${markAsk.section.label}.`,
+    };
+  }
   if (markAsk && markAskIsFresh(markAsk.at, nowMs)) {
     const spec = parseMarkAskReply(text);
     if (spec) {

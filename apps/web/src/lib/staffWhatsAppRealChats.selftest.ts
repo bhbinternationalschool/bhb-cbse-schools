@@ -29,11 +29,11 @@ import {
   markAskIsFresh,
   MY_SECTIONS_MARKER,
 } from "./erpCommands";
-import { detectOwnAttendanceAsk } from "./waStaffAttendanceBotEngine";
+import { detectOwnAttendanceAsk, staffAttAskLocationText } from "./waStaffAttendanceBotEngine";
 import { shouldRouteStaffAttendance } from "./waStaffAttendanceBotServer";
 import {
+  shouldShowUnifiedMenu,
   composeStaffFallbackText,
-  composeUnknownStaffAskReply,
   isStaffHumanAsk,
   looksLikeStaffAsk,
   readVisitorName,
@@ -41,8 +41,35 @@ import {
 import { detectStaffBotKeyword } from "./waStaffBotPrompts";
 import { roleFlowInteractiveMenu } from "./waUnifiedMenus";
 import { isLikelyClassChannelPost } from "./waClassChannelEngine";
+import { composeStaffLinkIntro } from "./staffOnboarding";
 
 console.log("staffWhatsAppRealChats.selftest.ts");
+
+/* ── A location pin is a punch, not a menu request ─────────────────── */
+
+// Every punch on 29 Sep failed here: the pin has no text, and no text meant
+// "show the menu". Five staff sent IN and then their location, some twice.
+assert.equal(
+  shouldShowUnifiedMenu({ text: "", staff: true, known: true, hasSession: true, hasAudio: false, hasLocation: true }),
+  false,
+  "a staff location pin must reach the attendance bot",
+);
+assert.equal(
+  shouldShowUnifiedMenu({ text: "", staff: false, known: true, hasSession: true, hasAudio: false, hasLocation: true }),
+  false,
+  "nor is a parent's pin a menu request",
+);
+// A bare empty message with nothing attached still opens the menu, as before.
+assert.equal(
+  shouldShowUnifiedMenu({ text: "", staff: true, known: true, hasSession: true, hasAudio: false, hasLocation: false }),
+  true,
+);
+for (const lang of ["en", "hi"] as const) {
+  const t = staffAttAskLocationText("in", lang);
+  assert.ok(t.includes("Send your current location"), "names the option that works");
+  assert.ok(t.includes("Share live location"), "and warns off the one that does not");
+  assert.ok(/1\./.test(t) && /3\./.test(t), "as numbered steps");
+}
 
 /* ── Their own attendance, not the class register ──────────────────── */
 
@@ -247,9 +274,14 @@ for (const t of [
   assert.equal(looksLikeStaffAsk(t), false, `a family, not staff: "${t}"`);
 }
 {
-  const r = composeUnknownStaffAskReply();
+  const r = composeStaffLinkIntro();
   assert.ok(r.includes("not on the school's staff record"));
   assert.ok(r.includes("स्टाफ रिकॉर्ड"), "in Hindi too — an unknown number gets the school's default language");
+  assert.ok(r.includes("employee code"), "asks for something that finds the record");
+}
+// Words parents use are not staff words, even though teachers use them too.
+for (const t of ["homework kya hai", "class teacher ka number", "timetable of class 5", "how many students in class 3"]) {
+  assert.equal(looksLikeStaffAsk(t), false, `a parent's question: "${t}"`);
 }
 
 // A sentence, a button tap or a menu word is not a name.

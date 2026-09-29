@@ -100,6 +100,8 @@ SELFTESTS=(
   test:parent-messages-hindi
   test:parent-bot-real-chats
   test:staff-wa-real-chats
+  test:staff-onboarding
+  test:staff-leave-wa
   test:pin-review
   test:due-pay-link
   test:fee-dues-server-inputs

@@ -117,19 +117,24 @@ export function composeStaffFallbackText(opts: { firstName?: string; text?: stri
  * Words a teacher uses about their work. "class" alone is not one of them —
  * "class 5 admission" is a parent — only "my class" / "mere class" is.
  */
+/**
+ * Words a teacher uses about their own work. Not "homework", "timetable",
+ * "students" or "class teacher" on their own — from an unknown number those
+ * are far more often a parent — and not "class" alone ("class 5 admission"
+ * is a parent). "My class" / "mere class" and attendance words are staff.
+ */
 const STAFF_ASK_WORDS =
-  /(?<![\p{L}\p{M}\p{N}])(attendance|attendence|atendance|hazri|haziri|हाजिरी|हाज़िरी|section|students|register|homework|roll\s*no|timetable|class\s*teacher|(?:my|mere|meri|mera|apni|apne)\s+class|छात्रों|मेरी\s+कक्षा)(?![\p{L}\p{M}\p{N}])/iu;
+  /(?<![\p{L}\p{M}\p{N}])(attendance|attendence|atendance|hazri|haziri|हाजिरी|हाज़िरी|register|roll\s*no|(?:my|mere|meri|mera|apni|apne)\s+(?:class|classes|section|students)|मेरी\s+कक्षा)(?![\p{L}\p{M}\p{N}])/iu;
 /** A parent asking about their own child, or a new family — never staff. */
 const PARENT_ASK_WORDS =
-  /(?<![\p{L}\p{M}\p{N}])(admission|fees?|child|children|son|daughter|beta|beti|bachch?a|bachch?e|bachchi|ward|baby|kid|kids|बच्चा|बच्चे|बेटा|बेटी|प्रवेश|फीस)(?![\p{L}\p{M}\p{N}])/iu;
+  /(?<![\p{L}\p{M}\p{N}])(admission|fees?|child|children|son|daughter|beta|beti|bachch?a|bachch?e|bachchi|ward|baby|kid|kids|parent|parents|papa|mummy|mother|father|guardian|abhibhavak|बच्चा|बच्चे|बेटा|बेटी|प्रवेश|फीस|अभिभावक)(?![\p{L}\p{M}\p{N}])/iu;
 
 /**
  * An unknown number writing like a member of staff — "Mere class ka
  * attendance lena hai", "Show my class students name". 29 Sep 2026: two
  * teachers whose mobiles were not on their staff record got the visitor
- * name question, then the admission-enquiry menu three times over, whatever
- * they typed. There is nothing the bot can do for them until the number is
- * on the record, so it should say exactly that, once, and tell the office.
+ * name question, then the admission-enquiry menu three times over. They are
+ * now offered a way to find their record (waUnifiedBotServer staffLinkStep).
  */
 export function looksLikeStaffAsk(text: string): boolean {
   const t = (text || "").trim();
@@ -137,16 +142,9 @@ export function looksLikeStaffAsk(text: string): boolean {
   return STAFF_ASK_WORDS.test(t) && !PARENT_ASK_WORDS.test(t);
 }
 
-export function composeUnknownStaffAskReply(): string {
-  return [
-    "This number is not on the school's staff record, so staff features (class lists, attendance, homework) cannot open on it.",
-    "",
-    "If you work at the school, ask the office to add *this* mobile number to your staff profile — then send *hi* again.",
-    "",
-    "यह नंबर स्कूल के स्टाफ रिकॉर्ड में नहीं है। अगर आप स्कूल स्टाफ हैं, तो ऑफिस से यह नंबर अपनी स्टाफ प्रोफ़ाइल में जुड़वाएँ, फिर *hi* भेजें।",
-    "",
-    "_Your message has been passed to the office._",
-  ].join("\n");
+/** Parent or visitor wording — a way out of the staff-record search. */
+export function looksLikeParentAsk(text: string): boolean {
+  return PARENT_ASK_WORDS.test(text || "");
 }
 
 /**
@@ -201,9 +199,15 @@ export function shouldShowUnifiedMenu(opts: {
   known: boolean;
   hasSession: boolean;
   hasAudio: boolean;
+  /**
+   * A location pin. It has no text, and until 29 Sep 2026 that made it a
+   * menu request — every staff attendance punch that day was answered with
+   * the greeting menu instead of being recorded.
+   */
+  hasLocation?: boolean;
 }): boolean {
   if (!opts.known && opts.hasSession && looksLikeForward(opts.text)) return false;
-  if (!opts.text.trim() && opts.hasAudio) return false;
+  if (!opts.text.trim() && (opts.hasAudio || opts.hasLocation)) return false;
   return isUnifiedMenuCommand(opts.text, { staff: opts.staff });
 }
 

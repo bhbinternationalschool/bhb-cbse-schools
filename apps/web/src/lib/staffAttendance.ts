@@ -528,9 +528,14 @@ export function upsertStaffMarkInState(
     input.date,
     input.academicYearCode,
   );
+  // A register created by the day's first punch starts everyone "Not
+  // punched". Anyone on approved leave that day starts as leave instead, so
+  // the register is right before the desk ever opens it.
   const marks = existing
     ? [...existing.marks]
-    : defaultStaffMarks(input.roster);
+    : normalizeAttendanceSettings(state.settings).syncLeaveToAttendance
+      ? applyApprovedLeaveToMarks(defaultStaffMarks(input.roster), input.date, input.academicYearCode)
+      : defaultStaffMarks(input.roster);
 
   const idx = marks.findIndex((m) => m.staffId === input.staffId);
   const base: StaffAttendanceMark =
@@ -955,15 +960,24 @@ export function startOutdoorDuty(input: {
   startGeo?: OutdoorDutyGeoPoint | null;
   createdBy: string;
   roster: StaffRecord[];
+  /** Server: compute against this (fresh) state and do not save — the
+   * caller writes the one register + session itself. */
+  state?: StaffAttendanceState;
+  persist?: boolean;
 }):
-  | { ok: true; state: StaffAttendanceState; session: OutdoorDutySession }
+  | {
+      ok: true;
+      state: StaffAttendanceState;
+      session: OutdoorDutySession;
+      register: StaffAttendanceRegister;
+    }
   | { ok: false; error: string } {
   const actorError = outdoorDutyActorError(input.roster, input.staffId);
   if (actorError) return { ok: false, error: actorError };
   if (!input.destination.trim()) {
     return { ok: false, error: "Destination is required" };
   }
-  const state = loadStaffAttendance();
+  const state = input.state ?? loadStaffAttendance();
   if (activeOutdoorDutyForStaff(state, input.staffId)) {
     return {
       ok: false,
@@ -995,7 +1009,7 @@ export function startOutdoorDuty(input: {
     existingMark?.note || "",
     `Outdoor duty · ${OUTDOOR_DUTY_PURPOSE_LABELS[input.purpose]} · ${session.destination}`,
   );
-  const { state: stateWithMark } = upsertStaffMarkInState(state, {
+  const { state: stateWithMark, register } = upsertStaffMarkInState(state, {
     academicYearCode: input.academicYearCode,
     date,
     staffId: input.staffId,
@@ -1013,10 +1027,10 @@ export function startOutdoorDuty(input: {
     ...stateWithMark,
     outdoorDuty: [session, ...state.outdoorDuty],
   };
-  if (!saveStaffAttendanceSelfOrModule(nextState, input.staffId)) {
+  if (input.persist !== false && !saveStaffAttendanceSelfOrModule(nextState, input.staffId)) {
     return { ok: false, error: "You don't have permission to do this" };
   }
-  return { ok: true, state: nextState, session };
+  return { ok: true, state: nextState, session, register };
 }
 
 /** Staff checks back in on returning from official off-campus work. */
@@ -1027,17 +1041,27 @@ export function endOutdoorDuty(input: {
   endGeo?: OutdoorDutyGeoPoint | null;
   markedBy: string;
   roster: StaffRecord[];
+  state?: StaffAttendanceState;
+  persist?: boolean;
 }):
-  | { ok: true; state: StaffAttendanceState; session: OutdoorDutySession }
+  | {
+      ok: true;
+      state: StaffAttendanceState;
+      session: OutdoorDutySession;
+      register: StaffAttendanceRegister;
+    }
   | { ok: false; error: string } {
   const actorError = outdoorDutyActorError(input.roster, input.staffId);
   if (actorError) return { ok: false, error: actorError };
-  const state = loadStaffAttendance();
+  const state = input.state ?? loadStaffAttendance();
   const idx = state.outdoorDuty.findIndex((s) => s.id === input.sessionId);
   if (idx < 0) return { ok: false, error: "Outdoor duty session not found" };
   const before = state.outdoorDuty[idx]!;
   if (before.status !== "active") {
     return { ok: false, error: "This session is already closed" };
+  }
+  if (before.staffId !== input.staffId) {
+    return { ok: false, error: "This outdoor duty belongs to someone else" };
   }
 
   const now = new Date().toISOString();
@@ -1065,7 +1089,7 @@ export function endOutdoorDuty(input: {
       ? `Outdoor duty closed · ${worked} · returned to school`
       : `Outdoor duty closed · ${worked}`,
   );
-  const { state: stateWithMark } = upsertStaffMarkInState(state, {
+  const { state: stateWithMark, register } = upsertStaffMarkInState(state, {
     academicYearCode: input.academicYearCode,
     date,
     staffId: input.staffId,
@@ -1080,8 +1104,8 @@ export function endOutdoorDuty(input: {
   });
 
   const nextState: StaffAttendanceState = { ...stateWithMark, outdoorDuty };
-  if (!saveStaffAttendanceSelfOrModule(nextState, input.staffId)) {
+  if (input.persist !== false && !saveStaffAttendanceSelfOrModule(nextState, input.staffId)) {
     return { ok: false, error: "You don't have permission to do this" };
   }
-  return { ok: true, state: nextState, session };
+  return { ok: true, state: nextState, session, register };
 }

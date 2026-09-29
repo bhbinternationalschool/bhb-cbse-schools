@@ -86,24 +86,38 @@ export function staffAttBotWelcomeText(staffName: string | undefined, lang: Staf
   ].join("\n");
 }
 
+/**
+ * How to send the pin, step by step. Not "live location": WhatsApp's
+ * "Share live location" is a different message, and the business API does
+ * not deliver it as a pin — the one that works is "Send your current
+ * location".
+ */
 export function staffAttAskLocationText(action: "in" | "out", lang: StaffAttLang): string {
   if (lang === "hi") {
     const verb = action === "in" ? "पंच *IN*" : "पंच *OUT*";
     return [
       `*${verb} के लिए लोकेशन भेजें*`,
       "",
-      "📎 → *Location* → *Send your current location* पर टैप करें।",
-      "सेव की गई जगह / घर का पिन मान्य नहीं — स्कूल में लाइव GPS भेजें।",
+      "1. नीचे 📎 (या +) पर टैप करें",
+      "2. *Location* चुनें",
+      "3. *Send your current location* पर टैप करें",
+      "",
+      "⚠️ *Share live location* नहीं — वह पंच नहीं करता।",
+      "सेव की गई जगह / घर का पिन मान्य नहीं — स्कूल में रहते हुए भेजें।",
       "",
       "रद्द करने के लिए *CANCEL* लिखें।",
     ].join("\n");
   }
   const verb = action === "in" ? "punch IN" : "punch OUT";
   return [
-    `*Share location to ${verb}*`,
+    `*Send your location to ${verb}*`,
     "",
-    "Tap 📎 → *Location* → *Send your current location*.",
-    "Saved places / home pins are not accepted — use live GPS at school.",
+    "1. Tap 📎 (or +) next to the message box",
+    "2. Choose *Location*",
+    "3. Tap *Send your current location*",
+    "",
+    "⚠️ Not *Share live location* — that one does not punch.",
+    "Saved places / home pins are not accepted — send it while you are at school.",
     "",
     "Reply *CANCEL* to abort.",
   ].join("\n");

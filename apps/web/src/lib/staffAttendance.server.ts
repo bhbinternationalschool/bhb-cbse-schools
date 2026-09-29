@@ -425,6 +425,73 @@ export async function applyWhatsAppStaffPunch(opts: {
   };
 }
 
+/**
+ * Today's punch for one staff member — IN and OUT times, "" when missing —
+ * or null when there is no mark at all today.
+ */
+export async function staffPunchToday(
+  staffId: string,
+): Promise<{ inTime: string; outTime: string } | null> {
+  // Fresh: the punch may have been saved by another server a minute ago.
+  const state = await loadStaffAttendanceServer({ fresh: true });
+  const masters = loadMasters();
+  const ay = currentAcademicYearCode(masters);
+  const reg = findStaffRegister(state, todayIst(), ay);
+  const mark = reg?.marks.find((m) => m.staffId === staffId);
+  if (!mark) return null;
+  return { inTime: mark.inTime || "", outTime: mark.outTime || "" };
+}
+
+/** Is this staff member exempt from attendance — the same list the register uses? */
+export async function staffAttendanceExempt(staffId: string): Promise<boolean> {
+  const state = await loadStaffAttendanceServer();
+  return (await exemptStaffIdsServer(normalizeAttendanceSettings(state.settings))).has(staffId);
+}
+
+/**
+ * Approved leave onto the days whose register already exists — today, once
+ * anyone has punched. Days with no register yet need nothing: the register
+ * created on that day starts this person as on leave (upsertStaffMarkInState).
+ * Returns how many days were marked.
+ */
+export async function markApprovedLeaveOnRegisters(opts: {
+  staffId: string;
+  fromDate: string;
+  toDate: string;
+  halfDay: boolean;
+  typeCode: string;
+  by: string;
+}): Promise<number> {
+  let state = await loadStaffAttendanceFresh();
+  const masters = loadMasters();
+  const ay = currentAcademicYearCode(masters);
+  const roster = masters.staff ?? [];
+  let marked = 0;
+  const end = opts.halfDay ? opts.fromDate : opts.toDate;
+  for (let d = opts.fromDate; d <= end; ) {
+    if (findStaffRegister(state, d, ay)) {
+      const merged = upsertStaffMarkInState(state, {
+        academicYearCode: ay,
+        date: d,
+        staffId: opts.staffId,
+        status: opts.halfDay ? "HD" : "LE",
+        note: opts.halfDay ? `Half-day leave (${opts.typeCode})` : `On leave (${opts.typeCode})`,
+        punchWay: "leave_sync",
+        markedBy: opts.by,
+        roster,
+      });
+      state = merged.state;
+      // One day's register at a time, confirmed by the database — the same
+      // way a punch is saved.
+      if ((await saveStaffPunchRegister(state, merged.register)).ok) marked += 1;
+    }
+    const next = new Date(`${d}T00:00:00Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    d = next.toISOString().slice(0, 10);
+  }
+  return marked;
+}
+
 export async function staffAttendanceStatusForWa(
   staffId: string,
 ): Promise<string> {
@@ -435,7 +502,7 @@ export async function staffAttendanceStatusForWa(
   const reg = findStaffRegister(state, date, ay);
   const mark = reg?.marks.find((m) => m.staffId === staffId);
   if (!mark) {
-    return `*Attendance* — ${date}\n\nNo punch yet. Reply *IN* and share your live location pin.`;
+    return `*Attendance* — ${date}\n\nNo punch yet. To punch IN, send your location: 📎 → *Location* → *Send your current location*.`;
   }
   const geo = mark.punchGeo
     ? `📍 last pin ~${formatDistanceLabel(mark.punchGeo.distanceM ?? -1)} from school`
@@ -447,8 +514,118 @@ export async function staffAttendanceStatusForWa(
     mark.note ? `Note: ${mark.note}` : null,
     geo || null,
     "",
-    "Reply *IN* or *OUT* + location pin to update.",
+    "To punch, send your location: 📎 → *Location* → *Send your current location*.",
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+/**
+ * Write ONE member of staff's mark for one day, server-side: fresh read,
+ * single-register write confirmed by the database. The field-survey bridge
+ * used to write the browser's copy, which only staff.edit could save — a
+ * surveyor's Start/End never reached the register.
+ */
+export async function applyStaffDayMarkServer(opts: {
+  staffId: string;
+  date: string;
+  academicYearCode?: string;
+  markedBy: string;
+  build: (existing: import("@/lib/staffAttendance").StaffAttendanceMark | null) => {
+    status: import("@/lib/attendance").AttendanceStatus;
+    inTime?: string;
+    outTime?: string;
+    note: string;
+    punchWay: import("@/lib/staffAttendance").AttendancePunchWay;
+  };
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const state = await loadStaffAttendanceFresh();
+  const settings = normalizeAttendanceSettings(state.settings);
+  const masters = loadMasters();
+  const ay = opts.academicYearCode || currentAcademicYearCode(masters);
+  const exempt = await exemptStaffIdsServer(settings);
+  const roster = (masters.staff ?? []).filter((s) => !exempt.has(s.id));
+  const existing =
+    findStaffRegister(state, opts.date, ay)?.marks.find((m) => m.staffId === opts.staffId) ??
+    null;
+  const next = opts.build(existing);
+  const merged = upsertStaffMarkInState(state, {
+    academicYearCode: ay,
+    date: opts.date,
+    staffId: opts.staffId,
+    ...next,
+    markedBy: opts.markedBy,
+    roster,
+  });
+  const saved = await saveStaffPunchRegister(merged.state, merged.register);
+  return saved.ok
+    ? { ok: true }
+    : { ok: false, error: "Attendance could not be saved to the school database. Please try again." };
+}
+
+/**
+ * Outdoor duty check-out / check-in, server-side. Same rules as the desk
+ * (lib/staffAttendance.ts start/endOutdoorDuty), computed on a fresh copy;
+ * writes that day's register and the one duty session. Until 2026-09-29 the
+ * browser pushed the whole staff register for this — refused for anyone
+ * who is not office — so outdoor duty never saved for a teacher.
+ */
+export async function applyOutdoorDutyServer(opts: {
+  staff: StaffRecord;
+  action: "start" | "end";
+  purpose?: import("@/lib/staffAttendance").OutdoorDutyPurpose;
+  destination?: string;
+  note?: string;
+  sessionId?: string;
+  geo?: import("@/lib/staffAttendance").OutdoorDutyGeoPoint | null;
+  actorName: string;
+  academicYearCode: string;
+}): Promise<
+  | { ok: true; session: import("@/lib/staffAttendance").OutdoorDutySession }
+  | { ok: false; error: string }
+> {
+  const { startOutdoorDuty, endOutdoorDuty } = await import("@/lib/staffAttendance");
+  const state = await loadStaffAttendanceFresh();
+  const masters = loadMasters();
+  const roster = masters.staff ?? [];
+  const r =
+    opts.action === "start"
+      ? startOutdoorDuty({
+          academicYearCode: opts.academicYearCode,
+          staffId: opts.staff.id,
+          purpose: opts.purpose ?? "other",
+          destination: opts.destination || "",
+          note: opts.note,
+          startGeo: opts.geo ?? null,
+          createdBy: opts.actorName,
+          roster,
+          state,
+          persist: false,
+        })
+      : endOutdoorDuty({
+          academicYearCode: opts.academicYearCode,
+          sessionId: opts.sessionId || "",
+          staffId: opts.staff.id,
+          endGeo: opts.geo ?? null,
+          markedBy: opts.actorName,
+          roster,
+          state,
+          persist: false,
+        });
+  if (!r.ok) return r;
+  const { pushStaffAttendanceOutdoorDutyToDb } = await import(
+    "@/lib/staffAttendanceOutdoorDuty.server"
+  );
+  const od = await pushStaffAttendanceOutdoorDutyToDb([r.session]).catch(
+    (e: unknown) => ({ ok: false as const, count: 0, error: (e as Error)?.message }),
+  );
+  if (!od.ok) {
+    console.error("[outdoor duty] session push failed", od.error);
+    return { ok: false, error: "Outdoor duty could not be saved to the school database. Please try again." };
+  }
+  const saved = await saveStaffPunchRegister(r.state, r.register);
+  if (!saved.ok) {
+    return { ok: false, error: "Outdoor duty was saved but the day's attendance was not. Please try again." };
+  }
+  return { ok: true, session: r.session };
 }

@@ -13,6 +13,7 @@ import {
   normalizeAttendanceRulesState,
 } from "./staffAttendanceRules";
 import type { StaffRecord } from "./foundationMasters";
+import { istHHmm, surveyEndMark, surveyStartMark } from "./surveyAttendanceBridge";
 
 let failed = 0;
 function expect(label: string, got: unknown, want: unknown) {
@@ -69,6 +70,33 @@ expect("rule: in after cut-off", gradeStaffPunch(withRule, "b", d, "11:30", "").
 expect("rule: out before cut-off", gradeStaffPunch(withRule, "b", d, "09:00", "13:00").status, "HD");
 expect("rule: full day", gradeStaffPunch(withRule, "b", d, "09:00", "15:30").status, "P");
 expect("rule: unassigned person unaffected", gradeStaffPunch(withRule, "a", d, "11:30", "").status, "L");
+
+// Field survey → attendance. 03:30 UTC is 09:00 in India; the server
+// runs in UTC, so a getHours() clock would have said 03:30.
+expect("IST time", istHHmm("2026-09-29T03:30:00.000Z"), "09:00");
+const start = surveyStartMark(null, "Ayar", "2026-09-29T03:30:00.000Z");
+expect("survey start", [start.status, start.inTime, start.punchWay], ["P", "09:00", "survey"]);
+// Punched in at school first: the school in-time stays.
+const startAfterPunch = surveyStartMark(
+  { staffId: "a", status: "L", note: "", inTime: "08:55", outTime: "", punchWay: "self" },
+  "Ayar",
+  "2026-09-29T05:00:00.000Z",
+);
+expect("survey keeps school in", startAfterPunch.inTime, "08:55");
+// End with no school OUT: out-time from the field end (went home).
+const endHome = surveyEndMark(
+  { staffId: "a", status: "P", note: "", inTime: "09:00", outTime: "", punchWay: "survey" },
+  { startedAt: "2026-09-29T03:30:00.000Z", endedAt: "2026-09-29T10:00:00.000Z", workedMs: 6.5 * 3600e3 },
+  "Ayar",
+);
+expect("survey end home", [endHome.outTime, endHome.usedSurveyOutTime], ["15:30", true]);
+// Returned and punched out at school: that OUT stays.
+const endBack = surveyEndMark(
+  { staffId: "a", status: "P", note: "", inTime: "09:00", outTime: "16:10", punchWay: "self" },
+  { startedAt: "2026-09-29T03:30:00.000Z", endedAt: "2026-09-29T10:00:00.000Z", workedMs: 1 },
+  "Ayar",
+);
+expect("survey end back at school", [endBack.outTime, endBack.usedSurveyOutTime], ["16:10", false]);
 
 if (failed) {
   console.error(`staffDayStatus: ${failed} failure(s)`);
