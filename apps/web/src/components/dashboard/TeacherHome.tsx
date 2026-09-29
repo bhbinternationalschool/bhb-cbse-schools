@@ -290,6 +290,22 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
         </Link>
       ) : null}
 
+      <Link
+        href="/my-pay"
+        className="flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3"
+      >
+        <CalendarClock className="h-5 w-5 shrink-0 text-[var(--brand-deep)]" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-semibold text-[var(--brand-deep)]">
+            My pay &amp; attendance
+          </span>
+          <span className="block text-xs text-[var(--muted)]">
+            Attendance calendar, payslips, advances
+          </span>
+        </span>
+        <ArrowRight className="h-4 w-4 shrink-0 text-[var(--muted)]" />
+      </Link>
+
       {mySections.length > 0 ? <ClassDuesCard /> : null}
 
       {unloggedPeriods.length > 0 ? (

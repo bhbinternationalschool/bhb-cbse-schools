@@ -41,6 +41,7 @@
     "test:tutor-video-sources": "npx tsx src/lib/tutorVideoSources.selftest.ts",
     "test:staff-home-kind": "npx tsx src/lib/staffHomeKind.selftest.ts",
     "test:staff-teaching-scope": "npx tsx src/lib/staffTeachingScope.selftest.ts",
+    "test:staff-month-calendar": "npx tsx src/lib/staffMonthCalendar.selftest.ts",
     "test:sis-class-teacher": "npx tsx src/lib/sisClassTeacher.selftest.ts",
     "test:staff-day-status": "npx tsx src/lib/staffDayStatus.selftest.ts",
     "test:payroll-no-register": "npx tsx src/lib/payrollNoRegister.selftest.ts",
