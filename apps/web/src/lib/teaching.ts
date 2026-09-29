@@ -1741,8 +1741,17 @@ export function upsertLessonPlan(
   if (!input.title?.trim()) {
     return { ok: false, error: "Give the lesson a title" };
   }
+  // An edit arrives as the editor's fields only. Without carrying these
+  // over, saving a plan dropped every content link on it and restamped
+  // who wrote it and when (2026-09-29).
+  const existing = input.id
+    ? state.lessonPlans.find((p) => p.id === input.id)
+    : undefined;
   const plan = normalizeLessonPlan({
     ...input,
+    resources: input.resources ?? existing?.resources,
+    createdBy: existing?.createdBy || input.createdBy,
+    createdAt: existing?.createdAt || input.createdAt,
     title: input.title.trim(),
     updatedAt: nowIso(),
   });

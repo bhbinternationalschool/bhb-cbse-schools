@@ -19,6 +19,16 @@ import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { AddResourceForm, ResourceList } from "@/components/teaching/ResourceLinks";
 import { VoiceDictateButton } from "@/components/teaching/VoiceDictateButton";
 import { SMART_TEACH_URL, smartTeachBookFor } from "@/lib/smartTeach";
+import type { LessonPlanWrite, LessonPlanWriteResult } from "@/components/teaching/teachingApi";
+
+/** The server's copy of one plan, put into the local state. */
+function withServerPlan(state: TeachingState, plan: LessonPlan | null): TeachingState {
+  if (!plan) return state;
+  return {
+    ...state,
+    lessonPlans: [...state.lessonPlans.filter((p) => p.id !== plan.id), plan],
+  };
+}
 
 type Draft = {
   id: string;
@@ -109,6 +119,12 @@ export function LessonPlansPanel(props: {
   subjectName: string;
   onError: (msg: string | null) => void;
   onNotice: (msg: string | null) => void;
+  /**
+   * Teacher mode (2026-09-29): every change goes to the server first, which
+   * checks the class and subject are the teacher's own, and lands on screen
+   * only once saved. Absent = the office's local-first save via onChange.
+   */
+  persist?: (req: LessonPlanWrite) => Promise<LessonPlanWriteResult>;
 }) {
   const {
     state,
@@ -117,7 +133,9 @@ export function LessonPlansPanel(props: {
     classId,
     subjectId,
     canEdit,
+    persist,
   } = props;
+  const [busy, setBusy] = useState(false);
 
   const [draft, setDraft] = useState<Draft | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -180,14 +198,10 @@ export function LessonPlansPanel(props: {
     });
   }
 
-  function save() {
-    if (!draft) return;
+  async function save() {
+    if (!draft || busy) return;
     props.onError(null);
-    const result = upsertLessonPlan(state, {
-      id: draft.id || undefined,
-      academicYearCode: ay,
-      classId,
-      subjectId,
+    const fields = {
       title: draft.title,
       unitIds: draft.unitIds,
       plannedDate: draft.plannedDate,
@@ -199,16 +213,41 @@ export function LessonPlansPanel(props: {
       homework: draft.homework,
       source: draft.source,
       aiModel: draft.aiModel,
+    };
+    // Checked here first so a teacher sees the same message either way
+    // (a missing title, a chapter from another subject) without a round trip.
+    const result = upsertLessonPlan(state, {
+      id: draft.id || undefined,
+      academicYearCode: ay,
+      classId,
+      subjectId,
+      ...fields,
       createdBy: props.createdBy,
     });
     if (!result.ok) return props.onError(result.error);
-    onChange(result.value.state);
+    let planId = result.value.plan.id;
+    if (persist) {
+      setBusy(true);
+      const saved = await persist({
+        action: "save",
+        id: draft.id || undefined,
+        classId,
+        subjectId,
+        ...fields,
+      });
+      setBusy(false);
+      if (!saved.ok) return props.onError(saved.error);
+      planId = saved.data.id;
+      onChange(withServerPlan(state, saved.data.plan));
+    } else {
+      onChange(result.value.state);
+    }
     if (draft.generationId) {
       reportAiOutcome({
         ids: [draft.generationId],
         outcome: draft.source === "ai_edited" ? "edited" : "accepted",
         targetType: "lesson_plan",
-        targetId: result.value.plan.id,
+        targetId: planId,
       });
     }
     setDraft(null);
@@ -313,12 +352,20 @@ export function LessonPlansPanel(props: {
     }
   }
 
-  function drop(planId: string) {
+  async function drop(planId: string) {
+    props.onError(null);
+    if (persist) {
+      if (busy) return;
+      setBusy(true);
+      const r = await persist({ action: "remove", id: planId });
+      setBusy(false);
+      if (!r.ok) return props.onError(r.error);
+    }
     onChange(removeLessonPlan(state, planId));
     props.onNotice("Lesson plan removed");
   }
 
-  function attach(
+  async function attach(
     planId: string,
     input: { kind: ResourceKind; title: string; url: string; locator: string },
   ) {
@@ -330,8 +377,31 @@ export function LessonPlansPanel(props: {
       props.createdBy,
     );
     if (!result.ok) return props.onError(result.error);
-    onChange(result.value.state);
+    if (persist) {
+      if (busy) return;
+      setBusy(true);
+      const r = await persist({ action: "add_resource", id: planId, resource: input });
+      setBusy(false);
+      if (!r.ok) return props.onError(r.error);
+      onChange(withServerPlan(state, r.data.plan));
+    } else {
+      onChange(result.value.state);
+    }
     props.onNotice("Link added");
+  }
+
+  async function detach(planId: string, resourceId: string) {
+    props.onError(null);
+    if (persist) {
+      if (busy) return;
+      setBusy(true);
+      const r = await persist({ action: "remove_resource", id: planId, resourceId });
+      setBusy(false);
+      if (!r.ok) return props.onError(r.error);
+      onChange(withServerPlan(state, r.data.plan));
+      return;
+    }
+    onChange(removeResourceLink(state, { kind: "lessonPlan", id: planId }, resourceId));
   }
 
   if (!classId || !subjectId) {
@@ -362,7 +432,7 @@ export function LessonPlansPanel(props: {
           draft={draft}
           setDraft={setDraft}
           unitOptions={unitOptions}
-          onSave={save}
+          onSave={() => void save()}
           onCancel={discardDraft}
           ai={{
             busy: aiBusy,
@@ -446,7 +516,7 @@ export function LessonPlansPanel(props: {
                       </button>
                       <button
                         type="button"
-                        onClick={() => drop(plan.id)}
+                        onClick={() => void drop(plan.id)}
                         className="text-xs font-semibold text-[var(--danger)] underline"
                       >
                         Remove
@@ -469,22 +539,13 @@ export function LessonPlansPanel(props: {
                       <ResourceList
                         resources={plan.resources}
                         onRemove={
-                          canEdit
-                            ? (rid) =>
-                                onChange(
-                                  removeResourceLink(
-                                    state,
-                                    { kind: "lessonPlan", id: plan.id },
-                                    rid,
-                                  ),
-                                )
-                            : undefined
+                          canEdit ? (rid) => void detach(plan.id, rid) : undefined
                         }
                       />
                       {canEdit ? (
                         <AddResourceForm
                           compact
-                          onAdd={(input) => attach(plan.id, input)}
+                          onAdd={(input) => void attach(plan.id, input)}
                         />
                       ) : null}
                     </div>

@@ -27,6 +27,11 @@ import {
   type SarvamLang,
 } from "@/lib/sarvam.server";
 import { translateMany, translationConfigured } from "@/lib/translate.server";
+import { resolveApiAuth } from "@/lib/api/v1/auth";
+import { ApiError } from "@/lib/api/v1/errors";
+import { assertSectionScope, staffSectionScope } from "@/lib/api/v1/staffScope";
+import { ensureSisHydratedServer } from "@/lib/sisPersistence";
+import { loadSis } from "@/lib/sis";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -39,6 +44,38 @@ export async function GET() {
     primaryEngine: status.primaryEngine,
     note: "POST { language?: household code, facts: PtmBriefFacts } — staff with ptm:edit; returns { observations, concerns, suggestions }, saves nothing",
   });
+}
+
+/** 403 (as a response) unless the session is school-wide or teaches the
+ * section of the student named in the facts; null when allowed. */
+async function refuseOutsideSection(
+  req: Request,
+  rawFacts: unknown,
+): Promise<NextResponse | null> {
+  try {
+    const ctx = await resolveApiAuth(req);
+    const scope = await staffSectionScope(ctx);
+    if (scope.unrestricted) return null;
+    const studentId =
+      rawFacts && typeof rawFacts === "object"
+        ? String((rawFacts as Record<string, unknown>).studentId ?? "").trim()
+        : "";
+    if (!studentId) {
+      return NextResponse.json({ error: "Which student? studentId is missing" }, { status: 400 });
+    }
+    await ensureSisHydratedServer();
+    const st = loadSis().students.find((s) => s.id === studentId);
+    if (!st) {
+      return NextResponse.json({ error: "Student not found in the register" }, { status: 404 });
+    }
+    await assertSectionScope(ctx, st.classId, st.sectionId);
+    return null;
+  } catch (e) {
+    if (e instanceof ApiError) {
+      return NextResponse.json({ error: e.message }, { status: e.status });
+    }
+    throw e;
+  }
 }
 
 export async function POST(req: Request) {
@@ -58,6 +95,14 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
+
+  // The brief carries a child's marks, attendance and conduct into an AI
+  // call; ptm.edit alone let any teacher ask for any child. A teacher may
+  // brief on children in their own sections only (2026-09-29). The class
+  // comes from the register, never from the client's facts.
+  const scopeErr = await refuseOutsideSection(req, body.facts);
+  if (scopeErr) return scopeErr;
+
   const facts = cleanPtmBriefFacts(body.facts);
   if (!facts) {
     return NextResponse.json(

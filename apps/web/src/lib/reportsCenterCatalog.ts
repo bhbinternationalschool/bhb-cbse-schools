@@ -595,6 +595,19 @@ export function filterReportsCenterEntries(
   });
 }
 
+/**
+ * Reports about the staff themselves — leave, and staff attendance (which
+ * sits under the attendance module). A teacher holds "staff.view" and
+ * "attendance.view" for their own work, and until 2026-09-29 that listed
+ * every colleague's leave and punches here. Teacher mode drops these.
+ */
+export function isStaffRecordsEntry(e: {
+  moduleId: string;
+  href: string;
+}): boolean {
+  return e.moduleId === "staff" || e.href.includes("tab=staff-reports");
+}
+
 export function moduleLabel(id: ReportsCenterModuleId): string {
   return REPORTS_CENTER_MODULES.find((m) => m.id === id)?.label ?? id;
 }

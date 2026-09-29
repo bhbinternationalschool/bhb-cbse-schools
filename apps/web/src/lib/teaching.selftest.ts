@@ -1193,6 +1193,22 @@ assert.equal(expectedAll.periods[0]!.isSubstituted, false);
   if (!planRes.ok) throw new Error("unreachable");
   state = planRes.value.state;
 
+  // Editing the plan's text must not drop its links (the editor never
+  // sends them), nor restamp when it was written.
+  const edited = upsertLessonPlan(state, {
+    id: plan.value.plan.id,
+    academicYearCode: AY,
+    classId: CLASS,
+    subjectId: SUBJECT,
+    title: "Intro to rationals (revised)",
+    unitIds: [topic.value.unit.id],
+  });
+  assert.equal(edited.ok, true);
+  if (!edited.ok) throw new Error("unreachable");
+  assert.equal(edited.value.plan.resources.length, 1, "an edit keeps the plan's links");
+  assert.equal(edited.value.plan.createdAt, plan.value.plan.createdAt, "an edit keeps createdAt");
+  state = edited.value.state;
+
   // Teaching the topic should surface the topic's chapter e-book AND the
   // lesson plan's video.
   const forPeriod = resourcesForUnits(

@@ -259,3 +259,118 @@ export async function fetchStudentLeaveDeskFromDb(): Promise<{
     ok: true,
   };
 }
+
+/** One request, straight from the database. `ok: false` = the read failed
+ * (not "no such request"). */
+export async function fetchStudentLeaveRequestFromDb(
+  id: string,
+): Promise<{ ok: true; request: StudentLeaveRequest | null } | { ok: false; error: string }> {
+  const ctx = await resolveCtx();
+  if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
+  const { data, error } = await ctx.sb
+    .from("student_leave_desk_requests")
+    .select("*")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, request: data ? rowToRequest(data as Record<string, unknown>) : null };
+}
+
+/** Recount the desk meta after a single-row write, so a browser's hydrate
+ * (which compares `updated_at`) sees that something changed. */
+async function touchStudentLeaveMeta(
+  sb: SupabaseClient,
+  tenantId: string,
+  now: string,
+): Promise<void> {
+  const count = (status?: StudentLeaveStatus) => {
+    let q = sb
+      .from("student_leave_desk_requests")
+      .select("id", { count: "exact", head: true })
+      .eq("tenant_id", tenantId);
+    if (status) q = q.eq("status", status);
+    return q;
+  };
+  const [all, pending, approved] = await Promise.all([
+    count(),
+    count("pending"),
+    count("approved"),
+  ]);
+  const row: Record<string, unknown> = { tenant_id: tenantId, updated_at: now };
+  // A failed count leaves the old figure alone rather than writing a zero.
+  if (!all.error && typeof all.count === "number") row.request_count = all.count;
+  if (!pending.error && typeof pending.count === "number") row.pending_count = pending.count;
+  if (!approved.error && typeof approved.count === "number") row.approved_count = approved.count;
+  await sb.from("student_leave_desk_sync_meta").upsert(row, { onConflict: "tenant_id" });
+}
+
+/**
+ * Record ONE decision on ONE request (2026-09-29).
+ *
+ * The decide route used to push the whole desk from this instance's memory
+ * — a replace that prunes every row it does not hold, from a copy that may
+ * be minutes old. Here only the decided row changes, and only while it is
+ * still pending in the database: two people deciding at once cannot both
+ * win, and the second is told plainly (`conflict`).
+ */
+export async function recordStudentLeaveDecisionInDb(
+  decided: StudentLeaveRequest,
+): Promise<{ ok: true } | { ok: false; conflict: boolean; error: string }> {
+  if (!studentLeaveDualWriteDbEnabled()) {
+    return {
+      ok: false,
+      conflict: false,
+      error:
+        "Student leave is not being saved to the school database (STUDENT_LEAVE_DUAL_WRITE_DB is off)",
+    };
+  }
+  const ctx = await resolveCtx();
+  if (!ctx) return { ok: false, conflict: false, error: "Supabase tenant not configured" };
+  const { sb, tenantId } = ctx;
+  const now = new Date().toISOString();
+  const { data, error } = await sb
+    .from("student_leave_desk_requests")
+    .update({
+      status: decided.status,
+      decided_by: decided.decidedBy || "",
+      decided_at: decided.decidedAt || now,
+      decision_note: decided.decisionNote || "",
+      attendance_applied: !!decided.attendanceApplied,
+      updated_at: now,
+    })
+    .eq("tenant_id", tenantId)
+    .eq("id", decided.id)
+    .eq("status", "pending")
+    .select("id");
+  if (error) return { ok: false, conflict: false, error: error.message };
+  if (!data?.length) {
+    return {
+      ok: false,
+      conflict: true,
+      error: "This request was already decided or withdrawn — refresh the list",
+    };
+  }
+  await touchStudentLeaveMeta(sb, tenantId, now).catch(() => undefined);
+  return { ok: true };
+}
+
+/** Flip `attendance_applied` on one request once its marks are saved. */
+export async function setStudentLeaveAttendanceAppliedInDb(
+  id: string,
+  applied: boolean,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!studentLeaveDualWriteDbEnabled()) return { ok: true };
+  const ctx = await resolveCtx();
+  if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
+  const { sb, tenantId } = ctx;
+  const now = new Date().toISOString();
+  const { error } = await sb
+    .from("student_leave_desk_requests")
+    .update({ attendance_applied: applied, updated_at: now })
+    .eq("tenant_id", tenantId)
+    .eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  await touchStudentLeaveMeta(sb, tenantId, now).catch(() => undefined);
+  return { ok: true };
+}

@@ -163,7 +163,9 @@ export async function POST(request: Request) {
       reportedByStaffId: ctx.session.staffId || "",
       escalationLevel: escalation,
       status: "open",
-      notifiedParentAt: body.notifyParent && student.householdId ? now : null,
+      // Stamped below only once a notice actually reached a device — the
+      // register's "Parent told" must not say so for a family with no app.
+      notifiedParentAt: null,
     });
     const written = await writeModuleLocalState("discipline", next);
     if (!written.ok) throw new ApiError("server_error", "Could not save — try again", 503);
@@ -198,6 +200,16 @@ export async function POST(request: Request) {
         data: { kind: "discipline", studentId: student.id, incidentId: incident.id },
       }).catch(() => ({ sent: 0, expired: 0, failed: 0 }));
       parentNotified = r.sent > 0;
+    }
+    if (parentNotified) {
+      // Re-read rather than reuse `next`: the push took time, and another
+      // save may have landed on the same blob meanwhile. A failed stamp
+      // leaves "Not yet" — understating, never claiming a notice not sent.
+      const fresh = await loadState().catch(() => null);
+      if (fresh?.incidents.some((i) => i.id === incident.id)) {
+        const { state: stamped } = upsertIncident(fresh, { ...incident, notifiedParentAt: now });
+        await writeModuleLocalState("discipline", stamped);
+      }
     }
 
     return apiOk({

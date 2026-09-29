@@ -70,6 +70,9 @@ import {
 import type { CommsAudience } from "@/lib/schoolComms";
 import { loadMasters } from "@/lib/masters";
 import { loadSis } from "@/lib/sis";
+import { hasPermission } from "@/lib/rbac";
+import { useDemoSession } from "@/components/shell/SessionContext";
+import { isRestrictedTeacher, useMyTeaching } from "@/components/staff/useMyTeaching";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 
 function todayIso() {
@@ -403,18 +406,43 @@ export function TrustReportsRunner() {
 }
 
 export function HomeworkReportsRunner({ ay }: { ay: string }) {
+  const session = useDemoSession();
   const [format, setFormat] = useState<HomeworkReportFormat>("excel");
   const [fromDate, setFromDate] = useState(`${todayIso().slice(0, 7)}-01`);
   const [toDate, setToDate] = useState(todayIso);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // "" = all of the teacher's own sections; otherwise one "classId|sectionId".
+  const [mySection, setMySection] = useState("");
+
+  // A teacher exports their own sections only (2026-09-29); every export
+  // here used to cover the whole school.
+  const { my } = useMyTeaching();
+  const teacherMode = isRestrictedTeacher(my);
+  const canExport = useMemo(
+    () => hasPermission(session, loadMasters(), "homework", "export"),
+    [session],
+  );
 
   function run(id: HomeworkReportId) {
+    if (!canExport) {
+      setError("Your role can view homework but not download reports");
+      setNotice(null);
+      return;
+    }
+    const sectionKeys = teacherMode
+      ? new Set(
+          mySection
+            ? [mySection]
+            : my.teaching.map((t) => `${t.classId}|${t.sectionId}`),
+        )
+      : undefined;
     const r = runHomeworkReport(id, {
       academicYearCode: ay,
       fromDate,
       toDate,
       format,
+      sectionKeys,
     });
     if (!r.ok) {
       setError(r.error);
@@ -457,10 +485,32 @@ export function HomeworkReportsRunner({ ay }: { ay: string }) {
             <option value="pdf">PDF</option>
           </select>
         </label>
+        {teacherMode ? (
+          <label className="text-xs text-[var(--muted)]">
+            Class
+            <select
+              className={`${field} mt-1 block`}
+              value={mySection}
+              onChange={(e) => setMySection(e.target.value)}
+            >
+              <option value="">All my classes</option>
+              {my.teaching.map((t) => (
+                <option key={`${t.classId}|${t.sectionId}`} value={`${t.classId}|${t.sectionId}`}>
+                  {t.className} {t.sectionName}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <Link href="/homework?tab=reports" className={btnOutline}>
           Open in Homework
         </Link>
       </div>
+      {teacherMode && my.teaching.length === 0 ? (
+        <p className="text-sm text-[var(--muted)]">
+          No classes are linked to you yet — ask the office to add them (Staff → Duties).
+        </p>
+      ) : null}
       {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
       {notice ? <p className="text-sm text-[var(--success)]">{notice}</p> : null}
       <ul className="space-y-1.5">

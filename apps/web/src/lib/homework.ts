@@ -1035,10 +1035,33 @@ export function runHomeworkReport(
     homework?: HomeworkState;
     masters?: MastersState;
     sis?: SisState;
+    /**
+     * "classId|sectionId" keys a teacher may report on. Absent = the whole
+     * school (office). Until 2026-09-29 a teacher's Reports Centre export
+     * covered every class — and "missing homework days" listed every
+     * section in the school.
+     */
+    sectionKeys?: Set<string>;
   },
 ): { ok: true; message: string } | { ok: false; error: string } {
-  const hw = filters.homework ?? loadHomework();
-  const masters = filters.masters ?? loadMasters();
+  const keys = filters.sectionKeys;
+  const inScope = (classId: string, sectionId: string) =>
+    !keys || keys.has(`${classId}|${sectionId}`);
+  const rawHw = filters.homework ?? loadHomework();
+  const hw: HomeworkState = keys
+    ? {
+        ...rawHw,
+        posts: rawHw.posts.filter((p) => inScope(p.classId, p.sectionId)),
+        diary: rawHw.diary.filter((d) => inScope(d.classId, d.sectionId)),
+      }
+    : rawHw;
+  const rawMasters = filters.masters ?? loadMasters();
+  const masters: MastersState = keys
+    ? {
+        ...rawMasters,
+        sections: rawMasters.sections.filter((s) => inScope(s.classId, s.id)),
+      }
+    : rawMasters;
   const sis = filters.sis ?? loadSis();
   const note = describeFilters([
     `AY ${filters.academicYearCode}`,

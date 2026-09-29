@@ -136,7 +136,9 @@ export async function POST(request: Request) {
     }
 
     const state = await loadState();
-    const notifiedAt = body.notifyParent && student.householdId ? new Date().toISOString() : null;
+    // Stamped below only once a notice actually reached a device — "Parent
+    // told" must not say so for a family with no app installed.
+    const notifiedAt = new Date().toISOString();
     const { state: next, visit } = upsertVisit(state, {
       studentId,
       academicYearCode: ctx.session.academicYearCode,
@@ -147,7 +149,7 @@ export async function POST(request: Request) {
       actionTaken,
       referredToHospital: !!body.referredToHospital,
       reportedByStaffId: ctx.session.staffId || "",
-      notifiedParentAt: notifiedAt,
+      notifiedParentAt: null,
     });
     const written = await writeModuleLocalState("health", next);
     if (!written.ok) throw new ApiError("server_error", "Could not save — try again", 503);
@@ -182,6 +184,15 @@ export async function POST(request: Request) {
         data: { kind: "health", studentId: student.id, visitId: visit.id },
       }).catch(() => ({ sent: 0, expired: 0, failed: 0 }));
       parentNotified = r.sent > 0;
+    }
+    if (parentNotified) {
+      // Re-read rather than reuse `next`: another save may have landed on the
+      // same blob during the push. A failed stamp leaves "Not yet".
+      const fresh = await loadState().catch(() => null);
+      if (fresh?.visits.some((v) => v.id === visit.id)) {
+        const { state: stamped } = upsertVisit(fresh, { ...visit, notifiedParentAt: notifiedAt });
+        await writeModuleLocalState("health", stamped);
+      }
     }
     return apiOk({ id: visit.id, parentNotified });
   } catch (e) {

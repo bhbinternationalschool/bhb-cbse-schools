@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ShieldAlert } from "lucide-react";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
@@ -11,7 +11,7 @@ import { hasPermission } from "@/lib/rbac";
 import { classSectionLabel } from "@/lib/timetable";
 import { loadSis, type SisState, type SisStudent, studentsInSession} from "@/lib/sis";
 import {
-  deleteIncident,
+  DISCIPLINE_SAVE_REFUSED,
   disciplineCategoryLabel,
   DISCIPLINE_CATEGORIES,
   escalationLevelLabel,
@@ -19,7 +19,7 @@ import {
   loadDiscipline,
   notifyDisciplineParent,
   recentIncidentCount,
-  saveDiscipline,
+  trySaveDiscipline,
   studentPointsTotal,
   suggestEscalationLevel,
   upsertIncident,
@@ -32,6 +32,22 @@ import {
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import type { RowAction } from "@/components/ui/erp-grid";
+import { isRestrictedTeacher, useMyTeaching } from "@/components/staff/useMyTeaching";
+import { fetchForMySections, staffV1, studentsOfMySections } from "@/components/staff/staffV1";
+
+/** One row of GET /api/v1/staff/discipline (already scoped to the teacher's sections). */
+type ScopedIncident = Pick<
+  DisciplineIncident,
+  | "id"
+  | "studentId"
+  | "date"
+  | "category"
+  | "pointsDelta"
+  | "description"
+  | "escalationLevel"
+  | "status"
+  | "notifiedParentAt"
+>;
 
 type Tab = "log" | "all" | "student";
 
@@ -88,6 +104,84 @@ export function DisciplineWorkspace() {
     () => (masters ? hasPermission(session, masters, "discipline", "approve") : false),
     [session, masters],
   );
+  const canEdit = useMemo(
+    () => (masters ? hasPermission(session, masters, "discipline", "edit") : false),
+    [session, masters],
+  );
+
+  /**
+   * Teacher mode (2026-09-29). A class or subject teacher sees and records
+   * only for children of their own sections: the picker is narrowed to
+   * them, the register is read from GET /api/v1/staff/discipline (scoped on
+   * the server), and a new incident goes through the v1 POST, which checks
+   * the child's section again. Edit, delete and escalation stay with the
+   * office — the teacher's role has view + create, not edit, and the
+   * desk's whole-blob save would be refused anyway.
+   *
+   * Until "my classes" has answered, someone who cannot edit is shown no
+   * register at all rather than the whole school's: not knowing a
+   * teacher's scope is not the same as their scope being everything.
+   */
+  const { my, loading: myLoading } = useMyTeaching();
+  const teacherMode = isRestrictedTeacher(my);
+  const scopeUnknown = !my && !canEdit;
+  const [scoped, setScoped] = useState<DisciplineState | null>(null);
+  const [scopedError, setScopedError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const reloadScoped = useCallback(async () => {
+    if (!isRestrictedTeacher(my)) return;
+    const r = await fetchForMySections<ScopedIncident, { incidents: ScopedIncident[] }>(
+      my,
+      "/api/v1/staff/discipline",
+      (b) => b.incidents ?? [],
+    );
+    if (!r.ok) {
+      setScoped(null);
+      setScopedError(`Could not load your classes' incidents: ${r.error}`);
+      return;
+    }
+    setScopedError(null);
+    setScoped({
+      version: 1,
+      incidents: r.data.map((i) => ({
+        ...i,
+        // The v1 read is already this session only; the points total below
+        // filters on the year, so give each row the year it was read for.
+        academicYearCode: my.academicYearCode,
+        reportedByStaffId: "",
+        createdAt: "",
+        updatedAt: "",
+      })),
+    });
+  }, [my]);
+
+  useEffect(() => {
+    void reloadScoped();
+  }, [reloadScoped]);
+
+  /** What every list on this page reads: the scoped server copy for a
+   * teacher, the desk copy for the office. */
+  const view = useMemo<DisciplineState>(
+    () =>
+      teacherMode
+        ? (scoped ?? { version: 1, incidents: [] })
+        : scopeUnknown
+          ? { version: 1, incidents: [] }
+          : state,
+    [teacherMode, scoped, scopeUnknown, state],
+  );
+
+  /** Children a picker may offer: the teacher's sections, or the school. */
+  const pickable = useMemo(() => {
+    if (!sis) return [];
+    if (teacherMode) return studentsOfMySections(sis, my.academicYearCode, my);
+    if (scopeUnknown) return [];
+    // One row per child, this session. SIS keeps a row per child per year and
+    // marks them all active, so the same name appeared several times and, in a
+    // capped list, pushed real matches off the end.
+    return studentsInSession(sis, currentAcademicYearCode(masters));
+  }, [sis, masters, teacherMode, scopeUnknown, my]);
 
   // --- Log incident ---
   const [studentQuery, setStudentQuery] = useState("");
@@ -97,21 +191,19 @@ export function DisciplineWorkspace() {
   const [logDescription, setLogDescription] = useState("");
   const [logDate, setLogDate] = useState(todayIso());
 
+  const [logNotify, setLogNotify] = useState(false);
+
   const studentMatches = useMemo(() => {
-    if (!sis) return [];
     const q = studentQuery.trim().toLowerCase();
     if (!q) return [];
-    // One row per child, this session. SIS keeps a row per child per year and
-    // marks them all active, so the same name appeared several times and, in a
-    // capped list, pushed real matches off the end.
-    return studentsInSession(sis, currentAcademicYearCode(masters))
+    return pickable
       .filter(
         (s) =>
           s.fullName.toLowerCase().includes(q) ||
           s.admissionNo.toLowerCase().includes(q),
       )
       .slice(0, 15);
-  }, [sis, studentQuery]);
+  }, [pickable, studentQuery]);
 
   function resetLogForm() {
     setPickedStudent(null);
@@ -120,9 +212,10 @@ export function DisciplineWorkspace() {
     setLogPoints("-1");
     setLogDescription("");
     setLogDate(todayIso());
+    setLogNotify(false);
   }
 
-  function onLogIncident() {
+  async function onLogIncident() {
     if (!pickedStudent) {
       setError("Pick a student.");
       return;
@@ -136,6 +229,10 @@ export function DisciplineWorkspace() {
       setError("Add a short description.");
       return;
     }
+    if (teacherMode) {
+      await logIncidentScoped(pickedStudent, points);
+      return;
+    }
     const { state: withIncident } = upsertIncident(state, {
       studentId: pickedStudent.id,
       academicYearCode: ay,
@@ -145,10 +242,61 @@ export function DisciplineWorkspace() {
       description: logDescription.trim(),
       reportedByStaffId: session.staffId || "",
     });
-    const saved = saveDiscipline(withIncident);
-    setState(saved);
+    const saved = trySaveDiscipline(withIncident);
+    if (!saved.ok) {
+      // Keep the form filled so nothing typed is lost, and say so.
+      setError(DISCIPLINE_SAVE_REFUSED);
+      return;
+    }
+    setState(saved.state);
     resetLogForm();
     flash("Incident logged.");
+  }
+
+  /** Teacher path: the server checks the child is in one of their sections,
+   * saves, and (when asked) sends the parent-app notice to that child's
+   * family only. The register is re-read from the server afterwards so it
+   * shows what was stored, not what the page hoped was stored. */
+  async function logIncidentScoped(student: SisStudent, points: number) {
+    if (logDescription.trim().length < 5) {
+      setError("Describe what happened (a few words at least).");
+      return;
+    }
+    if (Math.abs(points) > 20) {
+      setError("Points must be between -20 and 20.");
+      return;
+    }
+    setBusy(true);
+    const r = await staffV1<{ id: string; escalationLabel: string; parentNotified: boolean }>(
+      "/api/v1/staff/discipline",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          studentId: student.id,
+          date: logDate,
+          category: logCategory,
+          pointsDelta: Math.round(points),
+          description: logDescription.trim(),
+          notifyParent: logNotify,
+        }),
+      },
+    );
+    setBusy(false);
+    if (!r.ok) {
+      setError(r.error);
+      return;
+    }
+    const askedNotify = logNotify;
+    resetLogForm();
+    await reloadScoped();
+    flash(
+      !askedNotify
+        ? "Incident logged."
+        : r.data.parentNotified
+          ? "Incident logged. The parent was notified on the school app."
+          : "Incident logged. The parent app notice did not reach anyone (no app signed in for this family) — ask the office to call if the parent must hear today.",
+    );
   }
 
   // --- All incidents ---
@@ -158,13 +306,13 @@ export function DisciplineWorkspace() {
   const [filterTo, setFilterTo] = useState("");
 
   const allRows = useMemo(() => {
-    return state.incidents
+    return view.incidents
       .filter((i) => !filterCategory || i.category === filterCategory)
       .filter((i) => !filterStatus || i.status === filterStatus)
       .filter((i) => !filterFrom || i.date >= filterFrom)
       .filter((i) => !filterTo || i.date <= filterTo)
       .sort((a, b) => b.date.localeCompare(a.date));
-  }, [state, filterCategory, filterStatus, filterFrom, filterTo]);
+  }, [view, filterCategory, filterStatus, filterFrom, filterTo]);
 
   function studentName(id: string): string {
     return sis?.students.find((s) => s.id === id)?.fullName || "—";
@@ -181,7 +329,13 @@ export function DisciplineWorkspace() {
       ...incident,
       notifiedParentAt: new Date().toISOString(),
     });
-    setState(saveDiscipline(next));
+    const saved = trySaveDiscipline(next);
+    if (!saved.ok) {
+      // The message went; only the "Parent told" mark could not be kept.
+      setError(`WhatsApp sent to ${studentName(incident.studentId)}'s parent, but the register could not be updated. ${DISCIPLINE_SAVE_REFUSED}`);
+      return;
+    }
+    setState(saved.state);
     flash(`Parent notified for ${studentName(incident.studentId)}.`);
   }
 
@@ -194,40 +348,52 @@ export function DisciplineWorkspace() {
       ...incident,
       escalationLevel: level,
     });
-    setState(saveDiscipline(next));
+    const saved = trySaveDiscipline(next);
+    if (!saved.ok) {
+      setError(DISCIPLINE_SAVE_REFUSED);
+      return;
+    }
+    setState(saved.state);
   }
 
   function onDelete(id: string) {
     if (!window.confirm("Delete this incident?")) return;
-    setState(deleteIncident(state, id));
+    const saved = trySaveDiscipline({
+      ...state,
+      incidents: state.incidents.filter((i) => i.id !== id),
+    });
+    if (!saved.ok) {
+      setError(DISCIPLINE_SAVE_REFUSED);
+      return;
+    }
+    setState(saved.state);
   }
 
   // --- By student ---
   const [byStudentQuery, setByStudentQuery] = useState("");
   const [byStudentId, setByStudentId] = useState<string | null>(null);
   const byStudentMatches = useMemo(() => {
-    if (!sis) return [];
     const q = byStudentQuery.trim().toLowerCase();
     if (!q) return [];
-    // One row per child, this session. SIS keeps a row per child per year and
-    // marks them all active, so the same name appeared several times and, in a
-    // capped list, pushed real matches off the end.
-    return studentsInSession(sis, currentAcademicYearCode(masters))
+    return pickable
       .filter(
         (s) =>
           s.fullName.toLowerCase().includes(q) ||
           s.admissionNo.toLowerCase().includes(q),
       )
       .slice(0, 15);
-  }, [sis, byStudentQuery]);
+  }, [pickable, byStudentQuery]);
   const byStudentHistory = useMemo(
-    () => (byStudentId ? state.incidents.filter((i) => i.studentId === byStudentId) : []),
-    [state, byStudentId],
+    () => (byStudentId ? view.incidents.filter((i) => i.studentId === byStudentId) : []),
+    [view, byStudentId],
   );
-  const byStudentTotal = byStudentId ? studentPointsTotal(state, byStudentId, ay) : 0;
-  const byStudentRecent = byStudentId ? recentIncidentCount(state, byStudentId) : 0;
+  const byStudentAy = teacherMode ? my.academicYearCode : ay;
+  const byStudentTotal = byStudentId ? studentPointsTotal(view, byStudentId, byStudentAy) : 0;
+  const byStudentRecent = byStudentId ? recentIncidentCount(view, byStudentId) : 0;
   const byStudentSuggestion = suggestEscalationLevel(byStudentTotal, byStudentRecent);
-  const byStudent = sis?.students.find((s) => s.id === byStudentId) || null;
+  // Looked up in the pickable list, not the whole SIS, so a stale id from
+  // before the scope loaded can never show another class's child.
+  const byStudent = pickable.find((s) => s.id === byStudentId) || null;
 
   /**
    * The incident register as a register. A child's name, what happened, when,
@@ -252,12 +418,15 @@ export function DisciplineWorkspace() {
     {
       key: "escalation", header: "Escalation", sortable: true,
       value: (i) => i.escalationLevel,
-      render: (i) => (
+      // A teacher reads the level; changing it is the office's (edit) call.
+      render: (i) => teacherMode ? (
+        escalationLevelLabel(i.escalationLevel)
+      ) : (
         <select
           className="rounded-lg border border-[var(--border)] px-2 py-1 text-xs"
           value={i.escalationLevel}
           onChange={(e) => onSetEscalation(i, e.target.value as EscalationLevel)}
-          disabled={readOnly}
+          disabled={readOnly || !canEdit}
         >
           {ESCALATION_LEVELS.map((e) => (
             <option key={e.value} value={e.value}>
@@ -279,18 +448,28 @@ export function DisciplineWorkspace() {
     },
   ];
 
-  const incidentActions: RowAction<(typeof allRows)[number]>[] = [
-    {
-      id: "notify", label: "Notify parent",
-      onSelect: (i) => onNotifyParent(i),
-      disabled: (i) => readOnly || !!i.notifiedParentAt,
-    },
-    {
-      id: "delete", label: "Delete", tone: "danger", separatorAbove: true,
-      onSelect: (i) => onDelete(i.id),
-      disabled: () => readOnly,
-    },
-  ];
+  /**
+   * No row actions in teacher mode. "Notify parent" here is a WhatsApp
+   * send through /api/wa/dispatch under the discipline module, which needs
+   * discipline.edit — a teacher would only ever get a refusal. A teacher
+   * tells the parent at the moment of logging instead (the "notify on the
+   * school app" tick), which the v1 POST sends to that child's own family
+   * and nobody else. Delete needs edit too.
+   */
+  const incidentActions: RowAction<(typeof allRows)[number]>[] = teacherMode
+    ? []
+    : [
+        {
+          id: "notify", label: "Notify parent",
+          onSelect: (i) => onNotifyParent(i),
+          disabled: (i) => readOnly || !canEdit || !!i.notifiedParentAt,
+        },
+        {
+          id: "delete", label: "Delete", tone: "danger", separatorAbove: true,
+          onSelect: (i) => onDelete(i.id),
+          disabled: () => readOnly || !canEdit,
+        },
+      ];
 
   return (
     <ErpWorkspaceShell
@@ -301,6 +480,23 @@ export function DisciplineWorkspace() {
       error={error}
     >
       <ModuleTabs value={tab} onChange={(id) => setTab(id as Tab)} items={TABS} />
+
+      {teacherMode ? (
+        <p className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-xs text-[var(--muted)]">
+          {my.teaching.length === 0
+            ? "You have no classes assigned for this session, so there is nobody to show. Ask the office to set your timetable or class-teacher section."
+            : `Showing children of your classes only: ${my.teaching.map((t) => `${t.className}-${t.sectionName}`).join(", ")}. Changing or deleting an incident is done by the office.`}
+        </p>
+      ) : scopeUnknown ? (
+        <p className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-xs text-[var(--muted)]">
+          {myLoading
+            ? "Loading your classes…"
+            : "Could not load your classes, so no records are shown. Reload the page to try again."}
+        </p>
+      ) : null}
+      {scopedError ? (
+        <p className="mt-2 text-xs font-semibold text-[var(--danger)]">{scopedError}</p>
+      ) : null}
 
       {tab === "log" ? (
         <div className="mt-5 max-w-xl space-y-4">
@@ -397,11 +593,18 @@ export function DisciplineWorkspace() {
             />
           </label>
 
+          {teacherMode ? (
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={logNotify} onChange={(e) => setLogNotify(e.target.checked)} />
+              Notify the parent on the school app
+            </label>
+          ) : null}
+
           <button
             type="button"
             className="btn-accent rounded-lg px-4 py-2 text-sm font-bold disabled:opacity-50"
-            disabled={readOnly}
-            onClick={onLogIncident}
+            disabled={readOnly || busy || scopeUnknown}
+            onClick={() => void onLogIncident()}
           >
             Log incident
           </button>
@@ -449,14 +652,21 @@ export function DisciplineWorkspace() {
 
           {allRows.length === 0 ? (
             <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-8 text-center text-sm text-[var(--muted)]">
-              No incidents match this filter.
+              {/* Not loaded is not "none": say which it is. */}
+              {scopedError
+                ? scopedError
+                : scopeUnknown && !myLoading
+                  ? "Could not load your classes, so no incidents are shown."
+                  : scopeUnknown || (teacherMode && !scoped)
+                    ? "Loading…"
+                    : "No incidents match this filter."}
             </p>
           ) : (
             <DataTable
               columns={incidentCols}
               rows={allRows}
               rowKey={(i) => i.id}
-              rowActions={incidentActions}
+              rowActions={incidentActions.length ? incidentActions : undefined}
               rowActionsLabel="Incident actions"
               minWidth="min-w-[980px]"
               exportFileBaseName="discipline-incidents"
@@ -521,7 +731,9 @@ export function DisciplineWorkspace() {
 
               {byStudentHistory.length === 0 ? (
                 <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-8 text-center text-sm text-[var(--muted)]">
-                  No incidents logged for this student.
+                  {teacherMode && !scoped
+                    ? scopedError || "Loading…"
+                    : "No incidents logged for this student."}
                 </p>
               ) : (
                 <ul className="space-y-2">

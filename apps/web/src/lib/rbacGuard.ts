@@ -93,6 +93,27 @@ export function assertSelfOrModulePermission(
   return true;
 }
 
+/**
+ * A download (Excel / PDF) needs the module's "export" grant — viewing a
+ * report on screen does not imply it. Read-only, so unlike
+ * assertModulePermission there is no closed-year lock: a closed year's
+ * register can still be downloaded by someone allowed to. Added
+ * 2026-09-29: the SIS catalog downloaded for anyone who could open it.
+ */
+export function actorMayExport(module: RbacModule, label = "export"): boolean {
+  const session = getSessionActor();
+  if (!session) return true;
+  if (typeof window === "undefined") return true;
+  const masters = loadMastersSafe();
+  if (hasPermission(session, masters, module, "export")) return true;
+  window.dispatchEvent(
+    new CustomEvent("bhb-rbac-denied", {
+      detail: { module, action: "export", label },
+    }),
+  );
+  return false;
+}
+
 export function assertCanConfigureRbac(label = "saveRbac"): boolean {
   if (!assertSessionWritable(label)) return false;
   const session = getSessionActor();

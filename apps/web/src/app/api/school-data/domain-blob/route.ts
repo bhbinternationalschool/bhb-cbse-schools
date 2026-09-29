@@ -1,9 +1,18 @@
 import { NextResponse } from "next/server";
 import { cachedBlobJson, deskJsonResponse } from "@/lib/deskProbeCache.server";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
+import { staffSectionScope } from "@/lib/api/v1/staffScope";
 import type { DomainBlobTable } from "@/lib/domainBlobPersistence";
 import { domainBlobRbacModule } from "@/lib/domainBlobRbac";
 import { fetchDomainBlobFromDb, pushDomainBlobToDb } from "@/lib/domainBlob.server";
+
+/**
+ * Blobs that hold a whole-school desk a teacher now edits piece by piece
+ * through scoped v1 routes. A teacher's push of one would overwrite every
+ * other class's rows, so only school-wide sessions may send it
+ * (2026-09-29, PTM first).
+ */
+const SCHOOL_WIDE_ONLY_BLOBS = new Set<DomainBlobTable>(["ptm_state"]);
 
 export const runtime = "nodejs";
 
@@ -62,6 +71,41 @@ export async function POST(req: Request) {
   const rbacModule = domainBlobRbacModule(table)!;
   const auth = await requireStaffPermission(req, rbacModule, "edit");
   if (!auth.ok) return auth.response;
+  if (SCHOOL_WIDE_ONLY_BLOBS.has(table) && !auth.viaMirrorSecret) {
+    const scope = await staffSectionScope(auth.ctx).catch(() => null);
+    if (!scope?.unrestricted) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Only the office or principal can save the whole PTM desk. " +
+            "Your own slots and meeting feedback are saved on their own.",
+        },
+        { status: 403 },
+      );
+    }
+  }
+
+  // The teaching blob holds every teacher's period logs and lesson plans.
+  // "teaching.edit" alone let any teacher's browser replace all of it — a
+  // stale or hand-built copy could rewrite other classes' logs and plans.
+  // Since 2026-09-29 a teacher saves one log through /api/v1/teaching/log
+  // and one plan through /api/v1/teaching/lesson-plan, both scope-checked;
+  // this whole-blob push is the office's and the principal's.
+  if (table === "teaching_state" && !auth.viaMirrorSecret) {
+    const scope = await staffSectionScope(auth.ctx).catch(() => null);
+    if (!scope?.unrestricted) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Only the office or principal can save the whole teaching desk. " +
+            "Your period logs and lesson plans are saved one at a time.",
+        },
+        { status: 403 },
+      );
+    }
+  }
 
   const result = await pushDomainBlobToDb(table, body.state);
   if (!result.ok) {

@@ -6,33 +6,31 @@
  * same localStorage-first path. Neither persists off the browser, so the
  * command desk needs its own route to the database — this is it.
  *
- * One deliberate difference from the browser path. `applyLeaveToAttendance`
- * creates a register for every date in the range, marking every *other*
- * child present. For leave approved in advance that pre-marks a whole class
- * present on days nobody has taught yet, which then reads as "attendance
- * done" in the summary. Here, a future date is only touched when its
- * register already exists; the caller is told how many dates were left for
- * the teacher to mark normally.
+ * Since 2026-09-30 it shares the staff route's one-row path
+ * (/api/v1/staff/student-leave/decide): the request is read fresh from the
+ * database, the decision is written to that one row only while it is still
+ * pending (never a whole-desk push from this instance's cache, which prunes
+ * what it does not hold), and the leave mark goes only onto registers that
+ * already exist, changing that child's line alone. A date with no register
+ * — past or future — is left for the teacher; creating one would mark the
+ * rest of the class present on a day nobody took attendance.
  */
 
 import type { DemoSession } from "@/lib/auth";
 import type { MastersState } from "@/lib/masters";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { ensureAttendanceHydratedServer } from "@/lib/attendancePersistence";
-import { ensureStudentLeaveHydratedServer } from "@/lib/studentLeavePersistence";
+import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import {
-  findRegister,
-  loadAttendance,
-  upsertRegister,
-  writeAttendanceLocalRaw,
-  type AttendanceStatus,
-} from "@/lib/attendance";
-import {
-  STUDENT_LEAVE_TYPES,
   loadStudentLeave,
   writeStudentLeaveLocalRaw,
   type StudentLeaveRequest,
 } from "@/lib/studentLeave";
+import {
+  fetchStudentLeaveRequestFromDb,
+  recordStudentLeaveDecisionInDb,
+  setStudentLeaveAttendanceAppliedInDb,
+} from "@/lib/studentLeaveNormalized.server";
+import { applyApprovedLeaveToRegisters } from "@/lib/studentLeaveAttendance.server";
 import { loadSis } from "@/lib/sis";
 import { sendPushToSubject } from "@/lib/webPush.server";
 
@@ -58,31 +56,16 @@ export type DecideLeaveResult =
     }
   | { ok: false; error: string };
 
-function daysBetween(fromDate: string, toDate: string): string[] {
-  const out: string[] = [];
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate)) return out;
-  const end = /^\d{4}-\d{2}-\d{2}$/.test(toDate) ? toDate : fromDate;
-  const d = new Date(`${fromDate}T00:00:00Z`);
-  const stop = new Date(`${end}T00:00:00Z`);
-  if (Number.isNaN(d.getTime()) || Number.isNaN(stop.getTime())) return out;
-  // A runaway range must not spin forever; a term's leave is well under this.
-  for (let i = 0; i <= 120 && d <= stop; i++) {
-    out.push(d.toISOString().slice(0, 10));
-    d.setUTCDate(d.getUTCDate() + 1);
-  }
-  return out;
-}
-
 export async function decideStudentLeaveServer(
   input: DecideLeaveInput,
 ): Promise<DecideLeaveResult> {
   await ensureSchoolMirrorHydrated();
-  await ensureStudentLeaveHydratedServer();
+  await ensureSisHydratedServer();
 
-  const state = loadStudentLeave();
-  const i = state.requests.findIndex((r) => r.id === input.requestId);
-  if (i < 0) return { ok: false, error: "Request not found" };
-  const req = state.requests[i]!;
+  const found = await fetchStudentLeaveRequestFromDb(input.requestId);
+  if (!found.ok) return { ok: false, error: "Could not read the leave request — try again" };
+  const req = found.request;
+  if (!req) return { ok: false, error: "Request not found" };
   if (req.status !== "pending") {
     return { ok: false, error: `Already ${req.status}` };
   }
@@ -91,100 +74,41 @@ export async function decideStudentLeaveServer(
   const student = sis.students.find((s) => s.id === req.studentId);
   if (!student) return { ok: false, error: "Student not found" };
 
-  const appliedDates: string[] = [];
-  const pendingDates: string[] = [];
-
-  if (input.approve) {
-    await ensureAttendanceHydratedServer();
-    const typeMeta = STUDENT_LEAVE_TYPES.find((t) => t.code === req.leaveType);
-    const status: AttendanceStatus = typeMeta?.attendance ?? "LE";
-    const note = `Leave ${req.leaveType}: ${req.reason}`.slice(0, 120);
-    const roster = sis.students.filter(
-      (st) =>
-        st.status === "active" &&
-        st.sectionId === student.sectionId &&
-        st.academicYearCode === req.academicYearCode,
-    );
-    const { pushAttendanceRegisterToDb } = await import(
-      "@/lib/attendanceNormalized.server"
-    );
-    for (const date of daysBetween(req.fromDate, req.toDate)) {
-      const existing = findRegister(
-        req.academicYearCode,
-        student.sectionId,
-        date,
-        loadAttendance(),
-      );
-      // Future dates with no register are the teacher's to mark; creating
-      // one here would mark the rest of the class present in advance.
-      if (!existing && date > input.todayIso) {
-        pendingDates.push(date);
-        continue;
-      }
-      if (!roster.length) {
-        pendingDates.push(date);
-        continue;
-      }
-      const marks = roster.map((st) => {
-        if (st.id === student.id) return { studentId: st.id, status, note };
-        const prev = existing?.marks.find((m) => m.studentId === st.id);
-        return {
-          studentId: st.id,
-          status: prev?.status ?? ("P" as AttendanceStatus),
-          note: prev?.note ?? "",
-        };
-      });
-      const res = upsertRegister({
-        academicYearCode: req.academicYearCode,
-        campusId: "",
-        classId: student.classId,
-        sectionId: student.sectionId,
-        date,
-        marks,
-        markedBy: input.session.fullName,
-        remark: `Leave ${req.leaveType} applied`,
-        skipLockCheck: true,
-      });
-      if (!res.ok) {
-        pendingDates.push(date);
-        continue;
-      }
-      // upsertRegister saves through the browser path, so mirror the change
-      // into the server cache before pushing it.
-      const cur = loadAttendance();
-      const registers = cur.registers.some((x) => x.id === res.register.id)
-        ? cur.registers.map((x) => (x.id === res.register.id ? res.register : x))
-        : [res.register, ...cur.registers];
-      writeAttendanceLocalRaw({ ...cur, registers });
-      const push = await pushAttendanceRegisterToDb(res.register);
-      if (!push.ok) {
-        console.warn("[leaveDecide] register push failed", push.error);
-      }
-      appliedDates.push(date);
-    }
-  }
-
   const decided: StudentLeaveRequest = {
     ...req,
     status: input.approve ? "approved" : "rejected",
     decidedBy: input.session.fullName,
     decidedAt: new Date().toISOString(),
     decisionNote: input.note || "",
-    attendanceApplied: input.approve && appliedDates.length > 0,
+    attendanceApplied: false,
   };
-  const requests = [...state.requests];
-  requests[i] = decided;
-  const nextState = { ...state, requests };
-  writeStudentLeaveLocalRaw(nextState);
+  // The decision is the point of the call; if it cannot be stored, say so
+  // rather than reporting a decision that will vanish on the next load.
+  const saved = await recordStudentLeaveDecisionInDb(decided);
+  if (!saved.ok) return { ok: false, error: saved.error || "Could not save the decision" };
 
-  const { pushStudentLeaveDeskToDb } = await import(
-    "@/lib/studentLeaveNormalized.server"
-  );
-  const dbPush = await pushStudentLeaveDeskToDb(nextState);
-  if (!dbPush.ok) {
-    // The decision is the point of the call; if it cannot be stored, say so
-    // rather than reporting a decision that will vanish on the next load.
-    return { ok: false, error: dbPush.error || "Could not save the decision" };
+  let appliedDates: string[] = [];
+  let pendingDates: string[] = [];
+  if (input.approve) {
+    const applied = await applyApprovedLeaveToRegisters({
+      request: decided,
+      sectionId: student.sectionId,
+    });
+    appliedDates = applied.appliedDates;
+    pendingDates = [...applied.unmarkedDates, ...applied.failedDates].sort();
+    if (appliedDates.length > 0 && pendingDates.length === 0) {
+      const flag = await setStudentLeaveAttendanceAppliedInDb(decided.id, true);
+      if (flag.ok) decided.attendanceApplied = true;
+    }
+  }
+
+  // Keep this instance's cache in step, only when it already holds the row.
+  const state = loadStudentLeave();
+  if (state.requests.some((r) => r.id === decided.id)) {
+    writeStudentLeaveLocalRaw({
+      ...state,
+      requests: state.requests.map((r) => (r.id === decided.id ? decided : r)),
+    });
   }
 
   let pushSent = 0;

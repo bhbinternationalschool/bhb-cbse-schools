@@ -30,6 +30,8 @@ import {
 } from "@/lib/complaints";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 import { AiReportsPanel } from "@/components/complaints/AiReportsPanel";
+import { TeacherComplaintsPanel } from "@/components/complaints/TeacherComplaintsPanel";
+import { useMyTeaching } from "@/components/staff/useMyTeaching";
 
 type Tab = "all" | "mine" | "ai";
 
@@ -140,7 +142,46 @@ function TicketCard({
   );
 }
 
+/**
+ * Principal / office get the full desk below, unchanged. A teacher gets
+ * TeacherComplaintsPanel — server-scoped to their classes, changes one
+ * ticket at a time — because the desk reads and saves the whole school's
+ * complaints book (2026-09-29). If "my classes" cannot be fetched we also
+ * use the server-scoped panel: unknown is not "may see everything", and the
+ * server still gives the office its full list there.
+ */
 export function ComplaintsWorkspace() {
+  const { my, loading } = useMyTeaching();
+  const readOnly = useSessionReadOnly();
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  if (my?.unrestricted) return <OfficeComplaintsWorkspace />;
+
+  function flash(msg: string) {
+    setNotice(msg);
+    setError(null);
+    window.setTimeout(() => setNotice(null), 4000);
+  }
+
+  return (
+    <ErpWorkspaceShell
+      title="Complaints / grievance"
+      subtitle="Parents' complaints about your classes"
+      icon={<MessageSquareWarning className="size-6" aria-hidden />}
+      notice={notice}
+      error={error}
+    >
+      {loading ? (
+        <p className="px-4 py-6 text-center text-sm text-[var(--muted)]">Loading…</p>
+      ) : (
+        <TeacherComplaintsPanel readOnly={readOnly} onNotice={flash} onError={setError} />
+      )}
+    </ErpWorkspaceShell>
+  );
+}
+
+function OfficeComplaintsWorkspace() {
   const session = useDemoSession();
   const readOnly = useSessionReadOnly();
   const [tab, setTab] = useState<Tab>("all");

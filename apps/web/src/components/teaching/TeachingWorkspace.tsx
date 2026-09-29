@@ -20,13 +20,17 @@ import {
   summarizeByTeacher,
   summarizeCoverage,
   upsertTeachingLog,
+  writeTeachingLocalRaw,
   type PeriodDelivery,
+  type TeachingLog,
   type TeachingLogStatus,
   type TeachingState,
 } from "@/lib/teaching";
 import { hasPermission } from "@/lib/rbac";
 import { resolveSessionStaff } from "@/lib/staffResolve";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { isRestrictedTeacher, useMyTeaching } from "@/components/staff/useMyTeaching";
+import { postLessonPlan, postPeriodLog } from "@/components/teaching/teachingApi";
 import { SyllabusPlanPanel } from "@/components/teaching/SyllabusPlanPanel";
 import { LessonPlansPanel } from "@/components/teaching/LessonPlansPanel";
 import { ChapterOutcomesPanel } from "@/components/teaching/ChapterOutcomesPanel";
@@ -141,9 +145,28 @@ export function TeachingWorkspace() {
     [session, masters],
   );
 
+  // "My classes" from the server — the same answer the v1 routes use to
+  // allow or refuse a save. Principal / office come back unrestricted and
+  // keep the whole-school desk.
+  const { my } = useMyTeaching();
+  const teacherMode = isRestrictedTeacher(my);
+  const seeEveryone = canSeeEveryone && !teacherMode;
+  // Pickers are narrowed for a teacher, and — failing closed — for anyone
+  // without the export right while "my classes" has not arrived.
+  const restrictPickers = teacherMode || (!my && !canSeeEveryone);
+  // Anyone not confirmed school-wide saves one row at a time through the
+  // scope-checked v1 routes; the whole-blob push refuses them (2026-09-29).
+  const writesViaApi = my ? !my.unrestricted : !canSeeEveryone;
+
   // A teacher without the export right sees only their own periods, and
   // cannot widen the filter to the rest of the staff room.
-  const effectiveStaffFilter = canSeeEveryone ? staffFilter : me?.id || "";
+  // The session's own staff id, not resolveSessionStaff(): that looks the
+  // person up in Masters, and when Masters' staff list was empty it found
+  // nobody — the filter became "" and a teacher saw every teacher's
+  // periods (fixed 2026-09-29). No staff id now means no periods.
+  const ownStaffId = session.staffId || "";
+  const effectiveStaffFilter = seeEveryone ? staffFilter : ownStaffId;
+  const noOwnPeriods = !seeEveryone && !ownStaffId;
 
   const teachingStaff = useMemo(() => {
     if (!masters) return [];
@@ -157,7 +180,7 @@ export function TeachingWorkspace() {
   /* ---------------------------------------------------------------- */
 
   const dayResult = useMemo(() => {
-    if (!timetable || !masters) return null;
+    if (!timetable || !masters || noOwnPeriods) return null;
     return resolveExpectedPeriods({
       timetable,
       masters,
@@ -165,7 +188,7 @@ export function TeachingWorkspace() {
       date,
       staffId: effectiveStaffFilter || undefined,
     });
-  }, [timetable, masters, ay, date, effectiveStaffFilter]);
+  }, [timetable, masters, ay, date, effectiveStaffFilter, noOwnPeriods]);
 
   const dayRows = useMemo(() => {
     if (!state || !dayResult?.ok) return [];
@@ -225,13 +248,57 @@ export function TeachingWorkspace() {
       setError(result.error);
       return;
     }
-    saveTeaching(result.value.state);
-    setState(result.value.state);
-    setNotice(`Saved — ${STATUS_LABEL[status as PeriodDelivery["status"]]}`);
+    const label = STATUS_LABEL[status as PeriodDelivery["status"]];
+    void persistLog(row, result.value.state, result.value.log, `Saved — ${label}`);
+  }
+
+  const [logBusy, setLogBusy] = useState(false);
+
+  /**
+   * The office saves the whole desk as before. Anyone else sends the one
+   * period to /api/v1/teaching/log, which re-finds it on their own
+   * timetable before saving; it lands on screen only once the server has
+   * it (the blob push would be refused for them anyway).
+   */
+  async function persistLog(
+    row: PeriodDelivery,
+    next: TeachingState,
+    log: TeachingLog,
+    doneNotice: string | null,
+  ) {
+    if (!writesViaApi) {
+      saveTeaching(next);
+      setState(next);
+      if (doneNotice) setNotice(doneNotice);
+      return;
+    }
+    if (logBusy) return;
+    setLogBusy(true);
+    const res = await postPeriodLog({
+      date: row.expected.date,
+      periodNo: row.expected.periodNo,
+      classId: row.expected.classId,
+      sectionId: row.expected.sectionId,
+      status: log.status,
+      unitIds: log.unitIds,
+      lessonPlanId: log.lessonPlanId,
+      note: log.note,
+      startedAt: log.startedAt || undefined,
+    });
+    setLogBusy(false);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    // Local copy only — no blob push. The next hydrate merges the server's.
+    writeTeachingLocalRaw(next);
+    setState(next);
+    if (doneNotice) setNotice(doneNotice);
   }
 
   function setPeriodTopic(row: PeriodDelivery, unitIds: string[]) {
     if (!state || !row.log) return;
+    setError(null);
     const result = upsertTeachingLog(
       state,
       {
@@ -256,8 +323,16 @@ export function TeachingWorkspace() {
       setError(result.error);
       return;
     }
-    saveTeaching(result.value.state);
-    setState(result.value.state);
+    void persistLog(row, result.value.state, result.value.log, null);
+  }
+
+  /** Teacher-mode lesson-plan writes; the panel applies the server's copy. */
+  const persistPlan = writesViaApi ? postLessonPlan : undefined;
+
+  /** Put a server-saved change on screen without pushing the blob. */
+  function commitLocal(next: TeachingState) {
+    writeTeachingLocalRaw(next);
+    setState(next);
   }
 
   const daySummary = useMemo(() => summarizeCoverage(dayRows), [dayRows]);
@@ -282,7 +357,7 @@ export function TeachingWorkspace() {
   }, [fromDate, toDate]);
 
   const coverage = useMemo(() => {
-    if (!timetable || !masters || !state) {
+    if (!timetable || !masters || !state || noOwnPeriods) {
       return { rows: [] as PeriodDelivery[], skipped: [] as string[] };
     }
     const rows: PeriodDelivery[] = [];
@@ -312,7 +387,7 @@ export function TeachingWorkspace() {
       );
     }
     return { rows, skipped };
-  }, [timetable, masters, state, rangeDates, ay, effectiveStaffFilter]);
+  }, [timetable, masters, state, rangeDates, ay, effectiveStaffFilter, noOwnPeriods]);
 
   const coverageSummary = useMemo(
     () => summarizeCoverage(coverage.rows),
@@ -327,16 +402,53 @@ export function TeachingWorkspace() {
   /* Syllabus plan                                                    */
   /* ---------------------------------------------------------------- */
 
+  // A teacher's Syllabus / Lesson plans pickers list only their own
+  // classes, and in each only the subjects they teach there (all of them
+  // for a class teacher). Until 2026-09-29 every class was offered, and a
+  // teacher could write lesson plans for any class and subject.
+  const planClasses = useMemo(() => {
+    if (!masters) return [];
+    const active = (masters.classes ?? [])
+      .filter((c) => c.isActive)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    if (!restrictPickers) return active;
+    if (!teacherMode) return [];
+    const mine = new Set(my.teaching.map((t) => t.classId));
+    return active.filter((c) => mine.has(c.id));
+  }, [masters, restrictPickers, teacherMode, my]);
+
   const classSubjects = useMemo(() => {
     if (!masters || !planClassId) return [];
     const links = (masters.classSubjects ?? []).filter(
       (l) => l.classId === planClassId && l.isActive,
     );
+    let allowed: Set<string> | null = null;
+    if (restrictPickers) {
+      allowed = new Set(
+        teacherMode
+          ? my.teaching
+              .filter((t) => t.classId === planClassId)
+              .flatMap((t) => t.subjects.map((s) => s.id))
+          : [],
+      );
+    }
     return links
+      .filter((l) => !allowed || allowed.has(l.subjectId))
       .map((l) => (masters.subjects ?? []).find((s) => s.id === l.subjectId))
       .filter((s): s is NonNullable<typeof s> => !!s)
       .sort((a, b) => a.sortOrder - b.sortOrder);
-  }, [masters, planClassId]);
+  }, [masters, planClassId, restrictPickers, teacherMode, my]);
+
+  // A choice made before "my classes" arrived must not survive narrowing.
+  const pickedClassId = planClasses.some((c) => c.id === planClassId) ? planClassId : "";
+  const pickedSubjectId =
+    pickedClassId && classSubjects.some((s) => s.id === planSubjectId) ? planSubjectId : "";
+
+  // The Nucleus tab reads the whole school's progress; it is the office's.
+  const showNucleus = !restrictPickers;
+  useEffect(() => {
+    if (!showNucleus && tab === "nucleus") setTab("today");
+  }, [showNucleus, tab]);
 
   /** Persist a panel's edit and keep the workspace copy in step. */
   function commit(next: TeachingState) {
@@ -376,7 +488,7 @@ export function TeachingWorkspace() {
             { id: "lessons", label: "Lesson plans" },
             { id: "coverage", label: "Coverage" },
             { id: "outcomes", label: "Learning outcomes" },
-            { id: "nucleus", label: "Nucleus progress" },
+            ...(showNucleus ? [{ id: "nucleus", label: "Nucleus progress" }] : []),
           ]}
           value={tab}
           onChange={(id) => setTab(id as TeachTab)}
@@ -396,7 +508,7 @@ export function TeachingWorkspace() {
                 className="mt-1 block rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
               />
             </label>
-            {canSeeEveryone ? (
+            {seeEveryone ? (
               <label className="text-xs font-semibold text-[var(--muted)]">
                 Teacher
                 <select
@@ -414,6 +526,14 @@ export function TeachingWorkspace() {
               </label>
             ) : null}
           </div>
+
+          {noOwnPeriods ? (
+            <p className="text-sm text-[var(--muted)]">
+              This login is not linked to a staff record, so there are no
+              periods of yours to show. Ask the office to link it (Staff →
+              Login).
+            </p>
+          ) : null}
 
           {!dayResult ? null : !dayResult.ok ? (
             <div className="rounded-xl border border-[var(--warning)]/25 bg-[var(--warning-soft)] px-4 py-3">
@@ -589,7 +709,7 @@ export function TeachingWorkspace() {
             <label className="text-xs font-semibold text-[var(--muted)]">
               Class
               <select
-                value={planClassId}
+                value={pickedClassId}
                 onChange={(e) => {
                   setPlanClassId(e.target.value);
                   setPlanSubjectId("");
@@ -597,22 +717,19 @@ export function TeachingWorkspace() {
                 className="mt-1 block rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
               >
                 <option value="">Select…</option>
-                {(masters.classes ?? [])
-                  .filter((c) => c.isActive)
-                  .sort((a, b) => a.sortOrder - b.sortOrder)
-                  .map((c) => (
+                {planClasses.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
                     </option>
-                  ))}
+                ))}
               </select>
             </label>
             <label className="text-xs font-semibold text-[var(--muted)]">
               Subject
               <select
-                value={planSubjectId}
+                value={pickedSubjectId}
                 onChange={(e) => setPlanSubjectId(e.target.value)}
-                disabled={!planClassId}
+                disabled={!pickedClassId}
                 className="mt-1 block rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm disabled:opacity-50"
               >
                 <option value="">Select…</option>
@@ -625,16 +742,26 @@ export function TeachingWorkspace() {
             </label>
           </div>
 
+          {restrictPickers && planClasses.length === 0 ? (
+            <p className="text-sm text-[var(--muted)]">
+              {teacherMode
+                ? "No classes are linked to you yet — ask the office to add them (Staff → Duties)."
+                : "Loading your classes…"}
+            </p>
+          ) : null}
+
           {tab === "plan" ? (
             <SyllabusPlanPanel
               state={state}
               onChange={commit}
               academicYearCode={ay}
-              classId={planClassId}
-              subjectId={planSubjectId}
-              classLabel={masters?.classes.find((c) => c.id === planClassId)?.name ?? ""}
-              subjectName={masters ? subjectLabel(masters, planSubjectId) : ""}
-              canEdit={canManagePlan}
+              classId={pickedClassId}
+              subjectId={pickedSubjectId}
+              classLabel={masters?.classes.find((c) => c.id === pickedClassId)?.name ?? ""}
+              subjectName={masters ? subjectLabel(masters, pickedSubjectId) : ""}
+              // The syllabus is the school's plan, saved by whole-desk push —
+              // which only the office and principal may make.
+              canEdit={canManagePlan && !writesViaApi}
               createdBy={me?.id || session.fullName}
               onError={setError}
               onNotice={setNotice}
@@ -642,17 +769,18 @@ export function TeachingWorkspace() {
           ) : (
             <LessonPlansPanel
               state={state}
-              onChange={commit}
+              onChange={writesViaApi ? commitLocal : commit}
+              persist={persistPlan}
               academicYearCode={ay}
-              classId={planClassId}
-              subjectId={planSubjectId}
+              classId={pickedClassId}
+              subjectId={pickedSubjectId}
               canEdit={canEdit}
               createdBy={me?.id || session.fullName}
               classLabel={
-                masters?.classes.find((c) => c.id === planClassId)?.name ??
+                masters?.classes.find((c) => c.id === pickedClassId)?.name ??
                 ""
               }
-              subjectName={masters ? subjectLabel(masters, planSubjectId) : ""}
+              subjectName={masters ? subjectLabel(masters, pickedSubjectId) : ""}
               onError={setError}
               onNotice={setNotice}
             />
@@ -662,7 +790,7 @@ export function TeachingWorkspace() {
 
       {tab === "outcomes" ? <ChapterOutcomesPanel canApprove={canApproveOutcomes} /> : null}
 
-      {tab === "nucleus" ? <NucleusProgressPanel academicYearCode={ay} /> : null}
+      {tab === "nucleus" && showNucleus ? <NucleusProgressPanel academicYearCode={ay} /> : null}
 
       {tab === "coverage" ? (
         <section className="space-y-4">
@@ -685,7 +813,7 @@ export function TeachingWorkspace() {
                 className="mt-1 block rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
               />
             </label>
-            {canSeeEveryone ? (
+            {seeEveryone ? (
               <label className="text-xs font-semibold text-[var(--muted)]">
                 Teacher
                 <select

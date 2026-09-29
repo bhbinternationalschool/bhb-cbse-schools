@@ -201,6 +201,41 @@ export async function assertSubjectScope(
   return scope;
 }
 
+/**
+ * 403 unless the session teaches this subject in this class. With a
+ * section, exactly assertSubjectScope. Without one (a lesson plan or a
+ * syllabus written for the whole class), ANY section of the class where
+ * the session teaches the subject — or is its class teacher — will do.
+ *
+ * Added 2026-09-29: the lesson-plan and syllabus-import routes checked
+ * only that the class and subject existed, so any teacher could write
+ * plans for any class in the school.
+ */
+export async function assertClassSubjectScope(
+  ctx: ApiAuthContext,
+  classId: string,
+  sectionId: string,
+  subjectId: string,
+): Promise<StaffScope> {
+  if (sectionId) return assertSubjectScope(ctx, classId, sectionId, subjectId);
+  const scope = await staffSectionScope(ctx);
+  if (scope.unrestricted) return scope;
+  const ok = ctx.masters.sections.some(
+    (s) => s.classId === classId && scopeAllowsSubject(scope, classId, s.id, subjectId),
+  );
+  if (!ok) {
+    const cls = ctx.masters.classes.find((c) => c.id === classId)?.name || "this class";
+    const sub = ctx.masters.subjects.find((s) => s.id === subjectId)?.nameEn || "this subject";
+    throw new ApiError(
+      "forbidden",
+      `${sub} in ${cls} is not one of your subjects` +
+        " — ask the office to add it (Staff → Duties)",
+      403,
+    );
+  }
+  return scope;
+}
+
 /** 403 unless the session may see the whole school (leadership / office
  * or admin role). The principal snapshot and its drill-down lists used to
  * need only "home.view", which every role — even support — holds. */

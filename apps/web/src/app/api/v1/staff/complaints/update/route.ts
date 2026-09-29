@@ -58,6 +58,17 @@ export async function POST(request: Request) {
       throw new ApiError("forbidden", "Only the office can close a ticket; resolve it instead", 403);
     }
 
+    // A teacher may take up an unassigned ticket, not one the office gave
+    // to someone else — that reassignment is the office's call (2026-09-29).
+    if (
+      (body.takeUp || status === "assigned") &&
+      !scope.unrestricted &&
+      ticket.assignedToStaffId &&
+      ticket.assignedToStaffId !== ctx.session.staffId
+    ) {
+      throw new ApiError("forbidden", "This ticket is already with another member of staff — ask the office to reassign it", 403);
+    }
+
     const patch: Parameters<typeof updateComplaintTicketServer>[1] = {};
     if (body.takeUp || status === "assigned") {
       patch.assignedToStaffId = ctx.session.staffId || ticket.assignedToStaffId;
