@@ -412,6 +412,7 @@ jobs:
           npm run test:nucleus-assessments
           npm run test:staff-home-kind
           npm run test:staff-teaching-scope
+          npm run test:sis-class-teacher
           npm run test:staff-day-status
           npm run test:payroll-no-register
           npm run test:mobile-features

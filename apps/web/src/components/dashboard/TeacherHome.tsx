@@ -14,6 +14,7 @@ import {
   NotebookPen,
   ArrowRight,
   AlertCircle,
+  Users,
 } from "lucide-react";
 import { formatIst } from "@bhb/time";
 import { useDemoSession } from "@/components/shell/SessionContext";
@@ -269,6 +270,24 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
             {mySections.map((s) => s.label).join(" · ")}
           </p>
         </div>
+      ) : null}
+
+      {mySections.length > 0 ? (
+        <Link
+          href="/my-class"
+          className="flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3"
+        >
+          <Users className="h-5 w-5 shrink-0 text-[var(--brand-deep)]" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold text-[var(--brand-deep)]">
+              My class records
+            </span>
+            <span className="block text-xs text-[var(--muted)]">
+              WhatsApp numbers to fix, details and photos
+            </span>
+          </span>
+          <ArrowRight className="h-4 w-4 shrink-0 text-[var(--muted)]" />
+        </Link>
       ) : null}
 
       {mySections.length > 0 ? <ClassDuesCard /> : null}
