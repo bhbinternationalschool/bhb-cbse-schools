@@ -34,7 +34,7 @@ import {
   composeBriefTemplateVariables,
   type DailyBrief,
 } from "@/lib/dailyBrief";
-import { buildDailyBrief, istToday } from "@/lib/dailyBrief.server";
+import { briefHolidaySkipFor, buildDailyBrief, istToday } from "@/lib/dailyBrief.server";
 import { signBriefLinkToken } from "@/lib/dailyBriefLinkToken.server";
 import { generateBriefPendingNote } from "@/lib/dailyBriefAi.server";
 
@@ -101,10 +101,33 @@ export async function briefRecipients(): Promise<BriefRecipient[]> {
 }
 
 export async function sendDailyBrief(
-  opts: { dateIso?: string; dryRun?: boolean } = {},
+  opts: {
+    dateIso?: string;
+    dryRun?: boolean;
+    /** A person asked for it: send even on a holiday. */
+    ignoreHoliday?: boolean;
+  } = {},
 ): Promise<BriefSendResult> {
   const date = opts.dateIso || istToday();
   const skipped: string[] = [];
+
+  // The scheduler runs Mon–Sat; the holiday calendar decides the rest. A
+  // brief on Diwali would list every class as unmarked. If the calendar
+  // cannot be read the brief goes out as usual — an unknown is not a
+  // holiday.
+  if (!opts.ignoreHoliday) {
+    const holiday = await briefHolidaySkipFor(date).catch(() => null);
+    if (holiday) {
+      return {
+        ok: true,
+        date,
+        recipients: 0,
+        sent: 0,
+        failed: 0,
+        skipped: [`school holiday — ${holiday}; no brief today`],
+      };
+    }
+  }
 
   const recipients = await briefRecipients();
   if (recipients.length === 0) {
