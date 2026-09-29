@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { HeartPulse } from "lucide-react";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
@@ -12,26 +12,47 @@ import { DEFAULT_AY, loadMasters, type MastersState, currentAcademicYearCode} fr
 import { classSectionLabel } from "@/lib/timetable";
 import { loadSis, type SisState, type SisStudent, studentsInSession} from "@/lib/sis";
 import {
-  deleteMedication,
-  deleteVaccination,
-  deleteVisit,
   emptyHealthState,
+  HEALTH_SAVE_REFUSED,
   healthVisitReasonLabel,
   HEALTH_VISIT_REASONS,
   isVaccinationOverdue,
   listHealthRecordsForStudent,
   loadHealth,
   notifyHealthParent,
-  saveHealth,
+  trySaveHealth,
   upsertMedication,
   upsertVaccination,
   upsertVisit,
   type HealthState,
+  type HealthVisit,
   type HealthVisitReason,
 } from "@/lib/health";
+import { hasPermission } from "@/lib/rbac";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
+import { isRestrictedTeacher, useMyTeaching } from "@/components/staff/useMyTeaching";
+import { fetchForMySections, staffV1, studentsOfMySections } from "@/components/staff/staffV1";
+
+/** One row of GET /api/v1/staff/health (already scoped to the teacher's sections). */
+type ScopedVisit = Pick<
+  HealthVisit,
+  | "id"
+  | "studentId"
+  | "date"
+  | "time"
+  | "reason"
+  | "symptoms"
+  | "actionTaken"
+  | "referredToHospital"
+  | "notifiedParentAt"
+>;
 
 type Tab = "log" | "visits" | "medications" | "vaccinations" | "student";
+
+/** A teacher logs and reads sick-room visits for their own classes. The
+ * medication and vaccination registers are the nurse's/office's (they need
+ * health.edit, and they list the whole school), so those tabs are hidden. */
+const TEACHER_TABS = new Set<Tab>(["log", "visits", "student"]);
 
 const TABS: ModuleTabItem[] = [
   { id: "log", label: "Log visit", tone: "rose" },
@@ -46,13 +67,14 @@ function todayIso() {
 }
 
 function StudentPicker({
-  sis,
+  students,
   masters,
   value,
   onPick,
   onClear,
 }: {
-  sis: SisState | null;
+  /** Who may be picked — the teacher's own sections, or the whole school. */
+  students: SisStudent[];
   masters: MastersState | null;
   value: SisStudent | null;
   onPick: (s: SisStudent) => void;
@@ -60,16 +82,12 @@ function StudentPicker({
 }) {
   const [query, setQuery] = useState("");
   const matches = useMemo(() => {
-    if (!sis) return [];
     const q = query.trim().toLowerCase();
     if (!q) return [];
-      // One row per child, this session. SIS keeps a row per child per
-      // year and marks them all active, so the same name appeared several
-      // times and, in a capped list, pushed real matches off the end.
-    return studentsInSession(sis, currentAcademicYearCode(masters))
+    return students
       .filter((s) => s.fullName.toLowerCase().includes(q) || s.admissionNo.toLowerCase().includes(q))
       .slice(0, 15);
-  }, [sis, query]);
+  }, [students, query]);
 
   if (value) {
     return (
@@ -159,6 +177,76 @@ export function HealthWorkspace() {
     return sis?.students.find((s) => s.id === id)?.fullName || "—";
   }
 
+  const canEdit = useMemo(
+    () => (masters ? hasPermission(session, masters, "health", "edit") : false),
+    [session, masters],
+  );
+
+  /**
+   * Teacher mode (2026-09-29): a teacher sees and records sick-room visits
+   * only for children of their own sections — picker narrowed, visit log
+   * read from GET /api/v1/staff/health (scoped on the server), a new visit
+   * sent through the v1 POST (which re-checks the child's section). Delete,
+   * medications and vaccinations need health.edit and stay with the office.
+   * Until "my classes" answers, someone who cannot edit sees no records —
+   * an unknown scope is not "the whole school".
+   */
+  const { my, loading: myLoading } = useMyTeaching();
+  const teacherMode = isRestrictedTeacher(my);
+  const scopeUnknown = !my && !canEdit;
+  const [scoped, setScoped] = useState<HealthState | null>(null);
+  const [scopedError, setScopedError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const reloadScoped = useCallback(async () => {
+    if (!isRestrictedTeacher(my)) return;
+    const r = await fetchForMySections<ScopedVisit, { visits: ScopedVisit[] }>(
+      my,
+      "/api/v1/staff/health",
+      (b) => b.visits ?? [],
+    );
+    if (!r.ok) {
+      setScoped(null);
+      setScopedError(`Could not load your classes' visits: ${r.error}`);
+      return;
+    }
+    setScopedError(null);
+    setScoped({
+      ...emptyHealthState(),
+      visits: r.data.map((v) => ({
+        ...v,
+        academicYearCode: my.academicYearCode,
+        reportedByStaffId: "",
+        createdAt: "",
+        updatedAt: "",
+      })),
+    });
+  }, [my]);
+
+  useEffect(() => {
+    void reloadScoped();
+  }, [reloadScoped]);
+
+  /** What every list on this page reads: the scoped server copy for a
+   * teacher, the desk copy for the office. */
+  const view = useMemo<HealthState>(
+    () => (teacherMode ? (scoped ?? emptyHealthState()) : scopeUnknown ? emptyHealthState() : state),
+    [teacherMode, scoped, scopeUnknown, state],
+  );
+
+  const pickable = useMemo(() => {
+    if (!sis) return [];
+    if (teacherMode) return studentsOfMySections(sis, my.academicYearCode, my);
+    if (scopeUnknown) return [];
+    // One row per child, this session. SIS keeps a row per child per
+    // year and marks them all active, so the same name appeared several
+    // times and, in a capped list, pushed real matches off the end.
+    return studentsInSession(sis, currentAcademicYearCode(masters));
+  }, [sis, masters, teacherMode, scopeUnknown, my]);
+
+  const tabs = teacherMode ? TABS.filter((t) => TEACHER_TABS.has(t.id as Tab)) : TABS;
+  const shownTab: Tab = teacherMode && !TEACHER_TABS.has(tab) ? "log" : tab;
+
   // --- Log visit ---
   const [pickedStudent, setPickedStudent] = useState<SisStudent | null>(null);
   const [logReason, setLogReason] = useState<HealthVisitReason>("illness");
@@ -167,6 +255,7 @@ export function HealthWorkspace() {
   const [logSymptoms, setLogSymptoms] = useState("");
   const [logAction, setLogAction] = useState("");
   const [logReferred, setLogReferred] = useState(false);
+  const [logNotify, setLogNotify] = useState(false);
 
   function resetLogForm() {
     setPickedStudent(null);
@@ -176,11 +265,58 @@ export function HealthWorkspace() {
     setLogSymptoms("");
     setLogAction("");
     setLogReferred(false);
+    setLogNotify(false);
   }
 
-  function onLogVisit() {
+  /** Teacher path: saved by the server after it checks the child is in one
+   * of their sections; the optional parent notice goes to that child's own
+   * family on the school app. The log is re-read afterwards so it shows
+   * what was stored. */
+  async function logVisitScoped(student: SisStudent) {
+    if (logSymptoms.trim().length < 3) {
+      setError("Say what the child reported.");
+      return;
+    }
+    setBusy(true);
+    const r = await staffV1<{ id: string; parentNotified: boolean }>("/api/v1/staff/health", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        studentId: student.id,
+        date: logDate,
+        // Blank = "now" on the server (IST), same as the staff app.
+        time: logTime,
+        reason: logReason,
+        symptoms: logSymptoms.trim(),
+        actionTaken: logAction.trim(),
+        referredToHospital: logReferred,
+        notifyParent: logNotify,
+      }),
+    });
+    setBusy(false);
+    if (!r.ok) {
+      setError(r.error);
+      return;
+    }
+    const askedNotify = logNotify;
+    resetLogForm();
+    await reloadScoped();
+    flash(
+      !askedNotify
+        ? "Visit logged."
+        : r.data.parentNotified
+          ? "Visit logged. The parent was notified on the school app."
+          : "Visit logged. The parent app notice did not reach anyone (no app signed in for this family) — ask the office to call if the parent must know now.",
+    );
+  }
+
+  async function onLogVisit() {
     if (!pickedStudent) {
       setError("Pick a student.");
+      return;
+    }
+    if (teacherMode) {
+      await logVisitScoped(pickedStudent);
       return;
     }
     const { state: withVisit } = upsertVisit(state, {
@@ -194,9 +330,27 @@ export function HealthWorkspace() {
       referredToHospital: logReferred,
       reportedByStaffId: session.staffId || "",
     });
-    setState(saveHealth(withVisit));
+    const saved = trySaveHealth(withVisit);
+    if (!saved.ok) {
+      // Keep the form filled so nothing typed is lost, and say so.
+      setError(HEALTH_SAVE_REFUSED);
+      return;
+    }
+    setState(saved.state);
     resetLogForm();
     flash("Visit logged.");
+  }
+
+  /** Office save for the edit paths below; false (with the reason shown)
+   * when the permission guard refused it. */
+  function commit(next: HealthState): boolean {
+    const saved = trySaveHealth(next);
+    if (!saved.ok) {
+      setError(HEALTH_SAVE_REFUSED);
+      return false;
+    }
+    setState(saved.state);
+    return true;
   }
 
   // --- Visit log ---
@@ -205,12 +359,12 @@ export function HealthWorkspace() {
   const [filterTo, setFilterTo] = useState("");
 
   const visitRows = useMemo(() => {
-    return state.visits
+    return view.visits
       .filter((v) => !filterReason || v.reason === filterReason)
       .filter((v) => !filterFrom || v.date >= filterFrom)
       .filter((v) => !filterTo || v.date <= filterTo)
       .sort((a, b) => b.date.localeCompare(a.date));
-  }, [state, filterReason, filterFrom, filterTo]);
+  }, [view, filterReason, filterFrom, filterTo]);
 
   async function onNotifyParent(visitId: string) {
     if (!sis) return;
@@ -222,13 +376,19 @@ export function HealthWorkspace() {
       return;
     }
     const { state: next } = upsertVisit(state, { ...visit, notifiedParentAt: new Date().toISOString() });
-    setState(saveHealth(next));
+    const saved = trySaveHealth(next);
+    if (!saved.ok) {
+      // The message went; only the "Parent told" mark could not be kept.
+      setError(`WhatsApp sent to ${studentName(visit.studentId)}'s parent, but the log could not be updated. ${HEALTH_SAVE_REFUSED}`);
+      return;
+    }
+    setState(saved.state);
     flash(`Parent notified for ${studentName(visit.studentId)}.`);
   }
 
   function onDeleteVisit(id: string) {
     if (!window.confirm("Delete this visit record?")) return;
-    setState(deleteVisit(state, id));
+    commit({ ...state, visits: state.visits.filter((v) => v.id !== id) });
   }
 
   // --- Medications ---
@@ -272,7 +432,7 @@ export function HealthWorkspace() {
       notes: medNotes,
       active: true,
     });
-    setState(saveHealth(next));
+    if (!commit(next)) return;
     resetMedForm();
     flash("Medication added.");
   }
@@ -281,17 +441,17 @@ export function HealthWorkspace() {
     const med = state.medications.find((m) => m.id === id);
     if (!med) return;
     const { state: next } = upsertMedication(state, { ...med, active });
-    setState(saveHealth(next));
+    commit(next);
   }
 
   function onDeleteMedication(id: string) {
     if (!window.confirm("Delete this medication record?")) return;
-    setState(deleteMedication(state, id));
+    commit({ ...state, medications: state.medications.filter((m) => m.id !== id) });
   }
 
   const medicationRows = useMemo(
-    () => state.medications.slice().sort((a, b) => b.startDate.localeCompare(a.startDate)),
-    [state],
+    () => view.medications.slice().sort((a, b) => b.startDate.localeCompare(a.startDate)),
+    [view],
   );
 
   // --- Vaccinations ---
@@ -331,24 +491,28 @@ export function HealthWorkspace() {
       administeredBy: vaxAdministeredBy,
       notes: vaxNotes,
     });
-    setState(saveHealth(next));
+    if (!commit(next)) return;
     resetVaxForm();
     flash("Vaccination recorded.");
   }
 
   function onDeleteVaccination(id: string) {
     if (!window.confirm("Delete this vaccination record?")) return;
-    setState(deleteVaccination(state, id));
+    commit({ ...state, vaccinations: state.vaccinations.filter((v) => v.id !== id) });
   }
 
   const vaccinationRows = useMemo(
-    () => state.vaccinations.slice().sort((a, b) => b.dateGiven.localeCompare(a.dateGiven)),
-    [state],
+    () => view.vaccinations.slice().sort((a, b) => b.dateGiven.localeCompare(a.dateGiven)),
+    [view],
   );
 
   // --- By student ---
-  const [byStudent, setByStudent] = useState<SisStudent | null>(null);
-  const timeline = byStudent ? listHealthRecordsForStudent(state, byStudent.id) : [];
+  const [byStudentPick, setByStudent] = useState<SisStudent | null>(null);
+  // Only while still pickable: a child chosen before the scope loaded must
+  // not stay on screen if they are not in the teacher's classes.
+  const byStudent =
+    byStudentPick && pickable.some((s) => s.id === byStudentPick.id) ? byStudentPick : null;
+  const timeline = byStudent ? listHealthRecordsForStudent(view, byStudent.id) : [];
 
   /* ------------------------------------------------------------------ */
   /* The three registers, as registers                                   */
@@ -395,22 +559,31 @@ export function HealthWorkspace() {
     },
   ];
 
-  const visitActions: RowAction<(typeof visitRows)[number]>[] = [
-    {
-      id: "notify",
-      label: "Notify parent",
-      onSelect: (v) => void onNotifyParent(v.id),
-      disabled: (v) => readOnly || !!v.notifiedParentAt,
-    },
-    {
-      id: "delete",
-      label: "Delete",
-      tone: "danger",
-      separatorAbove: true,
-      onSelect: (v) => onDeleteVisit(v.id),
-      disabled: () => readOnly,
-    },
-  ];
+  /**
+   * No row actions in teacher mode. "Notify parent" here is a WhatsApp send
+   * via /api/wa/dispatch under the health module, which needs health.edit —
+   * a teacher would only get a refusal. A teacher tells the parent when
+   * logging instead (the school-app tick), which the v1 POST sends to that
+   * child's own family only. Delete needs edit too.
+   */
+  const visitActions: RowAction<(typeof visitRows)[number]>[] = teacherMode
+    ? []
+    : [
+        {
+          id: "notify",
+          label: "Notify parent",
+          onSelect: (v) => void onNotifyParent(v.id),
+          disabled: (v) => readOnly || !canEdit || !!v.notifiedParentAt,
+        },
+        {
+          id: "delete",
+          label: "Delete",
+          tone: "danger",
+          separatorAbove: true,
+          onSelect: (v) => onDeleteVisit(v.id),
+          disabled: () => readOnly || !canEdit,
+        },
+      ];
 
   const medicationCols: DataTableColumn<(typeof medicationRows)[number]>[] = [
     { key: "student", header: "Student", value: (m) => studentName(m.studentId), sortable: true },
@@ -427,7 +600,7 @@ export function HealthWorkspace() {
           <input
             type="checkbox"
             checked={m.active}
-            disabled={readOnly}
+            disabled={readOnly || !canEdit}
             onChange={(e) => onToggleMedicationActive(m.id, e.target.checked)}
           />
           {m.active ? "Active" : "Stopped"}
@@ -443,7 +616,7 @@ export function HealthWorkspace() {
       label: "Delete",
       tone: "danger",
       onSelect: (m) => onDeleteMedication(m.id),
-      disabled: () => readOnly,
+      disabled: () => readOnly || !canEdit,
     },
   ];
 
@@ -474,7 +647,7 @@ export function HealthWorkspace() {
       label: "Delete",
       tone: "danger",
       onSelect: (v) => onDeleteVaccination(v.id),
-      disabled: () => readOnly,
+      disabled: () => readOnly || !canEdit,
     },
   ];
 
@@ -487,14 +660,31 @@ export function HealthWorkspace() {
       notice={notice}
       error={error}
     >
-      <ModuleTabs value={tab} onChange={(id) => setTab(id as Tab)} items={TABS} />
+      <ModuleTabs value={shownTab} onChange={(id) => setTab(id as Tab)} items={tabs} />
 
-      {tab === "log" ? (
+      {teacherMode ? (
+        <p className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-xs text-[var(--muted)]">
+          {my.teaching.length === 0
+            ? "You have no classes assigned for this session, so there is nobody to show. Ask the office to set your timetable or class-teacher section."
+            : `Showing children of your classes only: ${my.teaching.map((t) => `${t.className}-${t.sectionName}`).join(", ")}. Deleting a visit, medications and vaccinations are kept by the office.`}
+        </p>
+      ) : scopeUnknown ? (
+        <p className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-xs text-[var(--muted)]">
+          {myLoading
+            ? "Loading your classes…"
+            : "Could not load your classes, so no records are shown. Reload the page to try again."}
+        </p>
+      ) : null}
+      {scopedError ? (
+        <p className="mt-2 text-xs font-semibold text-[var(--danger)]">{scopedError}</p>
+      ) : null}
+
+      {shownTab === "log" ? (
         <div className="mt-5 max-w-xl space-y-4">
           <label className="block text-sm">
             <span className="mb-1 block text-[11px] text-[var(--muted)]">Student</span>
             <StudentPicker
-              sis={sis}
+              students={pickable}
               masters={masters}
               value={pickedStudent}
               onPick={setPickedStudent}
@@ -537,18 +727,25 @@ export function HealthWorkspace() {
             Referred to hospital
           </label>
 
+          {teacherMode ? (
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={logNotify} onChange={(e) => setLogNotify(e.target.checked)} />
+              Notify the parent on the school app
+            </label>
+          ) : null}
+
           <button
             type="button"
             className="btn-accent rounded-lg px-4 py-2 text-sm font-bold disabled:opacity-50"
-            disabled={readOnly}
-            onClick={onLogVisit}
+            disabled={readOnly || busy || scopeUnknown}
+            onClick={() => void onLogVisit()}
           >
             Log visit
           </button>
         </div>
       ) : null}
 
-      {tab === "visits" ? (
+      {shownTab === "visits" ? (
         <div className="mt-5 space-y-4">
           <div className="flex flex-wrap items-end gap-3">
             <label className="block text-sm">
@@ -578,22 +775,31 @@ export function HealthWorkspace() {
             columns={visitCols}
             rows={visitRows}
             rowKey={(v) => v.id}
-            rowActions={visitActions}
+            rowActions={visitActions.length ? visitActions : undefined}
             minWidth="min-w-[980px]"
             exportFileBaseName="health-visits"
             exportTitle="Infirmary visits"
-            emptyTitle="No visits match this filter."
+            // Not loaded is not "none": say which it is.
+            emptyTitle={
+              scopedError
+                ? scopedError
+                : scopeUnknown && !myLoading
+                  ? "Could not load your classes, so no visits are shown."
+                  : scopeUnknown || (teacherMode && !scoped)
+                    ? "Loading…"
+                    : "No visits match this filter."
+            }
           />
         </div>
       ) : null}
 
-      {tab === "medications" ? (
+      {shownTab === "medications" ? (
         <div className="mt-5 space-y-5">
           <div className="max-w-xl space-y-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <p className="text-sm font-bold">Add medication</p>
             <label className="block text-sm">
               <span className="mb-1 block text-[11px] text-[var(--muted)]">Student</span>
-              <StudentPicker sis={sis} masters={masters} value={medStudent} onPick={setMedStudent} onClear={() => setMedStudent(null)} />
+              <StudentPicker students={pickable} masters={masters} value={medStudent} onPick={setMedStudent} onClear={() => setMedStudent(null)} />
             </label>
             <div className="grid grid-cols-2 gap-3">
               <label className="block text-sm">
@@ -630,7 +836,7 @@ export function HealthWorkspace() {
             <button
               type="button"
               className="btn-accent rounded-lg px-4 py-2 text-sm font-bold disabled:opacity-50"
-              disabled={readOnly}
+              disabled={readOnly || !canEdit}
               onClick={onAddMedication}
             >
               Add medication
@@ -650,13 +856,13 @@ export function HealthWorkspace() {
         </div>
       ) : null}
 
-      {tab === "vaccinations" ? (
+      {shownTab === "vaccinations" ? (
         <div className="mt-5 space-y-5">
           <div className="max-w-xl space-y-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <p className="text-sm font-bold">Record vaccination</p>
             <label className="block text-sm">
               <span className="mb-1 block text-[11px] text-[var(--muted)]">Student</span>
-              <StudentPicker sis={sis} masters={masters} value={vaxStudent} onPick={setVaxStudent} onClear={() => setVaxStudent(null)} />
+              <StudentPicker students={pickable} masters={masters} value={vaxStudent} onPick={setVaxStudent} onClear={() => setVaxStudent(null)} />
             </label>
             <div className="grid grid-cols-2 gap-3">
               <label className="block text-sm">
@@ -689,7 +895,7 @@ export function HealthWorkspace() {
             <button
               type="button"
               className="btn-accent rounded-lg px-4 py-2 text-sm font-bold disabled:opacity-50"
-              disabled={readOnly}
+              disabled={readOnly || !canEdit}
               onClick={onAddVaccination}
             >
               Record vaccination
@@ -709,11 +915,11 @@ export function HealthWorkspace() {
         </div>
       ) : null}
 
-      {tab === "student" ? (
+      {shownTab === "student" ? (
         <div className="mt-5 space-y-4">
           <label className="block max-w-md text-sm">
             <span className="mb-1 block text-[11px] text-[var(--muted)]">Student</span>
-            <StudentPicker sis={sis} masters={masters} value={byStudent} onPick={setByStudent} onClear={() => setByStudent(null)} />
+            <StudentPicker students={pickable} masters={masters} value={byStudent} onPick={setByStudent} onClear={() => setByStudent(null)} />
           </label>
 
           {byStudent ? (
@@ -738,7 +944,7 @@ export function HealthWorkspace() {
 
               {timeline.length === 0 ? (
                 <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-8 text-center text-sm text-[var(--muted)]">
-                  No health records for this student.
+                  {teacherMode && !scoped ? scopedError || "Loading…" : "No health records for this student."}
                 </p>
               ) : (
                 <ul className="space-y-2">
