@@ -302,6 +302,7 @@ SELFTESTS=(
   test:nucleus-assessments
   test:staff-home-kind
   test:staff-teaching-scope
+  test:sis-class-teacher
   test:staff-day-status
   test:payroll-no-register
   test:mobile-features
