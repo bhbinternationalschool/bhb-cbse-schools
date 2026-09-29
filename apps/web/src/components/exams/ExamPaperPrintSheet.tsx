@@ -327,7 +327,10 @@ function PaperHeader(props: { ctx: Ctx; classLabel: string; subjectLabel: string
             {h.schoolName || header.schoolName}
           </p>
           <p className="text-[11px] text-[var(--muted)]">
-            {h.address || header.address} · {L.affiliation} {header.affiliationNo} · {L.schoolCode} {header.schoolCode}
+            {/* No affiliation number or school code: the school is
+                state-recognised, not CBSE-affiliated, and both values were
+                the placeholders 213XXXX and 70XXX. */}
+            {h.address || header.address}
           </p>
           <p className="mt-1 text-sm font-bold uppercase tracking-wide text-[var(--brand-deep)]">
             {h.examName || paper.examName || examLabel || L.examination}

@@ -185,23 +185,33 @@ export function schoolRecognitionLine(masters?: MastersState | null): string {
   const p = schoolIdentity(masters);
   const affiliation = real(p.affiliationNo) || real(TENANT.affiliationNo);
   const state = real(p.state) || TENANT.state;
+  // The school's recognition certificates are issued by the District Basic
+  // Education Officer under UP Basic Shiksha Parishad — say who recognised it.
+  const stateRecognition = /uttar pradesh/i.test(state)
+    ? "Recognised by the Basic Education Department, Uttar Pradesh"
+    : state
+      ? `Recognised by the Government of ${state}`
+      : "";
 
+  let base = "";
   switch (p.boardMode) {
     case "CBSE":
-      return affiliation
-        ? "Affiliated to the Central Board of Secondary Education"
-        : "";
+      base = affiliation ? "Affiliated to the Central Board of Secondary Education" : "";
+      break;
     case "DUAL":
-      return affiliation
+      base = affiliation
         ? "Affiliated to the Central Board of Secondary Education"
-        : state
-          ? `Recognised by the Government of ${state}`
-          : "";
+        : stateRecognition;
+      break;
     case "UP_STATE":
-      return state ? `Recognised by the Government of ${state}` : "";
-    default:
-      return "";
+      base = stateRecognition;
+      break;
   }
+  // Applied for, not granted: said as exactly that, and only while there is
+  // no real affiliation number — once there is, the line above says it.
+  const inProcess =
+    p.cbseAffiliationInProcess && !affiliation ? "CBSE affiliation under process" : "";
+  return [base, inProcess].filter(Boolean).join(" · ");
 }
 
 /** "Varanasi, Uttar Pradesh" — the short place line under a certificate. */

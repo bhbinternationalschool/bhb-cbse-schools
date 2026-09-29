@@ -29,6 +29,12 @@ export type SchoolProfile = {
   udiseCode: string;
   boardMode: BoardMode;
   affiliationNo: string;
+  /**
+   * The school has applied for CBSE affiliation and it is not yet granted.
+   * Printed as "CBSE affiliation under process" — never as affiliated — and
+   * only while no real affiliation number is on file.
+   */
+  cbseAffiliationInProcess: boolean;
   schoolCode: string;
   address: string;
   city: string;
@@ -1277,6 +1283,7 @@ export function defaultSchoolProfile(): SchoolProfile {
     udiseCode: "",
     boardMode: (TENANT.boardMode as BoardMode) || "DUAL",
     affiliationNo: TENANT.affiliationNo,
+    cbseAffiliationInProcess: false,
     schoolCode: TENANT.schoolCode,
     address: TENANT.schoolAddress,
     city: TENANT.city,
@@ -1971,6 +1978,9 @@ export function normalizeSchoolProfile(
     udiseCode: p?.udiseCode ?? "",
     boardMode: (p?.boardMode as BoardMode) || d.boardMode,
     affiliationNo: p?.affiliationNo ?? d.affiliationNo,
+    // Carried through explicitly: a field normalize does not copy is dropped
+    // on the next save of the profile.
+    cbseAffiliationInProcess: p?.cbseAffiliationInProcess === true,
     schoolCode: p?.schoolCode ?? d.schoolCode,
     address: p?.address ?? d.address,
     city: p?.city ?? d.city,
@@ -2293,7 +2303,7 @@ export function isPublishedHoliday(
 
 export const BOARD_MODES: { value: BoardMode; label: string }[] = [
   { value: "CBSE", label: "CBSE" },
-  { value: "UP_STATE", label: "UP State" },
+  { value: "UP_STATE", label: "UP Basic Education (state recognition)" },
   { value: "DUAL", label: "Dual (UP + CBSE path)" },
 ];
 

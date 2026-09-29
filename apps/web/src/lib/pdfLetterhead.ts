@@ -183,14 +183,14 @@ export function letterheadInfoFromMasters(masters?: MastersState): Omit<PdfLette
   ]
     .filter(Boolean)
     .join(", ");
-  const affiliation = profile.affiliationNo
-    ? ` · CBSE Aff. ${profile.affiliationNo}`
-    : " · Affiliated to CBSE";
-
+  // No affiliation on the letterhead. The school is state-recognised
+  // (Nursery–VIII), not CBSE-affiliated: this line printed "CBSE Aff. …"
+  // with a number, and "Affiliated to CBSE" without one, on every PDF the
+  // ERP makes — receipts, certificates, agreements, the daily brief.
   return {
     displayName: profile.displayName || TENANT.nameDisplay,
     tagline: profile.tagline || TENANT.tagline,
-    addressLine: `${addressLine || TENANT.schoolAddress}${affiliation}`,
+    addressLine: addressLine || TENANT.schoolAddress,
     contactLine: contactParts(profile).join("  |  "),
   };
 }

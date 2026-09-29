@@ -1099,11 +1099,11 @@ export function CertificatesWorkspace() {
               className={`mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-3 ${isUidaiFormKind(kind) ? "hidden" : ""}`}
             >
               <h3 className="text-xs font-bold text-[var(--brand-deep)]">
-                Draft with AI (CBSE + UP Basic Education)
+                Draft with AI (UP Basic Education)
               </h3>
               <p className="mt-1 text-[10px] text-[var(--muted)]">
-                Generates certificate text per CBSE affiliation norms and UP
-                Basic Shiksha guidelines — English, Hindi, or both.
+                Generates certificate text per UP Basic Shiksha guidelines —
+                English, Hindi, or both.
               </p>
               <div className="mt-2 grid gap-2 sm:grid-cols-2">
                 <label className="text-[11px] font-semibold text-[var(--muted)]">

@@ -326,7 +326,7 @@ export function StaffAgreementPanel({
       body: editBody,
       changeRequest:
         aiReviseNote.trim() ||
-        "Align with CBSE affiliation norms and standard clauses used by reputed CBSE private schools in India. Expand any thin sections.",
+        "Align with standard clauses used by reputed private schools in India. Expand any thin sections.",
     });
     if (!result) return;
     if (
@@ -954,10 +954,10 @@ export function StaffAgreementPanel({
 
               <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-3">
                 <p className="text-xs font-semibold text-[var(--brand-deep)]">
-                  AI assist (CBSE alignment)
+                  AI assist
                 </p>
                 <p className="mt-1 text-[11px] text-[var(--muted)]">
-                  Revises your draft to match clauses used in CBSE-affiliated schools — child
+                  Revises your draft to match clauses used in reputed private schools — child
                   safety, POCSO, conduct, notice period, disciplinary action, etc.
                 </p>
                 <label className="mt-2 block text-[11px] font-semibold text-[var(--muted)]">
