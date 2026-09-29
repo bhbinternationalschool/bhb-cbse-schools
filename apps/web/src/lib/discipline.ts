@@ -13,6 +13,7 @@
  * calls assertModulePermission — the actual server/session-enforced check.
  */
 
+import { tombstonesOf, withTombstone } from "@/lib/moduleStateMerge";
 import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
@@ -73,6 +74,8 @@ export type DisciplineIncident = {
 export type DisciplineState = {
   version: 1;
   incidents: DisciplineIncident[];
+  /** Ids deleted here — so a merge with an older copy never brings them back (lib/moduleStateMerge). */
+  deletedIds?: string[];
 };
 
 const STORAGE_KEY = "bhb_discipline_v1";
@@ -150,7 +153,8 @@ export function normalizeDisciplineState(raw: unknown): DisciplineState {
         .map((i) => normalizeIncident(i as Partial<DisciplineIncident>))
         .filter((x): x is DisciplineIncident => !!x)
     : [];
-  return { version: 1, incidents };
+  const deletedIds = tombstonesOf(r);
+  return deletedIds.length ? { version: 1, incidents, deletedIds } : { version: 1, incidents };
 }
 
 export function loadDiscipline(): DisciplineState {
@@ -239,6 +243,7 @@ export function deleteIncident(
   return saveDiscipline({
     ...state,
     incidents: state.incidents.filter((i) => i.id !== id),
+    deletedIds: withTombstone(state.deletedIds, id),
   });
 }
 

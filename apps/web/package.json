@@ -44,6 +44,7 @@
     "test:staff-month-calendar": "npx tsx src/lib/staffMonthCalendar.selftest.ts",
     "test:staff-roster-redact": "npx tsx src/lib/staffRosterRedact.selftest.ts",
     "test:sis-class-teacher": "npx tsx src/lib/sisClassTeacher.selftest.ts",
+    "test:module-state-merge": "npx tsx src/lib/moduleStateMerge.selftest.ts",
     "test:staff-day-status": "npx tsx src/lib/staffDayStatus.selftest.ts",
     "test:payroll-no-register": "npx tsx src/lib/payrollNoRegister.selftest.ts",
     "test:masters-staff-slices": "npx tsx src/lib/mastersStaffSlices.selftest.ts",

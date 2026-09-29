@@ -8,8 +8,18 @@ import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { isModuleStateKey, MODULE_STATE_DEFS } from "@/lib/moduleStateRegistry";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { complaintScopeFilter } from "@/lib/api/v1/staffComplaints";
-import { staffSectionScope } from "@/lib/api/v1/staffScope";
+import { scopeAllows, staffSectionScope } from "@/lib/api/v1/staffScope";
 import type { ComplaintTicket } from "@/lib/complaints";
+import { isMergedModuleState, mergeModuleState } from "@/lib/moduleStateMerge";
+import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
+import { ensureSisHydratedServer } from "@/lib/sisPersistence";
+import { loadSis } from "@/lib/sis";
+
+/** Books a teacher adds to one entry at a time through /api/v1/staff/*. */
+const STUDENT_BOOKS: Record<string, string[]> = {
+  discipline: ["incidents"],
+  health: ["visits", "medications", "vaccinations"],
+};
 
 export const runtime = "nodejs";
 
@@ -59,6 +69,31 @@ export async function GET(req: Request, ctx: RouteCtx) {
       state = { ...(state as object), tickets: tickets.filter((t) => !!t && filter.allows(t)) };
     }
   }
+  if (module in STUDENT_BOOKS && !auth.viaMirrorSecret && state) {
+    // discipline.view / health.view are held by teachers, and these rows are
+    // the whole school's registers (health: children's medical notes). A
+    // teacher's browser gets only their own sections' children (2026-09-29).
+    const scope = await staffSectionScope(auth.ctx).catch(() => null);
+    if (!scope) {
+      return NextResponse.json({ ok: false, error: "Could not work out your classes" }, { status: 503 });
+    }
+    if (!scope.unrestricted) {
+      await ensureSchoolMirrorHydrated();
+      await ensureSisHydratedServer();
+      const mine = new Set(
+        loadSis()
+          .students.filter((s) => scopeAllows(scope, s.classId, s.sectionId))
+          .map((s) => s.id),
+      );
+      const book = { ...(state as Record<string, unknown>) };
+      for (const key of STUDENT_BOOKS[module]!) {
+        const rows = Array.isArray(book[key]) ? (book[key] as { studentId?: string }[]) : [];
+        book[key] = rows.filter((r) => !!r?.studentId && mine.has(r.studentId));
+      }
+      delete book.deletedIds;
+      state = book;
+    }
+  }
   return NextResponse.json({
     ok: true,
     state,
@@ -73,6 +108,23 @@ export async function POST(req: Request, ctx: RouteCtx) {
   }
   const auth = await requireStaffPermission(req, MODULE_STATE_DEFS[module].rbac, "edit");
   if (!auth.ok) return auth.response;
+  if (module in STUDENT_BOOKS && !auth.viaMirrorSecret) {
+    // Same rule for discipline / health: a teacher's copy is filtered to
+    // their classes, so pushing it whole would erase every other class.
+    // Teachers log entries through /api/v1/staff/discipline|health.
+    const scope = await staffSectionScope(auth.ctx).catch(() => null);
+    if (!scope?.unrestricted) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            `Only the office or principal can save the whole ${MODULE_STATE_DEFS[module].label} register. ` +
+            "Entries for your own class are saved one at a time.",
+        },
+        { status: 403 },
+      );
+    }
+  }
   if (module === "complaints" && !auth.viaMirrorSecret) {
     // This push is the whole complaints book, upserted over the office's
     // copy. "complaints.edit" alone let a teacher's browser send it — a stale
@@ -137,6 +189,24 @@ export async function POST(req: Request, ctx: RouteCtx) {
       ...(body.state as Record<string, unknown>),
       rows: mergeFeeAdjustmentRows(rowsOf(current?.state), rowsOf(body.state)),
     };
+  }
+  if (isMergedModuleState(module)) {
+    // Merge, never overwrite (lib/moduleStateMerge): teachers' phones add
+    // entries to this same row between two office saves.
+    const { data: current, error: readErr } = await tctx.sb
+      .from("module_local_state")
+      .select("state")
+      .eq("tenant_id", tctx.tenantId)
+      .eq("module_key", module)
+      .maybeSingle();
+    if (readErr) {
+      // Unreadable is not empty: writing now could erase the whole book.
+      return NextResponse.json(
+        { ok: false, error: `Could not read the current ${MODULE_STATE_DEFS[module].label}: ${readErr.message}` },
+        { status: 503 },
+      );
+    }
+    state = mergeModuleState(module, current?.state ?? null, body.state as Record<string, unknown>);
   }
   const { error } = await tctx.sb.from("module_local_state").upsert(
     { tenant_id: tctx.tenantId, module_key: module, state, updated_at: now },

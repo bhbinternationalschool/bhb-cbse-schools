@@ -305,6 +305,7 @@ SELFTESTS=(
   test:staff-month-calendar
   test:staff-roster-redact
   test:sis-class-teacher
+  test:module-state-merge
   test:staff-day-status
   test:payroll-no-register
   test:mobile-features

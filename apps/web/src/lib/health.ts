@@ -13,6 +13,7 @@
  * assertModulePermission guard), not lib/dutyRoster.ts's ungated one.
  */
 
+import { tombstonesOf, withTombstone } from "@/lib/moduleStateMerge";
 import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
@@ -83,6 +84,8 @@ export type VaccinationRecord = {
 export type HealthState = {
   version: 1;
   visits: HealthVisit[];
+  /** Ids deleted here (visits, medications, vaccinations) — see lib/moduleStateMerge. */
+  deletedIds?: string[];
   medications: MedicationRecord[];
   vaccinations: VaccinationRecord[];
 };
@@ -187,6 +190,7 @@ export function normalizeHealthState(raw: unknown): HealthState {
           .map((v) => normalizeVaccination(v as Partial<VaccinationRecord>))
           .filter((x): x is VaccinationRecord => !!x)
       : [],
+    ...(tombstonesOf(r).length ? { deletedIds: tombstonesOf(r) } : {}),
   };
 }
 
@@ -256,7 +260,7 @@ export function upsertVisit(
 }
 
 export function deleteVisit(state: HealthState, id: string): HealthState {
-  return saveHealth({ ...state, visits: state.visits.filter((v) => v.id !== id) });
+  return saveHealth({ ...state, visits: state.visits.filter((v) => v.id !== id), deletedIds: withTombstone(state.deletedIds, id) });
 }
 
 export function upsertMedication(
@@ -277,7 +281,7 @@ export function upsertMedication(
 }
 
 export function deleteMedication(state: HealthState, id: string): HealthState {
-  return saveHealth({ ...state, medications: state.medications.filter((m) => m.id !== id) });
+  return saveHealth({ ...state, medications: state.medications.filter((m) => m.id !== id), deletedIds: withTombstone(state.deletedIds, id) });
 }
 
 export function upsertVaccination(
@@ -298,7 +302,7 @@ export function upsertVaccination(
 }
 
 export function deleteVaccination(state: HealthState, id: string): HealthState {
-  return saveHealth({ ...state, vaccinations: state.vaccinations.filter((v) => v.id !== id) });
+  return saveHealth({ ...state, vaccinations: state.vaccinations.filter((v) => v.id !== id), deletedIds: withTombstone(state.deletedIds, id) });
 }
 
 export function listVisitsForStudent(state: HealthState, studentId: string): HealthVisit[] {

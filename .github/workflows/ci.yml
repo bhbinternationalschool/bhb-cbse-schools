@@ -415,6 +415,7 @@ jobs:
           npm run test:staff-month-calendar
           npm run test:staff-roster-redact
           npm run test:sis-class-teacher
+          npm run test:module-state-merge
           npm run test:staff-day-status
           npm run test:payroll-no-register
           npm run test:mobile-features

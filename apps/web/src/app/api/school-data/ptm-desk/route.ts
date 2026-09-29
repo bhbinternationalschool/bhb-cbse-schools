@@ -5,6 +5,10 @@ import {
   SCHOOL_DATA_DESK_RBAC,
 } from "@/lib/apiRouteAuth.server";
 import type { PtmState } from "@/lib/ptm";
+import { scopedPtmState } from "@/lib/ptmTeacherScope.server";
+import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
+import { ensureSisHydratedServer } from "@/lib/sisPersistence";
+import { loadSis } from "@/lib/sis";
 import { ptmDualWriteDbEnabled } from "@/lib/ptmDbConfig";
 import {
   fetchPtmDeskFromDb,
@@ -23,6 +27,39 @@ export async function GET(req: Request) {
       { ok: false, error: "PTM desk fetch failed — tenant/db unavailable" },
       { status: 503 },
     );
+  }
+  // A teacher's browser gets only its own slice (lib/ptmTeacherScope.server,
+  // the same cut as /api/v1/staff/ptm/desk) — ptm.view is held by every
+  // teacher, and this was the whole school's bookings and feedback
+  // (2026-09-29). Unknown scope is refused, never widened.
+  if (!auth.viaMirrorSecret) {
+    const scope = await staffSectionScope(auth.ctx).catch(() => null);
+    if (!scope) {
+      return NextResponse.json({ ok: false, error: "Could not work out your classes" }, { status: 503 });
+    }
+    if (!scope.unrestricted) {
+      await ensureSchoolMirrorHydrated();
+      await ensureSisHydratedServer();
+      const cut = scopedPtmState({
+        state: { version: 1, ...bundle },
+        scope,
+        staffId: auth.ctx.session.staffId || "",
+        sis: loadSis(),
+      });
+      return NextResponse.json(
+        {
+          ok: true,
+          events: cut.events,
+          slots: cut.slots,
+          bookings: cut.bookings,
+          feedback: cut.feedback,
+          eventCount: cut.events.length,
+          updatedAt: meta?.updatedAt || new Date().toISOString(),
+          meta,
+        },
+        { headers: { "Cache-Control": "private, no-store" } },
+      );
+    }
   }
   return NextResponse.json({
     ok: true,
