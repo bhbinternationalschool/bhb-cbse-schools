@@ -12,6 +12,8 @@ import {
   type SisReportId,
 } from "@/lib/sisReportCatalog";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { isRestrictedTeacher, useMyTeaching } from "@/components/staff/useMyTeaching";
+import { hasPermission } from "@/lib/rbac";
 
 export function SisReportsPanel({
   tick = 0,
@@ -53,12 +55,43 @@ export function SisReportsPanel({
     setSis(loadSis());
   }, [tick, ay]);
 
+  // Every button on this panel downloads a file of children's records, so
+  // the whole panel needs "students.export" (2026-09-29). runSisReport
+  // refuses too; this saves a teacher a screen of buttons that all fail.
+  const canExport = useMemo(
+    () => hasPermission(session, masters, "students", "export"),
+    [session, masters],
+  );
+
+  // A teacher's class picker lists their own sections. The roster this
+  // browser holds is already limited to them by the server.
+  const { my } = useMyTeaching();
+  const teacherMode = isRestrictedTeacher(my);
+  const mySections = useMemo(
+    () =>
+      teacherMode
+        ? new Set(my.teaching.map((t) => `${t.classId}|${t.sectionId}`))
+        : null,
+    [teacherMode, my],
+  );
+
+  const classOptions = useMemo(() => {
+    if (!masters) return [];
+    const active = masters.classes.filter((c) => c.isActive);
+    if (!mySections) return active;
+    const mine = new Set([...mySections].map((k) => k.split("|")[0]));
+    return active.filter((c) => mine.has(c.id));
+  }, [masters, mySections]);
+
   const sections = useMemo(() => {
     if (!masters || !classId) return [];
     return masters.sections.filter(
-      (s) => s.isActive && s.classId === classId,
+      (s) =>
+        s.isActive &&
+        s.classId === classId &&
+        (!mySections || mySections.has(`${classId}|${s.id}`)),
     );
-  }, [masters, classId]);
+  }, [masters, classId, mySections]);
 
   const byCat = useMemo(() => {
     const map: Record<string, typeof SIS_REPORTS> = {
@@ -113,6 +146,16 @@ export function SisReportsPanel({
     );
   }
 
+  if (!canExport) {
+    return (
+      <p className="mt-4 rounded-xl border border-dashed border-[var(--border)] px-4 py-6 text-sm text-[var(--muted)]">
+        Student reports are downloads, and your role can view students but
+        not download them. Your class list is under Students; ask the office
+        for a report you need.
+      </p>
+    );
+  }
+
   return (
     <div className="mt-4 space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3">
@@ -139,13 +182,11 @@ export function SisReportsPanel({
               }}
             >
               <option value="">All</option>
-              {masters.classes
-                .filter((c) => c.isActive)
-                .map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
+              {classOptions.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
             </select>
           </label>
           <label className="text-sm">

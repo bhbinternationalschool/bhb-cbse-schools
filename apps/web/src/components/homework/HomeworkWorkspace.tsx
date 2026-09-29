@@ -1382,6 +1382,10 @@ export function HomeworkWorkspace() {
                       homework: state,
                       masters,
                       sis,
+                      // A teacher's export covers their own sections only (2026-09-29).
+                      sectionKeys: teacherMode
+                        ? new Set(my.teaching.map((t) => `${t.classId}|${t.sectionId}`))
+                        : undefined,
                     });
                     if (!res.ok) setError(res.error);
                     else flash(res.message);

@@ -20,6 +20,7 @@ import {
   TrustReportsRunner,
 } from "@/components/reports/ModuleReportRunners";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { useMyTeaching } from "@/components/staff/useMyTeaching";
 import {
   StaffAttendanceReportsPanel,
   StaffLeaveReportsPanel,
@@ -43,6 +44,7 @@ import {
 } from "@/lib/reportsCenter";
 import {
   filterReportsCenterEntries,
+  isStaffRecordsEntry,
   listReportsCenterEntries,
   moduleLabel,
   REPORTS_CENTER_MODULES,
@@ -69,17 +71,27 @@ export function ReportsCenterWorkspace() {
   const [recent, setRecent] = useState<ReportsCenterRecentItem[]>([]);
   const [ay, setAy] = useState("");
 
+  // Teacher mode (2026-09-29): no reports about colleagues (staff leave,
+  // staff attendance), and the class-based runners narrow to the teacher's
+  // own sections (each runner reads "my classes" itself). Principal /
+  // office come back unrestricted — unchanged. Colleagues' records stay
+  // hidden until that answer confirms a school-wide login, failing closed
+  // while it loads so a teacher never gets a moment with the Staff tab.
+  const { my } = useMyTeaching();
+  const hideStaffRecords = !my?.unrestricted;
+
   const { allowedModules, allowedRbac } = useMemo(() => {
     const masters = loadMasters();
     const rbac = loadRbac();
     const mods = REPORTS_CENTER_MODULES.filter((m) => {
       if (!canAccessModule(session, masters, m.rbacModule, rbac)) return false;
+      if (hideStaffRecords && m.id === "staff") return false;
       if (m.id === "rte") return isModuleEnabled("rte_ews");
       return true;
     });
     const set = new Set<RbacModule>(mods.map((m) => m.rbacModule));
     return { allowedModules: mods, allowedRbac: set };
-  }, [session]);
+  }, [session, hideStaffRecords]);
 
   const canExport = useMemo(() => {
     const masters = loadMasters();
@@ -115,8 +127,8 @@ export function ReportsCenterWorkspace() {
         query,
         moduleId: moduleFilter,
         allowedRbac,
-      }),
-    [allEntries, query, moduleFilter, allowedRbac],
+      }).filter((e) => !hideStaffRecords || !isStaffRecordsEntry(e)),
+    [allEntries, query, moduleFilter, allowedRbac, hideStaffRecords],
   );
 
   const hubTabs: ModuleTabItem[] = useMemo(() => {
@@ -315,8 +327,10 @@ export function ReportsCenterWorkspace() {
           ) : (
             <ul className="space-y-1.5">
               {recent
-                .filter((r) =>
-                  allowedModules.some((m) => m.id === r.moduleId),
+                .filter(
+                  (r) =>
+                    allowedModules.some((m) => m.id === r.moduleId) &&
+                    (!hideStaffRecords || !isStaffRecordsEntry(r)),
                 )
                 .map((r) => (
                   <li
@@ -372,7 +386,7 @@ export function ReportsCenterWorkspace() {
               Open full module →
             </Link>
           </div>
-          <ModuleRunner id={tab} ay={ay} />
+          <ModuleRunner id={tab} ay={ay} hideStaffRecords={hideStaffRecords} />
         </section>
       ) : null}
     </ErpWorkspaceShell>
@@ -382,9 +396,11 @@ export function ReportsCenterWorkspace() {
 function ModuleRunner({
   id,
   ay,
+  hideStaffRecords,
 }: {
   id: ReportsCenterModuleId;
   ay: string;
+  hideStaffRecords: boolean;
 }) {
   switch (id) {
     case "fees":
@@ -394,8 +410,13 @@ function ModuleRunner({
     case "admissions":
       return <AdmissionReportsPanel />;
     case "staff":
-      return <StaffLeaveReportsPanel ay={ay} scope="leave" />;
+      // Unreachable for a teacher (the tab is not offered); belt and braces
+      // for a stale ?module=staff link.
+      return hideStaffRecords ? null : <StaffLeaveReportsPanel ay={ay} scope="leave" />;
     case "attendance":
+      // A teacher gets their own classes' student attendance only — the
+      // staff attendance report is every colleague's punches.
+      if (hideStaffRecords) return <StudentAttendanceReportsPanel ay={ay} />;
       return (
         <div className="space-y-8">
           <div>
