@@ -5,6 +5,7 @@ import {
   requestMeta,
   resolveApiAuth,
 } from "@/lib/api/v1/auth";
+import { assertClassSubjectScope } from "@/lib/api/v1/staffScope";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import {
   ensureTeachingHydratedServer,
@@ -51,6 +52,9 @@ export async function POST(request: Request) {
     if (!ctx.masters.subjects.some((s) => s.id === subjectId)) {
       throw new ApiError("bad_request", "Unknown subject", 400);
     }
+    // Only a subject the session teaches in this class (2026-09-29) — the
+    // app's scan-a-contents-page flow let any teacher fill any class's plan.
+    await assertClassSubjectScope(ctx, classId, "", subjectId);
     if (chapters.length === 0) {
       throw new ApiError("bad_request", "No chapters to import", 400);
     }

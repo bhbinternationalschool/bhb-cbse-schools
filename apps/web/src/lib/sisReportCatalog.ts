@@ -31,6 +31,7 @@ import {
   studentToRegisterExportRow,
 } from "@/lib/studentRegisterExport";
 import { tagLabelsForStudent } from "@/lib/studentTags";
+import { actorMayExport } from "@/lib/rbacGuard";
 import { TENANT } from "@/lib/types";
 import {
   computeStudentUdiseGaps,
@@ -761,6 +762,12 @@ export function runSisReport(
   id: SisReportId,
   filters: SisReportFilters,
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Every format here is a file download of children's records (names,
+  // DOB, category, Aadhaar-bearing registers). "students.view" — which
+  // every teacher holds — used to be enough.
+  if (!actorMayExport("students", "runSisReport")) {
+    return { ok: false, error: "Your role can view students but not download student reports" };
+  }
   const masters = filters.masters ?? loadMasters();
   const sis = filters.sis ?? loadSis();
   const students = filterSisStudents(sis, masters, filters);

@@ -111,6 +111,12 @@ async function resolveLogLocation(
  * timetable and must match a period actually assigned to this teacher.
  * A client cannot invent a period, log someone else's class, or claim a
  * subject that isn't on the grid.
+ *
+ * That slot match IS the scope check (2026-09-29): it is narrower than
+ * assertSectionScope, and deliberately not replaced by it — a substitute
+ * covering another teacher's period is not a teacher of that section, yet
+ * the period is theirs to log. The web Teaching desk sends a teacher's
+ * logs here; the whole-blob push is refused to them.
  */
 export async function POST(request: Request) {
   try {
@@ -220,9 +226,20 @@ export async function POST(request: Request) {
     // Only accept a start stamp for a period being logged on its own
     // day; anything else is a backfill and leaves punctuality unmeasured
     // rather than recording a start time the teacher did not tap.
+    // A re-save of a period already logged (the web desk's "topic covered"
+    // picker, since 2026-09-29) keeps the start already recorded rather
+    // than restamping it with the time the topic was picked.
+    const prior = state.logs.find(
+      (l) =>
+        l.academicYearCode === ay &&
+        l.date === date &&
+        l.periodNo === periodNo &&
+        l.classId === slot.classId &&
+        l.sectionId === slot.sectionId,
+    );
     const startedAt =
       date === istDateOf() && status !== "not_delivered"
-        ? body.startedAt || new Date().toISOString()
+        ? body.startedAt || prior?.startedAt || new Date().toISOString()
         : "";
 
     const location = await resolveLogLocation(body);

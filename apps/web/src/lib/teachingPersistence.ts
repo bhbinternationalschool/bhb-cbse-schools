@@ -56,15 +56,30 @@ export function scheduleTeachingSync(state: TeachingState) {
 /**
  * Server-side push. Merges against whatever is already in the cloud so a
  * stale server-side copy cannot truncate the shared log set.
+ *
+ * `dropLessonPlanIds`: the merge is a union with no tombstones, so a plan
+ * removed from `state` would come straight back from the cloud copy. A
+ * removal names its plan here and it is filtered out after the merge.
  */
 export async function pushTeachingRemoteServer(
   state: TeachingState,
+  opts?: { dropLessonPlanIds?: string[] },
 ): Promise<{ ok: boolean; error?: string }> {
   const { fetchServerBlob, pushServerBlob } = await import("@/lib/serverBlob");
   const remote = await fetchServerBlob<TeachingState>("teaching_state");
-  const next = remote.state
+  let next = remote.state
     ? mergeTeachingStates(remote.state, state)
     : state;
+  const drop = new Set(opts?.dropLessonPlanIds ?? []);
+  if (drop.size > 0) {
+    next = {
+      ...next,
+      lessonPlans: next.lessonPlans.filter((p) => !drop.has(p.id)),
+      logs: next.logs.map((l) =>
+        drop.has(l.lessonPlanId) ? { ...l, lessonPlanId: "" } : l,
+      ),
+    };
+  }
   return pushServerBlob("teaching_state", next);
 }
 
