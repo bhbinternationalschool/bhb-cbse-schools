@@ -1245,6 +1245,29 @@ export async function handleWaUnifiedInbound(opts: {
   const isStaff =
     identity.isKnown &&
     identity.roles.some((role) => ["teacher", "staff", "owner"].includes(flowKindFromRole(role)));
+
+  // A location pin from staff is their attendance punch — always, whatever
+  // menu or role they were last in.
+  //
+  // 29 Sep 2026: every staff punch of the day failed. A pin carries no
+  // text, and empty text read as "show the menu", so each pin was answered
+  // with the greeting and never reached the attendance bot. Staff did it
+  // right — IN, then 📎 → Location — and were not marked, five of them,
+  // some twice. A teacher-parent last talking as a parent, or a staff
+  // member sitting at the profile question, lost the pin the same way.
+  if (opts.location && isStaff) {
+    const att = await handleWaStaffAttendanceInbound({
+      fromWaId: opts.fromWaId,
+      text: "",
+      waMessageId: opts.waMessageId,
+      profileName: opts.profileName,
+      location: opts.location,
+      fromUnified: true,
+    });
+    if (att.handled) {
+      return { replied: att.replied, escalate: att.escalate, audience: "staff_attendance", stub: att.stub, error: att.error };
+    }
+  }
   // An unknown caller already in a conversation who forwards a link or
   // drops a photo with no caption is not asking for the welcome menu.
   // Empty text reads as a menu command, so without this a bare photo
@@ -1256,6 +1279,7 @@ export async function handleWaUnifiedInbound(opts: {
       known: identity.isKnown,
       hasSession: !!session,
       hasAudio: !!opts.audio,
+      hasLocation: !!opts.location,
     })
   ) {
     session = sessionFor(mobile10, identity, opts.profileName);

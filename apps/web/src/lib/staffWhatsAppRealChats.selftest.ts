@@ -29,9 +29,10 @@ import {
   markAskIsFresh,
   MY_SECTIONS_MARKER,
 } from "./erpCommands";
-import { detectOwnAttendanceAsk } from "./waStaffAttendanceBotEngine";
+import { detectOwnAttendanceAsk, staffAttAskLocationText } from "./waStaffAttendanceBotEngine";
 import { shouldRouteStaffAttendance } from "./waStaffAttendanceBotServer";
 import {
+  shouldShowUnifiedMenu,
   composeStaffFallbackText,
   composeUnknownStaffAskReply,
   isStaffHumanAsk,
@@ -43,6 +44,32 @@ import { roleFlowInteractiveMenu } from "./waUnifiedMenus";
 import { isLikelyClassChannelPost } from "./waClassChannelEngine";
 
 console.log("staffWhatsAppRealChats.selftest.ts");
+
+/* ── A location pin is a punch, not a menu request ─────────────────── */
+
+// Every punch on 29 Sep failed here: the pin has no text, and no text meant
+// "show the menu". Five staff sent IN and then their location, some twice.
+assert.equal(
+  shouldShowUnifiedMenu({ text: "", staff: true, known: true, hasSession: true, hasAudio: false, hasLocation: true }),
+  false,
+  "a staff location pin must reach the attendance bot",
+);
+assert.equal(
+  shouldShowUnifiedMenu({ text: "", staff: false, known: true, hasSession: true, hasAudio: false, hasLocation: true }),
+  false,
+  "nor is a parent's pin a menu request",
+);
+// A bare empty message with nothing attached still opens the menu, as before.
+assert.equal(
+  shouldShowUnifiedMenu({ text: "", staff: true, known: true, hasSession: true, hasAudio: false, hasLocation: false }),
+  true,
+);
+for (const lang of ["en", "hi"] as const) {
+  const t = staffAttAskLocationText("in", lang);
+  assert.ok(t.includes("Send your current location"), "names the option that works");
+  assert.ok(t.includes("Share live location"), "and warns off the one that does not");
+  assert.ok(/1\./.test(t) && /3\./.test(t), "as numbered steps");
+}
 
 /* ── Their own attendance, not the class register ──────────────────── */
 

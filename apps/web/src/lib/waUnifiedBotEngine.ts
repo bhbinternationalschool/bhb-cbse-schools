@@ -201,9 +201,15 @@ export function shouldShowUnifiedMenu(opts: {
   known: boolean;
   hasSession: boolean;
   hasAudio: boolean;
+  /**
+   * A location pin. It has no text, and until 29 Sep 2026 that made it a
+   * menu request — every staff attendance punch that day was answered with
+   * the greeting menu instead of being recorded.
+   */
+  hasLocation?: boolean;
 }): boolean {
   if (!opts.known && opts.hasSession && looksLikeForward(opts.text)) return false;
-  if (!opts.text.trim() && opts.hasAudio) return false;
+  if (!opts.text.trim() && (opts.hasAudio || opts.hasLocation)) return false;
   return isUnifiedMenuCommand(opts.text, { staff: opts.staff });
 }
 

@@ -308,6 +308,22 @@ export async function applyWhatsAppStaffPunch(opts: {
   };
 }
 
+/**
+ * Today's punch for one staff member — IN and OUT times, "" when missing —
+ * or null when there is no mark at all today.
+ */
+export async function staffPunchToday(
+  staffId: string,
+): Promise<{ inTime: string; outTime: string } | null> {
+  const state = await loadStaffAttendanceServer();
+  const masters = loadMasters();
+  const ay = currentAcademicYearCode(masters);
+  const reg = findStaffRegister(state, todayIst(), ay);
+  const mark = reg?.marks.find((m) => m.staffId === staffId);
+  if (!mark) return null;
+  return { inTime: mark.inTime || "", outTime: mark.outTime || "" };
+}
+
 export async function staffAttendanceStatusForWa(
   staffId: string,
 ): Promise<string> {
@@ -318,7 +334,7 @@ export async function staffAttendanceStatusForWa(
   const reg = findStaffRegister(state, date, ay);
   const mark = reg?.marks.find((m) => m.staffId === staffId);
   if (!mark) {
-    return `*Attendance* — ${date}\n\nNo punch yet. Reply *IN* and share your live location pin.`;
+    return `*Attendance* — ${date}\n\nNo punch yet. To punch IN, send your location: 📎 → *Location* → *Send your current location*.`;
   }
   const geo = mark.punchGeo
     ? `📍 last pin ~${formatDistanceLabel(mark.punchGeo.distanceM ?? -1)} from school`
@@ -330,7 +346,7 @@ export async function staffAttendanceStatusForWa(
     mark.note ? `Note: ${mark.note}` : null,
     geo || null,
     "",
-    "Reply *IN* or *OUT* + location pin to update.",
+    "To punch, send your location: 📎 → *Location* → *Send your current location*.",
   ]
     .filter(Boolean)
     .join("\n");

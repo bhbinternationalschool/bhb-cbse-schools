@@ -9,6 +9,7 @@ import { loadMasters } from "@/lib/masters";
 import {
   applyWhatsAppStaffPunch,
   staffAttendanceStatusForWa,
+  staffPunchToday,
 } from "@/lib/staffAttendance.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { findStaffByMobile } from "@/lib/waRoleResolver";
@@ -375,7 +376,40 @@ export async function handleWaStaffAttendanceInbound(opts: {
       });
     }
   } else if (opts.location && !pending) {
-    replyText = staffAttLocationWithoutPendingText(lang);
+    // A pin with no IN typed first is still a punch IN when there has been
+    // none today — there is nothing else it could mean, and "reply IN first,
+    // then send the pin again" is a second trip for no reason. After an IN
+    // it stays a question: a pin sent again in the morning must not clock
+    // anybody out.
+    const today = await staffPunchToday(staff.id);
+    if (!today?.inTime) {
+      const result = await applyWhatsAppStaffPunch({
+        staff,
+        mobile10,
+        kind: "in",
+        geo: {
+          lat: opts.location.lat,
+          lng: opts.location.lng,
+          accuracyM: opts.location.accuracyM,
+          name: opts.location.name,
+          address: opts.location.address,
+        },
+      });
+      replyText = result.ok
+        ? composeStaffAttPunchSuccess({
+            kind: result.kind,
+            time: result.time,
+            distanceM: result.distanceM,
+            staffName: staff.fullName,
+            altMobile: result.altMobile,
+            earlyOut: false,
+            schoolEnd: "",
+            lang,
+          })
+        : result.error;
+    } else {
+      replyText = staffAttLocationWithoutPendingText(lang);
+    }
   } else if (intent === "in") {
     pending = { kind: "punch_in" };
     replyText = staffAttAskLocationText("in", lang);
