@@ -1,3 +1,4 @@
+import { staffSectionScope } from "@/lib/api/v1/staffScope";
 import { NextResponse } from "next/server";
 import { cachedDeskJson, deskJsonResponse } from "@/lib/deskProbeCache.server";
 import {
@@ -52,6 +53,25 @@ type DeskPostBody = Pick<AttendanceState, "registers"> &
 export async function POST(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["attendance-registers"], "POST");
   if (!auth.ok) return auth.response
+  // This push carries the whole student attendance desk (every class's registers, the policy and the parent nudges).
+  // "attendance.edit" alone let a teacher's browser send it — a stale copy
+  // could overwrite other classes' registers. Teachers save one register at
+  // a time through /api/v1/attendance/mark and punch through
+  // /api/v1/staff/attendance/punch; this route is the office's.
+  if (!auth.viaMirrorSecret) {
+    const scope = await staffSectionScope(auth.ctx).catch(() => null);
+    if (!scope?.unrestricted) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Only the office or principal can save the full register. " +
+            "Your own class and your own attendance are saved on their own.",
+        },
+        { status: 403 },
+      );
+    }
+  }
   if (!attendanceDualWriteDbEnabled()) {
     return NextResponse.json({
       ok: true,

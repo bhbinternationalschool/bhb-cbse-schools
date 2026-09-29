@@ -16,6 +16,7 @@ import {
 } from "@/lib/rbac";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { ApiError } from "@/lib/api/v1/errors";
+import { staffRoleCodeFor } from "@/lib/staffSessionRole";
 import { trackServerWork } from "@/lib/serverWork";
 
 export type ApiAuthContext = {
@@ -188,18 +189,58 @@ async function authFromApiKey(request: Request): Promise<ApiAuthContext | null> 
   };
 }
 
+/**
+ * A signed cookie proves who signed in, not what they may do today. The
+ * role it was minted with is re-derived from the roster on every request,
+ * the same way login derives it (lib/staffSessionRole.ts), so a teacher
+ * holding a pre-2026-08-14 cookie that says "principal" is a teacher again
+ * the moment this ships — no sign-out needed. A staff record that has been
+ * made inactive ends the session.
+ *
+ * When the roster could not be read (loadServerMasters falls back to an
+ * empty default), nothing is decided: the cookie stands as it is.
+ */
+export function revalidateStaffSession(
+  session: DemoSession,
+  masters: MastersState,
+): DemoSession {
+  if (session.persona !== "staff" || !session.staffId) return session;
+  const roster = masters.staff ?? [];
+  if (roster.length === 0) return session;
+  const me = roster.find((s) => s.id === session.staffId);
+  if (!me || me.status !== "active") {
+    throw new ApiError(
+      "unauthorized",
+      "Your staff record is not active any more — please sign in again or contact the office.",
+      401,
+    );
+  }
+  try {
+    const roleCode = staffRoleCodeFor(
+      { email: session.email, fullName: session.fullName, staffId: session.staffId },
+      masters,
+      session.roleCode,
+    );
+    return roleCode === session.roleCode ? session : { ...session, roleCode };
+  } catch {
+    return session;
+  }
+}
+
 export async function resolveApiAuth(request: Request): Promise<ApiAuthContext> {
   const fromKey = await authFromApiKey(request);
   if (fromKey) return fromKey;
 
-  const session = await getDemoSession();
-  if (!session) {
+  const cookieSession = await getDemoSession();
+  if (!cookieSession) {
     throw new ApiError("unauthorized", "Sign in or provide a valid API key", 401);
   }
+  const masters = await loadServerMasters();
+  const session = revalidateStaffSession(cookieSession, masters);
 
   return {
     session,
-    masters: await loadServerMasters(),
+    masters,
     rbac: await loadServerRbac(),
     authKind: "session",
   };

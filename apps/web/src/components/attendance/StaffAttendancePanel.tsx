@@ -260,10 +260,59 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
 
   const summary = useMemo(() => summarizeStaffMarks(marks), [marks]);
 
-  const myMark = useMemo(() => {
+  const localMark = useMemo(() => {
     if (!selfStaff) return null;
     return marks.find((m) => m.staffId === selfStaff.id) ?? null;
   }, [marks, selfStaff]);
+
+  /**
+   * My own punch, as the SERVER holds it. The card used to read this
+   * browser's copy of the register — where everyone defaults to "P" — so a
+   * teacher who had not punched saw "Status: P", and "Punch in" wrote to a
+   * local copy the teacher's role could not save (staff.edit), silently.
+   */
+  type ServerPunch = {
+    allowSelfPunch: boolean;
+    today: {
+      status: string;
+      inTime: string | null;
+      outTime: string | null;
+      punchWayLabel?: string;
+    } | null;
+  };
+  const [serverPunch, setServerPunch] = useState<ServerPunch | null>(null);
+  const [punching, setPunching] = useState(false);
+
+  async function loadServerPunch() {
+    try {
+      const res = await fetch("/api/v1/staff/attendance/punch", { cache: "no-store" });
+      const body = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        data?: ServerPunch;
+      } | null;
+      if (res.ok && body?.ok && body.data) setServerPunch(body.data);
+    } catch {
+      /* keep what we have */
+    }
+  }
+
+  useEffect(() => {
+    if (tab !== "punch" || !selfStaff) return;
+    void loadServerPunch();
+  }, [tab, selfStaff]);
+
+  const myMark = serverPunch
+    ? serverPunch.today
+      ? {
+          status: serverPunch.today.status,
+          inTime: serverPunch.today.inTime || "",
+          outTime: serverPunch.today.outTime || "",
+          punchWay: localMark?.punchWay,
+          note: "",
+          punchGeo: undefined as undefined | { distanceM?: number },
+        }
+      : null
+    : localMark;
 
   function flash(msg: string, isErr = false) {
     if (isErr) {
@@ -432,40 +481,70 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     void runSubstitutionAutomation(date);
   }
 
+  /**
+   * Self punch through the server: the phone's location, checked against
+   * the campus geofence, written to the day's register and confirmed by the
+   * database before we say "punched". Same path as the staff app.
+   */
   function onSelfPunch(kind: "in" | "out") {
     if (!selfStaff) {
       flash("Sign in with your staff login to punch", true);
       return;
     }
-    const selfHol = holidayForStaffId(selfStaff.id);
-    if (selfHol?.status === "holiday") {
-      flash(`Holiday for you: ${selfHol.label}`, true);
+    if (punching) return;
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      flash("This browser cannot share your location — use the staff app or ask the office.", true);
       return;
     }
-    if (!settings.allowSelfPunch) {
-      flash("Self-punch is disabled in attendance settings", true);
-      return;
-    }
-    const time = nowHhmm();
-    const cur = myMark;
-    const result = upsertStaffMark({
-      academicYearCode: ay,
-      date,
-      staffId: selfStaff.id,
-      status: cur?.status === "A" || !cur ? "P" : cur.status,
-      inTime: kind === "in" ? time : cur?.inTime || time,
-      outTime: kind === "out" ? time : cur?.outTime || "",
-      note: kind === "in" ? "Self punch-in" : "Self punch-out",
-      punchWay: "self",
-      markedBy: session.fullName,
-      roster,
-    });
-    if (!result.ok) {
-      flash(result.error, true);
-      return;
-    }
-    flash(kind === "in" ? `Punched in at ${time}` : `Punched out at ${time}`);
-    setTick((x) => x + 1);
+    setPunching(true);
+    flash("Getting your location…");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        void (async () => {
+          try {
+            const res = await fetch("/api/v1/staff/attendance/punch", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                kind,
+                lat: pos.coords.latitude,
+                lng: pos.coords.longitude,
+                accuracyM: pos.coords.accuracy,
+              }),
+            });
+            const body = (await res.json().catch(() => null)) as {
+              ok?: boolean;
+              data?: { time?: string; distanceM?: number };
+              error?: { message?: string };
+            } | null;
+            if (!res.ok || !body?.ok) {
+              flash(body?.error?.message || "Punch was NOT saved — please try again.", true);
+              return;
+            }
+            flash(
+              `${kind === "in" ? "Punched in" : "Punched out"} at ${body.data?.time ?? ""}` +
+                (body.data?.distanceM != null ? ` · ~${body.data.distanceM} m from school` : ""),
+            );
+            await loadServerPunch();
+            setTick((x) => x + 1);
+          } catch {
+            flash("Punch was NOT saved — could not reach the school server.", true);
+          } finally {
+            setPunching(false);
+          }
+        })();
+      },
+      (err) => {
+        setPunching(false);
+        flash(
+          err.code === err.PERMISSION_DENIED
+            ? "Location is blocked for this site. Allow location in your browser settings, then try again."
+            : "Could not get your location. Go outdoors or near a window and try again.",
+          true,
+        );
+      },
+      { enableHighAccuracy: true, timeout: 20_000, maximumAge: 0 },
+    );
   }
 
   function onDirect(e: React.FormEvent) {
@@ -737,7 +816,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
       {tab === "punch" ? (
         <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4 max-w-lg space-y-3">
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
-            My punch · {date}
+            My punch · today
           </h2>
           {!settings.allowSelfPunch ? (
             <p className="text-sm text-[var(--muted)]">
@@ -752,7 +831,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
               <div className="text-sm text-[var(--muted)]">
                 Status:{" "}
                 <strong className="text-[var(--brand-deep)]">
-                  {myMark?.status ?? "—"}
+                  {myMark?.status ?? (serverPunch ? "Not punched yet" : "—")}
                 </strong>
                 {myMark?.inTime ? ` · In ${myMark.inTime}` : ""}
                 {myMark?.outTime ? ` · Out ${myMark.outTime}` : ""}
@@ -777,13 +856,15 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
                 <button
                   type="button"
                   className="rounded-xl bg-[var(--brand-deep)] px-4 py-2.5 text-sm font-bold text-white"
+                  disabled={punching}
                   onClick={() => onSelfPunch("in")}
                 >
-                  Punch in
+                  {punching ? "Punching…" : "Punch in"}
                 </button>
                 <button
                   type="button"
                   className="rounded-xl border border-[rgba(32,48,80,0.2)] px-4 py-2.5 text-sm font-bold text-[var(--brand-deep)]"
+                  disabled={punching}
                   onClick={() => onSelfPunch("out")}
                 >
                   Punch out

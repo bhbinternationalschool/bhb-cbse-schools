@@ -43,7 +43,10 @@ function todayIst(): string {
   return istDateParts().date;
 }
 
-export async function loadStaffAttendanceServer(): Promise<StaffAttendanceState> {
+export async function loadStaffAttendanceServer(
+  opts: { fresh?: boolean } = {},
+): Promise<StaffAttendanceState> {
+  if (opts.fresh) return loadStaffAttendanceFresh();
   if (loaded && cache) return cache;
 
   const { ensureStaffAttendanceHydratedServer } = await import(
@@ -82,6 +85,57 @@ export async function loadStaffAttendanceServer(): Promise<StaffAttendanceState>
   cache = emptyStaffAttendanceState();
   loaded = true;
   return cache;
+}
+
+/**
+ * The register as the database holds it NOW. loadStaffAttendanceServer()
+ * keeps the first copy it ever read for the life of the instance, so a punch
+ * read-modify-wrote a stale register and pushed it back over whatever the
+ * office had saved since (and, with two Cloud Run instances, over each
+ * other's punches).
+ */
+async function loadStaffAttendanceFresh(): Promise<StaffAttendanceState> {
+  const { ensureStaffAttendanceHydratedServer } = await import(
+    "@/lib/staffAttendancePersistence"
+  );
+  await ensureStaffAttendanceHydratedServer();
+  const fresh = (await import("@/lib/staffAttendance")).loadStaffAttendance();
+  cache = normalizeStaffAttendanceState(fresh);
+  loaded = true;
+  return cache;
+}
+
+/**
+ * Persist ONE day's register — the one a punch touched — and wait for the
+ * database to confirm it. The old path pushed the whole cached desk,
+ * fire-and-forget: a failed write still answered "Punched in".
+ */
+async function saveStaffPunchRegister(
+  state: StaffAttendanceState,
+  register: import("@/lib/staffAttendance").StaffAttendanceRegister,
+): Promise<{ ok: boolean; error?: string }> {
+  const { pushStaffAttendanceRegisterToDb } = await import(
+    "@/lib/staffAttendanceNormalized.server"
+  );
+  const pushed = await pushStaffAttendanceRegisterToDb(register);
+  if (!pushed.ok) {
+    console.error("[staff punch] register push failed", pushed.error);
+    return { ok: false, error: pushed.error };
+  }
+  cache = normalizeStaffAttendanceState(state);
+  loaded = true;
+  writeStaffAttendanceLocalRaw(cache);
+  const { deskSkipBlobPush } = await import("@/lib/deskCutover");
+  if (!deskSkipBlobPush("staff_attendance")) {
+    void trackServerWork(pushServerBlob("staff_attendance_state", cache));
+  }
+  try {
+    await fs.mkdir(path.dirname(LOCAL_FILE), { recursive: true });
+    await fs.writeFile(LOCAL_FILE, JSON.stringify(cache, null, 2), "utf8");
+  } catch {
+    /* ephemeral disk */
+  }
+  return { ok: true };
 }
 
 export async function saveStaffAttendanceServer(
@@ -151,9 +205,11 @@ export async function applyWhatsAppStaffPunch(opts: {
   via?: "whatsapp" | "app";
   /** Confirmed early check-out — appended to the register note so HR sees it */
   earlyOutNote?: string;
+  /** The year to file the punch under; the app's GET reads the same one. */
+  academicYearCode?: string;
 }): Promise<ApplyWaStaffPunchResult> {
   const via = opts.via ?? "whatsapp";
-  let state = await loadStaffAttendanceServer();
+  let state = await loadStaffAttendanceFresh();
   const settings = normalizeAttendanceSettings(state.settings);
   if (via === "whatsapp" && !settings.allowWhatsAppPunch) {
     return {
@@ -175,9 +231,16 @@ export async function applyWhatsAppStaffPunch(opts: {
   }
 
   const masters = loadMasters();
-  const ay = currentAcademicYearCode(masters);
+  const ay = opts.academicYearCode || currentAcademicYearCode(masters);
   const date = todayIst();
   const roster = masters.staff ?? [];
+  const saveFailed = {
+    ok: false as const,
+    error:
+      via === "app"
+        ? "Your punch could not be saved to the school database. Please try again."
+        : "Could not save your punch — please try again in a minute.",
+  };
   const time = nowHhmmIst();
   const altMobile =
     via === "whatsapp" && staffMobileMatchedAlt(opts.staff, opts.mobile10);
@@ -220,7 +283,10 @@ export async function applyWhatsAppStaffPunch(opts: {
     if (cur?.inTime && cur.inTime.trim()) {
       return {
         ok: false,
-        error: `Already punched IN at ${cur.inTime}. Reply *STATUS* or *OUT* to punch out.`,
+        error:
+          via === "app"
+            ? `Already punched IN at ${cur.inTime}. Use Punch OUT when you leave.`
+            : `Already punched IN at ${cur.inTime}. Reply *STATUS* or *OUT* to punch out.`,
       };
     }
     const noteParts = [
@@ -242,7 +308,7 @@ export async function applyWhatsAppStaffPunch(opts: {
       roster,
     });
     state = merged.state;
-    await saveStaffAttendanceServer(state);
+    if (!(await saveStaffPunchRegister(state, merged.register)).ok) return saveFailed;
     const mark = merged.register.marks.find((m) => m.staffId === opts.staff.id)!;
     return {
       ok: true,
@@ -261,13 +327,19 @@ export async function applyWhatsAppStaffPunch(opts: {
   if (!cur?.inTime?.trim()) {
     return {
       ok: false,
-      error: "No punch-in today. Reply *IN* first, then share location.",
+      error:
+        via === "app"
+          ? "No punch-in today — punch IN first."
+          : "No punch-in today. Reply *IN* first, then share location.",
     };
   }
   if (cur.outTime?.trim()) {
     return {
       ok: false,
-      error: `Already punched OUT at ${cur.outTime}. Reply *STATUS* for summary.`,
+      error:
+        via === "app"
+          ? `Already punched OUT at ${cur.outTime}.`
+          : `Already punched OUT at ${cur.outTime}. Reply *STATUS* for summary.`,
     };
   }
 
@@ -292,7 +364,7 @@ export async function applyWhatsAppStaffPunch(opts: {
     roster,
   });
   state = merged.state;
-  await saveStaffAttendanceServer(state);
+  if (!(await saveStaffPunchRegister(state, merged.register)).ok) return saveFailed;
   const mark = merged.register.marks.find((m) => m.staffId === opts.staff.id)!;
   return {
     ok: true,

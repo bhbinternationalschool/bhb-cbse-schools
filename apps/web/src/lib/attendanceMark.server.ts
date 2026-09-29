@@ -69,7 +69,14 @@ export async function markAttendanceServer(
   );
   const dbPush = await pushAttendanceRegisterToDb(result.register);
   if (!dbPush.ok) {
-    console.warn("[attendanceMark] db push failed", dbPush.error);
+    // Saying "saved" here was the unknown-becomes-fact trap: the register
+    // lived only in this server instance's memory and vanished on the next
+    // cold start, while the teacher had been told it was done.
+    console.error("[attendanceMark] db push failed", dbPush.error);
+    return {
+      ok: false,
+      error: "The register could not be saved to the school database. Please try again.",
+    };
   }
 
   // Absent alert per household — only the marks in THIS request, so

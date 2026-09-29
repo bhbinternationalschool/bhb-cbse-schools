@@ -12,6 +12,7 @@ import {
   loadStaffAttendanceServer,
 } from "@/lib/staffAttendance.server";
 import { campusGeofenceFromSettings } from "@/lib/staffGeofence.server";
+import { staffWorkingYear } from "@/lib/api/v1/staffScope";
 
 export const runtime = "nodejs";
 
@@ -26,9 +27,13 @@ async function resolveStaff(
   if (ctx.session.persona !== "staff") {
     throw new ApiError("forbidden", "Staff session required", 403);
   }
-  // session.staffId is set by real logins; dev/demo sessions may pass a
-  // staffId explicitly (same convention as /api/v1/staff/summary).
-  const staffId = ctx.session.staffId || fallbackStaffId || "";
+  // session.staffId is set by real logins. The explicit staffId is a
+  // dev-only convenience: in production it let a session with no roster
+  // link punch as anybody it named.
+  const staffId =
+    ctx.session.staffId ||
+    (process.env.NODE_ENV !== "production" ? fallbackStaffId : "") ||
+    "";
   const staff = ctx.masters.staff.find((s) => s.id === staffId);
   if (!staff) {
     throw new ApiError(
@@ -56,12 +61,14 @@ export async function GET(request: Request) {
       url.searchParams.get("staffId")?.trim(),
     );
 
-    const state = await loadStaffAttendanceServer();
+    const state = await loadStaffAttendanceServer({ fresh: true });
     const settings = normalizeAttendanceSettings(state.settings);
     const fence = campusGeofenceFromSettings(settings);
 
     const date = todayIst();
-    const ay = ctx.session.academicYearCode;
+    // The same year the POST files under — they used to differ, so a punch
+    // could be saved yet read back as "not punched".
+    const ay = staffWorkingYear(ctx);
     const register = findStaffRegister(state, date, ay);
     const mark = register?.marks.find((m) => m.staffId === staff.id) ?? null;
 
@@ -122,6 +129,7 @@ export async function POST(request: Request) {
         mocked: body.mocked === true,
       },
       via: "app",
+      academicYearCode: staffWorkingYear(ctx),
     });
     if (!result.ok) throw new ApiError("bad_request", result.error, 400);
 

@@ -8,6 +8,7 @@ import {
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { assertSectionScope } from "@/lib/api/v1/staffScope";
 import { markAttendanceServer } from "@/lib/attendanceMark.server";
+import { loadSis, studentsInSession } from "@/lib/sis";
 import type { AttendanceMark, AttendanceStatus } from "@/lib/attendance";
 
 export const runtime = "nodejs";
@@ -40,7 +41,26 @@ export async function POST(request: Request) {
     // Class teacher, a subject teacher on the section's timetable, or the
     // office — the module permission alone let any staff login mark any class.
     // This is the route's own guard; the command desk checks its own scope.
-    await assertSectionScope(ctx, body.classId, body.sectionId);
+    const scope = await assertSectionScope(ctx, body.classId, body.sectionId);
+
+    // A teacher's register is for the working year and for the children of
+    // THIS section only; the office may still name another year.
+    const academicYearCode = scope.unrestricted
+      ? body.academicYearCode || scope.academicYearCode
+      : scope.academicYearCode;
+    const inSection = new Set(
+      studentsInSession(loadSis(), academicYearCode)
+        .filter((s) => s.classId === body.classId && s.sectionId === body.sectionId)
+        .map((s) => s.id),
+    );
+    const strangers = body.marks.filter((m) => !inSection.has(m.studentId));
+    if (strangers.length) {
+      throw new ApiError(
+        "bad_request",
+        `${strangers.length} of these children are not in this section — reload the class and try again`,
+        400,
+      );
+    }
 
     const marks: AttendanceMark[] = body.marks.map((m) => ({
       studentId: m.studentId,
@@ -53,7 +73,7 @@ export async function POST(request: Request) {
     const result = await markAttendanceServer({
       session: ctx.session,
       masters: ctx.masters,
-      academicYearCode: body.academicYearCode,
+      academicYearCode,
       classId: body.classId,
       sectionId: body.sectionId,
       date: body.date,

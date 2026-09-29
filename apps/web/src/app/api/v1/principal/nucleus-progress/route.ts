@@ -1,4 +1,5 @@
 import { apiErr, apiOk } from "@/lib/api/v1/errors";
+import { assertSchoolWide } from "@/lib/api/v1/staffScope";
 import { assertPermission, resolveApiAuth } from "@/lib/api/v1/auth";
 import {
   latestNucleusAssessments,
@@ -40,6 +41,7 @@ export async function POST(request: Request) {
   try {
     const ctx = await resolveApiAuth(request);
     assertPermission(ctx, "home", "view");
+    await assertSchoolWide(ctx);
     const body = (await request.json().catch(() => ({}))) as {
       text?: string;
       capturedOn?: string;

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   DESK_SLICE_RBAC,
+  requireStaffApi,
   requireStaffPermission,
 } from "@/lib/apiRouteAuth.server";
 import type { DeskModuleId } from "@/lib/deskCutover";
@@ -19,6 +20,42 @@ function parseModuleId(raw: string): DeskModuleId | null {
   return def ? (raw as DeskModuleId) : null;
 }
 
+/**
+ * Roles & permissions as ONE member of staff needs them: every role's
+ * definition, but only their own assignments and grants, and no audit log.
+ *
+ * Reading the rbac desk needs Settings, so until 2026-09-29 a teacher's
+ * browser never learned what the school had configured — it fell back to
+ * the built-in defaults, ignored any class-scoped assignment, and the page
+ * gate sat on "Checking access…" waiting for a desk it would never get.
+ */
+async function ownRbacResponse(req: Request): Promise<NextResponse | null> {
+  const staff = await requireStaffApi(req);
+  if (!staff.ok || staff.viaMirrorSecret) return null;
+  const session = staff.ctx.session;
+  if (session.persona !== "staff") return null;
+  const { bundle, meta, ok } = await fetchDeskSliceFromDb("rbac");
+  if (!ok) {
+    return NextResponse.json({ ok: false, error: "Desk read failed" }, { status: 503 });
+  }
+  const me = session.staffId || "";
+  const mine = (rows: unknown) =>
+    Array.isArray(rows)
+      ? rows.filter((r) => !!me && (r as { staffId?: string }).staffId === me)
+      : [];
+  const b = bundle as Record<string, unknown>;
+  return NextResponse.json({
+    ok: true,
+    ...b,
+    assignments: mine(b.assignments),
+    userGrants: mine(b.userGrants),
+    audit: [],
+    ownOnly: true,
+    rowCount: meta?.rowCount ?? 0,
+    updatedAt: meta?.updatedAt || "",
+  });
+}
+
 export async function GET(req: Request, ctx: RouteCtx) {
   const { module } = await ctx.params;
   const id = parseModuleId(module);
@@ -27,7 +64,13 @@ export async function GET(req: Request, ctx: RouteCtx) {
   }
   const rbacModule = DESK_SLICE_RBAC[id] ?? "settings";
   const auth = await requireStaffPermission(req, rbacModule, "view");
-  if (!auth.ok) return auth.response;
+  if (!auth.ok) {
+    if (id === "rbac" && auth.response.status === 403) {
+      const self = await ownRbacResponse(req);
+      if (self) return self;
+    }
+    return auth.response;
+  }
 
   const { bundle, meta, ok, error } = await fetchDeskSliceFromDb(id);
   if (!ok) {

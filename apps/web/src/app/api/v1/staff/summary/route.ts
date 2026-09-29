@@ -5,9 +5,8 @@ import { ensureAttendanceHydratedServer } from "@/lib/attendancePersistence";
 import { ensureTimetableHydratedServer } from "@/lib/timetablePersistence";
 import { findRegister, loadAttendance } from "@/lib/attendance";
 import { loadTimetable, teachingPeriods } from "@/lib/timetable";
-import { loadSis } from "@/lib/sis";
-
-import { resolveStaffHomeKind } from "@/lib/staffHomeKind.server";
+import { loadSis, studentsInSession } from "@/lib/sis";
+import { staffSectionScope } from "@/lib/api/v1/staffScope";
 
 export const runtime = "nodejs";
 
@@ -52,7 +51,8 @@ export async function GET(request: Request) {
       ensureAttendanceHydratedServer(),
     ]);
 
-    const ay = ctx.session.academicYearCode;
+    const scope = await staffSectionScope(ctx);
+    const ay = scope.academicYearCode;
     const { date, weekday } = todayInKolkata();
 
     const classNameOf = (id: string) =>
@@ -63,20 +63,15 @@ export async function GET(request: Request) {
       ctx.masters.subjects.find((s) => s.id === id)?.nameEn || "";
 
     // Class teacher section (primary link for this AY first).
-    const links = (staff?.classTeacherLinks || []).filter(
-      (l) => !l.academicYearCode || l.academicYearCode === ay,
+    const links = (staff?.classTeacherLinks || []).filter((l) =>
+      scope.classTeacherOf.has(`${l.classId}|${l.sectionId}`),
     );
     const primary = links.find((l) => l.isPrimary) || links[0] || null;
 
     let classTeacherOf: Record<string, unknown> | null = null;
     if (primary) {
-      const sis = loadSis();
-      const students = sis.students.filter(
-        (s) =>
-          s.status === "active" &&
-          s.classId === primary.classId &&
-          s.sectionId === primary.sectionId &&
-          s.academicYearCode === ay,
+      const students = studentsInSession(loadSis(), ay).filter(
+        (s) => s.classId === primary.classId && s.sectionId === primary.sectionId,
       );
       const register = findRegister(ay, primary.sectionId, date, loadAttendance());
       classTeacherOf = {
@@ -115,18 +110,34 @@ export async function GET(request: Request) {
       )
       .sort((a, b) => a.periodNo - b.periodNo);
 
-    // Active classes with their sections — the app's class/section picker
-    // for teachers without a class-teacher link (or for other sections).
-    const classes = ctx.masters.classes
-      .filter((c) => c.isActive !== false)
-      .sort((a, b) => a.sortOrder - b.sortOrder)
-      .map((c) => ({
-        id: c.id,
-        name: c.name,
-        sections: ctx.masters.sections
-          .filter((s) => s.classId === c.id && s.isActive !== false)
-          .map((s) => ({ id: s.id, name: s.name })),
-      }));
+    // The app's class/section picker. It used to be every class in the
+    // school for everyone, so a teacher picked any class and was refused on
+    // save. Now: the principal and office see the school; a teacher sees
+    // only the sections they teach (class teacher first).
+    const classes = scope.unrestricted
+      ? ctx.masters.classes
+          .filter((c) => c.isActive !== false)
+          .sort((a, b) => a.sortOrder - b.sortOrder)
+          .map((c) => ({
+            id: c.id,
+            name: c.name,
+            sections: ctx.masters.sections
+              .filter((s) => s.classId === c.id && s.isActive !== false)
+              .map((s) => ({ id: s.id, name: s.name })),
+          }))
+          .filter((c) => c.sections.length > 0)
+      : (() => {
+          const byClass = new Map<string, { id: string; name: string; sections: { id: string; name: string }[] }>();
+          for (const t of scope.teaching) {
+            let c = byClass.get(t.classId);
+            if (!c) {
+              c = { id: t.classId, name: t.className, sections: [] };
+              byClass.set(t.classId, c);
+            }
+            c.sections.push({ id: t.sectionId, name: t.sectionName });
+          }
+          return [...byClass.values()];
+        })();
 
     return apiOk({
       staff: staff
@@ -144,11 +155,10 @@ export async function GET(request: Request) {
       classTeacherOf,
       periodsToday: periods,
       classes,
-      homeKind: resolveStaffHomeKind(ctx.session, ctx.masters, {
-        teachesClasses:
-          !!primary ||
-          grids.some((g) => g.slots.some((s) => s.teacherId === staffId)),
-      }),
+      // Newer clients: each of my sections with MY subjects in it.
+      teaching: scope.teaching,
+      unrestricted: scope.unrestricted,
+      homeKind: scope.kind,
     });
   } catch (e) {
     return apiErr(e);
