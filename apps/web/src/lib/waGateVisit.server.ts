@@ -50,6 +50,8 @@ export type WaGateResult = {
   pending?: WaGateVisitPending | null;
   replies: WaGateReply[];
   audience: string;
+  /** A check-out was asked for and this number has no open visit. */
+  noOpenVisit?: boolean;
 };
 
 function fmtTime(iso: string): string {
@@ -202,6 +204,7 @@ async function checkOut(mobile10: string): Promise<WaGateResult> {
       handled: true,
       pending: null,
       audience: "gate_visit",
+      noOpenVisit: true,
       replies: [{ text: `No open visit found for this number.\nइस नंबर पर कोई खुली विज़िट नहीं मिली।\n\nSend *${WA_GATE_START_TEXT}* to check in.\nचेक-इन के लिए *${WA_GATE_START_TEXT}* भेजें।` }],
     };
   }
@@ -231,6 +234,13 @@ export async function handleWaGateVisit(opts: {
   rawText: string;
   profileName?: string;
   pending: WaGateVisitPending | null | undefined;
+  /**
+   * The sender is staff. A typed OUT from staff is their attendance punch-out;
+   * it is a gate check-out only when they have an open visit. 29 Sep 2026: a
+   * staff member sent "Out" to clock out and was told "No open visit found
+   * for this number" — the punch never happened.
+   */
+  staff?: boolean;
 }): Promise<WaGateResult> {
   const raw = (opts.rawText || "").trim();
   const none: WaGateResult = { handled: false, replies: [], audience: "" };
@@ -239,7 +249,13 @@ export async function handleWaGateVisit(opts: {
   let pending = opts.pending ?? null;
   if (pending && Date.now() - new Date(pending.startedAt).getTime() > PENDING_TTL_MS) pending = null;
 
-  if (raw === "gate_out" || OUT_RE.test(raw)) return checkOut(opts.mobile10);
+  if (raw === "gate_out" || OUT_RE.test(raw)) {
+    const r = await checkOut(opts.mobile10);
+    // No open visit and the sender is staff: this was never a gate OUT.
+    // The gate pass's own button ("gate_out") still answers either way.
+    if (opts.staff && raw !== "gate_out" && r.audience === "gate_visit" && r.noOpenVisit) return none;
+    return r;
+  }
   if (raw === "gate_new" || START_RE.test(raw)) return startVisit(opts.mobile10, opts.profileName);
 
   if (pending?.step === "name") {

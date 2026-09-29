@@ -883,7 +883,7 @@ export function extractSectionRefs(
   // class <n> section <x> / class <n> <x> / class <n>
   // \b is ASCII-only, so the Hindi "कक्षा" needs letter lookarounds.
   const classRe =
-    /(?<![\p{L}\p{M}\p{N}])(?:class|grade|std|kaksha|कक्षा)\s*(\d{1,2}|[ivx]{1,4}|nursery|lkg|ukg|kg|pg)(?:st|nd|rd|th)?\s*(?:-|\s)?\s*(?:section|sec|sec\.)?\s*([a-h])?(?![\p{L}\p{M}\p{N}])/gu;
+    /(?<![\p{L}\p{M}\p{N}])(?:class|grade|std|kaksha|कक्षा)\s*[-:.]?\s*(\d{1,2}|[ivx]{1,4}|nursery|lkg|ukg|kg|pg)(?:st|nd|rd|th)?\s*(?:-|\s)?\s*(?:section|sec|sec\.)?\s*([a-h])?(?![\p{L}\p{M}\p{N}])/gu;
   let m: RegExpExecArray | null;
   while ((m = classRe.exec(low))) {
     push(classKey(m[1]!), (m[2] || "").toUpperCase());
@@ -1034,6 +1034,21 @@ const DIGEST_WORDS =
  * decides whether the message is worth an LLM parse.
  */
 export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
+  // The teacher's own class, and taking the register — first, because the
+  // readers below know neither and grab the words: "mere class ke bachche"
+  // is a parent called "mere class" to the family lookup. See
+  // parseMyClassRosterQuery and parseTakeAttendanceQuery (29 Sep 2026).
+  if (parseMyClassRosterQuery(text)) {
+    return { commandId: "class_roster", fields: { section: MY_SECTIONS_MARKER }, source: "local" };
+  }
+  const takeAtt = parseMarkAttendanceQuery(text) ? null : parseTakeAttendanceQuery(text);
+  if (takeAtt) {
+    return {
+      commandId: "mark_attendance",
+      fields: { section: takeAtt.section || MY_SECTIONS_MARKER, text: "", date: "" },
+      source: "local",
+    };
+  }
   // School-wide call lists and the store come before the report parse:
   // "store due list" is not the fee defaulters PDF, and "top 10 defaulters
   // with number" is a list to call from, not a document. A pdf/print word
@@ -2125,10 +2140,20 @@ export function formatFeeHelpReply(focus: FeeFocus | "collect", firstName = ""):
 // ─── A class on its own ───────────────────────────────────────────────
 
 const BARE_CLASS_TAIL =
-  /\s+(?:ki\s+list|ke\s+bachch?e|ke\s+students?|ke\s+chhatra|list|students?|roster|strength|bachch?e|dikhao|batao|details|info|की\s+सूची|के\s+बच्चे|सूची|बच्चे)$/iu;
+  /\s+(?:ki\s+list|ke\s+bachch?e|ke\s+bachch?on|ke\s+bachcho|ke\s+students?|ke\s+chhatra|ke\s+naam|ka\s+naam|ki\s+naam|list|lists|students?|student's|roster|strength|bachch?e|bachch?on|bachcho|names?|namw|naam|naame|dikhao|batao|bhejo|details|info|की\s+सूची|के\s+बच्चे|सूची|बच्चे|नाम)$/iu;
+
+/**
+ * "Show", "send me", "list of" in front of a class. 29 Sep 2026: "Show my
+ * class students", "Class 10 students namw" — the class was there, the
+ * words around it were not ones this reader knew, and the message went to
+ * the answering model, which said the names were "not available in the
+ * records". They are; this is the class list.
+ */
+const BARE_CLASS_LEAD =
+  /^(?:show|send|give|get|list\s+of|list|all|please|pls|plz|dikhao|batao|bhejo|mujhe|me)\s+/iu;
 
 const BARE_CLASS_RE =
-  /^(class|grade|std|standard|kaksha|कक्षा)?\s*(\d{1,2}|[ivx]{1,4}|nursery|nur|pre\s?-?nursery|lkg|ukg|kg|pg|play\s?group)(?:st|nd|rd|th)?\s*(?:-|\s)?\s*(?:section|sec\.?)?\s*([a-h])?$/iu;
+  /^(class|grade|std|standard|kaksha|कक्षा)?\s*[-:.]?\s*(\d{1,2}|[ivx]{1,4}|nursery|nur|pre\s?-?nursery|lkg|ukg|kg|pg|play\s?group)(?:st|nd|rd|th)?\s*(?:-|\s)?\s*(?:section|sec\.?)?\s*([a-h])?$/iu;
 
 /**
  * "5A", "Class 5", "IV", "LKG", "5A list", "class 3 ke bachche" — a message
@@ -2145,8 +2170,10 @@ const BARE_CLASS_RE =
  */
 export function parseBareClassQuery(text: string): string | null {
   let t = (text || "").trim().toLowerCase().replace(/[?.!।]+$/u, "").trim();
-  if (!t || t.length > 40) return null;
-  for (let i = 0; i < 2; i += 1) t = t.replace(BARE_CLASS_TAIL, "").trim();
+  if (!t || t.length > 60) return null;
+  for (let i = 0; i < 3; i += 1) t = t.replace(BARE_CLASS_LEAD, "").trim();
+  for (let i = 0; i < 4; i += 1) t = t.replace(BARE_CLASS_TAIL, "").trim();
+  if (t.length > 40) return null;
   const m = BARE_CLASS_RE.exec(t);
   if (!m) return null;
   const hasClassWord = !!m[1];
@@ -3440,6 +3467,10 @@ export function parseStudentDetailsQuery(text: string): string | null {
   const isWhoIs = /^\s*who\s+is\s+\S/i.test(t);
   if (!isWhoIs && !DETAILS_WORDS.test(t)) return null;
   if (FEE_WORDS.test(t) || HOMEWORK_WORDS.test(t) || BUS_WORDS.test(t)) return null;
+  // "My attendance record", "Teacher attendance record" (29 Sep 2026) came
+  // back as a search for a child called "my attendance". An attendance word
+  // is never part of a child's name.
+  if (TAKE_ATTENDANCE_WORD.test(t)) return null;
   const refs = extractSectionRefs(t);
   let rest = t.toLowerCase();
   const roll = /(?<![\p{L}\p{M}\p{N}])roll\s*(?:no\.?|number)?\s*(\d{1,3})(?![\p{L}\p{M}\p{N}])/iu.exec(rest);
@@ -5929,3 +5960,149 @@ export function formatFamilyChoice(name: string, rows: { asWho: string; childNam
   lines.push("", "Send the number.");
   return lines.join("\n");
 }
+
+// ─── Taking the register as a conversation ─────────────────────────────
+//
+// 29 Sep 2026, the first day teachers were shown the bot: "Class 8 ka
+// attendance lena hai", "Mere class ka attendance lena hai", "Mere class ka
+// attendence lena hai". Every one of them wanted to TAKE the register, and
+// the desk only knew the one-line form — "Mark 5A attendance: absent roll
+// 4, 11, 19" — which nobody types on a first try. One teacher was asked
+// "Which class and section?", answered "VIII A", and got the class list:
+// the desk had forgotten what it asked.
+//
+// So the register is now a short conversation. Ask to take it; the desk
+// shows the class, numbered by roll, and asks who is absent; the answer
+// ("4, 11" or "all present") becomes the same mark_attendance command,
+// through the same confirm card, so nothing is written without a YES.
+
+const TAKE_ATTENDANCE_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(attendance|attendence|atendance|attendace|hazri|haziri|हाज़िरी|हाजिरी|upasthiti|उपस्थिति|register)(?![\p{L}\p{M}\p{N}])/iu;
+const TAKE_ATTENDANCE_VERB =
+  /(?<![\p{L}\p{M}\p{N}])(lena|leni|le\s*lo|lelo|lagana|lagani|lagaani|lagao|laga\s*do|karna|karni|kar\s*do|bharna|bharni|bhar\s*do|mark|marking|take|taking|fill|submit|लेना|लेनी|लगाना|लगानी)(?![\p{L}\p{M}\p{N}])/iu;
+const TAKE_ATTENDANCE_QUESTION =
+  /[?？]|(?<![\p{L}\p{M}\p{N}])(kaun|kon|who|which|kitne|kitna|list|batao|dikhao|show|see|view|record|report|summary|कौन|कितने|दिखाओ|बताओ)(?![\p{L}\p{M}\p{N}])/iu;
+
+/**
+ * "Take 5A attendance", "Class 8 ka attendance lena hai", "attendance
+ * lagani hai". Returns the section when one is named ("" when not — the desk
+ * then uses the teacher's own section), or null.
+ *
+ * Never a question ("5A me kaun absent hai" reads the register), and never
+ * with an absent list already in it — that is parseMarkAttendanceQuery's.
+ */
+export function parseTakeAttendanceQuery(text: string): { section: string } | null {
+  const t = (text || "").trim();
+  if (!t || t.length > 120) return null;
+  if (!TAKE_ATTENDANCE_WORD.test(t) || !TAKE_ATTENDANCE_VERB.test(t)) return null;
+  if (TAKE_ATTENDANCE_QUESTION.test(t)) return null;
+  if (ABSENT_LIST_WORD.test(t) && /\d/.test(t)) return null;
+  const refs = extractSectionRefs(t);
+  const r = refs[0];
+  return { section: r ? `${r.classKey}${r.sectionName}` : "" };
+}
+
+/** How long "who is absent?" stays answerable. A teacher is counting heads. */
+export const MARK_ASK_WINDOW_MINUTES = 20;
+
+export function markAskIsFresh(atIso: string, nowMs: number): boolean {
+  const at = Date.parse(atIso || "");
+  if (!Number.isFinite(at)) return false;
+  const age = nowMs - at;
+  return age >= 0 && age <= MARK_ASK_WINDOW_MINUTES * 60_000;
+}
+
+const MARK_REPLY_NONE_ABSENT =
+  /^(?:all|sab|sabhi|everyone|everybody|all\s+present|sab\s+present|sabhi\s+present|full|full\s+attendance|poori\s+hazri|none|none\s+absent|no\s*one|nobody|no\s+absent|koi\s+nahi|koi\s+absent\s+nahi|koi\s+bhi\s+absent\s+nahi|0|zero|nil|सब|सब\s+उपस्थित|कोई\s+नहीं)(?:\s+(?:hai|hain|है|present|absent|nahi|aaye|aaye\s+hain))*$/iu;
+
+/**
+ * The answer to "who is absent?" — the list part of a mark_attendance
+ * message, or null when this reply is something else (so it still goes
+ * wherever it would have gone).
+ *
+ *   "4, 11"            → "absent 4, 11"
+ *   "4 11 19"          → "absent 4, 11, 19"
+ *   "roll 4 and 11"    → "absent 4, 11"
+ *   "all present"      → "all present"
+ *   "absent 4 leave 7" → as written; parseAttendanceSpec reads it
+ *
+ * Bare names are not taken: "Riya" alone is as likely a question about Riya
+ * as an absentee. With "absent" in front they are.
+ */
+export function parseMarkAskReply(text: string): string | null {
+  const t = (text || "").trim().replace(/[.!।]+$/u, "").trim();
+  if (!t || t.length > 200) return null;
+  if (MARK_REPLY_NONE_ABSENT.test(t) || ALL_PRESENT.test(t)) return "all present";
+  const onlyNumbers = t
+    .toLowerCase()
+    .replace(/(?<![\p{L}\p{M}\p{N}])(roll|rolls|no|nos|number|numbers|and|aur|absent|absents|hain|hai|है)(?![\p{L}\p{M}\p{N}])/gu, " ")
+    .replace(/[,;/&.#]+/g, " ")
+    .trim();
+  if (/^\d{1,3}(?:\s+\d{1,3})*$/.test(onlyNumbers)) {
+    return `absent ${onlyNumbers.split(/\s+/).join(", ")}`;
+  }
+  // "absent 4, 11 leave 7 late 9", "absent Riya, Aman" — a list with its
+  // own status words.
+  if (/^(?:absent|gair\s*hazir|leave|chutti|late)\b/iu.test(t)) return t;
+  return null;
+}
+
+export type MarkPromptInput = {
+  sectionLabel: string;
+  date: string;
+  todayIso: string;
+  roster: { rollNo: string; fullName: string }[];
+};
+
+const MARK_PROMPT_MAX = 60;
+
+/** The class, numbered by roll, and the one question: who is absent? */
+export function formatMarkAttendancePrompt(input: MarkPromptInput): string {
+  const when = input.date === input.todayIso ? "today" : input.date;
+  const lines = [
+    `*Take attendance · ${input.sectionLabel}* · ${when} · ${input.roster.length} student${input.roster.length === 1 ? "" : "s"}`,
+    "",
+  ];
+  let noRoll = 0;
+  for (const st of input.roster.slice(0, MARK_PROMPT_MAX)) {
+    const roll = parseInt(st.rollNo, 10);
+    if (Number.isFinite(roll)) lines.push(`${roll}. ${st.fullName}`);
+    else {
+      noRoll += 1;
+      lines.push(`– ${st.fullName}`);
+    }
+  }
+  if (input.roster.length > MARK_PROMPT_MAX) lines.push(`+${input.roster.length - MARK_PROMPT_MAX} more`);
+  lines.push(
+    "",
+    "Reply with the *roll numbers of children who are absent* — e.g. _4, 11_",
+    "or reply *all present*.",
+    "",
+    "_Leave or late too: absent 4, 11 leave 7 late 9_",
+  );
+  if (noRoll) lines.push(`_No roll number (–): write the name, e.g. absent ${input.roster.find((r) => !Number.isFinite(parseInt(r.rollNo, 10)))!.fullName.split(" ")[0]}_`);
+  lines.push("", "Nothing is saved until you confirm.");
+  return lines.join("\n");
+}
+
+const MY_CLASS_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(?:my|mere|meri|mera|apni|apne|apna|hamari|hamare|मेरी|मेरे|अपनी)\s+(?:class|classes|students?|bachch?e|bachcho|bachchon|section|कक्षा|बच्चे|बच्चों)(?![\p{L}\p{M}\p{N}])/iu;
+const MY_CLASS_OTHER_TOPIC =
+  /(?<![\p{L}\p{M}\p{N}])(attendance|attendence|atendance|hazri|haziri|absent|present|fees?|dues?|defaulters?|homework|hw|marks|result|exam|timetable|leave|complaint|हाजिरी|फीस)(?![\p{L}\p{M}\p{N}])/iu;
+
+/**
+ * "Show my class students", "mere class ke bachche", "my students names" —
+ * the teacher's own class list, with no class named. Not when the message
+ * is about attendance, fees or homework for "my class"; those have their
+ * own readings.
+ */
+export function parseMyClassRosterQuery(text: string): boolean {
+  const t = (text || "").trim();
+  if (!t || t.length > 80) return false;
+  if (!MY_CLASS_WORDS.test(t) && !/^(?:my|mere|meri)\s+students?(?:\s+(?:names?|list))?$/iu.test(t)) return false;
+  if (MY_CLASS_OTHER_TOPIC.test(t)) return false;
+  return extractSectionRefs(t).length === 0;
+}
+
+/** The desk's marker for "the sender's own section(s)" in a section field. */
+export const MY_SECTIONS_MARKER = "@mine";
