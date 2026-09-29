@@ -666,6 +666,53 @@ export function evaluatePunchAgainstRule(
   };
 }
 
+/** The rules state as stored (module_local_state "staff_attendance_rules"),
+ * normalized — for server callers that read the row themselves. */
+export function normalizeAttendanceRulesState(
+  raw: Partial<StaffAttendanceRulesState> | null | undefined,
+): StaffAttendanceRulesState {
+  return normalizeState(raw ?? {});
+}
+
+/**
+ * What a member of staff with NO rule assigned is held to: the school
+ * timing in Masters, and the late grace from Leave settings. Nothing is
+ * invented — no half-day cut-offs the school never set.
+ */
+export function schoolTimingOnlyRule(): AttendanceRule {
+  return {
+    id: "arl_school_timing",
+    code: "SCHOOL",
+    name: "School timing",
+    description: "Masters school timing + Leave-settings grace (no rule assigned)",
+    isActive: true,
+    followSchoolTiming: true,
+    steps: [emptyRuleStep("use_school_timing"), emptyRuleStep("buffer_late")],
+    createdAt: "",
+    updatedAt: "",
+  };
+}
+
+/**
+ * Grade one member of staff's punches for a date: their assigned rule from
+ * Masters → Attendance rules, else school timing. A punch on a day the rule
+ * calls non-working is still attendance (P), not leave.
+ */
+export function gradeStaffPunch(
+  state: StaffAttendanceRulesState,
+  staffId: string,
+  dateIso: string,
+  inTime: string,
+  outTime: string,
+): PunchEvaluation & { ruleName: string } {
+  const rule = ruleForStaff(state, staffId) ?? schoolTimingOnlyRule();
+  const ev = evaluatePunchAgainstRule(state, rule, dateIso, inTime, outTime);
+  if (ev.label === "Non-working day" && (inTime || "").trim()) {
+    return { ...ev, status: "P", label: "Present (non-working day)", ruleName: rule.name };
+  }
+  return { ...ev, ruleName: rule.name };
+}
+
 export function activeStaffSorted(staff: StaffRecord[]): StaffRecord[] {
   return staff
     .filter((s) => s.status === "active")

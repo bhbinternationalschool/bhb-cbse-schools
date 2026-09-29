@@ -482,6 +482,15 @@ export function findStaffRegister(
   );
 }
 
+/**
+ * A new day's register: nobody is present until they punch (or the office
+ * marks them, or approved leave says otherwise). Until 2026-09-29 every
+ * active member of staff started as "P", so the first punch of the day
+ * marked the whole school present — the director asked for no default
+ * present; attendance follows punches, the Masters rules and leave.
+ */
+export const NOT_PUNCHED_NOTE = "Not punched";
+
 export function defaultStaffMarks(
   staff: StaffRecord[],
 ): StaffAttendanceMark[] {
@@ -489,8 +498,8 @@ export function defaultStaffMarks(
     .filter((s) => s.status === "active")
     .map((s) => ({
       staffId: s.id,
-      status: "P" as AttendanceStatus,
-      note: "",
+      status: "A" as AttendanceStatus,
+      note: NOT_PUNCHED_NOTE,
       inTime: "",
       outTime: "",
       punchWay: "" as const,
@@ -529,8 +538,8 @@ export function upsertStaffMarkInState(
       ? marks[idx]!
       : {
           staffId: input.staffId,
-          status: "P",
-          note: "",
+          status: "A",
+          note: NOT_PUNCHED_NOTE,
           inTime: "",
           outTime: "",
           punchWay: "",

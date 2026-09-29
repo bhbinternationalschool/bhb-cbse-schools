@@ -41,6 +41,7 @@
     "test:tutor-video-sources": "npx tsx src/lib/tutorVideoSources.selftest.ts",
     "test:staff-home-kind": "npx tsx src/lib/staffHomeKind.selftest.ts",
     "test:staff-teaching-scope": "npx tsx src/lib/staffTeachingScope.selftest.ts",
+    "test:staff-day-status": "npx tsx src/lib/staffDayStatus.selftest.ts",
     "test:masters-staff-slices": "npx tsx src/lib/mastersStaffSlices.selftest.ts",
     "test:mobile-features": "npx tsx src/lib/mobileFeatures.selftest.ts",
     "test:cashfree-checkout": "npx tsx src/lib/cashfreeCheckout.selftest.ts",

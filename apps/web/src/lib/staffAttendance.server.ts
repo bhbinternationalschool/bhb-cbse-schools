@@ -9,7 +9,14 @@ import type { StaffRecord } from "@/lib/foundationMasters";
 import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
 import { fetchServerBlob, pushServerBlob } from "@/lib/serverBlob";
 import {
+  gradeStaffPunch,
+  normalizeAttendanceRulesState,
+  type StaffAttendanceRulesState,
+} from "@/lib/staffAttendanceRules";
+import {
   applyApprovedLeaveToMarks,
+  attendanceExemptStaffIds,
+  defaultStaffMarks,
   emptyStaffAttendanceState,
   findStaffRegister,
   normalizeAttendanceSettings,
@@ -183,6 +190,35 @@ function punchGeoFromInput(
   };
 }
 
+/** Half-day leave already on the mark: the punch records times, the leave
+ * decides the status. */
+function halfDayLeave(m: { status: string; punchWay?: string } | undefined): boolean {
+  return !!m && m.status === "HD" && m.punchWay === "leave_sync";
+}
+
+/** Masters → Attendance rules as saved (module_local_state). Unreadable or
+ * never saved = no assignments, so everyone is graded on school timing. */
+async function loadAttendanceRulesServer() {
+  const { readModuleLocalState } = await import("@/lib/moduleLocalState.server");
+  const row = await readModuleLocalState<Partial<StaffAttendanceRulesState>>(
+    "staff_attendance_rules",
+  ).catch(() => null);
+  if (!row) console.warn("[staff punch] attendance rules unreadable — grading on school timing");
+  return normalizeAttendanceRulesState(row?.state ?? null);
+}
+
+async function exemptStaffIdsServer(
+  settings: ReturnType<typeof normalizeAttendanceSettings>,
+): Promise<Set<string>> {
+  try {
+    const { loadServerRbac } = await import("@/lib/api/v1/auth");
+    const rbac = await loadServerRbac();
+    return attendanceExemptStaffIds(settings, rbac);
+  } catch {
+    return attendanceExemptStaffIds(settings, null);
+  }
+}
+
 export type ApplyWaStaffPunchResult =
   | {
       ok: true;
@@ -255,19 +291,20 @@ export async function applyWhatsAppStaffPunch(opts: {
   const punchWay = via === "app" ? ("self" as const) : ("whatsapp" as const);
   const markedBy = via === "app" ? "Mobile app attendance" : "WhatsApp attendance";
 
+  // Leave (approved requests) and the late grace both live in Staff HR,
+  // which the server never loaded here — so approved leave was never
+  // applied to a punch-created register.
+  const { ensureStaffHrHydratedServer } = await import("@/lib/staffHrPersistence");
+  await ensureStaffHrHydratedServer().catch(() => false);
+  const rules = await loadAttendanceRulesServer();
+
+  // Staff who keep no attendance stay off the register (same list the
+  // office desk uses); everyone else starts "Not punched" (A).
+  const exempt = await exemptStaffIdsServer(settings);
   const existingReg = findStaffRegister(state, date, ay);
   let marks = existingReg
     ? [...existingReg.marks]
-    : roster
-        .filter((s) => s.status === "active")
-        .map((s) => ({
-          staffId: s.id,
-          status: "P" as const,
-          note: "",
-          inTime: "",
-          outTime: "",
-          punchWay: "" as const,
-        }));
+    : defaultStaffMarks(roster.filter((s) => !exempt.has(s.id)));
 
   if (settings.syncLeaveToAttendance) {
     marks = applyApprovedLeaveToMarks(marks, date, ay);
@@ -291,8 +328,11 @@ export async function applyWhatsAppStaffPunch(opts: {
             : `Already punched IN at ${cur.inTime}. Reply *STATUS* or *OUT* to punch out.`,
       };
     }
+    const graded = gradeStaffPunch(rules, opts.staff.id, date, time, "");
+    const status = halfDayLeave(cur) ? "HD" : graded.status;
     const noteParts = [
       `${channelLabel} campus punch-in`,
+      halfDayLeave(cur) ? cur!.note : `${graded.label} (${graded.ruleName})`,
       altMobile ? "alt mobile" : null,
       `~${formatDistanceLabel(check.distanceM)} from school`,
     ].filter(Boolean);
@@ -300,7 +340,7 @@ export async function applyWhatsAppStaffPunch(opts: {
       academicYearCode: ay,
       date,
       staffId: opts.staff.id,
-      status: "P",
+      status,
       inTime: time,
       outTime: cur?.outTime || "",
       note: noteParts.join(" · "),
@@ -345,8 +385,10 @@ export async function applyWhatsAppStaffPunch(opts: {
     };
   }
 
+  const gradedOut = gradeStaffPunch(rules, opts.staff.id, date, cur.inTime, time);
   const noteParts = [
-    cur.note || `${channelLabel} campus punch`,
+    `${channelLabel} campus punch`,
+    halfDayLeave(cur) ? cur.note : `${gradedOut.label} (${gradedOut.ruleName})`,
     `OUT ${time}`,
     opts.earlyOutNote || null,
     altMobile ? "alt mobile" : null,
@@ -356,7 +398,8 @@ export async function applyWhatsAppStaffPunch(opts: {
     academicYearCode: ay,
     date,
     staffId: opts.staff.id,
-    status: cur.status === "HD" ? "HD" : "P",
+    // The day is graded again with both punches (early out → half day).
+    status: halfDayLeave(cur) ? "HD" : gradedOut.status,
     inTime: cur.inTime,
     outTime: time,
     note: noteParts.join(" · "),

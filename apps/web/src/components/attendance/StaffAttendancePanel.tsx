@@ -13,6 +13,7 @@ import {
   adjustStaffHalfDayAttendance,
   applyApprovedLeaveToMarks,
   defaultStaffMarks,
+  NOT_PUNCHED_NOTE,
   findStaffRegister,
   attendanceExemptStaffIds,
   loadStaffAttendance,
@@ -28,7 +29,7 @@ import {
   type StaffAttendanceMark,
 } from "@/lib/staffAttendance";
 import {
-  evaluatePunchAgainstRule,
+  gradeStaffPunch,
   loadAttendanceRules,
   ruleForStaff,
 } from "@/lib/staffAttendanceRules";
@@ -202,8 +203,8 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
           return (
             hit ?? {
               staffId: s.id,
-              status: "P" as AttendanceStatus,
-              note: "",
+              status: "A" as AttendanceStatus,
+              note: NOT_PUNCHED_NOTE,
               inTime: "",
               outTime: "",
               punchWay: "" as const,
@@ -393,22 +394,23 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     setDirty(true);
   }
 
-  function applyRulesToMarks(list: StaffAttendanceMark[]): StaffAttendanceMark[] {
+  /** Punches graded by Masters → Attendance rules (school timing for staff
+   * with no rule). What a person decided stays: manual / direct / adjusted
+   * marks and approved leave are not re-graded. */
+  const DECIDED_BY_PERSON = new Set(["manual", "direct", "adjusted", "leave_sync", "survey", "outdoor"]);
+  function applyRulesToMarks(
+    list: StaffAttendanceMark[],
+    opts: { punchesOnly?: boolean } = {},
+  ): StaffAttendanceMark[] {
     return list.map((m) => {
-      const rule = ruleForStaff(rulesState, m.staffId);
-      if (!rule || !m.inTime) return m;
-      const ev = evaluatePunchAgainstRule(
-        rulesState,
-        rule,
-        date,
-        m.inTime,
-        m.outTime,
-      );
+      if (!m.inTime) return m;
+      if (opts.punchesOnly && DECIDED_BY_PERSON.has(m.punchWay || "")) return m;
+      const ev = gradeStaffPunch(rulesState, m.staffId, date, m.inTime, m.outTime);
       return {
         ...m,
         status: ev.status,
-        note: ev.label,
-        punchWay: "rule",
+        note: `${ev.label} (${ev.ruleName})`,
+        punchWay: opts.punchesOnly ? m.punchWay : "rule",
       };
     });
   }
@@ -419,23 +421,16 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     setMarks((prev) =>
       prev.map((m) => {
         if (!filtered.some((s) => s.id === m.staffId)) return m;
-        const rule = ruleForStaff(rulesState, m.staffId);
-        if (!rule || !m.inTime) {
+        if (!m.inTime) {
           skipped += 1;
           return m;
         }
-        const ev = evaluatePunchAgainstRule(
-          rulesState,
-          rule,
-          date,
-          m.inTime,
-          m.outTime,
-        );
+        const ev = gradeStaffPunch(rulesState, m.staffId, date, m.inTime, m.outTime);
         applied += 1;
         return {
           ...m,
           status: ev.status,
-          note: ev.label,
+          note: `${ev.label} (${ev.ruleName})`,
           punchWay: "rule",
         };
       }),
@@ -443,7 +438,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     setDirty(true);
     flash(
       `Rules applied to ${applied} staff` +
-        (skipped ? ` · ${skipped} skipped (no rule / no in-time)` : ""),
+        (skipped ? ` · ${skipped} skipped (no in-time)` : ""),
     );
   }
 
@@ -463,11 +458,15 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
       flash("No active staff in roster", true);
       return;
     }
-    let toSave = marks;
-    if (settings.autoApplyRulesOnSave) {
-      toSave = applyRulesToMarks(marks);
-      setMarks(toSave);
+    // Punches always follow the Masters rules; with "Auto-apply punch rules
+    // on save" on, every mark with an in-time is re-graded.
+    let toSave = applyRulesToMarks(marks, {
+      punchesOnly: !settings.autoApplyRulesOnSave,
+    });
+    if (settings.syncLeaveToAttendance) {
+      toSave = applyApprovedLeaveToMarks(toSave, date, ay);
     }
+    setMarks(toSave);
     upsertStaffRegister({
       academicYearCode: ay,
       date,
