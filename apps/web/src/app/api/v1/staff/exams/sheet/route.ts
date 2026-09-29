@@ -11,7 +11,7 @@ import {
   subjectsForMarkEntry,
 } from "@/lib/exams";
 import { loadSis } from "@/lib/sis";
-import { assertSectionScope } from "@/lib/api/v1/staffScope";
+import { assertSectionScope, scopeAllowsSubjectCode } from "@/lib/api/v1/staffScope";
 
 export const runtime = "nodejs";
 
@@ -35,11 +35,11 @@ export async function GET(request: Request) {
     if (!termId || !classId || !sectionId) {
       throw new ApiError("bad_request", "termId, classId, sectionId required", 400);
     }
-    await assertSectionScope(ctx, classId, sectionId);
+    const scope = await assertSectionScope(ctx, classId, sectionId);
 
     await ensureSchoolMirrorHydrated();
     await Promise.all([ensureSisHydratedServer(), ensureExamsHydratedServer()]);
-    const ay = ctx.session.academicYearCode;
+    const ay = scope.academicYearCode;
     const state = loadExams();
     const term = state.terms.find((t) => t.id === termId && t.academicYearCode === ay);
     if (!term) throw new ApiError("not_found", "Exam term not found", 404);
@@ -59,7 +59,10 @@ export async function GET(request: Request) {
         return ra - rb || a.fullName.localeCompare(b.fullName);
       });
 
-    const subjects = subjectsForMarkEntry(classId, students, state).map((s) => ({
+    // Only the subjects this teacher teaches here (a class teacher sees all).
+    const subjects = subjectsForMarkEntry(classId, students, state)
+      .filter((s) => scopeAllowsSubjectCode(scope, classId, sectionId, s.code))
+      .map((s) => ({
       id: s.id,
       code: s.code,
       name: s.name,

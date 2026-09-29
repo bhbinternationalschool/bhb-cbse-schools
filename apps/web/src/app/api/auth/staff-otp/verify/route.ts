@@ -1,3 +1,4 @@
+import { staffRoleCodeFor } from "@/lib/staffSessionRole";
 import { NextResponse } from "next/server";
 import { demoSessionCookieName, type DemoSession } from "@/lib/auth";
 import { appSessionCookieOptions } from "@/lib/authCookies.server";
@@ -7,8 +8,6 @@ import { verifyParentOtp } from "@/lib/parentOtp.server";
 import { resolvePersonByMobile } from "@/lib/authProvisioning.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { loadServerMasters } from "@/lib/api/v1/auth";
-import { inferRoleCodes } from "@/lib/rbac";
-import { superAdminRoleCode } from "@/lib/superAdmin";
 import { resolveStaffHomeKind } from "@/lib/staffHomeKind.server";
 import { TENANT } from "@/lib/types";
 import { writeAudit } from "@/lib/audit.server";
@@ -60,37 +59,13 @@ export async function POST(request: Request) {
     // real driver/teacher/office match against their sis_staff designation
     // matters here exactly as much as it does for a password login.
     let roleCode = "teacher";
-    const ownerRole = superAdminRoleCode(person.email);
-    if (ownerRole) {
-      roleCode = ownerRole;
-    } else {
-      try {
-        const masters = await loadServerMasters();
-        const codes = inferRoleCodes(
-          {
-            roleCode: "",
-            email: person.email,
-            fullName: person.fullName,
-            persona: "staff",
-            staffId: person.staffId,
-          },
-          masters,
-        );
-        const priority = [
-          "principal",
-          "admin",
-          "driver",
-          "accounts",
-          "office",
-          "transport",
-          "teacher",
-          "support",
-        ];
-        const picked = priority.find((c) => codes.includes(c));
-        if (picked) roleCode = picked;
-      } catch (e) {
-        console.warn("[staff-otp/verify] roleCode inference failed, keeping default", e);
-      }
+    try {
+      roleCode = staffRoleCodeFor(
+        { email: person.email, fullName: person.fullName, staffId: person.staffId },
+        await loadServerMasters(),
+      );
+    } catch (e) {
+      console.warn("[staff-otp/verify] roleCode inference failed, keeping default", e);
     }
 
     const session: DemoSession = {

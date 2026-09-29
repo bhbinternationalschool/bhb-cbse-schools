@@ -1,4 +1,5 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
+import { assertSchoolWide } from "@/lib/api/v1/staffScope";
 import { assertPermission, resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
@@ -31,6 +32,9 @@ export async function GET(request: Request) {
   try {
     const ctx = await resolveApiAuth(request);
     assertPermission(ctx, "home", "view");
+    // Whole-school figures and lists (every register, every defaulter with
+    // the parent's mobile) — "home.view" alone let any login read them.
+    await assertSchoolWide(ctx);
     const url = new URL(request.url);
     const kind = url.searchParams.get("kind") as Kind | null;
     if (!kind) throw new ApiError("bad_request", "kind required", 400);

@@ -321,6 +321,13 @@ export async function hydrateMastersDeskFromDb(
       meta?: { sliceCount?: number; updatedAt?: string };
     };
     const bundle = body as Omit<MastersState, "version">;
+    if ((body as { teachingOnly?: boolean }).teachingOnly) {
+      // A teacher's view of Masters (classes, subjects, holidays — no fees).
+      // Take it, but record no revision: this browser has not seen the whole
+      // desk, so it must never become a base for a push, and the next
+      // full-rights sign-in here must re-read everything.
+      return { bundle, changed: true, ok: true };
+    }
     const meta = readMeta();
     const localEditAt = readLocalMastersEditAt();
     const remoteAt = body.updatedAt || body.meta?.updatedAt || "";

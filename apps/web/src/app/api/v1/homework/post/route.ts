@@ -6,7 +6,7 @@ import {
   resolveApiAuth,
 } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { assertSectionScope } from "@/lib/api/v1/staffScope";
+import { assertSubjectScope } from "@/lib/api/v1/staffScope";
 import { postHomeworkServer } from "@/lib/homeworkPost.server";
 
 export const runtime = "nodejs";
@@ -38,7 +38,12 @@ export async function POST(request: Request) {
     // section they teach. It needs masters loaded, so it runs before the
     // shared helper (which hydrates again, idempotently).
     await ensureSchoolMirrorHydrated();
-    await assertSectionScope(ctx, body.classId || "", body.sectionId || "");
+    await assertSubjectScope(
+      ctx,
+      body.classId || "",
+      body.sectionId || "",
+      body.subjectId || "",
+    );
 
     // Create + persist + notify live in one server-side helper, shared with
     // the ERP command desk so both cannot drift apart.

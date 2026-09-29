@@ -233,7 +233,44 @@ export function PayrollWorkspace() {
     setTick((n) => n + 1);
   }
 
+  /**
+   * Payroll reads attendance from this browser's copy, and a day with no
+   * mark now counts as ABSENT — so a stale or failed copy would dock
+   * everyone. Re-read the staff register and leave from the server before
+   * every build, and refuse to build on a failed read (unknown is not
+   * "absent"). Anything the office marked before this moment counts.
+   */
+  async function freshAttendanceForPayroll(): Promise<boolean> {
+    try {
+      const [att, hr, guard] = await Promise.all([
+        import("@/lib/staffAttendancePersistence"),
+        import("@/lib/staffHrPersistence"),
+        import("@/lib/deskHydrateGuard"),
+      ]);
+      guard.resetDeskHydrated("staff_attendance");
+      guard.resetDeskHydrated("staff_hr");
+      await Promise.all([att.ensureStaffAttendanceHydrated(), hr.ensureStaffHrHydrated()]);
+      if (!guard.isDeskHydrated("staff_attendance") || !guard.isDeskHydrated("staff_hr")) {
+        flash(
+          "Could not load the latest staff attendance / leave — payroll was NOT calculated. Check the connection and try again.",
+          true,
+        );
+        return false;
+      }
+      return true;
+    } catch {
+      flash("Could not load the latest staff attendance — payroll was NOT calculated.", true);
+      return false;
+    }
+  }
+
   function processBulk(replace = false) {
+    void (async () => {
+      if (await freshAttendanceForPayroll()) processBulkNow(replace);
+    })();
+  }
+
+  function processBulkNow(replace = false) {
     if (!masters || !allowed) return;
     const r = processPayrollDraft({
       masters,
@@ -250,7 +287,7 @@ export function PayrollWorkspace() {
             "Replace the existing draft for this month with a fresh bulk calculation?",
           )
         ) {
-          processBulk(true);
+          processBulkNow(true);
         }
         return;
       }
@@ -266,6 +303,12 @@ export function PayrollWorkspace() {
   }
 
   function processIndividual() {
+    void (async () => {
+      if (await freshAttendanceForPayroll()) processIndividualNow();
+    })();
+  }
+
+  function processIndividualNow() {
     if (!masters || !allowed) return;
     if (!processStaffId) {
       flash("Select a staff member", true);
@@ -461,6 +504,12 @@ export function PayrollWorkspace() {
   }
 
   function rebuildDraft() {
+    void (async () => {
+      if (await freshAttendanceForPayroll()) rebuildDraftNow();
+    })();
+  }
+
+  function rebuildDraftNow() {
     if (!masters || !selected || selected.status !== "draft") return;
     const prevByStaff = new Map(
       selected.lines.map((l) => [l.staffId, l] as const),

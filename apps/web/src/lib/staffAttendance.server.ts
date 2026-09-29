@@ -9,7 +9,14 @@ import type { StaffRecord } from "@/lib/foundationMasters";
 import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
 import { fetchServerBlob, pushServerBlob } from "@/lib/serverBlob";
 import {
+  gradeStaffPunch,
+  normalizeAttendanceRulesState,
+  type StaffAttendanceRulesState,
+} from "@/lib/staffAttendanceRules";
+import {
   applyApprovedLeaveToMarks,
+  attendanceExemptStaffIds,
+  defaultStaffMarks,
   emptyStaffAttendanceState,
   findStaffRegister,
   normalizeAttendanceSettings,
@@ -43,7 +50,10 @@ function todayIst(): string {
   return istDateParts().date;
 }
 
-export async function loadStaffAttendanceServer(): Promise<StaffAttendanceState> {
+export async function loadStaffAttendanceServer(
+  opts: { fresh?: boolean } = {},
+): Promise<StaffAttendanceState> {
+  if (opts.fresh) return loadStaffAttendanceFresh();
   if (loaded && cache) return cache;
 
   const { ensureStaffAttendanceHydratedServer } = await import(
@@ -82,6 +92,59 @@ export async function loadStaffAttendanceServer(): Promise<StaffAttendanceState>
   cache = emptyStaffAttendanceState();
   loaded = true;
   return cache;
+}
+
+/**
+ * The register as the database holds it NOW. loadStaffAttendanceServer()
+ * keeps the first copy it ever read for the life of the instance, so a punch
+ * read-modify-wrote a stale register and pushed it back over whatever the
+ * office had saved since (and, with two Cloud Run instances, over each
+ * other's punches).
+ */
+async function loadStaffAttendanceFresh(): Promise<StaffAttendanceState> {
+  const { ensureStaffAttendanceHydratedServer } = await import(
+    "@/lib/staffAttendancePersistence"
+  );
+  await ensureStaffAttendanceHydratedServer();
+  const fresh = (await import("@/lib/staffAttendance")).loadStaffAttendance();
+  cache = normalizeStaffAttendanceState(fresh);
+  loaded = true;
+  return cache;
+}
+
+/**
+ * Persist ONE day's register — the one a punch touched — and wait for the
+ * database to confirm it. The old path pushed the whole cached desk,
+ * fire-and-forget: a failed write still answered "Punched in".
+ */
+async function saveStaffPunchRegister(
+  state: StaffAttendanceState,
+  register: import("@/lib/staffAttendance").StaffAttendanceRegister,
+): Promise<{ ok: boolean; error?: string }> {
+  const { pushStaffAttendanceRegisterToDb } = await import(
+    "@/lib/staffAttendanceNormalized.server"
+  );
+  const pushed = await pushStaffAttendanceRegisterToDb(register).catch(
+    (e: unknown) => ({ ok: false as const, error: (e as Error)?.message || String(e) }),
+  );
+  if (!pushed.ok) {
+    console.error("[staff punch] register push failed", pushed.error);
+    return { ok: false, error: pushed.error };
+  }
+  cache = normalizeStaffAttendanceState(state);
+  loaded = true;
+  writeStaffAttendanceLocalRaw(cache);
+  const { deskSkipBlobPush } = await import("@/lib/deskCutover");
+  if (!deskSkipBlobPush("staff_attendance")) {
+    void trackServerWork(pushServerBlob("staff_attendance_state", cache));
+  }
+  try {
+    await fs.mkdir(path.dirname(LOCAL_FILE), { recursive: true });
+    await fs.writeFile(LOCAL_FILE, JSON.stringify(cache, null, 2), "utf8");
+  } catch {
+    /* ephemeral disk */
+  }
+  return { ok: true };
 }
 
 export async function saveStaffAttendanceServer(
@@ -127,6 +190,35 @@ function punchGeoFromInput(
   };
 }
 
+/** Half-day leave already on the mark: the punch records times, the leave
+ * decides the status. */
+function halfDayLeave(m: { status: string; punchWay?: string } | undefined): boolean {
+  return !!m && m.status === "HD" && m.punchWay === "leave_sync";
+}
+
+/** Masters → Attendance rules as saved (module_local_state). Unreadable or
+ * never saved = no assignments, so everyone is graded on school timing. */
+async function loadAttendanceRulesServer() {
+  const { readModuleLocalState } = await import("@/lib/moduleLocalState.server");
+  const row = await readModuleLocalState<Partial<StaffAttendanceRulesState>>(
+    "staff_attendance_rules",
+  ).catch(() => null);
+  if (!row) console.warn("[staff punch] attendance rules unreadable — grading on school timing");
+  return normalizeAttendanceRulesState(row?.state ?? null);
+}
+
+async function exemptStaffIdsServer(
+  settings: ReturnType<typeof normalizeAttendanceSettings>,
+): Promise<Set<string>> {
+  try {
+    const { loadServerRbac } = await import("@/lib/api/v1/auth");
+    const rbac = await loadServerRbac();
+    return attendanceExemptStaffIds(settings, rbac);
+  } catch {
+    return attendanceExemptStaffIds(settings, null);
+  }
+}
+
 export type ApplyWaStaffPunchResult =
   | {
       ok: true;
@@ -151,18 +243,11 @@ export async function applyWhatsAppStaffPunch(opts: {
   via?: "whatsapp" | "app";
   /** Confirmed early check-out — appended to the register note so HR sees it */
   earlyOutNote?: string;
+  /** The year to file the punch under; the app's GET reads the same one. */
+  academicYearCode?: string;
 }): Promise<ApplyWaStaffPunchResult> {
   const via = opts.via ?? "whatsapp";
-  // Approved leave is read from the HR desk (applyApprovedLeaveToMarks). On
-  // the server that cache is empty until hydrated, and then a staff member
-  // on approved leave was neither refused a punch nor shown as on leave.
-  try {
-    const { ensureStaffHrHydratedServer } = await import("@/lib/staffHrPersistence");
-    await ensureStaffHrHydratedServer();
-  } catch (e) {
-    console.warn("[staff-attendance] HR hydrate before punch failed", e);
-  }
-  let state = await loadStaffAttendanceServer();
+  let state = await loadStaffAttendanceFresh();
   const settings = normalizeAttendanceSettings(state.settings);
   if (via === "whatsapp" && !settings.allowWhatsAppPunch) {
     return {
@@ -184,9 +269,16 @@ export async function applyWhatsAppStaffPunch(opts: {
   }
 
   const masters = loadMasters();
-  const ay = currentAcademicYearCode(masters);
+  const ay = opts.academicYearCode || currentAcademicYearCode(masters);
   const date = todayIst();
   const roster = masters.staff ?? [];
+  const saveFailed = {
+    ok: false as const,
+    error:
+      via === "app"
+        ? "Your punch could not be saved to the school database. Please try again."
+        : "Could not save your punch — please try again in a minute.",
+  };
   const time = nowHhmmIst();
   const altMobile =
     via === "whatsapp" && staffMobileMatchedAlt(opts.staff, opts.mobile10);
@@ -199,19 +291,20 @@ export async function applyWhatsAppStaffPunch(opts: {
   const punchWay = via === "app" ? ("self" as const) : ("whatsapp" as const);
   const markedBy = via === "app" ? "Mobile app attendance" : "WhatsApp attendance";
 
+  // Leave (approved requests) and the late grace both live in Staff HR,
+  // which the server never loaded here — so approved leave was never
+  // applied to a punch-created register.
+  const { ensureStaffHrHydratedServer } = await import("@/lib/staffHrPersistence");
+  await ensureStaffHrHydratedServer().catch(() => false);
+  const rules = await loadAttendanceRulesServer();
+
+  // Staff who keep no attendance stay off the register (same list the
+  // office desk uses); everyone else starts "Not punched" (A).
+  const exempt = await exemptStaffIdsServer(settings);
   const existingReg = findStaffRegister(state, date, ay);
   let marks = existingReg
     ? [...existingReg.marks]
-    : roster
-        .filter((s) => s.status === "active")
-        .map((s) => ({
-          staffId: s.id,
-          status: "P" as const,
-          note: "",
-          inTime: "",
-          outTime: "",
-          punchWay: "" as const,
-        }));
+    : defaultStaffMarks(roster.filter((s) => !exempt.has(s.id)));
 
   if (settings.syncLeaveToAttendance) {
     marks = applyApprovedLeaveToMarks(marks, date, ay);
@@ -229,11 +322,17 @@ export async function applyWhatsAppStaffPunch(opts: {
     if (cur?.inTime && cur.inTime.trim()) {
       return {
         ok: false,
-        error: `Already punched IN at ${cur.inTime}. Reply *STATUS* or *OUT* to punch out.`,
+        error:
+          via === "app"
+            ? `Already punched IN at ${cur.inTime}. Use Punch OUT when you leave.`
+            : `Already punched IN at ${cur.inTime}. Reply *STATUS* or *OUT* to punch out.`,
       };
     }
+    const graded = gradeStaffPunch(rules, opts.staff.id, date, time, "");
+    const status = halfDayLeave(cur) ? "HD" : graded.status;
     const noteParts = [
       `${channelLabel} campus punch-in`,
+      halfDayLeave(cur) ? cur!.note : `${graded.label} (${graded.ruleName})`,
       altMobile ? "alt mobile" : null,
       `~${formatDistanceLabel(check.distanceM)} from school`,
     ].filter(Boolean);
@@ -241,7 +340,7 @@ export async function applyWhatsAppStaffPunch(opts: {
       academicYearCode: ay,
       date,
       staffId: opts.staff.id,
-      status: "P",
+      status,
       inTime: time,
       outTime: cur?.outTime || "",
       note: noteParts.join(" · "),
@@ -251,7 +350,7 @@ export async function applyWhatsAppStaffPunch(opts: {
       roster,
     });
     state = merged.state;
-    await saveStaffAttendanceServer(state);
+    if (!(await saveStaffPunchRegister(state, merged.register)).ok) return saveFailed;
     const mark = merged.register.marks.find((m) => m.staffId === opts.staff.id)!;
     return {
       ok: true,
@@ -270,18 +369,26 @@ export async function applyWhatsAppStaffPunch(opts: {
   if (!cur?.inTime?.trim()) {
     return {
       ok: false,
-      error: "No punch-in today. Reply *IN* first, then share location.",
+      error:
+        via === "app"
+          ? "No punch-in today — punch IN first."
+          : "No punch-in today. Reply *IN* first, then share location.",
     };
   }
   if (cur.outTime?.trim()) {
     return {
       ok: false,
-      error: `Already punched OUT at ${cur.outTime}. Reply *STATUS* for summary.`,
+      error:
+        via === "app"
+          ? `Already punched OUT at ${cur.outTime}.`
+          : `Already punched OUT at ${cur.outTime}. Reply *STATUS* for summary.`,
     };
   }
 
+  const gradedOut = gradeStaffPunch(rules, opts.staff.id, date, cur.inTime, time);
   const noteParts = [
-    cur.note || `${channelLabel} campus punch`,
+    `${channelLabel} campus punch`,
+    halfDayLeave(cur) ? cur.note : `${gradedOut.label} (${gradedOut.ruleName})`,
     `OUT ${time}`,
     opts.earlyOutNote || null,
     altMobile ? "alt mobile" : null,
@@ -291,7 +398,8 @@ export async function applyWhatsAppStaffPunch(opts: {
     academicYearCode: ay,
     date,
     staffId: opts.staff.id,
-    status: cur.status === "HD" ? "HD" : "P",
+    // The day is graded again with both punches (early out → half day).
+    status: halfDayLeave(cur) ? "HD" : gradedOut.status,
     inTime: cur.inTime,
     outTime: time,
     note: noteParts.join(" · "),
@@ -301,7 +409,7 @@ export async function applyWhatsAppStaffPunch(opts: {
     roster,
   });
   state = merged.state;
-  await saveStaffAttendanceServer(state);
+  if (!(await saveStaffPunchRegister(state, merged.register)).ok) return saveFailed;
   const mark = merged.register.marks.find((m) => m.staffId === opts.staff.id)!;
   return {
     ok: true,
@@ -324,7 +432,8 @@ export async function applyWhatsAppStaffPunch(opts: {
 export async function staffPunchToday(
   staffId: string,
 ): Promise<{ inTime: string; outTime: string } | null> {
-  const state = await loadStaffAttendanceServer();
+  // Fresh: the punch may have been saved by another server a minute ago.
+  const state = await loadStaffAttendanceServer({ fresh: true });
   const masters = loadMasters();
   const ay = currentAcademicYearCode(masters);
   const reg = findStaffRegister(state, todayIst(), ay);
@@ -333,10 +442,10 @@ export async function staffPunchToday(
   return { inTime: mark.inTime || "", outTime: mark.outTime || "" };
 }
 
-/** Is this staff member exempt from attendance (Masters → Attendance settings)? */
+/** Is this staff member exempt from attendance — the same list the register uses? */
 export async function staffAttendanceExempt(staffId: string): Promise<boolean> {
   const state = await loadStaffAttendanceServer();
-  return normalizeAttendanceSettings(state.settings).exemptStaffIds.includes(staffId);
+  return (await exemptStaffIdsServer(normalizeAttendanceSettings(state.settings))).has(staffId);
 }
 
 /**
@@ -353,7 +462,7 @@ export async function markApprovedLeaveOnRegisters(opts: {
   typeCode: string;
   by: string;
 }): Promise<number> {
-  let state = await loadStaffAttendanceServer();
+  let state = await loadStaffAttendanceFresh();
   const masters = loadMasters();
   const ay = currentAcademicYearCode(masters);
   const roster = masters.staff ?? [];
@@ -372,13 +481,14 @@ export async function markApprovedLeaveOnRegisters(opts: {
         roster,
       });
       state = merged.state;
-      marked += 1;
+      // One day's register at a time, confirmed by the database — the same
+      // way a punch is saved.
+      if ((await saveStaffPunchRegister(state, merged.register)).ok) marked += 1;
     }
     const next = new Date(`${d}T00:00:00Z`);
     next.setUTCDate(next.getUTCDate() + 1);
     d = next.toISOString().slice(0, 10);
   }
-  if (marked) await saveStaffAttendanceServer(state);
   return marked;
 }
 
