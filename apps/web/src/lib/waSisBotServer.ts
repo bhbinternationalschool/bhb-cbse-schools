@@ -1082,7 +1082,7 @@ export async function handleWaSisBotInbound(opts: {
   });
   const lastBot = [...thread.messages].reverse().find((m) => m.role === "bot");
   const justAskedLanguage = !!lastBot && lastBot.text.startsWith(languageMenuText().slice(0, 40));
-  const rawGate = languageGateDecision({ known: justAskedLanguage ? "" : hh.preferredLanguage || (explicitLang ? "" : "hi"), text });
+  const rawGate = languageGateDecision({ known: justAskedLanguage ? "" : (hh.preferredLanguage || ""), text });
   const gate =
     rawGate.action === "ask" && !explicitLang
       ? ({ action: "pass" } as const)
