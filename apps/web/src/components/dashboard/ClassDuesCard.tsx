@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { IndianRupee, MessageCircle, Phone } from "lucide-react";
+import { IndianRupee, Phone } from "lucide-react";
 
 /**
  * Fee dues of the class teacher's own class, on the teacher home.
@@ -9,6 +9,10 @@ import { IndianRupee, MessageCircle, Phone } from "lucide-react";
  * Read-only and server-scoped (GET /api/v1/staff/fees/defaulters answers a
  * class teacher with their class-teacher sections only). The director asked
  * that each class teacher see who in their class owes fees, 2026-09-29.
+ *
+ * Call only — no WhatsApp button. Families are messaged from the school's
+ * Business number (fee reminders run from the office's automation), never
+ * from a teacher's own WhatsApp: the personal_whatsapp ratchet is at 0.
  */
 
 type Child = {
@@ -139,15 +143,6 @@ export function ClassDuesCard() {
                         aria-label={`Call ${h.guardianName}`}
                       >
                         <Phone className="h-4 w-4" />
-                      </a>
-                      <a
-                        href={`https://wa.me/91${m}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border)] text-[#16a34a]"
-                        aria-label={`WhatsApp ${h.guardianName}`}
-                      >
-                        <MessageCircle className="h-4 w-4" />
                       </a>
                     </div>
                   ) : null}
