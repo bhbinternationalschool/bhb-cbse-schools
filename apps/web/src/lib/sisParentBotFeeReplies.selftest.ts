@@ -159,4 +159,50 @@ for (const s of [composeSisPromiseUnclear(true), composeSisPromiseUnclear(false)
   assert.ok(composeRecordCorrectionAck("mobile", false).includes("mobile number"));
 }
 
+/* ── A promise with a date but no figure (28 Sep 2026) ───────────────
+ *
+ * MR. DHARM PRAKASH SINGH was asked "कितनी राशि और कब तक"; he answered
+ * "Monday ko ho jayega". The date was read correctly, but with no figure
+ * the read-back printed the LABEL in the amount's place:
+ *   "हमने नोट कर लिया: *राशि — 5 अक्टूबर तक*"
+ * which tells the parent we noted an amount we never had.
+ */
+{
+  const p = parseSisPromiseToPay("Monday ko ho jayega", "2026-09-28");
+  assert.equal(p.amountPaise, null);
+  assert.equal(p.byDate, "2026-10-05");
+  assert.equal(promiseIsEmpty(p), false, "a date alone is still a promise");
+
+  const hi = composeSisPromiseRecorded(p, true);
+  assert.ok(!/\*राशि —/.test(hi), "the word for 'amount' must not stand in for a figure");
+  assert.ok(hi.includes("*5 अक्टूबर तक*"), hi);
+  const en = composeSisPromiseRecorded(p, false);
+  assert.ok(!/\*amount —/.test(en), "the word 'amount' must not stand in for a figure");
+  assert.ok(en.includes("*by 5 October*"), en);
+
+  // The office still learns the figure is missing.
+  assert.equal(
+    promiseSummaryForOffice(p),
+    'Promise to pay: amount not given, by 2026-10-05 — "Monday ko ho jayega"',
+  );
+
+  // A promise that DOES carry a figure is unchanged — MR. YOGENDRA KUMAR
+  // YADAV's "6 अक्टूबर कोई 4500", the same morning.
+  const q = parseSisPromiseToPay("6 अक्टूबर कोई 4500", "2026-09-28");
+  assert.equal(q.amountPaise, 450000);
+  assert.ok(composeSisPromiseRecorded(q, true).includes("*₹4,500 — 6 अक्टूबर तक*"));
+  assert.ok(composeSisPromiseRecorded(q, false).includes("*₹4,500 — by 6 October*"));
+
+  // "पूरा" keeps its own words rather than a figure, and still reads whole.
+  const f = parseSisPromiseToPay("पूरा अगले सोमवार", "2026-09-28");
+  assert.equal(f.full, true);
+  assert.ok(composeSisPromiseRecorded(f, true).includes("*पूरी राशि — 5 अक्टूबर तक*"));
+
+  // A figure with no date reads as the figure alone, with no dangling dash.
+  const a = parseSisPromiseToPay("4500", "2026-09-28");
+  assert.equal(a.byDate, null);
+  assert.ok(composeSisPromiseRecorded(a, true).includes("*₹4,500*"));
+  assert.ok(!composeSisPromiseRecorded(a, true).includes("—"), "no empty half");
+}
+
 console.log("ok");

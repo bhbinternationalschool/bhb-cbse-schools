@@ -850,9 +850,14 @@ export function composeSisPromiseRecorded(p: SisPromiseToPay, hindi: boolean): s
       ? "धन्यवाद 🙏 आपका संदेश कार्यालय तक पहुँच गया है। कार्यालय आपसे संपर्क कर राशि और तारीख तय कर लेगा।"
       : "Thank you 🙏 Your message has reached the school office; they will get in touch to agree the amount and date.";
   }
+  // With no figure, `amount` is empty. It used to fall back to the WORD for
+  // "amount", so MR. DHARM PRAKASH SINGH's "Monday ko ho jayega" was read
+  // back to him as "नोट कर लिया: *राशि — 5 अक्टूबर तक*" (28 Sep 2026) — the
+  // label where the number should be. Read back only what the parent
+  // actually said; the office note still records "amount not given".
   const line = hindi
-    ? `${amount || "राशि"}${when ? ` — ${when} तक` : ""}`
-    : `${amount || "amount"}${when ? ` — by ${when}` : ""}`;
+    ? [amount, when ? `${when} तक` : ""].filter(Boolean).join(" — ")
+    : [amount, when ? `by ${when}` : ""].filter(Boolean).join(" — ");
   return hindi
     ? `धन्यवाद 🙏 हमने नोट कर लिया: *${line}*।\n\nकार्यालय को सूचना दे दी गई है। यदि कुछ बदलना हो तो यहीं लिख दें।`
     : `Thank you 🙏 Noted: *${line}*.\n\nThe office has been informed. If anything changes, just write here.`;
