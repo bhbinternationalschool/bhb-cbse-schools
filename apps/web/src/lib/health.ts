@@ -201,11 +201,22 @@ export function loadHealth(): HealthState {
   }
 }
 
-/** The real permission guard — see file header for why this differs from
- * lib/dutyRoster.ts's saveDutyRoster, which has no such check. */
-export function saveHealth(state: HealthState): HealthState {
+/** Shown when the permission guard refuses a save — the role lacks
+ * health.edit, or the academic year is closed. */
+export const HEALTH_SAVE_REFUSED =
+  "Not saved — your role cannot change health records here, or this academic year is closed.";
+
+/**
+ * The real permission guard — see file header for why this differs from
+ * lib/dutyRoster.ts's saveDutyRoster, which has no such check.
+ *
+ * Says whether the save happened: saveHealth hands back the unsaved state
+ * on a refusal, so "Visit logged." showed for a save that never happened
+ * (a teacher has health view + create, not edit). 2026-09-29.
+ */
+export function trySaveHealth(state: HealthState): { ok: boolean; state: HealthState } {
   if (!assertModulePermission("health", "edit", "saveHealth")) {
-    return state;
+    return { ok: false, state };
   }
   const next = normalizeHealthState(state);
   if (typeof window !== "undefined") {
@@ -213,7 +224,12 @@ export function saveHealth(state: HealthState): HealthState {
     void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("health", next)));
     window.dispatchEvent(new CustomEvent("bhb-health"));
   }
-  return next;
+  return { ok: true, state: next };
+}
+
+/** Prefer trySaveHealth — this one cannot say it was refused. */
+export function saveHealth(state: HealthState): HealthState {
+  return trySaveHealth(state).state;
 }
 
 /** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */

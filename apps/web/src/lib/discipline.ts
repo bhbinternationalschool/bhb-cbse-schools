@@ -164,11 +164,25 @@ export function loadDiscipline(): DisciplineState {
   }
 }
 
-/** The real permission guard — see file header for why this differs from
- * lib/dutyRoster.ts's saveDutyRoster, which has no such check. */
-export function saveDiscipline(state: DisciplineState): DisciplineState {
+/** Shown when the permission guard refuses a save — the role lacks
+ * discipline.edit, or the academic year is closed. */
+export const DISCIPLINE_SAVE_REFUSED =
+  "Not saved — your role cannot change discipline records here, or this academic year is closed.";
+
+/**
+ * The real permission guard — see file header for why this differs from
+ * lib/dutyRoster.ts's saveDutyRoster, which has no such check.
+ *
+ * Says whether the save happened. saveDiscipline hands back the unsaved
+ * state on a refusal and its caller could not tell the two apart: a
+ * teacher (view + create, no edit) pressed "Log incident", nothing was
+ * stored, and the page still said "Incident logged." (2026-09-29).
+ */
+export function trySaveDiscipline(
+  state: DisciplineState,
+): { ok: boolean; state: DisciplineState } {
   if (!assertModulePermission("discipline", "edit", "saveDiscipline")) {
-    return state;
+    return { ok: false, state };
   }
   const next = normalizeDisciplineState(state);
   if (typeof window !== "undefined") {
@@ -176,7 +190,12 @@ export function saveDiscipline(state: DisciplineState): DisciplineState {
     void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("discipline", next)));
     window.dispatchEvent(new CustomEvent("bhb-discipline"));
   }
-  return next;
+  return { ok: true, state: next };
+}
+
+/** Prefer trySaveDiscipline — this one cannot say it was refused. */
+export function saveDiscipline(state: DisciplineState): DisciplineState {
+  return trySaveDiscipline(state).state;
 }
 
 /** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
