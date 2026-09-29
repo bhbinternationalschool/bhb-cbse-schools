@@ -992,6 +992,11 @@ export async function handleWaSisBotInbound(opts: {
   replyText: string;
   stub: boolean;
   error?: string;
+  /**
+   * Why this went to the office, when the bot knows better than the relay's
+   * own guess from the text. Left unset means "work it out from the text".
+   */
+  relayReason?: string;
 }> {
   await ensureSchoolMirrorHydrated();
   const mobile10 = waNormalizeLocal10(opts.fromWaId);
@@ -1266,6 +1271,7 @@ export async function handleWaSisBotInbound(opts: {
   let nextPtpAsks: number | undefined;
   let lastPromise = thread.lastPromise;
   let officeNote = "";
+  let relayReason = "";
   let closingNow = false;
   let intent: ReturnType<typeof detectSisBotIntent>;
   let bot: { text: string; escalate: boolean; sendLocationPin?: boolean };
@@ -1290,6 +1296,13 @@ export async function handleWaSisBotInbound(opts: {
     } else {
       lastPromise = { amountPaise: p.amountPaise, byDate: p.byDate, at: nowIso(), raw: p.raw };
       officeNote = promiseSummaryForOffice(p);
+      // The bot DID answer this one — it asked how much and by when, and
+      // wrote the answer down. Say so, or the relay falls back to "the bot
+      // could not answer" and the office reads a recorded promise as a
+      // failure (28 Sep 2026: "6 अक्टूबर कोई 4500" and "Monday ko ho
+      // jayega" both arrived at the desk under that label). Same reasoning
+      // as the "already paid" wording in waRelay.server.ts.
+      relayReason = officeNote;
       intent = "human";
       bot = { escalate: true, text: composeSisPromiseRecorded(p, hindi) };
     }
@@ -1481,6 +1494,7 @@ export async function handleWaSisBotInbound(opts: {
     replyText,
     stub: !send.ok,
     error: send.ok ? undefined : send.error,
+    relayReason: relayReason || undefined,
   };
 }
 

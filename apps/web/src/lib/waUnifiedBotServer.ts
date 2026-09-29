@@ -396,6 +396,8 @@ async function delegateActiveFlow(
   audience: string;
   stub: boolean;
   error?: string;
+  /** A reason the flow itself knows; the relay guesses from the text without it. */
+  relayReason?: string;
 }> {
   const mobile10 = waNormalizeLocal10(opts.fromWaId);
   const inbound = { ...opts, fromUnified: true as const };
@@ -678,6 +680,7 @@ async function delegateActiveFlow(
       audience: "sis_parent",
       stub: r.stub,
       error: r.error,
+      relayReason: r.relayReason,
     };
   }
 
@@ -2210,6 +2213,8 @@ export async function handleWaUnifiedInbound(opts: {
   audience: string;
   stub: boolean;
   error?: string;
+  /** A reason the flow itself knows; the relay guesses from the text without it. */
+  relayReason?: string;
 }> {
   await ensureSchoolMirrorHydrated();
   const mobile10 = waNormalizeLocal10(opts.fromWaId);
