@@ -209,17 +209,25 @@ function staffMenu(
   const body =
     headerBody ||
     `*${isOwner ? "Leadership" : "Staff"} desk* — ${name || "Team"}`;
-  const rows = prompts
-    .filter((p) => p.id !== "menu")
-    .slice(0, 9)
-    .map((p) => ({
-      id: `staff_${p.id}`,
-      title: p.waKeyword,
-      description: p.label.slice(0, 72),
-    }));
+  // HELP first: it opens the command desk — class lists, attendance,
+  // students, fees — which is most of what staff message about, and which
+  // this menu did not mention at all before 29 Sep 2026. WhatsApp allows
+  // ten rows; this is the tenth.
+  const rows = [
+    { id: "staff_help", title: "HELP", description: "Everything I can do — class lists, attendance, students" },
+    ...prompts
+      .filter((p) => p.id !== "menu")
+      .slice(0, 9)
+      .map((p) => ({
+        id: `staff_${p.id}`,
+        title: p.waKeyword,
+        description: p.label.slice(0, 72),
+      })),
+  ];
   const textFallback = [
     body,
     "",
+    "• *help* — everything I can do (class lists, attendance, students)",
     ...prompts
       .filter((p) => p.id !== "menu")
       .map((p) => `• *${p.waKeyword}* — ${p.label}`),
@@ -270,7 +278,20 @@ function parentMenu(
 function teacherMenu(
   headerBody?: string,
 ): { menu: WaInteractiveMenu; textFallback: string } {
-  const body = headerBody || "*Class teacher*\n\nDraft HW / notices for your class.";
+  // What teachers actually came to do, in the words that work. Shown under
+  // the greeting too: on 29 Sep 2026 the greeting offered only "Attendance
+  // IN/OUT, Homework, Notice", and teachers typed "Class 8 ka attendance
+  // lena hai" and "Show my class students" into a menu that never said
+  // either was possible.
+  const examples = [
+    "Just type what you need:",
+    "• *5A* — class list",
+    "• *Take 5A attendance* — mark the register",
+    "• *5A attendance* — who is absent",
+    "• *My attendance* — your own IN / OUT",
+    "• *help* — everything I can do",
+  ].join("\n");
+  const body = `${headerBody || "*Class teacher*"}\n\n${examples}`;
   return {
     menu: {
       kind: "buttons",

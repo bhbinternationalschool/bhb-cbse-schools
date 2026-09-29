@@ -62,3 +62,23 @@ export function staffBotMenuText(ctx: {
     "Type *MENU* anytime for this list · *MAIN* for school main menu.",
   ].join("\n");
 }
+
+/**
+ * One of the menu's own keywords, typed as the whole message — "FEE",
+ * "timing", "Staff." — or "unknown".
+ *
+ * Exact on purpose. detectStaffBotIntent also reads substrings ("attendance"
+ * anywhere is the staff snapshot, "hi" inside "which" is the menu), and on
+ * 29 Sep 2026 that would have answered "Mere class ka attendance lena hai"
+ * with the staff attendance snapshot. The menu promises its keywords work;
+ * this is what keeps that promise without the guessing.
+ */
+export function detectStaffBotKeyword(text: string): StaffBotQuickId | "unknown" {
+  const upper = (text || "").trim().toUpperCase().replace(/[.!?।]+$/, "").trim();
+  if (!upper) return "unknown";
+  for (const q of STAFF_BOT_OWNER_PROMPTS) {
+    if (upper === q.waKeyword) return q.id;
+  }
+  if (upper === "MAIN MENU") return "menu";
+  return "unknown";
+}

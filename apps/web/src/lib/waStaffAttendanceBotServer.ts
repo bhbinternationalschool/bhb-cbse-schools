@@ -164,6 +164,9 @@ function earlyOutWindow(): { early: boolean; now: string; end: string } {
   return { early: now < win.end, now, end: win.end };
 }
 
+/** How long a "1 — English / 2 — हिंदी" question stays answerable. */
+const LANGUAGE_ASK_OPEN_MS = 15 * 60_000;
+
 /**
  * Does this turn belong to the attendance bot?
  *
@@ -182,9 +185,17 @@ export function shouldRouteStaffAttendance(opts: {
   text: string;
   location?: { lat: number; lng: number } | null;
   hasPending?: boolean;
+  /**
+   * This bot asked "1 — English / 2 — हिंदी" a few minutes ago and has no
+   * answer yet. Without it the 1 went to whatever else reads a bare digit —
+   * on 29 Sep the command desk's help list, which answered the language
+   * choice with a description of the absent list.
+   */
+  languageAskOpen?: boolean;
 }): boolean {
   if (opts.location) return true;
   if (detectStaffAttBotIntent(opts.text) !== "unknown") return true;
+  if (opts.languageAskOpen && parseStaffAttLanguage(opts.text) !== null) return true;
   if (opts.hasPending) {
     // YES/CANCEL for an early checkout, and a 1/2 answering the language
     // menu that rode along with the punch reply.
@@ -206,6 +217,12 @@ export async function handleWaStaffAttendanceInbound(opts: {
     accuracyM?: number;
   };
   fromUnified?: boolean;
+  /**
+   * The unified bot already knows what this is — "Show my attendance" read
+   * by detectOwnAttendanceAsk — and says so, instead of this bot guessing
+   * from wording it deliberately matches only whole-message.
+   */
+  forceIntent?: "in" | "out" | "status";
 }): Promise<{
   handled: boolean;
   replied: boolean;
@@ -233,12 +250,19 @@ export async function handleWaStaffAttendanceInbound(opts: {
   let thread = opened.thread;
 
   const text = (opts.text || "").trim();
-  const intent = detectStaffAttBotIntent(text);
-  const routed = shouldRouteStaffAttendance({
-    text,
-    location: opts.location,
-    hasPending: !!thread.pending,
-  });
+  const intent = opts.forceIntent ?? detectStaffAttBotIntent(text);
+  const askedAtMs = Date.parse(thread.languageAskedAt || "");
+  const routed =
+    !!opts.forceIntent ||
+    shouldRouteStaffAttendance({
+      text,
+      location: opts.location,
+      hasPending: !!thread.pending,
+      languageAskOpen:
+        !thread.language &&
+        Number.isFinite(askedAtMs) &&
+        Date.now() - askedAtMs < LANGUAGE_ASK_OPEN_MS,
+    });
 
   if (!routed && opts.fromUnified) {
     return {

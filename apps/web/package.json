@@ -119,6 +119,7 @@
     "test:wa-unified-menus-hindi": "npx tsx src/lib/waUnifiedMenusHindi.selftest.ts",
     "test:parent-messages-hindi": "npx tsx src/lib/parentMessagesHindi.selftest.ts",
     "test:parent-bot-real-chats": "npx tsx src/lib/parentBotRealChats.selftest.ts",
+    "test:staff-wa-real-chats": "npx tsx src/lib/staffWhatsAppRealChats.selftest.ts",
     "test:pin-review": "npx tsx src/lib/pinReview.selftest.ts",
     "test:due-pay-link": "npx tsx src/lib/duePayLink.selftest.ts",
     "test:fee-dues-server-inputs": "npx tsx src/lib/feeDuesServerInputs.selftest.ts",

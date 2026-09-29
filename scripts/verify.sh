@@ -99,6 +99,7 @@ SELFTESTS=(
   test:wa-unified-menus-hindi
   test:parent-messages-hindi
   test:parent-bot-real-chats
+  test:staff-wa-real-chats
   test:pin-review
   test:due-pay-link
   test:fee-dues-server-inputs
