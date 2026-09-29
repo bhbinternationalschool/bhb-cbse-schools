@@ -303,6 +303,7 @@ SELFTESTS=(
   test:staff-home-kind
   test:staff-teaching-scope
   test:staff-month-calendar
+  test:staff-roster-redact
   test:sis-class-teacher
   test:staff-day-status
   test:payroll-no-register

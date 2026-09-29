@@ -199,7 +199,9 @@ export async function saveWaBotSlice<T>(
   loaded = true;
 
   const { pushWaThreadsSliceToDb } = await import("@/lib/waThreadsNormalized.server");
-  const desk = await pushWaThreadsSliceToDb(key, value, next);
+  const desk = await pushWaThreadsSliceToDb(key, value, next).catch(
+    (e: unknown) => ({ ok: false as const, error: (e as Error)?.message || String(e) }),
+  );
   if (!desk.ok) {
     console.error("[wa-bot-store] DESK PUSH FAILED — bot threads are NOT persisting:", desk.error);
   }
