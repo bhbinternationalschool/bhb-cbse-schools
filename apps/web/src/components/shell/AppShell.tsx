@@ -15,6 +15,7 @@ import { ErpAiChatbot } from "./ErpAiChatbot";
 import { ErpSidebar, ErpSidebarMenuButton } from "./ErpSidebar";
 import { UserAccountMenu } from "./UserAccountMenu";
 import { PwaInstallBanner } from "@/components/pwa/PwaInstallBanner";
+import { UpdateBar } from "@/components/pwa/UpdateBar";
 import { StaffBottomNav } from "@/components/pwa/StaffBottomNav";
 import { staffPwaInstallCopy } from "@/lib/pwaApps";
 import { useMobileAppShell, usePwaStandalone } from "@/lib/pwaStandalone";
@@ -403,6 +404,7 @@ export function AppShell({
           </div>
           <CommsRunningStrip audience="staff" />
         </header>
+        <UpdateBar />
         {!standalone ? (
           <PwaInstallBanner
             appId="staff"
