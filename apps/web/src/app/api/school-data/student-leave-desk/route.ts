@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { staffSectionScope } from "@/lib/api/v1/staffScope";
 import {
   authorizeSchoolDataDesk,
   SCHOOL_DATA_DESK_RBAC,
@@ -38,6 +39,25 @@ type StudentLeaveDeskPostBody = Pick<StudentLeaveState, "requests">;
 export async function POST(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["student-leave-desk"], "POST");
   if (!auth.ok) return auth.response
+  // This push replaces the whole school's leave desk (rows it does not
+  // carry are pruned). "student_leave.edit" alone let a teacher's browser
+  // send it — a stale copy could undo other classes' decisions. Teachers
+  // decide one request at a time through /api/v1/staff/student-leave/decide
+  // (2026-09-29); this route is the office's.
+  if (!auth.viaMirrorSecret) {
+    const scope = await staffSectionScope(auth.ctx).catch(() => null);
+    if (!scope?.unrestricted) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Only the office or principal can save the full student leave desk. " +
+            "Approve or reject your own class's requests from the Pending list.",
+        },
+        { status: 403 },
+      );
+    }
+  }
   if (!studentLeaveDualWriteDbEnabled()) {
     return NextResponse.json({
       ok: true,
