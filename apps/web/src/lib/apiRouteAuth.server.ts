@@ -252,6 +252,7 @@ export const DESK_SLICE_RBAC: Partial<Record<DeskModuleId, RbacModule>> = {
 
 export async function requireWaStaffApi(
   request: Request,
+  opts: { allowTeachers?: boolean } = {},
 ): Promise<RouteAuthResult> {
   const base = await requireStaffApi(request);
   if (!base.ok) return base;
@@ -269,6 +270,17 @@ export async function requireWaStaffApi(
   );
   if (!allowed) {
     return authFailure(403, "Missing communications or admissions access");
+  }
+  // "notices.view" let every teacher read every parent's WhatsApp thread
+  // and reply on it. The school's inbox is the office's: a teacher (not
+  // school-wide) is refused unless the route scopes to their own classes
+  // itself (class channels).
+  if (!opts.allowTeachers) {
+    const { staffSectionScope } = await import("@/lib/api/v1/staffScope");
+    const scope = await staffSectionScope(base.ctx).catch(() => null);
+    if (!scope?.unrestricted) {
+      return authFailure(403, "The school's WhatsApp inbox is handled by the office");
+    }
   }
   return base;
 }

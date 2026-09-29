@@ -16,6 +16,9 @@ import {
   timingSafeStringEqual,
 } from "@/lib/apiRouteAuth.server";
 import type { RbacModule } from "@/lib/rbac";
+import { sectionKey, staffSectionScope } from "@/lib/api/v1/staffScope";
+import { loadSis } from "@/lib/sis";
+import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import {
   buildWaTemplateBodyComponent,
   buildWaTemplateMediaHeader,
@@ -130,6 +133,47 @@ export async function POST(req: Request) {
       "edit",
     );
     if (!auth.ok) return auth.response;
+
+    // The module is the caller's own choice, so "homework.edit" let any
+    // teacher send up to 100 messages to ANY number from the school's
+    // WhatsApp. A teacher (not school-wide) may message only the families
+    // of children in the sections they teach.
+    if (!auth.viaMirrorSecret) {
+      const scope = await staffSectionScope(auth.ctx).catch(() => null);
+      if (scope && !scope.unrestricted) {
+        await ensureSisHydratedServer().catch(() => false);
+        const sis = loadSis();
+        const allowed = new Set<string>();
+        const add = (m?: string) => {
+          const d = (m || "").replace(/\D/g, "").slice(-10);
+          if (d.length === 10) allowed.add(d);
+        };
+        for (const st of sis.students) {
+          if (!scope.sections.has(sectionKey(st.classId, st.sectionId))) continue;
+          add(st.fatherMobile);
+          add(st.motherMobile);
+          add(st.emergencyMobile);
+          const hh = sis.households.find((h) => h.id === st.householdId);
+          add(hh?.mobile);
+          add(hh?.whatsappMobile);
+          add(hh?.altMobile);
+        }
+        const msgs = Array.isArray(body?.messages) ? body.messages : [];
+        const outside = msgs.filter(
+          (m) => !allowed.has(String(m.mobile || "").replace(/\D/g, "").slice(-10)),
+        );
+        if (outside.length > 0) {
+          return NextResponse.json(
+            {
+              error:
+                `${outside.length} of these numbers are not a family in your classes — ` +
+                "the school's WhatsApp can only message your own classes' parents from your login",
+            },
+            { status: 403 },
+          );
+        }
+      }
+    }
   }
 
   const messages = Array.isArray(body?.messages) ? body.messages : [];

@@ -199,6 +199,16 @@ export const HUB_GROUPS: HubGroup[] = [
         tone: "slate",
       },
       {
+        // Everyone's own records — no module grant needed (director,
+        // 2026-09-29): attendance calendar, payslips, advances.
+        href: "/my-pay",
+        title: "My pay & attendance",
+        blurb: "Your own records",
+        detail: "Your attendance calendar with counts, payslips, deductions and advances.",
+        icon: Wallet,
+        tone: "sky",
+      },
+      {
         href: "/id-cards",
         title: "ID cards",
         blurb: "Batch print",

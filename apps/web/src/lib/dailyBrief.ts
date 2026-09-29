@@ -59,6 +59,12 @@ export type BriefStudentAttendance = {
   strength: number;
   classesMarked: number;
   classesUnmarked: number;
+  /**
+   * The latest date BEFORE this brief's day with any class register on
+   * file. null = none ever; undefined = not looked up (or the read failed),
+   * which falls back to the plain "not marked today" wording.
+   */
+  lastMarkedOn?: string | null;
 };
 
 export type BriefStaffRow = {
@@ -94,6 +100,8 @@ export type BriefStaffAttendance = {
    * nobody could look — not because nothing is waiting.
    */
   leaveUnreadable?: boolean;
+  /** As BriefStudentAttendance.lastMarkedOn, for the staff register. */
+  lastMarkedOn?: string | null;
 };
 
 export type BriefDefaulter = {
@@ -170,6 +178,88 @@ export function staffPercent(s: BriefStaffAttendance): number | null {
 }
 
 /**
+ * "Not marked today" and "not taken in the ERP at all" are different facts.
+ *
+ * On 29 Sep 2026 the brief had said "no class register was marked today"
+ * every evening for a month. The school was taking attendance, just not in
+ * the ERP: its registers were an import of the old system's export that
+ * ended on 31 Aug. Read night after night, the daily wording suggests
+ * sections lapsing. The true sentence is that the desk is not in use, and it
+ * names the last date anything was recorded.
+ *
+ * A week with no register at all is past any weekend or short holiday.
+ */
+export const ATTENDANCE_IDLE_DAYS = 7;
+
+const MONTHS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/** "31 Aug" — the year is the brief's own, so it is left off. */
+export function shortDate(iso: string): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
+}
+
+/** Calendar days from one ISO date to a later one. */
+export function daysBetween(fromIso: string, toIso: string): number {
+  const a = Date.parse(`${fromIso}T00:00:00Z`);
+  const b = Date.parse(`${toIso}T00:00:00Z`);
+  if (Number.isNaN(a) || Number.isNaN(b)) return 0;
+  return Math.round((b - a) / 86_400_000);
+}
+
+/**
+ * True when nothing was marked today AND the register has been empty long
+ * enough that "not marked today" would mislead. An unknown last date
+ * (undefined) is never read as idle: we only say the desk is unused when
+ * we looked and found that it is.
+ */
+export function attendanceNotInUse(
+  markedToday: boolean,
+  lastMarkedOn: string | null | undefined,
+  today: string,
+): boolean {
+  if (markedToday || lastMarkedOn === undefined) return false;
+  if (lastMarkedOn === null) return true;
+  return daysBetween(lastMarkedOn, today) > ATTENDANCE_IDLE_DAYS;
+}
+
+/** "last register 31 Aug" / "no register on file". */
+function lastRegisterPhrase(lastMarkedOn: string | null | undefined): string {
+  return lastMarkedOn ? `last register ${shortDate(lastMarkedOn)}` : "no register on file";
+}
+
+/** "since 31 Aug (29 days)" / "ever" — for the still-open facts. */
+function idleSincePhrase(lastMarkedOn: string | null | undefined, today: string): string {
+  return lastMarkedOn
+    ? `since ${shortDate(lastMarkedOn)} (${daysBetween(lastMarkedOn, today)} days)`
+    : "at all — no register is on file";
+}
+
+export function studentsNotInUse(b: DailyBrief): boolean {
+  return attendanceNotInUse(attendancePercent(b.students) !== null, b.students.lastMarkedOn, b.date);
+}
+
+export function staffNotInUse(b: DailyBrief): boolean {
+  return attendanceNotInUse(staffPercent(b.staff) !== null, b.staff.lastMarkedOn, b.date);
+}
+
+/** The PDF's note when nothing was marked — the same distinction, in full. */
+export function attendanceIdleNote(b: DailyBrief, who: "students" | "staff"): string {
+  const last = who === "students" ? b.students.lastMarkedOn : b.staff.lastMarkedOn;
+  const idle = who === "students" ? studentsNotInUse(b) : staffNotInUse(b);
+  const what = who === "students" ? "Student" : "Staff";
+  if (idle) {
+    return `${what} attendance is not being taken in the ERP — ${lastRegisterPhrase(last)}. This is not a lapse today; the register has not been used ${idleSincePhrase(last, b.date)}.`;
+  }
+  const base = who === "students" ? "No class register was marked today." : "Staff attendance was not marked today.";
+  return last ? `${base} The last register on file is ${shortDate(last)}.` : base;
+}
+
+/**
  * The absences that need somebody to do something.
  *
  * An approved leave is not a problem; an absence with nothing on file is
@@ -212,7 +302,9 @@ export function composeBriefSummary(b: DailyBrief): string {
 
   const pct = attendancePercent(b.students);
   lines.push(
-    pct === null
+    studentsNotInUse(b)
+      ? `🎒 Student attendance isn't being taken in the ERP — ${lastRegisterPhrase(b.students.lastMarkedOn)}`
+      : pct === null
       ? "🎒 No class register was marked today"
       : `🎒 Students ${pct}% present — ${b.students.present} in, ${b.students.absent} absent${
           b.students.classesUnmarked
@@ -224,7 +316,9 @@ export function composeBriefSummary(b: DailyBrief): string {
   const spct = staffPercent(b.staff);
   const attention = absencesNeedingAttention(b.staff);
   lines.push(
-    spct === null
+    staffNotInUse(b)
+      ? `👩‍🏫 Staff attendance isn't being taken in the ERP — ${lastRegisterPhrase(b.staff.lastMarkedOn)}`
+      : spct === null
       ? "👩‍🏫 Staff attendance not marked today"
       : `👩‍🏫 Staff ${spct}% present — ${b.staff.present} in, ${b.staff.absent} absent${
           attention.length ? `, ${attention.length} without approved leave` : ""
@@ -254,12 +348,7 @@ export function composeBriefSummary(b: DailyBrief): string {
 export function briefTitle(dateIso: string): string {
   const d = new Date(`${dateIso}T00:00:00Z`);
   if (Number.isNaN(d.getTime())) return `Daily brief · ${dateIso}`;
-  const day = d.getUTCDate();
-  const month = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-  ][d.getUTCMonth()];
-  return `Daily brief · ${day} ${month} ${d.getUTCFullYear()}`;
+  return `Daily brief · ${shortDate(dateIso)} ${d.getUTCFullYear()}`;
 }
 
 export function briefFilename(dateIso: string): string {
@@ -371,7 +460,9 @@ export function composeBriefTemplateVariables(
         : "no voucher entered today",
     ),
     students: oneLine(
-      pct === null
+      studentsNotInUse(b)
+        ? `not being taken in the ERP — ${lastRegisterPhrase(b.students.lastMarkedOn)}`
+        : pct === null
         ? "no register marked today"
         : `${pct}% of those marked — ${b.students.present} in, ${b.students.absent} absent${
             b.students.classesUnmarked
@@ -382,7 +473,9 @@ export function composeBriefTemplateVariables(
           }`,
     ),
     staff: oneLine(
-      spct === null
+      staffNotInUse(b)
+        ? `not being taken in the ERP — ${lastRegisterPhrase(b.staff.lastMarkedOn)}`
+        : spct === null
         ? "not marked today"
         : `${b.staff.present} of ${b.staff.strength} present${
             attention.length
@@ -491,7 +584,18 @@ export function pendingFacts(b: DailyBrief): PendingFact[] {
     });
   }
 
-  if (b.students.classesUnmarked > 0) {
+  if (studentsNotInUse(b)) {
+    // Same rank: a school with no attendance in the ERP still has children
+    // nobody can account for from it. Only the sentence changes — "never
+    // marked today" read as a lapse today, every day.
+    out.push({
+      rank: 2,
+      text: `student attendance has not been taken in the ERP ${idleSincePhrase(
+        b.students.lastMarkedOn,
+        b.date,
+      )}`,
+    });
+  } else if (b.students.classesUnmarked > 0) {
     const children = b.students.classes
       .filter((c) => !c.marked)
       .reduce((s, c) => s + c.strength, 0);
@@ -512,7 +616,15 @@ export function pendingFacts(b: DailyBrief): PendingFact[] {
     });
   }
 
-  if (!b.staff.marked) {
+  if (staffNotInUse(b)) {
+    out.push({
+      rank: 4,
+      text: `staff attendance has not been taken in the ERP ${idleSincePhrase(
+        b.staff.lastMarkedOn,
+        b.date,
+      )}`,
+    });
+  } else if (!b.staff.marked) {
     out.push({ rank: 4, text: "staff attendance was never marked today" });
   }
 

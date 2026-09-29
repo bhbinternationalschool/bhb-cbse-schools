@@ -20,10 +20,8 @@ import {
 } from "@/lib/staffHr";
 import {
   activeOutdoorDutyForStaff,
-  endOutdoorDuty,
   loadStaffAttendance,
   OUTDOOR_DUTY_PURPOSE_LABELS,
-  startOutdoorDuty,
   type OutdoorDutyPurpose,
   type OutdoorDutySession,
 } from "@/lib/staffAttendance";
@@ -84,6 +82,29 @@ async function postStaffBroadcast(
  * instead of just sending a message that could get lost in chat. This one
  * genuinely sends WhatsApp — unlike the internal chat button, the logo is
  * accurate here. */
+async function postOutdoorDuty(
+  body: Record<string, unknown>,
+): Promise<{ ok: true; session: OutdoorDutySession } | { ok: false; error: string }> {
+  try {
+    const res = await fetch("/api/v1/staff/attendance/outdoor", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const j = (await res.json().catch(() => null)) as {
+      ok?: boolean;
+      data?: { session: OutdoorDutySession };
+      error?: { message?: string };
+    } | null;
+    if (!res.ok || !j?.ok || !j.data) {
+      return { ok: false, error: j?.error?.message || "Outdoor duty was NOT saved — please try again." };
+    }
+    return { ok: true, session: j.data.session };
+  } catch {
+    return { ok: false, error: "Outdoor duty was NOT saved — could not reach the school server." };
+  }
+}
+
 export function StaffBroadcastButton() {
   const session = useDemoSession();
   const [open, setOpen] = useState(false);
@@ -160,6 +181,17 @@ export function StaffBroadcastButton() {
   useEffect(() => {
     if (!open || !selfStaff) return;
     setOdActive(activeOutdoorDutyForStaff(loadStaffAttendance(), selfStaff.id));
+    // The server's answer wins — this browser may not hold the latest.
+    let alive = true;
+    void fetch("/api/v1/staff/attendance/outdoor", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { data?: { active: OutdoorDutySession | null } } | null) => {
+        if (alive && j?.data) setOdActive(j.data.active);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
   }, [open, selfStaff]);
 
   const sections = useMemo((): ChatSectionRef[] => {
@@ -340,15 +372,18 @@ export function StaffBroadcastButton() {
     setError(null);
     try {
       const geo = await captureSurveyGeo().catch(() => null);
-      const r = startOutdoorDuty({
-        academicYearCode: session.academicYearCode,
-        staffId: selfStaff.id,
+      if (!odDestination.trim()) {
+        setError("Destination is required");
+        return;
+      }
+      // Saved on the server (this day's register + the duty session); the
+      // browser's own copy could not be saved by non-office staff.
+      const r = await postOutdoorDuty({
+        action: "start",
         purpose: odPurpose,
         destination: odDestination.trim(),
         note: odNote.trim(),
-        startGeo: geo,
-        createdBy: session.fullName,
-        roster: masters.staff ?? [],
+        ...(geo ? { lat: geo.lat, lng: geo.lng, accuracyM: geo.accuracyM } : {}),
       });
       if (!r.ok) {
         setError(r.error);
@@ -382,13 +417,10 @@ export function StaffBroadcastButton() {
     setError(null);
     try {
       const geo = await captureSurveyGeo().catch(() => null);
-      const r = endOutdoorDuty({
-        academicYearCode: session.academicYearCode,
+      const r = await postOutdoorDuty({
+        action: "end",
         sessionId: odActive.id,
-        staffId: selfStaff.id,
-        endGeo: geo,
-        markedBy: session.fullName,
-        roster: masters.staff ?? [],
+        ...(geo ? { lat: geo.lat, lng: geo.lng, accuracyM: geo.accuracyM } : {}),
       });
       if (!r.ok) {
         setError(r.error);

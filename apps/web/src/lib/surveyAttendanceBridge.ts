@@ -15,7 +15,6 @@ import {
 import {
   findStaffRegister,
   loadStaffAttendance,
-  upsertStaffMark,
   type StaffAttendanceMark,
 } from "@/lib/staffAttendance";
 
@@ -73,40 +72,108 @@ function mergeSurveyNote(existing: string, line: string): string {
   return base ? `${base} · ${line}` : line;
 }
 
-/** Survey Start → ensure Present / outdoor note; fill inTime only if missing. */
+/** HH:mm in India time — the server runs in UTC, so getHours() is wrong there. */
+export function istHHmm(iso: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString("en-GB", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+/** The day's mark after a survey Start: present, outdoor note, in-time only
+ * if the school punch has none. Pure — used by the server route. */
+export function surveyStartMark(
+  existing: StaffAttendanceMark | null,
+  beatName: string,
+  startedAt: string,
+) {
+  const beat = beatName.trim() || "beat";
+  return {
+    status: "P" as const,
+    inTime: existing?.inTime || istHHmm(startedAt) || undefined,
+    outTime: existing?.outTime || undefined,
+    note: mergeSurveyNote(existing?.note || "", `Outdoor duty · field survey · ${beat}`),
+    punchWay: "survey" as const,
+  };
+}
+
+/** After survey End: present; out-time from End only if there is no school
+ * OUT (went home from the field). */
+export function surveyEndMark(
+  existing: StaffAttendanceMark | null,
+  session: { startedAt: string; endedAt: string; workedMs: number },
+  beatName: string,
+) {
+  const beat = beatName.trim() || "beat";
+  const hadSchoolOut = !!(existing?.outTime && existing.outTime.trim());
+  const worked = formatHours(session.workedMs);
+  return {
+    status: "P" as const,
+    inTime: existing?.inTime || istHHmm(session.startedAt) || undefined,
+    outTime: hadSchoolOut ? existing!.outTime : istHHmm(session.endedAt) || undefined,
+    note: mergeSurveyNote(
+      existing?.note || "",
+      hadSchoolOut
+        ? `Outdoor duty · field survey closed · ${worked} · returned to school · ${beat}`
+        : `Outdoor duty · field survey closed · ${worked} · ${beat}`,
+    ),
+    punchWay: "survey" as const,
+    usedSurveyOutTime: !hadSchoolOut,
+  };
+}
+
+/**
+ * Survey Start/End → staff attendance, through the server
+ * (POST /api/v1/staff/attendance/survey). The browser used to write its own
+ * copy of the register, which only staff.edit can save: a surveyor's day
+ * never reached the register, and nobody was told.
+ */
+async function postSurveyAttendance(body: Record<string, unknown>): Promise<void> {
+  if (typeof window === "undefined") return;
+  let message = "";
+  try {
+    const res = await fetch("/api/v1/staff/attendance/survey", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) return;
+    const j = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+    message = j?.error?.message || "";
+  } catch {
+    /* network */
+  }
+  const { pushToast } = await import("@/components/shell/Toast");
+  pushToast({
+    kind: "error",
+    message:
+      `Field survey attendance was NOT saved${message ? ` — ${message}` : ""}. ` +
+      "Ask the office to mark the day.",
+    durationMs: 0,
+  });
+}
+
+/** Survey Start → the member's attendance for the day (server). */
 export function syncStaffAttendanceOnSurveyStart(
   member: SurveyTeamMember,
   beatName: string,
   startedAt: string,
 ): void {
   if (member.kind !== "staff" || !member.staffId) return;
-  const masters = loadMasters();
-  const ay = currentAcademicYearCode(masters);
-  const date = (startedAt || todayYmd()).slice(0, 10);
-  const existing = staffMarkForDay(member.staffId, date, ay);
-  const beat = beatName.trim() || "beat";
-  const note = mergeSurveyNote(
-    existing?.note || "",
-    `Outdoor duty · field survey · ${beat}`,
-  );
-  upsertStaffMark({
-    academicYearCode: ay,
-    date,
+  void postSurveyAttendance({
+    action: "start",
     staffId: member.staffId,
-    status: "P",
-    inTime: existing?.inTime || isoToHHmm(startedAt) || undefined,
-    outTime: existing?.outTime || undefined,
-    note,
-    punchWay: "survey",
-    markedBy: "Field survey",
-    roster: masters.staff ?? [],
+    beatName,
+    startedAt,
   });
 }
 
-/**
- * Survey End → Present; set outTime from End only if school OUT empty
- * (home after survey). If campus OUT already exists, keep it.
- */
+/** Survey End → the member's attendance for the day (server). */
 export function syncStaffAttendanceOnSurveyEnd(
   member: SurveyTeamMember,
   session: SurveyWorkSession,
@@ -115,33 +182,17 @@ export function syncStaffAttendanceOnSurveyEnd(
   if (member.kind !== "staff" || !member.staffId) {
     return { usedSurveyOutTime: false };
   }
-  const masters = loadMasters();
-  const ay = currentAcademicYearCode(masters);
-  const date = (session.date || todayYmd()).slice(0, 10);
-  const existing = staffMarkForDay(member.staffId, date, ay);
-  const worked = formatHours(sessionWorkedMsLocal(session));
-  const beat = beatName.trim() || "beat";
-  const hadSchoolOut = !!(existing?.outTime && existing.outTime.trim());
-  const surveyOut = isoToHHmm(session.endedAt);
-  const note = mergeSurveyNote(
-    existing?.note || "",
-    hadSchoolOut
-      ? `Outdoor duty · field survey closed · ${worked} · returned to school`
-      : `Outdoor duty · field survey closed · ${worked}`,
-  );
-  upsertStaffMark({
-    academicYearCode: ay,
-    date,
+  const existing = staffMarkForDay(member.staffId, (session.date || todayYmd()).slice(0, 10));
+  void postSurveyAttendance({
+    action: "end",
     staffId: member.staffId,
-    status: "P",
-    inTime: existing?.inTime || isoToHHmm(session.startedAt) || undefined,
-    outTime: hadSchoolOut ? existing!.outTime : surveyOut || undefined,
-    note,
-    punchWay: "survey",
-    markedBy: "Field survey",
-    roster: masters.staff ?? [],
+    beatName,
+    date: (session.date || todayYmd()).slice(0, 10),
+    startedAt: session.startedAt,
+    endedAt: session.endedAt,
+    workedMs: sessionWorkedMsLocal(session),
   });
-  return { usedSurveyOutTime: !hadSchoolOut };
+  return { usedSurveyOutTime: !(existing?.outTime && existing.outTime.trim()) };
 }
 
 export type SurveySalaryDayOutcome =
