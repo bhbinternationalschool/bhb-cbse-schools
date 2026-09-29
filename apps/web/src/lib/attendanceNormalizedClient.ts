@@ -88,21 +88,23 @@ async function pushAttendanceDeskApi(
       count?: number;
       error?: string;
     } | null;
+    // Record whether this actually landed. A not-ok response is not
+    // thrown, so without this it slips past every branch in silence. (These
+    // two calls once sat after the returns below and never ran, so a
+    // refused student-register save showed no warning at all.)
     if (res.ok && body?.ok) {
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         registerCount: body.count ?? state.registers.length,
         ancillaryUpdatedAt: body.updatedAt,
       });
+      recordDeskSyncSuccess("attendance");
       return { ok: true };
     }
     const error = body?.error || `HTTP ${res.status}`;
+    recordDeskSyncFailure("attendance", { status: res.status, error });
     console.warn("[attendance-db] desk push failed", error);
     return { ok: false, error };
-    // Record whether this actually landed. A not-ok response is not
-    // thrown, so without this it slips past every branch in silence.
-    if (res.ok && body?.ok) recordDeskSyncSuccess("attendance");
-    else recordDeskSyncFailure("attendance", { status: res.status, error: body?.error });
   } catch (e) {
     recordDeskSyncFailure("attendance", { status: 0, error: e instanceof Error ? e.message : String(e) });
     console.warn("[attendance-db] desk push error", e);
