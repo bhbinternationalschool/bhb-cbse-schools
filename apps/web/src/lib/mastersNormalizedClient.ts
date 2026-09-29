@@ -232,8 +232,13 @@ async function pushMastersDeskApi(
         classCount: body.classCount ?? state.classes.length,
         feeHeadCount: body.feeHeadCount ?? state.feeHeads.length,
       });
+      recordDeskSyncSuccess("masters");
       return { ok: true };
     }
+
+    // Record that this did not land, before any of the returns below. (This
+    // call once sat after the last of them and never ran.)
+    recordDeskSyncFailure("masters", { status: res.status, error: body?.error });
 
     // Every rejection below used to be invisible except `stale`. On
     // 2026-08-09 a device holding a foreign class-id generation had 16
@@ -277,10 +282,6 @@ async function pushMastersDeskApi(
             "Please try again.",
     );
     return { ok: false, reason: `http_${res.status}` };
-    // Record whether this actually landed. A not-ok response is not
-    // thrown, so without this it slips past every branch in silence.
-    if (res.ok && body?.ok) recordDeskSyncSuccess("masters");
-    else recordDeskSyncFailure("masters", { status: res.status, error: body?.error });
   } catch (e) {
     recordDeskSyncFailure("masters", { status: 0, error: e instanceof Error ? e.message : String(e) });
     // A genuine network fault. Say that specifically — do NOT tell the user

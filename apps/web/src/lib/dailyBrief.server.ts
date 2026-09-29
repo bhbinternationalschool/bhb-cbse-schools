@@ -215,6 +215,33 @@ async function readExpenses(dateIso: string): Promise<BriefExpenses> {
   };
 }
 
+/**
+ * The latest register date before `dateIso`, so the brief can tell "not
+ * marked today" from "the desk is not in use" (see ATTENDANCE_IDLE_DAYS).
+ * null = no register ever; undefined = the read failed, and an unknown is
+ * not reported as "unused".
+ */
+async function lastRegisterBefore(
+  table: "attendance_desk_registers" | "staff_attendance_desk_registers",
+  dateIso: string,
+): Promise<string | null | undefined> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return undefined;
+  const { data, error } = await ctx.sb
+    .from(table)
+    .select("attendance_date")
+    .eq("tenant_id", ctx.tenantId)
+    .lt("attendance_date", dateIso)
+    .order("attendance_date", { ascending: false })
+    .limit(1);
+  if (error) {
+    console.warn("[dailyBrief] last register read failed", table, error.message);
+    return undefined;
+  }
+  const d = data?.[0]?.attendance_date;
+  return d ? String(d).slice(0, 10) : null;
+}
+
 /* ── 3. Student attendance, class by class ─────────────────────────── */
 
 function classLabelOf(
@@ -417,15 +444,20 @@ async function readStudentAttendance(
   );
   const present = classes.reduce((s, c) => s + c.present, 0);
   const absent = classes.reduce((s, c) => s + c.absent, 0);
+  const classesMarked = classes.filter((c) => c.marked).length;
   return {
     classes,
     present,
     absent,
     strength: classes.reduce((s, c) => s + c.strength, 0),
-    classesMarked: classes.filter((c) => c.marked).length,
+    classesMarked,
     // A class the calendar gave the day off has no register to forget.
     classesUnmarked: classes.filter((c) => !c.marked && !c.holiday).length,
     classesOff: classes.filter((c) => !c.marked && c.holiday).length,
+    // Only needed when nothing was marked today; one row either way.
+    lastMarkedOn: classesMarked
+      ? undefined
+      : await lastRegisterBefore("attendance_desk_registers", dateIso),
   };
 }
 
@@ -684,6 +716,9 @@ async function readStaffAttendance(
 
   return {
     marked: marks.size > 0,
+    lastMarkedOn: marks.size > 0
+      ? undefined
+      : await lastRegisterBefore("staff_attendance_desk_registers", dateIso),
     present,
     absent: absentRows.length,
     strength: staff.length,

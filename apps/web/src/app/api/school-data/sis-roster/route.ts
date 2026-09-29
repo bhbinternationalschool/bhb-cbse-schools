@@ -6,6 +6,8 @@ import {
   SCHOOL_DATA_DESK_RBAC,
 } from "@/lib/apiRouteAuth.server";
 import type { SisState } from "@/lib/sis";
+import { hasPermission } from "@/lib/rbac";
+import { sectionKey, staffSectionScope } from "@/lib/api/v1/staffScope";
 import { sisDualWriteDbEnabled } from "@/lib/sisDbConfig";
 import {
   deleteSisRecordsInDb,
@@ -22,6 +24,44 @@ export const runtime = "nodejs";
 export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["sis-roster"], "GET");
   if (!auth.ok) return auth.response
+
+  // A teacher's browser gets the children (and families) of the sections
+  // they teach — not the school. Until 2026-09-29 every login with
+  // students.view downloaded all ~700 students, their parents' mobiles,
+  // addresses and Aadhaar last-4. A teacher cannot push SIS (students.edit),
+  // so a partial copy here can never be written back over the full one.
+  if (!auth.viaMirrorSecret) {
+    const scope = await staffSectionScope(auth.ctx).catch(() => null);
+    const canEditStudents = hasPermission(auth.ctx.session, auth.ctx.masters, "students", "edit", auth.ctx.rbac);
+    if (scope && !scope.unrestricted && !canEditStudents) {
+      const { bundle, meta, ok } = sisIdentitySplitEnabled()
+        ? await fetchSisFromDbViaIdentitySplit()
+        : await fetchSisFromDb();
+      if (!ok) {
+        return NextResponse.json({ ok: false, error: "SIS roster fetch failed" }, { status: 503 });
+      }
+      const students = bundle.students.filter((st) =>
+        scope.sections.has(sectionKey(st.classId, st.sectionId)),
+      );
+      const hh = new Set(students.map((st) => st.householdId));
+      const households = bundle.households.filter((h) => hh.has(h.id));
+      return NextResponse.json(
+        {
+          ok: true,
+          households,
+          students: stripEmptyDocsList(students as unknown as Record<string, unknown>[]),
+          tags: bundle.tags,
+          classUpgrades: [],
+          householdCount: households.length,
+          studentCount: students.length,
+          scopedToTeacher: true,
+          updatedAt: meta?.updatedAt || "",
+          meta,
+        },
+        { headers: { "Cache-Control": "private, no-store" } },
+      );
+    }
+  }
   try {
     const result = await cachedDeskJson({
       cacheKey: "sis-roster",

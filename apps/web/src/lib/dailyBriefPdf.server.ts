@@ -27,9 +27,11 @@ import type { MastersState } from "@/lib/masters";
 import {
   absencesNeedingAttention,
   allClassesOff,
+  attendanceIdleNote,
   attendancePercent,
   briefTitle,
   classesOffLine,
+  studentsNotInUse,
   unmarkedWorkingClasses,
   rupeesExact,
   staffPercent,
@@ -246,11 +248,13 @@ export async function renderDailyBriefPdf(
   /* ── Students ── */
   const pct = attendancePercent(brief.students);
   heading("Student attendance");
-  const unmarked = unmarkedWorkingClasses(brief.students);
+  // Unmarked registers are named only while the desk is in use; a month of
+  // the same list is what "isn't being taken in the ERP" replaces.
+  const unmarked = studentsNotInUse(brief) ? [] : unmarkedWorkingClasses(brief.students);
   if (allClassesOff(brief.students)) {
     note(`No classes today — ${classesOffLine(brief.students)}.`);
   } else if (pct === null) {
-    note("No class register was marked today.");
+    note(attendanceIdleNote(brief, "students"));
   } else {
     line("Present", String(brief.students.present), true);
     line("Absent", String(brief.students.absent));
@@ -288,7 +292,7 @@ export async function renderDailyBriefPdf(
   const spct = staffPercent(brief.staff);
   heading("Staff attendance");
   if (spct === null) {
-    note("Staff attendance was not marked today.");
+    note(attendanceIdleNote(brief, "staff"));
   } else {
     line("Present", `${brief.staff.present} of ${brief.staff.strength}`, true);
     line("Absent", String(brief.staff.absent));

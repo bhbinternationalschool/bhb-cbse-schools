@@ -5,6 +5,7 @@ import {
   requireStaffPermission,
 } from "@/lib/apiRouteAuth.server";
 import type { DeskModuleId } from "@/lib/deskCutover";
+import { hasPermission } from "@/lib/rbac";
 import { deskSliceDef, deskSliceEnvDualWrite } from "@/lib/deskSliceRegistry";
 import {
   fetchDeskSliceFromDb,
@@ -73,6 +74,33 @@ export async function GET(req: Request, ctx: RouteCtx) {
   }
 
   const { bundle, meta, ok, error } = await fetchDeskSliceFromDb(id);
+  // Staff HR (every colleague's leave, balances and appraisals) is read with
+  // staff.view — which teachers, accounts, transport and the auditor hold.
+  // Without staff.edit: the school's leave types and settings, and your own
+  // rows only.
+  if (ok && id === "staff_hr" && !auth.viaMirrorSecret) {
+    const canEdit = hasPermission(auth.ctx.session, auth.ctx.masters, "staff", "edit", auth.ctx.rbac);
+    if (!canEdit) {
+      const me = auth.ctx.session.staffId || "";
+      const b = bundle as Record<string, unknown>;
+      const own = (rows: unknown) =>
+        Array.isArray(rows) ? rows.filter((r) => !!me && (r as { staffId?: string }).staffId === me) : [];
+      return NextResponse.json(
+        {
+          ok: true,
+          ...b,
+          leaveRequests: own(b.leaveRequests),
+          leaveBalances: own(b.leaveBalances),
+          leaveEncashments: own(b.leaveEncashments),
+          appraisals: own(b.appraisals),
+          ownOnly: true,
+          rowCount: meta?.rowCount ?? 0,
+          updatedAt: meta?.updatedAt || "",
+        },
+        { headers: { "Cache-Control": "private, no-store" } },
+      );
+    }
+  }
   if (!ok) {
     // Unknown, not empty. Returning ok:true with an empty bundle stamped
     // "now" made every client take the empty desk as newer than its cache.

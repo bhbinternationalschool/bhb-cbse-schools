@@ -25,12 +25,24 @@ export async function GET(req: Request) {
       { status: 503 },
     );
   }
+  // A teacher (attendance.view) used to download every colleague's daily
+  // attendance and outdoor duty. Outside the office/leadership: own rows only.
+  let registers = desk.registers;
+  let outdoorDuty = desk.ancillary.outdoorDuty;
+  if (!auth.viaMirrorSecret) {
+    const scope = await staffSectionScope(auth.ctx).catch(() => null);
+    if (!scope?.unrestricted) {
+      const me = auth.ctx.session.staffId || "";
+      registers = desk.registers.map((r) => ({ ...r, marks: r.marks.filter((m) => !!me && m.staffId === me) }));
+      outdoorDuty = (outdoorDuty ?? []).filter((o) => !!me && o.staffId === me);
+    }
+  }
   return NextResponse.json({
     ok: true,
-    registers: desk.registers,
-    ancillary: desk.ancillary,
+    registers,
+    ancillary: { ...desk.ancillary, outdoorDuty },
     settings: desk.ancillary.settings,
-    outdoorDuty: desk.ancillary.outdoorDuty,
+    outdoorDuty,
     count: desk.registers.length,
     updatedAt: desk.meta?.updatedAt || new Date().toISOString(),
     meta: desk.meta,

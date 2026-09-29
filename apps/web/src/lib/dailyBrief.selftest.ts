@@ -16,10 +16,13 @@ import {
   composePendingFallback,
   pendingFacts,
   pendingFactsBlock,
+  attendanceIdleNote,
+  attendanceNotInUse,
   attendancePercent,
   briefFilename,
   briefTitle,
   composeBriefSummary,
+  daysBetween,
   emptyBrief,
   rupees,
   rupeesExact,
@@ -597,6 +600,87 @@ const cls = (over: Partial<BriefClassAttendance> & { label: string }): BriefClas
   assert.equal(pendingFacts(brief({ homework: hw({ missing: [], posted: 4 }) })).some((f) => /homework/.test(f.text)), false);
   // An unreadable desk is a fact worth saying.
   assert.ok(pendingFacts(brief({ homework: hw({ checked: false, missing: [] }) })).some((f) => /could not be read/.test(f.text)));
+}
+
+// --- a desk nobody uses is not a lapse today --------------------------
+// 29 Sep 2026: every evening for a month said "no class register was marked
+// today" while the registers on file were an import that ended 31 Aug. The
+// brief must say the desk is not in use, and from when.
+{
+  assert.equal(daysBetween("2026-08-31", "2026-09-29"), 29);
+  // Marked today, or an unknown last date: never "not in use".
+  assert.equal(attendanceNotInUse(true, null, "2026-09-29"), false);
+  assert.equal(attendanceNotInUse(false, undefined, "2026-09-29"), false);
+  // A long weekend is not idleness; more than a week is.
+  assert.equal(attendanceNotInUse(false, "2026-09-25", "2026-09-29"), false);
+  assert.equal(attendanceNotInUse(false, "2026-09-22", "2026-09-29"), false);
+  assert.equal(attendanceNotInUse(false, "2026-09-21", "2026-09-29"), true);
+  assert.equal(attendanceNotInUse(false, null, "2026-09-29"), true);
+
+  const base = emptyBrief("2026-09-29", "BHB International School");
+  const idle = {
+    ...base,
+    students: { ...base.students, lastMarkedOn: "2026-08-31" },
+    staff: { ...base.staff, lastMarkedOn: "2026-09-16" },
+  };
+  const text = composeBriefSummary(idle);
+  assert.match(text, /Student attendance isn't being taken in the ERP — last register 31 Aug/);
+  assert.match(text, /Staff attendance isn't being taken in the ERP — last register 16 Sep/);
+  assert.doesNotMatch(text, /No class register was marked today/);
+  assert.doesNotMatch(text, /Staff attendance not marked today/);
+
+  const vars = composeBriefTemplateVariables(idle);
+  assert.deepEqual(briefTemplateProblems(vars), []);
+  assert.match(vars.students, /not being taken in the ERP — last register 31 Aug/);
+  assert.match(vars.staff, /not being taken in the ERP — last register 16 Sep/);
+
+  const facts = pendingFactsBlock(idle);
+  assert.match(facts, /student attendance has not been taken in the ERP since 31 Aug \(29 days\)/);
+  assert.match(facts, /staff attendance has not been taken in the ERP since 16 Sep \(13 days\)/);
+  assert.doesNotMatch(facts, /never marked/);
+
+  assert.match(attendanceIdleNote(idle, "students"), /not a lapse today/);
+
+  // Never any register: says so, rather than naming a date.
+  const never = { ...base, students: { ...base.students, lastMarkedOn: null } };
+  assert.match(composeBriefSummary(never), /isn't being taken in the ERP — no register on file/);
+  assert.match(pendingFactsBlock(never), /student attendance has not been taken in the ERP at all/);
+
+  // Recent register, nothing today: the ordinary wording, with the date in the PDF.
+  const recent = { ...base, students: { ...base.students, lastMarkedOn: "2026-09-26" } };
+  assert.match(composeBriefSummary(recent), /No class register was marked today/);
+  assert.match(attendanceIdleNote(recent, "students"), /last register on file is 26 Sep/);
+}
+
+// --- an unused desk and a holiday, together with class teachers --------
+{
+  const unused = brief({
+    date: "2026-09-29",
+    students: {
+      classes: [cls({ label: "Class 3 · A", classTeacherName: "Ramesh Yadav" }), cls({ label: "Nursery · A", holiday: "Pre-Primary Saturday off" })],
+      present: 0, absent: 0, strength: 40, classesMarked: 0, classesUnmarked: 1, classesOff: 1,
+      lastMarkedOn: "2026-08-31",
+    },
+  });
+  const text = composeBriefSummary(unused);
+  assert.match(text, /Student attendance isn't being taken in the ERP — last register 31 Aug/);
+  // A month of the same teacher list every night is what the line above replaces.
+  assert.doesNotMatch(text, /Not marked: /);
+  assert.doesNotMatch(pendingFacts(unused).map((f) => f.text).join("\n"), /Ramesh Yadav/);
+  assert.match(composeBriefTemplateVariables(unused).students, /^not being taken in the ERP/);
+
+  // Every class on holiday beats "not in use": there was nothing to take.
+  const holiday = brief({
+    date: "2026-10-02",
+    students: {
+      classes: [cls({ label: "Class 3 · A", holiday: "Gandhi Jayanti" })],
+      present: 0, absent: 0, strength: 20, classesMarked: 0, classesUnmarked: 0, classesOff: 1,
+      lastMarkedOn: "2026-08-31",
+    },
+  });
+  assert.match(composeBriefSummary(holiday), /No classes today — holiday for every class/);
+  assert.equal(composeBriefTemplateVariables(holiday).students, "no classes today — holiday for every class");
+  assert.equal(pendingFacts(holiday).some((f) => /student attendance has not been taken/.test(f.text)), false);
 }
 
 console.log("  ok");
