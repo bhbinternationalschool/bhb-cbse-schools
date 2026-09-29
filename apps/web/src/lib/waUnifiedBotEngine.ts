@@ -70,6 +70,85 @@ export function staffBotAwake(until: string | undefined, nowMs: number): boolean
   return Number.isFinite(t) && t > nowMs;
 }
 
+/** "HUMAN", "office", "talk to office" — a staff member asking for a person. */
+export function isStaffHumanAsk(text: string): boolean {
+  const t = (text || "").trim().toLowerCase().replace(/[.!?]+$/, "");
+  return /^(human|office|hr|talk to office|call me|baat karni hai|बात करनी है|ऑफिस)$/.test(t);
+}
+
+/**
+ * The reply a staff member gets when nothing understood their message.
+ *
+ * WHY (29 Sep 2026): this used to be silence. The rule was that the bot
+ * should not cut into staff talking to the school, so anything the command
+ * desk stepped aside from got no answer at all. On the day staff were shown
+ * the bot, that was most of what they typed — "English", "1", "Show my
+ * class students names", "??", "Mere class ka attendance lena hai",
+ * "Class -3rd Sec A" — and each one vanished. From the phone, silence is
+ * indistinguishable from the bot being broken, and that is what staff
+ * concluded.
+ *
+ * So every message gets an answer. It says plainly that it did not
+ * understand, shows the few things people actually want (a class list, who
+ * is absent, taking the register, their own IN/OUT), and names the way to
+ * reach a person — so a message that really was meant for the office has a
+ * one-word route there, and the office still sees it in the inbox either
+ * way.
+ */
+export function composeStaffFallbackText(opts: { firstName?: string; text?: string }): string {
+  const name = (opts.firstName || "").trim();
+  const said = (opts.text || "").replace(/\s+/g, " ").trim();
+  const echo = said && said.length <= 60 ? ` "${said}"` : " that";
+  return [
+    `Sorry${name ? ` ${name}` : ""}, I didn't understand${echo}.`,
+    "",
+    "Try one of these:",
+    "• *5A* — class list",
+    "• *5A attendance* — who is absent today",
+    "• *Take 5A attendance* — mark the register",
+    "• *My attendance* — your own IN / OUT today",
+    "• *help* — everything I can do",
+    "",
+    "Or send *HUMAN* to message the office.",
+  ].join("\n");
+}
+
+/**
+ * Words a teacher uses about their work. "class" alone is not one of them —
+ * "class 5 admission" is a parent — only "my class" / "mere class" is.
+ */
+const STAFF_ASK_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(attendance|attendence|atendance|hazri|haziri|हाजिरी|हाज़िरी|section|students|register|homework|roll\s*no|timetable|class\s*teacher|(?:my|mere|meri|mera|apni|apne)\s+class|छात्रों|मेरी\s+कक्षा)(?![\p{L}\p{M}\p{N}])/iu;
+/** A parent asking about their own child, or a new family — never staff. */
+const PARENT_ASK_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(admission|fees?|child|children|son|daughter|beta|beti|bachch?a|bachch?e|bachchi|ward|baby|kid|kids|बच्चा|बच्चे|बेटा|बेटी|प्रवेश|फीस)(?![\p{L}\p{M}\p{N}])/iu;
+
+/**
+ * An unknown number writing like a member of staff — "Mere class ka
+ * attendance lena hai", "Show my class students name". 29 Sep 2026: two
+ * teachers whose mobiles were not on their staff record got the visitor
+ * name question, then the admission-enquiry menu three times over, whatever
+ * they typed. There is nothing the bot can do for them until the number is
+ * on the record, so it should say exactly that, once, and tell the office.
+ */
+export function looksLikeStaffAsk(text: string): boolean {
+  const t = (text || "").trim();
+  if (!t || t.length > 200) return false;
+  return STAFF_ASK_WORDS.test(t) && !PARENT_ASK_WORDS.test(t);
+}
+
+export function composeUnknownStaffAskReply(): string {
+  return [
+    "This number is not on the school's staff record, so staff features (class lists, attendance, homework) cannot open on it.",
+    "",
+    "If you work at the school, ask the office to add *this* mobile number to your staff profile — then send *hi* again.",
+    "",
+    "यह नंबर स्कूल के स्टाफ रिकॉर्ड में नहीं है। अगर आप स्कूल स्टाफ हैं, तो ऑफिस से यह नंबर अपनी स्टाफ प्रोफ़ाइल में जुड़वाएँ, फिर *hi* भेजें।",
+    "",
+    "_Your message has been passed to the office._",
+  ].join("\n");
+}
+
 /**
  * A greeting that should reset to the top menu.
  *
@@ -176,7 +255,7 @@ export function looksLikeForward(text: string): boolean {
 
 export type VisitorNameRead =
   | { ok: true; name: string }
-  | { ok: false; reason: "empty" | "too_short" | "too_long" | "link" | "file" | "not_a_name" };
+  | { ok: false; reason: "empty" | "too_short" | "too_long" | "link" | "file" | "not_a_name" | "sentence" };
 
 /**
  * Read a reply as somebody's name, or refuse it.
@@ -198,8 +277,28 @@ export type VisitorNameRead =
  */
 const FILE_NAME_LIKE = /\.(pdf|docx?|jpe?g|png|webp|xlsx?|pptx?|txt|zip)$/i;
 
+/** Words that are never part of anybody's name — a sentence, not a name. */
+const NOT_NAME_WORDS = new Set([
+  "hai", "hain", "ho", "ka", "ke", "ki", "ko", "se", "mein", "lena", "leni", "karna", "karni",
+  "chahiye", "mera", "meri", "mere", "my", "i", "am", "want", "need", "please", "pls", "show",
+  "send", "tell", "class", "attendance", "attendence", "student", "students", "fees", "fee",
+  "admission", "school", "what", "how", "when", "where", "why", "kya", "kaise", "kab", "kahan",
+  "is", "the", "for", "to", "of", "list", "name", "names", "homework", "help",
+  "है", "का", "की", "के", "को", "मेरा", "मेरी", "मेरे", "क्या", "कैसे",
+]);
+
+/** A bare menu word on its own. */
+const MENU_WORDS = /^(menu|main|start|help|hi|hello|ok|okay|yes|no|english|hindi|हिंदी|मेनू)$/i;
+
 export function readVisitorName(text: string): VisitorNameRead {
-  const t = (text || "").replace(/\s+/g, " ").trim();
+  // "My name is Rajesh Kumar", "Mera naam Rajesh Kumar hai" — the name is
+  // in there; take it rather than refusing the sentence around it.
+  const t = (text || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^(?:my\s+name\s+is|i\s+am|i'm|this\s+is|mera\s+naam|mera\s+nam|मेरा\s+नाम)\s+/i, "")
+    .replace(/\s+(?:hai|hain|है)\s*[.!।]?$/i, "")
+    .trim();
   if (!t) return { ok: false, reason: "empty" };
   if (URL_LIKE.test(t)) return { ok: false, reason: "link" };
   if (FILE_NAME_LIKE.test(t)) return { ok: false, reason: "file" };
@@ -213,6 +312,26 @@ export function readVisitorName(text: string): VisitorNameRead {
   const words = t.split(" ").filter(Boolean);
   // Nobody's name is eight words long; that is a sentence about something.
   if (words.length > 6) return { ok: false, reason: "too_long" };
+  // A menu button's own id ("purpose_admission", "menu_main") or its title
+  // ("ADMISSION", "MENU") is a tap, not a name. 29 Sep 2026: a teacher
+  // whose number was not on record tapped ADMISSION at the name question and
+  // was thanked as "ADMISSION जी" for the rest of the conversation.
+  //
+  // Exact keywords only. detectVisitorPurpose reads substrings — "pay" in
+  // Payal, "meet" in Sumeet — and would refuse ordinary names.
+  const upperT = t.toUpperCase();
+  if (
+    /^[a-z]+(?:_[a-z0-9]+)+$/.test(t) ||
+    VISITOR_PURPOSE_OPTIONS.some((p) => p.keyword === upperT) ||
+    MENU_WORDS.test(t)
+  ) {
+    return { ok: false, reason: "not_a_name" };
+  }
+  // "Mere class ka attendance lena hai" is a sentence, and it was taken as
+  // the same teacher's name. Names do not carry these words.
+  if (words.length >= 2 && words.some((w) => NOT_NAME_WORDS.has(w.toLowerCase().replace(/[^\p{L}\p{M}]/gu, "")))) {
+    return { ok: false, reason: "sentence" };
+  }
   // Mostly letters, or it is a phone number, an emoji or a price list.
   // Marks count as letters: Devanagari carries its vowels as combining
   // marks, so counting only \p{L} makes सुनीता शर्मा half punctuation and
@@ -235,6 +354,7 @@ export function visitorNameRetryText(
       // The file is kept; what is missing is who sent it.
       return "Thank you — we have the file. Please reply with your *full name* (e.g. Rajesh Kumar) so we know whose it is.";
     case "too_long":
+    case "sentence":
       return "Please send just your *full name* (e.g. Rajesh Kumar) — you can tell us the rest next.";
     default:
       return "Please reply with your *full name* (e.g. Rajesh Kumar).";

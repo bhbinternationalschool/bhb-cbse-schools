@@ -19,7 +19,10 @@ import {
   visitorNameRetryText,
   VISITOR_ASK_LIMIT,
   parseStaffBotSwitch,
-  staffBotAwake,
+  composeStaffFallbackText,
+  composeUnknownStaffAskReply,
+  isStaffHumanAsk,
+  looksLikeStaffAsk,
   STAFF_BOT_WINDOW_MINUTES,
   type WaVisitorPurpose,
   categoryForKnownIdentity,
@@ -30,20 +33,21 @@ import {
   type WaRoleKind,
 } from "@/lib/waRoleResolver";
 import { resolveWaIdentityServer } from "@/lib/waRoleResolver.server";
-import {
-  detectStaffBotIntent,
-  replyStaffBotIntentWithAi,
-} from "@/lib/waStaffBotEngine";
+import { replyStaffBotIntentWithAi } from "@/lib/waStaffBotEngine";
+import { detectStaffBotKeyword } from "@/lib/waStaffBotPrompts";
 import {
   detectTransportBotIntent,
   replyTransportBotIntentWithAi,
   resolveTransportDriverContext,
 } from "@/lib/waTransportBotEngine";
 import { handleWaClassChannelInbound } from "@/lib/waClassChannelServer";
+import { isLikelyClassChannelPost } from "@/lib/waClassChannelEngine";
+import { loadMasters } from "@/lib/masters";
 import { handleWaCrmBotInbound } from "@/lib/waCrmBotServer";
 import { handleWaSisBotInbound } from "@/lib/waSisBotServer";
 import { handleWaSurveyBotInbound } from "@/lib/waSurveyBotServer";
 import { handleWaStaffAttendanceInbound } from "@/lib/waStaffAttendanceBotServer";
+import { detectOwnAttendanceAsk } from "@/lib/waStaffAttendanceBotEngine";
 import { handleErpStaffCommand } from "@/lib/erpCommands.server";
 import { transcribeInboundVoiceNote, voiceNoteTranscriptionEnabled } from "@/lib/voiceNote.server";
 import {
@@ -110,11 +114,25 @@ export type WaUnifiedSession = {
   jobAsk?: { applicationId: string; asks: number; at: string } | null;
   /**
    * Until when the staff keyword bot answers this person, ISO. Unset or
-   * past means the desk answers their commands and nothing answers the
-   * rest — which is the point: on a number staff also use to talk to the
-   * school, a bot that replies to everything is an interruption.
+   * past means the desk answers their commands and anything else gets the
+   * short "didn't understand — try these" reply (composeStaffFallbackText).
+   * It used to get silence; 29 Sep 2026 showed what silence looks like to
+   * staff.
    */
   staffBotUntil?: string;
+  /**
+   * When an unknown number that writes like staff was last told its number
+   * is not on the staff record, ISO. The reply goes every time; the office
+   * is alerted at most once per STAFF_ASK_ESCALATE_MS, so a teacher typing
+   * five attempts does not ring the office phone five times.
+   */
+  staffAskAt?: string;
+  /**
+   * Until when a staff member asked for quiet ("bot off"), ISO. Commands
+   * still answer; only the "didn't understand" reply is held back, for
+   * someone using this number to talk to the office.
+   */
+  staffQuietUntil?: string;
   /**
    * How many times we have re-asked this unknown caller for a name or a
    * purpose. At VISITOR_ASK_LIMIT the bot stops asking and parks the
@@ -275,7 +293,10 @@ async function delegateActiveFlow(
   const inbound = { ...opts, fromUnified: true as const };
 
   if (flow === "teacher" || flow === "staff" || flow === "owner") {
-    const att = await handleWaStaffAttendanceInbound(inbound);
+    // "Show my attendance", "Mera attendance present karna hai" — the
+    // sender's own punch, in their own words. See detectOwnAttendanceAsk.
+    const own = opts.location ? null : detectOwnAttendanceAsk(opts.text, { staffSelf: flow === "teacher" });
+    const att = await handleWaStaffAttendanceInbound(own ? { ...inbound, forceIntent: own } : inbound);
     if (att.handled) {
       return {
         replied: att.replied,
@@ -415,6 +436,7 @@ async function delegateActiveFlow(
               sw === "on"
                 ? new Date(nowMs + STAFF_BOT_WINDOW_MINUTES * 60_000).toISOString()
                 : "",
+            staffQuietUntil: sw === "off" ? new Date(nowMs + STAFF_QUIET_MS).toISOString() : "",
             updatedAt: nowIso(),
           },
         },
@@ -426,7 +448,7 @@ async function delegateActiveFlow(
           category: categoryForUnifiedAudience(flow, flow),
           audience: "staff_bot_off",
           flow,
-          text: "School bot closed. Commands still work as always — send *help* for the list.",
+          text: "OK — for the next 12 hours I'll stay quiet on messages I don't understand. Commands still work (send *help* for the list); send *school bot* to switch replies back on.",
           inbound: { text: opts.text, waMessageId: opts.waMessageId },
         });
         return { replied: true, escalate: false, audience: "staff_bot_off", stub: false };
@@ -444,45 +466,31 @@ async function delegateActiveFlow(
       return { replied: true, escalate: false, audience: "staff_bot_on", stub: false };
     }
 
-    if (!staffBotAwake(session.staffBotUntil, nowMs)) {
-      // Silence, not a reply saying it will be silent — a "I'm not
-      // answering that" on every message is the same interruption wearing
-      // an apology. The message is still recorded in Comms → WhatsApp
-      // inbox, so the office can see what was sent and answer as a human.
-      await sendBotReply({
+    const displayName = session.displayName || identity.displayName;
+    // Asked for a person: say so, and hand it to the office.
+    if (isStaffHumanAsk(opts.text)) {
+      const ok = await sendBotReply({
         mobile10,
-        displayName: session.displayName || identity.displayName,
+        displayName,
         category: categoryForUnifiedAudience(flow, flow),
-        audience: "staff_quiet",
+        audience: "staff_human",
         flow,
+        text: "Your message has gone to the school office. Someone will reply here.",
         inbound: { text: opts.text || "", waMessageId: opts.waMessageId },
       });
-      return { replied: false, escalate: false, audience: "staff_quiet", stub: false };
+      return { replied: ok, escalate: true, audience: "staff_human", stub: !ok };
     }
 
-    // Awake, and this message keeps it awake.
-    {
-      const store = await readStore();
-      const base = store.sessions[mobile10] ?? session;
-      await writeStore({
-        ...store,
-        sessions: {
-          ...store.sessions,
-          [mobile10]: {
-            ...base,
-            staffBotUntil: new Date(nowMs + STAFF_BOT_WINDOW_MINUTES * 60_000).toISOString(),
-            updatedAt: nowIso(),
-          },
-        },
-      });
-    }
-
-    const intent = detectStaffBotIntent(opts.text);
-    if (intent === "menu") {
+    // The staff menu's own keywords — STAFF, FEE, TIMING, REPORTS, MENU —
+    // typed as the whole message. The menu lists them, so they must work
+    // whenever it has been shown; before 29 Sep they answered only inside a
+    // "school bot" window nobody knew to open.
+    const keyword = detectStaffBotKeyword(opts.text);
+    if (keyword === "menu") {
       const pack = menuKnownUserGreeting(identity, unifiedHindiFor(identity));
       await sendBotReply({
         mobile10,
-        displayName: session.displayName || identity.displayName,
+        displayName,
         category: categoryForUnifiedAudience(flow, flow),
         audience: flow,
         flow,
@@ -490,24 +498,26 @@ async function delegateActiveFlow(
       });
       return { replied: true, escalate: false, audience: flow, stub: false };
     }
-    const bot = await replyStaffBotIntentWithAi(intent, opts.text, {
-      fullName: session.displayName || identity.displayName,
-      isOwner: flow === "owner",
-    });
-    await sendBotReply({
-      mobile10,
-      displayName: session.displayName || identity.displayName,
-      category: categoryForUnifiedAudience(flow, flow),
-      audience: flow,
-      flow,
-      text: bot.text,
-    });
-    return {
-      replied: true,
-      escalate: bot.escalate,
-      audience: flow,
-      stub: false,
-    };
+    if (keyword !== "unknown") {
+      const bot = await replyStaffBotIntentWithAi(keyword, opts.text, {
+        fullName: displayName,
+        isOwner: flow === "owner",
+      });
+      await sendBotReply({
+        mobile10,
+        displayName,
+        category: categoryForUnifiedAudience(flow, flow),
+        audience: flow,
+        flow,
+        text: bot.text,
+      });
+      return { replied: true, escalate: bot.escalate, audience: flow, stub: false };
+    }
+
+    // Never silence — and not the old keyword bot's substring guesses and
+    // its model either, which knows nothing about class lists or
+    // attendance and could only point at REPORTS or HUMAN.
+    return replyStaffFallback({ mobile10, flow, identity, session, text: opts.text, waMessageId: opts.waMessageId });
   }
 
   if (flow === "parent") {
@@ -549,6 +559,25 @@ async function delegateActiveFlow(
   }
 
   if (flow === "teacher") {
+    // HUMAN, and questions the desk did not recognise, are not class posts:
+    // the class channel would draft any sentence as a notice to parents.
+    // See isLikelyClassChannelPost.
+    if (isStaffHumanAsk(opts.text)) {
+      const ok = await sendBotReply({
+        mobile10,
+        displayName: session.displayName || identity.displayName,
+        category: categoryForUnifiedAudience(flow, flow),
+        audience: "staff_human",
+        flow,
+        text: "Your message has gone to the school office. Someone will reply here.",
+        inbound: { text: opts.text || "", waMessageId: opts.waMessageId },
+      });
+      return { replied: ok, escalate: true, audience: "staff_human", stub: !ok };
+    }
+    const subjectNames = (loadMasters().subjects ?? []).map((sub) => sub.nameEn || sub.code || "");
+    if (!isLikelyClassChannelPost(opts.text, { subjectNames })) {
+      return replyStaffFallback({ mobile10, flow, identity, session, text: opts.text, waMessageId: opts.waMessageId });
+    }
     const r = await handleWaClassChannelInbound({
       fromWaId: opts.fromWaId,
       text: opts.text,
@@ -901,6 +930,93 @@ function isParentBusiness(text: string): boolean {
   return ["dues", "pay", "receipts", "kids", "bus"].includes(detectSisBotIntent(t)) && /^[A-Za-z]+(\s+\S+)?$/.test(t);
 }
 
+const STAFF_ASK_ESCALATE_MS = 6 * 60 * 60_000;
+
+/** How long "bot off" holds back the "didn't understand" reply. */
+const STAFF_QUIET_MS = 12 * 60 * 60_000;
+
+/**
+ * What a staff member gets when nothing understood their message: the
+ * short "didn't understand — try these" reply (composeStaffFallbackText),
+ * never silence. A message with no words — a photo, a sticker — and anyone
+ * who asked for quiet with "bot off" are logged for the office instead.
+ */
+async function replyStaffFallback(opts: {
+  mobile10: string;
+  flow: WaUnifiedFlow;
+  identity: WaResolvedIdentity;
+  session: WaUnifiedSession;
+  text: string;
+  waMessageId?: string;
+}): Promise<{ replied: boolean; escalate: boolean; audience: string; stub: boolean }> {
+  const { mobile10, flow, identity, session } = opts;
+  const displayName = session.displayName || identity.displayName;
+  const category = categoryForUnifiedAudience(flow, flow);
+  const said = (opts.text || "").trim();
+  const quietUntil = Date.parse(session.staffQuietUntil || "");
+  if (!said || (Number.isFinite(quietUntil) && quietUntil > Date.now())) {
+    await sendBotReply({
+      mobile10,
+      displayName,
+      category,
+      audience: "staff_quiet",
+      flow,
+      inbound: { text: said, waMessageId: opts.waMessageId },
+    });
+    return { replied: false, escalate: false, audience: "staff_quiet", stub: false };
+  }
+  const staffRole =
+    identity.roles.find((r) => r.kind === flow && r.staff) ?? identity.roles.find((r) => r.staff);
+  const ok = await sendBotReply({
+    mobile10,
+    displayName,
+    category,
+    audience: "staff_fallback",
+    flow,
+    text: composeStaffFallbackText({
+      firstName: (staffRole?.staff?.fullName || displayName || "").split(" ")[0],
+      text: said,
+    }),
+    inbound: { text: said, waMessageId: opts.waMessageId },
+  });
+  return { replied: ok, escalate: false, audience: "staff_fallback", stub: !ok };
+}
+
+/**
+ * An unknown number writing like a teacher: say plainly that the number is
+ * not on the staff record and pass it to the office. Returns null when the
+ * message does not look like staff, so the visitor flow carries on as
+ * before. See looksLikeStaffAsk.
+ */
+async function answerUnknownStaffAsk(opts: {
+  mobile10: string;
+  text: string;
+  session: WaUnifiedSession;
+  store: WaUnifiedStore;
+  displayName: string;
+  inbound: { text: string; waMessageId?: string };
+}): Promise<{ replied: boolean; escalate: boolean; audience: string; stub: boolean } | null> {
+  if (!looksLikeStaffAsk(opts.text)) return null;
+  const last = Date.parse(opts.session.staffAskAt || "");
+  const escalate = !Number.isFinite(last) || Date.now() - last > STAFF_ASK_ESCALATE_MS;
+  const next: WaUnifiedSession = {
+    ...opts.session,
+    // Not a failed name or purpose answer: do not count it towards parking.
+    staffAskAt: escalate ? nowIso() : opts.session.staffAskAt,
+    updatedAt: nowIso(),
+  };
+  await writeStore({ ...opts.store, sessions: { ...opts.store.sessions, [opts.mobile10]: next } });
+  const ok = await sendBotReply({
+    mobile10: opts.mobile10,
+    displayName: opts.displayName,
+    category: "general",
+    audience: "visitor_staff_unlinked",
+    text: composeUnknownStaffAskReply(),
+    inbound: opts.inbound,
+  });
+  return { replied: ok, escalate, audience: "visitor_staff_unlinked", stub: !ok };
+}
+
 export async function handleWaUnifiedInbound(opts: {
   fromWaId: string;
   text: string;
@@ -1091,6 +1207,11 @@ export async function handleWaUnifiedInbound(opts: {
     rawText,
     profileName: opts.profileName,
     pending: session?.gate ?? null,
+    // A staff member's OUT is their attendance punch, unless they really
+    // are checked in at the gate as a visitor. See handleWaGateVisit.
+    staff:
+      identity.isKnown &&
+      identity.roles.some((role) => ["teacher", "staff", "owner"].includes(flowKindFromRole(role))),
   });
   if (gate.handled) {
     const base = session ?? sessionFor(mobile10, identity, opts.profileName);
@@ -1192,6 +1313,15 @@ export async function handleWaUnifiedInbound(opts: {
   // still logged; nothing more is sent. They get out by saying "hi" or
   // "menu" (handled above), or by finally naming what they want.
   if (!identity.isKnown && session.phase === "parked") {
+    const staffAsk = await answerUnknownStaffAsk({
+      mobile10,
+      text,
+      session,
+      store,
+      displayName: session.visitorName || identity.displayName,
+      inbound: inboundLog,
+    });
+    if (staffAsk) return staffAsk;
     const purpose = detectVisitorPurpose(text);
     if (!purpose) {
       await sendBotReply({
@@ -1222,6 +1352,15 @@ export async function handleWaUnifiedInbound(opts: {
       });
       return { replied: false, escalate: false, audience: "visitor_forward", stub: false };
     }
+    const staffAsk = await answerUnknownStaffAsk({
+      mobile10,
+      text,
+      session,
+      store,
+      displayName: identity.displayName,
+      inbound: inboundLog,
+    });
+    if (staffAsk) return staffAsk;
     // A document arriving here is the thing they came to send, not their
     // name. Keep it, so JOB can file it in a moment.
     if (opts.document?.mediaId) {
@@ -1297,6 +1436,15 @@ export async function handleWaUnifiedInbound(opts: {
         });
         return { replied: false, escalate: false, audience: "visitor_forward", stub: false };
       }
+      const staffAsk = await answerUnknownStaffAsk({
+        mobile10,
+        text,
+        session,
+        store,
+        displayName: session.visitorName || session.displayName,
+        inbound: inboundLog,
+      });
+      if (staffAsk) return staffAsk;
       const asks = (session.visitorAsks ?? 0) + 1;
       session.visitorAsks = asks;
       const giveUp = asks >= VISITOR_ASK_LIMIT;
@@ -1391,6 +1539,22 @@ export async function handleWaUnifiedInbound(opts: {
       return delegateActiveFlow("parent", { ...opts, text }, identity, session);
     }
     const role = pickRoleByInput(identity.roles, text);
+    // Staff who type a real request at the profile question are asking as
+    // staff. 29 Sep 2026: a teacher with an old admission enquiry on her
+    // number got "1. TEACHER 2. ADMISSION" back for everything she typed.
+    // Empty text (a sticker, a photo) still gets the menu.
+    const staffSide = identity.roles.find((r) => ["teacher", "staff", "owner"].includes(flowKindFromRole(r)));
+    if (!role && staffSide && text.trim()) {
+      session.activeFlow = flowKindFromRole(staffSide);
+      session.phase = "active";
+      session.displayName = staffSide.staff?.fullName || identity.displayName;
+      store = {
+        ...store,
+        sessions: { ...store.sessions, [mobile10]: { ...session, updatedAt: nowIso() } },
+      };
+      await writeStore(store);
+      return delegateActiveFlow(session.activeFlow, { ...opts, text }, identity, session);
+    }
     if (!role) {
       const pack = menuKnownUserGreeting(identity, unifiedHindiFor(identity));
       await sendBotReply({

@@ -383,6 +383,10 @@ export function buildErpAskAnswerSystemPrompt(opts: { language: ErpAskPlan["lang
     "2. Use only the facts. If something is marked 'not available' or 'not permitted', say that in one clause; do not guess it.",
     "3. Do not judge, praise or scold anyone. Do not name a family the facts do not name.",
     "4. WhatsApp formatting only: *bold* for the key figure, plain otherwise. No headings, no markdown tables.",
+    "5. If they asked for a list the facts do not contain — children's names, a class list, phone numbers — never say it is",
+    "   'not available' or 'not in the records'. It is in the ERP; say how to get it: for a class list, send the class alone,",
+    "   e.g. *10A* or *class 10*; for one child, their name. (29 Sep 2026: a teacher was told Class 10's names were",
+    "   'not available in the records'.)",
     "",
     'Reply with JSON only: {"answer":"..."}',
   ].join("\n");

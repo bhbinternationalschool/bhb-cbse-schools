@@ -175,6 +175,61 @@ export function isStaffAttendanceKeyword(text: string): boolean {
   return detectStaffAttBotIntent(text) !== "unknown";
 }
 
+const OWN_ATT_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(attendance|attendence|atendance|attendace|hazri|haziri|हाज़िरी|हाजिरी|उपस्थिति|punch)(?![\p{L}\p{M}\p{N}])/iu;
+const OWN_FIRST_PERSON =
+  /(?<![\p{L}\p{M}\p{N}])(my|mine|mera|meri|mere|mujhe|main|apna|apni|apne|self|मेरा|मेरी|मेरे|मुझे|मैं|अपना|अपनी)(?![\p{L}\p{M}\p{N}])/iu;
+const OWN_STAFF_SELF =
+  /(?<![\p{L}\p{M}\p{N}])(teacher|teachers|staff)\s+(attendance|attendence|atendance|hazri|haziri)(?![\p{L}\p{M}\p{N}])/iu;
+/** Anything about a class is the class register, never the sender's own punch. */
+const OWN_CLASS_CONTEXT =
+  /(?<![\p{L}\p{M}\p{N}])(class|classes|section|sections|student|students|bachch?e|bachon|bachcho|children|kids|kaksha|कक्षा|छात्र|बच्चे|बच्चों|roll|register)(?![\p{L}\p{M}\p{N}])|(?<![\p{L}\p{N}])(\d{1,2}|[ivx]{2,4}|lkg|ukg)\s*-?\s*[a-h](?![\p{L}\p{N}])/iu;
+const OWN_OUT =
+  /(?<![\p{L}\p{M}\p{N}])((punch|check|clock)\s*-?\s*out|out|chhutti|chutti|ja\s*(raha|rahi)|jaana)(?![\p{L}\p{M}\p{N}])/iu;
+const OWN_STATUS =
+  /(?<![\p{L}\p{M}\p{N}])(record|records|show|dikhao|dikha|dekh\w*|status|history|report|kitn\w*|month|mahina|mahine|check|batao|bata|view|see)(?![\p{L}\p{M}\p{N}])/iu;
+const OWN_IN =
+  /(?<![\p{L}\p{M}\p{N}])((punch|check|clock)\s*-?\s*in|present|lagana|lagani|lagao|laga\s*do|mark|karna|karni|kar\s*do|bharna|bharni|lena|leni|lagwana)(?![\p{L}\p{M}\p{N}])/iu;
+
+/**
+ * A staff member asking about THEIR OWN attendance, in their own words.
+ *
+ * WHY (29 Sep 2026, the first day staff were shown the bot): "My attendance
+ * record", "Show my attendance", "Mera attendance present karna hai" and
+ * "Teacher attendance record" were read as the class register or as a
+ * child's name — "I couldn't find an active student matching 'my
+ * attendance'" — because the keyword test above only knows a few exact
+ * phrases, and on purpose: it runs ahead of the command desk.
+ *
+ * So this is a separate, narrow reading, used in the same place and under
+ * the same rule — when in doubt, null. It needs an attendance word, and it
+ * needs the message to be about the sender: first person ("my", "mera",
+ * "मेरी"), or "teacher/staff attendance" when `staffSelf` says the sender is
+ * a teacher asking about themself. Any mention of a class, a section, a
+ * student or a register is the class register and returns null — "Mere
+ * class ka attendance" is the class, not the teacher.
+ *
+ * What it returns is the keyword the attendance bot already understands:
+ * "out", "status" when they want to see it, "in" when they want to be
+ * marked — which the bot answers by asking for a location pin, since a
+ * punch cannot be made from text.
+ */
+export function detectOwnAttendanceAsk(
+  text: string,
+  opts: { staffSelf?: boolean } = {},
+): "in" | "out" | "status" | null {
+  const t = (text || "").trim();
+  if (!t || t.length > 80) return null;
+  if (!OWN_ATT_WORD.test(t)) return null;
+  if (OWN_CLASS_CONTEXT.test(t)) return null;
+  const aboutSelf = OWN_FIRST_PERSON.test(t) || (!!opts.staffSelf && OWN_STAFF_SELF.test(t));
+  if (!aboutSelf) return null;
+  if (OWN_OUT.test(t)) return "out";
+  if (OWN_STATUS.test(t)) return "status";
+  if (OWN_IN.test(t)) return "in";
+  return "status";
+}
+
 /** Early-out confirmation words (used only while the confirm is pending). */
 export function isEarlyOutConfirm(text: string): boolean {
   const t = (text || "").trim().toLowerCase();

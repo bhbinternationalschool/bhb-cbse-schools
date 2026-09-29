@@ -192,6 +192,12 @@ import {
   type ParsedErpCommand,
   type PendingErpConfirm,
   type SectionMatch,
+  MY_SECTIONS_MARKER,
+  classKey,
+  formatMarkAttendancePrompt,
+  markAskIsFresh,
+  parseBareClassQuery,
+  parseMarkAskReply,
 } from "@/lib/erpCommands";
 import { trackServerWork } from "@/lib/serverWork";
 
@@ -278,6 +284,19 @@ type CommandStore = {
    * answer text only, on the same short window as the lists.
    */
   lastAsk?: Record<string, { at: string; question: string; answer: string }>;
+  /**
+   * "Who is absent?" — asked after the desk showed a section to take its
+   * register. The next "4, 11" or "all present" from this person marks that
+   * section (through the confirm card). See parseMarkAskReply.
+   */
+  markAsk?: Record<string, { at: string; section: SectionMatch; date: string }>;
+  /**
+   * "Which class?" — asked for a command that needed one. The next bare
+   * class ("VIII A") answers it and re-runs that command, instead of being
+   * read as a fresh request for the class list — which is what happened on
+   * 29 Sep 2026 to a teacher trying to take the register.
+   */
+  sectionAsk?: Record<string, { at: string; commandId: string; text: string }>;
 };
 
 let memoryStore: CommandStore = {
@@ -421,6 +440,75 @@ async function rememberPick(
     delete next[actor];
   }
   await writeStore({ ...st, pick: next });
+}
+
+/** Arm "who is absent?" for this person's next message. */
+async function rememberMarkAsk(actor: string, section: SectionMatch, date: string): Promise<void> {
+  const st = await readStore();
+  await writeStore({
+    ...st,
+    markAsk: { ...(st.markAsk ?? {}), [actor]: { at: new Date().toISOString(), section, date } },
+  });
+}
+
+/** Arm "which class?" for this person's next message. */
+async function rememberSectionAsk(actor: string, commandId: string, text: string): Promise<void> {
+  const st = await readStore();
+  await writeStore({
+    ...st,
+    sectionAsk: { ...(st.sectionAsk ?? {}), [actor]: { at: new Date().toISOString(), commandId, text } },
+  });
+}
+
+/**
+ * The sender's own sections: the ones they are class teacher of, or — when
+ * they are class teacher of none — the ones they teach. Empty for the office
+ * and leadership, for whom "my class" names nothing; they are asked which.
+ */
+function mySectionsFor(
+  staff: Parameters<typeof staffAllowedSections>[0],
+  masters: Parameters<typeof staffAllowedSections>[1],
+  academicYearCode: string,
+  roleCodes: string[],
+): SectionMatch[] {
+  if (!staff) return [];
+  // Empty role codes: this person's own links, never "every section".
+  const own = staffAllowedSections(staff, masters, academicYearCode, []).map((s) => ({
+    classId: s.classId,
+    sectionId: s.sectionId,
+    className: s.className,
+    sectionName: s.sectionName,
+    label: s.label,
+  }));
+  const classTeacherOf = new Set(
+    (staff.classTeacherLinks ?? [])
+      .filter((l) => !l.academicYearCode || l.academicYearCode === academicYearCode)
+      .map((l) => l.sectionId)
+      .filter(Boolean),
+  );
+  const ct = own.filter((s) => classTeacherOf.has(s.sectionId));
+  if (ct.length) return ct;
+  return isOfficeLike(roleCodes) ? [] : own;
+}
+
+/**
+ * The section references a command's section field names, or the message's
+ * when the field carries none that can be read back. The model and the
+ * bare-class reader both hand over keyed values ("8", "5A", "lkg"), and
+ * extractSectionRefs cannot read a lone "8" — 29 Sep 2026: "Class 8 ka
+ * attendance lena hai" was asked "Which class and section?" with the class
+ * right there in the message.
+ */
+function sectionRefsFor(askedRaw: string, text: string): { classKey: string; sectionName: string }[] {
+  const keyed = /^(\d{1,2}|nursery|prenursery|playgroup|lkg|ukg|kg)([A-H]?)$/.exec(askedRaw || "");
+  if (keyed) return [{ classKey: keyed[1]!, sectionName: keyed[2] || "" }];
+  const fromAsked = askedRaw ? extractSectionRefs(askedRaw) : [];
+  return fromAsked.length ? fromAsked : extractSectionRefs(text);
+}
+
+/** A section as the desk's section field writes it: "8A", "lkgB". */
+function sectionKeyOf(s: SectionMatch): string {
+  return `${classKey(s.className) ?? ""}${(s.sectionName || "").replace(/^(section|sec\.?)\s*/i, "").toUpperCase()}`;
 }
 
 /** Mobiles bucketed by family language, as frozen onto the confirm card. */
@@ -604,7 +692,8 @@ export async function handleErpStaffCommand(
   }
 
   // 4. Parse — regex first, then the model, only for command-shaped text.
-  let parsed: ParsedErpCommand | null = parseErpCommandLocal(text);
+  // (After the answers to the desk's own last question, just below.)
+  let parsed: ParsedErpCommand | null = null;
   // Set when a bare name was resolved against a list the desk just showed;
   // the student lookup below searches those sections instead of the school.
   let resolvedFollowUpSections: string[] | null = null;
@@ -616,6 +705,50 @@ export async function handleErpStaffCommand(
   let pinnedStaffId: string | null = null;
   /** Set when the child came from the previous answer, not from this text. */
   let carriedFrom = "";
+
+  // 4-pre. An answer to the desk's own last question.
+  //
+  // "Who is absent?" first: "4, 11" or "all present" after the desk showed
+  // a section to take its register marks THAT section, through the same
+  // confirm card as the one-line command.
+  const markAsk = (store.markAsk ?? {})[actor];
+  if (markAsk && markAskIsFresh(markAsk.at, nowMs)) {
+    const spec = parseMarkAskReply(text);
+    if (spec) {
+      const rest = { ...(store.markAsk ?? {}) };
+      delete rest[actor];
+      store = { ...store, markAsk: rest };
+      await writeStore(store);
+      pinnedSection = markAsk.section;
+      // The date rides in the text, where resolveCommandDate reads it.
+      text = `Mark ${markAsk.section.label} attendance ${markAsk.date}: ${spec}`;
+      parsed = {
+        commandId: "mark_attendance",
+        fields: { section: sectionKeyOf(markAsk.section), text: spec, date: "" },
+        source: "local",
+      };
+    }
+  }
+  // Then "which class?": a bare class re-runs the command that asked, with
+  // the original wording (its date, its message) and the class filled in.
+  const sectionAsk = (store.sectionAsk ?? {})[actor];
+  if (!parsed && sectionAsk && pickIsFresh(sectionAsk.at, nowMs)) {
+    const answered = parseBareClassQuery(text);
+    if (answered) {
+      const rest = { ...(store.sectionAsk ?? {}) };
+      delete rest[actor];
+      store = { ...store, sectionAsk: rest };
+      await writeStore(store);
+      text = sectionAsk.text;
+      const again = parseErpCommandLocal(text);
+      parsed = {
+        commandId: sectionAsk.commandId,
+        fields: { ...(again?.commandId === sectionAsk.commandId ? again.fields : {}), section: answered },
+        source: "local",
+      };
+    }
+  }
+  if (!parsed) parsed = parseErpCommandLocal(text);
 
   // Paused: answer anything command-shaped without spending a model call,
   // and leave everything else to the bots that were going to answer it.
@@ -671,18 +804,22 @@ export async function handleErpStaffCommand(
       const n = parsePickNumber(text, highest);
       const opt = n === null ? undefined : pk.options.find((o) => o.n === n);
       if (opt) {
-        // Spent. A second "2" is a new message, not the same choice again.
-        const cleared = { ...(store.pick ?? {}) };
-        delete cleared[actor];
-        store = { ...store, pick: cleared };
-        await writeStore(store);
-
         // A number typed at the help list explains a command; it does not
         // run one. Running "mark attendance" because somebody was reading
         // the menu would be the worst possible reading of a keystroke.
+        //
+        // And the list stays armed. Somebody reading a menu reads more than
+        // one line of it: on 29 Sep 2026 a staff member sent "3", read about
+        // marking attendance, sent "1" — and got nothing back, because the
+        // first number had spent the list.
         if (opt.describe) {
           const def = findErpCommand(opt.commandId);
           if (def) {
+            store = {
+              ...store,
+              pick: { ...(store.pick ?? {}), [actor]: { ...pk, at: new Date(nowMs).toISOString() } },
+            };
+            await writeStore(store);
             return {
               handled: true,
               audience: "erp_command_help",
@@ -690,6 +827,11 @@ export async function handleErpStaffCommand(
             };
           }
         }
+        // Spent. A second "2" is a new message, not the same choice again.
+        const cleared = { ...(store.pick ?? {}) };
+        delete cleared[actor];
+        store = { ...store, pick: cleared };
+        await writeStore(store);
         pinnedStudentId = opt.studentId || null;
         pinnedSection = opt.section || null;
         pinnedRouteId = opt.routeId || null;
@@ -772,6 +914,17 @@ export async function handleErpStaffCommand(
     // answer it from the records; otherwise stay quiet as before.
     const asked = await tryAnswerQuestion(inbound, text, actor, store, nowMs, todayIso);
     return asked ?? { handled: false };
+  }
+
+  // A command was read. Whatever the desk asked last is no longer the
+  // question on the table: a "4" after the next command must not mark a
+  // register shown two replies ago.
+  if ((store.markAsk ?? {})[actor] || (store.sectionAsk ?? {})[actor]) {
+    const ma = { ...(store.markAsk ?? {}) };
+    const sa = { ...(store.sectionAsk ?? {}) };
+    delete ma[actor];
+    delete sa[actor];
+    store = { ...store, markAsk: ma, sectionAsk: sa };
   }
 
   // 2b. Hourly cap per staff member.
@@ -921,7 +1074,27 @@ export async function handleErpStaffCommand(
     }
   }
   if (command.id === "class_defaulters" || command.id === "class_roster") {
-    const askedRaw = parsed.fields.section || "";
+    let askedRaw = parsed.fields.section || "";
+    // A number that answered "which of your classes?" chose the section.
+    if (pinnedSection) askedRaw = sectionKeyOf(pinnedSection);
+    // "Show my class students" — the teacher's own section(s).
+    if (askedRaw === MY_SECTIONS_MARKER) {
+      const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
+      const mine = mySectionsFor(inbound.staff, masters, session.academicYearCode, roleCodes);
+      if (mine.length === 1) {
+        askedRaw = sectionKeyOf(mine[0]!);
+      } else if (mine.length > 1) {
+        await rememberPick(actor, command.id, text, sectionProblemPicks("ambiguous", mine, command.id));
+        await rememberSectionAsk(actor, command.id, text);
+        return {
+          handled: true,
+          audience: "erp_command_ask",
+          text: formatSectionProblem("ambiguous", mine, text),
+        };
+      } else {
+        askedRaw = "";
+      }
+    }
     // The bare-class parse hands over the class already keyed ("4", "5A",
     // "lkg"), which extractSectionRefs would not read back: a lone "4" is
     // not a class to it.
@@ -930,6 +1103,7 @@ export async function handleErpStaffCommand(
       ? [{ classKey: keyed[1]!, sectionName: keyed[2] || "" }]
       : extractSectionRefs(askedRaw || text);
     if (!refs.length) {
+      await rememberSectionAsk(actor, command.id, text);
       return {
         handled: true,
         audience: "erp_command_ask",
@@ -982,9 +1156,27 @@ export async function handleErpStaffCommand(
     if (limitedTo) resolved.limitedTo = limitedTo.join("|");
   } else if (command.fields.some((f) => f.type === "section")) {
     // A number already answered "which section?" — nothing left to match.
-    const askedRaw = parsed.fields.section || "";
-    const refs = pinnedSection ? [] : extractSectionRefs(askedRaw || text);
+    let askedRaw = parsed.fields.section || "";
+    // "Mere class ka attendance lena hai" — the teacher's own section.
+    if (!pinnedSection && askedRaw === MY_SECTIONS_MARKER) {
+      const roleCodes = resolveSessionRoles(rbac, session, masters).map((r) => r.code);
+      const mine = mySectionsFor(inbound.staff, masters, session.academicYearCode, roleCodes);
+      if (mine.length === 1) {
+        pinnedSection = mine[0]!;
+      } else if (mine.length > 1) {
+        await rememberPick(actor, command.id, text, sectionProblemPicks("ambiguous", mine, command.id));
+        await rememberSectionAsk(actor, command.id, text);
+        return {
+          handled: true,
+          audience: "erp_command_ask",
+          text: formatSectionProblem("ambiguous", mine, text),
+        };
+      }
+      askedRaw = "";
+    }
+    const refs = pinnedSection ? [] : sectionRefsFor(askedRaw, text);
     if (!pinnedSection && !refs.length) {
+      await rememberSectionAsk(actor, command.id, text);
       return {
         handled: true,
         audience: "erp_command_ask",
@@ -2193,10 +2385,29 @@ export async function handleErpStaffCommand(
       };
     }
     if (!picked.size && !spec.allPresent) {
+      // The register as a conversation: show the class, numbered by roll,
+      // and ask who is absent. The next "4, 11" or "all present" marks this
+      // section — see the 4-pre step and parseMarkAskReply.
+      await rememberMarkAsk(
+        actor,
+        sectionMatch ?? {
+          classId: resolved.classId || "",
+          sectionId: resolved.sectionId,
+          className: "",
+          sectionName: "",
+          label: resolved.sectionLabel || "",
+        },
+        date,
+      );
       return {
         handled: true,
         audience: "erp_command_ask",
-        text: "Tell me who is absent, or say *all present*:\n_Mark 5A attendance: absent roll 4, 11, 19_",
+        text: formatMarkAttendancePrompt({
+          sectionLabel: resolved.sectionLabel || "that section",
+          date,
+          todayIso,
+          roster: roster.map((st) => ({ rollNo: st.rollNo, fullName: st.fullName })),
+        }),
       };
     }
     const row = (id: string) => {
