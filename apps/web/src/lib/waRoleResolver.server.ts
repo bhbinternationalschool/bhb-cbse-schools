@@ -260,3 +260,47 @@ export async function resolveWaIdentityServer(
     roles: sortRoles(roles),
   };
 }
+
+/**
+ * Add a second mobile to a staff record — the one they actually message
+ * from. Written as the record's altMobile, which every staff lookup already
+ * matches (findStaffByMobile, fetchStaffByMobileFromDb), and patched into
+ * the mirror so the next message is recognised without waiting for a reload.
+ *
+ * Called only after the director or principal approved the request
+ * (waUnifiedBotServer handleStaffLinkDecision) — never on the requester's
+ * word alone: the number gets staff access to class lists and families.
+ */
+export async function addStaffAltMobile(
+  staffId: string,
+  mobile10: string,
+): Promise<{ ok: true; staff: StaffRecord; replaced: string } | { ok: false; error: string }> {
+  const m10 = waNormalizeLocal10(mobile10);
+  if (m10.length !== 10) return { ok: false, error: "not a 10-digit mobile" };
+  const { getServerTenantContext } = await import("@/lib/serverTenant");
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "no tenant" };
+  const { data, error } = await ctx.sb
+    .from("sis_staff")
+    .select(
+      "id, emp_code, full_name, stream, category, department_id, designation_id, campus_id, mobile, email, status, profile",
+    )
+    .eq("tenant_id", ctx.tenantId)
+    .eq("id", staffId)
+    .maybeSingle();
+  if (error || !data) return { ok: false, error: error?.message || "staff record not found" };
+  const row = data as StaffRow;
+  const profile = (row.profile && typeof row.profile === "object" ? row.profile : {}) as Record<string, unknown>;
+  const replaced = waNormalizeLocal10(String(profile.altMobile || ""));
+  if (replaced !== m10) {
+    const { error: upErr } = await ctx.sb
+      .from("sis_staff")
+      .update({ profile: { ...profile, altMobile: m10 } })
+      .eq("tenant_id", ctx.tenantId)
+      .eq("id", staffId);
+    if (upErr) return { ok: false, error: upErr.message };
+  }
+  const staff = rowToStaff({ ...row, profile: { ...profile, altMobile: m10 } });
+  patchMirrorStaff(staff, loadMasters().designations ?? []);
+  return { ok: true, staff, replaced: replaced && replaced !== m10 ? replaced : "" };
+}

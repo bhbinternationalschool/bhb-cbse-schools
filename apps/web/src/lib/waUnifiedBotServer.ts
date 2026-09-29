@@ -20,9 +20,10 @@ import {
   VISITOR_ASK_LIMIT,
   parseStaffBotSwitch,
   composeStaffFallbackText,
-  composeUnknownStaffAskReply,
   isStaffHumanAsk,
   looksLikeStaffAsk,
+  looksLikeParentAsk,
+  VISITOR_PURPOSE_OPTIONS,
   STAFF_BOT_WINDOW_MINUTES,
   type WaVisitorPurpose,
   categoryForKnownIdentity,
@@ -42,12 +43,46 @@ import {
 } from "@/lib/waTransportBotEngine";
 import { handleWaClassChannelInbound } from "@/lib/waClassChannelServer";
 import { isLikelyClassChannelPost } from "@/lib/waClassChannelEngine";
-import { loadMasters } from "@/lib/masters";
+import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
+import { expectedWindowForTiming } from "@/lib/schoolTiming";
+import { classifyStaffHolidayDay } from "@/lib/holidayPolicy";
 import { handleWaCrmBotInbound } from "@/lib/waCrmBotServer";
 import { handleWaSisBotInbound } from "@/lib/waSisBotServer";
 import { handleWaSurveyBotInbound } from "@/lib/waSurveyBotServer";
 import { handleWaStaffAttendanceInbound } from "@/lib/waStaffAttendanceBotServer";
-import { detectOwnAttendanceAsk } from "@/lib/waStaffAttendanceBotEngine";
+import {
+  detectOwnAttendanceAsk,
+  detectStaffAttBotIntent,
+  isEarlyOutConfirm,
+  parseStaffAttLanguage,
+} from "@/lib/waStaffAttendanceBotEngine";
+import {
+  composeMorningAttendanceAsk,
+  composeOpenWorkReminder,
+  composeRolesFooter,
+  composeStaffFeedbackAck,
+  composeStaffLinkFound,
+  composeStaffLinkIntro,
+  composeStaffLinkRequested,
+  composeStaffWorkGuide,
+  DEFERRED_MAX,
+  isCancelOpenWork,
+  isRolesAsk,
+  makeStaffLinkCode,
+  maskMobile10,
+  matchStaffForLink,
+  parseRoleSwitch,
+  parseSkipOwnAttendance,
+  parseStaffFeedback,
+  parseStaffLinkDecision,
+  shouldAskMorningAttendance,
+  staffWorkProfile,
+  switchableRoles,
+  type OpenWork,
+  type StaffRoleNote,
+} from "@/lib/staffOnboarding";
+import { parseMarkAskReply } from "@/lib/erpCommands";
+import type { StaffRecord } from "@/lib/foundationMasters";
 import { handleErpStaffCommand } from "@/lib/erpCommands.server";
 import { transcribeInboundVoiceNote, voiceNoteTranscriptionEnabled } from "@/lib/voiceNote.server";
 import {
@@ -120,13 +155,29 @@ export type WaUnifiedSession = {
    * staff.
    */
   staffBotUntil?: string;
+  /** IST date the morning "mark your attendance first" was asked. */
+  morningAskOn?: string;
+  /** When it was asked; it stops holding other questions after MORNING_OPEN_MS. */
+  morningAskAt?: string;
+  /** IST date the day's guide (your classes, what to type) was sent. */
+  guideSentOn?: string;
   /**
-   * When an unknown number that writes like staff was last told its number
-   * is not on the staff record, ISO. The reply goes every time; the office
-   * is alerted at most once per STAFF_ASK_ESCALATE_MS, so a teacher typing
-   * five attempts does not ring the office phone five times.
+   * Questions asked while a job was open — a punch waiting for its pin, a
+   * register waiting for its absentees, a draft waiting for YES. Answered
+   * as soon as the job is finished or dropped (answerDeferred).
    */
-  staffAskAt?: string;
+  deferred?: { text: string; at: string }[];
+  /**
+   * An unknown number finding its staff record so the number can be added
+   * to it: asked who, shown the record, then waiting for the director.
+   */
+  staffLink?: {
+    step: "who" | "confirm" | "requested";
+    staffId?: string;
+    code?: string;
+    asks?: number;
+    at: string;
+  } | null;
   /**
    * Until when a staff member asked for quiet ("bot off"), ISO. Commands
    * still answer; only the "didn't understand" reply is held back, for
@@ -347,6 +398,13 @@ async function delegateActiveFlow(
     const staffRole =
       identity.roles.find((r) => r.kind === flow && r.staff) ??
       identity.roles.find((r) => r.staff);
+    // A teacher's plain YES/NO can answer the desk's confirm card when no
+    // class draft is waiting for it — see ErpCommandInbound.allowPlainConfirm.
+    let allowPlainConfirm = false;
+    if (flow === "teacher" && /^(yes|y|haan|ha|han|ok|okay|confirm|no|n|nahi|nahin|cancel|हाँ|हां|ठीक|नहीं|रद्द)$/i.test((opts.text || "").trim())) {
+      const { classChannelPendingDraftFor } = await import("@/lib/waClassChannelServer");
+      allowPlainConfirm = !(await classChannelPendingDraftFor(opts.fromWaId));
+    }
     const cmd = await handleErpStaffCommand({
       actorKey: mobile10,
       channel: "whatsapp",
@@ -355,8 +413,14 @@ async function delegateActiveFlow(
       staff: staffRole?.staff ?? null,
       displayName: session.displayName || identity.displayName,
       audio: opts.audio ?? null,
+      allowPlainConfirm,
     });
     if (cmd.handled) {
+      // Help for someone with more than one role says which one it is for,
+      // and how to switch.
+      const rolesFooter =
+        cmd.audience === "erp_command_help" && cmd.text ? composeRolesFooter(roleNotesFor(identity), flow) : "";
+      const cmdText = rolesFooter ? `${cmd.text}\n\n${rolesFooter}` : cmd.text;
       const ok = await sendBotReply({
         mobile10,
         displayName: session.displayName || identity.displayName,
@@ -364,7 +428,7 @@ async function delegateActiveFlow(
         audience: cmd.audience,
         flow,
         menu: cmd.menu,
-        text: cmd.text,
+        text: cmdText,
         inbound: {
           text: opts.text || (opts.audio ? "[voice note]" : ""),
           waMessageId: opts.waMessageId,
@@ -930,8 +994,6 @@ function isParentBusiness(text: string): boolean {
   return ["dues", "pay", "receipts", "kids", "bus"].includes(detectSisBotIntent(t)) && /^[A-Za-z]+(\s+\S+)?$/.test(t);
 }
 
-const STAFF_ASK_ESCALATE_MS = 6 * 60 * 60_000;
-
 /** How long "bot off" holds back the "didn't understand" reply. */
 const STAFF_QUIET_MS = 12 * 60 * 60_000;
 
@@ -982,39 +1044,525 @@ async function replyStaffFallback(opts: {
   return { replied: ok, escalate: false, audience: "staff_fallback", stub: !ok };
 }
 
+/* ── Staff: the day, open work, roles, number linking ────────────────── */
+
+/** How long the morning "mark your attendance first" holds other questions. */
+const MORNING_OPEN_MS = 30 * 60_000;
+/** How long a class draft waiting for YES counts as open work. */
+const CLASS_DRAFT_OPEN_MS = 30 * 60_000;
+/** A deferred question older than this is dropped rather than answered late. */
+const DEFERRED_TTL_MS = 2 * 60 * 60_000;
+/** How long a number-link conversation waits for the next step. */
+const STAFF_LINK_OPEN_MS = 30 * 60_000;
+/** How long a sent link request waits for the director. */
+const STAFF_LINK_REQUEST_MS = 7 * 24 * 60 * 60_000;
+
+function istNow(): { todayIso: string; hour: number } {
+  const d = new Date(Date.now() + 330 * 60_000);
+  return { todayIso: d.toISOString().slice(0, 10), hour: d.getUTCHours() };
+}
+
+/** Merge a patch into this number's stored session (re-read first). */
+async function patchSession(
+  mobile10: string,
+  base: WaUnifiedSession,
+  patch: Partial<WaUnifiedSession>,
+): Promise<WaUnifiedSession> {
+  const store = await readStore();
+  const next: WaUnifiedSession = { ...(store.sessions[mobile10] ?? base), ...patch, updatedAt: nowIso() };
+  await writeStore({ ...store, sessions: { ...store.sessions, [mobile10]: next } });
+  return next;
+}
+
+function staffRecordFor(identity: WaResolvedIdentity, flow: string): StaffRecord | null {
+  return (
+    identity.roles.find((r) => r.kind === flow && r.staff)?.staff ??
+    identity.roles.find((r) => r.staff)?.staff ??
+    null
+  );
+}
+
+function roleNotesFor(identity: WaResolvedIdentity): StaffRoleNote[] {
+  return identity.roles.map((r) => ({ kind: String(flowKindFromRole(r)), label: r.label, switchWord: r.pickKeyword }));
+}
+
+/** A school day for this staff member: timing says working, and no staff holiday. */
+function isStaffWorkingDay(staff: StaffRecord, todayIso: string): boolean {
+  const masters = loadMasters();
+  const timing = masters.schoolTiming?.default;
+  if (timing && !expectedWindowForTiming(timing, todayIso).isWorking) return false;
+  try {
+    const day = classifyStaffHolidayDay(masters, todayIso, currentAcademicYearCode(masters), staff.stream);
+    return day.status !== "holiday";
+  } catch {
+    return true;
+  }
+}
+
 /**
- * An unknown number writing like a teacher: say plainly that the number is
- * not on the staff record and pass it to the office. Returns null when the
- * message does not look like staff, so the visitor flow carries on as
- * before. See looksLikeStaffAsk.
+ * What this staff member has open and unfinished, or null. Never throws: a
+ * store that cannot be read must not stop the message being answered.
  */
-async function answerUnknownStaffAsk(opts: {
+async function openWorkFor(opts: Parameters<typeof readOpenWork>[0]): Promise<OpenWork | null> {
+  try {
+    return await readOpenWork(opts);
+  } catch (e) {
+    console.error("[wa-unified] open-work check failed", e);
+    return null;
+  }
+}
+
+async function readOpenWork(opts: {
+  mobile10: string;
+  fromWaId: string;
+  session: WaUnifiedSession;
+  flow: string;
+  staff: StaffRecord | null;
+}): Promise<OpenWork | null> {
+  const { todayIso } = istNow();
+  const askedAt = Date.parse(opts.session.morningAskAt || "");
+  if (
+    opts.staff &&
+    opts.session.morningAskOn === todayIso &&
+    Number.isFinite(askedAt) &&
+    Date.now() - askedAt < MORNING_OPEN_MS
+  ) {
+    const { staffPunchToday } = await import("@/lib/staffAttendance.server");
+    const today = await staffPunchToday(opts.staff.id);
+    if (!today?.inTime) {
+      return {
+        kind: "morning_attendance",
+        what: "today's attendance — waiting for your location",
+        how: "send your location — 📎 → *Location* → *Send your current location* (or reply *SKIP*)",
+      };
+    }
+  }
+  const { staffAttendanceOpenWorkFor } = await import("@/lib/waStaffAttendanceBotServer");
+  const punch = await staffAttendanceOpenWorkFor(opts.fromWaId);
+  if (punch) return punch;
+  const { commandDeskOpenWork } = await import("@/lib/erpCommands.server");
+  const desk = await commandDeskOpenWork(opts.mobile10);
+  if (desk) return desk;
+  if (opts.flow === "teacher") {
+    const { classChannelPendingDraftFor } = await import("@/lib/waClassChannelServer");
+    const draft = await classChannelPendingDraftFor(opts.fromWaId);
+    const at = Date.parse(draft?.createdAt || "");
+    if (draft && Number.isFinite(at) && Date.now() - at < CLASS_DRAFT_OPEN_MS) {
+      return {
+        kind: "class_draft",
+        what: `your draft for ${draft.label || "the class"} — "${draft.title.slice(0, 60)}"`,
+        how: "reply *YES* to send it, or *NO* to drop it",
+      };
+    }
+  }
+  return null;
+}
+
+/** Is this message the answer the open job is waiting for? */
+function answersOpenWork(work: OpenWork, text: string): boolean {
+  const t = (text || "").trim();
+  if (!t) return true;
+  if (isCancelOpenWork(t) || isStaffHumanAsk(t)) return true;
+  const attendanceWord =
+    detectStaffAttBotIntent(t) !== "unknown" || !!detectOwnAttendanceAsk(t) || parseStaffAttLanguage(t) !== null;
+  switch (work.kind) {
+    case "morning_attendance":
+      return attendanceWord || parseSkipOwnAttendance(t);
+    case "punch":
+      return attendanceWord || isEarlyOutConfirm(t);
+    case "confirm_card":
+      return /^(yes|y|haan|ha|han|ok|okay|confirm|no|n|nahi|nahin|cancel|हाँ|हां|ठीक|नहीं|रद्द)$/i.test(t) || /^cmd_(yes|no)_/.test(t);
+    case "register":
+      return parseMarkAskReply(t) !== null;
+    case "class_draft":
+      return /^(yes|y|ok|okay|confirm|approve|send|broadcast|publish|no|n|cancel|reject|discard|stop|edit)\b/i.test(t);
+  }
+}
+
+/** Keep a question to answer once the open job is done. */
+async function deferQuestion(mobile10: string, session: WaUnifiedSession, text: string): Promise<void> {
+  const q = (text || "").trim();
+  if (!q) return;
+  const queue = [...(session.deferred ?? []).filter((d) => d.text !== q), { text: q, at: nowIso() }].slice(-DEFERRED_MAX);
+  await patchSession(mobile10, session, { deferred: queue });
+}
+
+/**
+ * Answer the questions kept while a job was open — only when nothing is
+ * open any more. Each is run exactly as if it had just been sent.
+ */
+async function answerDeferred(
+  flow: WaUnifiedFlow,
+  opts: { fromWaId: string; profileName?: string },
+  identity: WaResolvedIdentity,
+): Promise<void> {
+  const mobile10 = waNormalizeLocal10(opts.fromWaId);
+  const session = (await readStore()).sessions[mobile10];
+  const queue = session?.deferred ?? [];
+  if (!session || !queue.length) return;
+  const staff = staffRecordFor(identity, String(flow));
+  if (await openWorkFor({ mobile10, fromWaId: opts.fromWaId, session, flow: String(flow), staff })) return;
+  // Cleared before running, so a question that itself opens a job is not
+  // answered twice.
+  await patchSession(mobile10, session, { deferred: [] });
+  for (const d of queue) {
+    const at = Date.parse(d.at);
+    if (!Number.isFinite(at) || Date.now() - at > DEFERRED_TTL_MS) continue;
+    const now = (await readStore()).sessions[mobile10] ?? session;
+    await sendBotReply({
+      mobile10,
+      displayName: now.displayName || identity.displayName,
+      category: categoryForUnifiedAudience(flow, String(flow)),
+      audience: "staff_deferred",
+      flow: String(flow),
+      text: `↩️ Now your earlier question: "${d.text.length > 80 ? `${d.text.slice(0, 77)}…` : d.text}"`,
+    });
+    try {
+      await delegateStaffAware(flow, { fromWaId: opts.fromWaId, text: d.text, profileName: opts.profileName }, identity, now);
+    } catch (e) {
+      console.error("[wa-unified] deferred question failed", e);
+    }
+  }
+}
+
+/** The day's guide: what they teach, and what to type for each job. */
+async function sendDayGuide(opts: {
+  mobile10: string;
+  identity: WaResolvedIdentity;
+  flow: string;
+  session: WaUnifiedSession;
+  punchedJustNow: boolean;
+}): Promise<void> {
+  const staff = staffRecordFor(opts.identity, opts.flow);
+  if (!staff) return;
+  const masters = loadMasters();
+  const profile = staffWorkProfile(staff, masters, currentAcademicYearCode(masters));
+  const roles = opts.identity.roles.length > 1 ? roleNotesFor(opts.identity) : undefined;
+  const text = composeStaffWorkGuide({
+    firstName: (staff.fullName || opts.identity.displayName || "").split(" ")[0] || "",
+    profile,
+    office: opts.flow === "staff" || opts.flow === "owner",
+    roles,
+    currentKind: opts.flow,
+    punchedJustNow: opts.punchedJustNow,
+  });
+  await sendBotReply({
+    mobile10: opts.mobile10,
+    displayName: staff.fullName || opts.identity.displayName,
+    category: categoryForUnifiedAudience(opts.flow, opts.flow),
+    audience: "staff_day_guide",
+    flow: opts.flow,
+    text,
+  });
+  await patchSession(opts.mobile10, opts.session, { guideSentOn: istNow().todayIso });
+}
+
+const GREETING_ONLY =
+  /^(hi+|hello+|hey|hii+|namaste|namaskar|good\s*(morning|afternoon|evening)|gm|pranam|jai\s*hind|नमस्ते|प्रणाम|सुप्रभात)[\s!.🙏]*$/iu;
+const GUIDE_ASK =
+  /^(my\s+(classes|class\s+list|work|day|duties|subjects)|guide|what\s+can\s+i\s+do|how\s+to\s+use|meri\s+classes|mera\s+kaam|मेरी\s+कक्षाएँ|मेरा\s+काम)[\s?!.]*$/iu;
+
+/**
+ * The staff side of delegateActiveFlow: the morning attendance question,
+ * finishing open work before anything new, the day's guide, and messages
+ * for the director. Other flows pass straight through.
+ */
+async function delegateStaffAware(
+  flow: WaUnifiedFlow,
+  opts: Parameters<typeof delegateActiveFlow>[1],
+  identity: WaResolvedIdentity,
+  session: WaUnifiedSession,
+): Promise<Awaited<ReturnType<typeof delegateActiveFlow>>> {
+  if (flow !== "teacher" && flow !== "staff" && flow !== "owner") {
+    return delegateActiveFlow(flow, opts, identity, session);
+  }
+  const mobile10 = waNormalizeLocal10(opts.fromWaId);
+  const text = (opts.text || "").trim();
+  const staff = staffRecordFor(identity, flow);
+  const displayName = session.displayName || identity.displayName;
+  const reply = async (body: string, audience: string, escalate = false) => {
+    const ok = await sendBotReply({
+      mobile10,
+      displayName,
+      category: categoryForUnifiedAudience(flow, flow),
+      audience,
+      flow,
+      text: body,
+      inbound: { text: text || (opts.audio ? "[voice note]" : ""), waMessageId: opts.waMessageId },
+    });
+    return { replied: ok, escalate, audience, stub: !ok };
+  };
+
+  // 1. Something is open: finish it first, answer this after.
+  const work = await openWorkFor({ mobile10, fromWaId: opts.fromWaId, session, flow, staff });
+  if (work && text && !answersOpenWork(work, text)) {
+    await deferQuestion(mobile10, session, text);
+    return reply(composeOpenWorkReminder(work, text), "staff_open_work");
+  }
+  if (work?.kind === "morning_attendance" && parseSkipOwnAttendance(text)) {
+    const next = await patchSession(mobile10, session, { morningAskAt: "" });
+    await reply("OK — not marking it here today.", "staff_morning_skip");
+    if (next.guideSentOn !== istNow().todayIso) {
+      await sendDayGuide({ mobile10, identity, flow, session: next, punchedJustNow: false });
+    }
+    await answerDeferred(flow, opts, identity);
+    return { replied: true, escalate: false, audience: "staff_morning_skip", stub: false };
+  }
+
+  // 2. The first message of a working morning: their own attendance first.
+  if (!work && staff && text && !opts.location) {
+    const { todayIso, hour } = istNow();
+    const attendanceWord = detectStaffAttBotIntent(text) !== "unknown" || !!detectOwnAttendanceAsk(text);
+    const lastAskedOn = session.morningAskOn || "";
+    let punchedIn = true;
+    let dayOn = false;
+    if (lastAskedOn !== todayIso && hour >= 5 && hour < 15) {
+      try {
+        dayOn = isStaffWorkingDay(staff, todayIso);
+        if (dayOn) {
+          const { staffPunchToday } = await import("@/lib/staffAttendance.server");
+          punchedIn = !!(await staffPunchToday(staff.id))?.inTime;
+        }
+      } catch (e) {
+        // Could not tell — do not stand between them and their question.
+        console.error("[wa-unified] morning attendance check failed", e);
+        dayOn = false;
+      }
+    }
+    if (dayOn) {
+      if (
+        shouldAskMorningAttendance({ flow, todayIso, istHour: hour, lastAskedOn, punchedIn, workingDay: true }) &&
+        !attendanceWord &&
+        !isStaffHumanAsk(text)
+      ) {
+        const next = await patchSession(mobile10, session, { morningAskOn: todayIso, morningAskAt: nowIso() });
+        const meaningful = !GREETING_ONLY.test(text) && !parseSkipOwnAttendance(text);
+        if (meaningful) await deferQuestion(mobile10, next, text);
+        return reply(
+          composeMorningAttendanceAsk({
+            firstName: (staff.fullName || displayName || "").split(" ")[0] || "",
+            deferredText: meaningful ? text : "",
+          }),
+          "staff_morning_attendance",
+        );
+      }
+      // Asked once a day at most — an attendance word or an existing punch
+      // counts as the day's answer.
+      await patchSession(mobile10, session, { morningAskOn: todayIso });
+    }
+  }
+
+  // 3. "My classes", "guide" — the day's guide on demand.
+  if (text && GUIDE_ASK.test(text)) {
+    await sendDayGuide({ mobile10, identity, flow, session, punchedJustNow: false });
+    return { replied: true, escalate: false, audience: "staff_day_guide", stub: false };
+  }
+
+  // 4. "Suggestion: …", "Requirement: …", "Complaint: …" — to the director.
+  const feedback = parseStaffFeedback(text);
+  if (feedback) {
+    const { relayEscalation } = await import("@/lib/waRelay.server");
+    const label = feedback.kind === "suggestion" ? "Suggestion" : feedback.kind === "complaint" ? "Complaint" : "Requirement";
+    const relay = await relayEscalation({
+      fromWaId: opts.fromWaId,
+      text: `${label} from ${staff?.fullName || displayName}${staff?.empCode ? ` (${staff.empCode})` : ""}: ${feedback.body}`,
+      waMessageId: opts.waMessageId,
+      profileName: opts.profileName,
+      audience: "staff_feedback",
+      category: "director",
+      reason: `staff ${feedback.kind} for the director`,
+    });
+    return reply(composeStaffFeedbackAck(feedback.kind, relay.ok && relay.forwarded > 0), "staff_feedback");
+  }
+
+  const r = await delegateActiveFlow(flow, opts, identity, session);
+  // The job this message finished may have been holding questions.
+  if (work) await answerDeferred(flow, opts, identity);
+  return r;
+}
+
+/**
+ * An unknown number that writes like staff: find their staff record, show
+ * it (masked), and on YES ask the director to add this number to it.
+ * Returns null when this is not a linking conversation.
+ */
+async function staffLinkStep(opts: {
   mobile10: string;
   text: string;
   session: WaUnifiedSession;
-  store: WaUnifiedStore;
   displayName: string;
   inbound: { text: string; waMessageId?: string };
 }): Promise<{ replied: boolean; escalate: boolean; audience: string; stub: boolean } | null> {
-  if (!looksLikeStaffAsk(opts.text)) return null;
-  const last = Date.parse(opts.session.staffAskAt || "");
-  const escalate = !Number.isFinite(last) || Date.now() - last > STAFF_ASK_ESCALATE_MS;
-  const next: WaUnifiedSession = {
-    ...opts.session,
-    // Not a failed name or purpose answer: do not count it towards parking.
-    staffAskAt: escalate ? nowIso() : opts.session.staffAskAt,
-    updatedAt: nowIso(),
+  const { mobile10, session } = opts;
+  const text = (opts.text || "").trim();
+  const link = session.staffLink ?? null;
+  const age = link ? Date.now() - Date.parse(link.at) : Infinity;
+  const live = !!link && Number.isFinite(age) && age < (link.step === "requested" ? STAFF_LINK_REQUEST_MS : STAFF_LINK_OPEN_MS);
+  const say = async (body: string, audience = "visitor_staff_link", escalate = false) => {
+    const ok = await sendBotReply({
+      mobile10,
+      displayName: opts.displayName,
+      category: "general",
+      audience,
+      text: body,
+      inbound: opts.inbound,
+    });
+    return { replied: ok, escalate, audience, stub: !ok };
   };
-  await writeStore({ ...opts.store, sessions: { ...opts.store.sessions, [opts.mobile10]: next } });
-  const ok = await sendBotReply({
-    mobile10: opts.mobile10,
-    displayName: opts.displayName,
-    category: "general",
-    audience: "visitor_staff_unlinked",
-    text: composeUnknownStaffAskReply(),
-    inbound: opts.inbound,
+  const save = (patch: Partial<WaUnifiedSession>) => patchSession(mobile10, session, patch);
+
+  if (!live) {
+    if (!looksLikeStaffAsk(text) && !/^(i\s*(am|'m)\s+(a\s+)?(teacher|staff)|main\s+teacher|mai\s+teacher|staff\s+hu|teacher\s+hu|school\s+staff)\b/i.test(text)) {
+      return null;
+    }
+    await save({ staffLink: { step: "who", asks: 0, at: nowIso() } });
+    return say(composeStaffLinkIntro());
+  }
+
+  if (link!.step === "requested") {
+    return say(
+      `Your request *${link!.code}* to add this number to your staff record is waiting for approval. You'll get a message here as soon as it is done.`,
+    );
+  }
+
+  const masters = loadMasters();
+  if (link!.step === "who") {
+    // Answering like a family or a visitor ("admission", "fees", a menu
+    // tap) leaves the staff search and carries on as before.
+    if (
+      looksLikeParentAsk(text) ||
+      VISITOR_PURPOSE_OPTIONS.some((p) => p.keyword === text.toUpperCase()) ||
+      /^purpose_|^menu_/.test(text) ||
+      /[?？]/.test(text) ||
+      text.split(/\s+/).filter(Boolean).length > 5
+    ) {
+      await save({ staffLink: null });
+      return null;
+    }
+    const { match, ambiguous } = matchStaffForLink(text, masters.staff ?? []);
+    if (!match) {
+      const asks = (link!.asks ?? 0) + 1;
+      if (asks >= 3) {
+        await save({ staffLink: null });
+        return say(
+          "I couldn't find your staff record. Please ask the office to add this number to your staff profile — your message has been passed to them.",
+          "visitor_staff_unlinked",
+          true,
+        );
+      }
+      await save({ staffLink: { ...link!, asks, at: nowIso() } });
+      return say(
+        ambiguous > 1
+          ? "More than one staff member has that name — please send your *employee code* (e.g. STF-007)."
+          : "I couldn't find that on the staff record. Please send your *full name exactly as on the record*, or your *employee code* (e.g. STF-007).",
+      );
+    }
+    const designation = (masters.designations ?? []).find((d) => d.id === match.designationId)?.name ?? "";
+    await save({ staffLink: { step: "confirm", staffId: match.id, at: nowIso() } });
+    return say(
+      composeStaffLinkFound({
+        fullName: match.fullName,
+        empCode: match.empCode,
+        designation,
+        registeredMobile: match.mobile,
+        thisMobile: mobile10,
+      }),
+    );
+  }
+
+  // step === "confirm"
+  if (/^(yes|y|haan|ha|han|ok|okay|confirm|हाँ|हां)$/i.test(text)) {
+    const staff = (masters.staff ?? []).find((s) => s.id === link!.staffId);
+    if (!staff) {
+      await save({ staffLink: null });
+      return say("That staff record is no longer available. Please ask the office.", "visitor_staff_unlinked", true);
+    }
+    const code = makeStaffLinkCode();
+    await save({ staffLink: { ...link!, step: "requested", code, at: nowIso() } });
+    const { relayEscalation } = await import("@/lib/waRelay.server");
+    await relayEscalation({
+      fromWaId: mobile10,
+      text: `Request ${code}: ${staff.fullName} (${staff.empCode || "no code"}) asks to add ${mobile10} to their staff record (registered mobile ${maskMobile10(staff.mobile)}). Reply LINK OK ${code} to approve or LINK NO ${code} to refuse.`,
+      audience: "visitor_staff_link",
+      category: "director",
+      reason: `add a number to a staff record — reply LINK OK ${code} or LINK NO ${code}`,
+    });
+    return say(composeStaffLinkRequested(code));
+  }
+  if (/^(no|n|nahi|nahin|नहीं)$/i.test(text)) {
+    await save({ staffLink: { step: "who", asks: 0, at: nowIso() } });
+    return say("OK — please send your *full name* as on the staff record, or your *employee code* (e.g. STF-007).");
+  }
+  return say("Please reply *YES* to add this number to that record, or *NO* if it is not you.");
+}
+
+/**
+ * "LINK OK 4821" / "LINK NO 4821" from the director or principal (or an
+ * office phone that takes director or staff messages). Adds the requester's
+ * number to their staff record and tells both sides. Returns handled:false
+ * for anyone else, so their message carries on as normal.
+ */
+export async function handleStaffLinkDecision(opts: { fromWaId: string; text: string }): Promise<{ handled: boolean }> {
+  const decision = parseStaffLinkDecision(opts.text);
+  if (!decision) return { handled: false };
+  const approver10 = waNormalizeLocal10(opts.fromWaId);
+  const identity = await resolveWaIdentityServer(opts.fromWaId);
+  let allowed = identity.roles.some((r) => r.kind === "owner");
+  if (!allowed) {
+    const { loadRelayRoutes } = await import("@/lib/waRelay.server");
+    const rr = await loadRelayRoutes();
+    allowed =
+      rr.ok &&
+      rr.routes.some(
+        (r) => r.active && r.mobile10 === approver10 && (r.categories.includes("director") || r.categories.includes("staff")),
+      );
+  }
+  if (!allowed) return { handled: false };
+
+  const store = await readStore();
+  const hit = Object.entries(store.sessions).find(
+    ([, s]) => s.staffLink?.step === "requested" && s.staffLink.code === decision.code,
+  );
+  if (!hit) {
+    await sendWhatsAppText({ toMobile: approver10, body: `No waiting request ${decision.code} — it may already have been decided.` });
+    return { handled: true };
+  }
+  const [requester10, reqSession] = hit;
+  const link = reqSession.staffLink!;
+  const masters = loadMasters();
+  const staff = (masters.staff ?? []).find((s) => s.id === link.staffId);
+  const who = staff ? `${staff.fullName}${staff.empCode ? ` (${staff.empCode})` : ""}` : "the staff record";
+
+  if (!decision.approve) {
+    await patchSession(requester10, reqSession, { staffLink: null });
+    await sendWhatsAppText({
+      toMobile: requester10,
+      body: "Your request to add this number to the staff record was not approved. Please speak to the office.",
+    });
+    await sendWhatsAppText({ toMobile: approver10, body: `Refused — ${requester10} was not added to ${who}.` });
+    return { handled: true };
+  }
+
+  const { addStaffAltMobile } = await import("@/lib/waRoleResolver.server");
+  const added = await addStaffAltMobile(link.staffId || "", requester10);
+  if (!added.ok) {
+    await sendWhatsAppText({ toMobile: approver10, body: `Could not add ${requester10} to ${who}: ${added.error}. Please add it in Staff → profile.` });
+    return { handled: true };
+  }
+  // A fresh session: the next message is from a known staff member.
+  const fresh = await readStore();
+  const sessions = { ...fresh.sessions };
+  delete sessions[requester10];
+  await writeStore({ ...fresh, sessions });
+  await sendWhatsAppText({
+    toMobile: requester10,
+    body: `✅ Approved — this number is now on your staff record (${added.staff.fullName}). Send *hi* to open your staff menu.`,
   });
-  return { replied: ok, escalate, audience: "visitor_staff_unlinked", stub: !ok };
+  await sendWhatsAppText({
+    toMobile: approver10,
+    body: `✅ Added ${requester10} to ${who}${added.replaced ? ` (replacing ${maskMobile10(added.replaced)} as the second number)` : ""}.`,
+  });
+  return { handled: true };
 }
 
 export async function handleWaUnifiedInbound(opts: {
@@ -1265,6 +1813,19 @@ export async function handleWaUnifiedInbound(opts: {
       fromUnified: true,
     });
     if (att.handled) {
+      // The morning punch: show the day (what they teach, what to type) once,
+      // then answer whatever they asked while it was waiting.
+      if (att.punched === "in") {
+        const staffFlow: WaUnifiedFlow =
+          session?.activeFlow && ["teacher", "staff", "owner"].includes(String(session.activeFlow))
+            ? session.activeFlow
+            : flowKindFromRole(identity.roles.find((r) => ["teacher", "staff", "owner"].includes(flowKindFromRole(r)))!);
+        const base = session ?? sessionFor(mobile10, identity, opts.profileName);
+        if (base.guideSentOn !== istNow().todayIso) {
+          await sendDayGuide({ mobile10, identity, flow: String(staffFlow), session: base, punchedJustNow: true });
+        }
+        await answerDeferred(staffFlow, opts, identity);
+      }
       return { replied: att.replied, escalate: att.escalate, audience: "staff_attendance", stub: att.stub, error: att.error };
     }
   }
@@ -1282,7 +1843,10 @@ export async function handleWaUnifiedInbound(opts: {
       hasLocation: !!opts.location,
     })
   ) {
+    // A number-link request survives "hi": it is waiting on the director.
+    const keptLink = session?.staffLink ?? null;
     session = sessionFor(mobile10, identity, opts.profileName);
+    if (!identity.isKnown && keptLink) session.staffLink = keptLink;
     if (identity.isKnown && identity.roles.length === 1) {
       session.phase = "active";
       session.activeFlow = identity.roles[0]!.kind;
@@ -1336,16 +1900,68 @@ export async function handleWaUnifiedInbound(opts: {
   // The bot gave up and handed the thread to a person. Everything is
   // still logged; nothing more is sent. They get out by saying "hi" or
   // "menu" (handled above), or by finally naming what they want.
-  if (!identity.isKnown && session.phase === "parked") {
-    const staffAsk = await answerUnknownStaffAsk({
+  // More than one role on this number — a teacher whose child studies here —
+  // switches with the role's word on its own, at any time, and "ROLE" shows
+  // them all. See parseRoleSwitch / composeRolesFooter.
+  if (identity.isKnown && switchableRoles(roleNotesFor(identity)).length > 1 && text) {
+    const notes = roleNotesFor(identity);
+    const current = String(session.activeFlow ?? "");
+    const target = parseRoleSwitch(text, notes, current);
+    if (target || isRolesAsk(text)) {
+      if (target) {
+        const role = identity.roles.find((r) => String(flowKindFromRole(r)) === target)!;
+        session.activeFlow = target as WaUnifiedFlow;
+        session.phase = "active";
+        session.displayName = role.staff?.fullName || identity.displayName;
+        await patchSession(mobile10, session, {
+          activeFlow: session.activeFlow,
+          phase: "active",
+          displayName: session.displayName,
+        });
+        const back = switchableRoles(notes).find((n) => n.kind !== target)?.switchWord ?? "MENU";
+        await sendBotReply({
+          mobile10,
+          displayName: session.displayName,
+          category: categoryForUnifiedAudience("role_pick", target),
+          audience: "role_switch",
+          flow: target,
+          text: `🔁 Switched to *${role.pickKeyword}* — ${role.label}.\nEverything you send now is answered in this role. Send *${back}* to switch back, or *ROLE* to see your roles.`,
+          inbound: inboundLog,
+        });
+        const hindi = unifiedHindiFor(identity);
+        const menu = roleFlowInteractiveMenu(target, session.displayName, hindi);
+        if (menu) {
+          await sendBotReply({ mobile10, displayName: session.displayName, category: categoryForUnifiedAudience("role_pick", target), audience: target, flow: target, menu });
+        }
+        return { replied: true, escalate: false, audience: "role_switch", stub: false };
+      }
+      const ok = await sendBotReply({
+        mobile10,
+        displayName: session.displayName || identity.displayName,
+        category: categoryForKnownIdentity(identity),
+        audience: "role_list",
+        text: composeRolesFooter(notes, current),
+        inbound: inboundLog,
+      });
+      return { replied: ok, escalate: false, audience: "role_list", stub: !ok };
+    }
+  }
+
+  // An unknown number that writes like staff — "Mere class ka attendance
+  // lena hai" from a teacher whose number is not on the record — is offered
+  // a way to find that record and ask for this number to be added to it.
+  if (!identity.isKnown) {
+    const linkStep = await staffLinkStep({
       mobile10,
       text,
       session,
-      store,
       displayName: session.visitorName || identity.displayName,
       inbound: inboundLog,
     });
-    if (staffAsk) return staffAsk;
+    if (linkStep) return linkStep;
+  }
+
+  if (!identity.isKnown && session.phase === "parked") {
     const purpose = detectVisitorPurpose(text);
     if (!purpose) {
       await sendBotReply({
@@ -1376,15 +1992,6 @@ export async function handleWaUnifiedInbound(opts: {
       });
       return { replied: false, escalate: false, audience: "visitor_forward", stub: false };
     }
-    const staffAsk = await answerUnknownStaffAsk({
-      mobile10,
-      text,
-      session,
-      store,
-      displayName: identity.displayName,
-      inbound: inboundLog,
-    });
-    if (staffAsk) return staffAsk;
     // A document arriving here is the thing they came to send, not their
     // name. Keep it, so JOB can file it in a moment.
     if (opts.document?.mediaId) {
@@ -1460,15 +2067,6 @@ export async function handleWaUnifiedInbound(opts: {
         });
         return { replied: false, escalate: false, audience: "visitor_forward", stub: false };
       }
-      const staffAsk = await answerUnknownStaffAsk({
-        mobile10,
-        text,
-        session,
-        store,
-        displayName: session.visitorName || session.displayName,
-        inbound: inboundLog,
-      });
-      if (staffAsk) return staffAsk;
       const asks = (session.visitorAsks ?? 0) + 1;
       session.visitorAsks = asks;
       const giveUp = asks >= VISITOR_ASK_LIMIT;
@@ -1577,7 +2175,7 @@ export async function handleWaUnifiedInbound(opts: {
         sessions: { ...store.sessions, [mobile10]: { ...session, updatedAt: nowIso() } },
       };
       await writeStore(store);
-      return delegateActiveFlow(session.activeFlow, { ...opts, text }, identity, session);
+      return delegateStaffAware(session.activeFlow, { ...opts, text }, identity, session);
     }
     if (!role) {
       const pack = menuKnownUserGreeting(identity, unifiedHindiFor(identity));
@@ -1637,7 +2235,7 @@ export async function handleWaUnifiedInbound(opts: {
       sessions: { ...store.sessions, [mobile10]: { ...session, updatedAt: nowIso() } },
     };
     await writeStore(store);
-    return delegateActiveFlow(
+    return delegateStaffAware(
       session.activeFlow,
       { ...opts, text },
       identity,

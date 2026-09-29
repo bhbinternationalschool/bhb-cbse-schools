@@ -180,6 +180,31 @@ export async function POST(req: Request) {
       console.error("[wa/webhook] homework remark check failed", msg.waMessageId, e);
     }
 
+    // "LINK OK 4821" — the director or principal approving a staff member's
+    // request to add their number to the staff record. Ahead of the relay,
+    // because the natural way to answer is a swipe-reply on the forwarded
+    // request, and the relay would pass those words on to the requester
+    // instead of acting on them. Anyone not allowed to decide falls through
+    // untouched (handleStaffLinkDecision returns handled:false).
+    if (/^\s*link\s/i.test(msg.text || "")) {
+      try {
+        const { handleStaffLinkDecision } = await import("@/lib/waUnifiedBotServer");
+        const decision = await handleStaffLinkDecision({ fromWaId: msg.fromWaId, text: msg.text });
+        if (decision.handled) {
+          results.push({
+            audience: "staff_link_decision",
+            from: msg.fromWaId,
+            escalate: false,
+            replied: true,
+            stub: false,
+          });
+          continue;
+        }
+      } catch (e) {
+        console.error("[wa/webhook] staff link decision failed", msg.waMessageId, e);
+      }
+    }
+
     // An office phone answering a forwarded message. Checked FIRST, before
     // media intake, the transport pin, the staff bots and the unified bot:
     // office phones are usually staff, and "#K7Q2 fees received" read by the
