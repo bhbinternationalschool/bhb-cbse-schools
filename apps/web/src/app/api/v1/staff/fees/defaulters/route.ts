@@ -4,8 +4,8 @@ import { assertMobileFeature } from "@/lib/api/v1/mobileAccess.server";
 import { classLabelOf, istToday, loadFeeContext, openDuesFor } from "@/lib/api/v1/staffFees";
 import { loadFeeFollowups } from "@/lib/api/v1/feeFollowups.server";
 import { formatInr } from "@/lib/fees";
-import { householdWhatsApp } from "@/lib/sis";
-import { scopeAllows, staffSectionScope } from "@/lib/api/v1/staffScope";
+import { householdWhatsApp, studentsInSession } from "@/lib/sis";
+import { sectionKey, staffSectionScope } from "@/lib/api/v1/staffScope";
 
 export const runtime = "nodejs";
 
@@ -24,20 +24,32 @@ function daysSince(iso: string | null, today: string): number {
  *
  * A class teacher sees only their own sections; the office and leadership
  * see the school. `classId`/`sectionId` narrow it further, `q` searches.
+ *
+ * Every class teacher may read their own class's dues (director,
+ * 2026-09-29), with no fee-module grant and no mobile switch: it is their
+ * class. Anyone else still needs the "fee_defaulters" feature.
  */
 export async function GET(request: Request) {
   try {
     const ctx = await resolveApiAuth(request);
-    assertMobileFeature(ctx, "fee_defaulters");
+    const scope = await staffSectionScope(ctx);
+    try {
+      assertMobileFeature(ctx, "fee_defaulters");
+    } catch (e) {
+      if (scope.classTeacherOf.size === 0) throw e;
+    }
+    // Outside the office, dues are the class teacher's business: their own
+    // class-teacher sections only, not every section they teach a subject in.
+    const inMyScope = (classId: string, sectionId: string) =>
+      scope.unrestricted || scope.classTeacherOf.has(sectionKey(classId, sectionId));
     const url = new URL(request.url);
     const classId = url.searchParams.get("classId")?.trim() || "";
     const sectionId = url.searchParams.get("sectionId")?.trim() || "";
     const q = (url.searchParams.get("q") || "").trim().toLowerCase();
     const minRupees = Number(url.searchParams.get("min") || 0);
 
-    const scope = await staffSectionScope(ctx);
     const { sis, fees, masters } = await loadFeeContext();
-    const ay = ctx.session.academicYearCode;
+    const ay = scope.academicYearCode;
     const today = istToday();
 
     let followups: Awaited<ReturnType<typeof loadFeeFollowups>>["meetings"] = [];
@@ -77,9 +89,8 @@ export async function GET(request: Request) {
     };
 
     const byHousehold = new Map<string, Row>();
-    for (const s of sis.students) {
-      if (s.status !== "active" || s.academicYearCode !== ay) continue;
-      if (!scopeAllows(scope, s.classId, s.sectionId)) continue;
+    for (const s of studentsInSession(sis, ay)) {
+      if (!inMyScope(s.classId, s.sectionId)) continue;
       if (classId && s.classId !== classId) continue;
       if (sectionId && s.sectionId !== sectionId) continue;
 

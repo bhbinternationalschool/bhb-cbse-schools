@@ -1,5 +1,6 @@
 "use client";
 
+import { ClassDuesCard } from "@/components/dashboard/ClassDuesCard";
 import { useMyTeaching } from "@/components/staff/useMyTeaching";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -269,6 +270,8 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
           </p>
         </div>
       ) : null}
+
+      {mySections.length > 0 ? <ClassDuesCard /> : null}
 
       {unloggedPeriods.length > 0 ? (
         <Link

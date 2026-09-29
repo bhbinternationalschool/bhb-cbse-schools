@@ -1,7 +1,7 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { resolveMobileAccess } from "@/lib/api/v1/mobileAccess.server";
-import { resolveStaffHomeKind } from "@/lib/staffHomeKind.server";
+import { staffSectionScope } from "@/lib/api/v1/staffScope";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 
 export const runtime = "nodejs";
@@ -19,11 +19,18 @@ export async function GET(request: Request) {
     }
     await ensureSchoolMirrorHydrated();
     const access = resolveMobileAccess(ctx);
+    // A class teacher always sees their own class's fee dues (read-only,
+    // scoped server-side in /api/v1/staff/fees/defaulters).
+    const scope = await staffSectionScope(ctx);
+    const features =
+      scope.classTeacherOf.size > 0 && !access.features.includes("fee_defaulters")
+        ? [...access.features, "fee_defaulters"]
+        : access.features;
     return apiOk({
       staffId: ctx.session.staffId || "",
       fullName: ctx.session.fullName,
-      homeKind: resolveStaffHomeKind(ctx.session, ctx.masters),
-      features: access.features,
+      homeKind: scope.kind,
+      features,
       blockedByRbac: access.blockedByRbac,
     });
   } catch (e) {
