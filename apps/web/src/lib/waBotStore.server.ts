@@ -182,5 +182,40 @@ export async function saveWaBotSlice<T>(
   value: T,
 ): Promise<void> {
   const bundle = await loadBundle();
-  await saveBundle({ ...bundle, [key]: value });
+  // Nothing changed → nothing to write. Several bot paths save on every
+  // message whether or not their slice moved.
+  try {
+    if (JSON.stringify(bundle[key] ?? null) === JSON.stringify(value ?? null)) return;
+  } catch {
+    /* not serialisable as-is — fall through and save */
+  }
+  const next: WaBotPersistBundle = {
+    ...bundle,
+    [key]: value,
+    version: 1,
+    updatedAt: new Date().toISOString(),
+  };
+  cache = next;
+  loaded = true;
+
+  const { pushWaThreadsSliceToDb } = await import("@/lib/waThreadsNormalized.server");
+  const desk = await pushWaThreadsSliceToDb(key, value, next);
+  if (!desk.ok) {
+    console.error("[wa-bot-store] DESK PUSH FAILED — bot threads are NOT persisting:", desk.error);
+  }
+
+  const { deskSkipBlobPush } = await import("@/lib/deskCutover");
+  if (!deskSkipBlobPush("wa_threads")) {
+    void trackServerWork(pushServerBlob("wa_bot_threads_state", next));
+  }
+  // A pretty-printed copy of the whole bundle on every message cost CPU on
+  // the one-CPU server and bought nothing: Cloud Run's disk is thrown away.
+  if (process.env.NODE_ENV !== "production") {
+    try {
+      await fs.mkdir(path.dirname(LOCAL_FILE), { recursive: true });
+      await fs.writeFile(LOCAL_FILE, JSON.stringify(next), "utf8");
+    } catch {
+      /* ephemeral disk */
+    }
+  }
 }

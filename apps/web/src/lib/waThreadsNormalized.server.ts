@@ -93,6 +93,47 @@ function countThreadsInBundle(bundle: WaBotPersistBundle): number {
   return n;
 }
 
+/**
+ * Write ONE bot slice. saveWaBotSlice used to push the whole bundle for a
+ * change to one slice: a prune SELECT, eight upserts and the sync meta, per
+ * WhatsApp message. On 2026-09-29, when ~15 staff messaged the bot while
+ * signing in to the ERP, that was ~1,400 writes in five minutes on the same
+ * one-CPU web server the staff were waiting on. One slice, one upsert.
+ */
+export async function pushWaThreadsSliceToDb(
+  key: WaBotSliceKey,
+  payload: unknown,
+  bundle: WaBotPersistBundle,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!waThreadsDualWriteDbEnabled()) return { ok: true };
+  if (payload == null) return { ok: true };
+  const ctx = await resolveCtx();
+  if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
+  const { sb, tenantId } = ctx;
+  const now = nowIso();
+  const { error } = await sb.from("wa_desk_bot_slices").upsert({
+    tenant_id: tenantId,
+    slice_key: key,
+    payload,
+    updated_at: now,
+  });
+  if (error) {
+    console.error("[wa-threads] slice upsert FAILED", key, error.message);
+    return { ok: false, error: `${key}: ${error.message}` };
+  }
+  await sb.from("wa_desk_sync_meta").upsert(
+    {
+      tenant_id: tenantId,
+      slice_count: WA_BOT_SLICE_KEYS.filter((k) => bundle[k] != null).length,
+      thread_count: countThreadsInBundle(bundle),
+      last_updated_at: bundle.updatedAt || now,
+      updated_at: now,
+    },
+    { onConflict: "tenant_id" },
+  );
+  return { ok: true };
+}
+
 export async function pushWaThreadsDeskToDb(
   bundle: WaBotPersistBundle,
 ): Promise<{ ok: boolean; error?: string }> {
