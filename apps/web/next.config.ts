@@ -15,6 +15,15 @@ const nextConfig: NextConfig = {
         destination: "/fees/defaulters?tab=policy",
         permanent: false,
       },
+      // Old module URLs. A page-level redirect() inside the (erp) layout
+      // streams the shell first and then swaps it on the client, which
+      // crashed React ("reading 'removeChild'") and left a blank screen
+      // (seen on /student-leave, 2026-09-30). An HTTP redirect never renders.
+      { source: "/student-leave", destination: "/attendance?tab=leave", permanent: false },
+      { source: "/notices", destination: "/comms?tab=notices", permanent: false },
+      { source: "/store", destination: "/inventory", permanent: false },
+      { source: "/purchase", destination: "/inventory?tab=purchase", permanent: false },
+      { source: "/rte", destination: "/admissions?tab=rte", permanent: false },
     ];
   },
   transpilePackages: ["@bhb/time"],

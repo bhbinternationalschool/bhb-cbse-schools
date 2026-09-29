@@ -5,7 +5,6 @@ import { staffSectionScope } from "@/lib/api/v1/staffScope";
 import type { DomainBlobTable } from "@/lib/domainBlobPersistence";
 import { domainBlobRbacModule } from "@/lib/domainBlobRbac";
 import { fetchDomainBlobFromDb, pushDomainBlobToDb } from "@/lib/domainBlob.server";
-import { staffSectionScope } from "@/lib/api/v1/staffScope";
 
 /**
  * Blobs that hold a whole-school desk a teacher now edits piece by piece
