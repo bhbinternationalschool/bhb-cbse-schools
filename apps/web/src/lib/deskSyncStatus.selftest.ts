@@ -106,6 +106,44 @@ async function main() {
     console.log("  ok  the reason is explained in words the counter can act on");
   }
 
+  // The recording itself must be reachable. The 24 Aug sweep that added
+  // recordDeskSync* to every desk client appended it after the push's last
+  // `return` in the student-attendance and masters clients, so neither ever
+  // recorded a success or a failure — and nothing complained. Any statement
+  // directly after a `return …;` at the same indent, in a file that records
+  // desk sync, is that bug again.
+  {
+    const { readdirSync, readFileSync, statSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const root = join(process.cwd(), "src");
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        if (statSync(p).isDirectory()) walk(p);
+        else if (/\.tsx?$/.test(name) && !/\.selftest\.ts$/.test(name)) files.push(p);
+      }
+    };
+    walk(root);
+    const unreachable: string[] = [];
+    for (const f of files) {
+      const text = readFileSync(f, "utf8");
+      if (!/recordDeskSync(Success|Failure)\(/.test(text)) continue;
+      const lines = text.split("\n");
+      for (let i = 0; i < lines.length - 1; i++) {
+        const ret = /^(\s*)return\b[^;]*;\s*$/.exec(lines[i]!);
+        if (!ret) continue;
+        const next = lines[i + 1]!;
+        if (/^\s*$/.test(next) || /^\s*[})\]]/.test(next) || /^\s*(case|default)\b/.test(next)) continue;
+        if (/^(\s*)/.exec(next)![1]!.length === ret[1]!.length) {
+          unreachable.push(`${f.slice(root.length + 1)}:${i + 2}`);
+        }
+      }
+    }
+    assert.deepEqual(unreachable, [], `code after a return, never runs: ${unreachable.join(", ")}`);
+    console.log("  ok  no desk client records its sync status after it has already returned");
+  }
+
   console.log("\nAll desk-sync status checks passed.");
 }
 

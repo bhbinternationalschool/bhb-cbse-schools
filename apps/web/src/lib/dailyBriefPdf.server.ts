@@ -26,6 +26,7 @@ import { drawPdfLetterhead, resolvePdfLetterhead } from "@/lib/pdfLetterhead";
 import type { MastersState } from "@/lib/masters";
 import {
   absencesNeedingAttention,
+  attendanceIdleNote,
   attendancePercent,
   briefTitle,
   rupeesExact,
@@ -244,7 +245,7 @@ export async function renderDailyBriefPdf(
   const pct = attendancePercent(brief.students);
   heading("Student attendance");
   if (pct === null) {
-    note("No class register was marked today.");
+    note(attendanceIdleNote(brief, "students"));
   } else {
     line("Present", String(brief.students.present), true);
     line("Absent", String(brief.students.absent));
@@ -262,7 +263,7 @@ export async function renderDailyBriefPdf(
   const spct = staffPercent(brief.staff);
   heading("Staff attendance");
   if (spct === null) {
-    note("Staff attendance was not marked today.");
+    note(attendanceIdleNote(brief, "staff"));
   } else {
     line("Present", `${brief.staff.present} of ${brief.staff.strength}`, true);
     line("Absent", String(brief.staff.absent));
