@@ -238,7 +238,15 @@ export async function applyWhatsAppStaffPunch(opts: {
   staff: StaffRecord;
   mobile10: string;
   kind: "in" | "out";
-  geo: PunchGeoInput;
+  /** GPS / location pin. Not used (and may be omitted) for a QR punch. */
+  geo?: PunchGeoInput;
+  /**
+   * "qr": presence was proven by the office screen's rotating code (and,
+   * in the app, by the phone's registered signing key) — checked by the
+   * caller. The geofence is then not consulted: the code says "at the gate
+   * a moment ago", which a GPS pin cannot (director, 30 Sep 2026).
+   */
+  presence?: "qr";
   /** Punch channel: WhatsApp location share (default) or the mobile app's GPS. */
   via?: "whatsapp" | "app";
   /** Confirmed early check-out — appended to the register note so HR sees it */
@@ -262,10 +270,15 @@ export async function applyWhatsAppStaffPunch(opts: {
     };
   }
 
-  const fence = campusGeofenceFromSettings(settings);
-  const check = validateStaffPunchLocation(opts.geo, fence);
-  if (!check.ok) {
-    return { ok: false, error: check.reason || "Outside school geofence." };
+  const qr = opts.presence === "qr";
+  let check: { ok: boolean; reason?: string; distanceM: number } = { ok: true, distanceM: 0 };
+  if (!qr) {
+    if (!opts.geo) return { ok: false, error: "Location required." };
+    const fence = campusGeofenceFromSettings(settings);
+    check = validateStaffPunchLocation(opts.geo, fence);
+    if (!check.ok) {
+      return { ok: false, error: check.reason || "Outside school geofence." };
+    }
   }
 
   const masters = loadMasters();
@@ -282,12 +295,17 @@ export async function applyWhatsAppStaffPunch(opts: {
   const time = nowHhmmIst();
   const altMobile =
     via === "whatsapp" && staffMobileMatchedAlt(opts.staff, opts.mobile10);
-  const geoAudit = punchGeoFromInput(
-    opts.geo,
-    check.distanceM,
-    via === "app" ? "app_gps" : "wa_location",
-  );
-  const channelLabel = via === "app" ? "App" : "WhatsApp";
+  const geoAudit =
+    !qr && opts.geo
+      ? punchGeoFromInput(opts.geo, check.distanceM, via === "app" ? "app_gps" : "wa_location")
+      : undefined;
+  const channelLabel = qr
+    ? via === "app"
+      ? "Office QR (own phone)"
+      : "Office QR code on WhatsApp"
+    : via === "app"
+      ? "App"
+      : "WhatsApp";
   const punchWay = via === "app" ? ("self" as const) : ("whatsapp" as const);
   const markedBy = via === "app" ? "Mobile app attendance" : "WhatsApp attendance";
 
@@ -331,10 +349,10 @@ export async function applyWhatsAppStaffPunch(opts: {
     const graded = gradeStaffPunch(rules, opts.staff.id, date, time, "");
     const status = halfDayLeave(cur) ? "HD" : graded.status;
     const noteParts = [
-      `${channelLabel} campus punch-in`,
+      qr ? `${channelLabel} punch-in` : `${channelLabel} campus punch-in`,
       halfDayLeave(cur) ? cur!.note : `${graded.label} (${graded.ruleName})`,
       altMobile ? "alt mobile" : null,
-      `~${formatDistanceLabel(check.distanceM)} from school`,
+      qr ? null : `~${formatDistanceLabel(check.distanceM)} from school`,
     ].filter(Boolean);
     const merged = upsertStaffMarkInState(state, {
       academicYearCode: ay,
@@ -387,12 +405,12 @@ export async function applyWhatsAppStaffPunch(opts: {
 
   const gradedOut = gradeStaffPunch(rules, opts.staff.id, date, cur.inTime, time);
   const noteParts = [
-    `${channelLabel} campus punch`,
+    qr ? `${channelLabel} punch` : `${channelLabel} campus punch`,
     halfDayLeave(cur) ? cur.note : `${gradedOut.label} (${gradedOut.ruleName})`,
     `OUT ${time}`,
     opts.earlyOutNote || null,
     altMobile ? "alt mobile" : null,
-    `~${formatDistanceLabel(check.distanceM)} from school`,
+    qr ? null : `~${formatDistanceLabel(check.distanceM)} from school`,
   ].filter(Boolean);
   const merged = upsertStaffMarkInState(state, {
     academicYearCode: ay,

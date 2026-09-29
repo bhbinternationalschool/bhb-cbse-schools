@@ -54,6 +54,8 @@ import {
 } from "@/components/ui/erp-roster";
 import { BulkActionBar, RowActionMenu, RowCheckbox, useRowSelection } from "@/components/ui/erp-grid";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import { QrPunchCard } from "@/components/staff/QrPunchCard";
+import { PunchPhonesPanel } from "@/components/staff/PunchPhonesPanel";
 
 type AttTab =
   | "punch"
@@ -282,7 +284,6 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     } | null;
   };
   const [serverPunch, setServerPunch] = useState<ServerPunch | null>(null);
-  const [punching, setPunching] = useState(false);
 
   async function loadServerPunch() {
     try {
@@ -478,72 +479,6 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     flash("Staff attendance saved");
     setTick((x) => x + 1);
     void runSubstitutionAutomation(date);
-  }
-
-  /**
-   * Self punch through the server: the phone's location, checked against
-   * the campus geofence, written to the day's register and confirmed by the
-   * database before we say "punched". Same path as the staff app.
-   */
-  function onSelfPunch(kind: "in" | "out") {
-    if (!selfStaff) {
-      flash("Sign in with your staff login to punch", true);
-      return;
-    }
-    if (punching) return;
-    if (typeof navigator === "undefined" || !navigator.geolocation) {
-      flash("This browser cannot share your location — use the staff app or ask the office.", true);
-      return;
-    }
-    setPunching(true);
-    flash("Getting your location…");
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        void (async () => {
-          try {
-            const res = await fetch("/api/v1/staff/attendance/punch", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                kind,
-                lat: pos.coords.latitude,
-                lng: pos.coords.longitude,
-                accuracyM: pos.coords.accuracy,
-              }),
-            });
-            const body = (await res.json().catch(() => null)) as {
-              ok?: boolean;
-              data?: { time?: string; distanceM?: number };
-              error?: { message?: string };
-            } | null;
-            if (!res.ok || !body?.ok) {
-              flash(body?.error?.message || "Punch was NOT saved — please try again.", true);
-              return;
-            }
-            flash(
-              `${kind === "in" ? "Punched in" : "Punched out"} at ${body.data?.time ?? ""}` +
-                (body.data?.distanceM != null ? ` · ~${body.data.distanceM} m from school` : ""),
-            );
-            await loadServerPunch();
-            setTick((x) => x + 1);
-          } catch {
-            flash("Punch was NOT saved — could not reach the school server.", true);
-          } finally {
-            setPunching(false);
-          }
-        })();
-      },
-      (err) => {
-        setPunching(false);
-        flash(
-          err.code === err.PERMISSION_DENIED
-            ? "Location is blocked for this site. Allow location in your browser settings, then try again."
-            : "Could not get your location. Go outdoors or near a window and try again.",
-          true,
-        );
-      },
-      { enableHighAccuracy: true, timeout: 20_000, maximumAge: 0 },
-    );
   }
 
   function onDirect(e: React.FormEvent) {
@@ -851,24 +786,15 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
                   WA GPS · ~{Math.round(myMark.punchGeo.distanceM)} m from campus
                 </p>
               ) : null}
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  className="rounded-xl bg-[var(--brand-deep)] px-4 py-2.5 text-sm font-bold text-white"
-                  disabled={punching}
-                  onClick={() => onSelfPunch("in")}
-                >
-                  {punching ? "Punching…" : "Punch in"}
-                </button>
-                <button
-                  type="button"
-                  className="rounded-xl border border-[rgba(32,48,80,0.2)] px-4 py-2.5 text-sm font-bold text-[var(--brand-deep)]"
-                  disabled={punching}
-                  onClick={() => onSelfPunch("out")}
-                >
-                  Punch out
-                </button>
-              </div>
+              <QrPunchCard
+                staffId={selfStaff.id}
+                inTime={myMark?.inTime || null}
+                outTime={myMark?.outTime || null}
+                onPunched={() => {
+                  void loadServerPunch();
+                  setTick((x) => x + 1);
+                }}
+              />
             </>
           )}
         </div>
@@ -876,6 +802,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
 
       {tab === "manage" && isManager ? (
         <>
+          <PunchPhonesPanel />
           <div className="flex flex-wrap items-end gap-2">
             <label className="min-w-[12rem] flex-1 text-xs font-semibold text-[var(--muted)]">
               Search / RFID / biometric

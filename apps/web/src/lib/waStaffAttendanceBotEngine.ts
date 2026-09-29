@@ -60,30 +60,81 @@ export function staffAttLanguageConfirmText(lang: StaffAttLang): string {
 }
 
 export function staffAttBotWelcomeText(staffName: string | undefined, lang: StaffAttLang): string {
+  // Since 30 Sep 2026 a punch needs the code on the office QR screen (it
+  // changes every 30 s). A location pin could be dropped anywhere on the map.
   if (lang === "hi") {
     return [
       `*${TENANT.shortName}* स्टाफ़ उपस्थिति${staffName ? ` · ${staffName}` : ""}`,
       "",
-      "स्कूल परिसर से *लाइव लोकेशन* के साथ पंच:",
-      "• *IN* — पंच इन + 📍 लोकेशन",
-      "• *OUT* — पंच आउट + 📍 लोकेशन",
+      "ऑफ़िस स्क्रीन पर दिख रहे *6 अंकों के कोड* के साथ पंच करें:",
+      "• *IN 123456* — पंच इन",
+      "• *OUT 123456* — पंच आउट",
       "• *STATUS* — आज की उपस्थिति",
       "",
-      "WhatsApp → 📎 → *Location* → *Send your current location*",
-      "(स्कूल परिसर में होना ज़रूरी है — GPS जियोफ़ेंस · भाषा बदलें: *LANG*)",
+      "कोड हर 30 सेकंड में बदलता है — स्क्रीन के सामने रहते हुए भेजें।",
+      "(सबसे आसान: ERP में अपने फ़ोन से QR स्कैन करें · भाषा बदलें: *LANG*)",
     ].join("\n");
   }
   return [
     `*${TENANT.shortName}* staff attendance${staffName ? ` · ${staffName}` : ""}`,
     "",
-    "Campus punch with *live location* (anti-proxy):",
-    "• *IN* — punch in + 📍 location pin",
-    "• *OUT* — punch out + 📍 location pin",
+    "Punch with the *6-digit code* on the office QR screen:",
+    "• *IN 123456* — punch in",
+    "• *OUT 123456* — punch out",
     "• *STATUS* — today's IN/OUT",
     "",
-    "WhatsApp → 📎 → *Location* → *Send your current location*",
-    "(Must be on school premises — GPS geofence · change language: *LANG*)",
+    "The code changes every 30 seconds — send it while you are at the screen.",
+    "(Easiest: scan the QR in the ERP on your own phone · change language: *LANG*)",
   ].join("\n");
+}
+
+/** "IN" or "OUT" was sent without the code. */
+export function staffAttAskCodeText(action: "in" | "out", lang: StaffAttLang): string {
+  return lang === "hi"
+    ? `पंच *${action === "in" ? "IN" : "OUT"}* के लिए ऑफ़िस स्क्रीन पर दिख रहा *6 अंकों का कोड* भेजें।\n\nरद्द करने के लिए *CANCEL* लिखें।`
+    : `Send the *6-digit code* shown on the office QR screen to punch *${action === "in" ? "IN" : "OUT"}*.\n\nReply *CANCEL* to stop.`;
+}
+
+export function staffAttCodeExpiredText(lang: StaffAttLang): string {
+  return lang === "hi"
+    ? "यह कोड पुराना हो गया या ग़लत है — कोड हर 30 सेकंड में बदलता है। स्क्रीन पर अभी दिख रहा कोड भेजें।"
+    : "That code has expired or is wrong — it changes every 30 seconds. Send the code on the screen right now.";
+}
+
+/** A location pin no longer punches. */
+export function staffAttLocationRetiredText(lang: StaffAttLang): string {
+  return lang === "hi"
+    ? "📍 लोकेशन से अब पंच नहीं होता। ऑफ़िस स्क्रीन का कोड भेजें: *IN 123456* या *OUT 123456*।"
+    : "📍 A location pin no longer punches. Send the office screen's code instead: *IN 123456* or *OUT 123456*.";
+}
+
+/** Success for a code punch — no distance line, the code proved presence. */
+export function composeStaffAttCodePunchSuccess(opts: {
+  kind: "in" | "out";
+  time: string;
+  staffName: string;
+  altMobile?: boolean;
+  earlyOut?: boolean;
+  schoolEnd?: string;
+  lang: StaffAttLang;
+}): string {
+  const hi = opts.lang === "hi";
+  const lines = [
+    hi
+      ? opts.kind === "in" ? "✅ *पंच IN दर्ज हुआ*" : "✅ *पंच OUT दर्ज हुआ*"
+      : opts.kind === "in" ? "✅ *Punch IN recorded*" : "✅ *Punch OUT recorded*",
+    `${opts.staffName} · ${opts.time} IST`,
+  ];
+  if (opts.earlyOut) {
+    lines.push(
+      hi
+        ? `⚠️ स्कूल समय (${opts.schoolEnd || ""} तक) के भीतर early checkout — रजिस्टर में दर्ज।`
+        : `⚠️ Early checkout within school timing (till ${opts.schoolEnd || ""}) — noted in the register.`,
+    );
+  }
+  if (opts.altMobile) lines.push(hi ? "⚠ *alt mobile* से दर्ज — HR जाँच कर सकता है।" : "⚠ Registered via *alt mobile* — HR may verify.");
+  lines.push("", hi ? "कभी भी *STATUS* लिखें।" : "Reply *STATUS* anytime.");
+  return lines.join("\n");
 }
 
 /**

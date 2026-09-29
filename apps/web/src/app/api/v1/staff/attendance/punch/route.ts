@@ -12,6 +12,14 @@ import {
   loadStaffAttendanceServer,
 } from "@/lib/staffAttendance.server";
 import { campusGeofenceFromSettings } from "@/lib/staffGeofence.server";
+import { cleanPunchCode } from "@/lib/punchCode";
+import { punchCodeIsValid } from "@/lib/punchCode.server";
+import {
+  checkPunchDevice,
+  cleanJwk,
+  punchMessage,
+  verifyPunchSignature,
+} from "@/lib/punchDevices.server";
 import { staffWorkingYear } from "@/lib/api/v1/staffScope";
 
 export const runtime = "nodejs";
@@ -77,6 +85,8 @@ export async function GET(request: Request) {
       staffName: staff.fullName,
       date,
       allowSelfPunch: settings.allowSelfPunch,
+      // Punches need the office screen's code and this phone's key (30 Sep 2026).
+      qrRequired: true,
       fence,
       today: mark
         ? {
@@ -95,14 +105,30 @@ export async function GET(request: Request) {
 
 type PunchBody = {
   kind: "in" | "out";
-  lat: number;
-  lng: number;
-  accuracyM?: number;
-    mocked?: boolean;
+  /** The office screen's six-digit code (or the QR link it encodes). */
+  code?: string;
+  device?: { jwk?: unknown; signature?: string; ts?: number; label?: string };
   staffId?: string;
 };
 
-/** POST /api/v1/staff/attendance/punch — GPS self punch from the app */
+/** How far a phone's clock may be from ours when it signs. */
+const SIGN_SKEW_MS = 2 * 60_000;
+
+/**
+ * POST /api/v1/staff/attendance/punch — a staff member's own punch.
+ *
+ * Since 30 Sep 2026 (director: "only the staff's actual phone, not a proxy
+ * phone") a punch needs BOTH:
+ *  1. the office screen's code of the last minute (lib/punchCode) — the
+ *     phone was at the gate; a GPS pin could be faked or dropped anywhere;
+ *  2. a signature by the phone's registered key (lib/punchDevices.server) —
+ *     it is THEIR phone. First punch registers the phone; another phone is
+ *     refused and waits for the office; a phone registered to someone else
+ *     is refused outright.
+ * A dead phone or no internet is not covered by anything else: they punch
+ * once their own phone is back (or with the code on WhatsApp from their
+ * registered number).
+ */
 export async function POST(request: Request) {
   try {
     const ctx = await resolveApiAuth(request);
@@ -112,22 +138,78 @@ export async function POST(request: Request) {
     if (body.kind !== "in" && body.kind !== "out") {
       throw new ApiError("bad_request", "kind must be 'in' or 'out'", 400);
     }
-    if (!Number.isFinite(body.lat) || !Number.isFinite(body.lng)) {
-      throw new ApiError("bad_request", "lat and lng required", 400);
+    const staff = await resolveStaff(ctx, body.staffId);
+
+    const code = cleanPunchCode(body.code);
+    if (!code || !body.device) {
+      throw new ApiError(
+        "bad_request",
+        "Punch at school: scan the QR on the office screen, or type its 6-digit code, in the ERP on your own phone.",
+        400,
+      );
+    }
+    if (!punchCodeIsValid(code)) {
+      throw new ApiError(
+        "bad_request",
+        "That code has expired — it changes every 30 seconds. Scan the office screen again.",
+        400,
+      );
+    }
+    const jwk = cleanJwk(body.device.jwk);
+    const ts = Number(body.device.ts);
+    if (!jwk || !body.device.signature || !Number.isFinite(ts)) {
+      throw new ApiError("bad_request", "This phone's key is missing — reload the page and try again.", 400);
+    }
+    if (Math.abs(Date.now() - ts) > SIGN_SKEW_MS) {
+      throw new ApiError(
+        "bad_request",
+        "Your phone's clock is wrong. Set date & time to automatic, then punch again.",
+        400,
+      );
+    }
+    const signed = await verifyPunchSignature(
+      jwk,
+      punchMessage({ staffId: staff.id, kind: body.kind, code, ts }),
+      body.device.signature,
+    );
+    if (!signed) {
+      throw new ApiError("forbidden", "This punch was not signed by this phone. Reload the page and try again.", 403);
     }
 
-    const staff = await resolveStaff(ctx, body.staffId);
+    const device = await checkPunchDevice({
+      staffId: staff.id,
+      jwk,
+      label: String(body.device.label || ""),
+    }).catch((e: unknown) => {
+      console.warn("[punch] device check threw", (e as Error)?.message);
+      return { ok: false as const, reason: "unavailable" as const };
+    });
+    if (!device.ok) {
+      if (device.reason === "other_staff") {
+        const owner = ctx.masters.staff.find((s) => s.id === device.otherStaffId)?.fullName || "another staff member";
+        throw new ApiError(
+          "forbidden",
+          `This phone is registered for ${owner}'s attendance. Each person punches from their own phone.`,
+          403,
+          { reason: "other_staff" },
+        );
+      }
+      if (device.reason === "not_registered") {
+        throw new ApiError(
+          "forbidden",
+          "This is not your registered punch phone. The office has been asked to approve it — until then, punch from your registered phone.",
+          403,
+          { reason: "not_registered" },
+        );
+      }
+      throw new ApiError("server_error", "Could not check your phone right now — try again in a minute.", 503);
+    }
 
     const result = await applyWhatsAppStaffPunch({
       staff,
       mobile10: "",
       kind: body.kind,
-      geo: {
-        lat: body.lat,
-        lng: body.lng,
-        accuracyM: body.accuracyM,
-        mocked: body.mocked === true,
-      },
+      presence: "qr",
       via: "app",
       academicYearCode: staffWorkingYear(ctx),
     });
@@ -140,8 +222,8 @@ export async function POST(request: Request) {
       action: "edit",
       entityType: "punch",
       entityId: staff.id,
-      summary: `App GPS punch-${result.kind} at ${result.time} (~${Math.round(result.distanceM)} m from campus)`,
-      after: { kind: result.kind, time: result.time },
+      summary: `Office-QR punch-${result.kind} at ${result.time} from own phone${device.firstRegistration ? " (phone registered on this punch)" : ""}`,
+      after: { kind: result.kind, time: result.time, firstRegistration: device.firstRegistration },
       ip: meta.ip,
       userAgent: meta.userAgent,
     });
@@ -149,10 +231,10 @@ export async function POST(request: Request) {
     return apiOk({
       kind: result.kind,
       time: result.time,
-      distanceM: Math.round(result.distanceM),
       status: result.mark.status,
       inTime: result.mark.inTime || null,
       outTime: result.mark.outTime || null,
+      firstRegistration: device.firstRegistration,
     });
   } catch (e) {
     return apiErr(e);

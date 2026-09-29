@@ -9,23 +9,25 @@ import { loadMasters } from "@/lib/masters";
 import {
   applyWhatsAppStaffPunch,
   staffAttendanceStatusForWa,
-  staffPunchToday,
 } from "@/lib/staffAttendance.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { findStaffByMobile } from "@/lib/waRoleResolver";
+import { cleanPunchCode } from "@/lib/punchCode";
+import { punchCodeIsValid } from "@/lib/punchCode.server";
 import {
+  composeStaffAttCodePunchSuccess,
   composeStaffAttHumanReply,
-  composeStaffAttPunchSuccess,
+  staffAttAskCodeText,
+  staffAttCodeExpiredText,
+  staffAttLocationRetiredText,
   detectStaffAttBotIntent,
   isEarlyOutConfirm,
   parseStaffAttLanguage,
-  staffAttAskLocationText,
   staffAttBotWelcomeText,
   staffAttCancelText,
   staffAttEarlyOutWarningText,
   staffAttLanguageConfirmText,
   staffAttLanguageMenuText,
-  staffAttLocationWithoutPendingText,
   type StaffAttLang,
 } from "@/lib/waStaffAttendanceBotEngine";
 import { expectedWindowForTiming } from "@/lib/schoolTiming";
@@ -198,11 +200,20 @@ export function shouldRouteStaffAttendance(opts: {
   if (detectStaffAttBotIntent(opts.text) !== "unknown") return true;
   if (opts.languageAskOpen && parseStaffAttLanguage(opts.text) !== null) return true;
   if (opts.hasPending) {
-    // YES/CANCEL for an early checkout, and a 1/2 answering the language
-    // menu that rode along with the punch reply.
-    return isEarlyOutConfirm(opts.text) || parseStaffAttLanguage(opts.text) !== null;
+    // YES/CANCEL for an early checkout, a 1/2 answering the language menu
+    // that rode along with the punch reply, and the office screen's code.
+    return (
+      isEarlyOutConfirm(opts.text) ||
+      parseStaffAttLanguage(opts.text) !== null ||
+      isBareCode(opts.text)
+    );
   }
   return false;
+}
+
+/** A message that is only the six digits ("482913", "482 913"). */
+function isBareCode(text: string): boolean {
+  return /^\s*\d{3}[\s-]?\d{3}\s*$/.test(text || "");
 }
 
 export async function handleWaStaffAttendanceInbound(opts: {
@@ -339,85 +350,60 @@ export async function handleWaStaffAttendanceInbound(opts: {
   } else if (pending?.kind === "punch_out_confirm") {
     if (!opts.location && isEarlyOutConfirm(text)) {
       pending = { kind: "punch_out", early: true };
-      replyText = staffAttAskLocationText("out", lang);
+      replyText = staffAttAskCodeText("out", lang);
     } else {
       // Anything else — including a location sent without confirming —
       // repeats the warning; the punch is NOT taken until YES.
       const win = earlyOutWindow();
       replyText = staffAttEarlyOutWarningText({ now: win.now, end: pending.end, lang });
     }
-  } else if (opts.location && pending) {
-    const kind = pending.kind === "punch_in" ? "in" : "out";
-    const early = pending.kind === "punch_out" && pending.early === true;
+  } else if (opts.location) {
+    // 30 Sep 2026: a pin can be dropped anywhere on the map, so it no
+    // longer punches. The office screen's code does. Anything pending stays.
+    replyText = staffAttLocationRetiredText(lang);
+  } else if (
+    (pending && isBareCode(text)) ||
+    ((intent === "in" || intent === "out") && cleanPunchCode(text))
+  ) {
+    const kind: "in" | "out" =
+      intent === "in" || intent === "out" ? intent : pending?.kind === "punch_in" ? "in" : "out";
+    const early = pending?.kind === "punch_out" && pending.early === true;
     const win = earlyOutWindow();
-    const result = await applyWhatsAppStaffPunch({
-      staff,
-      mobile10,
-      kind,
-      geo: {
-        lat: opts.location.lat,
-        lng: opts.location.lng,
-        accuracyM: opts.location.accuracyM,
-        name: opts.location.name,
-        address: opts.location.address,
-      },
-      earlyOutNote: early ? `early checkout ${win.now} (school till ${win.end})` : undefined,
-    });
-    pending = null;
-    if (!result.ok) {
-      replyText = result.error;
+    if (kind === "out" && win.early && !early) {
+      // Leaving while school runs: the same warning as before, then a
+      // fresh code after YES (this one will have expired by then).
+      pending = { kind: "punch_out_confirm", end: win.end };
+      replyText = staffAttEarlyOutWarningText({ now: win.now, end: win.end, lang });
+    } else if (!punchCodeIsValid(cleanPunchCode(text))) {
+      pending = { kind: kind === "in" ? "punch_in" : "punch_out", ...(early ? { early: true } : {}) };
+      replyText = staffAttCodeExpiredText(lang);
     } else {
-      punched = result.kind;
-      replyText = composeStaffAttPunchSuccess({
-        kind: result.kind,
-        time: result.time,
-        distanceM: result.distanceM,
-        staffName: staff.fullName,
-        altMobile: result.altMobile,
-        earlyOut: early,
-        schoolEnd: win.end,
-        lang,
-      });
-    }
-  } else if (opts.location && !pending) {
-    // A pin with no IN typed first is still a punch IN when there has been
-    // none today — there is nothing else it could mean, and "reply IN first,
-    // then send the pin again" is a second trip for no reason. After an IN
-    // it stays a question: a pin sent again in the morning must not clock
-    // anybody out.
-    const today = await staffPunchToday(staff.id);
-    if (!today?.inTime) {
       const result = await applyWhatsAppStaffPunch({
         staff,
         mobile10,
-        kind: "in",
-        geo: {
-          lat: opts.location.lat,
-          lng: opts.location.lng,
-          accuracyM: opts.location.accuracyM,
-          name: opts.location.name,
-          address: opts.location.address,
-        },
+        kind,
+        presence: "qr",
+        earlyOutNote: early ? `early checkout ${win.now} (school till ${win.end})` : undefined,
       });
-      if (result.ok) punched = result.kind;
-      replyText = result.ok
-        ? composeStaffAttPunchSuccess({
-            kind: result.kind,
-            time: result.time,
-            distanceM: result.distanceM,
-            staffName: staff.fullName,
-            altMobile: result.altMobile,
-            earlyOut: false,
-            schoolEnd: "",
-            lang,
-          })
-        : result.error;
-    } else {
-      replyText = staffAttLocationWithoutPendingText(lang);
+      pending = null;
+      if (!result.ok) {
+        replyText = result.error;
+      } else {
+        punched = result.kind;
+        replyText = composeStaffAttCodePunchSuccess({
+          kind: result.kind,
+          time: result.time,
+          staffName: staff.fullName,
+          altMobile: result.altMobile,
+          earlyOut: early,
+          schoolEnd: win.end,
+          lang,
+        });
+      }
     }
   } else if (intent === "in") {
     pending = { kind: "punch_in" };
-    replyText = staffAttAskLocationText("in", lang);
+    replyText = staffAttAskCodeText("in", lang);
   } else if (intent === "out") {
     // Checking out while school is still running → alert + confirm first.
     const win = earlyOutWindow();
@@ -426,7 +412,7 @@ export async function handleWaStaffAttendanceInbound(opts: {
       replyText = staffAttEarlyOutWarningText({ now: win.now, end: win.end, lang });
     } else {
       pending = { kind: "punch_out" };
-      replyText = staffAttAskLocationText("out", lang);
+      replyText = staffAttAskCodeText("out", lang);
     }
   } else if (!text && !opts.location) {
     replyText = staffAttBotWelcomeText(staff.fullName, lang);
