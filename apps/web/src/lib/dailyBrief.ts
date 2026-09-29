@@ -50,6 +50,14 @@ export type BriefClassAttendance = {
   strength: number;
   /** false = nobody opened the register for this class today. */
   marked: boolean;
+  /**
+   * The holiday that gives this class the day off ("Pre-Primary Saturday
+   * off"), by the same holiday rules the attendance desk uses. An unmarked
+   * class on holiday is not a register somebody forgot.
+   */
+  holiday?: string;
+  /** Whose register it is. Empty = no class teacher recorded for this section. */
+  classTeacherName?: string;
 };
 
 export type BriefStudentAttendance = {
@@ -58,7 +66,10 @@ export type BriefStudentAttendance = {
   absent: number;
   strength: number;
   classesMarked: number;
+  /** Working classes with no marks — classes on holiday are not counted here. */
   classesUnmarked: number;
+  /** Classes the holiday calendar gave the day off. */
+  classesOff?: number;
 };
 
 export type BriefStaffRow = {
@@ -110,6 +121,41 @@ export type BriefDefaulters = {
   noMobile: number;
 };
 
+/** One subject a teacher was expected to set homework for and did not. */
+export type BriefHomeworkGap = {
+  classLabel: string;
+  subjectName: string;
+};
+
+export type BriefHomeworkTeacher = {
+  staffId: string;
+  name: string;
+  gaps: BriefHomeworkGap[];
+};
+
+export type BriefHomework = {
+  /**
+   * false = the homework desk could not be read, so nobody knows who posted:
+   * the brief says so rather than naming every teacher.
+   */
+  checked: boolean;
+  /** Class-subjects expected today (after holidays and absent teachers). */
+  expected: number;
+  /** Of those, how many have a homework post today. */
+  posted: number;
+  /** Teachers with at least one class-subject not posted, most gaps first. */
+  missing: BriefHomeworkTeacher[];
+  /** Sections judged by today's timetable periods. */
+  timetableSections: number;
+  /**
+   * Sections with no published timetable, judged by the subjects assigned in
+   * Staff → Duties — every assigned subject on every school day.
+   */
+  assignmentSections: number;
+  /** Teachers left out because they are marked absent today. */
+  absentTeachersSkipped: number;
+};
+
 export type DailyBrief = {
   /** IST calendar date this brief is about. */
   date: string;
@@ -119,6 +165,8 @@ export type DailyBrief = {
   students: BriefStudentAttendance;
   staff: BriefStaffAttendance;
   defaulters: BriefDefaulters;
+  /** Homework posted against what was expected. Absent = not computed. */
+  homework?: BriefHomework;
   /** The AI paragraph on what is still open. Empty when it could not run. */
   aiNote: string;
 };
@@ -175,6 +223,134 @@ export function absencesNeedingAttention(s: BriefStaffAttendance): BriefStaffRow
   return s.absentRows.filter((r) => r.reason !== "on_leave");
 }
 
+/** Working classes nobody marked — the registers somebody owes. */
+export function unmarkedWorkingClasses(a: BriefStudentAttendance): BriefClassAttendance[] {
+  return a.classes.filter((c) => !c.marked && !c.holiday);
+}
+
+/**
+ * "Class 3 · A (Ramesh Yadav)" for each unmarked working class, the first
+ * `max` of them, then "+N more". A section with no class teacher on file
+ * says so — a guessed name would send the principal after the wrong person.
+ */
+export function unmarkedClassesWithTeachers(
+  a: BriefStudentAttendance,
+  max = 4,
+): string {
+  const rows = unmarkedWorkingClasses(a);
+  const shown = rows
+    .slice(0, max)
+    .map((c) => `${c.label} (${c.classTeacherName || "no class teacher on file"})`);
+  const more = rows.length - shown.length;
+  return `${shown.join(", ")}${more > 0 ? `, +${more} more` : ""}`;
+}
+
+/** Every class had the day off — nothing to mark, nothing missed. */
+export function allClassesOff(a: BriefStudentAttendance): boolean {
+  return a.classes.length > 0 && a.classes.every((c) => c.holiday && !c.marked);
+}
+
+/** "Holiday: Pre-Primary Saturday off" — one line naming who had the day off. */
+export function classesOffLine(a: BriefStudentAttendance): string {
+  const off = a.classes.filter((c) => c.holiday);
+  if (!off.length) return "";
+  const reasons = [...new Set(off.map((c) => c.holiday!))];
+  return `${off.length} section${off.length === 1 ? "" : "s"} off today (${reasons.join(", ")})`;
+}
+
+/**
+ * Is the school shut today? Only when EVERY class the school runs is on a
+ * full holiday AND staff are too.
+ *
+ * Not the calendar's "school" audience: that one counts a class-group
+ * holiday ("Pre-Primary Saturday off") as the whole school's, which would
+ * skip every Saturday brief for the classes that DID come in. A half day
+ * is a working day — the registers and the money still happen.
+ */
+export function briefHolidaySkip(opts: {
+  classDays: { status: "working" | "holiday" | "half_holiday"; label: string }[];
+  staffDay: { status: "working" | "holiday" | "half_holiday"; label: string };
+}): string | null {
+  if (opts.classDays.length === 0) return null;
+  if (!opts.classDays.every((d) => d.status === "holiday")) return null;
+  if (opts.staffDay.status !== "holiday") return null;
+  return opts.staffDay.label || opts.classDays[0]!.label || "School holiday";
+}
+
+/**
+ * Who owes homework today, from what was expected and what was posted.
+ *
+ * Pure so the matching rules can be proved: a subject counts as done when
+ * ANY post exists for that class, section and subject today — a substitute
+ * who set it covered it — and a teacher is listed once with every
+ * class-subject they still owe.
+ */
+export function computeHomeworkGaps(opts: {
+  expected: {
+    sectionKey: string;
+    classLabel: string;
+    subjectKey: string;
+    subjectName: string;
+    teacherStaffId: string;
+    teacherName: string;
+  }[];
+  /** `${sectionKey}|${subjectKey}` of every post today. */
+  postedKeys: Set<string>;
+}): Pick<BriefHomework, "expected" | "posted" | "missing"> {
+  const slots = new Map<
+    string,
+    { classLabel: string; subjectName: string; teachers: Map<string, string> }
+  >();
+  for (const e of opts.expected) {
+    const key = `${e.sectionKey}|${e.subjectKey}`;
+    let slot = slots.get(key);
+    if (!slot) {
+      slot = { classLabel: e.classLabel, subjectName: e.subjectName, teachers: new Map() };
+      slots.set(key, slot);
+    }
+    if (e.teacherStaffId) slot.teachers.set(e.teacherStaffId, e.teacherName || e.teacherStaffId);
+  }
+
+  let posted = 0;
+  const byTeacher = new Map<string, BriefHomeworkTeacher>();
+  for (const [key, slot] of slots) {
+    if (opts.postedKeys.has(key)) {
+      posted++;
+      continue;
+    }
+    for (const [staffId, name] of slot.teachers) {
+      let t = byTeacher.get(staffId);
+      if (!t) {
+        t = { staffId, name, gaps: [] };
+        byTeacher.set(staffId, t);
+      }
+      t.gaps.push({ classLabel: slot.classLabel, subjectName: slot.subjectName });
+    }
+  }
+  const missing = [...byTeacher.values()]
+    .map((t) => ({
+      ...t,
+      gaps: t.gaps.sort(
+        (a, b) => a.classLabel.localeCompare(b.classLabel) || a.subjectName.localeCompare(b.subjectName),
+      ),
+    }))
+    .sort((a, b) => b.gaps.length - a.gaps.length || a.name.localeCompare(b.name));
+  return { expected: slots.size, posted, missing };
+}
+
+/** One line on homework, or "" when there was nothing to expect. */
+export function homeworkLine(h: BriefHomework | undefined): string {
+  if (!h) return "";
+  if (!h.checked) return "homework could not be read today";
+  if (h.expected === 0) return "";
+  if (h.missing.length === 0) return `homework posted for all ${h.expected} class-subjects`;
+  const names = h.missing.slice(0, 4).map((t) => t.name);
+  const more = h.missing.length - names.length;
+  return `homework posted for ${h.posted} of ${h.expected} class-subjects — not yet from ${names.join(", ")}${
+    more > 0 ? ` +${more} more` : ""
+  }`;
+}
+
 /**
  * The WhatsApp body: the headline numbers and nothing else.
  *
@@ -207,7 +383,9 @@ export function composeBriefSummary(b: DailyBrief): string {
 
   const pct = attendancePercent(b.students);
   lines.push(
-    pct === null
+    allClassesOff(b.students)
+      ? "🎒 No classes today — holiday for every class"
+      : pct === null
       ? "🎒 No class register was marked today"
       : `🎒 Students ${pct}% present — ${b.students.present} in, ${b.students.absent} absent${
           b.students.classesUnmarked
@@ -215,6 +393,14 @@ export function composeBriefSummary(b: DailyBrief): string {
             : ""
         }`,
   );
+  if (b.students.classesUnmarked) {
+    lines.push(`   Not marked: ${unmarkedClassesWithTeachers(b.students)}`);
+  }
+  const off = classesOffLine(b.students);
+  if (off && !allClassesOff(b.students)) lines.push(`🏖️ ${off}`);
+
+  const hw = homeworkLine(b.homework);
+  if (hw) lines.push(`📚 ${hw.charAt(0).toUpperCase()}${hw.slice(1)}`);
 
   const spct = staffPercent(b.staff);
   const attention = absencesNeedingAttention(b.staff);
@@ -364,15 +550,19 @@ export function composeBriefTemplateVariables(
         : "no voucher entered today",
     ),
     students: oneLine(
-      pct === null
-        ? "no register marked today"
+      allClassesOff(b.students)
+        ? "no classes today — holiday for every class"
+        : pct === null
+        ? `no register marked today${
+            b.students.classesUnmarked ? `: ${unmarkedClassesWithTeachers(b.students, 3)}` : ""
+          }`
         : `${pct}% of those marked — ${b.students.present} in, ${b.students.absent} absent${
             b.students.classesUnmarked
               ? `, ${b.students.classesUnmarked} section${
                   b.students.classesUnmarked === 1 ? "" : "s"
-                } not marked`
+                } not marked: ${unmarkedClassesWithTeachers(b.students, 3)}`
               : ""
-          }`,
+          }${classesOffLine(b.students) ? `; ${classesOffLine(b.students)}` : ""}`,
     ),
     staff: oneLine(
       spct === null
@@ -483,14 +673,15 @@ export function pendingFacts(b: DailyBrief): PendingFact[] {
   }
 
   if (b.students.classesUnmarked > 0) {
-    const children = b.students.classes
-      .filter((c) => !c.marked)
-      .reduce((s, c) => s + c.strength, 0);
+    const children = unmarkedWorkingClasses(b.students).reduce((s, c) => s + c.strength, 0);
     out.push({
       rank: 2,
       text: `${b.students.classesUnmarked} section${
         b.students.classesUnmarked === 1 ? "" : "s"
-      } never marked attendance today, covering ${children} children`,
+      } never marked attendance today, covering ${children} children: ${unmarkedClassesWithTeachers(
+        b.students,
+        6,
+      )}`,
     });
   }
 
@@ -501,6 +692,12 @@ export function pendingFacts(b: DailyBrief): PendingFact[] {
         b.staff.pending.length === 1 ? "" : "s"
       } waiting for a decision, the earliest starting ${b.staff.pending[0]!.fromDate}`,
     });
+  }
+
+  // Below leave and above the staff register: a class-subject with no
+  // homework is a teacher to ask tomorrow morning, not a child unaccounted for.
+  if (b.homework && (!b.homework.checked || b.homework.missing.length)) {
+    out.push({ rank: 3.5, text: homeworkLine(b.homework) });
   }
 
   if (!b.staff.marked) {

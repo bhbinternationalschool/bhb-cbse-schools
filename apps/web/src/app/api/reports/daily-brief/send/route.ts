@@ -61,7 +61,9 @@ export async function POST(req: Request) {
     if (!auth.ok) return auth.response;
   }
 
-  const result = await sendDailyBrief({ dateIso, dryRun });
+  // The 6 PM job stays quiet on a school holiday; a person who presses
+  // send has asked for it and gets it.
+  const result = await sendDailyBrief({ dateIso, dryRun, ignoreHoliday: !byJob });
   // 200 with the detail either way: this is read by a scheduler log and by
   // a person, and both need to see WHY nothing went out.
   return NextResponse.json(result, { status: result.ok ? 200 : 502 });

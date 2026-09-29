@@ -26,8 +26,11 @@ import { drawPdfLetterhead, resolvePdfLetterhead } from "@/lib/pdfLetterhead";
 import type { MastersState } from "@/lib/masters";
 import {
   absencesNeedingAttention,
+  allClassesOff,
   attendancePercent,
   briefTitle,
+  classesOffLine,
+  unmarkedWorkingClasses,
   rupeesExact,
   staffPercent,
   tenderModeLabel,
@@ -243,19 +246,42 @@ export async function renderDailyBriefPdf(
   /* ── Students ── */
   const pct = attendancePercent(brief.students);
   heading("Student attendance");
-  if (pct === null) {
+  const unmarked = unmarkedWorkingClasses(brief.students);
+  if (allClassesOff(brief.students)) {
+    note(`No classes today — ${classesOffLine(brief.students)}.`);
+  } else if (pct === null) {
     note("No class register was marked today.");
   } else {
     line("Present", String(brief.students.present), true);
     line("Absent", String(brief.students.absent));
     line("Of those marked", `${pct}%`);
     if (brief.students.classesUnmarked) {
+      const working = brief.students.classes.length - (brief.students.classesOff ?? 0);
       note(
-        `${brief.students.classesUnmarked} of ${brief.students.classes.length} sections were not marked, covering ${brief.students.classes
-          .filter((c) => !c.marked)
-          .reduce((s, c) => s + c.strength, 0)} children. The percentage above is of the children who were marked, not of the school.`,
+        `${brief.students.classesUnmarked} of ${working} working sections were not marked, covering ${unmarked.reduce(
+          (s, c) => s + c.strength,
+          0,
+        )} children. The percentage above is of the children who were marked, not of the school.`,
       );
     }
+  }
+  if (unmarked.length) {
+    y += 4;
+    table(
+      [
+        { key: "cls", label: "Register not marked", width: 44 },
+        { key: "teacher", label: "Class teacher", width: 40 },
+        { key: "s", label: "Children", width: 16, align: "right" },
+      ],
+      unmarked.map((c) => ({
+        cls: c.label,
+        teacher: c.classTeacherName || "No class teacher on file",
+        s: String(c.strength),
+      })),
+    );
+  }
+  if (classesOffLine(brief.students) && !allClassesOff(brief.students)) {
+    note(`Not expected to mark: ${classesOffLine(brief.students)}.`);
   }
 
   /* ── Staff ── */
@@ -313,20 +339,60 @@ export async function renderDailyBriefPdf(
     heading("Class by class");
     table(
       [
-        { key: "cls", label: "Class", width: 34 },
-        { key: "p", label: "Present", width: 14, align: "right" },
-        { key: "a", label: "Absent", width: 14, align: "right" },
-        { key: "u", label: "Not marked", width: 16, align: "right" },
-        { key: "s", label: "Strength", width: 14, align: "right" },
+        { key: "cls", label: "Class", width: 24 },
+        { key: "teacher", label: "Class teacher", width: 26 },
+        { key: "p", label: "Present", width: 12, align: "right" },
+        { key: "a", label: "Absent", width: 12, align: "right" },
+        { key: "u", label: "Not marked", width: 14, align: "right" },
+        { key: "s", label: "Strength", width: 12, align: "right" },
       ],
-      brief.students.classes.map((c) => ({
-        cls: c.label,
-        p: c.marked ? String(c.present) : "—",
-        a: c.marked ? String(c.absent) : "—",
-        u: c.unmarked ? String(c.unmarked) : c.marked ? "" : String(c.strength),
-        s: String(c.strength),
-      })),
+      brief.students.classes.map((c) => {
+        const off = !c.marked && !!c.holiday;
+        return {
+          cls: c.label,
+          teacher: c.classTeacherName || "—",
+          p: c.marked ? String(c.present) : "—",
+          a: c.marked ? String(c.absent) : "—",
+          // A class on holiday had nothing to mark.
+          u: off ? "Holiday" : c.unmarked ? String(c.unmarked) : c.marked ? "" : String(c.strength),
+          s: String(c.strength),
+        };
+      }),
     );
+  }
+
+  /* ── Homework ── */
+  const hw = brief.homework;
+  if (hw && (!hw.checked || hw.expected > 0)) {
+    heading("Homework");
+    if (!hw.checked) {
+      note("The homework desk could not be read today, so nobody is listed — this is not the same as everyone having posted.");
+    } else {
+      line("Class-subjects expected today", String(hw.expected), true);
+      line("Homework posted", String(hw.posted));
+      // A block per teacher rather than a table row: the list of what they
+      // owe runs to several lines, and a table cell keeps only the first.
+      for (const t of hw.missing) {
+        y += 2;
+        line(t.name, `${t.gaps.length} not posted`, true);
+        note(t.gaps.map((g) => `${g.classLabel} ${g.subjectName}`).join("; "));
+      }
+      const basis: string[] = [];
+      if (hw.timetableSections) {
+        basis.push(`${hw.timetableSections} section${hw.timetableSections === 1 ? "" : "s"} by today's published timetable`);
+      }
+      if (hw.assignmentSections) {
+        basis.push(
+          `${hw.assignmentSections} section${hw.assignmentSections === 1 ? "" : "s"} with no published timetable by the subjects assigned in Staff > Duties, which counts every assigned subject on every school day`,
+        );
+      }
+      if (basis.length) note(`Expected homework was worked out for ${basis.join("; ")}.`);
+      if (hw.absentTeachersSkipped) {
+        note(
+          `${hw.absentTeachersSkipped} teacher${hw.absentTeachersSkipped === 1 ? " is" : "s are"} marked absent today and not counted here.`,
+        );
+      }
+    }
   }
 
   /* ── Tomorrow's calls ── */

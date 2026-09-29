@@ -32,7 +32,10 @@ import { TENANT } from "@/lib/types";
 import {
   emptyBrief,
   tenderModeLabel,
+  briefHolidaySkip,
+  computeHomeworkGaps,
   type BriefClassAttendance,
+  type BriefHomework,
   type BriefCollection,
   type BriefDefaulters,
   type BriefExpenses,
@@ -43,6 +46,10 @@ import {
   type DailyBrief,
 } from "@/lib/dailyBrief";
 import { isReviewDemoStudent, reviewDemoHouseholdIds } from "@/lib/reviewDemoRecords";
+import { classifyClassHolidayDay, classifyStaffHolidayDay } from "@/lib/holidayPolicy";
+import { normalizeYear } from "@/lib/staffTeachingScope";
+import { ensureTimetableHydratedServer } from "@/lib/timetablePersistence";
+import { loadTimetable } from "@/lib/timetable";
 
 /** Today in IST — the school's day, whatever the server's clock zone is. */
 export function istToday(nowMs = Date.now()): string {
@@ -221,6 +228,66 @@ function classLabelOf(
   return sec?.name ? `${cls} · ${sec.name}` : cls;
 }
 
+/** A link stamped with no year belongs to every year. */
+function linkInYear(linkYear: string, ay: string): boolean {
+  return !linkYear || !ay || normalizeYear(linkYear) === normalizeYear(ay);
+}
+
+/**
+ * The class teacher of each section this year, by name. Several links on
+ * one section (a co-class-teacher) keep the one marked primary.
+ */
+function classTeacherBySection(masters: MastersState, ay: string): Map<string, string> {
+  const out = new Map<string, { name: string; primary: boolean }>();
+  for (const s of masters.staff ?? []) {
+    if (s.status !== "active") continue;
+    for (const l of s.classTeacherLinks ?? []) {
+      if (!linkInYear(l.academicYearCode, ay)) continue;
+      const key = `${l.classId}:${l.sectionId}`;
+      const cur = out.get(key);
+      if (!cur || (l.isPrimary && !cur.primary)) {
+        out.set(key, { name: s.fullName || s.id, primary: !!l.isPrimary });
+      }
+    }
+  }
+  return new Map([...out].map(([k, v]) => [k, v.name]));
+}
+
+/**
+ * The holiday giving this class the day off, or "" on a working day. Only
+ * a FULL holiday: a half day still has a register to mark.
+ */
+function classHolidayLabel(
+  masters: MastersState,
+  dateIso: string,
+  ay: string,
+  classId: string,
+): string {
+  const day = classifyClassHolidayDay(masters, dateIso, ay, classId);
+  return day.status === "holiday" ? day.label || "Holiday" : "";
+}
+
+/**
+ * Why the 6 PM brief should not go out today, or null. The whole school
+ * is shut only when every class that has children is on a full holiday
+ * AND staff are too — see briefHolidaySkip.
+ */
+export async function briefHolidaySkipFor(dateIso: string): Promise<string | null> {
+  await ensureSisHydratedServer().catch(() => false);
+  const masters = await loadServerMasters();
+  const ay = currentAcademicYearCode(masters);
+  const classIds = new Set(
+    (loadSis().students ?? [])
+      .filter((s) => s.status === "active" && (!ay || s.academicYearCode === ay) && !isReviewDemoStudent(s))
+      .map((s) => s.classId)
+      .filter(Boolean),
+  );
+  return briefHolidaySkip({
+    classDays: [...classIds].map((id) => classifyClassHolidayDay(masters, dateIso, ay, id)),
+    staffDay: classifyStaffHolidayDay(masters, dateIso, ay, "any"),
+  });
+}
+
 async function readStudentAttendance(
   dateIso: string,
   masters: MastersState,
@@ -291,6 +358,13 @@ async function readStudentAttendance(
     }
   }
 
+  const teacherOf = classTeacherBySection(masters, ay);
+  const holidayOf = new Map<string, string>();
+  const holidayFor = (classId: string) => {
+    if (!holidayOf.has(classId)) holidayOf.set(classId, classHolidayLabel(masters, dateIso, ay, classId));
+    return holidayOf.get(classId)!;
+  };
+
   const seenSections = new Set<string>();
   const classes: BriefClassAttendance[] = [];
   for (const r of regs) {
@@ -311,6 +385,8 @@ async function readStudentAttendance(
       // A register row with no marks in it was opened and not filled —
       // still "not marked" as far as anyone reading this is concerned.
       marked: counts.present + counts.absent > 0,
+      holiday: holidayFor(classId),
+      classTeacherName: teacherOf.get(key) || "",
     });
   }
 
@@ -326,10 +402,19 @@ async function readStudentAttendance(
       unmarked: n,
       strength: n,
       marked: false,
+      holiday: holidayFor(classId),
+      classTeacherName: teacherOf.get(key) || "",
     });
   }
 
-  classes.sort((a, b) => a.label.localeCompare(b.label));
+  // The school's own class order (Nursery … X), not the alphabet — which
+  // files Class IX between IV and V.
+  const orderOf = new Map((masters.classes ?? []).map((c) => [c.id, c.sortOrder ?? 0]));
+  classes.sort(
+    (a, b) =>
+      (orderOf.get(a.classId) ?? 999) - (orderOf.get(b.classId) ?? 999) ||
+      a.label.localeCompare(b.label),
+  );
   const present = classes.reduce((s, c) => s + c.present, 0);
   const absent = classes.reduce((s, c) => s + c.absent, 0);
   return {
@@ -338,7 +423,135 @@ async function readStudentAttendance(
     absent,
     strength: classes.reduce((s, c) => s + c.strength, 0),
     classesMarked: classes.filter((c) => c.marked).length,
-    classesUnmarked: classes.filter((c) => !c.marked).length,
+    // A class the calendar gave the day off has no register to forget.
+    classesUnmarked: classes.filter((c) => !c.marked && !c.holiday).length,
+    classesOff: classes.filter((c) => !c.marked && c.holiday).length,
+  };
+}
+
+/* ── 3b. Homework: who set it, who owes it ─────────────────────────── */
+
+/**
+ * What each working section should have had homework for today, against
+ * what was posted.
+ *
+ * Expected comes from today's periods in the PUBLISHED timetable where a
+ * section has one; otherwise from the subjects assigned in Staff → Duties,
+ * every assigned subject on every school day. Which basis was used is
+ * counted, so the PDF can say how a teacher came to be listed. Classes on
+ * holiday and teachers marked absent today are left out: neither owes
+ * homework.
+ */
+async function readHomework(
+  dateIso: string,
+  masters: MastersState,
+  students: BriefStudentAttendance,
+  absentStaffIds: Set<string>,
+): Promise<BriefHomework> {
+  const blank: BriefHomework = {
+    checked: false,
+    expected: 0,
+    posted: 0,
+    missing: [],
+    timetableSections: 0,
+    assignmentSections: 0,
+    absentTeachersSkipped: 0,
+  };
+  const ctx = await getServerTenantContext();
+  if (!ctx) return blank;
+  const ay = currentAcademicYearCode(masters);
+
+  const subjectById = new Map((masters.subjects ?? []).map((x) => [x.id, x]));
+  // "Hindi — Oral" is homework in Hindi: posts are made on the parent.
+  const subjectKey = (id: string) => {
+    const parent = subjectById.get(id)?.parentId;
+    return parent && subjectById.has(parent) ? parent : id;
+  };
+  const subjectName = (id: string) => {
+    const x = subjectById.get(id);
+    return x?.nameEn || x?.code || id;
+  };
+  const staffById = new Map(
+    (masters.staff ?? []).filter((s) => s.status === "active").map((s) => [s.id, s]),
+  );
+
+  const working = students.classes.filter((c) => !c.holiday && c.strength > 0);
+  const sectionsOfClass = (classId: string) =>
+    (masters.sections ?? []).filter((x) => x.classId === classId && x.isActive !== false).map((x) => x.id);
+
+  await ensureTimetableHydratedServer().catch(() => false);
+  const grids = loadTimetable().publishedGrids.filter((g) => linkInYear(g.academicYearCode, ay));
+  const gridOf = new Map(grids.map((g) => [`${g.classId}:${g.sectionId}`, g]));
+  const weekday = new Date(`${dateIso}T12:00:00Z`).getUTCDay();
+
+  const expected: Parameters<typeof computeHomeworkGaps>[0]["expected"] = [];
+  const skippedAbsent = new Set<string>();
+  let timetableSections = 0;
+  let assignmentSections = 0;
+  const expect = (c: BriefClassAttendance, subjectId: string, teacherId: string) => {
+    if (!subjectId || !teacherId) return;
+    const staff = staffById.get(teacherId);
+    if (!staff) return;
+    if (absentStaffIds.has(teacherId)) {
+      skippedAbsent.add(teacherId);
+      return;
+    }
+    const key = subjectKey(subjectId);
+    expected.push({
+      sectionKey: `${c.classId}:${c.sectionId}`,
+      classLabel: c.label,
+      subjectKey: key,
+      subjectName: subjectName(key),
+      teacherStaffId: teacherId,
+      teacherName: staff.fullName || teacherId,
+    });
+  };
+
+  for (const c of working) {
+    const grid = gridOf.get(`${c.classId}:${c.sectionId}`);
+    if (grid) {
+      timetableSections++;
+      for (const slot of grid.slots) {
+        if (slot.weekday === weekday) expect(c, slot.subjectId, slot.teacherId);
+      }
+      continue;
+    }
+    let any = false;
+    for (const staff of staffById.values()) {
+      for (const l of staff.subjectTeachingLinks ?? []) {
+        if (!linkInYear(l.academicYearCode, ay) || l.classId !== c.classId) continue;
+        // A link with no section means the subject in every section.
+        const sections = l.sectionId ? [l.sectionId] : sectionsOfClass(l.classId);
+        if (!sections.includes(c.sectionId)) continue;
+        any = true;
+        expect(c, l.subjectId, staff.id);
+      }
+    }
+    if (any) assignmentSections++;
+  }
+
+  const { data: posts, error } = await ctx.sb
+    .from("homework_desk_posts")
+    .select("class_id, section_id, subject_id, status")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("post_date", dateIso);
+  if (error) {
+    // Not "nobody posted": nobody could look.
+    console.warn("[dailyBrief] homework read failed", error.message);
+    return { ...blank, timetableSections, assignmentSections };
+  }
+  const postedKeys = new Set(
+    (posts || [])
+      .filter((p) => String(p.status) !== "withdrawn")
+      .map((p) => `${p.class_id}:${p.section_id}|${subjectKey(String(p.subject_id || ""))}`),
+  );
+
+  return {
+    checked: true,
+    ...computeHomeworkGaps({ expected, postedKeys }),
+    timetableSections,
+    assignmentSections,
+    absentTeachersSkipped: skippedAbsent.size,
   };
 }
 
@@ -561,6 +774,12 @@ export async function buildDailyBrief(
     readStaffAttendance(dateIso, masters),
     readDefaulters(dateIso, masters, sis),
   ]);
+  const homework = await readHomework(
+    dateIso,
+    masters,
+    students,
+    new Set(staff.absentRows.map((r) => r.staffId)),
+  );
 
   return {
     ...emptyBrief(dateIso, TENANT.nameDisplay),
@@ -569,6 +788,7 @@ export async function buildDailyBrief(
     students,
     staff,
     defaulters,
+    homework,
     aiNote: opts.aiNote || "",
   };
 }
