@@ -8,7 +8,7 @@ import "server-only";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { isInQuietHours } from "@/lib/householdPrefs";
 import { logHouseholdWaSend } from "@/lib/householdMessageLog.server";
-import { parentBotIntroMessage, parentChatClosingMessage } from "@/lib/parentBotGuide";
+import { parentBotIntroMessage } from "@/lib/parentBotGuide";
 import { istHour, shouldCloseThread } from "@/lib/parentChatClose";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { childrenOfHousehold, householdWhatsApp, loadSis, type Household } from "@/lib/sis";
@@ -37,7 +37,7 @@ export type SweepResult = {
   skipped?: string;
 };
 
-/** Every 15 minutes in school hours: thank and guide each parent whose chat has gone quiet. */
+/** Every 15 minutes in school hours: close, without a message, each parent chat that has gone quiet. */
 export async function runParentChatCloseSweep(opts: { dryRun?: boolean; now?: Date } = {}): Promise<SweepResult> {
   await ensureSchoolMirrorHydrated();
   const now = opts.now ?? new Date();
@@ -99,26 +99,20 @@ export async function runParentChatCloseSweep(opts: { dryRun?: boolean; now?: Da
     }
     const hh = sis.households.find((x) => x.id === t.householdId);
     if (hh && isInQuietHours(hh, now)) continue;
-    const text = parentChatClosingMessage({ needsOffice: d.needsOffice, hasTransport: hh ? await ridesBus(hh) : true });
     if (opts.dryRun) {
       out.closed.push({ mobile: t.mobile, guardian: t.parentName, needsOffice: d.needsOffice });
       continue;
     }
-    const send = await sendWhatsAppText({ toMobile: t.mobile, body: text });
-    await logHouseholdWaSend({
-      mobile: t.mobile,
-      purpose: "parent_chat_close",
-      via: "text",
-      preview: text.slice(0, 200),
-      status: send.ok ? "sent" : "failed",
-      error: send.ok ? undefined : send.error,
-      waMessageId: send.ok ? send.providerId : undefined,
-    }).catch(() => undefined);
-    if (!send.ok) {
-      out.failed.push({ mobile: t.mobile, error: send.error || "send failed" });
-      continue;
-    }
-    await appendSisBotClosing({ threadId: t.id, text, at: new Date().toISOString() });
+    // The chat is closed QUIETLY — nothing is sent to the parent. The
+    // "thank you + guide" closing went to every family after every quiet
+    // chat, and from 1 Oct 2026 Meta bills every message; the director
+    // asked for it to stop (30 Sep 2026). The thread is still marked closed,
+    // so the office inbox and the next conversation behave as before.
+    await appendSisBotClosing({
+      threadId: t.id,
+      text: d.needsOffice ? "[Chat closed quietly — waiting for the office to reply]" : "[Chat closed quietly — no message sent]",
+      at: new Date().toISOString(),
+    });
     out.closed.push({ mobile: t.mobile, guardian: t.parentName, needsOffice: d.needsOffice });
   }
   return out;
