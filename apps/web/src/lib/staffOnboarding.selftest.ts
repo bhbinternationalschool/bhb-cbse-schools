@@ -20,6 +20,7 @@ import {
   composeStaffLinkRequested,
   composeStaffWorkGuide,
   isCancelOpenWork,
+  isPunchCodeOnly,
   isClassChannelPostPrefix,
   isRolesAsk,
   makeStaffLinkCode,
@@ -66,8 +67,9 @@ for (const t of ["5A", "skip school tomorrow?", "IN", ""]) assert.equal(parseSki
 {
   const t = composeMorningAttendanceAsk({ firstName: "Shweta", deferredText: "Show my class students" });
   assert.ok(t.startsWith("Good morning Shweta"), t);
-  assert.ok(t.includes("Send your current location"), "the option that works");
-  assert.ok(t.includes("Share live location"), "and the one that does not");
+  // Punching is by the office screen's code now; a location pin no longer punches.
+  assert.ok(t.includes("_IN 482913_") && t.includes("office QR screen"), "the way that works");
+  assert.ok(!/Send your current location/.test(t), "never sends staff round the retired pin route");
   assert.ok(t.includes('"Show my class students"'), "says their question will be answered");
   assert.ok(t.includes("*SKIP*"), "a way out for someone on leave");
   const hi = composeMorningAttendanceAsk({ firstName: "Shweta", hindi: true });
@@ -223,6 +225,10 @@ assert.equal(parseRoleSwitch("STAFF", [{ kind: "staff", label: "Staff / Office",
   assert.ok(g.includes("*PARENT*"));
 }
 for (const t of ["ROLE", "my roles", "switch", "profile"]) assert.equal(isRolesAsk(t), true, t);
+
+// The punch code on its own answers an open punch — never held as a question.
+for (const t of ["482913", " 482 913 ", "482-913"]) assert.equal(isPunchCodeOnly(t), true, t);
+for (const t of ["4829", "IN 482913", "4829131", "abc123", ""]) assert.equal(isPunchCodeOnly(t), false, t);
 
 /* ── To the director ───────────────────────────────────────────────── */
 

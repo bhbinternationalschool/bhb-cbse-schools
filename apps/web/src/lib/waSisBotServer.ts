@@ -437,6 +437,11 @@ async function finishLanguageFlow(
   // waSisBotThreadMerge.ts.
   const store = await readStore();
   await writeStore({ ...store, threads: mergeThreadTurns(store.threads, next, turns) });
+  // Nothing to add: the answer already went (e.g. the APAAR buttons). A
+  // second "tap the button above" is one more billed message from 1 Oct 2026.
+  if (!replyText.trim()) {
+    return { matched: true, replied: true, escalate: false, replyText, stub: false };
+  }
   const send = await sendWhatsAppText({ toMobile: next.mobile, body: replyText, clientMessageId: botMsg.id });
   return {
     matched: true,

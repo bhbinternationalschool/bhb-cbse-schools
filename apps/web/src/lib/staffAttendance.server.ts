@@ -527,7 +527,7 @@ export async function staffAttendanceStatusForWa(
   const reg = findStaffRegister(state, date, ay);
   const mark = reg?.marks.find((m) => m.staffId === staffId);
   if (!mark) {
-    return `*Attendance* — ${date}\n\nNo punch yet. To punch IN, send your location: 📎 → *Location* → *Send your current location*.`;
+    return `*Attendance* — ${date}\n\nNo punch yet. To punch IN, send *IN* with the 6-digit code on the office QR screen — e.g. _IN 482913_.`;
   }
   const geo = mark.punchGeo
     ? `📍 last pin ~${formatDistanceLabel(mark.punchGeo.distanceM ?? -1)} from school`
@@ -539,7 +539,7 @@ export async function staffAttendanceStatusForWa(
     mark.note ? `Note: ${mark.note}` : null,
     geo || null,
     "",
-    "To punch, send your location: 📎 → *Location* → *Send your current location*.",
+    "To punch, send *IN* or *OUT* with the 6-digit code on the office QR screen — e.g. _OUT 482913_.",
   ]
     .filter(Boolean)
     .join("\n");

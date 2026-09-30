@@ -286,6 +286,13 @@ export async function handleWaCrmBotInbound(opts: {
   fromUnified?: boolean;
   visitorName?: string;
   forceEscalate?: boolean;
+  /**
+   * Log to the admissions inbox and escalate, but send nothing: the caller
+   * sends its own reply. Without it a vendor or a visitor was told
+   * "Connecting you to the Admissions desk" AND the caller's own message —
+   * two billed messages, the first of them wrong.
+   */
+  logOnly?: boolean;
 }): Promise<{
   replied: boolean;
   escalate: boolean;
@@ -589,6 +596,10 @@ export async function handleWaCrmBotInbound(opts: {
     } catch {
       /* admissions push optional — never block the WA reply */
     }
+  }
+
+  if (opts.logOnly) {
+    return { replied: false, escalate: bot.escalate, replyText, stub: false };
   }
 
   const send = await sendWhatsAppText({

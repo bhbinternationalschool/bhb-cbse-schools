@@ -71,6 +71,7 @@ import {
   composeStaffWorkGuide,
   DEFERRED_MAX,
   isCancelOpenWork,
+  isPunchCodeOnly,
   isRolesAsk,
   makeStaffLinkCode,
   maskMobile10,
@@ -516,6 +517,7 @@ async function delegateActiveFlow(
       text: voiceNoteHubNote(opts.voiceNoteFailure),
       visitorName: name,
       forceEscalate: true,
+      logOnly: true,
     });
     const ok = await sendBotReply({
       mobile10,
@@ -741,6 +743,7 @@ async function delegateActiveFlow(
         text: note ? `[TRANSPORT] ${note}` : `HUMAN`,
         visitorName: name,
         forceEscalate: true,
+        logOnly: true,
       });
       const hint = composeActiveFlowHint("transport", name, unifiedHindiFor(identity));
       await sendBotReply({
@@ -815,6 +818,7 @@ async function delegateActiveFlow(
       text: note ? `[VENDOR] ${note}` : `HUMAN`,
       visitorName: name,
       forceEscalate: true,
+      logOnly: true,
     });
     await sendBotReply({
       mobile10,
@@ -963,6 +967,7 @@ async function delegateActiveFlow(
       text: note ? `[${flow.toUpperCase()}] ${note}` : `HUMAN`,
       visitorName: name,
       forceEscalate: true,
+      logOnly: true,
     });
     const ack = composeActiveFlowHint(flow, name, unifiedHindiFor(identity));
     await sendBotReply({
@@ -1216,8 +1221,8 @@ async function readOpenWork(opts: {
     if (!today?.inTime) {
       return {
         kind: "morning_attendance",
-        what: "today's attendance — waiting for your location",
-        how: "send your location — 📎 → *Location* → *Send your current location* (or reply *SKIP*)",
+        what: "today's attendance",
+        how: "send *IN* with the 6-digit code on the office QR screen, e.g. _IN 482913_ (or reply *SKIP*)",
       };
     }
   }
@@ -1251,9 +1256,11 @@ function answersOpenWork(work: OpenWork, text: string): boolean {
     detectStaffAttBotIntent(t) !== "unknown" || !!detectOwnAttendanceAsk(t) || parseStaffAttLanguage(t) !== null;
   switch (work.kind) {
     case "morning_attendance":
-      return attendanceWord || parseSkipOwnAttendance(t);
+      return attendanceWord || parseSkipOwnAttendance(t) || isPunchCodeOnly(t);
     case "punch":
-      return attendanceWord || isEarlyOutConfirm(t);
+      // The 6-digit code on its own is the answer the punch is waiting for;
+      // held as a "question" it was replayed later and the punch never ran.
+      return attendanceWord || isEarlyOutConfirm(t) || isPunchCodeOnly(t);
     case "confirm_card":
       return /^(yes|y|haan|ha|han|ok|okay|confirm|no|n|nahi|nahin|cancel|हाँ|हां|ठीक|नहीं|रद्द)$/i.test(t) || /^cmd_(yes|no)_/.test(t);
     case "register":
@@ -1299,14 +1306,8 @@ async function answerDeferred(
     const at = Date.parse(d.at);
     if (!Number.isFinite(at) || Date.now() - at > DEFERRED_TTL_MS) continue;
     const now = (await readStore()).sessions[mobile10] ?? session;
-    await sendBotReply({
-      mobile10,
-      displayName: now.displayName || identity.displayName,
-      category: categoryForUnifiedAudience(flow, String(flow)),
-      audience: "staff_deferred",
-      flow: String(flow),
-      text: `↩️ Now your earlier question: "${d.text.length > 80 ? `${d.text.slice(0, 77)}…` : d.text}"`,
-    });
+    // No separate "now your earlier question" message: from 1 Oct 2026 Meta
+    // bills every reply, and the reminder already told them it would come.
     try {
       await delegateStaffAware(flow, { fromWaId: opts.fromWaId, text: d.text, profileName: opts.profileName }, identity, now);
     } catch (e) {
@@ -1322,9 +1323,11 @@ async function sendDayGuide(opts: {
   flow: string;
   session: WaUnifiedSession;
   punchedJustNow: boolean;
-}): Promise<void> {
+  /** A line to put on top, so it goes as one message rather than two. */
+  lead?: string;
+}): Promise<boolean> {
   const staff = staffRecordFor(opts.identity, opts.flow);
-  if (!staff) return;
+  if (!staff) return false;
   const masters = loadMasters();
   const profile = staffWorkProfile(staff, masters, currentAcademicYearCode(masters));
   const roles = opts.identity.roles.length > 1 ? roleNotesFor(opts.identity) : undefined;
@@ -1342,9 +1345,10 @@ async function sendDayGuide(opts: {
     category: categoryForUnifiedAudience(opts.flow, opts.flow),
     audience: "staff_day_guide",
     flow: opts.flow,
-    text,
+    text: opts.lead ? `${opts.lead}\n\n${text}` : text,
   });
   await patchSession(opts.mobile10, opts.session, { guideSentOn: istNow().todayIso });
+  return true;
 }
 
 /* ── Who leadership is, for private messages and leave approval ───────── */
@@ -1921,10 +1925,12 @@ async function delegateStaffAware(
   }
   if (work?.kind === "morning_attendance" && parseSkipOwnAttendance(text)) {
     const next = await patchSession(mobile10, session, { morningAskAt: "" });
-    await reply("OK — not marking it here today.", "staff_morning_skip");
-    if (next.guideSentOn !== istNow().todayIso) {
-      await sendDayGuide({ mobile10, identity, flow, session: next, punchedJustNow: false });
-    }
+    const skipped = "OK — not marking it here today.";
+    // The OK and the day's guide as one message, not two.
+    const guided =
+      next.guideSentOn !== istNow().todayIso &&
+      (await sendDayGuide({ mobile10, identity, flow, session: next, punchedJustNow: false, lead: skipped }));
+    if (!guided) await reply(skipped, "staff_morning_skip");
     await answerDeferred(flow, opts, identity);
     return { replied: true, escalate: false, audience: "staff_morning_skip", stub: false };
   }
@@ -2536,18 +2542,28 @@ export async function handleWaUnifiedInbound(opts: {
           displayName: session.displayName,
         });
         const back = switchableRoles(notes).find((n) => n.kind !== target)?.switchWord ?? "MENU";
+        const switched = `🔁 Switched to *${role.pickKeyword}* — ${role.label}.\nEverything you send now is answered in this role. Send *${back}* to switch back, or *ROLE* to see your roles.`;
+        const hindi = unifiedHindiFor(identity);
+        const menu = roleFlowInteractiveMenu(target, session.displayName, hindi);
+        // The switch note and the role's menu as one message, not two. The
+        // note goes on top of the menu's text, within WhatsApp's 1,024.
+        const withNote =
+          menu && menu.menu.body.length + switched.length + 2 <= 1024
+            ? {
+                menu: { ...menu.menu, body: `${switched}\n\n${menu.menu.body}` },
+                textFallback: `${switched}\n\n${menu.textFallback}`,
+              }
+            : null;
         await sendBotReply({
           mobile10,
           displayName: session.displayName,
           category: categoryForUnifiedAudience("role_pick", target),
           audience: "role_switch",
           flow: target,
-          text: `🔁 Switched to *${role.pickKeyword}* — ${role.label}.\nEverything you send now is answered in this role. Send *${back}* to switch back, or *ROLE* to see your roles.`,
+          ...(withNote ? { menu: withNote } : { text: switched }),
           inbound: inboundLog,
         });
-        const hindi = unifiedHindiFor(identity);
-        const menu = roleFlowInteractiveMenu(target, session.displayName, hindi);
-        if (menu) {
+        if (menu && !withNote) {
           await sendBotReply({ mobile10, displayName: session.displayName, category: categoryForUnifiedAudience("role_pick", target), audience: target, flow: target, menu });
         }
         return { replied: true, escalate: false, audience: "role_switch", stub: false };

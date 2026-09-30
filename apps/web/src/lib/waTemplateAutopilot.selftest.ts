@@ -140,6 +140,12 @@ assert.deepEqual(datesMentioned("kal ka exam cancel, ab 5 Oct ko", "2026-09-30")
   assert.equal(merged[0]!.metaTemplateId, "8");
   assert.equal(merged[0]!.body, "office wording", "the wording stays the office's");
   assert.equal(merged[1]!.status, "approved", "an older registry row does not overrule a newer desk");
+  // Meta's category wins: a template it re-classed as marketing is billed as marketing.
+  const recat = overlayMetaFields(
+    [{ ...desk[0]!, category: "UTILITY" }],
+    [{ ...registry[0]!, category: "MARKETING" }],
+  );
+  assert.equal(recat[0]!.category, "MARKETING");
 }
 
 console.log("waTemplateAutopilot.selftest.ts\n  ok");

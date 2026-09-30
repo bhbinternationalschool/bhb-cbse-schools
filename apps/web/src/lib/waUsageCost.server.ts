@@ -30,6 +30,8 @@ import { loadWaCostRates } from "@/lib/waCostRates.server";
 import { loadWaTemplatesServer } from "@/lib/waTemplatesRead.server";
 import {
   istMonthKey,
+  META_PER_MESSAGE_FROM,
+  metaBillByMonth,
   splitWaUsageByAudience,
   summariseAiUsage,
   summariseWaUsage,
@@ -45,6 +47,7 @@ import {
   type WaUsageAudienceSection,
   type WaUsageByStudent,
   type WaUsageMessage,
+  type WaMetaBillMonth,
   type WaUsageMonth,
   type WaUsageStudentRef,
   type WaUsageYearWindow,
@@ -109,6 +112,12 @@ export type WaUsageReport = {
    * per-class figures.
    */
   attributedByNumber: number;
+  /**
+   * Meta's bill for last month and this one, from every message the number
+   * sent (the delivery reports), priced per message from 1 Oct 2026 — the
+   * figure the invoice will be close to. See metaBillByMonth.
+   */
+  metaBill: WaMetaBillMonth[];
 };
 
 /**
@@ -300,7 +309,12 @@ async function templateCategoryMap(): Promise<{
       const cat = normalizeCategory(t.category);
       for (const key of [t.metaName, t.name, t.familyKey]) {
         const k = String(key || "").trim().toLowerCase();
-        if (k) map.set(k, cat);
+        // One name, two languages, and Meta may bill them differently
+        // (bhb_exam_tomorrow: English MARKETING, Hindi UTILITY). The log
+        // does not say which language went, so the dearer one is used —
+        // an estimate that flatters the school is the one the invoice
+        // contradicts.
+        if (k && !(map.get(k) === "marketing" && cat !== "marketing")) map.set(k, cat);
       }
     }
     return { map, ok: true };
@@ -334,6 +348,44 @@ async function loadAiCalls(sinceIso: string): Promise<WaAiCall[]> {
     promptTokens: Number(r.prompt_tokens || 0),
     completionTokens: Number(r.completion_tokens || 0),
   }));
+}
+
+/**
+ * Messages the number sent in each IST month, from the delivery reports:
+ * every message gets one "sent" report, and a failed one a "failed" report,
+ * so delivered = sent − failed. Counted, not fetched, so a busy month is
+ * never cut off by a row cap.
+ */
+async function metaDeliveredByMonth(months: string[]): Promise<Record<string, number>> {
+  const ctx = await getServerTenantContext();
+  const out: Record<string, number> = {};
+  if (!ctx) return out;
+  const IST = 330 * 60_000;
+  const monthStart = (m: string) => new Date(Date.parse(`${m}-01T00:00:00Z`) - IST).toISOString();
+  const next = (m: string) => {
+    const [y, mo] = m.split("-").map(Number);
+    return mo === 12 ? `${y + 1}-01` : `${y}-${String(mo + 1).padStart(2, "0")}`;
+  };
+  for (const m of months) {
+    const count = async (status: string) => {
+      const { count: n, error } = await ctx.sb
+        .from("wa_message_delivery")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", ctx.tenantId)
+        .eq("status", status)
+        .gte("event_at", monthStart(m))
+        .lt("event_at", monthStart(next(m)));
+      if (error) throw new Error(error.message);
+      return n ?? 0;
+    };
+    try {
+      const [sent, failed] = await Promise.all([count("sent"), count("failed")]);
+      out[m] = Math.max(0, sent - failed);
+    } catch (e) {
+      console.warn("[waUsage] monthly delivery count failed", m, (e as Error).message);
+    }
+  }
+  return out;
 }
 
 async function countMetaOutbound(sinceIso: string): Promise<number> {
@@ -384,6 +436,7 @@ export async function waUsageReport(
       year: waUsageYearWindow({ todayIso: new Date().toISOString() }),
       rosterOk: false,
       attributedByNumber: 0,
+      metaBill: [],
     };
   }
 
@@ -425,6 +478,7 @@ export async function waUsageReport(
       year: waUsageYearWindow({ todayIso: new Date().toISOString() }),
       rosterOk: false,
       attributedByNumber: 0,
+      metaBill: [],
     };
   }
 
@@ -453,7 +507,9 @@ export async function waUsageReport(
   for (const r of rows) {
     const templateName = String(r.template_name || "").trim();
     const isTemplate = String(r.via || "") === "template" || !!templateName;
-    let category: WaBillCategory = "service";
+    // Free-form replies were free until 30 Sep 2026; from 1 Oct they are billed.
+    let category: WaBillCategory =
+      istMonthKey(String(r.created_at || "")) < META_PER_MESSAGE_FROM ? "service_free" : "service";
     if (isTemplate) {
       category = map.get(templateName.toLowerCase()) ?? "unknown";
     }
@@ -521,6 +577,21 @@ export async function waUsageReport(
 
   const ai = summariseAiUsage(aiCalls, rates);
 
+  // Last month and this one, priced the way Meta bills from 1 Oct 2026.
+  const nowIso = new Date().toISOString();
+  const thisMonth = istMonthKey(nowIso);
+  const [ty, tm] = thisMonth.split("-").map(Number);
+  const lastMonth = tm === 1 ? `${ty - 1}-12` : `${ty}-${String(tm - 1).padStart(2, "0")}`;
+  const byMonthForBill = summariseWaUsageByMonth(yearMessages, rates, {});
+  const marketingByMonth: Record<string, number> = {};
+  for (const m of byMonthForBill) marketingByMonth[m.month] = Math.round(m.sharesByCategory.marketing ?? 0);
+  const metaBill = metaBillByMonth({
+    deliveredByMonth: await metaDeliveredByMonth([lastMonth, thisMonth]),
+    marketingByMonth,
+    rates,
+    nowIso,
+  });
+
   return {
     ok: true,
     sinceIso,
@@ -545,5 +616,6 @@ export async function waUsageReport(
     }),
     rosterOk: attribution.ok,
     attributedByNumber,
+    metaBill,
   };
 }

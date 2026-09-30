@@ -4550,8 +4550,9 @@ async function runReportCommand(
           : `The PDF could not be sent here (${sent.error}), and could not be stored either. Open the report in the ERP.`,
       };
     }
-    // The document is the reply; the text is a one-line receipt of it.
-    return { handled: true, audience, text: `📄 Sent: *${table.title}* — ${table.summary}` };
+    // The document is the reply, and its caption already names it: no
+    // second "📄 Sent" message (every message is billed from 1 Oct 2026).
+    return { handled: true, audience, text: "" };
   }
 
   const stored = await storeReportPdf(bytes, table.filename, atIso);
@@ -4712,9 +4713,11 @@ async function runJobApplicants(
           bytes,
           filename: jobCvArchiveFileName(app.applicantName, app.cvMime, new Date(app.createdAt || Date.now())),
           mimeType: app.cvMime || undefined,
-          caption: `${app.applicantName || "Applicant"} — CV`,
+          // Who, how to call them and the Drive copy in the caption itself,
+          // so the CV goes as one message rather than two.
+          caption: `${app.applicantName || "Applicant"} — CV${app.mobile ? `\n📞 ${formatCallNumber(app.mobile)}` : ""}${drive ? `\nDrive: ${drive}` : ""}`,
         });
-        if (sent.ok) return { handled: true, audience, text: `📄 Sent: CV of ${who}${drive ? `\nDrive: ${drive}` : ""}` };
+        if (sent.ok) return { handled: true, audience, text: "" };
       }
     }
     return {
