@@ -349,8 +349,29 @@ function withColors(series: DashboardChartPoint[]): DashboardChartPoint[] {
   }));
 }
 
+/**
+ * All-zero series: say so instead of drawing. Recharts 3 loops ("Maximum
+ * update depth exceeded") on some all-zero charts, which took the whole
+ * Exams page down on 2026-09-30 (no mark sheets yet → every bar 0) — and a
+ * row of empty bars says nothing anyway.
+ */
+function NoChartData() {
+  return (
+    <div className="flex h-[220px] items-center justify-center rounded-xl border border-dashed border-[var(--border)] text-sm text-[var(--muted)]">
+      Nothing recorded yet
+    </div>
+  );
+}
+
+const allZero = (series: DashboardChartPoint[]) => series.every((p) => !(p.value > 0));
+
 function BarChartSvg({ series }: { series: DashboardChartPoint[] }) {
-  const data = withColors(series).slice(0, 31);
+  if (allZero(series)) return <NoChartData />;
+  return <BarChartDrawn series={series} />;
+}
+
+function BarChartDrawn({ series }: { series: DashboardChartPoint[] }) {
+  const data = useMemo(() => withColors(series).slice(0, 31), [series]);
   const [hovered, setHovered] = useState<number | null>(null);
   const dense = data.length > 14;
 
@@ -431,18 +452,30 @@ function DonutChartSvg({
   rings: DashboardChartRing[];
   center?: DashboardChartCenter;
 }) {
-  const activeRings = rings.filter((r) => r.series.some((p) => p.value > 0));
-  const displayRings: DonutRingData[] =
-    activeRings.length > 0
-      ? activeRings
+  // Memoised on `rings`: Recharts 3 re-registers a <Pie> whenever its
+  // `data` array is a new object, and that registration re-renders the
+  // chart — so arrays rebuilt on every render loop forever ("Maximum update
+  // depth exceeded"). It took down the whole Exams page on 2026-09-30, whose
+  // rings were all zero: every render handed each Pie a fresh empty [].
+  const displayRings: DonutRingData[] = useMemo(() => {
+    const active = rings.filter((r) => r.series.some((p) => p.value > 0));
+    return active.length > 0
+      ? active
       : [{ id: "empty", label: "", series: [{ label: "—", value: 0 }] }];
+  }, [rings]);
   const ringCount = displayRings.length;
   const [hover, setHover] = useState<{ ring: number; index: number } | null>(null);
 
-  const coloredRings = displayRings.map((ring) => ({
-    ...ring,
-    series: withColors(ring.series).filter((p) => p.value > 0).slice(0, 6),
-  }));
+  const coloredRings = useMemo(
+    () =>
+      displayRings.map((ring) => ({
+        ...ring,
+        series: withColors(ring.series).filter((p) => p.value > 0).slice(0, 6),
+      })),
+    [displayRings],
+  );
+  // Nothing to draw → no Recharts at all, just an empty ring.
+  const nothingToDraw = coloredRings.every((r) => r.series.length === 0);
 
   const outerTotal =
     displayRings[0]?.series.reduce((s, p) => s + (p.value > 0 ? p.value : 0), 0) ||
@@ -488,6 +521,13 @@ function DonutChartSvg({
             </p>
           </div>
         ) : null}
+        {nothingToDraw ? (
+          <div
+            aria-hidden
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border-[18px] border-[var(--surface-sunken)]"
+            style={{ width: 180, height: 180 }}
+          />
+        ) : (
         <ResponsiveContainer width="100%" height="100%">
           <RechartsPieChart>
             {coloredRings.map((ring, ringIndex) => {
@@ -521,6 +561,7 @@ function DonutChartSvg({
             })}
           </RechartsPieChart>
         </ResponsiveContainer>
+        )}
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
           <span
             className="font-display font-extrabold text-[var(--brand-deep)]"
@@ -582,7 +623,12 @@ function PieChartSvg({ series }: { series: DashboardChartPoint[] }) {
 }
 
 function TrendChartSvg({ series }: { series: DashboardChartPoint[] }) {
-  const data = withColors(series).slice(0, 31);
+  if (allZero(series)) return <NoChartData />;
+  return <TrendChartDrawn series={series} />;
+}
+
+function TrendChartDrawn({ series }: { series: DashboardChartPoint[] }) {
+  const data = useMemo(() => withColors(series).slice(0, 31), [series]);
   const [hovered, setHovered] = useState<number | null>(null);
   const gradientId = useId();
   const dense = data.length > 14;
