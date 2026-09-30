@@ -216,6 +216,14 @@ export function languageGateDecision(input: {
     return inline ? { action: "save", choice: inline } : { action: "ask" };
   }
 
+  // "Select english language", "English me bhejiye", "हिंदी में भेजें" —
+  // a sentence asking for a language counts whatever is stored, so a parent
+  // can change it without knowing the LANG keyword (2026-09-30: a parent's
+  // "Select english language" got "I don't have that information" and went
+  // to the office).
+  const request = parseLanguageRequest(text);
+  if (request) return request === known ? { action: "pass" } : { action: "save", choice: request };
+
   // Known already: never interpret a stray number as a language again. "2"
   // now belongs to whatever menu the parent is actually looking at.
   if (known) return { action: "pass" };
@@ -280,6 +288,49 @@ export function parseLanguageChoiceStrict(text: string): HouseholdLanguage | nul
   if (!t) return null;
   if (HOUSEHOLD_LANGUAGES.some((l) => t === l.id)) return null;
   return parseLanguageChoice(t);
+}
+
+const LANGUAGE_NAMES: Record<string, HouseholdLanguage> = {
+  english: "en", angrezi: "en", angreji: "en", "अंग्रेजी": "en", "अंग्रेज़ी": "en",
+  hindi: "hi", "हिंदी": "hi", "हिन्दी": "hi",
+  bhojpuri: "bho", "भोजपुरी": "bho",
+  maithili: "mai", "मैथिली": "mai",
+  urdu: "ur", "उर्दू": "ur", "اردو": "ur",
+  bengali: "bn", bangla: "bn", "বাংলা": "bn", "बंगाली": "bn",
+};
+/** Words that make a sentence about a language a request for one. */
+const LANGUAGE_ASK =
+  /(?<![\p{L}\p{M}])(language|lang|bhasha|bhasa|भाषा|select|choose|change|set|prefer|badlo|badal[\p{L}\p{M}]*|बदल[\p{L}\p{M}]*)(?![\p{L}\p{M}])/iu;
+/** "<language> में भेजें" / "send in <language>": an "in" word and a send word, either order. */
+const IN_WORD = /(?<![\p{L}\p{M}])(me|mein|main|में|in)(?![\p{L}\p{M}])/iu;
+const SEND_WORD =
+  /(?<![\p{L}\p{M}])(bhej[\p{L}\p{M}]*|भेज[\p{L}\p{M}]*|send|message|messages|msg|sms|likh[\p{L}\p{M}]*|लिख[\p{L}\p{M}]*|baat|बात|reply|chahiye|chaiye|चाहिए|samjha[\p{L}\p{M}]*)(?![\p{L}\p{M}])/iu;
+/** A sentence about schoolwork that happens to name a language is not a request. */
+const SCHOOLWORK =
+  /(?<![\p{L}\p{M}])(homework|hw|book|books|kitab[\p{L}\p{M}]*|किताब[\p{L}\p{M}]*|paper|exam[\p{L}\p{M}]*|test|marks|subject|class|teacher|period|syllabus|copy|chapter|पाठ|परीक्षा|गृहकार्य|medium)(?![\p{L}\p{M}])/iu;
+
+/**
+ * A sentence asking for a language, or null. Needs exactly one language
+ * NAME (never a bare code — "hi" is a greeting) plus a clear ask: a word
+ * like "language"/"select"/"change", or "<language> में भेजें". Anything about
+ * homework, books, exams or subjects is left alone unless it says
+ * "language"/"भाषा" outright — "English homework kya hai" is a question
+ * about English homework.
+ */
+export function parseLanguageRequest(text: string): HouseholdLanguage | null {
+  const t = (text || "").trim().toLowerCase();
+  if (!t || t.length > 120) return null;
+  const found = new Set<HouseholdLanguage>();
+  for (const [name, code] of Object.entries(LANGUAGE_NAMES)) {
+    const re = new RegExp(`(?<![\\p{L}\\p{M}])${name}(?![\\p{L}\\p{M}])`, "iu");
+    if (re.test(t)) found.add(code);
+  }
+  if (found.size !== 1) return null;
+  const [choice] = [...found];
+  const saysLanguage = /(?<![\p{L}\p{M}])(language|bhasha|bhasa|भाषा)(?![\p{L}\p{M}])/iu.test(t);
+  if (SCHOOLWORK.test(t) && !saysLanguage) return null;
+  if (LANGUAGE_ASK.test(t) || (IN_WORD.test(t) && SEND_WORD.test(t))) return choice!;
+  return null;
 }
 
 /** Confirmation in the chosen language (static — never sent through a model). */
