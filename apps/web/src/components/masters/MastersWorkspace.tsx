@@ -56,8 +56,8 @@ import {
   NumberSeriesPanel,
   SchoolProfilePanel,
   StaffMastersPanel,
-  SubjectsPanel,
 } from "@/components/masters/FoundationPanels";
+import { SubjectsPanel } from "@/components/masters/SubjectsPanel";
 import { SalarySetupPanel } from "@/components/masters/SalarySetupPanel";
 import { RolesPermissionsPanel } from "@/components/masters/RolesPermissionsPanel";
 import { WaTemplatesPanel } from "@/components/masters/WaTemplatesPanel";
