@@ -40,7 +40,7 @@ import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ErpTableShell } from "@/components/ui/erp-roster";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { StaffAttendancePanel } from "@/components/attendance/StaffAttendancePanel";
-import { VoiceMicButton } from "@/components/voice/VoiceMicButton";
+import { VoiceDictateButton } from "@/components/teaching/VoiceDictateButton";
 import { AttendanceExceptionsPanel } from "@/components/attendance/AttendanceExceptionsPanel";
 import { StaffAttendanceReportsPanel } from "@/components/staff/StaffLeaveReportsPanel";
 import { StudentAttendanceReportsPanel } from "@/components/attendance/StudentAttendanceReportsPanel";
@@ -883,12 +883,13 @@ export function AttendanceWorkspace() {
                   </ErpTableShell>
                 )}
 
-                <label className="mt-3 block text-sm">
+                <div className="mt-3 block text-sm">
                   <span className="mb-1 block text-[11px] text-[var(--muted)]">
                     Day remark (optional)
                   </span>
                   <span className="flex items-center gap-1.5">
                     <input
+                      aria-label="Day remark"
                       className="field !py-1.5"
                       value={remark}
                       disabled={lockBlocksTeacher}
@@ -898,15 +899,19 @@ export function AttendanceWorkspace() {
                       }}
                       placeholder="e.g. Class test period 3"
                     />
-                    <VoiceMicButton
+                    {/* 2026-09-30: the shared dictation mic — the old one was
+                        Chrome-only and hid itself on iPhones. */}
+                    <VoiceDictateButton
+                      title="Dictate the day remark"
                       disabled={lockBlocksTeacher}
-                      onTranscript={(t) => {
-                        setRemark((prev) => (prev ? `${prev} ${t}` : t));
+                      value={remark}
+                      onChange={(v) => {
+                        setRemark(v);
                         setDirty(true);
                       }}
                     />
                   </span>
-                </label>
+                </div>
 
                 {teacherLocked && canOverrideLock ? (
                   <label className="mt-3 block text-sm">

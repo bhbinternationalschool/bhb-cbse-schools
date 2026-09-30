@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight, Wallet } from "lucide-react";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { VoiceDictateButton } from "@/components/teaching/VoiceDictateButton";
 import type { CalendarCounts, CalendarDay, CalendarDayKind } from "@/lib/staffMonthCalendar";
 
 /**
@@ -446,10 +447,14 @@ function MyLeave() {
         <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
           <input type="checkbox" checked={form.halfDay} onChange={(e) => setForm({ ...form, halfDay: e.target.checked })} /> Half day
         </label>
-        <label className="block text-[11px] font-semibold text-[var(--muted)]">
-          Reason
-          <input className={input} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} />
-        </label>
+        {/* div, not label: the mic would be the label's control (2026-09-30). */}
+        <div className="block text-[11px] font-semibold text-[var(--muted)]">
+          <span className="flex flex-wrap items-center gap-2">
+            <span>Reason</span>
+            <VoiceDictateButton title="Dictate the reason" value={form.reason} onChange={(v) => setForm((f) => ({ ...f, reason: v }))} disabled={busy} />
+          </span>
+          <input aria-label="Reason" className={input} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} />
+        </div>
         <button
           type="button"
           disabled={busy || !form.typeCode}

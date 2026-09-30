@@ -49,6 +49,7 @@ import {
 } from "@/components/ui/erp-roster";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { VoiceDictateButton } from "@/components/teaching/VoiceDictateButton";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type RowState = {
@@ -592,35 +593,61 @@ export function RemarksPanel(props: {
                       onChange={(e) => setText(row.studentId, "text", e.target.value)}
                       aria-label={`${st.fullName} remark`}
                     />
+                    {/* 2026-09-30: class teachers write these on a phone — dictate instead of thumb-typing 40 remarks. */}
+                    <VoiceDictateButton
+                      lang="en-IN"
+                      title={`Dictate remark for ${st.fullName}`}
+                      value={row.text}
+                      onChange={(v) => setText(row.studentId, "text", v)}
+                      disabled={!canEdit || !row.card}
+                    />
                     {language !== "en" || row.textHi ? (
-                      <textarea
-                        className="field mt-1 min-h-[56px] w-full !px-2 !py-1.5 text-xs leading-relaxed"
-                        value={row.textHi}
-                        placeholder="हिंदी में टिप्पणी"
-                        disabled={!canEdit || !row.card}
-                        onChange={(e) => setText(row.studentId, "textHi", e.target.value)}
-                        aria-label={`${st.fullName} remark (Hindi)`}
-                        lang="hi"
-                      />
+                      <>
+                        <textarea
+                          className="field mt-1 min-h-[56px] w-full !px-2 !py-1.5 text-xs leading-relaxed"
+                          value={row.textHi}
+                          placeholder="हिंदी में टिप्पणी"
+                          disabled={!canEdit || !row.card}
+                          onChange={(e) => setText(row.studentId, "textHi", e.target.value)}
+                          aria-label={`${st.fullName} remark (Hindi)`}
+                          lang="hi"
+                        />
+                        <VoiceDictateButton
+                          lang="hi-IN"
+                          title={`Dictate Hindi remark for ${st.fullName}`}
+                          value={row.textHi}
+                          onChange={(v) => setText(row.studentId, "textHi", v)}
+                          disabled={!canEdit || !row.card}
+                        />
+                      </>
                     ) : null}
                     {isOpen ? (
                       <div className="mt-2 grid gap-1 sm:grid-cols-2">
                         {row.subjects.map((s) => (
-                          <label key={s.subjectId} className="block">
+                          <div key={s.subjectId} className="block">
                             <span className="mb-0.5 flex items-center justify-between text-[10px] text-[var(--muted)]">
                               <span>{s.subjectName}</span>
                               <span>{s.remark ? sourceLabel(s.source) : ""}</span>
                             </span>
-                            <input
-                              className="field w-full !px-2 !py-1 text-xs"
-                              value={s.remark}
-                              disabled={!canEdit}
-                              onChange={(e) =>
-                                setSubjectRemark(row.studentId, s.subjectId, e.target.value)
-                              }
-                              aria-label={`${st.fullName} ${s.subjectName} remark`}
-                            />
-                          </label>
+                            <span className="flex items-center gap-1">
+                              <input
+                                className="field min-w-0 flex-1 !px-2 !py-1 text-xs"
+                                value={s.remark}
+                                disabled={!canEdit}
+                                onChange={(e) =>
+                                  setSubjectRemark(row.studentId, s.subjectId, e.target.value)
+                                }
+                                aria-label={`${st.fullName} ${s.subjectName} remark`}
+                              />
+                              <VoiceDictateButton
+                                lang="en-IN"
+                                title={`Dictate ${s.subjectName} remark`}
+                                value={s.remark}
+                                onChange={(v) => setSubjectRemark(row.studentId, s.subjectId, v)}
+                                disabled={!canEdit}
+                              />
+                            </span>
+                          </div>
                         ))}
                       </div>
                     ) : null}

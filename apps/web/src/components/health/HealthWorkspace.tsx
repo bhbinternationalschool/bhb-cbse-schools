@@ -6,6 +6,7 @@ import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionCo
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { field } from "@/components/ui/erp-ui";
+import { VoiceDictateButton } from "@/components/teaching/VoiceDictateButton";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import type { RowAction } from "@/components/ui/erp-grid";
 import { DEFAULT_AY, loadMasters, type MastersState, currentAcademicYearCode} from "@/lib/masters";
@@ -712,15 +713,21 @@ export function HealthWorkspace() {
             </select>
           </label>
 
-          <label className="block text-sm">
-            <span className="mb-1 block text-[11px] text-[var(--muted)]">Symptoms</span>
-            <textarea className={field} rows={2} value={logSymptoms} onChange={(e) => setLogSymptoms(e.target.value)} />
-          </label>
+          <div className="block text-sm">
+            <span className="mb-1 flex flex-wrap items-center gap-2 text-[11px] text-[var(--muted)]">
+              <span>Symptoms</span>
+              <VoiceDictateButton title="Dictate symptoms" value={logSymptoms} onChange={setLogSymptoms} disabled={readOnly} />
+            </span>
+            <textarea aria-label="Symptoms" className={field} rows={2} value={logSymptoms} onChange={(e) => setLogSymptoms(e.target.value)} />
+          </div>
 
-          <label className="block text-sm">
-            <span className="mb-1 block text-[11px] text-[var(--muted)]">Action taken</span>
-            <textarea className={field} rows={2} value={logAction} onChange={(e) => setLogAction(e.target.value)} />
-          </label>
+          <div className="block text-sm">
+            <span className="mb-1 flex flex-wrap items-center gap-2 text-[11px] text-[var(--muted)]">
+              <span>Action taken</span>
+              <VoiceDictateButton title="Dictate action taken" value={logAction} onChange={setLogAction} disabled={readOnly} />
+            </span>
+            <textarea aria-label="Action taken" className={field} rows={2} value={logAction} onChange={(e) => setLogAction(e.target.value)} />
+          </div>
 
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={logReferred} onChange={(e) => setLogReferred(e.target.checked)} />
@@ -829,10 +836,13 @@ export function HealthWorkspace() {
               <span className="mb-1 block text-[11px] text-[var(--muted)]">Prescribed by</span>
               <input className={field} value={medPrescribedBy} onChange={(e) => setMedPrescribedBy(e.target.value)} />
             </label>
-            <label className="block text-sm">
-              <span className="mb-1 block text-[11px] text-[var(--muted)]">Notes</span>
-              <textarea className={field} rows={2} value={medNotes} onChange={(e) => setMedNotes(e.target.value)} />
-            </label>
+            <div className="block text-sm">
+              <span className="mb-1 flex flex-wrap items-center gap-2 text-[11px] text-[var(--muted)]">
+                <span>Notes</span>
+                <VoiceDictateButton title="Dictate notes" value={medNotes} onChange={setMedNotes} disabled={readOnly} />
+              </span>
+              <textarea aria-label="Notes" className={field} rows={2} value={medNotes} onChange={(e) => setMedNotes(e.target.value)} />
+            </div>
             <button
               type="button"
               className="btn-accent rounded-lg px-4 py-2 text-sm font-bold disabled:opacity-50"
@@ -888,10 +898,13 @@ export function HealthWorkspace() {
               <span className="mb-1 block text-[11px] text-[var(--muted)]">Administered by</span>
               <input className={field} value={vaxAdministeredBy} onChange={(e) => setVaxAdministeredBy(e.target.value)} />
             </label>
-            <label className="block text-sm">
-              <span className="mb-1 block text-[11px] text-[var(--muted)]">Notes</span>
-              <textarea className={field} rows={2} value={vaxNotes} onChange={(e) => setVaxNotes(e.target.value)} />
-            </label>
+            <div className="block text-sm">
+              <span className="mb-1 flex flex-wrap items-center gap-2 text-[11px] text-[var(--muted)]">
+                <span>Notes</span>
+                <VoiceDictateButton title="Dictate notes" value={vaxNotes} onChange={setVaxNotes} disabled={readOnly} />
+              </span>
+              <textarea aria-label="Notes" className={field} rows={2} value={vaxNotes} onChange={(e) => setVaxNotes(e.target.value)} />
+            </div>
             <button
               type="button"
               className="btn-accent rounded-lg px-4 py-2 text-sm font-bold disabled:opacity-50"
