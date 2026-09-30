@@ -110,4 +110,30 @@ assert.ok(composeFillBlanksReply("bring ........ tomorrow").includes("Nothing wa
   assert.ok(zero.includes("no family was messaged"));
 }
 
+/* ── A language whose template is not approved yet: held, not lost ─ */
+
+{
+  const preview = composeNoticeParentPreview({
+    kindLabel: "NOTICE",
+    classLabel: "Class VIII A",
+    rendered: "📢 Notice …",
+    families: 38,
+    languages: "30 Hindi, 8 English",
+    waiting: [{ lang: "English", families: 8 }],
+  });
+  assert.ok(preview.includes("8 English families will get it automatically"), preview);
+  assert.ok(preview.includes("nothing for you to do"));
+  const clean = composeNoticeParentPreview({ kindLabel: "NOTICE", classLabel: "Class VIII A", rendered: "x", families: 38, languages: "38 Hindi", waiting: [] });
+  assert.ok(!clean.includes("⏳"), "nothing waiting, nothing said");
+
+  const receipt = composeNoticeSentReceipt({
+    classLabel: "Class VIII A", families: 38, sent: 31, failed: 0, optedOut: 0, mode: "template",
+    erpLine: "", held: 7, heldUntil: "2026-10-01T01:30:00.000Z",
+  });
+  assert.ok(receipt.startsWith("✅ Sent to 31 of 38 families of Class VIII A."), receipt);
+  assert.ok(receipt.includes("7 more will get it *automatically*") && receipt.includes("Thu 1 Oct, 7:00 AM"), receipt);
+  const none = composeNoticeSentReceipt({ classLabel: "Class II B", families: 5, sent: 0, failed: 0, optedOut: 0, mode: "text", erpLine: "", held: 5, heldUntil: "" });
+  assert.ok(none.startsWith("⏳ Sent to 0 of 5") && !none.includes("✅"), "never a tick when nobody has it yet");
+}
+
 console.log("classNoticeWa.selftest.ts\n  ok");

@@ -167,6 +167,22 @@ export function parseLeaveDates(text: string, todayIso: string): { from: string;
   return null;
 }
 
+/**
+ * Every date a message mentions, in order, as YYYY-MM-DD — "kal", "2 Oct",
+ * "02/10", "Monday". Used beyond leave: a held notice expires once the day
+ * it talks about has come.
+ */
+export function datesMentioned(text: string, todayIso: string): string[] {
+  const low = ` ${(text || "").toLowerCase()} `;
+  const re = new RegExp(`(?<![a-z0-9])(${DATE_TOKEN})(?![a-z0-9])`, "gi");
+  const out: string[] = [];
+  for (const m of low.matchAll(re)) {
+    const d = oneDate(m[1]!, todayIso);
+    if (d && !out.includes(d)) out.push(d);
+  }
+  return out;
+}
+
 /* ── The rules ───────────────────────────────────────────────────────── */
 
 export type LeaveVerdict =

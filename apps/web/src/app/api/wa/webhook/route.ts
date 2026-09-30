@@ -110,6 +110,16 @@ export async function POST(req: Request) {
   const templateStatusEvents = parseMetaTemplateStatusUpdates(body);
   if (templateStatusEvents.length > 0) {
     await appendTemplateStatusEvents(templateStatusEvents);
+    // An approval sends held messages now rather than at the next hourly
+    // run; a rejection starts the automatic rewrite. Director's decision,
+    // 30 Sep 2026 — see waTemplateAutopilot.server.ts.
+    if (templateStatusEvents.some((e) => /^(APPROVED|REJECTED|PAUSED|DISABLED)$/i.test(String(e.event || "")))) {
+      void trackServerWork(
+        import("@/lib/waTemplateAutopilot.server")
+          .then((m) => m.runTemplateAutopilot({ sync: true }))
+          .catch((e) => console.error("[wa/webhook] template autopilot failed", e)),
+      );
+    }
   }
 
   const templateQualityEvents = parseMetaTemplateQualityUpdates(body);

@@ -43,8 +43,14 @@ export async function POST(req: Request) {
   if (!r.ok) {
     return NextResponse.json({ ok: false, error: r.error }, { status: 502 });
   }
+  // Then the template autopilot (director's decision, 30 Sep 2026): submit
+  // what was never submitted, rewrite what Meta rejected, send what was held
+  // for a template that is now approved. See waTemplateAutopilot.server.ts.
+  const { runTemplateAutopilot } = await import("@/lib/waTemplateAutopilot.server");
+  const autopilot = await runTemplateAutopilot({ sync: false });
   return NextResponse.json({
     ok: true,
+    autopilot,
     metaTemplates: r.metaTemplates,
     statusEvents: r.statusEvents,
     qualityEvents: r.qualityEvents,

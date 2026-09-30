@@ -14,6 +14,8 @@
  * words are joined into one line here first.
  */
 
+import { formatIstWhen } from "@/lib/waTemplateAutopilot";
+
 /** Meta's limit for one body parameter; kept under it with room to spare. */
 export const TEMPLATE_PARAM_MAX = 1000;
 
@@ -69,7 +71,10 @@ export function composeNoticeParentPreview(opts: {
   rendered: string;
   families: number;
   languages: string;
+  /** Languages whose template WhatsApp has not approved yet. */
+  waiting?: { lang: string; families: number }[];
 }): string {
+  const waiting = (opts.waiting ?? []).filter((w) => w.families > 0);
   return [
     `Draft · ${opts.kindLabel} · ${opts.classLabel}`,
     "",
@@ -81,6 +86,12 @@ export function composeNoticeParentPreview(opts: {
     opts.families
       ? `To *${opts.families}* ${opts.families === 1 ? "family" : "families"} of ${opts.classLabel}${opts.languages ? ` (${opts.languages})` : ""}, as the school's approved notice — it reaches every family, not only those who wrote in today.`
       : `⚠️ No parent WhatsApp numbers are on record for ${opts.classLabel}. It will be saved in the ERP only.`,
+    ...(waiting.length && opts.families
+      ? [
+          "",
+          `⏳ WhatsApp has not approved the ${waiting.map((w) => w.lang).join(" and ")} notice yet, so ${waiting.map((w) => `${w.families} ${w.lang}`).join(" and ")} ${waiting.reduce((n, w) => n + w.families, 0) === 1 ? "family" : "families"} will get it automatically the moment it is approved — nothing for you to do.`,
+        ]
+      : []),
     "",
     "Reply *YES* to send, or *NO* to cancel.",
   ].join("\n");
@@ -96,10 +107,22 @@ export function composeNoticeSentReceipt(opts: {
   /** "template" = every family; "text" = only those who wrote in within 24 h. */
   mode: "template" | "text" | "none";
   erpLine: string;
+  /** Families held for their language's template, and until when. */
+  held?: number;
+  heldUntil?: string;
 }): string {
   const lines: string[] = [];
+  const held = opts.held ?? 0;
   if (opts.mode === "none") {
     lines.push(`No parent WhatsApp numbers on record for ${opts.classLabel}, so no family was messaged.`);
+  } else if (held) {
+    const bits = [`${opts.sent ? "✅" : "⏳"} Sent to ${opts.sent} of ${opts.families} ${opts.families === 1 ? "family" : "families"} of ${opts.classLabel}`];
+    if (opts.failed) bits.push(`${opts.failed} failed`);
+    if (opts.optedOut) bits.push(`${opts.optedOut} opted out`);
+    lines.push(`${bits.join(" · ")}.`);
+    lines.push(
+      `⏳ ${held} more will get it *automatically* the moment WhatsApp approves the notice template — nothing for you to do.${opts.heldUntil ? ` If it is not approved by ${formatIstWhen(opts.heldUntil)}, it is dropped and you'll be told.` : ""}`,
+    );
   } else if (opts.mode === "text") {
     lines.push(
       `⚠️ The notice template is not approved yet, so this went as plain text: ${opts.sent} of ${opts.families} families got it (WhatsApp delivers plain text only to those who wrote to the school in the last 24 hours). Ask the office to approve *School notice broadcast* in Masters → WhatsApp templates.`,
