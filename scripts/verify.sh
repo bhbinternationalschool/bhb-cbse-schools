@@ -308,6 +308,7 @@ SELFTESTS=(
   test:sis-class-teacher
   test:punch-code
   test:punch-devices
+  test:punch-attempts
   test:module-state-merge
   test:staff-day-status
   test:payroll-no-register

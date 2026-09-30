@@ -253,6 +253,13 @@ export async function applyWhatsAppStaffPunch(opts: {
   earlyOutNote?: string;
   /** The year to file the punch under; the app's GET reads the same one. */
   academicYearCode?: string;
+  /**
+   * Record the punch at an earlier moment of TODAY (IST) instead of now —
+   * the office approving a new phone records the attempt the old phone
+   * rule refused, at the time it was made (director, 30 Sep 2026). Only for
+   * attempts that already passed the office-screen code check.
+   */
+  at?: { date: string; time: string };
 }): Promise<ApplyWaStaffPunchResult> {
   const via = opts.via ?? "whatsapp";
   let state = await loadStaffAttendanceFresh();
@@ -283,7 +290,7 @@ export async function applyWhatsAppStaffPunch(opts: {
 
   const masters = loadMasters();
   const ay = opts.academicYearCode || currentAcademicYearCode(masters);
-  const date = todayIst();
+  const date = opts.at?.date || todayIst();
   const roster = masters.staff ?? [];
   const saveFailed = {
     ok: false as const,
@@ -292,7 +299,7 @@ export async function applyWhatsAppStaffPunch(opts: {
         ? "Your punch could not be saved to the school database. Please try again."
         : "Could not save your punch — please try again in a minute.",
   };
-  const time = nowHhmmIst();
+  const time = opts.at?.time || nowHhmmIst();
   const altMobile =
     via === "whatsapp" && staffMobileMatchedAlt(opts.staff, opts.mobile10);
   const geoAudit =
