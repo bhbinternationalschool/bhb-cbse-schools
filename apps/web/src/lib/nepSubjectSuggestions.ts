@@ -2,6 +2,24 @@
  * NEP 2020 + NCF-FS / NCF-SE + CBSE (incl. Jadui Pitara / Balvatika) subject
  * suggestions for Masters. Pre-Primary also mirrors UP Basic Shiksha School
  * Readiness (भाषा · अंकीय दक्षता · पर्यावरण). Codes are practical ERP seeds.
+ *
+ * CBSE 2026-27 (read 30 Sep 2026 from cbseacademic.nic.in; copies in the
+ * school Drive, "BHB International — Documents / CBSE Curriculum 2026-27"):
+ *   - Scheme of Studies IX–X (Curriculum_SecP1_2026-27): R1 + R2 + R3 (R3
+ *     compulsory from Class VI & IX in 2026-27, school-assessed, qualifying;
+ *     two of the three native Indian), Maths & Science Standard with an
+ *     optional Advanced paper (Basic discontinued), Social Science,
+ *     Individuals in Society (IX), Environmental Education (X, 2027-28),
+ *     Art Education, PE & Well-being, Vocational Education, CT & AI modules.
+ *   - Scheme of Studies XI–XII (Curriculum_SecP2_2026-27): Hindi or English
+ *     as Subject 1, four more from Group L / A / S, optional 6th, plus HPE,
+ *     Work Experience and General Studies internally assessed.
+ *   - CT & AI framework, Classes 3–8 (CTAI_Pri_2026-27): III–V 50 h/yr inside
+ *     Mathematics & TWAU; VI–VIII 100 h/yr of projects and AI literacy.
+ *   - Skill Education with NCERT Kaushal Bodh mandatory in VI–VIII from
+ *     2025-26 (CBSE Circular Skill-81/2025; notifications 116/2025, 126/2026).
+ * The weekly DIKSHA list (ncfOfficial.ts) flags later changes; this file is
+ * what a person read and decided.
  */
 
 import {
@@ -143,6 +161,7 @@ export const NEP_STAGE_PACKS: NepStagePack[] = [
       "III–V (NCF Preparatory): R1 + R2, Mathematics, The World Around Us (EVS), Art, PE; work/pre-vocational inside WAU.",
       "UP Basic: हमारा परिवेश (III–V); Sanskrit or Urdu as third language option from Class III.",
       "CBSE dual-affiliation schools: keep Hindi + English as concrete languages for Varanasi / UP context.",
+      "CBSE 2026-27: Computational Thinking from Class III — about 50 hours a year inside Mathematics and The World Around Us (no separate subject or period).",
     ],
     subjects: [
       {
@@ -191,7 +210,7 @@ export const NEP_STAGE_PACKS: NepStagePack[] = [
         code: "EVS",
         nameEn: "Environmental Studies / World Around Us",
         category: "scholastic",
-        note: "NCF Preparatory WAU · UP हमारा परिवेश (III–V); integrated science & social",
+        note: "NCF Preparatory The World Around Us (TWAU) · UP हमारा परिवेश (III–V); integrated science & social · carries CBSE's CT activities with Mathematics",
       },
       {
         code: "SKT",
@@ -235,11 +254,12 @@ export const NEP_STAGE_PACKS: NepStagePack[] = [
     grades: "VI – VIII",
     ages: "11–14",
     summary:
-      "NCF Middle: three languages (R1–R3, ≥2 Indian), Mathematics, Science, Social Science, Art, PE & Well-being, Vocational. UP Basic upper primary adds Environmental Studies, Sanskrit/Urdu, craft/agriculture/home science, games & scouting.",
+      "NCF Middle: three languages (R1–R3, ≥2 Indian), Mathematics, Science, Social Science, Art, PE & Well-being, Skill Education. CBSE: R3 compulsory from Class VI (2026-27); Skill Education with Kaushal Bodh mandatory (2025-26); CT & AI about 100 hours a year. UP Basic upper primary adds Environmental Studies, Sanskrit/Urdu, craft/agriculture/home science, games & scouting.",
     tips: [
-      "Three-language formula: Hindi + English + Sanskrit (or Urdu) is the common UP pattern.",
+      "Three languages are compulsory from Class VI in 2026-27 (CBSE): Hindi + English + Sanskrit (or Urdu) is the common UP pattern; two must be native Indian languages. R3 is designed for 2–3 periods a week.",
       "Science and Social Science become separate subjects (NCF); subject teachers introduced.",
-      "Vocational / craft gets dedicated space from Grade 6 (NEP/NCF).",
+      "Skill Education is mandatory in VI–VIII (CBSE Circular Skill-81/2025) using NCERT's Kaushal Bodh activity books — work with life forms, machines & materials, and human services.",
+      "CT & AI (CBSE framework 2026-27): about 100 hours a year of worksheets, interdisciplinary projects and AI literacy, assessed through projects, journals and presentations.",
       "UP Basic also assesses पर्यावरणीय अध्ययन and खेल/स्कॉउटिंग — keep as co-curricular links.",
     ],
     subjects: [
@@ -282,7 +302,7 @@ export const NEP_STAGE_PACKS: NepStagePack[] = [
         code: "SKT",
         nameEn: "Sanskrit (R3)",
         category: "scholastic",
-        note: "UP Sanskrit/Urdu third language · NCF R3 (Indian)",
+        note: "Third language (R3), compulsory from Class VI in 2026-27 (CBSE) · UP Sanskrit/Urdu · 2–3 periods a week",
       },
       {
         code: "MAT",
@@ -329,16 +349,16 @@ export const NEP_STAGE_PACKS: NepStagePack[] = [
       },
       {
         code: "VOC",
-        nameEn: "Vocational / Work education",
+        nameEn: "Skill Education (Kaushal Bodh)",
         category: "co_scholastic",
         coScholasticArea: "Vocational",
-        note: "NCF Vocational from Middle · UP बेसिक क्राफ्ट / कृषि / गृह शिल्प",
+        note: "Mandatory in VI–VIII from 2025-26 (CBSE Circular Skill-81/2025) · NCERT Kaushal Bodh activity books · UP बेसिक क्राफ्ट / कृषि / गृह शिल्प",
       },
       {
         code: "ICT",
-        nameEn: "Computational Thinking / ICT",
+        nameEn: "Computational Thinking & AI",
         category: "scholastic",
-        note: "NEP digital literacy · CBSE skill exposure",
+        note: "CBSE 2026-27: about 100 h/yr — advanced CT, data, AI literacy through projects across subjects; assessed by projects, journals, presentations",
       },
     ],
   },
@@ -348,26 +368,33 @@ export const NEP_STAGE_PACKS: NepStagePack[] = [
     grades: "IX – X",
     ages: "14–16",
     summary:
-      "NCF Secondary Phase 1 / CBSE Class IX–X: shopping-cart enrolment — typically 7 subjects with ≥3 languages (Tag A) and ≥1 skill/voc (Tag B), plus academic electives (Tag C) and mandatory modules (Tag D).",
+      "CBSE Scheme of Studies 2026-27 (Class IX): Language 1 (R1) + Language 2 (R2) + Mathematics + Science + Social Science with annual exams; Language 3 (R3), Individuals in Society, Art Education, PE & Well-being, Vocational Education and an optional subject assessed in school; CT & AI as modules. Class X keeps the old scheme in 2026-27 and moves over in 2027-28.",
     tips: [
-      "Cart rule: exactly 7 · ≥3 Tag A languages · ≥1 Tag B skill (IT / AI / VOC).",
-      "Seed links ENG · HIN · SKT/URDU · Maths · Science · SST · skill options into IX and X.",
-      "Tag D (ENV / ETH) stay available as curricular modules.",
-      "Art & PE remain in the offering — pick into the cart where the school requires them.",
+      "Three languages: R1 + R2 examined; R3 compulsory from Class IX in 2026-27 (Class VI-level R3 textbook + one local literary text), assessed in school, graded Qualified / Not Qualified — no pass certificate without it. Two of the three must be native Indian languages.",
+      "Mathematics and Science: one Standard course for everyone (80 marks + 20 internal). Advanced is an optional extra 25-mark, 1-hour paper, not added to the total. Mathematics Basic is discontinued from 2026-27 (Class X of 2026-27 may still take it).",
+      "Interdisciplinary: Individuals in Society in Class IX (2026-27), Environmental Education in Class X (2027-28), as NCERT books arrive.",
+      "Board exam subjects: 7 in 2027 (5 compulsory + 2 optional) → 8 in 2029. CT & AI becomes a compulsory subject in 2027-28.",
+      "A student failing Science, Mathematics or Social Science can have it replaced by the optional (11th) subject — only if the three languages are cleared.",
     ],
     subjects: [
       {
-        code: "ENG",
-        nameEn: "English Language & Literature",
+        code: "HIN",
+        nameEn: "Hindi (R1 / R2)",
         category: "scholastic",
-        note: "Tag A · Foreign language",
+        note: "Native Indian language · Course A or B in Class X of 2026-27 · annual exam + internal",
+      },
+      {
+        code: "ENG",
+        nameEn: "English Language & Literature (R1 / R2)",
+        category: "scholastic",
+        note: "Annual exam + internal (Assessment of Speaking & Listening)",
       },
       {
         code: "ENG-ORAL",
-        nameEn: "English — Oral / ASL",
+        nameEn: "English — Speaking & Listening",
         category: "scholastic",
         underCode: "ENG",
-        note: "CBSE Assessment of Speaking & Listening",
+        note: "Internal assessment",
       },
       {
         code: "ENG-WRIT",
@@ -376,82 +403,82 @@ export const NEP_STAGE_PACKS: NepStagePack[] = [
         underCode: "ENG",
       },
       {
-        code: "HIN",
-        nameEn: "Hindi Course A / B",
-        category: "scholastic",
-        note: "Tag A · Native language",
-      },
-      {
         code: "SKT",
-        nameEn: "Sanskrit",
+        nameEn: "Sanskrit (R3)",
         category: "scholastic",
-        note: "Tag A · Regional / Indian language",
+        note: "Third language, compulsory from Class IX in 2026-27 · school-assessed, Qualified / Not Qualified · 2–3 periods a week",
       },
       {
         code: "URDU",
-        nameEn: "Urdu",
+        nameEn: "Urdu (R3 option)",
         category: "scholastic",
-        note: "Tag A · Regional / Indian language option",
+        note: "Alternative native Indian third language",
       },
       {
         code: "MAT",
-        nameEn: "Mathematics (Standard / Basic)",
+        nameEn: "Mathematics (Standard; Advanced optional)",
         category: "scholastic",
-        note: "Tag C · Academic",
+        note: "80 marks (3 h) + 20 internal · Advanced: optional extra 25-mark paper, not added to the total · Basic discontinued from 2026-27",
       },
       {
         code: "SCI",
-        nameEn: "Science",
+        nameEn: "Science (Standard; Advanced optional)",
         category: "scholastic",
-        note: "Tag C · Integrated Physics–Chemistry–Biology",
+        note: "80 marks (3 h) + 20 internal · Advanced: optional extra 25-mark paper, not added to the total",
       },
       {
         code: "SST",
         nameEn: "Social Science",
         category: "scholastic",
-        note: "Tag C · History, Geography, Political Science, Economics",
+        note: "History, Geography, Political Science, Economics · annual exam + internal",
       },
       {
-        code: "IT",
-        nameEn: "Information Technology / Computer Applications",
+        code: "ETH",
+        nameEn: "Individuals in Society",
         category: "scholastic",
-        note: "Tag B · Skill",
-      },
-      {
-        code: "AI",
-        nameEn: "Artificial Intelligence (Skill)",
-        category: "scholastic",
-        note: "Tag B · Skill",
-      },
-      {
-        code: "VOC",
-        nameEn: "Vocational / Skill subject",
-        category: "scholastic",
-        note: "Tag B · Vocational",
-      },
-      {
-        code: "ART",
-        nameEn: "Art Education / Painting",
-        category: "scholastic",
-        note: "Tag C · Art elective",
-      },
-      {
-        code: "PEW",
-        nameEn: "Health & Physical Education",
-        category: "scholastic",
-        note: "Tag C · PE elective",
+        note: "Interdisciplinary, compulsory · Class IX from 2026-27 as NCERT books arrive · school-assessed",
       },
       {
         code: "ENV",
         nameEn: "Environmental Education",
         category: "scholastic",
-        note: "Tag D · Mandatory module",
+        note: "Interdisciplinary, compulsory · Class X from 2027-28 · school-assessed",
       },
       {
-        code: "ETH",
-        nameEn: "Ethics / Individual in Society",
+        code: "VOC",
+        nameEn: "Vocational Education (Kaushal Vikas)",
         category: "scholastic",
-        note: "Tag D · Mandatory module",
+        note: "Compulsory · school-based internal + annual exam · continues Kaushal Bodh projects",
+      },
+      {
+        code: "ICT",
+        nameEn: "Computational Thinking & AI",
+        category: "scholastic",
+        note: "Modules from NCERT; compulsory subject from 2027-28",
+      },
+      {
+        code: "ART",
+        nameEn: "Art Education",
+        category: "scholastic",
+        note: "Compulsory · school-based internal assessment (theory + practical)",
+      },
+      {
+        code: "PEW",
+        nameEn: "Physical Education & Well-being",
+        category: "scholastic",
+        note: "Compulsory · school-based · Health & PE and Work Experience are subsumed in it",
+      },
+      {
+        code: "IT",
+        nameEn: "Information Technology (402)",
+        category: "scholastic",
+        note: "Optional skill subject",
+      },
+      {
+        code: "AI",
+        nameEn: "Artificial Intelligence (417)",
+        category: "scholastic",
+        note: "Optional skill subject",
       },
     ],
   },
@@ -461,91 +488,92 @@ export const NEP_STAGE_PACKS: NepStagePack[] = [
     grades: "XI – XII",
     ages: "16–18",
     summary:
-      "NCF Secondary Phase 2 / CBSE: shopping-cart enrolment — exactly 6 subjects, ≥2 languages (Tag A) with ≥1 native, free mix across Tag B skill and Tag C electives. Stream packages are counselor guidance only.",
+      "CBSE Scheme of Studies 2026-27 (XI–XII): Subject 1 is Hindi or English (Core or Elective); Subjects 2–5 are a language (Group L) or electives (Group A academic, Group S skill); a 6th subject is optional. Health & Physical Education, Work Experience and General Studies are taken by all and assessed in school. Stream packages are counselling guidance only.",
     tips: [
-      "Cart rule: exactly 6 · ≥2 Tag A · ≥1 native language · cross-group mixes allowed.",
-      "Seed Languages (ENG/HIN/SKT/URDU), Skill (IT/AI/VOC), and Electives (Science / Commerce / Humanities) onto XI and XII.",
-      "Soft warning when 3+ lab-heavy subjects (PHY/CHE/BIO/CT) are chosen together.",
-      "Masters → Streams still sync Science/Commerce/Humanities packages for counseling — not as an enrollment gate.",
+      "Hindi or English must be one of the languages; the same language cannot be taken at both Core and Elective level. A second language is not compulsory — Subject 2 may be an academic elective.",
+      "Not together: Mathematics (041) with Applied Mathematics (241); Business Studies (054) with Business Administration (833); only one of Informatics Practices (065), Computer Science (083), Information Technology (802).",
+      "If one of the first five subjects is failed, the 6th replaces it — provided Hindi or English stays among the five.",
+      "Class XII is graded on a 9-point scale (A-1…E); Class XI is assessed by the school on the same pattern.",
+      "Masters → Streams still syncs Science / Commerce / Humanities packages for counselling — not as an enrolment gate.",
     ],
     subjects: [
       {
         code: "ENG",
-        nameEn: "English Core",
+        nameEn: "English Core (301) / Elective (001)",
         category: "scholastic",
-        note: "Tag A · Foreign language",
+        note: "Subject 1 option · 80 + 20 internal",
       },
       {
         code: "HIN",
-        nameEn: "Hindi Core / Elective",
+        nameEn: "Hindi Core (302) / Elective (002)",
         category: "scholastic",
-        note: "Tag A · Native language",
+        note: "Subject 1 option · 80 + 20 internal",
       },
       {
         code: "SKT",
-        nameEn: "Sanskrit",
+        nameEn: "Sanskrit Elective (022)",
         category: "scholastic",
-        note: "Tag A · Regional / Indian language",
+        note: "Group L language",
       },
       {
         code: "URDU",
-        nameEn: "Urdu",
+        nameEn: "Urdu Core (303) / Elective (003)",
         category: "scholastic",
-        note: "Tag A · Regional / Indian language",
+        note: "Group L language",
       },
       {
         code: "PHY",
-        nameEn: "Physics",
+        nameEn: "Physics (042)",
         category: "scholastic",
-        note: "Tag C · Science",
+        note: "Group A · 70 theory + 30 practical",
       },
       {
         code: "CHE",
-        nameEn: "Chemistry",
+        nameEn: "Chemistry (043)",
         category: "scholastic",
-        note: "Tag C · Science",
+        note: "Group A · 70 theory + 30 practical",
       },
       {
         code: "BIO",
-        nameEn: "Biology",
+        nameEn: "Biology (044)",
         category: "scholastic",
-        note: "Tag C · Science",
+        note: "Group A · 70 theory + 30 practical",
       },
       {
         code: "MAT",
-        nameEn: "Mathematics",
+        nameEn: "Mathematics (041)",
         category: "scholastic",
-        note: "Tag C",
+        note: "Group A · not with Applied Mathematics",
       },
       {
         code: "APP-MAT",
-        nameEn: "Applied Mathematics",
+        nameEn: "Applied Mathematics (241)",
         category: "scholastic",
-        note: "Tag C · Commerce / Humanities friendly",
+        note: "Group A · not with Mathematics · commerce / humanities friendly",
       },
       {
         code: "CT",
-        nameEn: "Computer Science / Informatics Practices",
+        nameEn: "Computer Science (083) / Informatics Practices (065)",
         category: "scholastic",
-        note: "Tag C · Computational Thinking",
+        note: "Group A · only one of CS, IP or IT (802)",
       },
       {
         code: "IT",
-        nameEn: "Information Technology",
+        nameEn: "Information Technology (802)",
         category: "scholastic",
-        note: "Tag B · Skill",
+        note: "Group S skill · 60 + 40 practical · not with CS or IP",
       },
       {
         code: "AI",
-        nameEn: "Artificial Intelligence",
+        nameEn: "Artificial Intelligence (843)",
         category: "scholastic",
-        note: "Tag B · Skill",
+        note: "Group S skill · 50 + 50 practical",
       },
       {
         code: "VOC",
-        nameEn: "Vocational / Skill elective",
+        nameEn: "Skill elective (Group S)",
         category: "scholastic",
-        note: "Tag B · Vocational",
+        note: "Retail, Tourism, Financial Markets, Beauty & Wellness, Agriculture… · 60 + 40",
       },
       {
         code: "HIS",
@@ -603,21 +631,30 @@ export const NEP_STAGE_PACKS: NepStagePack[] = [
       },
       {
         code: "PEW",
-        nameEn: "Physical Education",
+        nameEn: "Physical Education (048)",
         category: "scholastic",
-        note: "Tag C · PE theory + practical",
+        note: "Group A elective · 70 + 30 practical (separate from the compulsory HPE)",
       },
       {
-        code: "ENV",
-        nameEn: "Environmental Education",
-        category: "scholastic",
-        note: "Tag D · Mandatory module",
+        code: "WE",
+        nameEn: "Work Experience",
+        category: "co_scholastic",
+        coScholasticArea: "Work Experience",
+        note: "Compulsory for all regular students · school-assessed",
       },
       {
-        code: "ETH",
-        nameEn: "Ethics / Individual in Society",
-        category: "scholastic",
-        note: "Tag D · Mandatory module",
+        code: "GS",
+        nameEn: "General Studies",
+        category: "co_scholastic",
+        coScholasticArea: "General Studies",
+        note: "Compulsory for all regular students · school-assessed",
+      },
+      {
+        code: "HPE",
+        nameEn: "Health & Physical Education",
+        category: "co_scholastic",
+        coScholasticArea: "HPE",
+        note: "Compulsory for all regular students · school-assessed",
       },
     ],
   },
@@ -645,17 +682,14 @@ export function analyseNepPack(
 }
 
 /** Codes seeded as electives / optional student choices. */
+// Choice subjects. VOC, WE, ICT (CT & AI), ENV and ETH (Individuals in
+// Society) were here until CBSE's 2026-27 scheme made them compulsory.
 const ELECTIVE_NEP_CODES = new Set([
   "SKT",
   "URDU",
-  "VOC",
   "MUS",
-  "WE",
-  "ICT",
   "IT",
   "AI",
-  "ENV",
-  "ETH",
   "APP-MAT",
   "PSY",
   "SOC",
@@ -837,7 +871,7 @@ const STAGE_PERIOD_DEFAULTS: Record<NepStage, Record<string, number>> = {
     ENG: 5,
     "ENG-ORAL": 2,
     "ENG-WRIT": 3,
-    SKT: 4,
+    SKT: 3,
     MAT: 7,
     SCI: 6,
     SST: 5,
@@ -846,25 +880,26 @@ const STAGE_PERIOD_DEFAULTS: Record<NepStage, Record<string, number>> = {
     MUS: 2,
     PEW: 3,
     VOC: 2,
-    ICT: 2,
+    ICT: 3,
   },
   secondary_9_10: {
     ENG: 6,
     "ENG-ORAL": 2,
     "ENG-WRIT": 4,
     HIN: 5,
-    SKT: 4,
-    URDU: 4,
+    SKT: 3,
+    URDU: 3,
     MAT: 7,
     SCI: 7,
     SST: 5,
     IT: 3,
     AI: 2,
+    ICT: 2,
     ART: 2,
     PEW: 3,
     VOC: 2,
     ENV: 2,
-    ETH: 1,
+    ETH: 2,
   },
   secondary_11_12: {
     ENG: 5,
@@ -890,8 +925,9 @@ const STAGE_PERIOD_DEFAULTS: Record<NepStage, Record<string, number>> = {
     ART: 3,
     PEW: 3,
     VOC: 3,
-    ENV: 2,
-    ETH: 1,
+    WE: 2,
+    GS: 1,
+    HPE: 2,
   },
 };
 
