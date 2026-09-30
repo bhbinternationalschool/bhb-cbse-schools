@@ -5,7 +5,7 @@ import { TENANT } from "@/lib/types";
 export const metadata: Metadata = {
   title: "Download the App — BHB International School",
   description:
-    "Install the BHB International School app — for parents, teachers, principal/office staff and transport drivers.",
+    "Install the BHB International School app for parents and transport drivers; teachers and office staff use the website.",
 };
 
 // Served from a dedicated public GCS bucket, not the app's own public/
@@ -81,17 +81,53 @@ export default function DownloadPage() {
           This is the app to install if you are a parent.
         </p>
 
+        {/*
+          Teachers and office staff use the website, not the Android app
+          (director, 2026-09-30). Staff attendance is punched at the office
+          QR screen with a key held by the phone's browser, which the app
+          cannot do — an app punch is refused — and website fixes reach
+          every phone on the next refresh, while the app needs a reinstall.
+          Drivers keep the app: the route/boarding screens and background
+          GPS live there.
+        */}
+        <div className="mt-5 rounded-xl border border-[var(--brand-deep)] p-4 text-left">
+          <p className="text-sm font-semibold text-[var(--brand-deep)]">
+            Teachers &amp; office staff — use the website, not an app
+          </p>
+          <p className="mt-1 text-xs leading-relaxed text-slate-600">
+            शिक्षक और ऑफ़िस स्टाफ़ ऐप डाउनलोड न करें — ERP वेबसाइट ही इस्तेमाल करें।
+            हाज़िरी (QR पंच) सिर्फ़ वेबसाइट से लगती है।
+          </p>
+          <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs leading-relaxed text-slate-600">
+            <li>
+              Open{" "}
+              <a href="/login" className="font-semibold text-[var(--brand-deep)] underline">
+                {TENANT.domain}/login
+              </a>{" "}
+              in <strong>Chrome</strong> (Android) or <strong>Safari</strong> (iPhone) and sign in.
+            </li>
+            <li>
+              Android: Chrome menu ⋮ → <strong>Add to Home screen</strong>. iPhone: Share →{" "}
+              <strong>Add to Home Screen</strong>.
+            </li>
+            <li>Use that icon every day. When a “Refresh” bar appears, tap it.</li>
+          </ol>
+          <p className="mt-2 text-xs leading-relaxed text-slate-500">
+            Already installed the old staff app? You can remove it — attendance cannot be
+            punched from it any more.
+          </p>
+        </div>
+
         <a
           href={SCHOOL_APK_URL}
-          className="mt-5 block w-full rounded-xl border border-[var(--brand-deep)] px-4 py-3.5 text-center text-sm font-semibold text-[var(--brand-deep)] hover:bg-slate-50"
+          className="mt-5 block w-full rounded-xl border border-slate-300 px-4 py-3.5 text-center text-sm font-semibold text-slate-700 hover:bg-slate-50"
         >
-          Teachers &amp; staff — download the app
+          Transport drivers — download the app
         </a>
         <p className="mt-2 text-left text-xs leading-relaxed text-slate-500">
-          For teachers, office staff, the principal and transport drivers.
-          Parents already using this app can keep it — it still works. The
-          two are separate apps, so installing the parent app above does not
-          replace it and nothing is lost either way.
+          For bus drivers and attendants: routes, boarding and live bus location.
+          Parents already using this app can keep it — it still works, and the
+          parent app above is a separate app, so nothing is lost either way.
         </p>
         <p className="mt-3 text-left text-xs leading-relaxed text-slate-500">
           After downloading, open the file. Android will warn about
@@ -99,9 +135,8 @@ export default function DownloadPage() {
           an app installed outside the Play Store; tap{" "}
           <strong>Settings</strong> → allow this source →{" "}
           <strong>Install</strong>. When you open the app, sign in with the
-          mobile number registered with the school (parents) or your school
-          email (staff) — a real one-time code or password is required, same
-          as the office portal.
+          mobile number registered with the school — a real one-time code or
+          password is required, same as the office portal.
         </p>
       </div>
 
