@@ -4,7 +4,7 @@
 import { isRestrictedTeacher, useMyTeaching } from "@/components/staff/useMyTeaching";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { urlAsksForTab } from "@/lib/nucleusHandoff";
-import { ClipboardList } from "lucide-react";
+import { ClipboardList, ScanLine } from "lucide-react";
 import {
   absenceKey,
   applyPromotionsToSis,
@@ -102,6 +102,7 @@ import { ExamDateSheetGrid } from "@/components/exams/ExamDateSheetGrid";
 import { ExamSeatingPanel } from "@/components/exams/ExamSeatingPanel";
 import { InvigilationPanel } from "@/components/exams/InvigilationPanel";
 import { ExamPapersPanel } from "@/components/exams/ExamPapersPanel";
+import { AnswerSheetScanDialog, type ScanSubject } from "@/components/exams/AnswerSheetScanDialog";
 import { AdmitCardsPanel } from "@/components/exams/AdmitCardsPanel";
 import { RemarksPanel } from "@/components/exams/RemarksPanel";
 import { ItemScoresPanel } from "@/components/exams/ItemScoresPanel";
@@ -164,6 +165,8 @@ type MarkRowProps = {
   onMark: (studentId: string, subjectId: string, component: string, value: string) => void;
   onGrade: (studentId: string, subjectId: string, component: string, grade: string) => void;
   onRating: (studentId: string, domain: CoScholasticDomain, value: string) => void;
+  /** Photograph this child's answer sheet for suggested marks; absent = not offered here. */
+  onScan?: (studentId: string) => void;
 };
 
 /**
@@ -196,6 +199,7 @@ const MarkRow = memo(function MarkRow({
   onMark,
   onGrade,
   onRating,
+  onScan,
 }: MarkRowProps) {
   return (
     <tr className="border-b border-[var(--border)]">
@@ -234,6 +238,17 @@ const MarkRow = memo(function MarkRow({
                 />
               ) : null}
             </label>
+            {onScan && !locked && !absentAll ? (
+              <button
+                type="button"
+                className="mt-1 inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-1.5 py-0.5 text-[11px] font-semibold text-[var(--brand-deep)]"
+                onClick={() => onScan(st.id)}
+                title="Photograph the answer sheet and get suggested marks to check"
+              >
+                <ScanLine className="size-3" aria-hidden />
+                Scan sheet · स्कैन
+              </button>
+            ) : null}
           </div>
         </div>
       </td>
@@ -421,6 +436,8 @@ export function ExamsWorkspace() {
   const [holdCheck, setHoldCheck] = useState<HoldCheck | null>(null);
   const [holdDialog, setHoldDialog] = useState(false);
   const [conflicts, setConflicts] = useState<SheetConflict[]>([]);
+  /** The child whose answer sheet is being scanned; null = dialog closed. */
+  const [scanStudentId, setScanStudentId] = useState<string | null>(null);
 
   const [newCode, setNewCode] = useState("UT3");
   const [newLabel, setNewLabel] = useState("Unit Test 3");
@@ -1156,6 +1173,43 @@ export function ExamsWorkspace() {
     if (!examTermId || !sectionId) return null;
     return findMarkSheet(ay, examTermId, sectionId, exams);
   }, [ay, examTermId, sectionId, exams]);
+
+  /**
+   * Answer-sheet scan (2026-09-30) fills ONE number per subject, so it is
+   * offered only where the grid has one number per subject: marks, not
+   * grades, and no theory/practical split — a scanned total cannot say
+   * which component it belongs to.
+   */
+  const canScan =
+    entryMode === "marks" &&
+    !!term &&
+    columns.length > 0 &&
+    columns.every((c) => !c.component) &&
+    !sheetMeta?.lockedAt;
+
+  const scanStudent = scanStudentId ? roster.find((s) => s.id === scanStudentId) ?? null : null;
+  const scanSubjects = useMemo<ScanSubject[]>(() => {
+    if (!scanStudentId || !term) return [];
+    const takes = takesBy.get(scanStudentId);
+    return columns
+      .filter((c) => !c.component && (!takes || takes.has(c.subject.id)))
+      .filter((c) => !absentCells.has(absenceKey(scanStudentId, c.subject.id)))
+      .map((c) => ({
+        id: c.subject.id,
+        code: c.subject.code.trim().toUpperCase(),
+        name: c.subject.name,
+        maxMarks: effectiveMaxMarks(term, c.subject),
+      }));
+  }, [scanStudentId, term, columns, takesBy, absentCells]);
+
+  /** The confirmed total goes into the grid like a typed mark; Save is still the teacher's. */
+  function onScanUse(subjectId: string, total: number) {
+    if (!scanStudentId) return;
+    setMark(scanStudentId, subjectId, "", String(total));
+    const name = scanStudent?.fullName ?? "the student";
+    setScanStudentId(null);
+    flash(`${total} filled in for ${name} — press Save marks to keep it`);
+  }
 
   /** Fee-hold verdicts for the section, computed once per roster change
    * instead of once per child per render on the report-card list. */
@@ -2332,12 +2386,27 @@ export function ExamsWorkspace() {
                             onMark={setMark}
                             onGrade={setGrade}
                             onRating={setCoScholasticRating}
+                            onScan={canScan ? setScanStudentId : undefined}
                           />
                         ))
                       : null}
                   </ErpTableBody>
                 </ErpTable>
               </ErpTableShell>
+              {canScan && scanStudent && term && scanSubjects.length > 0 ? (
+                <AnswerSheetScanDialog
+                  key={scanStudent.id}
+                  studentId={scanStudent.id}
+                  studentName={scanStudent.fullName}
+                  classId={classId}
+                  sectionId={sectionId}
+                  termId={term.id}
+                  subjects={scanSubjects}
+                  defaultSubjectId={scanSubjects.length === 1 ? scanSubjects[0]!.id : undefined}
+                  onUse={onScanUse}
+                  onClose={() => setScanStudentId(null)}
+                />
+              ) : null}
             </>
           )}
         </div>

@@ -289,14 +289,31 @@ function mapMetaRow(
   };
 }
 
+/**
+ * A teacher's save (2026-09-30). The office's save is the whole desk and
+ * prunes what it does not carry; a teacher's phone holds a copy that can be
+ * hours old, so the same prune erased homework other teachers had posted
+ * since. A teacher's save therefore writes only what they own — posts and
+ * diary entries they authored, in their own sections, and submissions on
+ * their own posts — and deletes nothing except their own diary entries
+ * (the one thing the desk lets a teacher delete).
+ */
+export type HomeworkTeacherSave = {
+  staffId: string;
+  allows: (classId: string, sectionId: string) => boolean;
+};
+
 export async function pushHomeworkDeskToDb(
   state: HomeworkState,
+  teacher?: HomeworkTeacherSave,
 ): Promise<{ ok: boolean; error?: string }> {
   if (!homeworkDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
   const { sb, tenantId } = ctx;
   const now = new Date().toISOString();
+
+  if (teacher) return pushTeacherHomework(sb, tenantId, now, state, teacher);
 
   const posts = state.posts ?? [];
   const diary = state.diary ?? [];
@@ -372,6 +389,56 @@ export async function pushHomeworkDeskToDb(
     { onConflict: "tenant_id" },
   );
 
+  return { ok: true };
+}
+
+async function pushTeacherHomework(
+  sb: SupabaseClient,
+  tenantId: string,
+  now: string,
+  state: HomeworkState,
+  teacher: HomeworkTeacherSave,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!teacher.staffId) return { ok: false, error: "Your login is not linked to a staff record" };
+  const mine = <T extends { teacherStaffId: string; classId: string; sectionId: string }>(r: T) =>
+    r.teacherStaffId === teacher.staffId && teacher.allows(r.classId, r.sectionId);
+  const posts = (state.posts ?? []).filter(mine);
+  const diary = (state.diary ?? []).filter(mine);
+  const myPostIds = new Set(posts.map((p) => p.id));
+  const submissions = (state.submissions ?? []).filter((x) => myPostIds.has(x.postId));
+
+  let r = await upsertChunks(sb, "homework_desk_posts", posts.map((p) => postToRow(tenantId, p)));
+  if (!r.ok) return r;
+  r = await upsertChunks(sb, "homework_desk_diary", diary.map((d) => diaryToRow(tenantId, d)));
+  if (!r.ok) return r;
+  r = await upsertChunks(
+    sb,
+    "homework_desk_submissions",
+    submissions.map((x) => submissionToRow(tenantId, x)),
+  );
+  if (!r.ok) return r;
+
+  // Their own diary entries that their copy no longer holds were deleted
+  // by them. Read first: an unreadable table is not "nothing to keep".
+  const { data: theirs, error: readErr } = await sb
+    .from("homework_desk_diary")
+    .select("id, class_id, section_id")
+    .eq("tenant_id", tenantId)
+    .eq("teacher_staff_id", teacher.staffId);
+  if (!readErr) {
+    const keep = new Set(diary.map((d) => d.id));
+    const gone = (theirs ?? [])
+      .filter((d) => !keep.has(String(d.id)) && teacher.allows(String(d.class_id), String(d.section_id)))
+      .map((d) => String(d.id));
+    if (gone.length) {
+      await sb.from("homework_desk_diary").delete().eq("tenant_id", tenantId).in("id", gone);
+    }
+  }
+
+  // Counts are the office save's job; the stamp tells other browsers to re-read.
+  await sb
+    .from("homework_desk_sync_meta")
+    .upsert({ tenant_id: tenantId, updated_at: now }, { onConflict: "tenant_id" });
   return { ok: true };
 }
 

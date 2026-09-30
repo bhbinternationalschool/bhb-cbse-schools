@@ -276,7 +276,7 @@ function sanitizeGeminiReply(text: string): string {
 }
 
 /**
- * One image (or PDF) + instructions → JSON. Used for form / document
+ * One image (or PDF), or several, + instructions → JSON. Used for form / document
  * extraction where Gemini's multimodal input does OCR + structuring in one
  * call. Returns raw text (caller parses); strips a ```json fence if present.
  */
@@ -287,10 +287,11 @@ export async function generateGeminiVisionJson(opts: {
   base64: string;
   mimeType: string;
   /**
-   * Further photos, in order, in the same turn (2026-09-30) — an exercise
-   * that runs onto the next page is one reading, not two.
+   * Further pages, sent after the first in order — one call sees a whole
+   * multi-page answer sheet, so a question that runs over a page break is
+   * read as one answer (added 2026-09-30).
    */
-  extraImages?: { base64: string; mimeType: string }[];
+  moreImages?: { base64: string; mimeType: string }[];
   maxTokens?: number;
   model?: string;
 }): Promise<
@@ -302,7 +303,6 @@ export async function generateGeminiVisionJson(opts: {
   if (!key) return { ok: false, error: "GEMINI_API_KEY not configured", model };
   const version = process.env.GEMINI_API_VERSION || "v1beta";
   const url = `https://generativelanguage.googleapis.com/${version}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
-  const images = [{ base64: opts.base64, mimeType: opts.mimeType }, ...(opts.extraImages ?? [])];
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -313,7 +313,10 @@ export async function generateGeminiVisionJson(opts: {
           {
             role: "user",
             parts: [
-              ...images.map((im) => ({ inline_data: { mime_type: im.mimeType, data: im.base64 } })),
+              { inline_data: { mime_type: opts.mimeType, data: opts.base64 } },
+              ...(opts.moreImages ?? []).map((img) => ({
+                inline_data: { mime_type: img.mimeType, data: img.base64 },
+              })),
               { text: opts.prompt },
             ],
           },
