@@ -16,7 +16,7 @@ import { admissionsKbChunks, emptyAdmissionsKb, normalizeAdmissionsKb, type Admi
 import { retrieveRelevantKb, type KbMatch, invalidateKbPresence } from "@/lib/schoolKb.server";
 import { generateAdmissionsAnswerJson, type LlmEngine } from "@/lib/aiLlm.server";
 import { TENANT } from "@/lib/types";
-import { sarvamConfigured, sarvamTranslate } from "@/lib/sarvam.server";
+import { translateText, translationConfigured } from "@/lib/translate.server";
 
 const MODULE_KEY = "admissions_kb";
 const GAPS_KEY = "admissions_kb_gaps";
@@ -207,15 +207,15 @@ export async function answerAdmissionsQuestion(opts: {
 }): Promise<AdmissionsAnswer> {
   const question = opts.question.trim().slice(0, 600);
   // Entries are English; a Devanagari / Urdu / Bengali question embeds far
-  // from them. Retrieve with an English rendering of the question (Sarvam)
+  // from them. Retrieve with an English rendering of the question (Bhashini, then Sarvam)
   // and let the model answer in the parent's language. Fails open to the
   // original text when translation is unavailable.
   let retrievalQuery = question;
   let detectedHindi = false;
   if (/[\u0900-\u097F]/.test(question)) detectedHindi = true;
-  if (/[\u0900-\u097F\u0600-\u06FF\u0980-\u09FF]/.test(question) && sarvamConfigured()) {
+  if (/[\u0900-\u097F\u0600-\u06FF\u0980-\u09FF]/.test(question) && translationConfigured()) {
     const from = /[\u0600-\u06FF]/.test(question) ? "ur-IN" : /[\u0980-\u09FF]/.test(question) ? "bn-IN" : "hi-IN";
-    const t = await sarvamTranslate({ text: question, from, to: "en-IN", mode: "formal" });
+    const t = await translateText({ text: question, from, to: "en-IN", mode: "formal" });
     if (t.ok && t.text.trim()) retrievalQuery = t.text.trim();
     else console.warn("[admissionsKb] query translate failed", t.ok ? "empty" : t.error);
   }
