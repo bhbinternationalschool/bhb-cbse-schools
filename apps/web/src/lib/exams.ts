@@ -41,9 +41,22 @@ import {
 } from "@/lib/attendance";
 import type { Subject as MasterSubject } from "@/lib/foundationMasters";
 import { ncfTagForSubject } from "@/lib/cbseSubjectGroups";
+
+/**
+ * A subject graded, not marked: Masters calls it co-scholastic, or its NCF
+ * tag is CO. Either signal keeps it off the marks grid — it is rated on the
+ * scheme's co-scholastic areas instead. Until 2026-09-30 only the tag was
+ * checked, so Work Education and Music (co-scholastic in Masters, tagged B/C)
+ * were given marks columns out of 80.
+ */
+export function isGradedNotMarked(sub: { code: string; category: string; ncfTagId?: string | null; cbseGroupId?: string | null }): boolean {
+  return sub.category === "co_scholastic" || ncfTagForSubject(sub) === "CO";
+}
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 import {
+  componentFailed,
+  componentsForSubject,
   componentsForTerm,
   componentsTotalMax,
   defaultAssessmentScheme,
@@ -53,8 +66,10 @@ import {
   NEP_CO_SCHOLASTIC_AREAS,
   normalizeAssessmentSchemes,
   schemeForClass,
+  splitForSubject,
   type AssessmentScheme,
   type CoScholasticArea,
+  type CoScholasticScale,
 } from "@/lib/examSchemes";
 
 import {
@@ -72,6 +87,7 @@ export {
 } from "@/lib/examReportTemplates";
 
 export {
+  componentsForSubject,
   componentsForTerm,
   componentsTotalMax,
   gradeForPercent,
@@ -261,9 +277,10 @@ export type StudentItemScore = {
  * gate — see the co-scholastic rounds's plan for why). */
 export type CoScholasticDomain = string;
 
-/** CBSE-style 3-band letter rating, deliberately distinct from the 8-point
- * A1-E academic scale so the two are never confused on a printed report. */
-export type CoScholasticRating = "A" | "B" | "C";
+/** CBSE-style letter rating — 3-band A–C by default, 5-band A–E when the
+ * scheme says so — deliberately distinct from the 8-point A1–E academic
+ * scale so the two are never confused on a printed report. */
+export type CoScholasticRating = "A" | "B" | "C" | "D" | "E";
 
 export type StudentCoScholasticEntry = {
   studentId: string;
@@ -272,17 +289,34 @@ export type StudentCoScholasticEntry = {
   rating: CoScholasticRating | null;
 };
 
-const CO_SCHOLASTIC_RATING_LABELS: Record<CoScholasticRating, string> = {
+const CO_SCHOLASTIC_RATING_LABELS: Record<"A" | "B" | "C", string> = {
   A: "Outstanding",
   B: "Good",
   C: "Needs Improvement",
 };
 
-/** Pure — human label for a co-scholastic rating letter. */
+const CO_SCHOLASTIC_RATING_LABELS_FIVE: Record<CoScholasticRating, string> = {
+  A: "Outstanding",
+  B: "Very Good",
+  C: "Good",
+  D: "Satisfactory",
+  E: "Needs Improvement",
+};
+
+/**
+ * Pure — human label for a co-scholastic rating letter. The same letter
+ * means different things on the two scales (C is the bottom of A–C but the
+ * middle of A–E), so the scale is part of the question.
+ */
 export function coScholasticRatingLabel(
   rating: CoScholasticRating | null,
+  scale: CoScholasticScale = "three",
 ): string {
-  return rating ? CO_SCHOLASTIC_RATING_LABELS[rating] : "Not rated";
+  if (!rating) return "Not rated";
+  if (scale === "five" || rating === "D" || rating === "E") {
+    return CO_SCHOLASTIC_RATING_LABELS_FIVE[rating];
+  }
+  return CO_SCHOLASTIC_RATING_LABELS[rating];
 }
 
 const CO_SCHOLASTIC_DOMAIN_LABELS: Record<string, string> = {
@@ -1121,7 +1155,10 @@ function normalizeItemScore(e: Partial<StudentItemScore>): StudentItemScore {
 function normalizeCoScholasticEntry(
   e: Partial<StudentCoScholasticEntry>,
 ): StudentCoScholasticEntry {
-  const rating = e.rating === "A" || e.rating === "B" || e.rating === "C" ? e.rating : null;
+  const rating =
+    e.rating === "A" || e.rating === "B" || e.rating === "C" || e.rating === "D" || e.rating === "E"
+      ? e.rating
+      : null;
   // Any area code the scheme defines is valid; unknown strings used to be
   // silently coerced to socio-emotional, which mislabelled the rating.
   const domain = String(e.domain ?? "").trim() || "socioEmotional";
@@ -1904,8 +1941,7 @@ export function syncExamSubjectsFromMasters(
       if (!link.isActive || link.classId !== cid) continue;
       const sub = masters.subjects.find((x) => x.id === link.subjectId);
       if (!sub || !sub.isActive || sub.parentId) continue;
-      const tag = ncfTagForSubject(sub);
-      if (tag === "CO") continue;
+      if (isGradedNotMarked(sub)) continue;
       linkedCodes.set(sub.code.toUpperCase(), sub);
     }
   }
@@ -1920,7 +1956,7 @@ export function syncExamSubjectsFromMasters(
         forAssessment: true,
       });
       for (const sub of enrolled) {
-        if (sub.parentId) continue;
+        if (sub.parentId || isGradedNotMarked(sub)) continue;
         linkedCodes.set(sub.code.toUpperCase(), sub);
       }
     }
@@ -2034,7 +2070,7 @@ export function subjectsForStudent(
 
   const enrolled = resolveStudentSubjects(student, masters, {
     forAssessment: true,
-  });
+  }).filter((sub) => !isGradedNotMarked(sub));
   const source = assessmentEnrollmentSource(student, masters);
 
   if (enrolled.length === 0) {
@@ -2194,7 +2230,6 @@ export function buildEmptyMarksGrid(
   for (const m of existing?.marks ?? []) {
     map.set(`${m.studentId}:${m.subjectId}:${m.component}`, m);
   }
-  const parts = scheme ? componentsForTerm(scheme, term.code) : [];
   const pass = scheme ? effectivePassPercent(scheme, passPercent) : passPercent;
   const gradeOf = (obtained: number | null, max: number, prevGrade: string | undefined) => {
     if (scheme && scheme.displayMode !== "marks_grade" && obtained == null) {
@@ -2207,8 +2242,12 @@ export function buildEmptyMarksGrid(
     return gradeFromMarks(obtained, max, pass);
   };
   const out: StudentSubjectMark[] = [];
+  const partsBySubject = new Map(
+    subjects.map((sub) => [sub.id, scheme ? componentsForSubject(scheme, term.code, sub.code) : []] as const),
+  );
   for (const st of students) {
     for (const sub of subjects) {
+      const parts = partsBySubject.get(sub.id) ?? [];
       if (parts.length === 0) {
         const prev = map.get(`${st.id}:${sub.id}:`);
         const max = effectiveMaxMarks(term, sub);
@@ -2333,21 +2372,33 @@ export function prepareMarkSheet(
   }
   const policy = getExamPolicy(state);
   const scheme = schemeForClassId(input.classId, policy);
-  const parts = componentsForTerm(scheme, term.code);
-  const partByCode = new Map(parts.map((c) => [c.code, c]));
+  // Parts are per subject: English may be Written + Oral while Maths is one
+  // mark, and a subject without a split keeps the scheme's components.
+  const partsCache = new Map<string, ReturnType<typeof componentsForSubject>>();
+  const partsOf = (sub: ExamSubject | undefined) => {
+    if (!sub) return componentsForTerm(scheme, term.code);
+    let hit = partsCache.get(sub.id);
+    if (!hit) {
+      hit = componentsForSubject(scheme, term.code, sub.code);
+      partsCache.set(sub.id, hit);
+    }
+    return hit;
+  };
   const maxFor = (sub: ExamSubject | undefined, component: string): number => {
-    if (component) return partByCode.get(component)?.maxMarks ?? 0;
+    if (component) return partsOf(sub).find((c) => c.code === component)?.maxMarks ?? 0;
     return sub ? effectiveMaxMarks(term, sub) : 100;
   };
 
   for (const m of input.marks) {
     const sub = subById.get(m.subjectId);
     if (!sub) continue;
+    const parts = partsOf(sub);
+    const partByCode = new Map(parts.map((c) => [c.code, c]));
     const component = String(m.component ?? "").toUpperCase();
     if (component && !partByCode.has(component)) {
       return {
         ok: false,
-        error: `${sub.name}: "${component}" is not a component of this class's assessment scheme`,
+        error: `${sub.name}: "${component}" is not one of its parts in this class's assessment scheme`,
       };
     }
     if (!component && parts.length > 0) {
@@ -2656,7 +2707,9 @@ export function saveSheetItemScores(input: {
       state.subjects.find((s) => s.id === input.subjectId) ?? null;
     const policy = getExamPolicy(state);
     const scheme = schemeForClassId(input.classId, policy);
-    const parts = componentsForTerm(scheme, term.code);
+    const parts = sub
+      ? componentsForSubject(scheme, term.code, sub.code)
+      : componentsForTerm(scheme, term.code);
     // Item marks are the written paper: they feed the exam component when
     // the class is assessed component-wise, else the whole subject mark.
     const target = parts.find((c) => c.kind === "exam") ?? parts[0] ?? null;
@@ -2729,14 +2782,20 @@ export type ReportCardLine = {
   /** Absent for this subject's paper: printed AB, left out of totals. */
   absent: boolean;
   remark: string;
+  /** The pass line this subject's total is held to (its own split's, else
+   * the scheme's, else the school's). */
+  passPercent?: number;
   /** Component breakdown when the class is assessed component-wise. */
   parts: {
     code: string;
     label: string;
     maxMarks: number;
     marksObtained: number | null;
-    /** Below the pass line on its own (only meaningful with passEachComponent). */
+    /** Below its own pass line (a part with its own pass %, or every part
+     * under passEachComponent). */
     failed: boolean;
+    /** That own pass line, when the part has one. */
+    passPercent?: number | null;
   }[];
 };
 
@@ -2864,6 +2923,7 @@ function coScholasticForReportCard(
 ): ReportCard["coScholastic"] {
   const areas = coScholasticAreasForClass(classId, policy);
   if (areas.length === 0) return [];
+  const scale = schemeForClassId(classId, policy).coScholasticScale;
   const sheet = findMarkSheet(ay, examTermId, sectionId, state);
   if (!sheet) return [];
   const codes = new Set(areas.map((a) => a.code));
@@ -2873,7 +2933,7 @@ function coScholasticForReportCard(
       domain: e.domain,
       domainLabel: coScholasticDomainLabel(e.domain, areas),
       rating: e.rating,
-      ratingLabel: coScholasticRatingLabel(e.rating),
+      ratingLabel: coScholasticRatingLabel(e.rating, scale),
     }));
 }
 
@@ -2947,7 +3007,7 @@ function subjectStandingOnSheet(
   parts: ReportCardLine["parts"];
 } {
   const rows = marksForExamSubject(sheet, studentId, subject, allSubjects);
-  const components = componentsForTerm(scheme, term.code);
+  const components = componentsForSubject(scheme, term.code, subject.code);
   const remark = rows.find((r) => r.remark)?.remark ?? "";
   if (components.length === 0) {
     const whole = rows.find((r) => !r.component) ?? rows[0];
@@ -2968,11 +3028,16 @@ function subjectStandingOnSheet(
       sum += got;
       any = true;
     }
-    const failed =
-      scheme.passEachComponent && got != null && c.maxMarks > 0
-        ? (got / c.maxMarks) * 100 < passPercent
-        : false;
-    return { code: c.code, label: c.label, maxMarks: c.maxMarks, marksObtained: got, failed };
+    const failed = componentFailed(c, got, scheme, passPercent);
+    const ownPass = c.passPercent ?? (scheme.passEachComponent ? passPercent : null);
+    return {
+      code: c.code,
+      label: c.label,
+      maxMarks: c.maxMarks,
+      marksObtained: got,
+      failed,
+      passPercent: ownPass,
+    };
   });
   return {
     maxMarks: componentsTotalMax(components),
@@ -3198,6 +3263,7 @@ export function buildReportCard(input: {
         gradeLabel: gradeLabel(aggGrade, scheme),
         absent: lineAbsent,
         remark,
+        passPercent: splitForSubject(scheme, sub.code)?.passPercent ?? passLine,
         parts: [],
       });
 
@@ -3318,6 +3384,7 @@ export function buildReportCard(input: {
       gradeLabel: gradeLabel(grade, scheme),
       absent: !!absence,
       remark: standing.remark,
+      passPercent: splitForSubject(scheme, sub.code)?.passPercent ?? passLine,
       parts: standing.parts,
     });
     if (obtained != null) {
@@ -3428,9 +3495,13 @@ export function evaluatePromotionPass(
     obtainedTotal += line.marksObtained;
     maxTotal += line.maxMarks;
     const pct = (line.marksObtained / line.maxMarks) * 100;
-    const partFailed =
-      !!opts?.passEachComponent && (line.parts ?? []).some((p) => p.failed);
-    if (pct < passPercent || partFailed) failedSubjects.push(line.subjectName);
+    // A part fails the subject only where it must be passed on its own: it
+    // has its own pass line (a subject split's "Oral 33 %"), or the scheme
+    // passes every part separately (XI–XII theory and practical).
+    const partFailed = (line.parts ?? []).some(
+      (p) => p.failed && (!!opts?.passEachComponent || p.passPercent != null),
+    );
+    if (pct < (line.passPercent ?? passPercent) || partFailed) failedSubjects.push(line.subjectName);
   }
   const overallPct = maxTotal > 0 ? (obtainedTotal / maxTotal) * 100 : 0;
   if (requireAllSubjects && failedSubjects.length > 0) {

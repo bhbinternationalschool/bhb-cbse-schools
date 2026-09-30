@@ -9,13 +9,23 @@
  * - components apply to term exams, not unit tests, unless told to;
  * - the grid builds one row per component, the save refuses a whole mark
  *   where components apply and a component mark over its maximum;
- * - each-component pass (XI–XII) fails a subject whose practical failed.
+ * - each-component pass (XI–XII) fails a subject whose practical failed;
+ * - a subject split (English = Written 80 + Oral 20) overrides the common
+ *   components for that subject only, in term exams AND unit tests, with a
+ *   pass line of its own per part and for the subject's total;
+ * - co-scholastic grades on a 3- or 5-point scale.
  */
 import assert from "node:assert/strict";
 
 import {
   CBSE_CO_SCHOLASTIC_AREAS,
+  componentFailed,
+  componentsForSubject,
   componentsForTerm,
+  coScholasticRatingsFor,
+  normalizeAssessmentScheme,
+  splitPartsFromMasterComponents,
+  subjectPassPercent,
   defaultAssessmentScheme,
   gradeBandsForPreset,
   gradeForPercent,
@@ -28,6 +38,8 @@ import {
 import {
   buildEmptyMarksGrid,
   coScholasticAreasForClass,
+  coScholasticRatingLabel,
+  isGradedNotMarked,
   defaultExamPolicy,
   evaluatePromotionPass,
   normalizeExamPolicy,
@@ -185,6 +197,151 @@ const eng: ExamSubject = { id: "sub_eng", code: "ENG", name: "English", classIds
   const each = evaluatePromotionPass([line(65, 100, partsFailedPractical)], 33, true, { passEachComponent: true });
   assert.equal(each.passed, false, "…but not when each component must pass");
   assert.deepEqual(each.failedSubjects, ["Physics"]);
+}
+
+// ------------------------------------------------------- subject splits
+{
+  // Class VI: the CBSE middle preset (TE 80 + PT 10 + NB 5 + SE 5) for every
+  // subject — except English, which the school marks Written + Oral, in unit
+  // tests too, with Oral to be passed on its own.
+  const middle = schemeFromPreset(SCHEME_PRESETS.find((p) => p.key === "cbse_middle")!, 33, ["cls_vi"]);
+  const scheme = normalizeAssessmentScheme(
+    {
+      ...middle,
+      subjectSplits: [
+        {
+          subjectCode: "eng",
+          passPercent: 40,
+          parts: [
+            { code: "wr-it", label: "Written", termMax: 80, unitTestMax: 30, kind: "exam", passPercent: null },
+            { code: "ORAL", label: "Oral", termMax: 20, unitTestMax: 10, kind: "internal", passPercent: 33 },
+            { code: "", label: "blank code is dropped", termMax: 5, unitTestMax: 5, kind: "exam", passPercent: null },
+          ],
+        },
+        { subjectCode: "HIN", passPercent: null, parts: [] },
+      ],
+    },
+    33,
+  );
+  assert.equal(scheme.subjectSplits.length, 1, "a split with no parts is no split");
+  assert.equal(scheme.subjectSplits[0]!.subjectCode, "ENG", "subject codes upper-cased");
+  assert.deepEqual(scheme.subjectSplits[0]!.parts.map((p) => p.code), ["WRIT", "ORAL"], "part codes A–Z0–9, blanks dropped");
+
+  const hyEng = componentsForSubject(scheme, "HY", "ENG");
+  assert.deepEqual(hyEng.map((c) => `${c.code}${c.maxMarks}`), ["WRIT80", "ORAL20"], "English: Written 80 + Oral 20 in term exams");
+  const utEng = componentsForSubject(scheme, "UT1", "ENG");
+  assert.deepEqual(utEng.map((c) => `${c.code}${c.maxMarks}`), ["WRIT30", "ORAL10"], "…and its own unit-test marks");
+  assert.deepEqual(
+    componentsForSubject(scheme, "HY", "MAT").map((c) => c.code),
+    ["TE", "PT", "NB", "SE"],
+    "Maths keeps the scheme's common components",
+  );
+  assert.equal(componentsForSubject(scheme, "UT1", "MAT").length, 0, "…and a whole mark in unit tests");
+
+  // A part with 0 for an exam type is not assessed in it; all 0 = whole mark.
+  const noOralInUt = normalizeAssessmentScheme(
+    { ...scheme, subjectSplits: [{ subjectCode: "ENG", passPercent: null, parts: [
+      { code: "WRIT", label: "Written", termMax: 80, unitTestMax: 40, kind: "exam", passPercent: null },
+      { code: "ORAL", label: "Oral", termMax: 20, unitTestMax: 0, kind: "internal", passPercent: null },
+    ] }] },
+    33,
+  );
+  assert.deepEqual(componentsForSubject(noOralInUt, "UT2", "ENG").map((c) => c.code), ["WRIT"]);
+  const termOnly = normalizeAssessmentScheme(
+    { ...scheme, subjectSplits: [{ subjectCode: "ENG", passPercent: null, parts: [
+      { code: "WRIT", label: "Written", termMax: 80, unitTestMax: 0, kind: "exam", passPercent: null },
+      { code: "ORAL", label: "Oral", termMax: 20, unitTestMax: 0, kind: "internal", passPercent: null },
+    ] }] },
+    33,
+  );
+  assert.equal(componentsForSubject(termOnly, "UT1", "ENG").length, 0, "split only in term exams: unit test is one mark");
+
+  // Pass lines.
+  assert.equal(subjectPassPercent(scheme, "ENG", 33), 40, "English's own total pass line");
+  assert.equal(subjectPassPercent(scheme, "MAT", 33), 33, "others use the scheme / school line");
+  const oral = hyEng[1]!;
+  assert.equal(componentFailed(oral, 6, scheme, 33), true, "6/20 = 30 % < Oral's own 33 %");
+  assert.equal(componentFailed(oral, 7, scheme, 33), false, "7/20 = 35 %");
+  assert.equal(componentFailed(hyEng[0]!, 10, scheme, 33), false, "Written has no line of its own");
+  assert.equal(componentFailed(hyEng[0]!, 10, { ...scheme, passEachComponent: true }, 33), true, "…unless every part must pass");
+
+  // The grid: English in Written/Oral, Maths in the common four.
+  const mat: ExamSubject = { ...eng, id: "sub_mat", code: "MAT", name: "Maths" };
+  const student = { id: "stu_1", fullName: "Test", classId: "cls_vi", sectionId: "sec_1", academicYearCode: "2026-27", status: "active" } as unknown as SisStudent;
+  const grid = buildEmptyMarksGrid([student], [eng, mat], term("HY", 80), undefined, 33, scheme);
+  assert.deepEqual(
+    grid.map((g) => `${g.subjectId}:${g.component}`),
+    ["sub_eng:WRIT", "sub_eng:ORAL", "sub_mat:TE", "sub_mat:PT", "sub_mat:NB", "sub_mat:SE"],
+  );
+  const utGrid = buildEmptyMarksGrid([student], [eng, mat], term("UT1", 40), undefined, 33, scheme);
+  assert.deepEqual(utGrid.map((g) => `${g.subjectId}:${g.component}`), ["sub_eng:WRIT", "sub_eng:ORAL", "sub_mat:"]);
+
+  // The save enforces each subject's own parts and maxima.
+  const policy = normalizeExamPolicy({ ...defaultExamPolicy(), schemes: [scheme] });
+  const state: ExamsState = { version: 1, terms: [term("HY", 80), term("UT1", 40)], subjects: [eng, mat], dateSheet: [], sheets: [], policy, promotions: [], rooms: [], seating: [] };
+  const deps = { state, masters: defaultMasters(), sis: { version: 1, households: [], students: [student], curriculumRequests: [] } as never };
+  const base = { academicYearCode: "2026-27", examTermId: "term_hy", classId: "cls_vi", sectionId: "sec_1", enteredBy: "T" };
+  const mk = (subjectId: string, component: string, marksObtained: number) =>
+    ({ studentId: "stu_1", subjectId, component, marksObtained, grade: "", remark: "", remarkSource: "manual" as const });
+  assert.equal(prepareMarkSheet({ ...base, marks: [mk("sub_eng", "TE", 60)] }, state, undefined, deps).ok, false, "English has no TE part");
+  assert.equal(prepareMarkSheet({ ...base, marks: [mk("sub_eng", "ORAL", 21)] }, state, undefined, deps).ok, false, "21 of a 20-mark Oral is refused");
+  assert.equal(prepareMarkSheet({ ...base, marks: [mk("sub_mat", "WRIT", 50)] }, state, undefined, deps).ok, false, "Maths has no Written part");
+  const ok = prepareMarkSheet({ ...base, marks: [mk("sub_eng", "WRIT", 70), mk("sub_eng", "ORAL", 18), mk("sub_mat", "TE", 60)] }, state, undefined, deps);
+  assert.ok(ok.ok, "each subject's own parts within their maxima are accepted");
+  const ut = prepareMarkSheet({ ...base, examTermId: "term_ut1", marks: [mk("sub_eng", "WRIT", 25), mk("sub_eng", "ORAL", 9), mk("sub_mat", "", 35)] }, state, undefined, deps);
+  assert.ok(ut.ok, "unit test: English in parts, Maths whole");
+  assert.equal(
+    prepareMarkSheet({ ...base, examTermId: "term_ut1", marks: [mk("sub_eng", "WRIT", 31)] }, state, undefined, deps).ok,
+    false,
+    "31 of the unit test's 30-mark Written is refused",
+  );
+
+  // Promotion: English's own 40 % total line and Oral's own 33 %.
+  const line = (name: string, obtained: number, max: number, passPercent: number | undefined, parts: ReportCardLine["parts"] = []): ReportCardLine => ({
+    subjectId: name, subjectName: name, maxMarks: max, marksObtained: obtained, grade: "", gradeLabel: "", absent: false, remark: "", parts, passPercent,
+  });
+  const engParts = (w: number, o: number): ReportCardLine["parts"] => [
+    { code: "WRIT", label: "Written", maxMarks: 80, marksObtained: w, failed: false, passPercent: null },
+    { code: "ORAL", label: "Oral", maxMarks: 20, marksObtained: o, failed: componentFailed(oral, o, scheme, 33), passPercent: 33 },
+  ];
+  const r1 = evaluatePromotionPass([line("English", 38, 100, 40, engParts(32, 6))], 33, true);
+  assert.deepEqual(r1.failedSubjects, ["English"], "38 % is under English's 40 % line (and Oral 6/20 failed)");
+  const r2 = evaluatePromotionPass([line("English", 50, 100, 40, engParts(44, 6))], 33, true);
+  assert.deepEqual(r2.failedSubjects, ["English"], "50 % overall, but Oral 30 % fails it on its own");
+  const r3 = evaluatePromotionPass([line("English", 52, 100, 40, engParts(44, 8))], 33, true);
+  assert.deepEqual(r3.failedSubjects, [], "both lines met");
+  const r4 = evaluatePromotionPass([line("Maths", 36, 100, undefined)], 33, true);
+  assert.ok(r4.passed, "a line without its own pass % uses the scheme's");
+
+  // Suggested parts from Masters components.
+  const suggested = splitPartsFromMasterComponents("ENG", [
+    { code: "ENG-WRIT", nameEn: "English — Written" },
+    { code: "ENG-ORAL", nameEn: "English — Oral" },
+    { code: "ENG-ORAL", nameEn: "duplicate" },
+  ]);
+  assert.deepEqual(suggested.map((p) => [p.code, p.label, p.masterCode]), [
+    ["WRIT", "Written", "ENG-WRIT"],
+    ["ORAL", "Oral", "ENG-ORAL"],
+  ]);
+}
+
+// ------------------------------------------------------- co-scholastic scale
+{
+  // Graded, not marked: Masters' category OR the CO tag. Work Education is
+  // co-scholastic in Masters but tagged B — it was getting a marks column.
+  assert.equal(isGradedNotMarked({ code: "WE", category: "co_scholastic", ncfTagId: "B" }), true);
+  assert.equal(isGradedNotMarked({ code: "SEE", category: "scholastic", ncfTagId: "CO" }), true);
+  assert.equal(isGradedNotMarked({ code: "ENG", category: "scholastic", ncfTagId: "A" }), false);
+
+  assert.deepEqual(coScholasticRatingsFor("three"), ["A", "B", "C"]);
+  assert.deepEqual(coScholasticRatingsFor("five"), ["A", "B", "C", "D", "E"]);
+  assert.equal(normalizeAssessmentScheme({ coScholasticScale: "five" }, 33).coScholasticScale, "five");
+  assert.equal(normalizeAssessmentScheme({ coScholasticScale: "nonsense" as never }, 33).coScholasticScale, "three");
+  // The same letter means different things on the two scales.
+  assert.equal(coScholasticRatingLabel("C", "three"), "Needs Improvement");
+  assert.equal(coScholasticRatingLabel("C", "five"), "Good");
+  assert.equal(coScholasticRatingLabel("E", "five"), "Needs Improvement");
+  assert.equal(coScholasticRatingLabel(null, "five"), "Not rated");
 }
 
 console.log("OK — examSchemes.selftest.ts");
