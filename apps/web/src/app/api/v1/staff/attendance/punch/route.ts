@@ -13,6 +13,7 @@ import {
 } from "@/lib/staffAttendance.server";
 import { campusGeofenceFromSettings } from "@/lib/staffGeofence.server";
 import { cleanPunchCode } from "@/lib/punchCode";
+import { istDateTime } from "@/lib/punchAttempts";
 import { punchCodeIsValid } from "@/lib/punchCode.server";
 import {
   checkPunchDevice,
@@ -180,6 +181,7 @@ export async function POST(request: Request) {
       staffId: staff.id,
       jwk,
       label: String(body.device.label || ""),
+      attempt: { kind: body.kind, at: new Date().toISOString() },
     }).catch((e: unknown) => {
       console.warn("[punch] device check threw", (e as Error)?.message);
       return { ok: false as const, reason: "unavailable" as const };
@@ -197,7 +199,7 @@ export async function POST(request: Request) {
       if (device.reason === "not_registered") {
         throw new ApiError(
           "forbidden",
-          "This is not your registered punch phone. The office has been asked to approve it — until then, punch from your registered phone.",
+          `This is not your registered punch phone. The office has been asked to approve it — your punch ${body.kind.toUpperCase()} at ${istDateTime(Date.now()).time} will count if they approve it today.`,
           403,
           { reason: "not_registered" },
         );

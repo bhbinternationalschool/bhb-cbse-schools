@@ -8,6 +8,21 @@ import path from "path";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { listSectionParentContacts } from "@/lib/homework";
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
+import {
+  missingLanguagesLabel,
+  renderTemplateBody,
+  templateForFamily,
+  templatesByLanguage,
+  type PickedTemplate,
+} from "@/lib/erpCommands";
+import {
+  composeFillBlanksReply,
+  composeNoticeParentPreview,
+  composeNoticeSentReceipt,
+  flattenTemplateParam,
+  hasUnfilledBlank,
+} from "@/lib/classNoticeWa";
 import { loadSis } from "@/lib/sis";
 import {
   resolveClassTeachers,
@@ -510,6 +525,151 @@ function composeBroadcast(draft: ClassChannelDraft, channel: ClassChannel): stri
     .join("\n");
 }
 
+/** The heading parents see above the teacher's words: what it is and for which class. */
+function noticeHeading(draft: ClassChannelDraft, channel: ClassChannel): string {
+  const what =
+    draft.kind === "holiday"
+      ? "Holiday"
+      : draft.kind === "exam"
+        ? "Exam update"
+        : draft.kind === "timing"
+          ? "School timing"
+          : "Notice";
+  return `${what} · ${channel.label.replace(" · ", " ")}`;
+}
+
+/** The teacher's words as one template-safe line, with any date the parser read. */
+function noticeBodyFor(draft: ClassChannelDraft): string {
+  const words = [draft.body || draft.title, draft.eventDate ? `Date: ${draft.eventDate}` : ""]
+    .filter(Boolean)
+    .join("\n");
+  return `${flattenTemplateParam(words)} — ${draft.createdByName}`;
+}
+
+type ClassNoticePlan =
+  | { ok: false; reason: "templates_unreadable" | "not_approved"; error: string; families: number; mobiles: string[] }
+  | {
+      ok: true;
+      families: number;
+      byLangMobiles: Record<string, string[]>;
+      byLang: Record<string, PickedTemplate | null>;
+      vars: Record<string, string>;
+      rendered: string;
+      languages: string;
+    };
+
+/**
+ * Who gets a class notice and in which approved template: every family of
+ * the section with a WhatsApp number, bucketed by the language each reads.
+ * Both the teacher's preview and the send come from this, so what they
+ * approve is what goes.
+ */
+async function planClassNotice(draft: ClassChannelDraft, channel: ClassChannel): Promise<ClassNoticePlan> {
+  await ensureSchoolMirrorHydrated();
+  const sis = loadSis();
+  const contacts = listSectionParentContacts(channel.sectionId, channel.academicYearCode, sis);
+  const mobiles = contacts.map((c) => c.mobile).filter(Boolean);
+  const byLangMobiles: Record<string, string[]> = {};
+  for (const c of contacts) {
+    if (!c.mobile) continue;
+    const hh = sis.households.find((h) => h.id === c.householdId);
+    (byLangMobiles[waTemplateLanguageFor(hh ?? {})] ??= []).push(c.mobile);
+  }
+  const { approvedTemplatesServer } = await import("@/lib/waTemplatesRead.server");
+  const read = await approvedTemplatesServer("comms");
+  if (!read.ok) {
+    return { ok: false, reason: "templates_unreadable", error: read.error, families: contacts.length, mobiles };
+  }
+  const tpls = templatesByLanguage(read.templates, ["comms_notice"]);
+  if (!tpls.ready) {
+    return {
+      ok: false,
+      reason: "not_approved",
+      error: `School notice broadcast is not approved in ${missingLanguagesLabel(tpls.missing) || "either language"}`,
+      families: contacts.length,
+      mobiles,
+    };
+  }
+  const vars: Record<string, string> = {
+    schoolName: TENANT.nameDisplay,
+    noticeTitle: flattenTemplateParam(noticeHeading(draft, channel), 60),
+    noticeBody: noticeBodyFor(draft),
+    guardianName: "Parent",
+    childName: "your child",
+  };
+  const languages = Object.entries(byLangMobiles)
+    .filter(([, v]) => v.length)
+    .map(([k, v]) => `${v.length} ${k === "en" ? "English" : "Hindi"}`)
+    .join(", ");
+  return {
+    ok: true,
+    families: contacts.length,
+    byLangMobiles,
+    byLang: tpls.byLang,
+    vars,
+    rendered: renderTemplateBody(tpls.rawReady?.body || "", vars),
+    languages,
+  };
+}
+
+export type ClassNoticeSendResult = {
+  /** "unavailable" = the templates could not be read; nothing was sent. */
+  mode: "template" | "text" | "none" | "unavailable";
+  families: number;
+  sent: number;
+  failed: number;
+  optedOut: number;
+};
+
+/** A notice to every family of the class, through the approved template. */
+async function sendClassNoticeToParents(draft: ClassChannelDraft, channel: ClassChannel): Promise<ClassNoticeSendResult> {
+  const plan = await planClassNotice(draft, channel);
+  const families = plan.families;
+  if (!families) return { mode: "none", families: 0, sent: 0, failed: 0, optedOut: 0 };
+  if (!plan.ok && plan.reason === "templates_unreadable") {
+    return { mode: "unavailable", families, sent: 0, failed: 0, optedOut: 0 };
+  }
+  if (!plan.ok) {
+    // No approved template: plain text is all there is, and it reaches only
+    // the families inside WhatsApp's 24-hour window. The receipt says so.
+    const body = composeBroadcast(draft, channel);
+    let sent = 0;
+    let failed = 0;
+    for (const m of plan.mobiles) {
+      const r = await sendWhatsAppText({ toMobile: m, body });
+      if (r.ok) sent += 1;
+      else failed += 1;
+    }
+    return { mode: "text", families, sent, failed, optedOut: 0 };
+  }
+  const { buildWaTemplateBodyComponent } = await import("@/lib/waSend");
+  const { broadcastTemplateToMobiles } = await import("@/lib/waBroadcast.server");
+  const { publicOrigin } = await import("@/lib/birthday.server");
+  const res: ClassNoticeSendResult = { mode: "template", families, sent: 0, failed: 0, optedOut: 0 };
+  for (const [lang, group] of Object.entries(plan.byLangMobiles)) {
+    if (!group.length) continue;
+    const tpl = templateForFamily(plan.byLang, lang, null);
+    if (!tpl) {
+      res.failed += group.length;
+      continue;
+    }
+    const one = await broadcastTemplateToMobiles({
+      mobiles: group,
+      template: {
+        name: tpl.metaName,
+        language: tpl.language,
+        components: [buildWaTemplateBodyComponent(tpl.variables, plan.vars)],
+      },
+      module: "notices",
+      originUrl: publicOrigin(),
+    });
+    res.sent += one.sent;
+    res.failed += one.failed;
+    res.optedOut += one.skippedOptOut;
+  }
+  return res;
+}
+
 /**
  * Send the draft to the channel.
  *
@@ -567,6 +727,8 @@ export async function confirmClassChannelDraft(input: {
       broadcast: { sent: number; stub: number };
       /** How the ERP write went — see `applyDraftToErpServer`. */
       erp: ClassChannelErpApply;
+      /** A notice's delivery to the families; null for other drafts. */
+      parents: ClassNoticeSendResult | null;
     }
   | { ok: false; error: string }
 > {
@@ -576,18 +738,57 @@ export async function confirmClassChannelDraft(input: {
   if (draft.status === "cancelled") {
     return { ok: false, error: "Draft was cancelled" };
   }
+  if (draft.status === "confirmed" || draft.status === "applied") {
+    // A second YES must never message every family again.
+    return { ok: false, error: "This was already sent." };
+  }
   draft.status = "confirmed";
   draft.confirmedAt = nowIso();
   // clear pending on threads
+  const clearedThreadIds: string[] = [];
   for (const t of store.threads) {
-    if (t.pendingDraftId === draft.id) t.pendingDraftId = "";
+    if (t.pendingDraftId === draft.id) {
+      t.pendingDraftId = "";
+      clearedThreadIds.push(t.id);
+    }
   }
   await writeStore(store);
   // Homework reaches the families from the ERP write below, through the
   // approved template, so it is not also text-broadcast here — that would
   // message twice every parent whose window happens to be open.
   const homeworkPath = draft.erpTarget === "homework";
-  const bc = await broadcastClassChannelDraft(draft.id, homeworkPath ? "staff_only" : "everyone");
+  // A notice reaches the families through the approved notice template
+  // (sendClassNoticeToParents); plain text would reach only the few who
+  // wrote to the school in the last 24 hours.
+  const noticePath = draft.erpTarget === "notice";
+  let parents: ClassNoticeSendResult | null = null;
+  if (noticePath) {
+    const channel = store.channels.find((c) => c.id === draft.channelId);
+    parents = channel
+      ? await sendClassNoticeToParents(draft, channel).catch((e: unknown) => {
+          console.error("[class-channel] notice to parents failed", e);
+          return { mode: "template" as const, families: 0, sent: 0, failed: 0, optedOut: 0 };
+        })
+      : null;
+    if (parents?.mode === "unavailable") {
+      // Nothing went out: put the draft back so the teacher's next YES sends it.
+      const back = await readStore();
+      const d = back.drafts.find((x) => x.id === draft.id);
+      if (d) {
+        d.status = "pending";
+        d.confirmedAt = "";
+      }
+      for (const t of back.threads) {
+        if (clearedThreadIds.includes(t.id) && !t.pendingDraftId) t.pendingDraftId = draft.id;
+      }
+      await writeStore(back);
+      return {
+        ok: false,
+        error: "Couldn't reach the school's WhatsApp templates just now, so nothing was sent. Reply YES again in a minute.",
+      };
+    }
+  }
+  const bc = await broadcastClassChannelDraft(draft.id, homeworkPath || noticePath ? "staff_only" : "everyone");
   // The ERP write happens here, not in a browser effect: parents have just
   // been messaged, and a homework post they can see must exist in the
   // school's own record whether or not anyone opens Comms today.
@@ -601,13 +802,14 @@ export async function confirmClassChannelDraft(input: {
   const fresh = await readStore();
   const latest = fresh.drafts.find((d) => d.id === draft.id) ?? draft;
   if (!bc.ok) {
-    return { ok: true, draft: latest, broadcast: { sent: 0, stub: 0 }, erp };
+    return { ok: true, draft: latest, broadcast: { sent: 0, stub: 0 }, erp, parents };
   }
   return {
     ok: true,
     draft: latest,
     broadcast: { sent: bc.sent, stub: bc.stub },
     erp,
+    parents,
   };
 }
 
@@ -857,7 +1059,18 @@ export async function handleWaClassChannelInbound(msg: {
             : conf.erp.status === "skipped"
               ? "Nothing to file in the ERP for this one."
               : `⚠️ Parents were told, but the ERP record could not be saved (${conf.erp.error}). The office can retry it in Comms → Class channels.`;
-        replyText = `Published · notified ~${conf.broadcast.sent + conf.broadcast.stub} contacts (${conf.broadcast.sent} sent${conf.broadcast.stub ? `, ${conf.broadcast.stub} stub` : ""}).\n${erpLine}`;
+        const ch = store.channels.find((c) => c.id === conf.draft.channelId);
+        replyText = conf.parents
+          ? composeNoticeSentReceipt({
+              classLabel: (ch?.label || "the class").replace(" · ", " "),
+              families: conf.parents.families,
+              sent: conf.parents.sent,
+              failed: conf.parents.failed,
+              optedOut: conf.parents.optedOut,
+              mode: conf.parents.mode === "unavailable" ? "template" : conf.parents.mode,
+              erpLine: conf.erp.status === "applied" ? `Saved in the ERP · ${conf.erp.detail}.` : conf.erp.status === "failed" ? `⚠️ The ERP record could not be saved (${conf.erp.error}). The office can retry it in Comms → Class channels.` : "",
+            })
+          : `Published · notified ~${conf.broadcast.sent + conf.broadcast.stub} contacts (${conf.broadcast.sent} sent${conf.broadcast.stub ? `, ${conf.broadcast.stub} stub` : ""}).\n${erpLine}`;
         const fresh = await readStore();
         const th = fresh.threads.find((t) => t.id === thread.id);
         if (th) {
@@ -926,7 +1139,9 @@ export async function handleWaClassChannelInbound(msg: {
         }
       }
 
-      if (
+      if (hasUnfilledBlank(msg.text || "")) {
+        replyText = composeFillBlanksReply((msg.text || "").trim());
+      } else if (
         (parsed.kind === "homework" || parsed.kind === "classwork") &&
         !subjectId
       ) {
@@ -982,6 +1197,25 @@ export async function handleWaClassChannelInbound(msg: {
         thread.pendingDraftId = draft.id;
         thread.channelId = ch.id;
         replyText = [composeDraftPreview(draft, ch), expandNote].filter(Boolean).join("\n\n");
+        if (draft.erpTarget === "notice") {
+          // The parents' message itself, exactly, so YES approves what goes.
+          try {
+            const plan = await planClassNotice(draft, ch);
+            if (plan.ok) {
+              replyText = composeNoticeParentPreview({
+                kindLabel: kindTitle(draft.kind).toUpperCase(),
+                classLabel: ch.label.replace(" · ", " "),
+                rendered: plan.rendered,
+                families: plan.families,
+                languages: plan.languages,
+              });
+            } else if (plan.families) {
+              replyText = `${replyText}\n\n⚠️ ${plan.error}, so only families who wrote to the school in the last 24 hours would get it. Ask the office to fix this in Masters → WhatsApp templates.`;
+            }
+          } catch (e) {
+            console.warn("[class-channel] notice preview failed", (e as Error)?.message);
+          }
+        }
       }
     }
   } else {

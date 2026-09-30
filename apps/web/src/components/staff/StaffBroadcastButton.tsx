@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { VoiceDictateButton } from "@/components/teaching/VoiceDictateButton";
 import { chatSelfFromSession } from "@/lib/erpChat";
 import {
   staffAllowedSections,
@@ -730,6 +731,8 @@ export function StaffBroadcastButton() {
                       rows={2}
                       className="w-full rounded-lg border border-[var(--border)] p-2 text-sm"
                     />
+                    {/* 2026-09-30: staff type these on the phone — dictate instead. */}
+                    <VoiceDictateButton title="Dictate the reason" value={reason} onChange={setReason} disabled={busy} />
                     {error ? (
                       <p className="text-xs text-[var(--danger)]">{error}</p>
                     ) : null}
@@ -796,6 +799,7 @@ export function StaffBroadcastButton() {
                       rows={2}
                       className="w-full rounded-lg border border-[var(--border)] p-2 text-sm"
                     />
+                    <VoiceDictateButton title="Dictate the details" value={requestDescription} onChange={setRequestDescription} disabled={busy} />
                     {error ? (
                       <p className="text-xs text-[var(--danger)]">{error}</p>
                     ) : null}
@@ -890,6 +894,7 @@ export function StaffBroadcastButton() {
                       rows={2}
                       className="w-full rounded-lg border border-[var(--border)] p-2 text-sm"
                     />
+                    <VoiceDictateButton title="Dictate a note" value={odNote} onChange={setOdNote} disabled={busy} />
                     {error ? (
                       <p className="text-xs text-[var(--danger)]">{error}</p>
                     ) : null}
@@ -965,6 +970,17 @@ export function StaffBroadcastButton() {
                       className="w-full rounded-lg border border-[var(--border)] p-2 text-sm"
                     />
                   )}
+                  {!selectedTemplate ? (
+                    <VoiceDictateButton
+                      title="Dictate the message"
+                      value={message}
+                      onChange={(v) => {
+                        setMessage(v);
+                        setPreview(null);
+                      }}
+                      disabled={busy}
+                    />
+                  ) : null}
 
                   {error ? (
                     <p className="text-xs text-[var(--danger)]">{error}</p>

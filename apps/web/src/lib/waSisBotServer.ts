@@ -98,7 +98,8 @@ import {
   LANGUAGE_MENU_KEYWORDS,
   sarvamTargetFor, waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { patchMirrorHousehold } from "@/lib/parentHousehold.server";
-import { sarvamConfigured, sarvamTranslate, type SarvamLang } from "@/lib/sarvam.server";
+import { type SarvamLang } from "@/lib/sarvam.server";
+import { translateText, translationConfigured } from "@/lib/translate.server";
 import { formatKbContext, retrieveRelevantKb } from "@/lib/schoolKb.server";
 import {
   buildComplaintFlowJson,
@@ -384,11 +385,11 @@ ${kbContext ? `Relevant school notices:\n${kbContext}\n` : ""}Parent's message: 
 
 /**
  * Regional preference: render a Hindi draft in the family's own language
- * when Sarvam can; otherwise the Hindi goes as it is.
+ * when Bhashini or Sarvam can; otherwise the Hindi goes as it is.
  */
 async function renderForFamily(text: string, sarvamTarget: string | null): Promise<string> {
-  if (!sarvamTarget || !sarvamConfigured()) return text;
-  const t = await sarvamTranslate({ text, from: "hi-IN", to: sarvamTarget as SarvamLang, mode: "modern-colloquial" });
+  if (!sarvamTarget || !translationConfigured()) return text;
+  const t = await translateText({ text, from: "hi-IN", to: sarvamTarget as SarvamLang, mode: "modern-colloquial" });
   return t.ok && t.text.trim() ? t.text.trim() : text;
 }
 

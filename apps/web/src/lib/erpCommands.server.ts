@@ -74,6 +74,7 @@ import { flagFutureDues } from "@/lib/feeDueFuture";
 import { listLiveDefaulters } from "@/lib/playbook";
 import { listSectionParentContacts } from "@/lib/homework";
 import { publicOrigin } from "@/lib/birthday.server";
+import { composeFillBlanksReply, flattenTemplateParam, hasUnfilledBlank } from "@/lib/classNoticeWa";
 import { ensureFeesHydratedServer } from "@/lib/feesPersistence.server";
 import { formatInr, loadMasters } from "@/lib/masters";
 import { classLabel } from "@/lib/homework";
@@ -578,14 +579,30 @@ function countByLanguage(rows: { language?: string }[]): Record<string, number> 
   return out;
 }
 
+/**
+ * May this session run this command? The command's own module permission —
+ * and, for a message to a class's parents, a teacher's right to post work
+ * to their classes counts too: they may write to the families of the
+ * sections they teach, and the own-sections check still limits which.
+ * Director's decision, 30 Sep 2026: a teacher's notice goes to parents on
+ * the teacher's own YES.
+ */
+function commandPermitted(
+  session: DemoSession,
+  masters: MastersState,
+  c: ErpCommandDef,
+  rbac: RbacState,
+): boolean {
+  if (hasPermission(session, masters, c.module, c.action, rbac)) return true;
+  return c.id === "class_message" && hasPermission(session, masters, "homework", "create", rbac);
+}
+
 function allowedCommandsFor(
   session: DemoSession,
   masters: MastersState,
   rbac: RbacState,
 ): ErpCommandDef[] {
-  return ERP_COMMANDS.filter((c) =>
-    hasPermission(session, masters, c.module, c.action, rbac),
-  );
+  return ERP_COMMANDS.filter((c) => commandPermitted(session, masters, c, rbac));
 }
 
 async function transcribeVoiceNote(audio: {
@@ -593,15 +610,13 @@ async function transcribeVoiceNote(audio: {
   mimeType?: string;
 }): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
   const { fetchWaMediaAsDataUrl } = await import("@/lib/waInboundMedia.server");
-  const { googleSpeechToText, speechConfigured } = await import(
-    "@/lib/googleSpeech.server"
-  );
-  if (!speechConfigured()) {
+  const { speechToText, anySpeechConfigured } = await import("@/lib/speech.server");
+  if (!anySpeechConfigured()) {
     return { ok: false, error: "Speech recognition is not configured" };
   }
   const media = await fetchWaMediaAsDataUrl(audio.mediaId);
   if (!media.ok) return media;
-  return googleSpeechToText({
+  return speechToText({
     audioBase64: media.dataUrl,
     mimeType: media.mimeType || audio.mimeType,
     languageCode: "hi-IN",
@@ -2255,8 +2270,8 @@ export async function handleErpStaffCommand(
       null;
     const vars: Record<string, string> = {
       schoolName: TENANT.nameDisplay,
-      noticeTitle: noticeTitleFrom(message),
-      noticeBody: message,
+      noticeTitle: flattenTemplateParam(noticeTitleFrom(message), 60),
+      noticeBody: flattenTemplateParam(message),
     };
     resolved.message = message;
     resolved.staffIds = activeStaff.map((st) => st.id).join(",");
@@ -2276,6 +2291,9 @@ export async function handleErpStaffCommand(
   }
   if (command.id === "class_message" && resolved.sectionId) {
     const message = (parsed.fields.text || "").trim();
+    if (hasUnfilledBlank(message)) {
+      return { handled: true, audience: "erp_command_ask", text: composeFillBlanksReply(message) };
+    }
     if (message.length < 3) {
       return {
         handled: true,
@@ -2319,10 +2337,12 @@ export async function handleErpStaffCommand(
         text: `No parent WhatsApp numbers on record for ${resolved.sectionLabel || "that section"}.`,
       };
     }
+    // One line: Meta refuses a template parameter holding a line break,
+    // and a notice typed on two lines failed for every family.
     const vars: Record<string, string> = {
       schoolName: TENANT.nameDisplay,
-      noticeTitle: noticeTitleFrom(message),
-      noticeBody: message,
+      noticeTitle: flattenTemplateParam(noticeTitleFrom(message), 60),
+      noticeBody: flattenTemplateParam(message),
       guardianName: "Parent",
       childName: "your child",
     };
@@ -3740,7 +3760,7 @@ async function runConfirmedWrite(
   const session = staffSessionFor(inbound.staff, masters);
   // Permission is re-checked at confirm time, not trusted from the card:
   // a role can change in the minutes a card sits waiting.
-  if (!hasPermission(session, masters, command.module, command.action, rbac)) {
+  if (!commandPermitted(session, masters, command, rbac)) {
     void trackServerWork(audit(session, command, pending.fields, pending.originalText, "denied", {
       reason: "rbac_at_confirm",
       channel: inbound.channel,

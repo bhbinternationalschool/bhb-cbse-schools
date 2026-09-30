@@ -275,6 +275,7 @@ jobs:
           npm run test:staff-wa-real-chats
           npm run test:staff-onboarding
           npm run test:staff-leave-wa
+          npm run test:class-notice-wa
           npm run test:pin-review
           npm run test:due-pay-link
           npm run test:fee-dues-server-inputs
@@ -307,6 +308,7 @@ jobs:
           npm run test:fleet-live
           npm run test:udise-doc-intake
           npm run test:homework-expand
+          npm run test:homework-page-scan
           npm run test:homework-submission
           npm run test:exam-drill
           npm run test:drill-skills
@@ -417,7 +419,10 @@ jobs:
           npm run test:staff-roster-redact
           npm run test:sis-class-teacher
           npm run test:punch-code
+          npm run test:answer-sheet-ai
+          npm run test:voice-dictation
           npm run test:punch-devices
+          npm run test:punch-attempts
           npm run test:module-state-merge
           npm run test:staff-day-status
           npm run test:payroll-no-register

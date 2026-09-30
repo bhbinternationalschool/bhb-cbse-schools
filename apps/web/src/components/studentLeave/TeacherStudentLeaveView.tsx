@@ -16,6 +16,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { VoiceDictateButton } from "@/components/teaching/VoiceDictateButton";
 import { TabsContent, WorkspaceTabs, type WorkspaceTabItem } from "@/components/ui/workspace-tabs";
 
 /**
@@ -169,6 +170,14 @@ function RequestCard({
               maxLength={300}
               onChange={(e) => setNote(e.target.value)}
               className="h-8 min-w-[12rem] flex-1"
+              disabled={busy || readOnly}
+            />
+            {/* 2026-09-30: dictated text is set programmatically, so maxLength
+                does not apply — cut it to the same 300 here. */}
+            <VoiceDictateButton
+              title="Dictate a note to the parent"
+              value={note}
+              onChange={(v) => setNote(v.slice(0, 300))}
               disabled={busy || readOnly}
             />
             <Button

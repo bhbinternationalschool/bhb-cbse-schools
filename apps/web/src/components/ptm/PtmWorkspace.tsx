@@ -39,6 +39,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { TabsContent, WorkspaceTabs, type WorkspaceTabItem } from "@/components/ui/workspace-tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { VoiceDictateButton } from "@/components/teaching/VoiceDictateButton";
 import { DeskListActions } from "@/components/ui/desk-list-actions";
 import { cn } from "@/lib/utils";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
@@ -1289,7 +1290,10 @@ export function PtmWorkspace() {
                 </Select>
               </div>
               <div className="grid gap-1.5">
-                <Label htmlFor="fb-strengths">Strengths</Label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Label htmlFor="fb-strengths">Strengths</Label>
+                  <VoiceDictateButton title="Dictate strengths" value={fbStrengths} onChange={setFbStrengths} disabled={readOnly} />
+                </div>
                 <Textarea
                   id="fb-strengths"
                   rows={2}
@@ -1298,7 +1302,10 @@ export function PtmWorkspace() {
                 />
               </div>
               <div className="grid gap-1.5">
-                <Label htmlFor="fb-areas">Areas to improve</Label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Label htmlFor="fb-areas">Areas to improve</Label>
+                  <VoiceDictateButton title="Dictate areas to improve" value={fbAreas} onChange={setFbAreas} disabled={readOnly} />
+                </div>
                 <Textarea
                   id="fb-areas"
                   rows={2}
@@ -1307,7 +1314,10 @@ export function PtmWorkspace() {
                 />
               </div>
               <div className="grid gap-1.5">
-                <Label htmlFor="fb-follow">Follow-up</Label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Label htmlFor="fb-follow">Follow-up</Label>
+                  <VoiceDictateButton title="Dictate follow-up" value={fbFollowUp} onChange={setFbFollowUp} disabled={readOnly} />
+                </div>
                 <Textarea
                   id="fb-follow"
                   rows={2}

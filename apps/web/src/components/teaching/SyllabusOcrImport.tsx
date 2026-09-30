@@ -2,15 +2,11 @@
 
 import { useRef, useState } from "react";
 import { Camera, ClipboardList, Loader2, ScanLine } from "lucide-react";
-import {
-  parseSyllabusTextApi,
-  readFileAsDataUrlForOcr,
-  runSyllabusOcrApi,
-  type SyllabusOcrApiResult,
-} from "@/lib/ocrClient";
+import { photoForOcr, type OcrPhoto } from "@/lib/ocrClient";
 import { ocrFirstPassUsable, puterEnabled, puterPathNote } from "@/lib/puterAi";
 import { puterReadImageText } from "@/lib/puterAi.client";
 import type { SyllabusImportChapter } from "@/lib/teaching";
+import { postSyllabusScan, type SyllabusScanResult } from "@/components/teaching/teachingApi";
 
 type ReviewTopic = { code: string; title: string; include: boolean };
 type ReviewChapter = {
@@ -21,6 +17,9 @@ type ReviewChapter = {
   topics: ReviewTopic[];
 };
 
+/** Same cap as the scan route: a contents list rarely runs past two pages. */
+const MAX_PAGES = 4;
+
 /**
  * Photograph a textbook contents page and turn it into chapters.
  *
@@ -28,14 +27,24 @@ type ReviewChapter = {
  * only the teacher's "Add to plan" press saves. Low-confidence rows are
  * marked and the lines the parser could not place are shown, so a
  * half-read page looks half-read rather than complete.
+ *
+ * Reads go through /api/v1/teaching/syllabus-scan with the class and
+ * subject (2026-09-30), so a teacher is refused a class they do not teach
+ * before any paid reading is made — the old /api/ocr/syllabus asked only
+ * "is this staff". Several pages can be photographed at once; they are
+ * shrunk on the phone to ~1600 px JPEG before upload.
  */
 export function SyllabusOcrImport(props: {
+  classId: string;
+  subjectId: string;
   disabled?: boolean;
-  onImport: (chapters: SyllabusImportChapter[]) => void;
+  /** Resolve true when saved — the review list closes; false keeps it open to retry. */
+  onImport: (chapters: SyllabusImportChapter[]) => boolean | Promise<boolean>;
   onError: (msg: string | null) => void;
 }) {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
   const [pasteText, setPasteText] = useState("");
   const [showPaste, setShowPaste] = useState(false);
@@ -56,7 +65,7 @@ export function SyllabusOcrImport(props: {
    * the paid scan end here, so there is exactly one place that decides what
    * a teacher sees — and no way for the cheap path to skip a check.
    */
-  function applyResult(result: SyllabusOcrApiResult) {
+  function applyResult(result: SyllabusScanResult) {
     setRows(
       (result.chapters ?? []).map((c) => ({
         code: c.code,
@@ -76,58 +85,80 @@ export function SyllabusOcrImport(props: {
     setOpen(true);
   }
 
-  async function onFile(file: File | undefined) {
-    if (!file) return;
+  async function onFiles(list: FileList | null) {
+    const files = Array.from(list ?? []);
+    if (!files.length) return;
     props.onError(null);
+    if (files.length > MAX_PAGES) {
+      props.onError(`At most ${MAX_PAGES} pages at a time — scan the rest separately`);
+      if (fileRef.current) fileRef.current.value = "";
+      return;
+    }
     setBusy(true);
     setRows(null);
     setVerdict(null);
     setPath(null);
     setFreeNote(null);
     try {
-      const read = await readFileAsDataUrlForOcr(file);
-      if (!read.ok) {
-        props.onError(read.error);
-        return;
+      const photos: OcrPhoto[] = [];
+      for (const [i, file] of files.entries()) {
+        const read = await photoForOcr(file);
+        if (!read.ok) {
+          props.onError(files.length > 1 ? `Page ${i + 1}: ${read.error}` : read.error);
+          return;
+        }
+        photos.push(read);
       }
 
-      // Free first pass (puterAi.ts). It reads the photo in the browser at
-      // no cost to the school, then hands its text to the SAME parser the
+      // Free first pass (puterAi.ts). It reads the photos in the browser at
+      // no cost to the school, then hands the text to the SAME parser the
       // pasted-list path uses — so the review list, the confidence marks
       // and the "nothing is saved until you confirm" promise are identical.
       //
-      // It is a first pass, not a cheaper scan: a thin or garbled read is
-      // discarded by ocrFirstPassUsable and we pay for Vision instead,
-      // because half a contents page presented as a whole one is worse
-      // than no scan at all. A printed textbook page carries no student
-      // data, which is why this surface is cleared and no other OCR is.
+      // It is a first pass, not a cheaper scan: if ANY page reads thin or
+      // garbled, the whole set goes to Vision instead, because half a
+      // contents list presented as a whole one is worse than no scan at
+      // all. A printed textbook page carries no student data, which is why
+      // this surface is cleared and no other OCR is.
       if (puterEnabled()) {
-        const free = await puterReadImageText(read.url);
-        if (free.ok && ocrFirstPassUsable(free.text)) {
-          const parsed = await parseSyllabusTextApi(free.text);
+        const texts: string[] = [];
+        for (const photo of photos) {
+          const free = await puterReadImageText(photo.dataUrl);
+          if (free.ok && ocrFirstPassUsable(free.text)) {
+            texts.push(free.text);
+            continue;
+          }
+          if (!free.ok && free.kind === "quota") setFreeNote(free.message);
+          break;
+        }
+        if (texts.length === photos.length) {
+          const parsed = await postSyllabusScan({
+            classId: props.classId,
+            subjectId: props.subjectId,
+            text: texts.join("\n"),
+          });
           if (parsed.ok) {
-            applyResult(parsed);
+            applyResult(parsed.data);
             setPath("puter");
             return;
           }
-        } else if (!free.ok && free.kind === "quota") {
-          setFreeNote(free.message);
+          // A refusal (not your class) is the answer, not a reason to pay
+          // for a second reading.
+          props.onError(parsed.error);
+          return;
         }
       }
 
-      const result = await runSyllabusOcrApi({
-        dataUrl: read.url,
-        mimeType: read.mimeType,
+      const result = await postSyllabusScan({
+        classId: props.classId,
+        subjectId: props.subjectId,
+        images: photos.map((p) => ({ imageBase64: p.base64, mimeType: p.mimeType })),
       });
       if (!result.ok) {
-        props.onError(
-          result.visionConfigured === false
-            ? "Text recognition is not switched on for this school yet — ask your administrator to enable the Vision API."
-            : result.error || "Could not read that page",
-        );
+        props.onError(result.error || "Could not read that page");
         return;
       }
-      applyResult(result);
+      applyResult(result.data);
       setPath("paid");
     } finally {
       setBusy(false);
@@ -137,6 +168,8 @@ export function SyllabusOcrImport(props: {
 
   async function onPaste() {
     props.onError(null);
+    const text = pasteText.trim();
+    if (!text) return props.onError("Paste the contents list first");
     setBusy(true);
     setRows(null);
     setVerdict(null);
@@ -145,20 +178,24 @@ export function SyllabusOcrImport(props: {
     try {
       // Same parser, same review, same no-invention rule as a scan — the only
       // difference is the text arrived clean instead of through a camera.
-      const result = await parseSyllabusTextApi(pasteText);
+      const result = await postSyllabusScan({
+        classId: props.classId,
+        subjectId: props.subjectId,
+        text,
+      });
       if (!result.ok) {
         props.onError(result.error || "Could not read that list");
         return;
       }
-      applyResult(result);
+      applyResult(result.data);
       setShowPaste(false);
     } finally {
       setBusy(false);
     }
   }
 
-  function save() {
-    if (!rows) return;
+  async function save() {
+    if (!rows || saving) return;
     const chapters: SyllabusImportChapter[] = rows
       .filter((c) => c.include && c.title.trim())
       .map((c) => ({
@@ -172,9 +209,18 @@ export function SyllabusOcrImport(props: {
       props.onError("Nothing ticked to import");
       return;
     }
-    props.onImport(chapters);
-    setRows(null);
-    setOpen(false);
+    setSaving(true);
+    try {
+      // The list stays on screen until the save is confirmed: a failed
+      // import that also threw away the teacher's corrections would make
+      // them scan and edit the page all over again.
+      const saved = await props.onImport(chapters);
+      if (!saved) return;
+      setRows(null);
+      setOpen(false);
+    } finally {
+      setSaving(false);
+    }
   }
 
   const selected = rows?.filter((c) => c.include).length ?? 0;
@@ -183,25 +229,28 @@ export function SyllabusOcrImport(props: {
     <div className="rounded-xl border border-dashed border-[var(--border)] px-4 py-3">
       <div className="flex flex-wrap items-center gap-3">
         <ScanLine className="h-4 w-4 text-[var(--muted)]" />
-        <div className="min-w-0 flex-1">
+        <div className="min-w-[14rem] flex-1">
           <p className="text-sm font-semibold text-[var(--brand-deep)]">
-            Import from the book
+            Scan syllabus / contents page
           </p>
           <p className="text-xs text-[var(--muted)]">
-            Paste the contents list from an e-book, or photograph a printed
-            page — chapters and topics are detected for you to check before
-            saving. Nothing is added to the plan until you confirm.
+            Photograph the printed contents page (two pages is fine), or paste
+            the list from an e-book — chapters and topics are detected for you
+            to check before saving. Nothing is added to the plan until you
+            press Add.
           </p>
         </div>
         <input
           ref={fileRef}
           type="file"
-          accept="image/*,application/pdf"
+          accept="image/*"
           // `capture` makes a phone open the camera straight away; a
-          // laptop ignores it and shows the normal file picker.
+          // laptop ignores it and shows the normal file picker. `multiple`
+          // lets a contents list that runs over two pages go as one scan.
           capture="environment"
+          multiple
           className="hidden"
-          onChange={(e) => void onFile(e.target.files?.[0])}
+          onChange={(e) => void onFiles(e.target.files)}
         />
         <div className="flex shrink-0 gap-2">
           <button
@@ -227,7 +276,7 @@ export function SyllabusOcrImport(props: {
             ) : (
               <Camera className="h-4 w-4" />
             )}
-            {busy ? "Reading…" : "Scan page"}
+            {busy ? "Reading…" : "Scan pages"}
           </button>
         </div>
       </div>
@@ -429,11 +478,13 @@ export function SyllabusOcrImport(props: {
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={save}
-              disabled={selected === 0}
+              onClick={() => void save()}
+              disabled={selected === 0 || saving}
               className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
             >
-              Add {selected} chapter{selected === 1 ? "" : "s"} to plan
+              {saving
+                ? "Adding…"
+                : `Add ${selected} chapter${selected === 1 ? "" : "s"} to plan`}
             </button>
             <button
               type="button"
