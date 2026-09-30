@@ -1,5 +1,7 @@
 "use client";
 
+// ratchet-allow: grids_without_row_menu — a line editor inside the scheme form: each row is a part being typed, with its own × to remove it; there is no record to act on
+
 /**
  * Per-subject splits inside an assessment scheme: English = Written 80 +
  * Oral 20 in Half-yearly / Annual, Written 40 + Oral 10 in unit tests, each
@@ -18,6 +20,7 @@ import {
   type SubjectSplitPart,
 } from "@/lib/examSchemes";
 import type { MastersState } from "@/lib/masters";
+import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { ncfTagForSubject } from "@/lib/cbseSubjectGroups";
 
 type MasterSubject = MastersState["subjects"][number];
@@ -202,25 +205,25 @@ export function SubjectSplitsEditor({
                 </button>
               </div>
 
-              <div className="mt-2 overflow-x-auto">
-                <table className="w-full min-w-[560px] text-sm">
-                  <thead>
-                    <tr className="text-left text-[10px] uppercase tracking-wide text-[var(--muted)]">
-                      <th className="py-1 pr-2">Code</th>
-                      <th className="py-1 pr-2">Part</th>
-                      <th className="py-1 pr-2 text-center">Term exams</th>
-                      <th className="py-1 pr-2 text-center">Unit tests</th>
-                      <th className="py-1 pr-2 text-center" title="Blank = no separate pass line for this part">
+              <ErpTableShell density="compact" className="mt-2 overflow-x-auto">
+                <ErpTable minWidth="min-w-[560px]">
+                  <ErpTableHead>
+                    <tr>
+                      <th className="px-2 py-1.5">Code</th>
+                      <th className="px-2 py-1.5">Part</th>
+                      <th className="px-2 py-1.5 text-center">Term exams</th>
+                      <th className="px-2 py-1.5 text-center">Unit tests</th>
+                      <th className="px-2 py-1.5 text-center" title="Blank = no separate pass line for this part">
                         Own pass %
                       </th>
-                      <th className="py-1 pr-2">Kind</th>
-                      <th />
+                      <th className="px-2 py-1.5">Kind</th>
+                      <th aria-label="Actions" />
                     </tr>
-                  </thead>
-                  <tbody>
+                  </ErpTableHead>
+                  <ErpTableBody>
                     {split.parts.map((p, k) => (
                       <tr key={k}>
-                        <td className="py-1 pr-2">
+                        <td className="px-2 py-1">
                           <input
                             className="field !w-20 !py-1 uppercase"
                             value={p.code}
@@ -229,7 +232,7 @@ export function SubjectSplitsEditor({
                             aria-label={`${split.subjectCode} part ${k + 1} code`}
                           />
                         </td>
-                        <td className="py-1 pr-2">
+                        <td className="px-2 py-1">
                           <input
                             className="field !py-1"
                             value={p.label}
@@ -238,7 +241,7 @@ export function SubjectSplitsEditor({
                             aria-label={`${split.subjectCode} part ${k + 1} name`}
                           />
                         </td>
-                        <td className="py-1 pr-2">
+                        <td className="px-2 py-1">
                           <input
                             className="field !w-16 !py-1 text-center tabular-nums"
                             inputMode="numeric"
@@ -248,7 +251,7 @@ export function SubjectSplitsEditor({
                             aria-label={`${split.subjectCode} ${p.label} term exam marks`}
                           />
                         </td>
-                        <td className="py-1 pr-2">
+                        <td className="px-2 py-1">
                           <input
                             className="field !w-16 !py-1 text-center tabular-nums"
                             inputMode="numeric"
@@ -258,7 +261,7 @@ export function SubjectSplitsEditor({
                             aria-label={`${split.subjectCode} ${p.label} unit test marks`}
                           />
                         </td>
-                        <td className="py-1 pr-2">
+                        <td className="px-2 py-1">
                           <input
                             className="field !w-16 !py-1 text-center tabular-nums"
                             inputMode="numeric"
@@ -268,7 +271,7 @@ export function SubjectSplitsEditor({
                             aria-label={`${split.subjectCode} ${p.label} own pass percent`}
                           />
                         </td>
-                        <td className="py-1 pr-2">
+                        <td className="px-2 py-1">
                           <select
                             className="field !w-auto !py-1 text-xs"
                             value={p.kind}
@@ -279,7 +282,7 @@ export function SubjectSplitsEditor({
                             <option value="internal">Oral / internal</option>
                           </select>
                         </td>
-                        <td className="py-1">
+                        <td className="px-2 py-1">
                           <button
                             type="button"
                             className="rounded-lg border border-[var(--border)] px-2 py-1 text-xs"
@@ -291,9 +294,9 @@ export function SubjectSplitsEditor({
                         </td>
                       </tr>
                     ))}
-                  </tbody>
-                </table>
-              </div>
+                  </ErpTableBody>
+                </ErpTable>
+              </ErpTableShell>
               <button
                 type="button"
                 className="mt-1 text-[11px] font-semibold text-[var(--brand-mid)] underline-offset-2 hover:underline"
