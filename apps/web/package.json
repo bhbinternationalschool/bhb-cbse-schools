@@ -331,6 +331,7 @@
     "test:open-lookups": "npx tsx src/lib/openLookups.selftest.ts",
     "test:free-routing": "npx tsx src/lib/freeRouting.selftest.ts",
     "test:bhashini": "npx tsx src/lib/bhashini.selftest.ts",
+    "test:ncf-official": "npx tsx src/lib/ncfOfficial.selftest.ts",
     "test:subject-masters": "npx tsx src/lib/subjectMasters.selftest.ts",
     "import:leads": "npx tsx scripts/import-lead-excels.ts",
     "import:fee-discounts": "npx tsx scripts/import-fee-discounts-excel.ts",

@@ -178,6 +178,13 @@ create_job "bhb-diksha-index-weekly" "30 3 * * 0" \
   "${LITE_URL}/api/curriculum/diksha-index/tick" \
   "Asia/Kolkata" "300s"
 
+# NCERT / CBSE class-wise subject lists from DIKSHA (lib/ncfOfficial.server.ts).
+# Weekly, after the chapter index: two small framework reads; new or dropped
+# subjects wait in Masters → Subjects for the office to act on.
+create_job "bhb-ncf-subjects-weekly" "45 3 * * 0" \
+  "${LITE_URL}/api/curriculum/ncf-official/tick" \
+  "Asia/Kolkata" "120s"
+
 # Birthday greetings: the tick sends once the IST clock passes the hour set in
 # Students → Birthdays (and auto-send is on); it is idempotent, so hourly is safe
 # and also retries quiet-hours deferrals.

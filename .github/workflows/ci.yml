@@ -155,6 +155,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:bhashini
 
+      - name: Self-test — NCERT/CBSE class lists from DIKSHA apply to a class once, and renames stay matched
+        working-directory: apps/web
+        run: npm run test:ncf-official
+
       - name: Self-test — a subject the school adds is never hidden, and codes stay unique
         working-directory: apps/web
         run: npm run test:subject-masters

@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/dialog";
 import type { BulkAction, RowAction } from "@/components/ui/erp-grid";
 import { MastersTabStack } from "@/components/masters/MastersLayout";
+import { NcfOfficialSubjectsCard } from "@/components/masters/NcfOfficialSubjectsCard";
 import {
   newFoundationId,
   normalizeSubject,
@@ -1045,6 +1046,15 @@ export function SubjectsPanel({ state, commit }: { state: MastersState; commit: 
               </div>
             ) : null}
           </SectionCard>
+
+          {/* 2b ── NCERT / CBSE class-wise lists from DIKSHA */}
+          <NcfOfficialSubjectsCard
+            state={state}
+            commit={commit}
+            classes={activeClasses}
+            onShowClass={setMapClassFilter}
+            onEditSubject={openEdit}
+          />
 
           {/* 3 ── Subjects by class */}
           <SectionCard
