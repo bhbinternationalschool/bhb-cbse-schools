@@ -156,7 +156,7 @@ export function HomeworkPageScan(props: {
   return (
     <div className="rounded-xl border border-dashed border-[var(--border)] px-3 py-3">
       <div className="flex flex-wrap items-center gap-2">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-[14rem] flex-1">
           <p className="text-sm font-semibold text-[var(--brand-deep)]">Scan book page</p>
           <p className="text-xs text-[var(--muted)]">
             Photograph the exercise — the questions are read for you to tick. Nothing is posted until you press

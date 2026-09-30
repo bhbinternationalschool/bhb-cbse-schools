@@ -72,10 +72,11 @@ export function cleanHomeworkPageScanInput(body: unknown): HomeworkPageScanInput
     // costs nothing to strip.
     const base64 = str(it.imageBase64).replace(/^data:[^,]*,/, "");
     const mimeType = str(it.mimeType).toLowerCase() || "image/jpeg";
-    const which = raw.length > 1 ? `Page ${i + 1}: ` : "";
-    if (!base64) return `${which}the photo is empty`;
-    if (!IMAGE_TYPES.has(mimeType)) return `${which}send a JPG or PNG photo`;
-    if (base64.length > HOMEWORK_PAGE_MAX_BASE64) return `${which}the photo is too large — retake it`;
+    const which = (msg: string) =>
+      raw.length > 1 ? `Page ${i + 1}: ${msg}` : `${msg[0]!.toUpperCase()}${msg.slice(1)}`;
+    if (!base64) return which("the photo is empty");
+    if (!IMAGE_TYPES.has(mimeType)) return which("send a JPG or PNG photo");
+    if (base64.length > HOMEWORK_PAGE_MAX_BASE64) return which("the photo is too large — retake it");
     images.push({ base64, mimeType });
   }
   return { classId, sectionId, subjectId, language, images };

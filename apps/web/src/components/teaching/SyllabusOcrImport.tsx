@@ -229,7 +229,7 @@ export function SyllabusOcrImport(props: {
     <div className="rounded-xl border border-dashed border-[var(--border)] px-4 py-3">
       <div className="flex flex-wrap items-center gap-3">
         <ScanLine className="h-4 w-4 text-[var(--muted)]" />
-        <div className="min-w-0 flex-1">
+        <div className="min-w-[14rem] flex-1">
           <p className="text-sm font-semibold text-[var(--brand-deep)]">
             Scan syllabus / contents page
           </p>
