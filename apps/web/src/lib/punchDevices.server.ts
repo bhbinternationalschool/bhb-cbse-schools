@@ -1,5 +1,6 @@
 import { createHash, randomBytes, webcrypto } from "crypto";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { mergePunchAttempt, type PunchAttempt } from "@/lib/punchAttempts";
 
 /**
  * Staff punch phones and office QR screens (director, 30 Sep 2026).
@@ -23,6 +24,7 @@ export type PunchDeviceRow = {
   decided_by: string;
   decided_at: string | null;
   last_used_at: string | null;
+  attempts?: PunchAttempt[];
 };
 
 export function cleanJwk(raw: unknown): PunchJwk | null {
@@ -85,6 +87,8 @@ export async function checkPunchDevice(input: {
   staffId: string;
   jwk: PunchJwk;
   label: string;
+  /** This punch — kept on a pending phone so approval records it at this time. */
+  attempt?: PunchAttempt;
 }): Promise<DeviceCheck> {
   const ctx = await getServerTenantContext();
   if (!ctx) return { ok: false, reason: "unavailable" };
@@ -117,27 +121,41 @@ export async function checkPunchDevice(input: {
     return { ok: true, firstRegistration: false };
   }
   if (mine) {
-    // A different phone. Record the ask once (the partial unique index
-    // keeps one pending row per staff+phone) and refuse.
-    const { error: pendErr } = await sb.from("staff_punch_devices").insert({
-      tenant_id: tenantId,
-      staff_id: input.staffId,
-      device_id: deviceId,
-      public_key: input.jwk,
-      status: "pending",
-      label: input.label.slice(0, 80),
-    });
-    if (pendErr && pendErr.code !== "23505") {
-      console.warn("[punch-devices] pending insert failed", pendErr.message);
-    }
-    if (!pendErr || pendErr.code === "23505") {
+    // A different phone. Keep one pending ask per staff+phone, carrying
+    // today's refused punches so the office's approval records them at the
+    // time they were made.
+    const label = input.label.slice(0, 80);
+    const { data: pend, error: pendReadErr } = await sb
+      .from("staff_punch_devices")
+      .select("id, attempts")
+      .eq("tenant_id", tenantId)
+      .eq("staff_id", input.staffId)
+      .eq("device_id", deviceId)
+      .eq("status", "pending")
+      .maybeSingle();
+    if (pendReadErr) {
+      console.warn("[punch-devices] pending read failed", pendReadErr.message);
+    } else if (pend) {
+      const attempts = input.attempt
+        ? mergePunchAttempt(pend.attempts, input.attempt, Date.now())
+        : pend.attempts;
       await sb
         .from("staff_punch_devices")
-        .update({ updated_at: now, label: input.label.slice(0, 80) })
-        .eq("tenant_id", tenantId)
-        .eq("staff_id", input.staffId)
-        .eq("device_id", deviceId)
-        .eq("status", "pending");
+        .update({ updated_at: now, label, attempts })
+        .eq("id", pend.id);
+    } else {
+      const { error: pendErr } = await sb.from("staff_punch_devices").insert({
+        tenant_id: tenantId,
+        staff_id: input.staffId,
+        device_id: deviceId,
+        public_key: input.jwk,
+        status: "pending",
+        label,
+        attempts: input.attempt ? mergePunchAttempt([], input.attempt, Date.now()) : [],
+      });
+      if (pendErr && pendErr.code !== "23505") {
+        console.warn("[punch-devices] pending insert failed", pendErr.message);
+      }
     }
     return { ok: false, reason: "not_registered" };
   }
@@ -166,7 +184,7 @@ export async function listPunchDevices(): Promise<PunchDeviceRow[] | null> {
   if (!ctx) return null;
   const { data, error } = await ctx.sb
     .from("staff_punch_devices")
-    .select("id, staff_id, device_id, status, label, created_at, decided_by, decided_at, last_used_at")
+    .select("id, staff_id, device_id, status, label, created_at, decided_by, decided_at, last_used_at, attempts")
     .eq("tenant_id", ctx.tenantId)
     .in("status", ["active", "pending"])
     .order("created_at", { ascending: false });
@@ -184,20 +202,22 @@ export async function decidePunchDevice(
   id: string,
   action: "approve" | "reject" | "reset",
   by: string,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<
+  { ok: true; staffId?: string; attempts?: PunchAttempt[] } | { ok: false; error: string }
+> {
   const ctx = await getServerTenantContext();
   if (!ctx) return { ok: false, error: "School database unavailable" };
   const { sb, tenantId } = ctx;
   const now = new Date().toISOString();
   const { data: row, error } = await sb
     .from("staff_punch_devices")
-    .select("id, staff_id, device_id, status")
+    .select("id, staff_id, device_id, status, attempts")
     .eq("tenant_id", tenantId)
     .eq("id", id)
     .maybeSingle();
   if (error) return { ok: false, error: error.message };
   if (!row) return { ok: false, error: "Not found" };
-  const r = row as Pick<PunchDeviceRow, "id" | "staff_id" | "device_id" | "status">;
+  const r = row as Pick<PunchDeviceRow, "id" | "staff_id" | "device_id" | "status" | "attempts">;
 
   if (action === "reset") {
     if (r.status !== "active") return { ok: false, error: "That phone is not active" };
@@ -237,10 +257,12 @@ export async function decidePunchDevice(
   if (revErr) return { ok: false, error: revErr.message };
   const { error: actErr } = await sb
     .from("staff_punch_devices")
-    .update({ status: "active", decided_by: by, decided_at: now, updated_at: now })
+    .update({ status: "active", decided_by: by, decided_at: now, updated_at: now, attempts: [] })
     .eq("id", id)
     .eq("status", "pending");
-  return actErr ? { ok: false, error: actErr.message } : { ok: true };
+  return actErr
+    ? { ok: false, error: actErr.message }
+    : { ok: true, staffId: r.staff_id, attempts: Array.isArray(r.attempts) ? r.attempts : [] };
 }
 
 /* ── Office QR screens ──────────────────────────────────────────────── */

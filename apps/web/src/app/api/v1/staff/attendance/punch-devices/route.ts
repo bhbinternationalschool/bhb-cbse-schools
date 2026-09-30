@@ -1,7 +1,10 @@
 import { writeAudit } from "@/lib/audit.server";
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { requestMeta, resolveApiAuth } from "@/lib/api/v1/auth";
-import { assertSchoolWide } from "@/lib/api/v1/staffScope";
+import { assertSchoolWide, staffWorkingYear } from "@/lib/api/v1/staffScope";
+import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
+import { applyWhatsAppStaffPunch } from "@/lib/staffAttendance.server";
+import { attemptsToRecord } from "@/lib/punchAttempts";
 import {
   createPunchDisplay,
   decidePunchDevice,
@@ -77,17 +80,51 @@ export async function POST(request: Request) {
       if (!body.id) throw new ApiError("bad_request", "Which phone?", 400);
       const r = await decidePunchDevice(body.id, body.action, by);
       if (!r.ok) throw new ApiError("conflict", r.error, 409);
+
+      // Approving a new phone records the punches it made while waiting,
+      // at the time they were made (director, 30 Sep 2026). Each passed
+      // the office-screen code and the phone's signature when it was tried.
+      const recorded: { kind: string; time: string; ok: boolean; note?: string }[] = [];
+      if (body.action === "approve" && r.staffId && r.attempts?.length) {
+        await ensureSchoolMirrorHydrated();
+        const staff = ctx.masters.staff.find((s) => s.id === r.staffId);
+        for (const a of attemptsToRecord(r.attempts, Date.now())) {
+          if (!staff) {
+            recorded.push({ kind: a.kind, time: a.time, ok: false, note: "staff record not found" });
+            continue;
+          }
+          const res = await applyWhatsAppStaffPunch({
+            staff,
+            mobile10: "",
+            kind: a.kind,
+            presence: "qr",
+            via: "app",
+            at: { date: a.date, time: a.time },
+            academicYearCode: staffWorkingYear(ctx),
+          }).catch((e: unknown) => ({ ok: false as const, error: (e as Error)?.message || "failed" }));
+          recorded.push(
+            res.ok
+              ? { kind: a.kind, time: a.time, ok: true }
+              : { kind: a.kind, time: a.time, ok: false, note: res.error },
+          );
+        }
+      }
       await writeAudit({
         session: ctx.session,
         module: "staff_attendance",
         action: "edit",
         entityType: "punch_phone",
         entityId: body.id,
-        summary: `Punch phone ${body.action === "approve" ? "approved" : body.action === "reject" ? "rejected" : "reset"}`,
+        summary:
+          `Punch phone ${body.action === "approve" ? "approved" : body.action === "reject" ? "rejected" : "reset"}` +
+          (recorded.length
+            ? ` · recorded ${recorded.map((x) => `${x.kind.toUpperCase()} ${x.time}${x.ok ? "" : " (not saved)"}`).join(", ")}`
+            : ""),
+        after: recorded.length ? { recorded } : undefined,
         ip: meta.ip,
         userAgent: meta.userAgent,
       });
-      return apiOk({ id: body.id, action: body.action });
+      return apiOk({ id: body.id, action: body.action, recorded });
     }
     throw new ApiError("bad_request", "Unknown action", 400);
   } catch (e) {
