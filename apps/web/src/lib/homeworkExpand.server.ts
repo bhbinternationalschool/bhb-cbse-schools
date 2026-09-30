@@ -135,6 +135,34 @@ export async function expandHomeworkForParents(input: {
 }
 
 /**
+ * The tutor's chapter hint for homework read off a photographed page
+ * (2026-09-30), resolved against the class's OWN book.
+ *
+ * The page's chapter heading and exercise go through the same resolver as
+ * the teacher's shorthand, so "Exercise 5.2" finds chapter 5 of the school's
+ * Propel book, or nothing. A heading the school's book does not have — a
+ * guide book, an NCERT page for a Propel class — resolves to "" rather than
+ * pointing the tutor at a chapter of some other book.
+ */
+export async function chapterHintForPage(input: {
+  className: string;
+  subjectLabel: string;
+  chapterHeading: string;
+  exercise: string;
+}): Promise<string> {
+  const text = [input.chapterHeading, input.exercise ? `ex ${input.exercise}` : ""].filter(Boolean).join(" ");
+  if (!text.trim()) return "";
+  try {
+    const books = await booksFor(input.className, input.subjectLabel);
+    const r = resolveHomeworkChapter({ books, reference: parseHomeworkReference(text) });
+    return r.kind === "chapter" ? `Ch ${r.chapter.position} — ${r.chapter.name}` : "";
+  } catch (e) {
+    console.warn("[homework-page-scan] books unavailable", e instanceof Error ? e.message : e);
+    return "";
+  }
+}
+
+/**
  * The WhatsApp chapter line for a post that was saved earlier.
  *
  * The post keeps the chapter in `aiTutorHint` ("Ch 6 — Multiples and

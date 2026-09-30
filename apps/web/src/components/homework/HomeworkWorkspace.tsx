@@ -48,6 +48,11 @@ import {
   type HomeworkState,
 } from "@/lib/homework";
 import { ClassroomSyncPanel } from "@/components/homework/ClassroomSyncPanel";
+import {
+  HomeworkPageScan,
+  type HomeworkPageDraftForForm,
+} from "@/components/homework/HomeworkPageScan";
+import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { TENANT } from "@/lib/types";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import { DeskListActions } from "@/components/ui/desk-list-actions";
@@ -111,6 +116,13 @@ export function HomeworkWorkspace() {
   const [requiresSubmit, setRequiresSubmit] = useState(false);
   const [aiHint, setAiHint] = useState("");
   const [referenceAnswer, setReferenceAnswer] = useState("");
+  /**
+   * The draft a scanned book page put into the form (2026-09-30), kept to
+   * report what the teacher did with it — posted as read, or edited first.
+   */
+  const [pageDraft, setPageDraft] = useState<
+    (HomeworkPageDraftForForm & { field: "en" | "hi" }) | null
+  >(null);
   const [gradingAssist, setGradingAssist] = useState<
     Record<
       string,
@@ -343,6 +355,20 @@ export function HomeworkWorkspace() {
     setRequiresSubmit(false);
     setAiHint("");
     setReferenceAnswer("");
+    setPageDraft(null);
+  }
+
+  /** A scanned page's draft into the ordinary fields — nothing is saved here. */
+  function applyScannedPage(d: HomeworkPageDraftForForm) {
+    const field = d.language === "hi" ? "hi" : "en";
+    setTitle(d.title);
+    if (field === "hi") setBodyHi(d.body);
+    else setBodyEn(d.body);
+    // Only a chapter the school's own book has; never over a teacher's hint.
+    if (d.chapterHint && !aiHint.trim()) setAiHint(d.chapterHint);
+    setPageDraft({ ...d, field });
+    setError(null);
+    flash("Read from the page — check it, then Publish");
   }
 
   function beginEditPost(p: HomeworkPost) {
@@ -394,6 +420,19 @@ export function HomeworkWorkspace() {
     if (!r.ok) {
       setError(r.error);
       return;
+    }
+    if (pageDraft && !wasEdit) {
+      // Posted as read, or changed first — the ai_generations loop for the
+      // page scan. Compared on what was drafted: the title and the one body
+      // field the draft filled.
+      const sent = pageDraft.field === "hi" ? bodyHi : bodyEn;
+      const same = title.trim() === pageDraft.title.trim() && sent.trim() === pageDraft.body.trim();
+      reportAiOutcome({
+        ids: [pageDraft.generationId],
+        outcome: same ? "accepted" : "edited",
+        targetType: "homework_post",
+        targetId: r.post.id,
+      });
     }
     resetComposeForm();
     refresh();
@@ -969,6 +1008,15 @@ export function HomeworkWorkspace() {
               ))}
             </select>
           </label>
+          {!editingPostId && !readOnly ? (
+            <HomeworkPageScan
+              classId={classId}
+              sectionId={sectionId}
+              subjectId={subjectId}
+              subjectLabel={masters ? subjectLabel(masters, subjectId) : ""}
+              onUse={applyScannedPage}
+            />
+          ) : null}
           <label className="block text-xs text-[var(--muted)]">
             Title
             <input

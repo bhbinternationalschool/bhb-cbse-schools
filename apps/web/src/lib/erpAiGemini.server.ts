@@ -286,6 +286,11 @@ export async function generateGeminiVisionJson(opts: {
   /** Raw base64 (no data: prefix) */
   base64: string;
   mimeType: string;
+  /**
+   * Further photos, in order, in the same turn (2026-09-30) — an exercise
+   * that runs onto the next page is one reading, not two.
+   */
+  extraImages?: { base64: string; mimeType: string }[];
   maxTokens?: number;
   model?: string;
 }): Promise<
@@ -297,6 +302,7 @@ export async function generateGeminiVisionJson(opts: {
   if (!key) return { ok: false, error: "GEMINI_API_KEY not configured", model };
   const version = process.env.GEMINI_API_VERSION || "v1beta";
   const url = `https://generativelanguage.googleapis.com/${version}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
+  const images = [{ base64: opts.base64, mimeType: opts.mimeType }, ...(opts.extraImages ?? [])];
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -307,7 +313,7 @@ export async function generateGeminiVisionJson(opts: {
           {
             role: "user",
             parts: [
-              { inline_data: { mime_type: opts.mimeType, data: opts.base64 } },
+              ...images.map((im) => ({ inline_data: { mime_type: im.mimeType, data: im.base64 } })),
               { text: opts.prompt },
             ],
           },

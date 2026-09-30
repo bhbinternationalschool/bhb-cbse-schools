@@ -1,6 +1,14 @@
 "use client";
 
-import type { LessonPlan, ResourceKind, TeachingLogStatus } from "@/lib/teaching";
+import type {
+  LessonPlan,
+  ResourceKind,
+  SyllabusImportChapter,
+  SyllabusImportSummary,
+  SyllabusUnit,
+  TeachingLogStatus,
+} from "@/lib/teaching";
+import type { SyllabusOcrChapter, syllabusOcrQuality } from "@/lib/syllabusOcr";
 
 /**
  * A teacher's writes on the web Teaching desk (2026-09-29).
@@ -16,7 +24,11 @@ import type { LessonPlan, ResourceKind, TeachingLogStatus } from "@/lib/teaching
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
-async function post<T>(path: string, body: unknown): Promise<ApiResult<T>> {
+async function post<T>(
+  path: string,
+  body: unknown,
+  fallback = "Could not save",
+): Promise<ApiResult<T>> {
   try {
     const res = await fetch(path, {
       method: "POST",
@@ -30,7 +42,7 @@ async function post<T>(path: string, body: unknown): Promise<ApiResult<T>> {
     if (!res.ok || !json?.ok) {
       const err = json?.error;
       const message =
-        (typeof err === "string" ? err : err?.message) || `Could not save (${res.status})`;
+        (typeof err === "string" ? err : err?.message) || `${fallback} (${res.status})`;
       return { ok: false, error: message };
     }
     return { ok: true, data: json.data as T };
@@ -86,4 +98,42 @@ export type LessonPlanWriteResult = ApiResult<{ id: string; plan: LessonPlan | n
 
 export function postLessonPlan(body: LessonPlanWrite): Promise<LessonPlanWriteResult> {
   return post<{ id: string; plan: LessonPlan | null }>("/api/v1/teaching/lesson-plan", body);
+}
+
+/* ---------------------------------------------------------------- */
+/* Scan a contents page → import into the plan (2026-09-30)          */
+/* ---------------------------------------------------------------- */
+
+export type SyllabusScanResult = {
+  chapters: SyllabusOcrChapter[];
+  ignored: string[];
+  quality: ReturnType<typeof syllabusOcrQuality>;
+  rawText: string;
+  source: "text" | "ocr";
+};
+
+/**
+ * Read a contents page (photos, or pasted text) for one class and subject.
+ * The class and subject ride along so the server can refuse a teacher who
+ * does not teach them BEFORE a paid OCR call is made. Saves nothing.
+ */
+export function postSyllabusScan(body: {
+  classId: string;
+  subjectId: string;
+  images?: { imageBase64: string; mimeType: string }[];
+  text?: string;
+}) {
+  return post<SyllabusScanResult>("/api/v1/teaching/syllabus-scan", body, "Could not read that page");
+}
+
+/** Save the chapters the teacher ticked; the server re-checks scope. */
+export function postSyllabusImport(body: {
+  classId: string;
+  subjectId: string;
+  chapters: SyllabusImportChapter[];
+}) {
+  return post<SyllabusImportSummary & { units?: SyllabusUnit[] }>(
+    "/api/v1/teaching/syllabus-import",
+    body,
+  );
 }

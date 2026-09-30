@@ -53,6 +53,15 @@ import {
   type HomeworkExpansion,
 } from "@/lib/homeworkExpand";
 import {
+  HOMEWORK_PAGE_SCAN_PROMPT_VERSION,
+  buildHomeworkPageScanPrompt,
+  buildHomeworkPageScanSystem,
+  homeworkPageAuditDescriptor,
+  parseHomeworkPageReading,
+  type HomeworkPageLanguage,
+  type HomeworkPageReading,
+} from "@/lib/homeworkPageScanAi";
+import {
   UDISE_DOC_EXTRACT_PROMPT,
   UDISE_DOC_EXTRACT_SYSTEM,
   UDISE_DOC_PROMPT_VERSION,
@@ -2423,4 +2432,91 @@ export async function readParentDocument(opts: {
   noteAiBudgetUse(requester, (r.usage.promptTokens ?? 0) + (r.usage.completionTokens ?? 0));
 
   return { ok: true, result: parsed, generationId };
+}
+
+/**
+ * Read a photographed textbook page into a homework draft (2026-09-30).
+ *
+ * Gemini only: it is the provider wired for images here, and a second
+ * vision provider would double the cost of a reading to get a different
+ * guess — the fallback that matters is the teacher typing it. Like the
+ * parent-document reader above, every attempt writes to ai_generations,
+ * with a descriptor of the photos in place of their bytes, and a failure
+ * comes back as a failure: "we could not ask" is never reported as "the
+ * page is unreadable", which is a claim about the page.
+ *
+ * `parseHomeworkPageReading` keeps only numbers the model's own transcript
+ * of the page bears out, so the draft cannot name an exercise the page
+ * does not print. Not cacheable: no two photos are the same.
+ */
+export async function readHomeworkPageJson(opts: {
+  images: { base64: string; mimeType: string }[];
+  classLabel: string;
+  subjectLabel: string;
+  language: HomeworkPageLanguage;
+  requester?: string;
+}): Promise<
+  | { ok: true; reading: HomeworkPageReading; generationId: string; engine: LlmEngine }
+  | { ok: false; failure: "not-configured" | "budget" | "read-failed"; error: string }
+> {
+  if (!geminiConfigured()) {
+    return { ok: false, failure: "not-configured", error: "GEMINI_API_KEY not configured" };
+  }
+  const [first, ...rest] = opts.images;
+  if (!first) return { ok: false, failure: "read-failed", error: "No photo was sent" };
+
+  const { requester, budget } = await startLlmPrecheck({ requester: opts.requester });
+  if (!budget.ok) return { ok: false, failure: "budget", error: budget.reason };
+
+  const system = buildHomeworkPageScanSystem(opts.language);
+  const prompt = buildHomeworkPageScanPrompt({
+    classLabel: opts.classLabel,
+    subjectLabel: opts.subjectLabel,
+    language: opts.language,
+    pageCount: opts.images.length,
+  });
+  const t0 = Date.now();
+  const r = await generateGeminiVisionJson({
+    system,
+    prompt,
+    base64: first.base64,
+    mimeType: first.mimeType,
+    extraImages: rest,
+    model: geminiModel("flash"),
+    // A transcribed exercise plus up to forty questions, and a thinking model
+    // bills its reasoning against this budget before any JSON is written
+    // (see expandHomeworkJson). Sized from the reply's shape, NOT measured
+    // against a real page yet — headroom, not a measured fix.
+    maxTokens: 6000,
+  });
+  const latencyMs = Date.now() - t0;
+
+  const reading = r.ok ? parseHomeworkPageReading(r.text) : null;
+  const parseError = r.ok && !reading ? "The reading was not valid JSON (truncated or fenced)" : "";
+
+  const generationId = await recordAiGeneration({
+    route: "homework-page-scan",
+    promptVersion: HOMEWORK_PAGE_SCAN_PROMPT_VERSION,
+    tier: "flash",
+    engine: "gemini",
+    model: r.model,
+    status: reading ? "ok" : "error",
+    error: r.ok ? parseError : r.error,
+    inputText: `${system}\n---\n${prompt}\n---\n${homeworkPageAuditDescriptor({
+      classLabel: opts.classLabel,
+      subjectLabel: opts.subjectLabel,
+      language: opts.language,
+      images: opts.images,
+    })}`,
+    outputText: r.ok ? r.text : "",
+    promptTokens: r.ok ? r.usage.promptTokens : null,
+    completionTokens: r.ok ? r.usage.completionTokens : null,
+    latencyMs,
+    requester,
+  });
+
+  if (!r.ok) return { ok: false, failure: "read-failed", error: r.error };
+  noteAiBudgetUse(requester, (r.usage.promptTokens ?? 0) + (r.usage.completionTokens ?? 0));
+  if (!reading) return { ok: false, failure: "read-failed", error: parseError };
+  return { ok: true, reading, generationId, engine: "gemini" };
 }
