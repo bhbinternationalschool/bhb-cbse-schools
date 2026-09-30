@@ -55,9 +55,12 @@ export function ReportCardSheet({ card }: { card: ReportCard }) {
   const gradesOnly = hpc || card.displayMode !== "marks_grade";
   const descriptors = hpc || card.displayMode === "descriptors";
   const hasSubjectRemarks = p.showSubjectRemarks && card.lines.some((l) => l.remark.trim());
+  // Every part code any subject uses, in first-seen order. Subjects split
+  // differently (English Written + Oral, Science Theory + Practical) each
+  // fill their own columns and show — in the others'.
   const partCodes =
     p.showComponents && !termwise
-      ? (card.lines.find((l) => l.parts.length > 0)?.parts.map((x) => ({ code: x.code, label: x.label })) ?? [])
+      ? [...new Map(card.lines.flatMap((l) => l.parts).map((x) => [x.code, { code: x.code, label: x.label }])).values()]
       : [];
   const showTotals = !gradesOnly && card.totalMax > 0;
   const examColumns = termwise

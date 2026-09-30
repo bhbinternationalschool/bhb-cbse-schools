@@ -5,7 +5,7 @@ import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { ensureExamsHydratedServer } from "@/lib/examsPersistence";
 import {
-  componentsForTerm,
+  componentsForSubject,
   getExamPolicy,
   loadExams,
   prepareMarkSheet,
@@ -83,10 +83,13 @@ export async function POST(request: Request) {
     // the desk, where those columns exist.
     const term = state.terms.find((t) => t.id === termId);
     const scheme = schemeForClassId(classId, getExamPolicy(state));
-    if (term && componentsForTerm(scheme, term.code).length > 0) {
+    // Per subject: English split into Written + Oral goes to the desk, while
+    // a one-mark subject in the same class can still be entered here.
+    const parts = term ? componentsForSubject(scheme, term.code, examSubject?.code || "") : [];
+    if (term && parts.length > 0) {
       throw new ApiError(
         "bad_request",
-        `This class is assessed component-wise for ${term.label} (${componentsForTerm(scheme, term.code).map((c) => c.label).join(" + ")}). Enter these marks on the exams desk.`,
+        `${examSubject?.name || "This subject"} is marked in parts for ${term.label} (${parts.map((c) => `${c.label} ${c.maxMarks}`).join(" + ")}). Enter these marks on the exams desk.`,
         400,
       );
     }

@@ -15,7 +15,7 @@ import {
   canPrintReportCard,
   coScholasticAreasForClass,
   coScholasticDomainLabel,
-  componentsForTerm,
+  componentsForSubject,
   createExamTerm,
   deactivateExamTerm,
   deleteExamTerm,
@@ -61,7 +61,7 @@ import {
 import { DeskSyncBanner } from "@/components/accounts/DeskSyncBanner";
 import { AssessmentSchemesPanel } from "@/components/exams/AssessmentSchemesPanel";
 import { ReportCardTemplatesPanel } from "@/components/exams/ReportCardTemplatesPanel";
-import { pickableGrades, type CoScholasticArea, type GradeBand } from "@/lib/examSchemes";
+import { coScholasticRatingsFor, pickableGrades, type CoScholasticArea, type GradeBand } from "@/lib/examSchemes";
 import { rosterForSection } from "@/lib/attendance";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
 import { loadSis, type SisState, type SisStudent } from "@/lib/sis";
@@ -155,6 +155,8 @@ type MarkRowProps = {
   areas: CoScholasticArea[];
   /** domain → rating ("" for unrated). */
   ratings: Record<string, string>;
+  /** Letters the scheme grades co-scholastic areas in (A–C or A–E). */
+  ratingChoices: string[];
   /** Absent for every subject taken (the row toggle). */
   absentAll: boolean;
   /** Absent for at least one subject — shows the reason box. */
@@ -191,6 +193,7 @@ const MarkRow = memo(function MarkRow({
   grades,
   areas,
   ratings,
+  ratingChoices,
   absentAll,
   absentAny,
   absentReason,
@@ -310,9 +313,11 @@ const MarkRow = memo(function MarkRow({
             aria-label={`${st.fullName} ${coScholasticDomainLabel(area.code, areas)}`}
           >
             <option value="">—</option>
-            <option value="A">A</option>
-            <option value="B">B</option>
-            <option value="C">C</option>
+            {ratingChoices.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
           </select>
         </td>
       ))}
@@ -624,12 +629,17 @@ export function ExamsWorkspace() {
     () => (classId ? coScholasticAreasForClass(classId, policy) : []),
     [classId, policy],
   );
+  const ratingChoices = useMemo(
+    () => coScholasticRatingsFor(scheme?.coScholasticScale ?? "three"),
+    [scheme],
+  );
   /** Subject × component columns for the current exam. */
   const columns = useMemo<GridColumn[]>(() => {
     if (!term) return [];
-    const parts = scheme ? componentsForTerm(scheme, term.code) : [];
     const out: GridColumn[] = [];
     for (const subject of subjects) {
+      // Per subject: English may be Written + Oral while Maths is one mark.
+      const parts = scheme ? componentsForSubject(scheme, term.code, subject.code) : [];
       if (parts.length === 0) out.push({ subject, component: null });
       else for (const component of parts) out.push({ subject, component });
     }
@@ -838,7 +848,9 @@ export function ExamsWorkspace() {
   const setCoScholasticRating = useCallback(
     (studentId: string, domain: CoScholasticDomain, value: string) => {
       const rating: CoScholasticRating | null =
-        value === "A" || value === "B" || value === "C" ? value : null;
+        value === "A" || value === "B" || value === "C" || value === "D" || value === "E"
+          ? value
+          : null;
       setCoScholasticGrid((prev) =>
         prev.map((e) =>
           e.studentId === studentId && e.domain === domain
@@ -1178,13 +1190,13 @@ export function ExamsWorkspace() {
    * Answer-sheet scan (2026-09-30) fills ONE number per subject, so it is
    * offered only where the grid has one number per subject: marks, not
    * grades, and no theory/practical split — a scanned total cannot say
-   * which component it belongs to.
+   * which component it belongs to. Subjects split into parts (English =
+   * Written + Oral) are left out of the scan; the rest are offered.
    */
   const canScan =
     entryMode === "marks" &&
     !!term &&
-    columns.length > 0 &&
-    columns.every((c) => !c.component) &&
+    columns.some((c) => !c.component) &&
     !sheetMeta?.lockedAt;
 
   const scanStudent = scanStudentId ? roster.find((s) => s.id === scanStudentId) ?? null : null;
@@ -2378,6 +2390,7 @@ export function ExamsWorkspace() {
                             grades={gradeChoices}
                             areas={areas}
                             ratings={ratingsByStudent.get(st.id) ?? {}}
+                            ratingChoices={ratingChoices}
                             absentAll={absentByStudent.get(st.id)?.all ?? false}
                             absentAny={absentByStudent.get(st.id)?.any ?? false}
                             absentReason={absentReasons.get(st.id) ?? ""}

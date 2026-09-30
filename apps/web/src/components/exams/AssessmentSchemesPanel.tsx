@@ -15,16 +15,20 @@ import {
   displayModeLabel,
   gradeBandsForPreset,
   gradeScaleLabel,
+  isUnitTestCode,
   promotionRuleLabel,
   SCHEME_PRESETS,
   schemeFromPreset,
   schemeSummary,
   type AssessmentScheme,
+  type CoScholasticScale,
   type DisplayMode,
   type GradeScalePreset,
   type PromotionRule,
 } from "@/lib/examSchemes";
 import { CLASS_GROUPS, type MastersState } from "@/lib/masters";
+import { ncfTagForSubject } from "@/lib/cbseSubjectGroups";
+import { SubjectSplitsEditor } from "@/components/exams/SubjectSplitsEditor";
 
 /**
  * Assessment schemes — the school decides how each class band is assessed.
@@ -258,6 +262,7 @@ export function AssessmentSchemesPanel({
           classes={classes}
           assignedElsewhere={assignedElsewhere}
           terms={terms}
+          masters={masters}
           policyPass={policy.passPercent}
           onCancel={() => setDraft(null)}
           onSave={save}
@@ -278,6 +283,7 @@ function SchemeEditor({
   classes,
   assignedElsewhere,
   terms,
+  masters,
   policyPass,
   onCancel,
   onSave,
@@ -288,6 +294,7 @@ function SchemeEditor({
   classes: MastersState["classes"];
   assignedElsewhere: Map<string, string>;
   terms: ExamTerm[];
+  masters: MastersState | null;
   policyPass: number;
   onCancel: () => void;
   onSave: () => void;
@@ -295,6 +302,40 @@ function SchemeEditor({
   const label = "mb-1 block text-[11px] text-[var(--muted)]";
   const box = "rounded-lg border border-[var(--border)] p-3";
   const total = componentsTotalMax(draft.components);
+  const activeTerms = terms.filter((t) => t.isActive).sort((a, b) => a.sortOrder - b.sortOrder);
+  const termMaxHint = activeTerms
+    .filter((t) => !isUnitTestCode(t.code))
+    .map((t) => `${t.label} ${t.maxMarks}`)
+    .join(" · ");
+  const unitTestMaxHint = activeTerms
+    .filter((t) => isUnitTestCode(t.code))
+    .map((t) => `${t.label} ${t.maxMarks}`)
+    .join(" · ");
+  // The default scheme covers every class nobody else claims, so its
+  // subjects are the whole school's.
+  const splitClassIds = draft.isDefault ? null : draft.classIds;
+
+  /** Co-scholastic areas = the Masters subjects marked co-scholastic that
+   * this scheme's classes study (or all of them for the default scheme). */
+  function coScholasticFromMasters() {
+    if (!masters) return [];
+    const want = splitClassIds ? new Set(splitClassIds) : null;
+    const linked = new Set(
+      (masters.classSubjects ?? [])
+        .filter((l) => l.isActive && (!want || want.has(l.classId)))
+        .map((l) => l.subjectId),
+    );
+    return (masters.subjects ?? [])
+      .filter(
+        (s) =>
+          s.isActive &&
+          !s.parentId &&
+          (s.category === "co_scholastic" || ncfTagForSubject(s) === "CO") &&
+          (linked.size === 0 || linked.has(s.id)),
+      )
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map((s) => ({ code: s.code.trim().toUpperCase(), label: s.nameEn }));
+  }
 
   return (
     <div className="mt-4 space-y-4">
@@ -608,6 +649,16 @@ function SchemeEditor({
         </label>
       </div>
 
+      <SubjectSplitsEditor
+        splits={draft.subjectSplits ?? []}
+        onChange={(next) => set("subjectSplits", next)}
+        masters={masters}
+        classIds={splitClassIds}
+        schemePass={draft.passPercent ?? policyPass}
+        termMaxHint={termMaxHint}
+        unitTestMaxHint={unitTestMaxHint}
+      />
+
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block text-sm">
           <span className={label}>Promotion rule</span>
@@ -691,10 +742,31 @@ function SchemeEditor({
       <div className={box}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">
-            Co-scholastic areas (rated A / B / C){" "}
+            Co-scholastic areas (graded, no marks){" "}
             <span className="font-normal normal-case">— none = the school-wide NEP switch</span>
           </p>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <select
+              className="field !w-auto !py-1 text-xs"
+              value={draft.coScholasticScale ?? "three"}
+              onChange={(e) => set("coScholasticScale", e.target.value as CoScholasticScale)}
+              aria-label="Co-scholastic grade scale"
+            >
+              <option value="three">Grades A / B / C</option>
+              <option value="five">Grades A / B / C / D / E</option>
+            </select>
+            <button
+              type="button"
+              className="rounded-lg border border-[var(--border)] px-2 py-1 text-xs font-semibold disabled:opacity-40"
+              disabled={!masters}
+              onClick={() => {
+                const areas = coScholasticFromMasters();
+                if (areas.length) set("coScholasticAreas", areas);
+              }}
+              title="Work Education, Art, Music… — every subject marked co-scholastic in Masters for these classes"
+            >
+              Use Masters co-scholastic subjects
+            </button>
             <button
               type="button"
               className="rounded-lg border border-[var(--border)] px-2 py-1 text-xs font-semibold"

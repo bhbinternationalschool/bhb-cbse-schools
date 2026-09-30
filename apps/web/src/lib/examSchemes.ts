@@ -51,7 +51,47 @@ export type SchemeComponent = {
   label: string;
   maxMarks: number;
   kind: ComponentKind;
+  /**
+   * This part's own pass line, when it must be passed on its own ("33 % in
+   * Oral as well"). Absent/null = no separate requirement, except that the
+   * scheme's passEachComponent still applies its pass % to every part.
+   */
+  passPercent?: number | null;
 };
+
+/**
+ * One part of ONE subject's split — English = Written 80 + Oral 20.
+ *
+ * Marks are set separately for term exams (Half-yearly / Annual) and unit
+ * tests, because a school that marks Oral 20 in the annual exam may mark it
+ * 10 — or not at all (0) — in a unit test.
+ */
+export type SubjectSplitPart = {
+  /** Stored on every mark row; short, A–Z0–9 (e.g. "WRIT", "ORAL"). */
+  code: string;
+  label: string;
+  /** Marks in Half-yearly / Annual. 0 = not assessed there. */
+  termMax: number;
+  /** Marks in unit / periodic tests. 0 = not assessed there. */
+  unitTestMax: number;
+  kind: ComponentKind;
+  /** Own pass line for this part; null = none of its own. */
+  passPercent: number | null;
+  /** The Masters component this part came from, when it came from one. */
+  masterCode?: string;
+};
+
+/** How one subject is split, overriding the scheme's components for it. */
+export type SubjectSplit = {
+  /** Exam subject code ("ENG"). */
+  subjectCode: string;
+  parts: SubjectSplitPart[];
+  /** Pass line for the subject's TOTAL; null = the scheme's pass %. */
+  passPercent: number | null;
+};
+
+/** Co-scholastic rating scale: CBSE's 3-point A–C, or 5-point A–E. */
+export type CoScholasticScale = "three" | "five";
 
 export type CoScholasticArea = {
   code: string;
@@ -85,8 +125,15 @@ export type AssessmentScheme = {
   showClassAverage: boolean;
   /** Print "Result: Promoted to VI" from the recorded decision. */
   showResultOnCard: boolean;
+  /**
+   * Subjects split their own way (English = Written 80 + Oral 20). A subject
+   * named here ignores `components`; every other subject keeps them.
+   */
+  subjectSplits: SubjectSplit[];
   /** Empty = the policy's legacy NEP pair, if co-scholastic is enabled. */
   coScholasticAreas: CoScholasticArea[];
+  /** Letters the co-scholastic areas are graded in. */
+  coScholasticScale: CoScholasticScale;
   /** Exams this scheme's classes sit; empty = all. */
   termIds: string[];
   /** Print the child's profile photo on the report card. */
@@ -178,7 +225,8 @@ export function pickableGrades(scheme: AssessmentScheme): GradeBand[] {
 
 /* ----------------------------------------------------------- components */
 
-function isUnitTestCode(code: string): boolean {
+/** Unit / periodic tests (UT1, PT2, PA1) — the rest are term exams. */
+export function isUnitTestCode(code: string): boolean {
   const c = code.toUpperCase();
   return c.startsWith("UT") || c.startsWith("PT") || c.startsWith("PA");
 }
@@ -191,6 +239,158 @@ export function componentsForTerm(
   if (scheme.components.length === 0) return [];
   if (scheme.componentsApplyTo === "all") return scheme.components;
   return isUnitTestCode(termCode) ? [] : scheme.components;
+}
+
+function clampPercent(v: unknown): number | null {
+  if (v == null || v === "") return null;
+  const n = Math.floor(Number(v));
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.min(100, n);
+}
+
+/** A part code as marks store it: A–Z0–9, at most 8. */
+export function splitPartCode(raw: string): string {
+  return String(raw ?? "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, 8);
+}
+
+export function normalizeSubjectSplits(list: unknown): SubjectSplit[] {
+  if (!Array.isArray(list)) return [];
+  const seenSubjects = new Set<string>();
+  const out: SubjectSplit[] = [];
+  for (const raw of list as Partial<SubjectSplit>[]) {
+    const subjectCode = String(raw?.subjectCode ?? "").trim().toUpperCase();
+    if (!subjectCode || seenSubjects.has(subjectCode)) continue;
+    const seen = new Set<string>();
+    const parts: SubjectSplitPart[] = [];
+    for (const p of (Array.isArray(raw?.parts) ? raw.parts : []) as Partial<SubjectSplitPart>[]) {
+      const code = splitPartCode(String(p?.code ?? ""));
+      if (!code || seen.has(code)) continue;
+      const termMax = Math.max(0, Math.floor(Number(p?.termMax) || 0));
+      const unitTestMax = Math.max(0, Math.floor(Number(p?.unitTestMax) || 0));
+      seen.add(code);
+      parts.push({
+        code,
+        label: String(p?.label ?? code).trim().slice(0, 40) || code,
+        termMax,
+        unitTestMax,
+        kind: p?.kind === "internal" ? "internal" : "exam",
+        passPercent: clampPercent(p?.passPercent),
+        ...(p?.masterCode ? { masterCode: String(p.masterCode).trim().toUpperCase() } : {}),
+      });
+    }
+    // A split with no parts is no split: the subject falls back to the
+    // scheme's own components.
+    if (parts.length === 0) continue;
+    seenSubjects.add(subjectCode);
+    out.push({ subjectCode, parts, passPercent: clampPercent(raw?.passPercent) });
+  }
+  return out;
+}
+
+export function splitForSubject(
+  scheme: AssessmentScheme,
+  subjectCode: string,
+): SubjectSplit | null {
+  const code = String(subjectCode ?? "").trim().toUpperCase();
+  return (scheme.subjectSplits ?? []).find((x) => x.subjectCode === code) ?? null;
+}
+
+/**
+ * The parts ONE subject is marked in for ONE exam, or [] for a single
+ * whole mark.
+ *
+ * A subject with its own split uses it — term-exam marks for Half-yearly
+ * and Annual, unit-test marks for unit tests, and a part with 0 marks for
+ * this kind of exam is simply not assessed in it. A split whose parts are
+ * ALL 0 for this exam leaves the subject as one whole mark. Every other
+ * subject keeps the scheme's components as before.
+ */
+export function componentsForSubject(
+  scheme: AssessmentScheme,
+  termCode: string,
+  subjectCode: string,
+): SchemeComponent[] {
+  const split = splitForSubject(scheme, subjectCode);
+  if (!split) return componentsForTerm(scheme, termCode);
+  const unitTest = isUnitTestCode(termCode);
+  return split.parts
+    .map((p) => ({
+      code: p.code,
+      label: p.label,
+      maxMarks: unitTest ? p.unitTestMax : p.termMax,
+      kind: p.kind,
+      passPercent: p.passPercent,
+    }))
+    .filter((c) => c.maxMarks > 0);
+}
+
+/** The pass line for one subject's total under this scheme. */
+export function subjectPassPercent(
+  scheme: AssessmentScheme,
+  subjectCode: string,
+  schoolPassPercent: number,
+): number {
+  return splitForSubject(scheme, subjectCode)?.passPercent ?? scheme.passPercent ?? schoolPassPercent;
+}
+
+/**
+ * Has this part failed on its own? Its own pass line if it has one; else
+ * the scheme's pass % when the scheme passes every part separately; else
+ * never (only the subject total counts).
+ */
+export function componentFailed(
+  component: SchemeComponent,
+  obtained: number | null,
+  scheme: AssessmentScheme,
+  schemePassPercent: number,
+): boolean {
+  if (obtained == null || component.maxMarks <= 0) return false;
+  const line = component.passPercent ?? (scheme.passEachComponent ? schemePassPercent : null);
+  if (line == null) return false;
+  return (obtained / component.maxMarks) * 100 < line;
+}
+
+/**
+ * Parts suggested from Masters: a subject's components, codes shortened by
+ * dropping the subject's own prefix (ENG-WRIT → WRIT). Written/theory parts
+ * get the term's larger share; everything else starts at 0 for the school
+ * to fill in.
+ */
+export function splitPartsFromMasterComponents(
+  subjectCode: string,
+  components: { code: string; nameEn: string }[],
+): SubjectSplitPart[] {
+  const prefix = String(subjectCode).trim().toUpperCase();
+  const seen = new Set<string>();
+  const out: SubjectSplitPart[] = [];
+  for (const c of components) {
+    const full = String(c.code).trim().toUpperCase();
+    const short = splitPartCode(
+      full.startsWith(prefix) ? full.slice(prefix.length) : full,
+    ) || splitPartCode(full);
+    if (!short || seen.has(short)) continue;
+    seen.add(short);
+    const name = String(c.nameEn || full);
+    const label = (name.split(/[—–-]/).pop() ?? name).trim() || short;
+    out.push({
+      code: short,
+      label: label.slice(0, 40),
+      termMax: 0,
+      unitTestMax: 0,
+      kind: "exam",
+      passPercent: null,
+      masterCode: full,
+    });
+  }
+  return out;
+}
+
+/** Ratings a teacher can pick on the co-scholastic grid. */
+export function coScholasticRatingsFor(scale: CoScholasticScale): string[] {
+  return scale === "five" ? ["A", "B", "C", "D", "E"] : ["A", "B", "C"];
 }
 
 export function componentsTotalMax(components: SchemeComponent[]): number {
@@ -215,6 +415,7 @@ export function normalizeComponents(list: unknown): SchemeComponent[] {
       label: String(raw?.label ?? code).trim().slice(0, 40) || code,
       maxMarks,
       kind: raw?.kind === "internal" ? "internal" : "exam",
+      ...(clampPercent(raw?.passPercent) != null ? { passPercent: clampPercent(raw?.passPercent) } : {}),
     });
   }
   return out;
@@ -267,7 +468,9 @@ export function defaultAssessmentScheme(passPercent = 33): AssessmentScheme {
     showRank: false,
     showClassAverage: false,
     showResultOnCard: true,
+    subjectSplits: [],
     coScholasticAreas: [],
+    coScholasticScale: "three",
     termIds: [],
     showPhoto: false,
     showAttendance: null,
@@ -318,7 +521,9 @@ export function normalizeAssessmentScheme(
     showRank: !!raw.showRank,
     showClassAverage: !!raw.showClassAverage,
     showResultOnCard: raw.showResultOnCard !== false,
+    subjectSplits: normalizeSubjectSplits(raw.subjectSplits),
     coScholasticAreas: normalizeCoScholasticAreas(raw.coScholasticAreas),
+    coScholasticScale: raw.coScholasticScale === "five" ? "five" : "three",
     termIds: Array.isArray(raw.termIds) ? raw.termIds.map(String).filter(Boolean) : [],
     showPhoto: !!raw.showPhoto,
     showAttendance: raw.showAttendance == null ? null : !!raw.showAttendance,
@@ -625,6 +830,9 @@ export function schemeSummary(scheme: AssessmentScheme): string {
     parts.push(scheme.components.map((c) => c.maxMarks).join("+"));
   } else {
     parts.push("single mark");
+  }
+  if ((scheme.subjectSplits ?? []).length) {
+    parts.push(`${scheme.subjectSplits.length} subject split${scheme.subjectSplits.length === 1 ? "" : "s"}`);
   }
   parts.push(gradeScaleLabel(scheme.gradeScale).split(" ")[0]!);
   parts.push(displayModeLabel(scheme.displayMode).toLowerCase());
