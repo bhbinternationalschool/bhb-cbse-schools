@@ -10,8 +10,10 @@
  *      MATH and MATH-ORAL.
  *   2. NCF / NEP suggestions for a stage — the reference list, kept apart
  *      from the school's own table, with "Add to school subjects" per row.
- *   3. Class–subject map — which class studies what, periods per week,
- *      optional or not, with a link form below it.
+ *   3. Subjects by class — a class dropdown: what that class studies as a
+ *      tree, components it does not take yet shown as gaps, and Add
+ *      subjects / New subject / Add component / Remove, all for that class.
+ *      "All classes" shows every link, flat.
  */
 
 import { useMemo, useState } from "react";
@@ -29,10 +31,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { BulkAction, RowAction } from "@/components/ui/erp-grid";
-import {
-  MastersTabStack,
-  MastersWorkCard,
-} from "@/components/masters/MastersLayout";
+import { MastersTabStack } from "@/components/masters/MastersLayout";
 import {
   newFoundationId,
   normalizeSubject,
@@ -75,6 +74,9 @@ import {
   subjectDeleteBlockers,
   subjectDraftError,
   subjectFromDraft,
+  classLinkIdsToRemove,
+  classSubjectRows,
+  type ClassSubjectRow,
   type NcfSuggestionRow,
   type SchoolSubjectRow,
   type SubjectDraft,
@@ -148,17 +150,25 @@ export function SubjectsPanel({ state, commit }: { state: MastersState; commit: 
     NEP_STAGE_PACKS.find((p) => p.id === CLASS_GROUP_TO_NEP[ncfStage]) ?? NEP_STAGE_PACKS[0]!;
 
   /* ── Dialog state ── */
-  const [editor, setEditor] = useState<{ editingId?: string; draft: SubjectDraft } | null>(null);
+  const [editor, setEditor] = useState<{
+    editingId?: string;
+    draft: SubjectDraft;
+    /** Opened from the class view: the new subject/component is linked to this class too. */
+    linkClassId?: string;
+  } | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
   const [toDelete, setToDelete] = useState<Subject | null>(null);
   const [linkEdit, setLinkEdit] = useState<{ link: ClassSubjectLink; periods: number } | null>(null);
 
   /* ── Link form ── */
-  const [mapClassId, setMapClassId] = useState("");
   const [mapSubjectIds, setMapSubjectIds] = useState<string[]>([]);
   const [periods, setPeriods] = useState(0);
   const [linkAsOptional, setLinkAsOptional] = useState(false);
-  const [mapClassFilter, setMapClassFilter] = useState("");
+  // The class view opens on the first class so what a class studies is the
+  // first thing seen; "All classes" is one option away.
+  const [mapClassFilter, setMapClassFilter] = useState(
+    () => (state.classes ?? []).filter((c) => c.isActive).sort((a, b) => a.sortOrder - b.sortOrder)[0]?.id ?? "",
+  );
 
   const allNepCodes = useMemo(() => {
     const set = new Set<string>();
@@ -198,9 +208,9 @@ export function SubjectsPanel({ state, commit }: { state: MastersState; commit: 
     };
   }, [subjects, slice.classSubjects]);
 
-  function openAdd(parentId = "") {
+  function openAdd(parentId = "", linkClassId?: string) {
     setEditorError(null);
-    setEditor({ draft: emptySubjectDraft(parentId) });
+    setEditor({ draft: emptySubjectDraft(parentId), linkClassId });
   }
 
   function openEdit(s: Subject) {
@@ -234,9 +244,23 @@ export function SubjectsPanel({ state, commit }: { state: MastersState; commit: 
     } else {
       const row = subjectFromDraft(subjects, editor.draft);
       const parent = row.parentId ? subjects.find((s) => s.id === row.parentId) : null;
+      const cls = editor.linkClassId ? slice.classes.find((c) => c.id === editor.linkClassId) : undefined;
+      const link: ClassSubjectLink[] = cls
+        ? [
+            {
+              id: newFoundationId("csub"),
+              classId: cls.id,
+              subjectId: row.id,
+              periodsPerWeek: nepPeriodsFor(cls, row),
+              isActive: true,
+              isOptional: row.isElective,
+            },
+          ]
+        : [];
+      const what = parent ? `Added ${row.code} under ${parent.code}` : `Added ${row.code}`;
       commit(
-        { ...state, subjects: [...subjects, row] },
-        parent ? `Added ${row.code} under ${parent.code}` : `Added ${row.code}`,
+        { ...state, subjects: [...subjects, row], classSubjects: [...slice.classSubjects, ...link] },
+        cls ? `${what} · linked to ${cls.name}` : what,
       );
     }
     setEditor(null);
@@ -494,15 +518,18 @@ export function SubjectsPanel({ state, commit }: { state: MastersState; commit: 
 
   const streams = (state.seniorStreams ?? []).slice().sort((a, b) => a.sortOrder - b.sortOrder);
 
-  /* ════════════════ 3. Class–subject map ════════════════ */
+  /* ════════════════ 3. Subjects by class ════════════════ */
 
   type MapRow = { link: ClassSubjectLink; cls: SchoolClass | undefined; subject: Subject; parent: Subject | null };
 
+  const viewClass = activeClasses.find((c) => c.id === mapClassFilter);
+
+  /** "All classes": every link, flat. */
   const mapRows = useMemo<MapRow[]>(() => {
     const clsById = new Map(slice.classes.map((c) => [c.id, c] as const));
     const subById = new Map(subjects.map((s) => [s.id, s] as const));
     return slice.classSubjects
-      .filter((l) => l.isActive && (!mapClassFilter || l.classId === mapClassFilter))
+      .filter((l) => l.isActive)
       .map((l) => {
         const subject = subById.get(l.subjectId);
         if (!subject) return null;
@@ -522,7 +549,14 @@ export function SubjectsPanel({ state, commit }: { state: MastersState; commit: 
           a.subject.code.localeCompare(b.subject.code),
       );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.classSubjects, state.subjects, state.classes, mapClassFilter]);
+  }, [state.classSubjects, state.subjects, state.classes]);
+
+  /** One class: its subjects as a tree, unlinked components shown as gaps. */
+  const classRows = useMemo<ClassSubjectRow[]>(
+    () => (viewClass ? classSubjectRows(slice, viewClass.id) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.classSubjects, state.subjects, viewClass],
+  );
 
   function nepPeriodsFor(cls: SchoolClass | undefined, s: Subject): number {
     const stage = CLASS_GROUP_TO_NEP[cls ? classStage(cls) : "MIDDLE"];
@@ -536,11 +570,48 @@ export function SubjectsPanel({ state, commit }: { state: MastersState; commit: 
     );
   }
 
-  function removeLinks(ids: string[]) {
+  function removeLinks(ids: string[], msg?: string) {
+    if (ids.length === 0) return;
     const set = new Set(ids);
     commit(
       { ...state, classSubjects: slice.classSubjects.filter((l) => !set.has(l.id)) },
-      `Removed ${ids.length} class link${ids.length === 1 ? "" : "s"}`,
+      msg ?? `Removed ${ids.length} class link${ids.length === 1 ? "" : "s"}`,
+    );
+  }
+
+  function linkToClass(cls: SchoolClass, subjectIds: string[], opts?: { periods?: number; optional?: boolean }) {
+    const existing = new Set(
+      slice.classSubjects.filter((l) => l.classId === cls.id && l.isActive).map((l) => l.subjectId),
+    );
+    const toAdd = subjectIds.filter((id) => !existing.has(id));
+    if (toAdd.length === 0) {
+      commit(state, `Already linked to ${cls.name}`);
+      return;
+    }
+    const rows: ClassSubjectLink[] = toAdd.map((subjectId) => {
+      const s = subjects.find((x) => x.id === subjectId)!;
+      return {
+        id: newFoundationId("csub"),
+        classId: cls.id,
+        subjectId,
+        periodsPerWeek: opts?.periods && opts.periods > 0 ? opts.periods : nepPeriodsFor(cls, s),
+        isActive: true,
+        isOptional: !!opts?.optional || !!s.isElective,
+      };
+    });
+    const codes = rows.map((r) => subjects.find((s) => s.id === r.subjectId)?.code).join(", ");
+    commit(
+      { ...state, classSubjects: [...slice.classSubjects, ...rows] },
+      rows.length === 1 ? `${codes} added to ${cls.name}` : `${rows.length} subjects added to ${cls.name}`,
+    );
+  }
+
+  function removeFromClass(cls: SchoolClass, subjectIds: string[]) {
+    const ids = [...new Set(subjectIds.flatMap((id) => classLinkIdsToRemove(slice, cls.id, id)))];
+    const codes = subjectIds.map((id) => subjects.find((s) => s.id === id)?.code).filter(Boolean);
+    removeLinks(
+      ids,
+      codes.length === 1 ? `${codes[0]} removed from ${cls.name}` : `${codes.length} subjects removed from ${cls.name}`,
     );
   }
 
@@ -571,35 +642,21 @@ export function SubjectsPanel({ state, commit }: { state: MastersState; commit: 
 
   const mapActions: RowAction<MapRow>[] = [
     {
+      id: "open",
+      label: "Open this class",
+      onSelect: (r) => r.cls && setMapClassFilter(r.cls.id),
+    },
+    {
       id: "periods",
       label: "Edit periods / week",
       onSelect: (r) => setLinkEdit({ link: r.link, periods: r.link.periodsPerWeek }),
-    },
-    {
-      id: "nep",
-      label: "Use NCF periods",
-      onSelect: (r) =>
-        updateLink(r.link.id, { periodsPerWeek: nepPeriodsFor(r.cls, r.subject) }, `${r.cls?.name} · ${r.subject.code} → NCF periods`),
-      hidden: (r) => r.link.periodsPerWeek === nepPeriodsFor(r.cls, r.subject),
-    },
-    {
-      id: "optional",
-      label: "Mark optional",
-      onSelect: (r) => updateLink(r.link.id, { isOptional: true }, `${r.subject.code} optional for ${r.cls?.name}`),
-      hidden: (r) => !!r.link.isOptional,
-    },
-    {
-      id: "compulsory",
-      label: "Mark compulsory",
-      onSelect: (r) => updateLink(r.link.id, { isOptional: false }, `${r.subject.code} compulsory for ${r.cls?.name}`),
-      hidden: (r) => !r.link.isOptional,
     },
     {
       id: "remove",
       label: "Remove from class",
       tone: "danger",
       separatorAbove: true,
-      onSelect: (r) => removeLinks([r.link.id]),
+      onSelect: (r) => removeLinks([r.link.id], `${r.subject.code} removed from ${r.cls?.name ?? "class"}`),
     },
   ];
 
@@ -607,14 +664,162 @@ export function SubjectsPanel({ state, commit }: { state: MastersState; commit: 
     { id: "remove", label: "Remove links", tone: "danger", onRun: (keys) => removeLinks(keys) },
   ];
 
-  /* ── Link form ── */
+  const classColumns: DataTableColumn<ClassSubjectRow>[] = [
+    {
+      key: "code",
+      header: "Subject",
+      value: (r) => r.subject.code,
+      render: (r) => (
+        <span className={`whitespace-nowrap font-semibold ${r.link ? "text-[var(--brand-deep)]" : "text-[var(--muted)]"} ${r.depth === 1 ? "pl-5" : ""}`}>
+          {r.depth === 1 ? <span className="mr-1 text-[var(--muted)]">↳</span> : null}
+          {r.subject.code}
+        </span>
+      ),
+    },
+    {
+      key: "name",
+      header: "Name",
+      value: (r) => r.subject.nameEn,
+      render: (r) => <span className={r.link ? "" : "text-[var(--muted)]"}>{r.subject.nameEn}</span>,
+    },
+    {
+      key: "periods",
+      header: "Periods / wk",
+      align: "right",
+      value: (r) => (r.link ? r.link.periodsPerWeek : ""),
+      render: (r) => (r.link ? r.link.periodsPerWeek : <span className="text-[var(--muted)]">—</span>),
+    },
+    {
+      key: "nep",
+      header: "NCF suggests",
+      align: "right",
+      value: (r) => nepPeriodsFor(viewClass, r.subject),
+    },
+    {
+      key: "status",
+      header: "In this class",
+      value: (r) =>
+        !r.link ? "Not added" : r.link.isOptional || r.subject.isElective ? "Optional" : "Compulsory",
+      render: (r) =>
+        !r.link ? (
+          <Badge tone="danger">Not added</Badge>
+        ) : r.link.isOptional || r.subject.isElective ? (
+          <Badge tone="gold">Optional</Badge>
+        ) : (
+          <Badge tone="teal">Compulsory</Badge>
+        ),
+    },
+  ];
 
-  const mapClass = activeClasses.find((c) => c.id === mapClassId);
-  const linkable = useMemo(
-    () => schoolSubjectRows(slice).filter((r) => r.subject.isActive && (r.depth === 0 || r.parent?.isActive)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.subjects, state.classSubjects, state.classes],
+  const classActions: RowAction<ClassSubjectRow>[] = [
+    {
+      id: "add",
+      label: "Add to this class",
+      onSelect: (r) => viewClass && linkToClass(viewClass, [r.subject.id]),
+      hidden: (r) => !!r.link || !r.subject.isActive,
+    },
+    {
+      id: "add-component",
+      label: "Add component",
+      onSelect: (r) => viewClass && openAdd(r.subject.id, viewClass.id),
+      hidden: (r) => r.depth === 1,
+    },
+    {
+      id: "periods",
+      label: "Edit periods / week",
+      onSelect: (r) => r.link && setLinkEdit({ link: r.link, periods: r.link.periodsPerWeek }),
+      hidden: (r) => !r.link,
+    },
+    {
+      id: "nep",
+      label: "Use NCF periods",
+      onSelect: (r) =>
+        r.link &&
+        updateLink(
+          r.link.id,
+          { periodsPerWeek: nepPeriodsFor(viewClass, r.subject) },
+          `${viewClass?.name} · ${r.subject.code} → NCF periods`,
+        ),
+      hidden: (r) => !r.link || r.link.periodsPerWeek === nepPeriodsFor(viewClass, r.subject),
+    },
+    {
+      id: "optional",
+      label: "Mark optional",
+      onSelect: (r) => r.link && updateLink(r.link.id, { isOptional: true }, `${r.subject.code} optional for ${viewClass?.name}`),
+      hidden: (r) => !r.link || !!r.link.isOptional,
+    },
+    {
+      id: "compulsory",
+      label: "Mark compulsory",
+      onSelect: (r) => r.link && updateLink(r.link.id, { isOptional: false }, `${r.subject.code} compulsory for ${viewClass?.name}`),
+      hidden: (r) => !r.link || !r.link.isOptional,
+    },
+    { id: "edit", label: "Edit subject", onSelect: (r) => openEdit(r.subject) },
+    {
+      id: "remove",
+      label: "Remove from this class",
+      tone: "danger",
+      separatorAbove: true,
+      onSelect: (r) => viewClass && removeFromClass(viewClass, [r.subject.id]),
+      hidden: (r) => !viewClass || classLinkIdsToRemove(slice, viewClass.id, r.subject.id).length === 0,
+    },
+  ];
+
+  const classBulk: BulkAction[] = [
+    {
+      id: "add",
+      label: "Add to class",
+      onRun: (keys) => viewClass && linkToClass(viewClass, keys),
+    },
+    {
+      id: "remove",
+      label: "Remove from class",
+      tone: "danger",
+      onRun: (keys) => viewClass && removeFromClass(viewClass, keys),
+    },
+  ];
+
+  const classPicker = (
+    <select
+      className="field !w-auto min-w-[9rem] !py-1.5 text-xs font-semibold"
+      value={mapClassFilter}
+      onChange={(e) => setMapClassFilter(e.target.value)}
+      aria-label="Class"
+    >
+      <option value="">All classes</option>
+      {activeClasses.map((c) => (
+        <option key={c.id} value={c.id}>
+          {c.name}
+        </option>
+      ))}
+    </select>
   );
+
+  /* ── "Add subjects to class" picker ── */
+
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const pickable = useMemo(() => {
+    if (!viewClass) return [];
+    const linked = new Set(
+      slice.classSubjects.filter((l) => l.classId === viewClass.id && l.isActive).map((l) => l.subjectId),
+    );
+    return schoolSubjectRows(slice).filter(
+      (r) =>
+        r.subject.isActive &&
+        (r.depth === 0 || r.parent?.isActive) &&
+        // A subject stays pickable while any of its components is still to add.
+        (!linked.has(r.subject.id) ||
+          (r.depth === 0 && subjects.some((k) => k.parentId === r.subject.id && k.isActive && !linked.has(k.id)))),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.subjects, state.classSubjects, viewClass]);
+
+  function openPicker() {
+    setMapSubjectIds([]);
+    setPeriods(0);
+    setLinkAsOptional(false);
+    setPickerOpen(true);
+  }
 
   function toggleMapSubject(id: string) {
     const kids = subjects.filter((s) => s.parentId === id && s.isActive).map((s) => s.id);
@@ -628,33 +833,10 @@ export function SubjectsPanel({ state, commit }: { state: MastersState; commit: 
     });
   }
 
-  function addMap() {
-    if (!mapClass || mapSubjectIds.length === 0) return;
-    const existing = new Set(
-      slice.classSubjects.filter((l) => l.classId === mapClass.id && l.isActive).map((l) => l.subjectId),
-    );
-    const toAdd = mapSubjectIds.filter((id) => !existing.has(id));
-    if (toAdd.length === 0) {
-      commit(state, "Those subjects are already linked to this class");
-      return;
-    }
-    const rows: ClassSubjectLink[] = toAdd.map((subjectId) => {
-      const s = subjects.find((x) => x.id === subjectId)!;
-      return {
-        id: newFoundationId("csub"),
-        classId: mapClass.id,
-        subjectId,
-        periodsPerWeek: periods > 0 ? periods : nepPeriodsFor(mapClass, s),
-        isActive: true,
-        isOptional: linkAsOptional || !!s.isElective,
-      };
-    });
-    commit(
-      { ...state, classSubjects: [...slice.classSubjects, ...rows] },
-      `Linked ${rows.length} subject${rows.length === 1 ? "" : "s"} to ${mapClass.name}`,
-    );
-    setMapSubjectIds([]);
-    setLinkAsOptional(false);
+  function addPicked() {
+    if (!viewClass || mapSubjectIds.length === 0) return;
+    linkToClass(viewClass, mapSubjectIds, { periods, optional: linkAsOptional });
+    setPickerOpen(false);
   }
 
   /* ── Dialog pieces ── */
@@ -868,113 +1050,155 @@ export function SubjectsPanel({ state, commit }: { state: MastersState; commit: 
             ) : null}
           </SectionCard>
 
-          {/* 3 ── Class–subject map */}
+          {/* 3 ── Subjects by class */}
           <SectionCard
-            title="Class–subject map"
-            hint="Which class studies which subject, and for how many periods a week. Link new subjects with the form below."
+            title={viewClass ? `Subjects in ${viewClass.name}` : "Subjects by class"}
+            hint={
+              viewClass
+                ? "Pick a class to see exactly what it studies. Components the class does not take yet show as Not added — add them from the … menu."
+                : "Every class link. Choose a class to add, remove or add components for that class."
+            }
           >
-            <DataTable
-              columns={mapColumns}
-              rows={mapRows}
-              rowKey={(r) => r.link.id}
-              rowActions={mapActions}
-              rowActionsLabel="Link actions"
-              bulkActions={mapBulk}
-              selectionNoun="link"
-              pageSize={100}
-              minWidth="min-w-[640px]"
-              exportFileBaseName="class-subject-map"
-              exportTitle="Class–subject map"
-              emptyTitle={mapClassFilter ? "No subjects linked to this class" : "No class links yet"}
-              toolbar={
-                <select
-                  className="field !w-auto !py-1.5 text-xs"
-                  value={mapClassFilter}
-                  onChange={(e) => setMapClassFilter(e.target.value)}
-                  aria-label="Class filter"
-                >
-                  <option value="">All classes</option>
-                  {activeClasses.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              }
-            />
+            {/* The class picker lives OUTSIDE the table: inside its toolbar it
+                sat in the subtree that switching class re-renders, and a
+                select torn down mid-change crashed React (removeChild of
+                null) and snapped the view back to the first class. */}
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              {classPicker}
+              {viewClass ? (
+                <>
+                  <span className="text-xs text-[var(--muted)]">
+                    {classRows.filter((r) => r.link).length} linked ·{" "}
+                    {classRows.filter((r) => r.link).reduce((n, r) => n + (r.link?.periodsPerWeek ?? 0), 0)} periods/wk
+                  </span>
+                  <span className="flex-1" />
+                  <Button type="button" size="sm" onClick={openPicker}>
+                    <Plus className="size-4" /> Add subjects
+                  </Button>
+                  <Button type="button" size="sm" variant="outline" onClick={() => openAdd("", viewClass.id)}>
+                    New subject for {viewClass.name}
+                  </Button>
+                </>
+              ) : null}
+            </div>
+            {viewClass ? (
+              <DataTable
+                columns={classColumns}
+                rows={classRows}
+                rowKey={(r) => r.subject.id}
+                rowActions={classActions}
+                rowActionsLabel="Class subject actions"
+                bulkActions={classBulk}
+                selectionNoun="subject"
+                pageSize={200}
+                minWidth="min-w-[640px]"
+                exportFileBaseName={`subjects-${viewClass.name.toLowerCase().replace(/\s+/g, "-")}`}
+                exportTitle={`Subjects in ${viewClass.name}`}
+                emptyTitle={`No subjects in ${viewClass.name} yet`}
+                emptyDescription="Use Add subjects to link the school's subjects to this class."
+              />
+            ) : (
+              <DataTable
+                columns={mapColumns}
+                rows={mapRows}
+                rowKey={(r) => r.link.id}
+                rowActions={mapActions}
+                rowActionsLabel="Link actions"
+                bulkActions={mapBulk}
+                selectionNoun="link"
+                pageSize={100}
+                minWidth="min-w-[640px]"
+                exportFileBaseName="class-subject-map"
+                exportTitle="Class–subject map"
+                emptyTitle="No class links yet"
+              />
+            )}
           </SectionCard>
         </div>
       }
-      work={
-        <MastersWorkCard title="Link subjects to a class" hint="Tap a subject to select it with all its components.">
-          <div className="space-y-3">
-            <select className="field !py-1.5" value={mapClassId} onChange={(e) => setMapClassId(e.target.value)}>
-              <option value="">Choose class…</option>
-              {activeClasses.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-            <div className="flex max-h-56 flex-wrap gap-1.5 overflow-y-auto rounded-xl border border-[var(--border)] p-2">
-              {linkable.map(({ subject: s, depth, componentCount }) => {
-                const on = mapSubjectIds.includes(s.id);
-                const already =
-                  !!mapClassId &&
-                  slice.classSubjects.some((l) => l.classId === mapClassId && l.subjectId === s.id && l.isActive);
-                return (
-                  <button
-                    key={s.id}
-                    type="button"
-                    title={s.nameEn}
-                    onClick={() => toggleMapSubject(s.id)}
-                    className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold ${depth === 1 ? "ml-2" : ""} ${
-                      on
-                        ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
-                        : already
-                          ? "bg-[var(--surface-sunken)] text-[var(--muted)] ring-1 ring-[var(--border)]"
-                          : componentCount > 0
-                            ? "bg-[rgba(15,118,110,0.12)] text-[var(--tone-teal)]"
-                            : "bg-[var(--surface)] text-[var(--brand-deep)]"
-                    }`}
-                  >
-                    {componentCount > 0 ? "▣ " : depth === 1 ? "· " : ""}
-                    {s.code}
-                    {already && !on ? " ✓" : ""}
-                  </button>
-                );
-              })}
-              {linkable.length === 0 ? (
-                <p className="text-xs text-[var(--muted)]">No active subjects — add one in the table above.</p>
-              ) : null}
-            </div>
-            <div className="flex flex-wrap items-end gap-2">
-              <label className="text-sm">
-                <span className="mb-1 block text-[11px] text-[var(--muted)]">Periods / week</span>
-                <input
-                  className="field !py-1.5 w-28"
-                  type="number"
-                  min={0}
-                  max={12}
-                  value={periods}
-                  onChange={(e) => setPeriods(Math.max(0, Number(e.target.value) || 0))}
-                  title="0 = the NCF suggestion for each subject"
-                />
-                <span className="mt-0.5 block text-[10px] text-[var(--muted)]">0 = NCF suggestion each</span>
-              </label>
-              <label className="flex items-center gap-2 pb-2 text-xs font-semibold text-[var(--brand-deep)]">
-                <input type="checkbox" checked={linkAsOptional} onChange={(e) => setLinkAsOptional(e.target.checked)} />
-                Optional (student choice)
-              </label>
-              <Button type="button" disabled={!mapClass || mapSubjectIds.length === 0} onClick={addMap}>
-                Link {mapSubjectIds.length || ""} subject{mapSubjectIds.length === 1 ? "" : "s"}
-                {mapClass ? ` to ${mapClass.name}` : ""}
-              </Button>
-            </div>
-          </div>
-        </MastersWorkCard>
-      }
     />
+
+    {/* Add subjects to one class */}
+    <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
+      <DialogPopup size="lg">
+        <DialogHeader>
+          <DialogTitle>Add subjects to {viewClass?.name}</DialogTitle>
+        </DialogHeader>
+        <DialogDescription>
+          Tap a subject to take it with all its components, or tap single components. Already-added ones are not listed.
+        </DialogDescription>
+        <div className="mt-3 flex max-h-72 flex-wrap gap-1.5 overflow-y-auto rounded-xl border border-[var(--border)] p-2">
+          {pickable.map(({ subject: s, depth, componentCount }) => {
+            const on = mapSubjectIds.includes(s.id);
+            const already =
+              !!viewClass &&
+              slice.classSubjects.some((l) => l.classId === viewClass.id && l.subjectId === s.id && l.isActive);
+            return (
+              <button
+                key={s.id}
+                type="button"
+                title={s.nameEn}
+                onClick={() => toggleMapSubject(s.id)}
+                className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold ${depth === 1 ? "ml-2" : ""} ${
+                  on
+                    ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                    : already
+                      ? "bg-[var(--surface-sunken)] text-[var(--muted)] ring-1 ring-[var(--border)]"
+                      : componentCount > 0
+                        ? "bg-[rgba(15,118,110,0.12)] text-[var(--tone-teal)]"
+                        : "bg-[var(--surface)] text-[var(--brand-deep)] ring-1 ring-[var(--border)]"
+                }`}
+              >
+                {componentCount > 0 ? "▣ " : depth === 1 ? "· " : ""}
+                {s.code}
+                <span className="ml-1 font-normal opacity-70">{s.nameEn}</span>
+                {already && !on ? " ✓" : ""}
+              </button>
+            );
+          })}
+          {pickable.length === 0 ? (
+            <p className="text-xs text-[var(--muted)]">
+              Every active subject is already in {viewClass?.name}. Create a new one with “New subject”.
+            </p>
+          ) : null}
+        </div>
+        <div className="mt-3 flex flex-wrap items-end gap-3">
+          <label className="text-sm">
+            <span className="mb-1 block text-[11px] text-[var(--muted)]">Periods / week</span>
+            <input
+              className="field !py-1.5 w-28"
+              type="number"
+              min={0}
+              max={12}
+              value={periods}
+              onChange={(e) => setPeriods(Math.max(0, Number(e.target.value) || 0))}
+            />
+            <span className="mt-0.5 block text-[10px] text-[var(--muted)]">0 = NCF suggestion each</span>
+          </label>
+          <label className="flex items-center gap-2 pb-5 text-xs font-semibold text-[var(--brand-deep)]">
+            <input type="checkbox" checked={linkAsOptional} onChange={(e) => setLinkAsOptional(e.target.checked)} />
+            Optional (student choice)
+          </label>
+        </div>
+        <DialogFooter className="mt-4">
+          <Button
+            type="button"
+            variant="outline"
+            className="mr-auto"
+            onClick={() => {
+              setPickerOpen(false);
+              if (viewClass) openAdd("", viewClass.id);
+            }}
+          >
+            New subject…
+          </Button>
+          <DialogClose render={<Button type="button" variant="outline" />}>Cancel</DialogClose>
+          <Button type="button" disabled={mapSubjectIds.length === 0} onClick={addPicked}>
+            Add {mapSubjectIds.length || ""} to {viewClass?.name}
+          </Button>
+        </DialogFooter>
+      </DialogPopup>
+    </Dialog>
 
     {/* Add / edit subject or component */}
     <Dialog open={!!editor} onOpenChange={(o) => !o && setEditor(null)}>
@@ -996,6 +1220,11 @@ export function SubjectsPanel({ state, commit }: { state: MastersState; commit: 
               saveEditor();
             }}
           >
+            {editor.linkClassId && !editor.editingId ? (
+              <p className="rounded-lg bg-[rgba(15,118,110,0.08)] px-3 py-2 text-[11px] font-semibold text-[var(--tone-teal)] sm:col-span-2">
+                Will also be added to {slice.classes.find((c) => c.id === editor.linkClassId)?.name}, with the NCF periods per week.
+              </p>
+            ) : null}
             <label className="block text-sm sm:col-span-2">
               <span className="mb-1 block text-[11px] font-semibold text-[var(--muted)]">Component of</span>
               <select

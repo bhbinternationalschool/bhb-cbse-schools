@@ -342,3 +342,55 @@ export function singleSuggestionPack(pack: NepStagePack, code: string): NepStage
     : undefined;
   return { ...pack, subjects: parent ? [parent, item] : [item] };
 }
+
+/* ── One class's subjects ────────────────────────────────────────────── */
+
+export type ClassSubjectRow = {
+  subject: Subject;
+  parent: Subject | null;
+  depth: 0 | 1;
+  /** The active link to this class, or null when the row is shown for context only. */
+  link: ClassSubjectLink | null;
+};
+
+/**
+ * What a class studies, as a tree.
+ *
+ * A subject shows when it — or any of its components — is linked to the
+ * class. Its components always show under it, linked or not, so a class
+ * that studies English but not English — Oral says so in one glance, and
+ * the missing component is one click from being added.
+ */
+export function classSubjectRows(slice: SubjectsSlice, classId: string): ClassSubjectRow[] {
+  const links = new Map(
+    slice.classSubjects
+      .filter((l) => l.isActive && l.classId === classId)
+      .map((l) => [l.subjectId, l] as const),
+  );
+  const ids = new Set(slice.subjects.map((s) => s.id));
+  const tops = slice.subjects.filter((s) => !s.parentId || !ids.has(s.parentId)).sort(byOrder);
+  const out: ClassSubjectRow[] = [];
+  for (const top of tops) {
+    const kids = slice.subjects.filter((s) => s.parentId === top.id).sort(byOrder);
+    if (!links.has(top.id) && !kids.some((k) => links.has(k.id))) continue;
+    out.push({ subject: top, parent: null, depth: 0, link: links.get(top.id) ?? null });
+    for (const k of kids) {
+      // An inactive component nobody linked is noise, not a gap.
+      if (!links.has(k.id) && !k.isActive) continue;
+      out.push({ subject: k, parent: top, depth: 1, link: links.get(k.id) ?? null });
+    }
+  }
+  return out;
+}
+
+/**
+ * Link ids that go when a subject leaves a class: its own link and its
+ * components' links. A component left behind would keep a class studying
+ * "English — Oral" after English was removed.
+ */
+export function classLinkIdsToRemove(slice: SubjectsSlice, classId: string, subjectId: string): string[] {
+  const family = new Set([subjectId, ...slice.subjects.filter((s) => s.parentId === subjectId).map((s) => s.id)]);
+  return slice.classSubjects
+    .filter((l) => l.classId === classId && family.has(l.subjectId))
+    .map((l) => l.id);
+}

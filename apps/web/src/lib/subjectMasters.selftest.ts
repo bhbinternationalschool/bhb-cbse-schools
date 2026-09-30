@@ -4,6 +4,8 @@ import type { SchoolClass } from "./masters";
 import { NEP_STAGE_PACKS, applyNepSuggestions } from "./nepSubjectSuggestions";
 import {
   applySubjectDraft,
+  classLinkIdsToRemove,
+  classSubjectRows,
   draftFromSubject,
   emptySubjectDraft,
   ncfSuggestionRows,
@@ -166,5 +168,51 @@ if (withComponent) {
 const lone = pack.subjects.find((s) => !s.underCode)!;
 assert.equal(applyNepSuggestions(slice.subjects, singleSuggestionPack(pack, lone.code)).added <= 1, true);
 assert.equal(singleSuggestionPack(pack, "NOPE").subjects.length, 0);
+
+/* ── One class's subjects ────────────────────────────────────────────── */
+
+// Class I studies ENG and ENG-ORAL; it does not study NUM, MATH or SCI.
+const classI = classSubjectRows(slice, "c-1");
+assert.deepEqual(classI.map((r) => r.subject.code), ["ENG", "ENG-ORAL"]);
+assert.ok(classI.every((r) => r.link), "both linked");
+assert.equal(classI[1].depth, 1);
+assert.equal(classI[1].parent!.code, "ENG");
+
+// A component the class does not study still shows under its subject,
+// unlinked, so the gap is visible and one click from being filled.
+const withWritten: SubjectsSlice = {
+  ...slice,
+  subjects: [...slice.subjects, sub("s-eng-w", "ENG-WRIT", "s-eng", 2)],
+};
+const classI2 = classSubjectRows(withWritten, "c-1");
+assert.deepEqual(classI2.map((r) => [r.subject.code, !!r.link]), [
+  ["ENG", true],
+  ["ENG-ORAL", true],
+  ["ENG-WRIT", false],
+]);
+// ...unless it is inactive, which is not a gap.
+const inactiveWritten: SubjectsSlice = {
+  ...withWritten,
+  subjects: withWritten.subjects.map((x) => (x.id === "s-eng-w" ? { ...x, isActive: false } : x)),
+};
+assert.equal(classSubjectRows(inactiveWritten, "c-1").length, 2);
+
+// A class linked only to a component still shows the subject above it.
+const onlyComponent: SubjectsSlice = { ...slice, classSubjects: [link("lx", "c-nur", "s-mo1")] };
+assert.deepEqual(
+  classSubjectRows(onlyComponent, "c-nur").map((r) => [r.subject.code, !!r.link]),
+  [["NUM", false], ["MATH-ORAL", true]],
+);
+assert.deepEqual(classSubjectRows(slice, "c-nur"), [], "a class with nothing linked is empty");
+
+// Removing a subject from a class takes its components' links too — and
+// only that class's.
+const twoClasses: SubjectsSlice = {
+  ...slice,
+  classSubjects: [...slice.classSubjects, link("l4", "c-6", "s-eng"), link("l5", "c-6", "s-eng-o")],
+};
+assert.deepEqual(classLinkIdsToRemove(twoClasses, "c-1", "s-eng").sort(), ["l1", "l3"]);
+assert.deepEqual(classLinkIdsToRemove(twoClasses, "c-1", "s-eng-o"), ["l3"], "a component alone");
+assert.deepEqual(classLinkIdsToRemove(twoClasses, "c-1", "s-sci"), []);
 
 console.log("OK — subjectMasters.selftest.ts");
