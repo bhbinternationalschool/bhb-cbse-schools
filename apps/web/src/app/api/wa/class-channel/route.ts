@@ -125,6 +125,7 @@ export async function POST(req: Request) {
       draft: r.draft,
       broadcast: r.broadcast,
       erp: r.erp,
+      parents: r.parents,
     });
   }
 
