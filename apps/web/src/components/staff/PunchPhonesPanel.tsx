@@ -11,9 +11,15 @@ type Device = {
   created_at: string;
   decided_by: string;
   last_used_at: string | null;
+  attempts?: { kind: "in" | "out"; at: string }[];
 };
 type Screen = { id: string; label: string; created_by: string; created_at: string; last_seen_at: string | null };
 type Data = { devices: Device[]; screens: Screen[]; staffWithoutPhone: { id: string; name: string }[] };
+
+const hhmm = (iso: string) =>
+  new Date(iso).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false });
+const triedText = (d: Device) =>
+  (d.attempts ?? []).map((a) => `${a.kind.toUpperCase()} ${hhmm(a.at)}`).join(", ");
 
 const day = (iso: string | null) =>
   iso
@@ -30,6 +36,7 @@ export function PunchPhonesPanel() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [label, setLabel] = useState("Office tablet");
+  const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch("/api/v1/staff/attendance/punch-devices", { cache: "no-store" }).catch(() => null);
@@ -54,11 +61,23 @@ export function PunchPhonesPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const body = (await res.json().catch(() => null)) as { ok?: boolean; data?: { token?: string }; error?: { message?: string } } | null;
+      const body = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        data?: { token?: string; recorded?: { kind: string; time: string; ok: boolean; note?: string }[] };
+        error?: { message?: string };
+      } | null;
       if (!res.ok || !body?.ok) {
         setError(body?.error?.message || "Not saved");
         return null;
       }
+      const rec = body.data?.recorded ?? [];
+      setNotice(
+        rec.length
+          ? rec
+              .map((x) => `${x.kind.toUpperCase()} ${x.time} ${x.ok ? "recorded" : `NOT recorded — ${x.note || "mark it by hand"}`}`)
+              .join(" · ")
+          : null,
+      );
       await load();
       return body.data ?? {};
     } finally {
@@ -88,6 +107,7 @@ export function PunchPhonesPanel() {
         </p>
       </div>
       {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
+      {notice ? <p className="rounded-lg bg-[var(--success-soft)] px-3 py-2 text-sm text-[var(--success)]">Approved · {notice}</p> : null}
 
       <section className="space-y-2">
         <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted)]">QR screens</p>
@@ -119,10 +139,19 @@ export function PunchPhonesPanel() {
           <div key={d.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[var(--warning-soft,rgba(245,158,11,0.1))] px-3 py-2 text-sm">
             <span>
               <b>{d.staffName}</b> · {d.label || "unknown phone"}
-              <span className="block text-xs text-[var(--muted)]">asked {day(d.created_at)} — replaces their current phone</span>
+              <span className="block text-xs text-[var(--muted)]">
+                asked {day(d.created_at)} — replaces their current phone
+                {triedText(d) ? ` · tried to punch today: ${triedText(d)} (recorded at those times on Approve)` : ""}
+              </span>
             </span>
             <span className="flex gap-2">
-              <button type="button" className={btn} disabled={busy} onClick={() => void act({ action: "approve", id: d.id }, `Make this ${d.staffName}'s punch phone? Their old phone stops working.`)}>
+              <button type="button" className={btn} disabled={busy} onClick={() =>
+                  void act(
+                    { action: "approve", id: d.id },
+                    `Make this ${d.staffName}'s punch phone? Their old phone stops working.` +
+                      (triedText(d) ? `\n\nTheir punch ${triedText(d)} will be recorded at that time.` : ""),
+                  )
+                }>
                 Approve
               </button>
               <button type="button" className={btn} disabled={busy} onClick={() => void act({ action: "reject", id: d.id })}>
