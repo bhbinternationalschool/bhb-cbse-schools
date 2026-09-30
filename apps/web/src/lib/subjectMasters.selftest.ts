@@ -215,4 +215,21 @@ assert.deepEqual(classLinkIdsToRemove(twoClasses, "c-1", "s-eng").sort(), ["l1",
 assert.deepEqual(classLinkIdsToRemove(twoClasses, "c-1", "s-eng-o"), ["l3"], "a component alone");
 assert.deepEqual(classLinkIdsToRemove(twoClasses, "c-1", "s-sci"), []);
 
+/* ── The NCF / CBSE suggestion packs themselves ────────────────────── */
+
+for (const p of NEP_STAGE_PACKS) {
+  const codes = p.subjects.map((x) => x.code.toUpperCase());
+  assert.equal(new Set(codes).size, codes.length, `${p.id}: a code is suggested twice`);
+  for (const x of p.subjects.filter((y) => y.underCode)) {
+    assert.ok(codes.includes(x.underCode!.toUpperCase()), `${p.id}: ${x.code} sits under a missing ${x.underCode}`);
+  }
+}
+// CBSE 2026-27 (Scheme of Studies IX–X): Mathematics Basic is discontinued,
+// and the third language is part of the IX–X pack.
+const ix = NEP_STAGE_PACKS.find((p) => p.id === "secondary_9_10")!;
+assert.ok(!ix.subjects.some((x) => /basic/i.test(x.nameEn)), "no Mathematics Basic from 2026-27");
+assert.ok(ix.subjects.some((x) => x.code === "SKT" && /R3/.test(x.nameEn)), "R3 offered in IX–X");
+const xi = NEP_STAGE_PACKS.find((p) => p.id === "secondary_11_12")!;
+assert.ok(["WE", "GS", "HPE"].every((c) => xi.subjects.some((x) => x.code === c)), "XI–XII internal subjects present");
+
 console.log("OK — subjectMasters.selftest.ts");
