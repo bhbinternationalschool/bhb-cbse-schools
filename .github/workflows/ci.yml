@@ -159,6 +159,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:ncf-official
 
+      - name: Self-test — enrolment follows CBSE 2026-27 (three languages from VI and IX, XI–XII one language + four)
+        working-directory: apps/web
+        run: npm run test:student-curriculum
+
       - name: Self-test — a subject the school adds is never hidden, and codes stay unique
         working-directory: apps/web
         run: npm run test:subject-masters

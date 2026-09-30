@@ -175,6 +175,7 @@ SELFTESTS=(
   test:free-routing
   test:bhashini
   test:ncf-official
+  test:student-curriculum
   test:subject-masters
   test:wa-sender-routing
   test:receipt-repair

@@ -60,11 +60,18 @@ const OPTIONAL_CODES = new Set([
   "MAT", // senior: elective among many; still linked
 ]);
 
-/** IX–X cores that stay non-optional in the class map */
-const SECONDARY_CORE = new Set(["ENG", "HIN", "MAT", "SCI", "SST"]);
+/**
+ * IX–X subjects CBSE 2026-27 makes compulsory — linked as non-optional.
+ * Individuals in Society (ETH), Environmental Education (ENV), Vocational
+ * Education (VOC), CT & AI (ICT), Art and PE & Well-being joined Hindi,
+ * English, Maths, Science and Social Science. The third language stays an
+ * option: SANSKRIT or URDU is the family's choice.
+ */
+const SECONDARY_CORE = new Set(["ENG", "HIN", "MAT", "SCI", "SST", "ETH", "ENV", "VOC", "ICT", "ART", "PEW"]);
 
-/** XI–XII: languages often treated as expected; still choosable in cart */
-const SENIOR_CORE = new Set(["ENG", "HIN"]);
+/** XI–XII: Hindi / English, plus Health & PE, Work Experience and General
+ * Studies, which CBSE requires of every regular student. */
+const SENIOR_CORE = new Set(["ENG", "HIN", "WE", "GS", "HPE"]);
 
 function packForGroup(group: "SECONDARY" | "SENIOR"): NepStagePack {
   const id: NepStage =

@@ -88,15 +88,17 @@ export function StudentCurriculumEditor({
   );
 
   const validation = validateCurriculum(student, curriculum, masters);
-  const progress = cartProgress(choiceMode, cartSubjects);
+  const clsName =
+    masters.classes.find((c) => c.id === student.classId)?.name ?? "—";
+  const progress = cartProgress(choiceMode, cartSubjects, {
+    className: clsName,
+    academicYearCode: curriculum.academicYearCode || student.academicYearCode,
+  });
 
   const enrolledIds = useMemo(
     () => new Set(cartSubjects.map((s) => s.id)),
     [cartSubjects],
   );
-
-  const clsName =
-    masters.classes.find((c) => c.id === student.classId)?.name ?? "—";
 
   function toggleInCart(id: string) {
     if (disabled) return;
@@ -119,7 +121,7 @@ export function StudentCurriculumEditor({
     if (curriculum.chosenSubjectIds.includes(id)) return;
     const next = [...curriculum.chosenSubjectIds, id];
     if (choiceMode === "middle_options" && next.length > 2) return;
-    // A full cart (7 for IX-X, 6 for XI-XII) refuses a new pick — it must
+    // A full cart (12 for IX-X, 6 main for XI-XII) refuses a new pick — it must
     // never silently drop an already-chosen subject to make room. That
     // silent swap was the bug: staff building a 7-subject cart from empty
     // never hit this path (cart isn't full at 1-2 picks), but anyone
@@ -153,14 +155,7 @@ export function StudentCurriculumEditor({
     );
   }
 
-  const modeHint =
-    choiceMode === "none"
-      ? "Fixed stage curriculum — office can still add if needed."
-      : choiceMode === "middle_options"
-        ? "Cores from class map · choose up to 2 options."
-        : choiceMode === "secondary_cart"
-          ? "Shopping cart · exactly 7 subjects · ≥3 languages · ≥1 skill/voc."
-          : "Shopping cart · exactly 6 subjects · ≥2 languages · ≥1 native language.";
+  const modeHint = progress.hint;
 
   return (
     <div className="space-y-3">
@@ -179,12 +174,17 @@ export function StudentCurriculumEditor({
         {progress.target != null ? (
           <span
             className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${
-              progress.count === progress.target
+              validation.ok
                 ? "bg-[rgba(15,118,110,0.12)] text-[var(--tone-teal)]"
                 : "bg-[rgba(32,48,80,0.08)] text-[var(--brand-mid)]"
             }`}
+            title={progress.min != null ? `${progress.min}–${progress.target} main subjects` : `up to ${progress.target}`}
           >
-            Cart {progress.count}/{progress.target}
+            {choiceMode === "senior_cart"
+              ? `Main ${progress.count} · ${progress.min}–${progress.target}`
+              : choiceMode === "middle_options"
+                ? `Options ${curriculum.chosenSubjectIds.length}/${progress.target}`
+                : `Subjects ${progress.count}`}
           </span>
         ) : null}
       </div>
@@ -192,18 +192,16 @@ export function StudentCurriculumEditor({
       {(isCart || choiceMode === "middle_options") && progress.target != null ? (
         <div className="flex flex-wrap gap-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
           <span>
-            Lang {progress.languages}
-            {choiceMode === "secondary_cart"
-              ? "/3+"
-              : choiceMode === "senior_cart"
-                ? "/2+"
-                : ""}
+            Languages {progress.languages}
+            {progress.languagesRequired != null ? `/${progress.languagesRequired}` : ""}
           </span>
+          {progress.indianRequired > 1 ? (
+            <span>
+              Indian {progress.nativeLanguages}/{progress.indianRequired}
+            </span>
+          ) : null}
           {choiceMode === "secondary_cart" ? (
             <span>Skill {progress.skill}/1+</span>
-          ) : null}
-          {choiceMode === "senior_cart" ? (
-            <span>Native {progress.nativeLanguages}/1+</span>
           ) : null}
           {choiceMode === "senior_cart" && progress.labHeavy > 0 ? (
             <span>Lab-heavy {progress.labHeavy}</span>
