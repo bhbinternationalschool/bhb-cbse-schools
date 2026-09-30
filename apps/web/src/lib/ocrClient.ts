@@ -43,6 +43,67 @@ export function readFileAsDataUrlForOcr(
   });
 }
 
+/** Longest edge for a page photo sent to be read (2026-09-30). */
+export const OCR_PHOTO_MAX_EDGE = 1600;
+
+export type OcrPhoto = {
+  /** data:image/jpeg;base64,… — what the free in-browser pass reads */
+  dataUrl: string;
+  /** The same bytes without the data: prefix — what the server routes take */
+  base64: string;
+  mimeType: string;
+};
+
+/**
+ * A phone photo of a book page, made small enough to send.
+ *
+ * A phone camera hands over 4000-pixel, 3–6 MB JPEGs. Printed text reads
+ * just as well at 1600 pixels on the long edge, and at that size a page is
+ * ~300 kB — so a teacher on mobile data can send two pages without the
+ * upload timing out, and the old 4 MB refusal never fires on a normal
+ * photo. Always re-encoded as JPEG: a screenshot PNG of a contents page
+ * gains nothing from transparency. A file the browser cannot decode
+ * (HEIC on some Android builds) falls back to the raw file, still under
+ * the old 4 MB cap, rather than being refused outright.
+ */
+export async function photoForOcr(
+  file: File,
+): Promise<({ ok: true } & OcrPhoto) | { ok: false; error: string }> {
+  if (!file.type.startsWith("image/")) {
+    return { ok: false, error: "Choose a photo of the page (JPG or PNG)" };
+  }
+  let bitmap: ImageBitmap | null = null;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    bitmap = null;
+  }
+  if (bitmap) {
+    const scale = Math.min(1, OCR_PHOTO_MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      // White under the page: a transparent PNG screenshot would otherwise
+      // turn black in JPEG and read as nothing at all.
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close();
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+      if (dataUrl.startsWith("data:image/jpeg")) {
+        return { ok: true, dataUrl, base64: base64FromDataUrl(dataUrl), mimeType: "image/jpeg" };
+      }
+    } else {
+      bitmap.close();
+    }
+  }
+  const raw = await readFileAsDataUrlForOcr(file);
+  if (!raw.ok) return raw;
+  return { ok: true, dataUrl: raw.url, base64: base64FromDataUrl(raw.url), mimeType: raw.mimeType };
+}
+
 function base64FromDataUrl(dataUrl: string): string {
   const i = dataUrl.indexOf(",");
   return i >= 0 ? dataUrl.slice(i + 1) : dataUrl;

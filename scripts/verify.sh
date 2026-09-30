@@ -135,6 +135,7 @@ SELFTESTS=(
   test:fleet-live
   test:udise-doc-intake
   test:homework-expand
+  test:homework-page-scan
   test:homework-submission
   test:exam-drill
   test:drill-skills

@@ -17,6 +17,7 @@ import {
   upsertSyllabusUnit,
   type ResourceKind,
   type SyllabusImportChapter,
+  type SyllabusImportSummary,
   type SyllabusUnit,
   type TeachingState,
   type UnitProgress,
@@ -91,6 +92,16 @@ export function SyllabusPlanPanel(props: {
   createdBy: string;
   onError: (msg: string | null) => void;
   onNotice: (msg: string | null) => void;
+  /**
+   * A teacher's scanned-page import, saved through the scope-checked v1
+   * route (2026-09-30). A teacher may not edit the plan by whole-desk push
+   * (`canEdit` is false for them), but they may add the chapters of a book
+   * they teach — the same right the staff app has always had. Present only
+   * for sessions that save row by row; the office keeps the local import.
+   */
+  onServerImport?: (
+    chapters: SyllabusImportChapter[],
+  ) => Promise<{ ok: true; summary: SyllabusImportSummary } | { ok: false; error: string }>;
 }) {
   const {
     state,
@@ -202,7 +213,15 @@ export function SyllabusPlanPanel(props: {
     props.onNotice("Topic added");
   }
 
-  function importChapters(chapters: SyllabusImportChapter[]) {
+  function importNotice({ chaptersAdded, topicsAdded, skipped }: SyllabusImportSummary) {
+    props.onNotice(
+      `Added ${chaptersAdded} chapter${chaptersAdded === 1 ? "" : "s"}` +
+        (topicsAdded ? ` and ${topicsAdded} topic${topicsAdded === 1 ? "" : "s"}` : "") +
+        (skipped.length ? ` · ${skipped.length} already in the plan` : ""),
+    );
+  }
+
+  function importChapters(chapters: SyllabusImportChapter[]): boolean {
     props.onError(null);
     const result = importSyllabusUnits(state, {
       academicYearCode: ay,
@@ -210,14 +229,28 @@ export function SyllabusPlanPanel(props: {
       subjectId,
       chapters,
     });
-    if (!result.ok) return props.onError(result.error);
+    if (!result.ok) {
+      props.onError(result.error);
+      return false;
+    }
     onChange(result.value.state);
-    const { chaptersAdded, topicsAdded, skipped } = result.value.summary;
-    props.onNotice(
-      `Added ${chaptersAdded} chapter${chaptersAdded === 1 ? "" : "s"}` +
-        (topicsAdded ? ` and ${topicsAdded} topic${topicsAdded === 1 ? "" : "s"}` : "") +
-        (skipped.length ? ` · ${skipped.length} already in the plan` : ""),
-    );
+    importNotice(result.value.summary);
+    return true;
+  }
+
+  /** The scan's import: the server's route for a teacher, the desk's own for the office. */
+  async function importScanned(chapters: SyllabusImportChapter[]): Promise<boolean> {
+    if (!props.onServerImport) return importChapters(chapters);
+    props.onError(null);
+    props.onNotice(null);
+    const r = await props.onServerImport(chapters);
+    if (!r.ok) {
+      props.onError(r.error);
+      return false;
+    }
+    importNotice(r.summary);
+    setExpandAll(true);
+    return true;
   }
 
   // The school's own books, already in the ERP for the AI to read from.
@@ -592,9 +625,11 @@ export function SyllabusPlanPanel(props: {
         </div>
       ) : null}
 
-      {canEdit ? (
+      {canEdit || props.onServerImport ? (
         <SyllabusOcrImport
-          onImport={importChapters}
+          classId={classId}
+          subjectId={subjectId}
+          onImport={importScanned}
           onError={props.onError}
         />
       ) : null}

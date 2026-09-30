@@ -94,7 +94,18 @@ export async function POST(request: Request) {
       userAgent: meta.userAgent,
     });
 
-    return apiOk(result.value.summary);
+    // The plan's rows for this class and subject as the server now holds
+    // them (2026-09-30). The web desk shows a teacher's import without
+    // pushing the whole teaching blob — which it may not — so it needs the
+    // server's copy, ids included, rather than re-running the import locally
+    // and minting different ids. The app reads only the summary fields.
+    const units = result.value.state.units.filter(
+      (u) =>
+        u.academicYearCode === ctx.session.academicYearCode &&
+        u.classId === classId &&
+        u.subjectId === subjectId,
+    );
+    return apiOk({ ...result.value.summary, units });
   } catch (e) {
     return apiErr(e);
   }

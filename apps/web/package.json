@@ -175,6 +175,7 @@
     "test:roster-name-case": "npx tsx src/lib/rosterNameCase.selftest.ts",
     "test:udise-doc-intake": "npx tsx src/lib/udiseDocIntake.selftest.ts",
     "test:homework-expand": "npx tsx src/lib/homeworkExpand.selftest.ts",
+    "test:homework-page-scan": "npx tsx src/lib/homeworkPageScanAi.selftest.ts",
     "test:homework-submission": "npx tsx src/lib/homeworkSubmission.selftest.ts",
     "test:exam-drill": "npx tsx src/lib/examDrill.selftest.ts",
     "test:drill-skills": "npx tsx src/lib/drillSkills.selftest.ts",
