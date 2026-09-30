@@ -136,6 +136,7 @@ SELFTESTS=(
   test:fleet-live
   test:udise-doc-intake
   test:homework-expand
+  test:homework-page-scan
   test:homework-submission
   test:exam-drill
   test:drill-skills
@@ -309,6 +310,7 @@ SELFTESTS=(
   test:staff-roster-redact
   test:sis-class-teacher
   test:punch-code
+  test:answer-sheet-ai
   test:voice-dictation
   test:punch-devices
   test:punch-attempts

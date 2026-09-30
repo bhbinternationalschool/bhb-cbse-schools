@@ -610,15 +610,13 @@ async function transcribeVoiceNote(audio: {
   mimeType?: string;
 }): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
   const { fetchWaMediaAsDataUrl } = await import("@/lib/waInboundMedia.server");
-  const { googleSpeechToText, speechConfigured } = await import(
-    "@/lib/googleSpeech.server"
-  );
-  if (!speechConfigured()) {
+  const { speechToText, anySpeechConfigured } = await import("@/lib/speech.server");
+  if (!anySpeechConfigured()) {
     return { ok: false, error: "Speech recognition is not configured" };
   }
   const media = await fetchWaMediaAsDataUrl(audio.mediaId);
   if (!media.ok) return media;
-  return googleSpeechToText({
+  return speechToText({
     audioBase64: media.dataUrl,
     mimeType: media.mimeType || audio.mimeType,
     languageCode: "hi-IN",

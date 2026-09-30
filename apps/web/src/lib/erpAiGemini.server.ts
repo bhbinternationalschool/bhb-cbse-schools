@@ -276,7 +276,7 @@ function sanitizeGeminiReply(text: string): string {
 }
 
 /**
- * One image (or PDF) + instructions → JSON. Used for form / document
+ * One image (or PDF), or several, + instructions → JSON. Used for form / document
  * extraction where Gemini's multimodal input does OCR + structuring in one
  * call. Returns raw text (caller parses); strips a ```json fence if present.
  */
@@ -286,6 +286,12 @@ export async function generateGeminiVisionJson(opts: {
   /** Raw base64 (no data: prefix) */
   base64: string;
   mimeType: string;
+  /**
+   * Further pages, sent after the first in order — one call sees a whole
+   * multi-page answer sheet, so a question that runs over a page break is
+   * read as one answer (added 2026-09-30).
+   */
+  moreImages?: { base64: string; mimeType: string }[];
   maxTokens?: number;
   model?: string;
 }): Promise<
@@ -308,6 +314,9 @@ export async function generateGeminiVisionJson(opts: {
             role: "user",
             parts: [
               { inline_data: { mime_type: opts.mimeType, data: opts.base64 } },
+              ...(opts.moreImages ?? []).map((img) => ({
+                inline_data: { mime_type: img.mimeType, data: img.base64 },
+              })),
               { text: opts.prompt },
             ],
           },

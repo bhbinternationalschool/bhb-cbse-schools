@@ -22,6 +22,7 @@ import {
   upsertTeachingLog,
   writeTeachingLocalRaw,
   type PeriodDelivery,
+  type SyllabusImportChapter,
   type TeachingLog,
   type TeachingLogStatus,
   type TeachingState,
@@ -30,7 +31,11 @@ import { hasPermission } from "@/lib/rbac";
 import { resolveSessionStaff } from "@/lib/staffResolve";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { isRestrictedTeacher, useMyTeaching } from "@/components/staff/useMyTeaching";
-import { postLessonPlan, postPeriodLog } from "@/components/teaching/teachingApi";
+import {
+  postLessonPlan,
+  postPeriodLog,
+  postSyllabusImport,
+} from "@/components/teaching/teachingApi";
 import { SyllabusPlanPanel } from "@/components/teaching/SyllabusPlanPanel";
 import { LessonPlansPanel } from "@/components/teaching/LessonPlansPanel";
 import { ChapterOutcomesPanel } from "@/components/teaching/ChapterOutcomesPanel";
@@ -333,6 +338,26 @@ export function TeachingWorkspace() {
   function commitLocal(next: TeachingState) {
     writeTeachingLocalRaw(next);
     setState(next);
+  }
+
+  /**
+   * A teacher's scanned contents page, saved by the scope-checked v1 route
+   * (2026-09-30), then the server's rows for that class and subject put on
+   * screen in place of ours — ids included, so a later lesson plan or log
+   * points at a chapter the server actually has.
+   */
+  async function importSyllabusViaApi(classId: string, subjectId: string, chapters: SyllabusImportChapter[]) {
+    const r = await postSyllabusImport({ classId, subjectId, chapters });
+    if (!r.ok) return { ok: false as const, error: r.error };
+    const { units, ...summary } = r.data;
+    if (units) {
+      // The local copy as it is now, not as it was when the scan began.
+      const base = loadTeaching();
+      const inScope = (u: TeachingState["units"][number]) =>
+        u.academicYearCode === ay && u.classId === classId && u.subjectId === subjectId;
+      commitLocal({ ...base, units: [...base.units.filter((u) => !inScope(u)), ...units] });
+    }
+    return { ok: true as const, summary };
   }
 
   const daySummary = useMemo(() => summarizeCoverage(dayRows), [dayRows]);
@@ -765,6 +790,13 @@ export function TeachingWorkspace() {
               createdBy={me?.id || session.fullName}
               onError={setError}
               onNotice={setNotice}
+              // A teacher adds a scanned book's chapters to their own class's
+              // plan through the v1 route, which checks the class and subject.
+              onServerImport={
+                writesViaApi && canEdit && pickedClassId && pickedSubjectId
+                  ? (chapters) => importSyllabusViaApi(pickedClassId, pickedSubjectId, chapters)
+                  : undefined
+              }
             />
           ) : (
             <LessonPlansPanel
