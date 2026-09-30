@@ -6,6 +6,7 @@ import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionCo
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { field } from "@/components/ui/erp-ui";
+import { VoiceDictateButton } from "@/components/teaching/VoiceDictateButton";
 import { DEFAULT_AY, loadMasters, type MastersState, currentAcademicYearCode} from "@/lib/masters";
 import { hasPermission } from "@/lib/rbac";
 import { classSectionLabel } from "@/lib/timetable";
@@ -583,15 +584,20 @@ export function DisciplineWorkspace() {
             />
           </label>
 
-          <label className="block text-sm">
-            <span className="mb-1 block text-[11px] text-[var(--muted)]">Description</span>
+          {/* div, not label: the mic is the first control, and a label would start it on a caption tap (2026-09-30). */}
+          <div className="block text-sm">
+            <span className="mb-1 flex flex-wrap items-center gap-2 text-[11px] text-[var(--muted)]">
+              <span>Description</span>
+              <VoiceDictateButton title="Dictate the incident" value={logDescription} onChange={setLogDescription} disabled={readOnly || busy} />
+            </span>
             <textarea
+              aria-label="Description"
               className={field}
               rows={3}
               value={logDescription}
               onChange={(e) => setLogDescription(e.target.value)}
             />
-          </label>
+          </div>
 
           {teacherMode ? (
             <label className="flex items-center gap-2 text-sm">

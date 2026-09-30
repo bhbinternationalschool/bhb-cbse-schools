@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { field } from "@/components/ui/erp-ui";
+import { VoiceDictateButton } from "@/components/teaching/VoiceDictateButton";
 
 /**
  * Complaints for a teacher (2026-09-29).
@@ -120,7 +121,10 @@ function TeacherTicket({
               value={note}
               disabled={disabled}
               onChange={(e) => setNote(e.target.value)}
+              aria-label="Resolution note"
             />
+            {/* 2026-09-30: teachers answer complaints from the phone, mostly in Hindi. */}
+            <VoiceDictateButton title="Dictate the resolution" value={note} onChange={setNote} disabled={disabled} />
             <button
               type="button"
               className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs font-semibold disabled:opacity-50"

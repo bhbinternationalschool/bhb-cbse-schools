@@ -51,7 +51,7 @@ import { ClassroomSyncPanel } from "@/components/homework/ClassroomSyncPanel";
 import { TENANT } from "@/lib/types";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import { DeskListActions } from "@/components/ui/desk-list-actions";
-import { VoiceMicButton } from "@/components/voice/VoiceMicButton";
+import { VoiceDictateButton } from "@/components/teaching/VoiceDictateButton";
 import {
   ErpTable,
   ErpTableBody,
@@ -978,31 +978,35 @@ export function HomeworkWorkspace() {
               placeholder="e.g. Fractions worksheet"
             />
           </label>
-          <label className="block text-xs text-[var(--muted)]">
-            English
-            <span className="mt-1 flex items-start gap-1.5">
-              <textarea
-                className={`${field} w-full`}
-                rows={3}
-                value={bodyEn}
-                onChange={(e) => setBodyEn(e.target.value)}
-              />
-              <VoiceMicButton
-                onTranscript={(t) =>
-                  setBodyEn((prev) => (prev ? `${prev} ${t}` : t))
-                }
-              />
-            </span>
-          </label>
-          <label className="block text-xs text-[var(--muted)]">
-            Hindi (optional)
+          {/* 2026-09-30: div, not label — a label's first control is the mic,
+              so tapping the caption would start recording. The mic works on
+              iPhone Safari too (the old browser-only mic hid itself there). */}
+          <div className="block text-xs text-[var(--muted)]">
+            <div className="flex flex-wrap items-center gap-2">
+              <span>English</span>
+              <VoiceDictateButton lang="en-IN" title="Dictate homework (English)" value={bodyEn} onChange={setBodyEn} disabled={readOnly} />
+            </div>
             <textarea
+              aria-label="Homework (English)"
+              className={`${field} mt-1 w-full`}
+              rows={3}
+              value={bodyEn}
+              onChange={(e) => setBodyEn(e.target.value)}
+            />
+          </div>
+          <div className="block text-xs text-[var(--muted)]">
+            <div className="flex flex-wrap items-center gap-2">
+              <span>Hindi (optional)</span>
+              <VoiceDictateButton lang="hi-IN" title="Dictate homework (Hindi)" value={bodyHi} onChange={setBodyHi} disabled={readOnly} />
+            </div>
+            <textarea
+              aria-label="Homework (Hindi)"
               className={`${field} mt-1 w-full`}
               rows={2}
               value={bodyHi}
               onChange={(e) => setBodyHi(e.target.value)}
             />
-          </label>
+          </div>
           <div className="flex flex-wrap gap-3">
             <label className="text-xs text-[var(--muted)]">
               Due
@@ -1076,16 +1080,20 @@ export function HomeworkWorkspace() {
               placeholder="e.g. MATH-FRAC-01"
             />
           </label>
-          <label className="block text-xs text-[var(--muted)]">
-            Reference answer / rubric (optional — grounds the AI grading assist on submitted photos, never shown to students)
+          <div className="block text-xs text-[var(--muted)]">
+            <div className="flex flex-wrap items-center gap-2">
+              <span>Reference answer / rubric (optional — grounds the AI grading assist on submitted photos, never shown to students)</span>
+              <VoiceDictateButton title="Dictate reference answer" value={referenceAnswer} onChange={setReferenceAnswer} disabled={readOnly} />
+            </div>
             <textarea
+              aria-label="Reference answer / rubric"
               className={`${field} mt-1 w-full`}
               rows={2}
               value={referenceAnswer}
               onChange={(e) => setReferenceAnswer(e.target.value)}
               placeholder="e.g. Q1: 3/4 + 1/8 = 7/8. Q2: correctly identifies photosynthesis inputs..."
             />
-          </label>
+          </div>
           <button type="button" className={btn} onClick={publishHw} disabled={readOnly}>
             {editingPostId ? "Save changes" : "Publish homework"}
           </button>
@@ -1113,31 +1121,32 @@ export function HomeworkWorkspace() {
               onChange={(e) => setDiaryTitle(e.target.value)}
             />
           </label>
-          <label className="block text-xs text-[var(--muted)]">
-            English
-            <span className="mt-1 flex items-start gap-1.5">
-              <textarea
-                className={`${field} w-full`}
-                rows={3}
-                value={diaryEn}
-                onChange={(e) => setDiaryEn(e.target.value)}
-              />
-              <VoiceMicButton
-                onTranscript={(t) =>
-                  setDiaryEn((prev) => (prev ? `${prev} ${t}` : t))
-                }
-              />
-            </span>
-          </label>
-          <label className="block text-xs text-[var(--muted)]">
-            Hindi (optional)
+          <div className="block text-xs text-[var(--muted)]">
+            <div className="flex flex-wrap items-center gap-2">
+              <span>English</span>
+              <VoiceDictateButton lang="en-IN" title="Dictate diary note (English)" value={diaryEn} onChange={setDiaryEn} disabled={readOnly} />
+            </div>
             <textarea
+              aria-label="Diary note (English)"
+              className={`${field} mt-1 w-full`}
+              rows={3}
+              value={diaryEn}
+              onChange={(e) => setDiaryEn(e.target.value)}
+            />
+          </div>
+          <div className="block text-xs text-[var(--muted)]">
+            <div className="flex flex-wrap items-center gap-2">
+              <span>Hindi (optional)</span>
+              <VoiceDictateButton lang="hi-IN" title="Dictate diary note (Hindi)" value={diaryHi} onChange={setDiaryHi} disabled={readOnly} />
+            </div>
+            <textarea
+              aria-label="Diary note (Hindi)"
               className={`${field} mt-1 w-full`}
               rows={2}
               value={diaryHi}
               onChange={(e) => setDiaryHi(e.target.value)}
             />
-          </label>
+          </div>
           <button type="button" className={btn} onClick={publishDiary} disabled={readOnly}>
             {editingDiaryId ? "Save changes" : "Post diary"}
           </button>
