@@ -153,7 +153,8 @@ export async function handleApaarConsentInbound(input: {
       return input.hindi ? "✅ आपके सभी बच्चों की APAAR ID पहले से बनी हुई है।" : "✅ All your children already have an APAAR ID.";
     }
     const sent = await sendApaarConsentAsk({ ...input, children: again, force: true });
-    return sent ? (input.hindi ? "👆 ऊपर के संदेश में एक बटन दबाइए।" : "👆 Please tap a button in the message above.") : input.hindi ? "क्षमा करें, अभी सहमति का संदेश नहीं भेज सके। थोड़ी देर बाद *APAAR* लिखकर फिर भेजें।" : "Sorry — the consent message could not be sent just now. Please send *APAAR* again in a few minutes.";
+    // Sent: the buttons are the reply — no second "tap a button above".
+    return sent ? "" : input.hindi ? "क्षमा करें, अभी सहमति का संदेश नहीं भेज सके। थोड़ी देर बाद *APAAR* लिखकर फिर भेजें।" : "Sorry — the consent message could not be sent just now. Please send *APAAR* again in a few minutes.";
   }
 
   // Everyone without an APAAR ID: the parent answered for the children

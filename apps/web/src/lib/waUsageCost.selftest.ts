@@ -8,6 +8,8 @@
 import assert from "node:assert/strict";
 import {
   DEFAULT_WA_RATES,
+  metaBillByMonth,
+  rupeeRange,
   billCategoryLabel,
   istDayKey,
   normalizeWaRates,
@@ -90,16 +92,25 @@ function msg(p: Partial<WaUsageMessage>): WaUsageMessage {
   );
 }
 
-// --- service messages are free today, and countable anyway ---------------
+// --- free-form replies: free until 30 Sep 2026, charged from 1 Oct -------
 {
-  const s = summariseWaUsage(
+  const before = summariseWaUsage(
+    [msg({ category: "service_free", templateName: "", outcome: "delivered" })],
+    rates,
+  );
+  assert.equal(before.serviceSent, 1);
+  assert.equal(before.templateSent, 0, "a free-form reply is not a template send");
+  assert.equal(before.messageCostPaise, 0, "a reply before 1 Oct 2026 cost nothing");
+  assert.equal(before.templates.length, 0, "free-form replies have no template row to show");
+
+  const after = summariseWaUsage(
     [msg({ category: "service", templateName: "", outcome: "delivered" })],
     rates,
   );
-  assert.equal(s.serviceSent, 1);
-  assert.equal(s.templateSent, 0, "a free-form reply is not a template send");
-  assert.equal(s.messageCostPaise, 0);
-  assert.equal(s.templates.length, 0, "free-form replies have no template row to show");
+  assert.equal(after.serviceSent, 1);
+  assert.equal(after.templateSent, 0);
+  assert.equal(after.messageCostPaise, Math.round(rates.service), "from 1 Oct 2026 a reply is billed");
+  assert.equal(repriceWaUsage(before, { ...rates, service: 50 }).messageCostPaise, 0, "a rate edit never charges September's replies");
 }
 
 // --- categories are priced apart, not lumped -----------------------------
@@ -500,7 +511,7 @@ function msg(p: Partial<WaUsageMessage>): WaUsageMessage {
       // A duty notice outside the window needs a paid template...
       am("staff", { category: "utility", templateName: "duty" }),
       // ...while a reply inside it is free. The whole point of the split.
-      am("staff", { category: "service", templateName: "" }),
+      am("staff", { category: "service_free", templateName: "" }),
       am("other", { category: "marketing", templateName: "enquiry" }),
     ],
     rates,
@@ -521,7 +532,7 @@ function msg(p: Partial<WaUsageMessage>): WaUsageMessage {
   );
   assert.deepEqual(
     staff.summary.buckets.map((b) => b.category).sort(),
-    ["service", "utility"],
+    ["service_free", "utility"],
     "cost per message type, within the staff section",
   );
   assert.equal(
@@ -536,7 +547,7 @@ function msg(p: Partial<WaUsageMessage>): WaUsageMessage {
       msg({ category: "utility" }),
       msg({ category: "utility" }),
       msg({ category: "utility" }),
-      msg({ category: "service", templateName: "" }),
+      msg({ category: "service_free", templateName: "" }),
       msg({ category: "marketing", templateName: "enquiry" }),
     ],
     rates,
@@ -805,6 +816,43 @@ function msg(p: Partial<WaUsageMessage>): WaUsageMessage {
     todayIso: "2026-09-10T06:00:00.000Z",
   });
   assert.equal(projectedSessionPaise(totals, done), totals.costPaise);
+}
+
+// --- Meta's bill from 1 Oct 2026: every message, a range for the free replies
+{
+  const r = { ...DEFAULT_WA_RATES };
+  assert.equal(r.service, 11.5, "₹0.115 a reply from 1 Oct 2026");
+  assert.equal(r.utility, 11.5);
+  assert.equal(r.serviceFreePerMonth, 1000);
+  assert.equal(r.gstPct, 18);
+  const bill = metaBillByMonth({
+    deliveredByMonth: { "2026-09": 3863, "2026-10": 1500 },
+    marketingByMonth: { "2026-10": 100 },
+    rates: r,
+    nowIso: "2026-10-10T06:00:00.000Z",
+  });
+  assert.equal(bill.length, 2);
+  const [sep, oct] = bill;
+  assert.equal(sep!.perMessage, false, "September was billed the old way");
+  assert.equal(sep!.highWithGstPaise, 0);
+  assert.equal(oct!.perMessage, true);
+  // 1,400 standard × 11.5 + 100 marketing × 78.46 = 16,100 + 7,846 = 23,946 paise before GST.
+  assert.equal(oct!.highPaise, 23946);
+  // All 1,000 free replies used: 400 × 11.5 + 7,846 = 12,446.
+  assert.equal(oct!.lowPaise, 12446);
+  assert.equal(oct!.highWithGstPaise, Math.round(23946 * 1.18), "GST on top");
+  // 10 Oct: 1,500 in 10 days → 4,650 by 31 Oct.
+  assert.equal(oct!.projection?.delivered, 4650);
+  assert.ok(oct!.projection!.highWithGstPaise > oct!.highWithGstPaise);
+  // A quiet month never goes below zero, and the free allowance never exceeds what was sent.
+  const quiet = metaBillByMonth({ deliveredByMonth: { "2026-11": 300 }, rates: r, nowIso: "2026-12-05T00:00:00Z" })[0]!;
+  assert.equal(quiet.lowPaise, 0);
+  assert.equal(quiet.highPaise, 3450);
+  assert.equal(quiet.projection, null, "a finished month is not paced");
+  assert.equal(rupeeRange(100, 100), "₹1.00");
+  assert.equal(rupeeRange(100, 250), "₹1.00 – ₹2.50");
+  assert.equal(rateFor(r, "service_free"), 0);
+  assert.equal(normalizeWaRates({}).serviceFreePerMonth, 1000, "an old saved rate card still gets the allowance");
 }
 
 console.log("  ok");

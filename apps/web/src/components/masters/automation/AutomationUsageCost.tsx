@@ -22,8 +22,10 @@ import {
   repriceWaUsageByStudent,
   projectedSessionPaise,
   rupees,
+  rupeeRange,
   waUsageYearTotals,
   type WaCostRates,
+  type WaMetaBillMonth,
   type WaUsageAudienceSection,
   type WaUsageByStudent,
   type WaUsageMonth,
@@ -56,6 +58,7 @@ type Report = {
   year: WaUsageYearWindow;
   rosterOk: boolean;
   attributedByNumber: number;
+  metaBill?: WaMetaBillMonth[];
 };
 
 /** The rate fields the office edits, in rupees per message. */
@@ -63,7 +66,7 @@ const RATE_FIELDS = [
   { key: "marketing" as const, label: "Marketing template", hint: "Offers, invites, anything promotional" },
   { key: "utility" as const, label: "Utility template", hint: "Fee reminders, receipts, notices" },
   { key: "authentication" as const, label: "Authentication template", hint: "OTP / login codes" },
-  { key: "service" as const, label: "Free-form reply", hint: "Replies inside the 24-hour window — free today" },
+  { key: "service" as const, label: "Free-form reply", hint: "Bot and office replies — charged from 1 Oct 2026 after 1,000 free a month" },
 ];
 
 function Stat({
@@ -376,9 +379,63 @@ export function AutomationUsageCost({ readOnly }: { readOnly: boolean }) {
             <Stat
               label="Messages the number sent"
               value={String(report.metaOutboundMessages)}
-              hint="Including free bot replies"
+              hint="Templates and replies — all billed from 1 Oct 2026"
             />
           </div>
+
+          {report.metaBill && report.metaBill.length ? (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] text-[var(--brand-deep)]">
+              <div className="font-semibold">
+                Meta&apos;s bill — from 1 Oct 2026 every message is charged
+              </div>
+              <div className="mt-0.5 text-[11px] text-[var(--muted)]">
+                ₹{rateRupees(Math.max(report.rates.utility, report.rates.service))} a
+                message (notices, receipts, replies) · marketing ₹
+                {rateRupees(report.rates.marketing)} · first{" "}
+                {report.rates.serviceFreePerMonth.toLocaleString("en-IN")} free-form
+                replies a month free · {report.rates.gstPct}% GST included below.
+                Counted from every message the number sent, so it matches the
+                invoice more closely than the template list.
+              </div>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                {report.metaBill.map((m) => (
+                  <div
+                    key={m.month}
+                    className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
+                  >
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                      {m.label} · {m.delivered.toLocaleString("en-IN")} messages
+                    </div>
+                    {m.perMessage ? (
+                      <>
+                        <div className="mt-0.5 text-lg font-semibold">
+                          {rupeeRange(m.lowWithGstPaise, m.highWithGstPaise)}
+                        </div>
+                        <div className="text-[10px] text-[var(--muted)]">
+                          Lower figure if all {report.rates.serviceFreePerMonth.toLocaleString("en-IN")} free
+                          replies are used; higher if none are.
+                        </div>
+                        {m.projection ? (
+                          <div className="mt-1 text-[11px]">
+                            At this pace: ~{m.projection.delivered.toLocaleString("en-IN")} messages ·{" "}
+                            <strong>
+                              {rupeeRange(m.projection.lowWithGstPaise, m.projection.highWithGstPaise)}
+                            </strong>{" "}
+                            by month end
+                          </div>
+                        ) : null}
+                      </>
+                    ) : (
+                      <div className="mt-0.5 text-[11px] text-[var(--muted)]">
+                        Before per-message billing — only templates were charged
+                        (see the figures above).
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           {summary.pendingCostPaise > 0 ? (
             <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-[11px] text-[var(--muted)]">

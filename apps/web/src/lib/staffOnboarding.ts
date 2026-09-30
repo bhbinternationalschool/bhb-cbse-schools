@@ -83,10 +83,8 @@ export function composeMorningAttendanceAsk(opts: { firstName: string; deferredT
       `सुप्रभात ${opts.firstName} 🙏`,
       "",
       "*पहले आज की अपनी उपस्थिति लगाएँ:*",
-      "1. नीचे 📎 (या +) पर टैप करें",
-      "2. *Location* चुनें",
-      "3. *Send your current location* पर टैप करें",
-      "(*Share live location* नहीं — स्कूल में रहते हुए भेजें)",
+      "ऑफ़िस QR स्क्रीन पर दिख रहा 6 अंकों का कोड *IN* के साथ भेजें — जैसे _IN 482913_",
+      "(कोड हर 30 सेकंड में बदलता है · या ERP ऐप में QR स्कैन करें)",
       "",
       echo ? `उसके बाद मैं आपके सवाल का जवाब दूँगा: "${echo}"` : "उसके बाद आपकी कक्षाएँ और काम दिखाऊँगा।",
       "",
@@ -97,10 +95,8 @@ export function composeMorningAttendanceAsk(opts: { firstName: string; deferredT
     `Good morning ${opts.firstName} 🙏`,
     "",
     "*First, mark your attendance for today:*",
-    "1. Tap 📎 (or +) next to the message box",
-    "2. Choose *Location*",
-    "3. Tap *Send your current location*",
-    "(Not *Share live location* — and send it while you are at school.)",
+    "Send *IN* with the 6-digit code on the office QR screen — e.g. _IN 482913_",
+    "(The code changes every 30 seconds · or scan the QR in the ERP app.)",
     "",
     echo ? `Then I'll answer what you asked: "${echo}"` : "Then I'll show your classes and what you can do today.",
     "",
@@ -256,7 +252,7 @@ export function composeStaffWorkGuide(input: {
     "",
     "🗓️ *Leave:* _CL tomorrow_ · _ML 2 Oct to 4 Oct fever_ · _my leave_ for your balance",
     "",
-    "⏱️ *Your own attendance:* _My attendance_ · to punch, send your location (📎 → Location → Send your current location)",
+    "⏱️ *Your own attendance:* _My attendance_ · to punch, send _IN 123456_ with the code on the office QR screen",
     "",
     "Anytime: *help* — everything I can do · *HUMAN* — message the office",
   );
@@ -343,9 +339,9 @@ export type OpenWork = {
     | "class_draft"
     | "feedback_recipient"
     | "leave_application";
-  /** What is open, in a few words: "your punch IN — waiting for your location". */
+  /** What is open, in a few words: "your punch IN — waiting for the code". */
   what: string;
-  /** How to finish it: "send your location (📎 → Location → Send your current location)". */
+  /** How to finish it: "send the 6-digit code shown on the office QR screen". */
   how: string;
 };
 
@@ -369,6 +365,15 @@ export function composeOpenWorkReminder(work: OpenWork, deferredText: string): s
     .filter((l, i, a) => l || (i > 0 && a[i - 1]))
     .join("\n")
     .trim();
+}
+
+/**
+ * "482913" or "482 913" — the office screen's punch code on its own. It is
+ * the answer an open punch is waiting for; held as a "question" instead, it
+ * was replayed later and the punch never ran (30 Sep 2026).
+ */
+export function isPunchCodeOnly(text: string): boolean {
+  return /^\s*\d{3}[\s-]?\d{3}\s*$/.test(text || "");
 }
 
 /** "CANCEL", "stop", "chhodo" — drop whatever job is open. */

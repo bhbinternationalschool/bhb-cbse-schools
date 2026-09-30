@@ -241,6 +241,12 @@ type MetaOwned = {
   metaTemplateId: string;
   rejectionReason: string;
   syncedAt: string;
+  /**
+   * Meta's category, not the one the template was submitted as: Meta
+   * re-classes on its own (bhb_exam_tomorrow went in as UTILITY and is
+   * billed as MARKETING in English), and the bill follows Meta's.
+   */
+  category?: string;
 };
 
 /**
@@ -270,6 +276,7 @@ export function overlayMetaFields<D extends MetaOwned>(desk: D[], registry: Meta
       metaTemplateId: r.metaTemplateId || d.metaTemplateId,
       rejectionReason: r.rejectionReason,
       syncedAt: r.syncedAt,
+      ...(r.category ? { category: r.category } : {}),
     };
   });
 }

@@ -481,13 +481,13 @@ export async function staffAttendanceOpenWorkFor(
   if (!thread || !pending) return null;
   const at = Date.parse(thread.updatedAt || "");
   if (!Number.isFinite(at) || Date.now() - at > PUNCH_OPEN_MS) return null;
-  const how = "send your location — 📎 → *Location* → *Send your current location*";
+  const how = "send the *6-digit code* shown on the office QR screen";
   if (pending.kind === "punch_out_confirm") {
     return { kind: "punch", what: "your early check-out", how: "reply *YES* to check out now" };
   }
   return {
     kind: "punch",
-    what: pending.kind === "punch_in" ? "your punch IN — waiting for your location" : "your punch OUT — waiting for your location",
+    what: pending.kind === "punch_in" ? "your punch IN — waiting for the code" : "your punch OUT — waiting for the code",
     how,
   };
 }
