@@ -133,6 +133,7 @@
     "test:staff-wa-real-chats": "npx tsx src/lib/staffWhatsAppRealChats.selftest.ts",
     "test:staff-onboarding": "npx tsx src/lib/staffOnboarding.selftest.ts",
     "test:staff-leave-wa": "npx tsx src/lib/staffLeaveWa.selftest.ts",
+    "test:class-notice-wa": "npx tsx src/lib/classNoticeWa.selftest.ts",
     "test:pin-review": "npx tsx src/lib/pinReview.selftest.ts",
     "test:due-pay-link": "npx tsx src/lib/duePayLink.selftest.ts",
     "test:fee-dues-server-inputs": "npx tsx src/lib/feeDuesServerInputs.selftest.ts",

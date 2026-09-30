@@ -673,7 +673,14 @@ export function buildWaTemplateBodyComponent(
     type: "body",
     parameters: variableKeys.map((key) => ({
       type: "text" as const,
-      text: String(vars[key] ?? "").slice(0, 1024) || "—",
+      // Meta refuses a parameter with a line break, a tab or more than four
+      // spaces in a row (error 132018) — for every recipient at once.
+      text:
+        String(vars[key] ?? "")
+          .replace(/\s*[\r\n\t]+\s*/g, " ")
+          .replace(/ {5,}/g, "    ")
+          .trim()
+          .slice(0, 1024) || "—",
     })),
   };
 }

@@ -275,6 +275,7 @@ jobs:
           npm run test:staff-wa-real-chats
           npm run test:staff-onboarding
           npm run test:staff-leave-wa
+          npm run test:class-notice-wa
           npm run test:pin-review
           npm run test:due-pay-link
           npm run test:fee-dues-server-inputs
