@@ -36,9 +36,23 @@ export async function loadWaTemplatesServer(): Promise<WaTemplatesState> {
     // nothing and tell the staff member it was their configuration.
     throw new Error(read.error || "Could not read WhatsApp templates");
   }
-  const templates = Array.isArray(read.bundle.templates)
+  const deskTemplates = Array.isArray(read.bundle.templates)
     ? (read.bundle.templates as WaTemplate[])
     : [];
+  // Meta's latest word (approved / rejected / paused) is in the registry the
+  // hourly sync and the status webhook keep; the desk copy only changes when
+  // someone saves in Masters. See overlayMetaFields.
+  let templates = deskTemplates;
+  try {
+    const { fetchServerBlob } = await import("@/lib/serverBlob");
+    const { overlayMetaFields } = await import("@/lib/waTemplateAutopilot");
+    const { state } = await fetchServerBlob<WaTemplatesState>("wa_templates_state");
+    if (state && Array.isArray(state.templates)) {
+      templates = overlayMetaFields(deskTemplates, state.templates);
+    }
+  } catch (e) {
+    console.warn("[waTemplatesRead] registry overlay skipped", (e as Error)?.message);
+  }
   // `senders` / `moduleSenders` came with multi-number routing on main. The
   // desk only ever asks this state which templates are approved, and the
   // slice does not carry them, so an empty routing table is the honest

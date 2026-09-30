@@ -730,6 +730,62 @@ Include 2-4 relevant variables in the body.`;
   };
 }
 
+/**
+ * Rewrite a WhatsApp template body that Meta rejected, so it can be
+ * resubmitted without a person (lib/waTemplateAutopilot.ts). The reply is
+ * checked by `validateTemplateRewrite` before Meta ever sees it; `feedback`
+ * carries that check's complaints into a second try.
+ */
+export async function generateWaTemplateRepairJson(opts: {
+  body: string;
+  language: "en" | "hi";
+  category: string;
+  reason: string;
+  variables: string[];
+  feedback?: string;
+}): Promise<
+  | { ok: true; body: string; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const system = `You fix WhatsApp Business message templates that Meta rejected, for an Indian CBSE school.
+Rules Meta enforces — follow every one:
+- Keep EXACTLY these placeholders, spelled the same, each once, in the SAME order: ${opts.variables.map((v) => `{{${v}}}`).join(", ") || "(none)"}.
+- Never start or end the body with a placeholder; put words between placeholders.
+- ${opts.category === "UTILITY" ? "UTILITY means transactional: a specific update about the recipient's child or the school day. No promotion, no offers, no urgency words like 'hurry' or 'limited'." : "Keep it clear, respectful and specific."}
+- No links unless the original had one. At most one blank line in a row. Under 900 characters.
+- Write in ${opts.language === "hi" ? "Hindi (Devanagari), simple and polite" : "simple, polite English"}; keep the original's meaning and tone.
+Respond with JSON only: {"body":"..."}.`;
+  const userMessage = [
+    `Meta's rejection reason: ${opts.reason || "(none given)"}`,
+    "",
+    "Rejected body:",
+    opts.body,
+    opts.feedback ? `\nYour previous rewrite was refused by our checker: ${opts.feedback}` : "",
+  ].join("\n");
+
+  const r = await callLlmJson(
+    {
+      system,
+      userMessage,
+      maxTokens: 900,
+      temperature: 0.2,
+      geminiMaxTokens: 3072,
+      meta: { route: "wa-template-repair", promptVersion: "v1" },
+    },
+    (text) => {
+      try {
+        const raw = JSON.parse(text) as { body?: string };
+        const body = String(raw.body || "").trim();
+        return body ? { body } : null;
+      } catch {
+        return null;
+      }
+    },
+  );
+  if (r.ok) return { ok: true, body: r.data.body, engine: r.engine, generationId: r.generationId };
+  return { ok: false, error: r.error || "No AI engine configured", engine: r.engine };
+}
+
 function parseWaDraftJson(
   text: string,
 ): { body: string; footer: string } | null {

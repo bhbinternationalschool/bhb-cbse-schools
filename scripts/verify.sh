@@ -103,6 +103,7 @@ SELFTESTS=(
   test:staff-onboarding
   test:staff-leave-wa
   test:class-notice-wa
+  test:wa-template-autopilot
   test:pin-review
   test:due-pay-link
   test:fee-dues-server-inputs
