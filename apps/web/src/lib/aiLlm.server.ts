@@ -61,6 +61,14 @@ import {
   type UdiseDocExtract,
 } from "@/lib/udiseDocIntakeAi";
 import {
+  ANSWER_SHEET_PROMPT_VERSION,
+  buildAnswerSheetSystemPrompt,
+  buildAnswerSheetUserPrompt,
+  parseAnswerSheetReply,
+  type AnswerSheetFacts,
+  type AnswerSheetResult,
+} from "@/lib/answerSheetAi";
+import {
   buildFollowupSystemPrompt,
   buildFollowupUserPrompt,
   parseFollowupDraft,
@@ -2411,6 +2419,85 @@ export async function readParentDocument(opts: {
     // it is given — a hash of that is of no use to anyone and the row is
     // read by staff.
     outputText: parsed ? parsed.docType : "",
+    promptTokens: r.ok ? r.usage.promptTokens : null,
+    completionTokens: r.ok ? r.usage.completionTokens : null,
+    latencyMs,
+    requester,
+  });
+
+  if (!r.ok) return { ok: false, failure: "read-failed", error: r.error };
+  if (!parsed) return { ok: false, failure: "read-failed", error: parseError };
+
+  noteAiBudgetUse(requester, (r.usage.promptTokens ?? 0) + (r.usage.completionTokens ?? 0));
+
+  return { ok: true, result: parsed, generationId };
+}
+
+/**
+ * Suggest marks for a photographed answer sheet (2026-09-30).
+ *
+ * Every page goes in ONE vision call, in order: an answer that runs over a
+ * page break is one answer, and a per-page call would have each page mark
+ * the questions it cannot see as "not found".
+ *
+ * Gemini only, "pro" tier. A wrong mark costs a child more than the tokens
+ * cost the school, and the OpenAI vision helper takes one image — a second
+ * provider would read a different subset of the pages. The fallback that
+ * matters here is the teacher, who confirms every number anyway.
+ *
+ * Recorded like readParentDocument: the photographs never reach the audit
+ * row (a page count and size stand in for them), and a reply that will not
+ * parse is a failed call, not an empty mark sheet.
+ */
+export async function suggestAnswerSheetMarks(opts: {
+  facts: AnswerSheetFacts;
+  pages: { base64: string; mimeType: string }[];
+  requester?: string;
+}): Promise<
+  | { ok: true; result: AnswerSheetResult; generationId: string }
+  | { ok: false; failure: "not-configured" | "budget" | "read-failed"; error: string }
+> {
+  if (!geminiConfigured()) {
+    return { ok: false, failure: "not-configured", error: "GEMINI_API_KEY not configured" };
+  }
+  const [first, ...rest] = opts.pages;
+  if (!first) return { ok: false, failure: "read-failed", error: "No pages" };
+
+  const { requester, budget } = await startLlmPrecheck({ requester: opts.requester });
+  if (!budget.ok) return { ok: false, failure: "budget", error: budget.reason };
+
+  const system = buildAnswerSheetSystemPrompt();
+  const prompt = buildAnswerSheetUserPrompt(opts.facts);
+  const t0 = Date.now();
+  const r = await generateGeminiVisionJson({
+    system,
+    prompt,
+    base64: first.base64,
+    mimeType: first.mimeType,
+    moreImages: rest,
+    model: geminiModel("pro"),
+    // ~120 output tokens a question (the reading is near-verbatim) for up to
+    // 80 questions, plus the pro model's thinking out of the same allowance.
+    // Headroom, not measured against a real sheet yet.
+    maxTokens: 16000,
+  });
+  const latencyMs = Date.now() - t0;
+
+  const parsed = r.ok ? parseAnswerSheetReply(r.text, opts.facts) : null;
+  const parseError = r.ok && !parsed ? "The reading was not valid JSON (truncated or fenced)" : "";
+  const bytes = opts.pages.reduce((a, p) => a + Math.floor((p.base64.length * 3) / 4), 0);
+
+  const generationId = await recordAiGeneration({
+    route: "answer-sheet-marks",
+    promptVersion: ANSWER_SHEET_PROMPT_VERSION,
+    tier: "pro",
+    engine: "gemini",
+    model: r.model,
+    status: parsed ? "ok" : "error",
+    error: r.ok ? parseError : r.error,
+    // The paper and a descriptor of the pages — never the photographs.
+    inputText: `${system}\n---\n${prompt}\n---\n[${opts.pages.length} page image(s), ${bytes} bytes]`,
+    outputText: r.ok ? r.text : "",
     promptTokens: r.ok ? r.usage.promptTokens : null,
     completionTokens: r.ok ? r.usage.completionTokens : null,
     latencyMs,

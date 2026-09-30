@@ -417,6 +417,7 @@ jobs:
           npm run test:staff-roster-redact
           npm run test:sis-class-teacher
           npm run test:punch-code
+          npm run test:answer-sheet-ai
           npm run test:punch-devices
           npm run test:module-state-merge
           npm run test:staff-day-status

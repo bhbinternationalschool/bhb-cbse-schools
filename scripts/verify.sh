@@ -307,6 +307,7 @@ SELFTESTS=(
   test:staff-roster-redact
   test:sis-class-teacher
   test:punch-code
+  test:answer-sheet-ai
   test:punch-devices
   test:module-state-merge
   test:staff-day-status

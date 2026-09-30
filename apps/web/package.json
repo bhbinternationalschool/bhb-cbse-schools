@@ -45,6 +45,7 @@
     "test:staff-roster-redact": "npx tsx src/lib/staffRosterRedact.selftest.ts",
     "test:sis-class-teacher": "npx tsx src/lib/sisClassTeacher.selftest.ts",
     "test:punch-code": "npx tsx src/lib/punchCode.selftest.ts",
+    "test:answer-sheet-ai": "npx tsx src/lib/answerSheetAi.selftest.ts",
     "test:punch-devices": "npx tsx src/lib/punchDevices.selftest.ts",
     "test:module-state-merge": "npx tsx src/lib/moduleStateMerge.selftest.ts",
     "test:staff-day-status": "npx tsx src/lib/staffDayStatus.selftest.ts",
