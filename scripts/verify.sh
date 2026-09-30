@@ -174,6 +174,7 @@ SELFTESTS=(
   test:open-lookups
   test:free-routing
   test:bhashini
+  test:subject-masters
   test:wa-sender-routing
   test:receipt-repair
   test:projection-double-post

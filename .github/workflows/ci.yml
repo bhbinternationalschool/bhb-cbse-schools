@@ -155,6 +155,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:bhashini
 
+      - name: Self-test — a subject the school adds is never hidden, and codes stay unique
+        working-directory: apps/web
+        run: npm run test:subject-masters
+
       - name: Test — which number sends which template, and both languages
         working-directory: apps/web
         run: npm run test:wa-sender-routing
