@@ -236,3 +236,163 @@ export function parseTranslation(raw: unknown, sent: string): string | null {
 
 /** Bhashini's documented per-request input cap for translation. */
 export const BHASHINI_MAX_INPUT_CHARS = 2000;
+
+/* ── Speech: the same two calls, for ASR and TTS ─────────────────────── */
+
+/*
+ * The ULCA key that does translation also does speech, through the same
+ * pipeline: step 1 names a model for (task, language), step 2 runs it. So
+ * dictation, staff voice commands and read-aloud can go to Bhashini first
+ * and to the paid Google key only when it fails — the same rule as
+ * translation, and the same silence about why.
+ *
+ * Same caveat as above: the shapes follow the published docs and the
+ * parsers refuse anything they do not recognise, which degrades to "Google
+ * answers instead", today's behaviour.
+ */
+
+export type BhashiniSpeechTask = "asr" | "tts";
+
+/** Step 1 for a speech task: one language, no target. */
+export function speechConfigRequestBody(
+  task: BhashiniSpeechTask,
+  lang: string,
+  pipelineId: string,
+) {
+  return {
+    pipelineTasks: [{ taskType: task, config: { language: { sourceLanguage: lang } } }],
+    pipelineRequestConfig: { pipelineId },
+  };
+}
+
+/**
+ * A BCP-47 speech code ("hi-IN", "en-IN") → Bhashini's, or null.
+ *
+ * Goes through the same table as translation so the two cannot disagree
+ * about which languages exist — Bhojpuri included, which has no speech
+ * model either.
+ */
+export function bhashiniSpeechLang(code: string): string | null {
+  const c = String(code || "").trim();
+  if (!c) return null;
+  const direct = bhashiniLang(c);
+  if (direct) return direct;
+  const base = c.split("-")[0].toLowerCase();
+  return bhashiniLang(`${base}-IN`) ?? (base === "or" ? "or" : null);
+}
+
+/**
+ * The audioFormat Bhashini is told, or null to leave the recording to
+ * Google.
+ *
+ * WhatsApp voice notes are Ogg/Opus; the dictation mic sends WAV when it
+ * had to convert. Chrome's native WebM is NOT on Bhashini's documented
+ * list, so it returns null rather than be sent under a format name it is
+ * not — a mislabelled recording comes back as confident nonsense, which a
+ * teacher would read as their own mistake.
+ */
+export function bhashiniAudioFormat(mimeType: string | undefined): "wav" | "ogg" | "flac" | "mp3" | null {
+  const m = String(mimeType || "").toLowerCase();
+  if (!m) return null;
+  if (m.includes("webm")) return null;
+  if (m.includes("wav") || m.includes("wave")) return "wav";
+  if (m.includes("ogg") || m.includes("opus")) return "ogg";
+  if (m.includes("flac")) return "flac";
+  if (m.includes("mpeg") || m.includes("mp3")) return "mp3";
+  return null;
+}
+
+/** Strip a data-URL prefix; Bhashini wants the bare base64. */
+export function bareBase64(audio: string): string {
+  return String(audio || "").replace(/^data:[^;]+;base64,/, "").trim();
+}
+
+export function asrInferenceBody(opts: {
+  serviceId: string;
+  lang: string;
+  audioBase64: string;
+  audioFormat: "wav" | "ogg" | "flac" | "mp3";
+}) {
+  return {
+    pipelineTasks: [
+      {
+        taskType: "asr",
+        config: {
+          language: { sourceLanguage: opts.lang },
+          serviceId: opts.serviceId,
+          audioFormat: opts.audioFormat,
+          samplingRate: 16000,
+        },
+      },
+    ],
+    inputData: { audio: [{ audioContent: bareBase64(opts.audioBase64) }] },
+  };
+}
+
+/**
+ * The transcript, or null.
+ *
+ * Documented shape: { pipelineResponse: [ { output: [ { source } ] } ] }.
+ * An empty or whitespace transcript is null, not "", so the caller falls
+ * through to Google instead of saving a blank remark as dictated.
+ */
+export function parseAsr(raw: unknown): string | null {
+  const root = obj(raw);
+  if (!root) return null;
+  const responses = Array.isArray(root.pipelineResponse) ? root.pipelineResponse : [];
+  for (const r of responses) {
+    const rr = obj(r);
+    const outputs = rr && Array.isArray(rr.output) ? rr.output : [];
+    const text = outputs
+      .map((o) => {
+        const oo = obj(o);
+        return oo ? str(oo.source) : "";
+      })
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    if (text) return text;
+  }
+  return null;
+}
+
+export function ttsInferenceBody(opts: { serviceId: string; lang: string; text: string }) {
+  return {
+    pipelineTasks: [
+      {
+        taskType: "tts",
+        config: {
+          language: { sourceLanguage: opts.lang },
+          serviceId: opts.serviceId,
+          gender: "female",
+          samplingRate: 22050,
+        },
+      },
+    ],
+    inputData: { input: [{ source: opts.text }] },
+  };
+}
+
+/**
+ * The spoken audio as base64 WAV, or null.
+ *
+ * Documented shape: { pipelineResponse: [ { audio: [ { audioContent } ] } ] }.
+ */
+export function parseTts(raw: unknown): string | null {
+  const root = obj(raw);
+  if (!root) return null;
+  const responses = Array.isArray(root.pipelineResponse) ? root.pipelineResponse : [];
+  for (const r of responses) {
+    const rr = obj(r);
+    const audio = rr && Array.isArray(rr.audio) ? rr.audio : [];
+    for (const a of audio) {
+      const aa = obj(a);
+      const content = aa ? str(aa.audioContent) : "";
+      if (content) return content;
+    }
+  }
+  return null;
+}
+
+/** Longest text sent for read-aloud; longer goes to Google, which takes 5,000. */
+export const BHASHINI_MAX_TTS_CHARS = 2000;

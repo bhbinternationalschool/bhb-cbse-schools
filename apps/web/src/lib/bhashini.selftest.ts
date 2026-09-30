@@ -9,6 +9,14 @@ import {
   inferenceRequestBody,
   parsePipelineConfig,
   parseTranslation,
+  asrInferenceBody,
+  bareBase64,
+  bhashiniAudioFormat,
+  bhashiniSpeechLang,
+  parseAsr,
+  parseTts,
+  speechConfigRequestBody,
+  ttsInferenceBody,
 } from "./bhashini";
 import { HOUSEHOLD_LANGUAGES } from "./householdPrefs";
 
@@ -162,5 +170,74 @@ assert.equal(parseTranslation("<html>429</html>", "x"), null);
 assert.equal(parseTranslation(null, "x"), null);
 
 assert.ok(BHASHINI_MAX_INPUT_CHARS > 0);
+
+/* ── Speech: languages ───────────────────────────────────────────────── */
+
+assert.equal(bhashiniSpeechLang("hi-IN"), "hi");
+assert.equal(bhashiniSpeechLang("en-IN"), "en");
+assert.equal(bhashiniSpeechLang("hi"), "hi", "a bare base code still resolves");
+assert.equal(bhashiniSpeechLang("od-IN"), "or");
+// Same refusal as translation: no Bhojpuri model means Google, not Hindi.
+assert.equal(bhashiniSpeechLang("bho"), null);
+assert.equal(bhashiniSpeechLang("bho-IN"), null);
+assert.equal(bhashiniSpeechLang(""), null);
+
+/* ── Speech: which recordings Bhashini is trusted with ───────────────── */
+
+assert.equal(bhashiniAudioFormat("audio/ogg; codecs=opus"), "ogg", "WhatsApp voice notes");
+assert.equal(bhashiniAudioFormat("audio/wav"), "wav", "the dictation mic after conversion");
+assert.equal(bhashiniAudioFormat("audio/x-wav"), "wav");
+assert.equal(bhashiniAudioFormat("audio/mpeg"), "mp3");
+assert.equal(bhashiniAudioFormat("audio/flac"), "flac");
+// WebM is not on Bhashini's list. Sent under another name it comes back as
+// confident nonsense a teacher would blame on themselves, so it goes to
+// Google instead.
+assert.equal(bhashiniAudioFormat("audio/webm;codecs=opus"), null);
+assert.equal(bhashiniAudioFormat("audio/mp4"), null);
+assert.equal(bhashiniAudioFormat(undefined), null);
+
+assert.equal(bareBase64("data:audio/ogg;base64,AAAA"), "AAAA");
+assert.equal(bareBase64("AAAA"), "AAAA");
+
+/* ── Speech: request shapes ──────────────────────────────────────────── */
+
+assert.deepEqual(speechConfigRequestBody("asr", "hi", DEFAULT_PIPELINE_ID), {
+  pipelineTasks: [{ taskType: "asr", config: { language: { sourceLanguage: "hi" } } }],
+  pipelineRequestConfig: { pipelineId: DEFAULT_PIPELINE_ID },
+});
+const asr = asrInferenceBody({
+  serviceId: "svc",
+  lang: "hi",
+  audioBase64: "data:audio/ogg;base64,QUJD",
+  audioFormat: "ogg",
+});
+assert.equal(asr.pipelineTasks[0].taskType, "asr");
+assert.equal(asr.pipelineTasks[0].config.serviceId, "svc");
+assert.equal(asr.pipelineTasks[0].config.audioFormat, "ogg");
+assert.equal(asr.inputData.audio[0].audioContent, "QUJD", "no data-URL prefix reaches Bhashini");
+const tts = ttsInferenceBody({ serviceId: "svc", lang: "hi", text: "नमस्ते" });
+assert.equal(tts.pipelineTasks[0].taskType, "tts");
+assert.equal(tts.inputData.input[0].source, "नमस्ते");
+
+/* ── Speech: reading answers ─────────────────────────────────────────── */
+
+assert.equal(
+  parseAsr({ pipelineResponse: [{ output: [{ source: "कल छुट्टी है" }] }] }),
+  "कल छुट्टी है",
+);
+assert.equal(
+  parseAsr({ pipelineResponse: [{ output: [{ source: "पहला" }, { source: "दूसरा" }] }] }),
+  "पहला दूसरा",
+);
+// An empty transcript is a failure, not a blank remark saved as dictated.
+assert.equal(parseAsr({ pipelineResponse: [{ output: [{ source: "   " }] }] }), null);
+assert.equal(parseAsr({ pipelineResponse: [] }), null);
+assert.equal(parseAsr({ error: "quota exceeded" }), null);
+assert.equal(parseAsr("<html>429</html>"), null);
+
+assert.equal(parseTts({ pipelineResponse: [{ audio: [{ audioContent: "UklGRg==" }] }] }), "UklGRg==");
+assert.equal(parseTts({ pipelineResponse: [{ audio: [] }] }), null);
+assert.equal(parseTts({ pipelineResponse: [{ output: [{ target: "x" }] }] }), null);
+assert.equal(parseTts(null), null);
 
 console.log("OK — bhashini.selftest.ts");

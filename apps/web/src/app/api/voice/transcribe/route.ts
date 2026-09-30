@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireStaffApi } from "@/lib/apiRouteAuth.server";
-import { googleSpeechToText } from "@/lib/googleSpeech.server";
+import { speechToText } from "@/lib/speech.server";
 import { MAX_DICTATION_BASE64_CHARS, speechAudioKind } from "@/lib/voiceDictation";
 
 export const runtime = "nodejs";
@@ -9,7 +9,7 @@ export const runtime = "nodejs";
  * Dictation for staff free-text fields (remarks, notes, reasons).
  *
  * 2026-09-30: staff only. It used to accept ANY signed session — parents,
- * students, drivers — and every call is a paid Google speech request. The
+ * students, drivers — and a call Bhashini cannot answer is a paid Google one. The
  * only callers are the staff dictation mic (VoiceDictateButton); parents
  * talk through /api/parent-voice, which has its own gate.
  */
@@ -48,7 +48,7 @@ export async function POST(req: Request) {
   }
 
   const languageCode = body.languageCode === "en-IN" ? "en-IN" : "hi-IN";
-  const result = await googleSpeechToText({
+  const result = await speechToText({
     audioBase64: body.audioBase64,
     mimeType: body.mimeType,
     languageCode,
@@ -58,5 +58,5 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: result.error }, { status: 400 });
   }
 
-  return NextResponse.json({ ok: true, text: result.text });
+  return NextResponse.json({ ok: true, text: result.text, engine: result.engine });
 }
