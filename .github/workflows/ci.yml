@@ -419,6 +419,7 @@ jobs:
           npm run test:staff-roster-redact
           npm run test:sis-class-teacher
           npm run test:punch-code
+          npm run test:wa-language-gate
           npm run test:answer-sheet-ai
           npm run test:voice-dictation
           npm run test:punch-devices

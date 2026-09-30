@@ -309,6 +309,7 @@ SELFTESTS=(
   test:staff-roster-redact
   test:sis-class-teacher
   test:punch-code
+  test:wa-language-gate
   test:answer-sheet-ai
   test:voice-dictation
   test:punch-devices
