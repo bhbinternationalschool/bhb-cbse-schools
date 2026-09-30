@@ -880,6 +880,35 @@ export function SubjectsPanel({ state, commit }: { state: MastersState; commit: 
             title="School subjects & components"
             hint="What your school actually teaches. Components (Oral, Written…) sit under their subject. A subject not yet linked to any class always shows here."
           >
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <input
+                className="field !w-auto min-w-[10rem] flex-1 !py-1.5"
+                placeholder="Search code or name…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                aria-label="Search subjects"
+              />
+              <select
+                className="field !w-auto !py-1.5 text-xs"
+                value={stageFilter}
+                onChange={(e) => setStageFilter(e.target.value as ClassGroupCode | "")}
+                aria-label="Stage filter"
+              >
+                <option value="">All stages</option>
+                {CLASS_GROUPS.map((g) => (
+                  <option key={g.code} value={g.code}>
+                    {g.label} ({g.shortLabel})
+                  </option>
+                ))}
+              </select>
+              <label className="flex items-center gap-1.5 text-xs font-semibold text-[var(--brand-deep)]">
+                <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
+                Show inactive
+              </label>
+              <Button type="button" size="sm" onClick={() => openAdd()}>
+                <Plus className="size-4" /> Add subject
+              </Button>
+            </div>
             <DataTable
               columns={schoolColumns}
               rows={schoolRows}
@@ -894,37 +923,6 @@ export function SubjectsPanel({ state, commit }: { state: MastersState; commit: 
               exportTitle="School subjects & components"
               emptyTitle={query || stageFilter ? "No subject matches" : "No subjects yet"}
               emptyDescription={query || stageFilter ? "Clear the search or stage filter." : "Add a subject, or add from the NCF suggestions below."}
-              toolbar={
-                <>
-                  <input
-                    className="field !w-auto min-w-[10rem] flex-1 !py-1.5"
-                    placeholder="Search code or name…"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    aria-label="Search subjects"
-                  />
-                  <select
-                    className="field !w-auto !py-1.5 text-xs"
-                    value={stageFilter}
-                    onChange={(e) => setStageFilter(e.target.value as ClassGroupCode | "")}
-                    aria-label="Stage filter"
-                  >
-                    <option value="">All stages</option>
-                    {CLASS_GROUPS.map((g) => (
-                      <option key={g.code} value={g.code}>
-                        {g.label} ({g.shortLabel})
-                      </option>
-                    ))}
-                  </select>
-                  <label className="flex items-center gap-1.5 text-xs font-semibold text-[var(--brand-deep)]">
-                    <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
-                    Show inactive
-                  </label>
-                  <Button type="button" size="sm" onClick={() => openAdd()}>
-                    <Plus className="size-4" /> Add subject
-                  </Button>
-                </>
-              }
             />
           </SectionCard>
 
@@ -938,6 +936,34 @@ export function SubjectsPanel({ state, commit }: { state: MastersState; commit: 
               </>
             }
           >
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <select
+                className="field !w-auto !py-1.5 text-xs"
+                value={ncfStage}
+                onChange={(e) => setNcfStage(e.target.value as ClassGroupCode)}
+                aria-label="NCF stage"
+              >
+                {CLASS_GROUPS.map((g) => (
+                  <option key={g.code} value={g.code}>
+                    {g.label} ({g.shortLabel})
+                  </option>
+                ))}
+              </select>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={nepAnalysis.missingCount === 0}
+                onClick={addAllMissing}
+              >
+                {nepAnalysis.missingCount === 0 ? "All in school" : `Add ${nepAnalysis.missingCount} missing`}
+              </Button>
+              {ncfStage === "SECONDARY" || ncfStage === "SENIOR" ? (
+                <Button type="button" size="sm" variant="outline" onClick={seedCartOfferings}>
+                  {ncfCartOfferingsReady(state) ? "Refresh cart seed" : "Seed cart for IX–XII"}
+                </Button>
+              ) : null}
+            </div>
             <DataTable
               columns={ncfColumns}
               rows={ncfRows}
@@ -949,36 +975,6 @@ export function SubjectsPanel({ state, commit }: { state: MastersState; commit: 
               exportFileBaseName={`ncf-suggestions-${ncfStage.toLowerCase()}`}
               exportTitle={`NCF / NEP suggestions · ${nepPack.label}`}
               emptyTitle="No suggestions for this stage"
-              toolbar={
-                <>
-                  <select
-                    className="field !w-auto !py-1.5 text-xs"
-                    value={ncfStage}
-                    onChange={(e) => setNcfStage(e.target.value as ClassGroupCode)}
-                    aria-label="NCF stage"
-                  >
-                    {CLASS_GROUPS.map((g) => (
-                      <option key={g.code} value={g.code}>
-                        {g.label} ({g.shortLabel})
-                      </option>
-                    ))}
-                  </select>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    disabled={nepAnalysis.missingCount === 0}
-                    onClick={addAllMissing}
-                  >
-                    {nepAnalysis.missingCount === 0 ? "All in school" : `Add ${nepAnalysis.missingCount} missing`}
-                  </Button>
-                  {ncfStage === "SECONDARY" || ncfStage === "SENIOR" ? (
-                    <Button type="button" size="sm" variant="outline" onClick={seedCartOfferings}>
-                      {ncfCartOfferingsReady(state) ? "Refresh cart seed" : "Seed cart for IX–XII"}
-                    </Button>
-                  ) : null}
-                </>
-              }
             />
             <details className="mt-3 rounded-lg bg-[var(--surface-sunken)] px-3 py-2">
               <summary className="cursor-pointer text-xs font-semibold text-[var(--brand-deep)]">
