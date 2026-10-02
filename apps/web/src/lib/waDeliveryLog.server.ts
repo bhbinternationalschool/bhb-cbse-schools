@@ -14,6 +14,14 @@ export type WaDeliveryStatusEvent = {
   mobile?: string;
   errorMessage?: string;
   eventAt?: string;
+  /**
+   * Meta's `pricing` block, on sent/delivered/read events: whether THIS
+   * message is charged, and in which category. A utility template inside an
+   * open 24-hour window and every free-form reply come back billable=false.
+   */
+  billable?: boolean;
+  pricingCategory?: string;
+  pricingType?: string;
 };
 
 /** Pure — extract `statuses` events from a Meta webhook POST body. */
@@ -30,6 +38,7 @@ export function parseMetaStatusUpdates(body: unknown): WaDeliveryStatusEvent[] {
             timestamp?: string;
             recipient_id?: string;
             errors?: { title?: string; message?: string }[];
+            pricing?: { billable?: unknown; category?: unknown; type?: unknown };
           }[];
         };
       }[];
@@ -40,7 +49,15 @@ export function parseMetaStatusUpdates(body: unknown): WaDeliveryStatusEvent[] {
       for (const s of change.value?.statuses || []) {
         if (!s.id || !s.status) continue;
         const ts = Number(s.timestamp);
+        const p = s.pricing;
         out.push({
+          ...(p && typeof p.billable === "boolean"
+            ? {
+                billable: p.billable,
+                pricingCategory: typeof p.category === "string" ? p.category.toLowerCase() : undefined,
+                pricingType: typeof p.type === "string" ? p.type.toLowerCase() : undefined,
+              }
+            : {}),
           waMessageId: s.id,
           status: s.status,
           mobile: s.recipient_id,
@@ -95,8 +112,25 @@ export async function recordDeliveryStatuses(
       error_message: e.errorMessage || null,
       event_at: e.eventAt || now,
       updated_at: now,
+      billable: e.billable ?? null,
+      pricing_category: e.pricingCategory ?? null,
+      pricing_type: e.pricingType ?? null,
     }));
-    const { error } = await sb.from("wa_message_delivery").insert(rows);
+    let { error } = await sb.from("wa_message_delivery").insert(rows);
+    if (error && /billable|pricing_(category|type)/.test(error.message)) {
+      // Deployed before migration 20261002130000 reached this database: the
+      // delivery log itself matters more than the pricing columns, so write
+      // the row without them rather than lose it.
+      console.warn("[waDeliveryLog] pricing columns missing — saving without", error.message);
+      const bare = rows.map((r) => {
+        const rest: Partial<typeof r> = { ...r };
+        delete rest.billable;
+        delete rest.pricing_category;
+        delete rest.pricing_type;
+        return rest;
+      });
+      ({ error } = await sb.from("wa_message_delivery").insert(bare));
+    }
     if (error) console.warn("[waDeliveryLog] insert failed", error.message);
 
     // Meta has just told us a number is not a WhatsApp user (131026). Write

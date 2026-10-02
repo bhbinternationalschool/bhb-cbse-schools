@@ -60,7 +60,6 @@ export async function saveWaCostRates(
         marketing: next.marketing,
         utility: next.utility,
         authentication: next.authentication,
-        service: next.service,
         aiInputPerKTok: next.aiInputPerKTok,
         aiOutputPerKTok: next.aiOutputPerKTok,
         note: next.note,
