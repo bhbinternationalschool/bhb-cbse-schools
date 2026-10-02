@@ -409,58 +409,95 @@ async function metaPricingFor(waMessageIds: string[]): Promise<Map<string, WaMet
 
 function chargedCategory(c: string): WaChargedCategory {
   const cat = billCategoryFor({ isTemplate: true, catalogueCategory: "unknown", meta: { billable: true, category: c } });
-  return cat === "marketing" || cat === "utility" || cat === "authentication" ? cat : "unknown";
+  return cat === "marketing" || cat === "utility" || cat === "authentication" || cat === "service"
+    ? cat
+    : "unknown";
 }
 
 /**
- * Every message Meta priced in each IST month — templates the bot sent
- * outside the send log included — each message counted once, in the month
- * of its first priced report. Paged: a busy month is several thousand rows
- * and PostgREST stops at 1,000 a read.
+ * Every message the number sent in each IST month, from the delivery
+ * reports — bot replies and bot-sent templates included, which never touch
+ * the send log — each message counted once, in the month of its first
+ * report. A message Meta priced goes into `priced`; one it never priced
+ * (sent before the flag was stored) and that did not fail goes into
+ * `unpriced`, categorised by billCategoryFor: its send-log category if the
+ * log knows it as a template, otherwise a free-form reply. Paged: a busy
+ * month is thousands of rows and PostgREST stops at 1,000 a read.
  */
-async function metaPricedByMonth(months: string[]): Promise<Record<string, WaMetaPricedMonth>> {
-  const out: Record<string, WaMetaPricedMonth> = {};
+async function metaBillInputs(
+  months: string[],
+  templateCategoryById: Map<string, WaBillCategory>,
+): Promise<{
+  priced: Record<string, WaMetaPricedMonth>;
+  unpriced: Record<string, Partial<Record<WaBillCategory, number>>>;
+}> {
+  const priced: Record<string, WaMetaPricedMonth> = {};
+  const unpriced: Record<string, Partial<Record<WaBillCategory, number>>> = {};
   const ctx = await getServerTenantContext();
-  if (!ctx || months.length === 0) return out;
+  if (!ctx || months.length === 0) return { priced, unpriced };
   const sorted = [...months].sort();
   const from = istMonthStart(sorted[0]!);
   const to = istMonthStart(nextMonth(sorted[sorted.length - 1]!));
-  const seen = new Map<string, { month: string; p: WaMetaPricing }>();
+  type Acc = { month: string; p: WaMetaPricing | null; failed: boolean };
+  const seen = new Map<string, Acc>();
   const PAGE = 1000;
-  for (let offset = 0; offset < 50_000; offset += PAGE) {
-    const { data, error } = await ctx.sb
-      .from("wa_message_delivery")
-      .select("wa_message_id, event_at, billable, pricing_category")
-      .eq("tenant_id", ctx.tenantId)
-      .not("billable", "is", null)
-      .gte("event_at", from)
-      .lt("event_at", to)
-      .order("event_at", { ascending: true })
-      .order("id", { ascending: true })
-      .range(offset, offset + PAGE - 1);
+  for (let offset = 0; offset < 100_000; offset += PAGE) {
+    const page = (cols: string) =>
+      ctx.sb
+        .from("wa_message_delivery")
+        .select(cols)
+        .eq("tenant_id", ctx.tenantId)
+        .gte("event_at", from)
+        .lt("event_at", to)
+        .order("event_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(offset, offset + PAGE - 1);
+    let res = await page("wa_message_id, status, event_at, billable, pricing_category");
+    if (res.error && /billable|pricing_category/.test(res.error.message)) {
+      // Pricing columns not migrated: everything is estimated.
+      res = await page("wa_message_id, status, event_at");
+    }
+    const { error } = res;
+    const data = res.data as unknown as Record<string, unknown>[] | null;
     if (error) {
-      console.warn("[waUsage] monthly pricing read failed", error.message);
+      console.warn("[waUsage] monthly delivery read failed", error.message);
       break;
     }
     for (const r of data || []) {
       const id = String(r.wa_message_id || "");
+      if (!id) continue;
       const p = pricingFromRow(r);
-      if (!id || !p) continue;
-      const cur = seen.get(id);
-      if (!cur) seen.set(id, { month: istMonthKey(String(r.event_at || "")), p });
-      else if (p.billable && !cur.p.billable) cur.p = p;
+      let cur = seen.get(id);
+      if (!cur) {
+        cur = { month: istMonthKey(String(r.event_at || "")), p: null, failed: false };
+        seen.set(id, cur);
+      }
+      if (p && (!cur.p || (p.billable && !cur.p.billable))) cur.p = p;
+      if (String(r.status || "") === "failed") cur.failed = true;
     }
     if (!data || data.length < PAGE) break;
   }
-  for (const { month, p } of seen.values()) {
-    const row = (out[month] ??= { charged: {}, free: 0 });
-    if (!p.billable) row.free++;
-    else {
-      const c = chargedCategory(p.category);
-      row.charged[c] = (row.charged[c] ?? 0) + 1;
+  for (const [id, { month, p, failed }] of seen) {
+    if (p) {
+      const row = (priced[month] ??= { charged: {}, free: 0 });
+      if (!p.billable) row.free++;
+      else {
+        const c = chargedCategory(p.category);
+        row.charged[c] = (row.charged[c] ?? 0) + 1;
+      }
+      continue;
     }
+    if (failed) continue;
+    const logCat = templateCategoryById.get(id);
+    const cat = billCategoryFor({
+      isTemplate: !!logCat,
+      catalogueCategory: logCat ?? "unknown",
+      month,
+    });
+    const bucket = (unpriced[month] ??= {});
+    bucket[cat] = (bucket[cat] ?? 0) + 1;
   }
-  return out;
+  return { priced, unpriced };
 }
 
 async function countMetaOutbound(sinceIso: string): Promise<number> {
@@ -580,8 +617,8 @@ export async function waUsageReport(
   let uncategorised = 0;
   let attributedByNumber = 0;
   let metaPriced = 0;
-  /** Delivered templates Meta never priced, by IST month and category. */
-  const unpricedByMonth: Record<string, Partial<Record<WaBillCategory, number>>> = {};
+  /** Send-log templates by message id, at their catalogue category — for estimating unpriced ones. */
+  const templateCategoryById = new Map<string, WaBillCategory>();
   const attributed: WaUsageAttributedMessage[] = [];
   const byAudience: WaUsageAudienceMessage[] = [];
   const yearMessages: WaUsageMessage[] = [];
@@ -589,11 +626,15 @@ export async function waUsageReport(
   for (const r of rows) {
     const templateName = String(r.template_name || "").trim();
     const isTemplate = String(r.via || "") === "template" || !!templateName;
-    const meta = pricing.get(String(r.wa_message_id || "")) ?? null;
+    const waId = String(r.wa_message_id || "");
+    const meta = pricing.get(waId) ?? null;
+    const catalogueCategory = map.get(templateName.toLowerCase()) ?? "unknown";
+    if (isTemplate && waId) templateCategoryById.set(waId, catalogueCategory);
     const category = billCategoryFor({
       isTemplate,
-      catalogueCategory: map.get(templateName.toLowerCase()) ?? "unknown",
+      catalogueCategory,
       meta,
+      month: istMonthKey(String(r.created_at || "")),
     });
 
     const handoffFailed = String(r.status || "") === "failed";
@@ -640,11 +681,6 @@ export async function waUsageReport(
       outcome,
     };
     yearMessages.push(message);
-    if (isTemplate && !meta && outcome === "delivered") {
-      const mk = istMonthKey(at);
-      const bucket = (unpricedByMonth[mk] ??= {});
-      bucket[category] = (bucket[category] ?? 0) + 1;
-    }
 
     // Everything below the year series is about the SELECTED window only,
     // so the tables and the headline always describe the same set.
@@ -670,10 +706,11 @@ export async function waUsageReport(
   const thisMonth = istMonthKey(nowIso);
   const [ty, tm] = thisMonth.split("-").map(Number);
   const lastMonth = tm === 1 ? `${ty - 1}-12` : `${ty}-${String(tm - 1).padStart(2, "0")}`;
+  const billInputs = await metaBillInputs([lastMonth, thisMonth], templateCategoryById);
   const metaBill = metaBillByMonth({
     months: [lastMonth, thisMonth],
-    pricedByMonth: await metaPricedByMonth([lastMonth, thisMonth]),
-    unpricedByMonth,
+    pricedByMonth: billInputs.priced,
+    unpricedByMonth: billInputs.unpriced,
     rates,
     nowIso,
   });

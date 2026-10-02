@@ -92,47 +92,62 @@ function msg(p: Partial<WaUsageMessage>): WaUsageMessage {
   );
 }
 
-// --- free-form replies and in-window templates are free ------------------
+// --- free-form replies: free until 30 Sep 2026, charged from 1 Oct -------
 {
-  const s = summariseWaUsage(
+  const before = summariseWaUsage(
+    [msg({ category: "service_free", templateName: "", outcome: "delivered" })],
+    rates,
+  );
+  assert.equal(before.serviceSent, 1);
+  assert.equal(before.templateSent, 0, "a free-form reply is not a template send");
+  assert.equal(before.messageCostPaise, 0, "a reply Meta did not charge costs nothing");
+  assert.equal(before.templates.length, 0, "free-form replies have no template row to show");
+  assert.equal(repriceWaUsage(before, { ...rates, service: 50 }).messageCostPaise, 0, "a rate edit never charges a free reply");
+
+  const after = summariseWaUsage(
     [msg({ category: "service", templateName: "", outcome: "delivered" })],
     rates,
   );
-  assert.equal(s.serviceSent, 1);
-  assert.equal(s.templateSent, 0, "a free-form reply is not a template send");
-  assert.equal(s.messageCostPaise, 0, "Meta never charges a free-form reply");
-  assert.equal(s.templates.length, 0, "free-form replies have no template row to show");
-  // A rate card saved while replies were wrongly priced must not bring the charge back.
-  assert.equal(rateFor(normalizeWaRates({ service: 11.5 }), "service"), 0);
+  assert.equal(after.serviceSent, 1);
+  assert.equal(after.templateSent, 0);
+  assert.equal(after.messageCostPaise, Math.round(rates.service), "from 1 Oct 2026 a reply is billed");
 
-  const inWindow = summariseWaUsage(
+  const freeTemplate = summariseWaUsage(
     [msg({ category: "template_free", templateName: "bhb_fee_receipt", outcome: "delivered" })],
     rates,
   );
-  assert.equal(inWindow.templateSent, 1, "still a template send");
-  assert.equal(inWindow.messageCostPaise, 0, "a template Meta reported free costs nothing");
-  assert.equal(repriceWaUsage(inWindow, { ...rates, utility: 99 }).messageCostPaise, 0);
+  assert.equal(freeTemplate.templateSent, 1, "still a template send");
+  assert.equal(freeTemplate.messageCostPaise, 0, "a template Meta reported free costs nothing");
+  assert.equal(repriceWaUsage(freeTemplate, { ...rates, utility: 99 }).messageCostPaise, 0);
 }
 
 // --- Meta's report decides the category ----------------------------------
 {
-  // Meta said free: free, whatever the template is filed as.
+  // Meta said free: free, whatever the message is.
   assert.equal(
     billCategoryFor({ isTemplate: true, catalogueCategory: "utility", meta: { billable: false, category: "utility" } }),
     "template_free",
   );
   assert.equal(
-    billCategoryFor({ isTemplate: false, catalogueCategory: "unknown", meta: { billable: false, category: "service" } }),
-    "service",
+    billCategoryFor({ isTemplate: false, catalogueCategory: "unknown", meta: { billable: false, category: "service" }, month: "2026-10" }),
+    "service_free",
+    "inside the free allowance, or a free entry point",
   );
-  // Meta said charged as marketing: marketing, even if submitted as utility.
+  // Meta said charged: in Meta's category.
+  assert.equal(
+    billCategoryFor({ isTemplate: false, catalogueCategory: "unknown", meta: { billable: true, category: "service" } }),
+    "service",
+    "a charged reply is priced as a reply, never at the marketing rate",
+  );
   assert.equal(
     billCategoryFor({ isTemplate: true, catalogueCategory: "utility", meta: { billable: true, category: "marketing" } }),
     "marketing",
   );
-  // No report: the template's catalogue category, and a reply is free.
+  // No report: template at its catalogue category; a reply by its month.
   assert.equal(billCategoryFor({ isTemplate: true, catalogueCategory: "utility" }), "utility");
-  assert.equal(billCategoryFor({ isTemplate: false, catalogueCategory: "unknown", meta: null }), "service");
+  assert.equal(billCategoryFor({ isTemplate: false, catalogueCategory: "unknown", month: "2026-09" }), "service_free");
+  assert.equal(billCategoryFor({ isTemplate: false, catalogueCategory: "unknown", month: "2026-10" }), "service");
+  assert.equal(billCategoryFor({ isTemplate: false, catalogueCategory: "unknown", meta: null }), "service_free", "no month: not charged");
   // Charged in a category with no rate: the dearest, never free.
   assert.equal(
     billCategoryFor({ isTemplate: true, catalogueCategory: "utility", meta: { billable: true, category: "referral_conversion" } }),
@@ -223,7 +238,7 @@ function msg(p: Partial<WaUsageMessage>): WaUsageMessage {
     ],
     rates,
   );
-  const cheap = { ...rates, marketing: 40, utility: 5, authentication: 6, aiInputPerKTok: 3, aiOutputPerKTok: 7 };
+  const cheap = { ...rates, marketing: 40, utility: 5, authentication: 6, service: 1, aiInputPerKTok: 3, aiOutputPerKTok: 7 };
   const fresh = summariseWaUsage(messages, cheap, summariseAiUsage(
     [
       { at: "2026-09-09T06:00:00.000Z", model: "m1", promptTokens: 1500, completionTokens: 500 },
@@ -500,6 +515,7 @@ function msg(p: Partial<WaUsageMessage>): WaUsageMessage {
     marketing: 91,
     utility: 7,
     authentication: 3,
+    service: 0,
   };
   const repriced = repriceWaUsageByStudent(
     summariseWaUsageByStudent(attributed, rates, roster),
@@ -554,7 +570,7 @@ function msg(p: Partial<WaUsageMessage>): WaUsageMessage {
       // A duty notice outside the window needs a paid template...
       am("staff", { category: "utility", templateName: "duty" }),
       // ...while a reply inside it is free. The whole point of the split.
-      am("staff", { category: "service", templateName: "" }),
+      am("staff", { category: "service_free", templateName: "" }),
       am("other", { category: "marketing", templateName: "enquiry" }),
     ],
     rates,
@@ -575,7 +591,7 @@ function msg(p: Partial<WaUsageMessage>): WaUsageMessage {
   );
   assert.deepEqual(
     staff.summary.buckets.map((b) => b.category).sort(),
-    ["service", "utility"],
+    ["service_free", "utility"],
     "cost per message type, within the staff section",
   );
   assert.equal(
@@ -590,7 +606,7 @@ function msg(p: Partial<WaUsageMessage>): WaUsageMessage {
       msg({ category: "utility" }),
       msg({ category: "utility" }),
       msg({ category: "utility" }),
-      msg({ category: "service", templateName: "" }),
+      msg({ category: "service_free", templateName: "" }),
       msg({ category: "marketing", templateName: "enquiry" }),
     ],
     rates,
@@ -865,13 +881,14 @@ function msg(p: Partial<WaUsageMessage>): WaUsageMessage {
 {
   const r = { ...DEFAULT_WA_RATES };
   assert.equal(r.utility, 11.5);
+  assert.equal(r.service, 11.5, "₹0.115 a reply from 1 Oct 2026");
   assert.equal(r.gstPct, 18);
   const bill = metaBillByMonth({
     months: ["2026-10", "2026-09"],
     pricedByMonth: {
-      "2026-10": { charged: { utility: 400, marketing: 100 }, free: 2000 },
+      "2026-10": { charged: { utility: 300, service: 100, marketing: 100 }, free: 2000 },
     },
-    unpricedByMonth: { "2026-10": { utility: 10, template_free: 5, service: 50 } },
+    unpricedByMonth: { "2026-10": { utility: 10, service: 4, template_free: 5, service_free: 50 } },
     rates: r,
     nowIso: "2026-10-10T06:00:00.000Z",
   });
@@ -883,15 +900,17 @@ function msg(p: Partial<WaUsageMessage>): WaUsageMessage {
   assert.equal(oct!.free, 2000, "free messages are counted, never priced");
   // 400 × 11.5 + 100 × 78.46 = 4,600 + 7,846 = 12,446 paise before GST.
   assert.equal(oct!.meteredPaise, 12446);
-  // Only the unpriced utility templates are estimated; free kinds add nothing.
-  assert.equal(oct!.estimated, 10);
-  assert.equal(oct!.estimatedPaise, 115);
-  assert.equal(oct!.totalWithGstPaise, Math.round((12446 + 115) * 1.18), "GST on top");
+  // Unpriced utility templates and replies are estimated; free kinds add nothing.
+  assert.equal(oct!.estimated, 14);
+  assert.equal(oct!.estimatedPaise, 161);
+  assert.equal(oct!.totalWithGstPaise, Math.round((12446 + 161) * 1.18), "GST on top");
   // 10 Oct of 31 days: paced by 3.1.
-  assert.equal(oct!.projection?.charged, Math.round(510 * 3.1));
+  assert.equal(oct!.projection?.charged, Math.round(514 * 3.1));
   assert.ok(oct!.projection!.totalWithGstPaise > oct!.totalWithGstPaise);
   assert.equal(sep!.projection, null, "a finished month is not paced");
   assert.equal(rateFor(r, "template_free"), 0);
+  assert.equal(rateFor(r, "service_free"), 0);
+  assert.equal(rateFor(normalizeWaRates({ service: 0 }), "service"), 0, "an office that sets replies to ₹0 gets ₹0");
 }
 
 console.log("  ok");

@@ -66,6 +66,7 @@ const RATE_FIELDS = [
   { key: "marketing" as const, label: "Marketing template", hint: "Offers, invites, anything promotional" },
   { key: "utility" as const, label: "Utility template", hint: "Fee reminders, receipts, notices" },
   { key: "authentication" as const, label: "Authentication template", hint: "OTP / login codes" },
+  { key: "service" as const, label: "Free-form reply", hint: "Bot and office replies inside the 24-hour window — charged from 1 Oct 2026" },
 ];
 
 function Stat({
@@ -378,7 +379,7 @@ export function AutomationUsageCost({ readOnly }: { readOnly: boolean }) {
             <Stat
               label="Messages the number sent"
               value={String(report.metaOutboundMessages)}
-              hint="Templates and replies — replies are always free"
+              hint="Templates and replies — both charged from 1 Oct 2026"
             />
           </div>
 
@@ -386,10 +387,9 @@ export function AutomationUsageCost({ readOnly }: { readOnly: boolean }) {
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] text-[var(--brand-deep)]">
               <div className="font-semibold">Meta&apos;s bill — as Meta priced each message</div>
               <div className="mt-0.5 text-[11px] text-[var(--muted)]">
-                Meta charges a template only when it is sent outside the
-                parent&apos;s 24-hour window; replies, and utility templates inside
-                an open window, are free. Each delivery report says which, so
-                these figures follow Meta, at your rates (utility ₹
+                From 1 Oct 2026 Meta charges replies and in-window templates too.
+                Each delivery report says whether that message was charged, so
+                these figures follow Meta, at your rates (utility and replies ₹
                 {rateRupees(report.rates.utility)}, marketing ₹
                 {rateRupees(report.rates.marketing)}) with {report.rates.gstPct}% GST.
               </div>
@@ -412,9 +412,9 @@ export function AutomationUsageCost({ readOnly }: { readOnly: boolean }) {
                     {m.estimated > 0 ? (
                       <div className="text-[10px] text-amber-700">
                         Includes {rupees(m.estimatedPaise)} estimated for{" "}
-                        {m.estimated.toLocaleString("en-IN")} template
-                        {m.estimated === 1 ? "" : "s"} Meta never priced (sent
-                        before pricing was recorded) — counted as charged.
+                        {m.estimated.toLocaleString("en-IN")} message
+                        {m.estimated === 1 ? "" : "s"} sent before Meta&apos;s pricing
+                        was recorded — counted as charged.
                       </div>
                     ) : null}
                     {m.projection ? (
