@@ -264,11 +264,12 @@ export async function POST(req: Request) {
       const keys =
         item.template.variableKeys ||
         Object.keys(item.template.variables || {});
-      if (keys.length && item.template.variables) {
-        components.push(
-          buildWaTemplateBodyComponent(keys, item.template.variables),
-        );
-      }
+      // Meta requires a body component for all templates with a body section,
+      // even if they have no variables. buildWaTemplateBodyComponent handles
+      // empty keys by adding placeholder dashes (fix for #131008 error).
+      components.push(
+        buildWaTemplateBodyComponent(keys, item.template.variables || {}),
+      );
       const r = await sendWaWithFailover({
         fromPhoneNumberId: item.fromPhoneNumberId,
         primaryMobile: mobile,
