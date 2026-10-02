@@ -1,7 +1,8 @@
 "use client";
 
 /**
- * The Defaulters page, in two tabs.
+ * The Defaulters page, in three tabs — the list, the withhold policy, and
+ * fee auto-pay (the way a family stops being a defaulter at all).
  *
  * The withhold policy and its approval rounds were first built as a separate
  * page at /fees/defaulter-policy — and linked from nowhere. The director went
@@ -18,14 +19,14 @@
 import { useEffect, useState } from "react";
 import { DefaultersPlaybook } from "@/components/fees/DefaultersPlaybook";
 import { DefaulterHoldPanel } from "@/components/fees/DefaulterHoldPanel";
+import { FeeAutopayPanel } from "@/components/fees/FeeAutopayPanel";
 
-type Tab = "list" | "policy";
+type Tab = "list" | "policy" | "autopay";
 
 function tabFromUrl(): Tab {
   if (typeof window === "undefined") return "list";
-  return new URL(window.location.href).searchParams.get("tab") === "policy"
-    ? "policy"
-    : "list";
+  const t = new URL(window.location.href).searchParams.get("tab");
+  return t === "policy" || t === "autopay" ? t : "list";
 }
 
 export function DefaultersTabs() {
@@ -43,7 +44,7 @@ export function DefaultersTabs() {
   function choose(next: Tab) {
     setTab(next);
     const url = new URL(window.location.href);
-    if (next === "policy") url.searchParams.set("tab", "policy");
+    if (next !== "list") url.searchParams.set("tab", next);
     else url.searchParams.delete("tab");
     window.history.replaceState({}, "", url.toString());
   }
@@ -76,9 +77,20 @@ export function DefaultersTabs() {
         >
           Withhold policy &amp; approvals
         </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "autopay"}
+          className={tabClass(tab === "autopay")}
+          onClick={() => choose("autopay")}
+        >
+          Auto-pay
+        </button>
       </div>
 
-      {tab === "policy" ? (
+      {tab === "autopay" ? (
+        <FeeAutopayPanel />
+      ) : tab === "policy" ? (
         <div className="space-y-2">
           <div>
             <h1 className="text-2xl font-semibold text-[var(--brand-deep)]">

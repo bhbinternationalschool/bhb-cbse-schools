@@ -212,6 +212,16 @@ create_job "bhb-fee-integrity-tick" "35 * * * *" \
   "${LITE_URL}/api/fees/integrity/tick" \
   "Asia/Kolkata" "120s"
 
+# Fee auto-pay (Cashfree UPI Autopay / e-NACH). Daily at 10:15: finishes any
+# debit whose outcome or receipt is outstanding (a webhook that never came),
+# then from the school's charge day raises the month's debit for each active
+# mandate, landing the next day. Raising before 9 PM for T+1 is inside every
+# rail's cut-off. Does nothing but report until Accounts → Auto-pay is turned
+# on. Returns 500 when a debit could not be raised or booked, so it shows red.
+create_job "bhb-fee-autopay-tick" "15 10 * * *" \
+  "${APP_URL}/api/fees/autopay/tick" \
+  "Asia/Kolkata" "300s"
+
 # Ledger projection: the server book is derived from the desks (a fee receipt
 # → receipt voucher, a void → reversal). It used to run only when somebody
 # pressed "Project" in Accounts → Server book; over 69 voided receipts the

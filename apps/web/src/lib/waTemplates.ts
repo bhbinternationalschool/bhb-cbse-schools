@@ -195,6 +195,9 @@ export const WA_TEMPLATE_VARIABLES: WaTemplateVariableDef[] = [
   { key: "duePayToken", label: "Pay-now button token (family's dues)", group: "Fees", sample: "eyJoIjoiaGhfYWJjIiwic2MiOiJvcGVuIn0.Ab12Cd34Ef56Gh78Ij90Kl", hint: "Fills the reminder's Pay now button: opens this family's payment for what they owe at that moment." },
   { key: "payToken", label: "Pay-now button token (link id + code)", group: "Fees", sample: "pl_8f3k2x9a.PL-7K2M", hint: "Fills the Pay now button's URL; the sender supplies it from the payment link." },
   { key: "receiptNo", label: "Receipt number", group: "Fees", sample: "RCP-1042" },
+  { key: "maxAmount", label: "Auto-pay monthly limit", group: "Fees", sample: "₹15,000" },
+  { key: "autopayLink", label: "Auto-pay set-up link", group: "Fees", sample: "https://bhbinternational.school/pay/autopay/ap_hh12_mf3k2x" },
+  { key: "debitDate", label: "Auto-pay debit date", group: "Fees", sample: "Tue, 6 Oct" },
   { key: "relayKind", label: "Office relay: kind of message", group: "School", sample: "Fees" },
   { key: "relaySender", label: "Office relay: who sent it", group: "School", sample: "Priya Sharma (98765 43210), parent of Aarav Sharma, Class 5 A" },
   { key: "relayCode", label: "Office relay: reference code", group: "School", sample: "K7Q2" },
@@ -823,6 +826,46 @@ const SEED_DEFS: SeedDef[] = [
       "नमस्ते 🙏 *{{schoolName}}* की ओर से {{childName}} के शुल्क भुगतान का लिंक तैयार है:\n\n💰 राशि: *{{feeDue}}*\n\nUPI, कार्ड या नेट बैंकिंग से सुरक्षित भुगतान के लिए नीचे *अभी भुगतान करें* दबाएँ — रसीद तुरंत व्हाट्सऐप पर मिलेगी।\n\nयदि बटन न खुले, तो यह लिंक इस्तेमाल करें:\n🔗 {{payLink}}\n\nधन्यवाद! 🙏",
     buttons: [PAY_NOW_EN],
     buttonsHi: [PAY_NOW_HI],
+    footerEn: "Fee counter · Reply to this message for help",
+    footerHi: "शुल्क काउंटर · सहायता के लिए इसी संदेश का उत्तर दें",
+  },
+  {
+    /*
+      Fee auto-pay (lib/feeAutopay.server.ts). The invite carries the family's
+      own approval page; the debit notice goes the day before every debit.
+      Neither ends on a variable and no two variables touch — the autopilot
+      submits these to Meta by itself, and Meta refuses either shape.
+    */
+    familyKey: "fees_autopay_invite",
+    nameEn: "Fee auto-pay invite",
+    nameHi: "शुल्क ऑटो-पे आमंत्रण",
+    module: "fees",
+    category: "UTILITY",
+    metaName: "bhb_fee_autopay_invite",
+    headerFormat: "TEXT",
+    headerTextEn: "Fee auto-pay",
+    headerTextHi: "शुल्क ऑटो-पे",
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\n*{{schoolName}}* now offers fee *auto-pay* for {{childName}}. Approve it once and each month's fee is paid automatically from your bank account or UPI — no queue, no missed date, and the receipt comes to WhatsApp.\n\n🔒 Limit you approve: up to *{{maxAmount}}* a month. You get a message before every debit, and you can stop it any time from your UPI app or by telling the school.\n\nSet it up here (takes a minute): {{autopayLink}}\n\nThank you! 🙏",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\n*{{schoolName}}* अब {{childName}} के शुल्क के लिए *ऑटो-पे* की सुविधा दे रहा है। एक बार स्वीकृति दें, फिर हर महीने का शुल्क आपके बैंक खाते या UPI से अपने आप जमा हो जाएगा — न लाइन, न तारीख छूटने की चिंता, और रसीद व्हाट्सऐप पर आएगी।\n\n🔒 आपकी स्वीकृत सीमा: हर महीने अधिकतम *{{maxAmount}}*। हर कटौती से पहले आपको संदेश मिलेगा, और आप इसे कभी भी अपने UPI ऐप से या विद्यालय को बताकर बंद कर सकते हैं।\n\nयहाँ सेट करें (एक मिनट लगेगा): {{autopayLink}}\n\nधन्यवाद! 🙏",
+    footerEn: "Fee counter · Reply to this message for help",
+    footerHi: "शुल्क काउंटर · सहायता के लिए इसी संदेश का उत्तर दें",
+  },
+  {
+    familyKey: "fees_autopay_debit",
+    nameEn: "Fee auto-pay debit notice",
+    nameHi: "शुल्क ऑटो-पे कटौती सूचना",
+    module: "fees",
+    category: "UTILITY",
+    metaName: "bhb_fee_autopay_debit",
+    headerFormat: "TEXT",
+    headerTextEn: "Auto-pay debit notice",
+    headerTextHi: "ऑटो-पे कटौती सूचना",
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\nA note from *{{schoolName}}*: the fee for {{childName}} of *{{amount}}* will be auto-debited on *{{debitDate}}* through your auto-pay.\n\nThere is nothing you need to do, and please do not pay this amount at the counter. The receipt comes to WhatsApp once the debit goes through.\n\nPlease keep enough balance in the account. To stop or change auto-pay, reply to this message. Thank you! 🙏",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\n*{{schoolName}}* की ओर से सूचना: {{childName}} का शुल्क *{{amount}}* आपके ऑटो-पे से *{{debitDate}}* को अपने आप कटेगा।\n\nआपको कुछ करने की आवश्यकता नहीं है, और कृपया यह राशि काउंटर पर जमा न करें। कटौती होते ही रसीद व्हाट्सऐप पर आ जाएगी।\n\nकृपया खाते में पर्याप्त राशि रखें। ऑटो-पे बंद करने या बदलने के लिए इसी संदेश का उत्तर दें। धन्यवाद! 🙏",
     footerEn: "Fee counter · Reply to this message for help",
     footerHi: "शुल्क काउंटर · सहायता के लिए इसी संदेश का उत्तर दें",
   },
