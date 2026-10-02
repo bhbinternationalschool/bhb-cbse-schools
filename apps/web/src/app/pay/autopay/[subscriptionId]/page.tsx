@@ -21,7 +21,7 @@ export default async function AutopayPage({
   if (!stored) {
     return (
       <Shell title="Link not found">
-        <p className="mt-3 text-[15px] text-[#203050]">This auto-pay link does not match any set-up. Please ask the school office for a new one.</p>
+        <p className="mt-3 text-[15px] text-[var(--foreground)]">This auto-pay link does not match any set-up. Please ask the school office for a new one.</p>
       </Shell>
     );
   }
@@ -32,7 +32,7 @@ export default async function AutopayPage({
   if (status === "ACTIVE") {
     return (
       <Shell title="Auto-pay is on ✅">
-        <p className="mt-3 text-[15px] leading-relaxed text-[#203050]">
+        <p className="mt-3 text-[15px] leading-relaxed text-[var(--foreground)]">
           Thank you. Each month&apos;s school fee will be paid automatically, up to {limit} a month. You will get a WhatsApp message the day before every debit, and the receipt after it.
         </p>
         <p className="mt-6 text-sm text-[var(--muted)]">To stop it, reply to the school&apos;s WhatsApp message or cancel it in your UPI app.</p>
@@ -42,7 +42,7 @@ export default async function AutopayPage({
   if (status === "BANK_APPROVAL_PENDING") {
     return (
       <Shell title="Approved — bank confirming">
-        <p className="mt-3 text-[15px] leading-relaxed text-[#203050]">
+        <p className="mt-3 text-[15px] leading-relaxed text-[var(--foreground)]">
           Thank you. Your bank is confirming the auto-pay, which can take 1–2 working days. Nothing more is needed from you; the school will see it once it is active.
         </p>
       </Shell>
@@ -51,7 +51,7 @@ export default async function AutopayPage({
   if (isTerminalMandate(status) || status === "ON_HOLD" || status === "PAUSED" || status === "CUSTOMER_PAUSED") {
     return (
       <Shell title={mandateStatusLabel(status)}>
-        <p className="mt-3 text-[15px] leading-relaxed text-[#203050]">
+        <p className="mt-3 text-[15px] leading-relaxed text-[var(--foreground)]">
           {isTerminalMandate(status)
             ? "This auto-pay is no longer active. If you would like to set it up again, please ask the school office for a new link."
             : "Auto-pay is paused at the moment. Please contact the school office if you have a question."}
@@ -62,8 +62,8 @@ export default async function AutopayPage({
 
   return (
     <Shell title="School fee auto-pay">
-      <p className="mt-2 text-3xl font-bold text-[#203050]">Up to {limit} a month</p>
-      <ul className="mx-auto mt-6 max-w-sm space-y-2 text-left text-[14px] leading-relaxed text-[#203050]">
+      <p className="mt-2 text-3xl font-bold text-[var(--foreground)]">Up to {limit} a month</p>
+      <ul className="mx-auto mt-6 max-w-sm space-y-2 text-left text-[14px] leading-relaxed text-[var(--foreground)]">
         <li>• Each month the school debits only the fee that is due — never more than {limit}.</li>
         <li>• You get a WhatsApp message the day before every debit, and the receipt after it.</li>
         <li>• No counter visit and no missed dates.</li>
@@ -82,7 +82,7 @@ function Shell({ title, children }: { title: string; children: React.ReactNode }
   return (
     <main className="mx-auto max-w-md px-6 py-14 text-center">
       <p className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">{TENANT.nameDisplay}</p>
-      <h1 className="mt-3 text-2xl font-bold text-[#203050]">{title}</h1>
+      <h1 className="mt-3 text-2xl font-bold text-[var(--foreground)]">{title}</h1>
       {children}
     </main>
   );

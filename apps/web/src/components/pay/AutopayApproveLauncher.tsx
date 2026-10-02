@@ -59,7 +59,7 @@ export function AutopayApproveLauncher({
         type="button"
         disabled={!ready || starting}
         onClick={() => void start()}
-        className="w-full rounded-xl bg-[#203050] px-5 py-3.5 text-[15px] font-semibold text-white disabled:opacity-60"
+        className="w-full rounded-xl bg-[var(--primary)] px-5 py-3.5 text-[15px] font-semibold text-[var(--primary-foreground)] disabled:opacity-60"
       >
         {starting ? "Opening secure page…" : `Approve auto-pay (up to ${limitLabel})`}
       </button>
