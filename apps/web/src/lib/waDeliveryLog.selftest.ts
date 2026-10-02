@@ -174,4 +174,46 @@ console.log("waDeliveryLog.selftest.ts");
   assert.equal(stageLabel("failed"), "Failed");
 }
 
+// --- Meta's pricing block is kept, and only when it is real ---------------
+{
+  const body = {
+    entry: [
+      {
+        changes: [
+          {
+            value: {
+              statuses: [
+                {
+                  id: "wamid.free",
+                  status: "delivered",
+                  timestamp: "1790900000",
+                  recipient_id: "919876543210",
+                  pricing: { billable: false, pricing_model: "PMP", type: "free_customer_service", category: "UTILITY" },
+                },
+                {
+                  id: "wamid.paid",
+                  status: "sent",
+                  timestamp: "1790900000",
+                  pricing: { billable: true, pricing_model: "PMP", type: "regular", category: "marketing" },
+                },
+                { id: "wamid.none", status: "failed", timestamp: "1790900000" },
+                { id: "wamid.bad", status: "sent", pricing: { billable: "yes", category: "utility" } },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  };
+  const [free, paid, none, bad] = parseMetaStatusUpdates(body);
+  assert.equal(free!.billable, false);
+  assert.equal(free!.pricingCategory, "utility", "lower-cased");
+  assert.equal(free!.pricingType, "free_customer_service");
+  assert.equal(paid!.billable, true);
+  assert.equal(paid!.pricingCategory, "marketing");
+  assert.equal(none!.billable, undefined, "a failed message carries no pricing");
+  assert.equal(bad!.billable, undefined, "a malformed flag is not read as charged or free");
+  assert.equal(bad!.pricingCategory, undefined);
+}
+
 console.log("OK — waDeliveryLog.selftest.ts");

@@ -29,8 +29,8 @@ import { deliveryLaddersFor, ladderStage } from "@/lib/waDeliveryStatus.server";
 import { loadWaCostRates } from "@/lib/waCostRates.server";
 import { loadWaTemplatesServer } from "@/lib/waTemplatesRead.server";
 import {
+  billCategoryFor,
   istMonthKey,
-  META_PER_MESSAGE_FROM,
   metaBillByMonth,
   splitWaUsageByAudience,
   summariseAiUsage,
@@ -40,6 +40,9 @@ import {
   waUsageYearWindow,
   type WaAiCall,
   type WaBillCategory,
+  type WaChargedCategory,
+  type WaMetaPricedMonth,
+  type WaMetaPricing,
   type WaCostRates,
   type WaUsageAttributedMessage,
   type WaUsageAudience,
@@ -113,11 +116,13 @@ export type WaUsageReport = {
    */
   attributedByNumber: number;
   /**
-   * Meta's bill for last month and this one, from every message the number
-   * sent (the delivery reports), priced per message from 1 Oct 2026 — the
-   * figure the invoice will be close to. See metaBillByMonth.
+   * Meta's bill for last month and this one, from Meta's own per-message
+   * pricing reports — the invoice's figure, plus a marked estimate for any
+   * template Meta never priced. See metaBillByMonth.
    */
   metaBill: WaMetaBillMonth[];
+  /** Messages in the window Meta priced itself (the rest are estimated). */
+  metaPriced: number;
 };
 
 /**
@@ -350,39 +355,109 @@ async function loadAiCalls(sinceIso: string): Promise<WaAiCall[]> {
   }));
 }
 
+const IST_MS = 330 * 60_000;
+
+/** IST month "YYYY-MM" → its first instant, as UTC ISO. */
+function istMonthStart(m: string): string {
+  return new Date(Date.parse(`${m}-01T00:00:00Z`) - IST_MS).toISOString();
+}
+
+function nextMonth(m: string): string {
+  const [y, mo] = m.split("-").map(Number);
+  return mo === 12 ? `${y + 1}-01` : `${y}-${String(mo + 1).padStart(2, "0")}`;
+}
+
+function pricingFromRow(r: { billable?: unknown; pricing_category?: unknown }): WaMetaPricing | null {
+  if (typeof r.billable !== "boolean") return null;
+  return { billable: r.billable, category: String(r.pricing_category || "").toLowerCase() };
+}
+
 /**
- * Messages the number sent in each IST month, from the delivery reports:
- * every message gets one "sent" report, and a failed one a "failed" report,
- * so delivered = sent − failed. Counted, not fetched, so a busy month is
- * never cut off by a row cap.
+ * Meta's pricing for these messages, where Meta sent it. A message is
+ * reported several times (sent, delivered, read); a charged report wins
+ * over a free one, so a disagreement can only ever overstate the bill.
  */
-async function metaDeliveredByMonth(months: string[]): Promise<Record<string, number>> {
+async function metaPricingFor(waMessageIds: string[]): Promise<Map<string, WaMetaPricing>> {
+  const out = new Map<string, WaMetaPricing>();
+  const ids = [...new Set(waMessageIds.filter(Boolean))];
   const ctx = await getServerTenantContext();
-  const out: Record<string, number> = {};
-  if (!ctx) return out;
-  const IST = 330 * 60_000;
-  const monthStart = (m: string) => new Date(Date.parse(`${m}-01T00:00:00Z`) - IST).toISOString();
-  const next = (m: string) => {
-    const [y, mo] = m.split("-").map(Number);
-    return mo === 12 ? `${y + 1}-01` : `${y}-${String(mo + 1).padStart(2, "0")}`;
-  };
-  for (const m of months) {
-    const count = async (status: string) => {
-      const { count: n, error } = await ctx.sb
-        .from("wa_message_delivery")
-        .select("id", { count: "exact", head: true })
-        .eq("tenant_id", ctx.tenantId)
-        .eq("status", status)
-        .gte("event_at", monthStart(m))
-        .lt("event_at", monthStart(next(m)));
-      if (error) throw new Error(error.message);
-      return n ?? 0;
-    };
-    try {
-      const [sent, failed] = await Promise.all([count("sent"), count("failed")]);
-      out[m] = Math.max(0, sent - failed);
-    } catch (e) {
-      console.warn("[waUsage] monthly delivery count failed", m, (e as Error).message);
+  if (!ctx || ids.length === 0) return out;
+  const CHUNK = 200;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const { data, error } = await ctx.sb
+      .from("wa_message_delivery")
+      .select("wa_message_id, billable, pricing_category")
+      .eq("tenant_id", ctx.tenantId)
+      .in("wa_message_id", ids.slice(i, i + CHUNK))
+      .not("billable", "is", null);
+    if (error) {
+      // Columns not migrated yet, or a bad read: every message falls back to
+      // its catalogue category — the old, conservative estimate.
+      console.warn("[waUsage] pricing read failed", error.message);
+      return out;
+    }
+    for (const r of data || []) {
+      const id = String(r.wa_message_id || "");
+      const p = pricingFromRow(r);
+      if (!id || !p) continue;
+      const cur = out.get(id);
+      if (!cur || (p.billable && !cur.billable)) out.set(id, p);
+    }
+  }
+  return out;
+}
+
+function chargedCategory(c: string): WaChargedCategory {
+  const cat = billCategoryFor({ isTemplate: true, catalogueCategory: "unknown", meta: { billable: true, category: c } });
+  return cat === "marketing" || cat === "utility" || cat === "authentication" ? cat : "unknown";
+}
+
+/**
+ * Every message Meta priced in each IST month — templates the bot sent
+ * outside the send log included — each message counted once, in the month
+ * of its first priced report. Paged: a busy month is several thousand rows
+ * and PostgREST stops at 1,000 a read.
+ */
+async function metaPricedByMonth(months: string[]): Promise<Record<string, WaMetaPricedMonth>> {
+  const out: Record<string, WaMetaPricedMonth> = {};
+  const ctx = await getServerTenantContext();
+  if (!ctx || months.length === 0) return out;
+  const sorted = [...months].sort();
+  const from = istMonthStart(sorted[0]!);
+  const to = istMonthStart(nextMonth(sorted[sorted.length - 1]!));
+  const seen = new Map<string, { month: string; p: WaMetaPricing }>();
+  const PAGE = 1000;
+  for (let offset = 0; offset < 50_000; offset += PAGE) {
+    const { data, error } = await ctx.sb
+      .from("wa_message_delivery")
+      .select("wa_message_id, event_at, billable, pricing_category")
+      .eq("tenant_id", ctx.tenantId)
+      .not("billable", "is", null)
+      .gte("event_at", from)
+      .lt("event_at", to)
+      .order("event_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(offset, offset + PAGE - 1);
+    if (error) {
+      console.warn("[waUsage] monthly pricing read failed", error.message);
+      break;
+    }
+    for (const r of data || []) {
+      const id = String(r.wa_message_id || "");
+      const p = pricingFromRow(r);
+      if (!id || !p) continue;
+      const cur = seen.get(id);
+      if (!cur) seen.set(id, { month: istMonthKey(String(r.event_at || "")), p });
+      else if (p.billable && !cur.p.billable) cur.p = p;
+    }
+    if (!data || data.length < PAGE) break;
+  }
+  for (const { month, p } of seen.values()) {
+    const row = (out[month] ??= { charged: {}, free: 0 });
+    if (!p.billable) row.free++;
+    else {
+      const c = chargedCategory(p.category);
+      row.charged[c] = (row.charged[c] ?? 0) + 1;
     }
   }
   return out;
@@ -437,6 +512,7 @@ export async function waUsageReport(
       rosterOk: false,
       attributedByNumber: 0,
       metaBill: [],
+      metaPriced: 0,
     };
   }
 
@@ -479,6 +555,7 @@ export async function waUsageReport(
       rosterOk: false,
       attributedByNumber: 0,
       metaBill: [],
+      metaPriced: 0,
     };
   }
 
@@ -489,17 +566,22 @@ export async function waUsageReport(
     aiCalls,
     metaOutboundMessages,
     attribution,
+    pricing,
   ] = await Promise.all([
     templateCategoryMap(),
     deliveryLaddersFor(rows.map((r) => String(r.wa_message_id || ""))),
     loadAiCalls(sinceIso),
     countMetaOutbound(sinceIso),
     buildAttribution(),
+    metaPricingFor(rows.map((r) => String(r.wa_message_id || ""))),
   ]);
 
   const truncated = rows.length >= MAX_ROWS;
   let uncategorised = 0;
   let attributedByNumber = 0;
+  let metaPriced = 0;
+  /** Delivered templates Meta never priced, by IST month and category. */
+  const unpricedByMonth: Record<string, Partial<Record<WaBillCategory, number>>> = {};
   const attributed: WaUsageAttributedMessage[] = [];
   const byAudience: WaUsageAudienceMessage[] = [];
   const yearMessages: WaUsageMessage[] = [];
@@ -507,12 +589,12 @@ export async function waUsageReport(
   for (const r of rows) {
     const templateName = String(r.template_name || "").trim();
     const isTemplate = String(r.via || "") === "template" || !!templateName;
-    // Free-form replies were free until 30 Sep 2026; from 1 Oct they are billed.
-    let category: WaBillCategory =
-      istMonthKey(String(r.created_at || "")) < META_PER_MESSAGE_FROM ? "service_free" : "service";
-    if (isTemplate) {
-      category = map.get(templateName.toLowerCase()) ?? "unknown";
-    }
+    const meta = pricing.get(String(r.wa_message_id || "")) ?? null;
+    const category = billCategoryFor({
+      isTemplate,
+      catalogueCategory: map.get(templateName.toLowerCase()) ?? "unknown",
+      meta,
+    });
 
     const handoffFailed = String(r.status || "") === "failed";
     const stage = ladderStage(ladders.get(String(r.wa_message_id || "")));
@@ -558,6 +640,11 @@ export async function waUsageReport(
       outcome,
     };
     yearMessages.push(message);
+    if (isTemplate && !meta && outcome === "delivered") {
+      const mk = istMonthKey(at);
+      const bucket = (unpricedByMonth[mk] ??= {});
+      bucket[category] = (bucket[category] ?? 0) + 1;
+    }
 
     // Everything below the year series is about the SELECTED window only,
     // so the tables and the headline always describe the same set.
@@ -572,22 +659,21 @@ export async function waUsageReport(
         : [],
     });
     if (category === "unknown") uncategorised++;
+    if (meta) metaPriced++;
     if (attributedByNumberRow) attributedByNumber++;
   }
 
   const ai = summariseAiUsage(aiCalls, rates);
 
-  // Last month and this one, priced the way Meta bills from 1 Oct 2026.
+  // Last month and this one, from Meta's own pricing reports.
   const nowIso = new Date().toISOString();
   const thisMonth = istMonthKey(nowIso);
   const [ty, tm] = thisMonth.split("-").map(Number);
   const lastMonth = tm === 1 ? `${ty - 1}-12` : `${ty}-${String(tm - 1).padStart(2, "0")}`;
-  const byMonthForBill = summariseWaUsageByMonth(yearMessages, rates, {});
-  const marketingByMonth: Record<string, number> = {};
-  for (const m of byMonthForBill) marketingByMonth[m.month] = Math.round(m.sharesByCategory.marketing ?? 0);
   const metaBill = metaBillByMonth({
-    deliveredByMonth: await metaDeliveredByMonth([lastMonth, thisMonth]),
-    marketingByMonth,
+    months: [lastMonth, thisMonth],
+    pricedByMonth: await metaPricedByMonth([lastMonth, thisMonth]),
+    unpricedByMonth,
     rates,
     nowIso,
   });
@@ -617,5 +703,6 @@ export async function waUsageReport(
     rosterOk: attribution.ok,
     attributedByNumber,
     metaBill,
+    metaPriced,
   };
 }

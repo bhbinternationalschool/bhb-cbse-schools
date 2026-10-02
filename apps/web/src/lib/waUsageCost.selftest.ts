@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_WA_RATES,
   metaBillByMonth,
-  rupeeRange,
+  billCategoryFor,
   billCategoryLabel,
   istDayKey,
   normalizeWaRates,
@@ -92,25 +92,70 @@ function msg(p: Partial<WaUsageMessage>): WaUsageMessage {
   );
 }
 
-// --- free-form replies: free until 30 Sep 2026, charged from 1 Oct -------
+// --- free-form replies and in-window templates are free ------------------
 {
-  const before = summariseWaUsage(
-    [msg({ category: "service_free", templateName: "", outcome: "delivered" })],
-    rates,
-  );
-  assert.equal(before.serviceSent, 1);
-  assert.equal(before.templateSent, 0, "a free-form reply is not a template send");
-  assert.equal(before.messageCostPaise, 0, "a reply before 1 Oct 2026 cost nothing");
-  assert.equal(before.templates.length, 0, "free-form replies have no template row to show");
-
-  const after = summariseWaUsage(
+  const s = summariseWaUsage(
     [msg({ category: "service", templateName: "", outcome: "delivered" })],
     rates,
   );
-  assert.equal(after.serviceSent, 1);
-  assert.equal(after.templateSent, 0);
-  assert.equal(after.messageCostPaise, Math.round(rates.service), "from 1 Oct 2026 a reply is billed");
-  assert.equal(repriceWaUsage(before, { ...rates, service: 50 }).messageCostPaise, 0, "a rate edit never charges September's replies");
+  assert.equal(s.serviceSent, 1);
+  assert.equal(s.templateSent, 0, "a free-form reply is not a template send");
+  assert.equal(s.messageCostPaise, 0, "Meta never charges a free-form reply");
+  assert.equal(s.templates.length, 0, "free-form replies have no template row to show");
+  // A rate card saved while replies were wrongly priced must not bring the charge back.
+  assert.equal(rateFor(normalizeWaRates({ service: 11.5 }), "service"), 0);
+
+  const inWindow = summariseWaUsage(
+    [msg({ category: "template_free", templateName: "bhb_fee_receipt", outcome: "delivered" })],
+    rates,
+  );
+  assert.equal(inWindow.templateSent, 1, "still a template send");
+  assert.equal(inWindow.messageCostPaise, 0, "a template Meta reported free costs nothing");
+  assert.equal(repriceWaUsage(inWindow, { ...rates, utility: 99 }).messageCostPaise, 0);
+}
+
+// --- Meta's report decides the category ----------------------------------
+{
+  // Meta said free: free, whatever the template is filed as.
+  assert.equal(
+    billCategoryFor({ isTemplate: true, catalogueCategory: "utility", meta: { billable: false, category: "utility" } }),
+    "template_free",
+  );
+  assert.equal(
+    billCategoryFor({ isTemplate: false, catalogueCategory: "unknown", meta: { billable: false, category: "service" } }),
+    "service",
+  );
+  // Meta said charged as marketing: marketing, even if submitted as utility.
+  assert.equal(
+    billCategoryFor({ isTemplate: true, catalogueCategory: "utility", meta: { billable: true, category: "marketing" } }),
+    "marketing",
+  );
+  // No report: the template's catalogue category, and a reply is free.
+  assert.equal(billCategoryFor({ isTemplate: true, catalogueCategory: "utility" }), "utility");
+  assert.equal(billCategoryFor({ isTemplate: false, catalogueCategory: "unknown", meta: null }), "service");
+  // Charged in a category with no rate: the dearest, never free.
+  assert.equal(
+    billCategoryFor({ isTemplate: true, catalogueCategory: "utility", meta: { billable: true, category: "referral_conversion" } }),
+    "unknown",
+  );
+}
+
+// --- one template, free inside a window and charged outside it -------------
+{
+  const s = summariseWaUsage(
+    [
+      msg({ category: "utility", templateName: "bhb_fee_receipt" }),
+      msg({ category: "template_free", templateName: "bhb_fee_receipt" }),
+      msg({ category: "template_free", templateName: "bhb_fee_receipt" }),
+    ],
+    rates,
+  );
+  assert.equal(s.templates.length, 2, "split by what Meta charged, so each row has one rate");
+  const charged = s.templates.find((t) => t.category === "utility")!;
+  assert.equal(charged.delivered, 1);
+  assert.equal(charged.costPaise, Math.round(rates.utility));
+  const repriced = repriceWaUsage(s, { ...rates, utility: 20 });
+  assert.equal(repriced.messageCostPaise, 20, "only the charged one moves with the rate");
 }
 
 // --- categories are priced apart, not lumped -----------------------------
@@ -178,7 +223,7 @@ function msg(p: Partial<WaUsageMessage>): WaUsageMessage {
     ],
     rates,
   );
-  const cheap = { ...rates, marketing: 40, utility: 5, authentication: 6, service: 1, aiInputPerKTok: 3, aiOutputPerKTok: 7 };
+  const cheap = { ...rates, marketing: 40, utility: 5, authentication: 6, aiInputPerKTok: 3, aiOutputPerKTok: 7 };
   const fresh = summariseWaUsage(messages, cheap, summariseAiUsage(
     [
       { at: "2026-09-09T06:00:00.000Z", model: "m1", promptTokens: 1500, completionTokens: 500 },
@@ -233,7 +278,6 @@ function msg(p: Partial<WaUsageMessage>): WaUsageMessage {
   // A typed rate is honoured exactly, decimals and all — a utility message
   // rounded from 11.46 to 11 paise is a 4% error on the biggest category.
   assert.equal(normalizeWaRates({ utility: 11.46 }).utility, 11.46);
-  assert.equal(normalizeWaRates({ service: 0 }).service, 0, "free must stay free");
   assert.equal(normalizeWaRates({ marketing: 99_999 }).marketing, 10_000, "stray zero");
   assert.equal(normalizeWaRates(null).marketing, DEFAULT_WA_RATES.marketing);
 }
@@ -456,7 +500,6 @@ function msg(p: Partial<WaUsageMessage>): WaUsageMessage {
     marketing: 91,
     utility: 7,
     authentication: 3,
-    service: 0,
   };
   const repriced = repriceWaUsageByStudent(
     summariseWaUsageByStudent(attributed, rates, roster),
@@ -511,7 +554,7 @@ function msg(p: Partial<WaUsageMessage>): WaUsageMessage {
       // A duty notice outside the window needs a paid template...
       am("staff", { category: "utility", templateName: "duty" }),
       // ...while a reply inside it is free. The whole point of the split.
-      am("staff", { category: "service_free", templateName: "" }),
+      am("staff", { category: "service", templateName: "" }),
       am("other", { category: "marketing", templateName: "enquiry" }),
     ],
     rates,
@@ -532,7 +575,7 @@ function msg(p: Partial<WaUsageMessage>): WaUsageMessage {
   );
   assert.deepEqual(
     staff.summary.buckets.map((b) => b.category).sort(),
-    ["service_free", "utility"],
+    ["service", "utility"],
     "cost per message type, within the staff section",
   );
   assert.equal(
@@ -547,7 +590,7 @@ function msg(p: Partial<WaUsageMessage>): WaUsageMessage {
       msg({ category: "utility" }),
       msg({ category: "utility" }),
       msg({ category: "utility" }),
-      msg({ category: "service_free", templateName: "" }),
+      msg({ category: "service", templateName: "" }),
       msg({ category: "marketing", templateName: "enquiry" }),
     ],
     rates,
@@ -818,41 +861,37 @@ function msg(p: Partial<WaUsageMessage>): WaUsageMessage {
   assert.equal(projectedSessionPaise(totals, done), totals.costPaise);
 }
 
-// --- Meta's bill from 1 Oct 2026: every message, a range for the free replies
+// --- Meta's bill: what Meta priced, plus a marked estimate ----------------
 {
   const r = { ...DEFAULT_WA_RATES };
-  assert.equal(r.service, 11.5, "₹0.115 a reply from 1 Oct 2026");
   assert.equal(r.utility, 11.5);
-  assert.equal(r.serviceFreePerMonth, 1000);
   assert.equal(r.gstPct, 18);
   const bill = metaBillByMonth({
-    deliveredByMonth: { "2026-09": 3863, "2026-10": 1500 },
-    marketingByMonth: { "2026-10": 100 },
+    months: ["2026-10", "2026-09"],
+    pricedByMonth: {
+      "2026-10": { charged: { utility: 400, marketing: 100 }, free: 2000 },
+    },
+    unpricedByMonth: { "2026-10": { utility: 10, template_free: 5, service: 50 } },
     rates: r,
     nowIso: "2026-10-10T06:00:00.000Z",
   });
   assert.equal(bill.length, 2);
   const [sep, oct] = bill;
-  assert.equal(sep!.perMessage, false, "September was billed the old way");
-  assert.equal(sep!.highWithGstPaise, 0);
-  assert.equal(oct!.perMessage, true);
-  // 1,400 standard × 11.5 + 100 marketing × 78.46 = 16,100 + 7,846 = 23,946 paise before GST.
-  assert.equal(oct!.highPaise, 23946);
-  // All 1,000 free replies used: 400 × 11.5 + 7,846 = 12,446.
-  assert.equal(oct!.lowPaise, 12446);
-  assert.equal(oct!.highWithGstPaise, Math.round(23946 * 1.18), "GST on top");
-  // 10 Oct: 1,500 in 10 days → 4,650 by 31 Oct.
-  assert.equal(oct!.projection?.delivered, 4650);
-  assert.ok(oct!.projection!.highWithGstPaise > oct!.highWithGstPaise);
-  // A quiet month never goes below zero, and the free allowance never exceeds what was sent.
-  const quiet = metaBillByMonth({ deliveredByMonth: { "2026-11": 300 }, rates: r, nowIso: "2026-12-05T00:00:00Z" })[0]!;
-  assert.equal(quiet.lowPaise, 0);
-  assert.equal(quiet.highPaise, 3450);
-  assert.equal(quiet.projection, null, "a finished month is not paced");
-  assert.equal(rupeeRange(100, 100), "₹1.00");
-  assert.equal(rupeeRange(100, 250), "₹1.00 – ₹2.50");
-  assert.equal(rateFor(r, "service_free"), 0);
-  assert.equal(normalizeWaRates({}).serviceFreePerMonth, 1000, "an old saved rate card still gets the allowance");
+  assert.equal(sep!.month, "2026-09", "sorted");
+  assert.equal(sep!.totalWithGstPaise, 0, "a month with nothing priced costs nothing");
+  assert.equal(oct!.charged, 500);
+  assert.equal(oct!.free, 2000, "free messages are counted, never priced");
+  // 400 × 11.5 + 100 × 78.46 = 4,600 + 7,846 = 12,446 paise before GST.
+  assert.equal(oct!.meteredPaise, 12446);
+  // Only the unpriced utility templates are estimated; free kinds add nothing.
+  assert.equal(oct!.estimated, 10);
+  assert.equal(oct!.estimatedPaise, 115);
+  assert.equal(oct!.totalWithGstPaise, Math.round((12446 + 115) * 1.18), "GST on top");
+  // 10 Oct of 31 days: paced by 3.1.
+  assert.equal(oct!.projection?.charged, Math.round(510 * 3.1));
+  assert.ok(oct!.projection!.totalWithGstPaise > oct!.totalWithGstPaise);
+  assert.equal(sep!.projection, null, "a finished month is not paced");
+  assert.equal(rateFor(r, "template_free"), 0);
 }
 
 console.log("  ok");

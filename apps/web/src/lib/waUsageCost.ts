@@ -11,14 +11,16 @@
  *    card; every screen that shows money from them says "estimate at your
  *    rates" and shows when they were last set.
  *
- * 2. **Only delivered messages are charged.** Meta bills per delivered
- *    message, by category. Until 30 Sep 2026 free-form replies inside the
- *    24-hour window were free; from 1 Oct 2026 they are charged after a
- *    free allowance each month, and a utility template is charged even
- *    inside the window (metaBillByMonth). A message that failed costs
- *    nothing, so counting sends would overstate the bill; one handed over
- *    but not yet confirmed is held in a separate "could still be charged"
- *    figure rather than quietly added.
+ * 2. **Only what Meta charges is charged.** Meta bills per delivered
+ *    TEMPLATE, by category. Free-form replies are never charged, and a
+ *    utility template sent while the parent's 24-hour window is open is
+ *    free too (Meta's pricing page, per-message model since 1 Jul 2025).
+ *    Meta says which on every delivery report — `pricing.billable` — and
+ *    when it has, that is the answer (billCategoryFor). Only a message Meta
+ *    never priced (older rows) falls back to the template's category. A
+ *    message that failed costs nothing, so counting sends would overstate
+ *    the bill; one handed over but not yet confirmed is held in a separate
+ *    "could still be charged" figure rather than quietly added.
  *
  * The counting half lives here, pure, so a selftest can prove the arithmetic
  * without a database and the dashboard can re-price a window in the browser
@@ -29,9 +31,10 @@ export type WaBillCategory =
   | "marketing"
   | "utility"
   | "authentication"
+  /** A free-form reply — never charged by Meta. */
   | "service"
-  /** A free-form reply sent before 1 Oct 2026, when Meta did not charge them. */
-  | "service_free"
+  /** A template Meta reported as NOT charged (sent inside an open window). */
+  | "template_free"
   | "unknown";
 
 export const WA_BILL_CATEGORIES: WaBillCategory[] = [
@@ -39,7 +42,7 @@ export const WA_BILL_CATEGORIES: WaBillCategory[] = [
   "utility",
   "authentication",
   "service",
-  "service_free",
+  "template_free",
   "unknown",
 ];
 
@@ -52,9 +55,9 @@ export function billCategoryLabel(c: WaBillCategory): string {
     case "authentication":
       return "Authentication";
     case "service":
-      return "Service (free-form reply)";
-    case "service_free":
-      return "Free-form reply (free before 1 Oct 2026)";
+      return "Free-form reply (free)";
+    case "template_free":
+      return "Template inside the 24-hour window (free)";
     default:
       return "Not in the template list";
   }
@@ -72,14 +75,6 @@ export type WaCostRates = {
   marketing: number;
   utility: number;
   authentication: number;
-  /**
-   * Free-form replies inside the 24-hour window. Free until 30 Sep 2026;
-   * from 1 Oct 2026 Meta charges them after a free allowance each month
-   * (see META_PER_MESSAGE_FROM and serviceFreePerMonth).
-   */
-  service: number;
-  /** Free-form replies Meta does not charge, per business number, per month. */
-  serviceFreePerMonth: number;
   /** GST on Meta's charges, per cent — shown on top, never inside the rates. */
   gstPct: number;
   /** Paise per 1,000 tokens for study-help AI. */
@@ -98,13 +93,11 @@ export type WaCostRates = {
  * dashboard nags until it has.
  */
 export const DEFAULT_WA_RATES: WaCostRates = {
-  // India rate card from 1 Oct 2026: utility, authentication and service
-  // ₹0.115 a delivered message before GST; marketing unchanged.
+  // India list rates per charged template, before GST. Free-form replies
+  // have no rate: Meta never charges them.
   marketing: 78.46,
   utility: 11.5,
   authentication: 11.5,
-  service: 11.5,
-  serviceFreePerMonth: 1000,
   gstPct: 18,
   aiInputPerKTok: 1.3,
   aiOutputPerKTok: 5.2,
@@ -126,8 +119,6 @@ export function normalizeWaRates(raw: unknown): WaCostRates {
     marketing: rateNum(r.marketing, DEFAULT_WA_RATES.marketing),
     utility: rateNum(r.utility, DEFAULT_WA_RATES.utility),
     authentication: rateNum(r.authentication, DEFAULT_WA_RATES.authentication),
-    service: rateNum(r.service, DEFAULT_WA_RATES.service),
-    serviceFreePerMonth: Math.round(rateNum(r.serviceFreePerMonth, DEFAULT_WA_RATES.serviceFreePerMonth)),
     gstPct: Math.min(100, rateNum(r.gstPct, DEFAULT_WA_RATES.gstPct)),
     aiInputPerKTok: rateNum(r.aiInputPerKTok, DEFAULT_WA_RATES.aiInputPerKTok),
     aiOutputPerKTok: rateNum(r.aiOutputPerKTok, DEFAULT_WA_RATES.aiOutputPerKTok),
@@ -157,13 +148,56 @@ export function rateFor(rates: WaCostRates, c: WaBillCategory): number {
       return rates.utility;
     case "authentication":
       return rates.authentication;
+    // Meta does not charge these, whatever a saved rate card says.
     case "service":
-      return rates.service;
-    case "service_free":
+    case "template_free":
       return 0;
     default:
       return rates.marketing;
   }
+}
+
+/** Meta's `pricing` block from a delivery report, as stored. */
+export type WaMetaPricing = {
+  billable: boolean;
+  /** marketing | utility | authentication | service | … — lower-case. */
+  category: string;
+};
+
+/**
+ * What a message is billed as.
+ *
+ * Meta's own report wins: billable=false is free whatever the template's
+ * category, and billable=true is billed in the category Meta names (which
+ * can differ from the one the template was submitted under). Without a
+ * report — rows from before Meta's pricing was stored — a template is
+ * priced at its catalogue category, the conservative guess, and a free-form
+ * reply is free, because Meta never charges one.
+ */
+export function billCategoryFor(input: {
+  isTemplate: boolean;
+  catalogueCategory: WaBillCategory;
+  meta?: WaMetaPricing | null;
+}): WaBillCategory {
+  const { isTemplate, catalogueCategory, meta } = input;
+  if (meta) {
+    if (!meta.billable) return isTemplate ? "template_free" : "service";
+    switch (meta.category) {
+      case "marketing":
+      case "marketing_lite":
+        return "marketing";
+      case "utility":
+        return "utility";
+      case "authentication":
+      case "authentication_international":
+        return "authentication";
+      default:
+        // Billed, in a category this ERP has no rate for: the dearest rate,
+        // as for any template it cannot place.
+        return "unknown";
+    }
+  }
+  return isTemplate ? catalogueCategory : "service";
 }
 
 /** One outbound message, already joined to its delivery ladder. */
@@ -357,12 +391,15 @@ export function summariseWaUsage(
       d.costPaise += charged;
     }
 
-    if (m.category === "service" || m.category === "service_free") continue;
-    const key = m.templateName || "(unnamed template)";
+    if (m.category === "service") continue;
+    // Keyed by name AND category: one template can go out free inside a
+    // window and charged outside it, and a row must reprice at one rate.
+    const name = m.templateName || "(unnamed template)";
+    const key = `${name}\u0000${m.category}`;
     let t = templates.get(key);
     if (!t) {
       t = {
-        templateName: key,
+        templateName: name,
         category: m.category,
         sent: 0,
         delivered: 0,
@@ -395,7 +432,7 @@ export function summariseWaUsage(
   for (const b of bucketList) {
     messageCostPaise += b.costPaise;
     pendingCostPaise += b.pendingPaise;
-    if (b.category === "service" || b.category === "service_free") {
+    if (b.category === "service") {
       serviceSent += b.sent;
       continue;
     }
@@ -1176,53 +1213,47 @@ export function projectedSessionPaise(
 
 
 /* ------------------------------------------------------------------ *
- * Meta's bill from 1 Oct 2026 — every message the number sends
+ * Meta's bill, month by month — from Meta's own pricing reports
  *
- * From 1 Oct 2026 Meta charges per delivered message whatever it is: a
- * utility template even inside the 24-hour window, and free-form replies
- * after the first `serviceFreePerMonth` in a month (per business number).
- * The template log above only sees template sends; this counts every
- * message the number sent (the delivery reports), so it is the figure the
- * invoice will be close to.
+ * Every delivery report Meta sends carries `pricing.billable`, so the bill
+ * is not estimated: it is the messages Meta said it charged, at the rate
+ * for the category Meta named. That includes templates the bot sends that
+ * never touch the ERP's send log.
  *
- * A delivery report does not say whether a message was a template or a
- * free-form reply, so the free allowance cannot be placed exactly: the
- * bill is a RANGE — high with no allowance, low with all of it used. The
- * marketing messages the log does know are priced at the marketing rate.
+ * The one gap is a message Meta has not priced in what the ERP stored —
+ * anything from before the pricing columns existed. Those templates are
+ * added at their catalogue rate and shown separately as "estimated", so the
+ * screen never passes a guess off as Meta's figure.
  * ------------------------------------------------------------------ */
 
-/** First IST month billed per message, every message. */
-export const META_PER_MESSAGE_FROM = "2026-10";
+export type WaChargedCategory = "marketing" | "utility" | "authentication" | "unknown";
+
+/** One IST month of Meta-priced messages, each message counted once. */
+export type WaMetaPricedMonth = {
+  charged: Partial<Record<WaChargedCategory, number>>;
+  /** Messages Meta reported as not charged. */
+  free: number;
+};
 
 export type WaMetaBillMonth = {
   month: string;
   label: string;
-  /** Messages Meta accepted and did not report as failed. */
-  delivered: number;
-  marketing: number;
-  /** false = a month before per-message billing; shown, not priced. */
-  perMessage: boolean;
-  lowPaise: number;
-  highPaise: number;
-  lowWithGstPaise: number;
-  highWithGstPaise: number;
+  /** Messages Meta priced (charged + free). */
+  priced: number;
+  charged: number;
+  free: number;
+  chargedByCategory: Partial<Record<WaChargedCategory, number>>;
+  /** Delivered templates Meta never priced, estimated at catalogue rates. */
+  estimated: number;
+  /** Charged per Meta, at the school's rates, before GST. */
+  meteredPaise: number;
+  /** The estimated part, before GST. */
+  estimatedPaise: number;
+  /** Both, with GST. */
+  totalWithGstPaise: number;
   /** The current month, paced to its end (null for a finished month). */
-  projection: { delivered: number; lowWithGstPaise: number; highWithGstPaise: number } | null;
+  projection: { charged: number; totalWithGstPaise: number } | null;
 };
-
-function billFor(
-  delivered: number,
-  marketing: number,
-  rates: WaCostRates,
-): { low: number; high: number } {
-  const m = Math.min(Math.max(0, marketing), Math.max(0, delivered));
-  const standard = Math.max(0, delivered - m);
-  const standardRate = Math.max(rates.utility, rates.service);
-  const high = standard * standardRate + m * rates.marketing;
-  const free = Math.min(standard, Math.max(0, rates.serviceFreePerMonth));
-  const low = high - free * standardRate;
-  return { low, high };
-}
 
 function withGst(paise: number, rates: WaCostRates): number {
   return Math.round(paise * (1 + Math.max(0, rates.gstPct) / 100));
@@ -1235,50 +1266,56 @@ function daysInMonth(month: string): number {
 }
 
 export function metaBillByMonth(input: {
-  /** { "2026-10": delivered messages } — IST months. */
-  deliveredByMonth: Record<string, number>;
-  marketingByMonth?: Record<string, number>;
+  months: string[];
+  /** { "2026-10": Meta-priced messages } — IST months. */
+  pricedByMonth: Record<string, WaMetaPricedMonth>;
+  /** Delivered templates with no Meta pricing, by catalogue category. */
+  unpricedByMonth?: Record<string, Partial<Record<WaBillCategory, number>>>;
   rates: WaCostRates;
   /** Now, for pacing the current month. */
   nowIso: string;
 }): WaMetaBillMonth[] {
   const nowMonth = istMonthKey(input.nowIso);
   const nowDay = Number(istDayKey(input.nowIso).slice(8, 10)) || 1;
-  return Object.keys(input.deliveredByMonth)
-    .sort()
-    .map((month) => {
-      const delivered = Math.max(0, Math.round(input.deliveredByMonth[month] ?? 0));
-      const marketing = Math.max(0, Math.round(input.marketingByMonth?.[month] ?? 0));
-      const perMessage = month >= META_PER_MESSAGE_FROM;
-      const { low, high } = perMessage ? billFor(delivered, marketing, input.rates) : { low: 0, high: 0 };
-      let projection: WaMetaBillMonth["projection"] = null;
-      if (perMessage && month === nowMonth) {
-        const total = daysInMonth(month);
-        const paced = Math.round((delivered / Math.max(1, nowDay)) * total);
-        const pacedMarketing = Math.round((marketing / Math.max(1, nowDay)) * total);
-        const p = billFor(paced, pacedMarketing, input.rates);
-        projection = {
-          delivered: paced,
-          lowWithGstPaise: withGst(p.low, input.rates),
-          highWithGstPaise: withGst(p.high, input.rates),
-        };
-      }
-      return {
-        month,
-        label: monthLabel(month),
-        delivered,
-        marketing,
-        perMessage,
-        lowPaise: Math.round(low),
-        highPaise: Math.round(high),
-        lowWithGstPaise: withGst(low, input.rates),
-        highWithGstPaise: withGst(high, input.rates),
-        projection,
+  return [...new Set(input.months)].sort().map((month) => {
+    const p = input.pricedByMonth[month] ?? { charged: {}, free: 0 };
+    let charged = 0;
+    let metered = 0;
+    for (const [cat, n] of Object.entries(p.charged)) {
+      const k = Math.max(0, Math.round(n ?? 0));
+      charged += k;
+      metered += k * rateFor(input.rates, cat as WaBillCategory);
+    }
+    let estimated = 0;
+    let estimatedPaise = 0;
+    for (const [cat, n] of Object.entries(input.unpricedByMonth?.[month] ?? {})) {
+      const k = Math.max(0, Math.round(n ?? 0));
+      const rate = rateFor(input.rates, cat as WaBillCategory);
+      if (rate <= 0) continue;
+      estimated += k;
+      estimatedPaise += k * rate;
+    }
+    let projection: WaMetaBillMonth["projection"] = null;
+    if (month === nowMonth) {
+      const scale = daysInMonth(month) / Math.max(1, nowDay);
+      projection = {
+        charged: Math.round((charged + estimated) * scale),
+        totalWithGstPaise: withGst((metered + estimatedPaise) * scale, input.rates),
       };
-    });
-}
-
-/** "₹540.00" or "₹410.00 – ₹540.00" when the range is real. */
-export function rupeeRange(lowPaise: number, highPaise: number): string {
-  return lowPaise === highPaise ? rupees(highPaise) : `${rupees(lowPaise)} – ${rupees(highPaise)}`;
+    }
+    const free = Math.max(0, Math.round(p.free));
+    return {
+      month,
+      label: monthLabel(month),
+      priced: charged + free,
+      charged,
+      free,
+      chargedByCategory: p.charged,
+      estimated,
+      meteredPaise: Math.round(metered),
+      estimatedPaise: Math.round(estimatedPaise),
+      totalWithGstPaise: withGst(metered + estimatedPaise, input.rates),
+      projection,
+    };
+  });
 }
