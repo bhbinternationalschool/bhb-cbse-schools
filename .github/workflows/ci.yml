@@ -445,6 +445,7 @@ jobs:
           npm run test:gateway-fees
           npm run test:gateway-methods
           npm run test:cashfree-refund
+          npm run test:fee-autopay
           npm run test:secure-id
           npm run test:payouts
           npm run test:diksha-index

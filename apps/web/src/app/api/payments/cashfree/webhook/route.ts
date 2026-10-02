@@ -199,7 +199,7 @@ export async function GET() {
     service: "cashfree-webhook",
     configured,
     note: configured
-      ? "POST PAYMENT_SUCCESS_WEBHOOK (orders) / PAYMENT_LINK_EVENT / SETTLEMENT_* (version 2025-01-01) here"
+      ? "POST PAYMENT_SUCCESS_WEBHOOK (orders) / PAYMENT_LINK_EVENT / SETTLEMENT_* / REFUND_* / SUBSCRIPTION_* (version 2025-01-01) here"
       : "Set CASHFREE_APP_ID, CASHFREE_SECRET_KEY (CASHFREE_ENV=sandbox|production)",
   });
 }
@@ -250,6 +250,34 @@ export async function POST(req: Request) {
     return res.ok
       ? NextResponse.json({ ok: true, settlement: true, posted: !!res.posted })
       : NextResponse.json({ ok: false, error: res.error }, { status: 400 });
+  }
+
+  // Fee auto-pay (Subscriptions): a mandate changed state, or a monthly debit
+  // has an outcome. Only the ids are taken from the payload — the mandate and
+  // the debit are re-read from Cashfree before anything is booked.
+  if (eventType.startsWith("SUBSCRIPTION_")) {
+    const { readAutopayEvent } = await import("@/lib/feeAutopay");
+    const ev = readAutopayEvent(event);
+    let detail = "no subscription id";
+    if (ev) {
+      try {
+        const { handleAutopayEvent } = await import("@/lib/feeAutopay.server");
+        detail = (await handleAutopayEvent(ev)).detail;
+      } catch (e) {
+        // Logged, then 200: the daily tick re-reads every open debit, so a
+        // failure here is caught up without Cashfree hammering the endpoint.
+        detail = e instanceof Error ? e.message : "autopay handler failed";
+        console.error("[cashfree-webhook] autopay", detail);
+      }
+    }
+    await recordPaymentGatewayEvent({
+      provider: "cashfree",
+      eventType,
+      externalPaymentId: ev?.paymentId || "",
+      settlementStatus: "received",
+      eventJson: { ...event, handled: detail },
+    }).catch(() => {});
+    return NextResponse.json({ ok: true, autopay: true, detail });
   }
 
   // Refund events carry a refund, not a payment, and are handled before the

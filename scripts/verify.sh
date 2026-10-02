@@ -326,6 +326,7 @@ SELFTESTS=(
   test:gateway-fees
   test:gateway-methods
   test:cashfree-refund
+  test:fee-autopay
   test:secure-id
   test:payouts
   test:diksha-index
