@@ -357,6 +357,7 @@ SELFTESTS=(
   test:transport-overlap-billing
   test:wa-contact-state
   test:wa-delivery-log
+  test:wa-meta-account-alerts
   test:wa-sequences
   test:wa-staff-att-bot
   test:erp-commands
