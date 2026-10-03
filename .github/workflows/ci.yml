@@ -489,6 +489,7 @@ jobs:
           npm run test:staff-geo
           npm run test:punch-screen-geofence
           npm run test:app-min-build
+          npm run test:canva-birthday
           npm run test:standing-discount-change
           npm run test:syllabus-outcomes-import
           npm run test:transport-overlap-billing

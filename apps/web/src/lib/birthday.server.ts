@@ -216,6 +216,29 @@ async function appendLogServer(entries: BirthdayLogEntry[]): Promise<void> {
 
 /* ─── Sending ──────────────────────────────────────────────────────── */
 
+/**
+ * The card design for this person today: the school's own Canva card when
+ * one is set and could be made, else the built-in design. A Canva failure is
+ * never a missed birthday — the built-in card goes and the log says why.
+ */
+async function cardDesignFor(
+  s: BirthdayState["settings"],
+  subject: BirthdaySubject,
+  id: string,
+  date: string,
+  age: number | null,
+  dryRun: boolean,
+): Promise<{ design: string; note: string }> {
+  const source = subject === "staff" ? s.canvaStaffDesign : s.canvaStudentDesign;
+  if (!source) return { design: s.design, note: "" };
+  if (dryRun) return { design: s.design, note: " · Canva card would be made" };
+  const { ensureCanvaBirthdayCard } = await import("@/lib/canvaBirthday.server");
+  const r = await ensureCanvaBirthdayCard({ subject, id, date, age }, source, s.cardWish);
+  if (r.ok) return { design: "canva", note: " · Canva card" };
+  console.warn("[birthday] Canva card failed — built-in card sent", r.error);
+  return { design: s.design, note: ` · Canva card failed (${r.error.slice(0, 120)}) — built-in card sent` };
+}
+
 export type BirthdayRunResult = {
   date: string;
   considered: number;
@@ -264,7 +287,8 @@ export async function runBirthdayGreetings(opts: { date: string; dryRun?: boolea
       push("deferred", `Family quiet hours ${quietHoursLabel(household)} — retried by the next tick`, "none");
       continue;
     }
-    const cardLink = birthdayCardUrl({ studentId: b.studentId, date: opts.date, design: s.design, format: s.format, wish: s.cardWish || undefined });
+    const card = await cardDesignFor(s, "student", b.studentId, opts.date, b.age, !!opts.dryRun);
+    const cardLink = birthdayCardUrl({ studentId: b.studentId, date: opts.date, design: card.design, format: s.format, wish: s.cardWish || undefined });
     const text = birthdayMessageFor({
       settings: s,
       language: b.language,
@@ -276,7 +300,7 @@ export async function runBirthdayGreetings(opts: { date: string; dryRun?: boolea
       cardLink,
     });
     if (opts.dryRun) {
-      push("skipped", `dry run · ${s.waTemplateName ? `template ${s.waTemplateName}` : "free text"} · ${text.slice(0, 80)}…`, s.waTemplateName ? "template" : "text");
+      push("skipped", `dry run · ${s.waTemplateName ? `template ${s.waTemplateName}` : "free text"}${card.note} · ${text.slice(0, 80)}…`, s.waTemplateName ? "template" : "text");
       continue;
     }
     let r;
@@ -307,8 +331,8 @@ export async function runBirthdayGreetings(opts: { date: string; dryRun?: boolea
     } else {
       r = await sendWaWithFailover({ primaryMobile: b.mobile, body: text, clientMessageId: `bday_${key}` });
     }
-    if (r.ok) push("sent", `${r.mode}${r.usedFallback ? " · fallback number" : ""}`, via);
-    else push("failed", r.error || "send failed", via);
+    if (r.ok) push("sent", `${r.mode}${r.usedFallback ? " · fallback number" : ""}${card.note}`, via);
+    else push("failed", `${r.error || "send failed"}${card.note}`, via);
   }
 
   // One social post for the day (names-only group card unless photos are opted in).
@@ -378,7 +402,8 @@ export async function runStaffBirthdayGreetings(opts: { date: string; dryRun?: b
       push("skipped", "No mobile on the staff record", "none");
       continue;
     }
-    const cardLink = birthdayCardUrl({ studentId: "", staffId: b.staffId, date: opts.date, design: s.design, format: s.format, wish: s.cardWish || undefined });
+    const card = await cardDesignFor(s, "staff", b.staffId, opts.date, b.age, !!opts.dryRun);
+    const cardLink = birthdayCardUrl({ studentId: "", staffId: b.staffId, date: opts.date, design: card.design, format: s.format, wish: s.cardWish || undefined });
     const text = staffBirthdayMessageFor({
       settings: s,
       language,
@@ -389,7 +414,7 @@ export async function runStaffBirthdayGreetings(opts: { date: string; dryRun?: b
       cardLink,
     });
     if (opts.dryRun) {
-      push("skipped", `dry run · ${s.staffWaTemplateName ? `template ${s.staffWaTemplateName}` : "free text"} · ${text.slice(0, 80)}…`, s.staffWaTemplateName ? "template" : "text");
+      push("skipped", `dry run · ${s.staffWaTemplateName ? `template ${s.staffWaTemplateName}` : "free text"}${card.note} · ${text.slice(0, 80)}…`, s.staffWaTemplateName ? "template" : "text");
       continue;
     }
     let r;
@@ -418,8 +443,8 @@ export async function runStaffBirthdayGreetings(opts: { date: string; dryRun?: b
     } else {
       r = await sendWaWithFailover({ primaryMobile: b.mobile, body: text, clientMessageId: `bdaystaff_${b.staffId}_${opts.date}` });
     }
-    if (r.ok) push("sent", `${r.mode}${r.usedFallback ? " · fallback number" : ""}`, via);
-    else push("failed", r.error || "send failed", via);
+    if (r.ok) push("sent", `${r.mode}${r.usedFallback ? " · fallback number" : ""}${card.note}`, via);
+    else push("failed", `${r.error || "send failed"}${card.note}`, via);
   }
 
   await appendLogServer(log);

@@ -7,7 +7,8 @@ import { loadMasters } from "@/lib/masters";
 import { hasPermission } from "@/lib/rbac";
 import { BIRTHDAY_FORMATS, normalizeDesign, normalizeFormat } from "@/lib/birthdayCards";
 import { renderBirthdayCard } from "@/lib/birthdayCardDesigns";
-import { birthdayCardSigOk, cardSignatureFor, findBirthdayCardSubject } from "@/lib/birthday.server";
+import { birthdayCardSigOk, cardSignatureFor, findBirthdayCardSubject, readBirthdayState } from "@/lib/birthday.server";
+import { readCanvaBirthdayCard } from "@/lib/canvaBirthday.server";
 import { TENANT } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -52,7 +53,11 @@ async function loadFonts(origin: string): Promise<FontEntry[]> {
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const q = url.searchParams;
-  const design = normalizeDesign(q.get("design"));
+  // "canva" is the school's own Canva card (made earlier by the greeting run
+  // and kept in storage). It is signed under that name, so check the
+  // signature against it before swapping in a built-in design to draw.
+  const isCanva = q.get("design") === "canva";
+  let design = normalizeDesign(q.get("design"));
   const format = normalizeFormat(q.get("format"));
   const studentId = (q.get("student") || "").slice(0, 60);
   const staffId = (q.get("staff") || "").slice(0, 60);
@@ -70,8 +75,21 @@ export async function GET(req: Request) {
   // Same prefix the URL builder signs with: a student's signature never opens
   // a staff member's card.
   const signedId = group ? "group" : staffId ? `staff:${staffId}` : studentId;
-  if (!staff && !birthdayCardSigOk(sig, { studentId: signedId, date, design, format })) {
+  if (!staff && !birthdayCardSigOk(sig, { studentId: signedId, date, design: isCanva ? "canva" : design, format })) {
     return NextResponse.json({ error: "Not allowed" }, { status: 403 });
+  }
+
+  if (isCanva && !group && (studentId || staffId)) {
+    const settings = (await readBirthdayState()).settings;
+    const source = staffId ? settings.canvaStaffDesign : settings.canvaStudentDesign;
+    const png = await readCanvaBirthdayCard(staffId ? "staff" : "student", staffId || studentId, date, source);
+    if (png) {
+      return new Response(Buffer.from(png), {
+        headers: { "Content-Type": "image/png", "Cache-Control": staff ? "private, max-age=60" : "public, max-age=86400" },
+      });
+    }
+    // Not made (or the design changed since): the built-in card, never a broken image.
+    design = settings.design;
   }
 
   const origin = `${url.protocol}//${url.host}`;
