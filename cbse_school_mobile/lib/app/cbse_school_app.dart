@@ -9,6 +9,7 @@ import "../core/i18n/locale_controller.dart";
 import "../l10n/app_localizations.dart";
 import "../core/push/push_service.dart";
 import "../core/theme/app_theme.dart";
+import "../core/update/app_update_gate.dart";
 import "app_audience.dart";
 
 /// The shared shell for both apps.
@@ -39,6 +40,7 @@ class _CbseSchoolAppState extends State<CbseSchoolApp> {
   late final ApiClient _api = ApiClient(widget.config);
   late final PushService _push = PushService(_api);
   final LocaleController _locale = LocaleController();
+  final _messenger = GlobalKey<ScaffoldMessengerState>();
 
   late final GoRouter _router = GoRouter(
     initialLocation: "/login",
@@ -134,6 +136,12 @@ class _CbseSchoolAppState extends State<CbseSchoolApp> {
           localizationsDelegates: L.localizationsDelegates,
           supportedLocales: LocaleController.supported,
           routerConfig: _router,
+          scaffoldMessengerKey: _messenger,
+          builder: (context, child) => AppUpdateGate(
+            apiBaseUrl: widget.config.apiBaseUrl,
+            messenger: _messenger,
+            child: child ?? const SizedBox.shrink(),
+          ),
         ),
       ),
     );

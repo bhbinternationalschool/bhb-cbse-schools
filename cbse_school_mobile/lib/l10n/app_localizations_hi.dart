@@ -1135,4 +1135,20 @@ class LHi extends L {
 
   @override
   String get checkingYourAutopay => 'आपका ऑटो-पे जाँचा जा रहा है…';
+
+  @override
+  String get updateRequiredTitle => 'आगे बढ़ने के लिए ऐप अपडेट करें';
+
+  @override
+  String get updateRequiredBody =>
+      'ऐप का यह संस्करण अब स्कूल के सिस्टम के साथ काम नहीं करता। अपडेट में एक मिनट लगता है और आपका सब कुछ सुरक्षित रहता है।';
+
+  @override
+  String get updateNow => 'अभी अपडेट करें';
+
+  @override
+  String get updateDownloaded => 'अपडेट डाउनलोड हो गया है।';
+
+  @override
+  String get updateRestart => 'फिर से खोलें';
 }

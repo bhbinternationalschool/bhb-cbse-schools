@@ -2136,6 +2136,36 @@ abstract class L {
   /// In en, this message translates to:
   /// **'Checking your auto-pay…'**
   String get checkingYourAutopay;
+
+  /// No description provided for @updateRequiredTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Update the app to continue'**
+  String get updateRequiredTitle;
+
+  /// No description provided for @updateRequiredBody.
+  ///
+  /// In en, this message translates to:
+  /// **'This version of the app no longer works with the school\'s system. Updating takes a minute and keeps everything you have.'**
+  String get updateRequiredBody;
+
+  /// No description provided for @updateNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Update now'**
+  String get updateNow;
+
+  /// No description provided for @updateDownloaded.
+  ///
+  /// In en, this message translates to:
+  /// **'The update is downloaded.'**
+  String get updateDownloaded;
+
+  /// No description provided for @updateRestart.
+  ///
+  /// In en, this message translates to:
+  /// **'Restart'**
+  String get updateRestart;
 }
 
 class _LDelegate extends LocalizationsDelegate<L> {

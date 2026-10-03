@@ -6,6 +6,7 @@ import "package:http/http.dart" as http;
 import "package:http_parser/http_parser.dart";
 
 import "../config/app_config.dart";
+import "../update/app_build.dart";
 
 part "staff_api.dart";
 part "online_classes_api.dart";
@@ -2755,6 +2756,7 @@ class ApiClient {
     return {
       "Content-Type": "application/json",
       if (cookie != null && cookie.isNotEmpty) "Cookie": "$_cookieName=$cookie",
+      ...AppBuild.headers,
     };
   }
 
@@ -2779,6 +2781,8 @@ class ApiClient {
     } catch (_) {
       /* keep default */
     }
+    // 426: this build is too old for the server — AppUpdateGate takes over.
+    if (res.statusCode == 426) AppBuild.updateRequired.value = true;
     throw ApiException(message, res.statusCode);
   }
 

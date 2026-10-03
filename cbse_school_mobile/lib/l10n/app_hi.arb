@@ -353,5 +353,10 @@
   "stopAutopay": "ऑटो-पे बंद करें",
   "stopAutopayConfirm": "फ़ीस का ऑटो-पे बंद करें? बाद में फिर से शुरू कर सकते हैं।",
   "autopayStopped": "ऑटो-पे बंद कर दिया गया",
-  "checkingYourAutopay": "आपका ऑटो-पे जाँचा जा रहा है…"
+  "checkingYourAutopay": "आपका ऑटो-पे जाँचा जा रहा है…",
+  "updateRequiredTitle": "आगे बढ़ने के लिए ऐप अपडेट करें",
+  "updateRequiredBody": "ऐप का यह संस्करण अब स्कूल के सिस्टम के साथ काम नहीं करता। अपडेट में एक मिनट लगता है और आपका सब कुछ सुरक्षित रहता है।",
+  "updateNow": "अभी अपडेट करें",
+  "updateDownloaded": "अपडेट डाउनलोड हो गया है।",
+  "updateRestart": "फिर से खोलें"
 }
