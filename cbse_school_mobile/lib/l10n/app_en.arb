@@ -338,5 +338,61 @@
   "speak": "Speak",
   "listening": "Listening…",
   "couldNotHearYou": "Could not hear you",
-  "dictationNotAvailable": "Dictation is not available on this phone"
+  "dictationNotAvailable": "Dictation is not available on this phone",
+  "howWillYouPay": "How will you pay?",
+  "schoolFeesAmount": "School fees {amount}",
+  "@schoolFeesAmount": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "paymentChargeHint": "Some ways of paying carry a bank charge. Pick the one that suits you.",
+  "noExtraCharge": "No extra charge",
+  "includesPaymentCharge": "Includes {amount} online payment charge",
+  "@includesPaymentCharge": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "payFeesAutomatically": "Pay fees automatically",
+  "autopayPitch": "Once a month, from day {day}, the school debits only the fee that is due — never more than {limit}. You get a WhatsApp message the day before.",
+  "@autopayPitch": {
+    "placeholders": {
+      "day": {
+        "type": "String"
+      },
+      "limit": {
+        "type": "String"
+      }
+    }
+  },
+  "setUpAutopay": "Set up auto-pay",
+  "approveAutopay": "Approve auto-pay",
+  "autopayOnUpTo": "Auto-pay is on · up to {limit} a month",
+  "@autopayOnUpTo": {
+    "placeholders": {
+      "limit": {
+        "type": "String"
+      }
+    }
+  },
+  "autopayLastDebit": "Last debit {amount} on {date}",
+  "@autopayLastDebit": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      },
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "stopAutopay": "Stop auto-pay",
+  "stopAutopayConfirm": "Stop paying fees automatically? You can set it up again later.",
+  "autopayStopped": "Auto-pay stopped",
+  "checkingYourAutopay": "Checking your auto-pay…"
 }

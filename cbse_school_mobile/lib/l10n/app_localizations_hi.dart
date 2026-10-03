@@ -1078,4 +1078,61 @@ class LHi extends L {
 
   @override
   String get dictationNotAvailable => 'इस फ़ोन में बोलकर लिखना उपलब्ध नहीं है';
+
+  @override
+  String get howWillYouPay => 'आप कैसे भुगतान करेंगे?';
+
+  @override
+  String schoolFeesAmount(String amount) {
+    return 'स्कूल फ़ीस $amount';
+  }
+
+  @override
+  String get paymentChargeHint =>
+      'कुछ भुगतान तरीक़ों पर बैंक शुल्क लगता है। अपनी सुविधा का तरीक़ा चुनें।';
+
+  @override
+  String get noExtraCharge => 'कोई अतिरिक्त शुल्क नहीं';
+
+  @override
+  String includesPaymentCharge(String amount) {
+    return 'इसमें $amount ऑनलाइन भुगतान शुल्क शामिल है';
+  }
+
+  @override
+  String get payFeesAutomatically => 'फ़ीस अपने-आप जमा करें';
+
+  @override
+  String autopayPitch(String day, String limit) {
+    return 'हर महीने $day तारीख़ से, स्कूल केवल बकाया फ़ीस काटेगा — $limit से ज़्यादा कभी नहीं। एक दिन पहले WhatsApp पर सूचना मिलेगी।';
+  }
+
+  @override
+  String get setUpAutopay => 'ऑटो-पे शुरू करें';
+
+  @override
+  String get approveAutopay => 'ऑटो-पे स्वीकृत करें';
+
+  @override
+  String autopayOnUpTo(String limit) {
+    return 'ऑटो-पे चालू है · हर महीने अधिकतम $limit';
+  }
+
+  @override
+  String autopayLastDebit(String amount, String date) {
+    return 'पिछली कटौती $amount, $date को';
+  }
+
+  @override
+  String get stopAutopay => 'ऑटो-पे बंद करें';
+
+  @override
+  String get stopAutopayConfirm =>
+      'फ़ीस का ऑटो-पे बंद करें? बाद में फिर से शुरू कर सकते हैं।';
+
+  @override
+  String get autopayStopped => 'ऑटो-पे बंद कर दिया गया';
+
+  @override
+  String get checkingYourAutopay => 'आपका ऑटो-पे जाँचा जा रहा है…';
 }

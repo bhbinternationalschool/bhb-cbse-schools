@@ -1078,4 +1078,61 @@ class LEn extends L {
   @override
   String get dictationNotAvailable =>
       'Dictation is not available on this phone';
+
+  @override
+  String get howWillYouPay => 'How will you pay?';
+
+  @override
+  String schoolFeesAmount(String amount) {
+    return 'School fees $amount';
+  }
+
+  @override
+  String get paymentChargeHint =>
+      'Some ways of paying carry a bank charge. Pick the one that suits you.';
+
+  @override
+  String get noExtraCharge => 'No extra charge';
+
+  @override
+  String includesPaymentCharge(String amount) {
+    return 'Includes $amount online payment charge';
+  }
+
+  @override
+  String get payFeesAutomatically => 'Pay fees automatically';
+
+  @override
+  String autopayPitch(String day, String limit) {
+    return 'Once a month, from day $day, the school debits only the fee that is due — never more than $limit. You get a WhatsApp message the day before.';
+  }
+
+  @override
+  String get setUpAutopay => 'Set up auto-pay';
+
+  @override
+  String get approveAutopay => 'Approve auto-pay';
+
+  @override
+  String autopayOnUpTo(String limit) {
+    return 'Auto-pay is on · up to $limit a month';
+  }
+
+  @override
+  String autopayLastDebit(String amount, String date) {
+    return 'Last debit $amount on $date';
+  }
+
+  @override
+  String get stopAutopay => 'Stop auto-pay';
+
+  @override
+  String get stopAutopayConfirm =>
+      'Stop paying fees automatically? You can set it up again later.';
+
+  @override
+  String get autopayStopped => 'Auto-pay stopped';
+
+  @override
+  String get checkingYourAutopay => 'Checking your auto-pay…';
 }

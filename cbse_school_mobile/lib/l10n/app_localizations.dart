@@ -2046,6 +2046,96 @@ abstract class L {
   /// In en, this message translates to:
   /// **'Dictation is not available on this phone'**
   String get dictationNotAvailable;
+
+  /// No description provided for @howWillYouPay.
+  ///
+  /// In en, this message translates to:
+  /// **'How will you pay?'**
+  String get howWillYouPay;
+
+  /// No description provided for @schoolFeesAmount.
+  ///
+  /// In en, this message translates to:
+  /// **'School fees {amount}'**
+  String schoolFeesAmount(String amount);
+
+  /// No description provided for @paymentChargeHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Some ways of paying carry a bank charge. Pick the one that suits you.'**
+  String get paymentChargeHint;
+
+  /// No description provided for @noExtraCharge.
+  ///
+  /// In en, this message translates to:
+  /// **'No extra charge'**
+  String get noExtraCharge;
+
+  /// No description provided for @includesPaymentCharge.
+  ///
+  /// In en, this message translates to:
+  /// **'Includes {amount} online payment charge'**
+  String includesPaymentCharge(String amount);
+
+  /// No description provided for @payFeesAutomatically.
+  ///
+  /// In en, this message translates to:
+  /// **'Pay fees automatically'**
+  String get payFeesAutomatically;
+
+  /// No description provided for @autopayPitch.
+  ///
+  /// In en, this message translates to:
+  /// **'Once a month, from day {day}, the school debits only the fee that is due — never more than {limit}. You get a WhatsApp message the day before.'**
+  String autopayPitch(String day, String limit);
+
+  /// No description provided for @setUpAutopay.
+  ///
+  /// In en, this message translates to:
+  /// **'Set up auto-pay'**
+  String get setUpAutopay;
+
+  /// No description provided for @approveAutopay.
+  ///
+  /// In en, this message translates to:
+  /// **'Approve auto-pay'**
+  String get approveAutopay;
+
+  /// No description provided for @autopayOnUpTo.
+  ///
+  /// In en, this message translates to:
+  /// **'Auto-pay is on · up to {limit} a month'**
+  String autopayOnUpTo(String limit);
+
+  /// No description provided for @autopayLastDebit.
+  ///
+  /// In en, this message translates to:
+  /// **'Last debit {amount} on {date}'**
+  String autopayLastDebit(String amount, String date);
+
+  /// No description provided for @stopAutopay.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop auto-pay'**
+  String get stopAutopay;
+
+  /// No description provided for @stopAutopayConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop paying fees automatically? You can set it up again later.'**
+  String get stopAutopayConfirm;
+
+  /// No description provided for @autopayStopped.
+  ///
+  /// In en, this message translates to:
+  /// **'Auto-pay stopped'**
+  String get autopayStopped;
+
+  /// No description provided for @checkingYourAutopay.
+  ///
+  /// In en, this message translates to:
+  /// **'Checking your auto-pay…'**
+  String get checkingYourAutopay;
 }
 
 class _LDelegate extends LocalizationsDelegate<L> {
