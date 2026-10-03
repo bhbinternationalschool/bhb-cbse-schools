@@ -7,6 +7,7 @@ import {
   DEFAULT_AY,
   STUDENT_TYPES,
   resolveFeeGroupId,
+  suggestFeeStudentType,
   type FeeStudentType,
   type MastersState,
 } from "@/lib/masters";
@@ -419,6 +420,28 @@ function mapStudentType(
   if (v.includes("rte") || v.includes("ews")) return "RTE";
   if (v.includes("new") || v.includes("admission")) return "NEW";
   return fallback;
+}
+
+/**
+ * The fee type an imported row gets.
+ *
+ * A fresh admission who joined after mid-May is MID_YEAR, so the months
+ * before they joined are never billed — the rule the admission desk and the
+ * student form already apply (suggestFeeStudentType). The sheet's own
+ * "New/Promoted" column says "New" for these children, and taking it at its
+ * word billed them from April: 8 of the 2026-27 uploads, joined 29 May –
+ * 30 Jul, were charged May and June, and the counter waived those months by
+ * hand — or didn't (₹8,750 still open on 3 Oct 2026). An explicit
+ * PROMOTE / MID_YEAR / RTE in the sheet is kept as written.
+ */
+export function importStudentType(
+  raw: string,
+  fallback: FeeStudentType,
+  joinedOn: string,
+  session: string,
+): FeeStudentType {
+  const t = mapStudentType(raw, fallback);
+  return t === "NEW" ? suggestFeeStudentType(joinedOn, session, "NEW") : t;
 }
 
 function mapCategory(raw: string): StudentCategory {
@@ -1156,7 +1179,7 @@ export function previewStudentImport(
         ? "RTE"
         : "PROMOTE"
       : options.defaultStudentType;
-    const studentType = mapStudentType(csvTypeRaw, typeFallback);
+    const studentType = importStudentType(csvTypeRaw, typeFallback, f.joinedOn ?? "", session);
     accepted += 1;
     if (sample.length < 5) {
       sample.push({
@@ -1314,7 +1337,12 @@ export function applyStudentImport(
           ? "RTE"
           : "PROMOTE"
         : options.defaultStudentType;
-    const studentType = mapStudentType(csvTypeRaw, typeFallback);
+    const studentType = importStudentType(
+      csvTypeRaw,
+      typeFallback,
+      f.joinedOn || existing?.joinedOn || "",
+      session,
+    );
     const campusId = resolveCampusId(masters, f.campus ?? "");
     const feeGroupId = resolveFeeGroupIdByName(
       masters,
@@ -1571,7 +1599,10 @@ export function reconcileContinuingTypes(
     if (normalizeSessionCode(s.academicYearCode) !== target) return s;
     if (s.studentType === "RTE" || s.studentType === "MID_YEAR") return s;
     const earlier = findEarlierEnrollment(students, s.admissionNo, target);
-    const nextType: FeeStudentType = earlier ? "PROMOTE" : "NEW";
+    // A fresh admission after mid-May is MID_YEAR, never reset to NEW.
+    const nextType: FeeStudentType = earlier
+      ? "PROMOTE"
+      : suggestFeeStudentType(s.joinedOn || "", target, "NEW");
     if (s.studentType === nextType) return s;
     return normalizeStudent({ ...s, studentType: nextType });
   });

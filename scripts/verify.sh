@@ -239,6 +239,7 @@ SELFTESTS=(
   test:udise-compliance
   test:lead-worklist
   test:student-import
+  test:student-import-mid-year
   test:cash-pool-orphans
   test:academic-risk
   test:admissions-ai

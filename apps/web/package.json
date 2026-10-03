@@ -317,6 +317,7 @@
     "test:udise-compliance": "npx tsx src/lib/udiseCompliance.selftest.ts",
     "test:lead-worklist": "npx tsx src/lib/leadWorklist.selftest.ts",
     "test:student-import": "npx tsx src/lib/studentImport.selftest.ts",
+    "test:student-import-mid-year": "npx tsx src/lib/studentImportMidYear.selftest.ts",
     "test:payment-link-amount": "npx tsx src/lib/paymentLinkAmount.selftest.ts",
     "test:sis-wire-payload": "npx tsx src/lib/sisWirePayload.selftest.ts",
     "test:print-palette": "npx tsx src/lib/printPalette.selftest.ts",

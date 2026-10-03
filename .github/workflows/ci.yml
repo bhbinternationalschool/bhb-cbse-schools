@@ -366,6 +366,7 @@ jobs:
           npm run test:udise-compliance
           npm run test:lead-worklist
           npm run test:student-import
+          npm run test:student-import-mid-year
           npm run test:cash-pool-orphans
           npm run test:academic-risk
           npm run test:admissions-ai
