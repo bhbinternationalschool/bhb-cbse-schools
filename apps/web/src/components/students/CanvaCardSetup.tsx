@@ -279,7 +279,7 @@ export function CanvaCardSetup(props: {
         ) : null}
       </div>
       <p className="mt-1.5 text-[10px] text-[var(--muted)]">
-        In the Canva editor, mark the parts that change as data fields (Apps → Data autofill) and name them: name, first name, class, age, wish, date, school, signature, photo, logo. Press Save settings to use the design; clear the link to go back to the built-in cards.
+        In the Canva editor: Apps → Bulk create → Enter data manually, add columns named name, class, age, wish, date, school, signature, photo or logo (one row of sample values is enough), then connect each column to its text or picture on the card. You don't need to generate the designs — the ERP fills them each day. Press Save settings to use the design; clear the link to go back to the built-in cards.
       </p>
     </div>
   );
