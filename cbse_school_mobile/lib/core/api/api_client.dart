@@ -1552,6 +1552,7 @@ class PunchToday {
 
 class PunchState {
   const PunchState({
+    this.staffId = "",
     required this.staffName,
     required this.date,
     required this.allowSelfPunch,
@@ -1566,6 +1567,7 @@ class PunchState {
     final fence = (j["fence"] as Map<String, dynamic>?) ?? const {};
     final today = j["today"] as Map<String, dynamic>?;
     return PunchState(
+      staffId: (j["staffId"] as String?) ?? "",
       staffName: (j["staffName"] as String?) ?? "",
       date: (j["date"] as String?) ?? "",
       allowSelfPunch: j["allowSelfPunch"] == true,
@@ -1584,6 +1586,8 @@ class PunchState {
     );
   }
 
+  /// Signed into every punch (the server re-builds the same message).
+  final String staffId;
   final String staffName;
   final String date;
   final bool allowSelfPunch;
@@ -3525,19 +3529,34 @@ class ApiClient {
   Future<PunchState> fetchPunchState() async =>
       PunchState.fromJson(await _getData("/api/v1/staff/attendance/punch"));
 
+  /// A punch since 30 Sep 2026: the office screen's 6-digit code, this
+  /// phone's signature (PunchDeviceKey) and — since 3 Oct 2026 — the
+  /// phone's location inside the school. The server checks all three.
   Future<PunchResult> punchAttendance({
     required String kind,
     required double lat,
     required double lng,
     double? accuracyM,
     bool mocked = false,
+    required String code,
+    required Map<String, String> deviceJwk,
+    required String signature,
+    required int ts,
+    String deviceLabel = "",
   }) async {
     final data = await _postData("/api/v1/staff/attendance/punch", {
       "kind": kind,
+      "code": code,
       "lat": lat,
       "lng": lng,
       "accuracyM": ?accuracyM,
       "mocked": mocked,
+      "device": {
+        "jwk": deviceJwk,
+        "signature": signature,
+        "ts": ts,
+        "label": deviceLabel,
+      },
     });
     return PunchResult(
       kind: (data["kind"] as String?) ?? kind,
