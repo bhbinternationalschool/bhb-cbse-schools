@@ -70,5 +70,9 @@ create index if not exists payout_transfers_attention_idx
 -- mean sending a transfer with no record of it — the exact state in which a
 -- salary gets paid twice.
 grant all on public.payout_transfers to service_role;
+-- Server-only, like fee_autopay: no anon/authenticated access and RLS on,
+-- so the public key cannot read money records through PostgREST.
+revoke all on public.payout_transfers from anon, authenticated;
+alter table public.payout_transfers enable row level security;
 
 notify pgrst, 'reload schema';
