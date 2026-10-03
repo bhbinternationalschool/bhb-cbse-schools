@@ -357,6 +357,7 @@ SELFTESTS=(
   test:staff-geo
   test:punch-screen-geofence
   test:app-min-build
+  test:canva-birthday
   test:standing-discount-change
   test:syllabus-outcomes-import
   test:transport-overlap-billing

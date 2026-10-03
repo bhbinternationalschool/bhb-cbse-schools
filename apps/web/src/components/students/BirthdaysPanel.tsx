@@ -43,6 +43,7 @@ import { TENANT } from "@/lib/types";
 import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { CanvaCardSetup } from "@/components/students/CanvaCardSetup";
 
 const inp = "w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm";
 
@@ -379,6 +380,8 @@ export function BirthdaysPanel({ canEdit }: { canEdit: boolean }) {
         <p className="mt-1 text-[10px] text-[var(--muted)]">Dates of birth come from Staff → HR. A staff member with no mobile on their record is skipped and says so in the log.</p>
       </div>
       ) : null}
+
+      <CanvaCardSetup settings={s} patch={patch} canEdit={canEdit} staffAccess={staffAccess} date={date} />
 
       {/* Card template gallery */}
       <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">

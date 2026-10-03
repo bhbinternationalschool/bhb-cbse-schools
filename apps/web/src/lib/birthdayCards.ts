@@ -19,6 +19,7 @@
  *    sent twice.
  */
 
+import { parseCanvaDesignId } from "@/lib/canvaBirthday";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { householdLanguage, SCHOOL_DEFAULT_WA_LANGUAGE, type HouseholdLanguage, type HouseholdPrefsLike } from "@/lib/householdPrefs";
@@ -287,6 +288,14 @@ export type BirthdaySettings = {
   socialIncludePhoto: boolean;
   socialCaption: string;
   socialDesign: BirthdayDesignId;
+  /**
+   * The school's own card designed in Canva (a design id, from the link the
+   * office pastes). "" = use the built-in `design`. When the Canva card can't
+   * be made on the day, the built-in `design` goes out instead.
+   */
+  canvaStudentDesign: string;
+  /** Same, for staff birthdays — a colleague's card is usually a different design. */
+  canvaStaffDesign: string;
   updatedAt: string;
 };
 
@@ -351,6 +360,8 @@ export function defaultBirthdaySettings(): BirthdaySettings {
     socialIncludePhoto: false,
     socialCaption: "",
     socialDesign: "minimal",
+    canvaStudentDesign: "",
+    canvaStaffDesign: "",
     updatedAt: "",
   };
 }
@@ -386,6 +397,8 @@ export function normalizeBirthdaySettings(raw: unknown): BirthdaySettings {
     socialIncludePhoto: r.socialIncludePhoto === true,
     socialCaption: str(r.socialCaption, 600),
     socialDesign: normalizeDesign(r.socialDesign ?? "minimal"),
+    canvaStudentDesign: parseCanvaDesignId(str(r.canvaStudentDesign, 300)),
+    canvaStaffDesign: parseCanvaDesignId(str(r.canvaStaffDesign, 300)),
     updatedAt: str(r.updatedAt, 40),
   };
 }
