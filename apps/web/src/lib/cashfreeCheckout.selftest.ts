@@ -34,6 +34,20 @@ const base = {
   assert.equal(r.body.order_expiry_time, undefined);
 }
 {
+  // No rail chosen: the order stays open to every rail the account has.
+  const open = buildCashfreeOrderBody(base, now);
+  assert.ok(open.ok);
+  assert.equal("payment_methods" in open.body.order_meta, false, "no restriction unless asked");
+  // A chosen rail travels as Create Order's short codes.
+  const card = buildCashfreeOrderBody({ ...base, paymentMethods: "cc,ccc" }, now);
+  assert.ok(card.ok);
+  assert.equal(card.body.order_meta.payment_methods, "cc,ccc");
+  // Anything that is not a plain code list is dropped, never sent half-formed.
+  const junk = buildCashfreeOrderBody({ ...base, paymentMethods: "credit card; upi" }, now);
+  assert.ok(junk.ok);
+  assert.equal("payment_methods" in junk.body.order_meta, false);
+}
+{
   assert.equal(buildCashfreeOrderBody({ ...base, customerMobile: "12345" }, now).ok, false, "no phone → no order, never invented");
   assert.equal(buildCashfreeOrderBody({ ...base, amountPaise: 50 }, now).ok, false, "under ₹1 refused");
   assert.equal(buildCashfreeOrderBody({ ...base, returnUrl: "http://localhost:3000/x" }, now).ok, false, "http return url refused up front");

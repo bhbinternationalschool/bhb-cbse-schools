@@ -382,6 +382,131 @@ class FeeDue {
   final int balancePaise;
 }
 
+/// One way of paying, priced for this amount (app 1.0.14+).
+///
+/// The server prices every rail the account takes from the school's fee
+/// policy. `surchargePaise` is 0 where the school absorbs the charge.
+class PayOption {
+  const PayOption({
+    required this.group,
+    required this.label,
+    required this.surchargePaise,
+    required this.chargeablePaise,
+  });
+
+  factory PayOption.fromJson(Map<String, dynamic> j) => PayOption(
+    group: (j["group"] as String?) ?? "",
+    label: (j["label"] as String?) ?? "",
+    surchargePaise: (j["surchargePaise"] as num?)?.toInt() ?? 0,
+    chargeablePaise: (j["chargeablePaise"] as num?)?.toInt() ?? 0,
+  );
+
+  final String group;
+  final String label;
+  final int surchargePaise;
+  final int chargeablePaise;
+}
+
+/// What paying the chosen dues online would cost, per rail, before anything
+/// is created. `chargesParents` false (the school absorbs every rail) means
+/// there is nothing to choose: the app goes straight to the open checkout.
+class PayQuote {
+  const PayQuote({
+    required this.netPaise,
+    required this.chargesParents,
+    required this.options,
+  });
+
+  factory PayQuote.fromJson(Map<String, dynamic> j) => PayQuote(
+    netPaise: (j["netPaise"] as num?)?.toInt() ?? 0,
+    chargesParents: j["chargesParents"] == true,
+    options: ((j["options"] as List?) ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map(PayOption.fromJson)
+        .where((o) => o.group.isNotEmpty && o.chargeablePaise > 0)
+        .toList(),
+  );
+
+  final int netPaise;
+  final bool chargesParents;
+  final List<PayOption> options;
+}
+
+/// This family's fee auto-pay, as /api/v1/autopay reports it.
+class AutopayMandateInfo {
+  const AutopayMandateInfo({
+    required this.status,
+    required this.statusLabel,
+    required this.maxPaise,
+    required this.active,
+    required this.needsApproval,
+    required this.approveUrl,
+  });
+
+  factory AutopayMandateInfo.fromJson(Map<String, dynamic> j) =>
+      AutopayMandateInfo(
+        status: (j["status"] as String?) ?? "",
+        statusLabel: (j["statusLabel"] as String?) ?? "",
+        maxPaise: (j["maxPaise"] as num?)?.toInt() ?? 0,
+        active: j["active"] == true,
+        needsApproval: j["needsApproval"] == true,
+        approveUrl: (j["approveUrl"] as String?) ?? "",
+      );
+
+  final String status;
+  final String statusLabel;
+  final int maxPaise;
+  final bool active;
+  final bool needsApproval;
+  final String approveUrl;
+}
+
+class AutopayInfo {
+  const AutopayInfo({
+    required this.offered,
+    required this.chargeDay,
+    required this.defaultMaxPaise,
+    required this.mandate,
+    required this.lastDebitPaise,
+    required this.lastDebitStatus,
+    required this.lastDebitDate,
+    this.approveUrl = "",
+  });
+
+  factory AutopayInfo.fromJson(Map<String, dynamic> j) {
+    final m = j["mandate"];
+    final last = j["lastDebit"];
+    return AutopayInfo(
+      offered: j["offered"] == true,
+      chargeDay: (j["chargeDay"] as num?)?.toInt() ?? 0,
+      defaultMaxPaise: (j["defaultMaxPaise"] as num?)?.toInt() ?? 0,
+      mandate: m is Map<String, dynamic>
+          ? AutopayMandateInfo.fromJson(m)
+          : null,
+      lastDebitPaise: last is Map
+          ? (last["amountPaise"] as num?)?.toInt() ?? 0
+          : 0,
+      lastDebitStatus: last is Map ? (last["status"] as String?) ?? "" : "",
+      lastDebitDate: last is Map ? (last["debitDate"] as String?) ?? "" : "",
+      approveUrl: (j["approveUrl"] as String?) ?? "",
+    );
+  }
+
+  /// Offered to start, or already set up — either way there is a card to show.
+  bool get visible => offered || mandate != null;
+
+  final bool offered;
+  final int chargeDay;
+  final int defaultMaxPaise;
+  final AutopayMandateInfo? mandate;
+  final int lastDebitPaise;
+  final String lastDebitStatus;
+  final String lastDebitDate;
+
+  /// Set only on the reply to "start": the school's approval page to open.
+  final String approveUrl;
+}
+
 /// What /api/payments/parent-checkout hands back once the pay-link exists.
 ///
 /// `checkoutUrl` is the gateway's hosted page (Cashfree) and is what the
@@ -1149,6 +1274,7 @@ class BusPosition {
   final double? courseDeg;
   final String recordedAt;
   final int ageSec;
+
   /// live · recent · stale
   final String freshness;
 }
@@ -1199,6 +1325,7 @@ class ChildBusLive {
   final String busNo;
   final String vehicleName;
   final bool tracked;
+
   /// morning · afternoon · off
   final String phase;
   final BusPosition? bus;
@@ -3167,13 +3294,34 @@ class ApiClient {
   /// pay-link, attaches the gateway checkout and — via its webhook — settles
   /// the receipt when the money lands. The app's part ends at opening the
   /// returned URL. Not a {data} envelope route, hence [postJson].
+  /// What paying these dues online would cost per way of paying. Only due
+  /// keys travel; the total and the charges come from the server. Any
+  /// failure reads as "nothing to choose", so a quote can never stop a fee
+  /// being paid — the checkout then uses the open, free fallback rail.
+  Future<PayQuote> quoteParentPayment(List<String> dueKeys) async {
+    try {
+      final body = await postJson("/api/payments/parent-checkout/quote", {
+        "dueKeys": dueKeys,
+      });
+      if (body["ok"] != true) {
+        return const PayQuote(netPaise: 0, chargesParents: false, options: []);
+      }
+      return PayQuote.fromJson(body);
+    } catch (_) {
+      return const PayQuote(netPaise: 0, chargesParents: false, options: []);
+    }
+  }
+
   Future<ParentCheckout> startParentCheckout({
     required List<String> dueKeys,
     required String studentId,
+    String? methodGroup,
   }) async {
     final body = await postJson("/api/payments/parent-checkout", {
       "dueKeys": dueKeys,
       "studentId": studentId,
+      if (methodGroup != null && methodGroup.isNotEmpty)
+        "methodGroup": methodGroup,
     });
     if (body["ok"] != true) {
       final err = body["error"];
@@ -3184,6 +3332,29 @@ class ApiClient {
     }
     return ParentCheckout.fromJson(body);
   }
+
+  // ---- fee auto-pay -------------------------------------------------------
+
+  Future<AutopayInfo> fetchAutopay() async =>
+      AutopayInfo.fromJson(await _getData("/api/v1/autopay"));
+
+  /// A mandate for this family; open the returned `approveUrl` to approve it.
+  Future<AutopayInfo> startAutopay({int? maxPaise}) async =>
+      AutopayInfo.fromJson(
+        await _postData("/api/v1/autopay", {
+          "action": "start",
+          "maxPaise": ?maxPaise,
+        }),
+      );
+
+  /// Re-read the mandate from Cashfree — after the parent comes back.
+  Future<AutopayInfo> refreshAutopay() async => AutopayInfo.fromJson(
+    await _postData("/api/v1/autopay", {"action": "refresh"}),
+  );
+
+  Future<AutopayInfo> stopAutopay() async => AutopayInfo.fromJson(
+    await _postData("/api/v1/autopay", {"action": "stop"}),
+  );
 
   // ---- profile & documents ----------------------------------------------
 

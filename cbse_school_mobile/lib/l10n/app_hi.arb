@@ -338,5 +338,20 @@
   "speak": "बोलें",
   "listening": "सुन रहे हैं…",
   "couldNotHearYou": "सुनाई नहीं दिया",
-  "dictationNotAvailable": "इस फ़ोन में बोलकर लिखना उपलब्ध नहीं है"
+  "dictationNotAvailable": "इस फ़ोन में बोलकर लिखना उपलब्ध नहीं है",
+  "howWillYouPay": "आप कैसे भुगतान करेंगे?",
+  "schoolFeesAmount": "स्कूल फ़ीस {amount}",
+  "paymentChargeHint": "कुछ भुगतान तरीक़ों पर बैंक शुल्क लगता है। अपनी सुविधा का तरीक़ा चुनें।",
+  "noExtraCharge": "कोई अतिरिक्त शुल्क नहीं",
+  "includesPaymentCharge": "इसमें {amount} ऑनलाइन भुगतान शुल्क शामिल है",
+  "payFeesAutomatically": "फ़ीस अपने-आप जमा करें",
+  "autopayPitch": "हर महीने {day} तारीख़ से, स्कूल केवल बकाया फ़ीस काटेगा — {limit} से ज़्यादा कभी नहीं। एक दिन पहले WhatsApp पर सूचना मिलेगी।",
+  "setUpAutopay": "ऑटो-पे शुरू करें",
+  "approveAutopay": "ऑटो-पे स्वीकृत करें",
+  "autopayOnUpTo": "ऑटो-पे चालू है · हर महीने अधिकतम {limit}",
+  "autopayLastDebit": "पिछली कटौती {amount}, {date} को",
+  "stopAutopay": "ऑटो-पे बंद करें",
+  "stopAutopayConfirm": "फ़ीस का ऑटो-पे बंद करें? बाद में फिर से शुरू कर सकते हैं।",
+  "autopayStopped": "ऑटो-पे बंद कर दिया गया",
+  "checkingYourAutopay": "आपका ऑटो-पे जाँचा जा रहा है…"
 }

@@ -78,5 +78,9 @@ create index if not exists cashfree_refunds_unapplied_idx
 -- would mean telling the office the money was sent back with no row to show
 -- for it — so this grant is the difference between a refund and a lie.
 grant all on public.cashfree_refunds to service_role;
+-- Server-only, like fee_autopay: no anon/authenticated access and RLS on,
+-- so the public key cannot read money records through PostgREST.
+revoke all on public.cashfree_refunds from anon, authenticated;
+alter table public.cashfree_refunds enable row level security;
 
 notify pgrst, 'reload schema';

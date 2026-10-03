@@ -40,6 +40,12 @@ export type CashfreeOrderInput = {
   tags: Record<string, string>;
   /** ISO timestamp; must be 16 minutes to 30 days out. Omitted = Cashfree's default. */
   expiresAt?: string;
+  /**
+   * order_meta.payment_methods short codes ("cc,ccc", "upi"). Omitted = every
+   * rail the account has. Set only when the parent chose a rail and was quoted
+   * a charge for it — see cashfreeOrderPaymentMethods.
+   */
+  paymentMethods?: string;
 };
 
 export type CashfreeOrderBody = {
@@ -47,7 +53,7 @@ export type CashfreeOrderBody = {
   order_amount: number;
   order_currency: "INR";
   customer_details: { customer_id: string; customer_name: string; customer_phone: string };
-  order_meta: { return_url: string; notify_url: string };
+  order_meta: { return_url: string; notify_url: string; payment_methods?: string };
   order_note: string;
   order_tags: Record<string, string>;
   order_expiry_time?: string;
@@ -81,7 +87,13 @@ export function buildCashfreeOrderBody(
       customer_name: (input.customerName || "Parent").slice(0, 120),
       customer_phone: phone,
     },
-    order_meta: { return_url: input.returnUrl, notify_url: input.notifyUrl },
+    order_meta: {
+      return_url: input.returnUrl,
+      notify_url: input.notifyUrl,
+      ...(input.paymentMethods && /^[a-z]+(,[a-z]+)*$/.test(input.paymentMethods)
+        ? { payment_methods: input.paymentMethods }
+        : {}),
+    },
     order_note: (input.note || "").slice(0, 200),
     order_tags: tags,
   };

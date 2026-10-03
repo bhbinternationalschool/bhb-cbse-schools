@@ -36,6 +36,35 @@ export function cashfreeFiltersFor(groups: readonly GatewayMethodGroup[]): strin
 }
 
 /**
+ * Create Order's `order_meta.payment_methods` codes for one rail.
+ *
+ * A DIFFERENT namespace from the eligibility filters above — Create Order
+ * takes Cashfree's short codes (cc, dc, ccc, ppc, nb, upi, app, paylater,
+ * cardlessemi, ccemi, dcemi, banktransfer), not the filter names. Mixing the
+ * two restricts an order to nothing and the parent meets an empty checkout.
+ *
+ * Used only when the parent CHOSE a rail and was quoted a charge for it: the
+ * order must then take only that rail, or a parent quoted the free UPI price
+ * could pay by credit card and the school would absorb the card fee it meant
+ * to pass on. UPI still admits a RuPay credit card linked to UPI, which
+ * Cashfree prices as a card; recon reports that gap per rail.
+ */
+const CASHFREE_ORDER_METHODS: Record<GatewayMethodGroup, string[]> = {
+  upi: ["upi"],
+  netbanking: ["nb"],
+  debit_card: ["dc"],
+  credit_card: ["cc", "ccc"],
+  prepaid_card: ["ppc"],
+  wallet: ["app"],
+  pay_later: ["paylater"],
+  emi: ["cardlessemi", "ccemi", "dcemi"],
+};
+
+export function cashfreeOrderPaymentMethods(group: GatewayMethodGroup): string {
+  return (CASHFREE_ORDER_METHODS[group] ?? []).join(",");
+}
+
+/**
  * Pull the eligible rails out of an eligibility response.
  *
  * Three documented envelopes across API versions — a bare array, `items`, and

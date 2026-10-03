@@ -75,5 +75,9 @@ create index if not exists bank_account_verifications_attention_idx
 -- mean paying for a verification and keeping no record of it — so the school
 -- would be billed again for the same check, for ever.
 grant all on public.bank_account_verifications to service_role;
+-- Server-only, like fee_autopay: no anon/authenticated access and RLS on,
+-- so the public key cannot read money records through PostgREST.
+revoke all on public.bank_account_verifications from anon, authenticated;
+alter table public.bank_account_verifications enable row level security;
 
 notify pgrst, 'reload schema';

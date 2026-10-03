@@ -536,4 +536,79 @@ void main() {
       );
     });
   });
+
+  group("payment charge and auto-pay", () {
+    test("a school that absorbs the charge offers nothing to choose", () {
+      final q = PayQuote.fromJson(const {
+        "ok": true,
+        "netPaise": 250000,
+        "chargesParents": false,
+        "options": [],
+      });
+      expect(q.chargesParents, false);
+      expect(q.options, isEmpty);
+    });
+
+    test("a passed-on charge is quoted per rail, totals included", () {
+      final q = PayQuote.fromJson(const {
+        "netPaise": 250000,
+        "chargesParents": true,
+        "options": [
+          {
+            "group": "upi",
+            "label": "UPI",
+            "surchargePaise": 0,
+            "chargeablePaise": 250000,
+          },
+          {
+            "group": "credit_card",
+            "label": "Credit card",
+            "surchargePaise": 5700,
+            "chargeablePaise": 255700,
+          },
+          {
+            "group": "",
+            "label": "junk",
+            "surchargePaise": 0,
+            "chargeablePaise": 0,
+          },
+        ],
+      });
+      expect(q.options.map((o) => o.group), ["upi", "credit_card"]);
+      expect(q.options.last.chargeablePaise, 255700);
+    });
+
+    test("auto-pay shows when offered or already set up, never otherwise", () {
+      final off = AutopayInfo.fromJson(const {
+        "offered": false,
+        "mandate": null,
+      });
+      expect(off.visible, false);
+
+      final mine = AutopayInfo.fromJson(const {
+        "offered": false,
+        "chargeDay": 5,
+        "mandate": {
+          "status": "ACTIVE",
+          "statusLabel": "Active",
+          "maxPaise": 1500000,
+          "active": true,
+          "needsApproval": false,
+          "approveUrl": "https://bhbinternational.school/pay/autopay/fap_x",
+        },
+        "lastDebit": {
+          "amountPaise": 320000,
+          "status": "SUCCESS",
+          "debitDate": "2026-10-06",
+        },
+      });
+      expect(
+        mine.visible,
+        true,
+        reason: "a parent can always find a mandate they gave",
+      );
+      expect(mine.mandate!.active, true);
+      expect(mine.lastDebitPaise, 320000);
+    });
+  });
 }
