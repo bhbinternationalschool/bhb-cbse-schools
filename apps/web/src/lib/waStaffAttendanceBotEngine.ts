@@ -101,11 +101,28 @@ export function staffAttCodeExpiredText(lang: StaffAttLang): string {
     : "That code has expired or is wrong — it changes every 30 seconds. Send the code on the screen right now.";
 }
 
-/** A location pin no longer punches. */
+/** A location pin on its own does not punch: the code comes first. */
 export function staffAttLocationRetiredText(lang: StaffAttLang): string {
   return lang === "hi"
-    ? "📍 लोकेशन से अब पंच नहीं होता। ऑफ़िस स्क्रीन का कोड भेजें: *IN 123456* या *OUT 123456*।"
-    : "📍 A location pin no longer punches. Send the office screen's code instead: *IN 123456* or *OUT 123456*.";
+    ? "📍 सिर्फ़ लोकेशन से पंच नहीं होता। पहले ऑफ़िस स्क्रीन का कोड भेजें: *IN 123456* या *OUT 123456*, फिर अपनी लोकेशन।"
+    : "📍 A location on its own does not punch. First send the office screen's code — *IN 123456* or *OUT 123456* — then your location.";
+}
+
+/**
+ * The code was right; now the phone must show it is inside the school
+ * (director, 3 Oct 2026). A live location only — a pin picked from the map
+ * is refused by validateStaffPunchLocation.
+ */
+export function staffAttSendLocationText(action: "in" | "out", lang: StaffAttLang): string {
+  return lang === "hi"
+    ? `✅ कोड सही है। अब *${action === "in" ? "IN" : "OUT"}* पूरा करने के लिए 3 मिनट के अंदर अपनी *वर्तमान लोकेशन* भेजें:\n📎 → Location → *Send your current location*\n\n(स्कूल परिसर के अंदर से ही पंच होगा।)`
+    : `✅ Code accepted. To finish punching *${action === "in" ? "IN" : "OUT"}*, send your *current location* within 3 minutes:\n📎 → Location → *Send your current location*\n\n(Punches count only from inside the school.)`;
+}
+
+export function staffAttLocationLateText(lang: StaffAttLang): string {
+  return lang === "hi"
+    ? "⏱️ लोकेशन देर से आई — कोड की वैधता ख़त्म। स्क्रीन पर अभी दिख रहा कोड फिर से भेजें।"
+    : "⏱️ The location came too late for that code. Send the code on the screen right now again.";
 }
 
 /** Success for a code punch — no distance line, the code proved presence. */
