@@ -1774,7 +1774,7 @@ async function staffLeaveStep(opts: {
     const t = text.replace(/[.!]+$/, "").trim();
     switch (draft.step) {
       case "type": {
-        const typeCode: WaLeaveType | null = t === "1" ? "CL" : t === "2" ? "SL" : parseLeaveType(t);
+        const typeCode: WaLeaveType | null = t === "1" ? "CL" : t === "2" ? "ML" : parseLeaveType(t);
         if (typeCode && typeCode !== "LWP") {
           const dates = draft.from ? null : parseLeaveDates(t, todayIso);
           return go({

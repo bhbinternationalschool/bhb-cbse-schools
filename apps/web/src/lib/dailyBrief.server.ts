@@ -694,8 +694,17 @@ async function readStaffAttendance(
   const absentRows: BriefStaffRow[] = [];
   for (const s of staff) {
     const mark = marks.get(s.id);
-    if (mark === "P") {
+    // Late and half day are at work — the same rule as staffMarkTotals.
+    if (mark === "P" || mark === "L" || mark === "HD") {
       present++;
+      continue;
+    }
+    // Marked On leave on the register: on leave, whether or not HR holds a
+    // request for it (the register files one since 3 Oct 2026; older marks
+    // may have none). Used to be dropped entirely — neither present nor
+    // absent nor on leave.
+    if (mark === "LE") {
+      absentRows.push(rowFor(s.id, approvedToday.get(s.id), "on_leave"));
       continue;
     }
     if (mark !== "A") continue; // unmarked: neither present nor absent

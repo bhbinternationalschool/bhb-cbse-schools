@@ -1,7 +1,7 @@
 /**
  * Staff leave over WhatsApp — pure.
  *
- * A staff member asks for CL or ML (the leave master's SL, "Sick leave")
+ * A staff member asks for CL or ML (the leave master's ML, "Medical leave")
  * for a day that has not ended yet (up to 11:59 PM IST of the leave day).
  * The leave master's own rules decide it — the balance, CL's one day a
  * month, CL's one day per application — through the same functions the HR
@@ -22,12 +22,12 @@ import {
   type StaffHrState,
 } from "@/lib/staffHr";
 
-export type WaLeaveType = "CL" | "SL" | "LWP";
+export type WaLeaveType = "CL" | "ML" | "LWP";
 
 /* ── Reading the ask ─────────────────────────────────────────────────── */
 
 const CL_WORDS = /(?<![\p{L}\p{M}\p{N}])(cl|casual(\s+leave)?|casual\s*chutti)(?![\p{L}\p{M}\p{N}])/iu;
-const SL_WORDS =
+const ML_WORDS =
   /(?<![\p{L}\p{M}\p{N}])(ml|sl|medical(\s+leave)?|sick(\s+leave)?|bimar|beemar|bimari|tabiyat|tabiyat\s+kharab|fever|bukhar|बीमार|मेडिकल)(?![\p{L}\p{M}\p{N}])/iu;
 const LEAVE_WORDS = /(?<![\p{L}\p{M}\p{N}])(leave|chutti|chhutti|avkash|अवकाश|छुट्टी)(?![\p{L}\p{M}\p{N}])/iu;
 const APPLY_WORDS =
@@ -39,7 +39,7 @@ const NOT_AN_APPLICATION =
 export function parseLeaveType(text: string): WaLeaveType | null {
   const t = text || "";
   if (CL_WORDS.test(t)) return "CL";
-  if (SL_WORDS.test(t)) return "SL";
+  if (ML_WORDS.test(t)) return "ML";
   if (/(?<![\p{L}\p{M}\p{N}])(lwp|without\s+pay|unpaid)(?![\p{L}\p{M}\p{N}])/iu.test(t)) return "LWP";
   return null;
 }
@@ -250,8 +250,7 @@ export function leaveVerdict(input: {
     (b) => b.staffId === input.staffId && b.typeCode === typeCode && b.academicYearCode === input.academicYearCode,
   );
   const left = bal ? remainingBalance(bal) : type.defaultDaysPerYear;
-  // Staff call sick leave ML.
-  const shown = type.code === "SL" ? "ML" : type.code;
+  const shown = type.code;
   if (type.defaultDaysPerYear > 0 && days > left + 0.001) {
     return {
       kind: "lwp",
@@ -270,7 +269,7 @@ export function leaveDecisionOpen(fromDate: string, todayIso: string): boolean {
 /* ── Wording ─────────────────────────────────────────────────────────── */
 
 export function leaveTypeLabel(code: string): string {
-  return code === "CL" ? "CL (Casual leave)" : code === "SL" ? "ML (Medical / sick leave)" : code === "LWP" ? "Leave without pay" : code;
+  return code === "CL" ? "CL (Casual leave)" : code === "ML" ? "ML (Medical leave)" : code === "LWP" ? "Leave without pay" : code;
 }
 
 export function formatLeaveDates(from: string, to: string, halfDay: boolean): string {
@@ -379,7 +378,7 @@ export function composeLeaveBalances(opts: {
   for (const t of opts.types) {
     if (t.code === "LWP" || t.defaultDaysPerYear <= 0) continue;
     const month = t.maxDaysPerMonth > 0 ? ` · this month ${opts.usedThisMonth[t.code] ?? 0}/${t.maxDaysPerMonth} used` : "";
-    lines.push(`• ${t.code === "SL" ? "ML" : t.code} (${t.name}) — ${opts.left[t.code] ?? t.defaultDaysPerYear} left${month}`);
+    lines.push(`• ${t.code} (${t.name}) — ${opts.left[t.code] ?? t.defaultDaysPerYear} left${month}`);
   }
   lines.push("", "To apply: _CL tomorrow_ or _ML 2 Oct to 4 Oct fever_");
   return lines.join("\n");

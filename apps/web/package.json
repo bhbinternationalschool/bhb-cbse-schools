@@ -135,6 +135,7 @@
     "test:parent-bot-real-chats": "npx tsx src/lib/parentBotRealChats.selftest.ts",
     "test:staff-wa-real-chats": "npx tsx src/lib/staffWhatsAppRealChats.selftest.ts",
     "test:staff-onboarding": "npx tsx src/lib/staffOnboarding.selftest.ts",
+    "test:staff-register-leave": "npx tsx src/lib/staffRegisterLeave.selftest.ts",
     "test:staff-leave-wa": "npx tsx src/lib/staffLeaveWa.selftest.ts",
     "test:class-notice-wa": "npx tsx src/lib/classNoticeWa.selftest.ts",
     "test:wa-template-autopilot": "npx tsx src/lib/waTemplateAutopilot.selftest.ts",
