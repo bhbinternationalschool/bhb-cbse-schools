@@ -2508,6 +2508,10 @@ export async function handleErpStaffCommand(
       correcting,
     });
   }
+  // "Teacher attendance" leads with the staff register (see STAFF_FOCUS_WORDS).
+  if (command.id === "attendance_summary" && /^staff$/i.test((parsed.fields.text || "").trim())) {
+    resolved.focus = "staff";
+  }
   if (command.fields.some((f) => f.type === "date")) {
     resolved.date =
       parsed.fields.date && /^\d{4}-\d{2}-\d{2}$/.test(parsed.fields.date)
@@ -2796,6 +2800,11 @@ async function attendanceSummary(
       (r) => r.date === date && r.academicYearCode === ay,
     );
     const marks = new Map((reg?.marks ?? []).map((m) => [m.staffId, m.status]));
+    const namesWith = (code: string) =>
+      active
+        .filter((s) => marks.get(s.id) === code)
+        .map((s) => s.fullName.split(" ").slice(0, 2).join(" "))
+        .sort();
     staff = {
       activeStaff: active.length,
       registerMarked: !!reg,
@@ -2806,6 +2815,9 @@ async function attendanceSummary(
         .filter((s) => !marks.has(s.id))
         .map((s) => s.fullName.split(" ").slice(0, 2).join(" "))
         .sort(),
+      absentNames: namesWith("A"),
+      leaveNames: namesWith("LE"),
+      lateNames: namesWith("L"),
     };
   }
   return formatAttendanceSummaryReply({
@@ -2814,6 +2826,7 @@ async function attendanceSummary(
     scope: school ? "school" : "mine",
     classes,
     staff,
+    focus: resolved.focus === "staff" ? "staff" : "",
   });
 }
 

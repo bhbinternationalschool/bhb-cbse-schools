@@ -131,13 +131,15 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
     module: "attendance",
     action: "view",
     description:
-      "School-wide attendance for a date: present percentage by class, sections not yet marked, and staff present / absent / not punched in. Teachers get their own sections only. No section in the message — a section means the absent list instead.",
+      "School-wide attendance for a date: present percentage by class, sections not yet marked, and staff present / absent / on leave / not punched in. Teachers get their own sections only. No section in the message — a section means the absent list instead. When the ask is about teachers or staff, focus is 'staff' and the staff register leads, with names.",
     examples: [
       "attendance summary",
       "aaj ki attendance",
       "today's attendance",
       "kal ki attendance report",
       "school attendance status",
+      "teacher attendance aaj ka",
+      "staff attendance today",
     ],
     fields: [
       {
@@ -145,6 +147,12 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
         type: "date",
         required: false,
         description: "YYYY-MM-DD; today when not said. 'kal' / 'yesterday' means yesterday.",
+      },
+      {
+        name: "text",
+        type: "text",
+        required: false,
+        description: "'staff' when the ask is about teachers / staff attendance; empty otherwise.",
       },
     ],
     scope: "any",
@@ -1025,6 +1033,14 @@ const DEFAULTER_WORDS =
 const ATTENDANCE_SUMMARY_WORDS =
   /(?<![\p{L}\p{M}\p{N}])(attendance|hazri|haziri|हाज़िरी|हाजिरी|upasthiti|उपस्थिति|kitne\s+present|present\s+percent(age)?)(?![\p{L}\p{M}\p{N}])/iu;
 
+/**
+ * "Teacher attendance आज का क्या है?" is about the staff register, not the
+ * classes. 18 Sep 2026: the principal asked exactly that and got the list
+ * of class sections not yet marked, with the staff line at the bottom.
+ */
+const STAFF_FOCUS_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(teachers?|staff|faculty|employees?|शिक्षक|शिक्षकों|अध्यापक|अध्यापकों|टीचर|टीचरों|स्टाफ|कर्मचारी)(?![\p{L}\p{M}\p{N}])/iu;
+
 const DIGEST_WORDS =
   /^\s*(commands?\s+(report|digest|summary|log)|(aaj|today)\s*(ke|ka|'s)?\s*commands?|ai\s+(report|digest))\s*$/i;
 
@@ -1245,7 +1261,11 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
     return { commandId: "class_roster", fields: { section: bareClass }, source: "local" };
   }
   if (!refs.length && ATTENDANCE_SUMMARY_WORDS.test(t) && !FEE_WORDS.test(t)) {
-    return { commandId: "attendance_summary", fields: { date: "" }, source: "local" };
+    return {
+      commandId: "attendance_summary",
+      fields: { date: "", ...(STAFF_FOCUS_WORDS.test(t) ? { text: "staff" } : {}) },
+      source: "local",
+    };
   }
   if (refs.length && ABSENT_WORDS.test(t)) {
     const r = refs[0]!;
@@ -3091,6 +3111,10 @@ export type AttendanceSummaryStaff = {
   leave: number;
   /** Active staff with no mark at all on the register. */
   notPunched: string[];
+  /** Names, for a staff-focused answer. Optional: older callers send counts only. */
+  absentNames?: string[];
+  leaveNames?: string[];
+  lateNames?: string[];
 };
 
 export type AttendanceSummaryInput = {
@@ -3099,13 +3123,57 @@ export type AttendanceSummaryInput = {
   scope: "school" | "mine";
   classes: AttendanceSummaryClass[];
   staff: AttendanceSummaryStaff | null;
+  /** "staff" = the ask was about teachers / staff: their register leads, with names. */
+  focus?: "staff" | "";
 };
+
+function namesLine(label: string, names: string[] | undefined): string | null {
+  if (!names?.length) return null;
+  const shown = names.slice(0, 10).join(", ");
+  return `${label}: ${shown}${names.length > 10 ? ` +${names.length - 10} more` : ""}`;
+}
+
+function formatStaffFocusedReply(input: AttendanceSummaryInput, st: AttendanceSummaryStaff): string {
+  const when = input.date === input.todayIso ? "today" : shortDate(input.date);
+  const lines = [`*Staff attendance* · ${when}`];
+  if (!st.registerMarked) {
+    lines.push(`No staff register yet (${st.activeStaff} active staff).`);
+  } else {
+    const head = [`Present *${st.present}*`];
+    if (st.absent) head.push(`Absent ${st.absent}`);
+    if (st.leave) head.push(`On leave ${st.leave}`);
+    lines.push(`${head.join(" · ")} of ${st.activeStaff}`);
+    for (const l of [
+      namesLine("On leave", st.leaveNames),
+      namesLine("Absent", st.absentNames),
+      namesLine("Late", st.lateNames),
+      namesLine("Not punched in", st.notPunched),
+    ]) {
+      if (l) lines.push(l);
+    }
+  }
+  const all = input.classes.flatMap((c) => c.sections);
+  const marked = all.filter((s) => s.marked);
+  const pending = all.filter((s) => !s.marked && !s.holiday);
+  if (all.length) {
+    const total = marked.reduce((n, s) => n + s.total, 0);
+    const present = marked.reduce((n, s) => n + s.present, 0);
+    lines.push(
+      "",
+      marked.length
+        ? `Students: ${pct(present, total)} present · ${marked.length} of ${marked.length + pending.length} sections marked`
+        : `Students: no section marked yet (${pending.length} pending)`,
+    );
+  }
+  return lines.join("\n");
+}
 
 function pct(n: number, d: number): string {
   return d > 0 ? `${Math.round((n / d) * 100)}%` : "—";
 }
 
 export function formatAttendanceSummaryReply(input: AttendanceSummaryInput): string {
+  if (input.focus === "staff" && input.staff) return formatStaffFocusedReply(input, input.staff);
   const when = input.date === input.todayIso ? "today" : shortDate(input.date);
   const lines: string[] = [
     `*${input.scope === "school" ? "School attendance" : "Your sections"}* · ${when}`,

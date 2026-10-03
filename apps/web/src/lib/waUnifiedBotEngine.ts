@@ -208,6 +208,11 @@ export function shouldShowUnifiedMenu(opts: {
 }): boolean {
   if (!opts.known && opts.hasSession && looksLikeForward(opts.text)) return false;
   if (!opts.text.trim() && (opts.hasAudio || opts.hasLocation)) return false;
+  // A staff member's photo or document with no caption is not "show me the
+  // menu". 18 Sep 2026: the principal sent class 9's attendance sheet as
+  // four photos and got the role list four times, her role forgotten each
+  // time — the point she typed in between was answered with the list too.
+  if (opts.staff && opts.hasSession && !opts.text.trim()) return false;
   return isUnifiedMenuCommand(opts.text, { staff: opts.staff });
 }
 
@@ -630,6 +635,41 @@ export function composeCollectPurposePrompt(visitorName: string): string {
       (p) => `• *${p.keyword}* — ${p.label}`,
     ),
   ].join("\n");
+}
+
+const STAFF_ROLE_KINDS: ReadonlySet<WaRoleKind> = new Set<WaRoleKind>(["owner", "staff", "teacher"]);
+
+/**
+ * The role a known number starts in without being asked, or null when the
+ * bot must ask.
+ *
+ * Asked only when the roles are different PEOPLE's business — a teacher who
+ * is also a parent here, a staff member who is also a vendor. Several staff
+ * roles are one person at work: a principal who also teaches is answered as
+ * the leadership role (roles arrive sorted owner → staff → teacher), and
+ * types TEACHER to switch. Until 3 Oct 2026 "Director + Teacher" made the
+ * principal pick a profile again after every reset.
+ */
+export function defaultRoleKind(roles: Pick<WaResolvedRole, "kind">[]): WaRoleKind | null {
+  if (roles.length === 1) return roles[0]!.kind;
+  if (roles.length > 1 && roles.every((r) => STAFF_ROLE_KINDS.has(r.kind))) return roles[0]!.kind;
+  return null;
+}
+
+/**
+ * A staff member on a number the school also has for a family, talking as
+ * the parent, who plainly means their staff side: "Show my class", "My
+ * attendance today", "class students", "IN" / "OUT". 29 Sep 2026: a
+ * teacher's "Show my class" got her own child's details, three times.
+ * Narrow on purpose — "attendance" alone is a parent asking about a child.
+ */
+const STAFF_SIDE_PHRASE =
+  /(?<![\p{L}\p{M}\p{N}])(my\s+class(es)?|class\s+students|my\s+students|my\s+attendance|meri\s+(class|attendance|hazri|haziri)|mera\s+(class|attendance)|मेरी\s+(क्लास|कक्षा|हाज़िरी|हाजिरी|उपस्थिति)|मेरा\s+(क्लास|अटेंडेंस)|punch\s*(in|out)|i\s*(am|'m)\s+(the\s+)?(class\s+)?teacher|class\s+teacher\s+h(u|oo|ai|ain)|teacher\s+h(u|oo|ai|ain))(?![\p{L}\p{M}\p{N}])/iu;
+
+export function staffSidePhrase(text: string): boolean {
+  const t = (text || "").trim();
+  if (/^(in|out)$/i.test(t)) return true;
+  return STAFF_SIDE_PHRASE.test(t);
 }
 
 export function flowKindFromRole(role: WaResolvedRole): WaRoleKind {

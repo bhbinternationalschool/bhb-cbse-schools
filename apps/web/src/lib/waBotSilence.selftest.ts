@@ -232,17 +232,23 @@ console.log("OK");
     text: "", staff: true, known: true, hasSession: true, hasAudio: true,
   };
   assert.equal(shouldShowUnifiedMenu(staffVoice), false, "staff voice note goes to the desk");
-  // Same message with no audio is still a menu request — that is what an
-  // empty text has always meant, and only the voice path is being fixed.
+  // Since 3 Oct 2026 a staff member's bare photo or file keeps their role too
+  // (the principal's attendance photos each re-sent the profile list). Only
+  // a staff number with no conversation yet still gets the menu for it.
   assert.equal(
     shouldShowUnifiedMenu({ ...staffVoice, hasAudio: false }),
-    true,
-    "empty text with no audio still opens the menu",
+    false,
+    "staff photo in a conversation keeps the role",
   );
-  // A staff member's bare photo is unchanged: audio only.
+  assert.equal(
+    shouldShowUnifiedMenu({ ...staffVoice, hasAudio: false, hasSession: false }),
+    true,
+    "empty text with no audio and no conversation still opens the menu",
+  );
+  // A staff member's bare photo mid-conversation keeps the role (3 Oct 2026).
   assert.equal(
     shouldShowUnifiedMenu({ text: "", staff: true, known: true, hasSession: true, hasAudio: false }),
-    true,
+    false,
   );
   // A staff member's spoken-then-typed command is a command either way.
   assert.equal(
