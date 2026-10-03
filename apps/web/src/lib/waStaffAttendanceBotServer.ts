@@ -28,6 +28,8 @@ import {
   staffAttEarlyOutWarningText,
   staffAttLanguageConfirmText,
   staffAttLanguageMenuText,
+  staffAttLocationLateText,
+  staffAttSendLocationText,
   type StaffAttLang,
 } from "@/lib/waStaffAttendanceBotEngine";
 import { expectedWindowForTiming } from "@/lib/schoolTiming";
@@ -37,7 +39,15 @@ export type WaStaffAttPending =
   | { kind: "punch_in" }
   | { kind: "punch_out"; early?: boolean }
   /** OUT requested inside school timing — waiting for YES / CANCEL */
-  | { kind: "punch_out_confirm"; end: string };
+  | { kind: "punch_out_confirm"; end: string }
+  /**
+   * The code was valid; waiting for a live location from inside the school
+   * (3 Oct 2026). `codeOkAt` bounds the wait: LOCATION_AFTER_CODE_MS.
+   */
+  | { kind: "await_location"; punch: "in" | "out"; codeOkAt: string; early?: boolean };
+
+/** How long after a valid code its location may arrive. */
+const LOCATION_AFTER_CODE_MS = 3 * 60_000;
 
 export type WaStaffAttBotThread = {
   id: string;
@@ -357,9 +367,61 @@ export async function handleWaStaffAttendanceInbound(opts: {
       const win = earlyOutWindow();
       replyText = staffAttEarlyOutWarningText({ now: win.now, end: pending.end, lang });
     }
+  } else if (opts.location && pending?.kind === "await_location") {
+    // The second half of a punch: the code was right, and now the phone
+    // shows where it is. Only inside the school (director, 3 Oct 2026).
+    const age = Date.now() - Date.parse(pending.codeOkAt || "");
+    if (!Number.isFinite(age) || age > LOCATION_AFTER_CODE_MS) {
+      pending = { kind: pending.punch === "in" ? "punch_in" : "punch_out", ...(pending.early ? { early: true } : {}) };
+      replyText = staffAttLocationLateText(lang);
+    } else {
+      const { campusGeofenceFromSettings, validateStaffPunchLocation } = await import("@/lib/staffGeofence.server");
+      const { fetchStaffAttendanceSettingsFromDb } = await import("@/lib/staffAttendanceDeskAncillary.server");
+      const fence = campusGeofenceFromSettings(await fetchStaffAttendanceSettingsFromDb());
+      const where = validateStaffPunchLocation(
+        {
+          lat: opts.location.lat,
+          lng: opts.location.lng,
+          accuracyM: opts.location.accuracyM,
+          name: opts.location.name,
+          address: opts.location.address,
+        },
+        fence,
+      );
+      if (!where.ok) {
+        // Kept waiting: a second, live location inside the time still counts.
+        replyText = where.reason || staffAttLocationRetiredText(lang);
+      } else {
+        const kind = pending.punch;
+        const early = pending.early === true;
+        const win = earlyOutWindow();
+        const result = await applyWhatsAppStaffPunch({
+          staff,
+          mobile10,
+          kind,
+          presence: "qr",
+          earlyOutNote: early ? `early checkout ${win.now} (school till ${win.end})` : undefined,
+        });
+        pending = null;
+        if (!result.ok) {
+          replyText = result.error;
+        } else {
+          punched = result.kind;
+          replyText = composeStaffAttCodePunchSuccess({
+            kind: result.kind,
+            time: result.time,
+            staffName: staff.fullName,
+            altMobile: result.altMobile,
+            earlyOut: early,
+            schoolEnd: win.end,
+            lang,
+          });
+        }
+      }
+    }
   } else if (opts.location) {
-    // 30 Sep 2026: a pin can be dropped anywhere on the map, so it no
-    // longer punches. The office screen's code does. Anything pending stays.
+    // A pin on its own can be dropped anywhere on the map, so it never
+    // punches: the office screen's code comes first, then the location.
     replyText = staffAttLocationRetiredText(lang);
   } else if (
     (pending && isBareCode(text)) ||
@@ -378,28 +440,15 @@ export async function handleWaStaffAttendanceInbound(opts: {
       pending = { kind: kind === "in" ? "punch_in" : "punch_out", ...(early ? { early: true } : {}) };
       replyText = staffAttCodeExpiredText(lang);
     } else {
-      const result = await applyWhatsAppStaffPunch({
-        staff,
-        mobile10,
-        kind,
-        presence: "qr",
-        earlyOutNote: early ? `early checkout ${win.now} (school till ${win.end})` : undefined,
-      });
-      pending = null;
-      if (!result.ok) {
-        replyText = result.error;
-      } else {
-        punched = result.kind;
-        replyText = composeStaffAttCodePunchSuccess({
-          kind: result.kind,
-          time: result.time,
-          staffName: staff.fullName,
-          altMobile: result.altMobile,
-          earlyOut: early,
-          schoolEnd: win.end,
-          lang,
-        });
-      }
+      // The code proves the screen was seen in the last minute; the phone
+      // must still show it is inside the school (director, 3 Oct 2026).
+      pending = {
+        kind: "await_location",
+        punch: kind,
+        codeOkAt: new Date().toISOString(),
+        ...(early ? { early: true } : {}),
+      };
+      replyText = staffAttSendLocationText(kind, lang);
     }
   } else if (intent === "in") {
     pending = { kind: "punch_in" };
@@ -484,6 +533,13 @@ export async function staffAttendanceOpenWorkFor(
   const how = "send the *6-digit code* shown on the office QR screen";
   if (pending.kind === "punch_out_confirm") {
     return { kind: "punch", what: "your early check-out", how: "reply *YES* to check out now" };
+  }
+  if (pending.kind === "await_location") {
+    return {
+      kind: "punch",
+      what: `your punch ${pending.punch.toUpperCase()} — waiting for your location`,
+      how: "send your *current location* (📎 → Location → Send your current location)",
+    };
   }
   return {
     kind: "punch",

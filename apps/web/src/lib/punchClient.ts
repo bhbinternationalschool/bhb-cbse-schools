@@ -103,6 +103,10 @@ export async function submitQrPunch(input: {
       error: "This browser would not store the phone's key (private / incognito mode?). Open the ERP in a normal window.",
     };
   }
+  // Inside the school, or no punch (director, 3 Oct 2026).
+  const { readDeviceLocation } = await import("@/lib/deviceLocation");
+  const here = await readDeviceLocation();
+  if ("error" in here) return { ok: false, error: here.error };
   const code = input.code.replace(/\D/g, "");
   const ts = Date.now();
   const message = `punch|${input.staffId}|${input.kind}|${code}|${ts}`;
@@ -119,6 +123,9 @@ export async function submitQrPunch(input: {
       body: JSON.stringify({
         kind: input.kind,
         code,
+        lat: here.lat,
+        lng: here.lng,
+        accuracyM: here.accuracyM,
         device: {
           jwk: { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y },
           signature: b64url(sig),

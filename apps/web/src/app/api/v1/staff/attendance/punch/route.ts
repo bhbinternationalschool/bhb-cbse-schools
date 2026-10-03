@@ -11,7 +11,8 @@ import {
   applyWhatsAppStaffPunch,
   loadStaffAttendanceServer,
 } from "@/lib/staffAttendance.server";
-import { campusGeofenceFromSettings } from "@/lib/staffGeofence.server";
+import { campusGeofenceFromSettings, validateStaffPunchLocation } from "@/lib/staffGeofence.server";
+import { fetchStaffAttendanceSettingsFromDb } from "@/lib/staffAttendanceDeskAncillary.server";
 import { cleanPunchCode } from "@/lib/punchCode";
 import { istDateTime } from "@/lib/punchAttempts";
 import { punchCodeIsValid } from "@/lib/punchCode.server";
@@ -110,6 +111,11 @@ type PunchBody = {
   code?: string;
   device?: { jwk?: unknown; signature?: string; ts?: number; label?: string };
   staffId?: string;
+  /** The phone's own position — inside the school, or no punch (3 Oct 2026). */
+  lat?: number;
+  lng?: number;
+  accuracyM?: number;
+  mocked?: boolean;
 };
 
 /** How far a phone's clock may be from ours when it signs. */
@@ -126,6 +132,8 @@ const SIGN_SKEW_MS = 2 * 60_000;
  *     it is THEIR phone. First punch registers the phone; another phone is
  *     refused and waits for the office; a phone registered to someone else
  *     is refused outright.
+ *  3. the phone's location, inside the school (director, 3 Oct 2026) — a
+ *     code photographed and sent home no longer punches from home.
  * A dead phone or no internet is not covered by anything else: they punch
  * once their own phone is back (or with the code on WhatsApp from their
  * registered number).
@@ -156,6 +164,27 @@ export async function POST(request: Request) {
         400,
       );
     }
+    // The phone must be inside the school (director, 3 Oct 2026).
+    const lat = Number(body.lat);
+    const lng = Number(body.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) {
+      throw new ApiError(
+        "forbidden",
+        "Allow location for the ERP on this phone — punches count only from inside the school.",
+        403,
+      );
+    }
+    const fence = campusGeofenceFromSettings(await fetchStaffAttendanceSettingsFromDb());
+    const where = validateStaffPunchLocation(
+      {
+        lat,
+        lng,
+        accuracyM: Number.isFinite(Number(body.accuracyM)) ? Number(body.accuracyM) : undefined,
+        mocked: body.mocked === true,
+      },
+      fence,
+    );
+    if (!where.ok) throw new ApiError("forbidden", where.reason || "Punches count only from inside the school.", 403);
     const jwk = cleanJwk(body.device.jwk);
     const ts = Number(body.device.ts);
     if (!jwk || !body.device.signature || !Number.isFinite(ts)) {
