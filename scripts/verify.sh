@@ -355,6 +355,7 @@ SELFTESTS=(
   test:session-cookie-edge
   test:staff-geo
   test:punch-screen-geofence
+  test:app-min-build
   test:standing-discount-change
   test:syllabus-outcomes-import
   test:transport-overlap-billing

@@ -23,6 +23,7 @@ import {
   verifyPunchSignature,
 } from "@/lib/punchDevices.server";
 import { staffWorkingYear } from "@/lib/api/v1/staffScope";
+import { APP_UPDATE_MESSAGE, requestNeedsAppUpdate } from "@/lib/appMinBuild";
 
 export const runtime = "nodejs";
 
@@ -140,6 +141,11 @@ const SIGN_SKEW_MS = 2 * 60_000;
  */
 export async function POST(request: Request) {
   try {
+    // An app build the server no longer understands is told to update,
+    // rather than failing the punch for a reason the staff member can't fix.
+    if (requestNeedsAppUpdate(request)) {
+      throw new ApiError("upgrade_required", APP_UPDATE_MESSAGE, 426);
+    }
     const ctx = await resolveApiAuth(request);
     await ensureSchoolMirrorHydrated();
 

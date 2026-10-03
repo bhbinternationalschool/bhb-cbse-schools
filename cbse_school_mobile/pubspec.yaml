@@ -38,6 +38,7 @@ dependencies:
   latlong2: ^0.9.1
   pointycastle: ^4.0.0
   mobile_scanner: ^7.4.2
+  in_app_update: ^5.0.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

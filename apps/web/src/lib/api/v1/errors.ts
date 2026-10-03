@@ -6,6 +6,7 @@ export type ApiErrorCode =
   | "not_found"
   | "bad_request"
   | "conflict"
+  | "upgrade_required"
   | "server_error";
 
 export class ApiError extends Error {

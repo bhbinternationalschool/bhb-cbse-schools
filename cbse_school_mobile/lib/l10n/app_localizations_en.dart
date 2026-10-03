@@ -1135,4 +1135,20 @@ class LEn extends L {
 
   @override
   String get checkingYourAutopay => 'Checking your auto-pay…';
+
+  @override
+  String get updateRequiredTitle => 'Update the app to continue';
+
+  @override
+  String get updateRequiredBody =>
+      'This version of the app no longer works with the school\'s system. Updating takes a minute and keeps everything you have.';
+
+  @override
+  String get updateNow => 'Update now';
+
+  @override
+  String get updateDownloaded => 'The update is downloaded.';
+
+  @override
+  String get updateRestart => 'Restart';
 }

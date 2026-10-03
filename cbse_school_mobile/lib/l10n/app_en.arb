@@ -394,5 +394,10 @@
   "stopAutopay": "Stop auto-pay",
   "stopAutopayConfirm": "Stop paying fees automatically? You can set it up again later.",
   "autopayStopped": "Auto-pay stopped",
-  "checkingYourAutopay": "Checking your auto-pay…"
+  "checkingYourAutopay": "Checking your auto-pay…",
+  "updateRequiredTitle": "Update the app to continue",
+  "updateRequiredBody": "This version of the app no longer works with the school's system. Updating takes a minute and keeps everything you have.",
+  "updateNow": "Update now",
+  "updateDownloaded": "The update is downloaded.",
+  "updateRestart": "Restart"
 }
