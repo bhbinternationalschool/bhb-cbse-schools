@@ -9,7 +9,7 @@
  */
 import assert from "node:assert/strict";
 import { canvaSubjectKey, parseCanvaDesignId, planCanvaFill, type CanvaCardValues } from "./canvaBirthday";
-import { normalizeBirthdaySettings } from "./birthdayCards";
+import { birthdayCardSigner, normalizeBirthdaySettings } from "./birthdayCards";
 
 // --- links the office actually pastes -------------------------------------
 assert.equal(parseCanvaDesignId("https://www.canva.com/design/DAGz1aBcDeF/abc123XYZ/edit"), "DAGz1aBcDeF");
@@ -85,5 +85,13 @@ const v: CanvaCardValues = {
 
 assert.equal(canvaSubjectKey("staff", "stf_1"), "staff:stf_1");
 assert.equal(canvaSubjectKey("student", "stu_1"), "student:stu_1");
+
+// --- a designed card's signature box gets the short signer ---------------
+{
+  const st = normalizeBirthdaySettings({});
+  assert.equal(birthdayCardSigner(st, "student"), "Principal");
+  assert.equal(birthdayCardSigner(st, "staff"), "Director");
+  assert.equal(birthdayCardSigner(normalizeBirthdaySettings({ principalName: "Mrs. R. Singh" }), "student"), "Mrs. R. Singh");
+}
 
 console.log("OK — canvaBirthday.selftest.ts");
