@@ -18,7 +18,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { cashfreeFiltersFor, readEligibleGroups } from "@/lib/gatewayMethods";
+import { cashfreeFiltersFor, cashfreeOrderPaymentMethods, readEligibleGroups } from "@/lib/gatewayMethods";
 import { GATEWAY_METHOD_GROUPS, type GatewayMethodGroup } from "@/lib/gatewayFees";
 
 console.log("gatewayMethods.selftest.ts");
@@ -183,6 +183,19 @@ console.log("gatewayMethods.selftest.ts");
     /payMethods\.map\(\(m\) => m\.label\)\.join\(" · "\)\s*\}/,
     "the list is only rendered behind a length check",
   );
+}
+
+/* ── Create Order's short codes, a different namespace from the filters ── */
+{
+  for (const g of GATEWAY_METHOD_GROUPS) {
+    const codes = cashfreeOrderPaymentMethods(g);
+    assert.match(codes, /^[a-z]+(,[a-z]+)*$/, `${g} has order codes`);
+    assert.doesNotMatch(codes, /_/, `${g}: filter names (credit_card…) are not order codes`);
+  }
+  assert.equal(cashfreeOrderPaymentMethods("upi"), "upi");
+  assert.equal(cashfreeOrderPaymentMethods("netbanking"), "nb");
+  assert.equal(cashfreeOrderPaymentMethods("credit_card"), "cc,ccc");
+  assert.equal(cashfreeOrderPaymentMethods("emi"), "cardlessemi,ccemi,dcemi");
 }
 
 console.log("  ok");

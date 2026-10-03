@@ -1,4 +1,5 @@
 import { buildCashfreeOrderBody, type CashfreeOrderInput } from "@/lib/cashfreeCheckout";
+import type { GatewayMethodGroup } from "@/lib/gatewayFees";
 /**
  * Cashfree Payment Links — server-only (keys never exposed to client).
  *
@@ -335,6 +336,8 @@ export async function attachCashfreeToPaymentLink(opts: {
   customerName: string;
   customerMobile: string;
   appOrigin: string;
+  /** The rail the parent picked in the app; omitted everywhere else. */
+  methodGroup?: GatewayMethodGroup;
 }): Promise<
   | { ok: true; link: PaymentLink; checkoutUrl: string }
   | { ok: false; error: string; link: PaymentLink }
@@ -351,6 +354,7 @@ export async function attachCashfreeToPaymentLink(opts: {
     ref: opts.link.id,
     preferredId: opts.link.id,
     amountPaise: opts.link.amountPaise,
+    methodGroup: opts.methodGroup,
     purpose: `School fees ${opts.link.code} — ${opts.link.studentName}`,
     customerId: opts.link.householdId,
     customerName: opts.customerName,

@@ -6,14 +6,6 @@
  */
 
 import { NextResponse } from "next/server";
-import { resolveApiAuth } from "@/lib/api/v1/auth";
-import { ApiError } from "@/lib/api/v1/errors";
-import {
-  computeHouseholdDues,
-  loadFees,
-  openFeeDues,
-} from "@/lib/fees";
-import { loadMasters } from "@/lib/masters";
 import {
   buildEnrichedPaymentSharePayload,
   buildPaymentShareUrlAbsolute,
@@ -24,72 +16,42 @@ import {
   shouldUseCashfreeCheckout,
 } from "@/lib/cashfree.server";
 import { attachRazorpayToPaymentLink } from "@/lib/razorpay.server";
+import {
+  parentHouseholdFrom,
+  readDueKeys,
+  readMethodGroup,
+  resolveChosenDues,
+} from "@/lib/parentFeeCheckout.server";
 import { publicAppOrigin } from "@/lib/waSisBotServer";
-import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { householdWhatsApp, loadSis } from "@/lib/sis";
+import { householdWhatsApp } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
 
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
-  let householdId: string;
-  try {
-    const ctx = await resolveApiAuth(req);
-    if (ctx.session.persona !== "parent" || !ctx.session.householdId) {
-      return NextResponse.json(
-        { error: "Parent session required" },
-        { status: 403 },
-      );
-    }
-    householdId = ctx.session.householdId;
-  } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof ApiError ? e.message : "Unauthorized" },
-      { status: 401 },
-    );
-  }
+  const auth = await parentHouseholdFrom(req);
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-  let body: { dueKeys?: string[]; studentId?: string };
+  let body: { dueKeys?: string[]; studentId?: string; methodGroup?: string };
   try {
     body = (await req.json()) as typeof body;
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
-  const wanted = new Set(
-    (Array.isArray(body.dueKeys) ? body.dueKeys : []).filter(
-      (k): k is string => typeof k === "string",
-    ),
-  );
+  const wanted = readDueKeys(body.dueKeys);
   if (wanted.size === 0) {
     return NextResponse.json({ error: "dueKeys required" }, { status: 400 });
   }
+  // The rail the parent chose in the app (1.0.14+). Absent from 1.0.13 and
+  // whenever the school absorbs every rail; the order then stays open to all
+  // rails at the policy's fallback quote, which is free.
+  const methodGroup = readMethodGroup(body.methodGroup);
 
-  // Hydrated from the database: the local mirror file does not exist on Cloud
-  // Run, so "loaded" meant no fee structure and nothing to pay.
-  await ensureSchoolMirrorHydrated();
-  const sis = loadSis();
-  const masters = loadMasters();
-  const fees = loadFees();
-  const hh = sis.households.find((h) => h.id === householdId);
-  if (!hh) {
-    return NextResponse.json({ error: "Household not found" }, { status: 404 });
+  const resolved = await resolveChosenDues(auth.householdId, wanted);
+  if (!resolved.ok) {
+    return NextResponse.json({ error: resolved.error }, { status: resolved.status });
   }
-
-  // A family may pay months ahead from the app, so the recomputation must
-  // see them; only the dueKeys the parent chose are collected, and amounts
-  // still come from here, never from the client.
-  const bundle = computeHouseholdDues(hh.id, sis, masters, fees, {
-    includeFuture: true,
-  });
-  const dues = openFeeDues(bundle.flatMap((r) => r.dues)).filter(
-    (d) => wanted.has(d.dueKey) && d.balancePaise > 0,
-  );
-  if (dues.length === 0) {
-    return NextResponse.json(
-      { error: "Nothing left to pay on the selected fees" },
-      { status: 400 },
-    );
-  }
+  const { sis, masters, hh, dues } = resolved;
 
   const primaryId = body.studentId || dues[0]!.studentId;
   const primary =
@@ -123,6 +85,7 @@ export async function POST(req: Request) {
     customerName: hh.guardianName || studentName,
     customerMobile: householdWhatsApp(hh) || hh.mobile || "",
     appOrigin: publicAppOrigin(),
+    methodGroup,
   };
   const gw = shouldUseCashfreeCheckout()
     ? await attachCashfreeToPaymentLink(attachOpts)
@@ -153,6 +116,7 @@ export async function POST(req: Request) {
     linkId: link.id,
     code: link.code,
     amountPaise: link.amountPaise,
+    methodGroup: methodGroup ?? null,
     checkoutUrl: gw.ok ? gw.checkoutUrl : null,
     shareUrl,
   });

@@ -33,6 +33,7 @@ import {
   type GatewayMethodGroup,
 } from "@/lib/gatewayFees";
 import { loadGatewayFeePolicy } from "@/lib/gatewayFeePolicy.server";
+import { cashfreeOrderPaymentMethods } from "@/lib/gatewayMethods";
 import { ensurePaymentLinkHydrated } from "@/lib/paymentsPersistence";
 import { settlePaymentLinkWithWhatsApp } from "@/lib/paymentSettlement.server";
 import { recordPaymentGatewayEvent } from "@/lib/paymentsNormalized.server";
@@ -175,6 +176,10 @@ export async function createCashfreeCheckout(input: CreateCheckoutInput): Promis
     notifyUrl: webhookUrl,
     tags: { kind: input.kind, ref: input.ref, ...input.notes },
     expiresAt: input.expiresOn ? `${input.expiresOn}T23:59:59+05:30` : undefined,
+    // A parent who picked a rail was quoted for THAT rail, so the order takes
+    // only that rail. Without a choice (WhatsApp links, the web pay page) the
+    // order stays open to every rail at the fallback quote, as before.
+    paymentMethods: input.methodGroup ? cashfreeOrderPaymentMethods(input.methodGroup) : undefined,
   });
   if (!order.ok) return order;
 
