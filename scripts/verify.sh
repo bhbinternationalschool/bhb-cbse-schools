@@ -354,6 +354,7 @@ SELFTESTS=(
   test:school-receipt-no
   test:session-cookie-edge
   test:staff-geo
+  test:punch-screen-geofence
   test:standing-discount-change
   test:syllabus-outcomes-import
   test:transport-overlap-billing

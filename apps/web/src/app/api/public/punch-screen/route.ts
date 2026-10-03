@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { punchCodeNow } from "@/lib/punchCode.server";
 import { punchDisplayFor } from "@/lib/punchDevices.server";
+import { campusGeofenceFromSettings, validateScreenLocation } from "@/lib/staffGeofence.server";
+import { fetchStaffAttendanceSettingsFromDb } from "@/lib/staffAttendanceDeskAncillary.server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,6 +12,10 @@ export const dynamic = "force-dynamic";
  * Authorized by the screen's own token (Authorization: Bearer …), not a
  * login: a login idles out after 30 minutes and the screen is never
  * touched. A revoked or unknown token gets 401 and the screen says so.
+ *
+ * ?lat=&lng=&acc= — the screen's own location, every time. Outside the
+ * school the code is withheld (403, outside: true): the punch QR is shown
+ * only on school premises (director, 3 Oct 2026; validateScreenLocation).
  */
 export async function GET(request: Request) {
   const auth = request.headers.get("authorization") || "";
@@ -20,6 +26,18 @@ export async function GET(request: Request) {
   }
   if (!screen) {
     return NextResponse.json({ ok: false, error: "This screen is switched off" }, { status: 401 });
+  }
+  const params = new URL(request.url).searchParams;
+  const fence = campusGeofenceFromSettings(await fetchStaffAttendanceSettingsFromDb());
+  const where = validateScreenLocation(
+    { lat: params.get("lat"), lng: params.get("lng"), accuracyM: params.get("acc") },
+    fence,
+  );
+  if (!where.ok) {
+    return NextResponse.json(
+      { ok: false, outside: true, error: where.reason, distanceM: Math.round(where.distanceM), label: screen.label },
+      { status: 403, headers: { "Cache-Control": "no-store" } },
+    );
   }
   const now = Date.now();
   const code = punchCodeNow(now);

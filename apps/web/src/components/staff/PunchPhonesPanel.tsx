@@ -52,7 +52,7 @@ export function PunchPhonesPanel() {
     void load();
   }, [load]);
 
-  async function act(payload: Record<string, string>, confirmText?: string) {
+  async function act(payload: Record<string, string | number>, confirmText?: string) {
     if (confirmText && !window.confirm(confirmText)) return null;
     setBusy(true);
     try {
@@ -86,7 +86,14 @@ export function PunchPhonesPanel() {
   }
 
   async function openScreenHere() {
-    const r = await act({ action: "screen_create", label });
+    // Only inside the school: the server checks this device's location.
+    const { readDeviceLocation } = await import("@/lib/deviceLocation");
+    const here = await readDeviceLocation();
+    if ("error" in here) {
+      setError(here.error);
+      return;
+    }
+    const r = await act({ action: "screen_create", label, lat: here.lat, lng: here.lng, accuracyM: here.accuracyM });
     if (r?.token) window.location.href = `/punch-screen#k=${r.token}`;
   }
 
