@@ -38,14 +38,53 @@ export function PunchScreen() {
   const [now, setNow] = useState(() => Date.now());
   const skew = useRef(0);
   const timer = useRef<number | undefined>(undefined);
+  /** The screen's latest position — sent with every code request. */
+  const where = useRef<{ lat: number; lng: number; accuracyM: number } | null>(null);
+  const [geoError, setGeoError] = useState<string | null>(null);
+  /** The server's refusal while this screen is outside the school. */
+  const [outside, setOutside] = useState<string | null>(null);
+
+  // The punch QR is shown only inside the school (director, 3 Oct 2026), so
+  // the screen keeps telling the server where it is.
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      setGeoError("This browser cannot share its location — the punch QR needs it.");
+      return;
+    }
+    const id = navigator.geolocation.watchPosition(
+      (p) => {
+        where.current = { lat: p.coords.latitude, lng: p.coords.longitude, accuracyM: p.coords.accuracy };
+        setGeoError(null);
+      },
+      (e) =>
+        setGeoError(
+          e.code === e.PERMISSION_DENIED
+            ? "Location is blocked for this screen. Allow location in the browser — the punch QR is shown only inside the school."
+            : "Waiting for this device's location…",
+        ),
+      { enableHighAccuracy: true, maximumAge: 60_000, timeout: 30_000 },
+    );
+    return () => navigator.geolocation.clearWatch(id);
+  }, []);
 
   useEffect(() => setToken(readToken()), []);
 
   const load = useCallback(async () => {
     if (!token) return;
     window.clearTimeout(timer.current);
+    const here = where.current;
+    if (!here) {
+      // No position yet — ask again shortly, never without one.
+      timer.current = window.setTimeout(() => void load(), 2_000);
+      return;
+    }
     try {
-      const res = await fetch("/api/public/punch-screen", {
+      const q = new URLSearchParams({
+        lat: String(here.lat),
+        lng: String(here.lng),
+        acc: String(Math.round(here.accuracyM)),
+      });
+      const res = await fetch(`/api/public/punch-screen?${q.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
         cache: "no-store",
       });
@@ -53,6 +92,15 @@ export function PunchScreen() {
         setOff(true);
         return;
       }
+      if (res.status === 403) {
+        const why = (await res.json().catch(() => null)) as { error?: string } | null;
+        setOutside(why?.error || "The punch QR is shown only inside the school.");
+        setData(null);
+        setQr("");
+        timer.current = window.setTimeout(() => void load(), 30_000);
+        return;
+      }
+      setOutside(null);
       const body = (await res.json()) as Code & { ok?: boolean };
       if (!res.ok || !body.ok) throw new Error("bad");
       skew.current = body.now - Date.now();
@@ -104,6 +152,18 @@ export function PunchScreen() {
         <p className="max-w-md" style={{ color: "#475569" }}>
           In the ERP, open Attendance → Staff → Punch phones & QR screens, and tap “Open QR screen on this device”
           on this tablet or computer.
+        </p>
+      </main>
+    );
+  }
+
+  if (outside || (geoError && !data)) {
+    return (
+      <main style={paper} className={wrap}>
+        <h1 className="text-2xl font-bold">Punch QR not available here</h1>
+        <p className="max-w-md" style={{ color: "#475569" }}>{outside || geoError}</p>
+        <p className="max-w-md text-sm" style={{ color: "#64748b" }}>
+          हाज़िरी का QR केवल स्कूल परिसर के अंदर दिखता है। · This screen checks again every 30 seconds.
         </p>
       </main>
     );

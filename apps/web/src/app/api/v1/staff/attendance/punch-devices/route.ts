@@ -5,6 +5,8 @@ import { assertSchoolWide, staffWorkingYear } from "@/lib/api/v1/staffScope";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { applyWhatsAppStaffPunch } from "@/lib/staffAttendance.server";
 import { attemptsToRecord } from "@/lib/punchAttempts";
+import { campusGeofenceFromSettings, validateScreenLocation } from "@/lib/staffGeofence.server";
+import { fetchStaffAttendanceSettingsFromDb } from "@/lib/staffAttendanceDeskAncillary.server";
 import {
   createPunchDisplay,
   decidePunchDevice,
@@ -45,7 +47,7 @@ export async function GET(request: Request) {
   }
 }
 
-type Body = { action?: string; id?: string; label?: string };
+type Body = { action?: string; id?: string; label?: string; lat?: number; lng?: number; accuracyM?: number };
 
 export async function POST(request: Request) {
   try {
@@ -56,6 +58,10 @@ export async function POST(request: Request) {
     const meta = requestMeta(request);
 
     if (body.action === "screen_create") {
+      // Only a device inside the school may become a QR screen.
+      const fence = campusGeofenceFromSettings(await fetchStaffAttendanceSettingsFromDb());
+      const where = validateScreenLocation({ lat: body.lat, lng: body.lng, accuracyM: body.accuracyM }, fence);
+      if (!where.ok) throw new ApiError("forbidden", where.reason || "Outside the school", 403);
       const r = await createPunchDisplay(String(body.label || "Office screen"), by);
       if (!r.ok) throw new ApiError("server_error", r.error, 503);
       await writeAudit({

@@ -486,6 +486,7 @@ jobs:
           npm run test:school-receipt-no
           npm run test:session-cookie-edge
           npm run test:staff-geo
+          npm run test:punch-screen-geofence
           npm run test:standing-discount-change
           npm run test:syllabus-outcomes-import
           npm run test:transport-overlap-billing
