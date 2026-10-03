@@ -381,10 +381,10 @@ export async function pushFeeVouchersToDb(
   const ids = active.map((v) => v.id);
   const idSet = new Set(ids);
 
-  const { rows: existingHeaders } = await fetchAllPages<{ id: string }>((from, to) =>
+  const { rows: existingHeaders } = await fetchAllPages<{ id: string; household_id: string | null }>((from, to) =>
     sb
       .from("fee_desk_vouchers")
-      .select("id")
+      .select("id, household_id")
       .eq("tenant_id", tenantId)
       .order("id", { ascending: true })
       .range(from, to),
@@ -429,8 +429,19 @@ export async function pushFeeVouchersToDb(
   const allTenders: Record<string, unknown>[] = [];
   const headers: Record<string, unknown>[] = [];
 
+  // A receipt's family is the server's once it exists. Separating a child
+  // from a family they were wrongly put in moves their receipts on the
+  // server (lib/sisSeparate.server.ts); a browser still holding the old
+  // copy must not move them back on its next sync.
+  const familyOf = new Map(
+    (existingHeaders ?? [])
+      .filter((r) => !!r.household_id)
+      .map((r) => [String(r.id), String(r.household_id)]),
+  );
   for (const v of active) {
     const { header, lines, tenders } = voucherToRows(tenantId, v);
+    const kept = familyOf.get(String(header.id));
+    if (kept) header.household_id = kept;
     headers.push(header);
     allLines.push(...lines);
     allTenders.push(...tenders);

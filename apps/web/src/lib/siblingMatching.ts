@@ -13,6 +13,7 @@ import {
   type Household,
   type SisState,
   type SisStudent,
+  isPlaceholderMobile,
 } from "@/lib/sis";
 
 function normName(v: string): string {
@@ -184,21 +185,23 @@ function matchReasons(
   hhB?: Household,
 ): SiblingMatchReason[] {
   const reasons: SiblingMatchReason[] = [];
+  // A placeholder number is shared by unrelated families — never evidence.
+  const real = (m: string) => m.length === 10 && !isPlaceholderMobile(m);
   const fA = digits(a.fatherMobile);
   const fB = digits(b.fatherMobile);
-  if (fA.length === 10 && fA === fB) reasons.push("father_mobile");
+  if (real(fA) && fA === fB) reasons.push("father_mobile");
 
   const mA = digits(a.motherMobile);
   const mB = digits(b.motherMobile);
-  if (mA.length === 10 && mA === mB) reasons.push("mother_mobile");
+  if (real(mA) && mA === mB) reasons.push("mother_mobile");
 
   const gA = digits(hhA?.mobile ?? "");
   const gB = digits(hhB?.mobile ?? "");
-  if (gA.length === 10 && gA === gB) reasons.push("guardian_mobile");
+  if (real(gA) && gA === gB) reasons.push("guardian_mobile");
 
   const wA = digits(hhA?.whatsappMobile || hhA?.mobile || "");
   const wB = digits(hhB?.whatsappMobile || hhB?.mobile || "");
-  if (wA.length === 10 && wA === wB && !reasons.includes("guardian_mobile")) {
+  if (real(wA) && wA === wB && !reasons.includes("guardian_mobile")) {
     reasons.push("whatsapp");
   }
 

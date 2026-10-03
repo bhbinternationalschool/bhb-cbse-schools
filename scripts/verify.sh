@@ -233,6 +233,7 @@ SELFTESTS=(
   test:photo-consent
   test:registration-blockers
   test:sibling-carry-over
+  test:sibling-separate
   test:udise-upload-store
   test:udise-student-details
   test:udise-compliance

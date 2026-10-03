@@ -1238,6 +1238,38 @@ export function isValidMobile(value: string): boolean {
   return /^\d{10}$/.test(value.trim());
 }
 
+/**
+ * A number typed to fill the box, not a family's phone: "0000000000",
+ * "9999999999", "1234567890", anything that is not ten digits or does not
+ * start 6–9 (no Indian mobile does).
+ *
+ * Never group children by one of these. On 26–27 Aug 2026 three unrelated
+ * admissions entered with 0000000000 became one family; editing the first
+ * child's parents rewrote the other two's. The UDISE import also saves
+ * households with 0000000000, so any admission without a number could
+ * join one of those.
+ */
+/** Next free "HH-NNN" — count-based codes could repeat after a delete. */
+export function nextHouseholdCode(codes: string[]): string {
+  let max = 0;
+  for (const c of codes) {
+    const m = /^HH-(\d+)$/i.exec((c || "").trim());
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return `HH-${String(max + 1).padStart(3, "0")}`;
+}
+
+export function isPlaceholderMobile(value: string): boolean {
+  // Last ten digits: "+91 …" and "0…" prefixes are the same number.
+  const digits = (value || "").replace(/\D/g, "");
+  const m = digits.length > 10 ? digits.slice(-10) : digits;
+  if (m.length !== 10) return true;
+  if (!/^[6-9]/.test(m)) return true;
+  if (/^(\d)\1{9}$/.test(m)) return true;
+  if (m === "1234567890" || m === "9876543210") return true;
+  return false;
+}
+
 export function studentInitials(fullName: string): string {
   const parts = fullName.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return "?";
