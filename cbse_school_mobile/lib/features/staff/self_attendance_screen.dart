@@ -3,11 +3,21 @@ import "dart:math" as math;
 
 import "package:flutter/material.dart";
 import "package:geolocator/geolocator.dart";
+import "package:mobile_scanner/mobile_scanner.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../../core/punch/punch_device_key.dart";
+
+/// The six digits from the office QR ("…/punch?c=482913") or as typed.
+String punchCodeFrom(String raw) {
+  final link = RegExp(r"[?&]c=(\d{6})\b").firstMatch(raw);
+  if (link != null) return link.group(1)!;
+  final d = raw.replaceAll(RegExp(r"\D"), "");
+  return d.length == 6 ? d : "";
+}
 
 double _distanceM(double lat1, double lng1, double lat2, double lng2) {
   const r = 6371000.0;
@@ -25,9 +35,10 @@ double _distanceM(double lat1, double lng1, double lat2, double lng2) {
 String _distanceLabel(double m) =>
     m < 1000 ? "${m.round()} m" : "${(m / 1000).toStringAsFixed(1)} km";
 
-/// GPS self-punch for staff: live distance to campus, then punch in/out.
-/// The server re-validates the geofence — this screen's feedback is a
-/// courtesy, not the authority.
+/// Staff self-punch: the office QR screen's code, this phone's key, and the
+/// phone's location inside the school (the website's /punch, in the app).
+/// Live distance to campus is shown as a courtesy; the server checks the
+/// code, the signature and the geofence — it is the authority.
 class SelfAttendanceScreen extends StatefulWidget {
   const SelfAttendanceScreen({super.key, required this.api});
 
@@ -122,21 +133,40 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
       );
       return;
     }
+    final state = _state;
+    if (state == null || state.staffId.isEmpty) return;
+    // The office screen's code: scanned or typed.
+    final code = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => _PunchCodeSheet(kind: kind),
+    );
+    if (code == null || code.isEmpty || !mounted) return;
     setState(() => _punching = true);
     try {
+      final key = await PunchDeviceKey.load();
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final signature = key.sign(
+        PunchDeviceKey.message(staffId: state.staffId, kind: kind, code: code, ts: ts),
+      );
       final result = await widget.api.punchAttendance(
         kind: kind,
         lat: pos.latitude,
         lng: pos.longitude,
         accuracyM: pos.accuracy,
         mocked: pos.isMocked,
+        code: code,
+        deviceJwk: key.publicJwk,
+        signature: signature,
+        ts: ts,
+        deviceLabel: "BHB staff app",
       );
       if (!mounted) return;
       Haptics.success();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            "Punched ${result.kind.toUpperCase()} at ${result.time} — ${result.distanceM} m from campus",
+            "Punched ${result.kind.toUpperCase()} at ${result.time}",
           ),
         ),
       );
@@ -376,6 +406,88 @@ class _TimeBox extends StatelessWidget {
         ),
         Text(value, style: AppText.titleLargeInk),
       ],
+    );
+  }
+}
+
+
+/// Scan the office QR, or type its six digits.
+class _PunchCodeSheet extends StatefulWidget {
+  const _PunchCodeSheet({required this.kind});
+
+  final String kind;
+
+  @override
+  State<_PunchCodeSheet> createState() => _PunchCodeSheetState();
+}
+
+class _PunchCodeSheetState extends State<_PunchCodeSheet> {
+  final _typed = TextEditingController();
+  bool _done = false;
+
+  @override
+  void dispose() {
+    _typed.dispose();
+    super.dispose();
+  }
+
+  void _finish(String raw) {
+    final code = punchCodeFrom(raw);
+    if (code.isEmpty || _done) return;
+    _done = true;
+    Navigator.of(context).pop(code);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final inset = MediaQuery.of(context).viewInsets.bottom;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + inset),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            "Punch ${widget.kind.toUpperCase()} — scan the office QR",
+            style: AppText.titleMedium,
+          ),
+          const SizedBox(height: 4),
+          const Text("ऑफ़िस स्क्रीन का QR स्कैन करें, या 6 अंकों का कोड लिखें।"),
+          const SizedBox(height: 12),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: SizedBox(
+              height: 260,
+              child: MobileScanner(
+                onDetect: (capture) {
+                  for (final b in capture.barcodes) {
+                    final raw = b.rawValue;
+                    if (raw != null && punchCodeFrom(raw).isNotEmpty) {
+                      _finish(raw);
+                      return;
+                    }
+                  }
+                },
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _typed,
+            keyboardType: TextInputType.number,
+            maxLength: 7,
+            decoration: const InputDecoration(
+              labelText: "Or type the 6-digit code",
+              border: OutlineInputBorder(),
+            ),
+            onSubmitted: _finish,
+          ),
+          FilledButton(
+            onPressed: () => _finish(_typed.text),
+            child: Text("Punch ${widget.kind.toUpperCase()}"),
+          ),
+        ],
+      ),
     );
   }
 }
