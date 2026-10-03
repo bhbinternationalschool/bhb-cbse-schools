@@ -536,6 +536,16 @@ export function staffBirthdayMessageFor(opts: {
  * is never blank, because a card that thanks somebody on the school's behalf
  * should say who from.
  */
+/**
+ * The short signer for a slot in a designed card (Canva): just the name, or
+ * the office when no name is set — "Principal", "Director". The long line
+ * above overflows the small signature boxes card designs give it.
+ */
+export function birthdayCardSigner(settings: BirthdaySettings, subject: BirthdaySubject): string {
+  const name = (subject === "staff" ? settings.directorName : settings.principalName).trim();
+  return name || (subject === "staff" ? "Director" : "Principal");
+}
+
 export function birthdayCardSignature(settings: BirthdaySettings, subject: BirthdaySubject): string {
   const office = subject === "staff" ? "Director" : "Principal";
   const name = (subject === "staff" ? settings.directorName : settings.principalName).trim();

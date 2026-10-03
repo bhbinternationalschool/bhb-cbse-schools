@@ -27,7 +27,8 @@ import {
   type CanvaAutofillData,
 } from "@/lib/canva.server";
 import { canvaSubjectKey, planCanvaFill, type CanvaCardValues, type CanvaFillPlan } from "@/lib/canvaBirthday";
-import { cardSignatureFor, findBirthdayCardSubject } from "@/lib/birthday.server";
+import { findBirthdayCardSubject, readBirthdayState } from "@/lib/birthday.server";
+import { birthdayCardSigner } from "@/lib/birthdayCards";
 
 const BUCKET = "school-files";
 
@@ -53,7 +54,9 @@ export async function canvaCardValues(s: CanvaCardSubject, wish: string): Promis
       wish: wish || DEFAULT_WISH,
       schoolName: TENANT.nameDisplay,
       dateLabel: dateLabelFor(s.date),
-      signature: await cardSignatureFor(s.subject),
+      // The short form: a designed card's signature box fits "Principal",
+      // not "With warm wishes — Principal" (it was cut off on the first test card).
+      signature: birthdayCardSigner((await readBirthdayState()).settings, s.subject),
     },
   };
 }
