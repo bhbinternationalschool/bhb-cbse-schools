@@ -241,6 +241,7 @@
     "test:report-export": "npx tsx src/lib/reportExport.selftest.ts",
     "test:wa-contact-state": "npx tsx src/lib/waContactState.selftest.ts",
     "test:wa-delivery-log": "npx tsx src/lib/waDeliveryLog.selftest.ts",
+    "test:wa-meta-account-alerts": "npx tsx src/lib/waMetaAccountAlerts.selftest.ts",
     "test:wa-failure-reason": "npx tsx src/lib/waFailureReason.selftest.ts",
     "test:wa-household-numbers": "npx tsx src/lib/waHouseholdNumbers.selftest.ts",
     "test:wa-audience-spec": "npx tsx src/lib/waAudienceSpec.selftest.ts",

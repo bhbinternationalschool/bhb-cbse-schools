@@ -45,7 +45,7 @@ import {
 /* ── Telling people ───────────────────────────────────────────────────── */
 
 /** A note to one staff number: text, or the approved office template outside 24 h. */
-async function tellStaff(mobile10: string, text: string, key: string): Promise<void> {
+export async function tellStaff(mobile10: string, text: string, key: string): Promise<void> {
   const to = waNormalizeLocal10(mobile10 || "");
   if (to.length !== 10) return;
   try {
@@ -65,7 +65,7 @@ async function tellStaff(mobile10: string, text: string, key: string): Promise<v
 }
 
 /** The director's number(s): the protected owner account, else a Director / Owner designation. */
-async function directorMobiles(): Promise<string[]> {
+export async function directorMobiles(): Promise<string[]> {
   const { loadServerMasters } = await import("@/lib/api/v1/auth");
   const masters = await loadServerMasters();
   const active = (masters.staff ?? []).filter(

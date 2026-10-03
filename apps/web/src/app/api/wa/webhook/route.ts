@@ -127,6 +127,19 @@ export async function POST(req: Request) {
     await appendTemplateQualityEvents(templateQualityEvents);
   }
 
+  // Account-level alerts (template recategorised, number downgraded,
+  // restriction, ban…) → one WhatsApp note to the director per event.
+  // In the background: a slow note must not make Meta re-deliver the body.
+  const { parseMetaAccountAlerts } = await import("@/lib/waMetaAccountAlerts");
+  const accountAlerts = parseMetaAccountAlerts(body);
+  if (accountAlerts.length > 0) {
+    void trackServerWork(
+      import("@/lib/waMetaAccountAlerts.server")
+        .then((m) => m.handleMetaAccountAlerts(accountAlerts))
+        .catch((e) => console.error("[wa/webhook] account alerts failed", e)),
+    );
+  }
+
   const deliveryStatusEvents = parseMetaStatusUpdates(body);
   if (deliveryStatusEvents.length > 0) {
     await recordDeliveryStatuses(deliveryStatusEvents);
@@ -144,6 +157,7 @@ export async function POST(req: Request) {
       templateStatusUpdates: templateStatusEvents.length,
       templateQualityUpdates: templateQualityEvents.length,
       deliveryStatusUpdates: deliveryStatusEvents.length,
+      accountAlerts: accountAlerts.length,
     });
   }
 
