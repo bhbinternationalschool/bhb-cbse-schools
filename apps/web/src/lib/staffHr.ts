@@ -190,8 +190,10 @@ export const DEFAULT_LEAVE_TYPES: LeaveType[] = [
     maxCarryForward: 15,
   },
   {
-    code: "SL",
-    name: "Sick leave",
+    // Medical leave. Replaced "SL — Sick leave" on 3 Oct 2026 (director):
+    // the school calls it ML, and the two must not both exist.
+    code: "ML",
+    name: "Medical leave",
     paid: true,
     defaultDaysPerYear: 10,
     maxDaysPerMonth: 0,
@@ -1027,6 +1029,87 @@ export function listStaffRequestsForStaff(
   return state.staffRequests
     .filter((t) => t.staffId === staffId)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+/**
+ * Leave entered from the staff attendance register.
+ *
+ * Marking someone "On leave" on the register files a one-day direct
+ * (approved) leave of the chosen type, so the balance goes down exactly as
+ * it would for leave applied in HR. This reason tags those entries, so the
+ * register can find and cancel its own — never one HR filed.
+ */
+export const REGISTER_LEAVE_REASON = "Marked on leave in the staff register";
+
+/** Approved leave covering `date` for this staff member, if any. */
+export function approvedLeaveOn(
+  state: StaffHrState,
+  staffId: string,
+  date: string,
+  academicYearCode: string,
+): LeaveRequest | null {
+  return (
+    state.leaveRequests.find(
+      (r) =>
+        r.staffId === staffId &&
+        r.status === "approved" &&
+        r.academicYearCode === academicYearCode &&
+        r.fromDate <= date &&
+        r.toDate >= date,
+    ) ?? null
+  );
+}
+
+/**
+ * Undo a register-made leave for one day (the register changed the mark
+ * back to present, late, …). Kept as rejected rather than deleted, so the
+ * history shows it was entered and withdrawn; the balance is restored.
+ * Leave filed through HR is never touched here.
+ */
+export function cancelRegisterLeave(input: {
+  staffId: string;
+  date: string;
+  academicYearCode: string;
+  cancelledBy: string;
+}): { ok: true; cancelled: number } | { ok: false; error: string } {
+  let state = loadStaffHr();
+  const mine = state.leaveRequests.filter(
+    (r) =>
+      r.staffId === input.staffId &&
+      r.status === "approved" &&
+      r.academicYearCode === input.academicYearCode &&
+      r.fromDate === input.date &&
+      r.toDate === input.date &&
+      r.reason === REGISTER_LEAVE_REASON,
+  );
+  if (!mine.length) return { ok: true, cancelled: 0 };
+  if (!assertSelfOrModulePermission("staff", "edit", input.staffId, "cancelRegisterLeave")) {
+    return { ok: false, error: "You don't have permission to do this" };
+  }
+  const ids = new Set(mine.map((r) => r.id));
+  const now = new Date().toISOString();
+  state = {
+    ...state,
+    leaveRequests: state.leaveRequests.map((r) =>
+      ids.has(r.id)
+        ? {
+            ...r,
+            status: "rejected" as const,
+            decidedBy: input.cancelledBy,
+            decidedAt: now,
+            decisionNote: "Withdrawn from the staff register",
+          }
+        : r,
+    ),
+  };
+  for (const r of mine) {
+    const bal = state.leaveBalances.find(
+      (b) => b.staffId === r.staffId && b.typeCode === r.typeCode && b.academicYearCode === r.academicYearCode,
+    );
+    if (bal) state = syncBalanceUsed(state, bal.id);
+  }
+  persistStaffHr(state);
+  return { ok: true, cancelled: mine.length };
 }
 
 export function decideLeave(input: {

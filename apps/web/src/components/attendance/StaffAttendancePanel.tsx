@@ -34,6 +34,28 @@ import {
   ruleForStaff,
 } from "@/lib/staffAttendanceRules";
 import { loadMasters, type MastersState } from "@/lib/masters";
+import {
+  approvedLeaveOn,
+  cancelRegisterLeave,
+  directLeave,
+  loadStaffHr,
+  REGISTER_LEAVE_REASON,
+  type LeaveType,
+} from "@/lib/staffHr";
+
+/**
+ * What each code means for STAFF, spelled out. The register used to show
+ * only "L" and "LE" side by side, and "L" is Late — on 3 Oct 2026 two staff
+ * on leave were marked L, counted as late (present), and every "On leave"
+ * figure read 0.
+ */
+const STAFF_STATUS_LABEL: Record<AttendanceStatus, string> = {
+  P: "Present",
+  A: "Absent",
+  L: "Late",
+  HD: "Half day",
+  LE: "On leave",
+};
 import { loadRbac } from "@/lib/rbac";
 import { classifyStaffHolidayDay } from "@/lib/holidayPolicy";
 import { useDemoSession } from "@/components/shell/SessionContext";
@@ -86,9 +108,15 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
   const [note, setNote] = useState("");
   const [punchWay, setPunchWay] = useState<AttendancePunchWay | "">("direct");
   const [halfDay, setHalfDay] = useState(true);
+  /** Leave type chosen on the register for staff marked On leave (staffId → CL / ML / …). */
+  const [leaveTypeFor, setLeaveTypeFor] = useState<Record<string, string>>({});
+  /** Leave type for the single-staff direct / adjust forms. */
+  const [formLeaveType, setFormLeaveType] = useState("");
 
   const rulesState = useMemo(() => loadAttendanceRules(), [tick]);
   const attState = useMemo(() => loadStaffAttendance(), [tick]);
+  const hrState = useMemo(() => loadStaffHr(), [tick]);
+  const leaveTypes: LeaveType[] = hrState.leaveTypes;
   const settings = useMemo(
     () => normalizeAttendanceSettings(attState.settings),
     [attState],
@@ -100,17 +128,25 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
 
   useEffect(() => {
     void (async () => {
-      const [{ ensureStaffHydrated }, { ensureStaffAttendanceHydrated }, { withHydrationSlot }] =
-        await Promise.all([
-          import("@/lib/staffPersistence"),
-          import("@/lib/staffAttendancePersistence"),
-          import("@/lib/deskHydrateGuard"),
-        ]);
-      const [didStaff, didAtt] = await Promise.all([
+      const [
+        { ensureStaffHydrated },
+        { ensureStaffAttendanceHydrated },
+        { ensureStaffHrHydrated },
+        { withHydrationSlot },
+      ] = await Promise.all([
+        import("@/lib/staffPersistence"),
+        import("@/lib/staffAttendancePersistence"),
+        import("@/lib/staffHrPersistence"),
+        import("@/lib/deskHydrateGuard"),
+      ]);
+      // HR too: marking someone On leave files the leave against their
+      // balance, which must be read from the real HR desk, not a stale copy.
+      const [didStaff, didAtt, didHr] = await Promise.all([
         withHydrationSlot(() => ensureStaffHydrated()),
         withHydrationSlot(() => ensureStaffAttendanceHydrated()),
+        withHydrationSlot(() => ensureStaffHrHydrated()),
       ]);
-      if (didStaff || didAtt) setTick((n) => n + 1);
+      if (didStaff || didAtt || didHr) setTick((n) => n + 1);
     })();
   }, []);
 
@@ -358,7 +394,8 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
   const staffKeys = useMemo(() => filtered.map((s) => s.id), [filtered]);
   const staffSel = useRowSelection(staffKeys);
 
-  function setStatus(id: string, st: AttendanceStatus) {
+  function setStatus(id: string, st: AttendanceStatus, leaveType?: string) {
+    if (st === "LE" && leaveType) setLeaveTypeFor((prev) => ({ ...prev, [id]: leaveType }));
     setMarks((prev) =>
       prev.map((m) =>
         m.staffId === id
@@ -443,6 +480,37 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     );
   }
 
+  /**
+   * Make the HR leave record agree with a staff member's mark for `date`.
+   * On leave → a one-day approved leave of the chosen type (balance goes
+   * down; refused when the balance or the type's rules say no). Anything
+   * else → withdraw a leave the register itself filed earlier. Leave filed
+   * through HR is never created twice nor withdrawn here.
+   * Returns an error to show, or "" when the HR side is in order.
+   */
+  function reconcileRegisterLeave(id: string, st: AttendanceStatus, typeCode: string): string {
+    const name = roster.find((s) => s.id === id)?.fullName || "this staff member";
+    const hr = loadStaffHr();
+    if (st === "LE") {
+      const existing = approvedLeaveOn(hr, id, date, ay);
+      if (existing) return "";
+      if (!typeCode) return `Choose the leave type (${leaveTypes.map((t) => t.code).join(" / ")}) for ${name}`;
+      const res = directLeave({
+        academicYearCode: ay,
+        staffId: id,
+        typeCode,
+        fromDate: date,
+        toDate: date,
+        reason: REGISTER_LEAVE_REASON,
+        appliedBy: session.fullName,
+      });
+      return res.ok ? "" : `${name}: ${res.error}`;
+    }
+    if (st === "HD") return "";
+    const res = cancelRegisterLeave({ staffId: id, date, academicYearCode: ay, cancelledBy: session.fullName });
+    return res.ok ? "" : `${name}: ${res.error}`;
+  }
+
   function saveRegister() {
     if (!isManager) {
       flash("Only principal / admin can save the full register", true);
@@ -461,9 +529,26 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     }
     // Punches always follow the Masters rules; with "Auto-apply punch rules
     // on save" on, every mark with an in-time is re-graded.
-    let toSave = applyRulesToMarks(marks, {
-      punchesOnly: !settings.autoApplyRulesOnSave,
-    });
+    // Leave first: an On-leave mark must be backed by an HR leave of a
+    // chosen type before the register says so, and a mark moved off leave
+    // gives the day back to the balance.
+    for (const m of marks) {
+      const err = reconcileRegisterLeave(m.staffId, m.status, leaveTypeFor[m.staffId] || "");
+      if (err) {
+        flash(err, true);
+        setTick((x) => x + 1);
+        return;
+      }
+    }
+    const hrNow = loadStaffHr();
+    let toSave = applyRulesToMarks(
+      marks.map((m) => {
+        if (m.status !== "LE") return m;
+        const lv = approvedLeaveOn(hrNow, m.staffId, date, ay);
+        return lv ? { ...m, note: `On leave (${lv.typeCode})` } : m;
+      }),
+      { punchesOnly: !settings.autoApplyRulesOnSave },
+    );
     if (settings.syncLeaveToAttendance) {
       toSave = applyApprovedLeaveToMarks(toSave, date, ay);
     }
@@ -495,6 +580,11 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
       );
       return;
     }
+    const leaveErr = reconcileRegisterLeave(staffId, status, formLeaveType);
+    if (leaveErr) {
+      flash(leaveErr, true);
+      return;
+    }
     const result = upsertStaffMark({
       academicYearCode: ay,
       date,
@@ -520,6 +610,11 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     e.preventDefault();
     if (!isManager) {
       flash("Only principal / admin can adjust attendance", true);
+      return;
+    }
+    const leaveErr = reconcileRegisterLeave(staffId, status, formLeaveType);
+    if (leaveErr) {
+      flash(leaveErr, true);
       return;
     }
     const result = adjustStaffAttendance({
@@ -876,7 +971,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
                 key={s.code}
                 className="rounded-md bg-[rgba(32,48,80,0.06)] px-2 py-1 font-semibold text-[var(--brand-deep)]"
               >
-                {s.short}: {summary[s.code] ?? 0}
+                {STAFF_STATUS_LABEL[s.code]}: {summary[s.code] ?? 0}
               </span>
             ))}
             {dirty ? (
@@ -901,14 +996,25 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
           <BulkActionBar
             selection={staffSel}
             noun="staff member"
-            actions={ATTENDANCE_STATUSES.map((st) => ({
-              id: st.code,
-              label: `Mark ${st.short}`,
-              onRun: (ids: string[]) => {
-                for (const id of ids) setStatus(id, st.code);
-                staffSel.clear();
-              },
-            }))}
+            actions={[
+              ...ATTENDANCE_STATUSES.filter((st) => st.code !== "LE").map((st) => ({
+                id: st.code,
+                label: `Mark ${STAFF_STATUS_LABEL[st.code]}`,
+                onRun: (ids: string[]) => {
+                  for (const id of ids) setStatus(id, st.code);
+                  staffSel.clear();
+                },
+              })),
+              // On leave always carries its type, so the balance is charged.
+              ...leaveTypes.map((t) => ({
+                id: `LE:${t.code}`,
+                label: `Mark On leave (${t.code})`,
+                onRun: (ids: string[]) => {
+                  for (const id of ids) setStatus(id, "LE", t.code);
+                  staffSel.clear();
+                },
+              })),
+            ]}
           />
           <ErpTableShell exportAs="staff_attendance" exportTitle="Staff attendance">
             <ErpTable minWidth="min-w-[880px]">
@@ -995,13 +1101,44 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
                                     : "bg-[rgba(32,48,80,0.06)] text-[var(--muted)]"
                                 }`}
                                 onClick={() => setStatus(s.id, st.code)}
+                                title={STAFF_STATUS_LABEL[st.code]}
                               >
-                                {st.short}
+                                {STAFF_STATUS_LABEL[st.code]}
                               </button>
                             );
                           })}
                         </div>
-                        {mark?.note ? (
+                        {mark?.status === "LE" ? (
+                          (() => {
+                            const lv = approvedLeaveOn(hrState, s.id, date, ay);
+                            if (lv) {
+                              return (
+                                <p className="mt-1 text-[10px] font-semibold text-[var(--brand-deep)]">
+                                  {lv.typeCode} leave · {lv.reason === REGISTER_LEAVE_REASON ? "from this register" : "approved in HR"}
+                                </p>
+                              );
+                            }
+                            return (
+                              <select
+                                className="field mt-1 !py-0.5 !text-[11px]"
+                                aria-label={`Leave type for ${s.fullName}`}
+                                value={leaveTypeFor[s.id] || ""}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  setLeaveTypeFor((prev) => ({ ...prev, [s.id]: v }));
+                                  setDirty(true);
+                                }}
+                              >
+                                <option value="">Leave type…</option>
+                                {leaveTypes.map((t) => (
+                                  <option key={t.code} value={t.code}>
+                                    {t.code} — {t.name}
+                                  </option>
+                                ))}
+                              </select>
+                            );
+                          })()
+                        ) : mark?.note ? (
                           <p className="mt-1 text-[10px] text-[var(--muted)]">
                             {mark.note}
                           </p>
@@ -1047,6 +1184,9 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
           onOutTime={setOutTime}
           onNote={setNote}
           onPunchWay={setPunchWay}
+          leaveTypes={leaveTypes}
+          leaveType={formLeaveType}
+          onLeaveType={setFormLeaveType}
           onSubmit={onDirect}
           submitLabel="Save direct mark"
         />
@@ -1070,6 +1210,9 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
           onOutTime={setOutTime}
           onNote={setNote}
           onPunchWay={setPunchWay}
+          leaveTypes={leaveTypes}
+          leaveType={formLeaveType}
+          onLeaveType={setFormLeaveType}
           onSubmit={onAdjust}
           submitLabel="Save adjustment"
         />
@@ -1157,6 +1300,9 @@ function MarkForm({
   onOutTime,
   onNote,
   onPunchWay,
+  leaveTypes,
+  leaveType,
+  onLeaveType,
   onSubmit,
   submitLabel,
 }: {
@@ -1176,6 +1322,9 @@ function MarkForm({
   onOutTime: (v: string) => void;
   onNote: (v: string) => void;
   onPunchWay: (v: AttendancePunchWay | "") => void;
+  leaveTypes: LeaveType[];
+  leaveType: string;
+  onLeaveType: (v: string) => void;
   onSubmit: (e: React.FormEvent) => void;
   submitLabel: string;
 }) {
@@ -1211,11 +1360,30 @@ function MarkForm({
         >
           {ATTENDANCE_STATUSES.map((s) => (
             <option key={s.code} value={s.code}>
-              {s.short} — {s.label}
+              {STAFF_STATUS_LABEL[s.code]}
             </option>
           ))}
         </select>
       </label>
+      {status === "LE" ? (
+        <label className="block text-sm">
+          <span className="mb-1 block text-[11px] text-[var(--muted)]">
+            Leave type (charged to the balance unless HR already approved this day)
+          </span>
+          <select
+            className="field !py-1.5"
+            value={leaveType}
+            onChange={(e) => onLeaveType(e.target.value)}
+          >
+            <option value="">Select…</option>
+            {leaveTypes.map((t) => (
+              <option key={t.code} value={t.code}>
+                {t.code} — {t.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       {showPunchWay ? (
         <label className="block text-sm">
           <span className="mb-1 block text-[11px] text-[var(--muted)]">

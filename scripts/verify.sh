@@ -102,6 +102,7 @@ SELFTESTS=(
   test:staff-wa-real-chats
   test:staff-onboarding
   test:staff-leave-wa
+  test:staff-register-leave
   test:class-notice-wa
   test:wa-template-autopilot
   test:pin-review

@@ -33,7 +33,7 @@ const TODAY = "2026-09-29"; // a Tuesday
   const a = parseLeaveApplyStart("CL tomorrow", TODAY);
   assert.deepEqual(a, { typeCode: "CL", dates: { from: "2026-09-30", to: "2026-09-30" }, halfDay: false });
   const b = parseLeaveApplyStart("ML 2 Oct to 4 Oct fever", TODAY);
-  assert.equal(b?.typeCode, "SL");
+  assert.equal(b?.typeCode, "ML");
   assert.deepEqual(b?.dates, { from: "2026-10-02", to: "2026-10-04" });
   const c = parseLeaveApplyStart("kal chutti chahiye", TODAY);
   assert.equal(c?.typeCode, null);
@@ -46,8 +46,8 @@ const TODAY = "2026-09-29"; // a Tuesday
   }
 }
 assert.equal(parseLeaveType("casual leave"), "CL");
-assert.equal(parseLeaveType("bukhar hai"), "SL");
-assert.equal(parseLeaveType("ML"), "SL");
+assert.equal(parseLeaveType("bukhar hai"), "ML");
+assert.equal(parseLeaveType("ML"), "ML");
 assert.equal(parseLeaveType("hello"), null);
 
 assert.deepEqual(parseLeaveDates("02/10", TODAY), { from: "2026-10-02", to: "2026-10-02" });
@@ -90,7 +90,7 @@ function stateWith(requests: LeaveRequest[], slUsed = 0): StaffHrState {
     leaveRequests: requests,
     leaveBalances: [
       { id: "b1", academicYearCode: "2026-27", staffId: "s1", typeCode: "CL", allotted: 12, carriedForward: 0, encashed: 0, used: 1, },
-      { id: "b2", academicYearCode: "2026-27", staffId: "s1", typeCode: "SL", allotted: 10, carriedForward: 0, encashed: 0, used: slUsed },
+      { id: "b2", academicYearCode: "2026-27", staffId: "s1", typeCode: "ML", allotted: 10, carriedForward: 0, encashed: 0, used: slUsed },
     ],
   };
 }
@@ -114,10 +114,10 @@ const base = { staffId: "s1", academicYearCode: "2026-27", halfDay: false, today
   const v = leaveVerdict({ ...base, state: stateWith([]), typeCode: "CL", from: "2026-10-01", to: "2026-10-02" });
   assert.equal(v.kind, "refuse");
   // A day that has ended cannot be applied for; today still can, until midnight.
-  assert.equal(leaveVerdict({ ...base, state: stateWith([]), typeCode: "SL", from: "2026-09-28", to: "2026-09-28" }).kind, "refuse");
-  assert.equal(leaveVerdict({ ...base, state: stateWith([]), typeCode: "SL", from: TODAY, to: TODAY }).kind, "ok");
+  assert.equal(leaveVerdict({ ...base, state: stateWith([]), typeCode: "ML", from: "2026-09-28", to: "2026-09-28" }).kind, "refuse");
+  assert.equal(leaveVerdict({ ...base, state: stateWith([]), typeCode: "ML", from: TODAY, to: TODAY }).kind, "ok");
   // ML beyond the year's balance → Leave Without Pay.
-  const sl = leaveVerdict({ ...base, state: stateWith([], 9), typeCode: "SL", from: "2026-10-01", to: "2026-10-03" });
+  const sl = leaveVerdict({ ...base, state: stateWith([], 9), typeCode: "ML", from: "2026-10-01", to: "2026-10-03" });
   assert.equal(sl.kind, "lwp");
   assert.ok(sl.kind === "lwp" && sl.why.includes("only 1 ML day left"), JSON.stringify(sl));
   // Leave Without Pay itself has no caps.
@@ -159,11 +159,11 @@ assert.equal(leaveDecisionOpen("2026-09-28", TODAY), false);
   assert.equal(leaveUsedInMonth(rs, "s1", "CL", "2026-09"), 1);
   const text = composeLeaveBalances({
     types: emptyStaffHrState().leaveTypes,
-    left: { CL: 11, SL: 10, EL: 15 },
+    left: { CL: 11, ML: 10, EL: 15 },
     usedThisMonth: { CL: 1 },
   });
   assert.ok(text.includes("CL (Casual leave) — 11 left · this month 1/1 used"), text);
-  assert.ok(text.includes("ML (Sick leave) — 10 left"), text);
+  assert.ok(text.includes("ML (Medical leave) — 10 left"), text);
   assert.ok(!text.includes("LWP"), "no balance line for unpaid leave");
 }
 
