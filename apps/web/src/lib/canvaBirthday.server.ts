@@ -142,7 +142,7 @@ export async function ensureCanvaBirthdayCard(s: CanvaCardSubject, sourceDesignI
     if ("error" in v) return { ok: false, error: v.error };
     const dataset = await getCanvaDesignDataset(sourceDesignId);
     if (!Object.keys(dataset).length) {
-      return { ok: false, error: "This Canva design has no data fields — add fields such as {name} and {class} with Canva's Data autofill app" };
+      return { ok: false, error: "This Canva design has no data fields — connect fields such as name and class with Canva's Bulk create (Apps → Bulk create)" };
     }
     const plan = planCanvaFill(dataset, v.values);
     if (!Object.keys(plan.text).length && !Object.keys(plan.images).length) {
