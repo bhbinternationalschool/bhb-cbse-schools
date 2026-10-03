@@ -347,6 +347,7 @@ jobs:
           npm run test:photo-consent
           npm run test:registration-blockers
           npm run test:sibling-carry-over
+          npm run test:sibling-separate
           npm run test:udise-upload-store
           npm run test:udise-student-details
       - name: Test — PEN + APAAR is the whole of UDISE+ compliance

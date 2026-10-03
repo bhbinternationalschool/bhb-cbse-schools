@@ -311,6 +311,7 @@
     "test:photo-consent": "npx tsx src/lib/photoConsent.selftest.ts",
     "test:registration-blockers": "npx tsx src/lib/registrationBlockers.selftest.ts",
     "test:sibling-carry-over": "npx tsx src/lib/siblingCarryOver.selftest.ts",
+    "test:sibling-separate": "npx tsx src/lib/siblingSeparate.selftest.ts",
     "test:udise-upload-store": "npx tsx src/lib/udiseUploadStore.selftest.ts",
     "test:udise-student-details": "npx tsx src/lib/udiseStudentDetails.selftest.ts",
     "test:udise-compliance": "npx tsx src/lib/udiseCompliance.selftest.ts",

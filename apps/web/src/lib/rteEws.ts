@@ -33,6 +33,7 @@ import {
   type SisState,
   type SisStudent,
   studentsInSession,
+  isPlaceholderMobile,
 } from "@/lib/sis";
 import { ensureRteEwsTagIds } from "@/lib/studentTags";
 import { TENANT } from "@/lib/types";
@@ -1375,9 +1376,10 @@ export function sendAllottedRteToSis(input: {
     "";
   const mobile = (app.mobile || "").replace(/\D/g, "").slice(-10);
   let households = [...sis.households];
-  let householdId =
-    households.find((h) => h.mobile.replace(/\D/g, "").slice(-10) === mobile)
-      ?.id || "";
+  // A missing or placeholder number groups nobody (see isPlaceholderMobile).
+  let householdId = isPlaceholderMobile(mobile)
+    ? ""
+    : households.find((h) => h.mobile.replace(/\D/g, "").slice(-10) === mobile)?.id || "";
   if (!householdId) {
     const hh = normalizeHousehold({
       id: newSisId("hh"),

@@ -20,6 +20,7 @@ import {
   type SisStudent,
   type StudentCategory,
   type StudentStatus,
+  isPlaceholderMobile,
 } from "@/lib/sis";
 import {
   STUDENT_REGISTER_EXPORT_COLUMNS,
@@ -1335,10 +1336,12 @@ export function applyStudentImport(
     let hh = identitySource?.householdId
       ? households.find((h) => h.id === identitySource.householdId)
       : undefined;
-    if (!hh) {
+    // A placeholder number groups nobody (see isPlaceholderMobile).
+    const groupableMobile = isPlaceholderMobile(guardianMobile) ? "" : guardianMobile;
+    if (!hh && groupableMobile) {
       hh = hhIndex.get(householdKey(guardianMobile, guardianName));
     }
-    if (!hh && guardianMobile) {
+    if (!hh && groupableMobile) {
       hh = households.find(
         (h) => normalizeMobile(h.mobile) === guardianMobile,
       );

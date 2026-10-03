@@ -39,6 +39,7 @@ import {
   suggestAdmissionNo,
   suggestSrn,
   type SisStudent,
+  isPlaceholderMobile,
 } from "@/lib/sis";
 import { ensureRteEwsTagIds } from "@/lib/studentTags";
 import { TENANT } from "@/lib/types";
@@ -1615,7 +1616,8 @@ export function findHouseholdByMobile(
   mobile: string,
 ): AdmissionHousehold | undefined {
   const m = normalizeMobile(mobile);
-  if (m.length !== 10) return undefined;
+  // A placeholder number is not a family — see isPlaceholderMobile.
+  if (m.length !== 10 || isPlaceholderMobile(m)) return undefined;
   return state.households.find(
     (h) =>
       h.primaryMobile === m ||
@@ -2602,15 +2604,18 @@ export function enrollLead(
   const primary = admHh ? primaryGuardian(admHh) : undefined;
   const mother = admHh ? motherFromHousehold(admHh) : undefined;
   /** Parent-wise: each guardian mobile is its own SIS household */
-  const parentMobile =
+  const rawParentMobile =
     normalizeMobile(lead.parentGroupKey || lead.mobile) ||
     normalizeMobile(admHh?.primaryMobile || "");
+  // "" when the number is a placeholder: then nothing below can match, and
+  // the child gets a family of their own (see isPlaceholderMobile).
+  const parentMobile = isPlaceholderMobile(rawParentMobile) ? "" : rawParentMobile;
 
   let sisHouseholdId = "";
   let households = [...sis.households];
 
   // Same parent already admitted → reuse that SIS household
-  const sameParentLead = state.leads.find(
+  const sameParentLead = !parentMobile ? undefined : state.leads.find(
     (l) =>
       l.id !== lead.id &&
       l.stage === "enrolled" &&
@@ -2632,6 +2637,7 @@ export function enrollLead(
   // Only reuse admission HH → SIS link if that HH mobile matches this parent
   if (
     !sisHouseholdId &&
+    !!parentMobile &&
     admHh?.sisHouseholdId &&
     households.some((h) => h.id === admHh.sisHouseholdId) &&
     normalizeMobile(admHh.primaryMobile) === parentMobile
