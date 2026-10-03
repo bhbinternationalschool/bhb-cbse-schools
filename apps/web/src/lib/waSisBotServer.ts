@@ -73,6 +73,8 @@ import {
   type SisChildFeeYear,
   type SisFeeHeadLine,
   type SisFeeQuestion,
+  composeSisComplaintAck,
+  detectSisComplaintLetter,
 } from "@/lib/sisParentBotEngine";
 import { attachRazorpayToPaymentLink } from "@/lib/razorpay.server";
 import {
@@ -1266,7 +1268,11 @@ export async function handleWaSisBotInbound(opts: {
   const feeReply = paidButton ? ("claims_paid" as const) : feeWhy ? null : detectSisFeeReplyIntent(text);
   // "1500 dina" in answer to "how much and by when" says it is already paid,
   // not a promise — read the payment first.
+  // A letter or complaint goes to a person before any keyword can claim it
+  // (see detectSisComplaintLetter). A template button tap is never one.
+  const complaint = !quickReply && detectSisComplaintLetter(text);
   const answeringPtp =
+    !complaint &&
     thread.pendingAsk === "ptp" && !quickReply && feeReply !== "claims_paid" && detectSisBotIntent(text) === "unknown";
   const feeQuestion = !quickReply && !feeReply && !feeWhy ? detectSisFeeQuestion(text) : null;
   // "Father name. KISHAN YADAV" — a correction to the record, not a question
@@ -1281,7 +1287,14 @@ export async function handleWaSisBotInbound(opts: {
   let closingNow = false;
   let intent: ReturnType<typeof detectSisBotIntent>;
   let bot: { text: string; escalate: boolean; sendLocationPin?: boolean };
-  if (answeringPtp) {
+  if (complaint) {
+    intent = "human";
+    officeNote = `Written complaint / letter from the parent — please read and reply here: "${text.slice(0, 400)}${text.length > 400 ? "…" : ""}"`;
+    // The relay shows this instead of "the bot could not answer": the bot
+    // did not try to, on purpose.
+    relayReason = officeNote;
+    bot = { escalate: true, text: composeSisComplaintAck(hindi) };
+  } else if (answeringPtp) {
     const p = parseSisPromiseToPay(text, new Date().toISOString().slice(0, 10));
     if (promiseIsEmpty(p)) {
       // Not an answer. Keep listening rather than filing an empty promise:

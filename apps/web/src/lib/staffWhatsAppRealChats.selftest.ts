@@ -59,9 +59,14 @@ assert.equal(
   false,
   "nor is a parent's pin a menu request",
 );
-// A bare empty message with nothing attached still opens the menu, as before.
+// A bare photo from staff mid-conversation keeps the role (3 Oct 2026); with
+// no conversation yet it still opens the menu.
 assert.equal(
   shouldShowUnifiedMenu({ text: "", staff: true, known: true, hasSession: true, hasAudio: false, hasLocation: false }),
+  false,
+);
+assert.equal(
+  shouldShowUnifiedMenu({ text: "", staff: true, known: true, hasSession: false, hasAudio: false, hasLocation: false }),
   true,
 );
 for (const lang of ["en", "hi"] as const) {

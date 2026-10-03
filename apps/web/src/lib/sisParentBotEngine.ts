@@ -676,6 +676,39 @@ const CORRECTION_WORD =
  * The bot never changes the record itself: the office checks it against a
  * document and replies.
  */
+/**
+ * A written complaint or formal letter, not a question for the bot.
+ *
+ * 30 Sep 2026: a father wrote "सेवा में, प्रधानाचार्य महोदय … विषय: शुल्क
+ * भुगतान के संबंध में गलत संदेश" — fees paid to August, wrong reminders
+ * still coming — then the same letter in English. The fee detector saw
+ * "fee" and sent him his fee statement, twice; the complaint never reached
+ * anyone and the chat closed "quietly". A letter is for a person.
+ *
+ * Read as a letter: the shape of one (salutation, "subject", "respected"),
+ * or a complaint word in a message long enough to be more than a keyword,
+ * or simply a very long message — a parent who writes a paragraph wants it
+ * read, not keyword-matched.
+ */
+const LETTER_SHAPE =
+  /सेवा\s*में|विषय\s*[:：]|महोदय|महोदया|मान्यवर|सविनय|प्रार्थना\s*पत्र|\bsubject\s*[:：]|\brespected\s+(sir|madam|ma'?am)\b|\bto,?\s*\n?\s*the\s+principal\b|\bdear\s+(sir|madam)\b/i;
+const COMPLAINT_WORD =
+  /शिकायत|गलत\s*(संदेश|मैसेज|मेसेज|message)|\bcomplain(t|ts)?\b|\bgrievance\b|\bincorrect\b|\bwrong(ly)?\s+(message|reminder|fee|amount|sms)|\bgalat\s+(message|msg|mesej)|\bshikayat\b|नाराज़|असंतुष्ट|\bnot\s+happy\b|\bharass/i;
+
+export function detectSisComplaintLetter(text: string): boolean {
+  const t = (text || "").trim();
+  if (!t) return false;
+  if (LETTER_SHAPE.test(t) && t.length >= 40) return true;
+  if (COMPLAINT_WORD.test(t) && t.length >= 25) return true;
+  return t.length >= 280;
+}
+
+export function composeSisComplaintAck(hindi: boolean): string {
+  return hindi
+    ? "🙏 आपका पत्र मिल गया है, धन्यवाद। इसे स्कूल ऑफिस / प्रधानाचार्य को भेज दिया गया है — वे इसे पढ़कर इसी WhatsApp पर जवाब देंगे।"
+    : "🙏 Thank you — your letter has been received and passed to the school office / principal. They will read it and reply on this WhatsApp.";
+}
+
 export function detectRecordCorrection(text: string): RecordCorrectionField | null {
   const t = String(text || "").trim();
   if (!t || t.length > 300) return null;

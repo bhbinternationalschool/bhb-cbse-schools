@@ -28,6 +28,8 @@ import {
   STAFF_BOT_WINDOW_MINUTES,
   type WaVisitorPurpose,
   categoryForKnownIdentity,
+  defaultRoleKind,
+  staffSidePhrase,
 } from "@/lib/waUnifiedBotEngine";
 import {
   pickRoleByInput,
@@ -294,16 +296,8 @@ function sessionFor(
     mobile: mobile10,
     displayName,
     visitorName: identity.isKnown ? displayName : "",
-    phase:
-      identity.isKnown && identity.roles.length > 1
-        ? "pick_role"
-        : identity.isKnown
-          ? "active"
-          : "menu",
-    activeFlow:
-      identity.isKnown && identity.roles.length === 1
-        ? identity.roles[0]!.kind
-        : null,
+    phase: !identity.isKnown ? "menu" : defaultRoleKind(identity.roles) ? "active" : "pick_role",
+    activeFlow: identity.isKnown ? defaultRoleKind(identity.roles) : null,
     updatedAt: nowIso(),
   };
 }
@@ -1061,6 +1055,16 @@ function isParentBusiness(text: string): boolean {
   return ["dues", "pay", "receipts", "kids", "bus"].includes(detectSisBotIntent(t)) && /^[A-Za-z]+(\s+\S+)?$/.test(t);
 }
 
+/** Last "what is this photo?" note per number — once per 10 minutes, per instance. */
+const mediaAskAt = new Map<string, number>();
+function mediaAskDue(mobile10: string): boolean {
+  const now = Date.now();
+  const last = mediaAskAt.get(mobile10) ?? 0;
+  if (now - last < 10 * 60_000) return false;
+  mediaAskAt.set(mobile10, now);
+  return true;
+}
+
 /** How long "bot off" holds back the "didn't understand" reply. */
 const STAFF_QUIET_MS = 12 * 60 * 60_000;
 
@@ -1083,7 +1087,24 @@ async function replyStaffFallback(opts: {
   const category = categoryForUnifiedAudience(flow, flow);
   const said = (opts.text || "").trim();
   const quietUntil = Date.parse(session.staffQuietUntil || "");
-  if (!said || (Number.isFinite(quietUntil) && quietUntil > Date.now())) {
+  const quiet = Number.isFinite(quietUntil) && quietUntil > Date.now();
+  // A photo or document with no words, from someone who has not asked for
+  // quiet: say what to do with it — once in a while, not once per photo (a
+  // sheet often arrives as four pictures). It used to get nothing at all,
+  // or, before 3 Oct 2026, the profile list.
+  if (!said && !quiet && mediaAskDue(mobile10)) {
+    const ok = await sendBotReply({
+      mobile10,
+      displayName,
+      category,
+      audience: "staff_media_ask",
+      flow,
+      text: "📎 Got it. I can't read a photo or file on its own — send one line saying what it is or what you need, e.g. _9A attendance_ or _send this to class 5 parents_.",
+      inbound: { text: said, waMessageId: opts.waMessageId },
+    });
+    return { replied: ok, escalate: false, audience: "staff_media_ask", stub: !ok };
+  }
+  if (!said || quiet) {
     await sendBotReply({
       mobile10,
       displayName,
@@ -2470,9 +2491,10 @@ export async function handleWaUnifiedInbound(opts: {
     const keptLink = session?.staffLink ?? null;
     session = sessionFor(mobile10, identity, opts.profileName);
     if (!identity.isKnown && keptLink) session.staffLink = keptLink;
-    if (identity.isKnown && identity.roles.length === 1) {
+    const startIn = identity.isKnown ? defaultRoleKind(identity.roles) : null;
+    if (startIn) {
       session.phase = "active";
-      session.activeFlow = identity.roles[0]!.kind;
+      session.activeFlow = startIn;
     } else if (identity.isKnown && identity.roles.length > 1) {
       session.phase = "pick_role";
       session.activeFlow = null;
@@ -2512,10 +2534,15 @@ export async function handleWaUnifiedInbound(opts: {
   if (!session) {
     session = sessionFor(mobile10, identity, opts.profileName);
     if (!identity.isKnown) session.phase = "collect_name";
-    else if (identity.roles.length > 1) session.phase = "pick_role";
-    else {
+  }
+  // A session left waiting at the profile question by the old rule (any two
+  // roles asked) — the principal's, among others — starts in its default
+  // role now instead of asking again. See defaultRoleKind.
+  if (identity.isKnown && session.phase === "pick_role" && !session.activeFlow) {
+    const startIn = defaultRoleKind(identity.roles);
+    if (startIn) {
       session.phase = "active";
-      session.activeFlow = identity.roles[0]?.kind ?? null;
+      session.activeFlow = startIn;
     }
   }
 
@@ -2577,6 +2604,28 @@ export async function handleWaUnifiedInbound(opts: {
         inbound: inboundLog,
       });
       return { replied: ok, escalate: false, audience: "role_list", stub: !ok };
+    }
+  }
+
+  // A teacher on a number the school also has for a family, last talking as
+  // the parent, asking for their class or their own attendance: answer as
+  // staff, and say so once. See staffSidePhrase.
+  if (identity.isKnown && session.activeFlow === "parent" && text && staffSidePhrase(text)) {
+    const staffRole = identity.roles.find((r) => ["owner", "staff", "teacher"].includes(String(flowKindFromRole(r))));
+    if (staffRole) {
+      const target = flowKindFromRole(staffRole) as WaUnifiedFlow;
+      session.activeFlow = target;
+      session.phase = "active";
+      session.displayName = staffRole.staff?.fullName || identity.displayName;
+      await patchSession(mobile10, session, { activeFlow: target, phase: "active", displayName: session.displayName });
+      await sendBotReply({
+        mobile10,
+        displayName: session.displayName,
+        category: categoryForUnifiedAudience("role_pick", target),
+        audience: "role_switch",
+        flow: target,
+        text: `🔁 Answering as *${staffRole.pickKeyword}* — ${staffRole.label}. Send *PARENT* to switch back.`,
+      });
     }
   }
 
