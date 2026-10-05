@@ -14,7 +14,6 @@ import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { findStaffByMobile } from "@/lib/waRoleResolver";
 import { cleanPunchCode } from "@/lib/punchCode";
 import { punchCodeIsValid } from "@/lib/punchCode.server";
-import { loadPunchOptions } from "@/lib/punchOptions.server";
 import { punchWindowMessage, punchWindowState } from "@/lib/punchSchedule";
 import {
   composeStaffAttCodePunchSuccess,
@@ -433,6 +432,9 @@ export async function handleWaStaffAttendanceInbound(opts: {
       intent === "in" || intent === "out" ? intent : pending?.kind === "punch_in" ? "in" : "out";
     const early = pending?.kind === "punch_out" && pending.early === true;
     const win = earlyOutWindow();
+    // Lazy: punchOptions.server is server-only, and this bot is also loaded by
+    // the chat self-tests, which cannot import a server-only module.
+    const { loadPunchOptions } = await import("@/lib/punchOptions.server");
     const gateOptions = await loadPunchOptions();
     const gateWindow = punchWindowState(gateOptions, Date.now());
     if (kind === "out" && win.early && !early) {
