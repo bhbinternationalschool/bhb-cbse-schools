@@ -56,7 +56,7 @@ const STAFF_STATUS_LABEL: Record<AttendanceStatus, string> = {
   HD: "Half day",
   LE: "On leave",
 };
-import { loadRbac } from "@/lib/rbac";
+import { hasPermission, loadRbac } from "@/lib/rbac";
 import { classifyStaffHolidayDay } from "@/lib/holidayPolicy";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
@@ -85,7 +85,8 @@ type AttTab =
   | "direct"
   | "adjust"
   | "halfday"
-  | "sync";
+  | "sync"
+  | "phones";
 
 export function StaffAttendancePanel({ ay }: { ay: string }) {
   const session = useDemoSession();
@@ -179,10 +180,18 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     return resolveSessionStaff(session, masters);
   }, [masters, session]);
 
-  const isManager = useMemo(() => {
+  // Office staff who manage leave still see punch phones and QR screens,
+  // but marking or changing the register needs RBAC attendance.edit —
+  // admin and owner only since 5 Oct 2026 (director). The server refuses
+  // those saves anyway; hiding the tabs saves a click that can only fail.
+  const canSeePhones = useMemo(() => {
     if (!masters) return false;
     return canManageStaffLeave(session, masters);
   }, [masters, session]);
+  const isManager = useMemo(() => {
+    if (!masters) return false;
+    return canSeePhones && hasPermission(session, masters, "attendance", "edit");
+  }, [canSeePhones, masters, session]);
 
   const holidayTeaching = useMemo(() => {
     if (!masters) return null;
@@ -214,7 +223,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     holidayNonTeaching?.status === "holiday";
 
   useEffect(() => {
-    if (isManager) setTab((t) => (t === "punch" ? "manage" : t));
+    if (isManager) setTab((t) => (t === "punch" || t === "phones" ? "manage" : t));
     else setTab("punch");
   }, [isManager]);
 
@@ -222,7 +231,8 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     if (!isManager && (tab === "manage" || tab === "direct" || tab === "adjust" || tab === "halfday" || tab === "sync")) {
       setTab("punch");
     }
-  }, [isManager, tab]);
+    if (tab === "phones" && (isManager || !canSeePhones)) setTab(isManager ? "manage" : "punch");
+  }, [isManager, canSeePhones, tab]);
 
   useEffect(() => {
     if (!isManager && selfStaff) setStaffId(selfStaff.id);
@@ -513,7 +523,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
 
   function saveRegister() {
     if (!isManager) {
-      flash("Only principal / admin can save the full register", true);
+      flash("Only admin can save the full register", true);
       return;
     }
     if (holidayBlocksAllStaff) {
@@ -569,7 +579,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
   function onDirect(e: React.FormEvent) {
     e.preventDefault();
     if (!isManager) {
-      flash("Only principal / admin can direct-mark", true);
+      flash("Only admin can direct-mark", true);
       return;
     }
     const targetHol = holidayForStaffId(staffId);
@@ -609,7 +619,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
   function onAdjust(e: React.FormEvent) {
     e.preventDefault();
     if (!isManager) {
-      flash("Only principal / admin can adjust attendance", true);
+      flash("Only admin can adjust attendance", true);
       return;
     }
     const leaveErr = reconcileRegisterLeave(staffId, status, formLeaveType);
@@ -640,7 +650,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
   function onHalfDay(e: React.FormEvent) {
     e.preventDefault();
     if (!isManager) {
-      flash("Only principal / admin can adjust half-day", true);
+      flash("Only admin can adjust half-day", true);
       return;
     }
     const result = adjustStaffHalfDayAttendance({
@@ -661,7 +671,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
 
   function onSyncLeave() {
     if (!isManager) {
-      flash("Only principal / admin can sync leave", true);
+      flash("Only admin can sync leave", true);
       return;
     }
     syncLeaveOntoAttendanceDate({
@@ -748,7 +758,9 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
           { id: "halfday", label: "Adjust half-day", tone: "sky" },
           { id: "sync", label: "Sync leave", tone: "green" },
         ] as const)
-      : []),
+      : canSeePhones
+        ? ([{ id: "phones", label: "Punch phones & QR screens", tone: "navy" }] as const)
+        : []),
   ];
 
   if (!masters) {
@@ -771,7 +783,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
       <p className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] px-4 py-2.5 text-sm text-[var(--muted)]">
         {isManager ? (
           <>
-            Principal / admin — manage register, direct mark, adjust, sync leave.
+            Admin — manage register, direct mark, adjust, sync leave.
             Settings &amp; rules in{" "}
             <Link
               href="/masters"
@@ -895,9 +907,13 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
         </div>
       ) : null}
 
+      {tab === "phones" && canSeePhones && !isManager ? (
+        <PunchPhonesPanel canDecidePhones={false} />
+      ) : null}
+
       {tab === "manage" && isManager ? (
         <>
-          <PunchPhonesPanel />
+          <PunchPhonesPanel canDecidePhones />
           <div className="flex flex-wrap items-end gap-2">
             <label className="min-w-[12rem] flex-1 text-xs font-semibold text-[var(--muted)]">
               Search / RFID / biometric

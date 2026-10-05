@@ -81,7 +81,7 @@ const day = (iso: string | null) =>
  * QR screens (30 Sep 2026). A staff member's first punch registers their
  * phone; a punch from any other phone lands here as "waiting".
  */
-export function PunchPhonesPanel() {
+export function PunchPhonesPanel({ canDecidePhones }: { canDecidePhones: boolean }) {
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -167,6 +167,7 @@ export function PunchPhonesPanel() {
         <p className="text-xs text-[var(--muted)]">
           Staff punch by scanning the QR on an office screen with their own phone. Their first punch registers that phone;
           any other phone must be approved here. One phone can never punch for two people.
+          {canDecidePhones ? null : " Approving, rejecting or resetting a phone is for admin only — approving records the punches it tried."}
         </p>
       </div>
       {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
@@ -250,6 +251,7 @@ export function PunchPhonesPanel() {
                 {triedText(d) ? ` · tried to punch today: ${triedText(d)} (recorded at those times on Approve)` : ""}
               </span>
             </span>
+            {canDecidePhones ? (
             <span className="flex gap-2">
               <button type="button" className={btn} disabled={busy} onClick={() =>
                   void act(
@@ -264,6 +266,9 @@ export function PunchPhonesPanel() {
                 Reject
               </button>
             </span>
+            ) : (
+              <span className="text-xs text-[var(--muted)]">Admin approves</span>
+            )}
           </div>
         ))}
       </section>
@@ -275,9 +280,11 @@ export function PunchPhonesPanel() {
             <span>
               {d.staffName} <span className="text-xs text-[var(--muted)]">· {d.label || "phone"} · last punch {day(d.last_used_at)}</span>
             </span>
-            <button type="button" className={btn} disabled={busy} onClick={() => void act({ action: "reset", id: d.id }, `Reset ${d.staffName}'s phone? Their next punch (from any phone) registers a new one.`)}>
-              Reset
-            </button>
+            {canDecidePhones ? (
+              <button type="button" className={btn} disabled={busy} onClick={() => void act({ action: "reset", id: d.id }, `Reset ${d.staffName}'s phone? Their next punch (from any phone) registers a new one.`)}>
+                Reset
+              </button>
+            ) : null}
           </div>
         ))}
         {data.staffWithoutPhone.length ? (
