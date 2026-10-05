@@ -1,26 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { SurveyDayApp } from "@/components/field/SurveyDayApp";
 import {
-  activeSessionForMember,
-  captureSurveyGeo,
-  endSurveyBreak,
-  endSurveySession,
-  ensureSurveyMasters,
   findSurveyMemberForSession,
-  formatSurveyHours,
   isSurveyTeamLeader,
   leaderUpsertBeat,
   loadOfflineQueue,
   persistAdmissions,
   reloadAdmissionsWithSurvey,
-  sessionWorkedMs,
   setSurveyBeatActive,
-  startSurveyBreak,
-  startSurveySession,
   type SurveyTeamMember,
-  type SurveyWorkSession,
 } from "@/lib/fieldSurvey";
 import { todayYmd, type AdmissionsState } from "@/lib/admissions";
 import type { DemoSession } from "@/lib/auth";
@@ -35,10 +26,7 @@ export function SurveyAgentApp({ session }: { session: DemoSession }) {
   const [state, setState] = useState<AdmissionsState | null>(null);
   const [member, setMember] = useState<SurveyTeamMember | null>(null);
   const [mobileGate, setMobileGate] = useState("");
-  const [beatId, setBeatId] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [tick, setTick] = useState(0);
 
   const [beatName, setBeatName] = useState("");
   const [beatArea, setBeatArea] = useState("");
@@ -75,27 +63,7 @@ export function SurveyAgentApp({ session }: { session: DemoSession }) {
     }
   }, [session.staffId]);
 
-  useEffect(() => {
-    const t = window.setInterval(() => setTick((n) => n + 1), 30000);
-    return () => window.clearInterval(t);
-  }, []);
-
-  const activeBeats = useMemo(
-    () => (state?.surveyBeats || []).filter((b) => b.isActive),
-    [state],
-  );
-
-  const work: SurveyWorkSession | null = useMemo(() => {
-    if (!state || !member) return null;
-    return activeSessionForMember(state, member.id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- tick refreshes live hours
-  }, [state, member, tick]);
-
   const isLeader = !!(state && member && isSurveyTeamLeader(state, member.id));
-
-  useEffect(() => {
-    if (!beatId && activeBeats[0]) setBeatId(activeBeats[0].id);
-  }, [activeBeats, beatId]);
 
   function claimByMobile() {
     if (!state) return;
@@ -112,79 +80,6 @@ export function SurveyAgentApp({ session }: { session: DemoSession }) {
   function signOutAgent() {
     setMember(null);
     window.localStorage.removeItem(LOCAL_MEMBER_KEY);
-  }
-
-  async function withGeo<T>(
-    fn: (geo: Awaited<ReturnType<typeof captureSurveyGeo>>) => T | Promise<T>,
-  ): Promise<T> {
-    setBusy(true);
-    try {
-      const geo = await captureSurveyGeo();
-      if (!geo) flash("Location unavailable — continuing without GPS pin");
-      return await fn(geo);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function onStart() {
-    if (!state || !member) return;
-    await withGeo((geo) => {
-      const r = startSurveySession(state, member.id, beatId, geo);
-      if (!r.ok) {
-        flash(r.reason);
-        return;
-      }
-      persistAdmissions(r.state);
-      setState(ensureSurveyMasters(r.state));
-      flash(
-        geo
-          ? `Survey started · ${geo.lat.toFixed(4)}, ${geo.lng.toFixed(4)}`
-          : "Survey started",
-      );
-    });
-  }
-
-  async function onBreak() {
-    if (!state || !work) return;
-    await withGeo((geo) => {
-      const r = startSurveyBreak(state, work.id, geo);
-      if (!r.ok) {
-        flash(r.reason);
-        return;
-      }
-      persistAdmissions(r.state);
-      setState(r.state);
-      flash("Break started");
-    });
-  }
-
-  async function onResume() {
-    if (!state || !work) return;
-    await withGeo((geo) => {
-      const r = endSurveyBreak(state, work.id, geo);
-      if (!r.ok) {
-        flash(r.reason);
-        return;
-      }
-      persistAdmissions(r.state);
-      setState(r.state);
-      flash("Back on survey");
-    });
-  }
-
-  async function onEnd() {
-    if (!state || !work) return;
-    await withGeo((geo) => {
-      const r = endSurveySession(state, work.id, geo);
-      if (!r.ok) {
-        flash(r.reason);
-        return;
-      }
-      persistAdmissions(r.state);
-      setState(r.state);
-      flash(`Survey ended · ${formatSurveyHours(r.workedMs)} worked`);
-    });
   }
 
   function saveBeat() {
@@ -265,8 +160,6 @@ export function SurveyAgentApp({ session }: { session: DemoSession }) {
     );
   }
 
-  const selectedBeat = activeBeats.find((b) => b.id === beatId);
-  const workedLive = work ? sessionWorkedMs(work) : 0;
   const offlineN = loadOfflineQueue().length;
 
   return (
@@ -299,98 +192,12 @@ export function SurveyAgentApp({ session }: { session: DemoSession }) {
         </p>
       ) : null}
 
-      {!work ? (
-        <div className="mt-6 space-y-4">
-          <label className="block text-sm">
-            <span className="mb-1 block text-[12px] text-[var(--muted)]">
-              Beat for today *
-            </span>
-            <select
-              className={inp}
-              value={beatId}
-              onChange={(e) => setBeatId(e.target.value)}
-            >
-              <option value="">Select beat…</option>
-              {activeBeats.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.code} · {b.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            disabled={busy || !beatId}
-            className="w-full rounded-2xl bg-[var(--tone-green-deep-solid)] py-4 text-base font-semibold text-white disabled:opacity-40"
-            onClick={() => void onStart()}
-          >
-            {busy ? "Getting location…" : "Start survey"}
-          </button>
-          <p className="text-center text-[11px] text-[var(--muted)]">
-            Attendance locks your start location when you tap Start.
-          </p>
-        </div>
-      ) : (
-        <div className="mt-6 space-y-3">
-          <div className="rounded-2xl border border-[rgba(32,48,80,0.12)] bg-[var(--brand-cream)] p-4">
-            <p className="text-[12px] text-[var(--muted)]">
-              {selectedBeat?.name || "Beat"} ·{" "}
-              <span className="capitalize">
-                {work.status.replace("_", " ")}
-              </span>
-            </p>
-            <p className="mt-1 text-3xl font-semibold text-[var(--brand-deep)]">
-              {formatSurveyHours(workedLive)}
-            </p>
-            <p className="mt-1 font-mono text-[10px] text-[var(--muted)]">
-              Start{" "}
-              {work.startGeo
-                ? `${work.startGeo.lat.toFixed(4)}, ${work.startGeo.lng.toFixed(4)}`
-                : "no GPS"}
-            </p>
-          </div>
-
-          {work.status === "active" ? (
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                disabled={busy}
-                className="rounded-2xl border border-[rgba(32,48,80,0.2)] py-3 text-sm font-semibold"
-                onClick={() => void onBreak()}
-              >
-                Break
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                className="rounded-2xl bg-[var(--tone-brick-solid)] py-3 text-sm font-semibold text-white"
-                onClick={() => void onEnd()}
-              >
-                End survey
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                disabled={busy}
-                className="rounded-2xl bg-[var(--tone-green-deep-solid)] py-3 text-sm font-semibold text-white"
-                onClick={() => void onResume()}
-              >
-                End break
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                className="rounded-2xl bg-[var(--tone-brick-solid)] py-3 text-sm font-semibold text-white"
-                onClick={() => void onEnd()}
-              >
-                End survey
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+      {/* The day itself — signed by this phone, live GPS at every step
+          (director, 5 Oct 2026). The old Start/Break/End here wrote only
+          this browser's copy, with GPS optional. */}
+      <div className="mt-6">
+        <SurveyDayApp embedded />
+      </div>
 
       {isLeader ? (
         <div className="mt-8 space-y-3 border-t border-[rgba(32,48,80,0.1)] pt-6">

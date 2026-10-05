@@ -649,6 +649,7 @@ export function addStaffToSurveyTeam(
     empCode: staff.empCode || "",
     role: asLeader ? "leader" : "agent",
     assigned: true,
+    startMode: "school",
     createdAt: new Date().toISOString(),
   };
   return {
@@ -684,6 +685,7 @@ export function addExternalToSurveyTeam(
     empCode: "EXT",
     role: "agent",
     assigned: true,
+    startMode: "field",
     createdAt: new Date().toISOString(),
   };
   return {
@@ -704,6 +706,18 @@ export function setSurveyTeamAssigned(
     surveyTeam: s.surveyTeam.map((m) =>
       m.id === memberId ? { ...m, assigned } : m,
     ),
+  };
+}
+
+export function setSurveyTeamStartMode(
+  state: AdmissionsState,
+  memberId: string,
+  startMode: "school" | "field",
+): AdmissionsState {
+  const s = ensureSurveyMasters(state);
+  return {
+    ...s,
+    surveyTeam: s.surveyTeam.map((m) => (m.id === memberId ? { ...m, startMode } : m)),
   };
 }
 

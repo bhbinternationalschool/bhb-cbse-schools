@@ -343,6 +343,12 @@ export type SurveyTeamMember = {
   role: "leader" | "agent";
   /** When true, member sees Survey Start on their app */
   assigned: boolean;
+  /**
+   * Where their survey day starts (director, 5 Oct 2026): "school" = scan the
+   * gate QR inside the campus first; "field" = start anywhere with live GPS.
+   * Set per person by the office.
+   */
+  startMode: "school" | "field";
   createdAt: string;
 };
 
@@ -986,6 +992,14 @@ function emptySurveyTeamMember(
     empCode: partial?.empCode || "",
     role: partial?.role === "leader" ? "leader" : "agent",
     assigned: partial?.assigned !== false,
+    // Staff report at school by default; an outsider usually lives in the
+    // villages they survey.
+    startMode:
+      partial?.startMode === "school" || partial?.startMode === "field"
+        ? partial.startMode
+        : kind === "staff"
+          ? "school"
+          : "field",
     createdAt: partial?.createdAt || new Date().toISOString(),
   };
 }

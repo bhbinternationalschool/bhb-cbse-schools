@@ -78,6 +78,36 @@ export function deviceLabel(): string {
   return [os, model && model !== "K" ? model : null, br].filter(Boolean).join(" · ");
 }
 
+/**
+ * Sign any message with this phone's punch key — the same key a staff
+ * member punches with, so a field surveyor's registered phone is the one
+ * they already have (lib/surveyDay, director 5 Oct 2026).
+ */
+export async function signWithDeviceKey(
+  message: string,
+): Promise<{ jwk: { kty: string; crv: string; x: string; y: string }; signature: string; label: string } | { error: string }> {
+  if (typeof crypto === "undefined" || !crypto.subtle || typeof indexedDB === "undefined") {
+    return { error: "This browser cannot keep a secure key. Open this page in Chrome (or Safari on iPhone)." };
+  }
+  let pair: Pair;
+  try {
+    pair = await devicePair();
+  } catch {
+    return { error: "This browser would not store the phone's key (private / incognito mode?). Open the page in a normal window." };
+  }
+  const sig = await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    pair.privateKey,
+    new TextEncoder().encode(message),
+  );
+  const jwk = await crypto.subtle.exportKey("jwk", pair.publicKey);
+  return {
+    jwk: { kty: String(jwk.kty), crv: String(jwk.crv), x: String(jwk.x), y: String(jwk.y) },
+    signature: b64url(sig),
+    label: deviceLabel(),
+  };
+}
+
 export type QrPunchResult =
   | { ok: true; kind: "in" | "out"; time: string; status?: string; firstRegistration?: boolean }
   | { ok: false; error: string; code?: string };
