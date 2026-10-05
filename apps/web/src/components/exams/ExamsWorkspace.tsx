@@ -18,6 +18,7 @@ import {
   buildReportCard,
   canPrintReportCard,
   coScholasticAreasForClass,
+  parseCoScholasticRating,
   coScholasticDomainLabel,
   componentsForSubject,
   createExamTerm,
@@ -185,6 +186,10 @@ type MarkRowProps = {
  * workspace re-rendered every cell on every keystroke and, worse, asked the
  * subject resolver per cell — see subjectTakeMap.
  */
+/** Stable empties: the marks table no longer carries co-scholastic cells. */
+const NO_AREAS: CoScholasticArea[] = [];
+const NO_RATINGS: Record<string, string> = {};
+
 const MarkRow = memo(function MarkRow({
   student: st,
   sis,
@@ -322,6 +327,88 @@ const MarkRow = memo(function MarkRow({
                 {r}
               </option>
             ))}
+            <option value="AB">AB · absent</option>
+          </select>
+        </td>
+      ))}
+    </tr>
+  );
+});
+
+type CoScholasticRowProps = {
+  student: SisStudent;
+  sis: SisState | undefined;
+  locked: boolean;
+  areas: CoScholasticArea[];
+  ratings: Record<string, string>;
+  ratingChoices: string[];
+  onRating: (studentId: string, domain: CoScholasticDomain, value: string) => void;
+  /** Tick = AB in every area; untick clears the AB grades it set. */
+  onAbsentAll: (studentId: string, absent: boolean) => void;
+};
+
+/**
+ * One student's row of the co-scholastic table — a grade per area, never a
+ * mark. Its own table under the scholastic one, so a teacher never mistakes
+ * a graded subject for a marked one. Memoised like MarkRow.
+ */
+const CoScholasticRow = memo(function CoScholasticRow({
+  student: st,
+  sis,
+  locked,
+  areas,
+  ratings,
+  ratingChoices,
+  onRating,
+  onAbsentAll,
+}: CoScholasticRowProps) {
+  const absentAll = areas.length > 0 && areas.every((a) => ratings[a.code] === "AB");
+  const absentAny = areas.some((a) => ratings[a.code] === "AB");
+  return (
+    <tr className="border-b border-[var(--border)]">
+      <td className="sticky left-0 z-10 bg-[var(--card)] px-3 py-1.5">
+        <div className="flex items-center gap-2">
+          <StudentAvatar student={st} size={28} />
+          <div className="min-w-0">
+            <div className="truncate font-medium text-[var(--brand-deep)]">
+              <StudentNameLabel student={st} sis={sis} />
+            </div>
+            <div className="text-[10px] text-[var(--muted)]">
+              {st.admissionNo}
+              {st.rollNo ? ` · Roll ${st.rollNo}` : ""}
+            </div>
+            <label className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--muted)]">
+              <input
+                type="checkbox"
+                checked={absentAll}
+                disabled={locked}
+                onChange={(e) => onAbsentAll(st.id, e.target.checked)}
+                aria-label={`${st.fullName} absent in all co-scholastic areas`}
+                title="Absent for every co-scholastic area (AB). For one area, pick AB in that column."
+              />
+              <span className={absentAny ? "font-semibold text-[var(--danger)]" : ""}>
+                {absentAll ? "Absent (all)" : absentAny ? "Absent (some)" : "Present"}
+              </span>
+            </label>
+          </div>
+        </div>
+      </td>
+      {areas.map((area) => (
+        <td key={`${st.id}:${area.code}`} className="px-1 py-1 text-center">
+          <select
+            className="field !w-16 !px-1 !py-1 text-center"
+            disabled={locked}
+            value={ratings[area.code] ?? ""}
+            onChange={(e) => onRating(st.id, area.code, e.target.value)}
+            aria-label={`${st.fullName} ${coScholasticDomainLabel(area.code, areas)}`}
+          >
+            <option value="">—</option>
+            {ratingChoices.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+            <option value="AB">AB · absent</option>
           </select>
         </td>
       ))}
@@ -644,8 +731,10 @@ export function ExamsWorkspace() {
     scheme && scheme.displayMode !== "marks_grade" ? "grades" : "marks";
   const gradeChoices = useMemo(() => (scheme ? pickableGrades(scheme) : []), [scheme]);
   const areas = useMemo<CoScholasticArea[]>(
-    () => (classId ? coScholasticAreasForClass(classId, policy) : []),
-    [classId, policy],
+    // Masters' co-scholastic subjects for the class join the scheme's areas,
+    // so a subject marked co-scholastic is graded here, not marked.
+    () => (classId ? coScholasticAreasForClass(classId, policy, masters) : []),
+    [classId, policy, masters],
   );
   const ratingChoices = useMemo(
     () => coScholasticRatingsFor(scheme?.coScholasticScale ?? "three"),
@@ -866,15 +955,32 @@ export function ExamsWorkspace() {
 
   const setCoScholasticRating = useCallback(
     (studentId: string, domain: CoScholasticDomain, value: string) => {
-      const rating: CoScholasticRating | null =
-        value === "A" || value === "B" || value === "C" || value === "D" || value === "E"
-          ? value
-          : null;
+      const rating: CoScholasticRating | null = parseCoScholasticRating(value);
       setCoScholasticGrid((prev) =>
         prev.map((e) =>
           e.studentId === studentId && e.domain === domain
             ? { ...e, rating }
             : e,
+        ),
+      );
+      setDirty(true);
+    },
+    [],
+  );
+
+  /** Absent for the whole co-scholastic sheet: AB in every area, or clear
+   * the AB grades back to unrated. Grades already given stay on untick. */
+  const setCoScholasticAbsentAll = useCallback(
+    (studentId: string, absent: boolean) => {
+      setCoScholasticGrid((prev) =>
+        prev.map((e) =>
+          e.studentId !== studentId
+            ? e
+            : absent
+              ? { ...e, rating: "AB" }
+              : e.rating === "AB"
+                ? { ...e, rating: null }
+                : e,
         ),
       );
       setDirty(true);
@@ -2314,8 +2420,8 @@ export function ExamsWorkspace() {
             <>
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--muted)]">
                 <span>
-                  {roster.length} students · {subjects.length} subjects
-                  (enrollment-aware)
+                  {roster.length} students · {subjects.length} scholastic
+                  {areas.length > 0 ? ` · ${areas.length} co-scholastic` : ""} (enrollment-aware)
                   {scheme ? ` · ${scheme.name}` : ""}
                   {entryMode === "grades" ? " · grades, not marks" : ""}
                   {absentCells.size > 0
@@ -2358,6 +2464,14 @@ export function ExamsWorkspace() {
                 </div>
               </div>
 
+              {columns.length > 0 ? (
+                <>
+                  <h3 className="mb-2 mt-1 text-sm font-bold text-[var(--brand-deep)]">
+                    Scholastic · {entryMode === "grades" ? "grades" : "marks"}
+                    <span className="ml-2 text-xs font-normal text-[var(--muted)]">
+                      Subjects marked scholastic in Masters
+                    </span>
+                  </h3>
               <ErpTableShell>
                 <ErpTable minWidth="min-w-full" className="text-xs sm:text-sm">
                   <ErpTableHead>
@@ -2370,7 +2484,9 @@ export function ExamsWorkspace() {
                           key={columnKey(col)}
                           className="px-3 py-2.5 text-center font-bold text-[var(--brand-deep)]"
                         >
-                          {col.subject.code}
+                          <span className="block max-w-[9rem] whitespace-normal leading-tight" title={col.subject.code}>
+                            {col.subject.name || col.subject.code}
+                          </span>
                           {col.component ? (
                             <span className="block text-[10px] font-semibold text-[var(--muted)]">
                               {col.component.label}
@@ -2381,14 +2497,6 @@ export function ExamsWorkspace() {
                               ? "grade"
                               : `/${col.component ? col.component.maxMarks : term ? effectiveMaxMarks(term, col.subject) : "—"}`}
                           </div>
-                        </th>
-                      ))}
-                      {areas.map((area) => (
-                        <th
-                          key={area.code}
-                          className="px-4 py-2.5 text-center font-bold text-[var(--brand-deep)]"
-                        >
-                          {coScholasticDomainLabel(area.code, areas)}
                         </th>
                       ))}
                     </tr>
@@ -2407,8 +2515,8 @@ export function ExamsWorkspace() {
                             locked={!!sheetMeta?.lockedAt}
                             entryMode={entryMode}
                             grades={gradeChoices}
-                            areas={areas}
-                            ratings={ratingsByStudent.get(st.id) ?? {}}
+                            areas={NO_AREAS}
+                            ratings={NO_RATINGS}
                             ratingChoices={ratingChoices}
                             absentAll={absentByStudent.get(st.id)?.all ?? false}
                             absentAny={absentByStudent.get(st.id)?.any ?? false}
@@ -2425,6 +2533,56 @@ export function ExamsWorkspace() {
                   </ErpTableBody>
                 </ErpTable>
               </ErpTableShell>
+                </>
+              ) : null}
+
+              {areas.length > 0 ? (
+                <>
+                  <h3 className="mb-2 mt-5 text-sm font-bold text-[var(--brand-deep)]">
+                    Co-scholastic · grades ({ratingChoices.join(", ")} · AB if absent)
+                    <span className="ml-2 text-xs font-normal text-[var(--muted)]">
+                      Subjects marked co-scholastic in Masters, and the scheme&apos;s areas — graded, not marked
+                    </span>
+                  </h3>
+                  <ErpTableShell>
+                    <ErpTable minWidth="min-w-full" className="text-xs sm:text-sm">
+                      <ErpTableHead>
+                        <tr>
+                          <th className="sticky left-0 z-10 bg-[var(--surface-sunken)] px-4 py-2.5 font-bold text-[var(--brand-deep)]">
+                            Student
+                          </th>
+                          {areas.map((area) => (
+                            <th
+                              key={area.code}
+                              className="px-4 py-2.5 text-center font-bold text-[var(--brand-deep)]"
+                            >
+                              {coScholasticDomainLabel(area.code, areas)}
+                              <div className="text-[10px] font-normal text-[var(--muted)]">grade</div>
+                            </th>
+                          ))}
+                        </tr>
+                      </ErpTableHead>
+                      <ErpTableBody>
+                        {term
+                          ? roster.map((st) => (
+                              <CoScholasticRow
+                                key={st.id}
+                                student={st}
+                                sis={sis ?? undefined}
+                                locked={!!sheetMeta?.lockedAt}
+                                areas={areas}
+                                ratings={ratingsByStudent.get(st.id) ?? {}}
+                                ratingChoices={ratingChoices}
+                                onRating={setCoScholasticRating}
+                                onAbsentAll={setCoScholasticAbsentAll}
+                              />
+                            ))
+                          : null}
+                      </ErpTableBody>
+                    </ErpTable>
+                  </ErpTableShell>
+                </>
+              ) : null}
               {canScan && scanStudent && term && scanSubjects.length > 0 ? (
                 <AnswerSheetScanDialog
                   key={scanStudent.id}
