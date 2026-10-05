@@ -626,8 +626,10 @@ export function ExamsWorkspace() {
     scheme && scheme.displayMode !== "marks_grade" ? "grades" : "marks";
   const gradeChoices = useMemo(() => (scheme ? pickableGrades(scheme) : []), [scheme]);
   const areas = useMemo<CoScholasticArea[]>(
-    () => (classId ? coScholasticAreasForClass(classId, policy) : []),
-    [classId, policy],
+    // Masters' co-scholastic subjects for the class join the scheme's areas,
+    // so a subject marked co-scholastic is graded here, not marked.
+    () => (classId ? coScholasticAreasForClass(classId, policy, masters) : []),
+    [classId, policy, masters],
   );
   const ratingChoices = useMemo(
     () => coScholasticRatingsFor(scheme?.coScholasticScale ?? "three"),

@@ -13,7 +13,9 @@
  * - a subject split (English = Written 80 + Oral 20) overrides the common
  *   components for that subject only, in term exams AND unit tests, with a
  *   pass line of its own per part and for the subject's total;
- * - co-scholastic grades on a 3- or 5-point scale.
+ * - co-scholastic grades on a 3- or 5-point scale;
+ * - a subject Masters calls co-scholastic is a grade row, never a marks
+ *   column — even when the exam catalogue still holds an old marks row for it.
  */
 import assert from "node:assert/strict";
 
@@ -39,6 +41,7 @@ import {
   buildEmptyMarksGrid,
   coScholasticAreasForClass,
   coScholasticRatingLabel,
+  subjectsForMarkEntry,
   isGradedNotMarked,
   defaultExamPolicy,
   evaluatePromotionPass,
@@ -342,6 +345,55 @@ const eng: ExamSubject = { id: "sub_eng", code: "ENG", name: "English", classIds
   assert.equal(coScholasticRatingLabel("C", "five"), "Good");
   assert.equal(coScholasticRatingLabel("E", "five"), "Needs Improvement");
   assert.equal(coScholasticRatingLabel(null, "five"), "Not rated");
+}
+
+// ------------------------------------------------- co-scholastic follows Masters
+{
+  // ART/GK/MUS were marked co-scholastic in Masters but kept their old marks
+  // rows (out of 100) in the exam catalogue, and no scheme had areas, so the
+  // grid showed numbers for them and offered no grade at all (2026-10-05).
+  const masters = defaultMasters();
+  const cls = masters.classes.find((c) => c.isActive)!;
+  const sub = (id: string, code: string, category: string, ncfTagId: string) => ({
+    id, code, nameEn: code === "ART" ? "Art Education" : code, category, coScholasticArea: "",
+    parentId: null, isElective: false, isActive: true, sortOrder: 1, ncfTagId, cbseGroupId: null,
+    languageSubtype: "",
+  });
+  const m = {
+    ...masters,
+    subjects: [sub("s_eng", "ENG", "scholastic", "A"), sub("s_art", "ART", "co_scholastic", "C"), sub("s_gk", "GK", "scholastic", "CO")],
+    classSubjects: [
+      { id: "l1", classId: cls.id, subjectId: "s_eng", periodsPerWeek: 6, isActive: true },
+      { id: "l2", classId: cls.id, subjectId: "s_art", periodsPerWeek: 2, isActive: true },
+      { id: "l3", classId: cls.id, subjectId: "s_gk", periodsPerWeek: 1, isActive: true },
+    ],
+  } as never;
+
+  const policy = defaultExamPolicy();
+  const areas = coScholasticAreasForClass(cls.id, policy, m);
+  assert.deepEqual(areas.map((a) => a.code), ["ART", "GK"], "Masters' co-scholastic subjects become grade rows even with no scheme areas");
+  assert.equal(areas[0]!.label, "Art Education");
+  assert.equal(coScholasticAreasForClass(cls.id, policy).length, 0, "without Masters, nothing is invented");
+  const withScheme = coScholasticAreasForClass(
+    cls.id,
+    { ...policy, schemes: [{ ...policy.schemes[0]!, coScholasticAreas: [{ code: "art", label: "Art (scheme)" }] }] },
+    m,
+  );
+  assert.deepEqual(withScheme.map((a) => a.code), ["art", "GK"], "the scheme's own area wins; Masters adds only what is missing");
+
+  const examSub = (code: string): ExamSubject => ({
+    id: `esub_${code.toLowerCase()}`, code, name: code, classIds: [cls.id], maxMarks: 100, sortOrder: 1, isActive: true,
+  });
+  const state = {
+    version: 1, terms: [], subjects: [examSub("ENG"), examSub("ART"), examSub("GK")], dateSheet: [], sheets: [],
+    policy, promotions: [], rooms: [], seating: [],
+  } as ExamsState;
+  const deps = { state, masters: m, sis: { version: 1, households: [], students: [], curriculumRequests: [] } as never };
+  assert.deepEqual(
+    subjectsForMarkEntry(cls.id, [], state, deps).map((x) => x.code),
+    ["ENG"],
+    "a stale marks row for a co-scholastic subject never reaches the marks grid",
+  );
 }
 
 console.log("OK — examSchemes.selftest.ts");

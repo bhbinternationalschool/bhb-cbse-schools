@@ -52,6 +52,48 @@ import { ncfTagForSubject } from "@/lib/cbseSubjectGroups";
 export function isGradedNotMarked(sub: { code: string; category: string; ncfTagId?: string | null; cbseGroupId?: string | null }): boolean {
   return sub.category === "co_scholastic" || ncfTagForSubject(sub) === "CO";
 }
+
+/**
+ * Exam-desk subjects with the graded ones taken out, by Masters' word.
+ *
+ * The exam catalogue keeps rows it synthesised before a subject was marked
+ * co-scholastic (ART, GK and MUS sat there as marks out of 100 after the
+ * 2026-09-30 fix), so the sync skipping them is not enough: every list a
+ * marks grid or report card reads goes through this as well.
+ */
+function withoutGradedSubjects(subs: ExamSubject[], masters: MastersState | null | undefined): ExamSubject[] {
+  if (!masters) return subs;
+  const graded = new Set(
+    masters.subjects
+      .filter((m) => !m.parentId && isGradedNotMarked(m))
+      .map((m) => m.code.trim().toUpperCase()),
+  );
+  if (graded.size === 0) return subs;
+  return subs.filter((x) => !graded.has(x.code.trim().toUpperCase()));
+}
+
+/**
+ * Co-scholastic subjects Masters links to this class — each becomes a grade
+ * row on the sheet (A–E on the scheme's scale), never a marks column.
+ */
+export function coScholasticSubjectAreasForClass(
+  classId: string,
+  masters: MastersState | null | undefined,
+): CoScholasticArea[] {
+  if (!masters) return [];
+  const out: CoScholasticArea[] = [];
+  const seen = new Set<string>();
+  for (const link of masters.classSubjects ?? []) {
+    if (!link.isActive || link.classId !== classId) continue;
+    const sub = masters.subjects.find((x) => x.id === link.subjectId);
+    if (!sub || !sub.isActive || sub.parentId || !isGradedNotMarked(sub)) continue;
+    const code = sub.code.trim().toUpperCase();
+    if (!code || seen.has(code)) continue;
+    seen.add(code);
+    out.push({ code, label: sub.nameEn || code });
+  }
+  return out;
+}
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 import {
@@ -773,10 +815,22 @@ export function reportTemplateForClassId(
 export function coScholasticAreasForClass(
   classId: string,
   policy: ExamPolicy,
+  masters?: MastersState | null,
 ): CoScholasticArea[] {
   const scheme = schemeForClassId(classId, policy);
-  if (scheme.coScholasticAreas.length > 0) return scheme.coScholasticAreas;
-  return policy.enableCoScholastic ? NEP_CO_SCHOLASTIC_AREAS : [];
+  const base =
+    scheme.coScholasticAreas.length > 0
+      ? scheme.coScholasticAreas
+      : policy.enableCoScholastic
+        ? NEP_CO_SCHOLASTIC_AREAS
+        : [];
+  // A subject Masters calls co-scholastic is graded here whatever the scheme
+  // says: marking it co-scholastic is the school's decision to rate it, and
+  // until this existed it fell off the marks grid with nowhere to grade it.
+  const extra = coScholasticSubjectAreasForClass(classId, masters).filter(
+    (a) => !base.some((b) => b.code.trim().toUpperCase() === a.code),
+  );
+  return extra.length ? [...base, ...extra] : base;
 }
 
 function normalizeRiskThresholds(
@@ -2089,8 +2143,8 @@ export function subjectsForStudent(
   // report cards. Their ids are deterministic (examSubjectIdForCode), and
   // saveMarkSheet persists whichever ones a sheet actually uses.
 
-  if (matched.length > 0) return matched;
-  return source === "confirmed_cart" ? [] : examSubs;
+  if (matched.length > 0) return withoutGradedSubjects(matched, masters);
+  return source === "confirmed_cart" ? [] : withoutGradedSubjects(examSubs, masters);
 }
 
 /** Union of subjects needed for a section mark sheet (per-student enrollment aware). */
@@ -2111,7 +2165,7 @@ export function subjectsForMarkEntry(
   }
 
   if (byCode.size === 0) {
-    return subjectsForClass(classId, s);
+    return withoutGradedSubjects(subjectsForClass(classId, s), d.masters);
   }
 
   return [...byCode.values()].sort(
@@ -2920,8 +2974,9 @@ function coScholasticForReportCard(
   state: ExamsState,
   policy: ExamPolicy,
   classId: string,
+  masters?: MastersState | null,
 ): ReportCard["coScholastic"] {
-  const areas = coScholasticAreasForClass(classId, policy);
+  const areas = coScholasticAreasForClass(classId, policy, masters);
   if (areas.length === 0) return [];
   const scale = schemeForClassId(classId, policy).coScholasticScale;
   const sheet = findMarkSheet(ay, examTermId, sectionId, state);
@@ -3336,6 +3391,7 @@ export function buildReportCard(input: {
         state,
         policy,
         input.student.classId,
+        masters,
       ),
       overallRemark: overallRemarkForReportCard(
         ay,
@@ -3455,6 +3511,7 @@ export function buildReportCard(input: {
       state,
       policy,
       input.student.classId,
+      masters,
     ),
     overallRemark: overallRemarkForReportCard(
       ay,
