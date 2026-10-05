@@ -85,7 +85,7 @@ export default async function SitePage({
   if (!bundle) notFound();
 
   return (
-    <PublicChrome>
+    <PublicChrome lang={lang}>
       <article>
         <header className="mx-auto max-w-3xl px-6 pt-14">
           <h1 className="text-3xl font-bold tracking-tight text-slate-900">

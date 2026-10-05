@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { BhashiniTranslate } from "@/components/public/BhashiniTranslate";
 import { SiteJsonLd } from "@/components/public/SiteJsonLd";
 import {
   ADDRESS_ONE_LINE,
@@ -7,6 +8,7 @@ import {
   TRADING_NAME,
   displayLegalName,
 } from "@/lib/publicOrgProfile";
+import type { SiteLang } from "@/lib/website";
 
 const NAV = [
   { href: "/", label: "Home" },
@@ -28,15 +30,30 @@ const LEGAL_NAV = [
  * Header + footer wrapper shared by every public (unauthenticated) page.
  * The footer carries the registered legal name and address on every page,
  * which is what payment-gateway onboarding reviews look for.
+ *
+ * `lang` is the language the page is written in. The BHASHINI translation
+ * widget is offered on English pages only (see BhashiniTranslate). The legal
+ * name, address and recognition statement carry `bhashini-skip-translation`:
+ * they are quoted exactly as registered, and a machine rendering of them is
+ * not the school's statement.
  */
-export function PublicChrome({ children }: { children: React.ReactNode }) {
+export function PublicChrome({
+  children,
+  lang = "en",
+}: {
+  children: React.ReactNode;
+  lang?: SiteLang;
+}) {
   return (
     <div className="flex min-h-screen flex-col bg-white text-slate-800">
       {/* Once, on every public page — the chrome is what they all share. */}
       <SiteJsonLd />
       <header className="border-b border-slate-200">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-6 gap-y-3 px-6 py-4">
-          <Link href="/" className="font-semibold text-slate-900">
+          <Link
+            href="/"
+            className="bhashini-skip-translation font-semibold text-slate-900"
+          >
             {TRADING_NAME}
           </Link>
           <nav className="flex flex-wrap gap-x-5 gap-y-2 text-sm">
@@ -50,12 +67,15 @@ export function PublicChrome({ children }: { children: React.ReactNode }) {
               </Link>
             ))}
           </nav>
-          <Link
-            href="/login"
-            className="ml-auto rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
-          >
-            Parent / staff login
-          </Link>
+          <div className="ml-auto flex items-center gap-3">
+            {lang === "en" ? <BhashiniTranslate /> : null}
+            <Link
+              href="/login"
+              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
+            >
+              Parent / staff login
+            </Link>
+          </div>
         </div>
       </header>
 
@@ -63,8 +83,10 @@ export function PublicChrome({ children }: { children: React.ReactNode }) {
 
       <footer className="mt-16 border-t border-slate-200 bg-slate-50">
         <div className="mx-auto max-w-5xl px-6 py-10 text-sm leading-6 text-slate-600">
-          <p className="font-semibold text-slate-900">{displayLegalName()}</p>
-          <p className="mt-1">{ADDRESS_ONE_LINE}</p>
+          <p className="bhashini-skip-translation font-semibold text-slate-900">
+            {displayLegalName()}
+          </p>
+          <p className="bhashini-skip-translation mt-1">{ADDRESS_ONE_LINE}</p>
           <p className="mt-1">
             Email:{" "}
             <a
@@ -92,7 +114,7 @@ export function PublicChrome({ children }: { children: React.ReactNode }) {
             of them it is a coin toss whether the reviewer ever sees why no
             central-board affiliation number is published.
           */}
-          <p className="mt-4 max-w-3xl text-slate-600">
+          <p className="bhashini-skip-translation mt-4 max-w-3xl text-slate-600">
             {RECOGNITION_STATEMENT}
           </p>
           <nav className="mt-5 flex flex-wrap gap-x-5 gap-y-2">
