@@ -890,6 +890,39 @@ function parseCollectionsDraftJson(
  * Suggest the next-best-action for an admissions lead + draft the outreach
  * message for it. A suggestion, not an auto-send — the counsellor reviews.
  */
+/**
+ * Suggest one class's weekly subject load + placement rules (director,
+ * 5 Oct 2026). Only proposes; the office accepts, the solver places.
+ */
+export async function generateTimetableRulesJson(
+  facts: import("@/lib/timetableRulesAi").TimetableRulesFacts,
+  classId: string,
+): Promise<
+  | {
+      ok: true;
+      suggestions: import("@/lib/timetableRulesAi").TimetableRulesSuggestion[];
+      engine: LlmEngine;
+      generationId: string;
+    }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const { buildTimetableRulesPrompt, parseTimetableRulesSuggestion } = await import("@/lib/timetableRulesAi");
+  const { system, userMessage } = buildTimetableRulesPrompt(facts);
+  const r = await callLlmJson(
+    {
+      system,
+      userMessage,
+      maxTokens: 1800,
+      temperature: 0.2,
+      geminiMaxTokens: 4096,
+      meta: { route: "timetable-rules", promptVersion: "v1" },
+    },
+    (text) => parseTimetableRulesSuggestion(text, facts, classId),
+  );
+  if (r.ok) return { ok: true, suggestions: r.data, engine: r.engine, generationId: r.generationId };
+  return { ok: false, error: r.error || "AI is not configured on the server", engine: r.engine };
+}
+
 export async function generateLeadNextActionJson(opts: {
   schoolName: string;
   childName: string;

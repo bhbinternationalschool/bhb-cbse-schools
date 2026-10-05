@@ -443,6 +443,7 @@ jobs:
           npm run test:punch-attempts
           npm run test:punch-schedule
           npm run test:survey-day
+          npm run test:timetable-rules
           npm run test:module-state-merge
           npm run test:staff-day-status
           npm run test:payroll-no-register

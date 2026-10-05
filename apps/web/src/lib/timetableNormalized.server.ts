@@ -35,6 +35,9 @@ export type TimetableDeskBundle = Pick<
   TimetableState,
   | "workingWeekdays"
   | "bellTemplate"
+  | "extraBellTemplates"
+  | "classTeacherAllClassIds"
+  | "subjectRules"
   | "grids"
   | "publishedGrids"
   | "substitutions"
@@ -59,6 +62,9 @@ function emptyBundle(): TimetableDeskBundle {
   return {
     workingWeekdays: [],
     bellTemplate: [],
+    extraBellTemplates: [],
+    classTeacherAllClassIds: null,
+    subjectRules: [],
     grids: [],
     publishedGrids: [],
     substitutions: [],
@@ -82,6 +88,9 @@ function stateToSlices(state: TimetableState): {
       payload: {
         workingWeekdays: state.workingWeekdays ?? [],
         bellTemplate: state.bellTemplate ?? [],
+        extraBellTemplates: state.extraBellTemplates ?? [],
+        classTeacherAllClassIds: state.classTeacherAllClassIds ?? null,
+        subjectRules: state.subjectRules ?? [],
         meta: state.meta ?? emptyBundle().meta,
       },
     },
@@ -101,6 +110,9 @@ function slicesToBundle(
       ? (sliceMap.config as {
           workingWeekdays?: number[];
           bellTemplate?: TimetableDeskBundle["bellTemplate"];
+          extraBellTemplates?: TimetableDeskBundle["extraBellTemplates"];
+          classTeacherAllClassIds?: TimetableDeskBundle["classTeacherAllClassIds"];
+          subjectRules?: TimetableDeskBundle["subjectRules"];
           meta?: TimetableDeskBundle["meta"];
         })
       : null;
@@ -111,6 +123,11 @@ function slicesToBundle(
     bellTemplate: Array.isArray(config?.bellTemplate)
       ? config.bellTemplate
       : empty.bellTemplate,
+    extraBellTemplates: Array.isArray(config?.extraBellTemplates) ? config.extraBellTemplates : [],
+    classTeacherAllClassIds: Array.isArray(config?.classTeacherAllClassIds)
+      ? config.classTeacherAllClassIds
+      : null,
+    subjectRules: Array.isArray(config?.subjectRules) ? config.subjectRules : [],
     meta: config?.meta ?? empty.meta,
     grids: Array.isArray(sliceMap.grids)
       ? (sliceMap.grids as TimetableDeskBundle["grids"])
@@ -132,6 +149,31 @@ export async function pushTimetableDeskToDb(
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
   const { sb, tenantId } = ctx;
   const now = nowIso();
+  // A browser still running the code from before these settings existed
+  // sends no such keys; keep what the database holds instead of writing
+  // them away (5 Oct 2026: extra bell schedules, class-teacher-takes-all,
+  // subject rules).
+  const loose = state as Partial<TimetableState>;
+  if (
+    loose.extraBellTemplates === undefined ||
+    loose.classTeacherAllClassIds === undefined ||
+    loose.subjectRules === undefined
+  ) {
+    const { data: cfgRow } = await sb
+      .from("timetable_desk_slices")
+      .select("payload")
+      .eq("tenant_id", tenantId)
+      .eq("slice_key", "config")
+      .maybeSingle();
+    const cfg = slicesToBundle({ config: (cfgRow as { payload?: unknown } | null)?.payload });
+    state = {
+      ...state,
+      extraBellTemplates: loose.extraBellTemplates ?? cfg.extraBellTemplates,
+      classTeacherAllClassIds:
+        loose.classTeacherAllClassIds === undefined ? cfg.classTeacherAllClassIds : loose.classTeacherAllClassIds,
+      subjectRules: loose.subjectRules ?? cfg.subjectRules,
+    };
+  }
   const slices = stateToSlices(state);
 
   const rows = slices.map(({ key, payload }) => ({

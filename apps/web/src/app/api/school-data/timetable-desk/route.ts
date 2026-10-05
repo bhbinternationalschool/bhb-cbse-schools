@@ -54,6 +54,11 @@ export async function POST(req: Request) {
     version: 1,
     workingWeekdays: body.workingWeekdays ?? [],
     bellTemplate: body.bellTemplate ?? [],
+    // Left undefined when an older page didn't send them — the writer then
+    // keeps what the database already holds.
+    extraBellTemplates: body.extraBellTemplates as TimetableState["extraBellTemplates"],
+    classTeacherAllClassIds: body.classTeacherAllClassIds as TimetableState["classTeacherAllClassIds"],
+    subjectRules: body.subjectRules as TimetableState["subjectRules"],
     grids: body.grids ?? [],
     publishedGrids: body.publishedGrids ?? [],
     substitutions: body.substitutions ?? [],

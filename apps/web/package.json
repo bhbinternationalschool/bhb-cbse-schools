@@ -52,6 +52,7 @@
     "test:punch-attempts": "npx tsx src/lib/punchAttempts.selftest.ts",
     "test:punch-schedule": "npx tsx src/lib/punchSchedule.selftest.ts",
     "test:survey-day": "npx tsx src/lib/surveyDay.selftest.ts",
+    "test:timetable-rules": "npx tsx src/lib/timetableRules.selftest.ts",
     "test:module-state-merge": "npx tsx src/lib/moduleStateMerge.selftest.ts",
     "test:staff-day-status": "npx tsx src/lib/staffDayStatus.selftest.ts",
     "test:payroll-no-register": "npx tsx src/lib/payrollNoRegister.selftest.ts",

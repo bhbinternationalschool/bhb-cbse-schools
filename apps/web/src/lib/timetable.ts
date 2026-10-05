@@ -8,6 +8,12 @@ import { DEFAULT_AY } from "@/lib/masters";
 import type { MastersState } from "@/lib/masters";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
+import {
+  bellFacts,
+  normalizeSubjectRule,
+  overlaps,
+  type TimetableSubjectRule,
+} from "@/lib/timetableRules";
 
 export type BellPeriodKind = "teaching" | "break" | "assembly";
 
@@ -107,10 +113,33 @@ export type TeacherTimeBlock = {
   createdAt: string;
 };
 
+/**
+ * A second bell schedule for some classes (director, 5 Oct 2026: Nursery,
+ * LKG and UKG keep different timings). Classes not listed use the main
+ * bellTemplate. Period numbers are local to a schedule — "period 2" of LKG
+ * is not at the same time as "period 2" of Class V — so every teacher-clash
+ * check compares clock times, not period numbers.
+ */
+export type ExtraBellTemplate = {
+  id: string;
+  name: string;
+  classIds: string[];
+  periods: BellPeriod[];
+};
+
 export type TimetableState = {
   version: 1;
   workingWeekdays: number[];
   bellTemplate: BellPeriod[];
+  extraBellTemplates: ExtraBellTemplate[];
+  /**
+   * Classes whose class teacher takes every subject unless a subject has its
+   * own teacher linked (a specialist). null = never set: Nursery, LKG and
+   * UKG by default (see classTeacherTakesAll).
+   */
+  classTeacherAllClassIds: string[] | null;
+  /** Placement rules per class subject; missing = the default for its kind. */
+  subjectRules: TimetableSubjectRule[];
   grids: TimetableGrid[];
   publishedGrids: TimetableGrid[];
   substitutions: TimetableSubstitution[];
@@ -231,6 +260,9 @@ export function emptyTimetableState(): TimetableState {
     version: 1,
     workingWeekdays: defaultWorkingWeekdays(),
     bellTemplate: defaultBellTemplate(),
+    extraBellTemplates: [],
+    classTeacherAllClassIds: null,
+    subjectRules: [],
     grids: [],
     publishedGrids: [],
     substitutions: [],
@@ -310,6 +342,49 @@ export function teachingPeriods(bell: BellPeriod[]): BellPeriod[] {
   return bell.filter((p) => p.kind === "teaching").sort((a, b) => a.no - b.no);
 }
 
+/** The bell schedule a class follows: its own extra schedule, else the main one. */
+export function bellForClass(
+  state: Pick<TimetableState, "bellTemplate" | "extraBellTemplates">,
+  classId: string,
+): BellPeriod[] {
+  const extra = (state.extraBellTemplates ?? []).find((t) => t.classIds.includes(classId));
+  return extra?.periods.length ? extra.periods : state.bellTemplate;
+}
+
+/** One teaching period of one class, on that class's own bell. */
+export function periodBell(
+  state: Pick<TimetableState, "bellTemplate" | "extraBellTemplates">,
+  classId: string,
+  periodNo: number,
+): BellPeriod | undefined {
+  return bellForClass(state, classId).find((p) => p.no === periodNo && p.kind === "teaching");
+}
+
+/** The clock time [startMin, endMin] of one period of one class, or null. */
+export function periodInterval(
+  state: Pick<TimetableState, "bellTemplate" | "extraBellTemplates">,
+  classId: string,
+  periodNo: number,
+): [number, number] | null {
+  return bellFacts(bellForClass(state, classId)).interval.get(periodNo) ?? null;
+}
+
+/** Group codes of the classes whose class teacher takes every subject by default. */
+export const CLASS_TEACHER_ALL_DEFAULT_GROUPS = ["PRE_PRIMARY"];
+
+/**
+ * Does this class's class teacher take every subject (unless a specialist
+ * is linked to a subject)? `groupCode` is the class's Masters group.
+ */
+export function classTeacherTakesAll(
+  state: Pick<TimetableState, "classTeacherAllClassIds">,
+  classId: string,
+  groupCode: string | undefined,
+): boolean {
+  if (state.classTeacherAllClassIds) return state.classTeacherAllClassIds.includes(classId);
+  return CLASS_TEACHER_ALL_DEFAULT_GROUPS.includes(groupCode || "");
+}
+
 function normalizeSlot(s: Partial<TimetableSlot>): TimetableSlot | null {
   if (typeof s.weekday !== "number" || typeof s.periodNo !== "number") {
     return null;
@@ -351,6 +426,24 @@ export function normalizeTimetableState(raw: unknown): TimetableState {
     bellTemplate: Array.isArray(p.bellTemplate) && p.bellTemplate.length
       ? p.bellTemplate.map((b, i) => normalizeBellPeriod(b, i))
       : empty.bellTemplate,
+    extraBellTemplates: Array.isArray(p.extraBellTemplates)
+      ? p.extraBellTemplates
+          .filter((t) => t && Array.isArray(t.periods) && t.periods.length)
+          .map((t) => ({
+            id: String(t.id || nid("bell")),
+            name: String(t.name || "Other timing").slice(0, 60),
+            classIds: Array.isArray(t.classIds) ? t.classIds.map(String) : [],
+            periods: t.periods.map((b, i) => normalizeBellPeriod(b, i)),
+          }))
+      : [],
+    classTeacherAllClassIds: Array.isArray(p.classTeacherAllClassIds)
+      ? p.classTeacherAllClassIds.map(String)
+      : null,
+    subjectRules: Array.isArray(p.subjectRules)
+      ? p.subjectRules
+          .map((r) => normalizeSubjectRule(r))
+          .filter((r): r is TimetableSubjectRule => !!r)
+      : [],
     grids: Array.isArray(p.grids) ? p.grids.map(normalizeGrid) : [],
     publishedGrids: Array.isArray(p.publishedGrids)
       ? p.publishedGrids.map(normalizeGrid)
@@ -591,6 +684,42 @@ export function setBellTemplate(
   return { ok: true };
 }
 
+/** Save the extra bell schedules (e.g. Nursery–UKG timing). */
+export function setExtraBellTemplates(
+  templates: ExtraBellTemplate[],
+): { ok: true } | { ok: false; error: string } {
+  for (const t of templates) {
+    if (!t.periods.some((p) => p.kind === "teaching")) {
+      return { ok: false, error: `${t.name || "Schedule"}: needs at least one teaching period` };
+    }
+  }
+  const state = loadTimetable();
+  saveTimetable({
+    ...state,
+    extraBellTemplates: templates.map((t) => ({
+      ...t,
+      periods: t.periods.map((p, i) => normalizeBellPeriod(p, i)),
+    })),
+    meta: { ...state.meta, status: "draft" },
+  });
+  return { ok: true };
+}
+
+export function setClassTeacherAllClassIds(classIds: string[]): void {
+  const state = loadTimetable();
+  saveTimetable({ ...state, classTeacherAllClassIds: [...new Set(classIds)] });
+}
+
+/** Replace the saved rules for one class (other classes untouched). */
+export function setSubjectRulesForClass(classId: string, rules: TimetableSubjectRule[]): void {
+  const state = loadTimetable();
+  const keep = (state.subjectRules ?? []).filter((r) => r.classId !== classId);
+  const mine = rules
+    .map((r) => normalizeSubjectRule({ ...r, classId }))
+    .filter((r): r is TimetableSubjectRule => !!r);
+  saveTimetable({ ...state, subjectRules: [...keep, ...mine] });
+}
+
 export function publishTimetable(
   publishedBy: string,
   academicYearCode?: string,
@@ -684,7 +813,18 @@ export function detectTimetableConflicts(
 ): TimetableConflict[] {
   const s = state ?? loadTimetable();
   const out: TimetableConflict[] = [];
-  const teacherAt = new Map<string, TimetableConflict>();
+  // teacher|weekday → the periods they already hold, as clock times: two
+  // classes on different bell schedules clash when their TIMES overlap.
+  const teacherAt = new Map<string, { at: [number, number]; label: string }[]>();
+  const factsByClass = new Map<string, ReturnType<typeof bellFacts>>();
+  const facts = (classId: string) => {
+    let f = factsByClass.get(classId);
+    if (!f) {
+      f = bellFacts(bellForClass(s, classId));
+      factsByClass.set(classId, f);
+    }
+    return f;
+  };
   const grids = academicYearCode
     ? s.grids.filter((g) => g.academicYearCode === academicYearCode)
     : s.grids;
@@ -732,9 +872,12 @@ export function detectTimetableConflicts(
         });
       }
       if (!slot.teacherId) continue;
-      const tKey = `${slot.teacherId}|${slot.weekday}|${slot.periodNo}`;
-      const prev = teacherAt.get(tKey);
-      if (prev) {
+      const at = facts(grid.classId).interval.get(slot.periodNo);
+      if (!at) continue;
+      const tKey = `${slot.teacherId}|${slot.weekday}`;
+      const held = teacherAt.get(tKey) ?? [];
+      const clash = held.find((h) => overlaps(h.at, at));
+      if (clash) {
         out.push({
           kind: "teacher_clash",
           weekday: slot.weekday,
@@ -743,20 +886,11 @@ export function detectTimetableConflicts(
           sectionId: grid.sectionId,
           teacherId: slot.teacherId,
           subjectId: slot.subjectId,
-          detail: `Teacher double-booked (${WEEKDAY_SHORT[slot.weekday]} P${slot.periodNo})`,
-        });
-      } else {
-        teacherAt.set(tKey, {
-          kind: "teacher_clash",
-          weekday: slot.weekday,
-          periodNo: slot.periodNo,
-          classId: grid.classId,
-          sectionId: grid.sectionId,
-          teacherId: slot.teacherId,
-          subjectId: slot.subjectId,
-          detail: "",
+          detail: `Teacher double-booked (${WEEKDAY_SHORT[slot.weekday]} P${slot.periodNo}, also ${clash.label})`,
         });
       }
+      held.push({ at, label: "another class at the same time" });
+      teacherAt.set(tKey, held);
     }
   }
   return out;

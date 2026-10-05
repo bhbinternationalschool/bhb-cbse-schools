@@ -102,6 +102,9 @@ export async function hydrateTimetableDeskFromDb(
     TimetableState,
     | "workingWeekdays"
     | "bellTemplate"
+    | "extraBellTemplates"
+    | "classTeacherAllClassIds"
+    | "subjectRules"
     | "grids"
     | "publishedGrids"
     | "substitutions"
@@ -113,6 +116,9 @@ export async function hydrateTimetableDeskFromDb(
   const emptyBundle = {
     workingWeekdays: [] as number[],
     bellTemplate: [] as TimetableState["bellTemplate"],
+    extraBellTemplates: [] as TimetableState["extraBellTemplates"],
+    classTeacherAllClassIds: null as TimetableState["classTeacherAllClassIds"],
+    subjectRules: [] as TimetableState["subjectRules"],
     grids: [] as TimetableState["grids"],
     publishedGrids: [] as TimetableState["publishedGrids"],
     substitutions: [] as TimetableState["substitutions"],
@@ -145,6 +151,9 @@ export async function hydrateTimetableDeskFromDb(
         ? body.workingWeekdays
         : [],
       bellTemplate: Array.isArray(body.bellTemplate) ? body.bellTemplate : [],
+      extraBellTemplates: Array.isArray(body.extraBellTemplates) ? body.extraBellTemplates : [],
+      classTeacherAllClassIds: Array.isArray(body.classTeacherAllClassIds) ? body.classTeacherAllClassIds : null,
+      subjectRules: Array.isArray(body.subjectRules) ? body.subjectRules : [],
       grids: Array.isArray(body.grids) ? body.grids : [],
       publishedGrids: Array.isArray(body.publishedGrids)
         ? body.publishedGrids

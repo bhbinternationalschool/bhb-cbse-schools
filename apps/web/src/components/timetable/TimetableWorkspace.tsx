@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { CalendarClock } from "lucide-react";
 import {
   WEEKDAY_SHORT,
+  bellForClass,
   classSectionLabel,
   defaultBellTemplate,
   deleteGrid,
@@ -29,6 +30,11 @@ import {
   runAutoAssign,
   type AutoAssignResult,
 } from "@/lib/timetableSolver";
+import {
+  ClassTeacherAllPanel,
+  PrePrimaryBellPanel,
+  SubjectRulesPanel,
+} from "@/components/timetable/TimetableRulesSetup";
 import {
   describeEffectiveWeekdays,
   effectiveGridWeekdays,
@@ -60,6 +66,7 @@ type TtTab =
   | "dashboard"
   | "setup"
   | "class"
+  | "rules"
   | "auto"
   | "teacher"
   | "free_periods"
@@ -217,7 +224,13 @@ export function TimetableWorkspace() {
     );
   }, [state, tick, ay]);
 
+  /** The selected class's own bell (Nursery–UKG may keep a separate timing). */
   const teaching = useMemo(
+    () => teachingPeriods(state ? bellForClass(state, classId) : bellDraft),
+    [state, bellDraft, classId],
+  );
+  /** The main school bell — the By-teacher view's rows. */
+  const mainTeaching = useMemo(
     () => teachingPeriods(state?.bellTemplate ?? bellDraft),
     [state, bellDraft],
   );
@@ -580,6 +593,7 @@ export function TimetableWorkspace() {
           { id: "dashboard", label: "Dashboard", tone: "navy" },
           { id: "setup", label: "Setup", tone: "slate" },
           { id: "class", label: "By class", tone: "navy" },
+          { id: "rules", label: "Subject rules", tone: "violet" },
           { id: "auto", label: "Auto-assign (AI)", tone: "violet" },
           { id: "teacher", label: "By teacher", tone: "teal" },
           { id: "free_periods", label: "Free periods", tone: "sky" },
@@ -803,6 +817,19 @@ export function TimetableWorkspace() {
               </button>
             ) : null}
           </div>
+        </div>
+      ) : null}
+
+      {tab === "setup" && masters && state ? (
+        <div className="mt-4 space-y-4" key={`setup-extra-${tick}`}>
+          <PrePrimaryBellPanel masters={masters} state={state} ay={ay} canEdit={canEdit} onSaved={refresh} flash={flash} />
+          <ClassTeacherAllPanel masters={masters} state={state} ay={ay} canEdit={canEdit} onSaved={refresh} flash={flash} />
+        </div>
+      ) : null}
+
+      {tab === "rules" && masters && state ? (
+        <div className="mt-5" key={`rules-${tick}`}>
+          <SubjectRulesPanel masters={masters} state={state} ay={ay} canEdit={canEdit} onSaved={refresh} flash={flash} />
         </div>
       ) : null}
 
@@ -1312,7 +1339,7 @@ export function TimetableWorkspace() {
                   </tr>
                 </ErpTableHead>
                 <ErpTableBody>
-                  {teaching.map((p) => (
+                  {mainTeaching.map((p) => (
                     <tr key={p.no}>
                       <td className="border border-[var(--border)] p-2 font-semibold">
                         {p.label}

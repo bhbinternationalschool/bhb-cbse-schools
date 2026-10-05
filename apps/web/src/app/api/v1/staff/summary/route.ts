@@ -4,7 +4,7 @@ import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureAttendanceHydratedServer } from "@/lib/attendancePersistence";
 import { ensureTimetableHydratedServer } from "@/lib/timetablePersistence";
 import { findRegister, loadAttendance } from "@/lib/attendance";
-import { loadTimetable, teachingPeriods } from "@/lib/timetable";
+import { loadTimetable, periodBell } from "@/lib/timetable";
 import { loadSis, studentsInSession } from "@/lib/sis";
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
 
@@ -89,8 +89,8 @@ export async function GET(request: Request) {
     // Today's periods across published grids (fallback: working grids).
     const tt = loadTimetable();
     const grids = tt.publishedGrids.length ? tt.publishedGrids : tt.grids;
-    const bell = teachingPeriods(tt.bellTemplate);
-    const bellByNo = new Map(bell.map((b) => [b.no, b]));
+    // Each period's time from its own class's bell (pre-primary may differ).
+    const at = (classId: string, periodNo: number) => periodBell(tt, classId, periodNo);
 
     const periods = grids
       .filter((g) => !g.academicYearCode || g.academicYearCode === ay)
@@ -99,8 +99,8 @@ export async function GET(request: Request) {
           .filter((s) => s.teacherId === staffId && s.weekday === weekday)
           .map((s) => ({
             periodNo: s.periodNo,
-            startTime: bellByNo.get(s.periodNo)?.startTime || "",
-            endTime: bellByNo.get(s.periodNo)?.endTime || "",
+            startTime: at(g.classId, s.periodNo)?.startTime || "",
+            endTime: at(g.classId, s.periodNo)?.endTime || "",
             subjectName: subjectNameOf(s.subjectId),
             classId: g.classId,
             sectionId: g.sectionId,
@@ -108,7 +108,7 @@ export async function GET(request: Request) {
             sectionName: sectionNameOf(g.sectionId),
           })),
       )
-      .sort((a, b) => a.periodNo - b.periodNo);
+      .sort((a, b) => a.startTime.localeCompare(b.startTime) || a.periodNo - b.periodNo);
 
     // The app's class/section picker. It used to be every class in the
     // school for everyone, so a teacher picked any class and was refused on

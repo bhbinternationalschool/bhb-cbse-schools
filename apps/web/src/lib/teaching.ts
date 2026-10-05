@@ -25,6 +25,7 @@ import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
 import { isoDateWeekday } from "@/lib/examTimetable";
 import type { MastersState } from "@/lib/masters";
 import {
+  bellForClass,
   teachingPeriods,
   type BellPeriod,
   type TimetableGrid,
@@ -807,6 +808,15 @@ export function resolveExpectedPeriods(input: {
   }
 
   const bell = bellByPeriodNo(timetable.bellTemplate ?? []);
+  const bellCache = new Map<string, Map<number, BellPeriod>>();
+  const bellByClass = (classId: string) => {
+    let m = bellCache.get(classId);
+    if (!m) {
+      m = bellByPeriodNo(bellForClass({ ...timetable, extraBellTemplates: timetable.extraBellTemplates ?? [] }, classId));
+      bellCache.set(classId, m);
+    }
+    return m;
+  };
   if (bell.size === 0) {
     return {
       ok: false,
@@ -845,7 +855,8 @@ export function resolveExpectedPeriods(input: {
 
     for (const slot of grid.slots) {
       if (slot.weekday !== weekday) continue;
-      const period = bell.get(slot.periodNo);
+      // The class's own bell: pre-primary may keep a different timing.
+      const period = bellByClass(grid.classId).get(slot.periodNo);
       if (!period) continue; // break/assembly or a stale period number
       if (!slot.subjectId) continue; // free period on the grid
 
