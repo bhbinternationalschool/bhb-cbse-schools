@@ -1,6 +1,6 @@
 import { writeAudit } from "@/lib/audit.server";
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
-import { requestMeta, resolveApiAuth } from "@/lib/api/v1/auth";
+import { assertPermission, requestMeta, resolveApiAuth } from "@/lib/api/v1/auth";
 import { assertSchoolWide, staffWorkingYear } from "@/lib/api/v1/staffScope";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { applyWhatsAppStaffPunch } from "@/lib/staffAttendance.server";
@@ -35,7 +35,9 @@ export const runtime = "nodejs";
  *      stops working at once.
  * POST {action: screen_pair_start, label} → {code, expiresAt} — a one-time
  *      code the gate phone types at /punch-screen; nobody signs in on it.
- * Office / principal / admin only.
+ * Office / principal / admin only. Deciding a phone also needs RBAC
+ * attendance.edit (admin / owner): approving writes the punches the phone
+ * tried while waiting into the register (director, 5 Oct 2026).
  */
 export async function GET(request: Request) {
   try {
@@ -185,6 +187,7 @@ export async function POST(request: Request) {
       return apiOk({ revoked: body.id });
     }
     if (body.action === "approve" || body.action === "reject" || body.action === "reset") {
+      assertPermission(ctx, "attendance", "edit");
       if (!body.id) throw new ApiError("bad_request", "Which phone?", 400);
       const r = await decidePunchDevice(body.id, body.action, by);
       if (!r.ok) throw new ApiError("conflict", r.error, 409);
