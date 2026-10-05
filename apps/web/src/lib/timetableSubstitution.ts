@@ -12,10 +12,13 @@ import type { StaffRecord } from "@/lib/foundationMasters";
 import { findStaffRegister, loadStaffAttendance } from "@/lib/staffAttendance";
 import { loadStaffHr } from "@/lib/staffHr";
 import { examBlocksForClassDate, isoDateWeekday } from "@/lib/examTimetable";
+import { overlaps } from "@/lib/timetableRules";
 import {
+  bellForClass,
   loadTimetable,
   normalizeSubstitution,
   normalizeTeacherTimeBlock,
+  periodInterval,
   saveTimetable,
   teachingPeriods,
   type TeacherTimeBlock,
@@ -160,7 +163,7 @@ export function affectedPeriodsForDate(input: {
           academicYearCode: input.academicYearCode,
           classId: grid.classId,
           date: input.date,
-          bellTemplate: state.bellTemplate,
+          bellTemplate: bellForClass(state, grid.classId),
         });
         examCache.set(
           grid.classId,
@@ -199,11 +202,15 @@ export function substituteCandidates(input: {
 }): SubstituteCandidate[] {
   const busy = new Set<string>();
   const dayLoad = new Map<string, number>();
+  // Busy = teaching anywhere at an overlapping CLOCK time: classes may keep
+  // different bell schedules (pre-primary), so period numbers don't line up.
+  const target = periodInterval(input.state, input.period.classId, input.period.periodNo);
   for (const g of sessionGrids(input.state, input.academicYearCode)) {
     for (const s of g.slots) {
       if (!s.teacherId || s.weekday !== input.period.weekday) continue;
       dayLoad.set(s.teacherId, (dayLoad.get(s.teacherId) || 0) + 1);
-      if (s.periodNo === input.period.periodNo) busy.add(s.teacherId);
+      const at = periodInterval(input.state, g.classId, s.periodNo);
+      if (target && at ? overlaps(target, at) : s.periodNo === input.period.periodNo) busy.add(s.teacherId);
     }
   }
 
@@ -268,7 +275,8 @@ export function arrangeSubstitutesForPeriods(input: {
   const source = input.source ?? "auto";
   const absentSet = new Set(periods.map((p) => p.absentTeacherId));
   const subLoad = new Map<string, number>();
-  const takenByPeriod = new Map<number, Set<string>>();
+  // Substitutes already given out today, with the clock time they cover.
+  const takenAt: { teacherId: string; at: [number, number] | null; periodNo: number }[] = [];
   const substitutions: TimetableSubstitution[] = [];
   const uncovered: AffectedPeriod[] = [];
   const examSkipped: AffectedPeriod[] = [];
@@ -279,8 +287,12 @@ export function arrangeSubstitutesForPeriods(input: {
       examSkipped.push(period);
       continue;
     }
-    const taken = takenByPeriod.get(period.periodNo) ?? new Set<string>();
-    takenByPeriod.set(period.periodNo, taken);
+    const here = periodInterval(state, period.classId, period.periodNo);
+    const taken = new Set(
+      takenAt
+        .filter((t) => (here && t.at ? overlaps(here, t.at) : t.periodNo === period.periodNo))
+        .map((t) => t.teacherId),
+    );
     const [best] = substituteCandidates({
       masters,
       state,
@@ -309,7 +321,7 @@ export function arrangeSubstitutesForPeriods(input: {
     })!;
     substitutions.push(sub);
     if (best) {
-      taken.add(best.staff.id);
+      takenAt.push({ teacherId: best.staff.id, at: here, periodNo: period.periodNo });
       subLoad.set(best.staff.id, (subLoad.get(best.staff.id) || 0) + 1);
     } else {
       uncovered.push(period);
@@ -372,11 +384,8 @@ export function affectedPeriodsForTimeBlock(input: {
     absentTeacherIds: [input.staffId],
   });
   if (!periods.length) return periods;
-  const bellByNo = new Map(
-    teachingPeriods(state.bellTemplate).map((p) => [p.no, p]),
-  );
   return periods.filter((p) => {
-    const bell = bellByNo.get(p.periodNo);
+    const bell = teachingPeriods(bellForClass(state, p.classId)).find((b) => b.no === p.periodNo);
     if (!bell) return false;
     return bell.startTime < input.endTime && bell.endTime > input.startTime;
   });

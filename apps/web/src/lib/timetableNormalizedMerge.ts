@@ -30,6 +30,19 @@ export function mergeDbDeskIntoTimetableState(
       : state.bellTemplate.length
         ? state.bellTemplate
         : bundle.bellTemplate,
+    extraBellTemplates: preferDb
+      ? bundle.extraBellTemplates ?? []
+      : state.extraBellTemplates?.length
+        ? state.extraBellTemplates
+        : bundle.extraBellTemplates ?? [],
+    classTeacherAllClassIds: preferDb
+      ? bundle.classTeacherAllClassIds ?? null
+      : state.classTeacherAllClassIds ?? bundle.classTeacherAllClassIds ?? null,
+    subjectRules: preferDb
+      ? bundle.subjectRules ?? []
+      : state.subjectRules?.length
+        ? state.subjectRules
+        : bundle.subjectRules ?? [],
     grids: preferDb
       ? bundle.grids
       : state.grids.length >= bundle.grids.length

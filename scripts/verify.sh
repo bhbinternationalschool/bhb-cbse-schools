@@ -324,6 +324,7 @@ SELFTESTS=(
   test:punch-attempts
   test:punch-schedule
   test:survey-day
+  test:timetable-rules
   test:module-state-merge
   test:staff-day-status
   test:payroll-no-register

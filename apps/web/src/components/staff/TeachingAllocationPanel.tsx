@@ -406,6 +406,20 @@ export function TeachingAllocationPanel({
                           : ""}
                       </p>
                     ) : null}
+                    {/* A pre-primary class teacher usually takes every subject. */}
+                    <button
+                      type="button"
+                      className="mb-2 text-xs font-semibold text-[var(--brand-deep)] underline"
+                      onClick={() =>
+                        setPicked(
+                          picked.size === subjectOptions.length
+                            ? new Set()
+                            : new Set(subjectOptions.map((o) => o.subjectId)),
+                        )
+                      }
+                    >
+                      {picked.size === subjectOptions.length ? "Clear all" : "Select all subjects"}
+                    </button>
                     <div className="grid gap-1.5 sm:grid-cols-2">
                       {subjectOptions.map((o) => {
                         const clash = conflicts.find(

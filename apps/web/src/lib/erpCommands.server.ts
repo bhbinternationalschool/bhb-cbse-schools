@@ -46,7 +46,7 @@ import {
 import { loadStaffAttendance } from "@/lib/staffAttendance";
 import { ensureStaffAttendanceHydratedServer } from "@/lib/staffAttendancePersistence";
 import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
-import { loadTimetable, teachingPeriods, WEEKDAY_SHORT } from "@/lib/timetable";
+import { loadTimetable, periodInterval, teachingPeriods, WEEKDAY_SHORT } from "@/lib/timetable";
 import { ensureTimetableHydratedServer } from "@/lib/timetablePersistence";
 import {
   absentTeachersForDate,
@@ -3286,23 +3286,30 @@ async function freeTeachers(
   const grids = state.grids.filter((g) => g.academicYearCode === ay);
   const busy = new Set<string>();
   const dayLoad = new Map<string, number>();
+  const toMin = (v: string) => {
+    const m = /^(\d{1,2}):(\d{2})/.exec(v);
+    return m ? parseInt(m[1]!, 10) * 60 + parseInt(m[2]!, 10) : NaN;
+  };
+  // Busy at the asked TIME: a class on another bell (pre-primary) is busy
+  // when its period overlaps, whatever its period number.
+  const asked: [number, number] = [toMin(bell.startTime), toMin(bell.endTime)];
+  const overlapsAsked = (classId: string, pNo: number) => {
+    const at = periodInterval(state, classId, pNo);
+    return at ? at[0] < asked[1] && asked[0] < at[1] : pNo === periodNo;
+  };
   for (const g of grids) {
     for (const sl of g.slots) {
       if (!sl.teacherId || sl.weekday !== weekday) continue;
       dayLoad.set(sl.teacherId, (dayLoad.get(sl.teacherId) ?? 0) + 1);
-      if (sl.periodNo === periodNo) busy.add(sl.teacherId);
+      if (overlapsAsked(g.classId, sl.periodNo)) busy.add(sl.teacherId);
     }
   }
   const subs = listSubstitutionsForDate(ay, date, state);
   const subLoad = new Map<string, number>();
   for (const sb of subs) {
     subLoad.set(sb.substituteTeacherId, (subLoad.get(sb.substituteTeacherId) ?? 0) + 1);
-    if (sb.periodNo === periodNo) busy.add(sb.substituteTeacherId);
+    if (overlapsAsked(sb.classId, sb.periodNo)) busy.add(sb.substituteTeacherId);
   }
-  const toMin = (v: string) => {
-    const m = /^(\d{1,2}):(\d{2})/.exec(v);
-    return m ? parseInt(m[1]!, 10) * 60 + parseInt(m[2]!, 10) : NaN;
-  };
   for (const b of state.teacherTimeBlocks ?? []) {
     if (b.date !== date || b.academicYearCode !== ay) continue;
     if (toMin(b.startTime) < toMin(bell.endTime) && toMin(b.endTime) > toMin(bell.startTime)) busy.add(b.staffId);

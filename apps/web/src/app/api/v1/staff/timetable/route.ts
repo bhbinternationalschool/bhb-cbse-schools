@@ -2,7 +2,7 @@ import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { assertPermission, resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureTimetableHydratedServer } from "@/lib/timetablePersistence";
-import { loadTimetable, teachingPeriods, WEEKDAY_SHORT } from "@/lib/timetable";
+import { loadTimetable, periodBell, teachingPeriods, WEEKDAY_SHORT } from "@/lib/timetable";
 
 export const runtime = "nodejs";
 
@@ -67,8 +67,12 @@ export async function GET(request: Request) {
     const grids = (published ? tt.publishedGrids : tt.grids).filter(
       (g) => !g.academicYearCode || g.academicYearCode === ay,
     );
+    // Each period's time comes from its own class's bell — Nursery–UKG may
+    // keep a different timing from the rest of the school.
+    const at = (classId: string, periodNo: number) => periodBell(tt, classId, periodNo);
+    // The main school bell, for the app's period rows; each period above
+    // carries its own times when its class keeps a different bell.
     const bell = teachingPeriods(tt.bellTemplate);
-    const bellByNo = new Map(bell.map((b) => [b.no, b]));
 
     const classNameOf = (id: string) =>
       ctx.masters.classes.find((c) => c.id === id)?.name || "";
@@ -93,8 +97,8 @@ export async function GET(request: Request) {
             .filter((s) => s.teacherId === staffId && s.weekday === weekday)
             .map((s) => ({
               periodNo: s.periodNo,
-              startTime: bellByNo.get(s.periodNo)?.startTime || "",
-              endTime: bellByNo.get(s.periodNo)?.endTime || "",
+              startTime: at(g.classId, s.periodNo)?.startTime || "",
+              endTime: at(g.classId, s.periodNo)?.endTime || "",
               classId: g.classId,
               sectionId: g.sectionId,
               className: classNameOf(g.classId),
@@ -104,7 +108,7 @@ export async function GET(request: Request) {
               roomId: s.roomId,
             })),
         )
-        .sort((a, b) => a.periodNo - b.periodNo),
+        .sort((a, b) => a.startTime.localeCompare(b.startTime) || a.periodNo - b.periodNo),
     }));
 
     const today = istToday();
@@ -120,8 +124,8 @@ export async function GET(request: Request) {
       .map((s) => ({
         date: s.date,
         periodNo: s.periodNo,
-        startTime: bellByNo.get(s.periodNo)?.startTime || "",
-        endTime: bellByNo.get(s.periodNo)?.endTime || "",
+        startTime: at(s.classId, s.periodNo)?.startTime || "",
+        endTime: at(s.classId, s.periodNo)?.endTime || "",
         className: classNameOf(s.classId),
         sectionName: sectionNameOf(s.sectionId),
         subjectName: subjectNameOf(s.subjectId),
