@@ -23,7 +23,11 @@ on:
   workflow_run:
     workflows: [CI]
     types: [completed]
-  pull_request:
+  # pull_request_target, not pull_request: a labelled event on a branch cut
+  # before this file existed found no workflow to run (PR #396, 5 Oct). The
+  # _target event always runs THIS file from main. Safe because the job never
+  # checks out or executes the PR's code — it only reads checks and merges.
+  pull_request_target:
     types: [labeled]
 
 permissions:
@@ -44,7 +48,7 @@ jobs:
       (github.event_name == 'workflow_run'
         && github.event.workflow_run.event == 'pull_request'
         && github.event.workflow_run.conclusion == 'success')
-      || (github.event_name == 'pull_request'
+      || (github.event_name == 'pull_request_target'
         && github.event.label.name == 'automerge')
     env:
       GH_TOKEN: ${{ github.token }}
@@ -56,7 +60,7 @@ jobs:
         id: pr
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
+          if [ "${{ github.event_name }}" = "pull_request_target" ]; then
             echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
