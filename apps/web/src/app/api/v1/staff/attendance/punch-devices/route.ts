@@ -17,6 +17,7 @@ import {
   listPunchDevices,
   listPunchDisplays,
   revokePunchDisplay,
+  startScreenPairing,
 } from "@/lib/punchDevices.server";
 
 export const runtime = "nodejs";
@@ -32,6 +33,8 @@ export const runtime = "nodejs";
  *      — the gate window and the printed backup QR on/off.
  * POST {action: printed_qr_new} — a new printed QR; every earlier print
  *      stops working at once.
+ * POST {action: screen_pair_start, label} → {code, expiresAt} — a one-time
+ *      code the gate phone types at /punch-screen; nobody signs in on it.
  * Office / principal / admin only.
  */
 export async function GET(request: Request) {
@@ -157,6 +160,23 @@ export async function POST(request: Request) {
         punchWindow: punchWindowState(r.options, Date.now()),
         printedQr: printedQrView(r.options),
       });
+    }
+    if (body.action === "screen_pair_start") {
+      // The office's own device may be anywhere; the GATE phone's location
+      // is checked when it types the code (/api/public/punch-screen/pair).
+      const r = await startScreenPairing(String(body.label || "Gate phone"), by);
+      if (!r.ok) throw new ApiError("server_error", r.error, 503);
+      await writeAudit({
+        session: ctx.session,
+        module: "staff_attendance",
+        action: "create",
+        entityType: "punch_screen",
+        entityId: "",
+        summary: `Pairing code made for a punch QR screen: ${body.label || "Gate phone"} (valid 10 min)`,
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+      });
+      return apiOk({ code: r.code, expiresAt: r.expiresAt });
     }
     if (body.action === "screen_revoke") {
       if (!body.id || !(await revokePunchDisplay(body.id))) {

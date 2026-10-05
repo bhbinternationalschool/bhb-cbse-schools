@@ -11,11 +11,13 @@ by itself (Attendance → Staff → Manage → **Gate punch hours**, default
 4. **Location**: Settings → Location ON, mode *High accuracy*. The QR is shown only inside the school.
 5. **Battery**: Settings → Apps → Chrome → Battery → *Unrestricted* (so Android does not put it to sleep).
 
-## 2. Switch it on as the QR screen
-1. On that phone, open Chrome → **bhbinternational.school**, sign in with an **office / principal** login.
-2. Attendance → Staff → **Manage** → *Punch phones & QR screens* → name it "Gate phone" → **Open QR screen on this device**. Allow location when asked.
-3. It now shows the QR (or a clock and "Punch QR opens at 06:45"). You can sign out of the ERP; the screen keeps working (it has its own key).
-4. Chrome menu → **Add to Home screen**, so a reboot is one tap to reopen.
+## 2. Switch it on as the QR screen (no sign-in on the gate phone)
+1. On the **gate phone**, open Chrome (or Fully Kiosk) → **bhbinternational.school/punch-screen**. Allow location when asked. It shows "Switch this phone on as the punch QR screen" and a code box.
+2. On the **office** phone or computer: Attendance → Staff → **Manage** → *Punch phones & QR screens* → name it "Gate phone" → **Pair a gate screen**. A 6-digit code appears (valid 10 minutes, once).
+3. Type that code on the gate phone → **Pair this phone**. It now shows the QR (or a clock and "Punch QR opens at 06:45").
+   - Nobody signs in on the gate phone, and it can only show the QR — no ERP menus or data.
+   - Lost or replaced phone: Manage → QR screens → **Switch off**.
+4. Chrome menu → **Add to Home screen**, so a reboot is one tap to reopen. (Using Fully Kiosk: do steps 1–3 inside Fully — it keeps its own storage.)
 
 ## 3. Lock it to that screen (recommended)
 - **Free:** Settings → Security → **App pinning / Screen pinning** ON, then pin Chrome on the QR page. Nobody can leave the page without the phone's PIN.
@@ -29,7 +31,7 @@ Attendance → Staff → Manage → **Printed gate QR** → tick *Allow punching
 ## If something is wrong
 | The gate phone shows | Do this |
 |---|---|
-| "This screen is not switched on" | Repeat step 2 (the office switched it off, or Chrome data was cleared). |
+| "Switch this phone on as the punch QR screen" | Repeat step 2 with a new pairing code (the office switched it off, or the browser's data was cleared). |
 | "Punch QR not available here" | Location is off or poor — turn Location on, move the phone nearer a window. |
 | A clock and "opens at …" | Normal outside punch hours. |
 | "No connection" | Check the Wi-Fi / data; the code returns by itself. |

@@ -87,6 +87,7 @@ export function PunchPhonesPanel() {
   const [busy, setBusy] = useState(false);
   const [label, setLabel] = useState("Office tablet");
   const [notice, setNotice] = useState<string | null>(null);
+  const [pairing, setPairing] = useState<{ code: string; expiresAt: string } | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch("/api/v1/staff/attendance/punch-devices", { cache: "no-store" }).catch(() => null);
@@ -113,7 +114,12 @@ export function PunchPhonesPanel() {
       });
       const body = (await res.json().catch(() => null)) as {
         ok?: boolean;
-        data?: { token?: string; recorded?: { kind: string; time: string; ok: boolean; note?: string }[] };
+        data?: {
+          token?: string;
+          code?: string;
+          expiresAt?: string;
+          recorded?: { kind: string; time: string; ok: boolean; note?: string }[];
+        };
         error?: { message?: string };
       } | null;
       if (!res.ok || !body?.ok) {
@@ -173,10 +179,37 @@ export function PunchPhonesPanel() {
             Name
             <input className="field mt-1 !py-1.5" value={label} onChange={(e) => setLabel(e.target.value)} />
           </label>
-          <button type="button" disabled={busy} onClick={() => void openScreenHere()} className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-bold text-[var(--primary-foreground)] disabled:opacity-40">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={async () => {
+              const r = await act({ action: "screen_pair_start", label });
+              if (r?.code && r.expiresAt) setPairing({ code: r.code, expiresAt: r.expiresAt });
+            }}
+            className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-bold text-[var(--primary-foreground)] disabled:opacity-40"
+            title="Show a one-time code to type on the gate phone — nobody signs in on it"
+          >
+            Pair a gate screen
+          </button>
+          <button type="button" disabled={busy} onClick={() => void openScreenHere()} className={btn}>
             Open QR screen on this device
           </button>
         </div>
+        {pairing ? (
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] p-3 text-sm">
+            <p className="text-[var(--brand-deep)]">
+              On the gate phone open <b>{typeof window !== "undefined" ? window.location.host : ""}/punch-screen</b>, allow
+              location, and type:
+            </p>
+            <p className="my-2 font-mono text-4xl font-bold tracking-[0.3em] text-[var(--brand-deep)]">
+              {pairing.code.slice(0, 3)} {pairing.code.slice(3)}
+            </p>
+            <p className="text-xs text-[var(--muted)]">
+              Works once, until {hhmm(pairing.expiresAt)} (10 minutes), only on a phone inside the school. Five wrong tries
+              cancel it. A new code cancels this one.
+            </p>
+          </div>
+        ) : null}
         {data.screens.map((s) => (
           <div key={s.id} className="flex items-center justify-between gap-2 text-sm">
             <span>

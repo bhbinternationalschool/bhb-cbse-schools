@@ -46,6 +46,44 @@ export function PunchScreen() {
   const [outside, setOutside] = useState<string | null>(null);
   /** Outside the gate's hours: a clock and when it opens, no code. */
   const [closed, setClosed] = useState<Closed | null>(null);
+  /** Pairing (no sign-in on the gate phone): the office's one-time code. */
+  const [pairCode, setPairCode] = useState("");
+  const [pairing, setPairing] = useState(false);
+  const [pairError, setPairError] = useState<string | null>(null);
+
+  async function pair() {
+    const here = where.current;
+    if (!here) {
+      setPairError(geoError || "Waiting for this phone's location — allow location and try again.");
+      return;
+    }
+    setPairing(true);
+    setPairError(null);
+    try {
+      const res = await fetch("/api/public/punch-screen/pair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: pairCode, lat: here.lat, lng: here.lng, acc: Math.round(here.accuracyM) }),
+        cache: "no-store",
+      });
+      const body = (await res.json().catch(() => null)) as { ok?: boolean; token?: string; error?: string } | null;
+      if (!res.ok || !body?.ok || !body.token) {
+        setPairError(body?.error || "Could not pair — try again.");
+        return;
+      }
+      try {
+        window.localStorage.setItem(TOKEN_KEY, body.token);
+      } catch {
+        /* the screen still runs this session */
+      }
+      setOff(false);
+      setToken(body.token);
+    } catch {
+      setPairError("No internet — connect this phone and try again.");
+    } finally {
+      setPairing(false);
+    }
+  }
 
   // The punch QR is shown only inside the school (director, 3 Oct 2026), so
   // the screen keeps telling the server where it is.
@@ -163,11 +201,35 @@ export function PunchScreen() {
   if (!token || off) {
     return (
       <main style={paper} className={wrap}>
-        <h1 className="text-2xl font-bold">This screen is not switched on</h1>
+        <h1 className="text-2xl font-bold">Switch this phone on as the punch QR screen</h1>
         <p className="max-w-md" style={{ color: "#475569" }}>
-          In the ERP, open Attendance → Staff → Punch phones & QR screens, and tap “Open QR screen on this device”
-          on this tablet or computer.
+          In the ERP on the office phone or computer: Attendance → Staff → Manage → <b>Pair a gate screen</b>. Type
+          the 6-digit code it shows here. Nobody signs in on this phone.
         </p>
+        <p className="max-w-md text-sm" style={{ color: "#64748b" }}>
+          ऑफ़िस के ERP में “Pair a gate screen” दबाएँ और दिखा 6 अंकों का कोड यहाँ लिखें।
+        </p>
+        <input
+          className="w-56 rounded-xl border px-3 py-3 text-center font-mono text-3xl tracking-[0.3em]"
+          style={{ borderColor: "#cbd5e1", color: "#0f172a", background: "#ffffff" }}
+          inputMode="numeric"
+          maxLength={7}
+          placeholder="000000"
+          value={pairCode}
+          onChange={(e) => setPairCode(e.target.value.replace(/[^\d]/g, "").slice(0, 6))}
+          aria-label="Pairing code"
+        />
+        <button
+          type="button"
+          disabled={pairing || pairCode.length !== 6}
+          onClick={() => void pair()}
+          className="min-h-12 w-56 rounded-xl px-4 text-lg font-bold text-white disabled:opacity-40"
+          style={{ background: "#0f172a" }}
+        >
+          {pairing ? "Pairing…" : "Pair this phone"}
+        </button>
+        {pairError ? <p className="max-w-md text-sm font-semibold" style={{ color: "#dc2626" }}>{pairError}</p> : null}
+        {geoError ? <p className="max-w-md text-sm" style={{ color: "#64748b" }}>{geoError}</p> : null}
       </main>
     );
   }

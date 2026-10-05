@@ -1,4 +1,4 @@
-import { createHash, randomBytes, webcrypto } from "crypto";
+import { createHash, randomBytes, randomInt, webcrypto } from "crypto";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { mergePunchAttempt, type PunchAttempt } from "@/lib/punchAttempts";
 
@@ -323,8 +323,120 @@ export async function listPunchDisplays() {
     .select("id, label, created_by, created_at, last_seen_at")
     .eq("tenant_id", ctx.tenantId)
     .is("revoked_at", null)
+    // A screen still waiting for its pairing code is not a screen yet.
+    .is("pairing_code_hash", null)
     .order("created_at", { ascending: false });
   return error ? null : data ?? [];
+}
+
+// ------------------------------------------------------------ pairing code
+
+const PAIRING_TTL_MS = 10 * 60_000;
+const PAIRING_MAX_TRIES = 5;
+
+const pairHash = (code: string) => sha(`punch-pair|${code}`);
+
+/**
+ * Start pairing a gate screen (director, 5 Oct 2026): a one-time 6-digit
+ * code, valid 10 minutes, so the gate phone is switched on without anybody
+ * signing in on it. Only one pairing is open at a time — starting another
+ * cancels the last — which is also what makes five wrong tries enough to
+ * stop guessing: they all count against the one open code.
+ */
+export async function startScreenPairing(
+  label: string,
+  by: string,
+): Promise<{ ok: true; code: string; expiresAt: string } | { ok: false; error: string }> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "School database unavailable" };
+  const now = new Date();
+  await ctx.sb
+    .from("staff_punch_displays")
+    .update({ revoked_at: now.toISOString(), pairing_code_hash: null })
+    .eq("tenant_id", ctx.tenantId)
+    .is("revoked_at", null)
+    .not("pairing_code_hash", "is", null);
+  const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
+  const expiresAt = new Date(now.getTime() + PAIRING_TTL_MS).toISOString();
+  const { error } = await ctx.sb.from("staff_punch_displays").insert({
+    tenant_id: ctx.tenantId,
+    // A placeholder nobody holds: the row shows nothing until paired.
+    token_hash: sha(randomBytes(24).toString("base64url")),
+    label: label.slice(0, 80) || "Gate phone",
+    created_by: by,
+    pairing_code_hash: pairHash(code),
+    pairing_expires_at: expiresAt,
+    pairing_attempts: 0,
+  });
+  return error ? { ok: false, error: error.message } : { ok: true, code, expiresAt };
+}
+
+/** The gate phone types the code — inside the school, checked by the caller. */
+export async function completeScreenPairing(
+  raw: unknown,
+): Promise<{ ok: true; token: string; label: string } | { ok: false; error: string; status: number }> {
+  const code = String(raw ?? "").replace(/\D/g, "");
+  if (code.length !== 6) return { ok: false, error: "Type the 6-digit pairing code from the office.", status: 400 };
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "School database unavailable", status: 503 };
+  const { data, error } = await ctx.sb
+    .from("staff_punch_displays")
+    .select("id, label, pairing_code_hash, pairing_expires_at, pairing_attempts")
+    .eq("tenant_id", ctx.tenantId)
+    .is("revoked_at", null)
+    .not("pairing_code_hash", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) return { ok: false, error: "Could not check the code right now — try again.", status: 503 };
+  const row = data as {
+    id: string;
+    label: string;
+    pairing_code_hash: string;
+    pairing_expires_at: string | null;
+    pairing_attempts: number | null;
+  } | null;
+  const expired = !row || !row.pairing_expires_at || Date.parse(row.pairing_expires_at) < Date.now();
+  if (expired) {
+    return { ok: false, error: "No pairing code is open. Ask the office to press “Pair a gate screen” again.", status: 404 };
+  }
+  if (row.pairing_code_hash !== pairHash(code)) {
+    const tries = (row.pairing_attempts ?? 0) + 1;
+    await ctx.sb
+      .from("staff_punch_displays")
+      .update(
+        tries >= PAIRING_MAX_TRIES
+          ? { pairing_attempts: tries, revoked_at: new Date().toISOString(), pairing_code_hash: null }
+          : { pairing_attempts: tries },
+      )
+      .eq("id", row.id);
+    return {
+      ok: false,
+      error:
+        tries >= PAIRING_MAX_TRIES
+          ? "Too many wrong codes — this pairing is cancelled. Ask the office for a new one."
+          : `That code is not right (${PAIRING_MAX_TRIES - tries} tries left).`,
+      status: 403,
+    };
+  }
+  const token = randomBytes(24).toString("base64url");
+  // Conditional on the code still being open: two phones typing the same
+  // code at once cannot both become screens.
+  const { data: done, error: upErr } = await ctx.sb
+    .from("staff_punch_displays")
+    .update({
+      token_hash: sha(token),
+      pairing_code_hash: null,
+      pairing_expires_at: null,
+      last_seen_at: new Date().toISOString(),
+    })
+    .eq("id", row.id)
+    .eq("pairing_code_hash", pairHash(code))
+    .select("id");
+  if (upErr || !done || done.length === 0) {
+    return { ok: false, error: "This code was just used. Ask the office for a new one.", status: 409 };
+  }
+  return { ok: true, token, label: String(row.label || "Gate phone") };
 }
 
 export async function revokePunchDisplay(id: string): Promise<boolean> {
