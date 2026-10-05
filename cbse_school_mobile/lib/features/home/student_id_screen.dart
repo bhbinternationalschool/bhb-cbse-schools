@@ -78,7 +78,7 @@ class StudentIdScreen extends StatelessWidget {
                     Text(child.classLabel, style: AppText.bodySmallMuted),
                     if (guardianName.isNotEmpty)
                       Text(
-                        "Guardian: $guardianName",
+                        context.l10n.homeGuardianName(guardianName),
                         style: AppText.labelMediumMuted,
                       ),
                     const SizedBox(height: 18),

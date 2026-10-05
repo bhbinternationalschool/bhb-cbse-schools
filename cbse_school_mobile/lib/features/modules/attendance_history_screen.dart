@@ -11,6 +11,14 @@ const _statusMeta = {
   "L": ("Late", AppColors.warning),
 };
 
+/// The on-screen word for a register mark; the map above keeps the colour.
+String? _statusLabel(BuildContext context, String status) => switch (status) {
+  "P" => context.l10n.modAttendancePresent,
+  "A" => context.l10n.modAttendanceAbsent,
+  "L" => context.l10n.modAttendanceLate,
+  _ => null,
+};
+
 class AttendanceHistoryScreen extends StatelessWidget {
   const AttendanceHistoryScreen({
     super.key,
@@ -24,7 +32,7 @@ class AttendanceHistoryScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<AttendanceHistory>(
-      title: "Attendance",
+      title: context.l10n.modAttendanceTitle,
       subtitle: child.fullName,
       load: () => api.fetchAttendanceHistory(child.id),
       emptyIcon: Icons.event_available_outlined,
@@ -37,19 +45,19 @@ class AttendanceHistoryScreen extends StatelessWidget {
           Row(
             children: [
               _StatCard(
-                label: "Present",
+                label: context.l10n.modAttendancePresent,
                 value: history.presentDays,
                 color: AppColors.success,
               ),
               const SizedBox(width: 8),
               _StatCard(
-                label: "Absent",
+                label: context.l10n.modAttendanceAbsent,
                 value: history.absentDays,
                 color: AppColors.danger,
               ),
               const SizedBox(width: 8),
               _StatCard(
-                label: "Late",
+                label: context.l10n.modAttendanceLate,
                 value: history.lateDays,
                 color: AppColors.warning,
               ),
@@ -88,7 +96,7 @@ class AttendanceHistoryScreen extends StatelessWidget {
                             ),
                           ),
                           Text(
-                            _statusMeta[e.status]?.$1 ?? e.status,
+                            _statusLabel(context, e.status) ?? e.status,
                             style: AppText.labelLarge.copyWith(
                               color:
                                   _statusMeta[e.status]?.$2 ?? AppColors.muted,

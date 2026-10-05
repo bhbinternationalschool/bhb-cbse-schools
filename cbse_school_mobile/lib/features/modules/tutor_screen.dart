@@ -12,6 +12,7 @@ import "video_player_screen.dart";
 import "../../core/i18n/locale_controller.dart";
 import "../../core/billing/play_billing.dart";
 import "../../core/config/app_config.dart";
+import "../../l10n/app_localizations.dart";
 
 /// What the tutor is told about the child and, when opened from a
 /// homework item, the assignment.
@@ -80,31 +81,17 @@ class _Msg {
   bool reported = false;
 }
 
-/// The few UI strings a Hindi-first parent must be able to read.
-const _hi = <String, String>{
-  "watch": "वीडियो देखें",
-  "videosTitle": "इस विषय के वीडियो",
-  "search": "YouTube पर खोजें",
-  "noVideos": "अभी कोई वीडियो नहीं मिला — YouTube पर खोजें।",
-  "hint_prompt": "जैसे: भिन्न कैसे समझाऊँ?",
-  "teach_prompt": "जैसे: कक्षा 5 के लिए प्रकाश संश्लेषण सिखाइए",
-  "examples_prompt": "जैसे: भाग के तीन हल किए हुए उदाहरण",
-  "practice_prompt": "जैसे: कक्षा 4 के लिए काल पर 5 प्रश्न",
-  "score_prompt": "प्रश्न और बच्चे के उत्तर यहाँ लिखें",
-  "homework_prompt": "जैसे: आज के गणित के होमवर्क में मदद",
-  "exam_prompt": "जैसे: कक्षा 3 की EVS यूनिट टेस्ट की तैयारी",
-  "report": "शिकायत करें",
-  "reported": "भेज दिया",
-  "reportTitle": "इस उत्तर की शिकायत करें",
-  "reportBody": "स्कूल इसे पढ़ेगा। बताइए क्या गलत था।",
-  "reportWrong": "उत्तर गलत है",
-  "reportInappropriate": "अनुचित या असुरक्षित",
-  "reportConfusing": "समझ नहीं आया",
-  "reportOther": "कुछ और",
-  "reportNote": "आप कुछ लिखना चाहें तो (वैकल्पिक)",
-  "reportSend": "भेजें",
-  "reportCancel": "रहने दें",
-  "reportThanks": "धन्यवाद — स्कूल इसे देखेगा।",
+/// The composer's example for each mode, in the app's language. The server
+/// sends an English example too; it is the fallback for a mode added later.
+String? _promptFor(L l, String mode) => switch (mode) {
+  "hint" => l.tutPromptHint,
+  "teach" => l.tutPromptTeach,
+  "examples" => l.tutPromptExamples,
+  "practice" => l.tutPromptPractice,
+  "score" => l.tutPromptScore,
+  "homework" => l.tutPromptHomework,
+  "exam" => l.tutPromptExam,
+  _ => null,
 };
 
 class _TutorScreenState extends State<TutorScreen> {
@@ -158,7 +145,6 @@ class _TutorScreenState extends State<TutorScreen> {
       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
     builder: (context) => _GuideSheet(
-      hindi: _language != "en",
       childFirstName: widget.context.child.fullName.split(" ").first,
     ),
   );
@@ -183,7 +169,7 @@ class _TutorScreenState extends State<TutorScreen> {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
       if (mounted) {
-        setState(() => _error = "Could not reach the school server.");
+        setState(() => _error = context.l10n.couldNotReachTheSchoolServer);
       }
     }
   }
@@ -218,8 +204,10 @@ class _TutorScreenState extends State<TutorScreen> {
     if (mode != null && mode.paid && !status.allowance.hasPass) {
       Haptics.warning();
       _showPasses(
-        reason:
-            "${mode.label} is part of the full tutor. Get a pass for ${widget.context.child.fullName.split(" ").first} — a day, a week or a month — to unlock it.",
+        reason: context.l10n.tutModeNeedsPassReason(
+          mode.label,
+          widget.context.child.fullName.split(" ").first,
+        ),
       );
       return;
     }
@@ -286,7 +274,7 @@ class _TutorScreenState extends State<TutorScreen> {
     } catch (_) {
       if (!mounted) return;
       setState(() => _messages.removeLast());
-      _toast("Could not reach the tutor. Check your connection.");
+      _toast(context.l10n.tutCouldNotReachTheTutor);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -336,8 +324,7 @@ class _TutorScreenState extends State<TutorScreen> {
   /// safety complaint silently dropped is worse than no button at all.
   Future<void> _reportReply(_Msg msg) async {
     if (msg.role != "assistant" || msg.text.trim().isEmpty) return;
-    final hindi = _language != "en";
-    String t(String key, String en) => hindi ? _hi[key]! : en;
+    final l = context.l10n;
 
     final note = TextEditingController();
     final chosen = await showModalBottomSheet<String>(
@@ -354,26 +341,20 @@ class _TutorScreenState extends State<TutorScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              t("reportTitle", "Report this reply"),
-              style: AppText.titleMedium,
-            ),
+            Text(l.tutReportTitle, style: AppText.titleMedium),
             const SizedBox(height: 4),
-            Text(
-              t("reportBody", "The school will read this. Tell us what was wrong."),
-              style: AppText.bodySmallMuted,
-            ),
+            Text(l.tutReportBody, style: AppText.bodySmallMuted),
             const SizedBox(height: 12),
-            for (final c in const [
-              ("wrong", "reportWrong", "The answer is wrong"),
-              ("inappropriate", "reportInappropriate", "Inappropriate or unsafe"),
-              ("confusing", "reportConfusing", "Confusing"),
-              ("other", "reportOther", "Something else"),
+            for (final c in [
+              ("wrong", l.tutReportWrong),
+              ("inappropriate", l.tutReportInappropriate),
+              ("confusing", l.tutReportConfusing),
+              ("other", l.tutReportOther),
             ])
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 dense: true,
-                title: Text(t(c.$2, c.$3), style: AppText.bodyMedium),
+                title: Text(c.$2, style: AppText.bodyMedium),
                 onTap: () => Navigator.pop(sheet, c.$1),
               ),
             const SizedBox(height: 8),
@@ -382,7 +363,7 @@ class _TutorScreenState extends State<TutorScreen> {
               maxLines: 2,
               maxLength: 500,
               decoration: InputDecoration(
-                labelText: t("reportNote", "Anything to add (optional)"),
+                labelText: l.tutReportNote,
                 border: const OutlineInputBorder(),
               ),
             ),
@@ -390,7 +371,7 @@ class _TutorScreenState extends State<TutorScreen> {
               alignment: Alignment.centerRight,
               child: TextButton(
                 onPressed: () => Navigator.pop(sheet),
-                child: Text(t("reportCancel", "Cancel")),
+                child: Text(l.cancel),
               ),
             ),
           ],
@@ -417,13 +398,13 @@ class _TutorScreenState extends State<TutorScreen> {
       );
       if (!mounted) return;
       setState(() => msg.reported = true);
-      _toast(t("reportThanks", "Thank you — the school will look at this."));
+      _toast(context.l10n.tutReportThanks);
     } on ApiException catch (e) {
       if (!mounted) return;
       _toast(e.message);
     } catch (_) {
       if (!mounted) return;
-      _toast("Could not send the report. Please try again.");
+      _toast(context.l10n.tutCouldNotSendReport);
     }
   }
 
@@ -483,7 +464,7 @@ class _TutorScreenState extends State<TutorScreen> {
               label: Text(
                 status.allowance.hasPass
                     ? status.allowance.validLabel
-                    : "Get a pass",
+                    : context.l10n.tutGetAPass,
               ),
               style: TextButton.styleFrom(foregroundColor: Colors.white),
             ),
@@ -541,9 +522,7 @@ class _TutorScreenState extends State<TutorScreen> {
                       children: [
                         Expanded(
                           child: Text(
-                            _language == "en"
-                                ? "Reply language"
-                                : "उत्तर की भाषा · Reply language",
+                            context.l10n.tutReplyLanguage,
                             style: AppText.bodySmallMuted,
                           ),
                         ),
@@ -591,7 +570,6 @@ class _TutorScreenState extends State<TutorScreen> {
                             itemBuilder: (context, i) => _Bubble(
                               msg: _messages[i],
                               busy: _busy && i == _messages.length - 1,
-                              hindi: _language != "en",
                               onVideos: _messages[i].topic.isEmpty
                                   ? null
                                   : () => _showVideos(_messages[i].topic),
@@ -601,9 +579,10 @@ class _TutorScreenState extends State<TutorScreen> {
                   ),
                   _Composer(
                     controller: _input,
-                    hint: _language != "en"
-                        ? (_hi["${_mode}_prompt"] ?? "शिक्षक से पूछें…")
-                        : (_modeInfo?.prompt ?? "Ask the tutor…"),
+                    hint:
+                        _promptFor(context.l10n, _mode) ??
+                        _modeInfo?.prompt ??
+                        context.l10n.tutAskTheTutor,
                     busy: _busy,
                     onSend: _send,
                     // Spoken questions are recognised in the reply language;
@@ -700,16 +679,22 @@ class _AllowanceStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = context.l10n;
     final String text;
     if (allowance.hasPass) {
-      text =
-          "Full tutor on for ${allowance.studentFirstName} · ${allowance.validLabel}"
-          "${allowance.passUsedToday >= allowance.passMessagesPerDay ? " · today's limit reached" : ""}";
+      text = allowance.passUsedToday >= allowance.passMessagesPerDay
+          ? l.tutFullTutorOnLimitReached(
+              allowance.studentFirstName,
+              allowance.validLabel,
+            )
+          : l.tutFullTutorOn(allowance.studentFirstName, allowance.validLabel);
     } else if (mode != null && mode!.paid) {
-      text = "${mode!.label} needs a pass — hints stay free";
+      text = l.tutModeNeedsPass(mode!.label);
     } else {
-      text =
-          "${allowance.freeLeft} of ${allowance.freeHintsPerDay} free hints left today";
+      text = l.tutFreeHintsLeft(
+        allowance.freeLeft.toString(),
+        allowance.freeHintsPerDay.toString(),
+      );
     }
     return Padding(
       padding: const EdgeInsets.fromLTRB(
@@ -764,7 +749,7 @@ class _Welcome extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                mode?.label ?? "Tutor",
+                mode?.label ?? context.l10n.tutTutor,
                 style: AppText.titleSmallInk.copyWith(
                   fontWeight: FontWeight.w700,
                 ),
@@ -800,14 +785,12 @@ class _Bubble extends StatelessWidget {
   const _Bubble({
     required this.msg,
     required this.busy,
-    required this.hindi,
     this.onVideos,
     this.onReport,
   });
 
   final _Msg msg;
   final bool busy;
-  final bool hindi;
   final VoidCallback? onVideos;
   final VoidCallback? onReport;
 
@@ -867,7 +850,9 @@ class _Bubble extends StatelessWidget {
                     Row(
                       children: [
                         Text(
-                          msg.charge == "free" ? "Free hint" : "Full tutor",
+                          msg.charge == "free"
+                              ? context.l10n.tutFreeHint
+                              : context.l10n.tutFullTutor,
                           style: AppText.labelSmallMuted,
                         ),
                         const Spacer(),
@@ -890,7 +875,7 @@ class _Bubble extends StatelessWidget {
                                   ),
                                   const SizedBox(width: 4),
                                   Text(
-                                    hindi ? _hi["watch"]! : "Watch videos",
+                                    context.l10n.tutWatchVideos,
                                     style: AppText.labelMedium.copyWith(
                                       color: AppColors.danger,
                                     ),
@@ -926,8 +911,8 @@ class _Bubble extends StatelessWidget {
                                   const SizedBox(width: 4),
                                   Text(
                                     msg.reported
-                                        ? (hindi ? _hi["reported"]! : "Reported")
-                                        : (hindi ? _hi["report"]! : "Report"),
+                                        ? context.l10n.tutReported
+                                        : context.l10n.tutReport,
                                     style: AppText.labelMediumMuted,
                                   ),
                                 ],
@@ -1035,7 +1020,6 @@ class _ComposerState extends State<_Composer> {
 
   @override
   Widget build(BuildContext context) {
-    final hindi = widget.speechLocale.startsWith("hi");
     return SafeArea(
       top: false,
       child: Padding(
@@ -1059,7 +1043,9 @@ class _ComposerState extends State<_Composer> {
                 ),
               ),
               child: IconButton(
-                tooltip: _listening ? "Stop" : "Speak your question",
+                tooltip: _listening
+                    ? context.l10n.tutStop
+                    : context.l10n.tutSpeakYourQuestion,
                 onPressed: widget.busy ? null : _toggleMic,
                 icon: Icon(
                   _listening ? Icons.stop : Icons.mic_none,
@@ -1077,7 +1063,7 @@ class _ComposerState extends State<_Composer> {
                 onSubmitted: (_) => widget.onSend(),
                 decoration: InputDecoration(
                   hintText: _listening
-                      ? (hindi ? "सुन रहा हूँ… बोलिए" : "Listening… speak now")
+                      ? context.l10n.tutListeningSpeakNow
                       : widget.hint,
                   filled: true,
                   fillColor: Colors.white,
@@ -1205,8 +1191,7 @@ class _PassSheetState extends State<_PassSheet> {
             SnackBar(
               duration: const Duration(seconds: 8),
               content: Text(
-                catalogue?.problem ??
-                    "Still asking Google Play about the passes. Try again in a moment.",
+                catalogue?.problem ?? context.l10n.tutStillAskingGooglePlay,
               ),
             ),
           );
@@ -1220,15 +1205,14 @@ class _PassSheetState extends State<_PassSheet> {
         if (mounted) {
           setState(() => _buying = null);
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("Google Play could not start the payment."),
-            ),
+            SnackBar(content: Text(context.l10n.tutGooglePlayCouldNotStart)),
           );
         }
       }
       return;
     }
 
+    final l = context.l10n;
     try {
       final r = await widget.api.buyTutorPass(
         planCode: plan.code,
@@ -1236,11 +1220,11 @@ class _PassSheetState extends State<_PassSheet> {
       );
       final uri = Uri.tryParse(r.checkoutUrl);
       if (uri == null) {
-        throw ApiException("Could not open the payment page", 502);
+        throw ApiException(l.tutCouldNotOpenPaymentPage, 502);
       }
       final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
       if (!opened) {
-        throw ApiException("No browser available to open the payment page", 0);
+        throw ApiException(l.tutNoBrowserForPaymentPage, 0);
       }
       Haptics.success();
       if (mounted) Navigator.pop(context, true);
@@ -1281,7 +1265,7 @@ class _PassSheetState extends State<_PassSheet> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              "Tutor pass for $first",
+              context.l10n.tutPassFor(first),
               style: AppText.titleMediumInk.copyWith(
                 fontWeight: FontWeight.w700,
               ),
@@ -1289,7 +1273,7 @@ class _PassSheetState extends State<_PassSheet> {
             const SizedBox(height: Space.xs),
             Text(
               widget.reason ??
-                  "Unlock the full tutor for $first — teaching, worked examples, practice questions, answer checking, homework help and exam preparation, all at the $classLabel level.",
+                  context.l10n.tutUnlockFullTutor(first, classLabel),
               style: AppText.bodyMediumInk.copyWith(height: 1.45),
             ),
             if (a.hasPass) ...[
@@ -1303,7 +1287,12 @@ class _PassSheetState extends State<_PassSheet> {
                   ),
                   const SizedBox(width: 6),
                   Text(
-                    "${a.passPlanLabel.isNotEmpty ? "${a.passPlanLabel} pass · " : ""}${a.validLabel}. A new pass starts when this one ends.",
+                    a.passPlanLabel.isNotEmpty
+                        ? context.l10n.tutCurrentPassWithPlan(
+                            a.passPlanLabel,
+                            a.validLabel,
+                          )
+                        : context.l10n.tutCurrentPass(a.validLabel),
                     style: AppText.bodySmall.copyWith(color: AppColors.success),
                   ),
                 ],
@@ -1322,13 +1311,22 @@ class _PassSheetState extends State<_PassSheet> {
             if (pending.isNotEmpty) ...[
               const SizedBox(height: Space.sm),
               Text(
-                "Waiting for the bank: ${pending.map((o) => "${o.days}-day pass (${o.amountLabel})").join(", ")}. The pass switches on by itself once the payment is confirmed.",
+                context.l10n.tutWaitingForBank(
+                  pending
+                      .map(
+                        (o) => context.l10n.tutPendingPass(
+                          o.days.toString(),
+                          o.amountLabel,
+                        ),
+                      )
+                      .join(", "),
+                ),
                 style: AppText.bodySmallMuted.copyWith(height: 1.4),
               ),
             ],
             const SizedBox(height: Space.sm),
             Text(
-              "A pass is for one child and covers $first's class ($classLabel) only — a brother or sister needs their own pass. Fair use: up to 60 tutor messages a day. Hints stay free every day.",
+              context.l10n.tutPassTerms(first, classLabel),
               style: AppText.labelMediumMuted.copyWith(height: 1.4),
             ),
           ],
@@ -1374,7 +1372,11 @@ class _PlanTile extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      "Full tutor for ${plan.days == 1 ? "one day" : "${plan.days} days"}",
+                      plan.days == 1
+                          ? context.l10n.tutFullTutorForOneDay
+                          : context.l10n.tutFullTutorForDays(
+                              plan.days.toString(),
+                            ),
                       style: AppText.labelMediumMuted,
                     ),
                   ],
@@ -1489,8 +1491,6 @@ class _VideosSheetState extends State<_VideosSheet> {
   TutorVideos? _videos;
   String? _error;
 
-  bool get _hindi => widget.language != "en";
-
   @override
   void initState() {
     super.initState();
@@ -1509,7 +1509,7 @@ class _VideosSheetState extends State<_VideosSheet> {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
       if (mounted) {
-        setState(() => _error = "Could not reach the school server.");
+        setState(() => _error = context.l10n.couldNotReachTheSchoolServer);
       }
     }
   }
@@ -1535,18 +1535,12 @@ class _VideosSheetState extends State<_VideosSheet> {
   String _sourceNote(List<TutorVideo> items) {
     final diksha = items.where((i) => i.fromDiksha).length;
     if (diksha > 0 && diksha == items.length) {
-      return _hindi
-          ? "ये दीक्षा के वीडियो हैं — NCERT और CBSE पाठों का भारत सरकार का मंच।"
-          : "These are from DIKSHA, the Government of India's platform for NCERT and CBSE lessons.";
+      return context.l10n.tutVideosAllDiksha;
     }
     if (diksha > 0) {
-      return _hindi
-          ? "“DIKSHA” वाले वीडियो भारत सरकार के मंच से हैं; बाकी YouTube के हैं, स्कूल के नहीं — देखकर ही भरोसा करें।"
-          : "Videos marked DIKSHA are from the Government of India's lesson platform; the rest are from YouTube, not the school — judge them as you watch.";
+      return context.l10n.tutVideosSomeDiksha;
     }
-    return _hindi
-        ? "वीडियो YouTube के हैं, स्कूल के नहीं — देखकर ही भरोसा करें।"
-        : "Videos are from YouTube, not the school — judge them as you watch.";
+    return context.l10n.tutVideosFromYoutube;
   }
 
   @override
@@ -1560,7 +1554,7 @@ class _VideosSheetState extends State<_VideosSheet> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              _hindi ? _hi["videosTitle"]! : "Videos on this topic",
+              context.l10n.tutVideosOnThisTopic,
               style: AppText.titleMediumInk.copyWith(
                 fontWeight: FontWeight.w700,
               ),
@@ -1585,9 +1579,7 @@ class _VideosSheetState extends State<_VideosSheet> {
             else ...[
               if (v!.items.isEmpty)
                 Text(
-                  _hindi
-                      ? _hi["noVideos"]!
-                      : "No videos found yet — search YouTube instead.",
+                  context.l10n.tutNoVideosFound,
                   style: AppText.bodyMediumInk,
                 ),
               for (final item in v.items) ...[
@@ -1598,7 +1590,7 @@ class _VideosSheetState extends State<_VideosSheet> {
               OutlinedButton.icon(
                 onPressed: () => _open(v.searchUrl),
                 icon: const Icon(Icons.search, size: 18),
-                label: Text(_hindi ? _hi["search"]! : "Search on YouTube"),
+                label: Text(context.l10n.tutSearchOnYoutube),
               ),
               const SizedBox(height: Space.sm),
               Text(_sourceNote(v.items), style: AppText.labelMediumMuted),
@@ -1680,99 +1672,32 @@ class _VideoTile extends StatelessWidget {
 /// The tuition routine, in the parent's language: what to do each day
 /// with the tutor instead of paying for a tuition teacher.
 class _GuideSheet extends StatelessWidget {
-  const _GuideSheet({required this.hindi, required this.childFirstName});
+  const _GuideSheet({required this.childFirstName});
 
-  final bool hindi;
   final String childFirstName;
 
   @override
   Widget build(BuildContext context) {
     final n = childFirstName;
-    final steps = hindi
-        ? <(IconData, String, String)>[
-            (
-              Icons.menu_book_outlined,
-              "1. आज का पाठ (10 मिनट)",
-              "\"Teach a topic\" चुनें और आज स्कूल में पढ़ाया विषय लिखें — जैसे \"भिन्न\"। ट्यूटर $n की कक्षा के स्तर पर छोटा पाठ देगा।",
-            ),
-            (
-              Icons.functions,
-              "2. हल किए उदाहरण (5 मिनट)",
-              "\"Worked examples\" में वही विषय लिखें। हर कदम दिखेगा — $n के साथ बैठकर पढ़ें।",
-            ),
-            (
-              Icons.edit_note,
-              "3. अभ्यास (10 मिनट)",
-              "\"Practice questions\" से 5 प्रश्न लें। $n उन्हें कॉपी में हल करे — उत्तर तब तक नहीं दिखेंगे।",
-            ),
-            (
-              Icons.fact_check_outlined,
-              "4. उत्तर जाँच (5 मिनट)",
-              "\"Check answers\" में प्रश्न और $n के उत्तर लिखें। अंक और क्या सुधारना है, दोनों मिलेंगे।",
-            ),
-            (
-              Icons.home_work_outlined,
-              "5. होमवर्क",
-              "Homework स्क्रीन पर किसी भी काम के आगे \"Ask tutor\" दबाएँ — वह काम ट्यूटर के सामने पहले से होगा।",
-            ),
-            (
-              Icons.event_available_outlined,
-              "6. परीक्षा से पहले",
-              "\"Exam preparation\" में विषय और तारीख लिखें — दोहराने की सूची, दिन-वार योजना और संभावित प्रश्न मिलेंगे।",
-            ),
-            (
-              Icons.play_circle_outline,
-              "7. समझ न आए तो वीडियो",
-              "हर उत्तर के नीचे \"वीडियो देखें\" — उसी विषय के हिंदी वीडियो, ऐप के अंदर ही चलते हैं।",
-            ),
-            (
-              Icons.lightbulb_outline,
-              "मुफ़्त संकेत",
-              "\"Hints\" रोज़ 20 बार मुफ़्त हैं — जब $n अटके तो अगला कदम पूछें। पूरा ट्यूटर पास से खुलता है: एक दिन, हफ़्ता या महीना, एक बच्चे के लिए।",
-            ),
-          ]
-        : <(IconData, String, String)>[
-            (
-              Icons.menu_book_outlined,
-              "1. Today's lesson (10 min)",
-              "Choose \"Teach a topic\" and type what was taught in school today, e.g. \"fractions\". The tutor gives a short lesson at $n's class level.",
-            ),
-            (
-              Icons.functions,
-              "2. Worked examples (5 min)",
-              "In \"Worked examples\", type the same topic. Every step is shown — read them with $n.",
-            ),
-            (
-              Icons.edit_note,
-              "3. Practice (10 min)",
-              "\"Practice questions\" gives 5 questions. $n solves them in a notebook — answers stay hidden until you ask.",
-            ),
-            (
-              Icons.fact_check_outlined,
-              "4. Check answers (5 min)",
-              "In \"Check answers\", type the questions with $n's answers. You get marks and what to fix.",
-            ),
-            (
-              Icons.home_work_outlined,
-              "5. Homework",
-              "On the Homework screen, tap \"Ask tutor\" next to any item — that assignment is already in front of the tutor.",
-            ),
-            (
-              Icons.event_available_outlined,
-              "6. Before a test",
-              "In \"Exam preparation\", type the subject and date — you get a revision list, a day-wise plan and likely questions.",
-            ),
-            (
-              Icons.play_circle_outline,
-              "7. Stuck? Watch a video",
-              "Under every reply, \"Watch videos\" finds videos on that topic and plays them inside the app.",
-            ),
-            (
-              Icons.lightbulb_outline,
-              "Free hints",
-              "\"Hints\" are free, 20 a day — when $n is stuck, ask for the next step. The full tutor opens with a pass: a day, a week or a month, for one child.",
-            ),
-          ];
+    final l = context.l10n;
+    final steps = <(IconData, String, String)>[
+      (Icons.menu_book_outlined, l.tutGuideStep1Title, l.tutGuideStep1Body(n)),
+      (Icons.functions, l.tutGuideStep2Title, l.tutGuideStep2Body(n)),
+      (Icons.edit_note, l.tutGuideStep3Title, l.tutGuideStep3Body(n)),
+      (Icons.fact_check_outlined, l.tutGuideStep4Title, l.tutGuideStep4Body(n)),
+      (Icons.home_work_outlined, l.tutGuideStep5Title, l.tutGuideStep5Body),
+      (
+        Icons.event_available_outlined,
+        l.tutGuideStep6Title,
+        l.tutGuideStep6Body,
+      ),
+      (Icons.play_circle_outline, l.tutGuideStep7Title, l.tutGuideStep7Body),
+      (
+        Icons.lightbulb_outline,
+        l.tutGuideFreeHintsTitle,
+        l.tutGuideFreeHintsBody(n),
+      ),
+    ];
     return DraggableScrollableSheet(
       expand: false,
       initialChildSize: 0.86,
@@ -1783,16 +1708,12 @@ class _GuideSheet extends StatelessWidget {
           padding: Insets.sheet,
           children: [
             Text(
-              hindi
-                  ? "ट्यूशन की ज़रूरत नहीं — ट्यूटर से रोज़ 30 मिनट"
-                  : "No tuition needed — 30 minutes a day with the tutor",
+              l.tutGuideHeading,
               style: AppText.titleLargeInk.copyWith(height: 1.3),
             ),
             const SizedBox(height: Space.xs),
             Text(
-              hindi
-                  ? "$n के साथ बैठें, यह क्रम रोज़ दोहराएँ। ट्यूटर उसकी कक्षा (CBSE) के हिसाब से पढ़ाता है, हिंदी या अंग्रेज़ी में।"
-                  : "Sit with $n and follow this routine every day. The tutor teaches at $n's class level (CBSE), in Hindi or English.",
+              l.tutGuideIntro(n),
               style: AppText.bodyMediumMuted.copyWith(height: 1.45),
             ),
             const SizedBox(height: Space.lg),
@@ -1838,7 +1759,7 @@ class _GuideSheet extends StatelessWidget {
             ],
             FilledButton(
               onPressed: () => Navigator.pop(context),
-              child: Text(hindi ? "समझ गया, शुरू करें" : "Got it, let's start"),
+              child: Text(l.tutGuideGotIt),
             ),
           ],
         ),

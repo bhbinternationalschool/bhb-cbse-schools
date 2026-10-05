@@ -17,37 +17,37 @@ class ProfileScreen extends StatelessWidget {
   final ApiClient api;
   final Future<void> Function() onSignOut;
 
-  static const labels = {
-    "guardianName": "Guardian",
-    "mobile": "Registered mobile",
-    "whatsappMobile": "WhatsApp",
-    "altMobile": "Alternate mobile",
-    "email": "Email",
-    "address": "Address",
-    "locality": "Locality",
-    "landmark": "Landmark",
-    "city": "City",
-    "state": "State",
-    "pincode": "PIN code",
+  static Map<String, String> labels(BuildContext context) => {
+    "guardianName": context.l10n.profGuardian,
+    "mobile": context.l10n.profRegisteredMobile,
+    "whatsappMobile": context.l10n.whatsapp,
+    "altMobile": context.l10n.profAlternateMobile,
+    "email": context.l10n.profEmail,
+    "address": context.l10n.profAddress,
+    "locality": context.l10n.profLocality,
+    "landmark": context.l10n.landmark,
+    "city": context.l10n.profCity,
+    "state": context.l10n.profState,
+    "pincode": context.l10n.profPinCode,
   };
 
   @override
   Widget build(BuildContext context) {
     return ModuleShell<ParentProfile>(
-      title: "Profile",
+      title: context.l10n.profProfile,
       load: api.fetchProfile,
       builder: (context, profile, reload) => ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),
         children: [
-          const _SectionTitle("Family"),
+          _SectionTitle(context.l10n.profFamily),
           Card(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  for (final e in labels.entries)
+                  for (final e in labels(context).entries)
                     _Row(label: e.value, value: profile.household[e.key]),
                   const SizedBox(height: 6),
                   Align(
@@ -63,7 +63,7 @@ class ProfileScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          const _SectionTitle("Children"),
+          _SectionTitle(context.l10n.profChildren),
           for (final child in profile.children)
             Card(
               child: ListTile(
@@ -81,9 +81,12 @@ class ProfileScreen extends StatelessWidget {
                   ),
                 ),
                 subtitle: Text(
-                  "${child.classLabel} · Adm. ${child.admissionNo}\n"
-                  "${child.requiredMissing == 0 ? "All required documents in" : "${child.requiredMissing} required document${child.requiredMissing == 1 ? "" : "s"} to upload"}"
-                  " · profile ${child.completeness}% complete",
+                  "${context.l10n.profClassAdmNo(child.classLabel, child.admissionNo)}\n"
+                  "${child.requiredMissing == 0
+                      ? context.l10n.profDocsStatusAllIn(child.completeness.toString())
+                      : child.requiredMissing == 1
+                      ? context.l10n.profDocsStatusOneMissing(child.completeness.toString())
+                      : context.l10n.profDocsStatusMissing(child.requiredMissing.toString(), child.completeness.toString())}",
                   style: AppText.labelMedium.copyWith(
                     height: 1.4,
                     color: child.requiredMissing == 0
@@ -201,8 +204,9 @@ class _HouseholdFormState extends State<_HouseholdForm> {
             ),
             const SizedBox(height: 4),
             Text(
-              "Registered mobile ${widget.profile.household["mobile"]} is your sign-in and "
-              "can only be changed at the office.",
+              context.l10n.profRegisteredMobileNote(
+                widget.profile.household["mobile"],
+              ),
               style: AppText.bodySmallMuted,
             ),
             const SizedBox(height: 12),
@@ -219,7 +223,7 @@ class _HouseholdFormState extends State<_HouseholdForm> {
                     : TextCapitalization.words,
                 maxLines: k == "address" ? 2 : 1,
                 decoration: InputDecoration(
-                  labelText: ProfileScreen.labels[k] ?? k,
+                  labelText: ProfileScreen.labels(context)[k] ?? k,
                 ),
               ),
               const SizedBox(height: 10),
@@ -229,7 +233,7 @@ class _HouseholdFormState extends State<_HouseholdForm> {
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(46),
               ),
-              child: Text(_busy ? "Saving…" : "Save"),
+              child: Text(_busy ? context.l10n.profSaving : context.l10n.save),
             ),
           ],
         ),

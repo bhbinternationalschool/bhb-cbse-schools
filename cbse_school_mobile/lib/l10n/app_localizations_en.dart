@@ -1151,4 +1151,1284 @@ class LEn extends L {
 
   @override
   String get updateRestart => 'Restart';
+
+  @override
+  String get oclOnlineClasses => 'Online classes';
+
+  @override
+  String oclNoClassScheduled(String name) {
+    return 'No online class is scheduled for $name\'s section. You will get a notification when the teacher schedules one.';
+  }
+
+  @override
+  String get oclComingUp => 'Coming up';
+
+  @override
+  String get oclEarlier => 'Earlier';
+
+  @override
+  String get oclJoinButtonNote =>
+      'The Join button works from 10 minutes before the class. It opens Google Meet or the app the teacher chose.';
+
+  @override
+  String get oclToday => 'Today';
+
+  @override
+  String get oclTomorrow => 'Tomorrow';
+
+  @override
+  String get oclLive => 'LIVE';
+
+  @override
+  String get oclStarting => 'Starting';
+
+  @override
+  String get oclCancelled => 'Cancelled';
+
+  @override
+  String get oclJoined => 'Joined';
+
+  @override
+  String get oclMissed => 'Missed';
+
+  @override
+  String get oclJoinNow => 'Join now';
+
+  @override
+  String get oclJoin => 'Join';
+
+  @override
+  String oclOpensAt(String time) {
+    return 'Opens at $time';
+  }
+
+  @override
+  String get oclTeacherQuestionsAndMyAnswers =>
+      'Teacher\'s questions & my answers';
+
+  @override
+  String get oclTakeAPhotoOfTheCopy => 'Take a photo of the copy';
+
+  @override
+  String get oclQuestionsFromTheTeacher => 'Questions from the teacher';
+
+  @override
+  String get oclNoQuestionYet =>
+      'The teacher has not asked a question yet. Pull down to refresh.';
+
+  @override
+  String get oclWriteAnswerInCopyNote =>
+      'Write the answer in the copy, then send a clear photo. You can send again until the teacher closes the question.';
+
+  @override
+  String get oclVerdictCorrect => 'Correct ✓';
+
+  @override
+  String get oclVerdictWrong => 'Not correct — try again';
+
+  @override
+  String get oclVerdictPartly => 'Partly right';
+
+  @override
+  String get oclSentWaitingForTeacher => 'Sent · waiting for the teacher';
+
+  @override
+  String oclQuestionNumber(String number) {
+    return 'Question $number';
+  }
+
+  @override
+  String oclQuestionNumberClosed(String number) {
+    return 'Question $number · closed';
+  }
+
+  @override
+  String get oclSending => 'Sending…';
+
+  @override
+  String get oclSendAgain => 'Send again';
+
+  @override
+  String get oclSendAnswerPhoto => 'Send answer photo';
+
+  @override
+  String get tutLibrary => 'Library';
+
+  @override
+  String get tutEBooks => 'E-books';
+
+  @override
+  String get tutGeneralSubject => 'General';
+
+  @override
+  String get tutShelfKey => 'Shelf key';
+
+  @override
+  String tutBookClasses(String classes) {
+    return 'Class $classes';
+  }
+
+  @override
+  String get tutKey => 'Key';
+
+  @override
+  String tutKeyLine(String label, String value) {
+    return '$label: $value';
+  }
+
+  @override
+  String tutKeyCopied(String label) {
+    return '$label copied';
+  }
+
+  @override
+  String get tutPromptHint => 'e.g. How do I explain fractions?';
+
+  @override
+  String get tutPromptTeach => 'e.g. Teach photosynthesis for Class V';
+
+  @override
+  String get tutPromptExamples => 'e.g. Three solved examples of long division';
+
+  @override
+  String get tutPromptPractice => 'e.g. 5 questions on tenses for Class IV';
+
+  @override
+  String get tutPromptScore => 'Paste the questions and your child\'s answers';
+
+  @override
+  String get tutPromptHomework => 'e.g. Help with today\'s maths homework';
+
+  @override
+  String get tutPromptExam => 'e.g. Prepare for the Class III EVS unit test';
+
+  @override
+  String get tutAskTheTutor => 'Ask the tutor…';
+
+  @override
+  String tutModeNeedsPassReason(String mode, String name) {
+    return '$mode is part of the full tutor. Get a pass for $name — a day, a week or a month — to unlock it.';
+  }
+
+  @override
+  String get tutCouldNotReachTheTutor =>
+      'Could not reach the tutor. Check your connection.';
+
+  @override
+  String get tutReportTitle => 'Report this reply';
+
+  @override
+  String get tutReportBody =>
+      'The school will read this. Tell us what was wrong.';
+
+  @override
+  String get tutReportWrong => 'The answer is wrong';
+
+  @override
+  String get tutReportInappropriate => 'Inappropriate or unsafe';
+
+  @override
+  String get tutReportConfusing => 'Confusing';
+
+  @override
+  String get tutReportOther => 'Something else';
+
+  @override
+  String get tutReportNote => 'Anything to add (optional)';
+
+  @override
+  String get tutReportThanks => 'Thank you — the school will look at this.';
+
+  @override
+  String get tutCouldNotSendReport =>
+      'Could not send the report. Please try again.';
+
+  @override
+  String get tutGetAPass => 'Get a pass';
+
+  @override
+  String get tutReplyLanguage => 'Reply language';
+
+  @override
+  String tutFullTutorOn(String name, String valid) {
+    return 'Full tutor on for $name · $valid';
+  }
+
+  @override
+  String tutFullTutorOnLimitReached(String name, String valid) {
+    return 'Full tutor on for $name · $valid · today\'s limit reached';
+  }
+
+  @override
+  String tutModeNeedsPass(String mode) {
+    return '$mode needs a pass — hints stay free';
+  }
+
+  @override
+  String tutFreeHintsLeft(String left, String total) {
+    return '$left of $total free hints left today';
+  }
+
+  @override
+  String get tutTutor => 'Tutor';
+
+  @override
+  String get tutFreeHint => 'Free hint';
+
+  @override
+  String get tutFullTutor => 'Full tutor';
+
+  @override
+  String get tutWatchVideos => 'Watch videos';
+
+  @override
+  String get tutReported => 'Reported';
+
+  @override
+  String get tutReport => 'Report';
+
+  @override
+  String get tutStop => 'Stop';
+
+  @override
+  String get tutSpeakYourQuestion => 'Speak your question';
+
+  @override
+  String get tutListeningSpeakNow => 'Listening… speak now';
+
+  @override
+  String get tutStillAskingGooglePlay =>
+      'Still asking Google Play about the passes. Try again in a moment.';
+
+  @override
+  String get tutGooglePlayCouldNotStart =>
+      'Google Play could not start the payment.';
+
+  @override
+  String get tutCouldNotOpenPaymentPage => 'Could not open the payment page';
+
+  @override
+  String get tutNoBrowserForPaymentPage =>
+      'No browser available to open the payment page';
+
+  @override
+  String tutPassFor(String name) {
+    return 'Tutor pass for $name';
+  }
+
+  @override
+  String tutUnlockFullTutor(String name, String classLabel) {
+    return 'Unlock the full tutor for $name — teaching, worked examples, practice questions, answer checking, homework help and exam preparation, all at the $classLabel level.';
+  }
+
+  @override
+  String tutCurrentPassWithPlan(String plan, String valid) {
+    return '$plan pass · $valid. A new pass starts when this one ends.';
+  }
+
+  @override
+  String tutCurrentPass(String valid) {
+    return '$valid. A new pass starts when this one ends.';
+  }
+
+  @override
+  String tutPendingPass(String days, String amount) {
+    return '$days-day pass ($amount)';
+  }
+
+  @override
+  String tutWaitingForBank(String passes) {
+    return 'Waiting for the bank: $passes. The pass switches on by itself once the payment is confirmed.';
+  }
+
+  @override
+  String tutPassTerms(String name, String classLabel) {
+    return 'A pass is for one child and covers $name\'s class ($classLabel) only — a brother or sister needs their own pass. Fair use: up to 60 tutor messages a day. Hints stay free every day.';
+  }
+
+  @override
+  String get tutFullTutorForOneDay => 'Full tutor for one day';
+
+  @override
+  String tutFullTutorForDays(String days) {
+    return 'Full tutor for $days days';
+  }
+
+  @override
+  String get tutVideosAllDiksha =>
+      'These are from DIKSHA, the Government of India\'s platform for NCERT and CBSE lessons.';
+
+  @override
+  String get tutVideosSomeDiksha =>
+      'Videos marked DIKSHA are from the Government of India\'s lesson platform; the rest are from YouTube, not the school — judge them as you watch.';
+
+  @override
+  String get tutVideosFromYoutube =>
+      'Videos are from YouTube, not the school — judge them as you watch.';
+
+  @override
+  String get tutVideosOnThisTopic => 'Videos on this topic';
+
+  @override
+  String get tutNoVideosFound =>
+      'No videos found yet — search YouTube instead.';
+
+  @override
+  String get tutSearchOnYoutube => 'Search on YouTube';
+
+  @override
+  String get tutGuideStep1Title => '1. Today\'s lesson (10 min)';
+
+  @override
+  String tutGuideStep1Body(String name) {
+    return 'Choose \"Teach a topic\" and type what was taught in school today, e.g. \"fractions\". The tutor gives a short lesson at $name\'s class level.';
+  }
+
+  @override
+  String get tutGuideStep2Title => '2. Worked examples (5 min)';
+
+  @override
+  String tutGuideStep2Body(String name) {
+    return 'In \"Worked examples\", type the same topic. Every step is shown — read them with $name.';
+  }
+
+  @override
+  String get tutGuideStep3Title => '3. Practice (10 min)';
+
+  @override
+  String tutGuideStep3Body(String name) {
+    return '\"Practice questions\" gives 5 questions. $name solves them in a notebook — answers stay hidden until you ask.';
+  }
+
+  @override
+  String get tutGuideStep4Title => '4. Check answers (5 min)';
+
+  @override
+  String tutGuideStep4Body(String name) {
+    return 'In \"Check answers\", type the questions with $name\'s answers. You get marks and what to fix.';
+  }
+
+  @override
+  String get tutGuideStep5Title => '5. Homework';
+
+  @override
+  String get tutGuideStep5Body =>
+      'On the Homework screen, tap \"Ask tutor\" next to any item — that assignment is already in front of the tutor.';
+
+  @override
+  String get tutGuideStep6Title => '6. Before a test';
+
+  @override
+  String get tutGuideStep6Body =>
+      'In \"Exam preparation\", type the subject and date — you get a revision list, a day-wise plan and likely questions.';
+
+  @override
+  String get tutGuideStep7Title => '7. Stuck? Watch a video';
+
+  @override
+  String get tutGuideStep7Body =>
+      'Under every reply, \"Watch videos\" finds videos on that topic and plays them inside the app.';
+
+  @override
+  String get tutGuideFreeHintsTitle => 'Free hints';
+
+  @override
+  String tutGuideFreeHintsBody(String name) {
+    return '\"Hints\" are free, 20 a day — when $name is stuck, ask for the next step. The full tutor opens with a pass: a day, a week or a month, for one child.';
+  }
+
+  @override
+  String get tutGuideHeading =>
+      'No tuition needed — 30 minutes a day with the tutor';
+
+  @override
+  String tutGuideIntro(String name) {
+    return 'Sit with $name and follow this routine every day. The tutor teaches at $name\'s class level (CBSE), in Hindi or English.';
+  }
+
+  @override
+  String get tutGuideGotIt => 'Got it, let\'s start';
+
+  @override
+  String get authCouldNotReachServerTryAgain =>
+      'Could not reach the school server. Try again.';
+
+  @override
+  String authOtpSentOnWhatsappTo(String mobile) {
+    return 'OTP sent on WhatsApp to $mobile';
+  }
+
+  @override
+  String get authSignInWithPasswordInstead => 'Sign in with password instead';
+
+  @override
+  String get authSignInWithOtpInstead => 'Sign in with OTP instead';
+
+  @override
+  String authSentTo(String mobile) {
+    return 'Sent to $mobile';
+  }
+
+  @override
+  String get authIfParentChooseParentAbove =>
+      'If you are a parent, choose Parent above.';
+
+  @override
+  String get authSignIn => 'Sign in';
+
+  @override
+  String get authVerifyAndSignIn => 'Verify & sign in';
+
+  @override
+  String get authSendOtp => 'Send OTP';
+
+  @override
+  String get homeWrongAppStaffSignIn => 'That\'s a staff sign-in';
+
+  @override
+  String get homeWrongAppParentSignIn => 'That\'s a parent sign-in';
+
+  @override
+  String homeWrongAppInstallOther(String thisApp, String otherApp) {
+    return 'This is the $thisApp app. Install $otherApp and sign in there instead.';
+  }
+
+  @override
+  String homeGuardianName(String name) {
+    return 'Guardian: $name';
+  }
+
+  @override
+  String get homeNothingHereYet => 'Nothing here yet.';
+
+  @override
+  String get homeCouldNotReachServerCheckConnection =>
+      'Could not reach the school server. Check your connection and try again.';
+
+  @override
+  String homeModuleComingSoon(String module) {
+    return '$module is coming soon';
+  }
+
+  @override
+  String get homeNoticesAndNews => 'Notices & news';
+
+  @override
+  String get homeNews => 'News';
+
+  @override
+  String get homeNotice => 'Notice';
+
+  @override
+  String get homeSchoolPhotos => 'School photos';
+
+  @override
+  String homePhotoCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count photos',
+      one: '1 photo',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get homeModuleFees => 'Fees';
+
+  @override
+  String get homeModuleAttendance => 'Attendance';
+
+  @override
+  String get homeModuleHomework => 'Homework';
+
+  @override
+  String get homeModuleTutor => 'Tutor';
+
+  @override
+  String get homeModuleOnlineClass => 'Online class';
+
+  @override
+  String get homeModuleLibrary => 'Library';
+
+  @override
+  String get homeModulePtm => 'PTM';
+
+  @override
+  String get homeModuleLeave => 'Leave';
+
+  @override
+  String get homeModuleComplaints => 'Complaints';
+
+  @override
+  String get homeModuleReceipts => 'Receipts';
+
+  @override
+  String get homeGoodMorning => 'Good morning';
+
+  @override
+  String get homeGoodAfternoon => 'Good afternoon';
+
+  @override
+  String get homeGoodEvening => 'Good evening';
+
+  @override
+  String homeCouldNotOpenWhatsappNumberIs(String number) {
+    return 'Could not open WhatsApp. The school\'s number is $number.';
+  }
+
+  @override
+  String get homeQuickAccess => 'Quick access';
+
+  @override
+  String get homeSchool => 'School';
+
+  @override
+  String get homeMessageATeacherHours => 'Message a teacher · 8 AM – 8 PM';
+
+  @override
+  String get homeMessageATeacherSubtitle =>
+      'Class and subject teachers, in app or on WhatsApp through the school';
+
+  @override
+  String homeStudentIdWithNumber(String admissionNo) {
+    return 'Student ID · $admissionNo';
+  }
+
+  @override
+  String homeGuardianTapForIdQr(String name) {
+    return 'Guardian $name · tap for the ID QR';
+  }
+
+  @override
+  String get homeTabHome => 'Home';
+
+  @override
+  String get homeTabMessages => 'Messages';
+
+  @override
+  String get homeTabProfile => 'Profile';
+
+  @override
+  String get homeFeesDue => 'Fees due';
+
+  @override
+  String homeWhatsappCardSubtitle(String number) {
+    return '$number · dues, receipts, pay by UPI, or ask for a person. Message from the mobile registered with the school.';
+  }
+
+  @override
+  String apiChildClass(String className) {
+    return 'Class $className';
+  }
+
+  @override
+  String apiChildClassRoll(String className, String rollNo) {
+    return 'Class $className · Roll $rollNo';
+  }
+
+  @override
+  String get apiFieldAdmissionNo => 'Admission no.';
+
+  @override
+  String get apiFieldRollNo => 'Roll no.';
+
+  @override
+  String get apiFieldDateOfBirth => 'Date of birth';
+
+  @override
+  String get apiGenderMale => 'Male';
+
+  @override
+  String get apiGenderFemale => 'Female';
+
+  @override
+  String get apiGenderOther => 'Other';
+
+  @override
+  String get apiFieldBloodGroup => 'Blood group';
+
+  @override
+  String get apiFieldCategory => 'Category';
+
+  @override
+  String get apiFieldReligion => 'Religion';
+
+  @override
+  String get apiFieldNationality => 'Nationality';
+
+  @override
+  String get apiFieldMotherTongue => 'Mother tongue';
+
+  @override
+  String get apiFieldPlaceOfBirth => 'Place of birth';
+
+  @override
+  String get apiFieldFatherName => 'Father\'s name';
+
+  @override
+  String get apiFieldFatherMobile => 'Father\'s mobile';
+
+  @override
+  String get apiFieldMotherName => 'Mother\'s name';
+
+  @override
+  String get apiFieldMotherMobile => 'Mother\'s mobile';
+
+  @override
+  String get apiFieldEmergencyContact => 'Emergency contact';
+
+  @override
+  String get apiFieldAadhaar => 'Aadhaar';
+
+  @override
+  String get apiFieldPreviousSchool => 'Previous school';
+
+  @override
+  String get apiFieldJoinedOn => 'Joined on';
+
+  @override
+  String get apiFieldAcademicYear => 'Academic year';
+
+  @override
+  String get apiDocSubmittedForVerification => 'Submitted for verification.';
+
+  @override
+  String apiRequestFailed(String statusCode) {
+    return 'Request failed ($statusCode)';
+  }
+
+  @override
+  String get apiYourWhatsapp => 'your WhatsApp';
+
+  @override
+  String get apiStaffLoginNotConfigured =>
+      'Staff login is not configured in this build (missing Supabase keys).';
+
+  @override
+  String get apiEmailOrPasswordIncorrect => 'Email or password is incorrect.';
+
+  @override
+  String get apiSignInFailedTryAgain => 'Sign-in failed. Try again.';
+
+  @override
+  String apiTutorUnavailable(String statusCode) {
+    return 'Tutor unavailable ($statusCode)';
+  }
+
+  @override
+  String get apiTutorFailed => 'Tutor failed';
+
+  @override
+  String get apiSchoolWhatsappCouldNotSend =>
+      'The school\'s WhatsApp could not send this';
+
+  @override
+  String get apiCouldNotStartPayment => 'Could not start payment';
+
+  @override
+  String get apiThisChild => 'this child';
+
+  @override
+  String apiValidTill(String date) {
+    return 'Valid till $date';
+  }
+
+  @override
+  String get apiOnlineClass => 'Online class';
+
+  @override
+  String apiOnlineRegisterMarked(String present, String total) {
+    return '$present present of $total';
+  }
+
+  @override
+  String apiOnlineRegisterMarkedWithAlerts(
+    String present,
+    String total,
+    String alerts,
+  ) {
+    return '$present present of $total · $alerts absent alerts sent';
+  }
+
+  @override
+  String apiOnlineRoomMatched(String inRoom, String matched) {
+    return '$inRoom in the room, $matched matched';
+  }
+
+  @override
+  String apiOnlineRoomMatchedWithUnmatched(
+    String inRoom,
+    String matched,
+    String names,
+  ) {
+    return '$inRoom in the room, $matched matched · not matched: $names';
+  }
+
+  @override
+  String get sysPlayUnavailable =>
+      'Google Play is not available on this phone. The app must be installed from Play, with a Google account signed in.';
+
+  @override
+  String sysPlayReturnedError(String error) {
+    return 'Google Play returned an error: $error';
+  }
+
+  @override
+  String sysPlayPassesNotFound(String ids) {
+    return 'Google Play does not have these passes yet: $ids. They may still be publishing.';
+  }
+
+  @override
+  String get sysPlayNoPasses => 'Google Play has no passes to sell right now.';
+
+  @override
+  String get sysPlayPaymentDidNotGoThrough => 'The payment did not go through';
+
+  @override
+  String get sysCouldNotReachSchoolServer =>
+      'Could not reach the school server';
+
+  @override
+  String get sysPushChannelName => 'School updates';
+
+  @override
+  String get sysPushChannelDescription =>
+      'Homework, attendance, messages from the class teacher, fee receipts and notices.';
+
+  @override
+  String get profGuardian => 'Guardian';
+
+  @override
+  String get profRegisteredMobile => 'Registered mobile';
+
+  @override
+  String get profAlternateMobile => 'Alternate mobile';
+
+  @override
+  String get profEmail => 'Email';
+
+  @override
+  String get profAddress => 'Address';
+
+  @override
+  String get profLocality => 'Locality';
+
+  @override
+  String get profCity => 'City';
+
+  @override
+  String get profState => 'State';
+
+  @override
+  String get profPinCode => 'PIN code';
+
+  @override
+  String get profProfile => 'Profile';
+
+  @override
+  String get profFamily => 'Family';
+
+  @override
+  String get profChildren => 'Children';
+
+  @override
+  String profClassAdmNo(String classLabel, String admissionNo) {
+    return '$classLabel · Adm. $admissionNo';
+  }
+
+  @override
+  String profDocsStatusAllIn(String percent) {
+    return 'All required documents in · profile $percent% complete';
+  }
+
+  @override
+  String profDocsStatusOneMissing(String percent) {
+    return '1 required document to upload · profile $percent% complete';
+  }
+
+  @override
+  String profDocsStatusMissing(String count, String percent) {
+    return '$count required documents to upload · profile $percent% complete';
+  }
+
+  @override
+  String profRegisteredMobileNote(String mobile) {
+    return 'Registered mobile $mobile is your sign-in and can only be changed at the office.';
+  }
+
+  @override
+  String get profSaving => 'Saving…';
+
+  @override
+  String get profStudentProfile => 'Student profile';
+
+  @override
+  String get profDocumentsSchoolNeeds => 'Documents the school needs';
+
+  @override
+  String get profDetailsOnRecord => 'Details on record';
+
+  @override
+  String get profDocBirthCert => 'Birth certificate';
+
+  @override
+  String get profDocPhoto => 'Photo';
+
+  @override
+  String get profDocAadhaar => 'Aadhaar';
+
+  @override
+  String get profDocAddressProof => 'Address proof';
+
+  @override
+  String get profDocTc => 'Transfer certificate';
+
+  @override
+  String get profDocCasteCert => 'Caste certificate';
+
+  @override
+  String get profDocIncomeCert => 'Income certificate';
+
+  @override
+  String profCheckMatches(String label) {
+    return '$label: matches';
+  }
+
+  @override
+  String profCheckMismatch(String label) {
+    return '$label: does not match';
+  }
+
+  @override
+  String profCheckNotReadable(String label) {
+    return '$label: not readable';
+  }
+
+  @override
+  String profCheckNotOnRecord(String label) {
+    return '$label: not on record';
+  }
+
+  @override
+  String get profCouldNotUpload => 'Could not upload';
+
+  @override
+  String get profNotAccepted => 'Not accepted';
+
+  @override
+  String profProfilePercentComplete(String percent) {
+    return 'Profile $percent% complete';
+  }
+
+  @override
+  String get profVerified => 'Verified';
+
+  @override
+  String get profAwaitingVerification => 'Awaiting verification';
+
+  @override
+  String get profRejected => 'Rejected';
+
+  @override
+  String get profRequired => 'Required';
+
+  @override
+  String get profOptional => 'Optional';
+
+  @override
+  String profOfficeNote(String note) {
+    return 'Office: $note';
+  }
+
+  @override
+  String get profUploadAgain => 'Upload again';
+
+  @override
+  String get profUpload => 'Upload';
+
+  @override
+  String profSchoolNote(String note) {
+    return 'School: $note';
+  }
+
+  @override
+  String get profSending => 'Sending…';
+
+  @override
+  String get profSendRequest => 'Send request';
+
+  @override
+  String get profLeave => 'Leave';
+
+  @override
+  String profLeaveTypeOneDay(String type) {
+    return '$type · 1 day';
+  }
+
+  @override
+  String profLeaveTypeDays(String type, String days) {
+    return '$type · $days days';
+  }
+
+  @override
+  String get profLeaveApproved => 'Approved';
+
+  @override
+  String get profLeaveNotApproved => 'Not approved';
+
+  @override
+  String get profLeaveWithdrawn => 'Withdrawn';
+
+  @override
+  String get profLeavePending => 'Pending';
+
+  @override
+  String profLeaveForChild(String name) {
+    return 'Leave for $name';
+  }
+
+  @override
+  String get profDate => 'Date';
+
+  @override
+  String get profFrom => 'From';
+
+  @override
+  String get profTo => 'To';
+
+  @override
+  String busRouteLine(String code, String name) {
+    return 'Bus $code · $name';
+  }
+
+  @override
+  String busStopLine(String stop) {
+    return 'Stop: $stop';
+  }
+
+  @override
+  String get busMorningPickupOnly => 'Morning pickup only';
+
+  @override
+  String get busAfternoonDropOnly => 'Afternoon drop only';
+
+  @override
+  String get busPickupAndDrop => 'Pickup and drop';
+
+  @override
+  String busFeePerMonth(String fee) {
+    return '$fee per month';
+  }
+
+  @override
+  String busDriverLine(String name) {
+    return 'Driver: $name';
+  }
+
+  @override
+  String get busLiveBusLocation => 'Live bus location';
+
+  @override
+  String get busRequestSchoolTransport => 'Request school transport';
+
+  @override
+  String get busRequestAgain => 'Request again';
+
+  @override
+  String busCouldNotStartCall(String mobile) {
+    return 'Could not start a call. The number is $mobile.';
+  }
+
+  @override
+  String get busStatusContacted => 'Office has been in touch';
+
+  @override
+  String get busStatusAssigned => 'Assigned — bus details will appear here';
+
+  @override
+  String get busStatusDeclined => 'Not possible right now';
+
+  @override
+  String get busStatusRequested => 'Request sent — waiting for the office';
+
+  @override
+  String busTransportForChild(String name) {
+    return 'School transport for $name';
+  }
+
+  @override
+  String busNoBusAssigned(String name) {
+    return 'No bus is assigned to $name.';
+  }
+
+  @override
+  String get busCouldNotLoadPosition =>
+      'Could not load the bus position. It will try again on its own, or tap refresh.';
+
+  @override
+  String get busBusLocation => 'Bus location';
+
+  @override
+  String get busCentreOnBus => 'Centre on the bus';
+
+  @override
+  String get busNoGpsTracker => 'This vehicle has no GPS tracker';
+
+  @override
+  String busNoGpsTrackerDetail(String vehicle) {
+    return '$vehicle · live location is not available. Call the driver from the Transport page.';
+  }
+
+  @override
+  String get busNotOnTrip => 'Bus is not on a school trip now';
+
+  @override
+  String get busLiveHoursNote =>
+      'Live location shows during the transport day (06:00–17:30, Mon–Sat).';
+
+  @override
+  String get busTrackerNotReporting => 'Tracker not reporting right now';
+
+  @override
+  String get busTrackerStaleNote =>
+      'Last position is older than 15 minutes, so it is not shown. Refreshes every 15 seconds.';
+
+  @override
+  String busSecondsAgo(String seconds) {
+    return '${seconds}s ago';
+  }
+
+  @override
+  String busMinutesAgo(String minutes) {
+    return '$minutes min ago';
+  }
+
+  @override
+  String busEtaToStop(String minutes, String stop) {
+    return 'About $minutes min to $stop';
+  }
+
+  @override
+  String busEtaToYourStop(String minutes) {
+    return 'About $minutes min to your stop';
+  }
+
+  @override
+  String get busOnTheRoad => 'Bus is on the road';
+
+  @override
+  String get busMorningPickupPhase => 'Morning pickup';
+
+  @override
+  String get busAfternoonDropPhase => 'Afternoon drop';
+
+  @override
+  String busUpdatedAgo(String age) {
+    return 'updated $age';
+  }
+
+  @override
+  String busSpeedKmh(String speed) {
+    return '$speed km/h';
+  }
+
+  @override
+  String busKmAway(String km) {
+    return '$km km away';
+  }
+
+  @override
+  String get busEstimateNotPromise => 'estimate, not a promise';
+
+  @override
+  String get modAttendanceTitle => 'Attendance';
+
+  @override
+  String get modAttendancePresent => 'Present';
+
+  @override
+  String get modAttendanceAbsent => 'Absent';
+
+  @override
+  String get modAttendanceLate => 'Late';
+
+  @override
+  String get modFeeReceiptsTitle => 'Fee receipts';
+
+  @override
+  String get modReceiptVoidCancelledByOffice =>
+      'VOID — cancelled by the office';
+
+  @override
+  String modReceiptTitle(String receiptNo) {
+    return 'Receipt $receiptNo';
+  }
+
+  @override
+  String get modFeesTitle => 'Fees';
+
+  @override
+  String get modFeesCouldNotStartPayment => 'Could not start payment';
+
+  @override
+  String get modFeesNoBrowserForPaymentPage =>
+      'No browser available to open the payment page';
+
+  @override
+  String get modFeesCouldNotStartPaymentConnection =>
+      'Could not start payment — check your connection and try again.';
+
+  @override
+  String get modFeesNoBrowserForPage => 'No browser available to open the page';
+
+  @override
+  String get modFeesCouldNotStartAutopay =>
+      'Could not start auto-pay — check your connection and try again.';
+
+  @override
+  String get modFeesCouldNotStopAutopay =>
+      'Could not stop auto-pay — check your connection and try again.';
+
+  @override
+  String modFeesDueOn(String date) {
+    return 'Due $date';
+  }
+
+  @override
+  String modFeesFallsDueOn(String date) {
+    return 'Falls due $date';
+  }
+
+  @override
+  String get modFeesSelectAFeeToPay => 'Select a fee to pay';
+
+  @override
+  String modFeesPayAmountOnline(String amount) {
+    return 'Pay $amount online';
+  }
+
+  @override
+  String modFeesPayAhead(String amount) {
+    return 'Pay ahead · $amount for the months to come';
+  }
+
+  @override
+  String get modPtmTitle => 'Parent-teacher meetings';
+
+  @override
+  String modPtmForChild(String name) {
+    return 'for $name';
+  }
+
+  @override
+  String modPtmNoneScheduled(String name) {
+    return 'No PTM scheduled for $name\'s class right now. Booking opens here when the school announces one.';
+  }
+
+  @override
+  String modPtmSeatsLeft(String count) {
+    return '$count left';
+  }
+
+  @override
+  String get modPtmSlotFull => 'Full';
+
+  @override
+  String get modPtmSlotBooked => 'Slot booked';
+
+  @override
+  String modPtmBookedWith(String teacher, String time) {
+    return 'Booked — $teacher, $time';
+  }
+
+  @override
+  String get modChatClassTeacher => 'Class teacher';
+
+  @override
+  String modChatClassTeacherNamed(String name) {
+    return 'Class teacher: $name';
+  }
+
+  @override
+  String modChatNoMessagesSayHello(String name) {
+    return 'No messages yet. Say hello to $name.';
+  }
+
+  @override
+  String get modChatNoClassTeacherAssigned =>
+      'No class teacher is assigned to this section yet — check with the school office.';
+
+  @override
+  String get modTeachersTitle => 'Teachers';
+
+  @override
+  String modTeachersWhatsappNote(String number) {
+    return 'WhatsApp messages go to the school\'s number ($number) and are passed to the teacher — the message is already addressed, just type below the last line and send.';
+  }
+
+  @override
+  String get modTeachersAvailableTill8pm => 'Teachers are available till 8 PM';
+
+  @override
+  String modTeachersAvailableHours(String hours) {
+    return 'Teachers are available $hours';
+  }
+
+  @override
+  String get modTeachersClosedNote =>
+      'Teachers are not available right now (8 AM – 8 PM). A message sent in the app is kept safe and reaches them in the morning.';
+
+  @override
+  String get modTeachersAfter8am => 'After 8 AM';
+
+  @override
+  String get modHomeworkTitle => 'Homework & diary';
+
+  @override
+  String get modHomeworkEmptyTeacher =>
+      'No homework posted for this section yet — use the button below to post the first one.';
+
+  @override
+  String get modHomeworkEmptyParent =>
+      'No homework posted for this class yet. New homework appears here as soon as the teacher publishes it.';
+
+  @override
+  String get modHomeworkLabel => 'Homework';
+
+  @override
+  String modHomeworkDueOn(String date) {
+    return 'due $date';
+  }
+
+  @override
+  String get modHomeworkCouldNotPost =>
+      'Could not post. Check the connection and try again.';
+
+  @override
+  String get modComplaintsTitle => 'Complaints';
+
+  @override
+  String modComplaintsAboutChild(String name) {
+    return 'about $name';
+  }
+
+  @override
+  String modComplaintsSchoolResponse(String note) {
+    return 'School\'s response: $note';
+  }
+
+  @override
+  String get modComplaintsSending => 'Sending…';
+
+  @override
+  String get modComplaintsSendToSchool => 'Send to the school';
+
+  @override
+  String get modDiaryLabel => 'Diary';
+
+  @override
+  String homeNewCount(String count) {
+    return '$count new';
+  }
 }

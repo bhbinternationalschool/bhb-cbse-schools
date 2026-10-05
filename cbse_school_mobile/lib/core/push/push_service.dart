@@ -9,6 +9,7 @@ import "package:flutter_local_notifications/flutter_local_notifications.dart";
 import "package:package_info_plus/package_info_plus.dart";
 
 import "../api/api_client.dart";
+import "../i18n/locale_controller.dart";
 
 /// Runs in a separate isolate when a message arrives while the app is
 /// terminated/backgrounded. FCM already displays `notification` messages
@@ -32,9 +33,11 @@ class PushService {
   final ApiClient api;
 
   static const _channelId = "bhb_default";
-  static const _channelName = "School updates";
-  static const _channelDescription =
-      "Homework, attendance, messages from the class teacher, fee receipts and notices.";
+  // Shown in the phone's notification settings, so in the app's language.
+  // Re-creating the channel at every start renames it after a switch.
+  static String get _channelName => LocaleController.strings.sysPushChannelName;
+  static String get _channelDescription =>
+      LocaleController.strings.sysPushChannelDescription;
 
   final _local = FlutterLocalNotificationsPlugin();
   final _openRoute = StreamController<String>.broadcast();
@@ -76,7 +79,7 @@ class PushService {
           AndroidFlutterLocalNotificationsPlugin
         >()
         ?.createNotificationChannel(
-          const AndroidNotificationChannel(
+          AndroidNotificationChannel(
             _channelId,
             _channelName,
             description: _channelDescription,
@@ -188,7 +191,7 @@ class PushService {
       m.hashCode,
       title,
       body,
-      const NotificationDetails(
+      NotificationDetails(
         android: AndroidNotificationDetails(
           _channelId,
           _channelName,

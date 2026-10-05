@@ -1151,4 +1151,1286 @@ class LHi extends L {
 
   @override
   String get updateRestart => 'फिर से खोलें';
+
+  @override
+  String get oclOnlineClasses => 'ऑनलाइन क्लास';
+
+  @override
+  String oclNoClassScheduled(String name) {
+    return '$name के सेक्शन की कोई ऑनलाइन क्लास अभी तय नहीं है। टीचर क्लास तय करेंगे तो आपको सूचना मिलेगी।';
+  }
+
+  @override
+  String get oclComingUp => 'आने वाली क्लास';
+
+  @override
+  String get oclEarlier => 'पिछली क्लास';
+
+  @override
+  String get oclJoinButtonNote =>
+      'Join बटन क्लास शुरू होने से 10 मिनट पहले से काम करता है। यह Google Meet या टीचर का चुना हुआ ऐप खोलता है।';
+
+  @override
+  String get oclToday => 'आज';
+
+  @override
+  String get oclTomorrow => 'कल';
+
+  @override
+  String get oclLive => 'लाइव';
+
+  @override
+  String get oclStarting => 'शुरू हो रही है';
+
+  @override
+  String get oclCancelled => 'रद्द';
+
+  @override
+  String get oclJoined => 'जुड़े';
+
+  @override
+  String get oclMissed => 'छूट गई';
+
+  @override
+  String get oclJoinNow => 'अभी जुड़ें';
+
+  @override
+  String get oclJoin => 'जुड़ें';
+
+  @override
+  String oclOpensAt(String time) {
+    return '$time बजे खुलेगी';
+  }
+
+  @override
+  String get oclTeacherQuestionsAndMyAnswers => 'टीचर के प्रश्न और मेरे उत्तर';
+
+  @override
+  String get oclTakeAPhotoOfTheCopy => 'कॉपी की फ़ोटो लें';
+
+  @override
+  String get oclQuestionsFromTheTeacher => 'टीचर के प्रश्न';
+
+  @override
+  String get oclNoQuestionYet =>
+      'टीचर ने अभी कोई प्रश्न नहीं पूछा है। ताज़ा करने के लिए नीचे खींचें।';
+
+  @override
+  String get oclWriteAnswerInCopyNote =>
+      'उत्तर कॉपी में लिखें, फिर उसकी साफ़ फ़ोटो भेजें। टीचर के प्रश्न बंद करने तक आप दोबारा भेज सकते हैं।';
+
+  @override
+  String get oclVerdictCorrect => 'सही ✓';
+
+  @override
+  String get oclVerdictWrong => 'सही नहीं — फिर से कोशिश करें';
+
+  @override
+  String get oclVerdictPartly => 'आंशिक रूप से सही';
+
+  @override
+  String get oclSentWaitingForTeacher => 'भेज दिया · टीचर के जवाब का इंतज़ार';
+
+  @override
+  String oclQuestionNumber(String number) {
+    return 'प्रश्न $number';
+  }
+
+  @override
+  String oclQuestionNumberClosed(String number) {
+    return 'प्रश्न $number · बंद';
+  }
+
+  @override
+  String get oclSending => 'भेज रहे हैं…';
+
+  @override
+  String get oclSendAgain => 'दोबारा भेजें';
+
+  @override
+  String get oclSendAnswerPhoto => 'उत्तर की फ़ोटो भेजें';
+
+  @override
+  String get tutLibrary => 'लाइब्रेरी';
+
+  @override
+  String get tutEBooks => 'ई-बुक';
+
+  @override
+  String get tutGeneralSubject => 'सामान्य';
+
+  @override
+  String get tutShelfKey => 'शेल्फ़ की चाबी (key)';
+
+  @override
+  String tutBookClasses(String classes) {
+    return 'कक्षा $classes';
+  }
+
+  @override
+  String get tutKey => 'चाबी (key)';
+
+  @override
+  String tutKeyLine(String label, String value) {
+    return '$label: $value';
+  }
+
+  @override
+  String tutKeyCopied(String label) {
+    return '$label कॉपी हो गई';
+  }
+
+  @override
+  String get tutPromptHint => 'जैसे: भिन्न कैसे समझाऊँ?';
+
+  @override
+  String get tutPromptTeach => 'जैसे: कक्षा 5 के लिए प्रकाश संश्लेषण सिखाइए';
+
+  @override
+  String get tutPromptExamples => 'जैसे: भाग के तीन हल किए हुए उदाहरण';
+
+  @override
+  String get tutPromptPractice => 'जैसे: कक्षा 4 के लिए काल पर 5 प्रश्न';
+
+  @override
+  String get tutPromptScore => 'प्रश्न और बच्चे के उत्तर यहाँ लिखें';
+
+  @override
+  String get tutPromptHomework => 'जैसे: आज के गणित के होमवर्क में मदद';
+
+  @override
+  String get tutPromptExam => 'जैसे: कक्षा 3 की EVS यूनिट टेस्ट की तैयारी';
+
+  @override
+  String get tutAskTheTutor => 'ट्यूटर से पूछें…';
+
+  @override
+  String tutModeNeedsPassReason(String mode, String name) {
+    return '$mode पूरे ट्यूटर का हिस्सा है। इसे खोलने के लिए $name के लिए पास लें — एक दिन, एक हफ़्ता या एक महीना।';
+  }
+
+  @override
+  String get tutCouldNotReachTheTutor =>
+      'ट्यूटर से संपर्क नहीं हुआ। अपना इंटरनेट जाँच लें।';
+
+  @override
+  String get tutReportTitle => 'इस उत्तर की शिकायत करें';
+
+  @override
+  String get tutReportBody => 'स्कूल इसे पढ़ेगा। बताइए क्या गलत था।';
+
+  @override
+  String get tutReportWrong => 'उत्तर गलत है';
+
+  @override
+  String get tutReportInappropriate => 'अनुचित या असुरक्षित';
+
+  @override
+  String get tutReportConfusing => 'समझ नहीं आया';
+
+  @override
+  String get tutReportOther => 'कुछ और';
+
+  @override
+  String get tutReportNote => 'आप कुछ लिखना चाहें तो (वैकल्पिक)';
+
+  @override
+  String get tutReportThanks => 'धन्यवाद — स्कूल इसे देखेगा।';
+
+  @override
+  String get tutCouldNotSendReport =>
+      'शिकायत नहीं भेजी जा सकी। कृपया फिर से कोशिश करें।';
+
+  @override
+  String get tutGetAPass => 'पास लें';
+
+  @override
+  String get tutReplyLanguage => 'उत्तर की भाषा';
+
+  @override
+  String tutFullTutorOn(String name, String valid) {
+    return '$name के लिए पूरा ट्यूटर चालू · $valid';
+  }
+
+  @override
+  String tutFullTutorOnLimitReached(String name, String valid) {
+    return '$name के लिए पूरा ट्यूटर चालू · $valid · आज की सीमा पूरी हो गई';
+  }
+
+  @override
+  String tutModeNeedsPass(String mode) {
+    return '$mode के लिए पास चाहिए — संकेत (hints) मुफ़्त रहेंगे';
+  }
+
+  @override
+  String tutFreeHintsLeft(String left, String total) {
+    return 'आज $total में से $left मुफ़्त संकेत बाकी हैं';
+  }
+
+  @override
+  String get tutTutor => 'ट्यूटर';
+
+  @override
+  String get tutFreeHint => 'मुफ़्त संकेत';
+
+  @override
+  String get tutFullTutor => 'पूरा ट्यूटर';
+
+  @override
+  String get tutWatchVideos => 'वीडियो देखें';
+
+  @override
+  String get tutReported => 'भेज दिया';
+
+  @override
+  String get tutReport => 'शिकायत करें';
+
+  @override
+  String get tutStop => 'रोकें';
+
+  @override
+  String get tutSpeakYourQuestion => 'अपना प्रश्न बोलें';
+
+  @override
+  String get tutListeningSpeakNow => 'सुन रहा हूँ… बोलिए';
+
+  @override
+  String get tutStillAskingGooglePlay =>
+      'Google Play से पास की जानकारी अभी आ रही है। थोड़ी देर में फिर से कोशिश करें।';
+
+  @override
+  String get tutGooglePlayCouldNotStart =>
+      'Google Play भुगतान शुरू नहीं कर सका।';
+
+  @override
+  String get tutCouldNotOpenPaymentPage => 'भुगतान का पेज नहीं खुल सका';
+
+  @override
+  String get tutNoBrowserForPaymentPage =>
+      'भुगतान का पेज खोलने के लिए फ़ोन में कोई ब्राउज़र नहीं है';
+
+  @override
+  String tutPassFor(String name) {
+    return '$name के लिए ट्यूटर पास';
+  }
+
+  @override
+  String tutUnlockFullTutor(String name, String classLabel) {
+    return '$name के लिए पूरा ट्यूटर खोलें — पढ़ाई, हल किए उदाहरण, अभ्यास प्रश्न, उत्तर जाँच, होमवर्क में मदद और परीक्षा की तैयारी, सब $classLabel के स्तर पर।';
+  }
+
+  @override
+  String tutCurrentPassWithPlan(String plan, String valid) {
+    return '$plan पास · $valid। नया पास इसके ख़त्म होने के बाद शुरू होगा।';
+  }
+
+  @override
+  String tutCurrentPass(String valid) {
+    return '$valid। नया पास इसके ख़त्म होने के बाद शुरू होगा।';
+  }
+
+  @override
+  String tutPendingPass(String days, String amount) {
+    return '$days दिन का पास ($amount)';
+  }
+
+  @override
+  String tutWaitingForBank(String passes) {
+    return 'बैंक की पुष्टि का इंतज़ार: $passes। भुगतान पक्का होते ही पास अपने-आप चालू हो जाएगा।';
+  }
+
+  @override
+  String tutPassTerms(String name, String classLabel) {
+    return 'एक पास एक ही बच्चे के लिए है और सिर्फ़ $name की कक्षा ($classLabel) के लिए चलता है — भाई या बहन के लिए अलग पास लेना होगा। उचित उपयोग: रोज़ 60 संदेश तक। संकेत (hints) हर दिन मुफ़्त रहते हैं।';
+  }
+
+  @override
+  String get tutFullTutorForOneDay => 'एक दिन के लिए पूरा ट्यूटर';
+
+  @override
+  String tutFullTutorForDays(String days) {
+    return '$days दिन के लिए पूरा ट्यूटर';
+  }
+
+  @override
+  String get tutVideosAllDiksha =>
+      'ये दीक्षा के वीडियो हैं — NCERT और CBSE पाठों का भारत सरकार का मंच।';
+
+  @override
+  String get tutVideosSomeDiksha =>
+      '“DIKSHA” वाले वीडियो भारत सरकार के मंच से हैं; बाकी YouTube के हैं, स्कूल के नहीं — देखकर ही भरोसा करें।';
+
+  @override
+  String get tutVideosFromYoutube =>
+      'वीडियो YouTube के हैं, स्कूल के नहीं — देखकर ही भरोसा करें।';
+
+  @override
+  String get tutVideosOnThisTopic => 'इस विषय के वीडियो';
+
+  @override
+  String get tutNoVideosFound => 'अभी कोई वीडियो नहीं मिला — YouTube पर खोजें।';
+
+  @override
+  String get tutSearchOnYoutube => 'YouTube पर खोजें';
+
+  @override
+  String get tutGuideStep1Title => '1. आज का पाठ (10 मिनट)';
+
+  @override
+  String tutGuideStep1Body(String name) {
+    return '\"Teach a topic\" चुनें और आज स्कूल में पढ़ाया विषय लिखें — जैसे \"भिन्न\"। ट्यूटर $name की कक्षा के स्तर पर छोटा पाठ देगा।';
+  }
+
+  @override
+  String get tutGuideStep2Title => '2. हल किए उदाहरण (5 मिनट)';
+
+  @override
+  String tutGuideStep2Body(String name) {
+    return '\"Worked examples\" में वही विषय लिखें। हर कदम दिखेगा — $name के साथ बैठकर पढ़ें।';
+  }
+
+  @override
+  String get tutGuideStep3Title => '3. अभ्यास (10 मिनट)';
+
+  @override
+  String tutGuideStep3Body(String name) {
+    return '\"Practice questions\" से 5 प्रश्न लें। $name उन्हें कॉपी में हल करे — उत्तर तब तक नहीं दिखेंगे।';
+  }
+
+  @override
+  String get tutGuideStep4Title => '4. उत्तर जाँच (5 मिनट)';
+
+  @override
+  String tutGuideStep4Body(String name) {
+    return '\"Check answers\" में प्रश्न और $name के उत्तर लिखें। अंक और क्या सुधारना है, दोनों मिलेंगे।';
+  }
+
+  @override
+  String get tutGuideStep5Title => '5. होमवर्क';
+
+  @override
+  String get tutGuideStep5Body =>
+      'Homework स्क्रीन पर किसी भी काम के आगे \"Ask tutor\" दबाएँ — वह काम ट्यूटर के सामने पहले से होगा।';
+
+  @override
+  String get tutGuideStep6Title => '6. परीक्षा से पहले';
+
+  @override
+  String get tutGuideStep6Body =>
+      '\"Exam preparation\" में विषय और तारीख लिखें — दोहराने की सूची, दिन-वार योजना और संभावित प्रश्न मिलेंगे।';
+
+  @override
+  String get tutGuideStep7Title => '7. समझ न आए तो वीडियो';
+
+  @override
+  String get tutGuideStep7Body =>
+      'हर उत्तर के नीचे \"वीडियो देखें\" — उसी विषय के वीडियो, ऐप के अंदर ही चलते हैं।';
+
+  @override
+  String get tutGuideFreeHintsTitle => 'मुफ़्त संकेत';
+
+  @override
+  String tutGuideFreeHintsBody(String name) {
+    return '\"Hints\" रोज़ 20 बार मुफ़्त हैं — जब $name अटके तो अगला कदम पूछें। पूरा ट्यूटर पास से खुलता है: एक दिन, हफ़्ता या महीना, एक बच्चे के लिए।';
+  }
+
+  @override
+  String get tutGuideHeading =>
+      'ट्यूशन की ज़रूरत नहीं — ट्यूटर से रोज़ 30 मिनट';
+
+  @override
+  String tutGuideIntro(String name) {
+    return '$name के साथ बैठें, यह क्रम रोज़ दोहराएँ। ट्यूटर उसकी कक्षा (CBSE) के हिसाब से पढ़ाता है, हिंदी या अंग्रेज़ी में।';
+  }
+
+  @override
+  String get tutGuideGotIt => 'समझ गया, शुरू करें';
+
+  @override
+  String get authCouldNotReachServerTryAgain =>
+      'स्कूल सर्वर से संपर्क नहीं हुआ। दोबारा कोशिश करें।';
+
+  @override
+  String authOtpSentOnWhatsappTo(String mobile) {
+    return '$mobile पर व्हाट्सएप से OTP भेजा गया';
+  }
+
+  @override
+  String get authSignInWithPasswordInstead =>
+      'इसके बजाय पासवर्ड से साइन इन करें';
+
+  @override
+  String get authSignInWithOtpInstead => 'इसके बजाय OTP से साइन इन करें';
+
+  @override
+  String authSentTo(String mobile) {
+    return '$mobile पर भेजा गया';
+  }
+
+  @override
+  String get authIfParentChooseParentAbove =>
+      'अगर आप अभिभावक हैं, तो ऊपर \"अभिभावक\" चुनें।';
+
+  @override
+  String get authSignIn => 'साइन इन करें';
+
+  @override
+  String get authVerifyAndSignIn => 'जाँचें और साइन इन करें';
+
+  @override
+  String get authSendOtp => 'OTP भेजें';
+
+  @override
+  String get homeWrongAppStaffSignIn => 'यह स्टाफ़ का लॉगिन है';
+
+  @override
+  String get homeWrongAppParentSignIn => 'यह अभिभावक का लॉगिन है';
+
+  @override
+  String homeWrongAppInstallOther(String thisApp, String otherApp) {
+    return 'यह $thisApp ऐप है। कृपया $otherApp ऐप इंस्टॉल करें और उसमें साइन इन करें।';
+  }
+
+  @override
+  String homeGuardianName(String name) {
+    return 'अभिभावक: $name';
+  }
+
+  @override
+  String get homeNothingHereYet => 'यहाँ अभी कुछ नहीं है।';
+
+  @override
+  String get homeCouldNotReachServerCheckConnection =>
+      'स्कूल सर्वर से संपर्क नहीं हुआ। अपना नेटवर्क देखें और दोबारा कोशिश करें।';
+
+  @override
+  String homeModuleComingSoon(String module) {
+    return '$module जल्द आ रहा है';
+  }
+
+  @override
+  String get homeNoticesAndNews => 'नोटिस और समाचार';
+
+  @override
+  String get homeNews => 'समाचार';
+
+  @override
+  String get homeNotice => 'नोटिस';
+
+  @override
+  String get homeSchoolPhotos => 'स्कूल की तस्वीरें';
+
+  @override
+  String homePhotoCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count फ़ोटो',
+      one: '1 फ़ोटो',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get homeModuleFees => 'फ़ीस';
+
+  @override
+  String get homeModuleAttendance => 'हाज़िरी';
+
+  @override
+  String get homeModuleHomework => 'होमवर्क';
+
+  @override
+  String get homeModuleTutor => 'ट्यूटर';
+
+  @override
+  String get homeModuleOnlineClass => 'ऑनलाइन क्लास';
+
+  @override
+  String get homeModuleLibrary => 'लाइब्रेरी';
+
+  @override
+  String get homeModulePtm => 'PTM';
+
+  @override
+  String get homeModuleLeave => 'छुट्टी';
+
+  @override
+  String get homeModuleComplaints => 'शिकायत';
+
+  @override
+  String get homeModuleReceipts => 'रसीदें';
+
+  @override
+  String get homeGoodMorning => 'सुप्रभात';
+
+  @override
+  String get homeGoodAfternoon => 'नमस्कार';
+
+  @override
+  String get homeGoodEvening => 'शुभ संध्या';
+
+  @override
+  String homeCouldNotOpenWhatsappNumberIs(String number) {
+    return 'व्हाट्सएप नहीं खुल सका। स्कूल का नंबर $number है।';
+  }
+
+  @override
+  String get homeQuickAccess => 'ज़रूरी सुविधाएँ';
+
+  @override
+  String get homeSchool => 'स्कूल';
+
+  @override
+  String get homeMessageATeacherHours =>
+      'अध्यापक को संदेश भेजें · सुबह 8 – रात 8 बजे';
+
+  @override
+  String get homeMessageATeacherSubtitle =>
+      'कक्षा और विषय अध्यापक — ऐप में या स्कूल के व्हाट्सएप से';
+
+  @override
+  String homeStudentIdWithNumber(String admissionNo) {
+    return 'छात्र पहचान पत्र · $admissionNo';
+  }
+
+  @override
+  String homeGuardianTapForIdQr(String name) {
+    return 'अभिभावक $name · पहचान पत्र का QR देखने के लिए दबाएँ';
+  }
+
+  @override
+  String get homeTabHome => 'होम';
+
+  @override
+  String get homeTabMessages => 'संदेश';
+
+  @override
+  String get homeTabProfile => 'प्रोफ़ाइल';
+
+  @override
+  String get homeFeesDue => 'बाकी फ़ीस';
+
+  @override
+  String homeWhatsappCardSubtitle(String number) {
+    return '$number · बाकी फ़ीस, रसीदें, UPI से भुगतान, या किसी व्यक्ति से बात करें। स्कूल में दर्ज मोबाइल नंबर से ही संदेश भेजें।';
+  }
+
+  @override
+  String apiChildClass(String className) {
+    return 'कक्षा $className';
+  }
+
+  @override
+  String apiChildClassRoll(String className, String rollNo) {
+    return 'कक्षा $className · रोल $rollNo';
+  }
+
+  @override
+  String get apiFieldAdmissionNo => 'प्रवेश संख्या';
+
+  @override
+  String get apiFieldRollNo => 'रोल नंबर';
+
+  @override
+  String get apiFieldDateOfBirth => 'जन्म तिथि';
+
+  @override
+  String get apiGenderMale => 'लड़का';
+
+  @override
+  String get apiGenderFemale => 'लड़की';
+
+  @override
+  String get apiGenderOther => 'अन्य';
+
+  @override
+  String get apiFieldBloodGroup => 'ब्लड ग्रुप';
+
+  @override
+  String get apiFieldCategory => 'वर्ग';
+
+  @override
+  String get apiFieldReligion => 'धर्म';
+
+  @override
+  String get apiFieldNationality => 'राष्ट्रीयता';
+
+  @override
+  String get apiFieldMotherTongue => 'मातृभाषा';
+
+  @override
+  String get apiFieldPlaceOfBirth => 'जन्म स्थान';
+
+  @override
+  String get apiFieldFatherName => 'पिता का नाम';
+
+  @override
+  String get apiFieldFatherMobile => 'पिता का मोबाइल';
+
+  @override
+  String get apiFieldMotherName => 'माता का नाम';
+
+  @override
+  String get apiFieldMotherMobile => 'माता का मोबाइल';
+
+  @override
+  String get apiFieldEmergencyContact => 'आपातकालीन संपर्क';
+
+  @override
+  String get apiFieldAadhaar => 'आधार';
+
+  @override
+  String get apiFieldPreviousSchool => 'पिछला स्कूल';
+
+  @override
+  String get apiFieldJoinedOn => 'प्रवेश की तारीख';
+
+  @override
+  String get apiFieldAcademicYear => 'सत्र';
+
+  @override
+  String get apiDocSubmittedForVerification => 'जाँच के लिए भेज दिया गया है।';
+
+  @override
+  String apiRequestFailed(String statusCode) {
+    return 'अनुरोध पूरा नहीं हुआ ($statusCode)';
+  }
+
+  @override
+  String get apiYourWhatsapp => 'आपके व्हाट्सएप';
+
+  @override
+  String get apiStaffLoginNotConfigured =>
+      'इस बिल्ड में स्टाफ़ लॉगिन चालू नहीं है (Supabase keys नहीं हैं)।';
+
+  @override
+  String get apiEmailOrPasswordIncorrect => 'ईमेल या पासवर्ड गलत है।';
+
+  @override
+  String get apiSignInFailedTryAgain =>
+      'साइन इन नहीं हो सका। दोबारा कोशिश करें।';
+
+  @override
+  String apiTutorUnavailable(String statusCode) {
+    return 'ट्यूटर अभी उपलब्ध नहीं है ($statusCode)';
+  }
+
+  @override
+  String get apiTutorFailed => 'ट्यूटर जवाब नहीं दे सका';
+
+  @override
+  String get apiSchoolWhatsappCouldNotSend =>
+      'स्कूल का व्हाट्सएप यह नहीं भेज सका';
+
+  @override
+  String get apiCouldNotStartPayment => 'भुगतान शुरू नहीं हो सका';
+
+  @override
+  String get apiThisChild => 'इस बच्चे';
+
+  @override
+  String apiValidTill(String date) {
+    return '$date तक मान्य';
+  }
+
+  @override
+  String get apiOnlineClass => 'ऑनलाइन क्लास';
+
+  @override
+  String apiOnlineRegisterMarked(String present, String total) {
+    return '$total में से $present हाज़िर';
+  }
+
+  @override
+  String apiOnlineRegisterMarkedWithAlerts(
+    String present,
+    String total,
+    String alerts,
+  ) {
+    return '$total में से $present हाज़िर · $alerts गैरहाज़िरी सूचनाएँ भेजी गईं';
+  }
+
+  @override
+  String apiOnlineRoomMatched(String inRoom, String matched) {
+    return 'क्लास में $inRoom, $matched का मिलान हुआ';
+  }
+
+  @override
+  String apiOnlineRoomMatchedWithUnmatched(
+    String inRoom,
+    String matched,
+    String names,
+  ) {
+    return 'क्लास में $inRoom, $matched का मिलान हुआ · मिलान नहीं हुआ: $names';
+  }
+
+  @override
+  String get sysPlayUnavailable =>
+      'इस फ़ोन पर Google Play उपलब्ध नहीं है। ऐप Play से इंस्टॉल होना चाहिए और फ़ोन में Google खाता साइन इन होना चाहिए।';
+
+  @override
+  String sysPlayReturnedError(String error) {
+    return 'Google Play से गड़बड़ी आई: $error';
+  }
+
+  @override
+  String sysPlayPassesNotFound(String ids) {
+    return 'Google Play पर ये पास अभी नहीं हैं: $ids। हो सकता है ये अभी प्रकाशित हो रहे हों।';
+  }
+
+  @override
+  String get sysPlayNoPasses => 'Google Play पर अभी कोई पास उपलब्ध नहीं है।';
+
+  @override
+  String get sysPlayPaymentDidNotGoThrough => 'भुगतान पूरा नहीं हुआ';
+
+  @override
+  String get sysCouldNotReachSchoolServer =>
+      'स्कूल सर्वर से संपर्क नहीं हो सका';
+
+  @override
+  String get sysPushChannelName => 'स्कूल की सूचनाएँ';
+
+  @override
+  String get sysPushChannelDescription =>
+      'होमवर्क, हाज़िरी, क्लास टीचर के संदेश, फ़ीस की रसीदें और नोटिस।';
+
+  @override
+  String get profGuardian => 'अभिभावक';
+
+  @override
+  String get profRegisteredMobile => 'रजिस्टर्ड मोबाइल';
+
+  @override
+  String get profAlternateMobile => 'दूसरा मोबाइल';
+
+  @override
+  String get profEmail => 'ईमेल';
+
+  @override
+  String get profAddress => 'पता';
+
+  @override
+  String get profLocality => 'मोहल्ला / इलाक़ा';
+
+  @override
+  String get profCity => 'शहर';
+
+  @override
+  String get profState => 'राज्य';
+
+  @override
+  String get profPinCode => 'पिन कोड';
+
+  @override
+  String get profProfile => 'प्रोफ़ाइल';
+
+  @override
+  String get profFamily => 'परिवार';
+
+  @override
+  String get profChildren => 'बच्चे';
+
+  @override
+  String profClassAdmNo(String classLabel, String admissionNo) {
+    return '$classLabel · प्रवेश सं. $admissionNo';
+  }
+
+  @override
+  String profDocsStatusAllIn(String percent) {
+    return 'सभी ज़रूरी दस्तावेज़ जमा हैं · प्रोफ़ाइल $percent% पूरी';
+  }
+
+  @override
+  String profDocsStatusOneMissing(String percent) {
+    return '1 ज़रूरी दस्तावेज़ अपलोड करना है · प्रोफ़ाइल $percent% पूरी';
+  }
+
+  @override
+  String profDocsStatusMissing(String count, String percent) {
+    return '$count ज़रूरी दस्तावेज़ अपलोड करने हैं · प्रोफ़ाइल $percent% पूरी';
+  }
+
+  @override
+  String profRegisteredMobileNote(String mobile) {
+    return 'रजिस्टर्ड मोबाइल $mobile से ही आप ऐप में लॉग-इन करते हैं; इसे सिर्फ़ स्कूल दफ़्तर में बदला जा सकता है।';
+  }
+
+  @override
+  String get profSaving => 'सहेजा जा रहा है…';
+
+  @override
+  String get profStudentProfile => 'बच्चे की प्रोफ़ाइल';
+
+  @override
+  String get profDocumentsSchoolNeeds => 'स्कूल को चाहिए ये दस्तावेज़';
+
+  @override
+  String get profDetailsOnRecord => 'रिकॉर्ड में दर्ज जानकारी';
+
+  @override
+  String get profDocBirthCert => 'जन्म प्रमाण पत्र';
+
+  @override
+  String get profDocPhoto => 'फ़ोटो';
+
+  @override
+  String get profDocAadhaar => 'आधार';
+
+  @override
+  String get profDocAddressProof => 'पते का प्रमाण';
+
+  @override
+  String get profDocTc => 'ट्रांसफ़र सर्टिफ़िकेट (TC)';
+
+  @override
+  String get profDocCasteCert => 'जाति प्रमाण पत्र';
+
+  @override
+  String get profDocIncomeCert => 'आय प्रमाण पत्र';
+
+  @override
+  String profCheckMatches(String label) {
+    return '$label: मेल खाता है';
+  }
+
+  @override
+  String profCheckMismatch(String label) {
+    return '$label: मेल नहीं खाता';
+  }
+
+  @override
+  String profCheckNotReadable(String label) {
+    return '$label: पढ़ा नहीं जा सका';
+  }
+
+  @override
+  String profCheckNotOnRecord(String label) {
+    return '$label: रिकॉर्ड में नहीं है';
+  }
+
+  @override
+  String get profCouldNotUpload => 'अपलोड नहीं हो सका';
+
+  @override
+  String get profNotAccepted => 'स्वीकार नहीं हुआ';
+
+  @override
+  String profProfilePercentComplete(String percent) {
+    return 'प्रोफ़ाइल $percent% पूरी';
+  }
+
+  @override
+  String get profVerified => 'जाँच पूरी';
+
+  @override
+  String get profAwaitingVerification => 'जाँच बाकी';
+
+  @override
+  String get profRejected => 'अस्वीकार';
+
+  @override
+  String get profRequired => 'ज़रूरी';
+
+  @override
+  String get profOptional => 'ज़रूरी नहीं';
+
+  @override
+  String profOfficeNote(String note) {
+    return 'दफ़्तर: $note';
+  }
+
+  @override
+  String get profUploadAgain => 'फिर से अपलोड करें';
+
+  @override
+  String get profUpload => 'अपलोड करें';
+
+  @override
+  String profSchoolNote(String note) {
+    return 'स्कूल: $note';
+  }
+
+  @override
+  String get profSending => 'भेजा जा रहा है…';
+
+  @override
+  String get profSendRequest => 'अनुरोध भेजें';
+
+  @override
+  String get profLeave => 'छुट्टी';
+
+  @override
+  String profLeaveTypeOneDay(String type) {
+    return '$type · 1 दिन';
+  }
+
+  @override
+  String profLeaveTypeDays(String type, String days) {
+    return '$type · $days दिन';
+  }
+
+  @override
+  String get profLeaveApproved => 'मंज़ूर';
+
+  @override
+  String get profLeaveNotApproved => 'मंज़ूर नहीं';
+
+  @override
+  String get profLeaveWithdrawn => 'वापस ली गई';
+
+  @override
+  String get profLeavePending => 'फ़ैसला बाकी';
+
+  @override
+  String profLeaveForChild(String name) {
+    return '$name के लिए छुट्टी';
+  }
+
+  @override
+  String get profDate => 'तारीख़';
+
+  @override
+  String get profFrom => 'से';
+
+  @override
+  String get profTo => 'तक';
+
+  @override
+  String busRouteLine(String code, String name) {
+    return 'बस $code · $name';
+  }
+
+  @override
+  String busStopLine(String stop) {
+    return 'स्टॉप: $stop';
+  }
+
+  @override
+  String get busMorningPickupOnly => 'सिर्फ़ सुबह घर से ले जाना';
+
+  @override
+  String get busAfternoonDropOnly => 'सिर्फ़ दोपहर में घर छोड़ना';
+
+  @override
+  String get busPickupAndDrop => 'ले जाना और घर छोड़ना, दोनों';
+
+  @override
+  String busFeePerMonth(String fee) {
+    return '$fee हर महीने';
+  }
+
+  @override
+  String busDriverLine(String name) {
+    return 'ड्राइवर: $name';
+  }
+
+  @override
+  String get busLiveBusLocation => 'बस की लाइव लोकेशन';
+
+  @override
+  String get busRequestSchoolTransport => 'स्कूल बस के लिए अनुरोध करें';
+
+  @override
+  String get busRequestAgain => 'फिर से अनुरोध करें';
+
+  @override
+  String busCouldNotStartCall(String mobile) {
+    return 'फ़ोन नहीं लग सका। नंबर है: $mobile।';
+  }
+
+  @override
+  String get busStatusContacted => 'दफ़्तर ने आपसे संपर्क किया है';
+
+  @override
+  String get busStatusAssigned => 'बस तय हो गई — बस की जानकारी यहाँ दिखेगी';
+
+  @override
+  String get busStatusDeclined => 'अभी संभव नहीं';
+
+  @override
+  String get busStatusRequested =>
+      'अनुरोध भेजा गया — दफ़्तर के जवाब का इंतज़ार';
+
+  @override
+  String busTransportForChild(String name) {
+    return '$name के लिए स्कूल बस';
+  }
+
+  @override
+  String busNoBusAssigned(String name) {
+    return '$name के लिए कोई बस तय नहीं है।';
+  }
+
+  @override
+  String get busCouldNotLoadPosition =>
+      'बस की लोकेशन नहीं मिल सकी। ऐप खुद दोबारा कोशिश करेगा, या रीफ़्रेश दबाएँ।';
+
+  @override
+  String get busBusLocation => 'बस की लोकेशन';
+
+  @override
+  String get busCentreOnBus => 'नक्शे पर बस दिखाएँ';
+
+  @override
+  String get busNoGpsTracker => 'इस गाड़ी में GPS ट्रैकर नहीं है';
+
+  @override
+  String busNoGpsTrackerDetail(String vehicle) {
+    return '$vehicle · लाइव लोकेशन उपलब्ध नहीं है। परिवहन पेज से ड्राइवर को फ़ोन करें।';
+  }
+
+  @override
+  String get busNotOnTrip => 'बस अभी स्कूल के फेरे पर नहीं है';
+
+  @override
+  String get busLiveHoursNote =>
+      'लाइव लोकेशन बस चलने के समय (06:00–17:30, सोमवार–शनिवार) दिखती है।';
+
+  @override
+  String get busTrackerNotReporting => 'ट्रैकर अभी लोकेशन नहीं भेज रहा';
+
+  @override
+  String get busTrackerStaleNote =>
+      'आख़िरी लोकेशन 15 मिनट से पुरानी है, इसलिए नहीं दिखाई जा रही। हर 15 सेकंड में ताज़ा होती है।';
+
+  @override
+  String busSecondsAgo(String seconds) {
+    return '$seconds सेकंड पहले';
+  }
+
+  @override
+  String busMinutesAgo(String minutes) {
+    return '$minutes मिनट पहले';
+  }
+
+  @override
+  String busEtaToStop(String minutes, String stop) {
+    return '$stop तक लगभग $minutes मिनट';
+  }
+
+  @override
+  String busEtaToYourStop(String minutes) {
+    return 'आपके स्टॉप तक लगभग $minutes मिनट';
+  }
+
+  @override
+  String get busOnTheRoad => 'बस रास्ते में है';
+
+  @override
+  String get busMorningPickupPhase => 'सुबह का फेरा';
+
+  @override
+  String get busAfternoonDropPhase => 'दोपहर का फेरा';
+
+  @override
+  String busUpdatedAgo(String age) {
+    return '$age अपडेट हुई';
+  }
+
+  @override
+  String busSpeedKmh(String speed) {
+    return '$speed किमी/घंटा';
+  }
+
+  @override
+  String busKmAway(String km) {
+    return '$km किमी दूर';
+  }
+
+  @override
+  String get busEstimateNotPromise => 'अंदाज़ा है, पक्का वादा नहीं';
+
+  @override
+  String get modAttendanceTitle => 'हाज़िरी';
+
+  @override
+  String get modAttendancePresent => 'उपस्थित';
+
+  @override
+  String get modAttendanceAbsent => 'अनुपस्थित';
+
+  @override
+  String get modAttendanceLate => 'देर से';
+
+  @override
+  String get modFeeReceiptsTitle => 'फ़ीस की रसीदें';
+
+  @override
+  String get modReceiptVoidCancelledByOffice =>
+      'रद्द — दफ़्तर ने यह रसीद रद्द कर दी है';
+
+  @override
+  String modReceiptTitle(String receiptNo) {
+    return 'रसीद $receiptNo';
+  }
+
+  @override
+  String get modFeesTitle => 'फ़ीस';
+
+  @override
+  String get modFeesCouldNotStartPayment => 'भुगतान शुरू नहीं हो सका';
+
+  @override
+  String get modFeesNoBrowserForPaymentPage =>
+      'भुगतान पेज खोलने के लिए फ़ोन में कोई ब्राउज़र नहीं है';
+
+  @override
+  String get modFeesCouldNotStartPaymentConnection =>
+      'भुगतान शुरू नहीं हो सका — अपना नेटवर्क देखें और दोबारा कोशिश करें।';
+
+  @override
+  String get modFeesNoBrowserForPage =>
+      'पेज खोलने के लिए फ़ोन में कोई ब्राउज़र नहीं है';
+
+  @override
+  String get modFeesCouldNotStartAutopay =>
+      'ऑटो-पे शुरू नहीं हो सका — अपना नेटवर्क देखें और दोबारा कोशिश करें।';
+
+  @override
+  String get modFeesCouldNotStopAutopay =>
+      'ऑटो-पे बंद नहीं हो सका — अपना नेटवर्क देखें और दोबारा कोशिश करें।';
+
+  @override
+  String modFeesDueOn(String date) {
+    return 'आख़िरी तारीख़ $date';
+  }
+
+  @override
+  String modFeesFallsDueOn(String date) {
+    return '$date को देय होगी';
+  }
+
+  @override
+  String get modFeesSelectAFeeToPay => 'जमा करने के लिए फ़ीस चुनें';
+
+  @override
+  String modFeesPayAmountOnline(String amount) {
+    return '$amount ऑनलाइन जमा करें';
+  }
+
+  @override
+  String modFeesPayAhead(String amount) {
+    return 'पहले से जमा करें · आने वाले महीनों के लिए $amount';
+  }
+
+  @override
+  String get modPtmTitle => 'अभिभावक-शिक्षक बैठक (PTM)';
+
+  @override
+  String modPtmForChild(String name) {
+    return '$name के लिए';
+  }
+
+  @override
+  String modPtmNoneScheduled(String name) {
+    return 'अभी $name की कक्षा के लिए कोई PTM तय नहीं है। स्कूल के PTM की घोषणा करते ही यहाँ बुकिंग खुल जाएगी।';
+  }
+
+  @override
+  String modPtmSeatsLeft(String count) {
+    return '$count बाकी';
+  }
+
+  @override
+  String get modPtmSlotFull => 'भर गया';
+
+  @override
+  String get modPtmSlotBooked => 'समय बुक हो गया';
+
+  @override
+  String modPtmBookedWith(String teacher, String time) {
+    return 'बुक हो गया — $teacher, $time';
+  }
+
+  @override
+  String get modChatClassTeacher => 'कक्षा अध्यापक';
+
+  @override
+  String modChatClassTeacherNamed(String name) {
+    return 'कक्षा अध्यापक: $name';
+  }
+
+  @override
+  String modChatNoMessagesSayHello(String name) {
+    return 'अभी कोई संदेश नहीं। $name को नमस्ते लिखें।';
+  }
+
+  @override
+  String get modChatNoClassTeacherAssigned =>
+      'इस सेक्शन के लिए अभी कोई कक्षा अध्यापक तय नहीं है — स्कूल दफ़्तर से पता करें।';
+
+  @override
+  String get modTeachersTitle => 'शिक्षक';
+
+  @override
+  String modTeachersWhatsappNote(String number) {
+    return 'व्हाट्सएप संदेश स्कूल के नंबर ($number) पर जाता है और शिक्षक तक पहुँचाया जाता है — संदेश पहले से पता किया हुआ है, बस आख़िरी पंक्ति के नीचे लिखकर भेजें।';
+  }
+
+  @override
+  String get modTeachersAvailableTill8pm => 'शिक्षक रात 8 बजे तक उपलब्ध हैं';
+
+  @override
+  String modTeachersAvailableHours(String hours) {
+    return 'शिक्षक $hours उपलब्ध हैं';
+  }
+
+  @override
+  String get modTeachersClosedNote =>
+      'अभी शिक्षक उपलब्ध नहीं हैं (सुबह 8 – रात 8)। ऐप में भेजा संदेश सुरक्षित रहेगा और सुबह पहुँचेगा।';
+
+  @override
+  String get modTeachersAfter8am => 'सुबह 8 बजे के बाद';
+
+  @override
+  String get modHomeworkTitle => 'होमवर्क और डायरी';
+
+  @override
+  String get modHomeworkEmptyTeacher =>
+      'इस सेक्शन के लिए अभी कोई होमवर्क नहीं डाला गया — पहला होमवर्क डालने के लिए नीचे का बटन दबाएँ।';
+
+  @override
+  String get modHomeworkEmptyParent =>
+      'इस कक्षा के लिए अभी कोई होमवर्क नहीं है। अध्यापक के होमवर्क डालते ही यहाँ दिखेगा।';
+
+  @override
+  String get modHomeworkLabel => 'होमवर्क';
+
+  @override
+  String modHomeworkDueOn(String date) {
+    return '$date तक जमा करें';
+  }
+
+  @override
+  String get modHomeworkCouldNotPost =>
+      'भेजा नहीं जा सका। नेटवर्क देखें और दोबारा कोशिश करें।';
+
+  @override
+  String get modComplaintsTitle => 'शिकायतें';
+
+  @override
+  String modComplaintsAboutChild(String name) {
+    return '$name के बारे में';
+  }
+
+  @override
+  String modComplaintsSchoolResponse(String note) {
+    return 'स्कूल का जवाब: $note';
+  }
+
+  @override
+  String get modComplaintsSending => 'भेजा जा रहा है…';
+
+  @override
+  String get modComplaintsSendToSchool => 'स्कूल को भेजें';
+
+  @override
+  String get modDiaryLabel => 'डायरी';
+
+  @override
+  String homeNewCount(String count) {
+    return '$count नए';
+  }
 }

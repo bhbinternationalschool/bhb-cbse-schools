@@ -5,7 +5,12 @@ import "package:cbse_school_mobile/app/routes_staff.dart";
 import "package:flutter_test/flutter_test.dart";
 
 void main() {
-  testWidgets("parent app opens on the OTP login screen", (tester) async {
+  // The school's language for parents is Hindi unless the family chose
+  // English, so a parent who has never picked sees Hindi — even on a phone
+  // set to English, which is what this test runs as.
+  testWidgets("parent app opens on the OTP login screen, in Hindi", (
+    tester,
+  ) async {
     await tester.pumpWidget(
       const CbseSchoolApp(
         audience: AppAudience.parent,
@@ -13,10 +18,11 @@ void main() {
       ),
     );
     await tester.pump();
-    expect(find.text("Mobile number"), findsOneWidget);
-    expect(find.text("Send OTP"), findsOneWidget);
+    expect(find.text("मोबाइल नंबर"), findsOneWidget);
+    expect(find.text("OTP भेजें"), findsOneWidget);
   });
 
+  // Staff keep following the phone's language.
   testWidgets("staff app opens on the same login screen", (tester) async {
     await tester.pumpWidget(
       const CbseSchoolApp(

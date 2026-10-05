@@ -13,7 +13,7 @@ class NoticesScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<List<CommsItem>>(
-      title: "Notices & news",
+      title: context.l10n.homeNoticesAndNews,
       load: api.fetchCommsFeed,
       emptyIcon: Icons.campaign_outlined,
       emptyText: context.l10n.noNoticesPublishedYetSchoolCirculars,
@@ -51,7 +51,9 @@ class NoticesScreen extends StatelessWidget {
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
-                            item.isNews ? "News" : "Notice",
+                            item.isNews
+                                ? context.l10n.homeNews
+                                : context.l10n.homeNotice,
                             style: AppText.labelSmall.copyWith(
                               color: item.isNews
                                   ? ModuleTone.blue.foreground

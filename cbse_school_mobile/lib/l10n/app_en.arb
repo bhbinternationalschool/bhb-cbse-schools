@@ -399,5 +399,1078 @@
   "updateRequiredBody": "This version of the app no longer works with the school's system. Updating takes a minute and keeps everything you have.",
   "updateNow": "Update now",
   "updateDownloaded": "The update is downloaded.",
-  "updateRestart": "Restart"
+  "updateRestart": "Restart",
+  "oclOnlineClasses": "Online classes",
+  "oclNoClassScheduled": "No online class is scheduled for {name}'s section. You will get a notification when the teacher schedules one.",
+  "@oclNoClassScheduled": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "oclComingUp": "Coming up",
+  "oclEarlier": "Earlier",
+  "oclJoinButtonNote": "The Join button works from 10 minutes before the class. It opens Google Meet or the app the teacher chose.",
+  "oclToday": "Today",
+  "oclTomorrow": "Tomorrow",
+  "oclLive": "LIVE",
+  "oclStarting": "Starting",
+  "oclCancelled": "Cancelled",
+  "oclJoined": "Joined",
+  "oclMissed": "Missed",
+  "oclJoinNow": "Join now",
+  "oclJoin": "Join",
+  "oclOpensAt": "Opens at {time}",
+  "@oclOpensAt": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "oclTeacherQuestionsAndMyAnswers": "Teacher's questions & my answers",
+  "oclTakeAPhotoOfTheCopy": "Take a photo of the copy",
+  "oclQuestionsFromTheTeacher": "Questions from the teacher",
+  "oclNoQuestionYet": "The teacher has not asked a question yet. Pull down to refresh.",
+  "oclWriteAnswerInCopyNote": "Write the answer in the copy, then send a clear photo. You can send again until the teacher closes the question.",
+  "oclVerdictCorrect": "Correct ✓",
+  "oclVerdictWrong": "Not correct — try again",
+  "oclVerdictPartly": "Partly right",
+  "oclSentWaitingForTeacher": "Sent · waiting for the teacher",
+  "oclQuestionNumber": "Question {number}",
+  "@oclQuestionNumber": {
+    "placeholders": {
+      "number": {
+        "type": "String"
+      }
+    }
+  },
+  "oclQuestionNumberClosed": "Question {number} · closed",
+  "@oclQuestionNumberClosed": {
+    "placeholders": {
+      "number": {
+        "type": "String"
+      }
+    }
+  },
+  "oclSending": "Sending…",
+  "oclSendAgain": "Send again",
+  "oclSendAnswerPhoto": "Send answer photo",
+  "tutLibrary": "Library",
+  "tutEBooks": "E-books",
+  "tutGeneralSubject": "General",
+  "tutShelfKey": "Shelf key",
+  "tutBookClasses": "Class {classes}",
+  "@tutBookClasses": {
+    "placeholders": {
+      "classes": {
+        "type": "String"
+      }
+    }
+  },
+  "tutKey": "Key",
+  "tutKeyLine": "{label}: {value}",
+  "@tutKeyLine": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      },
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "tutKeyCopied": "{label} copied",
+  "@tutKeyCopied": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "tutPromptHint": "e.g. How do I explain fractions?",
+  "tutPromptTeach": "e.g. Teach photosynthesis for Class V",
+  "tutPromptExamples": "e.g. Three solved examples of long division",
+  "tutPromptPractice": "e.g. 5 questions on tenses for Class IV",
+  "tutPromptScore": "Paste the questions and your child's answers",
+  "tutPromptHomework": "e.g. Help with today's maths homework",
+  "tutPromptExam": "e.g. Prepare for the Class III EVS unit test",
+  "tutAskTheTutor": "Ask the tutor…",
+  "tutModeNeedsPassReason": "{mode} is part of the full tutor. Get a pass for {name} — a day, a week or a month — to unlock it.",
+  "@tutModeNeedsPassReason": {
+    "placeholders": {
+      "mode": {
+        "type": "String"
+      },
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "tutCouldNotReachTheTutor": "Could not reach the tutor. Check your connection.",
+  "tutReportTitle": "Report this reply",
+  "tutReportBody": "The school will read this. Tell us what was wrong.",
+  "tutReportWrong": "The answer is wrong",
+  "tutReportInappropriate": "Inappropriate or unsafe",
+  "tutReportConfusing": "Confusing",
+  "tutReportOther": "Something else",
+  "tutReportNote": "Anything to add (optional)",
+  "tutReportThanks": "Thank you — the school will look at this.",
+  "tutCouldNotSendReport": "Could not send the report. Please try again.",
+  "tutGetAPass": "Get a pass",
+  "tutReplyLanguage": "Reply language",
+  "tutFullTutorOn": "Full tutor on for {name} · {valid}",
+  "@tutFullTutorOn": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "valid": {
+        "type": "String"
+      }
+    }
+  },
+  "tutFullTutorOnLimitReached": "Full tutor on for {name} · {valid} · today's limit reached",
+  "@tutFullTutorOnLimitReached": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "valid": {
+        "type": "String"
+      }
+    }
+  },
+  "tutModeNeedsPass": "{mode} needs a pass — hints stay free",
+  "@tutModeNeedsPass": {
+    "placeholders": {
+      "mode": {
+        "type": "String"
+      }
+    }
+  },
+  "tutFreeHintsLeft": "{left} of {total} free hints left today",
+  "@tutFreeHintsLeft": {
+    "placeholders": {
+      "left": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      }
+    }
+  },
+  "tutTutor": "Tutor",
+  "tutFreeHint": "Free hint",
+  "tutFullTutor": "Full tutor",
+  "tutWatchVideos": "Watch videos",
+  "tutReported": "Reported",
+  "tutReport": "Report",
+  "tutStop": "Stop",
+  "tutSpeakYourQuestion": "Speak your question",
+  "tutListeningSpeakNow": "Listening… speak now",
+  "tutStillAskingGooglePlay": "Still asking Google Play about the passes. Try again in a moment.",
+  "tutGooglePlayCouldNotStart": "Google Play could not start the payment.",
+  "tutCouldNotOpenPaymentPage": "Could not open the payment page",
+  "tutNoBrowserForPaymentPage": "No browser available to open the payment page",
+  "tutPassFor": "Tutor pass for {name}",
+  "@tutPassFor": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "tutUnlockFullTutor": "Unlock the full tutor for {name} — teaching, worked examples, practice questions, answer checking, homework help and exam preparation, all at the {classLabel} level.",
+  "@tutUnlockFullTutor": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "classLabel": {
+        "type": "String"
+      }
+    }
+  },
+  "tutCurrentPassWithPlan": "{plan} pass · {valid}. A new pass starts when this one ends.",
+  "@tutCurrentPassWithPlan": {
+    "placeholders": {
+      "plan": {
+        "type": "String"
+      },
+      "valid": {
+        "type": "String"
+      }
+    }
+  },
+  "tutCurrentPass": "{valid}. A new pass starts when this one ends.",
+  "@tutCurrentPass": {
+    "placeholders": {
+      "valid": {
+        "type": "String"
+      }
+    }
+  },
+  "tutPendingPass": "{days}-day pass ({amount})",
+  "@tutPendingPass": {
+    "placeholders": {
+      "days": {
+        "type": "String"
+      },
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "tutWaitingForBank": "Waiting for the bank: {passes}. The pass switches on by itself once the payment is confirmed.",
+  "@tutWaitingForBank": {
+    "placeholders": {
+      "passes": {
+        "type": "String"
+      }
+    }
+  },
+  "tutPassTerms": "A pass is for one child and covers {name}'s class ({classLabel}) only — a brother or sister needs their own pass. Fair use: up to 60 tutor messages a day. Hints stay free every day.",
+  "@tutPassTerms": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "classLabel": {
+        "type": "String"
+      }
+    }
+  },
+  "tutFullTutorForOneDay": "Full tutor for one day",
+  "tutFullTutorForDays": "Full tutor for {days} days",
+  "@tutFullTutorForDays": {
+    "placeholders": {
+      "days": {
+        "type": "String"
+      }
+    }
+  },
+  "tutVideosAllDiksha": "These are from DIKSHA, the Government of India's platform for NCERT and CBSE lessons.",
+  "tutVideosSomeDiksha": "Videos marked DIKSHA are from the Government of India's lesson platform; the rest are from YouTube, not the school — judge them as you watch.",
+  "tutVideosFromYoutube": "Videos are from YouTube, not the school — judge them as you watch.",
+  "tutVideosOnThisTopic": "Videos on this topic",
+  "tutNoVideosFound": "No videos found yet — search YouTube instead.",
+  "tutSearchOnYoutube": "Search on YouTube",
+  "tutGuideStep1Title": "1. Today's lesson (10 min)",
+  "tutGuideStep1Body": "Choose \"Teach a topic\" and type what was taught in school today, e.g. \"fractions\". The tutor gives a short lesson at {name}'s class level.",
+  "@tutGuideStep1Body": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "tutGuideStep2Title": "2. Worked examples (5 min)",
+  "tutGuideStep2Body": "In \"Worked examples\", type the same topic. Every step is shown — read them with {name}.",
+  "@tutGuideStep2Body": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "tutGuideStep3Title": "3. Practice (10 min)",
+  "tutGuideStep3Body": "\"Practice questions\" gives 5 questions. {name} solves them in a notebook — answers stay hidden until you ask.",
+  "@tutGuideStep3Body": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "tutGuideStep4Title": "4. Check answers (5 min)",
+  "tutGuideStep4Body": "In \"Check answers\", type the questions with {name}'s answers. You get marks and what to fix.",
+  "@tutGuideStep4Body": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "tutGuideStep5Title": "5. Homework",
+  "tutGuideStep5Body": "On the Homework screen, tap \"Ask tutor\" next to any item — that assignment is already in front of the tutor.",
+  "tutGuideStep6Title": "6. Before a test",
+  "tutGuideStep6Body": "In \"Exam preparation\", type the subject and date — you get a revision list, a day-wise plan and likely questions.",
+  "tutGuideStep7Title": "7. Stuck? Watch a video",
+  "tutGuideStep7Body": "Under every reply, \"Watch videos\" finds videos on that topic and plays them inside the app.",
+  "tutGuideFreeHintsTitle": "Free hints",
+  "tutGuideFreeHintsBody": "\"Hints\" are free, 20 a day — when {name} is stuck, ask for the next step. The full tutor opens with a pass: a day, a week or a month, for one child.",
+  "@tutGuideFreeHintsBody": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "tutGuideHeading": "No tuition needed — 30 minutes a day with the tutor",
+  "tutGuideIntro": "Sit with {name} and follow this routine every day. The tutor teaches at {name}'s class level (CBSE), in Hindi or English.",
+  "@tutGuideIntro": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "tutGuideGotIt": "Got it, let's start",
+  "authCouldNotReachServerTryAgain": "Could not reach the school server. Try again.",
+  "authOtpSentOnWhatsappTo": "OTP sent on WhatsApp to {mobile}",
+  "@authOtpSentOnWhatsappTo": {
+    "placeholders": {
+      "mobile": {
+        "type": "String"
+      }
+    }
+  },
+  "authSignInWithPasswordInstead": "Sign in with password instead",
+  "authSignInWithOtpInstead": "Sign in with OTP instead",
+  "authSentTo": "Sent to {mobile}",
+  "@authSentTo": {
+    "placeholders": {
+      "mobile": {
+        "type": "String"
+      }
+    }
+  },
+  "authIfParentChooseParentAbove": "If you are a parent, choose Parent above.",
+  "authSignIn": "Sign in",
+  "authVerifyAndSignIn": "Verify & sign in",
+  "authSendOtp": "Send OTP",
+  "homeWrongAppStaffSignIn": "That's a staff sign-in",
+  "homeWrongAppParentSignIn": "That's a parent sign-in",
+  "homeWrongAppInstallOther": "This is the {thisApp} app. Install {otherApp} and sign in there instead.",
+  "@homeWrongAppInstallOther": {
+    "placeholders": {
+      "thisApp": {
+        "type": "String"
+      },
+      "otherApp": {
+        "type": "String"
+      }
+    }
+  },
+  "homeGuardianName": "Guardian: {name}",
+  "@homeGuardianName": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "homeNothingHereYet": "Nothing here yet.",
+  "homeCouldNotReachServerCheckConnection": "Could not reach the school server. Check your connection and try again.",
+  "homeModuleComingSoon": "{module} is coming soon",
+  "@homeModuleComingSoon": {
+    "placeholders": {
+      "module": {
+        "type": "String"
+      }
+    }
+  },
+  "homeNoticesAndNews": "Notices & news",
+  "homeNews": "News",
+  "homeNotice": "Notice",
+  "homeSchoolPhotos": "School photos",
+  "homePhotoCount": "{count, plural, =1{1 photo} other{{count} photos}}",
+  "@homePhotoCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "homeModuleFees": "Fees",
+  "homeModuleAttendance": "Attendance",
+  "homeModuleHomework": "Homework",
+  "homeModuleTutor": "Tutor",
+  "homeModuleOnlineClass": "Online class",
+  "homeModuleLibrary": "Library",
+  "homeModulePtm": "PTM",
+  "homeModuleLeave": "Leave",
+  "homeModuleComplaints": "Complaints",
+  "homeModuleReceipts": "Receipts",
+  "homeGoodMorning": "Good morning",
+  "homeGoodAfternoon": "Good afternoon",
+  "homeGoodEvening": "Good evening",
+  "homeCouldNotOpenWhatsappNumberIs": "Could not open WhatsApp. The school's number is {number}.",
+  "@homeCouldNotOpenWhatsappNumberIs": {
+    "placeholders": {
+      "number": {
+        "type": "String"
+      }
+    }
+  },
+  "homeQuickAccess": "Quick access",
+  "homeSchool": "School",
+  "homeMessageATeacherHours": "Message a teacher · 8 AM – 8 PM",
+  "homeMessageATeacherSubtitle": "Class and subject teachers, in app or on WhatsApp through the school",
+  "homeStudentIdWithNumber": "Student ID · {admissionNo}",
+  "@homeStudentIdWithNumber": {
+    "placeholders": {
+      "admissionNo": {
+        "type": "String"
+      }
+    }
+  },
+  "homeGuardianTapForIdQr": "Guardian {name} · tap for the ID QR",
+  "@homeGuardianTapForIdQr": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "homeTabHome": "Home",
+  "homeTabMessages": "Messages",
+  "homeTabProfile": "Profile",
+  "homeFeesDue": "Fees due",
+  "homeWhatsappCardSubtitle": "{number} · dues, receipts, pay by UPI, or ask for a person. Message from the mobile registered with the school.",
+  "@homeWhatsappCardSubtitle": {
+    "placeholders": {
+      "number": {
+        "type": "String"
+      }
+    }
+  },
+  "apiChildClass": "Class {className}",
+  "@apiChildClass": {
+    "placeholders": {
+      "className": {
+        "type": "String"
+      }
+    }
+  },
+  "apiChildClassRoll": "Class {className} · Roll {rollNo}",
+  "@apiChildClassRoll": {
+    "placeholders": {
+      "className": {
+        "type": "String"
+      },
+      "rollNo": {
+        "type": "String"
+      }
+    }
+  },
+  "apiFieldAdmissionNo": "Admission no.",
+  "apiFieldRollNo": "Roll no.",
+  "apiFieldDateOfBirth": "Date of birth",
+  "apiGenderMale": "Male",
+  "apiGenderFemale": "Female",
+  "apiGenderOther": "Other",
+  "apiFieldBloodGroup": "Blood group",
+  "apiFieldCategory": "Category",
+  "apiFieldReligion": "Religion",
+  "apiFieldNationality": "Nationality",
+  "apiFieldMotherTongue": "Mother tongue",
+  "apiFieldPlaceOfBirth": "Place of birth",
+  "apiFieldFatherName": "Father's name",
+  "apiFieldFatherMobile": "Father's mobile",
+  "apiFieldMotherName": "Mother's name",
+  "apiFieldMotherMobile": "Mother's mobile",
+  "apiFieldEmergencyContact": "Emergency contact",
+  "apiFieldAadhaar": "Aadhaar",
+  "apiFieldPreviousSchool": "Previous school",
+  "apiFieldJoinedOn": "Joined on",
+  "apiFieldAcademicYear": "Academic year",
+  "apiDocSubmittedForVerification": "Submitted for verification.",
+  "apiRequestFailed": "Request failed ({statusCode})",
+  "@apiRequestFailed": {
+    "placeholders": {
+      "statusCode": {
+        "type": "String"
+      }
+    }
+  },
+  "apiYourWhatsapp": "your WhatsApp",
+  "apiStaffLoginNotConfigured": "Staff login is not configured in this build (missing Supabase keys).",
+  "apiEmailOrPasswordIncorrect": "Email or password is incorrect.",
+  "apiSignInFailedTryAgain": "Sign-in failed. Try again.",
+  "apiTutorUnavailable": "Tutor unavailable ({statusCode})",
+  "@apiTutorUnavailable": {
+    "placeholders": {
+      "statusCode": {
+        "type": "String"
+      }
+    }
+  },
+  "apiTutorFailed": "Tutor failed",
+  "apiSchoolWhatsappCouldNotSend": "The school's WhatsApp could not send this",
+  "apiCouldNotStartPayment": "Could not start payment",
+  "apiThisChild": "this child",
+  "apiValidTill": "Valid till {date}",
+  "@apiValidTill": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "apiOnlineClass": "Online class",
+  "apiOnlineRegisterMarked": "{present} present of {total}",
+  "@apiOnlineRegisterMarked": {
+    "placeholders": {
+      "present": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      }
+    }
+  },
+  "apiOnlineRegisterMarkedWithAlerts": "{present} present of {total} · {alerts} absent alerts sent",
+  "@apiOnlineRegisterMarkedWithAlerts": {
+    "placeholders": {
+      "present": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      },
+      "alerts": {
+        "type": "String"
+      }
+    }
+  },
+  "apiOnlineRoomMatched": "{inRoom} in the room, {matched} matched",
+  "@apiOnlineRoomMatched": {
+    "placeholders": {
+      "inRoom": {
+        "type": "String"
+      },
+      "matched": {
+        "type": "String"
+      }
+    }
+  },
+  "apiOnlineRoomMatchedWithUnmatched": "{inRoom} in the room, {matched} matched · not matched: {names}",
+  "@apiOnlineRoomMatchedWithUnmatched": {
+    "placeholders": {
+      "inRoom": {
+        "type": "String"
+      },
+      "matched": {
+        "type": "String"
+      },
+      "names": {
+        "type": "String"
+      }
+    }
+  },
+  "sysPlayUnavailable": "Google Play is not available on this phone. The app must be installed from Play, with a Google account signed in.",
+  "sysPlayReturnedError": "Google Play returned an error: {error}",
+  "@sysPlayReturnedError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "sysPlayPassesNotFound": "Google Play does not have these passes yet: {ids}. They may still be publishing.",
+  "@sysPlayPassesNotFound": {
+    "placeholders": {
+      "ids": {
+        "type": "String"
+      }
+    }
+  },
+  "sysPlayNoPasses": "Google Play has no passes to sell right now.",
+  "sysPlayPaymentDidNotGoThrough": "The payment did not go through",
+  "sysCouldNotReachSchoolServer": "Could not reach the school server",
+  "sysPushChannelName": "School updates",
+  "sysPushChannelDescription": "Homework, attendance, messages from the class teacher, fee receipts and notices.",
+  "profGuardian": "Guardian",
+  "profRegisteredMobile": "Registered mobile",
+  "profAlternateMobile": "Alternate mobile",
+  "profEmail": "Email",
+  "profAddress": "Address",
+  "profLocality": "Locality",
+  "profCity": "City",
+  "profState": "State",
+  "profPinCode": "PIN code",
+  "profProfile": "Profile",
+  "profFamily": "Family",
+  "profChildren": "Children",
+  "profClassAdmNo": "{classLabel} · Adm. {admissionNo}",
+  "@profClassAdmNo": {
+    "placeholders": {
+      "classLabel": {
+        "type": "String"
+      },
+      "admissionNo": {
+        "type": "String"
+      }
+    }
+  },
+  "profDocsStatusAllIn": "All required documents in · profile {percent}% complete",
+  "@profDocsStatusAllIn": {
+    "placeholders": {
+      "percent": {
+        "type": "String"
+      }
+    }
+  },
+  "profDocsStatusOneMissing": "1 required document to upload · profile {percent}% complete",
+  "@profDocsStatusOneMissing": {
+    "placeholders": {
+      "percent": {
+        "type": "String"
+      }
+    }
+  },
+  "profDocsStatusMissing": "{count} required documents to upload · profile {percent}% complete",
+  "@profDocsStatusMissing": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      },
+      "percent": {
+        "type": "String"
+      }
+    }
+  },
+  "profRegisteredMobileNote": "Registered mobile {mobile} is your sign-in and can only be changed at the office.",
+  "@profRegisteredMobileNote": {
+    "placeholders": {
+      "mobile": {
+        "type": "String"
+      }
+    }
+  },
+  "profSaving": "Saving…",
+  "profStudentProfile": "Student profile",
+  "profDocumentsSchoolNeeds": "Documents the school needs",
+  "profDetailsOnRecord": "Details on record",
+  "profDocBirthCert": "Birth certificate",
+  "profDocPhoto": "Photo",
+  "profDocAadhaar": "Aadhaar",
+  "profDocAddressProof": "Address proof",
+  "profDocTc": "Transfer certificate",
+  "profDocCasteCert": "Caste certificate",
+  "profDocIncomeCert": "Income certificate",
+  "profCheckMatches": "{label}: matches",
+  "@profCheckMatches": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "profCheckMismatch": "{label}: does not match",
+  "@profCheckMismatch": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "profCheckNotReadable": "{label}: not readable",
+  "@profCheckNotReadable": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "profCheckNotOnRecord": "{label}: not on record",
+  "@profCheckNotOnRecord": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "profCouldNotUpload": "Could not upload",
+  "profNotAccepted": "Not accepted",
+  "profProfilePercentComplete": "Profile {percent}% complete",
+  "@profProfilePercentComplete": {
+    "placeholders": {
+      "percent": {
+        "type": "String"
+      }
+    }
+  },
+  "profVerified": "Verified",
+  "profAwaitingVerification": "Awaiting verification",
+  "profRejected": "Rejected",
+  "profRequired": "Required",
+  "profOptional": "Optional",
+  "profOfficeNote": "Office: {note}",
+  "@profOfficeNote": {
+    "placeholders": {
+      "note": {
+        "type": "String"
+      }
+    }
+  },
+  "profUploadAgain": "Upload again",
+  "profUpload": "Upload",
+  "profSchoolNote": "School: {note}",
+  "@profSchoolNote": {
+    "placeholders": {
+      "note": {
+        "type": "String"
+      }
+    }
+  },
+  "profSending": "Sending…",
+  "profSendRequest": "Send request",
+  "profLeave": "Leave",
+  "profLeaveTypeOneDay": "{type} · 1 day",
+  "@profLeaveTypeOneDay": {
+    "placeholders": {
+      "type": {
+        "type": "String"
+      }
+    }
+  },
+  "profLeaveTypeDays": "{type} · {days} days",
+  "@profLeaveTypeDays": {
+    "placeholders": {
+      "type": {
+        "type": "String"
+      },
+      "days": {
+        "type": "String"
+      }
+    }
+  },
+  "profLeaveApproved": "Approved",
+  "profLeaveNotApproved": "Not approved",
+  "profLeaveWithdrawn": "Withdrawn",
+  "profLeavePending": "Pending",
+  "profLeaveForChild": "Leave for {name}",
+  "@profLeaveForChild": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "profDate": "Date",
+  "profFrom": "From",
+  "profTo": "To",
+  "busRouteLine": "Bus {code} · {name}",
+  "@busRouteLine": {
+    "placeholders": {
+      "code": {
+        "type": "String"
+      },
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "busStopLine": "Stop: {stop}",
+  "@busStopLine": {
+    "placeholders": {
+      "stop": {
+        "type": "String"
+      }
+    }
+  },
+  "busMorningPickupOnly": "Morning pickup only",
+  "busAfternoonDropOnly": "Afternoon drop only",
+  "busPickupAndDrop": "Pickup and drop",
+  "busFeePerMonth": "{fee} per month",
+  "@busFeePerMonth": {
+    "placeholders": {
+      "fee": {
+        "type": "String"
+      }
+    }
+  },
+  "busDriverLine": "Driver: {name}",
+  "@busDriverLine": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "busLiveBusLocation": "Live bus location",
+  "busRequestSchoolTransport": "Request school transport",
+  "busRequestAgain": "Request again",
+  "busCouldNotStartCall": "Could not start a call. The number is {mobile}.",
+  "@busCouldNotStartCall": {
+    "placeholders": {
+      "mobile": {
+        "type": "String"
+      }
+    }
+  },
+  "busStatusContacted": "Office has been in touch",
+  "busStatusAssigned": "Assigned — bus details will appear here",
+  "busStatusDeclined": "Not possible right now",
+  "busStatusRequested": "Request sent — waiting for the office",
+  "busTransportForChild": "School transport for {name}",
+  "@busTransportForChild": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "busNoBusAssigned": "No bus is assigned to {name}.",
+  "@busNoBusAssigned": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "busCouldNotLoadPosition": "Could not load the bus position. It will try again on its own, or tap refresh.",
+  "busBusLocation": "Bus location",
+  "busCentreOnBus": "Centre on the bus",
+  "busNoGpsTracker": "This vehicle has no GPS tracker",
+  "busNoGpsTrackerDetail": "{vehicle} · live location is not available. Call the driver from the Transport page.",
+  "@busNoGpsTrackerDetail": {
+    "placeholders": {
+      "vehicle": {
+        "type": "String"
+      }
+    }
+  },
+  "busNotOnTrip": "Bus is not on a school trip now",
+  "busLiveHoursNote": "Live location shows during the transport day (06:00–17:30, Mon–Sat).",
+  "busTrackerNotReporting": "Tracker not reporting right now",
+  "busTrackerStaleNote": "Last position is older than 15 minutes, so it is not shown. Refreshes every 15 seconds.",
+  "busSecondsAgo": "{seconds}s ago",
+  "@busSecondsAgo": {
+    "placeholders": {
+      "seconds": {
+        "type": "String"
+      }
+    }
+  },
+  "busMinutesAgo": "{minutes} min ago",
+  "@busMinutesAgo": {
+    "placeholders": {
+      "minutes": {
+        "type": "String"
+      }
+    }
+  },
+  "busEtaToStop": "About {minutes} min to {stop}",
+  "@busEtaToStop": {
+    "placeholders": {
+      "minutes": {
+        "type": "String"
+      },
+      "stop": {
+        "type": "String"
+      }
+    }
+  },
+  "busEtaToYourStop": "About {minutes} min to your stop",
+  "@busEtaToYourStop": {
+    "placeholders": {
+      "minutes": {
+        "type": "String"
+      }
+    }
+  },
+  "busOnTheRoad": "Bus is on the road",
+  "busMorningPickupPhase": "Morning pickup",
+  "busAfternoonDropPhase": "Afternoon drop",
+  "busUpdatedAgo": "updated {age}",
+  "@busUpdatedAgo": {
+    "placeholders": {
+      "age": {
+        "type": "String"
+      }
+    }
+  },
+  "busSpeedKmh": "{speed} km/h",
+  "@busSpeedKmh": {
+    "placeholders": {
+      "speed": {
+        "type": "String"
+      }
+    }
+  },
+  "busKmAway": "{km} km away",
+  "@busKmAway": {
+    "placeholders": {
+      "km": {
+        "type": "String"
+      }
+    }
+  },
+  "busEstimateNotPromise": "estimate, not a promise",
+  "modAttendanceTitle": "Attendance",
+  "modAttendancePresent": "Present",
+  "modAttendanceAbsent": "Absent",
+  "modAttendanceLate": "Late",
+  "modFeeReceiptsTitle": "Fee receipts",
+  "modReceiptVoidCancelledByOffice": "VOID — cancelled by the office",
+  "modReceiptTitle": "Receipt {receiptNo}",
+  "@modReceiptTitle": {
+    "placeholders": {
+      "receiptNo": {
+        "type": "String"
+      }
+    }
+  },
+  "modFeesTitle": "Fees",
+  "modFeesCouldNotStartPayment": "Could not start payment",
+  "modFeesNoBrowserForPaymentPage": "No browser available to open the payment page",
+  "modFeesCouldNotStartPaymentConnection": "Could not start payment — check your connection and try again.",
+  "modFeesNoBrowserForPage": "No browser available to open the page",
+  "modFeesCouldNotStartAutopay": "Could not start auto-pay — check your connection and try again.",
+  "modFeesCouldNotStopAutopay": "Could not stop auto-pay — check your connection and try again.",
+  "modFeesDueOn": "Due {date}",
+  "@modFeesDueOn": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "modFeesFallsDueOn": "Falls due {date}",
+  "@modFeesFallsDueOn": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "modFeesSelectAFeeToPay": "Select a fee to pay",
+  "modFeesPayAmountOnline": "Pay {amount} online",
+  "@modFeesPayAmountOnline": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "modFeesPayAhead": "Pay ahead · {amount} for the months to come",
+  "@modFeesPayAhead": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "modPtmTitle": "Parent-teacher meetings",
+  "modPtmForChild": "for {name}",
+  "@modPtmForChild": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "modPtmNoneScheduled": "No PTM scheduled for {name}'s class right now. Booking opens here when the school announces one.",
+  "@modPtmNoneScheduled": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "modPtmSeatsLeft": "{count} left",
+  "@modPtmSeatsLeft": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "modPtmSlotFull": "Full",
+  "modPtmSlotBooked": "Slot booked",
+  "modPtmBookedWith": "Booked — {teacher}, {time}",
+  "@modPtmBookedWith": {
+    "placeholders": {
+      "teacher": {
+        "type": "String"
+      },
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "modChatClassTeacher": "Class teacher",
+  "modChatClassTeacherNamed": "Class teacher: {name}",
+  "@modChatClassTeacherNamed": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "modChatNoMessagesSayHello": "No messages yet. Say hello to {name}.",
+  "@modChatNoMessagesSayHello": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "modChatNoClassTeacherAssigned": "No class teacher is assigned to this section yet — check with the school office.",
+  "modTeachersTitle": "Teachers",
+  "modTeachersWhatsappNote": "WhatsApp messages go to the school's number ({number}) and are passed to the teacher — the message is already addressed, just type below the last line and send.",
+  "@modTeachersWhatsappNote": {
+    "placeholders": {
+      "number": {
+        "type": "String"
+      }
+    }
+  },
+  "modTeachersAvailableTill8pm": "Teachers are available till 8 PM",
+  "modTeachersAvailableHours": "Teachers are available {hours}",
+  "@modTeachersAvailableHours": {
+    "placeholders": {
+      "hours": {
+        "type": "String"
+      }
+    }
+  },
+  "modTeachersClosedNote": "Teachers are not available right now (8 AM – 8 PM). A message sent in the app is kept safe and reaches them in the morning.",
+  "modTeachersAfter8am": "After 8 AM",
+  "modHomeworkTitle": "Homework & diary",
+  "modHomeworkEmptyTeacher": "No homework posted for this section yet — use the button below to post the first one.",
+  "modHomeworkEmptyParent": "No homework posted for this class yet. New homework appears here as soon as the teacher publishes it.",
+  "modHomeworkLabel": "Homework",
+  "modHomeworkDueOn": "due {date}",
+  "@modHomeworkDueOn": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "modHomeworkCouldNotPost": "Could not post. Check the connection and try again.",
+  "modComplaintsTitle": "Complaints",
+  "modComplaintsAboutChild": "about {name}",
+  "@modComplaintsAboutChild": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "modComplaintsSchoolResponse": "School's response: {note}",
+  "@modComplaintsSchoolResponse": {
+    "placeholders": {
+      "note": {
+        "type": "String"
+      }
+    }
+  },
+  "modComplaintsSending": "Sending…",
+  "modComplaintsSendToSchool": "Send to the school",
+  "modDiaryLabel": "Diary",
+  "homeNewCount": "{count} new",
+  "@homeNewCount": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  }
 }

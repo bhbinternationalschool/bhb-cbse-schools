@@ -18,7 +18,7 @@ class ReceiptsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<List<ReceiptInfo>>(
-      title: "Fee receipts",
+      title: context.l10n.modFeeReceiptsTitle,
       load: api.fetchReceipts,
       emptyIcon: Icons.receipt_long_outlined,
       emptyText: context.l10n.noReceiptsYetEveryPaymentMade,
@@ -71,7 +71,7 @@ class ReceiptsScreen extends StatelessWidget {
                 subtitle: Text(
                   "${formatDateLabel(r.date)} · ${r.paidBy}"
                   "${r.students.isNotEmpty ? "\n${r.students.join(", ")}" : ""}"
-                  "${r.voided ? "\nVOID — cancelled by the office" : ""}",
+                  "${r.voided ? "\n${context.l10n.modReceiptVoidCancelledByOffice}" : ""}",
                   style: AppText.labelMediumMuted.copyWith(height: 1.4),
                 ),
                 isThreeLine: true,
@@ -158,7 +158,10 @@ class _ReceiptPdfScreenState extends State<ReceiptPdfScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text("Receipt ${widget.title}", style: AppText.titleMedium),
+        title: Text(
+          context.l10n.modReceiptTitle(widget.title),
+          style: AppText.titleMedium,
+        ),
       ),
       body: PdfViewPinch(controller: _controller),
     );

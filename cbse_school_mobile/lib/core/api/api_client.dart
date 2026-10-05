@@ -6,6 +6,7 @@ import "package:http/http.dart" as http;
 import "package:http_parser/http_parser.dart";
 
 import "../config/app_config.dart";
+import "../i18n/locale_controller.dart";
 import "../update/app_build.dart";
 
 part "staff_api.dart";
@@ -123,8 +124,9 @@ class ParentChild {
   String get classLabel {
     final cls = className.isEmpty ? "—" : className;
     final sec = sectionName.isEmpty ? "" : " $sectionName";
-    final roll = rollNo.isEmpty ? "" : " · Roll $rollNo";
-    return "Class $cls$sec$roll";
+    return rollNo.isEmpty
+        ? LocaleController.strings.apiChildClass("$cls$sec")
+        : LocaleController.strings.apiChildClassRoll("$cls$sec", rollNo);
   }
 
   String get initials {
@@ -173,7 +175,8 @@ class ParentSummary {
   });
 
   factory ParentSummary.fromJson(Map<String, dynamic> j) => ParentSummary(
-    guardianName: (j["guardianName"] as String?) ?? "Parent",
+    guardianName:
+        (j["guardianName"] as String?) ?? LocaleController.strings.parent,
     children: ((j["children"] as List?) ?? const [])
         .map((c) => ParentChild.fromJson(c as Map<String, dynamic>))
         .toList(),
@@ -284,7 +287,7 @@ class StaffSummary {
   });
 
   factory StaffSummary.fromJson(Map<String, dynamic> j) => StaffSummary(
-    fullName: (j["fullName"] as String?) ?? "Staff",
+    fullName: (j["fullName"] as String?) ?? LocaleController.strings.staff,
     date: (j["date"] as String?) ?? "",
     classTeacherOf: j["classTeacherOf"] == null
         ? null
@@ -923,42 +926,42 @@ class StudentProfile {
     // values are kept so the screen can show "—" rather than hide a field
     // the office has not filled in.
     final fields = <(String, String)>[
-      ("Admission no.", s("admissionNo")),
-      ("Class", s("classLabel")),
-      ("Roll no.", s("rollNo")),
-      ("Date of birth", s("dob")),
+      (LocaleController.strings.apiFieldAdmissionNo, s("admissionNo")),
+      (LocaleController.strings.classLabel, s("classLabel")),
+      (LocaleController.strings.apiFieldRollNo, s("rollNo")),
+      (LocaleController.strings.apiFieldDateOfBirth, s("dob")),
       (
-        "Gender",
+        LocaleController.strings.gender,
         switch (s("gender")) {
-          "M" => "Male",
-          "F" => "Female",
-          "O" => "Other",
+          "M" => LocaleController.strings.apiGenderMale,
+          "F" => LocaleController.strings.apiGenderFemale,
+          "O" => LocaleController.strings.apiGenderOther,
           _ => "",
         },
       ),
-      ("Blood group", s("bloodGroup")),
-      ("Category", s("category")),
-      ("Religion", s("religion")),
-      ("Nationality", s("nationality")),
-      ("Mother tongue", s("motherTongue")),
-      ("Place of birth", s("placeOfBirth")),
-      ("Father's name", s("fatherName")),
-      ("Father's mobile", s("fatherMobile")),
-      ("Mother's name", s("motherName")),
-      ("Mother's mobile", s("motherMobile")),
+      (LocaleController.strings.apiFieldBloodGroup, s("bloodGroup")),
+      (LocaleController.strings.apiFieldCategory, s("category")),
+      (LocaleController.strings.apiFieldReligion, s("religion")),
+      (LocaleController.strings.apiFieldNationality, s("nationality")),
+      (LocaleController.strings.apiFieldMotherTongue, s("motherTongue")),
+      (LocaleController.strings.apiFieldPlaceOfBirth, s("placeOfBirth")),
+      (LocaleController.strings.apiFieldFatherName, s("fatherName")),
+      (LocaleController.strings.apiFieldFatherMobile, s("fatherMobile")),
+      (LocaleController.strings.apiFieldMotherName, s("motherName")),
+      (LocaleController.strings.apiFieldMotherMobile, s("motherMobile")),
       (
-        "Emergency contact",
+        LocaleController.strings.apiFieldEmergencyContact,
         [
           s("emergencyName"),
           s("emergencyMobile"),
         ].where((x) => x.isNotEmpty).join(" · "),
       ),
-      ("Aadhaar", s("aadhaarMasked")),
+      (LocaleController.strings.apiFieldAadhaar, s("aadhaarMasked")),
       ("PEN", s("pen")),
       ("APAAR ID", s("apaarId")),
-      ("Previous school", s("previousSchool")),
-      ("Joined on", s("joinedOn")),
-      ("Academic year", s("academicYearCode")),
+      (LocaleController.strings.apiFieldPreviousSchool, s("previousSchool")),
+      (LocaleController.strings.apiFieldJoinedOn, s("joinedOn")),
+      (LocaleController.strings.apiFieldAcademicYear, s("academicYearCode")),
     ];
     return StudentProfile(
       id: s("id"),
@@ -1064,7 +1067,9 @@ class DocumentSubmitResult {
       doc: StudentDocInfo.fromJson(
         (j["doc"] as Map<String, dynamic>?) ?? const {},
       ),
-      message: (j["message"] as String?) ?? "Submitted for verification.",
+      message:
+          (j["message"] as String?) ??
+          LocaleController.strings.apiDocSubmittedForVerification,
       checkRan: v["ran"] == true,
       overall: v["overall"] as String?,
       checks: ((v["checks"] as List?) ?? const [])
@@ -1530,9 +1535,14 @@ class HomeworkFeed {
   const HomeworkFeed({required this.items, required this.subjects});
 
   factory HomeworkFeed.fromJson(Map<String, dynamic> j) {
+    // A post can carry both languages. Show the one the app is in, and the
+    // other only when that one is blank. Fixed when the feed is loaded, so a
+    // language switch shows on the next refresh.
+    final preferHindi = LocaleController.strings.localeName == "hi";
     String bodyOf(Map<String, dynamic> m) {
       final en = (m["bodyEn"] as String?) ?? "";
       final hi = (m["bodyHi"] as String?) ?? "";
+      if (preferHindi) return hi.isNotEmpty ? hi : en;
       return en.isNotEmpty ? en : hi;
     }
 
@@ -2770,7 +2780,9 @@ class ApiClient {
   }
 
   Never _throwFrom(http.Response res) {
-    String message = "Request failed (${res.statusCode})";
+    String message = LocaleController.strings.apiRequestFailed(
+      res.statusCode.toString(),
+    );
     try {
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       final err = body["error"];
@@ -2795,7 +2807,8 @@ class ApiClient {
     );
     if (res.statusCode != 200) _throwFrom(res);
     final body = jsonDecode(res.body) as Map<String, dynamic>;
-    return (body["maskedMobile"] as String?) ?? "your WhatsApp";
+    return (body["maskedMobile"] as String?) ??
+        LocaleController.strings.apiYourWhatsapp;
   }
 
   /// Step 2 — verify the OTP; the ERP mints the session cookie.
@@ -2820,7 +2833,8 @@ class ApiClient {
     );
     if (res.statusCode != 200) _throwFrom(res);
     final body = jsonDecode(res.body) as Map<String, dynamic>;
-    return (body["maskedMobile"] as String?) ?? "your WhatsApp";
+    return (body["maskedMobile"] as String?) ??
+        LocaleController.strings.apiYourWhatsapp;
   }
 
   /// Step 2 — verify the staff OTP; the ERP mints the session cookie.
@@ -2839,9 +2853,7 @@ class ApiClient {
   /// Staff sign-in: Supabase email+password → ERP session cookie.
   Future<void> staffLogin(String email, String password) async {
     if (!config.supabaseConfigured) {
-      throw ApiException(
-        "Staff login is not configured in this build (missing Supabase keys).",
-      );
+      throw ApiException(LocaleController.strings.apiStaffLoginNotConfigured);
     }
     final tokenRes = await http.post(
       Uri.parse("${config.supabaseUrl}/auth/v1/token?grant_type=password"),
@@ -2852,7 +2864,7 @@ class ApiClient {
       body: jsonEncode({"email": email, "password": password}),
     );
     if (tokenRes.statusCode != 200) {
-      String message = "Email or password is incorrect.";
+      String message = LocaleController.strings.apiEmailOrPasswordIncorrect;
       try {
         final body = jsonDecode(tokenRes.body) as Map<String, dynamic>;
         final desc = body["error_description"] ?? body["msg"];
@@ -2865,7 +2877,9 @@ class ApiClient {
     final token =
         (jsonDecode(tokenRes.body) as Map<String, dynamic>)["access_token"]
             as String?;
-    if (token == null) throw ApiException("Sign-in failed. Try again.");
+    if (token == null) {
+      throw ApiException(LocaleController.strings.apiSignInFailedTryAgain);
+    }
 
     final res = await http.post(
       _uri("/api/auth/session"),
@@ -3133,7 +3147,9 @@ class ApiClient {
             ? err
             : err is Map && err["message"] is String
             ? err["message"] as String
-            : "Tutor unavailable (${res.statusCode})";
+            : LocaleController.strings.apiTutorUnavailable(
+                res.statusCode.toString(),
+              );
         if (res.statusCode == 402) {
           throw TutorRefused(
             message,
@@ -3172,7 +3188,11 @@ class ApiClient {
                   : null,
             );
           case "error":
-            throw ApiException((j["error"] as String?) ?? "Tutor failed", 503);
+            throw ApiException(
+              (j["error"] as String?) ??
+                  LocaleController.strings.apiTutorFailed,
+              503,
+            );
         }
       }
     } finally {
@@ -3277,7 +3297,9 @@ class ApiClient {
       final err = envelope["error"];
       final message = err is Map ? (err["message"] ?? "").toString() : "";
       throw Exception(
-        message.isEmpty ? "The school's WhatsApp could not send this" : message,
+        message.isEmpty
+            ? LocaleController.strings.apiSchoolWhatsappCouldNotSend
+            : message,
       );
     }
 
@@ -3330,7 +3352,9 @@ class ApiClient {
     if (body["ok"] != true) {
       final err = body["error"];
       throw ApiException(
-        err is String && err.isNotEmpty ? err : "Could not start payment",
+        err is String && err.isNotEmpty
+            ? err
+            : LocaleController.strings.apiCouldNotStartPayment,
         400,
       );
     }
@@ -3966,8 +3990,9 @@ class TutorAllowance {
   final int passMessagesPerDay;
   final int passUsedToday;
 
-  String get studentFirstName =>
-      studentName.isEmpty ? "this child" : studentName.split(" ").first;
+  String get studentFirstName => studentName.isEmpty
+      ? LocaleController.strings.apiThisChild
+      : studentName.split(" ").first;
 
   bool get hasPass =>
       passEndsAt.isNotEmpty &&
@@ -3995,7 +4020,9 @@ class TutorAllowance {
       "Nov",
       "Dec",
     ];
-    return "Valid till ${ist.day} ${months[ist.month - 1]}";
+    return LocaleController.strings.apiValidTill(
+      "${ist.day} ${months[ist.month - 1]}",
+    );
   }
 }
 

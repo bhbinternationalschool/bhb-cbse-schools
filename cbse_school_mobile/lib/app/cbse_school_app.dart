@@ -39,7 +39,9 @@ class CbseSchoolApp extends StatefulWidget {
 class _CbseSchoolAppState extends State<CbseSchoolApp> {
   late final ApiClient _api = ApiClient(widget.config);
   late final PushService _push = PushService(_api);
-  final LocaleController _locale = LocaleController();
+  late final LocaleController _locale = LocaleController(
+    fallback: widget.audience == AppAudience.parent ? const Locale("hi") : null,
+  );
   final _messenger = GlobalKey<ScaffoldMessengerState>();
 
   late final GoRouter _router = GoRouter(

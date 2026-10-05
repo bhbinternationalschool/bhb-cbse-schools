@@ -2,6 +2,7 @@ import "package:flutter/material.dart";
 import "package:image_picker/image_picker.dart";
 
 import "../../core/api/api_client.dart";
+import "../../core/i18n/locale_controller.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "module_shell.dart";
@@ -44,12 +45,12 @@ class _OnlineClassQaScreenState extends State<OnlineClassQaScreen> {
           children: [
             ListTile(
               leading: const Icon(Icons.photo_camera_outlined),
-              title: const Text("Take a photo of the copy"),
+              title: Text(context.l10n.oclTakeAPhotoOfTheCopy),
               onTap: () => Navigator.pop(context, ImageSource.camera),
             ),
             ListTile(
               leading: const Icon(Icons.photo_library_outlined),
-              title: const Text("Choose from gallery"),
+              title: Text(context.l10n.chooseFromGallery),
               onTap: () => Navigator.pop(context, ImageSource.gallery),
             ),
           ],
@@ -57,7 +58,11 @@ class _OnlineClassQaScreenState extends State<OnlineClassQaScreen> {
       ),
     );
     if (source == null) return;
-    final shot = await _picker.pickImage(source: source, imageQuality: 85, maxWidth: 2000);
+    final shot = await _picker.pickImage(
+      source: source,
+      imageQuality: 85,
+      maxWidth: 2000,
+    );
     if (shot == null) return;
     setState(() => _sendingFor = q.id);
     try {
@@ -73,7 +78,9 @@ class _OnlineClassQaScreenState extends State<OnlineClassQaScreen> {
     } on ApiException catch (e) {
       Haptics.warning();
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.message)));
       }
     } finally {
       if (mounted) setState(() => _sendingFor = null);
@@ -83,14 +90,14 @@ class _OnlineClassQaScreenState extends State<OnlineClassQaScreen> {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<List<ParentClassQuestion>>(
-      title: "Questions from the teacher",
+      title: context.l10n.oclQuestionsFromTheTeacher,
       subtitle: "${widget.title} · ${widget.child.fullName}",
       load: () => widget.api.fetchOnlineClassQuestions(
         sessionId: widget.sessionId,
         studentId: widget.child.id,
       ),
       emptyIcon: Icons.quiz_outlined,
-      emptyText: "The teacher has not asked a question yet. Pull down to refresh.",
+      emptyText: context.l10n.oclNoQuestionYet,
       isEmpty: (qs) => qs.isEmpty,
       builder: (context, qs, reload) => ListView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -106,7 +113,7 @@ class _OnlineClassQaScreenState extends State<OnlineClassQaScreen> {
             const SizedBox(height: 10),
           ],
           Text(
-            "Write the answer in the copy, then send a clear photo. You can send again until the teacher closes the question.",
+            context.l10n.oclWriteAnswerInCopyNote,
             style: AppText.labelMediumMuted,
           ),
         ],
@@ -131,10 +138,13 @@ class _QuestionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (label, color) = switch (q.verdict) {
-      "right" => ("Correct ✓", AppColors.success),
-      "wrong" => ("Not correct — try again", AppColors.warning),
-      "partial" => ("Partly right", AppColors.warning),
-      _ => q.answered ? ("Sent · waiting for the teacher", AppColors.muted) : ("", AppColors.muted),
+      "right" => (context.l10n.oclVerdictCorrect, AppColors.success),
+      "wrong" => (context.l10n.oclVerdictWrong, AppColors.warning),
+      "partial" => (context.l10n.oclVerdictPartly, AppColors.warning),
+      _ =>
+        q.answered
+            ? (context.l10n.oclSentWaitingForTeacher, AppColors.muted)
+            : ("", AppColors.muted),
     };
     return Card(
       child: Padding(
@@ -142,7 +152,12 @@ class _QuestionCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text("Question ${q.orderNo}${q.closed ? " · closed" : ""}", style: AppText.labelMediumMuted),
+            Text(
+              q.closed
+                  ? context.l10n.oclQuestionNumberClosed(q.orderNo.toString())
+                  : context.l10n.oclQuestionNumber(q.orderNo.toString()),
+              style: AppText.labelMediumMuted,
+            ),
             const SizedBox(height: 4),
             Text(q.text, style: AppText.titleMedium),
             if (q.answerPhotoUrl.isNotEmpty) ...[
@@ -165,7 +180,13 @@ class _QuestionCard extends StatelessWidget {
             ],
             if (label.isNotEmpty) ...[
               const SizedBox(height: 8),
-              Text(label, style: AppText.bodyMedium.copyWith(color: color, fontWeight: FontWeight.w700)),
+              Text(
+                label,
+                style: AppText.bodyMedium.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ],
             if (onAnswer != null) ...[
               const SizedBox(height: 10),
@@ -174,7 +195,13 @@ class _QuestionCard extends StatelessWidget {
                 child: FilledButton.icon(
                   onPressed: sending ? null : onAnswer,
                   icon: const Icon(Icons.photo_camera_outlined),
-                  label: Text(sending ? "Sending…" : (q.answered ? "Send again" : "Send answer photo")),
+                  label: Text(
+                    sending
+                        ? context.l10n.oclSending
+                        : (q.answered
+                              ? context.l10n.oclSendAgain
+                              : context.l10n.oclSendAnswerPhoto),
+                  ),
                 ),
               ),
             ],

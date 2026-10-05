@@ -1,4 +1,5 @@
 import "../../core/api/api_client.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// The two figures on the parent home that used to be a dash.
 ///
@@ -33,5 +34,5 @@ String homeworkTileValue(HomeworkFeed? feed, DateTime now) {
     final day = DateTime(d.year, d.month, d.day);
     if (!day.isBefore(cutoff) && !day.isAfter(now)) n++;
   }
-  return "$n new";
+  return LocaleController.strings.homeNewCount(n.toString());
 }

@@ -23,7 +23,7 @@ class PtmScreen extends StatelessWidget {
       builder: (context) => AlertDialog(
         title: Text(context.l10n.bookThisSlot, style: AppText.titleMedium),
         content: Text(
-          "${event.name} — ${slot.teacherName}\n${formatDateLabel(event.date)}, ${formatTimeLabel(slot.startAt)}–${formatTimeLabel(slot.endAt)}\nfor ${child.fullName}",
+          "${event.name} — ${slot.teacherName}\n${formatDateLabel(event.date)}, ${formatTimeLabel(slot.startAt)}–${formatTimeLabel(slot.endAt)}\n${context.l10n.modPtmForChild(child.fullName)}",
           style: AppText.bodyMedium,
         ),
         actions: [
@@ -88,12 +88,11 @@ class PtmScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<List<PtmEventInfo>>(
-      title: "Parent-teacher meetings",
+      title: context.l10n.modPtmTitle,
       subtitle: child.fullName,
       load: () => api.fetchPtmOverview(child.id),
       emptyIcon: Icons.groups_outlined,
-      emptyText:
-          "No PTM scheduled for ${child.fullName}'s class right now. Booking opens here when the school announces one.",
+      emptyText: context.l10n.modPtmNoneScheduled(child.fullName),
       isEmpty: (events) => events.isEmpty,
       builder: (context, events, reload) => ListView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -168,8 +167,10 @@ class PtmScreen extends StatelessWidget {
                                   ),
                                   Text(
                                     slot.seatsLeft > 0
-                                        ? "${slot.seatsLeft} left"
-                                        : "Full",
+                                        ? context.l10n.modPtmSeatsLeft(
+                                            slot.seatsLeft.toString(),
+                                          )
+                                        : context.l10n.modPtmSlotFull,
                                     style: AppText.labelMedium.copyWith(
                                       color: slot.seatsLeft > 0
                                           ? ModuleTone.teal.foreground
@@ -217,8 +218,11 @@ class _BookedBanner extends StatelessWidget {
           Expanded(
             child: Text(
               slot == null
-                  ? "Slot booked"
-                  : "Booked — ${slot.teacherName}, ${formatTimeLabel(slot.startAt)}",
+                  ? context.l10n.modPtmSlotBooked
+                  : context.l10n.modPtmBookedWith(
+                      slot.teacherName,
+                      formatTimeLabel(slot.startAt),
+                    ),
               style: AppText.labelLarge.copyWith(
                 color: ModuleTone.green.foreground,
               ),

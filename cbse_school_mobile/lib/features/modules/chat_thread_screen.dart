@@ -54,7 +54,7 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
       if (mounted) {
-        setState(() => _error = "Could not reach the school server.");
+        setState(() => _error = context.l10n.couldNotReachTheSchoolServer);
       }
     }
   }
@@ -104,8 +104,8 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
             Text(widget.studentName, style: AppText.titleMedium),
             Text(
               thread?.teacherName?.isNotEmpty == true
-                  ? "Class teacher: ${thread!.teacherName}"
-                  : "Class teacher",
+                  ? context.l10n.modChatClassTeacherNamed(thread!.teacherName!)
+                  : context.l10n.modChatClassTeacher,
               style: AppText.labelMedium.copyWith(color: Color(0xFFB8C0D4)),
             ),
           ],
@@ -157,9 +157,10 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
                           const SizedBox(height: 12),
                           Text(
                             thread.teacherName?.isNotEmpty == true
-                                ? "No messages yet. Say hello to ${thread.teacherName}."
-                                : "No class teacher is assigned to this section yet — "
-                                      "check with the school office.",
+                                ? context.l10n.modChatNoMessagesSayHello(
+                                    thread.teacherName!,
+                                  )
+                                : context.l10n.modChatNoClassTeacherAssigned,
                             textAlign: TextAlign.center,
                             style: AppText.bodyMediumMuted,
                           ),

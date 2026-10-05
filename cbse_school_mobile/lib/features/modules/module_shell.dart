@@ -16,7 +16,7 @@ class ModuleShell<T> extends StatefulWidget {
     required this.load,
     required this.builder,
     this.emptyIcon = Icons.inbox_outlined,
-    this.emptyText = "Nothing here yet.",
+    this.emptyText,
     this.isEmpty,
     this.floatingActionButton,
     this.bottomBar,
@@ -32,7 +32,9 @@ class ModuleShell<T> extends StatefulWidget {
   )
   builder;
   final IconData emptyIcon;
-  final String emptyText;
+
+  /// Null shows the generic "Nothing here yet." in the app's language.
+  final String? emptyText;
   final bool Function(T data)? isEmpty;
   final Widget Function(
     BuildContext context,
@@ -77,9 +79,7 @@ class _ModuleShellState<T> extends State<ModuleShell<T>> {
       // ("SocketException … errno = 111") means nothing to a parent.
       if (mounted) {
         setState(
-          () => _error =
-              "Could not reach the school server. "
-              "Check your connection and try again.",
+          () => _error = context.l10n.homeCouldNotReachServerCheckConnection,
         );
       }
     }
@@ -170,7 +170,8 @@ class _ModuleShellState<T> extends State<ModuleShell<T>> {
                                 horizontal: 32,
                               ),
                               child: Text(
-                                widget.emptyText,
+                                widget.emptyText ??
+                                    context.l10n.homeNothingHereYet,
                                 textAlign: TextAlign.center,
                                 style: AppText.bodyMediumMuted,
                               ),
@@ -210,7 +211,10 @@ void showComingSoon(BuildContext context, String module, String reason) {
           children: [
             const Icon(Icons.hourglass_empty, size: 36, color: AppColors.muted),
             const SizedBox(height: 12),
-            Text("$module is coming soon", style: AppText.titleSmallInk),
+            Text(
+              context.l10n.homeModuleComingSoon(module),
+              style: AppText.titleSmallInk,
+            ),
             const SizedBox(height: 6),
             Text(
               reason,

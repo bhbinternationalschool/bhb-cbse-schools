@@ -68,7 +68,9 @@ class WrongAppScreen extends StatelessWidget {
     final wanted = audience == AppAudience.parent
         ? "BHB School — Staff"
         : "BHB School — Parents";
-    final theirs = audience == AppAudience.parent ? "a staff" : "a parent";
+    final title = audience == AppAudience.parent
+        ? context.l10n.homeWrongAppStaffSignIn
+        : context.l10n.homeWrongAppParentSignIn;
     return Scaffold(
       body: Center(
         child: Padding(
@@ -79,14 +81,13 @@ class WrongAppScreen extends StatelessWidget {
               const Icon(Icons.swap_horiz, size: 44),
               const SizedBox(height: 16),
               Text(
-                "That's $theirs sign-in",
+                title,
                 style: Theme.of(context).textTheme.titleLarge,
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 10),
               Text(
-                "This is the ${audience.appName} app. Install $wanted and "
-                "sign in there instead.",
+                context.l10n.homeWrongAppInstallOther(audience.appName, wanted),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 22),
