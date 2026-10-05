@@ -21,7 +21,7 @@ class TransportScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<MyTransport>(
-      title: "Transport",
+      title: context.l10n.transport,
       load: api.fetchMyTransport,
       builder: (context, mine, reload) => ListView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -73,10 +73,13 @@ class _ChildCard extends StatelessWidget {
             Text(child.classLabel, style: AppText.bodySmallMuted),
             const SizedBox(height: 10),
             if (t != null) ...[
-              _Row(Icons.alt_route, "Bus ${t.routeCode} · ${t.routeName}"),
+              _Row(
+                Icons.alt_route,
+                context.l10n.busRouteLine(t.routeCode, t.routeName),
+              ),
               _Row(
                 Icons.place_outlined,
-                "Stop: ${t.stopName.isEmpty ? "—" : t.stopName}",
+                context.l10n.busStopLine(t.stopName.isEmpty ? "—" : t.stopName),
               ),
               _Row(
                 Icons.directions_bus_outlined,
@@ -86,12 +89,15 @@ class _ChildCard extends StatelessWidget {
                 ].where((x) => x.isNotEmpty).toSet().join(" · "),
               ),
               _Row(Icons.schedule_outlined, switch (t.serviceMode) {
-                "pickup" => "Morning pickup only",
-                "drop" => "Afternoon drop only",
-                _ => "Pickup and drop",
+                "pickup" => context.l10n.busMorningPickupOnly,
+                "drop" => context.l10n.busAfternoonDropOnly,
+                _ => context.l10n.busPickupAndDrop,
               }),
               if (t.monthlyFeeLabel.isNotEmpty && t.monthlyFeeLabel != "₹0")
-                _Row(Icons.payments_outlined, "${t.monthlyFeeLabel} per month"),
+                _Row(
+                  Icons.payments_outlined,
+                  context.l10n.busFeePerMonth(t.monthlyFeeLabel),
+                ),
               if (t.suspended)
                 Padding(
                   padding: EdgeInsets.only(top: 6),
@@ -112,7 +118,9 @@ class _ChildCard extends StatelessWidget {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        "Driver: ${t.driverName.isEmpty ? "—" : t.driverName}",
+                        context.l10n.busDriverLine(
+                          t.driverName.isEmpty ? "—" : t.driverName,
+                        ),
                         style: AppText.bodyMediumInk,
                       ),
                     ),
@@ -149,7 +157,7 @@ class _ChildCard extends StatelessWidget {
                     );
                   },
                   icon: const Icon(Icons.location_on_outlined, size: 18),
-                  label: const Text("Live bus location"),
+                  label: Text(context.l10n.busLiveBusLocation),
                 ),
               ),
             ] else ...[
@@ -173,7 +181,9 @@ class _ChildCard extends StatelessWidget {
                     onPressed: () => _request(context),
                     icon: const Icon(Icons.directions_bus_outlined, size: 18),
                     label: Text(
-                      r == null ? "Request school transport" : "Request again",
+                      r == null
+                          ? context.l10n.busRequestSchoolTransport
+                          : context.l10n.busRequestAgain,
                     ),
                   ),
                 ),
@@ -190,9 +200,7 @@ class _ChildCard extends StatelessWidget {
     final ok = await launchUrl(Uri.parse("tel:$digits"));
     if (!ok && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("Could not start a call. The number is $mobile."),
-        ),
+        SnackBar(content: Text(context.l10n.busCouldNotStartCall(mobile))),
       );
     }
   }
@@ -227,13 +235,10 @@ class _StatusLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (label, tone) = switch (r.status) {
-      "contacted" => ("Office has been in touch", ModuleTone.blue),
-      "assigned" => (
-        "Assigned — bus details will appear here",
-        ModuleTone.green,
-      ),
-      "declined" => ("Not possible right now", ModuleTone.coral),
-      _ => ("Request sent — waiting for the office", ModuleTone.amber),
+      "contacted" => (context.l10n.busStatusContacted, ModuleTone.blue),
+      "assigned" => (context.l10n.busStatusAssigned, ModuleTone.green),
+      "declined" => (context.l10n.busStatusDeclined, ModuleTone.coral),
+      _ => (context.l10n.busStatusRequested, ModuleTone.amber),
     };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -256,7 +261,7 @@ class _StatusLine extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Text(
-              "School: ${r.handlingNote}",
+              context.l10n.profSchoolNote(r.handlingNote),
               style: AppText.bodySmallMuted,
             ),
           ),
@@ -365,7 +370,7 @@ class _RequestFormState extends State<_RequestForm> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              "School transport for ${widget.child.fullName}",
+              context.l10n.busTransportForChild(widget.child.fullName),
               style: AppText.titleMediumInk,
             ),
             const SizedBox(height: 4),
@@ -415,7 +420,9 @@ class _RequestFormState extends State<_RequestForm> {
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(46),
               ),
-              child: Text(_busy ? "Sending…" : "Send request"),
+              child: Text(
+                _busy ? context.l10n.profSending : context.l10n.profSendRequest,
+              ),
             ),
           ],
         ),

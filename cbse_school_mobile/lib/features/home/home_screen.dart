@@ -56,11 +56,33 @@ const _modules = [
   _Module("Gallery", Icons.photo_library_outlined, ModuleTone.teal),
 ];
 
-String _greeting() {
+/// The tile label on screen. [_Module.label] stays English: it is the id the
+/// deep links and [_HomeScreenState._openModule] switch on.
+String _moduleLabel(BuildContext context, String id) {
+  final l = context.l10n;
+  return switch (id) {
+    "Fees" => l.homeModuleFees,
+    "Attendance" => l.homeModuleAttendance,
+    "Homework" => l.homeModuleHomework,
+    "Tutor" => l.homeModuleTutor,
+    "Notices" => l.notices,
+    "Transport" => l.transport,
+    "Online class" => l.homeModuleOnlineClass,
+    "Library" => l.homeModuleLibrary,
+    "PTM" => l.homeModulePtm,
+    "Leave" => l.homeModuleLeave,
+    "Complaints" => l.homeModuleComplaints,
+    "Receipts" => l.homeModuleReceipts,
+    "Gallery" => l.gallery,
+    _ => id,
+  };
+}
+
+String _greeting(BuildContext context) {
   final h = DateTime.now().hour;
-  if (h < 12) return "Good morning";
-  if (h < 17) return "Good afternoon";
-  return "Good evening";
+  if (h < 12) return context.l10n.homeGoodMorning;
+  if (h < 17) return context.l10n.homeGoodAfternoon;
+  return context.l10n.homeGoodEvening;
 }
 
 class HomeScreen extends StatefulWidget {
@@ -147,11 +169,17 @@ class _HomeScreenState extends State<HomeScreen> {
       case "/leave":
         _openModule("Leave", child);
       case "/online-classes":
-        final qaSession = uri.queryParameters["qa"] == "1" ? uri.queryParameters["sessionId"] : null;
+        final qaSession = uri.queryParameters["qa"] == "1"
+            ? uri.queryParameters["sessionId"]
+            : null;
         if (qaSession != null && qaSession.isNotEmpty) {
           Navigator.of(context).push(
             MaterialPageRoute(
-              builder: (_) => OnlineClassesScreen(api: widget.api, child: child, openQaSessionId: qaSession),
+              builder: (_) => OnlineClassesScreen(
+                api: widget.api,
+                child: child,
+                openQaSessionId: qaSession,
+              ),
             ),
           );
         } else {
@@ -195,7 +223,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
       if (mounted) {
-        setState(() => _error = "Could not reach the school server.");
+        setState(() => _error = context.l10n.couldNotReachTheSchoolServer);
       }
     }
   }
@@ -239,7 +267,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            "Could not open WhatsApp. The school's number is ${contact.display}.",
+            context.l10n.homeCouldNotOpenWhatsappNumberIs(contact.display),
           ),
         ),
       );
@@ -436,7 +464,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const _SectionTitle("Quick access"),
+                        _SectionTitle(context.l10n.homeQuickAccess),
                         const SizedBox(height: Space.md),
                         _ModuleGrid(
                           onTap: (label) {
@@ -453,7 +481,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const _SectionTitle("School"),
+                        _SectionTitle(context.l10n.homeSchool),
                         const SizedBox(height: Space.md),
                         if (summary.schoolWhatsApp != null) ...[
                           _WhatsAppCard(
@@ -466,9 +494,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         _ActionCard(
                           tone: ModuleTone.green,
                           icon: Icons.forum_outlined,
-                          title: "Message a teacher · 8 AM – 8 PM",
-                          subtitle:
-                              "Class and subject teachers, in app or on WhatsApp through the school",
+                          title: context.l10n.homeMessageATeacherHours,
+                          subtitle: context.l10n.homeMessageATeacherSubtitle,
                           onTap: () {
                             Haptics.tap();
                             Navigator.of(context).push(
@@ -485,9 +512,12 @@ class _HomeScreenState extends State<HomeScreen> {
                         _ActionCard(
                           tone: ModuleTone.blue,
                           icon: Icons.qr_code_2,
-                          title: "Student ID · ${child.admissionNo}",
-                          subtitle:
-                              "Guardian ${summary.guardianName} · tap for the ID QR",
+                          title: context.l10n.homeStudentIdWithNumber(
+                            child.admissionNo,
+                          ),
+                          subtitle: context.l10n.homeGuardianTapForIdQr(
+                            summary.guardianName,
+                          ),
                           onTap: () => Navigator.of(context).push(
                             MaterialPageRoute(
                               builder: (_) => StudentIdScreen(
@@ -528,19 +558,22 @@ class _HomeScreenState extends State<HomeScreen> {
               _openProfile();
           }
         },
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.home_outlined), label: "Home"),
+        destinations: [
           NavigationDestination(
-            icon: Icon(Icons.payments_outlined),
-            label: "Fees",
+            icon: const Icon(Icons.home_outlined),
+            label: context.l10n.homeTabHome,
           ),
           NavigationDestination(
-            icon: Icon(Icons.chat_bubble_outline),
-            label: "Messages",
+            icon: const Icon(Icons.payments_outlined),
+            label: context.l10n.homeModuleFees,
           ),
           NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            label: "Profile",
+            icon: const Icon(Icons.chat_bubble_outline),
+            label: context.l10n.homeTabMessages,
+          ),
+          NavigationDestination(
+            icon: const Icon(Icons.person_outline),
+            label: context.l10n.homeTabProfile,
           ),
         ],
       ),
@@ -601,7 +634,7 @@ class _Header extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        _greeting(),
+                        _greeting(context),
                         style: AppText.bodyMedium.copyWith(
                           letterSpacing: 0.2,
                           color: AppColors.accentSoft,
@@ -844,7 +877,7 @@ class _StatsRow extends StatelessWidget {
           child: _StatCard(
             icon: Icons.payments_outlined,
             tone: feesClear ? ModuleTone.green : ModuleTone.amber,
-            label: "Fees due",
+            label: context.l10n.homeFeesDue,
             value: child.openBalanceLabel,
             valueColor: feesClear ? AppColors.success : AppColors.warning,
             onTap: () => onOpen("Fees"),
@@ -855,7 +888,7 @@ class _StatsRow extends StatelessWidget {
           child: _StatCard(
             icon: Icons.fact_check_outlined,
             tone: ModuleTone.teal,
-            label: "Attendance",
+            label: context.l10n.homeModuleAttendance,
             value: attendanceValue,
             valueColor: attendanceValue == "—"
                 ? AppColors.muted
@@ -868,7 +901,7 @@ class _StatsRow extends StatelessWidget {
           child: _StatCard(
             icon: Icons.menu_book_outlined,
             tone: ModuleTone.purple,
-            label: "Homework",
+            label: context.l10n.homeModuleHomework,
             value: homeworkValue,
             valueColor: homeworkValue == "—" ? AppColors.muted : AppColors.ink,
             onTap: () => onOpen("Homework"),
@@ -1011,7 +1044,7 @@ class _ModuleGrid extends StatelessWidget {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        m.label,
+                        _moduleLabel(context, m.label),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: AppText.labelMediumInk,
@@ -1105,8 +1138,7 @@ class _WhatsAppCard extends StatelessWidget {
             style: AppText.bodyMedium.copyWith(fontWeight: FontWeight.w600),
           ),
           subtitle: Text(
-            "${contact.display} · dues, receipts, pay by UPI, or ask for a "
-            "person. Message from the mobile registered with the school.",
+            context.l10n.homeWhatsappCardSubtitle(contact.display),
             style: AppText.labelMediumMuted,
           ),
           trailing: const Icon(

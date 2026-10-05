@@ -21,8 +21,8 @@ class EbookShelfScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<EbookShelf>(
-      title: "Library",
-      subtitle: "E-books",
+      title: context.l10n.tutLibrary,
+      subtitle: context.l10n.tutEBooks,
       load: api.fetchEbookShelf,
       emptyIcon: Icons.local_library_outlined,
       emptyText: context.l10n.theSchoolSEBookShelf,
@@ -31,7 +31,10 @@ class EbookShelfScreen extends StatelessWidget {
         final bySubject = <String, List<LibraryEbook>>{};
         for (final b in shelf.books) {
           bySubject
-              .putIfAbsent(b.subject.isEmpty ? "General" : b.subject, () => [])
+              .putIfAbsent(
+                b.subject.isEmpty ? context.l10n.tutGeneralSubject : b.subject,
+                () => [],
+              )
               .add(b);
         }
         return ListView(
@@ -54,7 +57,7 @@ class EbookShelfScreen extends StatelessWidget {
                   subtitle: shelf.shelfKey.isEmpty
                       ? null
                       : _KeyLine(
-                          label: "Shelf key",
+                          label: context.l10n.tutShelfKey,
                           value: shelf.shelfKey,
                           light: true,
                         ),
@@ -125,14 +128,16 @@ class EbookShelfScreen extends StatelessWidget {
                             [
                               if (b.author.isNotEmpty) b.author,
                               if (b.classLabels.isNotEmpty)
-                                "Class ${b.classLabels.join(", ")}",
+                                context.l10n.tutBookClasses(
+                                  b.classLabels.join(", "),
+                                ),
                             ].join(" · "),
                             style: AppText.labelMediumMuted,
                           ),
                         if (b.passKey.isNotEmpty)
                           _KeyLine(
                             label: b.passKeyLabel.isEmpty
-                                ? "Key"
+                                ? context.l10n.tutKey
                                 : b.passKeyLabel,
                             value: b.passKey,
                           ),
@@ -247,7 +252,7 @@ class _KeyLine extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          "$label: $value",
+          context.l10n.tutKeyLine(label, value),
           style: AppText.labelMedium.copyWith(color: color),
         ),
         const SizedBox(width: 4),
@@ -255,9 +260,9 @@ class _KeyLine extends StatelessWidget {
           onTap: () async {
             await Clipboard.setData(ClipboardData(text: value));
             if (context.mounted) {
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(SnackBar(content: Text("$label copied")));
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(context.l10n.tutKeyCopied(label))),
+              );
             }
           },
           child: Padding(

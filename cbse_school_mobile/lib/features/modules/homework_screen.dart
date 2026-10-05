@@ -35,7 +35,7 @@ class HomeworkScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<HomeworkFeed>(
-      title: "Homework & diary",
+      title: context.l10n.modHomeworkTitle,
       subtitle: subtitle,
       load: () => api.fetchHomeworkFeed(
         studentId: studentId,
@@ -44,8 +44,8 @@ class HomeworkScreen extends StatelessWidget {
       ),
       emptyIcon: Icons.menu_book_outlined,
       emptyText: canPost
-          ? "No homework posted for this section yet — use the button below to post the first one."
-          : "No homework posted for this class yet. New homework appears here as soon as the teacher publishes it.",
+          ? context.l10n.modHomeworkEmptyTeacher
+          : context.l10n.modHomeworkEmptyParent,
       isEmpty: (feed) => feed.items.isEmpty,
       floatingActionButton: !canPost
           ? null
@@ -99,8 +99,10 @@ class HomeworkScreen extends StatelessWidget {
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
-                            item.subjectName.isEmpty
-                                ? "Homework"
+                            item.isDiary
+                                ? context.l10n.modDiaryLabel
+                                : item.subjectName.isEmpty
+                                ? context.l10n.modHomeworkLabel
                                 : item.subjectName,
                             style: AppText.labelSmall.copyWith(
                               color: item.isDiary
@@ -139,7 +141,9 @@ class HomeworkScreen extends StatelessWidget {
                             [
                               if (item.teacherName.isNotEmpty) item.teacherName,
                               if ((item.dueAt ?? "").isNotEmpty)
-                                "due ${formatDateLabel(item.dueAt!)}",
+                                context.l10n.modHomeworkDueOn(
+                                  formatDateLabel(item.dueAt!),
+                                ),
                             ].join(" · "),
                             style: AppText.labelMediumMuted,
                           ),
@@ -240,7 +244,7 @@ class _ComposeSheetState extends State<_ComposeSheet> {
       if (mounted) {
         setState(() {
           _saving = false;
-          _error = "Could not post. Check the connection and try again.";
+          _error = context.l10n.modHomeworkCouldNotPost;
         });
       }
     }

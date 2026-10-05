@@ -22,7 +22,7 @@ class LeaveScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<LeaveList>(
-      title: "Leave",
+      title: context.l10n.profLeave,
       subtitle: child.fullName,
       load: () => api.fetchLeaveList(studentId: child.id),
       emptyIcon: Icons.event_busy_outlined,
@@ -64,7 +64,12 @@ class LeaveScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      "${r.leaveTypeLabel} · ${r.days} day${r.days == 1 ? "" : "s"}",
+                      r.days == 1
+                          ? context.l10n.profLeaveTypeOneDay(r.leaveTypeLabel)
+                          : context.l10n.profLeaveTypeDays(
+                              r.leaveTypeLabel,
+                              r.days.toString(),
+                            ),
                       style: AppText.bodySmallMuted,
                     ),
                     const SizedBox(height: 6),
@@ -75,7 +80,7 @@ class LeaveScreen extends StatelessWidget {
                     if (r.decisionNote.isNotEmpty) ...[
                       const SizedBox(height: 6),
                       Text(
-                        "School: ${r.decisionNote}",
+                        context.l10n.profSchoolNote(r.decisionNote),
                         style: AppText.bodySmallMuted.copyWith(height: 1.4),
                       ),
                     ],
@@ -162,10 +167,10 @@ class _StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (label, tone) = switch (status) {
-      "approved" => ("Approved", ModuleTone.green),
-      "rejected" => ("Not approved", ModuleTone.coral),
-      "cancelled" => ("Withdrawn", ModuleTone.gray),
-      _ => ("Pending", ModuleTone.amber),
+      "approved" => (context.l10n.profLeaveApproved, ModuleTone.green),
+      "rejected" => (context.l10n.profLeaveNotApproved, ModuleTone.coral),
+      "cancelled" => (context.l10n.profLeaveWithdrawn, ModuleTone.gray),
+      _ => (context.l10n.profLeavePending, ModuleTone.amber),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -282,7 +287,7 @@ class _LeaveFormState extends State<_LeaveForm> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              "Leave for ${widget.child.fullName}",
+              context.l10n.profLeaveForChild(widget.child.fullName),
               style: AppText.titleMediumInk,
             ),
             const SizedBox(height: 14),
@@ -302,7 +307,9 @@ class _LeaveFormState extends State<_LeaveForm> {
               children: [
                 Expanded(
                   child: _DateField(
-                    label: _type.isHalfDay ? "Date" : "From",
+                    label: _type.isHalfDay
+                        ? context.l10n.profDate
+                        : context.l10n.profFrom,
                     value: formatDateLabel(_iso(_from)),
                     onTap: () => _pick(true),
                   ),
@@ -311,7 +318,7 @@ class _LeaveFormState extends State<_LeaveForm> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: _DateField(
-                      label: "To",
+                      label: context.l10n.profTo,
                       value: formatDateLabel(_iso(_to)),
                       onTap: () => _pick(false),
                     ),
@@ -333,7 +340,9 @@ class _LeaveFormState extends State<_LeaveForm> {
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(46),
               ),
-              child: Text(_busy ? "Sending…" : "Send request"),
+              child: Text(
+                _busy ? context.l10n.profSending : context.l10n.profSendRequest,
+              ),
             ),
           ],
         ),

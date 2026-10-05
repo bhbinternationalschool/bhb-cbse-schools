@@ -2,6 +2,7 @@ import "package:flutter/material.dart";
 import "package:url_launcher/url_launcher.dart";
 
 import "../../core/api/api_client.dart";
+import "../../core/i18n/locale_controller.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "module_shell.dart";
@@ -54,7 +55,10 @@ class _OnlineClassesScreenState extends State<OnlineClassesScreen> {
     Future<void> Function() reload,
   ) async {
     try {
-      final url = await api.joinOnlineClass(sessionId: c.id, studentId: child.id);
+      final url = await api.joinOnlineClass(
+        sessionId: c.id,
+        studentId: child.id,
+      );
       Haptics.success();
       final uri = Uri.tryParse(url);
       if (uri != null) {
@@ -64,7 +68,9 @@ class _OnlineClassesScreenState extends State<OnlineClassesScreen> {
     } on ApiException catch (e) {
       Haptics.warning();
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.message)));
       }
     }
   }
@@ -72,12 +78,11 @@ class _OnlineClassesScreenState extends State<OnlineClassesScreen> {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<OnlineClassList>(
-      title: "Online classes",
+      title: context.l10n.oclOnlineClasses,
       subtitle: child.fullName,
       load: () => api.fetchOnlineClasses(child.id),
       emptyIcon: Icons.videocam_outlined,
-      emptyText:
-          "No online class is scheduled for ${child.fullName}'s section. You will get a notification when the teacher schedules one.",
+      emptyText: context.l10n.oclNoClassScheduled(child.fullName),
       isEmpty: (d) => d.sessions.isEmpty,
       builder: (context, data, reload) {
         final wanted = widget.openQaSessionId;
@@ -88,14 +93,20 @@ class _OnlineClassesScreenState extends State<OnlineClassesScreen> {
             WidgetsBinding.instance.addPostFrameCallback((_) => _openQa(match));
           }
         }
-        final upcoming = data.sessions.where((s) => !s.isOver && !s.isCancelled).toList();
-        final past = data.sessions.where((s) => s.isOver || s.isCancelled).toList().reversed.toList();
+        final upcoming = data.sessions
+            .where((s) => !s.isOver && !s.isCancelled)
+            .toList();
+        final past = data.sessions
+            .where((s) => s.isOver || s.isCancelled)
+            .toList()
+            .reversed
+            .toList();
         return ListView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.all(16),
           children: [
             if (upcoming.isNotEmpty) ...[
-              Text("Coming up", style: AppText.labelMediumMuted),
+              Text(context.l10n.oclComingUp, style: AppText.labelMediumMuted),
               const SizedBox(height: 8),
               for (final c in upcoming) ...[
                 _ClassCard(
@@ -109,16 +120,21 @@ class _OnlineClassesScreenState extends State<OnlineClassesScreen> {
             ],
             if (past.isNotEmpty) ...[
               const SizedBox(height: 6),
-              Text("Earlier", style: AppText.labelMediumMuted),
+              Text(context.l10n.oclEarlier, style: AppText.labelMediumMuted),
               const SizedBox(height: 8),
               for (final c in past) ...[
-                _ClassCard(c: c, today: data.today, onJoin: null, onQa: c.isCancelled ? null : () => _openQa(c)),
+                _ClassCard(
+                  c: c,
+                  today: data.today,
+                  onJoin: null,
+                  onQa: c.isCancelled ? null : () => _openQa(c),
+                ),
                 const SizedBox(height: 10),
               ],
             ],
             const SizedBox(height: 8),
             Text(
-              "The Join button works from 10 minutes before the class. It opens Google Meet or the app the teacher chose.",
+              context.l10n.oclJoinButtonNote,
               style: AppText.labelMediumMuted,
             ),
           ],
@@ -138,16 +154,23 @@ String _fmt12(String t) {
   return "$hh:$m $ap";
 }
 
-String _dayLabel(String date, String today) {
-  if (date == today) return "Today";
+String _dayLabel(BuildContext context, String date, String today) {
+  if (date == today) return context.l10n.oclToday;
   final d = DateTime.tryParse(date);
   final t = DateTime.tryParse(today);
-  if (d != null && t != null && d.difference(t).inDays == 1) return "Tomorrow";
+  if (d != null && t != null && d.difference(t).inDays == 1) {
+    return context.l10n.oclTomorrow;
+  }
   return formatDateLabel(date);
 }
 
 class _ClassCard extends StatelessWidget {
-  const _ClassCard({required this.c, required this.today, required this.onJoin, this.onQa});
+  const _ClassCard({
+    required this.c,
+    required this.today,
+    required this.onJoin,
+    this.onQa,
+  });
 
   final OnlineClassInfo c;
   final String today;
@@ -158,11 +181,11 @@ class _ClassCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final live = c.isLive || c.phase == "joinable";
     final chipText = switch (c.phase) {
-      "live" => "LIVE",
-      "joinable" => "Starting",
-      "cancelled" => "Cancelled",
-      "over" => c.joined ? "Joined" : "Missed",
-      _ => _dayLabel(c.date, today),
+      "live" => context.l10n.oclLive,
+      "joinable" => context.l10n.oclStarting,
+      "cancelled" => context.l10n.oclCancelled,
+      "over" => c.joined ? context.l10n.oclJoined : context.l10n.oclMissed,
+      _ => _dayLabel(context, c.date, today),
     };
     final chipColor = switch (c.phase) {
       "live" || "joinable" => AppColors.success,
@@ -180,21 +203,27 @@ class _ClassCard extends StatelessWidget {
               children: [
                 Expanded(child: Text(c.title, style: AppText.titleMedium)),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
                     color: chipColor.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
                     chipText,
-                    style: AppText.labelMediumMuted.copyWith(color: chipColor, fontWeight: FontWeight.w700),
+                    style: AppText.labelMediumMuted.copyWith(
+                      color: chipColor,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 4),
             Text(
-              "${_dayLabel(c.date, today)} · ${_fmt12(c.startTime)} – ${_fmt12(c.endTime)}"
+              "${_dayLabel(context, c.date, today)} · ${_fmt12(c.startTime)} – ${_fmt12(c.endTime)}"
               "${c.teacherName.isEmpty ? "" : " · ${c.teacherName}"}",
               style: AppText.bodyMedium,
             ),
@@ -211,8 +240,10 @@ class _ClassCard extends StatelessWidget {
                   icon: const Icon(Icons.videocam_outlined),
                   label: Text(
                     c.canJoin
-                        ? (live ? "Join now" : "Join")
-                        : "Opens at ${_fmt12(c.startTime)}",
+                        ? (live
+                              ? context.l10n.oclJoinNow
+                              : context.l10n.oclJoin)
+                        : context.l10n.oclOpensAt(_fmt12(c.startTime)),
                   ),
                 ),
               ),
@@ -224,7 +255,7 @@ class _ClassCard extends StatelessWidget {
                 child: OutlinedButton.icon(
                   onPressed: onQa,
                   icon: const Icon(Icons.quiz_outlined),
-                  label: const Text("Teacher's questions & my answers"),
+                  label: Text(context.l10n.oclTeacherQuestionsAndMyAnswers),
                 ),
               ),
             ],

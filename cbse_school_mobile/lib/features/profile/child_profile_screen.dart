@@ -30,7 +30,7 @@ class ChildProfileScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<ParentProfile>(
-      title: "Student profile",
+      title: context.l10n.profStudentProfile,
       load: api.fetchProfile,
       builder: (context, profile, reload) {
         final child = profile.children
@@ -46,7 +46,7 @@ class ChildProfileScreen extends StatelessWidget {
           children: [
             _Header(api: api, child: child),
             const SizedBox(height: 16),
-            const _Section("Documents the school needs"),
+            _Section(context.l10n.profDocumentsSchoolNeeds),
             Padding(
               padding: EdgeInsets.fromLTRB(4, 0, 4, 8),
               child: Text(
@@ -62,7 +62,7 @@ class ChildProfileScreen extends StatelessWidget {
                     _upload(context, child, doc, hints[doc.key], reload),
               ),
             const SizedBox(height: 16),
-            const _Section("Details on record"),
+            _Section(context.l10n.profDetailsOnRecord),
             Card(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
@@ -185,16 +185,17 @@ class ChildProfileScreen extends StatelessWidget {
                               : AppColors.muted,
                         ),
                         const SizedBox(width: 6),
-                        Text(
-                          "${c.label}: ${switch (c.status) {
-                            "match" => "matches",
-                            "mismatch" => "does not match",
-                            "missing_ocr" => "not readable",
-                            "missing_record" => "not on record",
-                            _ => c.status,
-                          }}",
-                          style: AppText.bodySmall,
-                        ),
+                        Text(switch (c.status) {
+                          "match" => context.l10n.profCheckMatches(c.label),
+                          "mismatch" => context.l10n.profCheckMismatch(c.label),
+                          "missing_ocr" => context.l10n.profCheckNotReadable(
+                            c.label,
+                          ),
+                          "missing_record" => context.l10n.profCheckNotOnRecord(
+                            c.label,
+                          ),
+                          _ => "${c.label}: ${c.status}",
+                        }, style: AppText.bodySmall),
                       ],
                     ),
                   ),
@@ -225,7 +226,9 @@ class ChildProfileScreen extends StatelessWidget {
           // A 4xx is the school saying no to this file; a 5xx is the school's
           // side failing, and the parent should not think their file was bad.
           title: Text(
-            (e.statusCode ?? 0) >= 500 ? "Could not upload" : "Not accepted",
+            (e.statusCode ?? 0) >= 500
+                ? context.l10n.profCouldNotUpload
+                : context.l10n.profNotAccepted,
           ),
           content: Text(e.message, style: const TextStyle(height: 1.4)),
           actions: [
@@ -385,7 +388,10 @@ class _Header extends StatelessWidget {
                     style: AppText.titleMedium.copyWith(color: Colors.white),
                   ),
                   Text(
-                    "${child.classLabel} · Adm. ${child.admissionNo}",
+                    context.l10n.profClassAdmNo(
+                      child.classLabel,
+                      child.admissionNo,
+                    ),
                     style: AppText.bodySmall.copyWith(color: Color(0xFFB8C0D4)),
                   ),
                   const SizedBox(height: 8),
@@ -400,7 +406,9 @@ class _Header extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    "Profile ${child.completeness}% complete",
+                    context.l10n.profProfilePercentComplete(
+                      child.completeness.toString(),
+                    ),
                     style: AppText.labelMedium.copyWith(
                       color: Color(0xFFB8C0D4),
                     ),
@@ -481,11 +489,12 @@ class _DocTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (chipLabel, tone) = switch (doc.status) {
-      "verified" => ("Verified", ModuleTone.green),
-      "pending" || "received" => ("Awaiting verification", ModuleTone.amber),
-      "rejected" => ("Rejected", ModuleTone.coral),
+      "verified" => (context.l10n.profVerified, ModuleTone.green),
+      "pending" ||
+      "received" => (context.l10n.profAwaitingVerification, ModuleTone.amber),
+      "rejected" => (context.l10n.profRejected, ModuleTone.coral),
       _ => (
-        doc.required ? "Required" : "Optional",
+        doc.required ? context.l10n.profRequired : context.l10n.profOptional,
         doc.required ? ModuleTone.coral : ModuleTone.gray,
       ),
     };
@@ -499,7 +508,7 @@ class _DocTile extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    doc.label,
+                    _docLabel(context, doc),
                     style: AppText.bodyMediumInk.copyWith(
                       fontWeight: FontWeight.w600,
                     ),
@@ -548,7 +557,7 @@ class _DocTile extends StatelessWidget {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
-                  "Office: ${doc.reviewNote}",
+                  context.l10n.profOfficeNote(doc.reviewNote),
                   style: AppText.bodySmall.copyWith(
                     height: 1.4,
                     color: ModuleTone.coral.foreground,
@@ -564,7 +573,11 @@ class _DocTile extends StatelessWidget {
                   doc.hasFile ? Icons.refresh : Icons.upload_outlined,
                   size: 18,
                 ),
-                label: Text(doc.hasFile ? "Upload again" : "Upload"),
+                label: Text(
+                  doc.hasFile
+                      ? context.l10n.profUploadAgain
+                      : context.l10n.profUpload,
+                ),
               ),
             ),
           ],
@@ -572,6 +585,22 @@ class _DocTile extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The document's name in the app's language. The key is the server's
+/// document code (never translated); an unknown code keeps the server label.
+String _docLabel(BuildContext context, StudentDocInfo doc) {
+  final l = context.l10n;
+  return switch (doc.key) {
+    "birthCert" => l.profDocBirthCert,
+    "photo" => l.profDocPhoto,
+    "aadhaar" => l.profDocAadhaar,
+    "addressProof" => l.profDocAddressProof,
+    "tc" => l.profDocTc,
+    "casteCert" => l.profDocCasteCert,
+    "incomeCert" => l.profDocIncomeCert,
+    _ => doc.label,
+  };
 }
 
 class _Row extends StatelessWidget {

@@ -102,7 +102,7 @@ class StaffOnlineClass {
   final String note;
 
   String get sectionLabel => "$className $sectionName".trim();
-  String get heading => title.isNotEmpty ? title : (subjectName.isNotEmpty ? subjectName : "Online class");
+  String get heading => title.isNotEmpty ? title : (subjectName.isNotEmpty ? subjectName : LocaleController.strings.apiOnlineClass);
 }
 
 class OnlineClassSectionOption {
@@ -324,15 +324,25 @@ extension OnlineClassesApi on ApiClient {
       "remark": remark,
     });
     final alerts = _i(data, "absentAlerts");
-    return "${_i(data, "present")} present of ${_i(data, "markCount")}"
-        "${alerts > 0 ? " · $alerts absent alerts sent" : ""}";
+    final present = _i(data, "present").toString();
+    final total = _i(data, "markCount").toString();
+    return alerts > 0
+        ? LocaleController.strings.apiOnlineRegisterMarkedWithAlerts(
+            present,
+            total,
+            alerts.toString(),
+          )
+        : LocaleController.strings.apiOnlineRegisterMarked(present, total);
   }
 
   Future<String> syncOnlineClassAttendance(String id) async {
     final data = await _postData("/api/v1/staff/online-classes/$id/attendance", {});
     final unmatched = ((data["unmatched"] as List?) ?? const []).join(", ");
-    return "${_i(data, "participants")} in the room, ${_i(data, "matched")} matched"
-        "${unmatched.isEmpty ? "" : " · not matched: $unmatched"}";
+    final inRoom = _i(data, "participants").toString();
+    final matched = _i(data, "matched").toString();
+    return unmatched.isEmpty
+        ? LocaleController.strings.apiOnlineRoomMatched(inRoom, matched)
+        : LocaleController.strings.apiOnlineRoomMatchedWithUnmatched(inRoom, matched, unmatched);
   }
 }
 

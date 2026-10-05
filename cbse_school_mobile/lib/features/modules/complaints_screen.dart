@@ -28,7 +28,7 @@ class ComplaintsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<ComplaintList>(
-      title: "Complaints",
+      title: context.l10n.modComplaintsTitle,
       load: api.fetchComplaints,
       emptyIcon: Icons.support_agent_outlined,
       emptyText: context.l10n.noComplaintsRaisedIfSomethingAt,
@@ -70,7 +70,8 @@ class ComplaintsScreen extends StatelessWidget {
                       [
                         t.categoryLabel,
                         formatDateLabel(t.date),
-                        if (t.studentName.isNotEmpty) "about ${t.studentName}",
+                        if (t.studentName.isNotEmpty)
+                          context.l10n.modComplaintsAboutChild(t.studentName),
                       ].join(" · "),
                       style: AppText.bodySmallMuted,
                     ),
@@ -89,7 +90,9 @@ class ComplaintsScreen extends StatelessWidget {
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Text(
-                          "School's response: ${t.resolutionNote}",
+                          context.l10n.modComplaintsSchoolResponse(
+                            t.resolutionNote,
+                          ),
                           style: AppText.bodySmall.copyWith(
                             height: 1.4,
                             color: ModuleTone.green.foreground,
@@ -293,7 +296,11 @@ class _ComplaintFormState extends State<_ComplaintForm> {
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(46),
               ),
-              child: Text(_busy ? "Sending…" : "Send to the school"),
+              child: Text(
+                _busy
+                    ? context.l10n.modComplaintsSending
+                    : context.l10n.modComplaintsSendToSchool,
+              ),
             ),
           ],
         ),

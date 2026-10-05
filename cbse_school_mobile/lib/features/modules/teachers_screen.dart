@@ -35,7 +35,7 @@ class TeachersScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<TeacherContacts>(
-      title: "Teachers",
+      title: context.l10n.modTeachersTitle,
       subtitle: child.fullName,
       load: () => api.fetchTeacherContacts(studentId: child.id),
       emptyIcon: Icons.school_outlined,
@@ -73,8 +73,7 @@ class TeachersScreen extends StatelessWidget {
           ],
           const SizedBox(height: Space.sm),
           Text(
-            "WhatsApp messages go to the school's number (${d.schoolWhatsAppDisplay}) and are passed to the teacher — the message is already addressed, just type below the last line and send.\n"
-            "व्हाट्सऐप संदेश स्कूल के नंबर पर जाता है और शिक्षक तक पहुँचाया जाता है — संदेश पहले से पता किया हुआ है, बस आख़िरी पंक्ति के नीचे लिखकर भेजें।",
+            context.l10n.modTeachersWhatsappNote(d.schoolWhatsAppDisplay),
             style: AppText.labelMediumMuted.copyWith(height: 1.45),
           ),
         ],
@@ -113,24 +112,24 @@ class _HoursBanner extends StatelessWidget {
               children: [
                 Text(
                   open
-                      ? "Teachers are available till 8 PM"
-                      : "Teachers are available ${contacts.hoursLabel}",
+                      ? context.l10n.modTeachersAvailableTill8pm
+                      : context.l10n.modTeachersAvailableHours(
+                          contacts.hoursLabel,
+                        ),
                   style: AppText.bodyLarge.copyWith(
                     color: tone.foreground,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  open
-                      ? "शिक्षक रात 8 बजे तक उपलब्ध हैं।"
-                      : "अभी शिक्षक उपलब्ध नहीं हैं (सुबह 8 – रात 8)। ऐप में भेजा संदेश सुरक्षित रहेगा और सुबह पहुँचेगा।",
-                  style: AppText.bodySmall.copyWith(
-                    height: 1.4,
-                    color: tone.foreground,
-                  ),
-                ),
                 if (!open) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    context.l10n.modTeachersClosedNote,
+                    style: AppText.bodySmall.copyWith(
+                      height: 1.4,
+                      color: tone.foreground,
+                    ),
+                  ),
                   const SizedBox(height: 3),
                   Text(
                     contacts.hoursNote,
@@ -247,7 +246,11 @@ class _TeacherCard extends StatelessWidget {
                         ),
                       ),
                     ),
-                    label: Text(open ? "WhatsApp" : "After 8 AM"),
+                    label: Text(
+                      open
+                          ? context.l10n.whatsapp
+                          : context.l10n.modTeachersAfter8am,
+                    ),
                   ),
                 ),
               ],

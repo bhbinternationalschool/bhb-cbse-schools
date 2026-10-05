@@ -22,8 +22,8 @@ class GalleryScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<List<GalleryAlbum>>(
-      title: "Gallery",
-      subtitle: "School photos",
+      title: context.l10n.gallery,
+      subtitle: context.l10n.homeSchoolPhotos,
       load: api.fetchGalleryAlbums,
       emptyIcon: Icons.photo_library_outlined,
       emptyText: context.l10n.noAlbumsPublishedYetPhotosFrom,
@@ -61,7 +61,7 @@ class _AlbumBlock extends StatelessWidget {
             child: Text(
               [
                 if (album.description.isNotEmpty) album.description,
-                "${album.photos.length} photo${album.photos.length == 1 ? "" : "s"}",
+                context.l10n.homePhotoCount(album.photos.length),
               ].join(" · "),
               style: AppText.labelMediumMuted,
             ),

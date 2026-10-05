@@ -5,6 +5,7 @@ export "package:in_app_purchase/in_app_purchase.dart" show ProductDetails;
 import "package:in_app_purchase/in_app_purchase.dart";
 
 import "../api/api_client.dart";
+import "../i18n/locale_controller.dart";
 
 /// What the store knew about the products we asked for.
 class PlayProducts {
@@ -31,15 +32,17 @@ class PlayProducts {
   /// What to tell the parent, naming the actual fault.
   String get problem {
     if (storeUnavailable) {
-      return "Google Play is not available on this phone. The app must be "
-          "installed from Play, with a Google account signed in.";
+      return LocaleController.strings.sysPlayUnavailable;
     }
-    if (error != null) return "Google Play returned an error: $error";
+    if (error != null) {
+      return LocaleController.strings.sysPlayReturnedError(error!);
+    }
     if (notFound.isNotEmpty) {
-      return "Google Play does not have these passes yet: "
-          "${notFound.join(", ")}. They may still be publishing.";
+      return LocaleController.strings.sysPlayPassesNotFound(
+        notFound.join(", "),
+      );
     }
-    return "Google Play has no passes to sell right now.";
+    return LocaleController.strings.sysPlayNoPasses;
   }
 }
 
@@ -121,7 +124,8 @@ class PlayBilling {
           }
           if (purchase.status == PurchaseStatus.error) {
             onFailed(
-              purchase.error?.message ?? "The payment did not go through",
+              purchase.error?.message ??
+                  LocaleController.strings.sysPlayPaymentDidNotGoThrough,
             );
           }
           continue;
@@ -144,7 +148,7 @@ class PlayBilling {
           // outcome — better a refund than money taken for no pass.
           continue;
         } catch (_) {
-          onFailed("Could not reach the school server");
+          onFailed(LocaleController.strings.sysCouldNotReachSchoolServer);
           continue;
         }
 

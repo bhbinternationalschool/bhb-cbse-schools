@@ -110,6 +110,7 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
   Future<void> _pay(FeeLedger ledger) async {
     final dues = _selected(ledger);
     if (dues.isEmpty || _starting) return;
+    final l10n = context.l10n;
     setState(() => _starting = true);
     try {
       final keys = dues.map((d) => d.dueKey).toList();
@@ -128,17 +129,19 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
         methodGroup: methodGroup,
       );
       final uri = checkout.payUri;
-      if (uri == null) throw ApiException("Could not start payment", 400);
+      if (uri == null) {
+        throw ApiException(l10n.modFeesCouldNotStartPayment, 400);
+      }
       final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
       if (!opened) {
-        throw ApiException("No browser available to open the payment page", 0);
+        throw ApiException(l10n.modFeesNoBrowserForPaymentPage, 0);
       }
       _awaitingReturn = true;
       Haptics.success();
     } on ApiException catch (e) {
       _toast(e.message);
     } catch (_) {
-      _toast("Could not start payment — check your connection and try again.");
+      _toast(l10n.modFeesCouldNotStartPaymentConnection);
     } finally {
       if (mounted) setState(() => _starting = false);
     }
@@ -202,15 +205,17 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _openInBrowser(String url) async {
+    final l10n = context.l10n;
     final uri = Uri.tryParse(url);
     if (uri == null ||
         !await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-      throw ApiException("No browser available to open the page", 0);
+      throw ApiException(l10n.modFeesNoBrowserForPage, 0);
     }
   }
 
   Future<void> _startAutopay(Future<void> Function() reload) async {
     if (_autopayBusy) return;
+    final l10n = context.l10n;
     setState(() => _autopayBusy = true);
     try {
       final info = await widget.api.startAutopay();
@@ -227,7 +232,7 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
     } on ApiException catch (e) {
       _toast(e.message);
     } catch (_) {
-      _toast("Could not start auto-pay — check your connection and try again.");
+      _toast(l10n.modFeesCouldNotStartAutopay);
     } finally {
       if (mounted) setState(() => _autopayBusy = false);
     }
@@ -243,6 +248,7 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _stopAutopay(Future<void> Function() reload) async {
+    final l10n = context.l10n;
     final yes = await showDialog<bool>(
       context: context,
       builder: (d) => AlertDialog(
@@ -269,7 +275,7 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
     } on ApiException catch (e) {
       _toast(e.message);
     } catch (_) {
-      _toast("Could not stop auto-pay — check your connection and try again.");
+      _toast(l10n.modFeesCouldNotStopAutopay);
     } finally {
       if (mounted) setState(() => _autopayBusy = false);
     }
@@ -410,7 +416,9 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
         subtitle: due.dueOn.isEmpty
             ? null
             : Text(
-                "${ahead ? "Falls due" : "Due"} ${formatDateLabel(due.dueOn)}",
+                ahead
+                    ? context.l10n.modFeesFallsDueOn(formatDateLabel(due.dueOn))
+                    : context.l10n.modFeesDueOn(formatDateLabel(due.dueOn)),
                 style: AppText.labelMediumMuted,
               ),
         secondary: Text(
@@ -424,7 +432,7 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<_FeesData>(
-      title: "Fees",
+      title: context.l10n.modFeesTitle,
       subtitle: widget.child.fullName,
       load: _load,
       emptyIcon: Icons.task_alt,
@@ -459,8 +467,10 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
                   : const Icon(Icons.lock_outline, size: 18),
               label: Text(
                 selected.isEmpty
-                    ? "Select a fee to pay"
-                    : "Pay ${formatInrPaise(total)} online",
+                    ? context.l10n.modFeesSelectAFeeToPay
+                    : context.l10n.modFeesPayAmountOnline(
+                        formatInrPaise(total),
+                      ),
               ),
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(48),
@@ -518,7 +528,7 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(4, 4, 4, 6),
                   child: Text(
-                    "Pay ahead · ${ledger.futureBalanceLabel} for the months to come",
+                    context.l10n.modFeesPayAhead(ledger.futureBalanceLabel),
                     style: AppText.bodyMediumInk.copyWith(
                       fontWeight: FontWeight.w600,
                     ),

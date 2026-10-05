@@ -69,9 +69,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
       if (mounted) {
-        setState(
-          () => _error = "Could not reach the school server. Try again.",
-        );
+        setState(() => _error = context.l10n.authCouldNotReachServerTryAgain);
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -86,7 +84,7 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() {
       _otpSent = true;
       _maskedMobile = masked;
-      _info = "OTP sent on WhatsApp to $masked";
+      _info = context.l10n.authOtpSentOnWhatsappTo(masked);
     });
   });
 
@@ -203,8 +201,8 @@ class _LoginScreenState extends State<LoginScreen> {
                               }),
                         child: Text(
                           _staffUseOtp
-                              ? "Sign in with password instead"
-                              : "Sign in with OTP instead",
+                              ? context.l10n.authSignInWithPasswordInstead
+                              : context.l10n.authSignInWithOtpInstead,
                         ),
                       ),
                     ),
@@ -234,7 +232,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           counterText: "",
                           helperText: _maskedMobile == null
                               ? null
-                              : "Sent to $_maskedMobile",
+                              : context.l10n.authSentTo(_maskedMobile!),
                         ),
                       ),
                     ],
@@ -269,7 +267,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     if (_staffMode && _showAudienceToggle) ...[
                       const SizedBox(height: 6),
                       Text(
-                        "If you are a parent, choose Parent above.",
+                        context.l10n.authIfParentChooseParentAbove,
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ],
@@ -298,10 +296,10 @@ class _LoginScreenState extends State<LoginScreen> {
                           )
                         : Text(
                             _staffMode && !_staffUseOtp
-                                ? "Sign in"
+                                ? context.l10n.authSignIn
                                 : _otpSent
-                                ? "Verify & sign in"
-                                : "Send OTP",
+                                ? context.l10n.authVerifyAndSignIn
+                                : context.l10n.authSendOtp,
                           ),
                   ),
                   if ((!_staffMode || _staffUseOtp) && _otpSent) ...[
