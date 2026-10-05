@@ -77,6 +77,20 @@ console.log("waFailureReason.selftest.ts");
   );
 }
 
+// --- healthy ecosystem engagement (Oct 2026) --------------------------------
+{
+  assert.equal(
+    classifyWaFailure("This message was not delivered to maintain healthy ecosystem engagement.").kind,
+    "needs_template",
+    "ecosystem engagement failure should be treated like a 24h window",
+  );
+  assert.equal(
+    waFailureBlamesNumber("This message was not delivered to maintain healthy ecosystem engagement."),
+    false,
+    "ecosystem engagement is not a number problem",
+  );
+}
+
 // --- only number-faults land on a fix-the-number list --------------------
 {
   assert.equal(waFailureBlamesNumber("Message undeliverable"), true);

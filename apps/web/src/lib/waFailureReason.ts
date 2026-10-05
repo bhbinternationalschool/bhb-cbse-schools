@@ -116,6 +116,10 @@ const PATTERNS: { kind: WaFailureKind; test: RegExp }[] = [
     kind: "needs_template",
     test: /outside meta'?s? 24h|24[- ]?hour (session )?window|open conversation/i,
   },
+  {
+    kind: "needs_template",
+    test: /maintain.*healthy.*ecosystem|healthy ecosystem engagement/i,
+  },
   { kind: "opted_out", test: /opted out|\bstop\b|131050/i },
   {
     kind: "not_on_whatsapp",
