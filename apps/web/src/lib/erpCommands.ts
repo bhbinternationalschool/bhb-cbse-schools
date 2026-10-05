@@ -434,6 +434,49 @@ export const ERP_COMMANDS: ErpCommandDef[] = [
     scope: "any",
   },
   {
+    id: "udise_student",
+    title: "A student's UDISE+ status",
+    kind: "read",
+    module: "students",
+    action: "view",
+    description:
+      "One student's UDISE+ position: PEN, APAAR ID, whether the Aadhaar is on file / validated on the portal, the parent's APAAR answer, and the next step (office on the portal, or the family). Never prints an Aadhaar number.",
+    examples: [
+      "udise status of Riya Verma",
+      "Riya Verma ka PEN",
+      "Aarav 4B apaar",
+      "Kabir ka udise",
+    ],
+    fields: [
+      {
+        name: "student",
+        type: "student",
+        required: true,
+        description: "Student name as written, plus class-section or roll if given",
+      },
+    ],
+    scope: "any",
+  },
+  {
+    id: "udise_summary",
+    title: "UDISE+ to-do and gaps",
+    kind: "read",
+    module: "compliance",
+    action: "view",
+    description:
+      "The UDISE robot's to-do for the school or one class: how many children are complete, what the office must do on the portal and what families must give; or the list of children without a PEN, without an APAAR, with no Aadhaar, or whose Aadhaar failed on the portal.",
+    examples: [
+      "udise",
+      "udise to-do",
+      "class 3 without PEN",
+      "5A apaar nahi bana",
+      "kitne bachchon ka PEN nahi hai",
+      "udise aadhaar failed list",
+    ],
+    fields: [{ name: "text", type: "text", required: false, description: "The question as asked" }],
+    scope: "any",
+  },
+  {
     id: "staff_contact",
     title: "Reach a colleague",
     kind: "read",
@@ -1049,6 +1092,45 @@ const DIGEST_WORDS =
  * Returns null when nothing matched with confidence; the server then
  * decides whether the message is worth an LLM parse.
  */
+const UDISE_WORD = /(?:^|[^a-z])(udise\+?|u-dise|pen|apaa?r)(?:$|[^a-z])|यूडाइस|अपार/i;
+const UDISE_DOC_WORD = /\b(pdf|print|excel|xlsx|download|sheet)\b/i;
+const UDISE_LIST_WORD =
+  /\b(without|missing|bina|list|kitne|kitna|kitni|how many|kiska|kiske|kinka|kinke|pending|baki|baaki|todo|to-do|to do|summary|kaam|work|fail|failed|nahi|nahin|nhi|na bana|not)\b|\bno\s+(pen|apaa?r|aadha?ar)/i;
+const UDISE_NOT_A_NAME =
+  /\b(bachch?e|bachchon|bachcho|children|child|students?|kids|bana|bane|banaa|bani|banwana|hua|hue|yet|abhi|all|sab|sabka|school|data|update|aaj|today|kya|kaun|kon|who|which|have|has|hai|in|mein|main|wale|wali|walon|with|those|are|do|does|got|get|abhi tak)\b/gi;
+const UDISE_FILLER =
+  /\b(udise\+?|u-dise|pen|apaa?r|aadha?ar|adhar|id|ids|number|num|no|status|details?|info|check|batao|bataiye|dikhao|show|tell|me|what|whats|is|the|of|for|ka|ki|ke|kya|hai|h|ko|please|pls|plz|portal|kaha|tak|hua|hain)\b|[?.!,:]/gi;
+
+/**
+ * "udise status of Riya", "Riya ka PEN" → one child; "class 3 without PEN",
+ * "udise", "apaar nahi bana 5A" → the robot's to-do / gap list. Only when a
+ * UDISE word is present; a document word leaves it to the report parse.
+ */
+export function parseUdiseQuery(
+  text: string,
+): { kind: "summary" } | { kind: "student"; name: string } | null {
+  const t = (text || "").trim();
+  if (!t || !UDISE_WORD.test(t) || UDISE_DOC_WORD.test(t)) return null;
+  // What is left once the UDISE words, the question words and the class are
+  // gone is a child's name — "Riya 4B ka pen nahi bana" asks about Riya;
+  // "class 3 without PEN" leaves nothing and is the list.
+  const withClass = t
+    .replace(new RegExp(UDISE_LIST_WORD.source, "gi"), " ")
+    .replace(UDISE_FILLER, " ")
+    .replace(UDISE_NOT_A_NAME, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const nameOnly = withClass
+    .replace(/(?:^|\s)(class|kaksha|section|sec)(?=\s|$)/gi, " ")
+    .replace(/(?:^|\s)(\d{1,2}\s*[a-h]?|[ivx]{1,4}\s*-?\s*[a-h]?|nursery|lkg|ukg|kg)(?=\s|$)/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (nameOnly.length >= 2 && /^[a-z\s.'-]+$/i.test(nameOnly)) {
+    return { kind: "student", name: withClass };
+  }
+  return { kind: "summary" };
+}
+
 export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
   // The teacher's own class, and taking the register — first, because the
   // readers below know neither and grab the words: "mere class ke bachche"
@@ -1056,6 +1138,14 @@ export function parseErpCommandLocal(text: string): ParsedErpCommand | null {
   // parseMyClassRosterQuery and parseTakeAttendanceQuery (29 Sep 2026).
   if (parseMyClassRosterQuery(text)) {
     return { commandId: "class_roster", fields: { section: MY_SECTIONS_MARKER }, source: "local" };
+  }
+  // UDISE+ asks before the readers below: "Riya ka PEN" is not a family
+  // lookup and "class 3 without PEN" is not the class list.
+  const udiseQ = parseUdiseQuery(text);
+  if (udiseQ) {
+    return udiseQ.kind === "student"
+      ? { commandId: "udise_student", fields: { student: udiseQ.name }, source: "local" }
+      : { commandId: "udise_summary", fields: { text: (text || "").trim() }, source: "local" };
   }
   const takeAtt = parseMarkAttendanceQuery(text) ? null : parseTakeAttendanceQuery(text);
   if (takeAtt) {
