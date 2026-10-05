@@ -75,6 +75,8 @@ import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { FollowUpDialog } from "@/components/admissions/FollowUpDialog";
 import { LeadWorklistPanel } from "@/components/admissions/LeadWorklistPanel";
+import { LeadRecordBar } from "@/components/admissions/LeadRecordBar";
+import { LeadKanbanBoard } from "@/components/admissions/LeadKanbanBoard";
 import {
   ErpTable,
   ErpTableBody,
@@ -221,6 +223,10 @@ export function AdmissionsWorkspace() {
     | "hot"
   >("open");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /** List or board, and which page of the list — CRM-style (5 Oct 2026). */
+  const [leadView, setLeadView] = useState<"list" | "kanban">("list");
+  const [leadPage, setLeadPage] = useState(0);
+  const [leadPageSize, setLeadPageSize] = useState(50);
   const [leadDateFrom, setLeadDateFrom] = useState("");
   const [leadDateTo, setLeadDateTo] = useState("");
   const [localityQ, setLocalityQ] = useState("");
@@ -397,11 +403,12 @@ export function AdmissionsWorkspace() {
     [state],
   );
 
-  const selected = useMemo(() => {
-    const lead = state?.leads.find((l) => l.id === selectedId) ?? null;
-    if (lead && isConvertedShowOnly(lead.stage)) return null;
-    return lead;
-  }, [state, selectedId]);
+  // An admitted lead opens too, read-only: its page is the record of how
+  // the family came in. It used to refuse to open at all.
+  const selected = useMemo(
+    () => state?.leads.find((l) => l.id === selectedId) ?? null,
+    [state, selectedId],
+  );
 
   const classes = useMemo(
     () => (masters?.classes ?? []).filter((c) => c.isActive),
@@ -520,6 +527,18 @@ export function AdmissionsWorkspace() {
     "leadDate",
     "desc",
   );
+  const leadPageCount = Math.max(1, Math.ceil(leadSort.rows.length / leadPageSize));
+  const leadPageSafe = Math.min(leadPage, leadPageCount - 1);
+  const leadPageRows = useMemo(
+    () => leadSort.rows.slice(leadPageSafe * leadPageSize, (leadPageSafe + 1) * leadPageSize),
+    [leadSort.rows, leadPageSafe, leadPageSize],
+  );
+  // A new filter starts the list from its first page.
+  useEffect(() => {
+    setLeadPage(0);
+  }, [filter, captureYearFilter, leadDateFrom, leadDateTo, localityQ, leadPageSize]);
+  /** Where the open lead sits in the list it was opened from. */
+  const selectedIndex = selected ? leadSort.rows.findIndex((l) => l.id === selected.id) : -1;
 
   // Admission-year chips (derived from enquiry dates via the Oct→Sep rule)
   const captureYears = useMemo(() => {
@@ -763,25 +782,34 @@ export function AdmissionsWorkspace() {
   );
 
   function openLead(id: string) {
-    const lead = state?.leads.find((l) => l.id === id);
-    if (lead && isConvertedShowOnly(lead.stage)) {
-      setSelectedId(null);
-      setTab("leads");
-      setNotice(
-        "Admitted leads are display-only (green) — not for further working",
-      );
-      window.setTimeout(() => setNotice(null), 2800);
-      return;
+    // The lead now opens as its own page instead of under the list, so the
+    // filters only need clearing when the lead is not in the list being
+    // looked at (a deep link, a sibling) — that keeps "Back to leads" and
+    // previous / next on the list the counsellor was working.
+    if (!filtered.some((l) => l.id === id)) {
+      setFilter("all");
+      setCaptureYearFilter("all");
+      setLeadDateFrom("");
+      setLeadDateTo("");
+      setLocalityQ("");
     }
-    // Clear list filters so the lead being opened isn't hidden by a stale
-    // date-range/locality/stage filter left active from a previous view.
-    setFilter("all");
-    setCaptureYearFilter("all");
-    setLeadDateFrom("");
-    setLeadDateTo("");
-    setLocalityQ("");
     setSelectedId(id);
     setTab("leads");
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.set("openLead", id);
+      window.history.replaceState(null, "", url);
+      window.scrollTo({ top: 0 });
+    }
+  }
+
+  function closeLead() {
+    setSelectedId(null);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("openLead");
+      window.history.replaceState(null, "", url);
+    }
   }
 
   function doRegister() {
@@ -1187,6 +1215,8 @@ export function AdmissionsWorkspace() {
 
       {tab === "leads" ? (
         <div className="space-y-4">
+          {!selected ? (
+          <>
           {/* Before the table: the instruction. The table is a reference you
               search; this says which leads need something and what that
               something is. Hidden on a solo lead page, which is one lead. */}
@@ -1530,6 +1560,57 @@ export function AdmissionsWorkspace() {
               },
             ]}
           />
+          {/* CRM view bar: record count, list or board, page size. */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
+              <span>
+                <b className="tabular-nums text-[var(--brand-deep)]">{filtered.length}</b> lead
+                {filtered.length === 1 ? "" : "s"} in this view
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              {leadView === "list" ? (
+                <label className="flex items-center gap-1 text-xs text-[var(--muted)]">
+                  Per page
+                  <select
+                    className="field !py-1 text-xs"
+                    value={leadPageSize}
+                    onChange={(e) => setLeadPageSize(Number(e.target.value))}
+                  >
+                    {[25, 50, 100, 200].map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              <div className="inline-flex overflow-hidden rounded-lg border border-[var(--border)] text-xs font-semibold" role="group" aria-label="Lead view">
+                {(["list", "kanban"] as const).map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    aria-pressed={leadView === v}
+                    onClick={() => setLeadView(v)}
+                    className={`px-3 py-1.5 ${
+                      leadView === v
+                        ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                        : "bg-[var(--card)] text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
+                    }`}
+                  >
+                    {v === "list" ? "List" : "Board"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          {leadView === "kanban" ? (
+            <LeadKanbanBoard
+              leads={leadSort.rows}
+              classLabel={(l) => classes.find((c) => c.id === (l.classAdmittedId || l.classSoughtId))?.name || ""}
+              onOpen={openLead}
+            />
+          ) : (
           <MastersTableCard title="Leads">
             {filtered.length === 0 ? (
               <MastersEmptyRow label="No leads in this view — use New enquiry to capture." />
@@ -1539,9 +1620,9 @@ export function AdmissionsWorkspace() {
                   <tr>
                     <th className="w-10 px-3 py-2" onClick={(e) => e.stopPropagation()}>
                       <RowCheckbox
-                        checked={leadSelection.allSelected(leadSort.rows.map((r) => r.id))}
-                        indeterminate={leadSelection.someSelected(leadSort.rows.map((r) => r.id))}
-                        onChange={() => leadSelection.toggleAll(leadSort.rows.map((r) => r.id))}
+                        checked={leadSelection.allSelected(leadPageRows.map((r) => r.id))}
+                        indeterminate={leadSelection.someSelected(leadPageRows.map((r) => r.id))}
+                        onChange={() => leadSelection.toggleAll(leadPageRows.map((r) => r.id))}
                         label="Select all leads shown"
                       />
                     </th>
@@ -1566,7 +1647,7 @@ export function AdmissionsWorkspace() {
                   </tr>
                 </ErpTableHead>
                 <ErpTableBody>
-                  {leadSort.rows.map((l) => {
+                  {leadPageRows.map((l) => {
                     const hh = householdOf(state, l.householdId);
                     const showOnly = isConvertedShowOnly(l.stage);
                     const active =
@@ -1582,14 +1663,14 @@ export function AdmissionsWorkspace() {
                         key={l.id}
                         title={
                           showOnly
-                            ? "Admitted — display only (not for working)"
+                            ? "Admitted — opens read-only"
                             : greened
                               ? "Registered / Verified — open only to Verify or Admit"
                               : "Open to work this lead"
                         }
                         className={`border-t border-[var(--border)] ${
                           showOnly
-                            ? `${rowGreen} cursor-default`
+                            ? `${rowGreen} cursor-pointer hover:brightness-95`
                             : greened
                               ? `${rowGreen} cursor-pointer hover:brightness-95`
                               : `cursor-pointer ${
@@ -1598,9 +1679,7 @@ export function AdmissionsWorkspace() {
                                     : "hover:bg-[var(--surface-sunken)]"
                                 }`
                         }`}
-                        onClick={() => {
-                          if (!showOnly) openLead(l.id);
-                        }}
+                        onClick={() => openLead(l.id)}
                       >
                         <td className="w-10 px-3 py-2" onClick={(e) => e.stopPropagation()}>
                           <RowCheckbox
@@ -1864,23 +1943,63 @@ export function AdmissionsWorkspace() {
               </ErpTable>
             )}
           </MastersTableCard>
-
-          {!selected ? (
-            <p className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--card)] px-4 py-6 text-center text-sm text-[var(--muted)]">
-              Select an <strong>Open</strong> lead for counsellor work, or a
-              green <strong>Registered / Verified</strong> lead to Verify /
-              Admit. <strong>Admitted</strong> rows are display-only. Fee
-              collection lives under the <strong>Registration</strong> tab.
-            </p>
+          )}
+          {leadView === "list" && leadPageCount > 1 ? (
+            <div className="flex flex-wrap items-center justify-end gap-2 text-xs text-[var(--muted)]">
+              <span className="tabular-nums">
+                {leadPageSafe * leadPageSize + 1}–{Math.min((leadPageSafe + 1) * leadPageSize, leadSort.rows.length)} of{" "}
+                {leadSort.rows.length}
+              </span>
+              <button
+                type="button"
+                disabled={leadPageSafe === 0}
+                onClick={() => setLeadPage(leadPageSafe - 1)}
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 font-semibold text-[var(--brand-deep)] disabled:opacity-40"
+              >
+                ‹ Prev
+              </button>
+              <span className="tabular-nums">
+                Page {leadPageSafe + 1} / {leadPageCount}
+              </span>
+              <button
+                type="button"
+                disabled={leadPageSafe >= leadPageCount - 1}
+                onClick={() => setLeadPage(leadPageSafe + 1)}
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 font-semibold text-[var(--brand-deep)] disabled:opacity-40"
+              >
+                Next ›
+              </button>
+            </div>
+          ) : null}
+          </>
           ) : (
+            <>
+            <LeadRecordBar
+              lead={selected}
+              classLabel={classes.find((c) => c.id === (selected.classAdmittedId || selected.classSoughtId))?.name || ""}
+              index={selectedIndex}
+              total={leadSort.rows.length}
+              readOnly={isConvertedShowOnly(selected.stage)}
+              canAct={canCreate && !isConvertedShowOnly(selected.stage)}
+              onBack={closeLead}
+              onPrev={selectedIndex > 0 ? () => openLead(leadSort.rows[selectedIndex - 1].id) : null}
+              onNext={
+                selectedIndex >= 0 && selectedIndex < leadSort.rows.length - 1
+                  ? () => openLead(leadSort.rows[selectedIndex + 1].id)
+                  : null
+              }
+              onCall={() => setFollowUpFor({ lead: selected, channel: "call" })}
+              onWhatsApp={() => setFollowUpFor({ lead: selected, channel: "whatsapp" })}
+            />
             <LeadDetail
+              key={selected.id}
               lead={selected}
               state={state}
               masters={masters}
               sis={sis}
               classes={classes}
               sectionsFor={sectionsFor}
-              canEdit={canCreate}
+              canEdit={canCreate && !isConvertedShowOnly(selected.stage)}
               agentName={session.fullName}
               onPatch={patchSelected}
               onRegister={doRegister}
@@ -1895,6 +2014,7 @@ export function AdmissionsWorkspace() {
               onAssign={doAssign}
               onLogFollowUp={doLogFollowUp}
             />
+            </>
           )}
         </div>
       ) : null}
