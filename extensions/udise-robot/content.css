@@ -21,4 +21,5 @@
 #bhb-udise-robot .err { color: #a3261a; }
 #bhb-udise-robot .ok { color: #0f6b3f; }
 #bhb-udise-robot .muted { color: #5f6f80; font-size: 12px; margin-top: 6px; }
+#bhb-udise-robot .queue { padding: 6px 8px; margin-bottom: 4px; border-radius: 8px; background: #eef6ff; font-weight: 600; }
 .bhb-robot-filled { outline: 3px solid #f5b400 !important; background: #fff7d6 !important; }

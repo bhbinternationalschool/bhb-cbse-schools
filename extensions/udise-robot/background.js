@@ -25,9 +25,10 @@ const PORTAL_FIELDS = [
   "motherTongueDesc", "bloodGroup", "admnNumber",
 ];
 
+// One ERP, matching the manifest's only host permission. For local testing,
+// add the localhost origin to host_permissions and change this line.
 async function erpBase() {
-  const { erpBase } = await chrome.storage.sync.get("erpBase");
-  return String(erpBase || DEFAULT_ERP).replace(/\/+$/, "");
+  return DEFAULT_ERP;
 }
 
 async function erpFetch(path, init = {}) {

@@ -1,13 +1,10 @@
 {
   "manifest_version": 3,
   "name": "BHB UDISE Robot",
-  "version": "0.1.0",
-  "description": "On a click, sends the school's UDISE+ student list to the BHB ERP, and fills the open portal form from the ERP for a person to check and save.",
+  "version": "1.0.0",
+  "description": "For BHB International School staff: fills UDISE+ student forms from the school ERP, one click per child. You check and save.",
   "permissions": ["storage"],
-  "host_permissions": [
-    "https://bhbinternational.school/*",
-    "http://localhost/*"
-  ],
+  "host_permissions": ["https://bhbinternational.school/*"],
   "background": { "service_worker": "background.js" },
   "content_scripts": [
     {
@@ -17,6 +14,11 @@
       "run_at": "document_idle"
     }
   ],
-  "options_page": "options.html",
-  "action": { "default_title": "BHB UDISE Robot", "default_popup": "options.html" }
+  "icons": { "16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
+  "action": {
+    "default_title": "BHB UDISE Robot",
+    "default_popup": "options.html",
+    "default_icon": { "16": "icons/icon16.png", "32": "icons/icon32.png" }
+  },
+  "options_page": "options.html"
 }
