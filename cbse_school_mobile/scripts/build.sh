@@ -131,7 +131,16 @@ if [ "$FLAVOR" = parent ]; then
   echo "$PERMS" | grep -q RECORD_AUDIO || { echo "FAIL: parent app lost RECORD_AUDIO; the tutor's voice input will not work" >&2; exit 1; }
   echo "OK: parent app carries no restricted permission (microphone kept for tutor voice input)"
 else
-  echo "$PERMS" | grep -q ACCESS_BACKGROUND_LOCATION \
-    || { echo "FAIL: staff app lost ACCESS_BACKGROUND_LOCATION; presence pings will not work" >&2; exit 1; }
-  echo "OK: staff app keeps background location"
+  # Since 1.0.16 the staff app uses location only in the foreground (punch,
+  # survey day). Background location is a Play-restricted permission that
+  # blocks review; it must not come back through a plugin's manifest.
+  BAD=$(echo "$PERMS" | grep -E 'ACCESS_BACKGROUND_LOCATION|FOREGROUND_SERVICE_LOCATION' || true)
+  if [ -n "$BAD" ]; then
+    echo "FAIL: the staff app must not carry background location — add tools:node=\"remove\"" >&2
+    echo "lines to android/app/src/staff/AndroidManifest.xml:" >&2
+    echo "$BAD" | sed 's/^/  /' >&2
+    exit 1
+  fi
+  echo "$PERMS" | grep -q ACCESS_FINE_LOCATION || { echo "FAIL: staff app lost ACCESS_FINE_LOCATION; the punch fence check will not work" >&2; exit 1; }
+  echo "OK: staff app has foreground location only"
 fi

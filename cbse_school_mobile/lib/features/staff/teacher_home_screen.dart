@@ -6,7 +6,6 @@ import "../modules/chat_inbox_screen.dart";
 import "../modules/homework_screen.dart";
 import "../modules/notices_screen.dart";
 import "../modules/syllabus_scan_screen.dart";
-import "presence_screen.dart";
 import "../modules/teaching_screen.dart";
 import "attendance_screen.dart";
 import "admission_leads_screen.dart";
@@ -600,43 +599,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                       ),
                       subtitle: Text(
                         context.l10n.gpsPunchInOutFromCampus,
-                        style: AppText.labelMediumMuted,
-                      ),
-                      trailing: const Icon(
-                        Icons.chevron_right,
-                        color: AppColors.muted,
-                      ),
-                    ),
-                  ),
-                  Card(
-                    margin: const EdgeInsets.only(bottom: 16),
-                    child: ListTile(
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => PresenceScreen(api: widget.api),
-                        ),
-                      ),
-                      leading: Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: ModuleTone.green.background,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(
-                          Icons.my_location,
-                          color: ModuleTone.green.foreground,
-                          size: 22,
-                        ),
-                      ),
-                      title: Text(
-                        context.l10n.schoolPresence,
-                        style: AppText.bodyMediumInk.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      subtitle: Text(
-                        context.l10n.shareLocationDuringSchoolHoursWorks,
                         style: AppText.labelMediumMuted,
                       ),
                       trailing: const Icon(

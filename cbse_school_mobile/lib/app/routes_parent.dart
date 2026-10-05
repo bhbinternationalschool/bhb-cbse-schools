@@ -9,7 +9,7 @@ import "app_audience.dart";
 /// Routes for the parent app.
 ///
 /// Deliberately does not import a single screen under features/staff. Those
-/// screens pull in geolocator, flutter_background_service, speech_to_text and
+/// screens pull in geolocator, speech_to_text and
 /// image_picker, and a parent build that never references them can be shipped
 /// without the permissions those plugins carry.
 List<RouteBase> parentRoutes(

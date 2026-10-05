@@ -28,7 +28,6 @@ import "waiting_card.dart";
 import "../modules/chat_inbox_screen.dart";
 import "principal_lists.dart";
 import "section_picker.dart";
-import "presence_screen.dart";
 import "self_attendance_screen.dart";
 import "students_screen.dart";
 import "../../core/i18n/locale_controller.dart";
@@ -758,12 +757,6 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                         tone: ModuleTone.teal,
                         onTap: () =>
                             _push(SelfAttendanceScreen(api: widget.api)),
-                      ),
-                      _Action(
-                        icon: Icons.my_location,
-                        label: "School presence",
-                        tone: ModuleTone.green,
-                        onTap: () => _push(PresenceScreen(api: widget.api)),
                       ),
                     ],
                   ),
