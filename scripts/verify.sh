@@ -239,6 +239,7 @@ SELFTESTS=(
   test:udise-compliance
   test:udise-robot
   test:udise-portal-api
+  test:udise-portal-fill
   test:lead-worklist
   test:student-import
   test:student-import-mid-year

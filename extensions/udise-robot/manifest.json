@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "BHB UDISE Robot",
+  "version": "0.1.0",
+  "description": "On a click, sends the school's UDISE+ student list to the BHB ERP, and fills the open portal form from the ERP for a person to check and save.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://bhbinternational.school/*",
+    "http://localhost/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://sdms.udiseplus.gov.in/g1/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "options.html",
+  "action": { "default_title": "BHB UDISE Robot", "default_popup": "options.html" }
+}
