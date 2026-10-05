@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import QRCode from "qrcode";
+import { TENANT } from "@/lib/types";
 
 type Device = {
   id: string;
@@ -14,7 +16,55 @@ type Device = {
   attempts?: { kind: "in" | "out"; at: string }[];
 };
 type Screen = { id: string; label: string; created_by: string; created_at: string; last_seen_at: string | null };
-type Data = { devices: Device[]; screens: Screen[]; staffWithoutPhone: { id: string; name: string }[] };
+type PunchOptions = {
+  windowStart: string;
+  windowEnd: string;
+  days: number[];
+  printedQrEnabled: boolean;
+  printedQrVersion: number;
+  printedQrIssuedAt: string | null;
+};
+type PrintedQr = { version: number; issuedAt: string | null; link: string } | null;
+type Data = {
+  devices: Device[];
+  screens: Screen[];
+  staffWithoutPhone: { id: string; name: string }[];
+  punchOptions?: PunchOptions;
+  printedQr?: PrintedQr;
+};
+
+const WEEKDAYS: [number, string][] = [
+  [1, "Mon"],
+  [2, "Tue"],
+  [3, "Wed"],
+  [4, "Thu"],
+  [5, "Fri"],
+  [6, "Sat"],
+  [7, "Sun"],
+];
+
+/** A printable A4 sheet for the gate: the QR, the rules, the version. */
+async function printGateQr(qr: NonNullable<PrintedQr>) {
+  const img = await QRCode.toDataURL(qr.link, { width: 900, margin: 2, errorCorrectionLevel: "H" });
+  const w = window.open("", "_blank");
+  if (!w) return false;
+  const issued = qr.issuedAt
+    ? new Date(qr.issuedAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric" })
+    : "";
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Gate punch QR</title>
+<style>@page{size:A4;margin:14mm}body{font-family:system-ui,sans-serif;color:#0f172a;text-align:center;margin:0}
+h1{font-size:30px;margin:8px 0}h2{font-size:22px;margin:4px 0 12px;color:#334155}img{width:150mm;height:150mm}
+p{font-size:16px;margin:6px 0}.small{font-size:12px;color:#64748b}</style></head><body>
+<h1>${TENANT.shortName} · Staff attendance</h1>
+<h2>Scan with your OWN phone at the gate · अपने फ़ोन से गेट पर स्कैन करें</h2>
+<img src="${img}" alt="Gate punch QR">
+<p>Location is checked — this works only inside the school, within punching hours.</p>
+<p>लोकेशन जाँची जाती है — यह केवल स्कूल परिसर में, हाज़िरी के समय में ही काम करता है।</p>
+<p class="small">Printed QR · version ${qr.version}${issued ? ` · issued ${issued}` : ""} · a newer print stops this one working</p>
+<script>window.onload=function(){setTimeout(function(){window.print()},300)}</script></body></html>`);
+  w.document.close();
+  return true;
+}
 
 const hhmm = (iso: string) =>
   new Date(iso).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false });
@@ -52,7 +102,7 @@ export function PunchPhonesPanel() {
     void load();
   }, [load]);
 
-  async function act(payload: Record<string, string | number>, confirmText?: string) {
+  async function act(payload: Record<string, unknown>, confirmText?: string) {
     if (confirmText && !window.confirm(confirmText)) return null;
     setBusy(true);
     try {
@@ -139,6 +189,22 @@ export function PunchPhonesPanel() {
         ))}
       </section>
 
+      {data.punchOptions ? (
+        <GateQrSection
+          options={data.punchOptions}
+          printed={data.printedQr ?? null}
+          busy={busy}
+          onSave={(patch) => act({ action: "punch_options", ...patch })}
+          onNewPrint={() =>
+            act(
+              { action: "printed_qr_new" },
+              "Make a new printed QR? Every printed copy already on the walls stops working — print and paste the new one.",
+            )
+          }
+          onError={setError}
+        />
+      ) : null}
+
       <section className="space-y-2">
         <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted)]">Waiting for approval ({pending.length})</p>
         {pending.length === 0 ? <p className="text-xs text-[var(--muted)]">None.</p> : null}
@@ -188,5 +254,126 @@ export function PunchPhonesPanel() {
         ) : null}
       </section>
     </div>
+  );
+}
+
+/**
+ * Gate punch hours and the printed backup QR (director, 5 Oct 2026). The
+ * gate phone shows the QR only inside these hours and every punch outside
+ * them is refused. The printed QR is the backup for when the gate phone is
+ * off: own registered phone + precise GPS inside the school + these hours,
+ * marked "Printed gate QR" in the register.
+ */
+function GateQrSection(props: {
+  options: PunchOptions;
+  printed: PrintedQr;
+  busy: boolean;
+  onSave: (patch: Partial<PunchOptions>) => Promise<unknown>;
+  onNewPrint: () => Promise<unknown>;
+  onError: (msg: string) => void;
+}) {
+  const [start, setStart] = useState(props.options.windowStart);
+  const [end, setEnd] = useState(props.options.windowEnd);
+  const [days, setDays] = useState<number[]>(props.options.days);
+  useEffect(() => {
+    setStart(props.options.windowStart);
+    setEnd(props.options.windowEnd);
+    setDays(props.options.days);
+  }, [props.options]);
+  const changed =
+    start !== props.options.windowStart ||
+    end !== props.options.windowEnd ||
+    days.join(",") !== props.options.days.join(",");
+  const btn = "rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs font-semibold text-[var(--brand-deep)] disabled:opacity-40";
+
+  return (
+    <section className="space-y-3 rounded-lg border border-[var(--border)] p-3">
+      <div>
+        <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted)]">Gate punch hours</p>
+        <p className="text-xs text-[var(--muted)]">
+          The gate phone shows the QR only in these hours (a clock otherwise) and opens by itself. Every punch outside
+          them — screen, printed QR or WhatsApp — is refused.
+        </p>
+      </div>
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="text-xs font-semibold text-[var(--muted)]">
+          From
+          <input type="time" className="field mt-1 !py-1.5" value={start} onChange={(e) => setStart(e.target.value)} />
+        </label>
+        <label className="text-xs font-semibold text-[var(--muted)]">
+          To
+          <input type="time" className="field mt-1 !py-1.5" value={end} onChange={(e) => setEnd(e.target.value)} />
+        </label>
+        <div className="flex flex-wrap gap-1.5">
+          {WEEKDAYS.map(([n, label]) => (
+            <label key={n} className="flex items-center gap-1 text-xs">
+              <input
+                type="checkbox"
+                checked={days.includes(n)}
+                onChange={(e) => setDays((d) => (e.target.checked ? [...d, n].sort() : d.filter((x) => x !== n)))}
+              />
+              {label}
+            </label>
+          ))}
+        </div>
+        <button
+          type="button"
+          className={btn}
+          disabled={props.busy || !changed}
+          onClick={() => {
+            if (!start || !end || end <= start) {
+              props.onError("“To” must be later than “From”.");
+              return;
+            }
+            void props.onSave({ windowStart: start, windowEnd: end, days });
+          }}
+        >
+          Save hours
+        </button>
+      </div>
+
+      <div className="border-t border-[var(--border)] pt-3">
+        <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted)]">Printed gate QR (backup)</p>
+        <p className="text-xs text-[var(--muted)]">
+          For when the gate phone is off. It cannot change like the screen QR, so a punch with it needs the staff
+          member&apos;s own registered phone, a precise GPS fix inside the school and the hours above, and is marked
+          “Printed gate QR” in the register. Make a new one every month — old prints then stop working.
+        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-1.5 text-sm">
+            <input
+              type="checkbox"
+              checked={props.options.printedQrEnabled}
+              disabled={props.busy}
+              onChange={(e) => void props.onSave({ printedQrEnabled: e.target.checked })}
+            />
+            Allow punching with the printed QR
+          </label>
+          {props.printed ? (
+            <>
+              <button
+                type="button"
+                className={btn}
+                disabled={props.busy}
+                onClick={() => {
+                  void printGateQr(props.printed!).then((ok) => {
+                    if (!ok) props.onError("Allow pop-ups for the ERP to print the QR.");
+                  });
+                }}
+              >
+                Print gate QR
+              </button>
+              <button type="button" className={btn} disabled={props.busy} onClick={() => void props.onNewPrint()}>
+                New printed QR (old prints stop)
+              </button>
+              <span className="text-xs text-[var(--muted)]">
+                Version {props.printed.version}
+                {props.printed.issuedAt ? ` · issued ${day(props.printed.issuedAt)}` : ""}
+              </span>
+            </>
+          ) : null}
+        </div>
+      </div>
+    </section>
   );
 }

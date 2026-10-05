@@ -7,6 +7,12 @@ import { submitQrPunch } from "@/lib/punchClient";
 type BarcodeDetectorLike = { detect: (src: HTMLVideoElement) => Promise<{ rawValue: string }[]> };
 type BarcodeDetectorCtor = new (o: { formats: string[] }) => BarcodeDetectorLike;
 
+/** The printed gate QR's token, from its link (…/punch?p=…). */
+function placeFrom(raw: string): string {
+  const m = raw.match(/[?&]p=([A-Za-z0-9_-]{10,64})/);
+  return m ? m[1]! : "";
+}
+
 function codeFrom(raw: string): string {
   const link = raw.match(/[?&]c=(\d{6})\b/);
   if (link) return link[1]!;
@@ -25,9 +31,12 @@ export function QrPunchCard(props: {
   inTime?: string | null;
   outTime?: string | null;
   initialCode?: string;
+  /** Came in through the printed gate QR. */
+  initialPlace?: string;
   onPunched?: () => void;
 }) {
   const [code, setCode] = useState(props.initialCode || "");
+  const [place, setPlace] = useState(props.initialPlace || "");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -65,9 +74,17 @@ export function QrPunchCard(props: {
       const tick = async () => {
         if (!stream.current || !video.current) return;
         const found = await detector.detect(video.current).catch(() => []);
+        const p = found.map((f) => placeFrom(f.rawValue)).find(Boolean);
+        if (p) {
+          setPlace(p);
+          setCode("");
+          stopScan();
+          return;
+        }
         const c = found.map((f) => codeFrom(f.rawValue)).find(Boolean);
         if (c) {
           setCode(c);
+          setPlace("");
           stopScan();
           return;
         }
@@ -84,19 +101,20 @@ export function QrPunchCard(props: {
   const clean = codeFrom(code);
 
   async function punch(kind: "in" | "out") {
-    if (!clean) {
+    if (!clean && !place) {
       setMsg({ ok: false, text: "Scan the QR on the office screen, or type its 6-digit code." });
       return;
     }
     setBusy(true);
     setMsg(null);
-    const r = await submitQrPunch({ staffId: props.staffId, kind, code: clean });
+    const r = await submitQrPunch({ staffId: props.staffId, kind, code: clean, place: clean ? undefined : place });
     setBusy(false);
     if (!r.ok) {
       setMsg({ ok: false, text: r.error });
       return;
     }
     setCode("");
+    setPlace("");
     setMsg({
       ok: true,
       text:
@@ -116,6 +134,11 @@ export function QrPunchCard(props: {
             At school, scan the QR on the office screen{canScan ? "" : " with your phone camera"}, or type the 6-digit code
             shown under it. Punch only from your own phone.
           </p>
+          {place && !clean ? (
+            <p className="rounded-lg bg-[var(--surface-sunken)] px-3 py-2 text-xs text-[var(--brand-deep)]">
+              Printed gate QR scanned · your phone&apos;s exact location is checked, so stand near the gate with GPS on.
+            </p>
+          ) : null}
           <div className="flex gap-2">
             <input
               className="field !py-2.5 flex-1 text-center font-mono text-xl tracking-[0.3em]"

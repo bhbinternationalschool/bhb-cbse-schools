@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { punchCodeNow } from "@/lib/punchCode.server";
 import { punchDisplayFor } from "@/lib/punchDevices.server";
+import { loadPunchOptions } from "@/lib/punchOptions.server";
+import { punchWindowState } from "@/lib/punchSchedule";
 import { campusGeofenceFromSettings, validateScreenLocation } from "@/lib/staffGeofence.server";
 import { fetchStaffAttendanceSettingsFromDb } from "@/lib/staffAttendanceDeskAncillary.server";
 
@@ -40,12 +42,31 @@ export async function GET(request: Request) {
     );
   }
   const now = Date.now();
+  // Outside the gate's hours the screen shows a clock, not a code
+  // (director, 5 Oct 2026). It keeps polling and opens by itself.
+  const options = await loadPunchOptions();
+  const gate = punchWindowState(options, now);
+  if (!gate.open) {
+    return NextResponse.json(
+      {
+        ok: true,
+        closed: true,
+        now,
+        label: screen.label,
+        windowStart: options.windowStart,
+        windowEnd: options.windowEnd,
+        opensToday: gate.opensToday,
+        reason: gate.reason,
+      },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  }
   const code = punchCodeNow(now);
   if (!code) {
     return NextResponse.json({ ok: false, error: "Punch codes are not configured" }, { status: 503 });
   }
   return NextResponse.json(
-    { ok: true, ...code, now, label: screen.label },
+    { ok: true, ...code, now, label: screen.label, windowEnd: options.windowEnd },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

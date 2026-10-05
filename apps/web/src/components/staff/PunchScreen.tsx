@@ -6,7 +6,8 @@ import { TENANT } from "@/lib/types";
 
 const TOKEN_KEY = "bhb_punch_screen_token";
 
-type Code = { code: string; expiresAt: number; windowMs: number; now: number; label: string };
+type Code = { code: string; expiresAt: number; windowMs: number; now: number; label: string; windowEnd?: string };
+type Closed = { closed: true; now: number; label: string; windowStart: string; windowEnd: string; opensToday: boolean; reason: string };
 
 function readToken(): string {
   try {
@@ -43,6 +44,8 @@ export function PunchScreen() {
   const [geoError, setGeoError] = useState<string | null>(null);
   /** The server's refusal while this screen is outside the school. */
   const [outside, setOutside] = useState<string | null>(null);
+  /** Outside the gate's hours: a clock and when it opens, no code. */
+  const [closed, setClosed] = useState<Closed | null>(null);
 
   // The punch QR is shown only inside the school (director, 3 Oct 2026), so
   // the screen keeps telling the server where it is.
@@ -101,8 +104,20 @@ export function PunchScreen() {
         return;
       }
       setOutside(null);
-      const body = (await res.json()) as Code & { ok?: boolean };
-      if (!res.ok || !body.ok) throw new Error("bad");
+      const raw = (await res.json()) as (Code | Closed) & { ok?: boolean };
+      if (!res.ok || !raw.ok) throw new Error("bad");
+      if ("closed" in raw && raw.closed) {
+        skew.current = raw.now - Date.now();
+        setClosed(raw);
+        setData(null);
+        setQr("");
+        setError(null);
+        // Check again every 30 s, so it opens on time by itself.
+        timer.current = window.setTimeout(() => void load(), 30_000);
+        return;
+      }
+      setClosed(null);
+      const body = raw as Code;
       skew.current = body.now - Date.now();
       setData(body);
       setError(null);
@@ -165,6 +180,32 @@ export function PunchScreen() {
         <p className="max-w-md text-sm" style={{ color: "#64748b" }}>
           हाज़िरी का QR केवल स्कूल परिसर के अंदर दिखता है। · This screen checks again every 30 seconds.
         </p>
+      </main>
+    );
+  }
+
+  if (closed) {
+    const t = new Date(now + skew.current).toLocaleTimeString("en-IN", {
+      timeZone: "Asia/Kolkata",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    return (
+      <main style={paper} className={wrap}>
+        <p className="text-lg font-semibold" style={{ color: "#334155" }}>{TENANT.shortName} · Staff attendance</p>
+        <p className="font-mono text-7xl font-bold sm:text-8xl">{t}</p>
+        <h1 className="text-2xl font-bold">
+          {closed.reason === "day_off"
+            ? "No punching today"
+            : closed.opensToday
+              ? `Punch QR opens at ${closed.windowStart}`
+              : "Punching has closed for today"}
+        </h1>
+        <p className="max-w-md" style={{ color: "#475569" }}>
+          Open {closed.windowStart}–{closed.windowEnd} IST on working days · हाज़िरी का QR {closed.windowStart} से{" "}
+          {closed.windowEnd} बजे तक खुलता है।
+        </p>
+        <p className="text-sm" style={{ color: "#64748b" }}>This screen opens by itself — leave it on.</p>
       </main>
     );
   }

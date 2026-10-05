@@ -25,7 +25,8 @@ export type AttendancePunchWay =
   | "rule"
   | "survey"
   | "whatsapp"
-  | "outdoor";
+  | "outdoor"
+  | "printed_qr";
 
 export const ATTENDANCE_PUNCH_WAYS: {
   code: AttendancePunchWay;
@@ -43,6 +44,7 @@ export const ATTENDANCE_PUNCH_WAYS: {
   { code: "survey", label: "Field survey", short: "Survey" },
   { code: "whatsapp", label: "WhatsApp GPS", short: "WA" },
   { code: "outdoor", label: "Outdoor duty", short: "Outdoor" },
+  { code: "printed_qr", label: "Printed gate QR (own phone)", short: "Print QR" },
 ];
 
 export function punchWayLabel(way: string | undefined): string {

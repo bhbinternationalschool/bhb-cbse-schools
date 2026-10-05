@@ -7,6 +7,10 @@ import { applyWhatsAppStaffPunch } from "@/lib/staffAttendance.server";
 import { attemptsToRecord } from "@/lib/punchAttempts";
 import { campusGeofenceFromSettings, validateScreenLocation } from "@/lib/staffGeofence.server";
 import { fetchStaffAttendanceSettingsFromDb } from "@/lib/staffAttendanceDeskAncillary.server";
+import { loadPunchOptions, savePunchOptions } from "@/lib/punchOptions.server";
+import { printedQrTokenFor } from "@/lib/punchCode.server";
+import { normalizePunchOptions, printedQrLink, punchWindowState, type PunchOptions } from "@/lib/punchSchedule";
+import { publicAppOrigin } from "@/lib/waSisBotServer";
 import {
   createPunchDisplay,
   decidePunchDevice,
@@ -24,6 +28,10 @@ export const runtime = "nodejs";
  * POST {action: approve|reject|reset, id} — decide a phone.
  * POST {action: screen_create, label} → {token} — switch THIS device on as
  *      a QR screen; POST {action: screen_revoke, id} switches one off.
+ * POST {action: punch_options, windowStart, windowEnd, days, printedQrEnabled}
+ *      — the gate window and the printed backup QR on/off.
+ * POST {action: printed_qr_new} — a new printed QR; every earlier print
+ *      stops working at once.
  * Office / principal / admin only.
  */
 export async function GET(request: Request) {
@@ -35,7 +43,11 @@ export async function GET(request: Request) {
       throw new ApiError("server_error", "Could not read punch phones right now", 503);
     }
     const nameOf = new Map(ctx.masters.staff.map((s) => [s.id, s.fullName]));
+    const punchOptions = await loadPunchOptions();
     return apiOk({
+      punchOptions,
+      punchWindow: punchWindowState(punchOptions, Date.now()),
+      printedQr: printedQrView(punchOptions),
       devices: devices.map((d) => ({ ...d, staffName: nameOf.get(d.staff_id) || d.staff_id })),
       screens,
       staffWithoutPhone: ctx.masters.staff
@@ -47,7 +59,30 @@ export async function GET(request: Request) {
   }
 }
 
-type Body = { action?: string; id?: string; label?: string; lat?: number; lng?: number; accuracyM?: number };
+type Body = {
+  action?: string;
+  id?: string;
+  label?: string;
+  lat?: number;
+  lng?: number;
+  accuracyM?: number;
+  windowStart?: string;
+  windowEnd?: string;
+  days?: number[];
+  printedQrEnabled?: boolean;
+};
+
+/** The printed QR's link, for the office's print page — only while it is on. */
+function printedQrView(o: PunchOptions) {
+  if (!o.printedQrEnabled) return null;
+  const token = printedQrTokenFor(o.printedQrVersion);
+  if (!token) return null;
+  return {
+    version: o.printedQrVersion,
+    issuedAt: o.printedQrIssuedAt,
+    link: printedQrLink(publicAppOrigin(), token),
+  };
+}
 
 export async function POST(request: Request) {
   try {
@@ -75,6 +110,53 @@ export async function POST(request: Request) {
         userAgent: meta.userAgent,
       });
       return apiOk({ token: r.token });
+    }
+    if (body.action === "punch_options" || body.action === "printed_qr_new") {
+      const current = await loadPunchOptions();
+      const next: PunchOptions =
+        body.action === "printed_qr_new"
+          ? {
+              ...current,
+              printedQrEnabled: true,
+              printedQrVersion: current.printedQrVersion + 1,
+              printedQrIssuedAt: new Date().toISOString(),
+            }
+          : normalizePunchOptions({
+              ...current,
+              windowStart: body.windowStart ?? current.windowStart,
+              windowEnd: body.windowEnd ?? current.windowEnd,
+              days: body.days ?? current.days,
+              printedQrEnabled:
+                typeof body.printedQrEnabled === "boolean" ? body.printedQrEnabled : current.printedQrEnabled,
+              // The first switch-on stamps the issue date; the version is never
+              // touched here, so saving times cannot revive or kill a print.
+              printedQrIssuedAt:
+                body.printedQrEnabled === true && !current.printedQrIssuedAt
+                  ? new Date().toISOString()
+                  : current.printedQrIssuedAt,
+            });
+      const r = await savePunchOptions(next);
+      if (!r.ok) throw new ApiError("server_error", r.error, 503);
+      await writeAudit({
+        session: ctx.session,
+        module: "staff_attendance",
+        action: "edit",
+        entityType: "punch_options",
+        entityId: "",
+        summary:
+          body.action === "printed_qr_new"
+            ? `New printed gate QR (version ${r.options.printedQrVersion}) — earlier prints stop working`
+            : `Gate punch window ${r.options.windowStart}–${r.options.windowEnd}, days ${r.options.days.join(",")}; printed QR ${r.options.printedQrEnabled ? "on" : "off"}`,
+        before: current,
+        after: r.options,
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+      });
+      return apiOk({
+        punchOptions: r.options,
+        punchWindow: punchWindowState(r.options, Date.now()),
+        printedQr: printedQrView(r.options),
+      });
     }
     if (body.action === "screen_revoke") {
       if (!body.id || !(await revokePunchDisplay(body.id))) {
