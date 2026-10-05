@@ -87,6 +87,8 @@ export async function submitQrPunch(input: {
   staffId: string;
   kind: "in" | "out";
   code: string;
+  /** The printed gate QR's token, instead of a screen code. */
+  place?: string;
 }): Promise<QrPunchResult> {
   if (typeof crypto === "undefined" || !crypto.subtle || typeof indexedDB === "undefined") {
     return {
@@ -107,9 +109,11 @@ export async function submitQrPunch(input: {
   const { readDeviceLocation } = await import("@/lib/deviceLocation");
   const here = await readDeviceLocation();
   if ("error" in here) return { ok: false, error: here.error };
-  const code = input.code.replace(/\D/g, "");
+  const place = (input.place || "").trim();
+  const code = place ? "" : input.code.replace(/\D/g, "");
   const ts = Date.now();
-  const message = `punch|${input.staffId}|${input.kind}|${code}|${ts}`;
+  // A printed-QR punch signs the token in place of the code (server: P:<token>).
+  const message = `punch|${input.staffId}|${input.kind}|${place ? `P:${place}` : code}|${ts}`;
   const sig = await crypto.subtle.sign(
     { name: "ECDSA", hash: "SHA-256" },
     pair.privateKey,
@@ -122,7 +126,7 @@ export async function submitQrPunch(input: {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         kind: input.kind,
-        code,
+        ...(place ? { place } : { code }),
         lat: here.lat,
         lng: here.lng,
         accuracyM: here.accuracyM,

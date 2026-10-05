@@ -10,6 +10,8 @@ type Today = { status: string; inTime: string | null; outTime: string | null } |
 export function PunchPage() {
   const params = useSearchParams();
   const code = (params.get("c") || "").replace(/\D/g, "").slice(0, 6);
+  // The printed gate QR (backup when the gate phone is off).
+  const place = (params.get("p") || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64);
   const [me, setMe] = useState<{ staffId: string; staffName: string; today: Today } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -17,7 +19,7 @@ export function PunchPage() {
     try {
       const res = await fetch("/api/v1/staff/attendance/punch", { cache: "no-store" });
       if (res.status === 401) {
-        const next = `/punch${code ? `?c=${code}` : ""}`;
+        const next = `/punch${code ? `?c=${code}` : place ? `?p=${place}` : ""}`;
         window.location.href = `/login?next=${encodeURIComponent(next)}`;
         return;
       }
@@ -34,7 +36,7 @@ export function PunchPage() {
     } catch {
       setError("No internet — punch once your phone is back online.");
     }
-  }, [code]);
+  }, [code, place]);
 
   useEffect(() => {
     void load();
@@ -64,6 +66,7 @@ export function PunchPage() {
             inTime={me.today?.inTime}
             outTime={me.today?.outTime}
             initialCode={code}
+            initialPlace={place}
             onPunched={() => void load()}
           />
         </section>

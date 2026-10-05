@@ -14,6 +14,8 @@ import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { findStaffByMobile } from "@/lib/waRoleResolver";
 import { cleanPunchCode } from "@/lib/punchCode";
 import { punchCodeIsValid } from "@/lib/punchCode.server";
+import { loadPunchOptions } from "@/lib/punchOptions.server";
+import { punchWindowMessage, punchWindowState } from "@/lib/punchSchedule";
 import {
   composeStaffAttCodePunchSuccess,
   composeStaffAttHumanReply,
@@ -431,11 +433,17 @@ export async function handleWaStaffAttendanceInbound(opts: {
       intent === "in" || intent === "out" ? intent : pending?.kind === "punch_in" ? "in" : "out";
     const early = pending?.kind === "punch_out" && pending.early === true;
     const win = earlyOutWindow();
+    const gateOptions = await loadPunchOptions();
+    const gateWindow = punchWindowState(gateOptions, Date.now());
     if (kind === "out" && win.early && !early) {
       // Leaving while school runs: the same warning as before, then a
       // fresh code after YES (this one will have expired by then).
       pending = { kind: "punch_out_confirm", end: win.end };
       replyText = staffAttEarlyOutWarningText({ now: win.now, end: win.end, lang });
+    } else if (!gateWindow.open) {
+      // Out of the gate's hours (director, 5 Oct 2026) — no code works.
+      pending = null;
+      replyText = punchWindowMessage(gateOptions, gateWindow);
     } else if (!punchCodeIsValid(cleanPunchCode(text))) {
       pending = { kind: kind === "in" ? "punch_in" : "punch_out", ...(early ? { early: true } : {}) };
       replyText = staffAttCodeExpiredText(lang);

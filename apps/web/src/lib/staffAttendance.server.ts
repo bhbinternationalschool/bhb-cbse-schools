@@ -246,7 +246,7 @@ export async function applyWhatsAppStaffPunch(opts: {
    * caller. The geofence is then not consulted: the code says "at the gate
    * a moment ago", which a GPS pin cannot (director, 30 Sep 2026).
    */
-  presence?: "qr";
+  presence?: "qr" | "printed_qr";
   /** Punch channel: WhatsApp location share (default) or the mobile app's GPS. */
   via?: "whatsapp" | "app";
   /** Confirmed early check-out — appended to the register note so HR sees it */
@@ -277,7 +277,10 @@ export async function applyWhatsAppStaffPunch(opts: {
     };
   }
 
-  const qr = opts.presence === "qr";
+  // The printed gate QR is checked by the caller the same way (registered
+  // phone + live GPS inside the campus + the gate window); the register
+  // records which one it was so the office can watch the printed punches.
+  const qr = opts.presence === "qr" || opts.presence === "printed_qr";
   let check: { ok: boolean; reason?: string; distanceM: number } = { ok: true, distanceM: 0 };
   if (!qr) {
     if (!opts.geo) return { ok: false, error: "Location required." };
@@ -313,7 +316,12 @@ export async function applyWhatsAppStaffPunch(opts: {
     : via === "app"
       ? "App"
       : "WhatsApp";
-  const punchWay = via === "app" ? ("self" as const) : ("whatsapp" as const);
+  const punchWay =
+    opts.presence === "printed_qr"
+      ? ("printed_qr" as const)
+      : via === "app"
+        ? ("self" as const)
+        : ("whatsapp" as const);
   const markedBy = via === "app" ? "Mobile app attendance" : "WhatsApp attendance";
 
   // Leave (approved requests) and the late grace both live in Staff HR,

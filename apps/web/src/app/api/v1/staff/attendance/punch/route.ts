@@ -15,7 +15,9 @@ import { campusGeofenceFromSettings, validateStaffPunchLocation } from "@/lib/st
 import { fetchStaffAttendanceSettingsFromDb } from "@/lib/staffAttendanceDeskAncillary.server";
 import { cleanPunchCode } from "@/lib/punchCode";
 import { istDateTime } from "@/lib/punchAttempts";
-import { punchCodeIsValid } from "@/lib/punchCode.server";
+import { printedQrTokenIsValid, punchCodeIsValid } from "@/lib/punchCode.server";
+import { loadPunchOptions } from "@/lib/punchOptions.server";
+import { PRINTED_QR_MAX_ACCURACY_M, punchWindowMessage, punchWindowState } from "@/lib/punchSchedule";
 import {
   checkPunchDevice,
   cleanJwk,
@@ -90,6 +92,12 @@ export async function GET(request: Request) {
       allowSelfPunch: settings.allowSelfPunch,
       // Punches need the office screen's code and this phone's key (30 Sep 2026).
       qrRequired: true,
+      punchWindow: await loadPunchOptions().then((o) => ({
+        ...punchWindowState(o, Date.now()),
+        windowStart: o.windowStart,
+        windowEnd: o.windowEnd,
+        printedQrEnabled: o.printedQrEnabled,
+      })),
       fence,
       today: mark
         ? {
@@ -110,6 +118,8 @@ type PunchBody = {
   kind: "in" | "out";
   /** The office screen's six-digit code (or the QR link it encodes). */
   code?: string;
+  /** The printed gate QR's token — the backup when the gate phone is off. */
+  place?: string;
   device?: { jwk?: unknown; signature?: string; ts?: number; label?: string };
   staffId?: string;
   /** The phone's own position — inside the school, or no punch (3 Oct 2026). */
@@ -155,15 +165,34 @@ export async function POST(request: Request) {
     }
     const staff = await resolveStaff(ctx, body.staffId);
 
-    const code = cleanPunchCode(body.code);
-    if (!code || !body.device) {
+    // Only inside the gate window (director, 5 Oct 2026) — screen, printed
+    // QR and WhatsApp alike. A photo of a code is no use out of hours.
+    const options = await loadPunchOptions();
+    const gate = punchWindowState(options, Date.now());
+    if (!gate.open) throw new ApiError("forbidden", punchWindowMessage(options, gate), 403, { reason: "closed" });
+
+    const place = typeof body.place === "string" ? body.place.trim() : "";
+    const printed = !!place;
+    const code = printed ? "" : cleanPunchCode(body.code);
+    if ((!printed && !code) || !body.device) {
       throw new ApiError(
         "bad_request",
         "Punch at school: scan the QR on the office screen, or type its 6-digit code, in the ERP on your own phone.",
         400,
       );
     }
-    if (!punchCodeIsValid(code)) {
+    if (printed) {
+      if (!options.printedQrEnabled) {
+        throw new ApiError("forbidden", "The printed gate QR is switched off. Scan the QR on the gate phone.", 403);
+      }
+      if (!printedQrTokenIsValid(place, options.printedQrVersion)) {
+        throw new ApiError(
+          "forbidden",
+          "This printed QR is old and no longer works. Scan the QR on the gate phone, or the newly printed one.",
+          403,
+        );
+      }
+    } else if (!punchCodeIsValid(code)) {
       throw new ApiError(
         "bad_request",
         "That code has expired — it changes every 30 seconds. Scan the office screen again.",
@@ -191,6 +220,18 @@ export async function POST(request: Request) {
       fence,
     );
     if (!where.ok) throw new ApiError("forbidden", where.reason || "Punches count only from inside the school.", 403);
+    // A printed QR cannot rotate, so the phone's fix must be tight — a rough
+    // fix 150 m away is where a photo of the print would be used from.
+    if (printed) {
+      const acc = Number(body.accuracyM);
+      if (!Number.isFinite(acc) || acc > PRINTED_QR_MAX_ACCURACY_M) {
+        throw new ApiError(
+          "forbidden",
+          `Your phone's location is not precise enough (needs ±${PRINTED_QR_MAX_ACCURACY_M} m). Turn on GPS / high-accuracy location, stand in the open for a moment, and try again.`,
+          403,
+        );
+      }
+    }
     const jwk = cleanJwk(body.device.jwk);
     const ts = Number(body.device.ts);
     if (!jwk || !body.device.signature || !Number.isFinite(ts)) {
@@ -205,7 +246,7 @@ export async function POST(request: Request) {
     }
     const signed = await verifyPunchSignature(
       jwk,
-      punchMessage({ staffId: staff.id, kind: body.kind, code, ts }),
+      punchMessage({ staffId: staff.id, kind: body.kind, code: printed ? `P:${place}` : code, ts }),
       body.device.signature,
     );
     if (!signed) {
@@ -246,7 +287,7 @@ export async function POST(request: Request) {
       staff,
       mobile10: "",
       kind: body.kind,
-      presence: "qr",
+      presence: printed ? "printed_qr" : "qr",
       via: "app",
       academicYearCode: staffWorkingYear(ctx),
     });
@@ -259,8 +300,16 @@ export async function POST(request: Request) {
       action: "edit",
       entityType: "punch",
       entityId: staff.id,
-      summary: `Office-QR punch-${result.kind} at ${result.time} from own phone${device.firstRegistration ? " (phone registered on this punch)" : ""}`,
-      after: { kind: result.kind, time: result.time, firstRegistration: device.firstRegistration },
+      summary: `${printed ? `Printed-QR (v${options.printedQrVersion})` : "Office-QR"} punch-${result.kind} at ${result.time} from own phone${device.firstRegistration ? " (phone registered on this punch)" : ""}`,
+      after: {
+        kind: result.kind,
+        time: result.time,
+        firstRegistration: device.firstRegistration,
+        via: printed ? "printed_qr" : "screen_qr",
+        lat,
+        lng,
+        accuracyM: Number(body.accuracyM),
+      },
       ip: meta.ip,
       userAgent: meta.userAgent,
     });

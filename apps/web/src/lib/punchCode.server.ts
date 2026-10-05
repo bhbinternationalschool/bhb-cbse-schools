@@ -1,4 +1,5 @@
 import { currentPunchCode, verifyPunchCode } from "@/lib/punchCode";
+import { printedQrToken, verifyPrintedQrToken } from "@/lib/punchSchedule";
 
 const DEV_FALLBACK_SECRET = "bhb-staff-punch-dev-only";
 
@@ -30,4 +31,15 @@ export function punchCodeNow(nowMs = Date.now()) {
 export function punchCodeIsValid(raw: unknown, nowMs = Date.now()): boolean {
   const s = secret();
   return !!s && verifyPunchCode(s, raw, nowMs);
+}
+
+/** The printed gate QR's token for a version (same secret, own message). */
+export function printedQrTokenFor(version: number): string | null {
+  const s = secret();
+  return s ? printedQrToken(s, version) : null;
+}
+
+export function printedQrTokenIsValid(raw: unknown, version: number): boolean {
+  const s = secret();
+  return !!s && verifyPrintedQrToken(s, version, raw);
 }

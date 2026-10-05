@@ -321,6 +321,7 @@ SELFTESTS=(
   test:voice-dictation
   test:punch-devices
   test:punch-attempts
+  test:punch-schedule
   test:module-state-merge
   test:staff-day-status
   test:payroll-no-register
