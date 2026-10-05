@@ -1,5 +1,6 @@
 /*
- * BHB UDISE Robot — the panel on UDISE+ portal pages.
+ * BHB Office Robot — the panel on UDISE+ portal pages (the first portal it
+ * works on; each further portal gets its own panel script).
  *
  * Every move starts with a person's click. A person logs in (user id,
  * password, captcha/OTP), and the panel shows how many children's portal
@@ -33,8 +34,8 @@
 
   // ─── Panel ───────────────────────────────────────────────────────────
 
-  const panel = el("div", { id: "bhb-udise-robot" });
-  const head = el("header", {}, "🤖 BHB UDISE Robot", el("span", { class: "muted" }, "–"));
+  const panel = el("div", { id: "bhb-office-robot" });
+  const head = el("header", {}, "🤖 BHB Office Robot · UDISE+", el("span", { class: "muted" }, "–"));
   const body = el("div", { class: "body" });
   const queueBox = el("div", { class: "queue" });
   const startBtn = el("button", { class: "act", type: "button" }, "Start robot");

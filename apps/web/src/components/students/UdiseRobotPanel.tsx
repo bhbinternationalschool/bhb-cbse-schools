@@ -116,7 +116,7 @@ export function UdiseRobotPanel({
       <p className="mt-2 text-[11px] text-[var(--muted)]">
         Each child&apos;s next step, worked out from the ERP every time this opens. A step drops off by itself once the
         portal export is imported below or the family&apos;s document arrives on WhatsApp — nothing to tick.
-        To refresh from the portal without downloading Excel, log in to UDISE+ in Chrome with the BHB UDISE Robot
+        To refresh from the portal without downloading Excel, log in to UDISE+ in Chrome with the BHB Office Robot
         extension and press <strong>Send portal list to ERP</strong>, then Apply below.
       </p>
       <div className="mt-3 flex flex-col gap-3 md:flex-row">

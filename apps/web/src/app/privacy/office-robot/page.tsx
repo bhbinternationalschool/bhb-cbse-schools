@@ -4,26 +4,26 @@ import { LegalList, LegalPage, LegalSection } from "@/components/public/LegalPag
 import { CONTACT, TRADING_NAME } from "@/lib/publicOrgProfile";
 
 export const metadata: Metadata = {
-  title: "BHB UDISE Robot — privacy",
+  title: "BHB Office Robot — privacy",
   description:
-    "What the BHB UDISE Robot Chrome extension reads, where it sends it, and what it never does.",
+    "What the BHB Office Robot Chrome extension reads on government portals, where it sends it, and what it never does.",
 };
 
 /**
- * Privacy policy for the staff-only Chrome extension (extensions/udise-robot),
+ * Privacy policy for the staff-only Chrome extension (extensions/office-robot),
  * linked from its Chrome Web Store listing. Static, public, no auth.
  */
-export default function UdiseRobotPrivacyPage() {
+export default function OfficeRobotPrivacyPage() {
   return (
     <LegalPage
-      title="BHB UDISE Robot — privacy"
+      title="BHB Office Robot — privacy"
       updated="6 October 2026"
-      current="/privacy/udise-robot"
+      current="/privacy/office-robot"
       summary={
         <p>
-          The BHB UDISE Robot is a tool for {TRADING_NAME} staff. It moves the
-          school&rsquo;s own student records between the government UDISE+
-          portal and the school&rsquo;s ERP, in the staff member&rsquo;s own
+          The BHB Office Robot is a tool for {TRADING_NAME} staff. It moves the
+          school&rsquo;s own records between government portals (today, the
+          UDISE+ Student module) and the school&rsquo;s ERP, in the staff member&rsquo;s own
           browser, only when they click. It sends nothing anywhere else, has no
           analytics, and does nothing in the background.
         </p>
@@ -38,7 +38,7 @@ export default function UdiseRobotPrivacyPage() {
         </p>
       </LegalSection>
 
-      <LegalSection n={2} title="What it reads">
+      <LegalSection n={2} title="What it reads on UDISE+">
         <LegalList>
           <li>
             On UDISE+ pages, the school&rsquo;s current-year student list that
@@ -83,7 +83,15 @@ export default function UdiseRobotPrivacyPage() {
         </p>
       </LegalSection>
 
-      <LegalSection n={6} title="The rest of our data practices">
+      <LegalSection n={6} title="Other portals">
+        <p>
+          The robot works only on the portals named on this page. When another
+          portal is added, this page will name it and say what is read there
+          before the new version is released.
+        </p>
+      </LegalSection>
+
+      <LegalSection n={7} title="The rest of our data practices">
         <p>
           Student records in the ERP are covered by the school&rsquo;s main{" "}
           <Link href="/privacy" className="text-blue-700 underline">

@@ -1,4 +1,4 @@
-# BHB UDISE Robot (Chrome extension)
+# BHB Office Robot (Chrome extension)
 
 Works beside the UDISE+ Student module (sdms.udiseplus.gov.in). **Every move starts with a person's click.**
 A person always signs in to the portal (captcha/OTP) and always presses the portal's own **Save**.
@@ -34,7 +34,7 @@ Works in desktop Chrome, Edge or Brave. Not on phones. The ERP and the portal mu
 
 ## Publishing
 
-See `STORE_LISTING.md`. Privacy policy: https://bhbinternational.school/privacy/udise-robot (`apps/web/src/app/privacy/udise-robot/page.tsx`).
+See `STORE_LISTING.md`. Privacy policy: https://bhbinternational.school/privacy/office-robot (`apps/web/src/app/privacy/office-robot/page.tsx`).
 
 ## ERP side
 
