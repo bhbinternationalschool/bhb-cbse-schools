@@ -1933,3 +1933,13 @@ h3,
   font-weight: 700;
   letter-spacing: 0.02em;
 }
+
+/*
+ * BHASHINI translation widget (public site header). Its own stylesheet sets
+ * the button to `color: #fff`, and the icon is filled with currentColor, so
+ * it vanished on the light theme. Unlayered on purpose: their CSS is
+ * unlayered, which beats any Tailwind utility however specific.
+ */
+.bhashini-plugin-container .bhashini-dropdown-btn {
+  color: inherit;
+}
