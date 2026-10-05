@@ -1,3 +1,5 @@
+import "dart:ui" show PlatformDispatcher;
+
 import "package:flutter/material.dart";
 import "package:flutter_secure_storage/flutter_secure_storage.dart";
 
@@ -14,8 +16,35 @@ import "../../l10n/app_localizations.dart";
 /// Null means "follow the phone". Anything else is a deliberate choice and is
 /// remembered across launches and sign-outs — a driver should not have to
 /// re-pick Hindi every morning.
+///
+/// [fallback] is what a person who has never picked gets. The parent app
+/// passes Hindi: the school's language for parents is Hindi unless the family
+/// chose English (the director, 2026-09-13 — the same rule the WhatsApp
+/// messages follow), and most parents' phones are set to English, so
+/// "follow the phone" showed them English. The staff app keeps following the
+/// phone.
 class LocaleController extends ValueNotifier<Locale?> {
-  LocaleController() : super(null);
+  LocaleController({this.fallback}) : super(fallback) {
+    _active = this;
+  }
+
+  final Locale? fallback;
+
+  /// The controller of the running app, for code with no BuildContext.
+  static LocaleController? _active;
+
+  /// Strings in the language on screen, for code with no BuildContext —
+  /// an API error message, a notification body. Widgets use `context.l10n`.
+  static L get strings {
+    final chosen = _active?.value;
+    if (chosen != null) return lookupL(chosen);
+    final phone = PlatformDispatcher.instance.locale;
+    final match = supported.firstWhere(
+      (l) => l.languageCode == phone.languageCode,
+      orElse: () => supported.first,
+    );
+    return lookupL(match);
+  }
 
   static const _key = "bhb_app_locale";
   static const _storage = FlutterSecureStorage();
@@ -37,7 +66,7 @@ class LocaleController extends ValueNotifier<Locale?> {
   }
 
   Future<void> set(Locale? locale) async {
-    value = locale;
+    value = locale ?? fallback;
     try {
       if (locale == null) {
         await _storage.delete(key: _key);
