@@ -53,7 +53,11 @@ export async function GET(request: Request) {
       punchOptions,
       punchWindow: punchWindowState(punchOptions, Date.now()),
       printedQr: printedQrView(punchOptions),
-      devices: devices.map((d) => ({ ...d, staffName: nameOf.get(d.staff_id) || d.staff_id })),
+      // Outside field surveyors' phones (ext:…) live in the same table but
+      // are managed under Admissions → Field survey, not here.
+      devices: devices
+        .filter((d) => !d.staff_id.startsWith("ext:"))
+        .map((d) => ({ ...d, staffName: nameOf.get(d.staff_id) || d.staff_id })),
       screens,
       staffWithoutPhone: ctx.masters.staff
         .filter((s) => s.status !== "inactive" && !devices.some((d) => d.staff_id === s.id && d.status === "active"))
