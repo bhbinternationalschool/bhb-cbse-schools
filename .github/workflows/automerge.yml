@@ -1,0 +1,104 @@
+name: Auto-merge
+
+# Merges a PR labelled `automerge` once CI is green on its latest commit.
+#
+# GitHub's own auto-merge needs a branch protection rule to wait on, and this
+# private repo's plan does not allow one — so "auto-merge" would merge the
+# moment it was switched on, before CI ran. This waits for the two CI jobs
+# itself (director, 5 Oct 2026).
+#
+# - Label a PR `automerge` (gh pr edit <n> --add-label automerge).
+# - When CI finishes on that PR, or when the label is added after CI already
+#   passed, both "Typecheck · Lint · Tests" and "Production build" must have
+#   succeeded on the PR's CURRENT head commit. Then it merges (merge commit).
+# - CI failed, still running, or a newer push since: nothing happens; the
+#   next green CI run on the new commit merges it.
+# - Merging does not deploy. Deploy stays a manual step.
+#
+# Note: a merge made by this workflow's token does not start the push-to-main
+# CI run (GitHub never chains workflows off GITHUB_TOKEN events). The PR's own
+# CI run on the same commit is the check that counted.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+
+concurrency:
+  group: automerge-${{ github.event.pull_request.number || github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    name: Merge when CI is green
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: >-
+      (github.event_name == 'workflow_run'
+        && github.event.workflow_run.event == 'pull_request'
+        && github.event.workflow_run.conclusion == 'success')
+      || (github.event_name == 'pull_request'
+        && github.event.label.name == 'automerge')
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      LABEL: automerge
+      REQUIRED_CHECKS: "Typecheck · Lint · Tests|Production build"
+    steps:
+      - name: Find the PR
+        id: pr
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # workflow_run carries the PR for same-repo branches; fall back to
+          # the head branch if the list is empty.
+          n='${{ github.event.workflow_run.pull_requests[0].number }}'
+          if [ -z "$n" ]; then
+            n=$(gh pr list --state open --head '${{ github.event.workflow_run.head_branch }}' --json number -q '.[0].number' || true)
+          fi
+          echo "number=${n}" >> "$GITHUB_OUTPUT"
+
+      - name: Merge if labelled and green
+        if: steps.pr.outputs.number != ''
+        run: |
+          set -euo pipefail
+          n='${{ steps.pr.outputs.number }}'
+          pr=$(gh pr view "$n" --json state,isDraft,headRefOid,labels,mergeable,baseRefName)
+          state=$(jq -r .state <<<"$pr")
+          draft=$(jq -r .isDraft <<<"$pr")
+          sha=$(jq -r .headRefOid <<<"$pr")
+          base=$(jq -r .baseRefName <<<"$pr")
+          labelled=$(jq -r --arg l "$LABEL" '[.labels[].name] | index($l) != null' <<<"$pr")
+
+          if [ "$state" != "OPEN" ] || [ "$draft" = "true" ] || [ "$labelled" != "true" ] || [ "$base" != "main" ]; then
+            echo "PR #$n: state=$state draft=$draft labelled=$labelled base=$base — not merging."
+            exit 0
+          fi
+
+          # Every required check must have SUCCEEDED on the current head
+          # commit. Missing, running, failed or cancelled all mean wait.
+          checks=$(gh api "repos/$GH_REPO/commits/$sha/check-runs?per_page=100" \
+            -q '[.check_runs[] | {id, name, status, conclusion}]')
+          IFS='|' read -ra need <<<"$REQUIRED_CHECKS"
+          for c in "${need[@]}"; do
+            # The newest run of each check decides — a re-run replaces a cancelled one.
+            ok=$(jq -r --arg c "$c" '[.[] | select(.name == $c)] | sort_by(.id) | last | (. != null) and .status == "completed" and .conclusion == "success"' <<<"$checks")
+            if [ "$ok" != "true" ]; then
+              echo "PR #$n: '$c' is not green on $sha yet — waiting for CI."
+              exit 0
+            fi
+          done
+
+          echo "PR #$n: CI green on $sha — merging."
+          # --match-head-commit: refuse if someone pushed after the check.
+          gh pr merge "$n" --merge --match-head-commit "$sha"
