@@ -80,6 +80,7 @@
     "test:exam-date-sheet": "npx tsx src/lib/examDateSheet.selftest.ts",
     "test:exams-sheet-safety": "npx tsx src/lib/examsSheetSafety.selftest.ts",
     "test:exam-schemes": "npx tsx src/lib/examSchemes.selftest.ts",
+    "test:exam-readiness": "npx tsx src/lib/examReadiness.selftest.ts",
     "test:exam-report-templates": "npx tsx src/lib/examReportTemplates.selftest.ts",
     "test:exam-paper-question-types": "npx tsx src/lib/examPaperQuestionTypes.selftest.ts",
     "test:exam-paper-print-layout": "npx tsx src/lib/examPaperPrintLayout.selftest.ts",

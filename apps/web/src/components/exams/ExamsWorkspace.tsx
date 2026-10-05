@@ -89,6 +89,7 @@ import {
   ErpTableShell,
 } from "@/components/ui/erp-roster";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
+import { ExamReadinessDashboard } from "@/components/exams/ExamReadinessDashboard";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import {
   HoldStatusBanner,
@@ -2397,7 +2398,22 @@ export function ExamsWorkspace() {
       ) : null}
 
       {tab === "dashboard" ? (
-        <div className="mt-6">
+        <div className="mt-6 space-y-6">
+          <ExamReadinessDashboard
+            ay={ay}
+            terms={terms}
+            exams={exams}
+            masters={masters}
+            sis={sis}
+            policy={policy}
+            teaching={teacherMode ? myTeaching : null}
+            onOpen={(termId, cls, sec) => {
+              setExamTermId(termId);
+              setClassId(cls);
+              setSectionId(sec);
+              setTab("marks");
+            }}
+          />
           <ModuleDashboardHost
             moduleId="exams"
             onNavigateTab={(t) => setTab(t as Tab)}
