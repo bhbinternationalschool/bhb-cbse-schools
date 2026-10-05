@@ -13,7 +13,6 @@ import "my_collections_screen.dart";
 import "survey_screen.dart";
 import "leave_approvals_screen.dart";
 import "payslips_screen.dart";
-import "presence_screen.dart";
 import "self_attendance_screen.dart";
 import "staff_complaints_screen.dart";
 import "staff_leave_screen.dart";
@@ -87,14 +86,6 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
       ModuleTone.teal,
       "gps_punch",
       (api) => SelfAttendanceScreen(api: api),
-    ),
-    _Tile(
-      "Presence",
-      "उपस्थिति",
-      Icons.my_location,
-      ModuleTone.green,
-      "gps_punch",
-      (api) => PresenceScreen(api: api),
     ),
     _Tile(
       "Notices",

@@ -5,19 +5,17 @@
          separate: every one of them backs a staff feature, and none of them
          belongs in a build that parents install.
 
-         Play treats ACCESS_BACKGROUND_LOCATION as a restricted permission —
-         it needs the declaration form, a demonstration video and prominent
-         in-app disclosure. The case here is presence tracking: a foreground
-         service pings GPS on the school's configured interval, inside the
-         school's timing window only, behind a persistent notification. See
-         lib/features/staff/presence_service.dart. -->
+         Location is FOREGROUND only: it is read at the moment of a punch or a
+         survey step, while the staff member is using the app. Background
+         location ("all the time") and the presence-ping service were removed
+         in 1.0.16 (director, 5 Oct 2026) — Play restricts that permission,
+         and attendance no longer needs it (gate QR + phone key + live GPS).
+         The lines with tools:node="remove" keep any plugin from merging the
+         restricted permissions back in; scripts/build.sh fails if they appear. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
-    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
-    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" tools:node="remove"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" tools:node="remove"/>
 
     <!-- Dictating lesson plan notes (speech_to_text). -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
@@ -25,13 +23,6 @@
     <!-- Photographing a textbook contents page (image_picker). The camera
          is optional so the app still installs on camera-less devices. -->
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
-
-    <application>
-        <service
-            android:name="id.flutter.flutter_background_service.BackgroundService"
-            android:foregroundServiceType="location"
-            tools:replace="android:foregroundServiceType" />
-    </application>
 
     <queries>
         <!-- Required on Android 11+ so speech_to_text can find the
