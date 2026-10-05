@@ -339,6 +339,8 @@ type CoScholasticRowProps = {
   ratings: Record<string, string>;
   ratingChoices: string[];
   onRating: (studentId: string, domain: CoScholasticDomain, value: string) => void;
+  /** Tick = AB in every area; untick clears the AB grades it set. */
+  onAbsentAll: (studentId: string, absent: boolean) => void;
 };
 
 /**
@@ -354,7 +356,10 @@ const CoScholasticRow = memo(function CoScholasticRow({
   ratings,
   ratingChoices,
   onRating,
+  onAbsentAll,
 }: CoScholasticRowProps) {
+  const absentAll = areas.length > 0 && areas.every((a) => ratings[a.code] === "AB");
+  const absentAny = areas.some((a) => ratings[a.code] === "AB");
   return (
     <tr className="border-b border-[var(--border)]">
       <td className="sticky left-0 z-10 bg-[var(--card)] px-3 py-1.5">
@@ -368,6 +373,19 @@ const CoScholasticRow = memo(function CoScholasticRow({
               {st.admissionNo}
               {st.rollNo ? ` · Roll ${st.rollNo}` : ""}
             </div>
+            <label className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--muted)]">
+              <input
+                type="checkbox"
+                checked={absentAll}
+                disabled={locked}
+                onChange={(e) => onAbsentAll(st.id, e.target.checked)}
+                aria-label={`${st.fullName} absent in all co-scholastic areas`}
+                title="Absent for every co-scholastic area (AB). For one area, pick AB in that column."
+              />
+              <span className={absentAny ? "font-semibold text-[var(--danger)]" : ""}>
+                {absentAll ? "Absent (all)" : absentAny ? "Absent (some)" : "Present"}
+              </span>
+            </label>
           </div>
         </div>
       </td>
@@ -924,6 +942,26 @@ export function ExamsWorkspace() {
           e.studentId === studentId && e.domain === domain
             ? { ...e, rating }
             : e,
+        ),
+      );
+      setDirty(true);
+    },
+    [],
+  );
+
+  /** Absent for the whole co-scholastic sheet: AB in every area, or clear
+   * the AB grades back to unrated. Grades already given stay on untick. */
+  const setCoScholasticAbsentAll = useCallback(
+    (studentId: string, absent: boolean) => {
+      setCoScholasticGrid((prev) =>
+        prev.map((e) =>
+          e.studentId !== studentId
+            ? e
+            : absent
+              ? { ...e, rating: "AB" }
+              : e.rating === "AB"
+                ? { ...e, rating: null }
+                : e,
         ),
       );
       setDirty(true);
@@ -2427,7 +2465,9 @@ export function ExamsWorkspace() {
                           key={columnKey(col)}
                           className="px-3 py-2.5 text-center font-bold text-[var(--brand-deep)]"
                         >
-                          {col.subject.code}
+                          <span className="block max-w-[9rem] whitespace-normal leading-tight" title={col.subject.code}>
+                            {col.subject.name || col.subject.code}
+                          </span>
                           {col.component ? (
                             <span className="block text-[10px] font-semibold text-[var(--muted)]">
                               {col.component.label}
@@ -2515,6 +2555,7 @@ export function ExamsWorkspace() {
                                 ratings={ratingsByStudent.get(st.id) ?? {}}
                                 ratingChoices={ratingChoices}
                                 onRating={setCoScholasticRating}
+                                onAbsentAll={setCoScholasticAbsentAll}
                               />
                             ))
                           : null}
