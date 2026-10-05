@@ -260,6 +260,7 @@ SELFTESTS=(
   test:exam-date-sheet
   test:exams-sheet-safety
   test:exam-schemes
+  test:exam-readiness
   test:exam-report-templates
   test:exam-paper-question-types
   test:exam-paper-print-layout

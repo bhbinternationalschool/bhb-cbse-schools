@@ -387,6 +387,7 @@ jobs:
           npm run test:exam-date-sheet
           npm run test:exams-sheet-safety
           npm run test:exam-schemes
+          npm run test:exam-readiness
           npm run test:exam-report-templates
           npm run test:exam-paper-question-types
           npm run test:exam-paper-print-layout
