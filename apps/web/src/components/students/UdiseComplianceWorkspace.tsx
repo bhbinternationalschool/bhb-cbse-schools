@@ -29,6 +29,7 @@ import {
 } from "@/lib/udiseCompliance";
 import type { SisStudent } from "@/lib/sis";
 import { UdisePenApaarImportPanel } from "@/components/students/UdisePenApaarImportPanel";
+import { UdiseRobotPanel } from "@/components/students/UdiseRobotPanel";
 import {
   UdiseStudentListModal,
   type UdiseListRow,
@@ -525,6 +526,8 @@ export function UdiseComplianceWorkspace({
 
   return (
     <div className="mt-4 space-y-4">
+      <UdiseRobotPanel sis={sis} masters={masters} academicYearCode={ay} />
+
       <div className="rounded-xl border border-[rgba(180,35,24,0.25)] bg-[rgba(180,35,24,0.06)] px-4 py-3">
         <p className="text-sm font-semibold text-[#8b1a12]">
           High priority — UDISE+ compliance

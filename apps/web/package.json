@@ -319,6 +319,7 @@
     "test:udise-upload-store": "npx tsx src/lib/udiseUploadStore.selftest.ts",
     "test:udise-student-details": "npx tsx src/lib/udiseStudentDetails.selftest.ts",
     "test:udise-compliance": "npx tsx src/lib/udiseCompliance.selftest.ts",
+    "test:udise-robot": "npx tsx src/lib/udiseRobot.selftest.ts",
     "test:lead-worklist": "npx tsx src/lib/leadWorklist.selftest.ts",
     "test:student-import": "npx tsx src/lib/studentImport.selftest.ts",
     "test:student-import-mid-year": "npx tsx src/lib/studentImportMidYear.selftest.ts",

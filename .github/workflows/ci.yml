@@ -364,6 +364,7 @@ jobs:
           npm run test:sibling-carry-over
           npm run test:udise-upload-store
           npm run test:udise-compliance
+          npm run test:udise-robot
           npm run test:lead-worklist
           npm run test:student-import
           npm run test:student-import-mid-year
