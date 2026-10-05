@@ -30,6 +30,7 @@ import { classTeachersOf, isPrePrimaryClass } from "@/lib/timetableSolver";
 import { bellFacts, effectiveSubjectRule, toMinutes, type TimeOfDay, type TimetableSubjectRule } from "@/lib/timetableRules";
 import type { TimetableRulesSuggestion } from "@/lib/timetableRulesAi";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
+import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 
 type Common = {
   masters: MastersState;
@@ -129,17 +130,18 @@ export function PrePrimaryBellPanel({ masters, state, canEdit, onSaved, flash }:
               ))}
             </div>
           </div>
-          <table className="w-full text-sm">
-            <thead className="text-[11px] uppercase text-[var(--muted)]">
+          <ErpTableShell density="compact">
+          <ErpTable minWidth="min-w-[560px]">
+            <ErpTableHead>
               <tr>
-                <th className="py-1 text-left">Label</th>
-                <th className="py-1 text-left">Kind</th>
-                <th className="py-1 text-left">Start</th>
-                <th className="py-1 text-left">End</th>
+                <th className="px-2 py-2 text-left">Label</th>
+                <th className="px-2 py-2 text-left">Kind</th>
+                <th className="px-2 py-2 text-left">Start</th>
+                <th className="px-2 py-2 text-left">End</th>
                 <th />
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody>
               {t.periods
                 .map((p, i) => ({ p, i }))
                 .sort((a, b) => toMinutes(a.p.startTime) - toMinutes(b.p.startTime))
@@ -179,8 +181,9 @@ export function PrePrimaryBellPanel({ masters, state, canEdit, onSaved, flash }:
                     </td>
                   </tr>
                 ))}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
+          </ErpTableShell>
           {canEdit ? (
             <div className="flex flex-wrap gap-2">
               <button
@@ -470,18 +473,19 @@ export function SubjectRulesPanel({ masters, state, canEdit, onSaved, flash }: C
         <p className="mt-3 text-sm text-[var(--muted)]">This class has no subjects linked yet — add them in Masters → Subjects.</p>
       ) : (
         <div className="mt-3 overflow-x-auto">
-          <table className="w-full min-w-[860px] text-sm">
-            <thead className="text-[11px] uppercase text-[var(--muted)]">
+          <ErpTableShell density="compact">
+          <ErpTable minWidth="min-w-[860px]">
+            <ErpTableHead>
               <tr>
-                <th className="py-1 text-left">Subject</th>
-                <th className="py-1 text-left">Periods / wk</th>
-                <th className="py-1 text-left">Doubles / wk</th>
-                <th className="py-1 text-left">Time of day</th>
-                <th className="py-1 text-left">Most a day</th>
-                <th className="py-1 text-left">Never in</th>
+                <th className="px-2 py-2 text-left">Subject</th>
+                <th className="px-2 py-2 text-left">Periods / wk</th>
+                <th className="px-2 py-2 text-left">Doubles / wk</th>
+                <th className="px-2 py-2 text-left">Time of day</th>
+                <th className="px-2 py-2 text-left">Most a day</th>
+                <th className="px-2 py-2 text-left">Never in</th>
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody>
               {view.map((r, i) => (
                 <tr key={r.subjectId} className={`border-t border-[var(--border)] ${r.aiChanged ? "bg-[var(--info-soft)]" : ""}`}>
                   <td className="py-1.5 pr-2">
@@ -562,8 +566,9 @@ export function SubjectRulesPanel({ masters, state, canEdit, onSaved, flash }: C
                   </td>
                 </tr>
               ))}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
+          </ErpTableShell>
         </div>
       )}
       {canEdit && view.length ? (
