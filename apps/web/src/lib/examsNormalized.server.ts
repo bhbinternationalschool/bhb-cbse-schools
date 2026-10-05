@@ -18,6 +18,7 @@ import {
   type PromotionDecision,
   type PromotionRecord,
   normalizeRemarkSource,
+  parseCoScholasticRating,
   type StudentExamAbsence,
   type StudentCoScholasticEntry,
   type StudentOverallRemark,
@@ -356,8 +357,12 @@ function rowToSheet(
       }),
     ),
     coScholastic: coScholasticRows.map((r): StudentCoScholasticEntry => {
-      const rating = r.rating === "A" || r.rating === "B" || r.rating === "C" ? r.rating : null;
-      const domain = r.domain === "psychomotor" ? "psychomotor" : "socioEmotional";
+      // Any area code is valid — a scheme's own areas and every co-scholastic
+      // subject from Masters (GK, ACT, MUS…). This used to coerce everything
+      // but "psychomotor" to socioEmotional and keep only A–C, so saved
+      // grades came back under the wrong area and D/E/AB were lost.
+      const rating = parseCoScholasticRating(r.rating);
+      const domain = String(r.domain ?? "").trim() || "socioEmotional";
       return {
         studentId: String(r.student_id),
         domain,

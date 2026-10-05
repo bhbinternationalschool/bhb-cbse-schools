@@ -42,6 +42,7 @@ import {
   coScholasticAreasForClass,
   coScholasticRatingLabel,
   subjectsForMarkEntry,
+  parseCoScholasticRating,
   isGradedNotMarked,
   defaultExamPolicy,
   evaluatePromotionPass,
@@ -345,6 +346,12 @@ const eng: ExamSubject = { id: "sub_eng", code: "ENG", name: "English", classIds
   assert.equal(coScholasticRatingLabel("C", "five"), "Good");
   assert.equal(coScholasticRatingLabel("E", "five"), "Needs Improvement");
   assert.equal(coScholasticRatingLabel(null, "five"), "Not rated");
+  // Absent is a recorded outcome, not a grade and not "not rated".
+  assert.equal(parseCoScholasticRating("AB"), "AB");
+  assert.equal(coScholasticRatingLabel("AB", "three"), "Absent");
+  assert.equal(coScholasticRatingLabel("AB", "five"), "Absent");
+  assert.equal(parseCoScholasticRating("E"), "E", "the five-point letters survive a read");
+  assert.equal(parseCoScholasticRating("ab"), null, "only the exact code");
 }
 
 // ------------------------------------------------- co-scholastic follows Masters

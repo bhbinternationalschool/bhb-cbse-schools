@@ -14,6 +14,7 @@ import {
   buildReportCard,
   canPrintReportCard,
   coScholasticAreasForClass,
+  parseCoScholasticRating,
   coScholasticDomainLabel,
   componentsForSubject,
   createExamTerm,
@@ -322,6 +323,7 @@ const MarkRow = memo(function MarkRow({
                 {r}
               </option>
             ))}
+            <option value="AB">AB · absent</option>
           </select>
         </td>
       ))}
@@ -384,6 +386,7 @@ const CoScholasticRow = memo(function CoScholasticRow({
                 {r}
               </option>
             ))}
+            <option value="AB">AB · absent</option>
           </select>
         </td>
       ))}
@@ -915,10 +918,7 @@ export function ExamsWorkspace() {
 
   const setCoScholasticRating = useCallback(
     (studentId: string, domain: CoScholasticDomain, value: string) => {
-      const rating: CoScholasticRating | null =
-        value === "A" || value === "B" || value === "C" || value === "D" || value === "E"
-          ? value
-          : null;
+      const rating: CoScholasticRating | null = parseCoScholasticRating(value);
       setCoScholasticGrid((prev) =>
         prev.map((e) =>
           e.studentId === studentId && e.domain === domain
@@ -2480,7 +2480,7 @@ export function ExamsWorkspace() {
               {areas.length > 0 ? (
                 <>
                   <h3 className="mb-2 mt-5 text-sm font-bold text-[var(--brand-deep)]">
-                    Co-scholastic · grades ({ratingChoices.join(", ")})
+                    Co-scholastic · grades ({ratingChoices.join(", ")} · AB if absent)
                     <span className="ml-2 text-xs font-normal text-[var(--muted)]">
                       Subjects marked co-scholastic in Masters, and the scheme&apos;s areas — graded, not marked
                     </span>

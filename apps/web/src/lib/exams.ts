@@ -322,7 +322,17 @@ export type CoScholasticDomain = string;
 /** CBSE-style letter rating — 3-band A–C by default, 5-band A–E when the
  * scheme says so — deliberately distinct from the 8-point A1–E academic
  * scale so the two are never confused on a printed report. */
-export type CoScholasticRating = "A" | "B" | "C" | "D" | "E";
+export type CoScholasticRating = "A" | "B" | "C" | "D" | "E" | "AB";
+
+/** A child absent for the term's observation — recorded, never graded. */
+export const CO_SCHOLASTIC_ABSENT = "AB" as const;
+
+/** Pure — a stored/typed value as a rating, or null for "not rated". */
+export function parseCoScholasticRating(v: unknown): CoScholasticRating | null {
+  return v === "A" || v === "B" || v === "C" || v === "D" || v === "E" || v === CO_SCHOLASTIC_ABSENT
+    ? v
+    : null;
+}
 
 export type StudentCoScholasticEntry = {
   studentId: string;
@@ -337,7 +347,7 @@ const CO_SCHOLASTIC_RATING_LABELS: Record<"A" | "B" | "C", string> = {
   C: "Needs Improvement",
 };
 
-const CO_SCHOLASTIC_RATING_LABELS_FIVE: Record<CoScholasticRating, string> = {
+const CO_SCHOLASTIC_RATING_LABELS_FIVE: Record<Exclude<CoScholasticRating, "AB">, string> = {
   A: "Outstanding",
   B: "Very Good",
   C: "Good",
@@ -355,6 +365,7 @@ export function coScholasticRatingLabel(
   scale: CoScholasticScale = "three",
 ): string {
   if (!rating) return "Not rated";
+  if (rating === CO_SCHOLASTIC_ABSENT) return "Absent";
   if (scale === "five" || rating === "D" || rating === "E") {
     return CO_SCHOLASTIC_RATING_LABELS_FIVE[rating];
   }
@@ -1209,10 +1220,7 @@ function normalizeItemScore(e: Partial<StudentItemScore>): StudentItemScore {
 function normalizeCoScholasticEntry(
   e: Partial<StudentCoScholasticEntry>,
 ): StudentCoScholasticEntry {
-  const rating =
-    e.rating === "A" || e.rating === "B" || e.rating === "C" || e.rating === "D" || e.rating === "E"
-      ? e.rating
-      : null;
+  const rating = parseCoScholasticRating(e.rating);
   // Any area code the scheme defines is valid; unknown strings used to be
   // silently coerced to socio-emotional, which mislabelled the rating.
   const domain = String(e.domain ?? "").trim() || "socioEmotional";
