@@ -1,7 +1,11 @@
 "use client";
 // ratchet-allow: grids_without_row_menu — the marks-entry grid and the promotion summary — cells are inputs, not a record list
 
-import { isRestrictedTeacher, useMyTeaching } from "@/components/staff/useMyTeaching";
+import {
+  isRestrictedTeacher,
+  useMyTeaching,
+  type MyTeaching,
+} from "@/components/staff/useMyTeaching";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { urlAsksForTab } from "@/lib/nucleusHandoff";
 import { ClipboardList, ScanLine } from "lucide-react";
@@ -488,6 +492,20 @@ function ConflictNotice({
 
 const UNLOCK_ROLES = new Set(["owner", "principal", "admin", "office"]);
 
+/**
+ * Anyone who is not a restricted teacher (and the first paint, before
+ * /my-teaching answers). One shared object on purpose: built inline it was a
+ * new object every render, so `subjects` handed back a fresh [] every render,
+ * the grid-reset effect re-ran and set a fresh [] grid, and the page rendered
+ * itself in a loop — which the dashboard's Recharts donut turned into
+ * "Maximum update depth exceeded" and a dead Exams page (2026-10-05).
+ */
+const UNRESTRICTED_TEACHING: MyTeaching = {
+  unrestricted: true,
+  academicYearCode: "",
+  teaching: [],
+};
+
 export function ExamsWorkspace() {
   // Fee holds are server truth. Without this the gates below read an
   // unloaded snapshot and every child looks allowed.
@@ -495,7 +513,7 @@ export function ExamsWorkspace() {
   const session = useDemoSession();
   const { my: myTeachingRaw } = useMyTeaching();
   const teacherMode = isRestrictedTeacher(myTeachingRaw);
-  const myTeaching = myTeachingRaw ?? { unrestricted: true, academicYearCode: "", teaching: [] };
+  const myTeaching = myTeachingRaw ?? UNRESTRICTED_TEACHING;
   const [tab, setTab] = useState<Tab>("dashboard");
 
   // The Nucleus bookmark opens this workspace straight at the question papers desk, so the
@@ -783,7 +801,8 @@ export function ExamsWorkspace() {
 
   useEffect(() => {
     if (!term || !sectionId || !classId) {
-      setGrid([]);
+      // Keep the same empty grid: a fresh [] is a new state, and a re-render.
+      setGrid((prev) => (prev.length === 0 ? prev : []));
       setDirty(false);
       return;
     }
