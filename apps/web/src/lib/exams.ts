@@ -2505,6 +2505,15 @@ export function prepareMarkSheet(
     });
   });
 
+  // One sheet per section is shared by every teacher of it. A subject teacher
+  // sees and sends only their own subjects, so the sheet keeps every other
+  // subject's marks exactly as stored — until 2026-10-05 a save replaced the
+  // whole sheet and erased the other teachers' marks (Class V HY was being
+  // filled subject by subject that morning). A subject the caller sent is
+  // theirs to rewrite; one they did not send is left alone.
+  const sentSubjects = new Set(input.marks.map((m) => m.subjectId));
+  const keptMarks = (existing?.marks ?? []).filter((m) => !sentSubjects.has(m.subjectId));
+
   const now = new Date().toISOString();
   const sheet = normalizeSheet({
     id: existing?.id ?? id("ms"),
@@ -2512,7 +2521,7 @@ export function prepareMarkSheet(
     examTermId: input.examTermId,
     classId: input.classId,
     sectionId: input.sectionId,
-    marks: normalizedMarks,
+    marks: [...keptMarks, ...normalizedMarks],
     absences,
     coScholastic: input.coScholastic ?? existing?.coScholastic ?? [],
     overallRemarks: existing?.overallRemarks ?? [],

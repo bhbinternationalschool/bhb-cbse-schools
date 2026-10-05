@@ -126,6 +126,28 @@ const deps = { state, masters, sis: { version: 1, households: [], students: [stu
     assert.equal(r3.sheet.marks[0]!.grade, "A1", "39/40 = 97.5% → A1");
     assert.equal(r3.sheet.lockedAt, null);
   }
+  // Two subject teachers share one section sheet. Teacher A's Maths marks
+  // must survive Teacher B saving English — the save used to replace the
+  // whole sheet with only the sender's subjects (found 2026-10-05).
+  const shared = {
+    ...open,
+    id: "ms_shared",
+    marks: [
+      ...open.marks,
+      { studentId: student.id, component: "", subjectId: "esub_mat", marksObtained: 35, grade: "A2", remark: "", remarkSource: "manual" as const },
+    ],
+  };
+  const rShared = prepareMarkSheet(input, state, shared, deps);
+  assert.ok(rShared.ok);
+  if (rShared.ok) {
+    const mat = rShared.sheet.marks.filter((m) => m.subjectId === "esub_mat");
+    assert.equal(mat.length, 1, "another teacher's subject is kept on save");
+    assert.equal(mat[0]!.marksObtained, 35, "…exactly as stored");
+    const engMarks = rShared.sheet.marks.filter((m) => m.subjectId === eng.id);
+    assert.equal(engMarks.length, 1, "the sender's own subject is replaced, not duplicated");
+    assert.equal(engMarks[0]!.marksObtained, 39);
+  }
+
   const r4 = prepareMarkSheet(
     { ...input, marks: [{ ...input.marks[0]!, marksObtained: 41 }] },
     state,
