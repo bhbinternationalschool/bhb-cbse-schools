@@ -113,6 +113,7 @@ import { AdmitCardsPanel } from "@/components/exams/AdmitCardsPanel";
 import { RemarksPanel } from "@/components/exams/RemarksPanel";
 import { ItemScoresPanel } from "@/components/exams/ItemScoresPanel";
 import { AtRiskPanel } from "@/components/exams/AtRiskPanel";
+import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import { ExamReportsRunner } from "@/components/reports/ModuleReportRunners";
 import { hasPermission, inferRoleCodes } from "@/lib/rbac";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
@@ -141,7 +142,7 @@ type Tab =
  */
 type SetupStep = "policy" | "schemes" | "exams" | "reports";
 
-const SETUP_STEPS: { id: SetupStep; title: string; what: string }[] = [
+const SETUP_STEPS: StepDef<SetupStep>[] = [
   {
     id: "policy",
     title: "School policy",
@@ -1670,15 +1671,10 @@ export function ExamsWorkspace() {
 
       {tab === "setup" ? (
         <div className="mt-6 space-y-4">
-          <ModuleTabs
+          <StepTabs
             aria-label="Exams setup steps"
-            size="md"
-            value={setupStep}
-            onChange={(id) => setSetupStep(id as SetupStep)}
-            items={SETUP_STEPS.map((st, i) => ({
-              id: st.id,
-              label: `${i + 1} · ${st.title}`,
-              tone: (["navy", "violet", "sky", "amber"] as const)[i],
+            steps={SETUP_STEPS.map((st) => ({
+              ...st,
               badge:
                 st.id === "schemes"
                   ? policy.schemes.length
@@ -1688,44 +1684,9 @@ export function ExamsWorkspace() {
                       ? (policy.reportTemplates ?? []).length
                       : undefined,
             }))}
+            value={setupStep}
+            onChange={setSetupStep}
           />
-          {(() => {
-            const i = SETUP_STEPS.findIndex((x) => x.id === setupStep);
-            const cur = SETUP_STEPS[i]!;
-            const prev = SETUP_STEPS[i - 1];
-            const next = SETUP_STEPS[i + 1];
-            return (
-              <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">
-                <div className="min-w-0 flex-1">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
-                    Step {i + 1} of {SETUP_STEPS.length}
-                  </p>
-                  <p className="text-sm font-bold text-[var(--brand-deep)]">{cur.title}</p>
-                  <p className="mt-0.5 text-xs text-[var(--muted)]">{cur.what}</p>
-                </div>
-                <div className="flex shrink-0 gap-2">
-                  {prev ? (
-                    <button
-                      type="button"
-                      className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
-                      onClick={() => setSetupStep(prev.id)}
-                    >
-                      ← {prev.title}
-                    </button>
-                  ) : null}
-                  {next ? (
-                    <button
-                      type="button"
-                      className="btn-accent rounded-lg px-3 py-1.5 text-xs font-semibold"
-                      onClick={() => setSetupStep(next.id)}
-                    >
-                      Next: {next.title} →
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            );
-          })()}
           <div className="max-w-4xl">
           {setupStep === "policy" ? (
           <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5">

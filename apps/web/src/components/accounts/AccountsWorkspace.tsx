@@ -37,6 +37,7 @@ import { hasPermission } from "@/lib/rbac";
 import { ClosingBalancePanel } from "@/components/accounts/ClosingBalancePanel";
 import { DaySheetPanel } from "@/components/accounts/DaySheetPanel";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
+import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { SkeletonModulePage } from "@/components/ui/skeleton";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
@@ -88,6 +89,36 @@ const TABS: ModuleTabItem[] = [
   { id: "closing", label: "Closing balances", tone: "rose" },
 ];
 
+/**
+ * Accounts masters, in the order an entry needs them: the bank and cash
+ * accounts money moves through, the heads an expense is booked to, the
+ * tags saying what it was for, then the chart, categories and vendors.
+ */
+type AccountsMastersStep = "banks" | "heads" | "tags" | "chart";
+
+const ACCOUNTS_MASTERS_STEPS: StepDef<AccountsMastersStep>[] = [
+  {
+    id: "banks",
+    title: "Bank & cash accounts",
+    what: "The school's bank accounts and cash drawers — where every receipt lands and every payment comes from.",
+  },
+  {
+    id: "heads",
+    title: "Expense heads",
+    what: "What money is spent on: a category (Utilities) holding sub-heads (Electricity, Diesel). Every expense voucher is booked to one.",
+  },
+  {
+    id: "tags",
+    title: "Spend tags",
+    what: "What an expense was FOR — Bus-1, Hostel, Annual Function — so a report can say what Bus-1 cost, split by fuel, EMI and service.",
+  },
+  {
+    id: "chart",
+    title: "Accounts, categories & vendors",
+    what: "The account list, expense categories and sub-categories, and the vendors bills are paid to.",
+  },
+];
+
 export function AccountsWorkspace() {
   const session = useDemoSession();
   // Running the projection is a bulk write to the book; the button only
@@ -102,6 +133,7 @@ export function AccountsWorkspace() {
    */
   const canSeePosition = hasPermission(session, null, "accounts_position", "view");
   const [tab, setTab] = useState<AccountsTab>("dashboard");
+  const [mastersStep, setMastersStep] = useState<AccountsMastersStep>("banks");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -290,12 +322,18 @@ export function AccountsWorkspace() {
           <GatewayFeePolicyPanel />
         </>
       ) : tab === "masters" ? (
-        <div className="space-y-4">
-          <BanksPanel {...panelProps} />
-          <ExpenseHeadsPanel />
-          <SpendTagsPanel />
-          <AccountsMastersPanel {...panelProps} />
-        </div>
+        <StepTabs
+          className="mt-4"
+          aria-label="Accounts masters steps"
+          steps={ACCOUNTS_MASTERS_STEPS}
+          value={mastersStep}
+          onChange={setMastersStep}
+        >
+          {mastersStep === "banks" ? <BanksPanel {...panelProps} /> : null}
+          {mastersStep === "heads" ? <ExpenseHeadsPanel /> : null}
+          {mastersStep === "tags" ? <SpendTagsPanel /> : null}
+          {mastersStep === "chart" ? <AccountsMastersPanel {...panelProps} /> : null}
+        </StepTabs>
       ) : tab === "bills" ? (
         <>
           <BillsPanel {...panelProps} />
