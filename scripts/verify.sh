@@ -178,6 +178,7 @@ SELFTESTS=(
   test:ncf-official
   test:student-curriculum
   test:subject-masters
+  test:timetable-free-grid
   test:udise-teacher-apaar
   test:wa-sender-routing
   test:receipt-repair
