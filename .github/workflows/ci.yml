@@ -367,6 +367,7 @@ jobs:
           npm run test:udise-robot
           npm run test:udise-portal-api
           npm run test:udise-portal-fill
+          npm run test:udise-portal-add
           npm run test:lead-worklist
           npm run test:student-import
           npm run test:student-import-mid-year

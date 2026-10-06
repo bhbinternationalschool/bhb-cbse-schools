@@ -44,9 +44,10 @@
   const stopBtn = el("button", { class: "act sec", type: "button" }, "Stop robot");
   const pullBtn = el("button", { class: "act sec", type: "button" }, "Only send portal list to ERP");
   const fillBtn = el("button", { class: "act sec", type: "button" }, "Fill this form from ERP");
+  const addBtn = el("button", { class: "act sec", type: "button" }, "Add missing children to UDISE+");
   const msg = el("div", { class: "msg" });
   const last = el("div", { class: "muted" });
-  body.append(queueBox, startBtn, nextBtn, skipBtn, stopBtn, pullBtn, fillBtn, msg, last);
+  body.append(queueBox, startBtn, nextBtn, skipBtn, stopBtn, addBtn, pullBtn, fillBtn, msg, last);
   panel.append(head, body);
   head.addEventListener("click", () => {
     panel.classList.toggle("min");
@@ -196,6 +197,12 @@
     }
     if ((node.value || "").trim()) return "kept";
     setNative(node, f.value);
+    // Date boxes are calendar widgets that may reformat or reject typed
+    // text; anything that did not stay as typed is reported, not trusted.
+    if ((node.value || "") !== f.value) {
+      setNative(node, "");
+      return "failed";
+    }
     node.classList.add("bhb-robot-filled");
     return "filled";
   }
@@ -204,7 +211,7 @@
   async function waitForForm(ms = 15000) {
     const until = Date.now() + ms;
     while (Date.now() < until) {
-      if (document.querySelector('[formcontrolname="address"], [formcontrolname="pincode"]')) return true;
+      if (document.querySelector('[formcontrolname="address"], [formcontrolname="pincode"], [formcontrolname="studentName"]')) return true;
       await sleep(400);
     }
     return false;
@@ -243,6 +250,35 @@
     return lines.join("\n");
   }
 
+  /**
+   * Fill the open "Add New Student" form for one ERP child. The plan is
+   * fetched fresh each time (it carries the Aadhaar, which is never kept in
+   * the browser's storage).
+   */
+  async function fillAddForm(item) {
+    if (!/\/new-ac\/addStudent\//.test(location.hash)) throw new Error("The Add Student form is not open.");
+    if (!(await waitForForm())) throw new Error("The form did not open. Reload the page and try again.");
+    const res = await ask({ type: "add-list", students: await portalList(schoolId()) });
+    if (!res.ok) throw new Error(res.error);
+    const c = (res.body.candidates || []).find((x) => x.studentId === item.studentId);
+    if (!c) throw new Error("This child is no longer missing from the portal (or now has a PEN in the ERP). Press Skip.");
+    const name = document.querySelector('[formcontrolname="studentName"]');
+    if (name && (name.value || "").trim()) throw new Error("This form already has a name typed in. Clear it or press Skip.");
+    const filled = [];
+    const failed = [];
+    for (const f of c.fields || []) {
+      const r = fillOne(f);
+      if (r === "filled") filled.push(f.label);
+      else if (r !== "kept") failed.push(f.label);
+    }
+    const lines = [`${c.name} — ${c.classLabel}`, `✓ Filled ${filled.length} field(s), outlined in yellow.`];
+    if (failed.length) lines.push(`Could not fill (please type): ${failed.join(", ")}`);
+    if ((c.leftForYou || []).length) lines.push(`Not in the ERP — please type: ${c.leftForYou.join(", ")}`);
+    for (const h of c.hints || []) lines.push(`Note: ${h}`);
+    lines.push("If the portal says a similar student exists, check before agreeing. Then press the portal's Save yourself.");
+    return lines.join("\n");
+  }
+
   fillBtn.addEventListener("click", async () => {
     fillBtn.disabled = true;
     try {
@@ -278,12 +314,13 @@
   }
 
   const formHash = (id, q) => `#/school/${id}/new-ac/${q.classId}/${q.sectionId}/${q.studentId}?formId=1&formEditFlag=1`;
+  const addHash = (id, q) => `#/school/${id}/new-ac/addStudent/${q.classId}/${q.sectionId}`;
 
   function renderQueue(q, pendingCount) {
     const active = !!(q && q.items && q.index < q.items.length);
     if (active) {
       const it = q.items[q.index];
-      queueBox.textContent = `Child ${q.index + 1} of ${q.items.length}: ${it.studentName} (${it.classDesc})`;
+      queueBox.textContent = `${q.kind === "add" ? "Adding child" : "Child"} ${q.index + 1} of ${q.items.length}: ${it.studentName} (${it.classDesc})`;
     } else if (pendingCount) {
       queueBox.textContent = `${pendingCount} children still have an incomplete portal profile.`;
     } else {
@@ -292,6 +329,7 @@
     queueBox.style.display = queueBox.textContent ? "" : "none";
     for (const b of [nextBtn, skipBtn, stopBtn]) b.style.display = active ? "" : "none";
     startBtn.style.display = active ? "none" : "";
+    addBtn.style.display = !active && /schoolDashboard/.test(location.hash) ? "" : "none";
     fillBtn.style.display = !active && /\/new-ac\//.test(location.hash) ? "" : "none";
   }
 
@@ -302,15 +340,25 @@
     if (!q || !q.items || q.index >= q.items.length) {
       await store.set("queue", null);
       renderQueue(null, 0);
-      say("🎉 The robot has been through every incomplete child. Press “Only send portal list to ERP” to refresh the ERP.", "ok");
+      say(
+        q && q.kind === "add"
+          ? "🎉 Done with the missing children. Press “Only send portal list to ERP” so the ERP picks up their new PENs."
+          : "🎉 The robot has been through every incomplete child. Press “Only send portal list to ERP” to refresh the ERP.",
+        "ok",
+      );
       return;
     }
     const item = q.items[q.index];
     renderQueue(q, 0);
-    location.hash = formHash(q.schoolId, item);
+    // A fresh form for every child: leave first, so the portal clears it.
+    if (q.kind === "add") {
+      location.hash = `#/school/${q.schoolId}/schoolDashboard/cy`;
+      await sleep(1500);
+    }
+    location.hash = q.kind === "add" ? addHash(q.schoolId, item) : formHash(q.schoolId, item);
     say(`Opening ${item.studentName}…`);
     try {
-      say(await fillOpenForm(item), "ok");
+      say(q.kind === "add" ? await fillAddForm(item) : await fillOpenForm(item), "ok");
     } catch (e) {
       say(`${item.studentName}: ${e.message || e}\nFill by hand, or press Skip.`, "err");
     }
@@ -363,6 +411,68 @@
         }
         await store.set("queue", { schoolId: id, ay, items, index: 0, startedAt: new Date().toISOString() });
         say(`${pulled}\n${items.length} children to fill.`, "ok");
+        await sleep(1200);
+        await openCurrent();
+      } catch (e) {
+        say(e.message || String(e), "err");
+      }
+    }),
+  );
+
+  /**
+   * Classes the portal lets this school add to right now: those whose row on
+   * the dashboard shows an "Add Student" button (2026-10-06: PP3 to Class I).
+   * Portal class and section ids come from the portal's own section list.
+   */
+  async function addableSections(id) {
+    const r = await fetch(`/p1/api/v2/section/stats/${encodeURIComponent(id)}`, { credentials: "include" });
+    const j = await r.json().catch(() => null);
+    if (!r.ok || !j || j.status !== true || !Array.isArray(j.data)) throw new Error("Could not read the portal's classes.");
+    const rows = [...document.querySelectorAll("button,a,span,div")].filter((e) => e.children.length === 0 && (e.innerText || "").trim() === "Add Student");
+    // Each button sits in a table row whose first cell is exactly the class
+    // name ("I", "II", "Nursery/KG/PP3") — matched whole, so "I" is never "II".
+    const allowedNames = new Set();
+    for (const b of rows) {
+      const cell = (b.closest("tr")?.cells?.[0]?.innerText || "").trim();
+      if (j.data.some((s) => s.className === cell)) allowedNames.add(cell);
+    }
+    return j.data.filter((s) => allowedNames.has(s.className));
+  }
+
+  addBtn.addEventListener("click", () =>
+    void clickStep(async () => {
+      const id = schoolId();
+      if (!id || !/schoolDashboard/.test(location.hash)) return say("Open the current year's School Dashboard first.", "err");
+      try {
+        say("Checking which classes the portal lets you add to…");
+        const sections = await addableSections(id);
+        if (!sections.length) return say("The portal is not allowing Add Student for any class right now.", "err");
+        const res = await ask({ type: "add-list", students: await portalList(id) });
+        if (!res.ok) return say(res.error, "err");
+        const b = res.body;
+        const items = [];
+        const otherClasses = [];
+        const noSection = [];
+        for (const c of b.candidates || []) {
+          const inClass = sections.filter((s) => Number(s.classId) === Number(c.portalClassId));
+          if (!inClass.length) {
+            otherClasses.push(c.name);
+            continue;
+          }
+          const sec = inClass.length === 1 ? inClass[0] : inClass.find((s) => String(s.sectionName).trim().toUpperCase() === String(c.sectionName || "").trim().toUpperCase());
+          if (!sec) {
+            noSection.push(`${c.name} (${c.classLabel})`);
+            continue;
+          }
+          items.push({ studentId: c.studentId, studentName: c.name, classDesc: c.classLabel, classId: String(sec.classId), sectionId: String(sec.sectionId) });
+        }
+        const notes = [];
+        if ((b.alreadyOnPortal || []).length) notes.push(`Probably already on the portal (apply the portal list in the ERP instead): ${b.alreadyOnPortal.join(", ")}`);
+        if (otherClasses.length) notes.push(`${otherClasses.length} more in classes the portal is not allowing Add Student for yet.`);
+        if (noSection.length) notes.push(`No matching portal section: ${noSection.join(", ")}`);
+        if (!items.length) return say(["Nobody to add in the classes the portal allows now.", ...notes].join("\n"), "ok");
+        await store.set("queue", { kind: "add", schoolId: id, items, index: 0, startedAt: new Date().toISOString() });
+        say([`${items.length} children to add.`, ...notes].join("\n"), "ok");
         await sleep(1200);
         await openCurrent();
       } catch (e) {

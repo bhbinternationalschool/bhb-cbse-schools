@@ -240,6 +240,7 @@ SELFTESTS=(
   test:udise-robot
   test:udise-portal-api
   test:udise-portal-fill
+  test:udise-portal-add
   test:lead-worklist
   test:student-import
   test:student-import-mid-year

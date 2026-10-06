@@ -1,0 +1,59 @@
+/**
+ * The add-missing-children queue: who is offered, and what is typed.
+ *
+ * Run: npx tsx src/lib/udisePortalAdd.selftest.ts
+ */
+import assert from "node:assert/strict";
+import { normalizeStudent, type Household, type SisStudent } from "@/lib/sis";
+import { buildUdiseAddPlan, listUdiseAddCandidates, portalClassIdFor, probablyOnPortal } from "@/lib/udisePortalAdd";
+
+const st = (p: Partial<SisStudent>) =>
+  normalizeStudent({ id: "s", admissionNo: "A-1", fullName: "Riya Verma", status: "active", classId: "c-n", sectionId: "x-a", ...p } as SisStudent);
+const hh = { id: "h", guardianName: "Ram Verma", whatsappMobile: "+919400000011", mobile: "", altMobile: "" } as unknown as Household;
+
+assert.equal(portalClassIdFor("Nursery"), -3);
+assert.equal(portalClassIdFor("LKG"), -2);
+assert.equal(portalClassIdFor("UKG"), -1);
+assert.equal(portalClassIdFor("I"), 1);
+assert.equal(portalClassIdFor("VIII"), 8);
+assert.equal(portalClassIdFor("Class 4"), 4);
+assert.equal(portalClassIdFor("Toddlers"), null);
+
+const plan = buildUdiseAddPlan(st({ gender: "F", dob: "2022-01-21", fatherName: "Ram Verma", motherName: "Sita Verma" }), hh);
+const v = (c: string) => plan.fields.find((f) => f.control === c)?.value;
+assert.equal(v("studentName"), "RIYA VERMA");
+assert.equal(v("gender"), "2");
+assert.equal(v("dob"), "21/01/2022", "the portal's DD/MM/YYYY");
+assert.equal(v("fatherName"), "RAM VERMA");
+assert.equal(v("guardianName"), "RAM VERMA");
+assert.equal(v("primaryMobile"), "9400000011");
+assert.equal(v("uuid"), undefined, "no Aadhaar in the ERP → nothing typed");
+assert.equal(v("admnStartDate"), undefined, "admission date is never guessed from joinedOn");
+assert.ok(plan.leftForYou.includes("Admission date"));
+// A number that fails the Aadhaar checksum is not typed.
+assert.equal(buildUdiseAddPlan(st({ aadhaarNumber: "123412341234" }), hh).fields.find((f) => f.control === "uuid"), undefined);
+
+// Already on the portal by name + DOB, or name + father: not offered again.
+assert.ok(probablyOnPortal(st({ dob: "2022-01-21" }), [{ studentName: "RIYA KUMARI VERMA", dob: "21/01/2022" }]));
+assert.ok(probablyOnPortal(st({ fatherName: "Ram Verma" }), [{ studentName: "RIYA", fatherName: "RAM VERMA" }]));
+assert.ok(!probablyOnPortal(st({ dob: "2022-01-21" }), [{ studentName: "RIYA VERMA", dob: "22/01/2022" }]));
+
+const res = listUdiseAddCandidates({
+  students: [
+    st({ id: "a", fullName: "Aarav", classId: "c-n" }),
+    st({ id: "b", fullName: "Has Pen", pen: "23263951182" }),
+    st({ id: "c", fullName: "Transfer", udiseInboundTransferPending: true }),
+    st({ id: "d", fullName: "Riya Verma", dob: "2022-01-21" }),
+    st({ id: "e", fullName: "Gone", status: "inactive" }),
+    st({ id: "f", fullName: "Odd", classId: "c-odd" }),
+  ],
+  portal: [{ studentName: "RIYA VERMA", dob: "21/01/2022" }],
+  classLabelOf: (s) => ({ className: s.classId === "c-odd" ? "Toddlers" : "Nursery", sectionName: "A" }),
+  householdOf: () => hh,
+});
+assert.deepEqual(res.candidates.map((c) => c.studentId), ["a"]);
+assert.equal(res.candidates[0]!.portalClassId, -3);
+assert.equal(res.alreadyOnPortal.length, 1);
+assert.equal(res.noPortalClass.length, 1);
+
+console.log("udisePortalAdd selftest: ok");

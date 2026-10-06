@@ -322,6 +322,7 @@
     "test:udise-robot": "npx tsx src/lib/udiseRobot.selftest.ts",
     "test:udise-portal-api": "npx tsx src/lib/udisePortalApi.selftest.ts",
     "test:udise-portal-fill": "npx tsx src/lib/udisePortalFill.selftest.ts",
+    "test:udise-portal-add": "npx tsx src/lib/udisePortalAdd.selftest.ts",
     "test:lead-worklist": "npx tsx src/lib/leadWorklist.selftest.ts",
     "test:student-import": "npx tsx src/lib/studentImport.selftest.ts",
     "test:student-import-mid-year": "npx tsx src/lib/studentImportMidYear.selftest.ts",
