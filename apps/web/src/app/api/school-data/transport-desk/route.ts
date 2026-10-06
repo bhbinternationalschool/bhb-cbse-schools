@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
+import { SCHOOL_DATA_DESK_RBAC } from "@/lib/apiRouteAuth.server";
 import {
-  authorizeSchoolDataDesk,
-  SCHOOL_DATA_DESK_RBAC,
-} from "@/lib/apiRouteAuth.server";
+  deskReadGate,
+  deskWriteGate,
+  featurePushOutcome,
+  featureSavedResponse,
+  stripDeskForFeatures,
+} from "@/lib/deskFeatureGate.server";
 import type { TransportState } from "@/lib/transport";
 import { transportDualWriteDbEnabled } from "@/lib/transportDbConfig";
 import {
@@ -13,9 +17,11 @@ import {
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["transport-desk"], "GET");
-  if (!auth.ok) return auth.response
-  const { bundle, meta, ok } = await fetchTransportDeskFromDb();
+  // The whole desk, or — holding Transport functions only — their slices.
+  const gate = await deskReadGate(req, SCHOOL_DATA_DESK_RBAC["transport-desk"]);
+  if (gate.mode === "deny") return gate.response;
+  const { bundle: full, meta, ok } = await fetchTransportDeskFromDb();
+  const bundle = gate.mode === "feature" ? stripDeskForFeatures("transport", full, gate) : full;
   if (!ok) {
     return NextResponse.json(
       { ok: false, error: "Transport desk fetch failed — tenant/db unavailable" },
@@ -34,8 +40,8 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["transport-desk"], "POST");
-  if (!auth.ok) return auth.response
+  const gate = await deskWriteGate(req, SCHOOL_DATA_DESK_RBAC["transport-desk"]);
+  if (gate.mode === "deny") return gate.response;
   if (!transportDualWriteDbEnabled()) {
     return NextResponse.json({
       ok: true,
@@ -49,6 +55,22 @@ export async function POST(req: Request) {
     body = (await req.json()) as TransportState;
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  // Function-only writers (e.g. Transport → Fuel log): merged onto the
+  // stored desk, only their functions' slices — never the body as sent.
+  if (gate.mode === "feature") {
+    const stored = await fetchTransportDeskFromDb();
+    if (!stored.ok) {
+      return NextResponse.json(
+        { ok: false, error: "Could not read the saved transport desk — nothing was written. Try again." },
+        { status: 503 },
+      );
+    }
+    const merged = featurePushOutcome(gate, "transport", stored.bundle, body);
+    if (!merged.ok) return merged.response;
+    if (!merged.changed) return featureSavedResponse(false);
+    body = merged.state as unknown as TransportState;
   }
 
   const result = await pushTransportDeskToDb({
@@ -79,6 +101,7 @@ export async function POST(req: Request) {
     );
   }
 
+  if (gate.mode === "feature") return featureSavedResponse(true);
   return NextResponse.json({
     ok: true,
     routeCount: body.routes?.length ?? 0,

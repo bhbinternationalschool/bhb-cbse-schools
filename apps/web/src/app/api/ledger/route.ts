@@ -11,6 +11,8 @@
  */
 
 import { NextResponse } from "next/server";
+import { functionWriteAllowed } from "@/lib/moneyFunctionScope";
+import { LEDGER_FUNCTION_WRITES } from "@/lib/rbacFeatureCatalog/money";
 import {
   requireStaffPermission,
   authorizeSchoolDataDesk,
@@ -328,12 +330,27 @@ export async function POST(req: Request) {
     if (!posAuth.ok) return posAuth.response;
   }
 
-  const auth = await requireStaffPermission(
-    req,
-    "accounts",
-    needsApproval ? "approve" : readOnly.has(body.action) ? "view" : "edit",
-  );
+  const needed = needsApproval ? "approve" : readOnly.has(body.action) ? "view" : "edit";
+  const auth = await requireStaffPermission(req, "accounts", needed);
   if (!auth.ok) return auth.response;
+  // Someone holding Accounts FUNCTIONS (voucher entry, bank recon, …) rather
+  // than the module reads through this route like anyone else, but writes
+  // only the operations their functions name. Voiding, amending, reversing
+  // and closing the book are in no function — they stay with the module.
+  if (
+    needed !== "view" &&
+    !auth.viaMirrorSecret &&
+    !functionWriteAllowed(auth.ctx, "accounts", needed, LEDGER_FUNCTION_WRITES, String(body.action))
+  ) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: `Your role's accounts functions do not cover "${String(body.action)}" — ask the office to give your role this.`,
+        reason: "feature_forbidden",
+      },
+      { status: 403 },
+    );
+  }
 
   const actor =
     auth.ctx.session.fullName || auth.ctx.session.email || auth.ctx.session.roleCode || "";

@@ -11,6 +11,7 @@ import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
 import { isModuleEnabled, setModuleEnabled } from "@/lib/moduleRegistry";
 import { loadSis, type SisState } from "@/lib/sis";
 import { useModuleTabQuery } from "@/lib/useModuleTabQuery";
+import { visibleModuleTabs } from "@/lib/rbac";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import {
   ErpTable,
@@ -163,6 +164,18 @@ export function RteWorkspace({
     () => (masters?.classes ?? []).filter((c) => c.isActive !== false),
     [masters],
   );
+
+  // Someone holding only some RTE functions (director, 6 Oct 2026 — e.g.
+  // Govt list & admissions) sees only their tabs.
+  const shownTabs = useMemo(
+    () => (masters ? visibleModuleTabs(TABS, session, masters, "rte") : TABS),
+    [session, masters],
+  );
+  useEffect(() => {
+    if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
+      setTab(shownTabs[0]!.id as RteTab);
+    }
+  }, [shownTabs, tab, setTab]);
 
   const seatRows = useMemo(
     () => (state && masters && sis ? listQuotaSeatRows(state, ay, masters, sis) : []),
@@ -340,7 +353,7 @@ export function RteWorkspace({
       }
     >
       <ModuleTabs
-        items={TABS}
+        items={shownTabs}
         value={tab}
         onChange={(id) => setTab(id as RteTab)}
       />

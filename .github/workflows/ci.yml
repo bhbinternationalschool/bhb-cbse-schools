@@ -171,6 +171,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:subject-masters
 
+      - name: Self-test — Masters function grants, own classes only
+        working-directory: apps/web
+        run: npm run test:masters-change-auth
+
       - name: Self-test — free-period grid agrees with the free-period list
         working-directory: apps/web
         run: npm run test:timetable-free-grid

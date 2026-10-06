@@ -7,11 +7,13 @@ import { assertSessionWritable } from "@/lib/sessionWriteGuard";
 import { getSessionActor } from "@/lib/sessionActor";
 import {
   canConfigureRbac,
+  featureAccess,
   hasPermission,
   type RbacAction,
   type RbacModule,
 } from "@/lib/rbac";
 import type { MastersState } from "@/lib/masters";
+import { featuresForModule } from "@/lib/rbacFeatures";
 
 function loadMastersSafe(): MastersState | null {
   if (typeof window === "undefined") return null;
@@ -22,6 +24,39 @@ function loadMastersSafe(): MastersState | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * True when the actor holds a write on some FUNCTION of the module (e.g. a
+ * teacher's Masters → Class subjects) without the module itself. The
+ * server decides which rows of the save stand (lib/deskFeatureAuth.ts).
+ */
+export function holdsModuleFeatureWrite(module: RbacModule): boolean {
+  if (typeof window === "undefined") return false;
+  const session = getSessionActor();
+  if (!session) return false;
+  const masters = loadMastersSafe();
+  const writes: RbacAction[] = ["create", "edit", "delete"];
+  return featuresForModule(module).some((f) =>
+    writes.some((a) => featureAccess(session, masters, f.id, a).allowed),
+  );
+}
+
+/**
+ * Holds functions of the module but not its edit grant. Such a browser must
+ * not push the module's whole-module copies (the domain blob): the server
+ * would refuse it, and the desk save that matters was merged slice by slice.
+ */
+export function isFunctionOnlyWriter(module: RbacModule): boolean {
+  if (typeof window === "undefined") return false;
+  const session = getSessionActor();
+  if (!session) return false;
+  if (hasPermission(session, loadMastersSafe(), module, "edit")) return false;
+  return holdsModuleFeatureWrite(module);
+}
+
+export function holdsMastersFeatureWrite(): boolean {
+  return holdsModuleFeatureWrite("masters") && assertSessionWritable("saveMasters");
 }
 
 /**
@@ -40,6 +75,14 @@ export function assertModulePermission(
   if (typeof window === "undefined") return true;
   const masters = loadMastersSafe();
   if (!hasPermission(session, masters, module, action)) {
+    // A function holder's save goes to the server, which keeps only the
+    // rows their functions own and refuses the rest with a reason.
+    if (
+      (action === "create" || action === "edit" || action === "delete") &&
+      holdsModuleFeatureWrite(module)
+    ) {
+      return true;
+    }
     if (typeof window !== "undefined") {
       window.dispatchEvent(
         new CustomEvent("bhb-rbac-denied", {

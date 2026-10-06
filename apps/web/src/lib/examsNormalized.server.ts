@@ -910,6 +910,61 @@ export async function fetchExamDeskFromDb(): Promise<{
   };
 }
 
+/**
+ * The exam SETUP as stored (no mark sheets), and whether it was read.
+ *
+ * fetchExamDeskFromDb swallows table errors (a failed table reads as
+ * empty). That is tolerable for a GET, and not for a save that merges onto
+ * what is stored: a function holder's push (lib/deskFeatureAuth) starts
+ * from this copy, and an unread table taken as empty would be written back
+ * as empty. Here any error makes ok false and the caller writes nothing.
+ */
+export async function fetchExamSetupFromDb(): Promise<{
+  ok: boolean;
+  bundle: Omit<ExamDeskBundle, "sheets">;
+}> {
+  const empty = {
+    terms: [],
+    subjects: [],
+    dateSheet: [],
+    policy: defaultExamPolicy(),
+    promotions: [],
+    rooms: [],
+    seating: [],
+  };
+  const ctx = await resolveCtx();
+  if (!ctx) return { ok: false, bundle: empty };
+  const { sb, tenantId } = ctx;
+  const results = await Promise.all([
+    sb.from("exam_desk_terms").select("*").eq("tenant_id", tenantId),
+    sb.from("exam_desk_subjects").select("*").eq("tenant_id", tenantId),
+    sb.from("exam_desk_date_sheet").select("*").eq("tenant_id", tenantId),
+    sb.from("exam_desk_policy").select("policy_json").eq("tenant_id", tenantId).maybeSingle(),
+    sb.from("exam_desk_promotions").select("*").eq("tenant_id", tenantId),
+    sb.from("exam_desk_rooms").select("*").eq("tenant_id", tenantId),
+    sb.from("exam_desk_seating").select("*").eq("tenant_id", tenantId),
+  ]);
+  if (results.some((r) => r.error)) return { ok: false, bundle: empty };
+  const [terms, subjects, dates, policyRow, promos, rooms, seating] = results;
+  const rows = (r: { data: unknown }) => ((r.data as Record<string, unknown>[] | null) ?? []);
+  return {
+    ok: true,
+    bundle: {
+      terms: rows(terms).map(rowToTerm).sort((a, b) => a.sortOrder - b.sortOrder),
+      subjects: rows(subjects).map(rowToSubject).sort((a, b) => a.sortOrder - b.sortOrder),
+      dateSheet: rows(dates).map(rowToDateSheet),
+      policy: normalizeExamPolicy(
+        ((policyRow.data as { policy_json?: unknown } | null)?.policy_json as
+          | Partial<ExamPolicy>
+          | undefined) ?? undefined,
+      ),
+      promotions: rows(promos).map(rowToPromotion),
+      rooms: rows(rooms).map(rowToRoom).sort((a, b) => a.sortOrder - b.sortOrder),
+      seating: rows(seating).map(rowToSeating),
+    },
+  };
+}
+
 export type SheetPushResult =
   | { ok: true }
   | { ok: false; error: string; conflict?: boolean };

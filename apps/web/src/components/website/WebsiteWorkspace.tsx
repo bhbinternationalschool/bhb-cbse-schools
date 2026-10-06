@@ -36,7 +36,8 @@ import {
 import { readAll } from "@/lib/data/client/query";
 import { writeRecords } from "@/lib/data/client/mutate";
 import { getSessionActor } from "@/lib/sessionActor";
-import { hasPermission } from "@/lib/rbac";
+import { canWriteModuleTab, loadRbac, visibleModuleTabs } from "@/lib/rbac";
+import { loadMasters } from "@/lib/masters";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import {
   HOME_SLUG,
@@ -59,6 +60,12 @@ import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 type Filter = PageStatus | "all";
 type Tab = "pages" | "media" | "publish";
 
+const TABS = [
+  { id: "pages", label: "Pages", icon: Globe },
+  { id: "media", label: "Pictures & files", icon: ImageIcon },
+  { id: "publish", label: "Show on website", icon: Globe2 },
+] as const;
+
 const STATUS_TONE: Record<PageStatus, string> = {
   draft: "bg-[var(--surface-sunken)] text-[var(--muted)]",
   scheduled: "bg-[rgba(197,160,40,0.14)] text-[var(--warning,#8a6d1f)]",
@@ -75,12 +82,25 @@ export function WebsiteWorkspace() {
    * whether someone is shown a button that would fail, or told why.
    */
   const session = useDemoSession();
-  const canPublish = hasPermission(session, null, "website", "approve");
+  // The module's approve, or Website → Publish to the website.
+  const canPublish = canWriteModuleTab(session, null, "website", "pages", "approve");
 
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [tab, setTab] = useState<Tab>("pages");
+
+  // Someone holding only some Website functions (Masters → Roles) sees only
+  // their tabs: the server (/api/data/site.*) refuses the rest anyway.
+  const [shownTabs, setShownTabs] = useState<(typeof TABS)[number][]>([...TABS]);
+  useEffect(() => {
+    setShownTabs(visibleModuleTabs([...TABS], session, loadMasters(), "website", loadRbac()));
+  }, [session]);
+  useEffect(() => {
+    if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
+      setTab(shownTabs[0]!.id);
+    }
+  }, [shownTabs, tab]);
   const [busy, setBusy] = useState(false);
 
   // The site ships English; the picker exists so a Hindi twin can be made
@@ -267,13 +287,7 @@ export function WebsiteWorkspace() {
       notice={notice}
     >
       <div className="flex gap-2 border-b border-[var(--border)]">
-        {(
-          [
-            { id: "pages", label: "Pages", icon: Globe },
-            { id: "media", label: "Pictures & files", icon: ImageIcon },
-            { id: "publish", label: "Show on website", icon: Globe2 },
-          ] as const
-        ).map(({ id, label, icon: Icon }) => (
+        {shownTabs.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             type="button"

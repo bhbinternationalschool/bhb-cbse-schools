@@ -1,4 +1,4 @@
-import { assertModulePermission } from "@/lib/rbacGuard";
+import { assertModulePermission, holdsMastersFeatureWrite } from "@/lib/rbacGuard";
 import type { FoundationSlice } from "@/lib/foundationMasters";
 import {
   ensureFoundationOnMasters,
@@ -2034,7 +2034,10 @@ function shouldSeedEmptyMastersShell(): boolean {
 export function saveMasters(
   state: MastersState,
 ): Promise<MastersSaveOutcome> {
-  if (!assertModulePermission("masters", "edit", "saveMasters")) {
+  // Someone holding only a FUNCTION of Masters (a teacher's Class
+  // subjects) may push too: the server lifts in only the slices those
+  // functions own and refuses any row outside them (mastersChangeAuth).
+  if (!holdsMastersFeatureWrite() && !assertModulePermission("masters", "edit", "saveMasters")) {
     return Promise.resolve({ ok: false, reason: "blocked" });
   }
   return persistMastersClient(state);

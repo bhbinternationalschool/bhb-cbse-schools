@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Landmark } from "lucide-react";
 import {
   AccountsMastersPanel,
@@ -33,7 +33,7 @@ import {
   OwnerLoansPanel,
 } from "@/components/accounts/AccountsPanels";
 import { useDemoSession } from "@/components/shell/SessionContext";
-import { hasPermission } from "@/lib/rbac";
+import { hasPermission, visibleModuleTabs } from "@/lib/rbac";
 import { ClosingBalancePanel } from "@/components/accounts/ClosingBalancePanel";
 import { DaySheetPanel } from "@/components/accounts/DaySheetPanel";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
@@ -133,6 +133,20 @@ export function AccountsWorkspace() {
    */
   const canSeePosition = hasPermission(session, null, "accounts_position", "view");
   const [tab, setTab] = useState<AccountsTab>("dashboard");
+  // Someone holding only some Accounts functions (voucher entry, bank recon,
+  // …) sees only their tabs; the ledger route enforces the same split.
+  const shownTabs = useMemo(() => visibleModuleTabs(TABS, session, null, "accounts"), [session]);
+  useEffect(() => {
+    // The module holder's landing tab is unchanged; only a function holder,
+    // whose tab bar may not include the dashboard, is moved to one they hold.
+    if (hasPermission(session, null, "accounts", "view")) return;
+    const open = shownTabs.filter(
+      (t) => canSeePosition || !["dashboard", "book", "bookreports", "recon", "closing"].includes(t.id),
+    );
+    if (open.length > 0 && !open.some((t) => t.id === tab)) {
+      setTab(open[0]!.id as AccountsTab);
+    }
+  }, [session, shownTabs, tab, canSeePosition]);
   const [mastersStep, setMastersStep] = useState<AccountsMastersStep>("banks");
 
   useEffect(() => {
@@ -219,7 +233,7 @@ export function AccountsWorkspace() {
 
   // Tabs that show a balance or a session total at all.
   const POSITION_TABS = new Set(["dashboard", "book", "bookreports", "recon", "closing"]);
-  const tabsWithBadge = TABS.filter((t) => canSeePosition || !POSITION_TABS.has(t.id)).map((t) =>
+  const tabsWithBadge = shownTabs.filter((t) => canSeePosition || !POSITION_TABS.has(t.id)).map((t) =>
     t.id === "dayclose" ? { ...t, badge: dayCloseBadge } : t,
   );
 

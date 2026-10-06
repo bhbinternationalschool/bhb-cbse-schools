@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Images, Megaphone } from "lucide-react";
-import { hasPermission } from "@/lib/rbac";
+import { canAccessHref, hasPermission, loadRbac } from "@/lib/rbac";
+import { loadMasters } from "@/lib/masters";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
@@ -388,6 +389,30 @@ export function CommsWorkspace() {
     const albumParam = searchParams.get("album");
     if (albumParam) setActiveAlbumId(albumParam);
   }, [searchParams]);
+
+  /*
+    The Comms screen serves five modules (Notices, News, Gallery,
+    Notifications, and WA chatbot answers). Someone who holds only some of
+    them, or only some of their functions (Masters → Roles), sees the tabs
+    they may open — exactly the ones the page gate (ErpModuleGate) lets
+    through, so a tab never leads to "Access restricted". Read in an effect:
+    roles and masters live in this browser's storage, not on the server.
+  */
+  const [shownTabs, setShownTabs] = useState<ModuleTabItem[]>(TABS);
+  useEffect(() => {
+    const masters = loadMasters();
+    const rbac = loadRbac();
+    setShownTabs(
+      hasPermission(session, masters, "notices", "view", rbac)
+        ? TABS
+        : TABS.filter((t) => canAccessHref(session, masters, `/comms?tab=${t.id}`, rbac)),
+    );
+  }, [session]);
+  useEffect(() => {
+    if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
+      setTab(shownTabs[0]!.id as CommsTab);
+    }
+  }, [shownTabs, tab]);
 
   function setTab(next: CommsTab) {
     const url = new URL(window.location.href);
@@ -829,7 +854,7 @@ export function CommsWorkspace() {
       error={error}
       notice={noticeMsg}
     >
-      <ModuleTabs items={TABS} value={tab} onChange={(id) => setTab(id as CommsTab)} />
+      <ModuleTabs items={shownTabs} value={tab} onChange={(id) => setTab(id as CommsTab)} />
 
       {tab === "dashboard" ? (
         <div className="mt-6">

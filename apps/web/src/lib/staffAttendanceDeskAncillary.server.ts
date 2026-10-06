@@ -63,16 +63,31 @@ export async function pushStaffAttendanceSettingsToDb(
 }
 
 export async function fetchStaffAttendanceSettingsFromDb(): Promise<StaffAttendanceSettings> {
+  return (await readStaffAttendanceSettings()).settings;
+}
+
+/**
+ * The settings as stored, and whether they were read. The plain fetch
+ * above turns a failed read into the defaults — for a save that merges
+ * onto it (a function holder's push to school-data/staff-attendance-
+ * registers) that would write the defaults over the school's rules, so
+ * that save writes nothing when ok is false.
+ */
+export async function readStaffAttendanceSettings(): Promise<{
+  ok: boolean;
+  settings: StaffAttendanceSettings;
+}> {
   const c = await ctx();
-  if (!c) return defaultAttendanceSettings();
-  const { data } = await c.sb
+  if (!c) return { ok: false, settings: defaultAttendanceSettings() };
+  const { data, error } = await c.sb
     .from("staff_attendance_desk_settings")
     .select("*")
     .eq("tenant_id", c.tenantId)
     .maybeSingle();
 
-  if (!data) return defaultAttendanceSettings();
-  return {
+  if (error) return { ok: false, settings: defaultAttendanceSettings() };
+  if (!data) return { ok: true, settings: defaultAttendanceSettings() };
+  const settings: StaffAttendanceSettings = {
     allowSelfPunch: !!data.allow_self_punch,
     autoApplyRulesOnSave: !!data.auto_apply_rules_on_save,
     syncLeaveToAttendance: !!data.sync_leave_to_attendance,
@@ -83,4 +98,5 @@ export async function fetchStaffAttendanceSettingsFromDb(): Promise<StaffAttenda
       ? (data.exempt_staff_ids as string[])
       : [],
   };
+  return { ok: true, settings };
 }

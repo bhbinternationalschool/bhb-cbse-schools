@@ -6,7 +6,9 @@
  */
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
+import { requireStaffPermission, type RouteAuthResult } from "@/lib/apiRouteAuth.server";
+import { deskFeatureGateFor } from "@/lib/deskFeatureGate.server";
+import type { RbacAction } from "@/lib/rbac";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
@@ -61,6 +63,29 @@ function rowToEvent(r: EventRow): SchoolEvent {
   };
 }
 
+/**
+ * The Events grant, or one Events function (lib/rbacFeatureCatalog/comms.ts).
+ *
+ * Not a desk: every call here is one event, so there is no slice to merge —
+ * the function is checked per call instead. Events → Events & calendar adds,
+ * changes and removes events; Events → RSVP invitations sends the RSVP
+ * question. Any Events function reads the list, since both work from it.
+ */
+async function eventsAuth(
+  req: Request,
+  action: RbacAction,
+  featureIds: string[],
+): Promise<RouteAuthResult> {
+  const auth = await requireStaffPermission(req, "events", action);
+  if (auth.ok || auth.response.status !== 403) return auth;
+  const gate = await deskFeatureGateFor(req, "events", action === "view" ? "read" : "write");
+  if (!gate) return auth;
+  const actions: RbacAction[] =
+    action === "view" ? ["view", "create", "edit", "delete"] : [action];
+  const holds = featureIds.some((id) => actions.some((a) => gate.access(id, a).allowed));
+  return holds ? { ok: true, ctx: gate.ctx, viaMirrorSecret: false } : auth;
+}
+
 type RsvpRow = {
   id: string;
   event_id: string;
@@ -73,7 +98,7 @@ type RsvpRow = {
 
 /** GET — events (+ their RSVPs) for the tenant, optionally by academic year. */
 export async function GET(req: Request) {
-  const auth = await requireStaffPermission(req, "events", "view");
+  const auth = await eventsAuth(req, "view", ["events.calendar", "events.rsvp"]);
   if (!auth.ok) return auth.response;
 
   const ctx = await getServerTenantContext();
@@ -138,8 +163,10 @@ type EventPostBody = {
 
 /** POST — create (no id) or update (id present) one event. */
 export async function POST(req: Request) {
-  const auth = await requireStaffPermission(req, "events", "edit");
-  if (!auth.ok) return auth.response;
+  // The module asks for edit either way (unchanged). A function holder is
+  // asked for what the call does: a new event is an add, an id is a change.
+  let auth = await requireStaffPermission(req, "events", "edit");
+  if (!auth.ok && auth.response.status !== 403) return auth.response;
 
   let body: EventPostBody;
   try {
@@ -147,6 +174,11 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
+  const viaFunction = !auth.ok;
+  if (viaFunction) {
+    auth = await eventsAuth(req, body.id ? "edit" : "create", ["events.calendar"]);
+  }
+  if (!auth.ok) return auth.response;
 
   const title = (body.title || "").trim();
   const academicYearCode = (body.academicYearCode || "").trim();
@@ -164,6 +196,27 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Tenant context unavailable" }, { status: 503 });
   }
   const { sb, tenantId } = ctx;
+
+  // An id the school has never had is an add, whatever the browser sent —
+  // the upsert below would create it.
+  if (viaFunction && body.id) {
+    const { data: existing, error: existErr } = await sb
+      .from("school_events")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .eq("id", body.id)
+      .maybeSingle();
+    if (existErr) {
+      return NextResponse.json(
+        { error: "Could not read the saved event — nothing was written. Try again." },
+        { status: 503 },
+      );
+    }
+    if (!existing) {
+      const asAdd = await eventsAuth(req, "create", ["events.calendar"]);
+      if (!asAdd.ok) return asAdd.response;
+    }
+  }
 
   const now = new Date().toISOString();
   const id = body.id || `evt_${randomUUID()}`;
@@ -196,7 +249,7 @@ export async function POST(req: Request) {
 
 /** DELETE — remove an event (cascades to its RSVPs). */
 export async function DELETE(req: Request) {
-  const auth = await requireStaffPermission(req, "events", "delete");
+  const auth = await eventsAuth(req, "delete", ["events.calendar"]);
   if (!auth.ok) return auth.response;
 
   const id = new URL(req.url).searchParams.get("id");
@@ -224,7 +277,8 @@ type EventPatchBody = { eventId?: string; action?: "send_rsvp" };
 /** PATCH — send the RSVP prompt to every household in the event's classes
  * (or every active household, when the event has no class scope). */
 export async function PATCH(req: Request) {
-  const auth = await requireStaffPermission(req, "events", "edit");
+  // Sending the RSVP question is the RSVP function's, not the calendar's.
+  const auth = await eventsAuth(req, "edit", ["events.rsvp"]);
   if (!auth.ok) return auth.response;
 
   let body: EventPatchBody;
