@@ -13,6 +13,12 @@
  *    presses the portal's own Save;
  *  - "Saved — next child" opens and fills the next one.
  *
+ * On the APAAR Module (director, 6 Oct 2026): "Start APAAR queue" asks the
+ * ERP which children are ready (family consented on WhatsApp, the consenting
+ * parent's own Aadhaar on file, portal Aadhaar verified, no APAAR yet), opens
+ * each child's "Generate APAAR ID" page and fills the consent block; the
+ * person checks it and presses the portal's own Submit.
+ *
  * The robot never logs in, never presses Save / Next / Complete on the
  * portal, and has no timers or background work: it stops when the tab is
  * closed or the portal logs out.
@@ -46,9 +52,20 @@
   const fillBtn = el("button", { class: "act sec", type: "button" }, "Fill this form from ERP");
   const addBtn = el("button", { class: "act sec", type: "button" }, "Add missing children to UDISE+");
   const addAnywayBtn = el("button", { class: "act sec", type: "button" }, "Not the same child — add anyway");
+  // APAAR (director, 6 Oct 2026): only on the portal's APAAR pages.
+  const apaarBox = el("div", { class: "queue" });
+  const apaarStartBtn = el("button", { class: "act", type: "button" }, "Start APAAR queue");
+  const apaarNextBtn = el("button", { class: "act", type: "button" }, "Submitted — next child ▶");
+  const apaarSkipBtn = el("button", { class: "act sec", type: "button" }, "Skip this child");
+  const apaarStopBtn = el("button", { class: "act sec", type: "button" }, "Stop APAAR queue");
+  const apaarFillBtn = el("button", { class: "act sec", type: "button" }, "Fill this APAAR page from ERP");
   const msg = el("div", { class: "msg" });
   const last = el("div", { class: "muted" });
-  body.append(queueBox, startBtn, nextBtn, addAnywayBtn, skipBtn, stopBtn, addBtn, pullBtn, fillBtn, msg, last);
+  body.append(
+    queueBox, startBtn, nextBtn, addAnywayBtn, skipBtn, stopBtn, addBtn, pullBtn, fillBtn,
+    apaarBox, apaarStartBtn, apaarNextBtn, apaarSkipBtn, apaarStopBtn, apaarFillBtn,
+    msg, last,
+  );
   addAnywayBtn.style.display = "none";
   panel.append(head, body);
   head.addEventListener("click", () => {
@@ -642,6 +659,154 @@
     }),
   );
 
+  // ─── APAAR: open "Generate APAAR ID" for ready children, fill, never submit ─
+
+  const onApaarPage = () => /\/apaarModule|\/apaarNewBasicDetails\//.test(location.hash);
+  const apaarOpenId = () => (location.hash.match(/\/apaarNewBasicDetails\/(\d+)/) || [])[1] || "";
+
+  async function waitForApaarForm(ms = 15000) {
+    const until = Date.now() + ms;
+    while (Date.now() < until) {
+      if (document.querySelector('[formcontrolname="consenterName"]')) return true;
+      await sleep(400);
+    }
+    return false;
+  }
+
+  /** `item` is { studentId, pen, name } from the queue or the portal list. */
+  async function fillApaarPage(item) {
+    if (apaarOpenId() !== String(item.studentId)) throw new Error("This child's Generate APAAR page is not open.");
+    if (!(await waitForApaarForm())) throw new Error("The APAAR page did not open. Reload and try again.");
+    const res = await ask({ type: "apaar-fill", pen: item.pen });
+    if (!res.ok) throw new Error(res.error);
+    const plan = res.body;
+    const first = (n) => String(n || "").trim().toUpperCase().split(/\s+/)[0] || "";
+    if (!first(item.name) || first(item.name) !== first(plan.student && plan.student.name)) {
+      throw new Error(`Names disagree — portal “${item.name}”, ERP “${plan.student && plan.student.name}”. Nothing filled.`);
+    }
+    const filled = [];
+    const kept = [];
+    const failed = [];
+    for (const f of plan.fields || []) {
+      const node = document.querySelector(`[formcontrolname="${f.control}"]`);
+      if (!node) {
+        failed.push(f.label);
+        continue;
+      }
+      if (node.disabled || (node.value && node.value !== "0" && String(node.value).trim())) {
+        kept.push(f.label);
+        continue;
+      }
+      if (f.kind === "select") {
+        if (![...node.options].some((o) => o.value === f.value)) {
+          failed.push(f.label);
+          continue;
+        }
+        node.value = f.value;
+        node.dispatchEvent(new Event("change", { bubbles: true }));
+      } else {
+        setNative(node, f.value);
+      }
+      if (node.value === f.value) {
+        node.classList.add("bhb-robot-filled");
+        filled.push(f.label);
+      } else {
+        failed.push(f.label);
+      }
+    }
+    const lines = [`${plan.student.name} (PEN ${item.pen}) — Generate APAAR ID`, `✓ Filled ${filled.length} field(s), outlined in yellow.`];
+    if (kept.length) lines.push(`Already on the page, left as is: ${kept.join(", ")}`);
+    if (failed.length) lines.push(`Could not fill: ${failed.join(", ")}`);
+    if ((plan.leftForYou || []).length) lines.push(`Please check / do: ${plan.leftForYou.join("; ")}`);
+    lines.push("Check the page, then press the portal's own Submit. After it is accepted, press “Submitted — next child”.");
+    return lines.join("\n");
+  }
+
+  async function renderApaar() {
+    const q = await store.get("apaarQueue");
+    const active = !!(q && q.items && q.index < q.items.length);
+    apaarBox.textContent = active
+      ? `APAAR child ${q.index + 1} of ${q.items.length}: ${q.items[q.index].name}`
+      : "";
+    apaarBox.style.display = onApaarPage() && apaarBox.textContent ? "" : "none";
+    const show = (b, on) => (b.style.display = onApaarPage() && on ? "" : "none");
+    show(apaarStartBtn, !active);
+    show(apaarNextBtn, active);
+    show(apaarSkipBtn, active);
+    show(apaarStopBtn, active);
+    show(apaarFillBtn, !active && !!apaarOpenId());
+    if (onApaarPage()) {
+      // The student-profile queue's buttons do not belong on this page.
+      for (const b of [queueBox, startBtn, nextBtn, skipBtn, stopBtn, addBtn, pullBtn, fillBtn, addAnywayBtn]) b.style.display = "none";
+    }
+  }
+
+  async function openApaarCurrent() {
+    const q = await store.get("apaarQueue");
+    if (!q || !q.items || q.index >= q.items.length) {
+      await store.set("apaarQueue", null);
+      await renderApaar();
+      return say("🎉 Done with every ready child. Press “Only send portal list to ERP” on the dashboard so the ERP picks up the new APAAR IDs.", "ok");
+    }
+    const item = q.items[q.index];
+    await renderApaar();
+    say(`Opening ${item.name}…`);
+    location.hash = `#/school/${q.schoolId}/apaarNewBasicDetails/${item.studentId}`;
+    try {
+      say(await fillApaarPage(item), "ok");
+    } catch (e) {
+      say(`${item.name}: ${e.message || e}\nFill by hand, or press Skip.`, "err");
+    }
+  }
+
+  const apaarAdvance = async () => {
+    const q = await store.get("apaarQueue");
+    if (!q) return;
+    await store.set("apaarQueue", { ...q, index: q.index + 1 });
+    await openApaarCurrent();
+  };
+  apaarNextBtn.addEventListener("click", () => void clickStep(apaarAdvance));
+  apaarSkipBtn.addEventListener("click", () => void clickStep(apaarAdvance));
+  apaarStopBtn.addEventListener("click", async () => {
+    await store.set("apaarQueue", null);
+    await renderApaar();
+    say("APAAR queue stopped.");
+  });
+  apaarStartBtn.addEventListener("click", () =>
+    void clickStep(async () => {
+      const id = schoolId();
+      if (!id) return say("Open the APAAR Module from the school menu first.", "err");
+      try {
+        say("Reading the student list from the portal…");
+        const res = await ask({ type: "apaar-queue", students: await portalList(id) });
+        if (!res.ok) throw new Error(res.error);
+        const b = res.body;
+        const notes = [];
+        if ((b.aadhaarNotVerified || []).length) notes.push(`${b.aadhaarNotVerified.length} consented child(ren) wait for the portal to verify their Aadhaar: ${b.aadhaarNotVerified.map((x) => x.name).join(", ")}.`);
+        if (b.waitingInErp) notes.push(`${b.waitingInErp} more are ready on the portal but wait on the family in the ERP (consent, or the consenting parent's Aadhaar).`);
+        if (!(b.items || []).length) return say(["No child is ready for APAAR right now.", ...notes].join("\n"));
+        await store.set("apaarQueue", { schoolId: id, items: b.items, index: 0 });
+        if (notes.length) say(notes.join("\n"));
+        await openApaarCurrent();
+      } catch (e) {
+        say(e.message || String(e), "err");
+      }
+    }),
+  );
+  apaarFillBtn.addEventListener("click", () =>
+    void clickStep(async () => {
+      const sid = apaarOpenId();
+      try {
+        const me = (await portalList(schoolId())).find((x) => String(x.studentId) === sid);
+        const pen = me && String(me.studentCodeNat || "").replace(/\D/g, "");
+        if (!pen) throw new Error("This child has no PEN on the portal.");
+        say(await fillApaarPage({ studentId: sid, pen, name: me.studentName }), "ok");
+      } catch (e) {
+        say(e.message || String(e), "err");
+      }
+    }),
+  );
+
   // ─── On each page: show the panel and the count; never act ───────────
 
   let counted = false;
@@ -650,6 +815,8 @@
     panel.style.display = onSchool ? "" : "none";
     if (!onSchool) return;
     void showLast();
+    if (onApaarPage()) return void renderApaar();
+    for (const b of [apaarBox, apaarStartBtn, apaarNextBtn, apaarSkipBtn, apaarStopBtn, apaarFillBtn]) b.style.display = "none";
     const q = await store.get("queue");
     if (q && q.items && q.index < q.items.length) return renderQueue(q, 0);
     renderQueue(null, 0);
