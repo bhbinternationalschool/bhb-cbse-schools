@@ -237,6 +237,11 @@ SELFTESTS=(
   test:udise-upload-store
   test:udise-student-details
   test:udise-compliance
+  test:udise-robot
+  test:udise-portal-api
+  test:udise-portal-fill
+  test:udise-portal-add
+  test:udise-portal-reconcile
   test:lead-worklist
   test:student-import
   test:student-import-mid-year

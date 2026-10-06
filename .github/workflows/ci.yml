@@ -48,6 +48,10 @@ jobs:
             @tailwindcss/oxide-linux-x64-gnu@4.3.2
 
       - name: Typecheck
+        # tsc outgrew Node's default ~2 GB heap on 6 Oct 2026: every PR's
+        # Typecheck died with "JavaScript heap out of memory" (exit 134).
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
         run: npm run typecheck
 
       - name: Lint
@@ -364,6 +368,11 @@ jobs:
           npm run test:sibling-carry-over
           npm run test:udise-upload-store
           npm run test:udise-compliance
+          npm run test:udise-robot
+          npm run test:udise-portal-api
+          npm run test:udise-portal-fill
+          npm run test:udise-portal-add
+          npm run test:udise-portal-reconcile
           npm run test:lead-worklist
           npm run test:student-import
           npm run test:student-import-mid-year
