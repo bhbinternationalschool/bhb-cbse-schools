@@ -28,7 +28,7 @@ import {
   setMirrorSlice,
 } from "@/lib/schoolDataMirror";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { readCache, writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { guardMastersOverwrite } from "@/lib/mastersWriteGuard";
 import { resolveAcademicYear, fallbackAcademicYear } from "@/lib/academicYearResolve";
 import { trackServerWork } from "@/lib/serverWork";
@@ -1980,7 +1980,7 @@ export function loadMasters(): MastersState {
     return shouldSeedEmptyMastersShell() ? emptyMastersShell() : defaultMasters();
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (raw) {
       const parsed = ensureFeeSetup(JSON.parse(raw) as MastersState);
       const migrated = migrateDemoStaffToTeacherRoster(parsed);
@@ -2070,7 +2070,7 @@ async function persistMastersClient(
   // classes. The server refuses such a push anyway; this keeps the browser
   // from displaying — and re-pushing — the empty copy in the meantime.
   {
-    const rawPrev = localStorage.getItem(STORAGE_KEY);
+    const rawPrev = readCache(STORAGE_KEY);
     if (rawPrev) {
       try {
         const stored = JSON.parse(rawPrev) as Partial<MastersState>;
@@ -2095,7 +2095,7 @@ async function persistMastersClient(
     }
   }
   const serialized = JSON.stringify({ ...state, version: 2 });
-  const prev = localStorage.getItem(STORAGE_KEY);
+  const prev = readCache(STORAGE_KEY);
   if (prev === serialized) return { ok: true, reason: "unchanged" };
 
   try {
