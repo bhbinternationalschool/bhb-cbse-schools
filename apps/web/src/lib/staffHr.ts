@@ -44,6 +44,17 @@ export type LeaveSettings = {
   gracePeriodMinutes: number;
 };
 
+/**
+ * Which half of the day a half-day leave takes off. "" = not said (requests
+ * before 6 Oct 2026, or a full-day leave). The person is expected to punch
+ * for the other half; only then does the day count as a half day (HD).
+ */
+export type HalfDaySession = "" | "morning" | "afternoon";
+
+export function normalizeHalfDaySession(v: unknown): HalfDaySession {
+  return v === "morning" || v === "afternoon" ? v : "";
+}
+
 export type LeaveRequest = {
   id: string;
   academicYearCode: string;
@@ -53,6 +64,8 @@ export type LeaveRequest = {
   toDate: string;
   days: number;
   halfDay: boolean;
+  /** Morning or afternoon off, for a half-day leave. */
+  halfDaySession?: HalfDaySession;
   reason: string;
   status: LeaveStatus;
   /** How the leave was created / last changed */
@@ -293,6 +306,7 @@ function normalizeLeaveRequest(
     toDate: r.toDate || r.fromDate || "",
     days,
     halfDay: !!r.halfDay,
+    halfDaySession: r.halfDay ? normalizeHalfDaySession(r.halfDaySession) : "",
     reason: r.reason || "",
     status,
     origin:
@@ -808,6 +822,7 @@ export function applyLeave(input: {
   fromDate: string;
   toDate: string;
   halfDay?: boolean;
+  halfDaySession?: HalfDaySession;
   reason: string;
   appliedBy: string;
   /** When true, approve immediately (principal/admin direct leave). */
@@ -890,6 +905,7 @@ export function applyLeave(input: {
     toDate,
     days,
     halfDay,
+    halfDaySession: halfDay ? normalizeHalfDaySession(input.halfDaySession) : "",
     reason: input.reason.trim(),
     status,
     origin,
@@ -1259,6 +1275,8 @@ export function adjustLeave(input: {
   fromDate: string;
   toDate: string;
   halfDay: boolean;
+  /** Omitted = keep the request's session. */
+  halfDaySession?: HalfDaySession;
   typeCode: LeaveTypeCode;
   reason?: string;
   adjustedBy: string;
@@ -1340,6 +1358,9 @@ export function adjustLeave(input: {
     toDate,
     days,
     halfDay,
+    halfDaySession: halfDay
+      ? normalizeHalfDaySession(input.halfDaySession ?? req.halfDaySession)
+      : "",
     reason:
       input.reason !== undefined ? input.reason.trim() : req.reason,
     origin: "adjusted",

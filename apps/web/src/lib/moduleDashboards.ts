@@ -73,7 +73,7 @@ import { loadReportsCenterRecent } from "@/lib/reportsCenter";
 import { audienceLabel, loadSchoolComms } from "@/lib/schoolComms";
 import { applicationStatusLabel, loadRte } from "@/lib/rteEws";
 import { countActiveHouseholds, loadSis } from "@/lib/sis";
-import { loadStaffAttendance, summarizeStaffMarks } from "@/lib/staffAttendance";
+import { loadStaffAttendance, staffMarkTotals } from "@/lib/staffAttendance";
 import { loadStaffHr } from "@/lib/staffHr";
 import {
   loadTimetable,
@@ -656,6 +656,7 @@ function staffDash(academicYearCode?: string): ModuleDashboardModel {
         tone: "coral",
         tab: "leave",
         detailTitle: "Pending leave requests",
+        detailAction: "staff_leave_decide",
         detailColumns: [
           { key: "empCode", label: "Code" },
           { key: "fullName", label: "Name" },
@@ -1051,11 +1052,13 @@ function attendanceDash(academicYearCode?: string): ModuleDashboardModel {
   let staffLeave = 0;
   let staffHalf = 0;
   for (const r of staffTodayRegs) {
-    const counts = summarizeStaffMarks(r.marks || []);
-    staffPresent += counts.P ?? 0;
-    staffAbsent += counts.A ?? 0;
-    staffLeave += counts.LE ?? 0;
-    staffHalf += counts.HD ?? 0;
+    // Late (L) and half-day (HD) staff came to work. Counting only "P" showed
+    // "Staff present 0" on 6 Oct 2026 while two staff had punched in late.
+    const t = staffMarkTotals(r.marks || []);
+    staffPresent += t.present;
+    staffAbsent += t.absent;
+    staffLeave += t.leave;
+    staffHalf += t.halfDay;
   }
 
   const days = lastNDays(7);
@@ -1066,7 +1069,7 @@ function attendanceDash(academicYearCode?: string): ModuleDashboardModel {
     }
     let staff = 0;
     for (const r of staffRegisters.filter((x) => x.date === d)) {
-      staff += summarizeStaffMarks(r.marks || []).P ?? 0;
+      staff += staffMarkTotals(r.marks || []).present;
     }
     return { label: dayLabel(d), value: students + staff };
   });

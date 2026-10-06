@@ -40,6 +40,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { ErpTable, ErpTableBody } from "@/components/ui/erp-roster";
+import { StaffLeaveDecideList } from "@/components/dashboard/StaffLeaveDecideList";
 
 export type DashboardTone =
   | "navy"
@@ -88,6 +89,8 @@ export type DashboardKpi = {
   detailTitle?: string;
   detailColumns?: DashboardTableColumn[];
   detailRows?: DashboardTableRow[];
+  /** Live actions in the detail drawer instead of the static rows. */
+  detailAction?: "staff_leave_decide";
 };
 
 export type DashboardQuickLink = {
@@ -991,7 +994,9 @@ function KpiDetailDrawer({
           </button>
         </div>
         <div className="p-4 sm:p-5">
-          {kpi.detailColumns && kpi.detailRows ? (
+          {kpi.detailAction === "staff_leave_decide" ? (
+            <StaffLeaveDecideList />
+          ) : kpi.detailColumns && kpi.detailRows ? (
             <>
               <div className="mb-3 flex flex-wrap items-center justify-end gap-2 print:hidden">
                 <button

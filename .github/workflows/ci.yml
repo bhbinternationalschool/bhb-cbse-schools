@@ -304,6 +304,7 @@ jobs:
           npm run test:staff-onboarding
           npm run test:staff-leave-wa
           npm run test:staff-register-leave
+          npm run test:staff-half-day-session
           npm run test:class-notice-wa
           npm run test:wa-template-autopilot
           npm run test:pin-review
