@@ -16,6 +16,11 @@ import type { RbacModule } from "@/lib/rbac";
 import type { RbacFeatureDef } from "@/lib/rbacFeatureCatalog/types";
 import { MASTERS_FEATURES } from "@/lib/rbacFeatureCatalog/masters";
 import { TRANSPORT_FEATURES } from "@/lib/rbacFeatureCatalog/transport";
+import { PEOPLE_FEATURES } from "@/lib/rbacFeatureCatalog/people";
+import { MONEY_FEATURES } from "@/lib/rbacFeatureCatalog/money";
+import { ACADEMICS_FEATURES } from "@/lib/rbacFeatureCatalog/academics";
+import { COMMS_FEATURES } from "@/lib/rbacFeatureCatalog/comms";
+import { CAMPUS_FEATURES } from "@/lib/rbacFeatureCatalog/campus";
 
 export type { RbacFeatureDef, RbacFeatureId } from "@/lib/rbacFeatureCatalog/types";
 
@@ -28,6 +33,11 @@ export type { RbacFeatureDef, RbacFeatureId } from "@/lib/rbacFeatureCatalog/typ
 export const RBAC_FEATURES: RbacFeatureDef[] = [
   ...MASTERS_FEATURES,
   ...TRANSPORT_FEATURES,
+  ...PEOPLE_FEATURES,
+  ...MONEY_FEATURES,
+  ...ACADEMICS_FEATURES,
+  ...COMMS_FEATURES,
+  ...CAMPUS_FEATURES,
 ];
 
 /** Masters keys that are not checked here — they sync through their own

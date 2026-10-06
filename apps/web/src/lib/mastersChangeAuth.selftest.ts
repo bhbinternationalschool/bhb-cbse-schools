@@ -215,6 +215,10 @@ const label = (id: string) => ({ c6: "Class 6", c7: "Class 7" })[id] ?? id;
     assert.ok(f.id.startsWith(`${f.module}.`), `${f.id} must start with its module`);
     assert.ok(modules.has(f.module), `${f.id}: unknown module`);
     assert.ok(f.actions.length > 0, `${f.id}: no actions`);
+    for (const r of f.routes ?? []) {
+      assert.ok(r.startsWith("/api/"), `${f.id}: route ${r} must be an /api/ path`);
+      assert.ok(!r.startsWith("/api/school-data/"), `${f.id}: desk routes are gated by slices, not routes`);
+    }
     for (const k of f.slices ?? []) {
       const key = `${f.module}:${k}`;
       assert.ok(!owner.has(key), `${key} owned by both ${owner.get(key)} and ${f.id}`);

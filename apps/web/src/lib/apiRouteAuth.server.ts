@@ -177,6 +177,9 @@ function holdsRouteFeature(
   } catch {
     return false;
   }
+  // Desk stores are never opened whole by a function: their routes merge
+  // a function holder's save slice by slice (lib/deskFeatureGate.server).
+  if (pathname.startsWith("/api/school-data/")) return false;
   return featuresForRoute(module, pathname).some(
     (f) => featureAccess(ctx.session, ctx.masters, f.id, action, ctx.rbac).allowed,
   );

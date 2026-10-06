@@ -50,6 +50,15 @@ export type DeskGate =
 
 const WRITES: RbacAction[] = ["create", "edit", "delete"];
 
+/** A function gate for routes that do their own module check first. */
+export async function deskFeatureGateFor(
+  req: Request,
+  module: RbacModule,
+  mode: "read" | "write",
+): Promise<FeatureGate | null> {
+  return featureGate(req, module, mode === "read" ? ["view", ...WRITES] : WRITES);
+}
+
 async function featureGate(
   req: Request,
   module: RbacModule,
@@ -98,19 +107,42 @@ export async function deskReadGate(req: Request, module: RbacModule): Promise<De
   return gate ?? { mode: "deny", response: auth.response };
 }
 
+/**
+ * Shared stores (desk-slice/<desk>, module-state/<desk>) hold several desks
+ * of one module; their functions name slices "<desk>/<key>". The prefix
+ * maps a desk's own keys onto those names and back.
+ */
+function prefixed(obj: object, prefix: string): Record<string, unknown> {
+  if (!prefix) return obj as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) out[`${prefix}${k}`] = v;
+  return out;
+}
+
+function unprefixed(obj: Record<string, unknown>, prefix: string): Record<string, unknown> {
+  if (!prefix) return obj;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    out[k.startsWith(prefix) ? k.slice(prefix.length) : k] = v;
+  }
+  return out;
+}
+
 export function featurePushOutcome(
   gate: FeatureGate,
   module: RbacModule,
   stored: object,
   incoming: object,
   classLabel?: (classId: string) => string,
+  opts: { prefix?: string } = {},
 ):
   | { ok: true; changed: boolean; state: Record<string, unknown> }
   | { ok: false; response: NextResponse } {
+  const prefix = opts.prefix ?? "";
   const verdict = authorizeFeatureChange(
     module,
-    stored as Record<string, unknown>,
-    incoming as Record<string, unknown>,
+    prefixed(stored, prefix),
+    prefixed(incoming, prefix),
     gate.access,
     gate.ownClassIds,
     classLabel,
@@ -129,12 +161,32 @@ export function featurePushOutcome(
   if (verdict.changedSlices.length > 0) {
     console.info(`[${module}-desk] function-only push by ${who}: ${verdict.changedSlices.join(", ")}`);
   }
-  return { ok: true, changed: verdict.changedSlices.length > 0, state: verdict.merged };
+  return {
+    ok: true,
+    changed: verdict.changedSlices.length > 0,
+    state: unprefixed(verdict.merged, prefix),
+  };
 }
 
 /** The reply to a function-only save: no revision, on purpose. */
 export function featureSavedResponse(changed: boolean): NextResponse {
   return NextResponse.json({ ok: true, functionOnly: true, changed, unchanged: !changed });
+}
+
+/** The desk keys (without prefix) this function holder may see. */
+export function visibleSlices(
+  module: RbacModule,
+  gate: FeatureGate,
+  prefix = "",
+): Set<string> {
+  const out = new Set<string>();
+  for (const f of featuresForModule(module)) {
+    if (!["view", ...WRITES].some((a) => gate.access(f.id, a as RbacAction).allowed)) continue;
+    for (const k of f.slices ?? []) {
+      if (k.startsWith(prefix)) out.add(k.slice(prefix.length));
+    }
+  }
+  return out;
 }
 
 /**
@@ -148,7 +200,9 @@ export function stripDeskForFeatures<T extends object>(
   module: RbacModule,
   bundle: T,
   gate: FeatureGate,
+  opts: { prefix?: string } = {},
 ): T & { functionOnly: true } {
+  const prefix = opts.prefix ?? "";
   const visible = new Set<string>();
   const owned = new Set<string>();
   for (const f of featuresForModule(module)) {
@@ -159,9 +213,10 @@ export function stripDeskForFeatures<T extends object>(
   }
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(bundle as Record<string, unknown>)) {
-    if (visible.has(k)) out[k] = v;
+    const name = `${prefix}${k}`;
+    if (visible.has(name)) out[k] = v;
     else if (Array.isArray(v)) out[k] = [];
-    else if (owned.has(k)) continue;
+    else if (owned.has(name)) continue;
     else out[k] = v;
   }
   return { ...(out as T), functionOnly: true };
