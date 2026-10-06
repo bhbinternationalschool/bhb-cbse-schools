@@ -6,12 +6,23 @@ import {
   SCHOOL_DATA_DESK_RBAC,
 } from "@/lib/apiRouteAuth.server";
 import type { AttendanceRegister, AttendanceState } from "@/lib/attendance";
-import type { AttendanceDeskAncillary } from "@/lib/attendanceDeskAncillary.server";
+import {
+  readAttendanceDeskAncillary,
+  type AttendanceDeskAncillary,
+} from "@/lib/attendanceDeskAncillary.server";
 import {
   attendanceDualWriteDbEnabled,
   fetchAttendanceDeskFromDb,
+  fetchAttendanceRegistersFromDb,
   pushAttendanceDeskToDb,
 } from "@/lib/attendanceNormalized.server";
+import {
+  deskFeatureGateFor,
+  featurePushOutcome,
+  featureSavedResponse,
+  stripDeskForFeatures,
+  type FeatureGate,
+} from "@/lib/deskFeatureGate.server";
 
 export const runtime = "nodejs";
 
@@ -44,18 +55,49 @@ function scopeDeskBody(body: string, sections: Set<string>): DeskBody {
   return { ...desk, registers, ancillary, count: registers.length };
 }
 
+/**
+ * A function holder's copy (Attendance → Student register, Exceptions, …):
+ * the lists of the functions they hold, the rest empty. The policy is the
+ * school's marking cut-off — every register screen works to it — so it is
+ * always served; only its owner may change it.
+ */
+function featureDeskBody(desk: DeskBody, gate: FeatureGate): DeskBody {
+  const flat = {
+    registers: desk.registers ?? [],
+    absentNudges: desk.ancillary?.absentNudges ?? [],
+    exceptions: desk.ancillary?.exceptions ?? [],
+  };
+  const cut = stripDeskForFeatures("attendance", flat, gate);
+  return {
+    ...desk,
+    registers: cut.registers,
+    ancillary: desk.ancillary
+      ? { ...desk.ancillary, absentNudges: cut.absentNudges, exceptions: cut.exceptions }
+      : desk.ancillary,
+    count: cut.registers.length,
+    functionOnly: true,
+  };
+}
+
 /** GET — pull full attendance desk from normalized tables */
 export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["attendance-registers"], "GET");
-  if (!auth.ok) return auth.response
+  let gate: FeatureGate | null = null;
+  if (!auth.ok) {
+    if (auth.response.status !== 403) return auth.response;
+    gate = await deskFeatureGateFor(req, "attendance", "read");
+    if (!gate) return auth.response;
+  }
   // A teacher gets only their own sections' registers (2026-09-29). Every
   // register carries student ids and marks, and the nudges/exceptions carry
   // parents' numbers — "attendance.view" alone handed a teacher's browser
   // the whole school. Unknown scope (lookup failed) is treated as
   // restricted with no sections, never as school-wide.
+  // A function holder is cut the same way, then to their functions.
   let sections: Set<string> | null = null;
-  if (!auth.viaMirrorSecret) {
-    const scope = await staffSectionScope(auth.ctx).catch(() => null);
+  const scopeCtx = gate ? gate.ctx : auth.ok && !auth.viaMirrorSecret ? auth.ctx : null;
+  if (scopeCtx) {
+    const scope = await staffSectionScope(scopeCtx).catch(() => null);
     if (!scope?.unrestricted) sections = scope?.sections ?? new Set<string>();
   }
   try {
@@ -65,7 +107,7 @@ export async function GET(req: Request) {
       // The shared cache and its ETag describe the WHOLE desk. A scoped
       // caller must never get a 304 against a whole-desk body its browser
       // may hold from an office login, so it always gets a fresh body.
-      ifNoneMatch: sections ? null : req.headers.get("if-none-match"),
+      ifNoneMatch: sections || gate ? null : req.headers.get("if-none-match"),
       build: async () => {
         const desk = await fetchAttendanceDeskFromDb();
         if (!desk.ok) throw new Error("Attendance desk fetch failed — tenant/db unavailable");
@@ -79,6 +121,12 @@ export async function GET(req: Request) {
         };
       },
     });
+    if (gate && result.kind !== "not_modified") {
+      const desk = sections ? scopeDeskBody(result.body, sections) : (JSON.parse(result.body) as DeskBody);
+      return NextResponse.json(featureDeskBody(desk, gate), {
+        headers: { "Cache-Control": "private, no-store" },
+      });
+    }
     if (!sections || result.kind === "not_modified") return deskJsonResponse(result);
     return NextResponse.json(scopeDeskBody(result.body, sections), {
       headers: { "Cache-Control": "private, no-store" },
@@ -97,14 +145,23 @@ type DeskPostBody = Pick<AttendanceState, "registers"> &
 /** POST — push attendance desk snapshot (registers + policy + nudges + exceptions) */
 export async function POST(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["attendance-registers"], "POST");
-  if (!auth.ok) return auth.response
+  // Without the module: a function holder's save, or refused.
+  let gate: FeatureGate | null = null;
+  if (!auth.ok) {
+    if (auth.response.status !== 403) return auth.response;
+    gate = await deskFeatureGateFor(req, "attendance", "write");
+    if (!gate) return auth.response;
+  }
   // This push carries the whole student attendance desk (every class's registers, the policy and the parent nudges).
   // "attendance.edit" alone let a teacher's browser send it — a stale copy
   // could overwrite other classes' registers. Teachers save one register at
   // a time through /api/v1/attendance/mark and punch through
   // /api/v1/staff/attendance/punch; this route is the office's.
-  if (!auth.viaMirrorSecret) {
-    const scope = await staffSectionScope(auth.ctx).catch(() => null);
+  // A function holder is held to it too — a teacher holding Student
+  // register still marks one register at a time through the mark route.
+  const scopeCtx = gate ? gate.ctx : auth.ok && !auth.viaMirrorSecret ? auth.ctx : null;
+  if (scopeCtx) {
+    const scope = await staffSectionScope(scopeCtx).catch(() => null);
     if (!scope?.unrestricted) {
       return NextResponse.json(
         {
@@ -132,6 +189,26 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  // Function holders (e.g. Attendance → Exceptions): merged onto the stored
+  // desk, only their functions' slices — never the body as sent.
+  if (gate) {
+    const [regs, anc] = await Promise.all([
+      fetchAttendanceRegistersFromDb(),
+      readAttendanceDeskAncillary(),
+    ]);
+    if (!regs.ok || !anc.ok) {
+      return NextResponse.json(
+        { ok: false, error: "Could not read the saved attendance desk — nothing was written. Try again." },
+        { status: 503 },
+      );
+    }
+    const stored = { registers: regs.registers, ...anc.ancillary };
+    const merged = featurePushOutcome(gate, "attendance", stored, body);
+    if (!merged.ok) return merged.response;
+    if (!merged.changed) return featureSavedResponse(false);
+    body = merged.state as unknown as DeskPostBody;
+  }
+
   const result = await pushAttendanceDeskToDb({
     registers: Array.isArray(body.registers) ? body.registers : [],
     policy: body.policy,
@@ -145,6 +222,7 @@ export async function POST(req: Request) {
     );
   }
 
+  if (gate) return featureSavedResponse(true);
   return NextResponse.json({
     ok: true,
     count: result.registerCount,

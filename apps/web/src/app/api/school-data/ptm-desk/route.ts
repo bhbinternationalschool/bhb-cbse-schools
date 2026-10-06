@@ -4,6 +4,13 @@ import {
   authorizeSchoolDataDesk,
   SCHOOL_DATA_DESK_RBAC,
 } from "@/lib/apiRouteAuth.server";
+import {
+  deskFeatureGateFor,
+  featurePushOutcome,
+  featureSavedResponse,
+  stripDeskForFeatures,
+  type FeatureGate,
+} from "@/lib/deskFeatureGate.server";
 import type { PtmState } from "@/lib/ptm";
 import { scopedPtmState } from "@/lib/ptmTeacherScope.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
@@ -17,10 +24,34 @@ import {
 
 export const runtime = "nodejs";
 
+type PtmDeskBody = Pick<PtmState, "events" | "slots" | "bookings" | "feedback">;
+
+/**
+ * A PTM function holder's copy: their slices, plus the events and slots
+ * every PTM job is arranged around; bookings also go to whoever records
+ * the meeting's feedback (feedback is written against a booking).
+ */
+function featurePtmBody(desk: PtmDeskBody, gate: FeatureGate): PtmDeskBody {
+  const holds = (id: string) =>
+    (["view", "create", "edit", "delete"] as const).some((a) => gate.access(id, a).allowed);
+  const cut = stripDeskForFeatures("ptm", desk, gate);
+  return {
+    events: desk.events,
+    slots: desk.slots,
+    bookings: holds("ptm.bookings") || holds("ptm.feedback") ? desk.bookings : [],
+    feedback: cut.feedback,
+  };
+}
+
 /** GET — pull PTM desk from normalized tables */
 export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["ptm-desk"], "GET");
-  if (!auth.ok) return auth.response
+  let gate: FeatureGate | null = null;
+  if (!auth.ok) {
+    if (auth.response.status !== 403) return auth.response;
+    gate = await deskFeatureGateFor(req, "ptm", "read");
+    if (!gate) return auth.response;
+  }
   const { bundle, meta, ok } = await fetchPtmDeskFromDb();
   if (!ok) {
     return NextResponse.json(
@@ -31,21 +62,24 @@ export async function GET(req: Request) {
   // A teacher's browser gets only its own slice (lib/ptmTeacherScope.server,
   // the same cut as /api/v1/staff/ptm/desk) — ptm.view is held by every
   // teacher, and this was the whole school's bookings and feedback
-  // (2026-09-29). Unknown scope is refused, never widened.
-  if (!auth.viaMirrorSecret) {
-    const scope = await staffSectionScope(auth.ctx).catch(() => null);
+  // (2026-09-29). Unknown scope is refused, never widened. A function
+  // holder outside the office gets the same cut, then their functions' part.
+  const scopeCtx = gate ? gate.ctx : auth.ok && !auth.viaMirrorSecret ? auth.ctx : null;
+  if (scopeCtx) {
+    const scope = await staffSectionScope(scopeCtx).catch(() => null);
     if (!scope) {
       return NextResponse.json({ ok: false, error: "Could not work out your classes" }, { status: 503 });
     }
     if (!scope.unrestricted) {
       await ensureSchoolMirrorHydrated();
       await ensureSisHydratedServer();
-      const cut = scopedPtmState({
+      const scoped = scopedPtmState({
         state: { version: 1, ...bundle },
         scope,
-        staffId: auth.ctx.session.staffId || "",
+        staffId: scopeCtx.session.staffId || "",
         sis: loadSis(),
       });
+      const cut = gate ? featurePtmBody(scoped, gate) : scoped;
       return NextResponse.json(
         {
           ok: true,
@@ -54,6 +88,7 @@ export async function GET(req: Request) {
           bookings: cut.bookings,
           feedback: cut.feedback,
           eventCount: cut.events.length,
+          ...(gate ? { functionOnly: true } : {}),
           updatedAt: meta?.updatedAt || new Date().toISOString(),
           meta,
         },
@@ -61,13 +96,15 @@ export async function GET(req: Request) {
       );
     }
   }
+  const desk = gate ? featurePtmBody(bundle, gate) : bundle;
   return NextResponse.json({
     ok: true,
-    events: bundle.events,
-    slots: bundle.slots,
-    bookings: bundle.bookings,
-    feedback: bundle.feedback,
-    eventCount: bundle.events.length,
+    events: desk.events,
+    slots: desk.slots,
+    bookings: desk.bookings,
+    feedback: desk.feedback,
+    eventCount: desk.events.length,
+    ...(gate ? { functionOnly: true } : {}),
     updatedAt: meta?.updatedAt || new Date().toISOString(),
     meta,
   });
@@ -81,14 +118,23 @@ type PtmDeskPostBody = Pick<
 /** POST — push full PTM desk snapshot */
 export async function POST(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["ptm-desk"], "POST");
-  if (!auth.ok) return auth.response
+  // Without the module: a function holder's save, or refused.
+  let gate: FeatureGate | null = null;
+  if (!auth.ok) {
+    if (auth.response.status !== 403) return auth.response;
+    gate = await deskFeatureGateFor(req, "ptm", "write");
+    if (!gate) return auth.response;
+  }
   // This push replaces the whole school's PTM desk (every event, slot,
   // booking and feedback note). "ptm.edit" alone let a teacher's browser
   // send it — a stale copy could drop other classes' bookings. Teachers add
   // their own slots and record feedback through /api/v1/staff/ptm/slots and
   // /api/v1/staff/ptm/booking; this route is the office's (2026-09-29).
-  if (!auth.viaMirrorSecret) {
-    const scope = await staffSectionScope(auth.ctx).catch(() => null);
+  // A function holder is held to it too: the function says what may
+  // change, not that a teacher's browser may push the school's desk.
+  const scopeCtx = gate ? gate.ctx : auth.ok && !auth.viaMirrorSecret ? auth.ctx : null;
+  if (scopeCtx) {
+    const scope = await staffSectionScope(scopeCtx).catch(() => null);
     if (!scope?.unrestricted) {
       return NextResponse.json(
         {
@@ -116,6 +162,22 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  // Function holders (e.g. PTM → Meeting slots): merged onto the stored
+  // desk, only their functions' slices — never the body as sent.
+  if (gate) {
+    const stored = await fetchPtmDeskFromDb();
+    if (!stored.ok) {
+      return NextResponse.json(
+        { ok: false, error: "Could not read the saved PTM desk — nothing was written. Try again." },
+        { status: 503 },
+      );
+    }
+    const merged = featurePushOutcome(gate, "ptm", stored.bundle, body);
+    if (!merged.ok) return merged.response;
+    if (!merged.changed) return featureSavedResponse(false);
+    body = merged.state as unknown as PtmDeskPostBody;
+  }
+
   const result = await pushPtmDeskToDb({
     version: 1,
     events: Array.isArray(body.events) ? body.events : [],
@@ -130,6 +192,7 @@ export async function POST(req: Request) {
     );
   }
 
+  if (gate) return featureSavedResponse(true);
   return NextResponse.json({
     ok: true,
     eventCount: body.events?.length ?? 0,

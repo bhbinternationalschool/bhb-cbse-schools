@@ -38,6 +38,7 @@ import { VisitorPassSheet, printVisitorPass } from "@/components/visitors/Visito
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 import { GateQrPanel } from "@/components/visitors/GateQrPanel";
 import { VISITOR_PURPOSE_HI, type VisitorLang } from "@/lib/visitorI18n";
+import { canWriteModuleTab, visibleModuleTabs } from "@/lib/rbac";
 
 type Tab = "register" | "gateqr" | "gatepasses" | "gateduty";
 
@@ -211,6 +212,26 @@ export function VisitorsWorkspace() {
       setSis(loadSis());
     })();
   }, []);
+
+  // Someone holding only some Visitors functions sees only their tabs.
+  const shownTabs = useMemo(
+    () => visibleModuleTabs(lang === "hi" ? TABS_HI : TABS_EN, session, masters, "visitors"),
+    [lang, session, masters],
+  );
+  useEffect(() => {
+    if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
+      setTab(shownTabs[0]!.id as Tab);
+    }
+  }, [shownTabs, tab]);
+  /**
+   * The register saves the whole visitors book, which needs edit (module
+   * grant or the "Gate register" function) — saveVisitors and the server
+   * both refuse less. Without it the buttons are off rather than letting a
+   * check-in look saved on this screen and never reach the server. Until
+   * masters load, only the session's own read-only state decides.
+   */
+  const locked =
+    readOnly || (masters !== null && !canWriteModuleTab(session, masters, "visitors", tab));
 
   function flash(msg: string) {
     setNotice(msg);
@@ -428,7 +449,7 @@ export function VisitorsWorkspace() {
       id: "checkout",
       label: L.checkOut,
       onSelect: (v) => onCheckOut(v.id),
-      disabled: (v) => readOnly || !!v.outTime,
+      disabled: (v) => locked || !!v.outTime,
     },
     { id: "pass", label: L.printPass, onSelect: (v) => setPrintEntry(v) },
     {
@@ -439,7 +460,7 @@ export function VisitorsWorkspace() {
     },
     {
       id: "del", label: L.del, tone: "danger", separatorAbove: true,
-      hidden: () => readOnly,
+      hidden: () => locked,
       onSelect: (v) => onDeleteEntry(v.id),
     },
   ];
@@ -484,23 +505,23 @@ export function VisitorsWorkspace() {
     {
       id: "notify", label: "Notify parent",
       onSelect: (g) => void onNotifyGatePass(g),
-      disabled: (g) => readOnly || !!g.notifiedParentAt,
+      disabled: (g) => locked || !!g.notifiedParentAt,
     },
     {
       id: "approve", label: "Approve",
       onSelect: (g) => onApproveGatePass(g),
       // Only an approved pass can be released at the gate.
-      disabled: (g) => readOnly || g.status !== "requested",
+      disabled: (g) => locked || g.status !== "requested",
     },
     {
       id: "pickedup", label: "Mark picked up",
       onSelect: (g) => onMarkPickedUp(g),
-      disabled: (g) => readOnly || g.status === "picked_up" || g.status === "cancelled",
+      disabled: (g) => locked || g.status === "picked_up" || g.status === "cancelled",
     },
     {
       id: "del", label: "Delete", tone: "danger", separatorAbove: true,
       onSelect: (g) => onDeleteGatePass(g.id),
-      disabled: () => readOnly,
+      disabled: () => locked,
     },
   ];
 
@@ -520,7 +541,7 @@ export function VisitorsWorkspace() {
     >
       <div className="flex flex-wrap items-center gap-2">
         <div className="min-w-0 flex-1">
-          <ModuleTabs value={tab} onChange={(id) => setTab(id as Tab)} items={lang === "hi" ? TABS_HI : TABS_EN} />
+          <ModuleTabs value={tab} onChange={(id) => setTab(id as Tab)} items={shownTabs} />
         </div>
         <button type="button" onClick={toggleLang} className="rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-bold" title="Switch language / भाषा बदलें">
           {L.langToggle}
@@ -562,7 +583,7 @@ export function VisitorsWorkspace() {
             <button
               type="button"
               className="btn-accent rounded-lg px-4 py-2 text-sm font-bold disabled:opacity-50"
-              disabled={readOnly}
+              disabled={locked}
               onClick={onCheckIn}
             >
               {L.checkInBtn}
@@ -666,7 +687,7 @@ export function VisitorsWorkspace() {
             <button
               type="button"
               className="btn-accent rounded-lg px-4 py-2 text-sm font-bold disabled:opacity-50"
-              disabled={readOnly}
+              disabled={locked}
               onClick={onLogGatePass}
             >
               Log gate pass

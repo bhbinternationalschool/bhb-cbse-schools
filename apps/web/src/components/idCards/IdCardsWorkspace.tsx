@@ -26,6 +26,7 @@ import {
   type IdCardTemplateState,
 } from "@/lib/idCardTemplate";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
+import { canWriteModuleTab, visibleModuleTabs } from "@/lib/rbac";
 
 type Tab = "student" | "staff" | "design";
 
@@ -64,6 +65,20 @@ export function IdCardsWorkspace() {
     emptyIdCardTemplateState(),
   );
   const [designKind, setDesignKind] = useState<IdCardKind>("student");
+
+  // Someone holding only some ID-card functions (director, 6 Oct 2026 —
+  // Print ID cards / Card design) sees only their tabs.
+  const shownTabs = useMemo(
+    () => (masters ? visibleModuleTabs(TABS, session, masters, "id_cards") : TABS),
+    [session, masters],
+  );
+  useEffect(() => {
+    if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
+      setTab(shownTabs[0]!.id as Tab);
+    }
+  }, [shownTabs, tab]);
+  const canEditDesign =
+    !readOnly && !!masters && canWriteModuleTab(session, masters, "id_cards", "design");
 
   // Re-read when the server copy of this module lands (login/refresh hydration).
   useModuleStateHydration("id_card_template", () => { setTemplateState(loadIdCardTemplateState()); });
@@ -254,7 +269,7 @@ export function IdCardsWorkspace() {
       notice={notice}
       error={error}
     >
-      <ModuleTabs value={tab} onChange={(id) => setTab(id as Tab)} items={TABS} />
+      <ModuleTabs value={tab} onChange={(id) => setTab(id as Tab)} items={shownTabs} />
 
       {tab === "student" ? (
         <div className="mt-5 space-y-4">
@@ -571,7 +586,7 @@ export function IdCardsWorkspace() {
           <button
             type="button"
             className="btn-accent rounded-lg px-4 py-2 text-sm font-bold disabled:opacity-50"
-            disabled={readOnly}
+            disabled={!canEditDesign}
             onClick={onSaveTemplate}
           >
             Save card design

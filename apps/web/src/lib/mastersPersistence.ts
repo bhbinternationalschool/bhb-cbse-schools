@@ -17,7 +17,7 @@ import { mergeDbDeskIntoMastersState } from "@/lib/mastersNormalizedMerge";
 import { mastersReadFromDbEnabled } from "@/lib/mastersDbConfig";
 import { deskSkipMirrorBlobSliceClient } from "@/lib/deskCutover";
 import { dedupeHydration, isDeskHydrated, markDeskHydrated, resetDeskHydrated } from "@/lib/deskHydrateGuard";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { readCache, writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { guardMastersOverwrite } from "@/lib/mastersWriteGuard";
 import { trackServerWork } from "@/lib/serverWork";
 
@@ -39,7 +39,7 @@ const STORAGE_KEY = "bhb_masters_v5";
 function protectLocalClasses(next: MastersState): MastersState {
   if (typeof window === "undefined") return next;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return next;
     const stored = JSON.parse(raw) as Partial<MastersState>;
     const storedIds = (stored.classes ?? []).map((c) => c.id);

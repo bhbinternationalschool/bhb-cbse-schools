@@ -56,6 +56,7 @@ import {
 } from "@/lib/examPapers";
 import { loadTeaching, type SyllabusUnit } from "@/lib/teaching";
 import { BlueprintPanel } from "@/components/exams/BlueprintPanel";
+import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import { ExamPaperImportPanel } from "@/components/exams/ExamPaperImportPanel";
 import { NucleusCapturePanel } from "@/components/exams/NucleusCapturePanel";
 import { BankPicker } from "@/components/exams/BankPicker";
@@ -88,6 +89,36 @@ type Props = {
   onNotice: (msg: string) => void;
 };
 
+type PaperStep = "details" | "blueprint" | "questions" | "sets" | "print";
+
+const PAPER_STEPS: StepDef<PaperStep>[] = [
+  {
+    id: "details",
+    title: "Paper details",
+    what: "Title, exam name, duration, maximum marks, hardness, general instructions and the syllabus chapters covered.",
+  },
+  {
+    id: "blueprint",
+    title: "Blueprint",
+    what: "Optional: plan marks by chapter and question type, then generate the active set's sections from it.",
+  },
+  {
+    id: "questions",
+    title: "Questions",
+    what: "Sections and questions of the active set — add, edit, pull from the bank or ask AI for more.",
+  },
+  {
+    id: "sets",
+    title: "Sets",
+    what: "Set A/B/C… for the exam day: pick the active set, clone it, or let AI draft the active set.",
+  },
+  {
+    id: "print",
+    title: "Layout, preview & print",
+    what: "Page size, layout, language and header for printing; preview the active set and see past prints.",
+  },
+];
+
 export function ExamPapersPanel({
   masters,
   academicYearCode: ay,
@@ -104,6 +135,7 @@ export function ExamPapersPanel({
   const [headerConverting, setHeaderConverting] = useState(false);
   const [headerConvertError, setHeaderConvertError] = useState("");
   const [showPreview, setShowPreview] = useState(false);
+  const [paperStep, setPaperStep] = useState<PaperStep>("details");
   const [aiHardness, setAiHardness] = useState<ExamPaperHardness>("mixed");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiMoreType, setAiMoreType] = useState<ExamPaperQuestionType | "">("");
@@ -439,7 +471,12 @@ export function ExamPapersPanel({
     if (!draft || !canEdit) return;
     const r = saveExamPaper(draft, actorName);
     if (!r.ok) {
-      onError(r.error);
+      if (!draft.sets.length) {
+        setPaperStep("sets");
+        onError(`${r.error} — see step 4 · Sets`);
+      } else {
+        onError(r.error);
+      }
       return;
     }
     setDraft(r.paper);
@@ -625,7 +662,12 @@ export function ExamPapersPanel({
     if (!draft) return;
     const saved = saveExamPaper(draft, actorName);
     if (!saved.ok) {
-      onError(saved.error);
+      if (!draft.sets.length) {
+        setPaperStep("sets");
+        onError(`${saved.error} — see step 4 · Sets`);
+      } else {
+        onError(saved.error);
+      }
       return;
     }
     const logged = recordPaperPrint({
@@ -639,6 +681,7 @@ export function ExamPapersPanel({
       refresh();
     }
     setShowPreview(true);
+    setPaperStep("print");
     window.setTimeout(() => printExamPaper(draft.id), 200);
     onNotice(
       `Print logged · ${printCount} copy/copies · Set ${draft.activeSetCode}`,
@@ -689,6 +732,7 @@ export function ExamPapersPanel({
             onClick={() => {
               setEditingId(null);
               setDraft(null);
+              setPaperStep("details");
               refresh();
             }}
           >
@@ -727,7 +771,10 @@ export function ExamPapersPanel({
             <button
               type="button"
               className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-semibold"
-              onClick={() => setShowPreview((v) => !v)}
+              onClick={() => {
+                if (!showPreview) setPaperStep("print");
+                setShowPreview((v) => !v);
+              }}
             >
               {showPreview ? "Hide preview" : "Preview"}
             </button>
@@ -768,8 +815,20 @@ export function ExamPapersPanel({
               />
             </label>
           </div>
+        </div>
 
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {/* Every step stays mounted (inactive ones only hidden): sections,
+            questions and the blueprint keep unsaved state in their own
+            components, which unmounting would throw away. */}
+        <StepTabs
+          aria-label="Question paper steps"
+          steps={PAPER_STEPS}
+          value={paperStep}
+          onChange={setPaperStep}
+        >
+        <div className={paperStep === "details" ? "space-y-4" : "hidden"}>
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <label className="block text-sm">
               <span className="mb-1 block text-[11px] text-[var(--muted)]">
                 Paper title
@@ -870,17 +929,6 @@ export function ExamPapersPanel({
             />
           </label>
 
-          <PrintLayoutCard
-            draft={draft}
-            canEdit={canEdit}
-            classLabel={labelClass(draft.classId)}
-            subjectLabel={labelSubject(draft.subjectId)}
-            onChange={updatePrint}
-            onConvertHeader={convertHeaderTo}
-            converting={headerConverting}
-            convertError={headerConvertError}
-          />
-
           <div className="mt-3 text-sm">
             <span className="mb-1 block text-[11px] text-[var(--muted)]">
               Syllabus covered · from Teaching → Syllabus (LO codes drive competency tagging)
@@ -934,6 +982,30 @@ export function ExamPapersPanel({
           </div>
         </div>
 
+        </div>
+
+        <div className={paperStep === "blueprint" ? "space-y-4" : "hidden"}>
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+            <BlueprintPanel
+              key={draft.id}
+              paper={draft}
+              syllabusUnits={syllabusUnits}
+              canEdit={canEdit}
+              actorName={actorName}
+              onGenerated={(sections, unitIds, note) => {
+                mutateActiveSet((st) => ({ ...st, sections }));
+                if (unitIds.length) {
+                  updateDraft({ unitIds: Array.from(new Set([...draft.unitIds, ...unitIds])) });
+                }
+                onNotice(note);
+              }}
+              onError={onError}
+              onNotice={onNotice}
+            />
+          </div>
+        </div>
+
+        <div className={paperStep === "sets" ? "space-y-4" : "hidden"}>
         {/* Sets + AI */}
         <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <div className="flex flex-wrap items-end justify-between gap-3">
@@ -1023,25 +1095,10 @@ export function ExamPapersPanel({
               </label>
             </div>
           ) : null}
-
-          <BlueprintPanel
-            key={draft.id}
-            paper={draft}
-            syllabusUnits={syllabusUnits}
-            canEdit={canEdit}
-            actorName={actorName}
-            onGenerated={(sections, unitIds, note) => {
-              mutateActiveSet((st) => ({ ...st, sections }));
-              if (unitIds.length) {
-                updateDraft({ unitIds: Array.from(new Set([...draft.unitIds, ...unitIds])) });
-              }
-              onNotice(note);
-            }}
-            onError={onError}
-            onNotice={onNotice}
-          />
+        </div>
         </div>
 
+        <div className={paperStep === "questions" ? "space-y-4" : "hidden"}>
         {/* Sections / questions */}
         {set.sections.map((section, sIdx) => (
           <SectionEditor
@@ -1122,6 +1179,21 @@ export function ExamPapersPanel({
             + Add section
           </button>
         ) : null}
+        </div>
+
+        <div className={paperStep === "print" ? "space-y-4" : "hidden"}>
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+          <PrintLayoutCard
+            draft={draft}
+            canEdit={canEdit}
+            classLabel={labelClass(draft.classId)}
+            subjectLabel={labelSubject(draft.subjectId)}
+            onChange={updatePrint}
+            onConvertHeader={convertHeaderTo}
+            converting={headerConverting}
+            convertError={headerConvertError}
+          />
+        </div>
 
         {showPreview ? (
           <div className="space-y-2">
@@ -1153,6 +1225,8 @@ export function ExamPapersPanel({
             </ul>
           </div>
         ) : null}
+        </div>
+        </StepTabs>
       </div>
     );
   }

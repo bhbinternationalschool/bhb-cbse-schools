@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
+import { SCHOOL_DATA_DESK_RBAC } from "@/lib/apiRouteAuth.server";
 import {
-  authorizeSchoolDataDesk,
-  SCHOOL_DATA_DESK_RBAC,
-} from "@/lib/apiRouteAuth.server";
-import type { TrustState } from "@/lib/trust";
+  deskReadGate,
+  deskWriteGate,
+  featurePushOutcome,
+  featureSavedResponse,
+  stripDeskForFeatures,
+} from "@/lib/deskFeatureGate.server";
+import type { TrustLabourEntry, TrustState } from "@/lib/trust";
 import { trustDualWriteDbEnabled } from "@/lib/trustDbConfig";
 import {
   fetchTrustDeskFromDb,
@@ -12,10 +16,52 @@ import {
 
 export const runtime = "nodejs";
 
+/**
+ * A function-only save may record labour, never pay it. Paying writes a cost
+ * line and a cash or bank posting on other desks that a function holder
+ * cannot save, so a "paid" flag from one would say a wage was paid that the
+ * books never saw. And a paid entry is in the books: only the Trust grant
+ * changes or removes it. Returns the refusal, or null.
+ */
+function labourPaymentRefusal(
+  stored: TrustLabourEntry[],
+  merged: TrustLabourEntry[],
+): string | null {
+  const before = new Map(stored.map((l) => [l.id, l]));
+  const after = new Map(merged.map((l) => [l.id, l]));
+  for (const [id, prev] of before) {
+    if (prev.paidStatus !== "paid") continue;
+    const next = after.get(id);
+    if (!next || JSON.stringify(next) !== JSON.stringify(prev)) {
+      return "A paid labour entry is in the accounts — only someone with the whole Trust module can change or remove it.";
+    }
+  }
+  for (const [id, next] of after) {
+    const prev = before.get(id);
+    if (prev && JSON.stringify(prev) === JSON.stringify(next)) continue;
+    if (next.paidStatus === "paid") {
+      return "Paying labour posts to the accounts — ask someone with the whole Trust module to pay it.";
+    }
+  }
+  return null;
+}
+
 export async function GET(req: Request) {
-  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["trust-desk"], "GET");
-  if (!auth.ok) return auth.response
-  const { bundle, meta, ok } = await fetchTrustDeskFromDb();
+  // The whole desk, or — holding Trust functions only — their slices.
+  const gate = await deskReadGate(req, SCHOOL_DATA_DESK_RBAC["trust-desk"]);
+  if (gate.mode === "deny") return gate.response;
+  const { bundle: full, meta, ok } = await fetchTrustDeskFromDb();
+  // Projects and their work items are the frame every register hangs on
+  // (the project picker on each tab), so any Trust function reads them;
+  // only "Projects & works" may change them — the POST merge sees to that.
+  const bundle =
+    gate.mode === "feature"
+      ? {
+          ...stripDeskForFeatures("trust", full, gate),
+          projects: full.projects,
+          workItems: full.workItems,
+        }
+      : full;
   if (!ok) {
     return NextResponse.json(
       { ok: false, error: "Trust desk fetch failed — tenant/db unavailable" },
@@ -32,8 +78,8 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["trust-desk"], "POST");
-  if (!auth.ok) return auth.response
+  const gate = await deskWriteGate(req, SCHOOL_DATA_DESK_RBAC["trust-desk"]);
+  if (gate.mode === "deny") return gate.response;
   if (!trustDualWriteDbEnabled()) {
     return NextResponse.json({
       ok: true,
@@ -47,6 +93,32 @@ export async function POST(req: Request) {
     body = (await req.json()) as TrustState;
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  // Function-only writers (e.g. Trust → Site materials): merged onto the
+  // stored desk, only their functions' slices — never the body as sent.
+  // Bills, cost lines and contractors belong to no writing function, so a
+  // function save can never touch them.
+  if (gate.mode === "feature") {
+    const stored = await fetchTrustDeskFromDb();
+    if (!stored.ok) {
+      return NextResponse.json(
+        { ok: false, error: "Could not read the saved trust desk — nothing was written. Try again." },
+        { status: 503 },
+      );
+    }
+    const merged = featurePushOutcome(gate, "trust", stored.bundle, body);
+    if (!merged.ok) return merged.response;
+    if (!merged.changed) return featureSavedResponse(false);
+    const next = merged.state as unknown as TrustState;
+    const refusal = labourPaymentRefusal(stored.bundle.labourEntries ?? [], next.labourEntries ?? []);
+    if (refusal) {
+      return NextResponse.json(
+        { ok: false, error: refusal, reason: "feature_forbidden" },
+        { status: 403 },
+      );
+    }
+    body = next;
   }
 
   const result = await pushTrustDeskToDb({
@@ -69,6 +141,7 @@ export async function POST(req: Request) {
     );
   }
 
+  if (gate.mode === "feature") return featureSavedResponse(true);
   return NextResponse.json({
     ok: true,
     projectCount: body.projects?.length ?? 0,

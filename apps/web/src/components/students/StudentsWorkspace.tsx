@@ -91,7 +91,7 @@ import { StudentPromotionPanel } from "@/components/students/StudentPromotionPan
 import { StudentUpdatePanel } from "@/components/students/StudentUpdatePanel";
 import { StudentDuplicatesPanel } from "@/components/students/StudentDuplicatesPanel";
 import { DocVerificationQueuePanel } from "@/components/students/DocVerificationQueuePanel";
-import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ErpTableShell } from "@/components/ui/erp-roster";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -99,7 +99,7 @@ import { SkeletonModulePage } from "@/components/ui/skeleton";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { BirthdaysPanel } from "@/components/students/BirthdaysPanel";
-import { hasPermission } from "@/lib/rbac";
+import { canSeeModuleTab, canWriteModuleTab, visibleModuleTabs } from "@/lib/rbac";
 import { listImportSessions, normalizeSessionCode } from "@/lib/studentImport";
 import {
   classNeedsCartEnrollment,
@@ -122,6 +122,21 @@ type MainTab =
   | "birthdays";
 const VIEW_KEY = "bhb_sis_view";
 const TAB_KEY = "bhb_sis_main_tab";
+
+const STUDENT_TABS: ModuleTabItem[] = [
+  { id: "dashboard", label: "Dashboard", tone: "navy" },
+  { id: "roster", label: "Overview", tone: "navy" },
+  { id: "register", label: "Register", tone: "navy" },
+  { id: "update", label: "Update", tone: "sky" },
+  { id: "duplicates", label: "Duplicates", tone: "coral" },
+  { id: "udise", label: "UDISE+", tone: "coral" },
+  { id: "doc_verify", label: "Doc verify", tone: "amber" },
+  { id: "siblings", label: "Siblings", tone: "violet" },
+  { id: "upgrade", label: "Upgrade", tone: "amber" },
+  { id: "reports", label: "Reports", tone: "green" },
+  { id: "tags", label: "Tags", tone: "slate" },
+  { id: "birthdays", label: "Birthdays", tone: "coral" },
+];
 
 export function StudentsWorkspace() {
   const session = useDemoSession();
@@ -187,6 +202,27 @@ export function StudentsWorkspace() {
   const [mainTab, setMainTab] = useState<MainTab>("dashboard");
   const [showCurriculumOffice, setShowCurriculumOffice] = useState(false);
   const [panelTick, setPanelTick] = useState(0);
+  /** Upgrade sub-tab: one child vs the whole class — alternatives, not steps. */
+  const [upgradeMode, setUpgradeMode] = useState<"single" | "class">("single");
+
+  // Someone holding only a Students function (director, 6 Oct 2026 — e.g.
+  // Birthday cards) sees only its tab.
+  const shownTabs = useMemo(
+    () => {
+      if (!masters) return STUDENT_TABS;
+      const own = new Set(visibleModuleTabs(STUDENT_TABS, session, masters, "students").map((t) => t.id));
+      // UDISE+ is Compliance work that lives on this screen.
+      return STUDENT_TABS.filter(
+        (t) => own.has(t.id) || (t.id === "udise" && canSeeModuleTab(session, masters, "compliance", "udise")),
+      );
+    },
+    [session, masters],
+  );
+  useEffect(() => {
+    if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === mainTab)) {
+      setMainTab(shownTabs[0]!.id as MainTab);
+    }
+  }, [shownTabs, mainTab]);
 
   useEffect(() => {
     const m = loadMasters();
@@ -1023,20 +1059,7 @@ export function StudentsWorkspace() {
         aria-label="Students sections"
         value={mainTab}
         onChange={(id) => setMainTabPersist(id as MainTab)}
-        items={[
-          { id: "dashboard", label: "Dashboard", tone: "navy" },
-          { id: "roster", label: "Overview", tone: "navy" },
-          { id: "register", label: "Register", tone: "navy" },
-          { id: "update", label: "Update", tone: "sky" },
-          { id: "duplicates", label: "Duplicates", tone: "coral" },
-          { id: "udise", label: "UDISE+", tone: "coral" },
-          { id: "doc_verify", label: "Doc verify", tone: "amber" },
-          { id: "siblings", label: "Siblings", tone: "violet" },
-          { id: "upgrade", label: "Upgrade", tone: "amber" },
-          { id: "reports", label: "Reports", tone: "green" },
-          { id: "tags", label: "Tags", tone: "slate" },
-          { id: "birthdays", label: "Birthdays", tone: "coral" },
-        ]}
+        items={shownTabs}
       />
 
       {/* Parents the school cannot reach on WhatsApp. Sits above every tab
@@ -1100,7 +1123,7 @@ export function StudentsWorkspace() {
       ) : null}
 
       {mainTab === "birthdays" ? (
-        <BirthdaysPanel canEdit={!!session && !!masters && hasPermission(session, masters, "students", "edit")} />
+        <BirthdaysPanel canEdit={!!session && !!masters && canWriteModuleTab(session, masters, "students", "birthdays")} />
       ) : null}
 
       {mainTab === "tags" ? (
@@ -1125,6 +1148,18 @@ export function StudentsWorkspace() {
 
       {mainTab === "upgrade" ? (
         <div className="space-y-6">
+          <ModuleTabs
+            size="md"
+            aria-label="Upgrade type"
+            value={upgradeMode}
+            onChange={(id) => setUpgradeMode(id as "single" | "class")}
+            items={[
+              { id: "single", label: "Single student", tone: "navy" },
+              { id: "class", label: "Whole class", tone: "teal" },
+            ]}
+          />
+          {/* Both stay mounted (hidden) so unsaved picks survive a switch. */}
+          <div className={upgradeMode === "single" ? "" : "hidden"}>
           <StudentUpgradePanel
             tick={panelTick}
             onChanged={(next) => {
@@ -1132,7 +1167,8 @@ export function StudentsWorkspace() {
               setPanelTick((t) => t + 1);
             }}
           />
-          <hr className="border-[rgba(32,48,80,0.1)]" />
+          </div>
+          <div className={upgradeMode === "class" ? "" : "hidden"}>
           <StudentPromotionPanel
             tick={panelTick}
             onChanged={(next) => {
@@ -1140,6 +1176,7 @@ export function StudentsWorkspace() {
               setPanelTick((t) => t + 1);
             }}
           />
+          </div>
         </div>
       ) : null}
 

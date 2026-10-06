@@ -10,6 +10,7 @@
 import { useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import {
   FIELD_CLASS,
   InvAlert,
@@ -35,6 +36,37 @@ const LOCATION_KINDS = [
   "office",
   "other",
 ] as const;
+
+type SetupStep = "categories" | "units" | "locations" | "settings";
+
+/**
+ * The lists an item needs come first (its category and unit), then where
+ * stock sits, then module settings — whose default location picks from the
+ * locations above. The lists are independent, so the order is advice only.
+ * All typed input lives in this component, so switching steps loses nothing.
+ */
+const SETUP_STEPS: StepDef<SetupStep>[] = [
+  {
+    id: "categories",
+    title: "Categories",
+    what: "Classify items; asset categories go to the asset register instead of being consumed on sale.",
+  },
+  {
+    id: "units",
+    title: "Units",
+    what: "Units of measurement — decimals decide how quantities show (0 for pieces, 3 for kg).",
+  },
+  {
+    id: "locations",
+    title: "Stock locations",
+    what: "Where stock physically sits — every movement names one.",
+  },
+  {
+    id: "settings",
+    title: "Module settings",
+    what: "PO approval threshold, default location and price list, and the GST, walk-in sale, negative stock and sales-on-account switches.",
+  },
+];
 
 export function MastersTab({
   boot,
@@ -88,6 +120,7 @@ export function MastersTab({
     if (ok) onChanged();
   }
 
+  const [step, setStep] = useState<SetupStep>("categories");
   const [threshold, setThreshold] = useState(
     paiseToInput(boot.settings.poApprovalThresholdPaise),
   );
@@ -110,8 +143,14 @@ export function MastersTab({
         <StatTile label="Price lists" value={boot.priceLists.length} />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <StepTabs
+        aria-label="Store setup steps"
+        steps={SETUP_STEPS}
+        value={step}
+        onChange={setStep}
+      >
         {/* Categories */}
+        {step === "categories" ? (
         <section className="space-y-2 rounded-xl border p-3">
           <h3 className="text-sm font-semibold">Categories</h3>
           <p className="text-xs text-muted-foreground">
@@ -164,8 +203,10 @@ export function MastersTab({
             </Button>
           </div>
         </section>
+        ) : null}
 
         {/* Units */}
+        {step === "units" ? (
         <section className="space-y-2 rounded-xl border p-3">
           <h3 className="text-sm font-semibold">Units of measurement</h3>
           <p className="text-xs text-muted-foreground">
@@ -219,8 +260,10 @@ export function MastersTab({
             </Button>
           </div>
         </section>
+        ) : null}
 
         {/* Locations */}
+        {step === "locations" ? (
         <section className="space-y-2 rounded-xl border p-3">
           <h3 className="text-sm font-semibold">Stock locations</h3>
           <p className="text-xs text-muted-foreground">
@@ -275,8 +318,9 @@ export function MastersTab({
             </Button>
           </div>
         </section>
-      </div>
+        ) : null}
 
+      {step === "settings" ? (
       <section className="space-y-3 rounded-xl border p-3">
         <h3 className="text-sm font-semibold">Module settings</h3>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -402,6 +446,8 @@ export function MastersTab({
           </div>
         </div>
       </section>
+      ) : null}
+      </StepTabs>
     </div>
   );
 }

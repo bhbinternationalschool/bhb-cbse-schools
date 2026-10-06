@@ -29,6 +29,7 @@ import {
 } from "@/lib/udiseCompliance";
 import type { SisStudent } from "@/lib/sis";
 import { UdisePenApaarImportPanel } from "@/components/students/UdisePenApaarImportPanel";
+import { UdiseRobotPanel } from "@/components/students/UdiseRobotPanel";
 import {
   UdiseStudentListModal,
   type UdiseListRow,
@@ -36,7 +37,7 @@ import {
 import type { ReportColumn } from "@/lib/reportExport";
 import { runSisReport } from "@/lib/sisReportCatalog";
 import { useDemoSession } from "@/components/shell/SessionContext";
-import { hasPermission } from "@/lib/rbac";
+import { hasFeaturePermission } from "@/lib/rbac";
 import { ComplianceFactsPanel } from "@/components/students/ComplianceFactsPanel";
 import { currentAcademicYearCode } from "@/lib/masters";
 import { RowActionMenu } from "@/components/ui/erp-grid";
@@ -525,6 +526,8 @@ export function UdiseComplianceWorkspace({
 
   return (
     <div className="mt-4 space-y-4">
+      <UdiseRobotPanel sis={sis} masters={masters} academicYearCode={ay} />
+
       <div className="rounded-xl border border-[rgba(180,35,24,0.25)] bg-[rgba(180,35,24,0.06)] px-4 py-3">
         <p className="text-sm font-semibold text-[#8b1a12]">
           High priority — UDISE+ compliance
@@ -1008,7 +1011,10 @@ export function UdiseComplianceWorkspace({
       </div>
 
       {view === "facts" ? (
-        <ComplianceFactsPanel canEdit={hasPermission(session, masters, "compliance", "edit")} />
+        // The Compliance grant, or Compliance → Compliance facts on its own.
+        <ComplianceFactsPanel
+          canEdit={hasFeaturePermission(session, masters, "compliance.facts", "edit")}
+        />
       ) : view === "unregistered" ? (
         <div className="space-y-3">
           <div className="rounded-xl border border-[rgba(138,90,16,0.35)] bg-[rgba(138,90,16,0.08)] px-4 py-3">

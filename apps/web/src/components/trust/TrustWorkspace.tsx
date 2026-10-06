@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Building2 } from "lucide-react";
 import {
   AllotmentsPanel,
@@ -12,6 +12,7 @@ import {
   WorksPanel,
 } from "@/components/trust/TrustPanels";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { hasPermission, visibleModuleTabs } from "@/lib/rbac";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
@@ -71,6 +72,16 @@ export function TrustWorkspace() {
 
   const actorName = session.fullName || "Trust user";
 
+  // Someone holding only some Trust functions sees only their tabs.
+  const shownTabs = useMemo(() => visibleModuleTabs(TABS, session, null, "trust"), [session]);
+  useEffect(() => {
+    if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
+      setTab(shownTabs[0]!.id as TrustTab);
+    }
+  }, [shownTabs, tab]);
+  // Paying labour or a bill posts to the accounts — the whole module's job.
+  const canPay = hasPermission(session, null, "trust", "edit");
+
   function flash(message: string) {
     setNotice(message);
     setError(null);
@@ -123,6 +134,7 @@ export function TrustWorkspace() {
       setNotice(null);
     },
     actorName,
+    canPay,
   };
 
   return (
@@ -133,7 +145,7 @@ export function TrustWorkspace() {
       error={error}
       notice={notice}
     >
-      <ModuleTabs items={TABS} value={tab} onChange={(id) => setTab(id as TrustTab)} />
+      <ModuleTabs items={shownTabs} value={tab} onChange={(id) => setTab(id as TrustTab)} />
 
       {tab === "dashboard" ? (
         <ModuleDashboardHost
