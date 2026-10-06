@@ -7,7 +7,7 @@
  */
 import assert from "node:assert/strict";
 import { authorizeMastersFeatureChange } from "./mastersChangeAuth";
-import { authorizeFeatureChange } from "./deskFeatureAuth";
+import { authorizeFeatureChange, isFeatureRefusalMessage } from "./deskFeatureAuth";
 import { RBAC_FEATURES, featuresForRoute } from "./rbacFeatures";
 import { RBAC_MODULES, canSeeModuleTab, canWriteModuleTab, visibleModuleTabs } from "./rbac";
 import {
@@ -202,6 +202,36 @@ const label = (id: string) => ({ c6: "Class 6", c7: "Class 7" })[id] ?? id;
   assert.ok(featuresForRoute("transport", "/api/transport/live-positions").some((f) => f.id === "transport.live"));
   assert.equal(featuresForRoute("transport", "/api/transport/live-positionsX").length, 0);
   assert.equal(featuresForRoute("fees", "/api/transport/live").length, 0);
+}
+
+/* ── Union stores keep rows a stale copy lacks; key order is not a change ── */
+{
+  const st = { "certificates/issues": [{ id: "c1", no: 1, kind: "TC" }, { id: "c2", no: 2, kind: "BON" }] };
+  const clerk = (f: string, a: string) =>
+    f === "certificates.register" && a !== "delete"
+      ? { allowed: true, ownClassesOnly: false }
+      : { allowed: false, ownClassesOnly: false };
+  const stale = { "certificates/issues": [{ kind: "TC", no: 1, id: "c1" }, { id: "c3", no: 3, kind: "CHR" }] };
+  const v = authorizeFeatureChange("certificates", st, stale, clerk, null);
+  assert.ok(v.ok, v.ok ? "" : v.reason);
+  assert.deepEqual(
+    (v.merged["certificates/issues"] as { id: string }[]).map((r) => r.id).sort(),
+    ["c1", "c2", "c3"],
+    "c2 kept, c3 added, c1 reordered keys is no edit",
+  );
+}
+
+/* ── Only this check's refusals are toasted, not every 403 ── */
+{
+  const st = { classSubjects: [link("l1", "c6", "eng")] };
+  const r = authorizeFeatureChange("masters", st, { classSubjects: [] }, (f, a) =>
+    f === "masters.class_subjects" && a === "create" ? { allowed: true, ownClassesOnly: false } : { allowed: false, ownClassesOnly: false },
+  null);
+  assert.ok(!r.ok && isFeatureRefusalMessage(r.reason));
+  const c = authorizeFeatureChange("masters", stored, { ...stored, classSubjects: [...stored.classSubjects, link("x", "c7", "sci")] }, teacher, own, label);
+  assert.ok(!c.ok && isFeatureRefusalMessage(c.reason));
+  assert.ok(!isFeatureRefusalMessage("Missing permission exams.edit"));
+  assert.ok(!isFeatureRefusalMessage("Only the office or principal can save the whole PTM desk."));
 }
 
 /* ── Catalogue hygiene: ids, modules, one owner per slice ── */

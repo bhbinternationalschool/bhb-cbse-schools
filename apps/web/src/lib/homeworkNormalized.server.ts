@@ -14,6 +14,7 @@ import type {
 } from "@/lib/homework";
 import { homeworkDualWriteDbEnabled } from "@/lib/homeworkDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { fetchAllPages } from "@/lib/supabase/pageAll";
 
 export type HomeworkDeskSyncMeta = {
   postCount: number;
@@ -445,6 +446,12 @@ async function pushTeacherHomework(
 export async function fetchHomeworkDeskFromDb(): Promise<{
   bundle: HomeworkDeskBundle;
   meta: HomeworkDeskSyncMeta | null;
+  /**
+   * false = a table could not be read; the bundle is NOT a confirmed empty
+   * desk. A save that merges onto this copy (a function holder's, see
+   * school-data/homework-desk) must write nothing then.
+   */
+  ok: boolean;
 }> {
   const ctx = await resolveCtx();
   const empty: HomeworkDeskBundle = {
@@ -454,37 +461,39 @@ export async function fetchHomeworkDeskFromDb(): Promise<{
     seen: [],
     settings: { examModeFreeze: false },
   };
-  if (!ctx) return { bundle: empty, meta: null };
+  if (!ctx) return { bundle: empty, meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
-  const [
-    { data: postRows },
-    { data: diaryRows },
-    { data: submissionRows },
-    { data: seenRows },
-    { data: settingsRow },
-    { data: metaRow },
-  ] = await Promise.all([
-    sb.from("homework_desk_posts").select("*").eq("tenant_id", tenantId),
-    sb.from("homework_desk_diary").select("*").eq("tenant_id", tenantId),
-    sb.from("homework_desk_submissions").select("*").eq("tenant_id", tenantId),
-    sb.from("homework_desk_seen").select("*").eq("tenant_id", tenantId),
-    sb
-      .from("homework_desk_settings")
-      .select("exam_mode_freeze")
-      .eq("tenant_id", tenantId)
-      .maybeSingle(),
-    sb.from("homework_desk_sync_meta").select(META_SELECT).eq("tenant_id", tenantId).maybeSingle(),
-  ]);
+  // Paged: PostgREST stops at 1,000 rows, and "seen" passes that early
+  // (one row per child per post). A short copy pushed back whole would
+  // prune every row past the first page.
+  const all = (table: string) =>
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from(table).select("*").eq("tenant_id", tenantId).order("id", { ascending: true }).range(from, to),
+    );
+  const [postRes, diaryRes, submissionRes, seenRes, settingsRes, { data: metaRow }] =
+    await Promise.all([
+      all("homework_desk_posts"),
+      all("homework_desk_diary"),
+      all("homework_desk_submissions"),
+      all("homework_desk_seen"),
+      sb
+        .from("homework_desk_settings")
+        .select("exam_mode_freeze")
+        .eq("tenant_id", tenantId)
+        .maybeSingle(),
+      sb.from("homework_desk_sync_meta").select(META_SELECT).eq("tenant_id", tenantId).maybeSingle(),
+    ]);
+  const ok = ![postRes, diaryRes, submissionRes, seenRes].some((r) => r.error) && !settingsRes.error;
+  const settingsRow = settingsRes.data;
 
   return {
+    ok,
     bundle: {
-      posts: (postRows ?? []).map((r) => rowToPost(r as Record<string, unknown>)),
-      diary: (diaryRows ?? []).map((r) => rowToDiary(r as Record<string, unknown>)),
-      submissions: (submissionRows ?? []).map((r) =>
-        rowToSubmission(r as Record<string, unknown>),
-      ),
-      seen: (seenRows ?? []).map((r) => rowToSeen(r as Record<string, unknown>)),
+      posts: postRes.rows.map((r) => rowToPost(r)),
+      diary: diaryRes.rows.map((r) => rowToDiary(r)),
+      submissions: submissionRes.rows.map((r) => rowToSubmission(r)),
+      seen: seenRes.rows.map((r) => rowToSeen(r)),
       settings: {
         examModeFreeze: !!(settingsRow as { exam_mode_freeze?: boolean } | null)
           ?.exam_mode_freeze,

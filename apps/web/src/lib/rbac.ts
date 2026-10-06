@@ -1756,10 +1756,38 @@ export function canAccessMastersTab(
 ): boolean {
   const tabModule = moduleForMastersTab(tab);
   if (hasPermission(session, masters, tabModule, action, rbac)) return true;
-  // A function of Masters (e.g. a teacher's Class subjects) opens its tab.
-  if (tabModule !== "masters" || !tab) return false;
-  return featuresForMastersTab(tab).some(
+  if (!tab) return false;
+  // A function of Masters (e.g. a teacher's Class subjects) opens its tab;
+  // the WhatsApp tabs open for functions of their own modules.
+  const fns = tabModule === "masters" ? featuresForMastersTab(tab) : featuresForTab(tabModule, tab);
+  return fns.some(
     (f) => featureAccess(session, masters, f.id, action, rbac).allowed,
+  );
+}
+
+/**
+ * Screens that show more than one module's tabs. A tab there opens for a
+ * function of any of these modules that lists it (e.g. Comms → WhatsApp
+ * for Notifications → Send WhatsApp; Students → UDISE+ for Compliance).
+ */
+const SCREEN_EXTRA_MODULES: Record<string, RbacModule[]> = {
+  "/comms": ["notices", "news", "gallery", "notifications", "wa_automation"],
+  "/students": ["compliance"],
+};
+
+/** Holds any action of a function of these modules (on `tab`, if named). */
+function holdsScreenFunction(
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  modules: RbacModule[],
+  tab: string | null,
+  rbac?: RbacState,
+): boolean {
+  const fns = modules.flatMap((m) => (tab ? featuresForTab(m, tab) : featuresForModule(m)));
+  return fns.some((f) =>
+    (["view", "create", "edit", "delete", "approve"] as RbacAction[]).some(
+      (a) => featureAccess(session, masters, f.id, a, rbac).allowed,
+    ),
   );
 }
 
@@ -1859,7 +1887,8 @@ export function canAccessHref(
     ) {
       return canAccessModuleHref(href);
     }
-    return false;
+    return holdsScreenFunction(session, masters, ["payroll", "staff_advances"], tab, rbac) &&
+      canAccessModuleHref(href);
   }
   const mod = moduleForHref(href);
   if (!mod) return canAccessModuleHref(href);
@@ -1869,14 +1898,8 @@ export function canAccessHref(
     // its page; its own tab when the link names one.
     const qs = href.includes("?") ? href.split("?")[1] : "";
     const tab = new URLSearchParams(qs).get("tab");
-    const fns = tab ? featuresForTab(mod, tab) : featuresForModule(mod);
-    const holds = fns.some(
-      (f) =>
-        (["view", "create", "edit", "delete"] as RbacAction[]).some(
-          (a) => featureAccess(session, masters, f.id, a, rbac).allowed,
-        ),
-    );
-    return holds && canAccessModuleHref(href);
+    const modules = [mod, ...(SCREEN_EXTRA_MODULES[path.replace(/\/$/, "")] ?? [])];
+    return holdsScreenFunction(session, masters, modules, tab, rbac) && canAccessModuleHref(href);
   }
   return canAccessModuleHref(href);
 }

@@ -11,6 +11,8 @@ import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import type { ApiAuthContext } from "@/lib/api/v1/auth";
 import type { RbacAction } from "@/lib/rbac";
 import { InvError } from "@/lib/inventory/db.server";
+import { functionWriteAllowed, pathCovers } from "@/lib/moneyFunctionScope";
+import { STORE_FUNCTION_WRITES } from "@/lib/rbacFeatureCatalog/money";
 
 export type InvHandlerCtx = {
   ctx: ApiAuthContext;
@@ -31,6 +33,28 @@ export async function invRoute(
 ): Promise<NextResponse> {
   const auth = await requireStaffPermission(request, "store", action);
   if (!auth.ok) return auth.response;
+  // A store FUNCTION (Counter, Purchase, …) opens these paths for reading;
+  // it writes only where its own job is. Without this the counter clerk,
+  // who must read the catalogue, could reprice it — or raise the approval
+  // threshold through the bootstrap path the whole screen loads from.
+  if (action !== "view" && !auth.viaMirrorSecret) {
+    let pathname = "";
+    try {
+      pathname = new URL(request.url).pathname;
+    } catch {
+      // No path, no function match: only the module grant passes below.
+    }
+    if (!functionWriteAllowed(auth.ctx, "store", action, STORE_FUNCTION_WRITES, pathname, pathCovers)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Your role's store functions do not cover this change — ask the office to give your role this.",
+          reason: "feature_forbidden",
+        },
+        { status: 403 },
+      );
+    }
+  }
 
   const session = auth.ctx.session;
   const actor = String(session.fullName || session.roleCode || "staff");

@@ -20,6 +20,11 @@ export type RbacFeatureDef = {
   classScoped?: boolean;
   /** The row field naming the class (default "classId"). */
   classKey?: string;
+  /**
+   * The store is merged by id on the server: a row missing from a push is a
+   * stale copy, never a deletion (and so needs no delete grant).
+   */
+  unionRows?: boolean;
   /** Tab ids of the module's screen this function opens. */
   tabs?: string[];
   /**

@@ -28,6 +28,8 @@ import { useInvBootstrap } from "@/lib/inventory/client";
 import { ensureMastersHydrated } from "@/lib/mastersPersistence";
 import { loadMasters } from "@/lib/masters";
 import { Button } from "@/components/ui/button";
+import { useDemoSession } from "@/components/shell/SessionContext";
+import { visibleModuleTabs } from "@/lib/rbac";
 
 type Tab =
   | "counter"
@@ -100,10 +102,24 @@ export function InventoryWorkspace() {
     };
   }, []);
 
+  // Someone holding only some Store functions (Counter, Purchase, …) sees
+  // only their tabs. The inventory routes enforce the same split, writes
+  // included (lib/inventory/route.server.ts).
+  const session = useDemoSession();
   const tabItems = useMemo(
-    () => TABS.map((t) => ({ id: t.id, label: t.label, tone: t.tone })),
-    [],
+    () =>
+      visibleModuleTabs(TABS, session, null, "store").map((t) => ({
+        id: t.id,
+        label: t.label,
+        tone: t.tone,
+      })),
+    [session],
   );
+  useEffect(() => {
+    if (tabItems.length > 0 && !tabItems.some((t) => t.id === tab)) {
+      setTab(tabItems[0]!.id as Tab);
+    }
+  }, [tabItems, tab]);
 
   return (
     <ErpWorkspaceShell

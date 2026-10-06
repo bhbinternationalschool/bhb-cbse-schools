@@ -58,6 +58,7 @@ import {
   resolveSessionStaff,
 } from "@/lib/staffResolve";
 import { loadIncrementState } from "@/lib/salaryIncrement";
+import { canSeeModuleTab } from "@/lib/rbac";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
@@ -189,6 +190,17 @@ export function PayrollWorkspace() {
     if (!masters) return false;
     return canViewStaffAdvancesDesk(session, masters);
   }, [masters, session]);
+
+  // Read-only payroll tabs a Payroll FUNCTION opens (Masters → Roles →
+  // "Payroll runs & payslips") for someone without the whole module. Runs,
+  // approvals, holds and increments write payroll and stay with the module.
+  const fnTabs = useMemo(() => {
+    if (allowed) return [] as PayTab[];
+    return (["payslips", "print", "reports"] as PayTab[]).filter((t) =>
+      canSeeModuleTab(session, masters, "payroll", t),
+    );
+  }, [allowed, session, masters]);
+  const seesTab = (t: PayTab) => allowed || fnTabs.includes(t);
 
   const advancesEdit = useMemo(() => {
     if (!masters) return false;
@@ -633,24 +645,40 @@ export function PayrollWorkspace() {
           { id: "mine", label: "My payslip", tone: "violet" },
           { id: "myAdvances", label: "My advances", tone: "teal" },
         ]
-      : advancesDesk
-        ? [
-            { id: "advances", label: "Staff advances", tone: "teal" },
-            { id: "myAdvances", label: "My advances", tone: "teal" },
-          ]
-        : [
-            { id: "mine", label: "My payslip", tone: "violet" },
-            { id: "myAdvances", label: "My advances", tone: "teal" },
-          ];
+      : [
+          ...(fnTabs.includes("payslips")
+            ? [{ id: "payslips" as const, label: "Payslips", tone: "amber" as const }]
+            : []),
+          ...(fnTabs.includes("print")
+            ? [{ id: "print" as const, label: "Print payslips", tone: "navy" as const }]
+            : []),
+          ...(fnTabs.includes("reports")
+            ? [{ id: "reports" as const, label: "Reports", tone: "slate" as const }]
+            : []),
+          ...(advancesDesk
+            ? [
+                { id: "advances" as const, label: "Staff advances", tone: "teal" as const },
+                { id: "myAdvances" as const, label: "My advances", tone: "teal" as const },
+              ]
+            : [
+                { id: "mine" as const, label: "My payslip", tone: "violet" as const },
+                { id: "myAdvances" as const, label: "My advances", tone: "teal" as const },
+              ]),
+        ];
 
   useEffect(() => {
     if (allowed) return;
+    if (fnTabs.includes(tab)) return;
+    if (fnTabs.length > 0 && tab === "dashboard") {
+      setTab(fnTabs[0]!);
+      return;
+    }
     if (advancesDesk && tab !== "advances" && tab !== "myAdvances") {
       setTab("advances");
       return;
     }
     if (!advancesDesk && tab !== "mine" && tab !== "myAdvances") setTab("mine");
-  }, [allowed, advancesDesk, tab]);
+  }, [allowed, advancesDesk, fnTabs, tab]);
 
   return (
     <ErpWorkspaceShell
@@ -891,7 +919,7 @@ export function PayrollWorkspace() {
         />
       ) : null}
 
-      {tab === "payslips" && allowed ? (
+      {tab === "payslips" && seesTab("payslips") ? (
         <PayslipsAdmin
           runs={runs.filter(
             (r) =>
@@ -906,11 +934,11 @@ export function PayrollWorkspace() {
         />
       ) : null}
 
-      {tab === "print" && allowed ? (
+      {tab === "print" && seesTab("print") ? (
         <PrintPayslipsPanel academicYearCode={ay} />
       ) : null}
 
-      {tab === "reports" && allowed ? (
+      {tab === "reports" && seesTab("reports") ? (
         <PayrollReportsPanel academicYearCode={ay} />
       ) : null}
 

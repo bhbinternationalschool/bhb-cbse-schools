@@ -49,6 +49,7 @@ import type { PtmBriefDraft } from "@/lib/ptmBriefAi";
 import { languageLabel } from "@/lib/householdPrefs";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { useModuleTabQuery } from "@/lib/useModuleTabQuery";
+import { visibleModuleTabs } from "@/lib/rbac";
 import {
   addPtmSlots,
   cancelPtmBooking,
@@ -324,10 +325,18 @@ export function PtmWorkspace() {
     if (teacherMode && tab === "dashboard") setTab("bookings");
   }, [teacherMode, tab, setTab]);
 
-  const tabItems = useMemo(
-    () => (teacherMode ? TAB_ITEMS.filter((t) => t.id !== "dashboard") : TAB_ITEMS),
-    [teacherMode],
-  );
+  // Someone holding only some PTM functions (Masters → Roles, e.g. Meeting
+  // slots) sees only their tabs.
+  const tabItems = useMemo(() => {
+    const base = teacherMode ? TAB_ITEMS.filter((t) => t.id !== "dashboard") : TAB_ITEMS;
+    return visibleModuleTabs(base, session, masters, "ptm");
+  }, [teacherMode, session, masters]);
+  useEffect(() => {
+    if (!masters) return;
+    if (tabItems.length > 0 && !tabItems.some((t) => t.id === tab)) {
+      setTab(tabItems[0]!.id as PtmTab);
+    }
+  }, [masters, tabItems, tab, setTab]);
 
   /** Every class, for naming an event's classes on its card. */
   const classNameById = useMemo(

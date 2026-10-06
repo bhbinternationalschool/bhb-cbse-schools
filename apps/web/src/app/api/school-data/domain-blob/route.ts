@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { cachedBlobJson, deskJsonResponse } from "@/lib/deskProbeCache.server";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
+import { deskFeatureGateFor } from "@/lib/deskFeatureGate.server";
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
 import type { DomainBlobTable } from "@/lib/domainBlobPersistence";
 import { domainBlobRbacModule } from "@/lib/domainBlobRbac";
@@ -70,7 +71,16 @@ export async function POST(req: Request) {
   }
   const rbacModule = domainBlobRbacModule(table)!;
   const auth = await requireStaffPermission(req, rbacModule, "edit");
-  if (!auth.ok) return auth.response;
+  if (!auth.ok) {
+    // A function holder's browser pushes the module's blob alongside its
+    // desk save. The desk tables are the truth and their save was merged
+    // slice by slice; the blob is a whole-module copy they may not write.
+    // Skip it quietly rather than report a failed save that did not fail.
+    if (auth.response.status === 403 && (await deskFeatureGateFor(req, rbacModule, "write"))) {
+      return NextResponse.json({ ok: true, skipped: true, reason: "function_only" });
+    }
+    return auth.response;
+  }
   if (SCHOOL_WIDE_ONLY_BLOBS.has(table) && !auth.viaMirrorSecret) {
     const scope = await staffSectionScope(auth.ctx).catch(() => null);
     if (!scope?.unrestricted) {

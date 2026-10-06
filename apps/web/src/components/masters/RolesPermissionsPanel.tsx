@@ -220,6 +220,17 @@ export function RolesPermissionsPanel() {
     );
   }
 
+  // Modules whose function rows are unfolded in the matrix.
+  const [openModules, setOpenModules] = useState<Set<string>>(() => new Set());
+  function toggleOpen(moduleId: string) {
+    setOpenModules((prev) => {
+      const next = new Set(prev);
+      if (next.has(moduleId)) next.delete(moduleId);
+      else next.add(moduleId);
+      return next;
+    });
+  }
+
   function toggleFeature(featureId: string, action: RbacAction, enabled: boolean) {
     if (!state || !selected) return;
     commit(
@@ -496,6 +507,25 @@ export function RolesPermissionsPanel() {
                           <tr>
                             <td className="px-2 py-1.5 font-medium text-[var(--brand-deep)]">
                               {m.label}
+                              {(() => {
+                                const fns = featuresForModule(m.id);
+                                if (fns.length === 0) return null;
+                                const held = fns.filter((f) =>
+                                  selected.featureGrants?.some((g) => g.feature === f.id && g.actions.length > 0),
+                                ).length;
+                                const open = openModules.has(m.id);
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleOpen(m.id)}
+                                    className="ml-2 rounded px-1.5 py-0.5 text-[10px] font-semibold text-[var(--muted)] hover:bg-[var(--surface-sunken)]"
+                                    aria-expanded={open}
+                                  >
+                                    {open ? "▾" : "▸"} {fns.length} functions
+                                    {held > 0 ? ` · ${held} given` : ""}
+                                  </button>
+                                );
+                              })()}
                             </td>
                             {RBAC_ACTIONS.map((a) => {
                               const on = roleHasAction(selected, m.id, a.id);
@@ -515,7 +545,7 @@ export function RolesPermissionsPanel() {
                           </tr>
                           {/* Functions inside the module, each grantable on
                               its own. A module tick covers every function. */}
-                          {featuresForModule(m.id).map((f) => (
+                          {(openModules.has(m.id) ? featuresForModule(m.id) : []).map((f) => (
                             <tr key={f.id} className="bg-[var(--surface-sunken)]/40">
                               <td
                                 className="py-1 pl-6 pr-2 text-[var(--foreground)]"

@@ -29,7 +29,7 @@ import {
   type HealthVisit,
   type HealthVisitReason,
 } from "@/lib/health";
-import { hasPermission } from "@/lib/rbac";
+import { canWriteModuleTab, visibleModuleTabs } from "@/lib/rbac";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 import { isRestrictedTeacher, useMyTeaching } from "@/components/staff/useMyTeaching";
 import { fetchForMySections, staffV1, studentsOfMySections } from "@/components/staff/staffV1";
@@ -178,9 +178,11 @@ export function HealthWorkspace() {
     return sis?.students.find((s) => s.id === id)?.fullName || "—";
   }
 
+  // The module grant, or the "Sick room & health records" function (which
+  // owns the whole health book, so it covers every tab here).
   const canEdit = useMemo(
-    () => (masters ? hasPermission(session, masters, "health", "edit") : false),
-    [session, masters],
+    () => (masters ? canWriteModuleTab(session, masters, "health", tab) : false),
+    [session, masters, tab],
   );
 
   /**
@@ -245,8 +247,11 @@ export function HealthWorkspace() {
     return studentsInSession(sis, currentAcademicYearCode(masters));
   }, [sis, masters, teacherMode, scopeUnknown, my]);
 
-  const tabs = teacherMode ? TABS.filter((t) => TEACHER_TABS.has(t.id as Tab)) : TABS;
-  const shownTab: Tab = teacherMode && !TEACHER_TABS.has(tab) ? "log" : tab;
+  const tabs = useMemo(() => {
+    const allowed = visibleModuleTabs(TABS, session, masters, "health");
+    return teacherMode ? allowed.filter((t) => TEACHER_TABS.has(t.id as Tab)) : allowed;
+  }, [session, masters, teacherMode]);
+  const shownTab: Tab = tabs.some((t) => t.id === tab) ? tab : ((tabs[0]?.id as Tab | undefined) ?? "log");
 
   // --- Log visit ---
   const [pickedStudent, setPickedStudent] = useState<SisStudent | null>(null);

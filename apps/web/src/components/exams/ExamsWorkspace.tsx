@@ -80,7 +80,7 @@ import {
   StudentAvatar,
   StudentNameLabel,
 } from "@/components/students/StudentAvatar";
-import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import {
   ErpTable,
@@ -114,7 +114,12 @@ import { RemarksPanel } from "@/components/exams/RemarksPanel";
 import { ItemScoresPanel } from "@/components/exams/ItemScoresPanel";
 import { AtRiskPanel } from "@/components/exams/AtRiskPanel";
 import { ExamReportsRunner } from "@/components/reports/ModuleReportRunners";
-import { hasPermission, inferRoleCodes } from "@/lib/rbac";
+import {
+  canWriteModuleTab,
+  hasPermission,
+  inferRoleCodes,
+  visibleModuleTabs,
+} from "@/lib/rbac";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type Tab =
@@ -507,6 +512,23 @@ const UNRESTRICTED_TEACHING: MyTeaching = {
   teaching: [],
 };
 
+const EXAM_TABS: ModuleTabItem[] = [
+  { id: "dashboard", label: "Dashboard", tone: "navy" },
+  { id: "marks", label: "Mark entry", tone: "sky" },
+  { id: "items", label: "Item scores", tone: "sky" },
+  { id: "atrisk", label: "At-risk", tone: "coral" },
+  { id: "remarks", label: "Remarks", tone: "teal" },
+  { id: "datesheet", label: "Date-sheet", tone: "violet" },
+  { id: "seating", label: "Seating", tone: "navy" },
+  { id: "invigilation", label: "Invigilation", tone: "coral" },
+  { id: "papers", label: "Question papers", tone: "rose" },
+  { id: "admitcards", label: "Admit cards", tone: "sky" },
+  { id: "reports", label: "Report cards", tone: "amber" },
+  { id: "results", label: "Results", tone: "green" },
+  { id: "result_reports", label: "Result reports", tone: "teal" },
+  { id: "setup", label: "Exams & policy", tone: "navy" },
+];
+
 export function ExamsWorkspace() {
   // Fee holds are server truth. Without this the gates below read an
   // unloaded snapshot and every child looks allowed.
@@ -529,6 +551,19 @@ export function ExamsWorkspace() {
   const [sis, setSis] = useState<SisState | null>(() =>
     typeof window !== "undefined" ? loadSis() : null,
   );
+
+  // Someone holding only some Exams functions (Masters → Roles, e.g. Mark
+  // entry or Date sheet) sees only their tabs.
+  const shownTabs = useMemo(
+    () => visibleModuleTabs(EXAM_TABS, session, masters, "exams"),
+    [session, masters],
+  );
+  useEffect(() => {
+    if (!masters) return;
+    if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
+      setTab(shownTabs[0]!.id as Tab);
+    }
+  }, [masters, shownTabs, tab]);
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
   const [examTermId, setExamTermId] = useState("");
@@ -1493,22 +1528,7 @@ export function ExamsWorkspace() {
         aria-label="Exams sections"
         value={tab}
         onChange={(id) => setTab(id as Tab)}
-        items={[
-          { id: "dashboard", label: "Dashboard", tone: "navy" },
-          { id: "marks", label: "Mark entry", tone: "sky" },
-          { id: "items", label: "Item scores", tone: "sky" },
-          { id: "atrisk", label: "At-risk", tone: "coral" },
-          { id: "remarks", label: "Remarks", tone: "teal" },
-          { id: "datesheet", label: "Date-sheet", tone: "violet" },
-          { id: "seating", label: "Seating", tone: "navy" },
-          { id: "invigilation", label: "Invigilation", tone: "coral" },
-          { id: "papers", label: "Question papers", tone: "rose" },
-          { id: "admitcards", label: "Admit cards", tone: "sky" },
-          { id: "reports", label: "Report cards", tone: "amber" },
-          { id: "results", label: "Results", tone: "green" },
-          { id: "result_reports", label: "Result reports", tone: "teal" },
-          { id: "setup", label: "Exams & policy", tone: "navy" },
-        ]}
+        items={shownTabs}
       />
 
       <DeskSyncBanner
@@ -1625,7 +1645,7 @@ export function ExamsWorkspace() {
           masters={masters}
           academicYearCode={ay}
           terms={terms}
-          canEdit={hasPermission(session, masters, "exams", "edit")}
+          canEdit={canWriteModuleTab(session, masters, "exams", "papers")}
           actorName={session.fullName || "Staff"}
           onError={setError}
           onNotice={(msg) => {
@@ -2628,7 +2648,7 @@ export function ExamsWorkspace() {
           subjects={subjects}
           classLabel={classLabel}
           masters={masters}
-          canEdit={!!masters && hasPermission(session, masters, "exams", "edit")}
+          canEdit={!!masters && canWriteModuleTab(session, masters, "exams", "items")}
           enteredBy={session.fullName}
           onSaved={refresh}
           onFlash={flash}
@@ -2662,7 +2682,7 @@ export function ExamsWorkspace() {
           roster={roster}
           subjects={subjects}
           policy={policy}
-          canEdit={!!masters && hasPermission(session, masters, "exams", "edit")}
+          canEdit={!!masters && canWriteModuleTab(session, masters, "exams", "remarks")}
           onSaved={refresh}
           onFlash={flash}
           onError={setError}

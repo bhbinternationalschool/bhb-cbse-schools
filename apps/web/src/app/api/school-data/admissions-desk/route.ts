@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
 import { cachedDeskJson, deskJsonResponse } from "@/lib/deskProbeCache.server";
 import { stripEmptyList } from "@/lib/wirePayload";
+import { SCHOOL_DATA_DESK_RBAC } from "@/lib/apiRouteAuth.server";
 import {
-  authorizeSchoolDataDesk,
-  SCHOOL_DATA_DESK_RBAC,
-} from "@/lib/apiRouteAuth.server";
+  deskReadGate,
+  deskWriteGate,
+  featurePushOutcome,
+  featureSavedResponse,
+  stripDeskForFeatures,
+  visibleSlices,
+  type FeatureGate,
+} from "@/lib/deskFeatureGate.server";
 import {
   normalizeAdmissionsState,
   type AdmissionsState,
@@ -16,6 +22,50 @@ import {
 } from "@/lib/admissionsNormalized.server";
 
 export const runtime = "nodejs";
+
+/**
+ * The number counters. No function owns them (lib/rbacFeatureCatalog/
+ * people.ts): whoever adds a lead, household, payment or beat must move its
+ * counter, or the next one reuses a number — and someone allowed only to
+ * ADD enquiries holds no "change" to edit a counter with. So a
+ * function-only save moves each counter forward to the pushed value and
+ * never back (a stale browser cannot rewind it).
+ */
+const SEQ_KEYS = [
+  "nextEnquirySeq",
+  "nextApplicationSeq",
+  "nextHouseholdSeq",
+  "nextRegPaySeq",
+  "nextBeatSeq",
+] as const;
+
+/**
+ * A function holder's read: their slices, the rest empty. Not served from
+ * the shared desk cache — that copy (and its ETag) is the whole desk.
+ */
+async function featureDeskResponse(gate: FeatureGate): Promise<NextResponse> {
+  const { state, ok } = await fetchAdmissionDeskFromDb();
+  if (!ok) {
+    return NextResponse.json(
+      { ok: false, error: "Admissions desk fetch failed — tenant/db unavailable" },
+      { status: 503 },
+    );
+  }
+  const stripped = stripDeskForFeatures("admissions", state, gate);
+  return NextResponse.json(
+    {
+      ok: true,
+      state: stripped,
+      leadCount: stripped.leads?.length ?? 0,
+      householdCount: stripped.households?.length ?? 0,
+      functionOnly: true,
+      // No revision (and no sync meta carrying one): this copy is partial
+      // and must never be a base.
+      updatedAt: "",
+    },
+    { headers: { "Cache-Control": "private, no-store" } },
+  );
+}
 
 /** GET — pull admissions desk from normalized tables */
 /**
@@ -32,8 +82,10 @@ function leanWireEnabled(): boolean {
 }
 
 export async function GET(req: Request) {
-  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["admissions-desk"], "GET");
-  if (!auth.ok) return auth.response
+  // The whole desk, or — holding Admissions functions only (e.g. Field
+  // survey) — their slices.
+  const gate = await deskReadGate(req, SCHOOL_DATA_DESK_RBAC["admissions-desk"]);
+  if (gate.mode === "deny") return gate.response;
 
   // ?leadId=... returns ONE complete lead, lead_json included.
   //
@@ -43,6 +95,14 @@ export async function GET(req: Request) {
   // arrive looking like "no such lead".
   const leadId = new URL(req.url).searchParams.get("leadId")?.trim();
   if (leadId) {
+    // One whole lead is the leads list's business: a function holder sees
+    // it only through a function that shows the leads.
+    if (gate.mode === "feature" && !visibleSlices("admissions", gate).has("leads")) {
+      return NextResponse.json(
+        { ok: false, error: "Your role does not include admission leads." },
+        { status: 403 },
+      );
+    }
     try {
       const { fetchAdmissionLeadDetail } = await import(
         "@/lib/admissionsNormalized.server"
@@ -65,6 +125,8 @@ export async function GET(req: Request) {
       );
     }
   }
+
+  if (gate.mode === "feature") return featureDeskResponse(gate);
 
   try {
     const result = await cachedDeskJson({
@@ -110,8 +172,8 @@ export async function GET(req: Request) {
 
 /** POST — push full admissions desk snapshot */
 export async function POST(req: Request) {
-  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["admissions-desk"], "POST");
-  if (!auth.ok) return auth.response
+  const gate = await deskWriteGate(req, SCHOOL_DATA_DESK_RBAC["admissions-desk"]);
+  if (gate.mode === "deny") return gate.response;
   if (!admissionsDualWriteDbEnabled()) {
     return NextResponse.json({
       ok: true,
@@ -130,7 +192,38 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Missing state" }, { status: 400 });
   }
 
-  const normalized = normalizeAdmissionsState(body.state);
+  let normalized = normalizeAdmissionsState(body.state);
+
+  // Function-only writers (director, 6 Oct 2026 — e.g. Admissions → Field
+  // survey): merged onto the stored desk, their functions' slices only, row
+  // by row — never the body as sent. Both sides go through the same
+  // normaliser so an unchanged lead compares equal; keys the browser did not
+  // send stay out (normalising would invent them — empty lists, seeded
+  // beats — and an invented empty list reads as "removed everything").
+  // pushAdmissionDeskToDb keeps every guard it has for everyone: stub leads
+  // are restored from lead_json, paid / enrolled leads are never pruned.
+  if (gate.mode === "feature") {
+    const stored = await fetchAdmissionDeskFromDb();
+    if (!stored.ok) {
+      return NextResponse.json(
+        { ok: false, error: "Could not read the saved admissions desk — nothing was written. Try again." },
+        { status: 503 },
+      );
+    }
+    const sent = body.state as Record<string, unknown>;
+    const incoming: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(normalized)) if (k in sent) incoming[k] = v;
+    const merged = featurePushOutcome(gate, "admissions", stored.state, incoming);
+    if (!merged.ok) return merged.response;
+    if (!merged.changed) return featureSavedResponse(false);
+    const next = merged.state as unknown as AdmissionsState;
+    for (const k of SEQ_KEYS) {
+      const pushed = Number(sent[k]);
+      if (Number.isFinite(pushed) && pushed > next[k]) next[k] = Math.round(pushed);
+    }
+    normalized = normalizeAdmissionsState(next);
+  }
+
   const result = await pushAdmissionDeskToDb(normalized);
   if (!result.ok) {
     return NextResponse.json(
@@ -139,6 +232,7 @@ export async function POST(req: Request) {
     );
   }
 
+  if (gate.mode === "feature") return featureSavedResponse(true);
   return NextResponse.json({
     ok: true,
     leadCount: normalized.leads.length,

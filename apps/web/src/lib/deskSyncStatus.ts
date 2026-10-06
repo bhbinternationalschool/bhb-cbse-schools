@@ -29,6 +29,7 @@
  */
 
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { isFeatureRefusalMessage } from "@/lib/deskFeatureAuth";
 
 const STORAGE_KEY = "bhb_desk_sync_status_v1";
 
@@ -123,10 +124,11 @@ export function recordDeskSyncFailure(
   );
   if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
     window.dispatchEvent(new CustomEvent("bhb-desk-sync-failed", { detail: next }));
-    // A 403 with a reason is a person told what they may not do — e.g. a
-    // function holder (Masters → Roles → functions) saving outside their
-    // functions or classes. Say it where they are, not only in a banner.
-    if (detail.status === 403 && detail.error) {
+    // A function holder (Masters → Roles → functions) saving outside their
+    // functions or classes is told so where they are, not only in a banner.
+    // Other 403s stay quiet here: many are background pushes refused by
+    // design, and each desk reports its own.
+    if (detail.status === 403 && isFeatureRefusalMessage(detail.error)) {
       const message = `Your last change was NOT saved. ${detail.error}`;
       void import("@/components/shell/Toast")
         .then(({ pushToast }) => pushToast({ kind: "error", message, durationMs: 0 }))

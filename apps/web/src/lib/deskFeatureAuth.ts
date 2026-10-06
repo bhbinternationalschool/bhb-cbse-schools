@@ -33,6 +33,21 @@ export type DeskChangeVerdict =
 
 type Row = { id?: unknown } & Record<string, unknown>;
 
+/**
+ * Is this server message one of this check's refusals? The browser toasts
+ * these — a person told what their role may not do — but not every other
+ * 403, many of which are background pushes refused by design (a teacher's
+ * browser pushing exam setup on every marks save).
+ */
+export function isFeatureRefusalMessage(msg: string | null | undefined): boolean {
+  return (
+    !!msg &&
+    /(ask the office to give your role this\.|only for the classes you teach\.|could not be read — nothing was saved\.)$/.test(
+      msg.trim(),
+    )
+  );
+}
+
 function rowsById(v: unknown): Map<string, Row> | null {
   if (!Array.isArray(v)) return null;
   const m = new Map<string, Row>();
@@ -45,8 +60,23 @@ function rowsById(v: unknown): Map<string, Row> | null {
   return m;
 }
 
+/** Key order does not make a row different: the database and the browser
+ * build the same row with keys in different orders. */
+function stable(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(stable);
+  if (v && typeof v === "object") {
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(v as object).sort()) {
+      const x = (v as Record<string, unknown>)[k];
+      if (x !== undefined) out[k] = stable(x);
+    }
+    return out;
+  }
+  return v;
+}
+
 function same(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  return JSON.stringify(stable(a ?? null)) === JSON.stringify(stable(b ?? null));
 }
 
 const ACTION_WORD: Partial<Record<RbacAction, string>> = {
@@ -157,10 +187,22 @@ export function authorizeFeatureChange(
             if (why) return { ok: false, reason: why };
           }
         }
-        for (const [id, prev] of oldRows) {
-          if (newRows.has(id)) continue;
-          const why = deny("delete", String(prev[ck] ?? ""));
-          if (why) return { ok: false, reason: why };
+        if (f.unionRows) {
+          // The server merges this store by id: a row missing from the push
+          // is a stale copy, not a deletion. Keep the stored row.
+          const kept = [...((before as Row[] | undefined) ?? [])].filter(
+            (r) => !newRows!.has(String(r.id)),
+          );
+          if (kept.length > 0) {
+            effective = [...(effective as Row[]), ...kept];
+            if (same(before, effective)) continue;
+          }
+        } else {
+          for (const [id, prev] of oldRows) {
+            if (newRows.has(id)) continue;
+            const why = deny("delete", String(prev[ck] ?? ""));
+            if (why) return { ok: false, reason: why };
+          }
         }
       } else {
         // A settings object (school timing, profile, …): one edit. A

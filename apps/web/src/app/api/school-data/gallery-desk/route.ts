@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
+import { SCHOOL_DATA_DESK_RBAC } from "@/lib/apiRouteAuth.server";
 import {
-  authorizeSchoolDataDesk,
-  SCHOOL_DATA_DESK_RBAC,
-} from "@/lib/apiRouteAuth.server";
+  deskReadGate,
+  deskWriteGate,
+  featurePushOutcome,
+  featureSavedResponse,
+  stripDeskForFeatures,
+} from "@/lib/deskFeatureGate.server";
 import { galleryDualWriteDbEnabled } from "@/lib/galleryDbConfig";
 import type { GalleryDeskBundle } from "@/lib/schoolCommsNormalized.server";
 import {
+  canonicalCommsDesk,
   fetchGalleryDeskFromDb,
   pushGalleryDeskToDb,
 } from "@/lib/schoolCommsNormalized.server";
@@ -13,15 +18,17 @@ import {
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["gallery-desk"], "GET");
-  if (!auth.ok) return auth.response
-  const { bundle, meta, ok } = await fetchGalleryDeskFromDb();
+  // The whole desk, or — holding Gallery functions only — their slices.
+  const gate = await deskReadGate(req, SCHOOL_DATA_DESK_RBAC["gallery-desk"]);
+  if (gate.mode === "deny") return gate.response;
+  const { bundle: full, meta, ok } = await fetchGalleryDeskFromDb();
   if (!ok) {
     return NextResponse.json(
       { ok: false, error: "Gallery desk fetch failed — tenant/db unavailable" },
       { status: 503 },
     );
   }
+  const bundle = gate.mode === "feature" ? stripDeskForFeatures("gallery", full, gate) : full;
   return NextResponse.json({
     ok: true,
     albums: bundle.albums,
@@ -34,8 +41,8 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["gallery-desk"], "POST");
-  if (!auth.ok) return auth.response
+  const gate = await deskWriteGate(req, SCHOOL_DATA_DESK_RBAC["gallery-desk"]);
+  if (gate.mode === "deny") return gate.response;
   if (!galleryDualWriteDbEnabled()) {
     return NextResponse.json({
       ok: true,
@@ -51,6 +58,30 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  // Function-only writers (Gallery → Albums & photos): merged onto the
+  // stored desk, row by row — never the body as sent.
+  if (gate.mode === "feature") {
+    const stored = await fetchGalleryDeskFromDb();
+    if (!stored.ok) {
+      return NextResponse.json(
+        { ok: false, error: "Could not read the saved gallery — nothing was written. Try again." },
+        { status: 503 },
+      );
+    }
+    const merged = featurePushOutcome(
+      gate,
+      "gallery",
+      canonicalCommsDesk(stored.bundle),
+      canonicalCommsDesk({
+        albums: Array.isArray(body.albums) ? body.albums : [],
+        photos: Array.isArray(body.photos) ? body.photos : [],
+      }),
+    );
+    if (!merged.ok) return merged.response;
+    if (!merged.changed) return featureSavedResponse(false);
+    body = merged.state as unknown as GalleryDeskBundle;
+  }
+
   const result = await pushGalleryDeskToDb({
     albums: Array.isArray(body.albums) ? body.albums : [],
     photos: Array.isArray(body.photos) ? body.photos : [],
@@ -62,6 +93,7 @@ export async function POST(req: Request) {
     );
   }
 
+  if (gate.mode === "feature") return featureSavedResponse(true);
   return NextResponse.json({
     ok: true,
     albumCount: body.albums?.length ?? 0,
