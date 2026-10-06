@@ -32,6 +32,7 @@ import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 import { AiReportsPanel } from "@/components/complaints/AiReportsPanel";
 import { TeacherComplaintsPanel } from "@/components/complaints/TeacherComplaintsPanel";
 import { useMyTeaching } from "@/components/staff/useMyTeaching";
+import { canWriteModuleTab, visibleModuleTabs } from "@/lib/rbac";
 
 type Tab = "all" | "mine" | "ai";
 
@@ -276,6 +277,22 @@ function OfficeComplaintsWorkspace() {
 
   const rows = tab === "all" ? allRows : myRows;
 
+  // Someone holding only some Complaints functions sees only their tabs:
+  // the desk (whole book) or the AI reports queue.
+  const shownTabs = useMemo(
+    () => visibleModuleTabs(TABS, session, masters, "complaints"),
+    [session, masters],
+  );
+  useEffect(() => {
+    if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
+      setTab(shownTabs[0]!.id as Tab);
+    }
+  }, [shownTabs, tab]);
+  // Ticket changes save the whole complaints book (edit); AI reports close
+  // through their own route. Until masters load, the session decides alone.
+  const locked =
+    readOnly || (masters !== null && !canWriteModuleTab(session, masters, "complaints", tab));
+
   return (
     <ErpWorkspaceShell
       title="Complaints / grievance"
@@ -284,10 +301,10 @@ function OfficeComplaintsWorkspace() {
       notice={notice}
       error={error}
     >
-      <ModuleTabs value={tab} onChange={(id) => setTab(id as Tab)} items={TABS} />
+      <ModuleTabs value={tab} onChange={(id) => setTab(id as Tab)} items={shownTabs} />
 
       <div className="mt-5 space-y-4">
-        {tab === "ai" ? <AiReportsPanel readOnly={readOnly} /> : null}
+        {tab === "ai" ? <AiReportsPanel readOnly={locked} /> : null}
 
         {tab === "all" ? (
           <div className="flex flex-wrap items-end gap-3">
@@ -332,7 +349,7 @@ function OfficeComplaintsWorkspace() {
                 ticket={t}
                 masters={masters}
                 sis={sis}
-                readOnly={readOnly}
+                readOnly={locked}
                 onAssign={onAssign}
                 onStatus={onStatus}
                 onResolve={onResolve}

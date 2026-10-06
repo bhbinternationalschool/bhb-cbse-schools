@@ -4,6 +4,14 @@ import {
   authorizeSchoolDataDesk,
   SCHOOL_DATA_DESK_RBAC,
 } from "@/lib/apiRouteAuth.server";
+import {
+  deskFeatureGateFor,
+  deskReadGate,
+  featurePushOutcome,
+  featureSavedResponse,
+  stripDeskForFeatures,
+  type FeatureGate,
+} from "@/lib/deskFeatureGate.server";
 import type { StudentLeaveState } from "@/lib/studentLeave";
 import { studentLeaveDualWriteDbEnabled } from "@/lib/studentLeaveDbConfig";
 import {
@@ -15,9 +23,11 @@ export const runtime = "nodejs";
 
 /** GET — pull student leave desk from normalized tables */
 export async function GET(req: Request) {
-  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["student-leave-desk"], "GET");
-  if (!auth.ok) return auth.response
-  const { bundle, meta, ok } = await fetchStudentLeaveDeskFromDb();
+  // The whole desk, or — holding Student leave functions only — their slices.
+  const gate = await deskReadGate(req, SCHOOL_DATA_DESK_RBAC["student-leave-desk"]);
+  if (gate.mode === "deny") return gate.response;
+  const { bundle: full, meta, ok } = await fetchStudentLeaveDeskFromDb();
+  const bundle = gate.mode === "feature" ? stripDeskForFeatures("student_leave", full, gate) : full;
   if (!ok) {
     return NextResponse.json(
       { ok: false, error: "Failed to fetch student leave desk" },
@@ -38,14 +48,23 @@ type StudentLeaveDeskPostBody = Pick<StudentLeaveState, "requests">;
 /** POST — push full student leave desk snapshot */
 export async function POST(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["student-leave-desk"], "POST");
-  if (!auth.ok) return auth.response
+  // Without the module: a function holder's save, or refused.
+  let gate: FeatureGate | null = null;
+  if (!auth.ok) {
+    if (auth.response.status !== 403) return auth.response;
+    gate = await deskFeatureGateFor(req, "student_leave", "write");
+    if (!gate) return auth.response;
+  }
   // This push replaces the whole school's leave desk (rows it does not
   // carry are pruned). "student_leave.edit" alone let a teacher's browser
   // send it — a stale copy could undo other classes' decisions. Teachers
   // decide one request at a time through /api/v1/staff/student-leave/decide
   // (2026-09-29); this route is the office's.
-  if (!auth.viaMirrorSecret) {
-    const scope = await staffSectionScope(auth.ctx).catch(() => null);
+  // A function holder is held to it too: the function says what may change,
+  // not that a class teacher's browser may push the school's desk.
+  const scopeCtx = gate ? gate.ctx : auth.ok && !auth.viaMirrorSecret ? auth.ctx : null;
+  if (scopeCtx) {
+    const scope = await staffSectionScope(scopeCtx).catch(() => null);
     if (!scope?.unrestricted) {
       return NextResponse.json(
         {
@@ -73,6 +92,21 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  // Function holders: merged onto the stored desk, request by request.
+  if (gate) {
+    const stored = await fetchStudentLeaveDeskFromDb();
+    if (!stored.ok) {
+      return NextResponse.json(
+        { ok: false, error: "Could not read the saved leave desk — nothing was written. Try again." },
+        { status: 503 },
+      );
+    }
+    const merged = featurePushOutcome(gate, "student_leave", stored.bundle, body);
+    if (!merged.ok) return merged.response;
+    if (!merged.changed) return featureSavedResponse(false);
+    body = merged.state as unknown as StudentLeaveDeskPostBody;
+  }
+
   const result = await pushStudentLeaveDeskToDb({
     version: 1,
     requests: Array.isArray(body.requests) ? body.requests : [],
@@ -84,6 +118,7 @@ export async function POST(req: Request) {
     );
   }
 
+  if (gate) return featureSavedResponse(true);
   return NextResponse.json({
     ok: true,
     requestCount: body.requests?.length ?? 0,

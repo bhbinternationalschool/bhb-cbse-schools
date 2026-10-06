@@ -41,6 +41,7 @@ import { TabsContent, WorkspaceTabs, type WorkspaceTabItem } from "@/components/
 import { Textarea } from "@/components/ui/textarea";
 import { DeskListActions } from "@/components/ui/desk-list-actions";
 import { cn } from "@/lib/utils";
+import { visibleModuleTabs } from "@/lib/rbac";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
 import { loadSis, type SisState } from "@/lib/sis";
 import { loadFees, type FeesState } from "@/lib/fees";
@@ -106,6 +107,18 @@ export function EventsWorkspace() {
   ]);
 
   const [masters, setMasters] = useState<MastersState | null>(null);
+
+  // Someone holding only some Events functions (Masters → Roles) sees only
+  // their tabs; the dashboard belongs to the whole module.
+  const shownTabs = useMemo(
+    () => visibleModuleTabs(TAB_ITEMS, session, masters, "events"),
+    [session, masters],
+  );
+  useEffect(() => {
+    if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
+      setTab(shownTabs[0]!.id as EventsTab);
+    }
+  }, [shownTabs, tab, setTab]);
   const [sis, setSis] = useState<SisState | null>(null);
   const [fees, setFees] = useState<FeesState | null>(null);
   const [examsState, setExamsState] = useState<ExamsState | null>(null);
@@ -384,7 +397,7 @@ export function EventsWorkspace() {
       <WorkspaceTabs
         value={tab}
         onValueChange={(value) => setTab(value as EventsTab)}
-        items={TAB_ITEMS}
+        items={shownTabs}
         aria-label="Events sections"
       >
         <TabsContent value="dashboard">

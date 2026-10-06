@@ -54,13 +54,23 @@ import { listSubstitutionsForDate } from "@/lib/timetableSubstitution";
 import { SubstitutionPanel } from "@/components/timetable/SubstitutionPanel";
 import { FreePeriodsPanel } from "@/components/timetable/FreePeriodsPanel";
 import { useDemoSession } from "@/components/shell/SessionContext";
-import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
+import { StepChainGuide, type StepDef } from "@/components/ui/StepTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { TimetableReportsRunner } from "@/components/reports/ModuleReportRunners";
 import { resolveSessionStaff } from "@/lib/staffResolve";
-import { hasPermission } from "@/lib/rbac";
+import { canWriteModuleTab, visibleModuleTabs } from "@/lib/rbac";
+
+/** Building a timetable, in order: the day's shape, the rules, a draft, the fixes, publish. */
+const TIMETABLE_STEPS: StepDef<TtTab>[] = [
+  { id: "setup", title: "Setup", what: "Working days and the bell — periods and their times — for each class group." },
+  { id: "rules", title: "Subject rules", what: "Periods per week, double periods and which teacher takes which subject in each class." },
+  { id: "auto", title: "Auto-assign (AI)", what: "Let the system draft the whole timetable from the setup and rules." },
+  { id: "class", title: "By class", what: "Check and adjust each class's week by hand." },
+  { id: "publish", title: "Publish", what: "Publish the timetable so teachers, students and parents see it." },
+];
 
 type TtTab =
   | "dashboard"
@@ -73,6 +83,19 @@ type TtTab =
   | "subs"
   | "publish"
   | "reports";
+
+const TIMETABLE_TABS: ModuleTabItem[] = [
+  { id: "dashboard", label: "Dashboard", tone: "navy" },
+  { id: "setup", label: "Setup", tone: "slate" },
+  { id: "class", label: "By class", tone: "navy" },
+  { id: "rules", label: "Subject rules", tone: "violet" },
+  { id: "auto", label: "Auto-assign (AI)", tone: "violet" },
+  { id: "teacher", label: "By teacher", tone: "teal" },
+  { id: "free_periods", label: "Free periods", tone: "sky" },
+  { id: "subs", label: "Substitutes", tone: "rose" },
+  { id: "publish", label: "Publish", tone: "amber" },
+  { id: "reports", label: "Reports", tone: "sky" },
+];
 
 export function TimetableWorkspace() {
   const session = useDemoSession();
@@ -163,10 +186,24 @@ export function TimetableWorkspace() {
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as TtTab);
   }, []);
 
+  // The module's edit, or the Timetable function behind this tab (Masters →
+  // Roles, e.g. Substitutions). The server decides per slice what stands.
   const canEdit = useMemo(() => {
     if (!masters) return false;
-    return hasPermission(session, masters, "timetable", "edit");
-  }, [masters, session, tick]);
+    return canWriteModuleTab(session, masters, "timetable", tab);
+  }, [masters, session, tick, tab]);
+
+  // Someone holding only some Timetable functions sees only their tabs.
+  const shownTabs = useMemo(
+    () => visibleModuleTabs(TIMETABLE_TABS, session, masters, "timetable"),
+    [session, masters],
+  );
+  useEffect(() => {
+    if (!masters) return;
+    if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
+      setTab(shownTabs[0]!.id as TtTab);
+    }
+  }, [masters, shownTabs, tab]);
 
   const classOptions = useMemo(() => {
     if (!masters) return [];
@@ -589,18 +626,12 @@ export function TimetableWorkspace() {
         aria-label="Timetable"
         value={tab}
         onChange={(id) => setTab(id as TtTab)}
-        items={[
-          { id: "dashboard", label: "Dashboard", tone: "navy" },
-          { id: "setup", label: "Setup", tone: "slate" },
-          { id: "class", label: "By class", tone: "navy" },
-          { id: "rules", label: "Subject rules", tone: "violet" },
-          { id: "auto", label: "Auto-assign (AI)", tone: "violet" },
-          { id: "teacher", label: "By teacher", tone: "teal" },
-          { id: "free_periods", label: "Free periods", tone: "sky" },
-          { id: "subs", label: "Substitutes", tone: "rose" },
-          { id: "publish", label: "Publish", tone: "amber" },
-          { id: "reports", label: "Reports", tone: "sky" },
-        ]}
+        items={shownTabs}
+      />
+      <StepChainGuide
+        chains={[{ label: "Timetable", steps: TIMETABLE_STEPS }]}
+        value={tab}
+        onChange={setTab}
       />
 
       {masters && !canEdit ? (

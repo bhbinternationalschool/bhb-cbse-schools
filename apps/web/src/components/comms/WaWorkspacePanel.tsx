@@ -1,6 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useDemoSession } from "@/components/shell/SessionContext";
+import { loadMasters } from "@/lib/masters";
+import { canSeeModuleTab, hasPermission, loadRbac, type RbacModule } from "@/lib/rbac";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ClassChannelsPanel } from "@/components/comms/ClassChannelsPanel";
 import { HouseholdMessageLogPanel } from "@/components/comms/HouseholdMessageLogPanel";
@@ -52,6 +55,23 @@ const TABS: ModuleTabItem[] = [
 
 const IDS = new Set(TABS.map((t) => t.id));
 
+/**
+ * Whose grant each section answers to on the server: sending and the
+ * office relay are Notifications routes, delivery / numbers / cost are WA
+ * automation routes, and the inbox, class groups and household log sit
+ * behind the WhatsApp staff check (Notices and friends).
+ */
+const SECTION_MODULE: Record<WaWorkspaceTab, RbacModule> = {
+  send: "notifications",
+  chats: "notices",
+  classes: "notices",
+  delivered: "wa_automation",
+  numbers: "wa_automation",
+  cost: "wa_automation",
+  relay: "notifications",
+  log: "notices",
+};
+
 /** A tab name from a URL, or the default. Unknown values never throw. */
 export function waWorkspaceTabFrom(raw: string | null | undefined): WaWorkspaceTab {
   const v = (raw || "").trim();
@@ -67,7 +87,29 @@ export function WaWorkspacePanel({
   by: string;
   initialTab?: WaWorkspaceTab;
 }) {
+  const session = useDemoSession();
   const [tab, setTab] = useState<WaWorkspaceTab>(initialTab);
+
+  // Holding Notices, every section shows, as it always has. Holding only
+  // some WhatsApp functions (Masters → Roles), only their sections — each
+  // section's server route accepts exactly those functions.
+  const [shownTabs, setShownTabs] = useState<ModuleTabItem[]>(TABS);
+  useEffect(() => {
+    const masters = loadMasters();
+    const rbac = loadRbac();
+    setShownTabs(
+      hasPermission(session, masters, "notices", "view", rbac)
+        ? TABS
+        : TABS.filter((t) =>
+            canSeeModuleTab(session, masters, SECTION_MODULE[t.id as WaWorkspaceTab], t.id, rbac),
+          ),
+    );
+  }, [session]);
+  useEffect(() => {
+    if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
+      setTab(shownTabs[0]!.id as WaWorkspaceTab);
+    }
+  }, [shownTabs, tab]);
 
   const hint = useMemo(() => {
     switch (tab) {
@@ -100,7 +142,7 @@ export function WaWorkspacePanel({
       </div>
 
       <ModuleTabs
-        items={TABS}
+        items={shownTabs}
         value={tab}
         onChange={(id) => setTab(id as WaWorkspaceTab)}
         aria-label="WhatsApp sections"

@@ -42,6 +42,7 @@ import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost"
 import { ErpTableShell } from "@/components/ui/erp-roster";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import { CertificatesReportsRunner } from "@/components/reports/ModuleReportRunners";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { StudentHitsFilterExport } from "@/components/reports/StudentHitsFilterExport";
@@ -69,12 +70,43 @@ function todayIso() {
 
 type Tab = "dashboard" | "desk" | "reports";
 
+type CertStep = "student" | "type" | "details" | "draft" | "issue";
+
+const CERT_STEPS: StepDef<CertStep>[] = [
+  {
+    id: "student",
+    title: "Student",
+    what: "Find the student by name, admission no. or mobile (or class / section), and check PEN and APAAR ID.",
+  },
+  {
+    id: "type",
+    title: "Certificate type",
+    what: "Pick the certificate, see the next certificate no., and set the issue date and conduct.",
+  },
+  {
+    id: "details",
+    title: "Details",
+    what: "Fields only this certificate needs — TC register details, fees-paid period, or a note on UIDAI's Aadhaar form.",
+  },
+  {
+    id: "draft",
+    title: "Draft (AI)",
+    what: "Optional: let AI draft the certificate text, then edit it before issue. Not used for UIDAI's form.",
+  },
+  {
+    id: "issue",
+    title: "Preview & issue",
+    what: "Add remarks, check open dues and holds, then Issue & print — the issued certificate opens in the preview beside Recent issues.",
+  },
+];
+
 export function CertificatesWorkspace() {
   // Fee holds are server truth. Without this the gates below read an
   // unloaded snapshot and every child looks allowed.
   const holdDecisions = useHoldDecisions();
   const session = useDemoSession();
   const [tab, setTab] = useState<Tab>("desk");
+  const [certStep, setCertStep] = useState<CertStep>("student");
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [sis, setSis] = useState<SisState | null>(null);
   const [issues, setIssues] = useState<CertificateIssue[]>([]);
@@ -278,7 +310,8 @@ export function CertificatesWorkspace() {
 
   async function onGenerateCertificateAi() {
     if (!student) {
-      setError("Pick a student first");
+      setCertStep("student");
+      setError("Pick a student first — step 1 · Student");
       return;
     }
     setAiLoading(true);
@@ -341,7 +374,8 @@ export function CertificatesWorkspace() {
 
   function onIssue() {
     if (!student) {
-      setError("Pick a student first");
+      setCertStep("student");
+      setError("Pick a student first — step 1 · Student");
       return;
     }
     const mastersNow = masters ?? loadMasters();
@@ -399,7 +433,19 @@ export function CertificatesWorkspace() {
           : undefined,
     });
     if (!result.ok) {
-      setError(result.error);
+      // TC / fees-paid field errors belong to step 3; say so and go there.
+      if (
+        (kind === "tc" || kind === "fees_paid") &&
+        !(eligibility?.blockers ?? []).includes(result.error)
+      ) {
+        setCertStep("details");
+        setError(`${result.error} — see step 3 · Details`);
+      } else if (result.error === "Student not found") {
+        setCertStep("student");
+        setError(`${result.error} — see step 1 · Student`);
+      } else {
+        setError(result.error);
+      }
       return;
     }
     flash(
@@ -478,6 +524,16 @@ export function CertificatesWorkspace() {
               Issue certificate
             </h2>
 
+            {/* Every step stays mounted (inactive ones only hidden), so a
+                half-filled form survives moving between steps. */}
+            <StepTabs
+              aria-label="Issue certificate steps"
+              steps={CERT_STEPS}
+              value={certStep}
+              onChange={setCertStep}
+              className="mt-3"
+            >
+            <div className={certStep === "student" ? "" : "hidden"}>
             <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,0.7fr)_minmax(0,0.7fr)]">
               <label className="block text-sm">
                 <span className="mb-1 block text-[11px] text-[var(--muted)]">
@@ -653,6 +709,9 @@ export function CertificatesWorkspace() {
               </p>
             ) : null}
 
+            </div>
+
+            <div className={certStep === "type" ? "" : "hidden"}>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <label className="block text-sm sm:col-span-2">
                 <span className="mb-1 block text-[11px] text-[var(--muted)]">
@@ -704,6 +763,14 @@ export function CertificatesWorkspace() {
               </label>
             </div>
 
+            </div>
+
+            <div className={certStep === "details" ? "" : "hidden"}>
+            {kind !== "fees_paid" && kind !== "tc" && !isUidaiFormKind(kind) ? (
+              <p className="mt-3 text-[11px] text-[var(--muted)]">
+                No extra details for this certificate — go on to the next step.
+              </p>
+            ) : null}
             {kind === "fees_paid" ? (
               <div className="mt-3 space-y-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] p-3">
                 <p className="text-[11px] font-semibold text-[var(--brand-deep)]">
@@ -1095,6 +1162,14 @@ export function CertificatesWorkspace() {
               </div>
             ) : null}
 
+            </div>
+
+            <div className={certStep === "draft" ? "" : "hidden"}>
+            {isUidaiFormKind(kind) ? (
+              <p className="mt-3 text-[11px] text-[var(--muted)]">
+                UIDAI&apos;s form prints as is — there is no AI draft for it.
+              </p>
+            ) : null}
             <div
               className={`mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-3 ${isUidaiFormKind(kind) ? "hidden" : ""}`}
             >
@@ -1160,6 +1235,9 @@ export function CertificatesWorkspace() {
               ) : null}
             </div>
 
+            </div>
+
+            <div className={certStep === "issue" ? "" : "hidden"}>
             <label className="mt-3 block text-sm">
               <span className="mb-1 block text-[11px] text-[var(--muted)]">
                 Remarks / purpose (optional)
@@ -1227,6 +1305,8 @@ export function CertificatesWorkspace() {
             >
               Issue & print
             </button>
+            </div>
+            </StepTabs>
           </div>
         </div>
 

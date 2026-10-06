@@ -8,6 +8,7 @@ import { ApiError } from "@/lib/api/v1/errors";
 import { assertSectionScope } from "@/lib/api/v1/staffScope";
 import { auditArrayDiff } from "@/lib/auditDeskDiff.server";
 import { writeAudit } from "@/lib/audit.server";
+import { deskFeatureGateFor, type FeatureGate } from "@/lib/deskFeatureGate.server";
 import {
   flattenAbsences,
   flattenCoScholastic,
@@ -71,7 +72,20 @@ export async function POST(req: Request) {
 }
 
 async function saveSheet(req: Request) {
-  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["exams-desk"], "POST");
+  let auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["exams-desk"], "POST");
+  // Without the Exams module, Exams → Mark entry (lib/rbacFeatureCatalog/
+  // academics.ts) saves a sheet too. Everything below still applies to it:
+  // the section must be one the login teaches, the lock, the version.
+  // Whether the sheet is new (create) or not (edit) is checked once it is read.
+  let marksGate: FeatureGate | null = null;
+  if (!auth.ok && auth.response.status === 403) {
+    const gate = await deskFeatureGateFor(req, "exams", "write");
+    const fn = (a: "create" | "edit") => gate?.access("exams.marks", a).allowed ?? false;
+    if (gate && (fn("create") || fn("edit"))) {
+      auth = { ok: true, ctx: gate.ctx, viaMirrorSecret: false };
+      marksGate = gate;
+    }
+  }
   if (!auth.ok) return auth.response;
   if (!examsDualWriteDbEnabled()) {
     // Not "ok, skipped": the browser would record a success for marks the
@@ -117,6 +131,14 @@ async function saveSheet(req: Request) {
 
   const existing = await fetchExamSheetFromDb(sheet.id);
   const expected = body.expectedUpdatedAt ?? null;
+  if (marksGate && !marksGate.access("exams.marks", existing ? "edit" : "create").allowed) {
+    return bad(
+      403,
+      existing
+        ? "You may not change mark sheets — ask the office to give your role this."
+        : "You may not start a new mark sheet — ask the office to give your role this.",
+    );
+  }
 
   let next: MarkSheet = {
     id: sheet.id,
