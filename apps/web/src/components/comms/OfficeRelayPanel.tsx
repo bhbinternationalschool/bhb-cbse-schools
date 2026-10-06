@@ -363,7 +363,7 @@ export function OfficeRelayPanel({ readOnly }: { readOnly: boolean }) {
           <p className="mt-3 text-sm text-muted-foreground">Nothing handed to the office in this period.</p>
         ) : (
           <ErpTableShell className="mt-3" exportAs="office-relay-record">
-            <ErpTableShell><ErpTable minWidth="min-w-[900px]">
+            <div className="overflow-x-auto"><ErpTable minWidth="min-w-[900px]">
               <ErpTableHead>
                 <tr>
                   <th className="px-2 py-2 text-left">When</th>
@@ -436,7 +436,7 @@ export function OfficeRelayPanel({ readOnly }: { readOnly: boolean }) {
                   </Fragment>
                 ))}
               </ErpTableBody>
-            </ErpTable></ErpTableShell>
+            </ErpTable></div>
           </ErpTableShell>
         )}
       </ErpPanel>

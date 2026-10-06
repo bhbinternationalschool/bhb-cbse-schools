@@ -377,7 +377,7 @@ export function DefaulterHoldPanel() {
         ) : (
           <>
             <ErpTableShell density="compact">
-              <ErpTableShell><ErpTable minWidth="min-w-[640px]">
+              <div className="overflow-x-auto"><ErpTable minWidth="min-w-[640px]">
                 <ErpTableHead>
                   <tr>
                     <th className="px-2 py-2 text-left">Service</th>
@@ -467,7 +467,7 @@ export function DefaulterHoldPanel() {
                     );
                   })}
                 </ErpTableBody>
-              </ErpTable></ErpTableShell>
+              </ErpTable></div>
             </ErpTableShell>
 
             <p className="mt-3 text-xs text-muted-foreground">
@@ -587,7 +587,7 @@ export function DefaulterHoldPanel() {
             ) : null}
 
             <ErpTableShell className="mt-3" exportAs="defaulter-round">
-              <ErpTableShell><ErpTable minWidth="min-w-[640px]">
+              <div className="overflow-x-auto"><ErpTable minWidth="min-w-[640px]">
                 <ErpTableHead>
                   <tr>
                     {isDraft ? (
@@ -663,7 +663,7 @@ export function DefaulterHoldPanel() {
                     </tr>
                   ))}
                 </ErpTableBody>
-              </ErpTable></ErpTableShell>
+              </ErpTable></div>
             </ErpTableShell>
 
             {isDraft ? (
@@ -731,7 +731,7 @@ export function DefaulterHoldPanel() {
               />
             </label>
             <ErpTableShell density="compact" exportAs="withheld-now">
-              <ErpTableShell><ErpTable minWidth="min-w-[640px]">
+              <div className="overflow-x-auto"><ErpTable minWidth="min-w-[640px]">
                 <ErpTableHead>
                   <tr>
                     <th className="w-8 px-2 py-2" />
@@ -771,7 +771,7 @@ export function DefaulterHoldPanel() {
                     </tr>
                   ))}
                 </ErpTableBody>
-              </ErpTable></ErpTableShell>
+              </ErpTable></div>
             </ErpTableShell>
           </>
         )}

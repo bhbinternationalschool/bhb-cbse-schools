@@ -309,6 +309,7 @@ export function ItemAnalysis(props: {
       ) : (
         <div className="grid gap-3 lg:grid-cols-[1.4fr_1fr]">
           <ErpTableShell exportAs="item_analysis" exportTitle="Item analysis">
+          <div className="overflow-x-auto">
           <ErpTable className="text-xs">
             <ErpTableHead>
               <tr>
@@ -343,6 +344,7 @@ export function ItemAnalysis(props: {
               ))}
             </ErpTableBody>
           </ErpTable>
+          </div>
           </ErpTableShell>
 
           <div className="rounded-lg bg-[var(--surface-sunken)] p-2 text-xs">

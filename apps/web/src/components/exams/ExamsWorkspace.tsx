@@ -2592,6 +2592,7 @@ export function ExamsWorkspace() {
                     </span>
                   </h3>
               <ErpTableShell>
+                <div className="overflow-x-auto">
                 <ErpTable minWidth="min-w-full" className="text-xs sm:text-sm">
                   <ErpTableHead>
                     <tr>
@@ -2651,6 +2652,7 @@ export function ExamsWorkspace() {
                       : null}
                   </ErpTableBody>
                 </ErpTable>
+                </div>
               </ErpTableShell>
                 </>
               ) : null}
@@ -2664,6 +2666,7 @@ export function ExamsWorkspace() {
                     </span>
                   </h3>
                   <ErpTableShell>
+                    <div className="overflow-x-auto">
                     <ErpTable minWidth="min-w-full" className="text-xs sm:text-sm">
                       <ErpTableHead>
                         <tr>
@@ -2699,6 +2702,7 @@ export function ExamsWorkspace() {
                           : null}
                       </ErpTableBody>
                     </ErpTable>
+                    </div>
                   </ErpTableShell>
                 </>
               ) : null}
@@ -2931,6 +2935,7 @@ export function ExamsWorkspace() {
               </div>
 
               <ErpTableShell className="print-hide">
+                <div className="overflow-x-auto">
                 <ErpTable minWidth="min-w-full" className="text-xs sm:text-sm">
                   <ErpTableHead>
                     <tr>
@@ -3042,6 +3047,7 @@ export function ExamsWorkspace() {
                     })}
                   </ErpTableBody>
                 </ErpTable>
+                </div>
               </ErpTableShell>
 
               <ClassResultSheetView sheet={classResult.sheet} />

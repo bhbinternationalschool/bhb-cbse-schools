@@ -209,6 +209,7 @@ export function NucleusProgressPanel({ academicYearCode }: { academicYearCode: s
 
           {snapshot.summary.worst.length > 0 ? (
             <ErpTableShell density="compact">
+              <div className="overflow-x-auto">
               <ErpTable minWidth="min-w-[520px]">
                 <ErpTableHead>
                   <tr>
@@ -237,6 +238,7 @@ export function NucleusProgressPanel({ academicYearCode }: { academicYearCode: s
                   ))}
                 </ErpTableBody>
               </ErpTable>
+              </div>
             </ErpTableShell>
           ) : null}
 
@@ -258,6 +260,7 @@ export function NucleusProgressPanel({ academicYearCode }: { academicYearCode: s
 
         {assessments && assessments.summary.gaps.length > 0 ? (
           <ErpTableShell className="mt-3" density="compact">
+            <div className="overflow-x-auto">
             <ErpTable minWidth="min-w-[520px]">
               <ErpTableHead>
                 <tr>
@@ -282,6 +285,7 @@ export function NucleusProgressPanel({ academicYearCode }: { academicYearCode: s
                 ))}
               </ErpTableBody>
             </ErpTable>
+            </div>
           </ErpTableShell>
         ) : null}
 

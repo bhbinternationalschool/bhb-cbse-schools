@@ -502,7 +502,7 @@ export function ExamSeatingPanel({ academicYearCode, masters, terms }: Props) {
 
             {plan.tallies.length > 0 ? (
               <div className="mt-4 overflow-x-auto">
-                <ErpTableShell><ErpTable minWidth="min-w-[640px]">
+                <ErpTableShell><div className="overflow-x-auto"><ErpTable minWidth="min-w-[640px]">
                   <ErpTableHead>
                     <tr>
                       {["Class", "Group", "Children", "Seated", "Rooms"].map((h) => (
@@ -537,7 +537,7 @@ export function ExamSeatingPanel({ academicYearCode, masters, terms }: Props) {
                       </tr>
                     ))}
                   </ErpTableBody>
-                </ErpTable></ErpTableShell>
+                </ErpTable></div></ErpTableShell>
               </div>
             ) : null}
 
@@ -553,7 +553,7 @@ export function ExamSeatingPanel({ academicYearCode, masters, terms }: Props) {
                   </span>
                 </h3>
                 <div className="mt-2 overflow-x-auto">
-                  <ErpTableShell><ErpTable minWidth="min-w-[640px]">
+                  <ErpTableShell><div className="overflow-x-auto"><ErpTable minWidth="min-w-[640px]">
                     <ErpTableHead>
                       <tr>
                         <th className="border border-[var(--border)] bg-[var(--surface-sunken)] p-2">
@@ -592,7 +592,7 @@ export function ExamSeatingPanel({ academicYearCode, masters, terms }: Props) {
                         </tr>
                       ))}
                     </ErpTableBody>
-                  </ErpTable></ErpTableShell>
+                  </ErpTable></div></ErpTableShell>
                 </div>
               </div>
             ))}

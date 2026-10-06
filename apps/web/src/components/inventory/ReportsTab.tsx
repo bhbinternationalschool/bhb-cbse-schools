@@ -318,6 +318,7 @@ function RepeatPurchases() {
         </p>
       ) : (
         <ErpTableShell exportAs="store_dues_by_student" exportTitle="Store dues by student">
+          <div className="overflow-x-auto">
           <ErpTable minWidth="min-w-full">
             <ErpTableHead>
               <tr>
@@ -369,6 +370,7 @@ function RepeatPurchases() {
               })}
             </ErpTableBody>
           </ErpTable>
+          </div>
         </ErpTableShell>
       )}
       <p className="rounded-lg bg-muted/50 px-3 py-2 text-[11px] text-muted-foreground">

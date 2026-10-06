@@ -385,6 +385,7 @@ export function ItemScoresPanel(props: {
         </p>
       ) : (
         <ErpTableShell exportAs="item_scores" exportTitle="Item scores">
+          <div className="overflow-x-auto">
           <ErpTable>
             <ErpTableHead>
               <tr>
@@ -459,6 +460,7 @@ export function ItemScoresPanel(props: {
               </tr>
             </ErpTableBody>
           </ErpTable>
+          </div>
         </ErpTableShell>
       )}
 

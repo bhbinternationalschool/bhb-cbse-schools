@@ -713,6 +713,7 @@ export function StaffAgreementPanel({
       ) : null}
 
       <ErpTableShell exportAs="staff_agreements" exportTitle="Staff agreements">
+        <div className="overflow-x-auto">
         <ErpTable>
           <ErpTableHead>
             <tr>
@@ -883,6 +884,7 @@ export function StaffAgreementPanel({
             ) : null}
           </ErpTableBody>
         </ErpTable>
+        </div>
       </ErpTableShell>
 
       {editingId && editingAgreement?.status === "draft" && canEdit ? (
