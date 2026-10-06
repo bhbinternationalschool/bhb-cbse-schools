@@ -38,7 +38,7 @@ import {
 } from "@/lib/salarySetup";
 import { canManagePayroll } from "@/lib/staffResolve";
 import { useDemoSession } from "@/components/shell/SessionContext";
-import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { StepTabs } from "@/components/ui/StepTabs";
 import {
   ErpTable,
   ErpTableBody,
@@ -137,16 +137,18 @@ export function SalarySetupPanel() {
       {notice ? (
         <p className="text-sm font-medium text-[var(--brand-deep)]">{notice}</p>
       ) : null}
-      <ModuleTabs
+      {/* Already in the order it is built: a structure is made of heads,
+          a staff member is assigned a structure, an increment changes it. */}
+      <StepTabs
         aria-label="Salary setup"
         value={tab}
-        onChange={(id) => setTab(id as SalTab)}
-        items={[
-          { id: "settings", label: "Pay cycle", tone: "navy" },
-          { id: "heads", label: "Heads", tone: "teal" },
-          { id: "structures", label: "Structures", tone: "amber" },
-          { id: "assign", label: "Assign staff", tone: "violet" },
-          { id: "increment", label: "Increment", tone: "coral" },
+        onChange={setTab}
+        steps={[
+          { id: "settings", title: "Pay cycle", what: "When salary is paid and how the month is counted — the base for every run." },
+          { id: "heads", title: "Heads", what: "The earnings and deductions a payslip can carry — basic, DA, HRA, PF, ESIC and the rest." },
+          { id: "structures", title: "Structures", what: "Salary templates built from the heads, for each kind of post." },
+          { id: "assign", title: "Assign staff", what: "Give each staff member a structure and their own amounts." },
+          { id: "increment", title: "Increment", what: "Raise salaries — school-wide policy or one person — from a chosen month." },
         ]}
       />
       {tab === "settings" ? (

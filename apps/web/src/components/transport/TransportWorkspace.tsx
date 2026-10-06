@@ -46,6 +46,7 @@ import {
 } from "@/lib/transportStartMonth";
 import { TransportPlannerPanel } from "@/components/transport/TransportPlannerPanel";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
+import { StepChainGuide, type StepDef } from "@/components/ui/StepTabs";
 import { TransportRequestsPanel } from "@/components/transport/TransportRequestsPanel";
 import { ErpTableShell } from "@/components/ui/erp-roster";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
@@ -120,6 +121,19 @@ type TransportTab =
   | "live"
   | "fleetDashboard"
   | "reports";
+
+/**
+ * Setting transport up, in order: the vehicles, the routes they run, where
+ * each child boards, then who rides which bus. The daily tabs stay first in
+ * the bar; this guide shows only on the setup tabs.
+ */
+const TRANSPORT_SETUP_STEPS: StepDef<TransportTab>[] = [
+  { id: "fleet", title: "Fleet", what: "The school's vehicles — registration, seats, driver and attendant, documents." },
+  { id: "routes", title: "Routes", what: "Each route with its stops, timed runs (shifts) and the year's transport fee policy." },
+  { id: "planner", title: "Planner", what: "Ask families where the child waits, audit boarding points, and place children on routes." },
+  { id: "riders", title: "Riders", what: "Who rides: assign each child to a route and stop (and the fee follows)." },
+  { id: "rosters", title: "Riders by bus", what: "Check each bus's list of children before it runs." },
+];
 
 const TABS: ModuleTabItem[] = [
   { id: "dashboard", label: "Dashboard", tone: "navy" },
@@ -610,6 +624,11 @@ export function TransportWorkspace() {
         onChange={(id) => setTab(id as TransportTab)}
         aria-label="Transport workspace"
         size="md"
+      />
+      <StepChainGuide
+        chains={[{ label: "Transport setup", steps: TRANSPORT_SETUP_STEPS }]}
+        value={tab}
+        onChange={setTab}
       />
 
       {!state ? (

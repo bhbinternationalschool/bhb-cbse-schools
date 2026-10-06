@@ -118,3 +118,38 @@ export function StepTabs<T extends string>({
     </div>
   );
 }
+
+export type StepChain<T extends string> = { label: string; steps: StepDef<T>[] };
+
+/**
+ * A module whose existing top-level tabs hide one or more ordered chains
+ * (Masters: fee setup, academic setup; Payroll: the monthly run). Shows the
+ * guide for the chain the current tab belongs to — using only the tabs this
+ * login can see, so Next never leads somewhere hidden — and nothing on tabs
+ * outside every chain.
+ */
+export function StepChainGuide<T extends string>({
+  chains,
+  value,
+  onChange,
+  visible,
+  className = "mt-4",
+}: {
+  chains: StepChain<T>[];
+  value: T;
+  onChange: (id: T) => void;
+  /** Tab ids this login can open; omit when every tab is visible. */
+  visible?: Iterable<string>;
+  className?: string;
+}) {
+  const can = visible ? new Set(visible) : null;
+  for (const chain of chains) {
+    const mine = can ? chain.steps.filter((st) => can.has(st.id)) : chain.steps;
+    if (mine.length > 1 && mine.some((st) => st.id === value)) {
+      return (
+        <StepGuide className={className} label={chain.label} steps={mine} value={value} onChange={onChange} />
+      );
+    }
+  }
+  return null;
+}

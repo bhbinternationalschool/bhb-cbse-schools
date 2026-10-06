@@ -72,7 +72,7 @@ import {
   MastersWorkCard,
 } from "@/components/masters/MastersLayout";
 import { ModuleTabGroups, type ModuleTabGroup } from "@/components/ui/ModuleTabs";
-import { StepGuide, type StepDef } from "@/components/ui/StepTabs";
+import { StepChainGuide, type StepDef } from "@/components/ui/StepTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
@@ -340,23 +340,15 @@ export function MastersWorkspace() {
         groups={visibleTabGroups}
       />
 
-      {(() => {
-        // Only the tabs this login may open: Next never leads to a tab the
-        // role cannot see.
-        const visible = new Set(visibleTabGroups.flatMap((g) => g.tabs.map((t) => t.id)));
-        for (const [label, steps] of [
-          ["Fee setup", FEE_SETUP_STEPS],
-          ["Academic setup", ACADEMIC_STEPS],
-        ] as const) {
-          const mine = steps.filter((st) => visible.has(st.id));
-          if (mine.length > 1 && mine.some((st) => st.id === tab)) {
-            return (
-              <StepGuide className="mt-4" label={label} steps={mine} value={tab} onChange={setTab} />
-            );
-          }
-        }
-        return null;
-      })()}
+      <StepChainGuide
+        chains={[
+          { label: "Fee setup", steps: FEE_SETUP_STEPS },
+          { label: "Academic setup", steps: ACADEMIC_STEPS },
+        ]}
+        value={tab}
+        onChange={setTab}
+        visible={visibleTabGroups.flatMap((g) => g.tabs.map((t) => t.id))}
+      />
 
       <div className="mt-5">
         {tab === "overview" ? (

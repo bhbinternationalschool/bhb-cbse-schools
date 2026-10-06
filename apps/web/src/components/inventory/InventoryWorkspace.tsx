@@ -15,6 +15,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Boxes } from "lucide-react";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { StepChainGuide, type StepDef } from "@/components/ui/StepTabs";
 import { CatalogueTab } from "@/components/inventory/CatalogueTab";
 import { CounterTab } from "@/components/inventory/CounterTab";
 import { ReportsTab } from "@/components/inventory/ReportsTab";
@@ -55,6 +56,19 @@ const TABS: {
 ];
 
 const TAB_IDS = TABS.map((t) => t.id);
+
+/**
+ * Setting the store up, in order: categories, units and stock locations;
+ * the vendors; the items; class kits made of items; then buying stock.
+ * Counter stays the first tab — it is the daily one.
+ */
+const STORE_SETUP_STEPS: StepDef<Tab>[] = [
+  { id: "masters", title: "Setup", what: "Item categories, units and stock locations — what every item is filed under." },
+  { id: "vendors", title: "Vendors", what: "The suppliers the store buys from." },
+  { id: "catalogue", title: "Catalogue", what: "Every item the store sells, with its price and tax." },
+  { id: "kits", title: "Kits by class", what: "The books-and-uniform kit each class buys, made of catalogue items." },
+  { id: "purchase", title: "Purchase", what: "Order from vendors, receive the goods into stock, and record the bills." },
+];
 
 export function InventoryWorkspace() {
   const [tab, setTab] = useState<Tab>("counter");
@@ -116,6 +130,11 @@ export function InventoryWorkspace() {
         value={tab}
         onChange={(id) => setTab(id as Tab)}
         aria-label="Store sections"
+      />
+      <StepChainGuide
+        chains={[{ label: "Store setup", steps: STORE_SETUP_STEPS }]}
+        value={tab}
+        onChange={setTab}
       />
 
       {boot.loading ? (
