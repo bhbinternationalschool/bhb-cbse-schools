@@ -16,6 +16,7 @@ import { assertSessionWritable } from "@/lib/sessionWriteGuard";
 import { isProtectedSuperAdminEmail } from "@/lib/superAdmin";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
+import { RBAC_FEATURES, featuresForMastersTab, findFeature } from "@/lib/rbacFeatures";
 
 export type RbacModule =
   | "home"
@@ -86,6 +87,15 @@ export type PermissionGrant = {
   actions: RbacAction[];
 };
 
+/**
+ * One FUNCTION inside a module (lib/rbacFeatures.ts), e.g.
+ * "masters.class_subjects" — granted without the rest of the module.
+ */
+export type FeatureGrant = {
+  feature: string;
+  actions: RbacAction[];
+};
+
 export type RoleScope = {
   campusIds: string[];
   classIds: string[];
@@ -101,6 +111,8 @@ export type RbacRole = {
   /** Create/edit requests need another role to approve */
   makerChecker: boolean;
   permissions: PermissionGrant[];
+  /** Function-level grants inside modules the role does not hold whole. */
+  featureGrants?: FeatureGrant[];
   note: string;
 };
 
@@ -636,6 +648,13 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("website", ["view"]),
         grant("notifications", ["view"]),
       ],
+      // Director, 6 Oct 2026: teachers add / change / remove the subjects of
+      // the classes they teach (Masters → Subjects), and see the subject
+      // list — nothing else in Masters. Limited to their own classes.
+      featureGrants: [
+        { feature: "masters.class_subjects", actions: ["view", "create", "edit", "delete"] },
+        { feature: "masters.subjects", actions: ["view"] },
+      ],
     },
     {
       id: "role_parent",
@@ -731,11 +750,25 @@ function normalizeGrant(g: Partial<PermissionGrant> | null | undefined): Permiss
   return { module: mod.id, actions };
 }
 
+function normalizeFeatureGrant(
+  g: Partial<FeatureGrant> | null | undefined,
+): FeatureGrant | null {
+  const def = g?.feature ? findFeature(g.feature) : null;
+  if (!def) return null;
+  const actions = (Array.isArray(g!.actions) ? g!.actions : [])
+    .filter((a): a is RbacAction => def.actions.includes(a as RbacAction))
+    .filter((a, i, arr) => arr.indexOf(a) === i);
+  return actions.length ? { feature: def.id, actions } : null;
+}
+
 function normalizeRole(r: Partial<RbacRole> | null | undefined): RbacRole | null {
   if (!r?.id || !r.code) return null;
   const permissions = (Array.isArray(r.permissions) ? r.permissions : [])
     .map(normalizeGrant)
     .filter((g): g is PermissionGrant => !!g);
+  const featureGrants = (Array.isArray(r.featureGrants) ? r.featureGrants : [])
+    .map(normalizeFeatureGrant)
+    .filter((g): g is FeatureGrant => !!g);
   return {
     id: r.id,
     code: String(r.code).trim().toLowerCase(),
@@ -744,6 +777,7 @@ function normalizeRole(r: Partial<RbacRole> | null | undefined): RbacRole | null
     isActive: r.isActive !== false,
     makerChecker: !!r.makerChecker,
     permissions,
+    featureGrants,
     note: String(r.note || ""),
   };
 }
@@ -793,7 +827,22 @@ export function normalizeRbacState(
         mergedPerms.push({ module: g.module, actions: [...g.actions] });
       }
     }
-    roles[idx] = { ...existing, permissions: mergedPerms };
+    // Function grants arrived 6 Oct 2026. A stored built-in that has never
+    // carried the field takes the defaults once (the Teacher role's class
+    // subjects); once the office has saved the role — even with every box
+    // cleared — what they saved stands.
+    const rawRole = rolesRaw.find(
+      (r) => r && String(r.code || "").trim().toLowerCase() === b.code && r.isBuiltIn,
+    );
+    const neverHadFeatures = !rawRole || !Array.isArray(rawRole.featureGrants);
+    roles[idx] = {
+      ...existing,
+      permissions: mergedPerms,
+      featureGrants:
+        neverHadFeatures && b.featureGrants?.length
+          ? b.featureGrants.map((g) => ({ feature: g.feature, actions: [...g.actions] }))
+          : existing.featureGrants,
+    };
   }
   const assignments = (Array.isArray(raw.assignments) ? raw.assignments : [])
     .map(normalizeAssignment)
@@ -994,6 +1043,10 @@ export function cloneRole(
       module: p.module,
       actions: [...p.actions],
     })),
+    featureGrants: (src.featureGrants ?? []).map((g) => ({
+      feature: g.feature,
+      actions: [...g.actions],
+    })),
     note: `Cloned from ${src.name}`,
   };
   let next: RbacState = { ...state, roles: [...state.roles, role] };
@@ -1148,6 +1201,95 @@ export function setRolePermission(
     by,
     enabled ? "grant" : "revoke",
     `${roleId} ${module}.${action}`,
+  );
+}
+
+/** Turn one action of one function on or off for a role. */
+export function setRoleFeaturePermission(
+  state: RbacState,
+  roleId: string,
+  featureId: string,
+  action: RbacAction,
+  enabled: boolean,
+  by: string,
+): RbacState {
+  const def = findFeature(featureId);
+  if (!def || !def.actions.includes(action)) return state;
+  const roles = state.roles.map((r) => {
+    if (r.id !== roleId) return r;
+    const grants = [...(r.featureGrants ?? [])];
+    const cur = grants.find((g) => g.feature === featureId);
+    const actions = new Set(cur?.actions ?? []);
+    if (enabled) actions.add(action);
+    else actions.delete(action);
+    const next = grants
+      .filter((g) => g.feature !== featureId)
+      .concat(actions.size ? [{ feature: featureId, actions: [...actions] }] : []);
+    return { ...r, featureGrants: next };
+  });
+  return appendRbacAudit(
+    { ...state, roles },
+    by,
+    enabled ? "grant" : "revoke",
+    `${roleId} ${featureId}.${action}`,
+  );
+}
+
+/**
+ * May this person do `action` on one function of a module?
+ *
+ * Yes when they hold the whole module (module grant — unchanged behaviour)
+ * — then never limited to their own classes. Otherwise yes when one of
+ * their roles holds the function; `ownClassesOnly` is set for class-scoped
+ * functions: a teacher changes the subjects of the classes they teach, not
+ * every class (director, 6 Oct 2026).
+ */
+export function featureAccess(
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  featureId: string,
+  action: RbacAction,
+  rbac?: RbacState,
+): { allowed: boolean; ownClassesOnly: boolean } {
+  const def = findFeature(featureId);
+  if (!def) return { allowed: false, ownClassesOnly: false };
+  const state = rbac ?? (typeof window !== "undefined" ? loadRbac() : defaultRbacState());
+  if (hasPermission(session, masters, def.module, action, state)) {
+    return { allowed: true, ownClassesOnly: false };
+  }
+  const roles = resolveSessionRoles(state, session, masters);
+  const granting = roles.filter((r) =>
+    (r.featureGrants ?? []).some((g) => g.feature === featureId && g.actions.includes(action)),
+  );
+  if (granting.length === 0) return { allowed: false, ownClassesOnly: false };
+  // A class-scoped function always reaches the person's own classes only —
+  // whichever role (or clone of one) carries it. Leadership and office
+  // reach every class through the server's teaching scope, and the whole
+  // school through the module grant.
+  return { allowed: true, ownClassesOnly: !!def.classScoped };
+}
+
+export function hasFeaturePermission(
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  featureId: string,
+  action: RbacAction,
+  rbac?: RbacState,
+): boolean {
+  return featureAccess(session, masters, featureId, action, rbac).allowed;
+}
+
+/** Holds the whole module, or at least one function in it, for `action`. */
+export function hasAnyFeatureInModule(
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  module: RbacModule,
+  action: RbacAction,
+  rbac?: RbacState,
+): boolean {
+  if (hasPermission(session, masters, module, action, rbac)) return true;
+  return RBAC_FEATURES.some(
+    (f) => f.module === module && featureAccess(session, masters, f.id, action, rbac).allowed,
   );
 }
 
@@ -1557,12 +1699,12 @@ export function canAccessMastersTab(
   rbac?: RbacState,
   action: RbacAction = "view",
 ): boolean {
-  return hasPermission(
-    session,
-    masters,
-    moduleForMastersTab(tab),
-    action,
-    rbac,
+  const tabModule = moduleForMastersTab(tab);
+  if (hasPermission(session, masters, tabModule, action, rbac)) return true;
+  // A function of Masters (e.g. a teacher's Class subjects) opens its tab.
+  if (tabModule !== "masters" || !tab) return false;
+  return featuresForMastersTab(tab).some(
+    (f) => featureAccess(session, masters, f.id, action, rbac).allowed,
   );
 }
 
@@ -1573,6 +1715,16 @@ export function canAccessHref(
   rbac?: RbacState,
 ): boolean {
   const path = href.split("?")[0] || "";
+  if (path === "/masters") {
+    // A function of Masters (a teacher's Class subjects) opens the page and
+    // its own tab — not the whole module.
+    const qs = href.includes("?") ? href.split("?")[1] : "";
+    const tab = new URLSearchParams(qs).get("tab");
+    const ok = tab
+      ? canAccessMastersTab(session, masters, tab, rbac)
+      : hasAnyFeatureInModule(session, masters, "masters", "view", rbac);
+    if (ok) return canAccessModuleHref(href);
+  }
   if (path.startsWith("/reports")) {
     return (
       canAccessReportsCenter(session, masters, rbac) &&

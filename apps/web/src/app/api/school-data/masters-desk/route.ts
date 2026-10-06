@@ -15,6 +15,11 @@ import {
 import { fetchMastersFromRowTables } from "@/lib/mastersRowTables.server";
 import { guardMastersOverwrite } from "@/lib/mastersWriteGuard";
 import { guardMastersRevision } from "@/lib/mastersRevisionGuard";
+import { authorizeMastersFeatureChange } from "@/lib/mastersChangeAuth";
+import { featureAccess, type RbacAction } from "@/lib/rbac";
+import { featuresForModule } from "@/lib/rbacFeatures";
+import { staffSectionScope } from "@/lib/api/v1/staffScope";
+import type { ApiAuthContext } from "@/lib/api/v1/auth";
 
 export const runtime = "nodejs";
 
@@ -171,9 +176,30 @@ export async function GET(req: Request) {
   });
 }
 
+/**
+ * Someone without masters.edit who holds a FUNCTION of Masters (Masters →
+ * Roles → functions; e.g. a teacher's "Class subjects"). Null when they
+ * hold none — the plain 403 stands.
+ */
+async function featureWriterContext(req: Request): Promise<ApiAuthContext | null> {
+  const staff = await requireStaffApi(req);
+  if (!staff.ok || staff.viaMirrorSecret) return null;
+  const ctx = staff.ctx;
+  const writes: RbacAction[] = ["create", "edit", "delete"];
+  const any = featuresForModule("masters").some((f) =>
+    writes.some((a) => featureAccess(ctx.session, ctx.masters, f.id, a, ctx.rbac).allowed),
+  );
+  return any ? ctx : null;
+}
+
 export async function POST(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["masters-desk"], "POST");
-  if (!auth.ok) return auth.response
+  let featureCtx: ApiAuthContext | null = null;
+  if (!auth.ok) {
+    if (auth.response.status !== 403) return auth.response;
+    featureCtx = await featureWriterContext(req);
+    if (!featureCtx) return auth.response;
+  }
   if (!mastersDualWriteDbEnabled()) {
     return NextResponse.json({
       ok: true,
@@ -190,7 +216,7 @@ export async function POST(req: Request) {
   }
 
   const { version: _v, baseUpdatedAt, ...rest } = body;
-  const state = { version: 2 as const, ...rest };
+  let state = { version: 2 as const, ...rest } as MastersState;
 
   const { bundle: stored, meta, readFailed } = await fetchMastersDeskFromDb();
 
@@ -228,7 +254,11 @@ export async function POST(req: Request) {
     baseUpdatedAt ?? null,
     meta?.updatedAt ?? meta?.lastUpdatedAt ?? null,
   );
-  if (!revision.allow) {
+  // Function-only writers are exempt: their browser is served the teaching
+  // subset with no revision, and their push is merged row by row onto the
+  // stored desk below — nothing of theirs can overwrite a newer save
+  // outside their own classes.
+  if (!revision.allow && !featureCtx) {
     console.warn(
       `[masters-desk] rejected stale push`,
       `base=${baseUpdatedAt} stored=${revision.storedUpdatedAt}`,
@@ -244,6 +274,44 @@ export async function POST(req: Request) {
   }
   if (revision.reason === "unversioned" && meta) {
     console.warn("[masters-desk] unversioned push accepted (legacy client)");
+  }
+
+  // Function-only writers: the stored desk is the base, and only the slices
+  // their functions own are lifted in — row by row, inside their classes.
+  // Their browser holds the teaching subset only, so anything else in the
+  // push is not theirs to save and is ignored, never written.
+  if (featureCtx) {
+    const ctx = featureCtx;
+    let ownClassIds: Set<string> | null = null;
+    try {
+      const scope = await staffSectionScope(ctx);
+      if (!scope.unrestricted) {
+        ownClassIds = new Set([...scope.sections].map((k) => k.split("|")[0]!));
+      }
+    } catch {
+      ownClassIds = new Set();
+    }
+    const className = new Map((stored.classes ?? []).map((c) => [c.id, c.name]));
+    const verdict = authorizeMastersFeatureChange(
+      stored as unknown as Record<string, unknown>,
+      state as unknown as Record<string, unknown>,
+      (featureId, action) => featureAccess(ctx.session, ctx.masters, featureId, action, ctx.rbac),
+      ownClassIds,
+      (id) => className.get(id) || "That class",
+    );
+    if (!verdict.ok) {
+      console.warn(
+        `[masters-desk] refused function-only push from ${ctx.session.staffId || "?"}: ${verdict.reason}`,
+      );
+      return NextResponse.json({ error: verdict.reason, reason: "feature_forbidden" }, { status: 403 });
+    }
+    if (verdict.changedSlices.length === 0) {
+      return NextResponse.json({ ok: true, unchanged: true, functionOnly: true });
+    }
+    state = { ...(verdict.merged as unknown as MastersState), version: 2 };
+    console.info(
+      `[masters-desk] function-only push by ${ctx.session.staffId || "?"}: ${verdict.changedSlices.join(", ")}`,
+    );
   }
 
   // A client must not be able to replace the class-id generation wholesale.
@@ -279,6 +347,11 @@ export async function POST(req: Request) {
       { error: pushed.error || "Masters push failed" },
       { status: 500 },
     );
+  }
+  if (featureCtx) {
+    // No revision back: this browser holds the teaching subset and must
+    // never take it as a base for a whole-desk push.
+    return NextResponse.json({ ok: true, functionOnly: true, changed: true });
   }
   return NextResponse.json({
     ok: true,

@@ -7,11 +7,13 @@ import { assertSessionWritable } from "@/lib/sessionWriteGuard";
 import { getSessionActor } from "@/lib/sessionActor";
 import {
   canConfigureRbac,
+  featureAccess,
   hasPermission,
   type RbacAction,
   type RbacModule,
 } from "@/lib/rbac";
 import type { MastersState } from "@/lib/masters";
+import { featuresForModule } from "@/lib/rbacFeatures";
 
 function loadMastersSafe(): MastersState | null {
   if (typeof window === "undefined") return null;
@@ -22,6 +24,23 @@ function loadMastersSafe(): MastersState | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * True when the actor holds a write on some FUNCTION of Masters (e.g. a
+ * teacher's Class subjects) without the module. Also applies the
+ * closed-year lock. The server decides which rows of the save stand.
+ */
+export function holdsMastersFeatureWrite(): boolean {
+  if (typeof window === "undefined") return false;
+  const session = getSessionActor();
+  if (!session) return false;
+  const masters = loadMastersSafe();
+  const writes: RbacAction[] = ["create", "edit", "delete"];
+  const holds = featuresForModule("masters").some((f) =>
+    writes.some((a) => featureAccess(session, masters, f.id, a).allowed),
+  );
+  return holds && assertSessionWritable("saveMasters");
 }
 
 /**

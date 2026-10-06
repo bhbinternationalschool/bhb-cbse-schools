@@ -178,6 +178,7 @@ SELFTESTS=(
   test:ncf-official
   test:student-curriculum
   test:subject-masters
+  test:masters-change-auth
   test:wa-sender-routing
   test:receipt-repair
   test:projection-double-post

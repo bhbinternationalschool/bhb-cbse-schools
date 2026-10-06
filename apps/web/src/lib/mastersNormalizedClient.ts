@@ -218,7 +218,15 @@ async function pushMastersDeskApi(
       feeHeadCount?: number;
       error?: string;
       reason?: string;
+      functionOnly?: boolean;
     } | null;
+    if (res.ok && body?.ok && body.functionOnly) {
+      // Saved through a function grant (a teacher's class subjects): the
+      // server merged it onto the stored desk and returns no revision on
+      // purpose — this browser holds the teaching subset only.
+      recordDeskSyncSuccess("masters");
+      return { ok: true };
+    }
     if (res.ok && body?.ok) {
       // Never invent a revision. This value becomes `baseUpdatedAt` on the
       // next push, so a local clock here is exactly what made every masters
@@ -275,7 +283,9 @@ async function pushMastersDeskApi(
     // 401/403/500/503 and anything else: also silent until now.
     console.warn("[masters-db] desk push failed", body?.error || res.status);
     await reportMastersPushFailure(
-      res.status === 401 || res.status === 403
+      res.status === 403 && body?.reason === "feature_forbidden" && body.error
+        ? `Your last change was NOT saved. ${body.error}`
+        : res.status === 401 || res.status === 403
         ? "Your last change was NOT saved — your session has expired or you do not " +
             "have permission. Sign in again and re-apply the change."
         : `Your last change was NOT saved — the server returned ${res.status}. ` +
