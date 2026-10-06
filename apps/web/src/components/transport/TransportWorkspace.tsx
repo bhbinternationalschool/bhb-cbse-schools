@@ -30,9 +30,6 @@ import {
 import { ClassTransportPanel } from "@/components/transport/ClassTransportPanel";
 import { LivePositionsPanel } from "@/components/transport/LivePositionsPanel";
 import { FleetEdgeStatusStrip } from "@/components/transport/FleetEdgeStatusStrip";
-import { BoardingPointAuditPanel } from "@/components/transport/BoardingPointAuditPanel";
-import { PinRequestPanel } from "@/components/transport/PinRequestPanel";
-import { PinsReceivedPanel } from "@/components/transport/PinsReceivedPanel";
 import { StaffRiderPanel } from "@/components/transport/StaffRiderPanel";
 import { StopLinkRepairPanel } from "@/components/transport/StopLinkRepairPanel";
 import { strictClassGroup } from "@/lib/transportShifts";
@@ -44,7 +41,7 @@ import {
   checkTransportStartMonth,
   monthLabel,
 } from "@/lib/transportStartMonth";
-import { TransportPlannerPanel } from "@/components/transport/TransportPlannerPanel";
+import { TransportPlannerSteps } from "@/components/transport/TransportPlannerSteps";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { StepChainGuide, type StepDef } from "@/components/ui/StepTabs";
 import { TransportRequestsPanel } from "@/components/transport/TransportRequestsPanel";
@@ -642,7 +639,7 @@ export function TransportWorkspace() {
             />
           ) : null}
           {tab === "planner" ? (
-            <TransportPlannerPanel
+            <TransportPlannerSteps
               state={state}
               masters={masters}
               sis={sis}
@@ -651,25 +648,8 @@ export function TransportWorkspace() {
               onSisRefresh={() => setSis(loadSis())}
               onFlash={flash}
               onError={setError}
+              canEdit={hasPermission(session, masters, "transport", "edit")}
             />
-          ) : null}
-          {tab === "planner" ? (
-            <>
-              {/*
-                Above the audit, because the audit can only report on what it
-                can see: with no family placed better than a village centroid
-                its noise floor is a kilometre, and asking the families is
-                what moves that.
-              */}
-              <PinRequestPanel
-                canEdit={hasPermission(session, masters, "transport", "edit")}
-              />
-              <PinsReceivedPanel />
-              <BoardingPointAuditPanel
-                academicYearCode={session.academicYearCode}
-                canEdit={hasPermission(session, masters, "transport", "edit")}
-              />
-            </>
           ) : null}
           {tab === "riders" ? (
             <RidersPanel
