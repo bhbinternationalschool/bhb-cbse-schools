@@ -8,6 +8,8 @@
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 import { scheduleRetryingPush } from "@/lib/syncRetryStatus";
+import { domainBlobRbacModule } from "@/lib/domainBlobRbac";
+import { isFunctionOnlyWriter } from "@/lib/rbacGuard";
 
 export type DomainBlobTable =
   | "fees_state"
@@ -165,6 +167,11 @@ export function createDomainBlobPersistence<T>(opts: {
   function scheduleSync(state: T) {
     if (!remoteEnabled()) return;
     if (typeof window === "undefined") return;
+    // A function holder (Masters → Roles → functions) saves through the
+    // module's desk, merged slice by slice; the whole-module blob is not
+    // theirs to write, and pushing it would only retry a 403 forever.
+    const blobModule = domainBlobRbacModule(opts.table);
+    if (blobModule && isFunctionOnlyWriter(blobModule)) return;
     writeMetaUpdatedAt(new Date().toISOString());
     pendingPush = state;
     if (pushTimer) clearTimeout(pushTimer);

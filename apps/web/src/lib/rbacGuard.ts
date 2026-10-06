@@ -42,6 +42,19 @@ export function holdsModuleFeatureWrite(module: RbacModule): boolean {
   );
 }
 
+/**
+ * Holds functions of the module but not its edit grant. Such a browser must
+ * not push the module's whole-module copies (the domain blob): the server
+ * would refuse it, and the desk save that matters was merged slice by slice.
+ */
+export function isFunctionOnlyWriter(module: RbacModule): boolean {
+  if (typeof window === "undefined") return false;
+  const session = getSessionActor();
+  if (!session) return false;
+  if (hasPermission(session, loadMastersSafe(), module, "edit")) return false;
+  return holdsModuleFeatureWrite(module);
+}
+
 export function holdsMastersFeatureWrite(): boolean {
   return holdsModuleFeatureWrite("masters") && assertSessionWritable("saveMasters");
 }
