@@ -29,11 +29,11 @@ const AADHAAR = { aadhaarNumber: "234123412346", aadhaarLast4: "2346" };
 assert.deepEqual(kinds(student({ pen: "1234567890", apaarId: "111122223333" })), []);
 assert.deepEqual(kinds(student({ pen: "1234567890", apaarConsent: "refused" })), []);
 
-// No PEN: the office adds the child — but UDISE+ requires the Aadhaar to
-// add a student, so without one the family's Aadhaar comes first.
+// No PEN: the office adds the child — with no Aadhaar, using the portal's
+// 999999999999 "not available", while the family is asked for the real one.
 assert.deepEqual(kinds(student({ ...AADHAAR })), ["add_on_portal", "ask_apaar_consent"]);
-assert.deepEqual(kinds(student({})), ["collect_child_aadhaar", "ask_apaar_consent"]);
-assert.match(udiseRobotTasksFor(student({}))[0]!.note || "", /before the child can be added/);
+assert.deepEqual(kinds(student({})), ["add_on_portal", "collect_child_aadhaar", "ask_apaar_consent"]);
+assert.match(udiseRobotTasksFor(student({}))[0]!.note || "", /999999999999/);
 // A placeholder PEN is not a PEN.
 assert.ok(kinds(student({ pen: "NA", ...AADHAAR })).includes("add_on_portal"));
 
@@ -83,7 +83,7 @@ const board = buildUdiseRobotBoard([
 assert.equal(board.total, 3);
 assert.equal(board.done, 1);
 assert.equal(board.open, 2);
-assert.equal(board.byKind.find((g) => g.kind === "add_on_portal"), undefined, "no Aadhaar → not addable");
+assert.equal(board.byKind.find((g) => g.kind === "add_on_portal")?.children.length, 1);
 assert.equal(board.byKind.find((g) => g.kind === "collect_child_aadhaar")?.children.length, 1);
 assert.equal(board.byKind.find((g) => g.kind === "ask_apaar_consent")?.children.length, 2);
 

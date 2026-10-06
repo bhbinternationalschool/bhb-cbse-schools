@@ -54,7 +54,7 @@ export const UDISE_ROBOT_TASKS: Record<
     owner: "portal",
     order: 2,
     title: "Add child on UDISE+ (gets the PEN)",
-    how: "Student module → Add Student with the ERP details. UDISE+ requires the child's Aadhaar to add a student (rule 4.1.7), so only children whose Aadhaar is in the ERP are listed here.",
+    how: "Student module → Add Student with the ERP details. With no Aadhaar in the ERP, enter 999999999999 — the portal's own “AADHAAR not available” — and add the real number later.",
   },
   fix_aadhaar_failed: {
     owner: "portal",
@@ -121,11 +121,14 @@ export function udiseRobotTasksFor(s: SisStudent): UdiseRobotTask[] {
 
   if (s.udiseInboundTransferPending) {
     tasks.push({ kind: "accept_transfer", owner: "portal" });
-  } else if (!pen && childAadhaar) {
-    // UDISE+ will not add a student without an Aadhaar (rule 4.1.7, read off
-    // the Add Student form on 2026-10-06), so with none on file the next step
-    // is the family's, not the office's.
-    tasks.push({ kind: "add_on_portal", owner: "portal" });
+  } else if (!pen) {
+    // The Aadhaar box is mandatory (rule 4.1.7); with none on file the portal
+    // takes 999999999999 as "not available", so adding need not wait.
+    tasks.push({
+      kind: "add_on_portal",
+      owner: "portal",
+      note: childAadhaar ? undefined : "No Aadhaar yet — enter 999999999999 (portal's “not available”).",
+    });
   }
 
   if (childAadhaar && pen && !aadhaarVerified(s)) {
@@ -139,7 +142,7 @@ export function udiseRobotTasksFor(s: SisStudent): UdiseRobotTask[] {
     tasks.push({
       kind: "collect_child_aadhaar",
       owner: "family",
-      note: !pen && !s.udiseInboundTransferPending ? "Needed before the child can be added to UDISE+." : undefined,
+      note: !pen && !s.udiseInboundTransferPending ? "Then replace the 999999999999 on UDISE+; APAAR needs it." : undefined,
     });
   }
 

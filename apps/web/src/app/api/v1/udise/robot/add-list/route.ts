@@ -1,10 +1,11 @@
 /**
  * POST — the robot's "add missing children" queue (lib/udisePortalAdd).
  *
- * Body: { students: [{ studentName, dob, fatherName }] } — the portal's own
+ * Body: { students: [{ studentName, dob, fatherName, motherName,
+ * primaryMobile, studentCodeNat }] } — the portal's own
  * list, so a child who is already on UDISE+ (but whose PEN was never applied
- * in the ERP) is not offered for a second, duplicate record. Only those
- * three fields are read. Compliance · edit. Reads only.
+ * in the ERP — or is there under another name) is not offered for a second,
+ * duplicate record. Only those fields are read. Compliance · edit. Reads only.
  */
 
 import { NextResponse } from "next/server";
@@ -31,7 +32,14 @@ export async function POST(req: Request) {
   }
   const portal: PortalListEntry[] = (body.students as Record<string, unknown>[])
     .filter((p) => p && typeof p === "object")
-    .map((p) => ({ studentName: p.studentName, dob: p.dob, fatherName: p.fatherName }));
+    .map((p) => ({
+      studentName: p.studentName,
+      dob: p.dob,
+      fatherName: p.fatherName,
+      motherName: p.motherName,
+      primaryMobile: p.primaryMobile,
+      studentCodeNat: p.studentCodeNat,
+    }));
 
   await ensureSchoolMirrorHydrated();
   const sis = loadSis();

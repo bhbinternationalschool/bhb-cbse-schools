@@ -136,7 +136,14 @@
     void showLast();
     if (!res.ok) throw new Error(res.error);
     const s = (res.body || {}).summary || {};
-    return `✓ ERP has the portal list: ${s.received} children · PEN ${s.withPen} · APAAR ${s.withApaar} · Aadhaar failed ${s.aadhaarFailed}. (Apply it in ERP → Students → UDISE+.)`;
+    const r = (res.body || {}).reconcile || {};
+    const lines = [`✓ ERP has the portal list: ${s.received} children · PEN ${s.withPen} · APAAR ${s.withApaar} · Aadhaar failed ${s.aadhaarFailed}. (Apply it in ERP → Students → UDISE+.)`];
+    const list = (arr, f) => (arr || []).slice(0, 12).map(f).join("\n  ");
+    if ((r.differentName || []).length) lines.push(`Same child under a DIFFERENT NAME (portal ↔ ERP; twins look alike too — check) — make the names agree:\n  ${list(r.differentName, (x) => `${x.portalName} (PEN ${x.pen}) = ERP ${x.erpName} ${x.admissionNo} · ${x.why}`)}`);
+    if ((r.portalDuplicates || []).length) lines.push(`Possibly ONE child entered TWICE on UDISE+ (unless twins) — check with the family:\n  ${list(r.portalDuplicates, (x) => `${x.a} (${x.aPen}) & ${x.b} (${x.bPen}) · ${x.why}`)}`);
+    if ((r.leftSchool || []).length) lines.push(`Left school per the ERP but still active on UDISE+ (${r.leftSchool.length}) — send to Dropbox when allowed:\n  ${list(r.leftSchool, (x) => `${x.portalName} (PEN ${x.pen}) = ERP ${x.erpName}, last ${x.lastYear}`)}`);
+    if ((r.notInErp || []).length) lines.push(`On UDISE+ but nowhere in the ERP (${r.notInErp.length}):\n  ${list(r.notInErp, (x) => `${x.portalName} (${x.classDesc}, PEN ${x.pen})`)}`);
+    return lines.join("\n");
   }
 
   pullBtn.addEventListener("click", async () => {
@@ -620,7 +627,7 @@
           items.push({ studentId: c.studentId, studentName: c.name, classDesc: c.classLabel, classId: String(sec.classId), sectionId: String(sec.sectionId), portalClassName: String(sec.className) });
         }
         const notes = [];
-        if ((b.needAadhaar || []).length) notes.push(`UDISE+ needs the child's Aadhaar to add them, and the ERP has none for: ${b.needAadhaar.join(", ")}. Collect it first (WhatsApp photo works).`);
+        if ((b.aadhaarPlaceholder || []).length) notes.push(`No Aadhaar in the ERP — the robot enters 999999999999 (the portal's “AADHAAR not available”) for: ${b.aadhaarPlaceholder.join(", ")}. Collect the real numbers and update UDISE+ later (APAAR needs them).`);
         if ((b.alreadyOnPortal || []).length) notes.push(`Probably already on the portal (apply the portal list in the ERP instead): ${b.alreadyOnPortal.join(", ")}`);
         if (otherClasses.length) notes.push(`${otherClasses.length} more in classes the portal is not allowing Add Student for yet.`);
         if (noSection.length) notes.push(`No matching portal section: ${noSection.join(", ")}`);

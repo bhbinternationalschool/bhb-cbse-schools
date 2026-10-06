@@ -27,11 +27,12 @@ assert.equal(v("dob"), "21/01/2022", "the portal's DD/MM/YYYY");
 assert.equal(v("fatherName"), "RAM VERMA");
 assert.equal(v("guardianName"), "RAM VERMA");
 assert.equal(v("primaryMobile"), "9400000011");
-assert.equal(v("uuid"), undefined, "no Aadhaar in the ERP → nothing typed");
+assert.equal(v("uuid"), "999999999999", "no Aadhaar in the ERP → the portal's 'not available' value");
+assert.ok(plan.hints.some((h) => /AADHAAR not available/.test(h)), "and the office is told to collect the real one");
 assert.equal(v("admnStartDate"), undefined, "admission date is never guessed from joinedOn");
-assert.ok(plan.leftForYou.some((x) => /mandatory/.test(x)), "the missing Aadhaar is called out as mandatory");
+assert.ok(!plan.leftForYou.some((x) => /^Name as per Aadhaar/.test(x)), "no Aadhaar name is asked for with the placeholder");
 // A number that fails the Aadhaar checksum is not typed.
-assert.equal(buildUdiseAddPlan(st({ aadhaarNumber: "123412341234" }), hh).fields.find((f) => f.control === "uuid"), undefined);
+assert.equal(buildUdiseAddPlan(st({ aadhaarNumber: "123412341234" }), hh).fields.find((f) => f.control === "uuid")?.value, "999999999999", "a number failing the checksum is never typed");
 
 // Already on the portal by name + DOB, or name + father: not offered again.
 assert.ok(probablyOnPortal(st({ dob: "2022-01-21" }), [{ studentName: "RIYA KUMARI VERMA", dob: "21/01/2022" }]));
@@ -42,7 +43,7 @@ assert.ok(!probablyOnPortal(st({ dob: "2022-01-21" }), [{ studentName: "RIYA VER
 const OK_AADHAAR = (() => {
   for (let n = 0; n < 10; n++) {
     const a = `23412341234${n}`;
-    if (buildUdiseAddPlan(st({ aadhaarNumber: a }), hh).fields.some((f) => f.control === "uuid")) return a;
+    if (buildUdiseAddPlan(st({ aadhaarNumber: a }), hh).fields.some((f) => f.control === "uuid" && f.value === a)) return a;
   }
   throw new Error("no valid test Aadhaar");
 })();
@@ -60,10 +61,10 @@ const res = listUdiseAddCandidates({
   classLabelOf: (s) => ({ className: s.classId === "c-odd" ? "Toddlers" : "Nursery", sectionName: "A" }),
   householdOf: () => hh,
 });
-assert.deepEqual(res.candidates.map((c) => c.studentId), ["a"]);
+assert.deepEqual(res.candidates.map((c) => c.studentId).sort(), ["a", "g"]);
 assert.equal(res.candidates[0]!.portalClassId, -3);
 assert.equal(res.alreadyOnPortal.length, 1);
 assert.equal(res.noPortalClass.length, 1);
-assert.deepEqual(res.needAadhaar, ["NO AADHAAR YET (Nursery)"], "UDISE+ will not add a child without Aadhaar");
+assert.deepEqual(res.aadhaarPlaceholder, ["NO AADHAAR YET (Nursery)"], "added with 999999999999, flagged to collect");
 
 console.log("udisePortalAdd selftest: ok");

@@ -80,7 +80,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
       reply(await erpFetch("/api/v1/udise/robot/sync"));
     } else if (msg && msg.type === "add-list") {
       // Only what the ERP needs to tell who is already on the portal.
-      const students = (msg.students || []).map((p) => ({ studentName: p.studentName, dob: p.dob, fatherName: p.fatherName }));
+      const students = (msg.students || []).map((p) => ({
+        studentName: p.studentName,
+        dob: p.dob,
+        fatherName: p.fatherName,
+        motherName: p.motherName,
+        primaryMobile: p.primaryMobile,
+        studentCodeNat: p.studentCodeNat,
+      }));
       reply(await erpFetch("/api/v1/udise/robot/add-list", { method: "POST", body: JSON.stringify({ students }) }));
     } else if (msg && msg.type === "fill-data") {
       reply(await erpFetch(`/api/v1/udise/robot/fill?pen=${encodeURIComponent(msg.pen || "")}`));

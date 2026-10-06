@@ -12,6 +12,9 @@
 import { NextResponse } from "next/server";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { syncUdisePortalPull } from "@/lib/udiseRobotSync.server";
+import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
+import { householdOf, loadSis, studentsInSession } from "@/lib/sis";
+import { reconcilePortalWithErp, type PortalChild } from "@/lib/udisePortalReconcile";
 
 export const runtime = "nodejs";
 
@@ -42,5 +45,19 @@ export async function POST(req: Request) {
     actor: `UDISE robot · ${s.fullName || s.staffId || "staff"}`,
   });
   if (!res.ok) return NextResponse.json({ ok: false, error: res.error }, { status: res.status });
-  return NextResponse.json(res);
+  // Who on the portal is who in the ERP, even under another name — read
+  // only, for the office to act on (never applied by the robot).
+  await ensureSchoolMirrorHydrated();
+  const sis = loadSis();
+  const active = studentsInSession(sis, s.academicYearCode).filter((x) => x.status === "active");
+  const reconcile = reconcilePortalWithErp({
+    portal: (body.students as PortalChild[]).filter((p) => p && typeof p === "object"),
+    erpAll: sis.students,
+    activeIds: new Set(active.map((x) => x.id)),
+    householdMobiles: (x) => {
+      const h = x.householdId ? householdOf(sis, x.householdId) : undefined;
+      return h ? [h.whatsappMobile, h.mobile, h.altMobile] : [];
+    },
+  });
+  return NextResponse.json({ ...res, reconcile });
 }

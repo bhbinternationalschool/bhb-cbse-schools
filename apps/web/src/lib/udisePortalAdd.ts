@@ -12,9 +12,14 @@
  *    the robot can see in the portal's own list — that child needs the
  *    portal list applied in the ERP, not a second record on UDISE+.
  *
- * UDISE+ requires the child's Aadhaar to add a student (rule 4.1.7: "It
- * is a mandatory field"; admission date is optional). A child without a valid
- * Aadhaar in the ERP is reported under `needAadhaar`, never offered.
+ * UDISE+ requires the Aadhaar field to add a student (rule 4.1.7: "It is a
+ * mandatory field"; admission date is optional). The portal's own code treats
+ * 999999999999 as "AADHAAR not available": it clears and disables "Name as per
+ * Aadhaar", and its reports print "AADHAAR not available" (read from the
+ * portal's script on 2026-10-06; other schools' records already carry it). So
+ * a child with no Aadhaar in the ERP is added with that value, listed under
+ * `aadhaarPlaceholder` so the real number is collected and entered later. APAAR
+ * cannot be generated until it is.
  *
  * The portal decides which classes may be added (on 2026-10-06: PP3 to
  * Class I only); the extension offers only classes whose "Add Student"
@@ -25,9 +30,13 @@
  */
 
 import { aadhaarChecksumValid, aadhaarDigits } from "@/lib/aadhaar";
+
+/** The portal's own "AADHAAR not available" value for the Aadhaar box. */
+export const UDISE_AADHAAR_NOT_AVAILABLE = "999999999999";
 import { isRealPortalId, type Household, type SisStudent } from "@/lib/sis";
 import { udiseDobKey, udiseNamesCompatible } from "@/lib/udiseStudentDetails";
 import type { UdiseFillField } from "@/lib/udisePortalFill";
+import { sameChildEvidence } from "@/lib/udisePortalReconcile";
 
 /** Portal classId for an ERP class name; null when the portal has no such class here. */
 export function portalClassIdFor(className: string): number | null {
@@ -43,12 +52,26 @@ export function portalClassIdFor(className: string): number | null {
   return num && num >= 1 && num <= 12 ? num : null;
 }
 
-export type PortalListEntry = { studentName?: unknown; dob?: unknown; fatherName?: unknown };
+export type PortalListEntry = {
+  studentName?: unknown;
+  dob?: unknown;
+  fatherName?: unknown;
+  motherName?: unknown;
+  primaryMobile?: unknown;
+  studentCodeNat?: unknown;
+};
 
 /** Is this ERP child probably already on the portal (unapplied)? */
-export function probablyOnPortal(s: SisStudent, portal: PortalListEntry[]): boolean {
+export function probablyOnPortal(
+  s: SisStudent,
+  portal: PortalListEntry[],
+  householdMobiles: (s: SisStudent) => string[] = () => [],
+): boolean {
   const dob = udiseDobKey(s.dob || "");
   return portal.some((p) => {
+    // The same child under another name (SUHANI PATEL on the portal was
+    // ANJALI PATEL in the ERP): birth date + a parent or the family phone.
+    if (sameChildEvidence(p, s, householdMobiles)) return true;
     const name = String(p.studentName || "");
     if (!udiseNamesCompatible(s.fullName, name)) return false;
     if (dob && udiseDobKey(String(p.dob || "")) === dob) return true;
@@ -101,7 +124,14 @@ export function buildUdiseAddPlan(s: SisStudent, hh: Household | undefined): Udi
     fields.push({ control: "uuid", kind: "text", value: aadhaar, label: "Aadhaar", shown: `********${aadhaar.slice(-4)}` });
     left.push("Name as per Aadhaar (copy exactly from the card)");
   } else {
-    left.push("Aadhaar (mandatory on UDISE+ — not in the ERP)");
+    fields.push({
+      control: "uuid",
+      kind: "text",
+      value: UDISE_AADHAAR_NOT_AVAILABLE,
+      label: "Aadhaar not available (999999999999)",
+      shown: "not in the ERP",
+    });
+    hints.push("No Aadhaar in the ERP: entered as 999999999999, the portal's “AADHAAR not available”. Collect the real number and update UDISE+ later; APAAR cannot be made until then.");
   }
   const primary = mobile10(hh ? hh.whatsappMobile || hh.mobile : "") || mobile10(s.fatherMobile) || mobile10(s.motherMobile);
   add(primary ? { control: "primaryMobile", kind: "text", value: primary, label: "Mobile", shown: primary } : null, "Mobile");
@@ -129,11 +159,11 @@ export function listUdiseAddCandidates(input: {
   portal: PortalListEntry[];
   classLabelOf: (s: SisStudent) => { className: string; sectionName: string };
   householdOf: (s: SisStudent) => Household | undefined;
-}): { candidates: UdiseAddCandidate[]; alreadyOnPortal: string[]; noPortalClass: string[]; needAadhaar: string[] } {
+}): { candidates: UdiseAddCandidate[]; alreadyOnPortal: string[]; noPortalClass: string[]; aadhaarPlaceholder: string[] } {
   const candidates: UdiseAddCandidate[] = [];
   const alreadyOnPortal: string[] = [];
   const noPortalClass: string[] = [];
-  const needAadhaar: string[] = [];
+  const aadhaarPlaceholder: string[] = [];
   for (const s of input.students) {
     if (s.status !== "active" || isRealPortalId(s.pen) || s.udiseInboundTransferPending) continue;
     const { className, sectionName } = input.classLabelOf(s);
@@ -142,15 +172,15 @@ export function listUdiseAddCandidates(input: {
       noPortalClass.push(`${s.fullName} (${className || "no class"})`);
       continue;
     }
-    if (probablyOnPortal(s, input.portal)) {
+    if (probablyOnPortal(s, input.portal, (x) => {
+      const h = input.householdOf(x);
+      return h ? [h.whatsappMobile, h.mobile, h.altMobile] : [];
+    })) {
       alreadyOnPortal.push(`${s.fullName} (${className})`);
       continue;
     }
     const digits = aadhaarDigits(s.aadhaarNumber || "");
-    if (!(digits.length === 12 && aadhaarChecksumValid(digits))) {
-      needAadhaar.push(`${s.fullName} (${className})`);
-      continue;
-    }
+    if (!(digits.length === 12 && aadhaarChecksumValid(digits))) aadhaarPlaceholder.push(`${s.fullName} (${className})`);
     candidates.push({
       studentId: s.id,
       name: s.fullName,
@@ -161,5 +191,5 @@ export function listUdiseAddCandidates(input: {
     });
   }
   candidates.sort((a, b) => a.portalClassId - b.portalClassId || a.name.localeCompare(b.name));
-  return { candidates, alreadyOnPortal, noPortalClass, needAadhaar };
+  return { candidates, alreadyOnPortal, noPortalClass, aadhaarPlaceholder };
 }
