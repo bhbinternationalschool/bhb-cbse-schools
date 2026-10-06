@@ -4,7 +4,9 @@
  */
 
 import { NextResponse } from "next/server";
-import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
+import { requireStaffPermission, type RouteAuthResult } from "@/lib/apiRouteAuth.server";
+import { deskFeatureGateFor } from "@/lib/deskFeatureGate.server";
+import { featuresForModule } from "@/lib/rbacFeatures";
 import { isModuleStateKey, MODULE_STATE_DEFS } from "@/lib/moduleStateRegistry";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { complaintScopeFilter } from "@/lib/api/v1/staffComplaints";
@@ -25,12 +27,38 @@ export const runtime = "nodejs";
 
 type RouteCtx = { params: Promise<{ module: string }> };
 
+/**
+ * The module grant, or a function of the module that owns this whole book
+ * (slice "module-state/<book>" in lib/rbacFeatureCatalog) — view to read,
+ * edit to save. A book is saved whole, so its functions are book-level.
+ */
+async function bookAuth(
+  req: Request,
+  book: keyof typeof MODULE_STATE_DEFS,
+  action: "view" | "edit",
+): Promise<RouteAuthResult> {
+  const rbacModule = MODULE_STATE_DEFS[book].rbac;
+  const auth = await requireStaffPermission(req, rbacModule, action);
+  if (auth.ok || auth.response.status !== 403) return auth;
+  const gate = await deskFeatureGateFor(req, rbacModule, action === "view" ? "read" : "write");
+  if (!gate) return auth;
+  const slice = `module-state/${book}`;
+  const holds = featuresForModule(rbacModule).some(
+    (f) =>
+      f.slices?.includes(slice) &&
+      (action === "view"
+        ? (["view", "edit"] as const).some((a) => gate.access(f.id, a).allowed)
+        : gate.access(f.id, "edit").allowed),
+  );
+  return holds ? { ok: true, ctx: gate.ctx, viaMirrorSecret: false } : auth;
+}
+
 export async function GET(req: Request, ctx: RouteCtx) {
   const { module } = await ctx.params;
   if (!isModuleStateKey(module)) {
     return NextResponse.json({ error: "Unknown module" }, { status: 404 });
   }
-  const auth = await requireStaffPermission(req, MODULE_STATE_DEFS[module].rbac, "view");
+  const auth = await bookAuth(req, module, "view");
   if (!auth.ok) return auth.response;
 
   const tctx = await getServerTenantContext();
@@ -106,7 +134,7 @@ export async function POST(req: Request, ctx: RouteCtx) {
   if (!isModuleStateKey(module)) {
     return NextResponse.json({ error: "Unknown module" }, { status: 404 });
   }
-  const auth = await requireStaffPermission(req, MODULE_STATE_DEFS[module].rbac, "edit");
+  const auth = await bookAuth(req, module, "edit");
   if (!auth.ok) return auth.response;
   if (module in STUDENT_BOOKS && !auth.viaMirrorSecret) {
     // Same rule for discipline / health: a teacher's copy is filtered to

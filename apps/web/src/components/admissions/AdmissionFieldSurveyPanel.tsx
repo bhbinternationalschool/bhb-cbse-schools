@@ -51,6 +51,7 @@ import { AdmissionSurveyTeamPanel } from "@/components/admissions/AdmissionSurve
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 
 const inp =
   "w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm";
@@ -120,6 +121,17 @@ function Field({
     </label>
   );
 }
+
+/**
+ * Field survey, in the order a survey day runs: the team, beats and capture
+ * link are set up before anyone goes out; a capture is household first (the
+ * mobile decides whether it is a new family or a sibling), then its children
+ * and Save; captures taken offline wait in the queue until synced; saved
+ * leads are then pushed on to Registration; agent WhatsApp chats are watched
+ * throughout. Every step stays mounted (hidden, not unmounted) so a
+ * half-typed household, beat or reply survives a step switch.
+ */
+type SurveyStep = "team" | "household" | "children" | "offline" | "leads" | "chats";
 
 export function AdmissionFieldSurveyPanel({
   state: rawState,
@@ -199,6 +211,7 @@ export function AdmissionFieldSurveyPanel({
   const [beatArea, setBeatArea] = useState("");
   const [beatTarget, setBeatTarget] = useState("50");
   const [editBeatId, setEditBeatId] = useState("");
+  const [surveyStep, setSurveyStep] = useState<SurveyStep>("team");
 
   const surveyUrl = useMemo(
     () => publicEnquiryAbsoluteUrl("field_survey"),
@@ -616,6 +629,42 @@ export function AdmissionFieldSurveyPanel({
   const filledChildCount = childrenRows.filter((c) => c.childName.trim())
     .length;
 
+  const surveySteps: StepDef<SurveyStep>[] = [
+    {
+      id: "team",
+      title: "Team & beats",
+      what: "Survey team and lead callers, survey days, the beat / cluster master with household targets, the capture link & QR for parents, and today's agent check-in.",
+    },
+    {
+      id: "household",
+      title: "Household",
+      what: "Lead date, beat, primary mobile (an existing number links siblings), parents, address, optional photo and the parent's consent.",
+    },
+    {
+      id: "children",
+      title: "Children & save",
+      what: "Each child to enquire for (name, age, class sought…), then Save to the CRM — or queue it on this device when offline.",
+      badge: filledChildCount || undefined,
+    },
+    {
+      id: "offline",
+      title: "Offline queue",
+      what: "Captures stored on this device while offline — sync them to the CRM once the connection returns.",
+      badge: offlineQueue.length || undefined,
+    },
+    {
+      id: "leads",
+      title: "Push to Registration",
+      what: "Survey leads for the beat picked in Team & beats — select open ones and push them to Registration with a fee head and amount, or open one in the CRM.",
+      badge: filtered.length,
+    },
+    {
+      id: "chats",
+      title: "Agent WhatsApp",
+      what: "Chats from survey agents running their field day on WhatsApp (start code, location, captures) — read and reply.",
+    },
+  ];
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2 text-[11px]">
@@ -647,14 +696,19 @@ export function AdmissionFieldSurveyPanel({
         </span>
       </div>
 
+      <StepTabs
+        aria-label="Field survey steps"
+        steps={surveySteps}
+        value={surveyStep}
+        onChange={setSurveyStep}
+      >
+      <div className={surveyStep === "team" ? "space-y-4" : "hidden"}>
       <AdmissionSurveyTeamPanel
         state={state}
         masters={masters}
         canEdit={canEdit}
         onCommit={onCommit}
       />
-
-      <SurveyAgentWaInbox by={by} canEdit={canEdit} />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <MastersWorkCard
@@ -884,7 +938,9 @@ export function AdmissionFieldSurveyPanel({
           })}
         </div>
       </MastersWorkCard>
+      </div>
 
+      <div className={surveyStep === "household" || surveyStep === "children" ? "space-y-4" : "hidden"}>
       <p className="text-[12px] text-[var(--muted)]">
         Desk form below matches <strong>walk-in enquiry</strong> (household +
         children), with source locked to Field survey, beat, photo &amp;
@@ -897,6 +953,7 @@ export function AdmissionFieldSurveyPanel({
         </p>
       ) : (
         <>
+          <div className={surveyStep === "household" ? "" : "hidden"}>
           <MastersWorkCard
             title="1 · Field survey household / parents"
             hint="Primary mobile identifies the family. Matching an existing number links children as siblings."
@@ -1110,7 +1167,9 @@ export function AdmissionFieldSurveyPanel({
               </div>
             </div>
           </MastersWorkCard>
+          </div>
 
+          <div className={surveyStep === "children" ? "space-y-4" : "hidden"}>
           <MastersWorkCard
             title={`2 · Children (${childrenRows.length})`}
             hint="Same as walk-in — add as many children as needed. Each gets their own survey enquiry under this household."
@@ -1321,9 +1380,17 @@ export function AdmissionFieldSurveyPanel({
                     : "Save survey enquiry + household → CRM"}
             </button>
           </div>
+          </div>
         </>
       )}
+      </div>
 
+      <div className={surveyStep === "offline" ? "space-y-4" : "hidden"}>
+      {offlineQueue.length === 0 ? (
+        <p className="text-sm text-[var(--muted)]">
+          Nothing queued on this device.
+        </p>
+      ) : null}
       {offlineQueue.length > 0 ? (
         <MastersWorkCard
           title={`Offline queue (${offlineQueue.length})`}
@@ -1364,7 +1431,9 @@ export function AdmissionFieldSurveyPanel({
           ) : null}
         </MastersWorkCard>
       ) : null}
+      </div>
 
+      <div className={surveyStep === "leads" ? "space-y-4" : "hidden"}>
       <MastersTableCard title="Survey leads → CRM">
         {canEdit && filtered.some((l) => l.stage === "enquiry") ? (
           <div className="mb-3 flex flex-wrap items-end gap-2 border-b border-[rgba(32,48,80,0.08)] pb-3">
@@ -1519,6 +1588,12 @@ export function AdmissionFieldSurveyPanel({
           </ErpTable>
         )}
       </MastersTableCard>
+      </div>
+
+      <div className={surveyStep === "chats" ? "space-y-4" : "hidden"}>
+        <SurveyAgentWaInbox by={by} canEdit={canEdit} />
+      </div>
+      </StepTabs>
 
       <MastersWorkCard
         title="What this tab covers — roadmap"

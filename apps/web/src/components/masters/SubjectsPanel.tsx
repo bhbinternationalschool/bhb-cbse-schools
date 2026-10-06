@@ -33,6 +33,7 @@ import {
 import type { BulkAction, RowAction } from "@/components/ui/erp-grid";
 import { MastersTabStack } from "@/components/masters/MastersLayout";
 import { NcfOfficialSubjectsCard } from "@/components/masters/NcfOfficialSubjectsCard";
+import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import {
   newFoundationId,
   normalizeSubject,
@@ -127,7 +128,34 @@ function classStage(c: SchoolClass): ClassGroupCode {
   return c.groupCode ?? classGroupCodeForName(c.name);
 }
 
+/**
+ * Subjects, in the order they are built: the reference lists first (they add
+ * subjects to the school's own list), then the school's subjects and their
+ * components (a class can only be linked to a subject the school has), then
+ * what each class studies and for how many periods a week.
+ */
+type SubjectsStep = "suggest" | "school" | "classes";
+
+const SUBJECTS_STEPS: StepDef<SubjectsStep>[] = [
+  {
+    id: "suggest",
+    title: "NCF / NEP suggestions",
+    what: "Reference lists — NCF / NEP by stage (with XI–XII streams) and NCERT / CBSE by class from DIKSHA. Add only what the school teaches; nothing here is taught until it is in the school's subjects.",
+  },
+  {
+    id: "school",
+    title: "School subjects & components",
+    what: "Everything the school teaches, with components (Oral, Written…) under their subject — add, edit, deactivate or delete from each row's … menu.",
+  },
+  {
+    id: "classes",
+    title: "Subjects by class",
+    what: "Pick a class: link the school's subjects to it, add components it does not take yet, remove links, and set periods per week.",
+  },
+];
+
 export function SubjectsPanel({ state, commit }: { state: MastersState; commit: Commit }) {
+  const [subjStep, setSubjStep] = useState<SubjectsStep>("suggest");
   const slice: SubjectsSlice = {
     subjects: state.subjects ?? [],
     classSubjects: state.classSubjects ?? [],
@@ -859,7 +887,7 @@ export function SubjectsPanel({ state, commit }: { state: MastersState; commit: 
   return (
     <>
     <MastersTabStack
-      intro="Your school's own subjects and components are in the first table — every row has a … menu to edit, add a component, deactivate or delete. NCF / NEP suggestions are a separate reference table; add from there only what you teach."
+      intro="Your school's own subjects and components are in School subjects — every row has a … menu to edit, add a component, deactivate or delete. NCF / NEP suggestions are a separate reference table; add from there only what you teach."
       tables={
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -876,7 +904,17 @@ export function SubjectsPanel({ state, commit }: { state: MastersState; commit: 
             ))}
           </div>
 
+          <StepTabs
+            aria-label="Subjects steps"
+            steps={SUBJECTS_STEPS}
+            value={subjStep}
+            onChange={setSubjStep}
+          >
+          {/* Every step stays mounted (hidden, not removed): the NCERT / CBSE
+              card keeps its own board, class and pending choices, and the
+              tables their search and selection. */}
           {/* 1 ── School subjects & components */}
+          <div className={subjStep === "school" ? "" : "hidden"}>
           <SectionCard
             title="School subjects & components"
             hint="What your school actually teaches. Components (Oral, Written…) sit under their subject. A subject not yet linked to any class always shows here."
@@ -923,16 +961,18 @@ export function SubjectsPanel({ state, commit }: { state: MastersState; commit: 
               exportFileBaseName="school-subjects"
               exportTitle="School subjects & components"
               emptyTitle={query || stageFilter ? "No subject matches" : "No subjects yet"}
-              emptyDescription={query || stageFilter ? "Clear the search or stage filter." : "Add a subject, or add from the NCF suggestions below."}
+              emptyDescription={query || stageFilter ? "Clear the search or stage filter." : "Add a subject, or add from the NCF / NEP suggestions step."}
             />
           </SectionCard>
+          </div>
 
           {/* 2 ── NCF / NEP suggestions */}
+          <div className={subjStep === "suggest" ? "space-y-4" : "hidden"}>
           <SectionCard
             title={`NCF / NEP suggestions · ${nepPack.label}`}
             hint={
               <>
-                Reference list only — nothing here is taught until it is in the school table above.{" "}
+                Reference list only — nothing here is taught until it is in the school subjects table.{" "}
                 {nepAnalysis.presentCount}/{nepAnalysis.gaps.length} already in school · indicative load ~{weeklyLoad.total} periods/week.
               </>
             }
@@ -1055,8 +1095,10 @@ export function SubjectsPanel({ state, commit }: { state: MastersState; commit: 
             onShowClass={setMapClassFilter}
             onEditSubject={openEdit}
           />
+          </div>
 
           {/* 3 ── Subjects by class */}
+          <div className={subjStep === "classes" ? "" : "hidden"}>
           <SectionCard
             title={viewClass ? `Subjects in ${viewClass.name}` : "Subjects by class"}
             hint={
@@ -1120,6 +1162,8 @@ export function SubjectsPanel({ state, commit }: { state: MastersState; commit: 
               />
             )}
           </SectionCard>
+          </div>
+          </StepTabs>
         </div>
       }
     />

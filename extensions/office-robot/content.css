@@ -1,0 +1,25 @@
+#bhb-office-robot {
+  position: fixed; right: 16px; bottom: 16px; z-index: 2147483000;
+  width: 320px; max-width: calc(100vw - 32px);
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #1b2a3a; background: #fff; border: 1px solid #c9d3de; border-radius: 12px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+}
+#bhb-office-robot header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px; border-bottom: 1px solid #e3e8ee; font-weight: 600; cursor: pointer;
+}
+#bhb-office-robot .body { padding: 10px 12px; max-height: 60vh; overflow-y: auto; }
+#bhb-office-robot.min .body { display: none; }
+#bhb-office-robot button.act {
+  width: 100%; margin-top: 6px; padding: 7px 10px; border: 0; border-radius: 8px;
+  background: #0f4c81; color: #fff; font-weight: 600; cursor: pointer;
+}
+#bhb-office-robot button.act.sec { background: #e8eef5; color: #0f4c81; }
+#bhb-office-robot button.act:disabled { opacity: 0.55; cursor: default; }
+#bhb-office-robot .msg { margin-top: 8px; white-space: pre-wrap; }
+#bhb-office-robot .err { color: #a3261a; }
+#bhb-office-robot .ok { color: #0f6b3f; }
+#bhb-office-robot .muted { color: #5f6f80; font-size: 12px; margin-top: 6px; }
+#bhb-office-robot .queue { padding: 6px 8px; margin-bottom: 4px; border-radius: 8px; background: #eef6ff; font-weight: 600; }
+.bhb-robot-filled { outline: 3px solid #f5b400 !important; background: #fff7d6 !important; }

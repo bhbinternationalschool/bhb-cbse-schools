@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 
 // Static: writeCacheOrInvalidate reads `window` when CALLED, not when the
 // module loads, so installing a fake storage per test is enough.
-import { isStorageQuotaError, writeCacheOrInvalidate } from "./browserStorage";
+import { isStorageQuotaError, readCache, writeCacheOrInvalidate } from "./browserStorage";
 
 /** A localStorage with a byte ceiling, which is what a real one is. */
 class FakeStorage {
@@ -164,6 +164,29 @@ console.log("browserStorageQuota.selftest.ts");
     400,
     "better a stale masters than none — everything resolves through it",
   );
+}
+
+/* ── The page reads what it just loaded, even when it could not store it ── */
+// 6 Oct 2026: office browsers hydrated 35 staff, could not store them in
+// masters, read the old stored copy back and showed an HR list of 0.
+{
+  const store = install(1_000);
+  store.setItem("bhb_masters_v5", "old");
+  writeCacheOrInvalidate("bhb_masters_v5", big(5_000));
+  assert.equal(store.getItem("bhb_masters_v5"), "old", "storage still holds the old copy");
+  assert.equal(
+    readCache("bhb_masters_v5")?.length,
+    5_000,
+    "but readers get the fresh copy held in memory for this page",
+  );
+  // A dropped bulk cache is held the same way.
+  writeCacheOrInvalidate("bhb_transport_v2", big(5_000));
+  assert.equal(store.getItem("bhb_transport_v2"), null);
+  assert.equal(readCache("bhb_transport_v2")?.length, 5_000);
+  // Once a write fits again, storage is the truth and the memory copy goes.
+  writeCacheOrInvalidate("bhb_masters_v5", "new");
+  assert.equal(readCache("bhb_masters_v5"), "new");
+  assert.equal(store.getItem("bhb_masters_v5"), "new");
 }
 
 /* ── A non-quota error is a real error and must not be swallowed ── */

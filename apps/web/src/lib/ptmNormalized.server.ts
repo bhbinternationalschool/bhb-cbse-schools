@@ -14,6 +14,7 @@ import type {
 } from "@/lib/ptm";
 import { ptmDualWriteDbEnabled } from "@/lib/ptmDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { fetchAllPages } from "@/lib/supabase/pageAll";
 
 export type PtmDeskSyncMeta = {
   eventCount: number;
@@ -358,12 +359,19 @@ export async function fetchPtmDeskFromDb(): Promise<{
   if (!ctx) return { bundle: empty, meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
+  // Paged: PostgREST stops at 1,000 rows. A short copy merged and pushed
+  // back whole (school-data/ptm-desk) would prune every row past the first
+  // page — bookings get there after a few meetings.
+  const all = (table: string) =>
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from(table).select("*").eq("tenant_id", tenantId).order("id", { ascending: true }).range(from, to),
+    ).then((r) => ({ data: r.rows, error: r.error ? { message: r.error } : null }));
   const [eventRes, slotRes, bookingRes, feedbackRes, metaRes] =
     await Promise.all([
-      sb.from("ptm_desk_events").select("*").eq("tenant_id", tenantId),
-      sb.from("ptm_desk_slots").select("*").eq("tenant_id", tenantId),
-      sb.from("ptm_desk_bookings").select("*").eq("tenant_id", tenantId),
-      sb.from("ptm_desk_feedback").select("*").eq("tenant_id", tenantId),
+      all("ptm_desk_events"),
+      all("ptm_desk_slots"),
+      all("ptm_desk_bookings"),
+      all("ptm_desk_feedback"),
       sb
         .from("ptm_desk_sync_meta")
         .select(META_SELECT)

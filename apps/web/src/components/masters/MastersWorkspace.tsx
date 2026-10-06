@@ -72,6 +72,7 @@ import {
   MastersWorkCard,
 } from "@/components/masters/MastersLayout";
 import { ModuleTabGroups, type ModuleTabGroup } from "@/components/ui/ModuleTabs";
+import { StepChainGuide, StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
@@ -168,6 +169,31 @@ const TAB_GROUPS: ModuleTabGroup[] = [
       { id: "wa-chatbot", label: "WhatsApp chatbot", tone: "teal" },
     ],
   },
+];
+
+/**
+ * Two chains in Masters run across separate tabs, each needing the one
+ * before: fees are built head → group → structure → … → rules, and the
+ * academic year session → classes → subjects → holidays. A step guide over
+ * the tabs says where you are and what comes next; the tabs still work
+ * on their own.
+ */
+const FEE_SETUP_STEPS: StepDef<Tab>[] = [
+  { id: "fee-heads", title: "Fee heads", what: "The kinds of charge — tuition, admission, exam, transport, annual — every fee line is booked to one." },
+  { id: "fee-groups", title: "Fee groups", what: "Bands of classes that pay the same fees (e.g. Nursery–UKG, I–V, VI–VIII)." },
+  { id: "fee-structure", title: "Fee structure", what: "The amounts for each group, month by month, per student type (new, promoted, mid-year, RTE). Publish a group to use it at the counter." },
+  { id: "special-fees", title: "Special fees", what: "One-off charges outside the structure for chosen classes or students." },
+  { id: "concessions", title: "Concessions", what: "Discount policies and who receives them — sibling, staff ward, merit, need." },
+  { id: "installments", title: "Due dates", what: "When each month's or term's fees fall due — the pattern and the individual dates." },
+  { id: "late-fee", title: "Late fee", what: "What is charged after a due date passes, and from when." },
+  { id: "mid-year", title: "Fee rules", what: "How fees work for a child joining mid-year, and who may enter a back-dated receipt." },
+];
+
+const ACADEMIC_STEPS: StepDef<Tab>[] = [
+  { id: "academic", title: "Session", what: "The academic years and their terms. The current session is what every other screen works in." },
+  { id: "classes", title: "Classes & sections", what: "The classes the school runs, their sections, and the class teachers." },
+  { id: "subjects", title: "Subjects", what: "Subjects and their components, linked to classes, with periods per week for the timetable." },
+  { id: "holidays", title: "Holidays", what: "The holiday calendar — import the government list, draft the school's, and publish it." },
 ];
 
 export function MastersWorkspace() {
@@ -312,6 +338,16 @@ export function MastersWorkspace() {
         value={tab}
         onChange={(id) => setTab(id as Tab)}
         groups={visibleTabGroups}
+      />
+
+      <StepChainGuide
+        chains={[
+          { label: "Fee setup", steps: FEE_SETUP_STEPS },
+          { label: "Academic setup", steps: ACADEMIC_STEPS },
+        ]}
+        value={tab}
+        onChange={setTab}
+        visible={visibleTabGroups.flatMap((g) => g.tabs.map((t) => t.id))}
       />
 
       <div className="mt-5">
@@ -788,6 +824,31 @@ function CampusesPanel({
   );
 }
 
+/**
+ * Classes, then their sections, then who teaches each section: a section
+ * belongs to a class, and teachers are assigned per section. The class list
+ * stays on every step — it is how a class is picked for its sections.
+ */
+type ClassesStep = "classes" | "sections" | "teachers";
+
+const CLASSES_STEPS: StepDef<ClassesStep>[] = [
+  {
+    id: "classes",
+    title: "Classes",
+    what: "Add, rename or remove classes. A new class starts with sections A and B; its group (Pre-Primary to Senior) follows from its name.",
+  },
+  {
+    id: "sections",
+    title: "Sections",
+    what: "Pick a class in the list, then add, rename, inactivate or remove its sections.",
+  },
+  {
+    id: "teachers",
+    title: "Class & subject teachers",
+    what: "Pick a section's Teachers, then set its class teacher and a teacher for each subject.",
+  },
+];
+
 function ClassesPanel({
   state,
   commit,
@@ -795,6 +856,7 @@ function ClassesPanel({
   state: MastersState;
   commit: (s: MastersState, msg?: string) => void;
 }) {
+  const [classStep, setClassStep] = useState<ClassesStep>("classes");
   const [className, setClassName] = useState("");
   const [editingClassId, setEditingClassId] = useState<string | null>(null);
   const [selectedClassId, setSelectedClassId] = useState(
@@ -945,10 +1007,16 @@ function ClassesPanel({
   }
 
   return (
+    <StepTabs
+      aria-label="Classes & sections steps"
+      steps={CLASSES_STEPS}
+      value={classStep}
+      onChange={setClassStep}
+    >
     <MastersTabStack
       intro="Classes are grouped: Pre-Primary (Nursery–UKG), Primary (I–V), Middle (VI–VIII), Secondary (IX–X), Senior (XI–XII)."
       tables={
-        <MastersTablesRow>
+        <MastersTablesRow cols={classStep === "classes" ? 1 : 2}>
           <MastersTableCard title="Classes by group" maxHeight="max-h-[min(70vh,560px)]">
             {CLASS_GROUPS.map((g) => {
               const rows = classesInGroup(state.classes, g.code);
@@ -1037,6 +1105,7 @@ function ClassesPanel({
             })}
           </MastersTableCard>
 
+          {classStep !== "classes" ? (
           <MastersTableCard title={`Sections · ${selected?.name ?? "—"}`}>
             <ul className="divide-y divide-[var(--border)]">
               {sectionsForClass.map((s) => (
@@ -1060,11 +1129,16 @@ function ClassesPanel({
                           ? "text-[var(--brand-deep)]"
                           : "text-[var(--brand-mid)]"
                       }`}
-                      onClick={() =>
+                      onClick={() => {
+                        if (classStep !== "teachers") {
+                          setTeachersSectionId(s.id);
+                          setClassStep("teachers");
+                          return;
+                        }
                         setTeachersSectionId(
                           teachersSectionId === s.id ? null : s.id,
-                        )
-                      }
+                        );
+                      }}
                     >
                       Teachers
                     </button>
@@ -1117,10 +1191,12 @@ function ClassesPanel({
               ) : null}
             </ul>
           </MastersTableCard>
+          ) : null}
         </MastersTablesRow>
       }
       work={
         <div className="grid gap-4 lg:grid-cols-2">
+          {classStep === "classes" ? (
           <MastersWorkCard
             title={editingClassId ? "Edit class" : "Add class"}
           >
@@ -1150,6 +1226,8 @@ function ClassesPanel({
               </button>
             </form>
           </MastersWorkCard>
+          ) : null}
+          {classStep === "sections" ? (
           <MastersWorkCard
             title={
               editingSectionId
@@ -1185,8 +1263,14 @@ function ClassesPanel({
               </button>
             </form>
           </MastersWorkCard>
+          ) : null}
 
-          {teachersSection ? (
+          {classStep === "teachers" && !teachersSection ? (
+            <p className="text-sm text-[var(--muted)]">
+              Pick a class, then press Teachers on one of its sections.
+            </p>
+          ) : null}
+          {classStep === "teachers" && teachersSection ? (
             <MastersWorkCard
               title={`Teachers · ${teachersSection.className}-${teachersSection.name}`}
             >
@@ -1203,6 +1287,7 @@ function ClassesPanel({
         </div>
       }
     />
+    </StepTabs>
   );
 }
 

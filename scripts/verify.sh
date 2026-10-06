@@ -179,6 +179,9 @@ SELFTESTS=(
   test:ncf-official
   test:student-curriculum
   test:subject-masters
+  test:masters-change-auth
+  test:timetable-free-grid
+  test:udise-teacher-apaar
   test:wa-sender-routing
   test:receipt-repair
   test:projection-double-post
@@ -238,6 +241,11 @@ SELFTESTS=(
   test:udise-upload-store
   test:udise-student-details
   test:udise-compliance
+  test:udise-robot
+  test:udise-portal-api
+  test:udise-portal-fill
+  test:udise-portal-add
+  test:udise-portal-reconcile
   test:lead-worklist
   test:student-import
   test:student-import-mid-year

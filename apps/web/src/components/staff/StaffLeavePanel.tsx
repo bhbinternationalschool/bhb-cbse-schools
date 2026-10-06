@@ -34,6 +34,7 @@ import {
   canManageStaffLeave,
   resolveSessionStaff,
 } from "@/lib/staffResolve";
+import { hasFeaturePermission } from "@/lib/rbac";
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
@@ -103,7 +104,12 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
 
   const isManager = useMemo(() => {
     if (!masters) return false;
-    return canManageStaffLeave(session, masters);
+    // Staff → Leave approvals (director, 6 Oct 2026) manages leave without
+    // the whole Staff module; the server takes only its slices.
+    return (
+      canManageStaffLeave(session, masters) ||
+      hasFeaturePermission(session, masters, "staff.leave", "edit")
+    );
   }, [masters, session]);
 
   useEffect(() => {

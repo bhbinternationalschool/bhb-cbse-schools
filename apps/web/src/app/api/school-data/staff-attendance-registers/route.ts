@@ -5,7 +5,17 @@ import {
   SCHOOL_DATA_DESK_RBAC,
 } from "@/lib/apiRouteAuth.server";
 import type { StaffAttendanceState } from "@/lib/staffAttendance";
-import type { StaffAttendanceDeskAncillary } from "@/lib/staffAttendanceDeskAncillary.server";
+import {
+  deskFeatureGateFor,
+  featurePushOutcome,
+  featureSavedResponse,
+  stripDeskForFeatures,
+  type FeatureGate,
+} from "@/lib/deskFeatureGate.server";
+import {
+  readStaffAttendanceSettings,
+  type StaffAttendanceDeskAncillary,
+} from "@/lib/staffAttendanceDeskAncillary.server";
 import {
   fetchStaffAttendanceDeskFromDb,
   pushStaffAttendanceDeskToDb,
@@ -15,9 +25,21 @@ import {
 export const runtime = "nodejs";
 
 /** GET — pull full staff attendance desk from normalized tables */
+/**
+ * This desk's keys are named "staff/<key>" in the Attendance functions
+ * (lib/rbacFeatureCatalog/academics.ts) so they never meet the student
+ * register desk's — both are module "attendance", and both have "registers".
+ */
+const STAFF_PREFIX = "staff/";
+
 export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["staff-attendance-registers"], "GET");
-  if (!auth.ok) return auth.response
+  let gate: FeatureGate | null = null;
+  if (!auth.ok) {
+    if (auth.response.status !== 403) return auth.response;
+    gate = await deskFeatureGateFor(req, "attendance", "read");
+    if (!gate) return auth.response;
+  }
   const desk = await fetchStaffAttendanceDeskFromDb();
   if (!desk.ok) {
     return NextResponse.json(
@@ -29,13 +51,24 @@ export async function GET(req: Request) {
   // attendance and outdoor duty. Outside the office/leadership: own rows only.
   let registers = desk.registers;
   let outdoorDuty = desk.ancillary.outdoorDuty;
-  if (!auth.viaMirrorSecret) {
-    const scope = await staffSectionScope(auth.ctx).catch(() => null);
+  const scopeCtx = gate ? gate.ctx : auth.ok && !auth.viaMirrorSecret ? auth.ctx : null;
+  if (scopeCtx) {
+    const scope = await staffSectionScope(scopeCtx).catch(() => null);
     if (!scope?.unrestricted) {
-      const me = auth.ctx.session.staffId || "";
+      const me = scopeCtx.session.staffId || "";
       registers = desk.registers.map((r) => ({ ...r, marks: r.marks.filter((m) => !!me && m.staffId === me) }));
       outdoorDuty = (outdoorDuty ?? []).filter((o) => !!me && o.staffId === me);
     }
+  }
+  // A function holder (Attendance → Staff register / Staff rules) gets the
+  // lists of the functions they hold. The settings are the punch rules
+  // every staff screen works to, so they are always served.
+  if (gate) {
+    const cut = stripDeskForFeatures("attendance", { registers, outdoorDuty }, gate, {
+      prefix: STAFF_PREFIX,
+    });
+    registers = cut.registers;
+    outdoorDuty = cut.outdoorDuty;
   }
   return NextResponse.json({
     ok: true,
@@ -43,6 +76,7 @@ export async function GET(req: Request) {
     ancillary: { ...desk.ancillary, outdoorDuty },
     settings: desk.ancillary.settings,
     outdoorDuty,
+    ...(gate ? { functionOnly: true } : {}),
     count: desk.registers.length,
     updatedAt: desk.meta?.updatedAt || new Date().toISOString(),
     meta: desk.meta,
@@ -56,14 +90,23 @@ type DeskPostBody = Pick<StaffAttendanceState, "registers" | "settings"> &
 /** POST — push staff attendance desk snapshot */
 export async function POST(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["staff-attendance-registers"], "POST");
-  if (!auth.ok) return auth.response
+  // Without the module: a function holder's save, or refused.
+  let gate: FeatureGate | null = null;
+  if (!auth.ok) {
+    if (auth.response.status !== 403) return auth.response;
+    gate = await deskFeatureGateFor(req, "attendance", "write");
+    if (!gate) return auth.response;
+  }
   // This push carries the whole staff attendance register (every member of staff).
   // "attendance.edit" alone let a teacher's browser send it — a stale copy
   // could overwrite other classes' registers. Teachers save one register at
   // a time through /api/v1/attendance/mark and punch through
   // /api/v1/staff/attendance/punch; this route is the office's.
-  if (!auth.viaMirrorSecret) {
-    const scope = await staffSectionScope(auth.ctx).catch(() => null);
+  // A function holder is held to it too: the function says what may change,
+  // not that a teacher's browser may push every colleague's register.
+  const scopeCtx = gate ? gate.ctx : auth.ok && !auth.viaMirrorSecret ? auth.ctx : null;
+  if (scopeCtx) {
+    const scope = await staffSectionScope(scopeCtx).catch(() => null);
     if (!scope?.unrestricted) {
       return NextResponse.json(
         {
@@ -91,6 +134,32 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  // Function holders: merged onto the stored desk, only their functions'
+  // slices — never the body as sent.
+  if (gate) {
+    const [desk, settings] = await Promise.all([
+      fetchStaffAttendanceDeskFromDb(),
+      readStaffAttendanceSettings(),
+    ]);
+    if (!desk.ok || !settings.ok) {
+      return NextResponse.json(
+        { ok: false, error: "Could not read the saved staff register — nothing was written. Try again." },
+        { status: 503 },
+      );
+    }
+    const stored = {
+      registers: desk.registers,
+      settings: settings.settings,
+      outdoorDuty: desk.ancillary.outdoorDuty ?? [],
+    };
+    const merged = featurePushOutcome(gate, "attendance", stored, body, undefined, {
+      prefix: STAFF_PREFIX,
+    });
+    if (!merged.ok) return merged.response;
+    if (!merged.changed) return featureSavedResponse(false);
+    body = merged.state as unknown as DeskPostBody;
+  }
+
   const result = await pushStaffAttendanceDeskToDb({
     registers: Array.isArray(body.registers) ? body.registers : [],
     settings: body.settings,
@@ -103,6 +172,7 @@ export async function POST(req: Request) {
     );
   }
 
+  if (gate) return featureSavedResponse(true);
   return NextResponse.json({
     ok: true,
     count: result.registerCount,

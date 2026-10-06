@@ -4,20 +4,64 @@ import {
   SCHOOL_DATA_DESK_RBAC,
 } from "@/lib/apiRouteAuth.server";
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
+import {
+  deskFeatureGateFor,
+  deskReadGate,
+  featurePushOutcome,
+  featureSavedResponse,
+  stripDeskForFeatures,
+  type FeatureGate,
+} from "@/lib/deskFeatureGate.server";
 import type { ExamsState } from "@/lib/exams";
 import { examsDualWriteDbEnabled } from "@/lib/examsDbConfig";
 import {
   fetchExamDeskFromDb,
+  fetchExamSetupFromDb,
   pushExamDeskToDb,
+  type ExamDeskBundle,
 } from "@/lib/examsNormalized.server";
+import type { RbacAction } from "@/lib/rbac";
 
 export const runtime = "nodejs";
 
+/**
+ * A function holder's copy of the desk (Exams → Date sheet, Mark entry, …).
+ *
+ * Terms, subjects, the policy and the date sheet are the frame every exam
+ * function works inside — a marks screen cannot name its exam without the
+ * term list — so they are always served; only their owner may change them.
+ * Mark sheets go to Mark entry (own classes, when the function is limited
+ * to them) and to Report cards & promotion (every class: a report card is
+ * read across the school).
+ */
+function featureExamBundle(bundle: ExamDeskBundle, gate: FeatureGate): ExamDeskBundle {
+  const holds = (id: string) =>
+    (["view", "create", "edit", "delete"] as RbacAction[]).some((a) => gate.access(id, a).allowed);
+  const stripped = stripDeskForFeatures("exams", bundle, gate);
+  let sheets: ExamDeskBundle["sheets"] = [];
+  if (holds("exams.results")) {
+    sheets = bundle.sheets;
+  } else if (holds("exams.marks")) {
+    const own = gate.ownClassIds;
+    sheets = own ? bundle.sheets.filter((s) => own.has(s.classId)) : bundle.sheets;
+  }
+  return {
+    ...stripped,
+    terms: bundle.terms,
+    subjects: bundle.subjects,
+    policy: bundle.policy,
+    dateSheet: bundle.dateSheet,
+    sheets,
+  };
+}
+
 /** GET — pull exam desk from normalized tables */
 export async function GET(req: Request) {
-  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["exams-desk"], "GET");
-  if (!auth.ok) return auth.response
-  const { bundle, meta } = await fetchExamDeskFromDb();
+  // The whole desk, or — holding Exams functions only — their part of it.
+  const gate = await deskReadGate(req, SCHOOL_DATA_DESK_RBAC["exams-desk"]);
+  if (gate.mode === "deny") return gate.response;
+  const { bundle: full, meta } = await fetchExamDeskFromDb();
+  const bundle = gate.mode === "feature" ? featureExamBundle(full, gate) : full;
   return NextResponse.json({
     ok: true,
     terms: bundle.terms,
@@ -53,7 +97,13 @@ type ExamsDeskPostBody = Partial<
  */
 export async function POST(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["exams-desk"], "POST");
-  if (!auth.ok) return auth.response
+  // Without the module: a function holder's save, or refused.
+  let gate: FeatureGate | null = null;
+  if (!auth.ok) {
+    if (auth.response.status !== 403) return auth.response;
+    gate = await deskFeatureGateFor(req, "exams", "write");
+    if (!gate) return auth.response;
+  }
   if (!examsDualWriteDbEnabled()) {
     return NextResponse.json({
       ok: true,
@@ -61,8 +111,11 @@ export async function POST(req: Request) {
       reason: "EXAMS_DUAL_WRITE_DB disabled",
     });
   }
-  if (!auth.viaMirrorSecret) {
-    const scope = await staffSectionScope(auth.ctx);
+  // The school-wide rule holds for function holders too: a function moves
+  // what may be changed, not who may push the setup desk.
+  const scopeCtx = gate ? gate.ctx : auth.ok && !auth.viaMirrorSecret ? auth.ctx : null;
+  if (scopeCtx) {
+    const scope = await staffSectionScope(scopeCtx);
     if (!scope.unrestricted) {
       return NextResponse.json(
         {
@@ -87,6 +140,25 @@ export async function POST(req: Request) {
     );
   }
 
+  // Function holders (e.g. Exams → Date sheet): merged onto the stored
+  // setup, only their functions' slices — never the body as sent. Sheets
+  // are never written here, so a stray copy is dropped before the check.
+  if (gate) {
+    const stored = await fetchExamSetupFromDb();
+    if (!stored.ok) {
+      return NextResponse.json(
+        { ok: false, error: "Could not read the saved exam setup — nothing was written. Try again." },
+        { status: 503 },
+      );
+    }
+    const { sheets: _ignored, ...setup } = body;
+    void _ignored;
+    const merged = featurePushOutcome(gate, "exams", stored.bundle, setup);
+    if (!merged.ok) return merged.response;
+    if (!merged.changed) return featureSavedResponse(false);
+    body = merged.state as ExamsDeskPostBody;
+  }
+
   const result = await pushExamDeskToDb({
     version: 1,
     terms: Array.isArray(body.terms) ? body.terms : [],
@@ -107,6 +179,7 @@ export async function POST(req: Request) {
     );
   }
 
+  if (gate) return featureSavedResponse(true);
   const { bundle } = await fetchExamDeskFromDb();
   return NextResponse.json({
     ok: true,

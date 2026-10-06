@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { loadMasters, type MastersState } from "@/lib/masters";
 import {
   appendRbacAudit,
@@ -13,6 +13,7 @@ import {
   principalAccessSummary,
   roleHasAction,
   saveRbac,
+  setRoleFeaturePermission,
   setRolePermission,
   staffAccessOverview,
   RBAC_ACTIONS,
@@ -24,6 +25,7 @@ import {
   type RbacState,
   type UserRoleAssignment,
 } from "@/lib/rbac";
+import { featuresForModule } from "@/lib/rbacFeatures";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { isSuperAdminSession } from "@/lib/superAdmin";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
@@ -211,6 +213,31 @@ export function RolesPermissionsPanel() {
         state,
         selected.id,
         module,
+        action,
+        enabled,
+        session.fullName,
+      ),
+    );
+  }
+
+  // Modules whose function rows are unfolded in the matrix.
+  const [openModules, setOpenModules] = useState<Set<string>>(() => new Set());
+  function toggleOpen(moduleId: string) {
+    setOpenModules((prev) => {
+      const next = new Set(prev);
+      if (next.has(moduleId)) next.delete(moduleId);
+      else next.add(moduleId);
+      return next;
+    });
+  }
+
+  function toggleFeature(featureId: string, action: RbacAction, enabled: boolean) {
+    if (!state || !selected) return;
+    commit(
+      setRoleFeaturePermission(
+        state,
+        selected.id,
+        featureId,
         action,
         enabled,
         session.fullName,
@@ -476,9 +503,29 @@ export function RolesPermissionsPanel() {
                       </ErpTableHead>
                       <ErpTableBody>
                         {modules.map((m) => (
-                          <tr key={m.id}>
+                          <Fragment key={m.id}>
+                          <tr>
                             <td className="px-2 py-1.5 font-medium text-[var(--brand-deep)]">
                               {m.label}
+                              {(() => {
+                                const fns = featuresForModule(m.id);
+                                if (fns.length === 0) return null;
+                                const held = fns.filter((f) =>
+                                  selected.featureGrants?.some((g) => g.feature === f.id && g.actions.length > 0),
+                                ).length;
+                                const open = openModules.has(m.id);
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleOpen(m.id)}
+                                    className="ml-2 rounded px-1.5 py-0.5 text-[10px] font-semibold text-[var(--muted)] hover:bg-[var(--surface-sunken)]"
+                                    aria-expanded={open}
+                                  >
+                                    {open ? "▾" : "▸"} {fns.length} functions
+                                    {held > 0 ? ` · ${held} given` : ""}
+                                  </button>
+                                );
+                              })()}
                             </td>
                             {RBAC_ACTIONS.map((a) => {
                               const on = roleHasAction(selected, m.id, a.id);
@@ -496,6 +543,49 @@ export function RolesPermissionsPanel() {
                               );
                             })}
                           </tr>
+                          {/* Functions inside the module, each grantable on
+                              its own. A module tick covers every function. */}
+                          {(openModules.has(m.id) ? featuresForModule(m.id) : []).map((f) => (
+                            <tr key={f.id} className="bg-[var(--surface-sunken)]/40">
+                              <td
+                                className="py-1 pl-6 pr-2 text-[var(--foreground)]"
+                                title={f.blurb}
+                              >
+                                ↳ {f.label}
+                                {f.classScoped ? (
+                                  <span className="ml-1 text-[10px] text-[var(--muted)]">
+                                    (own classes)
+                                  </span>
+                                ) : null}
+                              </td>
+                              {RBAC_ACTIONS.map((a) => {
+                                if (!f.actions.includes(a.id)) {
+                                  return <td key={a.id} className="px-1 py-1" />;
+                                }
+                                const viaModule = roleHasAction(selected, m.id, a.id);
+                                const on =
+                                  viaModule ||
+                                  !!selected.featureGrants?.some(
+                                    (g) => g.feature === f.id && g.actions.includes(a.id),
+                                  );
+                                return (
+                                  <td key={a.id} className="px-1 py-1 text-center">
+                                    <input
+                                      type="checkbox"
+                                      checked={on}
+                                      disabled={viaModule}
+                                      title={viaModule ? `Given by the whole ${m.label} tick` : undefined}
+                                      onChange={(e) =>
+                                        toggleFeature(f.id, a.id, e.target.checked)
+                                      }
+                                      aria-label={`${m.label} — ${f.label} ${a.label}`}
+                                    />
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                          </Fragment>
                         ))}
                       </ErpTableBody>
                     </ErpTable>

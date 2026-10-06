@@ -116,8 +116,41 @@ function evictUntilItFits(exceptKey: string, write: () => void): boolean {
   return false;
 }
 
+/**
+ * The copy a full browser could not store, held for the life of the page.
+ *
+ * The quota toast below has always said records are "held in memory only",
+ * but until 2026-10-06 nothing held them: a write that lost the quota fight
+ * left the reader with the OLD stored copy (masters, which is never dropped)
+ * or with none. On 6 Oct the office browsers hydrated all 35 staff from the
+ * database, could not store them in bhb_masters_v5, read the previous copy
+ * back — saved before the roster existed — and the HR staff list showed 0.
+ * Readers go through readCache() so the page sees what it just loaded.
+ */
+const memoryCopies = new Map<string, string>();
+
+/** What a cache key holds for this page: the in-memory copy a full browser
+ *  could not store, else localStorage. Null when neither has it. */
+export function readCache(key: string): string | null {
+  if (typeof window === "undefined") return null;
+  const held = memoryCopies.get(key);
+  if (held !== undefined) return held;
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
 export function writeCacheOrInvalidate(key: string, value: string): boolean {
   if (typeof window === "undefined") return false;
+  const stored = writeCacheOrInvalidateInner(key, value);
+  if (stored) memoryCopies.delete(key);
+  else memoryCopies.set(key, value);
+  return stored;
+}
+
+function writeCacheOrInvalidateInner(key: string, value: string): boolean {
   try {
     window.localStorage.setItem(key, value);
     return true;
@@ -140,7 +173,8 @@ export function writeCacheOrInvalidate(key: string, value: string): boolean {
     if (PROTECTED_KEYS.has(key)) {
       // Nothing left to give — keep the previous masters rather than dropping
       // the one cache the whole page resolves through.
-      console.warn(`[storage] ${key} could not be written (quota); previous copy kept.`);
+      console.warn(`[storage] ${key} could not be written (quota); held in memory for this page.`);
+      noteQuotaDropOnce(key);
       return false;
     }
     try {

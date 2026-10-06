@@ -41,6 +41,30 @@ import {
 } from "@/lib/transport";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import type { RowAction } from "@/components/ui/erp-grid";
+import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
+
+type RouteStep = "routes" | "policy";
+
+/**
+ * Routes first: a route's stops, bus and runs are one form saved together, so
+ * they stay one step with the list beside it (Edit on a row fills the form).
+ * The year's fee policy comes after — it decides how the stop distances
+ * recorded in step 1 turn into monthly dues on assign / Fee Take.
+ * Inactive steps are hidden, not unmounted: the coverage and stop-distance
+ * cards keep their own state.
+ */
+const ROUTE_STEPS: StepDef<RouteStep>[] = [
+  {
+    id: "routes",
+    title: "Routes, stops & runs",
+    what: "Add or edit a route — stops in boarding order with road distance, bus, vehicle and runs — and see all routes.",
+  },
+  {
+    id: "policy",
+    title: "Fee policy for the year",
+    what: "How monthly transport dues are calculated on assign / Fee Take — flat route fee, per km, distance slabs or stop-priced bands.",
+  },
+];
 
 export function RoutesPanel({
   state,
@@ -76,6 +100,7 @@ export function RoutesPanel({
     km: number;
   } | null>(null);
   const [policy, setPolicy] = useState<TransportFeePolicy>(state.feePolicy);
+  const [routeStep, setRouteStep] = useState<RouteStep>("routes");
 
   useEffect(() => {
     setPolicy(state.feePolicy);
@@ -271,8 +296,16 @@ export function RoutesPanel({
   }
 
   return (
-    <div className="mt-4 grid gap-4 lg:grid-cols-2">
+    <StepTabs
+      className="mt-4"
+      aria-label="Routes steps"
+      steps={ROUTE_STEPS}
+      value={routeStep}
+      onChange={setRouteStep}
+    >
+    <div className={routeStep === "routes" ? "grid gap-4 lg:grid-cols-2" : ""}>
       <div className="space-y-4">
+        <div className={routeStep === "routes" ? "space-y-4" : "hidden"}>
         <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
             {editId ? "Edit route" : "Add route"}
@@ -418,7 +451,9 @@ export function RoutesPanel({
           onFlash={onFlash}
           onError={onError}
         />
+        </div>
 
+        <div className={routeStep === "policy" ? "" : "hidden"}>
         <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
             Fee policy (AY)
@@ -801,9 +836,10 @@ export function RoutesPanel({
             Save policy
           </button>
         </div>
+        </div>
       </div>
 
-      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+      <div className={routeStep === "routes" ? "rounded-xl border border-[var(--border)] bg-[var(--card)] p-4" : "hidden"}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
             All routes
@@ -864,6 +900,7 @@ export function RoutesPanel({
         />
       </div>
     </div>
+    </StepTabs>
   );
 }
 

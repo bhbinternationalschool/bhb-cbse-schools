@@ -48,6 +48,10 @@ jobs:
             @tailwindcss/oxide-linux-x64-gnu@4.3.2
 
       - name: Typecheck
+        # tsc outgrew Node's default ~2 GB heap on 6 Oct 2026: every PR's
+        # Typecheck died with "JavaScript heap out of memory" (exit 134).
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
         run: npm run typecheck
 
       - name: Lint
@@ -166,6 +170,18 @@ jobs:
       - name: Self-test — a subject the school adds is never hidden, and codes stay unique
         working-directory: apps/web
         run: npm run test:subject-masters
+
+      - name: Self-test — Masters function grants, own classes only
+        working-directory: apps/web
+        run: npm run test:masters-change-auth
+
+      - name: Self-test — free-period grid agrees with the free-period list
+        working-directory: apps/web
+        run: npm run test:timetable-free-grid
+
+      - name: Self-test — UDISE+ teacher profiles and APAAR consent page from the ERP
+        working-directory: apps/web
+        run: npm run test:udise-teacher-apaar
 
       - name: Test — which number sends which template, and both languages
         working-directory: apps/web
@@ -365,6 +381,11 @@ jobs:
           npm run test:sibling-carry-over
           npm run test:udise-upload-store
           npm run test:udise-compliance
+          npm run test:udise-robot
+          npm run test:udise-portal-api
+          npm run test:udise-portal-fill
+          npm run test:udise-portal-add
+          npm run test:udise-portal-reconcile
           npm run test:lead-worklist
           npm run test:student-import
           npm run test:student-import-mid-year
