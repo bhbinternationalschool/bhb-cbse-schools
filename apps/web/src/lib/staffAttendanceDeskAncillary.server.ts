@@ -62,16 +62,28 @@ export async function pushStaffAttendanceSettingsToDb(
   return { ok: true };
 }
 
-export async function fetchStaffAttendanceSettingsFromDb(): Promise<StaffAttendanceSettings> {
+/**
+ * The settings row, or null when it could not be read (no tenant, a query
+ * error or timeout, or no row at all).
+ *
+ * Callers that act on the settings must not guess. On 6 Oct 2026 a failed
+ * read here came back as defaultAttendanceSettings() — an EMPTY exempt list —
+ * and the first punch of the day built the register from it: all 16
+ * punch-exempt staff (director and admins included) were filed "A".
+ */
+export async function fetchStaffAttendanceSettingsFromDbStrict(): Promise<StaffAttendanceSettings | null> {
   const c = await ctx();
-  if (!c) return defaultAttendanceSettings();
-  const { data } = await c.sb
+  if (!c) return null;
+  const { data, error } = await c.sb
     .from("staff_attendance_desk_settings")
     .select("*")
     .eq("tenant_id", c.tenantId)
     .maybeSingle();
-
-  if (!data) return defaultAttendanceSettings();
+  if (error) {
+    console.error("[staff attendance] settings read failed", error.message);
+    return null;
+  }
+  if (!data) return null;
   return {
     allowSelfPunch: !!data.allow_self_punch,
     autoApplyRulesOnSave: !!data.auto_apply_rules_on_save,
@@ -83,4 +95,10 @@ export async function fetchStaffAttendanceSettingsFromDb(): Promise<StaffAttenda
       ? (data.exempt_staff_ids as string[])
       : [],
   };
+}
+
+/** Settings for display and geofence checks: the row, or the defaults when it
+ *  cannot be read. Never use this to decide who is on a register. */
+export async function fetchStaffAttendanceSettingsFromDb(): Promise<StaffAttendanceSettings> {
+  return (await fetchStaffAttendanceSettingsFromDbStrict()) ?? defaultAttendanceSettings();
 }

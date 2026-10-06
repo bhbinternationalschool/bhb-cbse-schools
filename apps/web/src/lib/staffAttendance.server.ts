@@ -333,11 +333,33 @@ export async function applyWhatsAppStaffPunch(opts: {
 
   // Staff who keep no attendance stay off the register (same list the
   // office desk uses); everyone else starts "Not punched" (A).
-  const exempt = await exemptStaffIdsServer(settings);
   const existingReg = findStaffRegister(state, date, ay);
-  let marks = existingReg
-    ? [...existingReg.marks]
-    : defaultStaffMarks(roster.filter((s) => !exempt.has(s.id)));
+  let marks: ReturnType<typeof defaultStaffMarks>;
+  // The roster a NEW register is built from (upsertStaffMarkInState). Until
+  // 6 Oct 2026 this was masters.staff unfiltered: the exempt list was applied
+  // to `marks` but not to the register actually saved, so the first punch of
+  // a day that the office desk had not opened yet filed all 16 exempt staff
+  // (director and admins included) as "A".
+  let registerRoster = roster;
+  if (existingReg) {
+    marks = [...existingReg.marks];
+  } else {
+    // A new day's register lists everyone who keeps attendance. Who is exempt
+    // must come from a confirmed read of the settings row: on 6 Oct 2026 an
+    // unread row became the defaults' empty list and the first punch filed
+    // all 16 exempt staff as "A". Better to refuse this punch for a minute.
+    const { fetchStaffAttendanceSettingsFromDbStrict } = await import(
+      "@/lib/staffAttendanceDeskAncillary.server"
+    );
+    const confirmed = await fetchStaffAttendanceSettingsFromDbStrict();
+    if (!confirmed) {
+      console.error("[staff punch] no confirmed settings — not creating today's register");
+      return saveFailed;
+    }
+    const exempt = await exemptStaffIdsServer(confirmed);
+    registerRoster = roster.filter((s) => !exempt.has(s.id));
+    marks = defaultStaffMarks(registerRoster);
+  }
 
   if (settings.syncLeaveToAttendance) {
     marks = applyApprovedLeaveToMarks(marks, date, ay);
@@ -380,7 +402,7 @@ export async function applyWhatsAppStaffPunch(opts: {
       punchWay,
       punchGeo: geoAudit,
       markedBy,
-      roster,
+      roster: registerRoster,
     });
     state = merged.state;
     if (!(await saveStaffPunchRegister(state, merged.register)).ok) return saveFailed;
@@ -439,7 +461,7 @@ export async function applyWhatsAppStaffPunch(opts: {
     punchWay,
     punchGeo: geoAudit,
     markedBy,
-    roster,
+    roster: registerRoster,
   });
   state = merged.state;
   if (!(await saveStaffPunchRegister(state, merged.register)).ok) return saveFailed;
@@ -620,7 +642,9 @@ export async function applyOutdoorDutyServer(opts: {
   const { startOutdoorDuty, endOutdoorDuty } = await import("@/lib/staffAttendance");
   const state = await loadStaffAttendanceFresh();
   const masters = loadMasters();
-  const roster = masters.staff ?? [];
+  // Same rule as a punch: a register this creates leaves exempt staff off.
+  const outdoorExempt = await exemptStaffIdsServer(normalizeAttendanceSettings(state.settings));
+  const roster = (masters.staff ?? []).filter((s) => !outdoorExempt.has(s.id));
   const r =
     opts.action === "start"
       ? startOutdoorDuty({
