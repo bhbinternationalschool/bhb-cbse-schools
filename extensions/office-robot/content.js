@@ -45,9 +45,11 @@
   const pullBtn = el("button", { class: "act sec", type: "button" }, "Only send portal list to ERP");
   const fillBtn = el("button", { class: "act sec", type: "button" }, "Fill this form from ERP");
   const addBtn = el("button", { class: "act sec", type: "button" }, "Add missing children to UDISE+");
+  const addAnywayBtn = el("button", { class: "act sec", type: "button" }, "Not the same child — add anyway");
   const msg = el("div", { class: "msg" });
   const last = el("div", { class: "muted" });
-  body.append(queueBox, startBtn, nextBtn, skipBtn, stopBtn, addBtn, pullBtn, fillBtn, msg, last);
+  body.append(queueBox, startBtn, nextBtn, addAnywayBtn, skipBtn, stopBtn, addBtn, pullBtn, fillBtn, msg, last);
+  addAnywayBtn.style.display = "none";
   panel.append(head, body);
   head.addEventListener("click", () => {
     panel.classList.toggle("min");
@@ -250,6 +252,78 @@
     return lines.join("\n");
   }
 
+  // ─── Is this child already on UDISE+ anywhere in India? ──────────────
+
+  const nameTokens = (n) => String(n || "").toUpperCase().replace(/[^A-Z\s]/g, " ").split(/\s+/).filter(Boolean);
+  /** Same first name, and the shorter name's words appear in order in the longer. */
+  function namesCompatible(a, b) {
+    const x = nameTokens(a);
+    const y = nameTokens(b);
+    if (!x.length || !y.length || x[0] !== y[0]) return false;
+    const [sh, lo] = x.length <= y.length ? [x, y] : [y, x];
+    let j = 0;
+    for (const t of lo) if (j < sh.length && sh[j] === t) j += 1;
+    return j === sh.length;
+  }
+
+  async function portalSearch(path, body) {
+    const r = await fetch(`/p1/api/search/${path}`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const j = await r.json().catch(() => null);
+    // A failed search is "could not check", never "not found".
+    if (!r.ok || !j || j.status !== true || !Array.isArray(j.data)) {
+      throw new Error((j && j.message) || `the portal's search answered ${r.status}`);
+    }
+    return j.data;
+  }
+
+  /**
+   * Search the whole of UDISE+ for this ERP child, the way the portal's own
+   * Global Student Search does: by name + Aadhaar last 4 when the ERP has
+   * the Aadhaar, and by name + date of birth + father + mother (the portal
+   * needs at least two of the three). Returns the hits that look like the
+   * same child, or throws when it could not search at all.
+   */
+  async function findOnUdise(c) {
+    const v = (control) => (c.fields || []).find((f) => f.control === control)?.value || "";
+    const name = v("studentName") || c.name;
+    const dob = v("dob");
+    const father = v("fatherName");
+    const mother = v("motherName");
+    const aadhaar = v("uuid");
+    const hits = new Map();
+    let searched = false;
+    if (/^\d{12}$/.test(aadhaar)) {
+      for (const h of await portalSearch("student-aadhaar", { studentName: name, uuid: aadhaar.slice(-4) })) hits.set(h.studentPEN || JSON.stringify(h), h);
+      searched = true;
+    }
+    if ([dob, father, mother].filter(Boolean).length >= 2) {
+      const found = await portalSearch("global", { studentName: name, dob, fatherName: father, motherName: mother, schoolId: null, stateId: null });
+      for (const h of found) hits.set(h.studentPEN || JSON.stringify(h), h);
+      searched = true;
+    }
+    if (!searched) {
+      throw new Error("the ERP has too few details to search UDISE+ (needs the Aadhaar, or two of date of birth, father's and mother's name)");
+    }
+    // The portal's matching is loose; keep hits that agree on the name AND
+    // on at least one of birth date / father / mother.
+    const same = [...hits.values()].filter(
+      (h) =>
+        namesCompatible(name, h.studentName) &&
+        ((dob && h.studentDob === dob) || (father && namesCompatible(father, h.fatherName)) || (mother && namesCompatible(mother, h.motherName))),
+    );
+    return { same, loose: [...hits.values()].filter((h) => !same.includes(h)) };
+  }
+
+  const describeHit = (h, ourId) =>
+    `${h.studentName} · PEN ${h.studentPEN} · born ${h.studentDob} · father ${h.fatherName || "—"} · ` +
+    (String(h.schoolId) === String(ourId) ? "OUR SCHOOL" : `${h.schoolName} (UDISE ${h.udiseSchCode})`) +
+    ` · ${h.classDesc || ""} ${h.yearDesc || ""} · ${h.statusDesc || ""}`;
+
   /**
    * Fill the open "Add New Student" form for one ERP child. The plan is
    * fetched fresh each time (it carries the Aadhaar, which is never kept in
@@ -350,6 +424,49 @@
     }
     const item = q.items[q.index];
     renderQueue(q, 0);
+    addAnywayBtn.style.display = "none";
+    if (q.kind === "add" && q.addAnywayFor !== item.studentId) {
+      say(`Searching all of UDISE+ for ${item.studentName}…`);
+      try {
+        const res = await ask({ type: "add-list", students: await portalList(q.schoolId) });
+        if (!res.ok) throw new Error(res.error);
+        const c = (res.body.candidates || []).find((x) => x.studentId === item.studentId);
+        if (!c) return say(`${item.studentName} is no longer missing from the portal (or now has a PEN in the ERP). Press Skip.`, "ok");
+        const { same, loose } = await findOnUdise(c);
+        const ours = same.filter((h) => String(h.schoolId) === String(q.schoolId));
+        const elsewhere = same.filter((h) => String(h.schoolId) !== String(q.schoolId));
+        if (ours.length) {
+          return say(
+            [`${item.studentName} is ALREADY on UDISE+ in our school — do not add.`, ...ours.map((h) => describeHit(h, q.schoolId)),
+              "Press “Only send portal list to ERP”, then Apply in the ERP so the PEN comes in. Then Skip."].join("\n"),
+            "err",
+          );
+        }
+        if (elsewhere.length) {
+          return say(
+            [`${item.studentName} is on UDISE+ at ANOTHER school — do not add; bring the child in by transfer.`,
+              ...elsewhere.map((h) => describeHit(h, q.schoolId)),
+              "Ask that school to release the child (or import from the Dropbox), and put this PEN on the child in the ERP. Then Skip."].join("\n"),
+            "err",
+          );
+        }
+        if (loose.length) {
+          addAnywayBtn.style.display = "";
+          return say(
+            [`UDISE+ has children with a similar name, but none agree on birth date or parents:`, ...loose.slice(0, 5).map((h) => describeHit(h, q.schoolId)),
+              "If none of them is this child, press “Not the same child — add anyway”. Otherwise Skip."].join("\n"),
+          );
+        }
+        say(`Not found anywhere on UDISE+. Opening Add Student for ${item.studentName}…`);
+      } catch (e) {
+        addAnywayBtn.style.display = "";
+        return say(
+          `Could not check UDISE+ for ${item.studentName}: ${e.message || e}.\nSearch by hand (Global Student Search). If the child is not there, press “Not the same child — add anyway”.`,
+          "err",
+        );
+      }
+    }
+    if (q.addAnywayFor) await store.set("queue", { ...q, addAnywayFor: "" });
     // A fresh form for every child: leave first, so the portal clears it.
     if (q.kind === "add") {
       location.hash = `#/school/${q.schoolId}/schoolDashboard/cy`;
@@ -367,12 +484,12 @@
   async function clickStep(fn) {
     if (busy) return;
     busy = true;
-    for (const b of [startBtn, nextBtn, skipBtn]) b.disabled = true;
+    for (const b of [startBtn, nextBtn, skipBtn, addAnywayBtn]) b.disabled = true;
     try {
       await fn();
     } finally {
       busy = false;
-      for (const b of [startBtn, nextBtn, skipBtn]) b.disabled = false;
+      for (const b of [startBtn, nextBtn, skipBtn, addAnywayBtn]) b.disabled = false;
     }
   }
 
@@ -383,6 +500,14 @@
     await openCurrent();
   };
   nextBtn.addEventListener("click", () => void clickStep(advance));
+  addAnywayBtn.addEventListener("click", () =>
+    void clickStep(async () => {
+      const q = await store.get("queue");
+      if (!q || q.kind !== "add") return;
+      await store.set("queue", { ...q, addAnywayFor: q.items[q.index]?.studentId || "" });
+      await openCurrent();
+    }),
+  );
   skipBtn.addEventListener("click", () => void clickStep(advance));
   stopBtn.addEventListener("click", async () => {
     await store.set("queue", null);
