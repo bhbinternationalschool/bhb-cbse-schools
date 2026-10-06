@@ -187,6 +187,8 @@ export function StudentsWorkspace() {
   const [mainTab, setMainTab] = useState<MainTab>("dashboard");
   const [showCurriculumOffice, setShowCurriculumOffice] = useState(false);
   const [panelTick, setPanelTick] = useState(0);
+  /** Upgrade sub-tab: one child vs the whole class — alternatives, not steps. */
+  const [upgradeMode, setUpgradeMode] = useState<"single" | "class">("single");
 
   useEffect(() => {
     const m = loadMasters();
@@ -1125,6 +1127,18 @@ export function StudentsWorkspace() {
 
       {mainTab === "upgrade" ? (
         <div className="space-y-6">
+          <ModuleTabs
+            size="md"
+            aria-label="Upgrade type"
+            value={upgradeMode}
+            onChange={(id) => setUpgradeMode(id as "single" | "class")}
+            items={[
+              { id: "single", label: "Single student", tone: "navy" },
+              { id: "class", label: "Whole class", tone: "teal" },
+            ]}
+          />
+          {/* Both stay mounted (hidden) so unsaved picks survive a switch. */}
+          <div className={upgradeMode === "single" ? "" : "hidden"}>
           <StudentUpgradePanel
             tick={panelTick}
             onChanged={(next) => {
@@ -1132,7 +1146,8 @@ export function StudentsWorkspace() {
               setPanelTick((t) => t + 1);
             }}
           />
-          <hr className="border-[rgba(32,48,80,0.1)]" />
+          </div>
+          <div className={upgradeMode === "class" ? "" : "hidden"}>
           <StudentPromotionPanel
             tick={panelTick}
             onChanged={(next) => {
@@ -1140,6 +1155,7 @@ export function StudentsWorkspace() {
               setPanelTick((t) => t + 1);
             }}
           />
+          </div>
         </div>
       ) : null}
 
