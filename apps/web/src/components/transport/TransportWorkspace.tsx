@@ -17,7 +17,7 @@ import {
 } from "@/components/transport/TransportFleetPanels";
 import { FleetEdgeEventsPanel } from "@/components/transport/FleetEdgeEventsPanel";
 import { FleetEdgeReport } from "@/components/transport/FleetEdgeReport";
-import { hasPermission } from "@/lib/rbac";
+import { canWriteModuleTab, visibleModuleTabs } from "@/lib/rbac";
 import {
   FleetPanel,
   FuelPanel,
@@ -588,6 +588,17 @@ export function TransportWorkspace() {
     },
   };
 
+  // Someone holding only some Transport functions sees only their tabs.
+  const shownTabs = useMemo(
+    () => visibleModuleTabs(TABS, session, masters, "transport"),
+    [session, masters],
+  );
+  useEffect(() => {
+    if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
+      setTab(shownTabs[0]!.id as TransportTab);
+    }
+  }, [shownTabs, tab]);
+
   return (
     <ErpWorkspaceShell
       title="Transport"
@@ -605,7 +616,7 @@ export function TransportWorkspace() {
       }
     >
       <ModuleTabs
-        items={TABS}
+        items={shownTabs}
         value={tab}
         onChange={(id) => setTab(id as TransportTab)}
         aria-label="Transport workspace"
@@ -643,18 +654,18 @@ export function TransportWorkspace() {
                 what moves that.
               */}
               <PinRequestPanel
-                canEdit={hasPermission(session, masters, "transport", "edit")}
+                canEdit={canWriteModuleTab(session, masters, "transport", tab)}
               />
               <PinsReceivedPanel />
               <BoardingPointAuditPanel
                 academicYearCode={session.academicYearCode}
-                canEdit={hasPermission(session, masters, "transport", "edit")}
+                canEdit={canWriteModuleTab(session, masters, "transport", tab)}
               />
             </>
           ) : null}
           {tab === "riders" ? (
             <RidersPanel
-              canEdit={hasPermission(session, masters, "transport", "edit")}
+              canEdit={canWriteModuleTab(session, masters, "transport", tab)}
               state={state}
               masters={masters}
               sis={sis}
@@ -728,7 +739,7 @@ export function TransportWorkspace() {
               studentName={rosterEditing.studentName}
               classGroupCode={rosterEditing.classGroupCode}
               home={rosterEditing.home}
-              canEdit={hasPermission(session, masters, "transport", "edit")}
+              canEdit={canWriteModuleTab(session, masters, "transport", tab)}
               academicYearCode={session.academicYearCode}
               state={state}
               dues={rosterEditing.dues}
@@ -833,7 +844,7 @@ export function TransportWorkspace() {
             </>
           ) : null}
           {tab === "fleetDashboard" ? (
-            <FleetEdgeReport canEdit={hasPermission(session, masters, "transport", "edit")} />
+            <FleetEdgeReport canEdit={canWriteModuleTab(session, masters, "transport", tab)} />
           ) : null}
           {tab === "reports" ? (
             <ReportsPanel

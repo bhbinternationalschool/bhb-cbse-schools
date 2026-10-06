@@ -15,11 +15,11 @@ import {
 import { fetchMastersFromRowTables } from "@/lib/mastersRowTables.server";
 import { guardMastersOverwrite } from "@/lib/mastersWriteGuard";
 import { guardMastersRevision } from "@/lib/mastersRevisionGuard";
-import { authorizeMastersFeatureChange } from "@/lib/mastersChangeAuth";
-import { featureAccess, type RbacAction } from "@/lib/rbac";
-import { featuresForModule } from "@/lib/rbacFeatures";
-import { staffSectionScope } from "@/lib/api/v1/staffScope";
-import type { ApiAuthContext } from "@/lib/api/v1/auth";
+import {
+  deskWriteGate,
+  featurePushOutcome,
+  featureSavedResponse,
+} from "@/lib/deskFeatureGate.server";
 
 export const runtime = "nodejs";
 
@@ -176,30 +176,12 @@ export async function GET(req: Request) {
   });
 }
 
-/**
- * Someone without masters.edit who holds a FUNCTION of Masters (Masters →
- * Roles → functions; e.g. a teacher's "Class subjects"). Null when they
- * hold none — the plain 403 stands.
- */
-async function featureWriterContext(req: Request): Promise<ApiAuthContext | null> {
-  const staff = await requireStaffApi(req);
-  if (!staff.ok || staff.viaMirrorSecret) return null;
-  const ctx = staff.ctx;
-  const writes: RbacAction[] = ["create", "edit", "delete"];
-  const any = featuresForModule("masters").some((f) =>
-    writes.some((a) => featureAccess(ctx.session, ctx.masters, f.id, a, ctx.rbac).allowed),
-  );
-  return any ? ctx : null;
-}
-
 export async function POST(req: Request) {
-  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["masters-desk"], "POST");
-  let featureCtx: ApiAuthContext | null = null;
-  if (!auth.ok) {
-    if (auth.response.status !== 403) return auth.response;
-    featureCtx = await featureWriterContext(req);
-    if (!featureCtx) return auth.response;
-  }
+  // The whole of Masters, or some of its functions (a teacher's Class
+  // subjects) — lib/deskFeatureGate.server.ts.
+  const gate = await deskWriteGate(req, SCHOOL_DATA_DESK_RBAC["masters-desk"]);
+  if (gate.mode === "deny") return gate.response;
+  const featureGate = gate.mode === "feature" ? gate : null;
   if (!mastersDualWriteDbEnabled()) {
     return NextResponse.json({
       ok: true,
@@ -258,7 +240,7 @@ export async function POST(req: Request) {
   // subset with no revision, and their push is merged row by row onto the
   // stored desk below — nothing of theirs can overwrite a newer save
   // outside their own classes.
-  if (!revision.allow && !featureCtx) {
+  if (!revision.allow && !featureGate) {
     console.warn(
       `[masters-desk] rejected stale push`,
       `base=${baseUpdatedAt} stored=${revision.storedUpdatedAt}`,
@@ -280,38 +262,18 @@ export async function POST(req: Request) {
   // their functions own are lifted in — row by row, inside their classes.
   // Their browser holds the teaching subset only, so anything else in the
   // push is not theirs to save and is ignored, never written.
-  if (featureCtx) {
-    const ctx = featureCtx;
-    let ownClassIds: Set<string> | null = null;
-    try {
-      const scope = await staffSectionScope(ctx);
-      if (!scope.unrestricted) {
-        ownClassIds = new Set([...scope.sections].map((k) => k.split("|")[0]!));
-      }
-    } catch {
-      ownClassIds = new Set();
-    }
+  if (featureGate) {
     const className = new Map((stored.classes ?? []).map((c) => [c.id, c.name]));
-    const verdict = authorizeMastersFeatureChange(
-      stored as unknown as Record<string, unknown>,
-      state as unknown as Record<string, unknown>,
-      (featureId, action) => featureAccess(ctx.session, ctx.masters, featureId, action, ctx.rbac),
-      ownClassIds,
+    const merged = featurePushOutcome(
+      featureGate,
+      "masters",
+      stored,
+      state,
       (id) => className.get(id) || "That class",
     );
-    if (!verdict.ok) {
-      console.warn(
-        `[masters-desk] refused function-only push from ${ctx.session.staffId || "?"}: ${verdict.reason}`,
-      );
-      return NextResponse.json({ error: verdict.reason, reason: "feature_forbidden" }, { status: 403 });
-    }
-    if (verdict.changedSlices.length === 0) {
-      return NextResponse.json({ ok: true, unchanged: true, functionOnly: true });
-    }
-    state = { ...(verdict.merged as unknown as MastersState), version: 2 };
-    console.info(
-      `[masters-desk] function-only push by ${ctx.session.staffId || "?"}: ${verdict.changedSlices.join(", ")}`,
-    );
+    if (!merged.ok) return merged.response;
+    if (!merged.changed) return featureSavedResponse(false);
+    state = { ...(merged.state as unknown as MastersState), version: 2 };
   }
 
   // A client must not be able to replace the class-id generation wholesale.
@@ -348,10 +310,10 @@ export async function POST(req: Request) {
       { status: 500 },
     );
   }
-  if (featureCtx) {
+  if (featureGate) {
     // No revision back: this browser holds the teaching subset and must
     // never take it as a base for a whole-desk push.
-    return NextResponse.json({ ok: true, functionOnly: true, changed: true });
+    return featureSavedResponse(true);
   }
   return NextResponse.json({
     ok: true,

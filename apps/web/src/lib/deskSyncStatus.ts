@@ -123,6 +123,15 @@ export function recordDeskSyncFailure(
   );
   if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
     window.dispatchEvent(new CustomEvent("bhb-desk-sync-failed", { detail: next }));
+    // A 403 with a reason is a person told what they may not do — e.g. a
+    // function holder (Masters → Roles → functions) saving outside their
+    // functions or classes. Say it where they are, not only in a banner.
+    if (detail.status === 403 && detail.error) {
+      const message = `Your last change was NOT saved. ${detail.error}`;
+      void import("@/components/shell/Toast")
+        .then(({ pushToast }) => pushToast({ kind: "error", message, durationMs: 0 }))
+        .catch(() => undefined);
+    }
   }
   return next;
 }

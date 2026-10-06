@@ -1,0 +1,97 @@
+import { CRUD, type RbacFeatureDef } from "@/lib/rbacFeatureCatalog/types";
+
+/**
+ * Transport — wired 6 Oct 2026 (transport-desk POST/GET, TransportWorkspace
+ * tabs). Slices are TransportState keys.
+ */
+export const TRANSPORT_FEATURES: RbacFeatureDef[] = [
+  {
+    id: "transport.riders",
+    module: "transport",
+    label: "Riders & boarding points",
+    blurb: "Put children and staff on a route and stop, handle transport requests and pin requests.",
+    actions: CRUD,
+    slices: ["assignments", "staffRiders"],
+    tabs: ["planner", "riders", "requests", "rosters", "classRosters", "staffRiders"],
+    routes: [
+      "/api/transport/pin-request",
+      "/api/transport/pins-received",
+      "/api/transport/boarding-point",
+      "/api/transport/boarding-audit",
+      "/api/transport/route-change-notice",
+    ],
+  },
+  {
+    id: "transport.routes",
+    module: "transport",
+    label: "Routes & stops",
+    blurb: "Routes, their stops, timings and shifts.",
+    actions: CRUD,
+    slices: ["routes"],
+    tabs: ["routes"],
+  },
+  {
+    id: "transport.fleet",
+    module: "transport",
+    label: "Vehicles & compliance",
+    blurb: "Vehicles, insurance and certificate renewals.",
+    actions: CRUD,
+    slices: ["vehicles", "insurancePolicies", "certificateRenewals"],
+    tabs: ["fleet", "compliance"],
+    routes: ["/api/transport/fleet-edge/vehicle-identity"],
+  },
+  {
+    id: "transport.fuel",
+    module: "transport",
+    label: "Fuel log",
+    blurb: "Fuel stock, purchases and refills.",
+    actions: CRUD,
+    slices: ["fuelStockLocations", "fuelPurchases", "fuelRefillLogs"],
+    tabs: ["fuel"],
+  },
+  {
+    id: "transport.service",
+    module: "transport",
+    label: "Service & repairs",
+    blurb: "Job cards and repair requests.",
+    actions: CRUD,
+    slices: ["serviceJobCards", "repairRequests"],
+    tabs: ["service"],
+  },
+  {
+    id: "transport.boarding",
+    module: "transport",
+    label: "Boarding register",
+    blurb: "Who boarded and got off, run by run.",
+    actions: ["view", "create", "edit"],
+    slices: ["boardingEvents"],
+    tabs: ["board"],
+  },
+  {
+    id: "transport.finance",
+    module: "transport",
+    label: "Dealers, loans & payables",
+    blurb: "Dealers, payables, vehicle loans, EMIs and the transport fee policy.",
+    actions: CRUD,
+    slices: ["dealers", "payables", "vehicleLoans", "emiSchedule", "feePolicy"],
+    tabs: ["dealers", "finance"],
+  },
+  {
+    id: "transport.live",
+    module: "transport",
+    label: "Live tracking",
+    blurb: "Live bus positions, halts and the Fleet Edge report.",
+    actions: ["view"],
+    slices: ["gpsPings"],
+    tabs: ["live", "fleetDashboard"],
+    routes: [
+      "/api/transport/live",
+      "/api/transport/live-positions",
+      "/api/transport/halt-analysis",
+      "/api/transport/fleet-edge/dashboard",
+      "/api/transport/fleet-edge/events",
+      "/api/transport/fleet-edge/notifications",
+      "/api/transport/fleet-edge/vehicle-status",
+    ],
+  },
+];

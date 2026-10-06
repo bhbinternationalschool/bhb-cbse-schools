@@ -16,7 +16,13 @@ import { assertSessionWritable } from "@/lib/sessionWriteGuard";
 import { isProtectedSuperAdminEmail } from "@/lib/superAdmin";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
-import { RBAC_FEATURES, featuresForMastersTab, findFeature } from "@/lib/rbacFeatures";
+import {
+  RBAC_FEATURES,
+  featuresForMastersTab,
+  featuresForModule,
+  featuresForTab,
+  findFeature,
+} from "@/lib/rbacFeatures";
 
 export type RbacModule =
   | "home"
@@ -1293,6 +1299,55 @@ export function hasAnyFeatureInModule(
   );
 }
 
+/**
+ * May this person open a tab of a module's screen? The whole module opens
+ * every tab; a function opens the tabs listed on it (lib/rbacFeatureCatalog).
+ */
+export function canSeeModuleTab(
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  module: RbacModule,
+  tab: string,
+  rbac?: RbacState,
+): boolean {
+  if (hasPermission(session, masters, module, "view", rbac)) return true;
+  return featuresForTab(module, tab).some((f) =>
+    (["view", "create", "edit", "delete"] as RbacAction[]).some(
+      (a) => featureAccess(session, masters, f.id, a, rbac).allowed,
+    ),
+  );
+}
+
+/**
+ * May this person change things on a tab? The module grant for `action`, or
+ * a function of that tab holding it. The server still decides per row.
+ */
+export function canWriteModuleTab(
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  module: RbacModule,
+  tab: string,
+  action: RbacAction = "edit",
+  rbac?: RbacState,
+): boolean {
+  if (hasPermission(session, masters, module, action, rbac)) return true;
+  return featuresForTab(module, tab).some(
+    (f) => featureAccess(session, masters, f.id, action, rbac).allowed,
+  );
+}
+
+/** A module screen's tab list cut to what this person may open. */
+export function visibleModuleTabs<T extends { id: string }>(
+  items: T[],
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  module: RbacModule,
+  rbac?: RbacState,
+): T[] {
+  if (hasPermission(session, masters, module, "view", rbac)) return items;
+  return items.filter((t) => canSeeModuleTab(session, masters, module, t.id, rbac));
+}
+
 /** Modules whose reports appear in Reports Center. */
 export const REPORTS_CENTER_RBAC_MODULES: RbacModule[] = [
   "fees",
@@ -1809,7 +1864,20 @@ export function canAccessHref(
   const mod = moduleForHref(href);
   if (!mod) return canAccessModuleHref(href);
   if (mod === "home") return canAccessModuleHref(href);
-  if (!canAccessModule(session, masters, mod, rbac)) return false;
+  if (!canAccessModule(session, masters, mod, rbac)) {
+    // Holding a function of the module (Masters → Roles → functions) opens
+    // its page; its own tab when the link names one.
+    const qs = href.includes("?") ? href.split("?")[1] : "";
+    const tab = new URLSearchParams(qs).get("tab");
+    const fns = tab ? featuresForTab(mod, tab) : featuresForModule(mod);
+    const holds = fns.some(
+      (f) =>
+        (["view", "create", "edit", "delete"] as RbacAction[]).some(
+          (a) => featureAccess(session, masters, f.id, a, rbac).allowed,
+        ),
+    );
+    return holds && canAccessModuleHref(href);
+  }
   return canAccessModuleHref(href);
 }
 

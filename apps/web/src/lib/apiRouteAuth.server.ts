@@ -11,10 +11,12 @@ import {
   type ApiAuthContext,
 } from "@/lib/api/v1/auth";
 import { ApiError } from "@/lib/api/v1/errors";
+import { featuresForRoute } from "@/lib/rbacFeatures";
 import type { DeskModuleId } from "@/lib/deskCutover";
 import { defaultMasters, DEFAULT_AY } from "@/lib/masters";
 import {
   defaultRbacState,
+  featureAccess,
   hasPermission,
   type RbacAction,
   type RbacModule,
@@ -156,8 +158,28 @@ export async function requireStaffPermission(
     assertPermission(base.ctx, module, action);
     return base;
   } catch (e) {
+    // A function of the module that lists this route (lib/rbacFeatureCatalog)
+    // stands in for the module grant here — and only here.
+    if (holdsRouteFeature(base.ctx, module, action, request)) return base;
     return authFailure(403, e instanceof ApiError ? e.message : "Forbidden");
   }
+}
+
+function holdsRouteFeature(
+  ctx: ApiAuthContext,
+  module: RbacModule,
+  action: RbacAction,
+  request: Request,
+): boolean {
+  let pathname = "";
+  try {
+    pathname = new URL(request.url).pathname;
+  } catch {
+    return false;
+  }
+  return featuresForRoute(module, pathname).some(
+    (f) => featureAccess(ctx.session, ctx.masters, f.id, action, ctx.rbac).allowed,
+  );
 }
 
 /**

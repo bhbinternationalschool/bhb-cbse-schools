@@ -282,10 +282,10 @@ async function pushMastersDeskApi(
 
     // 401/403/500/503 and anything else: also silent until now.
     console.warn("[masters-db] desk push failed", body?.error || res.status);
+    // A 403 carrying a reason was already said by recordDeskSyncFailure.
+    if (res.status === 403 && body?.error) return { ok: false, reason: "http_403" };
     await reportMastersPushFailure(
-      res.status === 403 && body?.reason === "feature_forbidden" && body.error
-        ? `Your last change was NOT saved. ${body.error}`
-        : res.status === 401 || res.status === 403
+      res.status === 401 || res.status === 403
         ? "Your last change was NOT saved — your session has expired or you do not " +
             "have permission. Sign in again and re-apply the change."
         : `Your last change was NOT saved — the server returned ${res.status}. ` +

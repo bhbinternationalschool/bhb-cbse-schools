@@ -7,6 +7,9 @@
  */
 import assert from "node:assert/strict";
 import { authorizeMastersFeatureChange } from "./mastersChangeAuth";
+import { authorizeFeatureChange } from "./deskFeatureAuth";
+import { RBAC_FEATURES, featuresForRoute } from "./rbacFeatures";
+import { RBAC_MODULES, canSeeModuleTab, canWriteModuleTab, visibleModuleTabs } from "./rbac";
 import {
   defaultRbacState,
   featureAccess,
@@ -164,6 +167,72 @@ const label = (id: string) => ({ c6: "Class 6", c7: "Class 7" })[id] ?? id;
   assert.equal(odd, base);
   odd = setRoleFeaturePermission(base, "role_teacher", "masters.school_profile", "delete", true, "t");
   assert.equal(odd, base);
+}
+
+/* ── Every module: the same rule (Transport as the example) ── */
+{
+  const storedT = {
+    vehicles: [{ id: "v1", plate: "UP65" }],
+    fuelRefillLogs: [{ id: "r1", litres: 20 }],
+    routes: [{ id: "rt1", name: "Ayar" }],
+    feePolicy: { perKm: 10 },
+  };
+  const fuelClerk = (f: string, a: string) =>
+    f === "transport.fuel" && a !== "delete"
+      ? { allowed: true, ownClassesOnly: false }
+      : { allowed: false, ownClassesOnly: false };
+  // The clerk's browser holds only their slices; everything else empty.
+  const incoming = {
+    vehicles: [],
+    routes: [],
+    fuelRefillLogs: [...storedT.fuelRefillLogs, { id: "r2", litres: 35 }],
+  };
+  const v = authorizeFeatureChange("transport", storedT, incoming, fuelClerk, null);
+  assert.ok(v.ok, v.ok ? "" : v.reason);
+  assert.deepEqual(v.changedSlices, ["fuelRefillLogs"]);
+  assert.deepEqual(v.merged.vehicles, storedT.vehicles, "vehicles never emptied");
+  assert.deepEqual(v.merged.routes, storedT.routes);
+  assert.deepEqual(v.merged.feePolicy, storedT.feePolicy);
+
+  const del = authorizeFeatureChange("transport", storedT, { fuelRefillLogs: [] }, fuelClerk, null);
+  assert.ok(!del.ok, "delete not granted");
+  assert.match(del.reason, /may not remove fuel log/);
+
+  // Routes listed on a function open those API paths, and only those.
+  assert.ok(featuresForRoute("transport", "/api/transport/live-positions").some((f) => f.id === "transport.live"));
+  assert.equal(featuresForRoute("transport", "/api/transport/live-positionsX").length, 0);
+  assert.equal(featuresForRoute("fees", "/api/transport/live").length, 0);
+}
+
+/* ── Catalogue hygiene: ids, modules, one owner per slice ── */
+{
+  const ids = new Set<string>();
+  const owner = new Map<string, string>();
+  const modules = new Set(RBAC_MODULES.map((m) => m.id));
+  for (const f of RBAC_FEATURES) {
+    assert.ok(!ids.has(f.id), `duplicate function id ${f.id}`);
+    ids.add(f.id);
+    assert.ok(f.id.startsWith(`${f.module}.`), `${f.id} must start with its module`);
+    assert.ok(modules.has(f.module), `${f.id}: unknown module`);
+    assert.ok(f.actions.length > 0, `${f.id}: no actions`);
+    for (const k of f.slices ?? []) {
+      const key = `${f.module}:${k}`;
+      assert.ok(!owner.has(key), `${key} owned by both ${owner.get(key)} and ${f.id}`);
+      owner.set(key, f.id);
+    }
+  }
+}
+
+/* ── Screens: a function opens its tabs, and editing there ── */
+{
+  // The Teacher role holds no Transport; give it one function.
+  const st = setRoleFeaturePermission(defaultRbacState(), "role_teacher", "transport.fuel", "create", true, "t");
+  const clerk = { persona: "staff", roleCode: "teacher", staffId: "s9", fullName: "F" };
+  const tabs = [{ id: "dashboard" }, { id: "fuel" }, { id: "fleet" }];
+  assert.deepEqual(visibleModuleTabs(tabs, clerk, null, "transport", st).map((t) => t.id), ["fuel"]);
+  assert.ok(canSeeModuleTab(clerk, null, "transport", "fuel", st));
+  assert.ok(canWriteModuleTab(clerk, null, "transport", "fuel", "create", st));
+  assert.ok(!canWriteModuleTab(clerk, null, "transport", "fleet", "create", st));
 }
 
 console.log("  ✓ masters function grants — own classes only, nothing else lifted");
