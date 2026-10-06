@@ -131,6 +131,7 @@ import { HOUSEHOLD_LANGUAGES } from "@/lib/householdPrefs";
 import { LEAD_CONCERNS, PREVIOUS_BOARDS } from "@/lib/admissionsEnquiryForm";
 import { AdmissionReportsPanel } from "@/components/admissions/AdmissionReportsPanel";
 import { waTemplateLanguageFor } from "@/lib/householdPrefs";
+import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 
 type AdmTab =
   | "dashboard"
@@ -147,6 +148,14 @@ type AdmTab =
   | "village_market"
   | "referrals"
   | "reports";
+
+/**
+ * Walk-in desk form: the household first, because the primary mobile decides
+ * whether this is a new family or a sibling of an existing one; then the
+ * children and Save. One form across both steps — inactive steps are hidden,
+ * never unmounted, so nothing typed is lost and Save sees every field.
+ */
+type EnquiryStep = "household" | "children";
 
 export function AdmissionsWorkspace() {
   const session = useDemoSession();
@@ -165,6 +174,7 @@ export function AdmissionsWorkspace() {
   const [showLeadFilters, setShowLeadFilters] = useState(false);
   const [showWaCheck, setShowWaCheck] = useState(false);
   const [tab, setTab] = useState<AdmTab>("dashboard");
+  const [enquiryStep, setEnquiryStep] = useState<EnquiryStep>("household");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -2152,7 +2162,27 @@ export function AdmissionsWorkspace() {
               Your role can view admissions but not create enquiries.
             </p>
           ) : (
-            <>
+            <StepTabs
+              aria-label="Walk-in enquiry steps"
+              steps={[
+                {
+                  id: "household",
+                  title: "Household",
+                  what: "Enquiry date, primary mobile (an existing number links siblings), parents, locality and address, and an optional second guardian.",
+                },
+                {
+                  id: "children",
+                  title: "Children & save",
+                  what: "Each child to enquire for (name, class sought…), then Save the enquiry and household.",
+                  badge:
+                    childrenRows.filter((c) => c.childName.trim()).length ||
+                    undefined,
+                },
+              ] satisfies StepDef<EnquiryStep>[]}
+              value={enquiryStep}
+              onChange={setEnquiryStep}
+            >
+              <div className={enquiryStep === "household" ? "" : "hidden"}>
               <MastersWorkCard
                 title="1 · Walk-in household / parents"
                 hint="Primary mobile identifies the family. Matching an existing number links this child as a sibling."
@@ -2325,7 +2355,9 @@ export function AdmissionsWorkspace() {
                   </div>
                 </div>
               </MastersWorkCard>
+              </div>
 
+              <div className={enquiryStep === "children" ? "space-y-4" : "hidden"}>
               <MastersWorkCard
                 title={`2 · Children (${childrenRows.length})`}
                 hint="Add as many children as needed. Each gets their own enquiry under this household."
@@ -2474,7 +2506,8 @@ export function AdmissionsWorkspace() {
                       : "Save enquiry + household"}
                 </button>
               </div>
-            </>
+              </div>
+            </StepTabs>
           )}
         </div>
       ) : null}

@@ -163,6 +163,11 @@ export function AccountsWorkspace() {
 
   const actorName = session.fullName || "Accounts user";
   const [entryTick, setEntryTick] = useState(0);
+  /** Vouchers sub-tab. The four forms are alternatives, not steps; Quick is
+   *  the everyday one, so it opens first. */
+  const [voucherForm, setVoucherForm] = useState<
+    "quick" | "multi" | "voucher" | "cheques"
+  >("quick");
 
   function flash(message: string) {
     setNotice(message);
@@ -271,6 +276,21 @@ export function AccountsWorkspace() {
         <LedgerBookPanel canApprove={canApprove} />
       ) : tab === "vouchers" ? (
         <div className="mt-4 space-y-4">
+          <ModuleTabs
+            size="md"
+            aria-label="Voucher entry forms"
+            value={voucherForm}
+            onChange={(id) => setVoucherForm(id as typeof voucherForm)}
+            items={[
+              { id: "quick", label: "Quick", tone: "navy" },
+              { id: "multi", label: "Multi-line", tone: "teal" },
+              { id: "voucher", label: "Voucher entry", tone: "amber" },
+              { id: "cheques", label: "Cheques", tone: "violet" },
+            ]}
+          />
+          {/* Inactive forms stay mounted (hidden) so typed-but-unsaved
+              input survives a sub-tab switch. */}
+          <div className={voucherForm === "quick" ? "" : "hidden"}>
           <QuickExpensePanel
             banks={(state.bankAccounts ?? [])
               .filter((b) => b.isActive !== false)
@@ -278,8 +298,10 @@ export function AccountsWorkspace() {
             actor={actorName}
             onPosted={() => setEntryTick((n) => n + 1)}
           />
+          </div>
           {/* Between the one-head quick form and the raw double-entry
               screen: the everyday pile of expenses from one trip. */}
+          <div className={voucherForm === "multi" ? "" : "hidden"}>
           <MultiLineExpensePanel
             banks={(state.bankAccounts ?? [])
               .filter((b) => b.isActive !== false)
@@ -287,6 +309,8 @@ export function AccountsWorkspace() {
             actor={actorName}
             onPosted={() => setEntryTick((n) => n + 1)}
           />
+          </div>
+          <div className={voucherForm === "voucher" ? "" : "hidden"}>
           <VoucherEntryPanel
             banks={(state.bankAccounts ?? [])
               .filter((b) => b.isActive !== false)
@@ -294,6 +318,8 @@ export function AccountsWorkspace() {
             actor={actorName}
             onPosted={() => setEntryTick((n) => n + 1)}
           />
+          </div>
+          <div className={voucherForm === "cheques" ? "" : "hidden"}>
           <ChequesPanel
             banks={(state.bankAccounts ?? [])
               .filter((b) => b.isActive !== false)
@@ -301,6 +327,7 @@ export function AccountsWorkspace() {
             actor={actorName}
             refreshKey={entryTick}
           />
+          </div>
         </div>
       ) : tab === "bookreports" ? (
         <LedgerReportsPanel />
