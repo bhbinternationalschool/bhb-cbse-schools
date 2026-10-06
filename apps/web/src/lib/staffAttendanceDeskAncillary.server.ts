@@ -62,31 +62,34 @@ export async function pushStaffAttendanceSettingsToDb(
   return { ok: true };
 }
 
-export async function fetchStaffAttendanceSettingsFromDb(): Promise<StaffAttendanceSettings> {
-  return (await readStaffAttendanceSettings()).settings;
-}
-
 /**
- * The settings as stored, and whether they were read. The plain fetch
- * above turns a failed read into the defaults — for a save that merges
- * onto it (a function holder's push to school-data/staff-attendance-
- * registers) that would write the defaults over the school's rules, so
- * that save writes nothing when ok is false.
+ * The settings as stored: `ok` false when they could not be read (no tenant,
+ * a query error or timeout), `found` false when the school never saved any.
+ *
+ * Callers that act on the settings must not guess. On 6 Oct 2026 a failed
+ * read here came back as defaultAttendanceSettings() — an EMPTY exempt list —
+ * and the first punch of the day built the register from it: all 16
+ * punch-exempt staff (director and admins included) were filed "A". A
+ * function holder's save to school-data/staff-attendance-registers merges
+ * onto these too, and must write nothing when they were not read.
  */
 export async function readStaffAttendanceSettings(): Promise<{
   ok: boolean;
+  found: boolean;
   settings: StaffAttendanceSettings;
 }> {
   const c = await ctx();
-  if (!c) return { ok: false, settings: defaultAttendanceSettings() };
+  if (!c) return { ok: false, found: false, settings: defaultAttendanceSettings() };
   const { data, error } = await c.sb
     .from("staff_attendance_desk_settings")
     .select("*")
     .eq("tenant_id", c.tenantId)
     .maybeSingle();
-
-  if (error) return { ok: false, settings: defaultAttendanceSettings() };
-  if (!data) return { ok: true, settings: defaultAttendanceSettings() };
+  if (error) {
+    console.error("[staff attendance] settings read failed", error.message);
+    return { ok: false, found: false, settings: defaultAttendanceSettings() };
+  }
+  if (!data) return { ok: true, found: false, settings: defaultAttendanceSettings() };
   const settings: StaffAttendanceSettings = {
     allowSelfPunch: !!data.allow_self_punch,
     autoApplyRulesOnSave: !!data.auto_apply_rules_on_save,
@@ -98,5 +101,18 @@ export async function readStaffAttendanceSettings(): Promise<{
       ? (data.exempt_staff_ids as string[])
       : [],
   };
-  return { ok: true, settings };
+  return { ok: true, found: true, settings };
+}
+
+/** The settings row, or null when it could not be read or does not exist —
+ *  for anything that decides who is on a register. */
+export async function fetchStaffAttendanceSettingsFromDbStrict(): Promise<StaffAttendanceSettings | null> {
+  const r = await readStaffAttendanceSettings();
+  return r.ok && r.found ? r.settings : null;
+}
+
+/** Settings for display and geofence checks: the row, or the defaults when it
+ *  cannot be read. Never use this to decide who is on a register. */
+export async function fetchStaffAttendanceSettingsFromDb(): Promise<StaffAttendanceSettings> {
+  return (await readStaffAttendanceSettings()).settings;
 }
