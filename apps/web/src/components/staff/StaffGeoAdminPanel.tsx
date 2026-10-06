@@ -143,6 +143,7 @@ export function StaffGeoAdminPanel({ canEdit }: { canEdit: boolean }) {
         </div>
         <div className="mt-2">
           <ErpTableShell exportAs="staff_gps_presence" exportTitle="Staff GPS presence">
+            <div className="overflow-x-auto">
             <ErpTable>
               <ErpTableHead>
                 <tr>
@@ -182,6 +183,7 @@ export function StaffGeoAdminPanel({ canEdit }: { canEdit: boolean }) {
                 })}
               </ErpTableBody>
             </ErpTable>
+            </div>
           </ErpTableShell>
         </div>
         <p className="mt-1 text-[10px] text-[var(--muted)]">

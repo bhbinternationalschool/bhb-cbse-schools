@@ -257,6 +257,7 @@ export function StudentTagsPanel({
       </div>
 
       <ErpTableShell exportAs="student_tags" exportTitle="Student tags">
+        <div className="overflow-x-auto">
         <ErpTable>
           <ErpTableHead>
             <tr>
@@ -313,6 +314,7 @@ export function StudentTagsPanel({
             })}
           </ErpTableBody>
         </ErpTable>
+        </div>
         {!students.length ? (
           <p className="px-3 py-6 text-center text-sm text-[var(--muted)]">
             No students match.

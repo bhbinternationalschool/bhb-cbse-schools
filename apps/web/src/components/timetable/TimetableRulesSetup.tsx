@@ -131,6 +131,7 @@ export function PrePrimaryBellPanel({ masters, state, canEdit, onSaved, flash }:
             </div>
           </div>
           <ErpTableShell density="compact">
+          <div className="overflow-x-auto">
           <ErpTable minWidth="min-w-[560px]">
             <ErpTableHead>
               <tr>
@@ -183,6 +184,7 @@ export function PrePrimaryBellPanel({ masters, state, canEdit, onSaved, flash }:
                 ))}
             </ErpTableBody>
           </ErpTable>
+          </div>
           </ErpTableShell>
           {canEdit ? (
             <div className="flex flex-wrap gap-2">
@@ -474,6 +476,7 @@ export function SubjectRulesPanel({ masters, state, canEdit, onSaved, flash }: C
       ) : (
         <div className="mt-3 overflow-x-auto">
           <ErpTableShell density="compact">
+          <div className="overflow-x-auto">
           <ErpTable minWidth="min-w-[860px]">
             <ErpTableHead>
               <tr>
@@ -568,6 +571,7 @@ export function SubjectRulesPanel({ masters, state, canEdit, onSaved, flash }: C
               ))}
             </ErpTableBody>
           </ErpTable>
+          </div>
           </ErpTableShell>
         </div>
       )}

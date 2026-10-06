@@ -120,6 +120,7 @@ export function TeacherAssignmentsPanel({
         </div>
       ) : (
         <ErpTableShell exportAs="teacher_assignments" exportTitle="Teacher assignments">
+          <div className="overflow-x-auto">
           <ErpTable minWidth="min-w-[560px]">
             <ErpTableHead>
               <tr>
@@ -152,6 +153,7 @@ export function TeacherAssignmentsPanel({
               ))}
             </ErpTableBody>
           </ErpTable>
+          </div>
         </ErpTableShell>
       )}
     </div>

@@ -734,6 +734,7 @@ export function StaffWorkspace() {
         />
 
         <ErpTableShell>
+          <div className="overflow-x-auto">
           <ErpTable>
             <ErpTableHead>
               <tr>
@@ -891,6 +892,7 @@ export function StaffWorkspace() {
               ) : null}
             </ErpTableBody>
           </ErpTable>
+          </div>
         </ErpTableShell>
       </div>
 

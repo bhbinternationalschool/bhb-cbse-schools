@@ -242,6 +242,7 @@ export function BlueprintPanel(props: {
       {open ? (
         <div className="mt-2 space-y-2">
           <ErpTableShell>
+          <div className="overflow-x-auto">
           <ErpTable className="text-xs">
             <ErpTableHead>
               <tr>
@@ -359,6 +360,7 @@ export function BlueprintPanel(props: {
               ))}
             </ErpTableBody>
           </ErpTable>
+          </div>
           </ErpTableShell>
           {canEdit ? (
             <div className="flex flex-wrap items-center gap-2">

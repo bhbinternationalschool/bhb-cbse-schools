@@ -435,6 +435,7 @@ export function WebsiteWorkspace() {
                 </p>
               </div>
             ) : (
+              <div className="overflow-x-auto">
               <ErpTable minWidth="min-w-[640px]">
                 <ErpTableHead>
                   <tr>
@@ -495,6 +496,7 @@ export function WebsiteWorkspace() {
                   ))}
                 </ErpTableBody>
               </ErpTable>
+              </div>
             )}
           </ErpTableShell>
 

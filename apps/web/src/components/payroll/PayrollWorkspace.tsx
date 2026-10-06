@@ -828,6 +828,7 @@ export function PayrollWorkspace() {
             </div>
           </div>
           <ErpTableShell exportAs="payroll_runs" exportTitle="Payroll runs">
+            <div className="overflow-x-auto">
             <ErpTable>
               <ErpTableHead>
                 <tr className="text-[11px] text-[var(--muted)]">
@@ -896,6 +897,7 @@ export function PayrollWorkspace() {
                 ) : null}
               </ErpTableBody>
             </ErpTable>
+            </div>
           </ErpTableShell>
         </div>
       ) : null}
@@ -1294,6 +1296,7 @@ function RunDetail({
       </div>
 
       <ErpTableShell exportAs="payroll_run_lines" exportTitle="Payroll run lines">
+        <div className="overflow-x-auto">
         <ErpTable minWidth="min-w-[780px]">
           <ErpTableHead>
             <tr>
@@ -1653,6 +1656,7 @@ function RunDetail({
             })}
           </ErpTableBody>
         </ErpTable>
+        </div>
       </ErpTableShell>
     </div>
   );

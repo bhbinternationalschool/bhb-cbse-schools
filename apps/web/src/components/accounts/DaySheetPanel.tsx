@@ -181,7 +181,7 @@ function SideCard({ title, side }: { title: string; side: Side }) {
         <div className="mt-3 text-sm text-[var(--muted)]">Nothing recorded for this day.</div>
       ) : (
         <div className="mt-3">
-          <ErpTableShell><ErpTable minWidth="min-w-[320px]">
+          <ErpTableShell><div className="overflow-x-auto"><ErpTable minWidth="min-w-[320px]">
             <ErpTableHead>
               <tr className="text-[11px] text-[var(--muted)]">
                 <th className="px-3 py-2 text-left font-medium">Tender / head</th>
@@ -209,7 +209,7 @@ function SideCard({ title, side }: { title: string; side: Side }) {
                 )),
               ])}
             </ErpTableBody>
-          </ErpTable></ErpTableShell>
+          </ErpTable></div></ErpTableShell>
         </div>
       )}
     </div>

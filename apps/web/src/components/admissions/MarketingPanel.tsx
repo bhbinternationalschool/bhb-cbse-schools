@@ -258,6 +258,7 @@ export function MarketingPanel({ masters, admissions, canEdit, by }: { masters: 
         ) : (
           <div className="mt-2">
             <ErpTableShell>
+              <div className="overflow-x-auto">
               <ErpTable>
                 <ErpTableHead>
                   <tr>
@@ -319,6 +320,7 @@ export function MarketingPanel({ masters, admissions, canEdit, by }: { masters: 
                   ))}
                 </ErpTableBody>
               </ErpTable>
+              </div>
             </ErpTableShell>
           </div>
         )}
@@ -538,6 +540,7 @@ export function MarketingPanel({ masters, admissions, canEdit, by }: { masters: 
         ) : null}
         <div className="mt-2">
           <ErpTableShell>
+            <div className="overflow-x-auto">
             <ErpTable>
               <ErpTableHead>
                 <tr>
@@ -572,6 +575,7 @@ export function MarketingPanel({ masters, admissions, canEdit, by }: { masters: 
                 )}
               </ErpTableBody>
             </ErpTable>
+            </div>
           </ErpTableShell>
         </div>
       </div>
