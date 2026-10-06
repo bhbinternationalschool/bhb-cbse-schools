@@ -29,7 +29,7 @@ assert.equal(v("guardianName"), "RAM VERMA");
 assert.equal(v("primaryMobile"), "9400000011");
 assert.equal(v("uuid"), undefined, "no Aadhaar in the ERP → nothing typed");
 assert.equal(v("admnStartDate"), undefined, "admission date is never guessed from joinedOn");
-assert.ok(plan.leftForYou.includes("Admission date"));
+assert.ok(plan.leftForYou.some((x) => /mandatory/.test(x)), "the missing Aadhaar is called out as mandatory");
 // A number that fails the Aadhaar checksum is not typed.
 assert.equal(buildUdiseAddPlan(st({ aadhaarNumber: "123412341234" }), hh).fields.find((f) => f.control === "uuid"), undefined);
 
@@ -38,9 +38,18 @@ assert.ok(probablyOnPortal(st({ dob: "2022-01-21" }), [{ studentName: "RIYA KUMA
 assert.ok(probablyOnPortal(st({ fatherName: "Ram Verma" }), [{ studentName: "RIYA", fatherName: "RAM VERMA" }]));
 assert.ok(!probablyOnPortal(st({ dob: "2022-01-21" }), [{ studentName: "RIYA VERMA", dob: "22/01/2022" }]));
 
+// A checksum-valid test Aadhaar (Verhoeff), so the child is addable.
+const OK_AADHAAR = (() => {
+  for (let n = 0; n < 10; n++) {
+    const a = `23412341234${n}`;
+    if (buildUdiseAddPlan(st({ aadhaarNumber: a }), hh).fields.some((f) => f.control === "uuid")) return a;
+  }
+  throw new Error("no valid test Aadhaar");
+})();
 const res = listUdiseAddCandidates({
   students: [
-    st({ id: "a", fullName: "Aarav", classId: "c-n" }),
+    st({ id: "a", fullName: "Aarav", classId: "c-n", aadhaarNumber: OK_AADHAAR }),
+    st({ id: "g", fullName: "No Aadhaar Yet" }),
     st({ id: "b", fullName: "Has Pen", pen: "23263951182" }),
     st({ id: "c", fullName: "Transfer", udiseInboundTransferPending: true }),
     st({ id: "d", fullName: "Riya Verma", dob: "2022-01-21" }),
@@ -55,5 +64,6 @@ assert.deepEqual(res.candidates.map((c) => c.studentId), ["a"]);
 assert.equal(res.candidates[0]!.portalClassId, -3);
 assert.equal(res.alreadyOnPortal.length, 1);
 assert.equal(res.noPortalClass.length, 1);
+assert.deepEqual(res.needAadhaar, ["NO AADHAAR YET (Nursery)"], "UDISE+ will not add a child without Aadhaar");
 
 console.log("udisePortalAdd selftest: ok");

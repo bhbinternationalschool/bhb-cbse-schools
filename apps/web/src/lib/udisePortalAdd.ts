@@ -12,6 +12,10 @@
  *    the robot can see in the portal's own list — that child needs the
  *    portal list applied in the ERP, not a second record on UDISE+.
  *
+ * UDISE+ requires the child's Aadhaar to add a student (rule 4.1.7: "It
+ * is a mandatory field"; admission date is optional). A child without a valid
+ * Aadhaar in the ERP is reported under `needAadhaar`, never offered.
+ *
  * The portal decides which classes may be added (on 2026-10-06: PP3 to
  * Class I only); the extension offers only classes whose "Add Student"
  * button is on the dashboard. The robot never guesses that permission.
@@ -95,9 +99,9 @@ export function buildUdiseAddPlan(s: SisStudent, hh: Household | undefined): Udi
   const aadhaar = aadhaarDigits(s.aadhaarNumber || "");
   if (aadhaar.length === 12 && aadhaarChecksumValid(aadhaar)) {
     fields.push({ control: "uuid", kind: "text", value: aadhaar, label: "Aadhaar", shown: `********${aadhaar.slice(-4)}` });
-    left.push("Name as per Aadhaar (copy from the card)");
+    left.push("Name as per Aadhaar (copy exactly from the card)");
   } else {
-    left.push("Aadhaar (not in the ERP — may be left blank and added later)");
+    left.push("Aadhaar (mandatory on UDISE+ — not in the ERP)");
   }
   const primary = mobile10(hh ? hh.whatsappMobile || hh.mobile : "") || mobile10(s.fatherMobile) || mobile10(s.motherMobile);
   add(primary ? { control: "primaryMobile", kind: "text", value: primary, label: "Mobile", shown: primary } : null, "Mobile");
@@ -105,8 +109,8 @@ export function buildUdiseAddPlan(s: SisStudent, hh: Household | undefined): Udi
   if (second) fields.push({ control: "secondaryMobile", kind: "text", value: second, label: "Alternate mobile", shown: second });
   if (s.isCwsn) fields.push({ control: "cwsnYN", kind: "radio", value: "1", label: "CWSN", shown: "Yes" });
   else left.push("CWSN (Yes/No)");
-  left.push("Admission date");
-  if (s.joinedOn) hints.push(`ERP says joined this session on ${dmy(s.joinedOn) || s.joinedOn} — use the admission register date.`);
+  // Optional on the portal (rule 4.1.9); never guessed from the join date.
+  if (s.joinedOn) hints.push(`Admission date is optional. The ERP says joined this session on ${dmy(s.joinedOn) || s.joinedOn}; use the admission register's date if you fill it.`);
   if (s.admissionNo) hints.push(`Admission no. ${s.admissionNo}`);
   return { fields, leftForYou: left, hints };
 }
@@ -125,10 +129,11 @@ export function listUdiseAddCandidates(input: {
   portal: PortalListEntry[];
   classLabelOf: (s: SisStudent) => { className: string; sectionName: string };
   householdOf: (s: SisStudent) => Household | undefined;
-}): { candidates: UdiseAddCandidate[]; alreadyOnPortal: string[]; noPortalClass: string[] } {
+}): { candidates: UdiseAddCandidate[]; alreadyOnPortal: string[]; noPortalClass: string[]; needAadhaar: string[] } {
   const candidates: UdiseAddCandidate[] = [];
   const alreadyOnPortal: string[] = [];
   const noPortalClass: string[] = [];
+  const needAadhaar: string[] = [];
   for (const s of input.students) {
     if (s.status !== "active" || isRealPortalId(s.pen) || s.udiseInboundTransferPending) continue;
     const { className, sectionName } = input.classLabelOf(s);
@@ -141,6 +146,11 @@ export function listUdiseAddCandidates(input: {
       alreadyOnPortal.push(`${s.fullName} (${className})`);
       continue;
     }
+    const digits = aadhaarDigits(s.aadhaarNumber || "");
+    if (!(digits.length === 12 && aadhaarChecksumValid(digits))) {
+      needAadhaar.push(`${s.fullName} (${className})`);
+      continue;
+    }
     candidates.push({
       studentId: s.id,
       name: s.fullName,
@@ -151,5 +161,5 @@ export function listUdiseAddCandidates(input: {
     });
   }
   candidates.sort((a, b) => a.portalClassId - b.portalClassId || a.name.localeCompare(b.name));
-  return { candidates, alreadyOnPortal, noPortalClass };
+  return { candidates, alreadyOnPortal, noPortalClass, needAadhaar };
 }

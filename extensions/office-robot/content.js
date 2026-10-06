@@ -331,6 +331,10 @@
    */
   async function fillAddForm(item) {
     if (!/\/new-ac\/addStudent\//.test(location.hash)) throw new Error("The Add Student form is not open.");
+    if (item.portalClassName) {
+      const head = (document.body.innerText.match(/Class - ([^\n]+?)\s*Section - /) || [])[1] || "";
+      if (head.trim() !== item.portalClassName) throw new Error(`The form is for class “${head.trim() || "?"}”, not ${item.portalClassName}. Nothing typed.`);
+    }
     if (!(await waitForForm())) throw new Error("The form did not open. Reload the page and try again.");
     const res = await ask({ type: "add-list", students: await portalList(schoolId()) });
     if (!res.ok) throw new Error(res.error);
@@ -388,7 +392,24 @@
   }
 
   const formHash = (id, q) => `#/school/${id}/new-ac/${q.classId}/${q.sectionId}/${q.studentId}?formId=1&formEditFlag=1`;
-  const addHash = (id, q) => `#/school/${id}/new-ac/addStudent/${q.classId}/${q.sectionId}`;
+  async function openAddFormFor(id, item) {
+    location.hash = `#/school/${id}/schoolDashboard/cy`;
+    let row = null;
+    for (let i = 0; i < 40 && !row; i++) {
+      await sleep(300);
+      row = [...document.querySelectorAll("tr")].find((tr) => (tr.cells?.[0]?.innerText || "").trim() === item.portalClassName);
+    }
+    if (!row) throw new Error(`could not find the ${item.portalClassName} row on the dashboard`);
+    const btn = [...row.querySelectorAll("*")].find((e) => e.children.length === 0 && (e.innerText || "").trim() === "Add Student");
+    if (!btn) throw new Error(`the portal is not allowing Add Student for ${item.portalClassName} now`);
+    btn.click();
+    if (!(await waitForForm())) throw new Error("the Add Student form did not open");
+    await sleep(800);
+    const head = (document.body.innerText.match(/Class - ([^\n]+?)\s*Section - /) || [])[1] || "";
+    if (head.trim() !== item.portalClassName) {
+      throw new Error(`the form says class “${head.trim() || "?"}”, not ${item.portalClassName}. Nothing was typed`);
+    }
+  }
 
   function renderQueue(q, pendingCount) {
     const active = !!(q && q.items && q.index < q.items.length);
@@ -467,13 +488,20 @@
       }
     }
     if (q.addAnywayFor) await store.set("queue", { ...q, addAnywayFor: "" });
-    // A fresh form for every child: leave first, so the portal clears it.
-    if (q.kind === "add") {
-      location.hash = `#/school/${q.schoolId}/schoolDashboard/cy`;
-      await sleep(1500);
-    }
-    location.hash = q.kind === "add" ? addHash(q.schoolId, item) : formHash(q.schoolId, item);
     say(`Opening ${item.studentName}…`);
+    if (q.kind === "add") {
+      // The Add Student form takes its class from the dashboard button that
+      // opened it, NOT from the address: opening it by address showed
+      // "Class - I" on a Nursery address (2026-10-06). So: back to the
+      // dashboard, click that class's own button, and check the header.
+      try {
+        await openAddFormFor(q.schoolId, item);
+      } catch (e) {
+        return say(`${item.studentName}: ${e.message || e}\nOpen it by hand from the dashboard, or press Skip.`, "err");
+      }
+    } else {
+      location.hash = formHash(q.schoolId, item);
+    }
     try {
       say(q.kind === "add" ? await fillAddForm(item) : await fillOpenForm(item), "ok");
     } catch (e) {
@@ -589,9 +617,10 @@
             noSection.push(`${c.name} (${c.classLabel})`);
             continue;
           }
-          items.push({ studentId: c.studentId, studentName: c.name, classDesc: c.classLabel, classId: String(sec.classId), sectionId: String(sec.sectionId) });
+          items.push({ studentId: c.studentId, studentName: c.name, classDesc: c.classLabel, classId: String(sec.classId), sectionId: String(sec.sectionId), portalClassName: String(sec.className) });
         }
         const notes = [];
+        if ((b.needAadhaar || []).length) notes.push(`UDISE+ needs the child's Aadhaar to add them, and the ERP has none for: ${b.needAadhaar.join(", ")}. Collect it first (WhatsApp photo works).`);
         if ((b.alreadyOnPortal || []).length) notes.push(`Probably already on the portal (apply the portal list in the ERP instead): ${b.alreadyOnPortal.join(", ")}`);
         if (otherClasses.length) notes.push(`${otherClasses.length} more in classes the portal is not allowing Add Student for yet.`);
         if (noSection.length) notes.push(`No matching portal section: ${noSection.join(", ")}`);

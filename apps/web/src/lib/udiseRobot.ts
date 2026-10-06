@@ -54,7 +54,7 @@ export const UDISE_ROBOT_TASKS: Record<
     owner: "portal",
     order: 2,
     title: "Add child on UDISE+ (gets the PEN)",
-    how: "Student module → Add student with the SIS details. Aadhaar can be added later if the family has not given it yet.",
+    how: "Student module → Add Student with the ERP details. UDISE+ requires the child's Aadhaar to add a student (rule 4.1.7), so only children whose Aadhaar is in the ERP are listed here.",
   },
   fix_aadhaar_failed: {
     owner: "portal",
@@ -84,7 +84,7 @@ export const UDISE_ROBOT_TASKS: Record<
     owner: "family",
     order: 7,
     title: "Collect the child's Aadhaar",
-    how: "Families can send a photo on the school WhatsApp; the ERP reads and files it.",
+    how: "Families can send a photo on the school WhatsApp; the ERP reads and files it. A child with no PEN cannot be added to UDISE+ without it.",
   },
   ask_apaar_consent: {
     owner: "family",
@@ -121,12 +121,11 @@ export function udiseRobotTasksFor(s: SisStudent): UdiseRobotTask[] {
 
   if (s.udiseInboundTransferPending) {
     tasks.push({ kind: "accept_transfer", owner: "portal" });
-  } else if (!pen) {
-    tasks.push({
-      kind: "add_on_portal",
-      owner: "portal",
-      note: childAadhaar ? "Aadhaar is in the ERP — add it while creating." : "No Aadhaar yet — add the child without it.",
-    });
+  } else if (!pen && childAadhaar) {
+    // UDISE+ will not add a student without an Aadhaar (rule 4.1.7, read off
+    // the Add Student form on 2026-10-06), so with none on file the next step
+    // is the family's, not the office's.
+    tasks.push({ kind: "add_on_portal", owner: "portal" });
   }
 
   if (childAadhaar && pen && !aadhaarVerified(s)) {
@@ -136,7 +135,13 @@ export function udiseRobotTasksFor(s: SisStudent): UdiseRobotTask[] {
       tasks.push({ kind: "validate_aadhaar", owner: "portal" });
     }
   }
-  if (!childAadhaar) tasks.push({ kind: "collect_child_aadhaar", owner: "family" });
+  if (!childAadhaar) {
+    tasks.push({
+      kind: "collect_child_aadhaar",
+      owner: "family",
+      note: !pen && !s.udiseInboundTransferPending ? "Needed before the child can be added to UDISE+." : undefined,
+    });
+  }
 
   // APAAR: only once a PEN exists does it become the school's next step.
   if (!apaar && s.apaarConsent !== "refused") {
