@@ -60,6 +60,7 @@ import {
 import { loadIncrementState } from "@/lib/salaryIncrement";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { StepChainGuide, type StepDef } from "@/components/ui/StepTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import {
   ErpTable,
@@ -83,6 +84,21 @@ import {
   StaffMyPayslips,
 } from "@/components/payroll/StaffSelfService";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+
+/**
+ * One month's salary, in order: make the run, check it, get it approved,
+ * then pay and record it. The tabs stay as they are; a guide over them
+ * says which step this is and what comes next.
+ */
+const PAYROLL_CYCLE_STEPS: StepDef<PayTab>[] = [
+  { id: "runs", title: "Runs", what: "Start the month's payroll run (a draft) from the assigned salary structures, attendance and leave." },
+  { id: "detail", title: "Run detail", what: "Check every staff line — days, earnings, deductions, advances — then submit the run." },
+  { id: "approvals", title: "Approvals", what: "The approver approves the submitted run, or returns it for correction." },
+  { id: "payslips", title: "Payslips", what: "Each staff member's payslip for the approved month." },
+  { id: "print", title: "Print payslips", what: "Print or share the payslips in bulk." },
+  { id: "bank", title: "Bank file", what: "Make the bank upload file (NEFT) for the net salaries." },
+  { id: "tally", title: "Tally sync", what: "Send the month's salary entries to Tally." },
+];
 
 type PayTab =
   | "dashboard"
@@ -707,6 +723,12 @@ export function PayrollWorkspace() {
         value={tab}
         onChange={(id) => setTab(id as PayTab)}
         items={tabs}
+      />
+      <StepChainGuide
+        chains={[{ label: "Monthly payroll", steps: PAYROLL_CYCLE_STEPS }]}
+        value={tab}
+        onChange={setTab}
+        visible={tabs.map((t) => t.id)}
       />
 
       {tab === "dashboard" && allowed ? (

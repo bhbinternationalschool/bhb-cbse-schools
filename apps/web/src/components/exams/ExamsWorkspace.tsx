@@ -113,7 +113,7 @@ import { AdmitCardsPanel } from "@/components/exams/AdmitCardsPanel";
 import { RemarksPanel } from "@/components/exams/RemarksPanel";
 import { ItemScoresPanel } from "@/components/exams/ItemScoresPanel";
 import { AtRiskPanel } from "@/components/exams/AtRiskPanel";
-import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
+import { StepChainGuide, StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import { ExamReportsRunner } from "@/components/reports/ModuleReportRunners";
 import { hasPermission, inferRoleCodes } from "@/lib/rbac";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
@@ -141,6 +141,22 @@ type Tab =
  * exams are what marks are entered against; report cards print the result.
  */
 type SetupStep = "policy" | "schemes" | "exams" | "reports";
+
+/**
+ * One exam, start to finish, across the module's tabs: plan it, seat it,
+ * staff it, set the papers, issue admit cards, enter marks, publish
+ * results, print report cards.
+ */
+const EXAM_CYCLE_STEPS: StepDef<Tab>[] = [
+  { id: "datesheet", title: "Date-sheet", what: "Which subject is on which day, class by class." },
+  { id: "seating", title: "Seating", what: "Seat students across rooms and benches for each paper." },
+  { id: "invigilation", title: "Invigilation", what: "Which teacher watches which room, each day." },
+  { id: "papers", title: "Question papers", what: "Set, import or print the question papers." },
+  { id: "admitcards", title: "Admit cards", what: "Print admit cards for students cleared to sit." },
+  { id: "marks", title: "Mark entry", what: "Teachers enter marks and grades, class by class." },
+  { id: "results", title: "Results", what: "Check and publish the results." },
+  { id: "reports", title: "Report cards", what: "Print or send each student's report card." },
+];
 
 const SETUP_STEPS: StepDef<SetupStep>[] = [
   {
@@ -1542,6 +1558,11 @@ export function ExamsWorkspace() {
           { id: "result_reports", label: "Result reports", tone: "teal" },
           { id: "setup", label: "Exams & policy", tone: "navy" },
         ]}
+      />
+      <StepChainGuide
+        chains={[{ label: "Exam cycle", steps: EXAM_CYCLE_STEPS }]}
+        value={tab}
+        onChange={setTab}
       />
 
       <DeskSyncBanner
