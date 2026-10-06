@@ -133,6 +133,37 @@ type Tab =
   | "result_reports"
   | "setup";
 
+/**
+ * "Exams & policy" is set up in this order, because each step inherits from
+ * the one before: the school policy gives every scheme its pass % and every
+ * new exam its default marks; schemes say how each class band is graded;
+ * exams are what marks are entered against; report cards print the result.
+ */
+type SetupStep = "policy" | "schemes" | "exams" | "reports";
+
+const SETUP_STEPS: { id: SetupStep; title: string; what: string }[] = [
+  {
+    id: "policy",
+    title: "School policy",
+    what: "Pass %, default marks for unit tests and term exams, report-card and promotion rules, at-risk thresholds. Everything below starts from these.",
+  },
+  {
+    id: "schemes",
+    title: "Assessment schemes",
+    what: "How each class band is graded: marks or grades, grade bands, subject splits (e.g. written + oral) and co-scholastic areas. Classes not given a scheme use the default.",
+  },
+  {
+    id: "exams",
+    title: "Session exams",
+    what: "Create the unit tests and term exams for this session (code, name, max marks, how they count toward half-yearly / final), and switch them on or off.",
+  },
+  {
+    id: "reports",
+    title: "Report cards",
+    what: "Choose the report-card template for each class band — what prints, in which layout. Then marks entered against the exams above print through it.",
+  },
+];
+
 function cellKey(studentId: string, subjectId: string, component = "") {
   return `${studentId}:${subjectId}:${component}`;
 }
@@ -563,6 +594,7 @@ export function ExamsWorkspace() {
   const [newRequiredMs, setNewRequiredMs] = useState(true);
   const [newSeparateMs, setNewSeparateMs] = useState(true);
   const [policyDraft, setPolicyDraft] = useState<ExamPolicy | null>(null);
+  const [setupStep, setSetupStep] = useState<SetupStep>("policy");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editCode, setEditCode] = useState("");
   const [editLabel, setEditLabel] = useState("");
@@ -1637,7 +1669,389 @@ export function ExamsWorkspace() {
       ) : null}
 
       {tab === "setup" ? (
-        <div className="mt-6 grid gap-6 lg:grid-cols-2">
+        <div className="mt-6 space-y-4">
+          <ModuleTabs
+            aria-label="Exams setup steps"
+            size="md"
+            value={setupStep}
+            onChange={(id) => setSetupStep(id as SetupStep)}
+            items={SETUP_STEPS.map((st, i) => ({
+              id: st.id,
+              label: `${i + 1} · ${st.title}`,
+              tone: (["navy", "violet", "sky", "amber"] as const)[i],
+              badge:
+                st.id === "schemes"
+                  ? policy.schemes.length
+                  : st.id === "exams"
+                    ? allTerms.length
+                    : st.id === "reports"
+                      ? (policy.reportTemplates ?? []).length
+                      : undefined,
+            }))}
+          />
+          {(() => {
+            const i = SETUP_STEPS.findIndex((x) => x.id === setupStep);
+            const cur = SETUP_STEPS[i]!;
+            const prev = SETUP_STEPS[i - 1];
+            const next = SETUP_STEPS[i + 1];
+            return (
+              <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                    Step {i + 1} of {SETUP_STEPS.length}
+                  </p>
+                  <p className="text-sm font-bold text-[var(--brand-deep)]">{cur.title}</p>
+                  <p className="mt-0.5 text-xs text-[var(--muted)]">{cur.what}</p>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  {prev ? (
+                    <button
+                      type="button"
+                      className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
+                      onClick={() => setSetupStep(prev.id)}
+                    >
+                      ← {prev.title}
+                    </button>
+                  ) : null}
+                  {next ? (
+                    <button
+                      type="button"
+                      className="btn-accent rounded-lg px-3 py-1.5 text-xs font-semibold"
+                      onClick={() => setSetupStep(next.id)}
+                    >
+                      Next: {next.title} →
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })()}
+          <div className="max-w-4xl">
+          {setupStep === "policy" ? (
+          <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5">
+            <h2 className="text-sm font-bold text-[var(--brand-deep)]">
+              Exam policy
+            </h2>
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              Grading, defaults, and report card rules
+            </p>
+            {policyDraft ? (
+              <div className="mt-4 space-y-3">
+                <label className="block text-sm">
+                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                    Pass % (grade D minimum)
+                  </span>
+                  <input
+                    className="field !py-1.5"
+                    inputMode="numeric"
+                    value={policyDraft.passPercent}
+                    onChange={(e) =>
+                      setPolicyDraft({
+                        ...policyDraft,
+                        passPercent: Number(
+                          e.target.value.replace(/\D/g, "") || 33,
+                        ),
+                      })
+                    }
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                    Default UT max marks
+                  </span>
+                  <input
+                    className="field !py-1.5"
+                    inputMode="numeric"
+                    value={policyDraft.defaultUtMaxMarks}
+                    onChange={(e) =>
+                      setPolicyDraft({
+                        ...policyDraft,
+                        defaultUtMaxMarks: Number(
+                          e.target.value.replace(/\D/g, "") || 40,
+                        ),
+                      })
+                    }
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                    Default term / annual max marks
+                  </span>
+                  <input
+                    className="field !py-1.5"
+                    inputMode="numeric"
+                    value={policyDraft.defaultTermMaxMarks}
+                    onChange={(e) =>
+                      setPolicyDraft({
+                        ...policyDraft,
+                        defaultTermMaxMarks: Number(
+                          e.target.value.replace(/\D/g, "") || 80,
+                        ),
+                      })
+                    }
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                    Report card fee hold from stage
+                  </span>
+                  <select
+                    className="field !py-1.5"
+                    value={policyDraft.reportCardHoldFromStage}
+                    onChange={(e) =>
+                      setPolicyDraft({
+                        ...policyDraft,
+                        reportCardHoldFromStage: e.target
+                          .value as ExamPolicy["reportCardHoldFromStage"],
+                      })
+                    }
+                  >
+                    {(["S1", "S2", "S3", "S4"] as const).map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[11px] text-[var(--muted)]">
+                    Saving policy updates HOLD_REPORT_CARD and applies default
+                    max marks to exams that still have no student marks (UT → UT
+                    default; others → term default).
+                  </p>
+                </label>
+                <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
+                  <input
+                    type="checkbox"
+                    checked={policyDraft.showAttendanceOnReport}
+                    onChange={(e) =>
+                      setPolicyDraft({
+                        ...policyDraft,
+                        showAttendanceOnReport: e.target.checked,
+                      })
+                    }
+                  />
+                  Show attendance on report card
+                </label>
+                <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
+                  <input
+                    type="checkbox"
+                    checked={policyDraft.includeOverallGrade}
+                    onChange={(e) =>
+                      setPolicyDraft({
+                        ...policyDraft,
+                        includeOverallGrade: e.target.checked,
+                      })
+                    }
+                  />
+                  Show overall grade
+                </label>
+                <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
+                  <input
+                    type="checkbox"
+                    checked={policyDraft.enableCoScholastic}
+                    onChange={(e) =>
+                      setPolicyDraft({
+                        ...policyDraft,
+                        enableCoScholastic: e.target.checked,
+                      })
+                    }
+                  />
+                  Enable NEP 2020 co-scholastic domains (socio-emotional,
+                  psychomotor) on marks entry and report cards
+                </label>
+                <div className="rounded-lg border border-[var(--border)] p-3">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">
+                    At-risk thresholds (early-warning list)
+                  </p>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-5">
+                    {(
+                      [
+                        ["attendancePct", "Attendance below %", 0, 100, 1],
+                        ["incidents", "Incidents ≥", 1, 50, 1],
+                        ["homeworkRatio", "Homework below (0–1)", 0, 1, 0.05],
+                        ["homeworkMinDue", "…with at least N due", 1, 100, 1],
+                        ["subjectDrops", "Subjects slipped ≥", 1, 20, 1],
+                      ] as const
+                    ).map(([key, label, min, max, step]) => (
+                      <label key={key} className="block text-[11px] text-[var(--muted)]">
+                        {label}
+                        <input
+                          type="number"
+                          min={min}
+                          max={max}
+                          step={step}
+                          className="field mt-0.5 !py-1 text-sm"
+                          value={policyDraft.riskThresholds[key]}
+                          onChange={(e) =>
+                            setPolicyDraft({
+                              ...policyDraft,
+                              riskThresholds: {
+                                ...policyDraft.riskThresholds,
+                                [key]: Number(e.target.value),
+                              },
+                            })
+                          }
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
+                  <input
+                    type="checkbox"
+                    checked={policyDraft.requireAllSubjectsForReport}
+                    onChange={(e) =>
+                      setPolicyDraft({
+                        ...policyDraft,
+                        requireAllSubjectsForReport: e.target.checked,
+                      })
+                    }
+                  />
+                  Require all subjects marked before report
+                </label>
+                <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
+                  <input
+                    type="checkbox"
+                    checked={policyDraft.requireAllSubjectsPassForPromotion}
+                    onChange={(e) =>
+                      setPolicyDraft({
+                        ...policyDraft,
+                        requireAllSubjectsPassForPromotion: e.target.checked,
+                      })
+                    }
+                  />
+                  Fail promotion if any subject is below pass %
+                </label>
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 space-y-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                    HY / Final aggregates
+                  </p>
+                  <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
+                    <input
+                      type="checkbox"
+                      checked={policyDraft.includeComponentsInHyFinalReports}
+                      onChange={(e) =>
+                        setPolicyDraft({
+                          ...policyDraft,
+                          includeComponentsInHyFinalReports: e.target.checked,
+                        })
+                      }
+                    />
+                    Fold component exams into HY / Final reports
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
+                    <input
+                      type="checkbox"
+                      checked={
+                        policyDraft.enforceSeparateMarksheetsForAggregate
+                      }
+                      onChange={(e) =>
+                        setPolicyDraft({
+                          ...policyDraft,
+                          enforceSeparateMarksheetsForAggregate:
+                            e.target.checked,
+                        })
+                      }
+                    />
+                    Block HY/Final if required separate marksheet missing
+                  </label>
+                  <p className="text-[11px] text-[var(--muted)]">
+                    Defaults for new exams
+                  </p>
+                  <label className="flex items-center gap-2 text-xs text-[var(--brand-deep)]">
+                    <input
+                      type="checkbox"
+                      checked={policyDraft.defaultCountsTowardHy}
+                      onChange={(e) =>
+                        setPolicyDraft({
+                          ...policyDraft,
+                          defaultCountsTowardHy: e.target.checked,
+                        })
+                      }
+                    />
+                    Count toward HY
+                    <input
+                      className="field !py-0.5 !w-14"
+                      value={policyDraft.defaultWeightInHy}
+                      onChange={(e) =>
+                        setPolicyDraft({
+                          ...policyDraft,
+                          defaultWeightInHy: Number(
+                            e.target.value.replace(/\D/g, "") || 0,
+                          ),
+                        })
+                      }
+                      title="Default HY weight"
+                    />
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-[var(--brand-deep)]">
+                    <input
+                      type="checkbox"
+                      checked={policyDraft.defaultCountsTowardFinal}
+                      onChange={(e) =>
+                        setPolicyDraft({
+                          ...policyDraft,
+                          defaultCountsTowardFinal: e.target.checked,
+                        })
+                      }
+                    />
+                    Count toward Final
+                    <input
+                      className="field !py-0.5 !w-14"
+                      value={policyDraft.defaultWeightInFinal}
+                      onChange={(e) =>
+                        setPolicyDraft({
+                          ...policyDraft,
+                          defaultWeightInFinal: Number(
+                            e.target.value.replace(/\D/g, "") || 0,
+                          ),
+                        })
+                      }
+                      title="Default Final weight"
+                    />
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-[var(--brand-deep)]">
+                    <input
+                      type="checkbox"
+                      checked={policyDraft.defaultRequiredOnMarksheet}
+                      onChange={(e) =>
+                        setPolicyDraft({
+                          ...policyDraft,
+                          defaultRequiredOnMarksheet: e.target.checked,
+                        })
+                      }
+                    />
+                    Required on marksheet
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-[var(--brand-deep)]">
+                    <input
+                      type="checkbox"
+                      checked={policyDraft.defaultRequiresSeparateMarksheet}
+                      onChange={(e) =>
+                        setPolicyDraft({
+                          ...policyDraft,
+                          defaultRequiresSeparateMarksheet: e.target.checked,
+                        })
+                      }
+                    />
+                    Requires separate marksheet
+                  </label>
+                </div>
+                <p className="text-[11px] text-[var(--muted)]">
+                  Grade scale: CBSE 8-point (A1–E)
+                </p>
+                <button
+                  type="button"
+                  className="btn-accent rounded-lg px-3 py-2 text-xs font-semibold"
+                  onClick={onSavePolicy}
+                >
+                  Save policy
+                </button>
+              </div>
+            ) : null}
+          </section>
+          ) : null}
+          {setupStep === "schemes" ? (
+            <>
           <AssessmentSchemesPanel
             policy={policy}
             masters={masters}
@@ -1646,13 +2060,9 @@ export function ExamsWorkspace() {
             onFlash={flash}
             onError={setError}
           />
-          <ReportCardTemplatesPanel
-            policy={policy}
-            masters={masters}
-            onSaved={refresh}
-            onFlash={flash}
-            onError={setError}
-          />
+            </>
+          ) : null}
+          {setupStep === "exams" ? (
           <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5">
             <h2 className="text-sm font-bold text-[var(--brand-deep)]">
               Create exam
@@ -2072,328 +2482,19 @@ export function ExamsWorkspace() {
               })}
             </ul>
           </section>
-
-          <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5">
-            <h2 className="text-sm font-bold text-[var(--brand-deep)]">
-              Exam policy
-            </h2>
-            <p className="mt-1 text-xs text-[var(--muted)]">
-              Grading, defaults, and report card rules
-            </p>
-            {policyDraft ? (
-              <div className="mt-4 space-y-3">
-                <label className="block text-sm">
-                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                    Pass % (grade D minimum)
-                  </span>
-                  <input
-                    className="field !py-1.5"
-                    inputMode="numeric"
-                    value={policyDraft.passPercent}
-                    onChange={(e) =>
-                      setPolicyDraft({
-                        ...policyDraft,
-                        passPercent: Number(
-                          e.target.value.replace(/\D/g, "") || 33,
-                        ),
-                      })
-                    }
-                  />
-                </label>
-                <label className="block text-sm">
-                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                    Default UT max marks
-                  </span>
-                  <input
-                    className="field !py-1.5"
-                    inputMode="numeric"
-                    value={policyDraft.defaultUtMaxMarks}
-                    onChange={(e) =>
-                      setPolicyDraft({
-                        ...policyDraft,
-                        defaultUtMaxMarks: Number(
-                          e.target.value.replace(/\D/g, "") || 40,
-                        ),
-                      })
-                    }
-                  />
-                </label>
-                <label className="block text-sm">
-                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                    Default term / annual max marks
-                  </span>
-                  <input
-                    className="field !py-1.5"
-                    inputMode="numeric"
-                    value={policyDraft.defaultTermMaxMarks}
-                    onChange={(e) =>
-                      setPolicyDraft({
-                        ...policyDraft,
-                        defaultTermMaxMarks: Number(
-                          e.target.value.replace(/\D/g, "") || 80,
-                        ),
-                      })
-                    }
-                  />
-                </label>
-                <label className="block text-sm">
-                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                    Report card fee hold from stage
-                  </span>
-                  <select
-                    className="field !py-1.5"
-                    value={policyDraft.reportCardHoldFromStage}
-                    onChange={(e) =>
-                      setPolicyDraft({
-                        ...policyDraft,
-                        reportCardHoldFromStage: e.target
-                          .value as ExamPolicy["reportCardHoldFromStage"],
-                      })
-                    }
-                  >
-                    {(["S1", "S2", "S3", "S4"] as const).map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="mt-1 text-[11px] text-[var(--muted)]">
-                    Saving policy updates HOLD_REPORT_CARD and applies default
-                    max marks to exams that still have no student marks (UT → UT
-                    default; others → term default).
-                  </p>
-                </label>
-                <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
-                  <input
-                    type="checkbox"
-                    checked={policyDraft.showAttendanceOnReport}
-                    onChange={(e) =>
-                      setPolicyDraft({
-                        ...policyDraft,
-                        showAttendanceOnReport: e.target.checked,
-                      })
-                    }
-                  />
-                  Show attendance on report card
-                </label>
-                <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
-                  <input
-                    type="checkbox"
-                    checked={policyDraft.includeOverallGrade}
-                    onChange={(e) =>
-                      setPolicyDraft({
-                        ...policyDraft,
-                        includeOverallGrade: e.target.checked,
-                      })
-                    }
-                  />
-                  Show overall grade
-                </label>
-                <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
-                  <input
-                    type="checkbox"
-                    checked={policyDraft.enableCoScholastic}
-                    onChange={(e) =>
-                      setPolicyDraft({
-                        ...policyDraft,
-                        enableCoScholastic: e.target.checked,
-                      })
-                    }
-                  />
-                  Enable NEP 2020 co-scholastic domains (socio-emotional,
-                  psychomotor) on marks entry and report cards
-                </label>
-                <div className="rounded-lg border border-[var(--border)] p-3">
-                  <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">
-                    At-risk thresholds (early-warning list)
-                  </p>
-                  <div className="mt-2 grid gap-2 sm:grid-cols-5">
-                    {(
-                      [
-                        ["attendancePct", "Attendance below %", 0, 100, 1],
-                        ["incidents", "Incidents ≥", 1, 50, 1],
-                        ["homeworkRatio", "Homework below (0–1)", 0, 1, 0.05],
-                        ["homeworkMinDue", "…with at least N due", 1, 100, 1],
-                        ["subjectDrops", "Subjects slipped ≥", 1, 20, 1],
-                      ] as const
-                    ).map(([key, label, min, max, step]) => (
-                      <label key={key} className="block text-[11px] text-[var(--muted)]">
-                        {label}
-                        <input
-                          type="number"
-                          min={min}
-                          max={max}
-                          step={step}
-                          className="field mt-0.5 !py-1 text-sm"
-                          value={policyDraft.riskThresholds[key]}
-                          onChange={(e) =>
-                            setPolicyDraft({
-                              ...policyDraft,
-                              riskThresholds: {
-                                ...policyDraft.riskThresholds,
-                                [key]: Number(e.target.value),
-                              },
-                            })
-                          }
-                        />
-                      </label>
-                    ))}
-                  </div>
-                </div>
-                <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
-                  <input
-                    type="checkbox"
-                    checked={policyDraft.requireAllSubjectsForReport}
-                    onChange={(e) =>
-                      setPolicyDraft({
-                        ...policyDraft,
-                        requireAllSubjectsForReport: e.target.checked,
-                      })
-                    }
-                  />
-                  Require all subjects marked before report
-                </label>
-                <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
-                  <input
-                    type="checkbox"
-                    checked={policyDraft.requireAllSubjectsPassForPromotion}
-                    onChange={(e) =>
-                      setPolicyDraft({
-                        ...policyDraft,
-                        requireAllSubjectsPassForPromotion: e.target.checked,
-                      })
-                    }
-                  />
-                  Fail promotion if any subject is below pass %
-                </label>
-                <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 space-y-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
-                    HY / Final aggregates
-                  </p>
-                  <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
-                    <input
-                      type="checkbox"
-                      checked={policyDraft.includeComponentsInHyFinalReports}
-                      onChange={(e) =>
-                        setPolicyDraft({
-                          ...policyDraft,
-                          includeComponentsInHyFinalReports: e.target.checked,
-                        })
-                      }
-                    />
-                    Fold component exams into HY / Final reports
-                  </label>
-                  <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
-                    <input
-                      type="checkbox"
-                      checked={
-                        policyDraft.enforceSeparateMarksheetsForAggregate
-                      }
-                      onChange={(e) =>
-                        setPolicyDraft({
-                          ...policyDraft,
-                          enforceSeparateMarksheetsForAggregate:
-                            e.target.checked,
-                        })
-                      }
-                    />
-                    Block HY/Final if required separate marksheet missing
-                  </label>
-                  <p className="text-[11px] text-[var(--muted)]">
-                    Defaults for new exams
-                  </p>
-                  <label className="flex items-center gap-2 text-xs text-[var(--brand-deep)]">
-                    <input
-                      type="checkbox"
-                      checked={policyDraft.defaultCountsTowardHy}
-                      onChange={(e) =>
-                        setPolicyDraft({
-                          ...policyDraft,
-                          defaultCountsTowardHy: e.target.checked,
-                        })
-                      }
-                    />
-                    Count toward HY
-                    <input
-                      className="field !py-0.5 !w-14"
-                      value={policyDraft.defaultWeightInHy}
-                      onChange={(e) =>
-                        setPolicyDraft({
-                          ...policyDraft,
-                          defaultWeightInHy: Number(
-                            e.target.value.replace(/\D/g, "") || 0,
-                          ),
-                        })
-                      }
-                      title="Default HY weight"
-                    />
-                  </label>
-                  <label className="flex items-center gap-2 text-xs text-[var(--brand-deep)]">
-                    <input
-                      type="checkbox"
-                      checked={policyDraft.defaultCountsTowardFinal}
-                      onChange={(e) =>
-                        setPolicyDraft({
-                          ...policyDraft,
-                          defaultCountsTowardFinal: e.target.checked,
-                        })
-                      }
-                    />
-                    Count toward Final
-                    <input
-                      className="field !py-0.5 !w-14"
-                      value={policyDraft.defaultWeightInFinal}
-                      onChange={(e) =>
-                        setPolicyDraft({
-                          ...policyDraft,
-                          defaultWeightInFinal: Number(
-                            e.target.value.replace(/\D/g, "") || 0,
-                          ),
-                        })
-                      }
-                      title="Default Final weight"
-                    />
-                  </label>
-                  <label className="flex items-center gap-2 text-xs text-[var(--brand-deep)]">
-                    <input
-                      type="checkbox"
-                      checked={policyDraft.defaultRequiredOnMarksheet}
-                      onChange={(e) =>
-                        setPolicyDraft({
-                          ...policyDraft,
-                          defaultRequiredOnMarksheet: e.target.checked,
-                        })
-                      }
-                    />
-                    Required on marksheet
-                  </label>
-                  <label className="flex items-center gap-2 text-xs text-[var(--brand-deep)]">
-                    <input
-                      type="checkbox"
-                      checked={policyDraft.defaultRequiresSeparateMarksheet}
-                      onChange={(e) =>
-                        setPolicyDraft({
-                          ...policyDraft,
-                          defaultRequiresSeparateMarksheet: e.target.checked,
-                        })
-                      }
-                    />
-                    Requires separate marksheet
-                  </label>
-                </div>
-                <p className="text-[11px] text-[var(--muted)]">
-                  Grade scale: CBSE 8-point (A1–E)
-                </p>
-                <button
-                  type="button"
-                  className="btn-accent rounded-lg px-3 py-2 text-xs font-semibold"
-                  onClick={onSavePolicy}
-                >
-                  Save policy
-                </button>
-              </div>
-            ) : null}
-          </section>
+          ) : null}
+          {setupStep === "reports" ? (
+            <>
+          <ReportCardTemplatesPanel
+            policy={policy}
+            masters={masters}
+            onSaved={refresh}
+            onFlash={flash}
+            onError={setError}
+          />
+            </>
+          ) : null}
+          </div>
         </div>
       ) : null}
 
