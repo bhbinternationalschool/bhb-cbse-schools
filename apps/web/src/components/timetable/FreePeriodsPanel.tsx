@@ -163,10 +163,15 @@ export function FreePeriodsPanel({
           </div>
         ) : (
           <ErpTableShell exportAs="free_periods_grid" exportTitle={`Free periods — ${WEEKDAY_SHORT[weekday] ?? weekday}`}>
+            {/* The shell clips (overflow-hidden), so the grid scrolls in its
+                own box: sideways for the day's periods, down for the staff,
+                with the period row and the teacher column pinned. Without
+                it the later periods were cut off and nothing scrolled. */}
+            <div className="max-h-[70vh] overflow-auto overscroll-contain">
             <ErpTable minWidth="min-w-[640px]">
-              <ErpTableHead>
+              <ErpTableHead sticky>
                 <tr>
-                  <th className="sticky left-0 z-10 bg-[var(--surface-sunken)] px-3 py-2 text-left font-semibold">Teacher</th>
+                  <th className="sticky left-0 z-20 bg-[var(--surface-sunken)] px-3 py-2 text-left font-semibold">Teacher</th>
                   {dayGrid.periods.map((p) => (
                     <th
                       key={p.no}
@@ -183,7 +188,7 @@ export function FreePeriodsPanel({
               <ErpTableBody>
                 {gridRows.map((r) => (
                   <tr key={r.teacherId}>
-                    <td className="sticky left-0 z-10 bg-[var(--card)] px-3 py-1.5">
+                    <td className="sticky left-0 z-[1] bg-[var(--card)] px-3 py-1.5">
                       <span className="block font-medium text-[var(--brand-deep)]">{r.teacherName}</span>
                       {r.empCode ? <span className="block text-[10px] text-[var(--muted)]">{r.empCode}</span> : null}
                     </td>
@@ -218,7 +223,7 @@ export function FreePeriodsPanel({
                   </tr>
                 ))}
                 <tr className="border-t-2 border-[var(--border)]">
-                  <td className="sticky left-0 z-10 bg-[var(--surface-sunken)] px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                  <td className="sticky left-0 z-[1] bg-[var(--surface-sunken)] px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
                     Free teachers
                   </td>
                   {dayGrid.periods.map((p) => (
@@ -230,6 +235,7 @@ export function FreePeriodsPanel({
                 </tr>
               </ErpTableBody>
             </ErpTable>
+            </div>
           </ErpTableShell>
         )
       ) : filtered.length === 0 ? (
@@ -238,6 +244,7 @@ export function FreePeriodsPanel({
         </div>
       ) : (
         <ErpTableShell exportAs="free_periods" exportTitle="Free periods">
+          <div className="overflow-x-auto">
           <ErpTable minWidth="min-w-[480px]">
             <ErpTableHead>
               <tr>
@@ -262,6 +269,7 @@ export function FreePeriodsPanel({
               ))}
             </ErpTableBody>
           </ErpTable>
+          </div>
         </ErpTableShell>
       )}
     </div>
