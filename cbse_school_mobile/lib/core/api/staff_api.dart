@@ -129,6 +129,7 @@ class StaffLeaveRequest {
       toDate = _s(j, "toDate"),
       days = _d(j, "days"),
       halfDay = _b(j, "halfDay"),
+      halfDaySession = _s(j, "halfDaySession"),
       reason = _s(j, "reason"),
       status = _s(j, "status"),
       statusLabel = _s(j, "statusLabel"),
@@ -149,6 +150,9 @@ class StaffLeaveRequest {
   final String toDate;
   final double days;
   final bool halfDay;
+
+  /// "morning" | "afternoon" | "" — which half of a half-day leave is off.
+  final String halfDaySession;
   final String reason;
 
   /// pending | pending_l2 | approved | rejected
@@ -1168,6 +1172,7 @@ extension StaffApi on ApiClient {
     required String fromDate,
     required String toDate,
     required bool halfDay,
+    String halfDaySession = "",
     required String reason,
   }) async => StaffLeaveRequest.fromJson(
     await _postData("/api/v1/staff/leave/apply", {
@@ -1175,6 +1180,7 @@ extension StaffApi on ApiClient {
       "fromDate": fromDate,
       "toDate": toDate,
       "halfDay": halfDay,
+      if (halfDay) "halfDaySession": halfDaySession,
       "reason": reason,
     }),
   );

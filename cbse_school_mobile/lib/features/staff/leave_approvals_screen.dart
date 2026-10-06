@@ -149,7 +149,7 @@ class _Card extends StatelessWidget {
               Text(r.designation, style: AppText.labelMediumMuted),
             const SizedBox(height: 6),
             Text(
-              "${r.typeName} (${r.typeCode}) · ${r.fromDate == r.toDate ? formatDateLabel(r.fromDate) : "${formatDateLabel(r.fromDate)} – ${formatDateLabel(r.toDate)}"}${r.halfDay ? " · half day" : ""} · ${r.days == r.days.roundToDouble() ? r.days.toInt() : r.days} day${r.days == 1 ? "" : "s"}",
+              "${r.typeName} (${r.typeCode}) · ${r.fromDate == r.toDate ? formatDateLabel(r.fromDate) : "${formatDateLabel(r.fromDate)} – ${formatDateLabel(r.toDate)}"}${r.halfDay ? " · half day${r.halfDaySession.isNotEmpty ? " (${r.halfDaySession} off)" : ""}" : ""} · ${r.days == r.days.roundToDouble() ? r.days.toInt() : r.days} day${r.days == 1 ? "" : "s"}",
               style: AppText.bodySmallInk,
             ),
             if (r.remaining != null && !r.unlimited)

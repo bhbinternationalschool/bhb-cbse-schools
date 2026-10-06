@@ -44,6 +44,21 @@ export async function POST(request: Request) {
     if (!result.ok) throw new ApiError("bad_request", result.error, 400);
     await saveStaffHrServer(result.state);
     const after = result.state.leaveRequests.find((r) => r.id === id) || req;
+    if (after.status === "approved") {
+      // Same as approving on WhatsApp: a register that already exists for the
+      // leave's days shows it now, not at the next punch. A half day stays
+      // "A" until the other half is punched (halfDayLeaveMark).
+      const { markApprovedLeaveOnRegisters } = await import("@/lib/staffAttendance.server");
+      await markApprovedLeaveOnRegisters({
+        staffId: after.staffId,
+        fromDate: after.fromDate,
+        toDate: after.toDate,
+        halfDay: after.halfDay,
+        halfDaySession: after.halfDaySession,
+        typeCode: after.typeCode,
+        by: `Leave approved by ${ctx.session.fullName || "Principal"}`,
+      }).catch((e: unknown) => console.warn("[leave decide] register mark failed", (e as Error)?.message));
+    }
 
     const meta = requestMeta(request);
     await writeAudit({

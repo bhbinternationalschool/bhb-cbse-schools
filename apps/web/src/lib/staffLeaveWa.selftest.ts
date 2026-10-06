@@ -31,7 +31,7 @@ const TODAY = "2026-09-29"; // a Tuesday
 
 {
   const a = parseLeaveApplyStart("CL tomorrow", TODAY);
-  assert.deepEqual(a, { typeCode: "CL", dates: { from: "2026-09-30", to: "2026-09-30" }, halfDay: false });
+  assert.deepEqual(a, { typeCode: "CL", dates: { from: "2026-09-30", to: "2026-09-30" }, halfDay: false, halfDaySession: "" });
   const b = parseLeaveApplyStart("ML 2 Oct to 4 Oct fever", TODAY);
   assert.equal(b?.typeCode, "ML");
   assert.deepEqual(b?.dates, { from: "2026-10-02", to: "2026-10-04" });
