@@ -25,6 +25,28 @@ const PORTAL_FIELDS = [
   "motherTongueDesc", "bloodGroup", "admnNumber",
 ];
 
+// The only fields of a UDISE+ Teacher-module row that leave the portal tab —
+// no Aadhaar, no mobile. Kept in step with PORTAL_TEACHER_FIELDS in
+// apps/web/src/lib/udiseTeacherFill.ts (the server re-applies its own copy).
+const TEACHER_FIELDS = [
+  "empStaffId", "nationalCode", "staffName", "gender", "dateOfBirth",
+  "dateOfJoiningInService", "dateOfJoiningInPresentSchool", "natureOfAppointment",
+  "typeOfTeacher", "classTaught", "academicQualification", "professionalQualification",
+  "socialCategory", "mainSubject1", "email",
+];
+
+// What the APAAR queue needs of a portal child — no Aadhaar, no mobile.
+const APAAR_FIELDS = [
+  "studentId", "studentName", "studentCodeNat", "classId", "sectionId",
+  "uuidStatus", "apaarId", "apaarIdStatusDesc",
+];
+
+const pick = (rec, keys) => {
+  const out = {};
+  for (const k of keys) if (rec && k in rec) out[k] = rec[k];
+  return out;
+};
+
 // One ERP, matching the manifest's only host permission. For local testing,
 // add the localhost origin to host_permissions and change this line.
 async function erpBase() {
@@ -89,6 +111,25 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
         studentCodeNat: p.studentCodeNat,
       }));
       reply(await erpFetch("/api/v1/udise/robot/add-list", { method: "POST", body: JSON.stringify({ students }) }));
+    } else if (msg && msg.type === "teachers-board") {
+      reply(
+        await erpFetch("/api/v1/udise/robot/teachers", {
+          method: "POST",
+          body: JSON.stringify({ teachers: (msg.teachers || []).map((t) => pick(t, TEACHER_FIELDS)) }),
+        }),
+      );
+    } else if (msg && msg.type === "teacher-fill") {
+      const q = new URLSearchParams({ code: msg.code || "", form: msg.form || "", name: msg.name || "", dob: msg.dob || "" });
+      reply(await erpFetch(`/api/v1/udise/robot/teacher-fill?${q}`));
+    } else if (msg && msg.type === "apaar-queue") {
+      reply(
+        await erpFetch("/api/v1/udise/robot/apaar-queue", {
+          method: "POST",
+          body: JSON.stringify({ students: (msg.students || []).map((s) => pick(s, APAAR_FIELDS)) }),
+        }),
+      );
+    } else if (msg && msg.type === "apaar-fill") {
+      reply(await erpFetch(`/api/v1/udise/robot/apaar-fill?pen=${encodeURIComponent(msg.pen || "")}`));
     } else if (msg && msg.type === "fill-data") {
       reply(await erpFetch(`/api/v1/udise/robot/fill?pen=${encodeURIComponent(msg.pen || "")}`));
     } else {

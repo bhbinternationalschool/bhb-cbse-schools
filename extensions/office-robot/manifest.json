@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "BHB Office Robot",
-  "version": "1.0.0",
-  "description": "For BHB International School staff: fills government portal forms (UDISE+ first) from the school ERP. You check and save.",
+  "version": "1.1.0",
+  "description": "BHB International School staff: fills UDISE+ student, teacher and APAAR forms from the school ERP. You check and save.",
   "permissions": ["storage"],
   "host_permissions": ["https://bhbinternational.school/*"],
   "background": { "service_worker": "background.js" },
@@ -10,6 +10,12 @@
     {
       "matches": ["https://sdms.udiseplus.gov.in/g1/*"],
       "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://teacher.udiseplus.gov.in/*"],
+      "js": ["content-teacher.js"],
       "css": ["content.css"],
       "run_at": "document_idle"
     }

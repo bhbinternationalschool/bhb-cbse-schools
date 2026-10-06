@@ -74,6 +74,7 @@ import {
   type PtmState,
 } from "@/lib/ptm";
 import { openWaMe } from "@/lib/waMe";
+import { StepChainGuide, type StepDef } from "@/components/ui/StepTabs";
 import {
   isRestrictedTeacher,
   useMyTeaching,
@@ -97,6 +98,14 @@ type PtmTab =
   | "bookings"
   | "feedback"
   | "reports";
+
+/** A parent-teacher meeting, in order: the event, its slots, parents book, feedback after. */
+const PTM_STEPS: StepDef<PtmTab>[] = [
+  { id: "events", title: "Events", what: "Create the meeting — date, classes, in person / video / phone." },
+  { id: "slots", title: "Slots", what: "The time slots each teacher offers for that event." },
+  { id: "bookings", title: "Bookings", what: "Parents book slots; see who is coming and when." },
+  { id: "feedback", title: "Feedback", what: "Notes and parent feedback after the meeting." },
+];
 
 const TAB_ITEMS: WorkspaceTabItem[] = [
   { id: "dashboard", label: "Dashboard", tone: "navy", icon: <LayoutDashboard /> },
@@ -772,6 +781,12 @@ export function PtmWorkspace() {
         items={tabItems}
         aria-label="PTM sections"
       >
+        <StepChainGuide
+          chains={[{ label: "PTM", steps: PTM_STEPS }]}
+          value={tab}
+          onChange={setTab}
+          visible={tabItems.map((t) => t.id)}
+        />
 
         {!teacherMode ? (
           <TabsContent value="dashboard">
