@@ -76,6 +76,7 @@ import { countActiveHouseholds, loadSis } from "@/lib/sis";
 import { loadStaffAttendance, staffMarkTotals } from "@/lib/staffAttendance";
 import { loadStaffHr } from "@/lib/staffHr";
 import {
+  bellForClass,
   loadTimetable,
   teacherLabel,
   teachingPeriods,
@@ -1957,13 +1958,19 @@ function timetableDash(academicYearCode?: string): ModuleDashboardModel {
   const masters = loadMasters();
   const state = loadTimetable();
   const grids = state.grids.filter((g) => inAcademicYear(g, academicYearCode));
-  const teaching = teachingPeriods(state.bellTemplate);
-
-  const possibleSlots = grids.length * teaching.length;
-  const filledSlots = grids.reduce(
-    (s, g) => s + g.slots.filter((sl) => sl.teacherId).length,
-    0,
-  );
+  // A week's teaching periods per class, on that class's own bell. This
+  // used to be one DAY's periods per class (13 grids × 7 = 91) set against
+  // the whole week's filled slots (441), and showed "485%" (6 Oct 2026).
+  const weekdays = new Set(state.workingWeekdays.length ? state.workingWeekdays : [1, 2, 3, 4, 5, 6]);
+  let possibleSlots = 0;
+  let filledSlots = 0;
+  for (const g of grids) {
+    const periodNos = new Set(teachingPeriods(bellForClass(state, g.classId)).map((p) => p.no));
+    possibleSlots += periodNos.size * weekdays.size;
+    filledSlots += g.slots.filter(
+      (sl) => sl.teacherId && weekdays.has(sl.weekday) && periodNos.has(sl.periodNo),
+    ).length;
+  }
   const fillPercent =
     possibleSlots > 0 ? Math.round((filledSlots / possibleSlots) * 100) : 0;
 
