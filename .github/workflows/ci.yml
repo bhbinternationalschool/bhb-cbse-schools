@@ -171,6 +171,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:subject-masters
 
+      - name: Self-test — free-period grid agrees with the free-period list
+        working-directory: apps/web
+        run: npm run test:timetable-free-grid
+
       - name: Self-test — UDISE+ teacher profiles and APAAR consent page from the ERP
         working-directory: apps/web
         run: npm run test:udise-teacher-apaar
