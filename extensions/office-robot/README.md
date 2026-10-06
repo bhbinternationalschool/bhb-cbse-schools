@@ -38,8 +38,29 @@ Works in desktop Chrome, Edge or Brave. Not on phones. The ERP and the portal mu
 
 See `STORE_LISTING.md`. Privacy policy: https://bhbinternational.school/privacy/office-robot (`apps/web/src/app/privacy/office-robot/page.tsx`).
 
+### On the APAAR Module (Students module → APAAR Module)
+
+| Button | What it does |
+|---|---|
+| **Start APAAR queue** | Asks the ERP which children are ready: the family said yes on WhatsApp, the consenting parent's own Aadhaar is on file, the portal has verified the child's Aadhaar, and there is no APAAR ID yet. Opens each child's **Generate APAAR ID** page and fills who gave consent, the relation (father/mother only), the parent's Aadhaar as identity proof, and the place. It also says how many children wait for Aadhaar verification or for the family. |
+| **Submitted — next child ▶** / **Skip** / **Stop** | After you have checked the page and pressed the portal's Submit. |
+| **Fill this APAAR page from ERP** | Fills whichever child's Generate page is open. |
+
+The portal requires the school to keep a **printed copy of the consent**. Print the ERP's consent record for each child before you submit.
+
+### On the Teacher module (teacher.udiseplus.gov.in)
+
+| Button | What it does |
+|---|---|
+| **Check teachers against the ERP** | On the staff list: who matches an ERP staff member (by National Code, else name + date of birth), whose National Code is missing in the ERP (Staff → OASIS / UDISE id), where dates or qualifications disagree, and which ERP teachers the portal does not list. |
+| **Fill this step from ERP** | On a teacher's GP or AT step: fills the empty fields from ERP Staff (gender, social category, qualifications, mobile, email, appointment, joining date, post, classes and subjects taught this year). The Training (TD) step is not in the ERP. |
+
+Aadhaar and mobile numbers never leave the portal tab. The robot never presses Save, Next or Submit.
+
 ## ERP side
 
 - `POST /api/v1/udise/robot/sync` → `apps/web/src/lib/udiseRobotSync.server.ts`; mapping in `lib/udisePortalApi.ts`
 - `GET /api/v1/udise/robot/fill?pen=` → `lib/udisePortalFill.ts`
+- `POST /api/v1/udise/robot/teachers`, `GET /api/v1/udise/robot/teacher-fill` → `lib/udiseTeacherFill.ts`
+- `POST /api/v1/udise/robot/apaar-queue`, `GET /api/v1/udise/robot/apaar-fill` → `lib/udiseApaarFill.ts`
 - The field whitelist in `background.js` must match `UDISE_PORTAL_FIELDS` in `lib/udisePortalApi.ts`.
