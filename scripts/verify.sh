@@ -103,6 +103,7 @@ SELFTESTS=(
   test:staff-onboarding
   test:staff-leave-wa
   test:staff-register-leave
+  test:staff-half-day-session
   test:class-notice-wa
   test:wa-template-autopilot
   test:pin-review

@@ -104,6 +104,7 @@ import {
   leaveTypeLabel,
   leaveUsedInMonth,
   leaveVerdict,
+  parseHalfDaySession,
   parseLeaveApplyStart,
   parseLeaveCodeDecision,
   parseLeaveDates,
@@ -204,6 +205,7 @@ export type WaUnifiedSession = {
     from?: string;
     to?: string;
     halfDay?: boolean;
+    halfDaySession?: "" | "morning" | "afternoon";
     reason?: string;
     lwpWhy?: string;
     at: string;
@@ -1519,6 +1521,7 @@ async function submitLeave(opts: {
     fromDate: draft.from!,
     toDate: draft.halfDay ? draft.from! : draft.to!,
     halfDay: !!draft.halfDay,
+    halfDaySession: draft.halfDay ? draft.halfDaySession || "" : "",
     reason: `${draft.reason}${draft.askedType && draft.askedType !== draft.typeCode ? ` (asked as ${draft.askedType}: ${draft.lwpWhy})` : ""} · via WhatsApp`,
     appliedBy: staff.fullName || "Staff",
   });
@@ -1532,7 +1535,7 @@ async function submitLeave(opts: {
   const dates = formatLeaveDates(req.fromDate, req.toDate, req.halfDay);
   if (req.status === "approved") {
     const { markApprovedLeaveOnRegisters } = await import("@/lib/staffAttendance.server");
-    await markApprovedLeaveOnRegisters({ staffId: staff.id, fromDate: req.fromDate, toDate: req.toDate, halfDay: req.halfDay, typeCode: req.typeCode, by: "Leave (auto-approved)" });
+    await markApprovedLeaveOnRegisters({ staffId: staff.id, fromDate: req.fromDate, toDate: req.toDate, halfDay: req.halfDay, halfDaySession: req.halfDaySession, typeCode: req.typeCode, by: "Leave (auto-approved)" });
     return `✅ ${leaveTypeLabel(req.typeCode)} on ${dates} is approved and marked.`;
   }
 
@@ -1673,6 +1676,7 @@ export async function handleLeaveCodeDecision(opts: { fromWaId: string; text: st
       fromDate: req.fromDate,
       toDate: req.toDate,
       halfDay: req.halfDay,
+      halfDaySession: req.halfDaySession,
       typeCode: req.typeCode,
       by: `Leave approved by ${byName}`,
     });
@@ -1802,7 +1806,8 @@ async function staffLeaveStep(opts: {
             ...draft,
             typeCode,
             ...(dates ? { from: dates.from, to: dates.to } : {}),
-            halfDay: draft.halfDay || /half\s*day/i.test(t),
+            halfDay: draft.halfDay || /half\s*day/i.test(t) || parseHalfDaySession(t) !== "",
+            halfDaySession: draft.halfDaySession || parseHalfDaySession(t),
           });
         }
         if (words <= 4 && !/[?？]/.test(t)) return say(`Please reply *1* for CL or *2* for ML.\n\n${composeLeaveAskType()}`, "staff_leave_apply");
@@ -1869,7 +1874,7 @@ async function staffLeaveStep(opts: {
   if (!start && /^\s*leave\s*$/i.test(text)) {
     const leaders = await leadershipContacts();
     const approver = [...leaders.principal, ...leaders.admin, ...leaders.owner].some((c) => c.staffId === staff.id);
-    if (!approver) start = { typeCode: null, dates: null, halfDay: false };
+    if (!approver) start = { typeCode: null, dates: null, halfDay: false, halfDaySession: "" };
   }
   if (!start) return null;
   return go({
@@ -1878,6 +1883,7 @@ async function staffLeaveStep(opts: {
     from: start.dates?.from,
     to: start.dates?.to,
     halfDay: start.halfDay,
+    halfDaySession: start.halfDaySession,
     reason: leaveReasonFrom(text) || undefined,
     at: nowIso(),
   });
