@@ -72,7 +72,7 @@ import {
   MastersWorkCard,
 } from "@/components/masters/MastersLayout";
 import { ModuleTabGroups, type ModuleTabGroup } from "@/components/ui/ModuleTabs";
-import { StepChainGuide, type StepDef } from "@/components/ui/StepTabs";
+import { StepChainGuide, StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
@@ -824,6 +824,31 @@ function CampusesPanel({
   );
 }
 
+/**
+ * Classes, then their sections, then who teaches each section: a section
+ * belongs to a class, and teachers are assigned per section. The class list
+ * stays on every step — it is how a class is picked for its sections.
+ */
+type ClassesStep = "classes" | "sections" | "teachers";
+
+const CLASSES_STEPS: StepDef<ClassesStep>[] = [
+  {
+    id: "classes",
+    title: "Classes",
+    what: "Add, rename or remove classes. A new class starts with sections A and B; its group (Pre-Primary to Senior) follows from its name.",
+  },
+  {
+    id: "sections",
+    title: "Sections",
+    what: "Pick a class in the list, then add, rename, inactivate or remove its sections.",
+  },
+  {
+    id: "teachers",
+    title: "Class & subject teachers",
+    what: "Pick a section's Teachers, then set its class teacher and a teacher for each subject.",
+  },
+];
+
 function ClassesPanel({
   state,
   commit,
@@ -831,6 +856,7 @@ function ClassesPanel({
   state: MastersState;
   commit: (s: MastersState, msg?: string) => void;
 }) {
+  const [classStep, setClassStep] = useState<ClassesStep>("classes");
   const [className, setClassName] = useState("");
   const [editingClassId, setEditingClassId] = useState<string | null>(null);
   const [selectedClassId, setSelectedClassId] = useState(
@@ -981,10 +1007,16 @@ function ClassesPanel({
   }
 
   return (
+    <StepTabs
+      aria-label="Classes & sections steps"
+      steps={CLASSES_STEPS}
+      value={classStep}
+      onChange={setClassStep}
+    >
     <MastersTabStack
       intro="Classes are grouped: Pre-Primary (Nursery–UKG), Primary (I–V), Middle (VI–VIII), Secondary (IX–X), Senior (XI–XII)."
       tables={
-        <MastersTablesRow>
+        <MastersTablesRow cols={classStep === "classes" ? 1 : 2}>
           <MastersTableCard title="Classes by group" maxHeight="max-h-[min(70vh,560px)]">
             {CLASS_GROUPS.map((g) => {
               const rows = classesInGroup(state.classes, g.code);
@@ -1073,6 +1105,7 @@ function ClassesPanel({
             })}
           </MastersTableCard>
 
+          {classStep !== "classes" ? (
           <MastersTableCard title={`Sections · ${selected?.name ?? "—"}`}>
             <ul className="divide-y divide-[var(--border)]">
               {sectionsForClass.map((s) => (
@@ -1096,11 +1129,16 @@ function ClassesPanel({
                           ? "text-[var(--brand-deep)]"
                           : "text-[var(--brand-mid)]"
                       }`}
-                      onClick={() =>
+                      onClick={() => {
+                        if (classStep !== "teachers") {
+                          setTeachersSectionId(s.id);
+                          setClassStep("teachers");
+                          return;
+                        }
                         setTeachersSectionId(
                           teachersSectionId === s.id ? null : s.id,
-                        )
-                      }
+                        );
+                      }}
                     >
                       Teachers
                     </button>
@@ -1153,10 +1191,12 @@ function ClassesPanel({
               ) : null}
             </ul>
           </MastersTableCard>
+          ) : null}
         </MastersTablesRow>
       }
       work={
         <div className="grid gap-4 lg:grid-cols-2">
+          {classStep === "classes" ? (
           <MastersWorkCard
             title={editingClassId ? "Edit class" : "Add class"}
           >
@@ -1186,6 +1226,8 @@ function ClassesPanel({
               </button>
             </form>
           </MastersWorkCard>
+          ) : null}
+          {classStep === "sections" ? (
           <MastersWorkCard
             title={
               editingSectionId
@@ -1221,8 +1263,14 @@ function ClassesPanel({
               </button>
             </form>
           </MastersWorkCard>
+          ) : null}
 
-          {teachersSection ? (
+          {classStep === "teachers" && !teachersSection ? (
+            <p className="text-sm text-[var(--muted)]">
+              Pick a class, then press Teachers on one of its sections.
+            </p>
+          ) : null}
+          {classStep === "teachers" && teachersSection ? (
             <MastersWorkCard
               title={`Teachers · ${teachersSection.className}-${teachersSection.name}`}
             >
@@ -1239,6 +1287,7 @@ function ClassesPanel({
         </div>
       }
     />
+    </StepTabs>
   );
 }
 
