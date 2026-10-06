@@ -18,6 +18,7 @@ import {
   waTemplatesMetaConfigured,
 } from "@/lib/waTemplatesMeta.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
+import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 
 export const runtime = "nodejs";
 
@@ -32,6 +33,10 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  // Staff with wa_templates edit only: this creates templates on the school's
+  // Meta WABA with the system-user token. Middleware does not cover /api.
+  const auth = await requireStaffPermission(req, "wa_templates", "edit");
+  if (!auth.ok) return auth.response;
   await ensureSchoolMirrorHydrated();
   let body: { templateId?: string; state?: WaTemplatesState };
   try {

@@ -21,6 +21,7 @@ import {
   readPendingTemplateStatusEvents,
   waTemplatesMetaConfigured,
 } from "@/lib/waTemplatesMeta.server";
+import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 
 export const runtime = "nodejs";
 
@@ -33,6 +34,11 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  // Staff with wa_templates edit only: this drains the pending webhook
+  // status/quality events and returns the registry. Middleware does not
+  // cover /api.
+  const auth = await requireStaffPermission(req, "wa_templates", "edit");
+  if (!auth.ok) return auth.response;
   let body: { state?: WaTemplatesState } = {};
   try {
     body = (await req.json()) as typeof body;
