@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import { DayCloseSheet, printDayClose } from "@/components/fees/DayCloseSheet";
 import {
   approveDayClose,
@@ -51,6 +52,37 @@ function statusClass(status: DayCloseSession["status"]) {
   }
 }
 
+/**
+ * The counter's evening, in order: check what the day book says, count the
+ * drawer and submit (receipts for the date lock), then Accounts receives or
+ * rejects. History is last. Steps never lock each other — the order is
+ * advice; the panel's own status rules still decide what can be done.
+ */
+type DayCloseStep = "review" | "count" | "receive" | "history";
+
+const DAY_CLOSE_STEPS: StepDef<DayCloseStep>[] = [
+  {
+    id: "review",
+    title: "Review day book",
+    what: "What was collected on this date — by type, by payment mode, store collections, and every receipt. Fix anything wrong before counting.",
+  },
+  {
+    id: "count",
+    title: "Count cash & submit",
+    what: "Count the notes and coins in the drawer; the count must match System cash, not the day total. Submitting locks new receipts for this date.",
+  },
+  {
+    id: "receive",
+    title: "Accounts receive",
+    what: "Accounts checks the count and approves (cash moves to the main pool) or rejects (the cashier recounts).",
+  },
+  {
+    id: "history",
+    title: "History",
+    what: "Recent day-closes with their variance. Tap one to open that date.",
+  },
+];
+
 export function DayClosePanel({
   tick,
   cashierName,
@@ -63,6 +95,7 @@ export function DayClosePanel({
   onOpenReceipt: (voucherId: string) => void;
 }) {
   const [closeDate, setCloseDate] = useState(todayIso);
+  const [dayStep, setDayStep] = useState<DayCloseStep>("review");
   const [denoms, setDenoms] = useState<DayCloseDenomLine[]>(emptyDenominations);
   const [cashierRemarks, setCashierRemarks] = useState("");
   const [receiverName, setReceiverName] = useState("");
@@ -280,6 +313,21 @@ export function DayClosePanel({
         />
       </div>
 
+      <StepTabs
+        aria-label="Day close steps"
+        steps={DAY_CLOSE_STEPS.map((st) =>
+          st.id === "review"
+            ? { ...st, badge: book.receiptCount }
+            : st.id === "history"
+              ? { ...st, badge: history.length || undefined }
+              : st,
+        )}
+        value={dayStep}
+        onChange={setDayStep}
+      />
+
+      {dayStep === "review" ? (
+        <>
       <p className="rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-[11px] leading-snug text-[var(--muted)]">
         <span className="font-semibold text-[var(--brand-deep)]">
           Why day total ≠ cash variance:
@@ -430,7 +478,11 @@ export function DayClosePanel({
         </p>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+        </>
+      ) : null}
+
+      <div className="space-y-4">
+        {dayStep === "count" ? (
         <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <div className="flex flex-wrap items-end justify-between gap-2">
             <div>
@@ -522,8 +574,11 @@ export function DayClosePanel({
             </p>
           ) : null}
         </div>
+        ) : null}
 
         <div className="space-y-4">
+          {dayStep === "receive" ? (
+            <>
           {session?.status === "submitted" ||
           session?.status === "approved" ||
           session?.status === "rejected" ? (
@@ -620,8 +675,16 @@ export function DayClosePanel({
                 </p>
               )}
             </div>
+          ) : (
+            <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 text-sm text-[var(--muted)]">
+              Nothing to receive yet for {closeDate} — the cashier counts and
+              submits in step 2 first.
+            </p>
+          )}
+            </>
           ) : null}
 
+          {dayStep === "review" ? (
           <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h3 className="text-sm font-bold text-[var(--brand-deep)]">
               Receipts on this date
@@ -698,10 +761,16 @@ export function DayClosePanel({
               </ul>
             )}
           </div>
+          ) : null}
         </div>
       </div>
 
-      {history.length > 0 ? (
+      {dayStep === "history" && history.length === 0 ? (
+        <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 text-sm text-[var(--muted)]">
+          No day-closes yet.
+        </p>
+      ) : null}
+      {dayStep === "history" && history.length > 0 ? (
         <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <h3 className="text-sm font-bold text-[var(--brand-deep)]">
             Recent day-closes
@@ -712,7 +781,11 @@ export function DayClosePanel({
                 <button
                   type="button"
                   className="flex w-full items-center justify-between gap-2 py-2 text-left hover:bg-[var(--surface-sunken)]"
-                  onClick={() => setCloseDate(h.closeDate)}
+                  onClick={() => {
+                    // Opening a past date starts from its day book.
+                    setCloseDate(h.closeDate);
+                    setDayStep("review");
+                  }}
                 >
                   <div>
                     <span className="text-sm font-semibold text-[var(--brand-deep)]">

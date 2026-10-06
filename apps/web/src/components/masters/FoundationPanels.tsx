@@ -58,6 +58,7 @@ import { LeaveApprovalSettingsPanel } from "@/components/masters/LeaveApprovalSe
 import { StaffAttendanceSettingsPanel } from "@/components/masters/StaffAttendanceSettingsPanel";
 import { StaffLeaveTypesPanel } from "@/components/masters/StaffLeaveTypesPanel";
 import { StaffAttendanceRulesPanel } from "@/components/masters/StaffAttendanceRulesPanel";
+import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import {
   MastersEmptyRow,
@@ -2072,8 +2073,39 @@ export function StaffMastersPanel({
   );
 }
 
+/**
+ * Leave setup, in the order it is built: the leave types and their caps
+ * first (approval needs something to approve), then who approves, then how
+ * attendance is taken, then the rules that adjust it and who they apply to.
+ */
+type LeaveSetupStep = "types" | "approval" | "attendance" | "rules";
+
+const LEAVE_SETUP_STEPS: StepDef<LeaveSetupStep>[] = [
+  {
+    id: "types",
+    title: "Leave types & caps",
+    what: "The kinds of leave staff can take (CL, ML, EL…), days allotted per academic year and what carries forward. Everything after this uses these types.",
+  },
+  {
+    id: "approval",
+    title: "Approval flow",
+    what: "How a leave request is approved — automatically, or in one or two levels — and how many minutes after start count as late.",
+  },
+  {
+    id: "attendance",
+    title: "Attendance settings",
+    what: "How staff attendance is taken: self-punch, WhatsApp IN/OUT, campus geofence, auto-applying punch rules, and syncing approved leave into the register.",
+  },
+  {
+    id: "rules",
+    title: "Attendance rules",
+    what: "Punch rules (late and early buffers and the rest) — build a rule, then assign it to the staff it applies to.",
+  },
+];
+
 /** Leave types, approval settings, and staff attendance adjustment rules. */
 export function LeaveMastersPanel() {
+  const [leaveStep, setLeaveStep] = useState<LeaveSetupStep>("types");
   return (
     <div className="space-y-4">
       <p className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-3 text-sm text-[var(--muted)]">
@@ -2090,10 +2122,17 @@ export function LeaveMastersPanel() {
         </Link>
         ; mark punches in Attendance → Staff.
       </p>
-      <LeaveApprovalSettingsPanel />
-      <StaffAttendanceSettingsPanel />
-      <StaffLeaveTypesPanel />
-      <StaffAttendanceRulesPanel />
+      <StepTabs
+        aria-label="Leave setup steps"
+        steps={LEAVE_SETUP_STEPS}
+        value={leaveStep}
+        onChange={setLeaveStep}
+      >
+        {leaveStep === "types" ? <StaffLeaveTypesPanel /> : null}
+        {leaveStep === "approval" ? <LeaveApprovalSettingsPanel /> : null}
+        {leaveStep === "attendance" ? <StaffAttendanceSettingsPanel /> : null}
+        {leaveStep === "rules" ? <StaffAttendanceRulesPanel /> : null}
+      </StepTabs>
     </div>
   );
 }
