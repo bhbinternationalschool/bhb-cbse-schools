@@ -19,7 +19,7 @@
  * is never a value.
  */
 
-import { BLOOD_GROUPS, isRealPortalId, type Household, type SisStudent } from "@/lib/sis";
+import { isRealPortalId, normalizeBloodGroup, type Household, type SisStudent } from "@/lib/sis";
 import { minorityCode } from "@/lib/udisePortalFill";
 import { sameChildEvidence } from "@/lib/udisePortalReconcile";
 import { udiseDobIso } from "@/lib/udiseStudentDetails";
@@ -88,12 +88,6 @@ const MINORITY_RELIGION: Record<string, string> = {
   "6": "JAIN",
 };
 const BLOOD_BY_CODE: Record<string, string> = { "1": "A+", "2": "A-", "3": "B+", "4": "B-", "5": "O+", "6": "O-", "7": "AB+", "8": "AB-" };
-
-/** "B(+)" (the old import's style), "b +ve" → "B+"; "" when not a blood group. */
-function bloodKey(raw: string): string {
-  const t = (raw || "").toUpperCase().replace(/[\s()]/g, "").replace(/(POSITIVE|POS|\+VE)$/, "+").replace(/(NEGATIVE|NEG|-VE)$/, "-");
-  return t && (BLOOD_GROUPS as readonly string[]).includes(t) ? t : "";
-}
 
 function number(v: unknown, max: number): string {
   const n = Number(s(v));
@@ -213,7 +207,7 @@ export function diffStudent(copy: PortalStudentCopy, st: SisStudent, hh?: Househ
   }
   text("motherTongue", "Mother tongue", st.motherTongue, s(gp.motherTongueDesc).replace(/^\d+\s*-\s*/, ""), (v) => v.trim().toUpperCase());
   const bg = BLOOD_BY_CODE[s(gp.bloodGroup)] || "";
-  const ebg = bloodKey(st.bloodGroup || "");
+  const ebg = normalizeBloodGroup(st.bloodGroup || "");
   if (bg && bg !== ebg) {
     out.push({ field: "bloodGroup", label: "Blood group", erp: st.bloodGroup, portal: bg, value: bg, action: ebg ? "differs" : "bring_into_erp" });
   }
