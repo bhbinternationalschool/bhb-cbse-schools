@@ -934,7 +934,15 @@ function clean(v: unknown, max: number): string {
  */
 export function renderQuestion(input: { number: number; question: string; questionHi?: string; hindi: boolean }): string {
   const head = input.questionHi ? `Question ${input.number} / प्रश्न ${input.number}` : input.hindi ? `प्रश्न ${input.number}` : `Question ${input.number}`;
-  return [`❓ *${head}*`, "", input.question, ...(input.questionHi ? ["", `🇮🇳 ${input.questionHi}`] : [])].join("\n");
+  const parts: string[] = [`❓ *${head}*`, ""];
+  parts.push(input.question);
+  if (input.questionHi) {
+    parts.push("", `🇮🇳 ${input.questionHi}`);
+  } else if (!input.hindi) {
+    // English-only paper: remind student to answer in English only
+    parts.push("", "_(Answer in **English** only)_");
+  }
+  return parts.join("\n");
 }
 
 /**
