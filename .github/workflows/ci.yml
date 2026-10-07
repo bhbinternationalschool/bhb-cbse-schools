@@ -400,6 +400,7 @@ jobs:
           npm run test:udise-robot
           npm run test:udise-portal-api
           npm run test:udise-portal-fill
+          npm run test:udise-teacher-sync
           npm run test:udise-portal-add
           npm run test:udise-portal-reconcile
           npm run test:lead-worklist

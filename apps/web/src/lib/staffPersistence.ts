@@ -55,7 +55,7 @@ type DesignationRow = {
   updated_at: string;
 };
 
-type StaffRow = {
+export type StaffRow = {
   id: string;
   emp_code: string | null;
   full_name: string | null;
@@ -135,7 +135,7 @@ function rowToDesignation(row: DesignationRow): Designation {
   };
 }
 
-function rowToStaff(row: StaffRow): StaffRecord {
+export function rowToStaff(row: StaffRow): StaffRecord {
   const profile =
     row.profile && typeof row.profile === "object"
       ? (row.profile as Partial<StaffRecord>)
