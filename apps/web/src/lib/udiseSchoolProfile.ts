@@ -247,7 +247,11 @@ export function erpSchoolFacts(input: {
     if (v) f[k] = v;
   };
   put("schoolName", real(p.legalName) || real(p.displayName));
-  put("address", [real(p.address), real(p.city)].filter(Boolean).join(", "));
+  // The live profile's address already ends "…, Varanasi, Uttar Pradesh 221202"
+  // (checked 7 Oct 2026); the city is added only when the address lacks it.
+  const addr = real(p.address);
+  const city = real(p.city);
+  put("address", city && !addr.toLowerCase().includes(city.toLowerCase()) ? [addr, city].filter(Boolean).join(", ") : addr);
   put("pincode", real(p.pincode).replace(/\D/g, "").length === 6 ? real(p.pincode).replace(/\D/g, "") : "");
   put("phone", real(p.phone));
   put("mobile", real(p.mobile));

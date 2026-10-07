@@ -130,6 +130,25 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
       );
     } else if (msg && msg.type === "apaar-fill") {
       reply(await erpFetch(`/api/v1/udise/robot/apaar-fill?pen=${encodeURIComponent(msg.pen || "")}`));
+    } else if (msg && msg.type === "profile-send") {
+      // UDISE+ School Profile (profile.udiseplus.gov.in): one section's boxes
+      // as the page shows them — school-level answers, no child's data. The
+      // server normalises and caps every field again.
+      reply(
+        await erpFetch("/api/v1/udise/robot/school-profile", {
+          method: "POST",
+          body: JSON.stringify({
+            academicYear: msg.academicYear,
+            section: msg.section,
+            fields: msg.fields,
+            formStatus: msg.formStatus,
+            text: msg.text,
+          }),
+        }),
+      );
+    } else if (msg && msg.type === "profile-plan") {
+      const q = new URLSearchParams({ section: msg.section || "", ay: msg.academicYear || "" });
+      reply(await erpFetch(`/api/v1/udise/robot/school-profile?${q}`));
     } else if (msg && msg.type === "fill-data") {
       reply(await erpFetch(`/api/v1/udise/robot/fill?pen=${encodeURIComponent(msg.pen || "")}&v=2`));
     } else {

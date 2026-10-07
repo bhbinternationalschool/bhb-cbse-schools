@@ -92,6 +92,11 @@ const facts = erpSchoolFacts({
 assert.equal(facts.schoolName, "BHB INTERNATIONAL SCHOOL");
 assert.equal(facts.address, "Puari Khurd, Varanasi");
 assert.equal(facts.email, "office@bhbinternational.school");
+assert.equal(
+  erpSchoolFacts({ profile: { address: "Piyamilan Chauraha, Ayar, Varanasi, Uttar Pradesh 221202", city: "Varanasi" }, academicYear: "2026-27" }).address,
+  "Piyamilan Chauraha, Ayar, Varanasi, Uttar Pradesh 221202",
+  "the city is not repeated",
+);
 assert.equal(facts.phone, undefined, "a blank landline is unknown, not empty-string fact");
 assert.equal(facts.principalName, undefined, "no single principal → no name");
 assert.equal(facts.lowestClass, "Nursery");

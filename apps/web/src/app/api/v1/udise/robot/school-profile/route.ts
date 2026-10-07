@@ -64,7 +64,8 @@ export async function POST(req: Request) {
   const by = auth.ctx.session.fullName || auth.ctx.session.email || "";
   if (!by) return NextResponse.json({ ok: false, error: "Your login has no name to record." }, { status: 400 });
   const saved = await saveSchoolProfileSection(ay, key, {
-    title: String(body.section?.title ?? "").slice(0, 200) || sectionTitle(key),
+    // A known tab keeps the name studied on 7 Oct 2026; a renamed one keeps the portal's.
+    title: sectionTitle(key) !== key ? sectionTitle(key) : String(body.section?.title ?? "").slice(0, 200) || key,
     capturedAt: new Date().toISOString(),
     capturedBy: by,
     fields,
