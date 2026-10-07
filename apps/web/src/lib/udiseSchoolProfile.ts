@@ -358,6 +358,8 @@ export function buildProfileFillPlan(
   academicYear: string,
   section: string,
   facts: ErpSchoolFacts,
+  /** Section-specific ERP figures (1(c): the office's confirmed annual figures, lib/udiseSchoolFinance). */
+  extraRules: { label: string; value: string; test: (label: string) => boolean }[] = [],
 ): ProfileFillPlan {
   const current = store[academicYear]?.[section];
   const earlierYear =
@@ -376,6 +378,19 @@ export function buildProfileFillPlan(
   const prev = earlierYear ? store[earlierYear]![section]!.fields : {};
   for (const [control, f] of Object.entries(current.fields)) {
     if (f.locked || !isEmptyField(f)) continue;
+    const extra = f.type === "text" || f.type === "textarea" || f.type === "number" ? extraRules.find((r) => r.test(f.label)) : undefined;
+    if (extra) {
+      plan.fields.push({
+        control,
+        label: f.label,
+        kind: f.type,
+        value: f.type === "number" ? extra.value.replace(/[^\d.]/g, "") : extra.value,
+        text: "",
+        source: "erp",
+        note: `ERP (${extra.label}) — check`,
+      });
+      continue;
+    }
     const rule = ruleFor(f.label);
     const factValue = rule?.fill ? facts[rule.fact] : undefined;
     // An ERP fact goes only into a plain box: a select's codes are the

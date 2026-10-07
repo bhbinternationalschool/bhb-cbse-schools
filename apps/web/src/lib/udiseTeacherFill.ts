@@ -61,6 +61,8 @@ export type PortalTeacher = {
   socialCategory?: string;
   mainSubject1?: string;
   email?: string;
+  /** Which portal list the row came from (the robot tags it; absent = teaching). */
+  staffType?: "teaching" | "non_teaching";
 };
 
 /** The fields of a portal teacher row that may leave the portal tab. */
@@ -85,6 +87,7 @@ export const PORTAL_TEACHER_FIELDS = [
 export function pickPortalTeacher(raw: Record<string, unknown>): PortalTeacher {
   const out: Record<string, unknown> = {};
   for (const k of PORTAL_TEACHER_FIELDS) if (k in raw) out[k] = raw[k];
+  if (raw.staffType === "non_teaching") out.staffType = "non_teaching";
   return out as PortalTeacher;
 }
 
@@ -392,7 +395,7 @@ export type TeacherBoardRow = {
 export type TeacherBoard = {
   rows: TeacherBoardRow[];
   /** Active ERP teaching staff the portal does not list — the add queue. */
-  notOnPortal: { staffId: string; name: string }[];
+  notOnPortal: { staffId: string; name: string; staffType: "teaching" | "non_teaching" }[];
   /**
    * Not matched, yet perhaps already on UDISE+: a candidate of a portal row
    * the matcher could not settle, or a record that already holds a National
@@ -402,7 +405,13 @@ export type TeacherBoard = {
   maybeOnPortal: { staffId: string; name: string; why: string }[];
 };
 
-export function buildTeacherBoard(staff: StaffRecord[], portal: PortalTeacher[]): TeacherBoard {
+/**
+ * `nonTeachingRead`: the robot also read the portal's NON-teaching list, so an
+ * ERP non-teaching staff member missing from it can be offered for adding too
+ * (director, 7 Oct 2026). Without that list, nobody non-teaching is "missing":
+ * unread is not absent.
+ */
+export function buildTeacherBoard(staff: StaffRecord[], portal: PortalTeacher[], opts: { nonTeachingRead?: boolean } = {}): TeacherBoard {
   const active = staff.filter((s) => s.status === "active");
   const seen = new Set<string>();
   const maybe = new Map<string, string>();
@@ -444,11 +453,14 @@ export function buildTeacherBoard(staff: StaffRecord[], portal: PortalTeacher[])
       differences,
     };
   });
-  const missing = active.filter((s) => s.stream === "teaching" && !seen.has(s.id));
+  const isTeaching = (s: StaffRecord) => s.stream === "teaching";
+  const missing = active.filter((s) => !seen.has(s.id) && (isTeaching(s) || opts.nonTeachingRead === true));
   for (const s of missing) {
     if (!maybe.has(s.id) && (s.oasisId || "").trim()) maybe.set(s.id, `holds National Code ${s.oasisId.trim()}`);
   }
-  const notOnPortal = missing.filter((s) => !maybe.has(s.id)).map((s) => ({ staffId: s.id, name: s.fullName }));
+  const notOnPortal = missing
+    .filter((s) => !maybe.has(s.id))
+    .map((s) => ({ staffId: s.id, name: s.fullName, staffType: isTeaching(s) ? ("teaching" as const) : ("non_teaching" as const) }));
   const maybeOnPortal = missing
     .filter((s) => maybe.has(s.id))
     .map((s) => ({ staffId: s.id, name: s.fullName, why: maybe.get(s.id)! }));

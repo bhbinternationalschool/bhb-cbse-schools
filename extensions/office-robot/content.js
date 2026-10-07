@@ -14,6 +14,14 @@
  *  - "Saved — next child" reads the saved form's Enrolment Profile into the
  *    ERP's copy, then opens and fills the next one.
  *
+ * One-click (director, 7 Oct 2026): with "One-click" ticked (the default),
+ * the person still presses the portal's own Save / Submit — and only that.
+ * The robot watches for the portal's answer to THAT click; on a success it
+ * closes the message, goes to the next step (Next only moves between steps),
+ * or reads the saved form and opens + fills the next child. On anything else
+ * it shows the portal's words and waits. The robot itself never presses
+ * Save or Submit.
+ *
  * Portal → ERP (director, 7 Oct 2026: "fetch data to ERP for existing
  * students which is not present in school ERP or wrong"):
  *  - "Fetch all children's details to ERP" reads every child's full record
@@ -63,6 +71,9 @@
   const addAnywayBtn = el("button", { class: "act sec", type: "button" }, "Not the same child — add anyway");
   const fetchAllBtn = el("button", { class: "act sec", type: "button" }, "Fetch all children's details to ERP");
   const penBtn = el("button", { class: "act sec", type: "button" }, "Find PENs for ERP children without one");
+  // Release requests, Dropbox, inactive lists (director, 7 Oct 2026).
+  const checkPageBtn = el("button", { class: "act sec", type: "button" }, "Check the children on this page against the ERP");
+  const importBtn = el("button", { class: "act sec", type: "button" }, "Fill import search from ERP");
   // APAAR (director, 6 Oct 2026): only on the portal's APAAR pages.
   const apaarBox = el("div", { class: "queue" });
   const apaarStartBtn = el("button", { class: "act", type: "button" }, "Start APAAR queue");
@@ -70,14 +81,17 @@
   const apaarSkipBtn = el("button", { class: "act sec", type: "button" }, "Skip this child");
   const apaarStopBtn = el("button", { class: "act sec", type: "button" }, "Stop APAAR queue");
   const apaarFillBtn = el("button", { class: "act sec", type: "button" }, "Fill this APAAR page from ERP");
+  const oneClickInput = el("input", { type: "checkbox" });
+  const oneClickBox = el("label", { class: "muted" }, oneClickInput, " One-click: you press Save / Submit; the robot closes the message, moves to the next step or child and fills it");
   const msg = el("div", { class: "msg" });
   const last = el("div", { class: "muted" });
   body.append(
-    queueBox, startBtn, nextBtn, addAnywayBtn, skipBtn, stopBtn, addBtn, pullBtn, fetchAllBtn, penBtn, fillBtn,
+    queueBox, startBtn, nextBtn, addAnywayBtn, skipBtn, stopBtn, addBtn, pullBtn, fetchAllBtn, penBtn, checkPageBtn, importBtn, fillBtn,
     apaarBox, apaarStartBtn, apaarNextBtn, apaarSkipBtn, apaarStopBtn, apaarFillBtn,
-    msg, last,
+    oneClickBox, msg, last,
   );
   addAnywayBtn.style.display = "none";
+  oneClickBox.style.display = "block";
   panel.append(head, body);
   head.addEventListener("click", () => {
     panel.classList.toggle("min");
@@ -335,6 +349,251 @@
       penBtn.disabled = false;
     }
   });
+
+  // ─── Release requests / Dropbox lists: is each child still ours? ──────
+
+  /** Every table row on the page that names a child: PEN, name, birth date. */
+  function childrenOnPage() {
+    const out = [];
+    for (const table of document.querySelectorAll("table")) {
+      const heads = [...table.querySelectorAll("thead th, tr:first-child th")].map((h) => (h.innerText || "").trim());
+      const nameCol = heads.findIndex((h) => /student'?s?\s*name|^name$/i.test(h));
+      for (const tr of table.querySelectorAll("tbody tr")) {
+        const cells = [...tr.cells].map((c) => (c.innerText || "").trim());
+        const text = cells.join(" ");
+        const pen = (text.match(/\b\d{11}\b/) || [""])[0];
+        const dob = (text.match(/\b\d{2}[/-]\d{2}[/-]\d{4}\b/) || [""])[0];
+        const name = nameCol >= 0 && cells[nameCol] ? cells[nameCol] : cells.find((c) => /^[A-Za-z][A-Za-z .]{2,60}$/.test(c) && c.split(" ").length <= 5) || "";
+        if (pen || (name && dob)) out.push({ tr, pen, name, dob });
+      }
+    }
+    return out;
+  }
+
+  checkPageBtn.addEventListener("click", async () => {
+    checkPageBtn.disabled = true;
+    try {
+      const rows = childrenOnPage();
+      if (!rows.length) throw new Error("No children (PEN, or name + birth date) found in a table on this page. Open the request / Dropbox list first.");
+      const res = await ask({ type: "students-check", rows: rows.map(({ pen, name, dob }) => ({ pen, name, dob })) });
+      if (!res.ok) throw new Error(res.error);
+      const results = (res.body && res.body.results) || [];
+      const tone = { studying_here: "#a3261a", left: "#0f6b3f", not_in_erp: "#5f6f80", unsure: "#a15c00" };
+      const label = { studying_here: "ERP: STILL STUDYING HERE", left: "ERP: left", not_in_erp: "ERP: not found", unsure: "ERP: check" };
+      results.forEach((r, i) => {
+        const row = rows[i];
+        if (!row) return;
+        row.tr.querySelectorAll(".bhb-robot-verdict").forEach((n) => n.remove());
+        const tag = el("div", { class: "bhb-robot-verdict", title: r.detail }, `🤖 ${label[r.verdict] || r.verdict}`);
+        tag.style.cssText = `font:600 11px system-ui;color:${tone[r.verdict] || "#333"};margin-top:2px`;
+        (row.tr.cells[0] || row.tr).append(tag);
+      });
+      const n = (v) => results.filter((r) => r.verdict === v).length;
+      const still = results.filter((r) => r.verdict === "studying_here");
+      say(
+        [
+          `Checked ${results.length} children against the ERP: left ${n("left")} · still studying here ${n("studying_here")} · not found ${n("not_in_erp")} · check ${n("unsure")}.`,
+          ...still.map((r) => `⚠ ${r.erpName || r.name} (PEN ${r.pen || "—"}): ${r.detail}`),
+          "Each row is marked. The robot never approves or rejects — you decide on the portal.",
+        ].join("\n"),
+        still.length ? "err" : "ok",
+      );
+    } catch (e) {
+      say(e.message || String(e), "err");
+    } finally {
+      checkPageBtn.disabled = false;
+    }
+  });
+
+  // ─── Import from Dropbox: PEN + birth date of the next transfer ──────
+
+  /** A box by its label / placeholder text. */
+  function boxFor(re) {
+    for (const input of document.querySelectorAll("input:not([type=hidden]):not([type=radio]):not([type=checkbox])")) {
+      if (input.disabled || input.readOnly || !input.offsetParent) continue;
+      const lab = [input.placeholder, input.getAttribute("aria-label"), input.getAttribute("formcontrolname"), input.name, input.closest("div")?.parentElement?.querySelector("label")?.innerText]
+        .filter(Boolean)
+        .join(" ");
+      if (re.test(lab)) return input;
+    }
+    return null;
+  }
+
+  importBtn.addEventListener("click", async () => {
+    importBtn.disabled = true;
+    try {
+      const res = await ask({ type: "transfers-in" });
+      if (!res.ok) throw new Error(res.error);
+      const list = (res.body && res.body.children) || [];
+      if (!list.length) throw new Error("No transfers waiting: the PEN finder found no ERP child at another school. Run “Find PENs…” first.");
+      const at = Number((await store.get("importIdx")) || 0) % list.length;
+      const c = list[at];
+      const penBox = boxFor(/\bpen\b|national\s*code|student\s*code/i);
+      const dobBox = boxFor(/birth|\bdob\b|dd\/mm/i);
+      if (!penBox) throw new Error("No PEN box on this page. Open UDISE+ → Student Movement → Import from Dropbox first.");
+      setNative(penBox, c.pen);
+      penBox.classList.add("bhb-robot-filled");
+      if (dobBox && c.dob) {
+        setNative(dobBox, c.dob);
+        dobBox.classList.add("bhb-robot-filled");
+      }
+      await store.set("importIdx", at + 1);
+      say(
+        `Filled for ${c.name} (${at + 1} of ${list.length}): PEN ${c.pen}${dobBox && c.dob ? `, born ${c.dob}` : " — type the birth date yourself"}.\n` +
+          `UDISE+ has the child at ${c.school} (${c.udiseCode}); it imports only after that school releases the child.\n` +
+          "Press the portal's own Search / Import. Click this button again for the next child.",
+        "ok",
+      );
+    } catch (e) {
+      say(e.message || String(e), "err");
+    } finally {
+      importBtn.disabled = false;
+    }
+  });
+
+  // ─── One-click: follow the person's own Save / Submit ────────────────
+
+  const POPUPS =
+    ".swal2-popup, .modal.show, mat-dialog-container, [role=alertdialog], [role=dialog], .toast, .toast-message, .ngx-toastr, mat-snack-bar-container, snack-bar-container, .alert";
+  const shown = (n) => !!(n && n.offsetParent !== null && getComputedStyle(n).visibility !== "hidden");
+  const inPanel = (n) => !!(n && n.closest && n.closest("#bhb-office-robot"));
+  const portalButtons = (re, within) =>
+    [...(within || document).querySelectorAll("button, input[type=button], input[type=submit]")].filter(
+      (b) => shown(b) && !inPanel(b) && re.test((b.innerText || b.value || "").trim()),
+    );
+  const popupTexts = () =>
+    [...document.querySelectorAll(POPUPS)].filter((n) => shown(n) && !inPanel(n)).map((n) => (n.innerText || "").replace(/\s+/g, " ").trim()).filter(Boolean);
+
+  function labelOf(n) {
+    let p = n;
+    for (let i = 0; i < 6 && p; i++) {
+      p = p.parentElement;
+      const l = p && [...p.children].find((c) => c.tagName === "LABEL");
+      if (l && (l.innerText || "").trim()) return l.innerText.trim().replace(/\s+/g, " ").slice(0, 70);
+    }
+    return n.getAttribute("formcontrolname") || "a box";
+  }
+
+  /** Required boxes on the visible step that are still empty or not accepted. */
+  function requiredGaps() {
+    const out = new Set();
+    for (const n of document.querySelectorAll("[formcontrolname].ng-invalid, ng-select.ng-invalid")) {
+      if (!shown(n) || inPanel(n) || n.disabled) continue;
+      out.add(labelOf(n));
+    }
+    return [...out];
+  }
+
+  /** Which step of the profile form is on screen. */
+  function stepNow() {
+    if (shown(document.querySelector('[formcontrolname="heightInCm"]'))) return "fp";
+    if (shown(document.querySelector('[formcontrolname="admnNumber"]'))) return "ep";
+    if (shown(document.querySelector('[formcontrolname="address"]'))) return "gp";
+    return "";
+  }
+
+  /** Close the portal's own message (OK / Close) — never a Yes on a question. */
+  function closeMessage() {
+    for (const p of document.querySelectorAll(POPUPS)) {
+      if (!shown(p) || inPanel(p)) continue;
+      const b = portalButtons(/^(ok|close|done)$/i, p)[0];
+      if (b) b.click();
+    }
+  }
+
+  /**
+   * The portal's answer to the person's click: ok / skip (step not allowed
+   * now) / stop (error, gaps). A question ("Are you sure…?") is the person's
+   * to answer — the robot just keeps waiting for the outcome.
+   */
+  async function portalAnswer(before) {
+    const until = Date.now() + 60000;
+    let unknown = "";
+    while (Date.now() < until) {
+      await sleep(500);
+      for (const t of popupTexts().filter((x) => !before.has(x))) {
+        if (/are you sure|do you want|confirm/i.test(t)) continue;
+        // "Only GP Form Save is allowed" (the portal's own words, Oct 2026).
+        if (/not\s*(allowed|permitted|enabled)|no permission|is disabled|only\b.*\b(is\s+)?allowed/i.test(t)) return { kind: "skip", text: t };
+        if (/success|saved|updated|submitted|generated|completed/i.test(t) && !/not\s+(saved|updated|submitted)|unsuccess/i.test(t)) return { kind: "ok", text: t };
+        if (/error|invalid|fail|please|required|mandatory|cannot|can't|already|exist|similar|duplicate|mismatch|wrong|otp|captcha/i.test(t)) {
+          return { kind: "stop", text: t };
+        }
+        unknown = t;
+      }
+      // A message the robot does not know: show it after a few seconds
+      // rather than guess what it means.
+      if (unknown && Date.now() > until - 54000) return { kind: "unknown", text: unknown };
+    }
+    return { kind: "none", text: "" };
+  }
+
+  let following = false;
+  document.addEventListener(
+    "click",
+    (e) => {
+      const b = e.target && e.target.closest && e.target.closest("button, input[type=button], input[type=submit]");
+      if (!b || inPanel(b) || !e.isTrusted) return; // only a person's own click
+      if (!/^(save|submit)$/i.test((b.innerText || b.value || "").trim())) return;
+      void followSave();
+    },
+    true,
+  );
+
+  async function followSave() {
+    if (following) return;
+    if ((await store.get("oneClick")) === false) return;
+    following = true;
+    const before = new Set(popupTexts());
+    const step = stepNow();
+    try {
+      const r = await portalAnswer(before);
+      if (r.kind === "none") return;
+      if (r.kind === "unknown") return say(`The portal said: “${r.text.slice(0, 220)}”. The robot did not move on — continue yourself, or press “Saved — next child”.`);
+      if (r.kind === "stop") {
+        const gaps = requiredGaps();
+        return say(`The portal said: “${r.text.slice(0, 220)}”${gaps.length ? `\nStill needed: ${gaps.join(", ")}` : ""}\nFix it and press Save again.`, "err");
+      }
+      await sleep(500);
+      closeMessage();
+      await sleep(900);
+      // APAAR: the person submitted this child — open and fill the next.
+      if (onApaarPage() && (await store.get("apaarQueue"))) {
+        say(`✓ ${r.kind === "ok" ? "Submitted" : r.text}. Next child…`, "ok");
+        return void (await clickStep(apaarAdvance));
+      }
+      const q = await store.get("queue");
+      if (!q || !q.items || q.index >= q.items.length) return;
+      if (q.kind === "add") {
+        if (r.kind !== "ok") return say(`The portal said: “${r.text.slice(0, 220)}”.`, "err");
+        say("✓ Added. Next child…", "ok");
+        return void (await clickStep(advance));
+      }
+      // The portal may already have moved on by itself after the save.
+      const now = stepNow();
+      const next = portalButtons(/^next$/i)[0];
+      if (now === step && next && !next.disabled && step !== "fp") {
+        next.click(); // moves between steps; saves nothing
+        await sleep(1200);
+      }
+      const at = stepNow();
+      if (at && at !== step && at !== "") {
+        const gaps = requiredGaps();
+        return say(
+          `✓ ${r.kind === "ok" ? "Saved" : `The portal said “${r.text.slice(0, 80)}” — moved on`}. Now on the ${at === "ep" ? "Enrolment" : at === "fp" ? "Facility" : "General"} Profile.` +
+            (gaps.length ? `\nNeeds you: ${gaps.join(", ")}` : "\nCheck it and press Save."),
+          gaps.length ? "err" : "ok",
+        );
+      }
+      // Last step done: read it back, then the next child opens and fills.
+      say(`✓ ${q.items[q.index].studentName} done. Next child…`, "ok");
+      await clickStep(advance);
+    } finally {
+      following = false;
+    }
+  }
+
+  oneClickInput.addEventListener("change", () => void store.set("oneClick", oneClickInput.checked));
 
   // ─── Fill ────────────────────────────────────────────────────────────
 
@@ -638,6 +897,9 @@
     addBtn.style.display = !active && /schoolDashboard/.test(location.hash) ? "" : "none";
     fetchAllBtn.style.display = !active ? "" : "none";
     penBtn.style.display = !active && /schoolDashboard/.test(location.hash) ? "" : "none";
+    // On list pages (requests, Dropbox) and the import page — not on a form.
+    checkPageBtn.style.display = !active && !/\/new-ac\//.test(location.hash) ? "" : "none";
+    importBtn.style.display = !active && /import|dropbox|movement/i.test(location.hash) ? "" : "none";
     fillBtn.style.display = !active && /\/new-ac\//.test(location.hash) ? "" : "none";
   }
 
@@ -1002,7 +1264,9 @@
 
   let counted = false;
   async function onPage() {
-    const onSchool = /\/school\/\d+\/|academic-choice/.test(location.hash);
+    oneClickInput.checked = (await store.get("oneClick")) !== false;
+    // Also the request / Dropbox / movement pages, wherever the portal puts them.
+    const onSchool = /\/school\/\d+\/|academic-choice|request|dropbox|import|movement|progress/i.test(location.hash);
     panel.style.display = onSchool ? "" : "none";
     if (!onSchool) return;
     void showLast();
