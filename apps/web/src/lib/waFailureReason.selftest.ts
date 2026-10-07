@@ -81,9 +81,10 @@ console.log("waFailureReason.selftest.ts");
 {
   assert.equal(
     classifyWaFailure("This message was not delivered to maintain healthy ecosystem engagement.").kind,
-    "needs_template",
-    "ecosystem engagement failure should be treated like a 24h window",
+    "engagement_limit",
+    "Meta's marketing-frequency limit (131049) — not a 24-hour window: sending a template would not help",
   );
+  assert.equal(classifyWaFailure("(#131049) Message not delivered").kind, "engagement_limit");
   assert.equal(
     waFailureBlamesNumber("This message was not delivered to maintain healthy ecosystem engagement."),
     false,
