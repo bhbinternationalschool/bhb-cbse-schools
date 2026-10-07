@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { UdiseSchoolAnswersCard } from "@/components/students/UdiseSchoolAnswersCard";
 import type { MastersState } from "@/lib/masters";
 import { studentsInSession, type SisState } from "@/lib/sis";
 import {
@@ -122,6 +123,9 @@ export function UdiseRobotPanel({
       <div className="mt-3 flex flex-col gap-3 md:flex-row">
         {renderGroup("portal", `Office — on the UDISE+ portal (${board.portalTaskCount})`, "Log in to UDISE+ and do these.")}
         {renderGroup("family", `Families (${board.familyTaskCount})`, "Only the parent can give these. WhatsApp asks them weekly.")}
+      </div>
+      <div className="mt-3">
+        <UdiseSchoolAnswersCard />
       </div>
     </section>
   );

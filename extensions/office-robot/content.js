@@ -262,16 +262,44 @@
     const filled = [];
     const kept = [];
     const failed = [];
-    for (const f of plan.fields || []) {
-      const r = fillOne(f);
-      if (r === "filled") filled.push(f.label);
-      else if (r === "kept") kept.push(f.label);
-      else failed.push(f.label);
+    // Some boxes appear only after an earlier choice (previous-year class and
+    // result show once the status is picked), so a box not on the page yet
+    // is tried again after the form has redrawn — at most three times.
+    let pending = plan.fields || [];
+    for (let round = 0; round < 3 && pending.length; round++) {
+      if (round) await sleep(700);
+      const missing = [];
+      for (const f of pending) {
+        const r = fillOne(f);
+        if (r === "filled") filled.push(f.label);
+        else if (r === "kept") kept.push(f.label);
+        else if (r === "missing") missing.push(f);
+        else failed.push(f.label);
+      }
+      pending = missing;
     }
+    for (const f of pending) failed.push(f.label);
+    // A "please type" line the portal already answers is not the office's job.
+    const answered = (control) => {
+      const radios = [...document.querySelectorAll(`input[type=radio][formcontrolname="${control}"]`)];
+      if (radios.length) return radios.some((r) => r.checked);
+      const node = document.querySelector(`[formcontrolname="${control}"]`);
+      if (!node || !("value" in node)) return false;
+      const v = String(node.value || "").trim();
+      return node.tagName === "SELECT" ? !!v && v !== "0" : !!v;
+    };
+    const controlsOf = plan.leftControls || {};
+    const left = (plan.leftForYou || []).filter((label) => {
+      const cs = controlsOf[label];
+      return !(cs && cs.length && cs.every(answered));
+    });
     const lines = [`${plan.student.name} (PEN ${pen})`, `✓ Filled ${filled.length} empty field(s), outlined in yellow.`];
     if (kept.length) lines.push(`Already on the portal, left as is: ${kept.join(", ")}`);
     if (failed.length) lines.push(`Could not fill: ${failed.join(", ")}`);
-    if ((plan.leftForYou || []).length) lines.push(`Not in the ERP — please type: ${plan.leftForYou.join(", ")}`);
+    if (left.length) lines.push(`Not in the ERP — please type: ${left.join(", ")}`);
+    if (plan.schoolAnswersConfirmed === false) {
+      lines.push("Tip: confirm the school answers in the ERP (Students → UDISE+ → Robot — school answers) and the robot fills BPL, out-of-school, NCC/NSS and the like for every child.");
+    }
     lines.push("Check the yellow fields, type the rest, and press the portal's Save on each step.");
     return lines.join("\n");
   }

@@ -16,6 +16,7 @@
  */
 
 import type { Household, SisStudent } from "@/lib/sis";
+import { schoolAnswerFields, type UdiseSchoolAnswers } from "@/lib/udiseSchoolAnswers";
 
 export type UdiseFillField = {
   /** The form's formcontrolname. */
@@ -31,7 +32,40 @@ export type UdiseFillPlan = {
   fields: UdiseFillField[];
   /** Portal questions the ERP cannot answer — the person types these. */
   leftForYou: string[];
+  /**
+   * The form controls behind each leftForYou line, so the robot can drop a
+   * line the portal already answers (extension 1.2+). Not every line has one.
+   */
+  leftControls: Record<string, string[]>;
 };
+
+/** What the fill route knows beyond the child's own row. */
+export type UdiseFillExtras = {
+  /** The office's confirmed school answers (lib/udiseSchoolAnswers). */
+  school?: UdiseSchoolAnswers;
+  /**
+   * The same child's ERP row for the previous academic year, if there is one:
+   * portal class ids for then and now (lib/udisePortalAdd portalClassIdFor).
+   */
+  previousYear?: { yearCode: string; className: string; portalClassId: number; currentPortalClassId: number | null } | null;
+  /** Road distance to the campus from the family's (exactly matched) village. */
+  distance?: { km: number; from: string } | null;
+  /**
+   * The robot can fill fields the portal shows only after another choice
+   * (previous-year class and result appear once the status is chosen).
+   * Extension 1.2+ asks with v=2; older versions get those listed instead.
+   */
+  dependentFields?: boolean;
+};
+
+/** Portal 4.3.6 distance band: 1 <1 km, 2 1–3, 3 3–5, 4 >5. */
+export function distanceBand(km: number): string {
+  if (!Number.isFinite(km) || km <= 0) return "";
+  if (km < 1) return "1";
+  if (km < 3) return "2";
+  if (km < 5) return "3";
+  return "4";
+}
 
 const SOCIAL: Record<string, string> = { GEN: "1", SC: "2", ST: "3", OBC: "4" };
 
@@ -92,17 +126,47 @@ function positiveNumber(v: string, max: number): string {
   return Number.isFinite(n) && n > 0 && n <= max ? String(Math.round(n * 10) / 10) : "";
 }
 
-export function buildUdiseFillPlan(s: SisStudent, hh: Household | undefined): UdiseFillPlan {
+export function buildUdiseFillPlan(s: SisStudent, hh: Household | undefined, extras: UdiseFillExtras = {}): UdiseFillPlan {
   const fields: UdiseFillField[] = [];
   const left: string[] = [];
+  const leftControls: Record<string, string[]> = {};
+  const CONTROLS: Record<string, string[]> = {
+    Address: ["address"],
+    Pincode: ["pincode"],
+    Mobile: ["primaryMobile"],
+    "Social category": ["socCatId"],
+    "Minority group (religion)": ["minorityId"],
+    EWS: ["ewsYN"],
+    "CWSN (Yes/No)": ["cwsnYN"],
+    "BPL / AAY": ["isBplYN"],
+    Nationality: ["natIndYN"],
+    "Out-of-school child": ["ooscYN"],
+    "Blood group": ["bloodGroup"],
+    "Admission no.": ["admnNumber"],
+    "Roll no.": ["rollNumber"],
+    Height: ["heightInCm"],
+    Weight: ["weightInKg"],
+    "Parent education": ["parentEducation"],
+    "Distance from school": ["distanceFrmSchool"],
+  };
+  const leave = (label: string, controls = CONTROLS[label]) => {
+    left.push(label);
+    if (controls?.length) leftControls[label] = controls;
+  };
   const add = (f: UdiseFillField | null, missing: string) => {
     if (f && f.value) fields.push(f);
-    else left.push(missing);
+    else leave(missing);
   };
+  const school = extras.school ? schoolAnswerFields(extras.school, s) : null;
 
   // GP — contact
   const address = hh
-    ? [hh.address, hh.locality, hh.landmark, hh.city].map((x) => (x || "").trim()).filter(Boolean).join(", ")
+    ? [hh.address, hh.locality, hh.landmark, hh.city]
+        // "AYAR, AYAR, VARANASI, VARANASI": the same place typed into two boxes.
+        .flatMap((x) => (x || "").split(","))
+        .map((x) => x.trim())
+        .filter((x, i, all) => x && all.findIndex((y) => y.toLowerCase() === x.toLowerCase()) === i)
+        .join(", ")
     : "";
   add(address ? { control: "address", kind: "text", value: address.slice(0, 250), label: "Address", shown: address } : null, "Address");
   const pin = digits(hh?.pincode || "");
@@ -120,18 +184,60 @@ export function buildUdiseFillPlan(s: SisStudent, hh: Household | undefined): Ud
   add(minority ? { control: "minorityId", kind: "select", value: minority, label: "Minority group", shown: s.religion } : null, "Minority group (religion)");
   if (s.category === "EWS") fields.push({ control: "ewsYN", kind: "radio", value: "1", label: "EWS", shown: "EWS" });
   else if (SOCIAL[s.category]) fields.push({ control: "ewsYN", kind: "radio", value: "2", label: "EWS", shown: `No (category ${s.category})` });
-  else left.push("EWS");
-  // isCwsn is a checkbox that is false until someone ticks it: false is not "No".
+  else leave("EWS");
+  // isCwsn is a checkbox that is false until someone ticks it: false is not
+  // "No" — only the office's confirmed school answer makes it one.
   if (s.isCwsn) fields.push({ control: "cwsnYN", kind: "radio", value: "1", label: "CWSN", shown: "Yes" });
-  else left.push("CWSN (Yes/No)");
-  left.push("BPL / AAY", "Nationality", "Out-of-school child");
+  if (school) {
+    fields.push(...school.fields);
+    for (const l of school.left) leave(l);
+  }
+  for (const q of ["CWSN (Yes/No)", "BPL / AAY", "Nationality", "Out-of-school child"]) {
+    if (q === "CWSN (Yes/No)" && s.isCwsn) continue;
+    if (!school?.covers.has(q)) leave(q);
+  }
 
   // EP — enrolment
   const bg = BLOOD[(s.bloodGroup || "").replace(/\s+/g, "").toUpperCase()] || "";
   add(bg ? { control: "bloodGroup", kind: "select", value: bg, label: "Blood group", shown: s.bloodGroup } : null, "Blood group");
   add(s.admissionNo ? { control: "admnNumber", kind: "text", value: s.admissionNo, label: "Admission no.", shown: s.admissionNo } : null, "Admission no.");
   add(digits(s.rollNo) ? { control: "rollNumber", kind: "text", value: digits(s.rollNo), label: "Roll no.", shown: s.rollNo } : null, "Roll no.");
-  left.push("Admission date", "Previous year: status, class, result, marks, attendance");
+  // ERP join dates are not the admission register's date — and more than half
+  // carry the day-equals-month parser fault (04/04, 07/07; 7 Oct 2026).
+  leave("Admission date (from the admission register)", ["admnStartDate"]);
+
+  // Previous academic year: the ERP knows where the child studied last year
+  // only when it holds the child's own row for that year.
+  const py = extras.previousYear;
+  if (py) {
+    fields.push({ control: "enrStatusPY", kind: "select", value: "1", label: "Previous year status", shown: `Studied here in ${py.yearCode} (${py.className})` });
+    if (extras.dependentFields) {
+      fields.push({ control: "classPY", kind: "select", value: String(py.portalClassId), label: "Previous class", shown: `${py.className} (${py.yearCode})` });
+      // Moved up a class = promoted; whether by exam is the school's answer.
+      // The SAME class both years is not read as "not promoted": a playgroup
+      // year filed as Nursery looks exactly like that (ABHI PATEL, 7 Oct 2026).
+      const movedUp = py.currentPortalClassId !== null && py.currentPortalClassId > py.portalClassId;
+      if (movedUp && extras.school?.answers.promotionByExam) {
+        const byExam = py.portalClassId >= 1;
+        fields.push({
+          control: "examResultPy",
+          kind: "select",
+          value: byExam ? "1" : "4",
+          label: "Previous year result",
+          shown: `${byExam ? "Promoted/Passed" : "Promoted without exam"} (${py.className} → this year's class; school answer)`,
+        });
+      } else if (py.currentPortalClassId === py.portalClassId) {
+        leave(`Previous year: result (the ERP shows ${py.className} in both years — check)`, ["examResultPy"]);
+      } else {
+        leave("Previous year: result", ["examResultPy"]);
+      }
+      leave("Previous year: marks %, days attended", ["examMarksPy", "attendancePy"]);
+    } else {
+      leave("Previous year: class, result, marks, days attended", ["classPY"]);
+    }
+  } else {
+    leave("Previous year: status, class, result, marks, attendance", ["enrStatusPY"]);
+  }
 
   // FP — facility / health
   const h = positiveNumber(s.heightCm, 220);
@@ -151,7 +257,27 @@ export function buildUdiseFillPlan(s: SisStudent, hh: Household | undefined): Ud
         : null,
     "Parent education",
   );
-  left.push("Distance from school", "Facilities received");
+  // The village centre is not the house: a figure within half a km of a band
+  // edge could fall either side, so it is shown, not typed.
+  const km = extras.distance?.km ?? 0;
+  const nearEdge = [1, 3, 5].some((edge) => Math.abs(km - edge) < 0.5);
+  const band = extras.distance && !nearEdge ? distanceBand(km) : "";
+  if (extras.distance && nearEdge) {
+    leave(`Distance from school (${extras.distance.from} is ≈${km.toFixed(1)} km by road — close to a band edge, check)`, ["distanceFrmSchool"]);
+  } else {
+    add(
+      band
+        ? {
+            control: "distanceFrmSchool",
+            kind: "select",
+            value: band,
+            label: "Distance from school",
+            shown: `≈${km.toFixed(1)} km by road from ${extras.distance!.from} (village centre)`,
+          }
+        : null,
+      "Distance from school",
+    );
+  }
 
-  return { fields, leftForYou: left };
+  return { fields, leftForYou: left, leftControls };
 }
