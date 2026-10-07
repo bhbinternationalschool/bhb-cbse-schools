@@ -180,6 +180,7 @@ SELFTESTS=(
   test:student-curriculum
   test:subject-masters
   test:expense-range
+  test:payroll-paid-on
   test:masters-change-auth
   test:timetable-free-grid
   test:udise-teacher-apaar

@@ -24,6 +24,8 @@ import {
   listPayrollAudit,
   loadPayroll,
   markPayrollPaid,
+  payrollRunPaymentDate,
+  todayIstDate,
   mergePreservedAdjustments,
   monthHasCommittedRun,
   payrollAuditActionLabel,
@@ -457,14 +459,14 @@ export function PayrollWorkspace() {
     refresh();
   }
 
-  function onPaid() {
+  function onPaid(paidOn: string) {
     if (!selected) return;
-    const r = markPayrollPaid(selected.id, session.fullName);
+    const r = markPayrollPaid(selected.id, session.fullName, paidOn);
     if (!r.ok) {
       flash(r.error, true);
       return;
     }
-    flash("Marked as paid");
+    flash(`Marked as paid on ${paidOn}`);
     setSelectedId(r.run.id);
     refresh();
   }
@@ -1031,7 +1033,7 @@ function RunDetail({
   canApprove: boolean;
   onPublish: () => void;
   onRecall: () => void;
-  onPaid: () => void;
+  onPaid: (paidOn: string) => void;
   onDelete: () => void;
   onExport: () => void;
   onExportRegister: (format: "xlsx" | "pdf") => void;
@@ -1046,6 +1048,8 @@ function RunDetail({
   readOnly?: boolean;
 }) {
   const [workflowNote, setWorkflowNote] = useState("");
+  // The day the salary was paid; empty = the lines' own date, else today.
+  const [paidOnDraft, setPaidOnDraft] = useState("");
   const net = run.lines.reduce((s, l) => s + l.netPay, 0);
   const payable = run.lines.reduce(
     (s, l) => s + (l.amountPayable ?? (l.juneHold ? 0 : l.netPay)),
@@ -1235,10 +1239,23 @@ function RunDetail({
           ) : null}
           {run.status === "posted" ? (
             <>
+              {/* The day the salary was actually paid — the books date the
+                  payment on it (not the day this button is pressed). */}
+              <label className="flex items-center gap-1 text-[11px] font-semibold">
+                Paid on
+                <input
+                  type="date"
+                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-1.5 py-1 text-[11px]"
+                  value={paidOnDraft || payrollRunPaymentDate(run) || todayIstDate()}
+                  min={`${run.month}-01`}
+                  max={todayIstDate()}
+                  onChange={(e) => setPaidOnDraft(e.target.value)}
+                />
+              </label>
               <button
                 type="button"
                 className="rounded-lg bg-[var(--primary)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--primary-foreground)]"
-                onClick={onPaid}
+                onClick={() => onPaid(paidOnDraft || payrollRunPaymentDate(run) || todayIstDate())}
               >
                 Mark paid
               </button>

@@ -175,6 +175,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:expense-range
 
+      - name: Self-test — payroll Mark paid uses the real pay date
+        working-directory: apps/web
+        run: npm run test:payroll-paid-on
+
       - name: Self-test — Masters function grants, own classes only
         working-directory: apps/web
         run: npm run test:masters-change-auth
