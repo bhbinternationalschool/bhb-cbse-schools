@@ -424,6 +424,20 @@ export const BLOOD_GROUPS = [
   "O-",
 ];
 
+/**
+ * "B(+)", "b +ve", "O Positive" → "B+" / "O+"; "" when it is not a blood
+ * group. The old ERP import wrote "B(+)" — 17 of 23 recorded groups on
+ * 7 Oct 2026 — which nothing that compared against BLOOD_GROUPS recognised.
+ */
+export function normalizeBloodGroup(raw: string): string {
+  const t = (raw || "")
+    .toUpperCase()
+    .replace(/[\s()]/g, "")
+    .replace(/(POSITIVE|POS|\+VE)$/, "+")
+    .replace(/(NEGATIVE|NEG|-VE)$/, "-");
+  return (BLOOD_GROUPS as readonly string[]).includes(t) && t ? t : "";
+}
+
 export function emptyDocFile(status: DocStatus = "missing"): StudentDocFile {
   return {
     status,

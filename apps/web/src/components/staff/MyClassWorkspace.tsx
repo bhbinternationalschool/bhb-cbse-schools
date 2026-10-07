@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Camera, CheckCircle2, Phone, Users, XCircle } from "lucide-react";
-import { ClassMeasurements } from "@/components/staff/ClassMeasurements";
+import { ClassSheet } from "@/components/staff/ClassSheet";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { uploadMedia } from "@/lib/mediaUpload";
 import { BLOOD_GROUPS, STUDENT_CATEGORIES } from "@/lib/sis";
@@ -28,6 +28,7 @@ type Row = {
   household: { id: string; revisionAt: string; fields: Record<string, string> } | null;
   whatsapp: { number: string; status: WaStatus };
   measure: { heightCm: string; weightKg: string; measuredOn: string };
+  sheet: { fatherQualification: string; motherQualification: string; isCwsn: boolean };
 };
 type Data = {
   /** Office / leadership only: every section, to pick one. */
@@ -178,14 +179,14 @@ export function MyClassWorkspace() {
                     : "border border-[var(--border)] text-[var(--brand-deep)]"
                 }`}
               >
-                {f === "wa" ? "WhatsApp to fix" : f === "all" ? "All children" : "Height & weight"}
+                {f === "wa" ? "WhatsApp to fix" : f === "all" ? "All children" : "Class sheet (UDISE+)"}
               </button>
             ))}
           </div>
 
           {filter === "measure" ? (
             data.students.length ? (
-              <ClassMeasurements key={sectionId || "mine"} rows={data.students} onSaved={() => void load()} />
+              <ClassSheet key={sectionId || "mine"} rows={data.students} onSaved={() => void load()} />
             ) : (
               <p className="mt-4 text-sm text-[var(--muted)]">
                 {data.sections.length ? "Pick a class above." : "No children in your class."}

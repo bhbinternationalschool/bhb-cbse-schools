@@ -109,8 +109,14 @@ export async function GET(request: Request) {
         household: hh
           ? { id: hh.id, revisionAt: hh.revisionAt || "", fields: household }
           : null,
-        // My class → Height & weight.
         measure: { heightCm: s.heightCm || "", weightKg: s.weightKg || "", measuredOn: s.measuredOn || "" },
+        // My class → Class sheet (bloodGroup, religion, category and
+        // motherTongue are already in `fields`).
+        sheet: {
+          fatherQualification: s.fatherQualification || "",
+          motherQualification: s.motherQualification || "",
+          isCwsn: !!s.isCwsn,
+        },
         whatsapp: { number: wa || "", status: waStatus },
       };
     });

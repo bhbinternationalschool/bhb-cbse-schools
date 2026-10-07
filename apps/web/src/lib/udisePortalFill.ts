@@ -15,7 +15,7 @@
  * person — and listed, so they know what is still theirs to type.
  */
 
-import type { Household, SisStudent } from "@/lib/sis";
+import { normalizeBloodGroup, type Household, type SisStudent } from "@/lib/sis";
 import { schoolAnswerFields, type UdiseSchoolAnswers } from "@/lib/udiseSchoolAnswers";
 
 export type UdiseFillField = {
@@ -198,7 +198,7 @@ export function buildUdiseFillPlan(s: SisStudent, hh: Household | undefined, ext
   }
 
   // EP — enrolment
-  const bg = BLOOD[(s.bloodGroup || "").replace(/\s+/g, "").toUpperCase()] || "";
+  const bg = BLOOD[normalizeBloodGroup(s.bloodGroup || "")] || "";
   add(bg ? { control: "bloodGroup", kind: "select", value: bg, label: "Blood group", shown: s.bloodGroup } : null, "Blood group");
   add(s.admissionNo ? { control: "admnNumber", kind: "text", value: s.admissionNo, label: "Admission no.", shown: s.admissionNo } : null, "Admission no.");
   add(digits(s.rollNo) ? { control: "rollNumber", kind: "text", value: digits(s.rollNo), label: "Roll no.", shown: s.rollNo } : null, "Roll no.");
