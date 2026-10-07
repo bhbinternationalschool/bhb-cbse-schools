@@ -14,15 +14,12 @@ import {
 } from "@/lib/certificates";
 import { amountInWordsPaise, formatInr } from "@/lib/fees";
 import {
-  schoolAddressLine,
-  schoolCityLine,
-  schoolPrintName,
   schoolRecognitionLine,
   schoolShortName,
   schoolStatutoryLine,
-  schoolTagline,
 } from "@/lib/schoolIdentity";
 import { TENANT } from "@/lib/types";
+import { SchoolLetterhead } from "@/components/shared/SchoolLetterhead";
 
 export function printCertificate(issueId: string) {
   const sheet = document.getElementById(`certificate-${issueId}`);
@@ -68,15 +65,7 @@ export function CertificateSheet({ issue }: { issue: CertificateIssue }) {
           <TcSheet issue={issue} voided={voided} />
         ) : (
           <>
-            <header className="border-b-2 border-[var(--brand-gold)] pb-3 text-center">
-              <p className="font-brand-name text-sm tracking-[0.12em] text-[var(--brand-deep)] sm:text-base">
-                {schoolPrintName()}
-              </p>
-              <p className="mt-0.5 text-[11px] text-[var(--muted)]">
-                {schoolCityLine()}
-              </p>
-              <p className="font-tagline mt-1 text-sm">{schoolTagline()}</p>
-            </header>
+            <SchoolLetterhead />
 
             <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
               <div className="rounded bg-[var(--brand-deep)] px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-white">
@@ -159,13 +148,8 @@ function TcSheet({
 
   return (
     <>
-      <header className="border-b-2 border-[var(--brand-deep)] pb-3 text-center">
-        <p className="font-brand-name text-[13px] tracking-[0.1em] text-[var(--brand-deep)] sm:text-base">
-          {schoolPrintName()}
-        </p>
-        <p className="mt-0.5 text-[10px] text-[var(--muted)]">
-          {schoolAddressLine() || schoolCityLine()}
-        </p>
+      <SchoolLetterhead showContact={false} />
+      <header className="pt-1 pb-3 text-center">
         {schoolRecognitionLine() ? (
           <p className="mt-1 text-[10px] font-bold uppercase tracking-wide text-[var(--brand-deep)]">
             {schoolRecognitionLine()}

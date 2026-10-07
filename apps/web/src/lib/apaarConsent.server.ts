@@ -33,8 +33,10 @@ export async function apaarConsentRecordInput(
   const { classLabel } = await import("@/lib/homework");
   const { TENANT } = await import("@/lib/types");
   const masters = await loadServerMasters();
+  const { schoolCrestPng } = await import("@/lib/receiptPdf.server");
   return {
     schoolName: TENANT.nameDisplay,
+    logoPng: schoolCrestPng(),
     schoolPlace: [TENANT.city, TENANT.state].filter(Boolean).join(", "),
     udiseCode: TENANT.udiseCode || "",
     student: {

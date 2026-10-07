@@ -1,8 +1,8 @@
 "use client";
 
+import { PRINT_LETTERHEAD_CSS, printLetterheadHtml } from "@/lib/printLetterheadHtml";
 import { useCallback, useEffect, useState } from "react";
 import QRCode from "qrcode";
-import { TENANT } from "@/lib/types";
 
 type Device = {
   id: string;
@@ -54,8 +54,9 @@ async function printGateQr(qr: NonNullable<PrintedQr>) {
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Gate punch QR</title>
 <style>@page{size:A4;margin:14mm}body{font-family:system-ui,sans-serif;color:#0f172a;text-align:center;margin:0}
 h1{font-size:30px;margin:8px 0}h2{font-size:22px;margin:4px 0 12px;color:#334155}img{width:150mm;height:150mm}
-p{font-size:16px;margin:6px 0}.small{font-size:12px;color:#64748b}</style></head><body>
-<h1>${TENANT.shortName} · Staff attendance</h1>
+p{font-size:16px;margin:6px 0}.small{font-size:12px;color:#64748b}${PRINT_LETTERHEAD_CSS}</style></head><body>
+${printLetterheadHtml()}
+<h1>Staff attendance</h1>
 <h2>Scan with your OWN phone at the gate · अपने फ़ोन से गेट पर स्कैन करें</h2>
 <img src="${img}" alt="Gate punch QR">
 <p>Location is checked — this works only inside the school, within punching hours.</p>

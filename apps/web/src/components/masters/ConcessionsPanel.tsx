@@ -1,5 +1,6 @@
 "use client";
 // ratchet-allow: grids_without_row_menu — printable concession registers — rows carry no student id to act on
+import { PRINT_LETTERHEAD_CSS, printLetterheadHtml, printWhenImagesReady } from "@/lib/printLetterheadHtml";
 import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import {
   canApproveConcession,
@@ -1978,12 +1979,13 @@ function ConcessionStudentListDrawer({
         th { background: #f8fafc; font-weight: 600; }
         td.num { text-align: center; width: 36px; }
         .status { text-transform: capitalize; }
+        ${PRINT_LETTERHEAD_CSS}
       </style></head><body>
+      ${printLetterheadHtml()}
       ${node.innerHTML}
       </body></html>`);
     w.document.close();
-    w.focus();
-    w.print();
+    printWhenImagesReady(w);
   }
 
   return (
