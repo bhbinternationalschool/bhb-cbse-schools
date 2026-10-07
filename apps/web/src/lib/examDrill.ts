@@ -61,8 +61,8 @@ export function renderScopeQuestion(input: {
     .map((c) => `${c.position}. ${c.name}`)
     .join("\n");
   return input.hindi
-    ? `📚 ${input.childName}, ${input.isToday ? "आज" : "कल"} *${input.paperLabel}* है।\n\nतैयारी शुरू करें? पहले बताइए — कक्षा में कहाँ तक पढ़ा है? आख़िरी अध्याय का नंबर भेजिए:\n\n${list}\n\n(नंबर लिखकर भेजें, जैसे *6*)`
-    : `📚 ${input.childName}, ${input.isToday ? "today" : "tomorrow"} is *${input.paperLabel}*.\n\nShall we revise? First — how far has the class done? Send the number of the last chapter:\n\n${list}\n\n(just the number, like *6*)`;
+    ? `📚 ${input.childName}, ${input.isToday ? "आज" : "कल"} *${input.paperLabel}* है।\n\nतैयारी शुरू करें? पहले बताइए — कक्षा में कहाँ तक पढ़ा है? आख़िरी अध्याय का नंबर या नाम भेजिए:\n\n${list}\n\n(नंबर भेजें जैसे *6*, या अध्याय का नाम जैसे *${input.chapters[Math.min(2, input.chapters.length - 1)]?.name || "अध्याय"}*)`
+    : `📚 ${input.childName}, ${input.isToday ? "today" : "tomorrow"} is *${input.paperLabel}*.\n\nShall we revise? First — how far has the class done? Send the number or name of the last chapter:\n\n${list}\n\n(send number like *6*, or chapter name like *${input.chapters[Math.min(2, input.chapters.length - 1)]?.name || "Chapter"}*)`;
 }
 
 /**
