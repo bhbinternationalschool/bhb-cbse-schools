@@ -33,10 +33,13 @@ assert.equal(val(full, "parentEducation"), "4", "highest of the two parents");
 
 // Nothing known → nothing typed; the gaps are listed instead.
 const bare = buildUdiseFillPlan(st({}), undefined);
-for (const c of ["address", "pincode", "primaryMobile", "socCatId", "minorityId", "ewsYN", "cwsnYN", "bloodGroup", "heightInCm", "parentEducation"]) {
+for (const c of ["address", "pincode", "primaryMobile", "socCatId", "minorityId", "ewsYN", "cwsnYN", "heightInCm", "weightInKg", "parentEducation"]) {
   assert.equal(val(bare, c), undefined, `${c} must not be guessed`);
 }
 assert.ok(bare.leftForYou.includes("Social category"));
+assert.equal(val(bare, "bloodGroup"), "9", "no blood group = the portal's Under Investigation");
+assert.ok(!bare.leftForYou.includes("Blood group"));
+assert.ok(bare.leftForYou.includes("Height") && bare.leftForYou.includes("Weight"), "measurements are never estimated");
 assert.ok(bare.leftForYou.includes("CWSN (Yes/No)"), "an unticked CWSN box is not a No");
 // The normaliser's default nationality is never typed.
 assert.equal(val(bare, "natIndYN"), undefined);

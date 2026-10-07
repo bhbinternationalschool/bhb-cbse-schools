@@ -199,7 +199,14 @@ export function buildUdiseFillPlan(s: SisStudent, hh: Household | undefined, ext
 
   // EP — enrolment
   const bg = BLOOD[(s.bloodGroup || "").replace(/\s+/g, "").toUpperCase()] || "";
-  add(bg ? { control: "bloodGroup", kind: "select", value: bg, label: "Blood group", shown: s.bloodGroup } : null, "Blood group");
+  // No blood group in the ERP → the portal's own "9 - Under Investigation -
+  // Result will be updated soon", which is a true statement, not a guess.
+  // The director's choice, 7 Oct 2026.
+  fields.push(
+    bg
+      ? { control: "bloodGroup", kind: "select", value: bg, label: "Blood group", shown: s.bloodGroup }
+      : { control: "bloodGroup", kind: "select", value: "9", label: "Blood group", shown: "Under investigation (not in the ERP)" },
+  );
   add(s.admissionNo ? { control: "admnNumber", kind: "text", value: s.admissionNo, label: "Admission no.", shown: s.admissionNo } : null, "Admission no.");
   add(digits(s.rollNo) ? { control: "rollNumber", kind: "text", value: digits(s.rollNo), label: "Roll no.", shown: s.rollNo } : null, "Roll no.");
   // ERP join dates are not the admission register's date — and more than half
