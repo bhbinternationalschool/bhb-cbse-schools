@@ -131,7 +131,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     } else if (msg && msg.type === "apaar-fill") {
       reply(await erpFetch(`/api/v1/udise/robot/apaar-fill?pen=${encodeURIComponent(msg.pen || "")}`));
     } else if (msg && msg.type === "fill-data") {
-      reply(await erpFetch(`/api/v1/udise/robot/fill?pen=${encodeURIComponent(msg.pen || "")}`));
+      reply(await erpFetch(`/api/v1/udise/robot/fill?pen=${encodeURIComponent(msg.pen || "")}&v=2`));
     } else {
       reply({ ok: false, error: "Unknown request" });
     }
