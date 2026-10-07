@@ -48,6 +48,15 @@
         "content.css"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://bhbinternational.school/*"
+      ],
+      "js": [
+        "content-erp.js"
+      ],
+      "run_at": "document_start"
     }
   ],
   "icons": {
