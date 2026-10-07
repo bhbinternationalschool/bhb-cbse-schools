@@ -35,6 +35,17 @@ const TEACHER_FIELDS = [
   "socialCategory", "mainSubject1", "email",
 ];
 
+// A teacher's GP / AT / TD form answers that may leave the portal tab (the
+// two-way sync, 7 Oct 2026) — staff mobile and email yes, Aadhaar never.
+// Kept in step with PORTAL_FORM_FIELDS in apps/web/src/lib/udiseTeacherSync.ts.
+const TEACHER_FORM_FIELDS = {
+  gp: ["empName", "gender", "dob", "empCodeState", "socialCat", "qualAcad", "trade", "mathUpto", "scienceUpto",
+    "englishUpto", "socStudyUpto", "langStudyUpto", "qualProf", "mobile", "email", "disabilityType"],
+  at: ["natureOfAppt", "dojService", "dojPs", "tchType", "docPh", "classTaught", "appointedLevel", "apptSub",
+    "subTaught1", "subTaught2"],
+  td: ["trainedCwsn", "trainedComp", "trgNishtha", "isCtetStet", "nontchDays", "trngRcvd", "trngNeeded"],
+};
+
 // What the APAAR queue needs of a portal child — no Aadhaar, no mobile.
 const APAAR_FIELDS = [
   "studentId", "studentName", "studentCodeNat", "classId", "sectionId",
@@ -121,6 +132,29 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     } else if (msg && msg.type === "teacher-fill") {
       const q = new URLSearchParams({ code: msg.code || "", form: msg.form || "", name: msg.name || "", dob: msg.dob || "" });
       reply(await erpFetch(`/api/v1/udise/robot/teacher-fill?${q}`));
+    } else if (msg && msg.type === "teacher-details") {
+      // null stays null: "this form was not read" is not "this form is blank".
+      const form = (rec, f) => (rec && typeof rec === "object" ? pick(rec, TEACHER_FORM_FIELDS[f]) : null);
+      reply(
+        await erpFetch("/api/v1/udise/robot/teacher-details", {
+          method: "POST",
+          body: JSON.stringify({
+            listsRead: {
+              teaching: !!(msg.listsRead && msg.listsRead.teaching),
+              non_teaching: !!(msg.listsRead && msg.listsRead.non_teaching),
+            },
+            teachers: (msg.teachers || []).map((t) => ({
+              staffType: t.staffType === "non_teaching" ? "non_teaching" : "teaching",
+              list: pick(t.list, TEACHER_FIELDS),
+              gp: form(t.gp, "gp"),
+              at: form(t.at, "at"),
+              td: form(t.td, "td"),
+            })),
+          }),
+        }),
+      );
+    } else if (msg && msg.type === "teacher-add") {
+      reply(await erpFetch(`/api/v1/udise/robot/teacher-add?staffId=${encodeURIComponent(msg.staffId || "")}`));
     } else if (msg && msg.type === "apaar-queue") {
       reply(
         await erpFetch("/api/v1/udise/robot/apaar-queue", {
@@ -130,6 +164,45 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
       );
     } else if (msg && msg.type === "apaar-fill") {
       reply(await erpFetch(`/api/v1/udise/robot/apaar-fill?pen=${encodeURIComponent(msg.pen || "")}`));
+    } else if (msg && msg.type === "student-details") {
+      // Each child's full portal record; the server keeps only its whitelist
+      // (lib/udisePortalStudentSync) and never an Aadhaar number.
+      reply(
+        await erpFetch("/api/v1/udise/robot/student-details", {
+          method: "POST",
+          body: JSON.stringify({ academicYearCode: msg.academicYearCode, students: msg.students || [] }),
+        }),
+      );
+    } else if (msg && msg.type === "student-enrolment") {
+      reply(
+        await erpFetch("/api/v1/udise/robot/student-enrolment", {
+          method: "POST",
+          body: JSON.stringify({ academicYearCode: msg.academicYearCode, pen: msg.pen, studentId: msg.studentId, ep: msg.ep || {} }),
+        }),
+      );
+    } else if (msg && msg.type === "pen-search-list") {
+      reply(await erpFetch("/api/v1/udise/robot/pen-search-list"));
+    } else if (msg && msg.type === "pen-candidates") {
+      reply(await erpFetch("/api/v1/udise/robot/pen-candidates", { method: "POST", body: JSON.stringify({ results: msg.results || [] }) }));
+    } else if (msg && msg.type === "profile-send") {
+      // UDISE+ School Profile (profile.udiseplus.gov.in): one section's boxes
+      // as the page shows them — school-level answers, no child's data. The
+      // server normalises and caps every field again.
+      reply(
+        await erpFetch("/api/v1/udise/robot/school-profile", {
+          method: "POST",
+          body: JSON.stringify({
+            academicYear: msg.academicYear,
+            section: msg.section,
+            fields: msg.fields,
+            formStatus: msg.formStatus,
+            text: msg.text,
+          }),
+        }),
+      );
+    } else if (msg && msg.type === "profile-plan") {
+      const q = new URLSearchParams({ section: msg.section || "", ay: msg.academicYear || "" });
+      reply(await erpFetch(`/api/v1/udise/robot/school-profile?${q}`));
     } else if (msg && msg.type === "fill-data") {
       reply(await erpFetch(`/api/v1/udise/robot/fill?pen=${encodeURIComponent(msg.pen || "")}&v=2`));
     } else {

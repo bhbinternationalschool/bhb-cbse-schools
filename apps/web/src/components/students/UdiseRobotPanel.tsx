@@ -2,7 +2,10 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { UdisePortalSyncCard } from "@/components/students/UdisePortalSyncCard";
 import { UdiseSchoolAnswersCard } from "@/components/students/UdiseSchoolAnswersCard";
+import { UdiseTeacherSyncCard } from "@/components/students/UdiseTeacherSyncCard";
+import { UdiseSchoolProfileCard } from "@/components/students/UdiseSchoolProfileCard";
 import type { MastersState } from "@/lib/masters";
 import { studentsInSession, type SisState } from "@/lib/sis";
 import {
@@ -125,7 +128,16 @@ export function UdiseRobotPanel({
         {renderGroup("family", `Families (${board.familyTaskCount})`, "Only the parent can give these. WhatsApp asks them weekly.")}
       </div>
       <div className="mt-3">
+        <UdisePortalSyncCard />
+      </div>
+      <div className="mt-3">
         <UdiseSchoolAnswersCard />
+      </div>
+      <div className="mt-3">
+        <UdiseTeacherSyncCard />
+      </div>
+      <div className="mt-3">
+        <UdiseSchoolProfileCard />
       </div>
     </section>
   );

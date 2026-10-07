@@ -81,7 +81,7 @@ const BLOOD: Record<string, string> = {
 };
 
 /** Portal minorityId from the ERP religion; Hindu is "7-NA" (not a minority). */
-function minorityCode(religion: string): string {
+export function minorityCode(religion: string): string {
   const r = religion.trim().toLowerCase();
   if (!r) return "";
   if (/^(muslim|islam)/.test(r)) return "1";

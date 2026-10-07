@@ -11,7 +11,16 @@
  *    EMPTY fields from the ERP, outlined in yellow;
  *  - the person checks the page, types what the ERP does not know, and
  *    presses the portal's own Save;
- *  - "Saved — next child" opens and fills the next one.
+ *  - "Saved — next child" reads the saved form's Enrolment Profile into the
+ *    ERP's copy, then opens and fills the next one.
+ *
+ * Portal → ERP (director, 7 Oct 2026: "fetch data to ERP for existing
+ * students which is not present in school ERP or wrong"):
+ *  - "Fetch all children's details to ERP" reads every child's full record
+ *    (General + Facility Profile) and sends it to the ERP, where the office
+ *    reviews what is missing or different and applies what it ticks;
+ *  - "Find PENs for ERP children without one" searches the whole of UDISE+
+ *    for each, and sends the matches for the office to confirm.
  *
  * On the APAAR Module (director, 6 Oct 2026): "Start APAAR queue" asks the
  * ERP which children are ready (family consented on WhatsApp, the consenting
@@ -52,6 +61,8 @@
   const fillBtn = el("button", { class: "act sec", type: "button" }, "Fill this form from ERP");
   const addBtn = el("button", { class: "act sec", type: "button" }, "Add missing children to UDISE+");
   const addAnywayBtn = el("button", { class: "act sec", type: "button" }, "Not the same child — add anyway");
+  const fetchAllBtn = el("button", { class: "act sec", type: "button" }, "Fetch all children's details to ERP");
+  const penBtn = el("button", { class: "act sec", type: "button" }, "Find PENs for ERP children without one");
   // APAAR (director, 6 Oct 2026): only on the portal's APAAR pages.
   const apaarBox = el("div", { class: "queue" });
   const apaarStartBtn = el("button", { class: "act", type: "button" }, "Start APAAR queue");
@@ -62,7 +73,7 @@
   const msg = el("div", { class: "msg" });
   const last = el("div", { class: "muted" });
   body.append(
-    queueBox, startBtn, nextBtn, addAnywayBtn, skipBtn, stopBtn, addBtn, pullBtn, fillBtn,
+    queueBox, startBtn, nextBtn, addAnywayBtn, skipBtn, stopBtn, addBtn, pullBtn, fetchAllBtn, penBtn, fillBtn,
     apaarBox, apaarStartBtn, apaarNextBtn, apaarSkipBtn, apaarStopBtn, apaarFillBtn,
     msg, last,
   );
@@ -174,6 +185,154 @@
       say(e.message || String(e), "err");
     } finally {
       pullBtn.disabled = false;
+    }
+  });
+
+  // ─── Portal → ERP: every child's full record ─────────────────────────
+
+  async function portalJson(path) {
+    const r = await fetch(path, { credentials: "include" });
+    const j = await r.json().catch(() => null);
+    if (!r.ok || !j || j.status !== true) return null;
+    return j.data ?? null;
+  }
+
+  /** Run `fn` over `items`, at most `n` at a time — the portal is shared. */
+  async function pool(items, n, fn) {
+    let i = 0;
+    const workers = Array.from({ length: Math.min(n, items.length) }, async () => {
+      while (i < items.length) {
+        const k = i++;
+        await fn(items[k], k);
+      }
+    });
+    await Promise.all(workers);
+  }
+
+  fetchAllBtn.addEventListener("click", async () => {
+    const id = schoolId();
+    const ay = await waitForYear();
+    if (!id || !ay) return say("Open the current year's School Dashboard, then click again.", "err");
+    fetchAllBtn.disabled = true;
+    try {
+      const list = await portalList(id);
+      let done = 0;
+      let failed = 0;
+      let batch = [];
+      const send = async () => {
+        if (!batch.length) return;
+        const res = await ask({ type: "student-details", academicYearCode: ay, students: batch });
+        batch = [];
+        if (!res.ok) throw new Error(`The ERP did not take the batch: ${res.error}`);
+      };
+      await pool(list, 3, async (s) => {
+        const sid = s.studentId;
+        const [gp, fp] = await Promise.all([portalJson(`/p1/api/cy/students/${sid}`), portalJson(`/p1/api/v2/students/facility/${sid}`)]);
+        if (!gp) failed += 1;
+        else batch.push({ studentId: sid, gp, fp: fp || {} });
+        done += 1;
+        if (done % 10 === 0) say(`Reading children from the portal… ${done} of ${list.length}`);
+        if (batch.length >= 40) await send();
+      });
+      await send();
+      say(
+        `✓ Sent ${list.length - failed} children's full records (${ay}) to the ERP.` +
+          (failed ? ` ${failed} could not be read — click again later for those.` : "") +
+          "\nReview them in the ERP: Students → UDISE+ → Portal ↔ ERP.",
+        failed ? "" : "ok",
+      );
+    } catch (e) {
+      say(e.message || String(e), "err");
+    } finally {
+      fetchAllBtn.disabled = false;
+    }
+  });
+
+  /**
+   * The saved form's Enrolment Profile (admission date, roll no., last
+   * year…). The portal's enrolment API does not answer a plain request, so
+   * the robot reads the boxes the person just saved.
+   */
+  function readEnrolment() {
+    const out = {};
+    for (const c of ["admnNumber", "admnStartDate", "rollNumber", "mediumOfInstruction", "enrStatusPY", "classPY", "examResultPy", "examMarksPy", "attendancePy"]) {
+      const n = document.querySelector(`[formcontrolname="${c}"]`);
+      if (n && "value" in n && String(n.value || "").trim()) out[c] = String(n.value).trim();
+    }
+    return out;
+  }
+
+  async function sendEnrolmentOf(item) {
+    // Only the child the queue says is open — never another child's form.
+    if (!item || !/\/new-ac\//.test(location.hash) || !location.hash.includes(`/${item.studentId}`)) return;
+    const ep = readEnrolment();
+    if (!Object.keys(ep).length) return;
+    const ay = currentYear();
+    if (!ay) return;
+    // Best effort: the next child opens whether or not the ERP took it.
+    await ask({ type: "student-enrolment", academicYearCode: ay, pen: String(item.studentCodeNat || ""), studentId: String(item.studentId || ""), ep });
+  }
+
+  // ─── PEN finder ──────────────────────────────────────────────────────
+
+  penBtn.addEventListener("click", async () => {
+    penBtn.disabled = true;
+    try {
+      const res = await ask({ type: "pen-search-list" });
+      if (!res.ok) throw new Error(res.error);
+      const kids = (res.body && res.body.children) || [];
+      if (!kids.length) return say("Every active ERP child already has a PEN.", "ok");
+      const results = [];
+      let found = 0;
+      let notFound = 0;
+      let failed = 0;
+      for (const [i, k] of kids.entries()) {
+        say(`Searching UDISE+ for ${k.name} (${i + 1} of ${kids.length})…`);
+        const hits = new Map();
+        let searched = false;
+        let error = "";
+        try {
+          if (/^\d{4}$/.test(k.aadhaarLast4 || "")) {
+            for (const h of await portalSearch("student-aadhaar", { studentName: k.name, uuid: k.aadhaarLast4 })) hits.set(h.studentPEN || JSON.stringify(h), h);
+            searched = true;
+          }
+          if ([k.dob, k.father, k.mother].filter(Boolean).length >= 2) {
+            const got = await portalSearch("global", { studentName: k.name, dob: k.dob, fatherName: k.father, motherName: k.mother, schoolId: null, stateId: null });
+            for (const h of got) hits.set(h.studentPEN || JSON.stringify(h), h);
+            searched = true;
+          }
+          if (!searched) error = "The ERP lacks the birth date or parents' names to search with";
+        } catch (e) {
+          searched = false;
+          error = `the portal's search failed: ${e.message || e}`;
+        }
+        const same = [...hits.values()].filter((h) => namesCompatible(h.studentName, k.name));
+        if (!searched) failed += 1;
+        else if (same.length) found += 1;
+        else notFound += 1;
+        results.push({
+          erpId: k.erpId,
+          searched,
+          error,
+          hits: same.map((h) => ({
+            pen: h.studentPEN, name: h.studentName, dob: h.studentDob, father: h.fatherName, mother: h.motherName,
+            schoolName: h.schoolName, udiseCode: h.udiseSchCode, classDesc: h.classDesc, yearDesc: h.yearDesc, statusDesc: h.statusDesc,
+          })),
+        });
+        await sleep(300);
+      }
+      const saved = await ask({ type: "pen-candidates", results });
+      if (!saved.ok) throw new Error(`Searched, but the ERP did not take the results: ${saved.error}`);
+      say(
+        `✓ PEN finder done for ${kids.length} children: found ${found}, not on UDISE+ ${notFound}` +
+          (failed ? `, could not search ${failed}` : "") +
+          ".\nConfirm the PENs in the ERP: Students → UDISE+ → Portal ↔ ERP.",
+        "ok",
+      );
+    } catch (e) {
+      say(e.message || String(e), "err");
+    } finally {
+      penBtn.disabled = false;
     }
   });
 
@@ -477,6 +636,8 @@
     for (const b of [nextBtn, skipBtn, stopBtn]) b.style.display = active ? "" : "none";
     startBtn.style.display = active ? "none" : "";
     addBtn.style.display = !active && /schoolDashboard/.test(location.hash) ? "" : "none";
+    fetchAllBtn.style.display = !active ? "" : "none";
+    penBtn.style.display = !active && /schoolDashboard/.test(location.hash) ? "" : "none";
     fillBtn.style.display = !active && /\/new-ac\//.test(location.hash) ? "" : "none";
   }
 
@@ -573,9 +734,11 @@
     }
   }
 
-  const advance = async () => {
+  const advance = async ({ saved = true } = {}) => {
     const q = await store.get("queue");
     if (!q) return;
+    // Only a form the person says they saved is read back into the ERP.
+    if (saved && q.kind !== "add") await sendEnrolmentOf(q.items[q.index]);
     await store.set("queue", { ...q, index: q.index + 1 });
     await openCurrent();
   };
@@ -588,7 +751,7 @@
       await openCurrent();
     }),
   );
-  skipBtn.addEventListener("click", () => void clickStep(advance));
+  skipBtn.addEventListener("click", () => void clickStep(() => advance({ saved: false })));
   stopBtn.addEventListener("click", async () => {
     await store.set("queue", null);
     renderQueue(null, 0);

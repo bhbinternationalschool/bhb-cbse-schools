@@ -186,6 +186,7 @@ SELFTESTS=(
   test:masters-change-auth
   test:timetable-free-grid
   test:udise-teacher-apaar
+  test:udise-teacher-sync
   test:wa-sender-routing
   test:receipt-repair
   test:projection-double-post
@@ -248,6 +249,8 @@ SELFTESTS=(
   test:udise-robot
   test:udise-portal-api
   test:udise-portal-fill
+  test:udise-portal-student-sync
+  test:udise-school-profile
   test:student-measurements
   test:udise-portal-add
   test:udise-portal-reconcile
