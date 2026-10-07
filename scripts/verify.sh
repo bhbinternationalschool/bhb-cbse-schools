@@ -186,6 +186,7 @@ SELFTESTS=(
   test:masters-change-auth
   test:timetable-free-grid
   test:udise-teacher-apaar
+  test:udise-teacher-sync
   test:wa-sender-routing
   test:receipt-repair
   test:projection-double-post

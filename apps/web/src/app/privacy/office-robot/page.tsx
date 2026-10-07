@@ -17,7 +17,7 @@ export default function OfficeRobotPrivacyPage() {
   return (
     <LegalPage
       title="BHB Office Robot — privacy"
-      updated="6 October 2026"
+      updated="7 October 2026"
       current="/privacy/office-robot"
       summary={
         <p>
@@ -48,6 +48,22 @@ export default function OfficeRobotPrivacyPage() {
             masked to the last four digits, and the robot keeps it that way.
           </li>
           <li>
+            On the UDISE+ Teacher module (teacher.udiseplus.gov.in), when a
+            staff member presses &ldquo;Fetch all teachers from portal&rdquo;:
+            the school&rsquo;s teaching and non-teaching staff list and each
+            one&rsquo;s profile, appointment and training answers &mdash; name,
+            gender, date of birth, category, qualifications, staff mobile and
+            email, National Code, appointment and joining dates, post, classes
+            and subjects taught. Never the Aadhaar number or the name as per
+            Aadhaar.
+          </li>
+          <li>
+            From the school ERP, for the one teacher whose Teacher-module form
+            is open (or who is being added): the details needed to fill that
+            form. A teacher&rsquo;s Aadhaar is typed only into the Add New Staff
+            form, only when the ERP holds a valid number.
+          </li>
+          <li>
             From the school ERP, for the one child whose UDISE+ form is open:
             the details needed to fill that form (address, contact, category,
             blood group, admission and roll number, height, weight, parents&rsquo;
@@ -59,6 +75,7 @@ export default function OfficeRobotPrivacyPage() {
       <LegalSection n={3} title="Where it sends it">
         <LegalList>
           <li>The UDISE+ student list goes only to the school&rsquo;s ERP, to be checked and applied by staff.</li>
+          <li>The UDISE+ teacher details go only to the school&rsquo;s ERP, where staff review them and apply only what they tick.</li>
           <li>ERP details go only into the UDISE+ form open on the staff member&rsquo;s screen.</li>
           <li>Nothing is sent to the extension&rsquo;s developer, to Google, or to any third party.</li>
         </LegalList>
@@ -78,8 +95,10 @@ export default function OfficeRobotPrivacyPage() {
           The time of the last send to the ERP, and while a staff member is
           working through forms, the list of children still to do (name, class,
           PEN and the portal&rsquo;s internal ids). Pressing &ldquo;Stop
-          robot&rdquo; clears the list; removing the extension removes
-          everything.
+          robot&rdquo; clears the list. While teachers are being added, the
+          names and ERP ids of those still to add, in that tab only, until
+          &ldquo;Stop adding&rdquo; or the tab closes. Removing the extension
+          removes everything.
         </p>
       </LegalSection>
 

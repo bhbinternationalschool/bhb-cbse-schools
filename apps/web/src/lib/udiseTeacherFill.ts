@@ -23,6 +23,7 @@
 
 import type { ClassGroupCode, MastersState } from "@/lib/masters";
 import type { StaffRecord } from "@/lib/foundationMasters";
+import { aadhaarChecksumValid, aadhaarDigits } from "@/lib/aadhaar";
 
 export type TeacherForm = "gp" | "at" | "td";
 
@@ -246,7 +247,7 @@ function designationName(m: MastersState, s: StaffRecord): string {
   return m.designations.find((d) => d.id === s.designationId)?.name || "";
 }
 
-function teachingGroups(m: MastersState, s: StaffRecord, ay: string): Set<ClassGroupCode> {
+export function teachingGroups(m: MastersState, s: StaffRecord, ay: string): Set<ClassGroupCode> {
   const ids = [
     ...s.classTeacherLinks.filter((l) => !ay || l.academicYearCode === ay).map((l) => l.classId),
     ...s.subjectTeachingLinks.filter((l) => !ay || l.academicYearCode === ay).map((l) => l.classId),
@@ -335,6 +336,45 @@ export function buildTeacherFillPlan(
   return { fields, leftForYou: left };
 }
 
+// ─── Adding a teacher the portal does not list ───────────────────────────
+
+/**
+ * The portal's "Add New Staff" (#/addNewStaff → Staff Type → Go) opens
+ * #/teacherCommonDetails: the SAME General Profile form as editing, but with
+ * name, date of birth and Aadhaar still open (studied 7 Oct 2026, read-only).
+ * So the plan is the GP plan plus those three.
+ *
+ * Aadhaar (referenceKey) only when the ERP holds a full 12-digit number whose
+ * checksum holds; otherwise it is left blank and said so — unlike Add Student
+ * there is no "999999999999" here: nobody has checked that the Teacher module
+ * accepts it. "Name as per Aadhaar" is never the ERP name: the ERP does not
+ * know how the card spells it.
+ */
+export function buildTeacherAddPlan(
+  s: StaffRecord,
+  masters: MastersState,
+  academicYearCode: string,
+): TeacherFillPlan & { aadhaarFilled: boolean } {
+  const gp = buildTeacherFillPlan(s, "gp", masters, academicYearCode);
+  const fields: TeacherFillField[] = [];
+  const left: string[] = [];
+  const name = (s.fullName || "").replace(/\s+/g, " ").trim();
+  if (name) fields.push({ control: "empName", kind: "text", value: name.toUpperCase(), label: "Name", shown: name });
+  else left.push("Name");
+  const dob = portalDate(s.dateOfBirth);
+  if (dob) fields.push({ control: "dob", kind: "text", value: dob, label: "Date of birth", shown: dob });
+  else left.push("Date of birth");
+  const aadhaar = aadhaarDigits(s.aadhaarNo || "");
+  const aadhaarFilled = aadhaar.length === 12 && aadhaarChecksumValid(aadhaar);
+  if (aadhaarFilled) {
+    fields.push({ control: "referenceKey", kind: "text", value: aadhaar, label: "Aadhaar", shown: `********${aadhaar.slice(-4)}` });
+  } else {
+    left.push(s.aadhaarNo ? "Aadhaar — the ERP's number is not a valid 12-digit Aadhaar" : "Aadhaar — not in the ERP");
+  }
+  left.push("Name as per Aadhaar");
+  return { fields: [...fields, ...gp.fields], leftForYou: [...left, ...gp.leftForYou], aadhaarFilled };
+}
+
 // ─── The portal list against the ERP ─────────────────────────────────────
 
 export type TeacherBoardRow = {
@@ -351,15 +391,24 @@ export type TeacherBoardRow = {
 
 export type TeacherBoard = {
   rows: TeacherBoardRow[];
-  /** Active ERP teaching staff the portal does not list. */
+  /** Active ERP teaching staff the portal does not list — the add queue. */
   notOnPortal: { staffId: string; name: string }[];
+  /**
+   * Not matched, yet perhaps already on UDISE+: a candidate of a portal row
+   * the matcher could not settle, or a record that already holds a National
+   * Code (it was registered somewhere — perhaps on the non-teaching list).
+   * Never queued for Add New Staff: a second portal record is worse than none.
+   */
+  maybeOnPortal: { staffId: string; name: string; why: string }[];
 };
 
 export function buildTeacherBoard(staff: StaffRecord[], portal: PortalTeacher[]): TeacherBoard {
   const active = staff.filter((s) => s.status === "active");
   const seen = new Set<string>();
+  const maybe = new Map<string, string>();
   const rows: TeacherBoardRow[] = portal.map((t) => {
     const m = matchPortalTeacher(active, t);
+    if (m.kind === "unsure") for (const c of m.candidates) maybe.set(c.id, `may be the portal's ${t.staffName}`);
     if (m.kind !== "matched") {
       return {
         nationalCode: t.nationalCode,
@@ -395,8 +444,13 @@ export function buildTeacherBoard(staff: StaffRecord[], portal: PortalTeacher[])
       differences,
     };
   });
-  const notOnPortal = active
-    .filter((s) => s.stream === "teaching" && !seen.has(s.id))
-    .map((s) => ({ staffId: s.id, name: s.fullName }));
-  return { rows, notOnPortal };
+  const missing = active.filter((s) => s.stream === "teaching" && !seen.has(s.id));
+  for (const s of missing) {
+    if (!maybe.has(s.id) && (s.oasisId || "").trim()) maybe.set(s.id, `holds National Code ${s.oasisId.trim()}`);
+  }
+  const notOnPortal = missing.filter((s) => !maybe.has(s.id)).map((s) => ({ staffId: s.id, name: s.fullName }));
+  const maybeOnPortal = missing
+    .filter((s) => maybe.has(s.id))
+    .map((s) => ({ staffId: s.id, name: s.fullName, why: maybe.get(s.id)! }));
+  return { rows, notOnPortal, maybeOnPortal };
 }
