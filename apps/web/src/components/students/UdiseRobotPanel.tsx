@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { UdiseSchoolAnswersCard } from "@/components/students/UdiseSchoolAnswersCard";
+import { UdiseTeacherSyncCard } from "@/components/students/UdiseTeacherSyncCard";
 import type { MastersState } from "@/lib/masters";
 import { studentsInSession, type SisState } from "@/lib/sis";
 import {
@@ -126,6 +127,9 @@ export function UdiseRobotPanel({
       </div>
       <div className="mt-3">
         <UdiseSchoolAnswersCard />
+      </div>
+      <div className="mt-3">
+        <UdiseTeacherSyncCard />
       </div>
     </section>
   );

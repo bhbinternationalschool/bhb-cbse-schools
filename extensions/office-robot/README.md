@@ -54,13 +54,16 @@ The portal requires the school to keep a **printed copy of the consent**. Print 
 |---|---|
 | **Check teachers against the ERP** | On the staff list: who matches an ERP staff member (by National Code, else name + date of birth), whose National Code is missing in the ERP (Staff → OASIS / UDISE id), where dates or qualifications disagree, and which ERP teachers the portal does not list. |
 | **Fill this step from ERP** | On a teacher's GP or AT step: fills the empty fields from ERP Staff (gender, social category, qualifications, mobile, email, appointment, joining date, post, classes and subjects taught this year). The Training (TD) step is not in the ERP. |
+| **Fetch all teachers from portal** | On the staff list: reads the teaching AND non-teaching lists and every teacher's GP / AT / TD forms (three requests at a time) and sends a whitelisted copy to the ERP. Review and apply in the ERP: Students → UDISE+ → **Teachers: portal vs ERP** (missing-in-ERP ticked, disagreements unticked; nothing changes until Apply). |
+| **Add missing teachers** | After a check: walks the ERP teaching staff the portal does not list, one at a time — opens Add New Staff, can choose Teaching and press Go, then **Fill new teacher from ERP** fills the empty General Profile boxes. You press the portal's Save, then **Saved — next teacher**. Aadhaar is filled only when the ERP holds a valid 12-digit number. |
 
-Aadhaar and mobile numbers never leave the portal tab. The robot never presses Save, Next or Submit.
+Aadhaar never leaves the portal tab (staff mobile and email do go to the ERP on a fetch). The robot never presses Save, Next or Submit.
 
 ## ERP side
 
 - `POST /api/v1/udise/robot/sync` → `apps/web/src/lib/udiseRobotSync.server.ts`; mapping in `lib/udisePortalApi.ts`
 - `GET /api/v1/udise/robot/fill?pen=` → `lib/udisePortalFill.ts`
-- `POST /api/v1/udise/robot/teachers`, `GET /api/v1/udise/robot/teacher-fill` → `lib/udiseTeacherFill.ts`
+- `POST /api/v1/udise/robot/teachers`, `GET /api/v1/udise/robot/teacher-fill`, `GET /api/v1/udise/robot/teacher-add?staffId=` → `lib/udiseTeacherFill.ts`
+- `POST|GET /api/v1/udise/robot/teacher-details`, `POST /api/v1/udise/robot/teacher-details/apply` → `lib/udiseTeacherSync.ts` (+ `.server.ts`); `TEACHER_FORM_FIELDS` in `background.js` must match `PORTAL_FORM_FIELDS` there.
 - `POST /api/v1/udise/robot/apaar-queue`, `GET /api/v1/udise/robot/apaar-fill` → `lib/udiseApaarFill.ts`
 - The field whitelist in `background.js` must match `UDISE_PORTAL_FIELDS` in `lib/udisePortalApi.ts`.
