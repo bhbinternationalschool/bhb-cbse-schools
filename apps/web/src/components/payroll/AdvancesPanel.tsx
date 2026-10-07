@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { UpiPayButton } from "@/components/payments/UpiPayButton";
+import { UpiPayButton, type UpiPaid } from "@/components/payments/UpiPayButton";
 import { recordUpiProof, useRecordedUpiProofs } from "@/lib/upiProofsClient";
+import { PayoutButton } from "@/components/payments/PayoutButton";
 import { loadMasters, type MastersState } from "@/lib/masters";
 import {
   formatInr,
@@ -336,7 +337,16 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
               the note and the mode/date are set — then Issue advance. */}
           {(() => {
             const st = masters?.staff.find((x) => x.id === staffId);
+            const onPaid = (p: UpiPaid) => {
+              setPendingUpi({ utr: p.utr, paidOn: p.paidOn, payeeVpa: p.payeeVpa });
+              setMode("upi");
+              setGivenDate(p.paidOn);
+              setNote((n) => [n.trim(), `UTR ${p.utr}`].filter(Boolean).join(" · "));
+            };
+            const today = new Date(Date.now() + 330 * 60 * 1000).toISOString().slice(0, 10);
+            const paise = Math.round(amount * 100);
             return st && amount > 0 ? (
+              <>
               <UpiPayButton
                 payeeName={st.fullName}
                 payeeVpa={st.upiId || ""}
@@ -350,6 +360,26 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
                   setNote((n) => [n.trim(), `UTR ${p.utr}`].filter(Boolean).join(" · "));
                 }}
               />
+              {/* Or from the Cashfree wallet (owner's switch). The advance is
+                  not issued yet, so the transfer carries a draft target; the
+                  UTR is recorded against the advance on Issue, as above. */}
+              <PayoutButton
+                paid={Boolean(pendingUpi)}
+                payee={{
+                  name: st.fullName,
+                  vpa: st.upiId || "",
+                  accountNumber: st.bankAccountNo || "",
+                  ifsc: st.bankIfsc || "",
+                  phone: st.mobile || "",
+                }}
+                amountPaise={paise}
+                note={`Advance ${st.empCode || ""}`.trim()}
+                target={{ kind: "staff_advance", id: `draft:${st.id}:${paise}:${today}`, label: `Advance ${today} — ${st.fullName}` }}
+                subjectId={st.id}
+                period={today}
+                onPaid={onPaid}
+              />
+              </>
             ) : null;
           })()}
           <button

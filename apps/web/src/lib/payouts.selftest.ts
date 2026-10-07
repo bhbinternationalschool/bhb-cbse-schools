@@ -12,7 +12,7 @@
  * trusting the call shape.
  */
 import assert from "node:assert/strict";
-import { generateKeyPairSync, privateDecrypt, constants } from "node:crypto";
+import { createHmac, generateKeyPairSync, privateDecrypt, constants } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -20,9 +20,13 @@ import {
   buildBeneficiaryBody,
   buildTransferBody,
   IMPS_MAX_PAISE,
+  PAYOUT_TRANSFER_ID_RE,
+  UPI_PAYOUT_MAX_PAISE,
+  payoutBeneficiaryId,
   payoutIsInFlight,
   payoutIsPaid,
   payoutModeFor,
+  payoutModeForInstrument,
   payoutNeedsAttention,
   payoutSentence,
   payoutTransferId,
@@ -31,7 +35,7 @@ import {
   shouldRetryTransfer,
   type PayoutStatus,
 } from "@/lib/payouts";
-import { payoutSignatureFrom } from "@/lib/payoutsSignature";
+import { payoutSignatureFrom, verifyPayoutWebhook } from "@/lib/payoutsSignature";
 
 console.log("payouts.selftest.ts");
 
@@ -249,6 +253,54 @@ console.log("payouts.selftest.ts");
   assert.equal(empty.ok, false);
   const noClient = payoutSignatureFrom({ clientId: "", publicKeyPem: publicKey, unixSeconds: at });
   assert.equal(noClient.ok, false, "no client id means no signature");
+}
+
+/* ── pay by UPI ID, the owner's switch, the webhook (7 Oct 2026) ─────── */
+{
+  // A UPI ID alone is enough to be paid; it goes as UPI, never IMPS.
+  assert.equal(payoutModeForInstrument(5_000_00, { vpa: "rajesh@okaxis" }), "upi");
+  assert.equal(payoutModeForInstrument(5_000_00, { vpa: "rajesh@okaxis", accountNumber: "1234567890" }), "imps");
+  assert.equal(payoutModeForInstrument(600_000_00, { accountNumber: "1234567890" }), "neft");
+  assert.equal(UPI_PAYOUT_MAX_PAISE, 1_00_000_00);
+
+  const ben = buildBeneficiaryBody({ beneficiaryId: "st1_urajeshokaxis", name: "Rajesh Patel", vpa: "rajesh@okaxis" });
+  assert.ok(ben.ok, "a UPI-only beneficiary is accepted");
+  if (ben.ok) assert.equal(ben.body.beneficiary_instrument_details.vpa, "rajesh@okaxis");
+  assert.equal(buildBeneficiaryBody({ beneficiaryId: "x_1", name: "No Way" }).ok, false, "neither UPI ID nor bank → refused");
+
+  // Beneficiary ids follow the instrument: a changed UPI ID is a new payee,
+  // never money to the old one under a reused id.
+  const a = payoutBeneficiaryId({ subject: "stf_123", vpa: "a@okaxis" });
+  const b = payoutBeneficiaryId({ subject: "stf_123", vpa: "b@okaxis" });
+  assert.notEqual(a, b);
+  assert.match(a, /^[A-Za-z0-9_]{1,50}$/);
+
+  // Same item + amount → same transfer id: a double click cannot pay twice.
+  const t1 = payoutTransferId({ kind: "adv", subjectId: "stf_123", period: "2026-10-07", amountPaise: 2_000_00 });
+  assert.equal(t1, payoutTransferId({ kind: "adv", subjectId: "stf_123", period: "2026-10-07", amountPaise: 2_000_00 }));
+  assert.match(t1, PAYOUT_TRANSFER_ID_RE);
+
+  // Webhook: HMAC-SHA256(timestamp + raw body), base64, client secret.
+  const secret = "cf_secret_test";
+  const raw = '{"type":"TRANSFER_SUCCESS","data":{"transfer_id":"adv_x"}}';
+  const ts = "1759800000";
+  const sig = createHmac("sha256", secret).update(ts + raw).digest("base64");
+  assert.equal(verifyPayoutWebhook(raw, ts, sig, secret), true);
+  assert.equal(verifyPayoutWebhook(raw + " ", ts, sig, secret), false, "a changed body fails");
+  assert.equal(verifyPayoutWebhook(raw, "1759800001", sig, secret), false, "a changed timestamp fails");
+  assert.equal(verifyPayoutWebhook(raw, ts, sig, ""), false, "no secret configured → nothing is trusted");
+
+  // The switch: off by default, only on after the ₹1 test, owner only.
+  const read = (rel: string) =>
+    readFileSync(join(process.cwd(), process.cwd().endsWith("apps/web") ? "src" : "apps/web/src", rel), "utf8");
+  const server = read("lib/payouts.server.ts");
+  assert.match(server, /test_passed_at/, "turning on needs a passed ₹1 test");
+  assert.match(server, /startsWith\("draft:"\)/, "draft targets are recorded by their screen, not here");
+  assert.match(read("app/api/payouts/settings/route.ts"), /isSuperAdminSession/, "owner-only switch");
+  const pay = read("app/api/payouts/pay/route.ts");
+  assert.match(pay, /wallet_low/, "a short wallet falls back to UPI, nothing is sent");
+  assert.match(pay, /findRecordedTargetProof/, "an item already paid is not paid again");
+  assert.match(read("app/api/payouts/webhook/route.ts"), /verifyPayoutWebhook/, "webhook verified before it is read");
 }
 
 /* ── the wiring: salary is NOT switched over yet ─────────────────────── */

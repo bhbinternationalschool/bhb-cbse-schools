@@ -7,6 +7,8 @@ import { loadMasters, currentAcademicYearCode, type MastersState } from "@/lib/m
 import type { StaffRecord } from "@/lib/foundationMasters";
 import { UpiPayButton, type UpiPaid } from "@/components/payments/UpiPayButton";
 import { recordUpiProof, useRecordedUpiProofs } from "@/lib/upiProofsClient";
+import { PayoutButton } from "@/components/payments/PayoutButton";
+import { PayoutSwitchPanel } from "@/components/payments/PayoutSwitchPanel";
 import {
   loadSalarySetup,
   normalizeSalarySettings,
@@ -937,7 +939,8 @@ export function PayrollWorkspace() {
                 return;
               }
               const line = selected.lines.find((x) => x.staffId === staffId);
-              void recordUpiProof({
+              // A Cashfree payout's UTR is recorded by the server already.
+              if (!p.viaPayout) void recordUpiProof({
                 utr: p.utr,
                 amountPaise: Math.round(((line?.amountPayable ?? line?.netPay) || 0) * 100),
                 paidOn: p.paidOn,
@@ -996,7 +999,12 @@ export function PayrollWorkspace() {
       ) : null}
 
       {tab === "bank" && allowed ? (
-        <BankFileExportPanel academicYearCode={ay} />
+        <div className="space-y-4">
+          {/* Salary by bank file, or one by one from the Cashfree wallet when
+              the owner has switched it on (director, 7 Oct 2026). */}
+          <PayoutSwitchPanel />
+          <BankFileExportPanel academicYearCode={ay} />
+        </div>
       ) : null}
 
       {tab === "tally" && allowed ? (
@@ -1450,7 +1458,10 @@ function RunDetail({
                           (() => {
                             const st = staffById(l.staffId);
                             const amt = l.amountPayable ?? (l.juneHold ? 0 : l.netPay);
+                            const lineKey = `${run.id}|${l.staffId}`;
+                            const linePaid = Boolean(upiPaid.get(lineKey)) || /UTR \d{12}/.test(l.note || "");
                             return amt > 0 ? (
+                              <>
                               <UpiPayButton
                                 label={
                                   upiPaid.get(`${run.id}|${l.staffId}`)
@@ -1467,6 +1478,25 @@ function RunDetail({
                                 earliest={`${run.month}-01`}
                                 onPaid={(p) => onLinePaid(l.staffId, p)}
                               />
+                              {/* Or straight from the Cashfree wallet when the
+                                  owner's switch is on (director, 7 Oct 2026). */}
+                              <PayoutButton
+                                paid={linePaid}
+                                payee={{
+                                  name: l.fullName,
+                                  vpa: st?.upiId || "",
+                                  accountNumber: st?.bankAccountNo || "",
+                                  ifsc: st?.bankIfsc || "",
+                                  phone: st?.mobile || "",
+                                }}
+                                amountPaise={Math.round(amt * 100)}
+                                note={`Salary ${run.month}`}
+                                target={{ kind: "payroll_line", id: lineKey, label: `Salary ${run.month} — ${l.fullName}` }}
+                                subjectId={l.staffId}
+                                period={run.id}
+                                onPaid={(p) => onLinePaid(l.staffId, p)}
+                              />
+                              </>
                             ) : null;
                           })()
                         ) : null}
