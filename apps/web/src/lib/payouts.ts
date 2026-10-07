@@ -88,6 +88,25 @@ export function shouldRetryTransfer(_httpStatus: number): false {
   return false;
 }
 
+/**
+ * A beneficiary's id, from who they are and how they are paid — a changed UPI
+ * ID or account is a new beneficiary, not an edit Cashfree would refuse.
+ */
+export function payoutBeneficiaryId(input: { subject: string; vpa?: string; accountNumber?: string }): string {
+  const clean = (v: string) => String(v || "").replace(/[^A-Za-z0-9]/g, "");
+  const how = input.vpa ? `u${clean(input.vpa)}` : `b${clean(input.accountNumber || "").slice(-6)}`;
+  return `${clean(input.subject).slice(0, 20)}_${how}`.slice(0, 50);
+}
+
+/** UPI when the only instrument is a UPI ID; else IMPS / NEFT by amount. */
+export function payoutModeForInstrument(amountPaise: number, inst: { vpa?: string; accountNumber?: string }): PayoutMode {
+  if (inst.vpa && !inst.accountNumber) return "upi";
+  return payoutModeFor(amountPaise);
+}
+
+/** UPI payouts cap at ₹1,00,000 a transfer (Cashfree). */
+export const UPI_PAYOUT_MAX_PAISE = 1_00_000_00;
+
 export const PAYOUT_TRANSFER_ID_RE = /^[A-Za-z0-9_-]{3,40}$/;
 
 /**
@@ -141,8 +160,10 @@ export type PayoutBeneficiaryBody = {
   beneficiary_id: string;
   beneficiary_name: string;
   beneficiary_instrument_details: {
-    bank_account_number: string;
-    bank_ifsc: string;
+    bank_account_number?: string;
+    bank_ifsc?: string;
+    /** A UPI ID — staff records carry this more often than a bank account. */
+    vpa?: string;
   };
   beneficiary_contact_details?: {
     beneficiary_phone?: string;
@@ -153,8 +174,10 @@ export type PayoutBeneficiaryBody = {
 export function buildBeneficiaryBody(input: {
   beneficiaryId: string;
   name: string;
-  accountNumber: string;
-  ifsc: string;
+  accountNumber?: string;
+  ifsc?: string;
+  /** UPI ID; enough on its own (director, 7 Oct 2026: staff are paid by UPI). */
+  vpa?: string;
   phone?: string;
   email?: string;
 }): { ok: true; body: PayoutBeneficiaryBody } | { ok: false; error: string } {
@@ -166,15 +189,26 @@ export function buildBeneficiaryBody(input: {
   if (!name) return { ok: false, error: "A beneficiary needs a name" };
   const bank_account_number = String(input.accountNumber || "").replace(/\s/g, "");
   const bank_ifsc = String(input.ifsc || "").trim().toUpperCase();
-  if (bank_account_number.length < 6) return { ok: false, error: "Account number looks too short" };
-  if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(bank_ifsc)) {
-    return { ok: false, error: `"${bank_ifsc}" is not a valid IFSC` };
+  const vpa = String(input.vpa || "").trim().toLowerCase();
+  const hasBank = !!(bank_account_number || bank_ifsc);
+  if (!hasBank && !vpa) return { ok: false, error: "A beneficiary needs a bank account or a UPI ID" };
+  if (hasBank) {
+    if (bank_account_number.length < 6) return { ok: false, error: "Account number looks too short" };
+    if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(bank_ifsc)) {
+      return { ok: false, error: `"${bank_ifsc}" is not a valid IFSC` };
+    }
+  }
+  if (vpa && !/^[a-z0-9][a-z0-9._-]{1,255}@[a-z][a-z0-9.-]{1,63}$/.test(vpa)) {
+    return { ok: false, error: `"${vpa}" is not a valid UPI ID` };
   }
 
   const body: PayoutBeneficiaryBody = {
     beneficiary_id,
     beneficiary_name: name.slice(0, 100),
-    beneficiary_instrument_details: { bank_account_number, bank_ifsc },
+    beneficiary_instrument_details: {
+      ...(hasBank ? { bank_account_number, bank_ifsc } : {}),
+      ...(vpa ? { vpa } : {}),
+    },
   };
   const phone = String(input.phone || "").replace(/\D/g, "").slice(-10);
   const email = String(input.email || "").trim();

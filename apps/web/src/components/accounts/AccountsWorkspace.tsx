@@ -18,6 +18,7 @@ import {
   LedgerReportsPanel,
 } from "@/components/accounts/LedgerPanels";
 import { GatewayFeePolicyPanel } from "@/components/accounts/GatewayFeePolicyPanel";
+import { PayoutSwitchPanel } from "@/components/payments/PayoutSwitchPanel";
 import { VendorHistoryPanel } from "@/components/accounts/VendorHistoryPanel";
 import {
   ChequesPanel,
@@ -361,6 +362,7 @@ export function AccountsWorkspace() {
               reads off those very rows. Putting it in a settings tab would
               separate the decision from its only evidence. */}
           <GatewayFeePolicyPanel />
+          <PayoutSwitchPanel />
         </>
       ) : tab === "masters" ? (
         <StepTabs

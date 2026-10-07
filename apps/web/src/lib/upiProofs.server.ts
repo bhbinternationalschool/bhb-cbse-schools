@@ -297,3 +297,18 @@ export async function listRecordedUpiProofs(
     .in("target_id", targetIds.slice(0, 500));
   return (data ?? []) as Pick<UpiProofRow, "utr" | "paid_on" | "target_id" | "source">[];
 }
+
+/** The recorded proof for one paid item, if any. */
+export async function findRecordedTargetProof(kind: UpiTargetKind, targetId: string): Promise<UpiProofRow | null> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return null;
+  const { data } = await ctx.sb
+    .from("upi_payment_proofs")
+    .select("*")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("status", "recorded")
+    .eq("target_kind", kind)
+    .eq("target_id", targetId)
+    .maybeSingle();
+  return (data as UpiProofRow | null) ?? null;
+}

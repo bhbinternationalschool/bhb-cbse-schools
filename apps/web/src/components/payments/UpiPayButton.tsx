@@ -30,7 +30,14 @@ import { asMobile, buildUpiPayLink, isVpa, type UpiProof, type UpiProofCheck } f
  * Nothing is saved here: the screen that hosts the button saves as usual.
  */
 
-export type UpiPaid = { utr: string; paidOn: string; payeeVpa: string; fromScreenshot: boolean };
+export type UpiPaid = {
+  utr: string;
+  paidOn: string;
+  payeeVpa: string;
+  fromScreenshot: boolean;
+  /** Sent by Cashfree Payouts: the server has already recorded the UTR (unless the item was a draft). */
+  viaPayout?: boolean;
+};
 
 function todayIst(): string {
   return new Date(Date.now() + 330 * 60 * 1000).toISOString().slice(0, 10);

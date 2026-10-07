@@ -30,6 +30,13 @@ assert.equal(val(buildUdiseFillPlan(st({ bloodGroup: "B(+)" }), hh), "bloodGroup
 assert.equal(val(buildUdiseFillPlan(st({ bloodGroup: "O(-)" }), hh), "bloodGroup"), "6");
 assert.equal(val(buildUdiseFillPlan(st({ bloodGroup: "ab +ve" }), hh), "bloodGroup"), "7");
 assert.equal(val(full, "admnNumber"), "A-1");
+// The ERP's joinedOn carried the day-overwritten-by-month fault (7 Oct 2026):
+// the admission date on the portal comes from the paper register, never from it.
+{
+  const p2 = buildUdiseFillPlan(st({ joinedOn: "2023-02-02" }), hh);
+  assert.equal(val(p2, "admnStartDate"), undefined, "admission date is never filled from joinedOn");
+  assert.ok(!/2023-02-02|02\/02\/2023/.test(JSON.stringify(p2)), "the ERP join date appears nowhere in the fill plan");
+}
 assert.equal(val(full, "rollNumber"), "12");
 assert.equal(val(full, "heightInCm"), "102");
 assert.equal(val(full, "weightInKg"), "16.5");
@@ -37,10 +44,13 @@ assert.equal(val(full, "parentEducation"), "4", "highest of the two parents");
 
 // Nothing known → nothing typed; the gaps are listed instead.
 const bare = buildUdiseFillPlan(st({}), undefined);
-for (const c of ["address", "pincode", "primaryMobile", "socCatId", "minorityId", "ewsYN", "cwsnYN", "bloodGroup", "heightInCm", "parentEducation"]) {
+for (const c of ["address", "pincode", "primaryMobile", "socCatId", "minorityId", "ewsYN", "cwsnYN", "heightInCm", "weightInKg", "parentEducation"]) {
   assert.equal(val(bare, c), undefined, `${c} must not be guessed`);
 }
 assert.ok(bare.leftForYou.includes("Social category"));
+assert.equal(val(bare, "bloodGroup"), "9", "no blood group = the portal's Under Investigation");
+assert.ok(!bare.leftForYou.includes("Blood group"));
+assert.ok(bare.leftForYou.includes("Height") && bare.leftForYou.includes("Weight"), "measurements are never estimated");
 assert.ok(bare.leftForYou.includes("CWSN (Yes/No)"), "an unticked CWSN box is not a No");
 // The normaliser's default nationality is never typed.
 assert.equal(val(bare, "natIndYN"), undefined);

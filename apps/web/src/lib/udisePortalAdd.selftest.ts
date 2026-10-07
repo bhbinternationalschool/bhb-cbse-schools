@@ -30,6 +30,15 @@ assert.equal(v("primaryMobile"), "9400000011");
 assert.equal(v("uuid"), "999999999999", "no Aadhaar in the ERP → the portal's 'not available' value");
 assert.ok(plan.hints.some((h) => /AADHAAR not available/.test(h)), "and the office is told to collect the real one");
 assert.equal(v("admnStartDate"), undefined, "admission date is never guessed from joinedOn");
+// joinedOn carried the day-overwritten-by-month fault (7 Oct 2026). It must not
+// reach the portal form, as a field or as a hint the office might copy.
+{
+  const p2 = buildUdiseAddPlan(st({ joinedOn: "2023-02-02" }), hh);
+  const text = JSON.stringify(p2);
+  assert.ok(!/2023-02-02|02\/02\/2023/.test(text), "the ERP join date appears nowhere in the Add plan");
+  assert.equal(p2.fields.find((f) => f.control === "admnStartDate"), undefined);
+  assert.ok(p2.hints.some((h) => /paper admission register/.test(h)), "the office is pointed at the register");
+}
 assert.ok(!plan.leftForYou.some((x) => /^Name as per Aadhaar/.test(x)), "no Aadhaar name is asked for with the placeholder");
 // A number that fails the Aadhaar checksum is not typed.
 assert.equal(buildUdiseAddPlan(st({ aadhaarNumber: "123412341234" }), hh).fields.find((f) => f.control === "uuid")?.value, "999999999999", "a number failing the checksum is never typed");
