@@ -180,6 +180,7 @@ SELFTESTS=(
   test:student-curriculum
   test:subject-masters
   test:upi-pay
+  test:upi-proof-match
   test:masters-change-auth
   test:timetable-free-grid
   test:udise-teacher-apaar

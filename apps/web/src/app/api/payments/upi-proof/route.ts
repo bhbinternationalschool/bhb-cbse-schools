@@ -38,6 +38,9 @@ async function utrSeenAt(utr: string): Promise<string[]> {
     sb.from("staff_advances_desk_slices").select("payload").eq("tenant_id", tenantId).eq("slice_key", "advances").limit(1),
   ]);
   const seen: string[] = [];
+  const { findRecordedUtr } = await import("@/lib/upiProofs.server");
+  const recorded = await findRecordedUtr(utr);
+  if (recorded) seen.push(recorded.target_label || "a recorded UPI payment");
   if (lines.data?.length) {
     const ids = lines.data.map((r) => (r as { voucher_id: string }).voucher_id);
     const { data } = await sb.from("ledger_vouchers").select("voucher_no").eq("tenant_id", tenantId).in("id", ids);

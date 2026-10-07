@@ -6,6 +6,7 @@ import { Wallet } from "lucide-react";
 import { loadMasters, currentAcademicYearCode, type MastersState } from "@/lib/masters";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import { UpiPayButton, type UpiPaid } from "@/components/payments/UpiPayButton";
+import { recordUpiProof, useRecordedUpiProofs } from "@/lib/upiProofsClient";
 import {
   loadSalarySetup,
   normalizeSalarySettings,
@@ -933,6 +934,19 @@ export function PayrollWorkspace() {
                 flash(r.error, true);
                 return;
               }
+              const line = selected.lines.find((x) => x.staffId === staffId);
+              void recordUpiProof({
+                utr: p.utr,
+                amountPaise: Math.round(((line?.amountPayable ?? line?.netPay) || 0) * 100),
+                paidOn: p.paidOn,
+                payeeName: line?.fullName || "",
+                payeeVpa: p.payeeVpa,
+                targetKind: "payroll_line",
+                targetId: `${selected.id}|${staffId}`,
+                targetLabel: `Salary ${selected.month} — ${line?.fullName || staffId}`,
+              }).then((rec) => {
+                if (!rec.ok) flash(`UTR saved on the line, but: ${rec.error}`, true);
+              });
               flash(`UTR ${p.utr} recorded`);
               refresh();
             }}
@@ -1063,6 +1077,13 @@ function RunDetail({
   readOnly?: boolean;
 }) {
   const [workflowNote, setWorkflowNote] = useState("");
+  // UTRs recorded for this run's salary lines — from the Pay UPI button or a
+  // screenshot confirmed on WhatsApp (api/payments/upi-proofs).
+  const upiPaid = useRecordedUpiProofs(
+    "payroll_line",
+    run.status === "posted" || run.status === "paid" ? run.lines.map((l) => `${run.id}|${l.staffId}`) : [],
+    run.lockVersion || 0,
+  );
   const net = run.lines.reduce((s, l) => s + l.netPay, 0);
   const payable = run.lines.reduce(
     (s, l) => s + (l.amountPayable ?? (l.juneHold ? 0 : l.netPay)),
@@ -1414,7 +1435,13 @@ function RunDetail({
                             const amt = l.amountPayable ?? (l.juneHold ? 0 : l.netPay);
                             return amt > 0 ? (
                               <UpiPayButton
-                                label={/UTR \d{12}/.test(l.note || "") ? "Paid ✓ UPI" : "Pay UPI"}
+                                label={
+                                  upiPaid.get(`${run.id}|${l.staffId}`)
+                                    ? `Paid ✓ ${upiPaid.get(`${run.id}|${l.staffId}`)!.utr.slice(-4)}`
+                                    : /UTR \d{12}/.test(l.note || "")
+                                      ? "Paid ✓ UPI"
+                                      : "Pay UPI"
+                                }
                                 payeeName={l.fullName}
                                 payeeVpa={st?.upiId || ""}
                                 payeeMobile={st?.mobile || ""}

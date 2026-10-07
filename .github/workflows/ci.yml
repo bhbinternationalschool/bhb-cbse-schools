@@ -175,6 +175,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:upi-pay
 
+      - name: Self-test — WhatsApp UPI screenshot finds the payment it pays
+        working-directory: apps/web
+        run: npm run test:upi-proof-match
+
       - name: Self-test — Masters function grants, own classes only
         working-directory: apps/web
         run: npm run test:masters-change-auth
