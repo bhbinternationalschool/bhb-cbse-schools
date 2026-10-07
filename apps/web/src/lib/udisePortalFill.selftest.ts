@@ -25,6 +25,10 @@ assert.equal(val(full, "socCatId"), "4");
 assert.equal(val(full, "minorityId"), "7");
 assert.equal(val(full, "ewsYN"), "2");
 assert.equal(val(full, "bloodGroup"), "3");
+// The old ERP import's "B(+)" style (17 of 23 groups on 7 Oct 2026).
+assert.equal(val(buildUdiseFillPlan(st({ bloodGroup: "B(+)" }), hh), "bloodGroup"), "3");
+assert.equal(val(buildUdiseFillPlan(st({ bloodGroup: "O(-)" }), hh), "bloodGroup"), "6");
+assert.equal(val(buildUdiseFillPlan(st({ bloodGroup: "ab +ve" }), hh), "bloodGroup"), "7");
 assert.equal(val(full, "admnNumber"), "A-1");
 // The ERP's joinedOn carried the day-overwritten-by-month fault (7 Oct 2026):
 // the admission date on the portal comes from the paper register, never from it.

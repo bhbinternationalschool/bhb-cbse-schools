@@ -15,7 +15,7 @@
  * person — and listed, so they know what is still theirs to type.
  */
 
-import type { Household, SisStudent } from "@/lib/sis";
+import { normalizeBloodGroup, type Household, type SisStudent } from "@/lib/sis";
 import { schoolAnswerFields, type UdiseSchoolAnswers } from "@/lib/udiseSchoolAnswers";
 
 export type UdiseFillField = {
@@ -198,7 +198,7 @@ export function buildUdiseFillPlan(s: SisStudent, hh: Household | undefined, ext
   }
 
   // EP — enrolment
-  const bg = BLOOD[(s.bloodGroup || "").replace(/\s+/g, "").toUpperCase()] || "";
+  const bg = BLOOD[normalizeBloodGroup(s.bloodGroup || "")] || "";
   // No blood group in the ERP → the portal's own "9 - Under Investigation -
   // Result will be updated soon", which is a true statement, not a guess.
   // The director's choice, 7 Oct 2026.
