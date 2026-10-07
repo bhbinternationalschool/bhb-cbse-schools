@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { UpiPayButton } from "@/components/payments/UpiPayButton";
 import { loadMasters, type MastersState } from "@/lib/masters";
 import {
   formatInr,
@@ -307,7 +308,26 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
             placeholder="Reason / reference"
           />
         </label>
-        <div className="flex items-end">
+        <div className="flex flex-wrap items-end gap-2">
+          {/* Pay it by UPI first; the UTR from the app's screenshot goes into
+              the note and the mode/date are set — then Issue advance. */}
+          {(() => {
+            const st = masters?.staff.find((x) => x.id === staffId);
+            return st && amount > 0 ? (
+              <UpiPayButton
+                payeeName={st.fullName}
+                payeeVpa={st.upiId || ""}
+                payeeMobile={st.mobile || ""}
+                amountPaise={Math.round(amount * 100)}
+                note={`Advance · ${st.empCode || st.fullName}`}
+                onPaid={(p) => {
+                  setMode("upi");
+                  setGivenDate(p.paidOn);
+                  setNote((n) => [n.trim(), `UTR ${p.utr}`].filter(Boolean).join(" · "));
+                }}
+              />
+            ) : null;
+          })()}
           <button
             type="button"
             className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-xs font-semibold text-white"

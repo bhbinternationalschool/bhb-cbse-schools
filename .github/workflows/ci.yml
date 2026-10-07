@@ -171,6 +171,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:subject-masters
 
+      - name: Self-test — UPI pay link and success-screenshot reading
+        working-directory: apps/web
+        run: npm run test:upi-pay
+
       - name: Self-test — Masters function grants, own classes only
         working-directory: apps/web
         run: npm run test:masters-change-auth

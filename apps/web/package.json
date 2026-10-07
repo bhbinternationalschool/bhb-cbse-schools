@@ -353,6 +353,7 @@
     "test:ncf-official": "npx tsx src/lib/ncfOfficial.selftest.ts",
     "test:student-curriculum": "npx tsx src/lib/studentCurriculum.selftest.ts",
     "test:subject-masters": "npx tsx src/lib/subjectMasters.selftest.ts",
+    "test:upi-pay": "npx tsx src/lib/upiPay.selftest.ts",
     "test:masters-change-auth": "npx tsx src/lib/mastersChangeAuth.selftest.ts",
     "test:timetable-free-grid": "npx tsx src/lib/timetableFreeGrid.selftest.ts",
     "test:udise-teacher-apaar": "npx tsx src/lib/udiseTeacherApaar.selftest.ts",
