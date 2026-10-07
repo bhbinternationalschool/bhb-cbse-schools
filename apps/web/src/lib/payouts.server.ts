@@ -31,9 +31,9 @@
 import "server-only";
 
 import {
+  type PayoutMode,
   buildBeneficiaryBody,
   buildTransferBody,
-  payoutIsPaid,
   payoutNeedsAttention,
   readPayoutTransfer,
   shouldRetryTransfer,
@@ -54,14 +54,78 @@ export function payoutKeysPresent(): boolean {
 }
 
 /**
- * Whether real transfers are allowed at all.
+ * Whether real transfers are allowed at all — the env override only.
  *
- * Off unless explicitly switched on, and it is checked before every transfer
- * rather than only at the top of a run. The field names have not been confirmed
- * against a live call, so the default must be that no money can move.
+ * Kept for the old deployment flag. The live switch is the owner's
+ * (payout_settings, `payoutsEnabled` below), which can only be turned on
+ * after a ₹1 test transfer has come back SUCCESS. CASHFREE_PAYOUTS_DISABLED
+ * =true is a hard stop over both.
  */
 export function payoutsArmed(): boolean {
   return process.env.CASHFREE_PAYOUTS_ARMED?.trim() === "true" && payoutKeysPresent();
+}
+
+function payoutsHardDisabled(): boolean {
+  return process.env.CASHFREE_PAYOUTS_DISABLED?.trim() === "true";
+}
+
+export type PayoutSettings = {
+  enabled: boolean;
+  testTransferId: string;
+  testPassedAt: string;
+  updatedBy: string;
+  updatedAt: string;
+};
+
+export async function getPayoutSettings(): Promise<PayoutSettings> {
+  const off: PayoutSettings = { enabled: false, testTransferId: "", testPassedAt: "", updatedBy: "", updatedAt: "" };
+  const ctx = await getServerTenantContext();
+  if (!ctx) return off;
+  const { data, error } = await ctx.sb.from("payout_settings").select("*").eq("tenant_id", ctx.tenantId).maybeSingle();
+  // Unreadable reads as OFF: no money moves on a setting nobody could read.
+  if (error || !data) return off;
+  const r = data as Record<string, unknown>;
+  return {
+    enabled: r.enabled === true,
+    testTransferId: String(r.test_transfer_id ?? ""),
+    testPassedAt: r.test_passed_at ? String(r.test_passed_at) : "",
+    updatedBy: String(r.updated_by ?? ""),
+    updatedAt: String(r.updated_at ?? ""),
+  };
+}
+
+async function savePayoutSettings(patch: Partial<{ enabled: boolean; test_transfer_id: string; test_passed_at: string | null }>, by: string) {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false as const, error: "No tenant context" };
+  const { error } = await ctx.sb
+    .from("payout_settings")
+    .upsert({ tenant_id: ctx.tenantId, ...patch, updated_by: by, updated_at: new Date().toISOString() }, { onConflict: "tenant_id" });
+  return error ? { ok: false as const, error: error.message } : { ok: true as const };
+}
+
+/**
+ * Real transfers allowed right now: keys present, not hard-disabled, and
+ * either the owner's switch is on (after a passed test) or the old env flag.
+ * Checked before EVERY transfer, not once per screen.
+ */
+export async function payoutsEnabled(): Promise<{ ok: boolean; why: string }> {
+  if (!payoutKeysPresent()) return { ok: false, why: "Cashfree Payouts is not configured on this server" };
+  if (payoutsHardDisabled()) return { ok: false, why: "Payouts are switched off on the server (CASHFREE_PAYOUTS_DISABLED)" };
+  if (payoutsArmed()) return { ok: true, why: "" };
+  const st = await getPayoutSettings();
+  if (!st.testPassedAt) return { ok: false, why: "Send the ₹1 test transfer first (Settings → Payouts)" };
+  if (!st.enabled) return { ok: false, why: "Payouts are switched off (Settings → Payouts)" };
+  return { ok: true, why: "" };
+}
+
+/** The owner's switch. Turning ON needs a passed ₹1 test. */
+export async function setPayoutsEnabled(enabled: boolean, by: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (enabled) {
+    if (!payoutKeysPresent()) return { ok: false, error: "Cashfree Payouts is not configured on this server" };
+    const st = await getPayoutSettings();
+    if (!st.testPassedAt) return { ok: false, error: "Send the ₹1 test transfer to your own UPI ID first — the switch turns on only after it succeeds." };
+  }
+  return savePayoutSettings({ enabled }, by);
 }
 
 export function payoutBaseUrl(): string {
@@ -215,8 +279,9 @@ export async function payoutBalance(): Promise<{ ok: true; availablePaise: numbe
 export async function ensureBeneficiary(input: {
   beneficiaryId: string;
   name: string;
-  accountNumber: string;
-  ifsc: string;
+  accountNumber?: string;
+  ifsc?: string;
+  vpa?: string;
   phone?: string;
   email?: string;
 }): Promise<{ ok: true; beneficiaryId: string } | { ok: false; error: string }> {
@@ -260,15 +325,19 @@ export async function requestPayoutTransfer(input: {
   period: string;
   remarks?: string;
   requestedBy?: string;
+  mode?: PayoutMode;
+  /** What this pays (same keys as upi_payment_proofs), so SUCCESS records its UTR. */
+  target?: { kind: string; id: string; label: string };
+  payeeName?: string;
+  /** The owner's ₹1 test — the one transfer allowed before the switch is on. */
+  isTest?: boolean;
 }): Promise<TransferOutcome> {
-  // Checked per transfer, not once per run: nothing may move real money while
-  // the V2 request shapes are unconfirmed.
-  if (!payoutsArmed()) {
-    return {
-      ok: false,
-      error:
-        "Payouts is not armed. Set CASHFREE_PAYOUTS_ARMED=true only after a sandbox probe has confirmed the request shapes — see payouts.server.ts.",
-    };
+  // Checked per transfer, not once per screen.
+  if (input.isTest) {
+    if (!payoutKeysPresent() || payoutsHardDisabled()) return { ok: false, error: "Cashfree Payouts is not available on this server" };
+  } else {
+    const gate = await payoutsEnabled();
+    if (!gate.ok) return { ok: false, error: gate.why };
   }
   const ctx = await getServerTenantContext();
   if (!ctx) return { ok: false, error: "No tenant context" };
@@ -278,15 +347,31 @@ export async function requestPayoutTransfer(input: {
     beneficiaryId: input.beneficiaryId,
     amountPaise: input.amountPaise,
     remarks: input.remarks,
+    mode: input.mode,
   });
   if (!built.ok) return built;
 
   const existing = await getPayout(input.transferId);
-  // Anything already sent and not failed is left alone. This is the guard that
-  // makes a double-clicked salary run harmless.
-  if (existing && (payoutIsPaid(existing.status) || existing.status !== "UNKNOWN")) {
-    if (!payoutNeedsAttention(existing.status)) {
+  if (existing) {
+    // Never sent twice under one id. UNKNOWN means Cashfree may already have
+    // it (a lost reply, a 5XX): ask first. Re-sending would come back as a
+    // duplicate-id refusal and be wrongly marked FAILED.
+    if (existing.status === "UNKNOWN") {
+      const seen = await fetchTransferStatus(input.transferId);
+      if (seen) {
+        const row = await getPayout(input.transferId);
+        return row ? { ok: true, transfer: row, view: seen } : { ok: false, error: "Transfer could not be read back" };
+      }
+    } else if (!payoutNeedsAttention(existing.status)) {
+      // In flight or paid: left alone. A double click is harmless.
       return { ok: true, transfer: existing, view: null };
+    } else {
+      // FAILED / REJECTED / REVERSED: a fresh attempt needs a fresh id —
+      // Cashfree refuses a used one. The caller asks again with a new id.
+      return {
+        ok: false,
+        error: `The last attempt ${existing.status.toLowerCase()} (${existing.statusDescription || existing.lastError || "no reason given"}). Pay by UPI instead, or try again tomorrow.`,
+      };
     }
   }
 
@@ -302,6 +387,11 @@ export async function requestPayoutTransfer(input: {
       status: "UNKNOWN",
       requested_by: input.requestedBy || "",
       last_error: "",
+      target_kind: input.target?.kind || "",
+      target_id: input.target?.id || "",
+      target_label: input.target?.label || "",
+      payee_name: input.payeeName || "",
+      transfer_mode: built.body.transfer_mode,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "transfer_id" },
@@ -360,6 +450,67 @@ export async function recordTransferView(view: PayoutTransferView): Promise<void
     })
     .eq("tenant_id", ctx.tenantId)
     .eq("transfer_id", view.transferId);
+  await settleTransferEffects(view);
+}
+
+/**
+ * What a final status means for the rest of the ERP:
+ *  - SUCCESS with a 12-digit UTR → recorded in upi_payment_proofs against the
+ *    salary line / advance / voucher it paid (source 'payout'), exactly as a
+ *    UPI screenshot would be — the screens then show it paid.
+ *  - REVERSED → that record is set aside: the money came back, so the item is
+ *    unpaid again and must show so.
+ *  - the owner's ₹1 test → SUCCESS marks the test passed (unlocks the switch).
+ */
+async function settleTransferEffects(view: PayoutTransferView): Promise<void> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return;
+  const row = await getPayout(view.transferId);
+  if (!row) return;
+  const { data: extra } = await ctx.sb
+    .from("payout_transfers")
+    .select("target_kind, target_id, target_label, payee_name")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("transfer_id", view.transferId)
+    .maybeSingle();
+  const t = (extra ?? {}) as { target_kind?: string; target_id?: string; target_label?: string; payee_name?: string };
+
+  if (row.kind === "test") {
+    if (view.status === "SUCCESS") {
+      const st = await getPayoutSettings();
+      if (!st.testPassedAt) {
+        await savePayoutSettings({ test_transfer_id: view.transferId, test_passed_at: new Date().toISOString() }, row.requestedBy || "test");
+      }
+    }
+    return;
+  }
+  // A "draft:" target was not saved when paid; its screen records the UTR
+  // against the real id once it is.
+  if (!t.target_kind || !t.target_id || t.target_id.startsWith("draft:")) return;
+  if (view.status === "SUCCESS" && /^\d{12}$/.test(view.utr)) {
+    // Idempotent: the unique indexes refuse a second copy, which is the
+    // outcome wanted when a webhook and a status check both arrive.
+    await ctx.sb.from("upi_payment_proofs").insert({
+      id: `upp_${view.transferId}`.slice(0, 64),
+      tenant_id: ctx.tenantId,
+      status: "recorded",
+      utr: view.utr,
+      amount_paise: view.amountPaise || row.amountPaise,
+      paid_on: new Date(Date.now() + 330 * 60 * 1000).toISOString().slice(0, 10),
+      payee_name: t.payee_name || "",
+      target_kind: t.target_kind,
+      target_id: t.target_id,
+      target_label: t.target_label || "",
+      source: "payout",
+      recorded_by: row.requestedBy || "cashfree",
+    });
+  } else if (view.status === "REVERSED") {
+    await ctx.sb
+      .from("upi_payment_proofs")
+      .update({ status: "dismissed", updated_at: new Date().toISOString() })
+      .eq("tenant_id", ctx.tenantId)
+      .eq("id", `upp_${view.transferId}`.slice(0, 64));
+  }
 }
 
 /** Ask Cashfree what became of a transfer. The answer after any 5XX. */

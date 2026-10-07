@@ -16,7 +16,7 @@
  * some minutes later, which is the worst shape of bug to chase.
  */
 
-import { createPublicKey, publicEncrypt, constants } from "node:crypto";
+import { constants, createHmac, createPublicKey, publicEncrypt, timingSafeEqual } from "node:crypto";
 
 export type SignatureResult =
   | { ok: true; signature: string }
@@ -71,4 +71,13 @@ export function payoutSignatureFrom(input: {
       error: `Could not sign with the Payouts public key: ${e instanceof Error ? e.message : "unknown error"}`,
     };
   }
+}
+
+/** Cashfree Payouts V2 webhook signature: base64 HMAC-SHA256(timestamp + raw body), keyed with the client secret. */
+export function verifyPayoutWebhook(rawBody: string, timestamp: string, signature: string, secret: string): boolean {
+  if (!rawBody || !timestamp || !signature || !secret) return false;
+  const expected = createHmac("sha256", secret).update(timestamp + rawBody).digest("base64");
+  const a = Buffer.from(expected);
+  const b = Buffer.from(signature);
+  return a.length === b.length && timingSafeEqual(a, b);
 }
