@@ -401,6 +401,7 @@ jobs:
           npm run test:udise-portal-api
           npm run test:udise-portal-fill
           npm run test:udise-portal-student-sync
+          npm run test:udise-school-finance
           npm run test:udise-teacher-sync
           npm run test:udise-school-profile
           npm run test:student-measurements

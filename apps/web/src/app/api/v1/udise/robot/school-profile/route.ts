@@ -15,6 +15,8 @@
 
 import { NextResponse } from "next/server";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
+import { confirmedYear, FINANCE_SECTION_KEY, financeRules, previousYear } from "@/lib/udiseSchoolFinance";
+import { readFinanceStore } from "@/lib/udiseSchoolFinance.server";
 import {
   academicYearForDate,
   buildProfileFillPlan,
@@ -98,7 +100,17 @@ export async function GET(req: Request) {
   if (sectionParam) {
     const key = sectionKeyFromLabel(sectionParam);
     if (!key) return NextResponse.json({ ok: false, error: "Unknown section" }, { status: 400 });
-    return NextResponse.json({ ok: true, plan: buildProfileFillPlan(got.store, ay, key, facts) });
+    // 1(c) Receipts and Expenditure: the office's confirmed figures for the
+    // previous year (lib/udiseSchoolFinance), never the ERP's partial books.
+    let extra: ReturnType<typeof financeRules> = [];
+    if (key === FINANCE_SECTION_KEY) {
+      const fin = await readFinanceStore();
+      if (!fin) return NextResponse.json({ ok: false, error: "Could not read the annual figures. Try again." }, { status: 503 });
+      const fy = previousYear(ay);
+      const y = confirmedYear(fin, fy);
+      if (y) extra = financeRules(y, fy);
+    }
+    return NextResponse.json({ ok: true, plan: buildProfileFillPlan(got.store, ay, key, facts, extra) });
   }
 
   // The newest year with a 1A capture is what the office compares against.

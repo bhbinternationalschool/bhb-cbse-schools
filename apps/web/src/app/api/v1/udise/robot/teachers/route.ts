@@ -18,7 +18,7 @@ export const runtime = "nodejs";
 export async function POST(req: Request) {
   const auth = await requireStaffPermission(req, "compliance", "edit");
   if (!auth.ok) return auth.response;
-  let body: { teachers?: unknown };
+  let body: { teachers?: unknown; nonTeachingRead?: unknown };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -35,5 +35,5 @@ export async function POST(req: Request) {
     // Unknown is not empty: an unread roster would call every teacher "not in the ERP".
     return NextResponse.json({ ok: false, error: "Could not read the ERP staff list — try again." }, { status: 503 });
   }
-  return NextResponse.json({ ok: true, ...buildTeacherBoard(staff, portal) });
+  return NextResponse.json({ ok: true, ...buildTeacherBoard(staff, portal, { nonTeachingRead: body.nonTeachingRead === true }) });
 }

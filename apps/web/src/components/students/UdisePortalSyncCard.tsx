@@ -37,8 +37,10 @@ type Data = {
   portalCount: number;
   children: Child[];
   notInErp: { pen: string; name: string; classDesc: string }[];
+  leftSchool: { portalName: string; pen: string; erpName: string; lastYear: string; why: string }[];
+  portalDuplicates: { a: string; aPen: string; b: string; bPen: string; why: string }[];
 };
-type View = "bring" | "differs" | "pen" | "notInErp";
+type View = "bring" | "differs" | "pen" | "transfers" | "dropbox" | "twice" | "notInErp";
 
 function when(iso: string): string {
   const d = new Date(iso);
@@ -87,6 +89,16 @@ export function UdisePortalSyncCard() {
       pen: kids.filter((c) => !c.pen && c.penSearch),
       noPenUnsearched: kids.filter((c) => !c.pen && !c.penSearch).length,
     };
+  }, [data]);
+
+  // ERP children the PEN finder found at ANOTHER school: a transfer to
+  // import from the Dropbox, after that school releases them.
+  const transfersIn = useMemo(() => {
+    const code = data?.ourUdiseCode || "";
+    return (data?.children ?? [])
+      .filter((c) => !c.pen && c.penSearch?.searched)
+      .map((c) => ({ c, hits: (c.penSearch?.hits ?? []).filter((h) => !code || h.udiseCode.replace(/\D/g, "") !== code) }))
+      .filter((x) => x.hits.length);
   }, [data]);
 
   const tickedItems = useMemo(() => {
@@ -140,6 +152,9 @@ export function UdisePortalSyncCard() {
     { id: "bring", label: "Missing in the ERP", n: groups.bring.length },
     { id: "differs", label: "Different / to check", n: groups.differs.length },
     { id: "pen", label: "PEN finder", n: groups.pen.length },
+    { id: "transfers", label: "Transfers in", n: transfersIn.length },
+    { id: "dropbox", label: "Left — send to Dropbox", n: data?.leftSchool?.length ?? 0 },
+    { id: "twice", label: "Entered twice on UDISE+", n: data?.portalDuplicates?.length ?? 0 },
     { id: "notInErp", label: "On UDISE+, not in the ERP", n: data?.notInErp.length ?? 0 },
   ];
 
@@ -294,6 +309,72 @@ export function UdisePortalSyncCard() {
               })}
               {msg ? <p className={`text-xs ${msg.ok ? "text-[var(--success)]" : "text-[var(--danger)]"}`}>{msg.text}</p> : null}
             </div>
+          ) : null}
+
+          {view === "transfers" ? (
+            transfersIn.length ? (
+              <ul className="mt-3 space-y-2 text-xs">
+                {transfersIn.map(({ c, hits }) => (
+                  <li key={c.erpId} className="rounded-lg border border-[var(--border)] px-3 py-2">
+                    <p className="text-sm font-semibold text-[var(--brand-deep)]">
+                      {c.name} <span className="font-normal text-[var(--muted)]">· {c.className} in the ERP</span>
+                    </p>
+                    {hits.map((h) => (
+                      <p key={h.pen}>
+                        On UDISE+ at <strong>{h.schoolName}</strong> ({h.udiseCode}) · {h.classDesc} {h.yearDesc} {h.statusDesc} · PEN{" "}
+                        <strong>{h.pen}</strong> · born {h.dob}
+                      </p>
+                    ))}
+                    <p className="mt-1 text-[var(--muted)]">
+                      Ask that school to release the child (or raise a request on UDISE+), then on UDISE+ open “Import from Dropbox” and press the
+                      robot&apos;s <strong>Fill import search from ERP</strong>.
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3 text-xs text-[var(--muted)]">No ERP child was found at another school. (Run the PEN finder on UDISE+ first.)</p>
+            )
+          ) : null}
+
+          {view === "dropbox" ? (
+            data.leftSchool?.length ? (
+              <>
+                <p className="mt-3 text-xs text-[var(--muted)]">
+                  Still active on this school&apos;s UDISE+ list, but the ERP says the child left. Send each to the Dropbox on UDISE+ (Student
+                  Movement) when the portal allows it — today it says “Send to Dropbox is not permitted”.
+                </p>
+                <ul className="mt-2 space-y-1 text-xs">
+                  {data.leftSchool.map((x) => (
+                    <li key={x.pen || x.portalName}>
+                      <strong>{x.portalName}</strong> (PEN {x.pen || "—"}) = ERP {x.erpName}, last in the ERP in {x.lastYear} · {x.why}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <p className="mt-3 text-xs text-[var(--muted)]">{data.fetchedAt ? "Nobody who left is still on the UDISE+ list." : "Fetch from the portal first."}</p>
+            )
+          ) : null}
+
+          {view === "twice" ? (
+            data.portalDuplicates?.length ? (
+              <>
+                <p className="mt-3 text-xs text-[var(--muted)]">
+                  Two UDISE+ records that look like ONE child (same birth date, gender and a parent or phone) — or twins. Check with the family;
+                  if it is one child, keep the record with the right name and send the other through the portal&apos;s duplicate / Dropbox process.
+                </p>
+                <ul className="mt-2 space-y-1 text-xs">
+                  {data.portalDuplicates.map((x) => (
+                    <li key={`${x.aPen}${x.bPen}`}>
+                      <strong>{x.a}</strong> ({x.aPen}) and <strong>{x.b}</strong> ({x.bPen}) · {x.why}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <p className="mt-3 text-xs text-[var(--muted)]">{data.fetchedAt ? "No child looks entered twice on UDISE+." : "Fetch from the portal first."}</p>
+            )
           ) : null}
 
           {view === "notInErp" ? (

@@ -63,6 +63,9 @@
   const addAnywayBtn = el("button", { class: "act sec", type: "button" }, "Not the same child — add anyway");
   const fetchAllBtn = el("button", { class: "act sec", type: "button" }, "Fetch all children's details to ERP");
   const penBtn = el("button", { class: "act sec", type: "button" }, "Find PENs for ERP children without one");
+  // Release requests, Dropbox, inactive lists (director, 7 Oct 2026).
+  const checkPageBtn = el("button", { class: "act sec", type: "button" }, "Check the children on this page against the ERP");
+  const importBtn = el("button", { class: "act sec", type: "button" }, "Fill import search from ERP");
   // APAAR (director, 6 Oct 2026): only on the portal's APAAR pages.
   const apaarBox = el("div", { class: "queue" });
   const apaarStartBtn = el("button", { class: "act", type: "button" }, "Start APAAR queue");
@@ -73,7 +76,7 @@
   const msg = el("div", { class: "msg" });
   const last = el("div", { class: "muted" });
   body.append(
-    queueBox, startBtn, nextBtn, addAnywayBtn, skipBtn, stopBtn, addBtn, pullBtn, fetchAllBtn, penBtn, fillBtn,
+    queueBox, startBtn, nextBtn, addAnywayBtn, skipBtn, stopBtn, addBtn, pullBtn, fetchAllBtn, penBtn, checkPageBtn, importBtn, fillBtn,
     apaarBox, apaarStartBtn, apaarNextBtn, apaarSkipBtn, apaarStopBtn, apaarFillBtn,
     msg, last,
   );
@@ -333,6 +336,107 @@
       say(e.message || String(e), "err");
     } finally {
       penBtn.disabled = false;
+    }
+  });
+
+  // ─── Release requests / Dropbox lists: is each child still ours? ──────
+
+  /** Every table row on the page that names a child: PEN, name, birth date. */
+  function childrenOnPage() {
+    const out = [];
+    for (const table of document.querySelectorAll("table")) {
+      const heads = [...table.querySelectorAll("thead th, tr:first-child th")].map((h) => (h.innerText || "").trim());
+      const nameCol = heads.findIndex((h) => /student'?s?\s*name|^name$/i.test(h));
+      for (const tr of table.querySelectorAll("tbody tr")) {
+        const cells = [...tr.cells].map((c) => (c.innerText || "").trim());
+        const text = cells.join(" ");
+        const pen = (text.match(/\b\d{11}\b/) || [""])[0];
+        const dob = (text.match(/\b\d{2}[/-]\d{2}[/-]\d{4}\b/) || [""])[0];
+        const name = nameCol >= 0 && cells[nameCol] ? cells[nameCol] : cells.find((c) => /^[A-Za-z][A-Za-z .]{2,60}$/.test(c) && c.split(" ").length <= 5) || "";
+        if (pen || (name && dob)) out.push({ tr, pen, name, dob });
+      }
+    }
+    return out;
+  }
+
+  checkPageBtn.addEventListener("click", async () => {
+    checkPageBtn.disabled = true;
+    try {
+      const rows = childrenOnPage();
+      if (!rows.length) throw new Error("No children (PEN, or name + birth date) found in a table on this page. Open the request / Dropbox list first.");
+      const res = await ask({ type: "students-check", rows: rows.map(({ pen, name, dob }) => ({ pen, name, dob })) });
+      if (!res.ok) throw new Error(res.error);
+      const results = (res.body && res.body.results) || [];
+      const tone = { studying_here: "#a3261a", left: "#0f6b3f", not_in_erp: "#5f6f80", unsure: "#a15c00" };
+      const label = { studying_here: "ERP: STILL STUDYING HERE", left: "ERP: left", not_in_erp: "ERP: not found", unsure: "ERP: check" };
+      results.forEach((r, i) => {
+        const row = rows[i];
+        if (!row) return;
+        row.tr.querySelectorAll(".bhb-robot-verdict").forEach((n) => n.remove());
+        const tag = el("div", { class: "bhb-robot-verdict", title: r.detail }, `🤖 ${label[r.verdict] || r.verdict}`);
+        tag.style.cssText = `font:600 11px system-ui;color:${tone[r.verdict] || "#333"};margin-top:2px`;
+        (row.tr.cells[0] || row.tr).append(tag);
+      });
+      const n = (v) => results.filter((r) => r.verdict === v).length;
+      const still = results.filter((r) => r.verdict === "studying_here");
+      say(
+        [
+          `Checked ${results.length} children against the ERP: left ${n("left")} · still studying here ${n("studying_here")} · not found ${n("not_in_erp")} · check ${n("unsure")}.`,
+          ...still.map((r) => `⚠ ${r.erpName || r.name} (PEN ${r.pen || "—"}): ${r.detail}`),
+          "Each row is marked. The robot never approves or rejects — you decide on the portal.",
+        ].join("\n"),
+        still.length ? "err" : "ok",
+      );
+    } catch (e) {
+      say(e.message || String(e), "err");
+    } finally {
+      checkPageBtn.disabled = false;
+    }
+  });
+
+  // ─── Import from Dropbox: PEN + birth date of the next transfer ──────
+
+  /** A box by its label / placeholder text. */
+  function boxFor(re) {
+    for (const input of document.querySelectorAll("input:not([type=hidden]):not([type=radio]):not([type=checkbox])")) {
+      if (input.disabled || input.readOnly || !input.offsetParent) continue;
+      const lab = [input.placeholder, input.getAttribute("aria-label"), input.getAttribute("formcontrolname"), input.name, input.closest("div")?.parentElement?.querySelector("label")?.innerText]
+        .filter(Boolean)
+        .join(" ");
+      if (re.test(lab)) return input;
+    }
+    return null;
+  }
+
+  importBtn.addEventListener("click", async () => {
+    importBtn.disabled = true;
+    try {
+      const res = await ask({ type: "transfers-in" });
+      if (!res.ok) throw new Error(res.error);
+      const list = (res.body && res.body.children) || [];
+      if (!list.length) throw new Error("No transfers waiting: the PEN finder found no ERP child at another school. Run “Find PENs…” first.");
+      const at = Number((await store.get("importIdx")) || 0) % list.length;
+      const c = list[at];
+      const penBox = boxFor(/\bpen\b|national\s*code|student\s*code/i);
+      const dobBox = boxFor(/birth|\bdob\b|dd\/mm/i);
+      if (!penBox) throw new Error("No PEN box on this page. Open UDISE+ → Student Movement → Import from Dropbox first.");
+      setNative(penBox, c.pen);
+      penBox.classList.add("bhb-robot-filled");
+      if (dobBox && c.dob) {
+        setNative(dobBox, c.dob);
+        dobBox.classList.add("bhb-robot-filled");
+      }
+      await store.set("importIdx", at + 1);
+      say(
+        `Filled for ${c.name} (${at + 1} of ${list.length}): PEN ${c.pen}${dobBox && c.dob ? `, born ${c.dob}` : " — type the birth date yourself"}.\n` +
+          `UDISE+ has the child at ${c.school} (${c.udiseCode}); it imports only after that school releases the child.\n` +
+          "Press the portal's own Search / Import. Click this button again for the next child.",
+        "ok",
+      );
+    } catch (e) {
+      say(e.message || String(e), "err");
+    } finally {
+      importBtn.disabled = false;
     }
   });
 
@@ -638,6 +742,9 @@
     addBtn.style.display = !active && /schoolDashboard/.test(location.hash) ? "" : "none";
     fetchAllBtn.style.display = !active ? "" : "none";
     penBtn.style.display = !active && /schoolDashboard/.test(location.hash) ? "" : "none";
+    // On list pages (requests, Dropbox) and the import page — not on a form.
+    checkPageBtn.style.display = !active && !/\/new-ac\//.test(location.hash) ? "" : "none";
+    importBtn.style.display = !active && /import|dropbox|movement/i.test(location.hash) ? "" : "none";
     fillBtn.style.display = !active && /\/new-ac\//.test(location.hash) ? "" : "none";
   }
 
@@ -1002,7 +1109,8 @@
 
   let counted = false;
   async function onPage() {
-    const onSchool = /\/school\/\d+\/|academic-choice/.test(location.hash);
+    // Also the request / Dropbox / movement pages, wherever the portal puts them.
+    const onSchool = /\/school\/\d+\/|academic-choice|request|dropbox|import|movement|progress/i.test(location.hash);
     panel.style.display = onSchool ? "" : "none";
     if (!onSchool) return;
     void showLast();

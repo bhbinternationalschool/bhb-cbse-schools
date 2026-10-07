@@ -12,6 +12,7 @@ import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { householdOf, isRealPortalId, loadSis, studentsInSession } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
 import { readPenCandidates, readPortalStudents } from "@/lib/udisePortalStudents.server";
+import { reconcilePortalWithErp } from "@/lib/udisePortalReconcile";
 import { diffStudent, matchCopies } from "@/lib/udisePortalStudentSync";
 
 export const runtime = "nodejs";
@@ -56,8 +57,23 @@ export async function GET(req: Request) {
     })
     .sort((a, b) => a.className.localeCompare(b.className) || a.name.localeCompare(b.name));
 
+  // Who on UDISE+ left the school per the ERP (→ Dropbox when the portal
+  // allows it), and one child entered twice on UDISE+ — the same evidence
+  // rules as the robot's list check (lib/udisePortalReconcile).
+  const rec = reconcilePortalWithErp({
+    portal: Object.values(copyYear.byPen).map((c) => c.gp),
+    erpAll: sis.students,
+    activeIds: new Set(active.map((s) => s.id)),
+    householdMobiles: (s) => {
+      const h = hhOf(s);
+      return h ? [h.whatsappMobile, h.mobile, h.altMobile] : [];
+    },
+  });
+
   return NextResponse.json({
     ok: true,
+    leftSchool: rec.leftSchool,
+    portalDuplicates: rec.portalDuplicates,
     academicYearCode: ay,
     ourUdiseCode: String(masters.schoolProfile?.udiseCode || TENANT.udiseCode || "").replace(/\D/g, ""),
     fetchedAt: copyYear.fetchedAt,

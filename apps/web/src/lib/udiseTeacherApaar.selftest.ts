@@ -171,6 +171,12 @@ assert.equal(buildTeacherFillPlan(ravi, "td", masters, "2026-27").fields.length,
   assert.equal(b.rows[0]!.codeMissingInErp, true);
   assert.deepEqual(b.rows[0]!.differences, ["Joined this school: portal 02/02/2024, ERP 02/02/2025"]);
   assert.deepEqual(b.notOnPortal.map((x) => x.name), ["New Teacher"], "non-teaching staff are not teachers");
+  assert.equal(b.notOnPortal[0]!.staffType, "teaching");
+  // Once the robot has read the NON-teaching list too, a non-teaching staff
+  // member missing from it is offered for adding as Non Teaching (7 Oct 2026).
+  const both = buildTeacherBoard([ravi, other, clerk], [pickPortalTeacher({ empStaffId: 1, nationalCode: "TP73446390", staffName: "RAVINDRA YADAV", dateOfBirth: "23/03/1991" })], { nonTeachingRead: true });
+  assert.deepEqual(both.notOnPortal.map((x) => `${x.name}:${x.staffType}`).sort(), ["Clerk:non_teaching", "New Teacher:teaching"]);
+  assert.equal(pickPortalTeacher({ staffType: "non_teaching" }).staffType, "non_teaching");
   assert.ok(!("aadhaarNo" in pickPortalTeacher({ aadhaarNo: "x", mobile: "y" })), "Aadhaar and mobile never leave the portal tab");
 }
 

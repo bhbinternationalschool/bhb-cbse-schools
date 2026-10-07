@@ -18,7 +18,7 @@
  *    teacher's GP / AT / TD forms, at most three requests at a time, and
  *    sends a whitelisted copy to the ERP. The office reviews it there
  *    (Students → UDISE+ → Teachers: portal vs ERP) and applies what it ticks;
- *  - after a check, "Add missing teachers" walks the ERP teachers the portal
+ *  - after a check, "Add missing staff" walks the ERP teachers the portal
  *    does not list, one at a time, through the portal's Add New Staff:
  *    the robot fills the EMPTY General Profile boxes, the person saves, then
  *    "Saved — next teacher".
@@ -48,9 +48,9 @@
   const checkBtn = el("button", { class: "act", type: "button" }, "Check teachers against the ERP");
   const fillBtn = el("button", { class: "act", type: "button" }, "Fill this step from ERP");
   const fetchBtn = el("button", { class: "act sec", type: "button" }, "Fetch all teachers from portal");
-  const queueStartBtn = el("button", { class: "act sec", type: "button" }, "Add missing teachers");
+  const queueStartBtn = el("button", { class: "act sec", type: "button" }, "Add missing staff");
   const queueBox = el("div", { class: "queue" });
-  const goBtn = el("button", { class: "act", type: "button" }, "Choose “Teaching” and press Go");
+  const goBtn = el("button", { class: "act", type: "button" }, "Choose staff type and press Go");
   const addFillBtn = el("button", { class: "act", type: "button" }, "Fill new teacher from ERP");
   const savedNextBtn = el("button", { class: "act sec", type: "button" }, "Saved — next teacher");
   const skipBtn = el("button", { class: "act sec", type: "button" }, "Skip this teacher");
@@ -338,13 +338,22 @@
   let lastMissing = [];
 
   async function check() {
-    say("Reading the portal's teacher list…");
-    const rows = await portalTeachers();
-    const res = await ask({ type: "teachers-board", teachers: rows });
+    say("Reading the portal's teaching and non-teaching staff lists…");
+    const teaching = (await portalTeachers()).map((r) => ({ ...r, staffType: "teaching" }));
+    // The non-teaching list is a bonus: if it cannot be read, nobody
+    // non-teaching is called "missing" (unread is not absent).
+    let nonTeaching = null;
+    try {
+      nonTeaching = (await portalList(2)).map((r) => ({ ...r, staffType: "non_teaching" }));
+    } catch {
+      nonTeaching = null;
+    }
+    const res = await ask({ type: "teachers-board", teachers: [...teaching, ...(nonTeaching || [])], nonTeachingRead: !!nonTeaching });
     if (!res.ok) throw new Error(res.error);
     const b = res.body;
     const matched = b.rows.filter((r) => r.match === "matched");
-    const lines = [`Portal lists ${b.rows.length} teaching staff · ${matched.length} matched in the ERP.`];
+    const lines = [`Portal lists ${teaching.length} teaching${nonTeaching ? ` + ${nonTeaching.length} non-teaching` : ""} staff · ${matched.length} matched in the ERP.`];
+    if (!nonTeaching) lines.push("The non-teaching list could not be read — only teaching staff are checked for adding.");
     const noCode = matched.filter((r) => r.codeMissingInErp);
     if (noCode.length) lines.push(`Put the National Code on the ERP record (Staff → OASIS / UDISE id): ${noCode.map((r) => `${r.erpName} ${r.nationalCode}`).join(", ")}`);
     const unsure = b.rows.filter((r) => r.match !== "matched");
@@ -352,14 +361,14 @@
     const diffs = matched.filter((r) => r.differences.length);
     for (const r of diffs) lines.push(`${r.erpName}: ${r.differences.join("; ")}`);
     lastMissing = b.notOnPortal || [];
-    if (lastMissing.length) lines.push(`In the ERP but not on the portal: ${lastMissing.map((x) => x.name).join(", ")} — press “Add missing teachers”.`);
+    if (lastMissing.length) lines.push(`In the ERP but not on the portal: ${lastMissing.map((x) => x.name).join(", ")} — press “Add missing staff”.`);
     if ((b.maybeOnPortal || []).length) lines.push(`Not queued for adding — they may already be on the portal under a match the robot could not settle: ${b.maybeOnPortal.map((x) => x.name).join(", ")}`);
     lines.push("Then open each teacher's GP / AT / TD and press “Fill this step from ERP”.");
     onPage();
     return lines.join("\n");
   }
 
-  // ─── Add missing teachers (ERP → portal) ─────────────────────────────
+  // ─── Add missing staff (ERP → portal) ─────────────────────────────
   //
   // One teacher at a time through the portal's own Add New Staff. The queue
   // lives in this tab's sessionStorage so it survives the portal's page
@@ -390,7 +399,7 @@
 
   function startQueue() {
     if (!lastMissing.length) throw new Error("Press “Check teachers against the ERP” first.");
-    writeQueue({ items: lastMissing.map((x) => ({ staffId: x.staffId, name: x.name })), i: 0 });
+    writeQueue({ items: lastMissing.map((x) => ({ staffId: x.staffId, name: x.name, staffType: x.staffType === "non_teaching" ? "non_teaching" : "teaching" })), i: 0 });
     location.hash = ADD_PAGE;
     onPage();
     return `Adding ${lastMissing.length} teacher(s), one at a time. First: ${lastMissing[0].name}.\nBefore each one, make sure the portal does not already list them under another spelling.`;
@@ -402,7 +411,11 @@
    * Any surprise in the page → the person does it by hand.
    */
   async function chooseTeachingAndGo() {
-    const want = (t) => /^\s*(\d+\s*-\s*)?teaching\b/i.test(t || "") && !/non/i.test(t || "");
+    // The queued person's own type: Teaching, or Non Teaching (director, 7 Oct 2026).
+    const nonTeaching = (current() || {}).staffType === "non_teaching";
+    const want = nonTeaching
+      ? (t) => /non\s*-?\s*teaching/i.test(t || "")
+      : (t) => /^\s*(\d+\s*-\s*)?teaching\b/i.test(t || "") && !/non/i.test(t || "");
     let chosen = false;
     for (const sel of document.querySelectorAll("select")) {
       const opt = [...sel.options].find((o) => want(o.text));
@@ -440,18 +453,18 @@
         if (chosen) break;
       }
     }
-    if (!chosen) throw new Error("Could not find “Teaching” in Staff Type. Choose it and press Go yourself.");
+    if (!chosen) throw new Error(`Could not find “${nonTeaching ? "Non Teaching" : "Teaching"}” in Staff Type. Choose it and press Go yourself.`);
     const go = [...document.querySelectorAll("button, input[type=button], input[type=submit]")].find((b) =>
       /^\s*go\s*$/i.test(b.innerText || b.value || ""),
     );
-    if (!go) throw new Error("Chose “Teaching”, but found no Go button. Press Go yourself.");
+    if (!go) throw new Error("Chose the staff type, but found no Go button. Press Go yourself.");
     go.click();
     return "Opening the new-staff form…";
   }
 
   async function fillNew() {
     const who = current();
-    if (!who) throw new Error("No teacher queued. Press “Check teachers against the ERP”, then “Add missing teachers”.");
+    if (!who) throw new Error("No teacher queued. Press “Check teachers against the ERP”, then “Add missing staff”.");
     if (!(await waitForForm())) throw new Error("The form did not open. Reload the page and try again.");
     const res = await ask({ type: "teacher-add", staffId: who.staffId });
     if (!res.ok) throw new Error(res.error);
@@ -530,7 +543,7 @@
     checkBtn.style.display = list ? "" : "none";
     fetchBtn.style.display = list ? "" : "none";
     queueStartBtn.style.display = list && lastMissing.length && !who ? "" : "none";
-    queueStartBtn.textContent = `Add missing teachers (${lastMissing.length})`;
+    queueStartBtn.textContent = `Add missing staff (${lastMissing.length})`;
     fillBtn.style.display = form ? "" : "none";
     queueBox.style.display = who ? "" : "none";
     if (who) {
@@ -543,7 +556,7 @@
     skipBtn.style.display = who ? "" : "none";
     stopBtn.style.display = who ? "" : "none";
     if (form) say("Press “Fill this step from ERP”, check the yellow fields, then Save.");
-    else if (who && addPage) say("Press “Choose Teaching and press Go” — or choose Staff Type yourself and press Go.");
+    else if (who && addPage) say("Press “Choose staff type and press Go” — or choose Staff Type yourself and press Go.");
     else if (who && addForm) say("Press “Fill new teacher from ERP”, check the yellow fields, then the portal's Save.");
     else if (who) say(`Open Add New Staff to add ${who.name}.`);
     else if (list) say("“Check teachers against the ERP” shows who matches; “Fetch all teachers from portal” sends the portal's details to the ERP for review.");

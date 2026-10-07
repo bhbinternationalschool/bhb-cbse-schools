@@ -126,7 +126,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
       reply(
         await erpFetch("/api/v1/udise/robot/teachers", {
           method: "POST",
-          body: JSON.stringify({ teachers: (msg.teachers || []).map((t) => pick(t, TEACHER_FIELDS)) }),
+          body: JSON.stringify({
+            teachers: (msg.teachers || []).map((t) => ({ ...pick(t, TEACHER_FIELDS), staffType: t.staffType === "non_teaching" ? "non_teaching" : "teaching" })),
+            nonTeachingRead: msg.nonTeachingRead === true,
+          }),
         }),
       );
     } else if (msg && msg.type === "teacher-fill") {
@@ -180,6 +183,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
           body: JSON.stringify({ academicYearCode: msg.academicYearCode, pen: msg.pen, studentId: msg.studentId, ep: msg.ep || {} }),
         }),
       );
+    } else if (msg && msg.type === "students-check") {
+      // Only PEN, name and birth date of the children listed on the page.
+      const rows = (msg.rows || []).map((r) => ({ pen: r.pen || "", name: r.name || "", dob: r.dob || "" }));
+      reply(await erpFetch("/api/v1/udise/robot/students-check", { method: "POST", body: JSON.stringify({ rows }) }));
+    } else if (msg && msg.type === "transfers-in") {
+      reply(await erpFetch("/api/v1/udise/robot/transfers-in"));
     } else if (msg && msg.type === "pen-search-list") {
       reply(await erpFetch("/api/v1/udise/robot/pen-search-list"));
     } else if (msg && msg.type === "pen-candidates") {
