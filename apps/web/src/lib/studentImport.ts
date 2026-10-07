@@ -249,7 +249,38 @@ export function excelSerialToIso(serial: number): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
-export function normalizeDateField(raw: string): string {
+/**
+ * Which way round a file writes its numeric dates. Only matters for values
+ * where both numbers are 12 or under; see normalizeDateField.
+ */
+export type DateOrder = "DMY" | "MDY";
+
+/**
+ * Read a column's convention off its unambiguous values. "4/29/25" can only be
+ * M/D/Y and "29/4/25" only D/M/Y; a column that shows one and never the other
+ * tells us how to read its "3/10/23". Null when there is no evidence, or when
+ * the column contradicts itself — then the caller keeps its default.
+ *
+ * The old ERP's Student Report reached us as M/D/YY (SheetJS writes date cells
+ * in their m/d/yy format), and reading that as D/M/Y swapped the day and
+ * month of every admission date and birth date with a day of 12 or under.
+ */
+export function detectDateOrder(values: string[]): DateOrder | null {
+  let dmy = false;
+  let mdy = false;
+  for (const raw of values) {
+    const m = /^(\d{1,2})[/-](\d{1,2})[/-]\d{2,4}$/.exec((raw || "").trim());
+    if (!m) continue;
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    if (a > 12 && b <= 12) dmy = true;
+    if (b > 12 && a <= 12) mdy = true;
+  }
+  if (dmy === mdy) return null;
+  return mdy ? "MDY" : "DMY";
+}
+
+export function normalizeDateField(raw: string, order: DateOrder = "DMY"): string {
   const v = raw.trim();
   if (!v) return "";
   if (/^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10);
@@ -270,7 +301,8 @@ export function normalizeDateField(raw: string): string {
       // NEITHER exceeds 12 the value is genuinely ambiguous — 08/04 is the 4th
       // of August to an American file and the 8th of April to an Indian one —
       // and nothing in the string can tell them apart. We take D/M/Y, the
-      // local convention, and the caller has to know its source.
+      // local convention, unless the caller knows its source is M/D/Y
+      // (detectDateOrder reads that off the rest of the column).
       //
       // What this must never do again is use `a` for both. The previous
       // version read
@@ -282,8 +314,9 @@ export function normalizeDateField(raw: string): string {
       // the roll, undetectable afterwards because the result is a valid date.
       // A wrong guess between the two conventions is recoverable; throwing one
       // of the numbers away is not.
-      const day = a > 12 ? a : b > 12 ? b : a;
-      const month = a > 12 ? b : b > 12 ? a : b;
+      const mdy = a <= 12 && b <= 12 ? order === "MDY" : a <= 12 && b > 12;
+      const day = mdy ? b : a;
+      const month = mdy ? a : b;
       const y = c;
       const m = String(month).padStart(2, "0");
       const d = String(day).padStart(2, "0");
@@ -728,7 +761,7 @@ type ParsedRow = {
   fields: Record<string, string>;
 };
 
-function rowsToFieldMaps(text: string): {
+export function rowsToFieldMaps(text: string): {
   rows: ParsedRow[];
   error?: string;
 } {
@@ -753,8 +786,6 @@ function rowsToFieldMaps(text: string): {
       else if (!fields[key].trim() && next) fields[key] = next;
     });
     preferFullName(fields);
-    if (fields.dob) fields.dob = normalizeDateField(fields.dob);
-    if (fields.joinedOn) fields.joinedOn = normalizeDateField(fields.joinedOn);
     if (fields.aadhaarLast4)
       fields.aadhaarLast4 = aadhaarLast4(fields.aadhaarLast4);
     if (fields.fatherAadhaarLast4)
@@ -766,6 +797,21 @@ function rowsToFieldMaps(text: string): {
     if (/^sr$/i.test(fields.admissionNo) || /^student name$/i.test(fields.fullName))
       continue;
     rows.push({ lineNo: i + 1, fields });
+  }
+  // Dates are read per column, after every row is in, so that one row's
+  // "4/29/25" can settle how to read another row's "3/10/23". A column with no
+  // unambiguous value of its own takes the file's: one export writes all its
+  // dates the same way.
+  const dateKeys = ["dob", "joinedOn"] as const;
+  const fileOrder = detectDateOrder(
+    rows.flatMap((r) => dateKeys.map((k) => r.fields[k] ?? "")),
+  );
+  for (const key of dateKeys) {
+    const order =
+      detectDateOrder(rows.map((r) => r.fields[key] ?? "")) ?? fileOrder ?? "DMY";
+    for (const r of rows) {
+      if (r.fields[key]) r.fields[key] = normalizeDateField(r.fields[key], order);
+    }
   }
   return { rows };
 }
@@ -1781,6 +1827,33 @@ export function applySessionGapActions(
 }
 
 /**
+ * Rewrite every date cell's display text as YYYY-MM-DD.
+ *
+ * sheet_to_csv writes a date cell as its number format shows it, and the old
+ * ERP's Student Report formats them m/d/yy: "3/10/23" for 10 March 2023. The
+ * import then had to guess which number was the day, and guessed wrong for
+ * every date with a day of 12 or under — first collapsing it to 2023-03-03,
+ * and after the 4 Sep fix, swapping it to 3 October. The cell holds the real
+ * date; read it from there. parse_date_code works on the serial itself, so no
+ * timezone can shift it a day (cellDates' Date objects can).
+ */
+function isoDateCells(XLSX: typeof import("xlsx"), sheet: import("xlsx").WorkSheet) {
+  // The ESM build exports SSF by name; under CJS interop it sits on default.
+  const SSF =
+    XLSX.SSF ?? (XLSX as unknown as { default?: typeof import("xlsx") }).default?.SSF;
+  if (!SSF) return;
+  for (const addr of Object.keys(sheet)) {
+    if (addr.startsWith("!")) continue;
+    const cell = sheet[addr] as import("xlsx").CellObject | undefined;
+    if (!cell || cell.t !== "n" || typeof cell.v !== "number") continue;
+    if (!cell.z || !SSF.is_date(cell.z)) continue;
+    const d = SSF.parse_date_code(cell.v);
+    if (!d || !d.y) continue;
+    cell.w = `${d.y}-${String(d.m).padStart(2, "0")}-${String(d.d).padStart(2, "0")}`;
+  }
+}
+
+/**
  * Convert an .xlsx Student Report (or register export) into CSV text
  * suitable for previewStudentImport / applyStudentImport.
  */
@@ -1788,10 +1861,11 @@ export async function workbookToStudentImportCsv(
   data: ArrayBuffer | Uint8Array,
 ): Promise<{ csv: string; detectedSession: string }> {
   const XLSX = await import("xlsx");
-  const wb = XLSX.read(data, { type: "array", cellDates: true });
+  const wb = XLSX.read(data, { type: "array", cellNF: true });
   const sheetName = wb.SheetNames[0];
   if (!sheetName) throw new Error("Workbook has no sheets");
   const sheet = wb.Sheets[sheetName]!;
+  isoDateCells(XLSX, sheet);
   // Detect session from title rows (e.g. Student Report(2023-2024))
   const grid = XLSX.utils.sheet_to_json(sheet, {
     header: 1,
