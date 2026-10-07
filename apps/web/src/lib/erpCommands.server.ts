@@ -68,7 +68,15 @@ import {
   pendingApproverHint,
   writeStudentLeaveLocalRaw,
 } from "@/lib/studentLeave";
-import { householdWhatsApp, loadSis, studentsInSession, type SisStudent } from "@/lib/sis";
+import { hasStoredAadhaar, householdWhatsApp, loadSis, studentsInSession, type SisStudent } from "@/lib/sis";
+import {
+  buildUdiseRobotBoard,
+  formatUdiseStudentReply,
+  formatUdiseSummaryReply,
+  udiseMissing,
+  udiseQuestionFocus,
+  udiseRobotTasksFor,
+} from "@/lib/udiseRobot";
 import { computeHouseholdDues, getDayCloseForDate, loadFees, openFeeDues } from "@/lib/fees";
 import { flagFutureDues } from "@/lib/feeDueFuture";
 import { listLiveDefaulters } from "@/lib/playbook";
@@ -2684,6 +2692,10 @@ async function runReadCommand(
       return plain(studentDetails(resolved, session));
     case "class_roster":
       return classRoster(resolved, session);
+    case "udise_student":
+      return plain(udiseStudent(resolved));
+    case "udise_summary":
+      return plain(udiseSummary(resolved, session));
     case "top_dues":
       return topDues(resolved, session, todayIso);
     case "store_summary":
@@ -3435,6 +3447,64 @@ async function collectionToday(
     monthToDatePaise,
     monthLabel,
     formatInr,
+  });
+}
+
+function udiseStudent(resolved: Record<string, string>): string {
+  const sis = loadSis();
+  const masters = loadMasters();
+  const s = sis.students.find((st) => st.id === resolved.studentId);
+  if (!s) return "That student record has gone missing. Please try again.";
+  const onFile = hasStoredAadhaar({ number: s.aadhaarNumber, last4: s.aadhaarLast4 });
+  // The portal's own words when it has reported; never the number itself.
+  const state =
+    s.aadhaarVerification === "verified_udise"
+      ? "on file · validated on UDISE+"
+      : /fail/i.test(s.udiseAadhaarValidationStatus || "")
+        ? `on file · portal says "${s.udiseAadhaarValidationStatus}"`
+        : "on file · not yet validated on UDISE+";
+  return formatUdiseStudentReply({
+    fullName: s.fullName,
+    classLabel: classLabel(masters, s.classId, s.sectionId).replace(" · ", " "),
+    pen: s.pen,
+    apaarId: s.apaarId,
+    tasks: udiseRobotTasksFor(s),
+    aadhaarOnFile: onFile,
+    aadhaarState: state,
+    apaarConsent: s.apaarConsent,
+  });
+}
+
+/**
+ * The robot's board for the school or one class ("class 3 without PEN").
+ * The class is read from the question here rather than by the desk's
+ * section step: it is optional, and a whole school is a valid answer.
+ */
+function udiseSummary(resolved: Record<string, string>, session: DemoSession): string {
+  const sis = loadSis();
+  const masters = loadMasters();
+  const text = resolved.text || "";
+  let students = studentsInSession(sis, session.academicYearCode).filter((s) => s.status === "active");
+  let scopeLabel = "School";
+  const ref = extractSectionRefs(text)[0];
+  if (ref) {
+    const res = resolveClassOrSectionRef(ref, masters);
+    if (!res.ok) return formatSectionProblem(res.reason, res.options, text);
+    const ids = new Set(res.sections.map((x) => x.sectionId));
+    students = students.filter((s) => ids.has(s.sectionId));
+    scopeLabel = res.wholeClass ? `Class ${res.className}` : res.sections.map((x) => x.label).join(", ");
+  }
+  const focus = udiseQuestionFocus(text);
+  const board = buildUdiseRobotBoard(students);
+  const label = (s: SisStudent) => classLabel(masters, s.classId, s.sectionId).replace(" · ", " ");
+  // The school-wide board alone is enough; a class or a focus asks for names.
+  const listed = focus || ref ? students.filter((s) => udiseMissing(s, focus)) : [];
+  listed.sort((a, b) => label(a).localeCompare(label(b)) || a.fullName.localeCompare(b.fullName));
+  return formatUdiseSummaryReply({
+    scopeLabel,
+    focus,
+    board,
+    matching: listed.map((s) => ({ fullName: s.fullName, classLabel: label(s) })),
   });
 }
 

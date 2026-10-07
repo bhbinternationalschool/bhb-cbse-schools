@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Images, Megaphone } from "lucide-react";
-import { hasPermission } from "@/lib/rbac";
+import { canAccessHref, hasPermission, loadRbac } from "@/lib/rbac";
+import { loadMasters } from "@/lib/masters";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
+import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import { CommsReportsRunner } from "@/components/reports/ModuleReportRunners";
 import { ErpTableShell } from "@/components/ui/erp-roster";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
@@ -108,6 +110,32 @@ const LEGACY_WA_TABS: Record<string, WaWorkspaceTab> = {
   channels: "classes",
   household_log: "log",
 };
+
+type SocialStep = "connect" | "rules" | "queue";
+
+/**
+ * Nothing cross-posts until an account is connected, and the rules decide
+ * what goes out on Publish — so connect, then set the rules, then watch the
+ * queue and log. The two settings panels keep their own unsaved input, so
+ * inactive steps are hidden, not unmounted.
+ */
+const SOCIAL_STEPS: StepDef<SocialStep>[] = [
+  {
+    id: "connect",
+    title: "Connect accounts",
+    what: "Connect the school Facebook Page and Instagram account (or enter tokens by hand), and add Telegram.",
+  },
+  {
+    id: "rules",
+    title: "Cross-post rules",
+    what: "Whether news, gallery albums and public notices cross-post on Publish by default, and to which platforms.",
+  },
+  {
+    id: "queue",
+    title: "Queue & log",
+    what: "Scheduled items waiting to publish, and the recent cross-posts that went out.",
+  },
+];
 
 function tabFromSearch(raw: string | null, path: string): CommsTab {
   if (path.startsWith("/news")) return "news";
@@ -227,6 +255,7 @@ export function CommsWorkspace() {
   const [uploading, setUploading] = useState(false);
   const [socialLogs, setSocialLogs] = useState<SocialCrossPostLogEntry[]>([]);
   const [socialBusy, setSocialBusy] = useState(false);
+  const [socialStep, setSocialStep] = useState<SocialStep>("connect");
 
   const actor = session.fullName || "Office";
   const recipientKey = currentStaffRecipientKey();
@@ -360,6 +389,30 @@ export function CommsWorkspace() {
     const albumParam = searchParams.get("album");
     if (albumParam) setActiveAlbumId(albumParam);
   }, [searchParams]);
+
+  /*
+    The Comms screen serves five modules (Notices, News, Gallery,
+    Notifications, and WA chatbot answers). Someone who holds only some of
+    them, or only some of their functions (Masters → Roles), sees the tabs
+    they may open — exactly the ones the page gate (ErpModuleGate) lets
+    through, so a tab never leads to "Access restricted". Read in an effect:
+    roles and masters live in this browser's storage, not on the server.
+  */
+  const [shownTabs, setShownTabs] = useState<ModuleTabItem[]>(TABS);
+  useEffect(() => {
+    const masters = loadMasters();
+    const rbac = loadRbac();
+    setShownTabs(
+      hasPermission(session, masters, "notices", "view", rbac)
+        ? TABS
+        : TABS.filter((t) => canAccessHref(session, masters, `/comms?tab=${t.id}`, rbac)),
+    );
+  }, [session]);
+  useEffect(() => {
+    if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
+      setTab(shownTabs[0]!.id as CommsTab);
+    }
+  }, [shownTabs, tab]);
 
   function setTab(next: CommsTab) {
     const url = new URL(window.location.href);
@@ -801,7 +854,7 @@ export function CommsWorkspace() {
       error={error}
       notice={noticeMsg}
     >
-      <ModuleTabs items={TABS} value={tab} onChange={(id) => setTab(id as CommsTab)} />
+      <ModuleTabs items={shownTabs} value={tab} onChange={(id) => setTab(id as CommsTab)} />
 
       {tab === "dashboard" ? (
         <div className="mt-6">
@@ -1278,9 +1331,19 @@ export function CommsWorkspace() {
       ) : null}
 
       {tab === "social" ? (
-        <div className="space-y-5">
+        <StepTabs
+          aria-label="Social steps"
+          steps={SOCIAL_STEPS}
+          value={socialStep}
+          onChange={setSocialStep}
+        >
+        <div className={socialStep === "connect" ? "" : "hidden"}>
           <SocialCredentialsPanel onSaved={reloadSocialLogs} />
+        </div>
+        <div className={socialStep === "rules" ? "" : "hidden"}>
           <SocialCrossPostPrefsPanel />
+        </div>
+        <div className={socialStep === "queue" ? "space-y-5" : "hidden"}>
           <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
               Scheduled queue
@@ -1328,6 +1391,7 @@ export function CommsWorkspace() {
             )}
           </section>
         </div>
+        </StepTabs>
       ) : null}
 
       {tab === "whatsapp" ? (

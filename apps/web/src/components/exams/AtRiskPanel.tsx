@@ -224,6 +224,7 @@ export function AtRiskPanel(props: {
         </p>
       ) : (
         <ErpTableShell exportAs="at_risk_students" exportTitle="At-risk students">
+          <div className="overflow-x-auto">
           <ErpTable>
             <ErpTableHead>
               <tr>
@@ -320,6 +321,7 @@ export function AtRiskPanel(props: {
               })}
             </ErpTableBody>
           </ErpTable>
+          </div>
         </ErpTableShell>
       )}
     </div>

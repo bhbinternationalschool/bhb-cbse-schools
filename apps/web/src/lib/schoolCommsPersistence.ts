@@ -22,8 +22,32 @@ import {
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
 import { trackServerWork } from "@/lib/serverWork";
+import { hasAnyFeatureInModule, type RbacModule } from "@/lib/rbac";
+import { getSessionActor } from "@/lib/sessionActor";
+import { loadMasters } from "@/lib/masters";
 
 const MODULE = "school_comms";
+
+/**
+ * May this browser's person save to a desk of `module` at all — the module,
+ * or one of its functions (Masters → Roles)?
+ *
+ * One Comms save goes to three desks: notices, news and gallery. Someone who
+ * holds only Notices → Notices & circulars was refused by the news and
+ * gallery desks on every save and told "Your last change was NOT saved" —
+ * twice, about desks they never changed (the schoolComms helpers already
+ * refuse their edits there, so there is nothing of theirs to send). The
+ * server still decides; this only skips a push that can only be refused.
+ * No actor (SSR) → push as before.
+ */
+function mayPushDesk(module: RbacModule): boolean {
+  const session = getSessionActor();
+  if (!session) return true;
+  const masters = loadMasters();
+  return (["create", "edit", "delete"] as const).some((a) =>
+    hasAnyFeatureInModule(session, masters, module, a),
+  );
+}
 
 const blob = createDomainBlobPersistence<SchoolCommsState>({
   table: "school_comms_state",
@@ -41,13 +65,17 @@ export const scheduleSchoolCommsSync = (state: SchoolCommsState) => {
     return;
   }
   if (!deskSkipBlobPushClient("school_comms")) blob.scheduleSync(state);
-  scheduleSchoolCommsDeskSync(state);
-  void trackServerWork(import("@/lib/galleryPersistence").then(({ scheduleGalleryDeskSync }) => {
-    scheduleGalleryDeskSync();
-  }));
-  void trackServerWork(import("@/lib/newsPersistence").then(({ scheduleNewsDeskSync }) => {
-    scheduleNewsDeskSync();
-  }));
+  if (mayPushDesk("notices")) scheduleSchoolCommsDeskSync(state);
+  if (mayPushDesk("gallery")) {
+    void trackServerWork(import("@/lib/galleryPersistence").then(({ scheduleGalleryDeskSync }) => {
+      scheduleGalleryDeskSync();
+    }));
+  }
+  if (mayPushDesk("news")) {
+    void trackServerWork(import("@/lib/newsPersistence").then(({ scheduleNewsDeskSync }) => {
+      scheduleNewsDeskSync();
+    }));
+  }
 };
 export const ensureSchoolCommsHydrated = async () => {
   if (isDeskHydrated(MODULE)) return false;

@@ -189,6 +189,7 @@ export async function handleLeaveCommand(opts: {
         fromDate: r.fromDate,
         toDate: r.toDate,
         halfDay: r.halfDay,
+        halfDaySession: r.halfDaySession,
         typeCode: r.typeCode,
         by: markBy,
       }),

@@ -50,10 +50,27 @@ export function parseLeaveType(text: string): WaLeaveType | null {
  * whatever it already says. Null for everything else, including the
  * approvers' own "LEAVE", "leave requests", and a student's leave.
  */
+/**
+ * Which half a half-day leave takes off, from a WhatsApp message — only when
+ * it is said plainly. "Half day" alone could mean either, so it stays "" and
+ * the register asks for the "other half" to be punched.
+ */
+export function parseHalfDaySession(text: string): "" | "morning" | "afternoon" {
+  const t = (text || "").toLowerCase();
+  if (/(first|1st|pehl[ae])\s*half|morning\s*(off|leave|chhutti)|सुबह\s*की\s*छुट्टी|पहला\s*हाफ/u.test(t)) return "morning";
+  if (/(second|2nd|doosr[ae]|dusr[ae])\s*half|afternoon\s*(off|leave|chhutti)|दोपहर\s*की\s*छुट्टी|दूसरा\s*हाफ/u.test(t)) return "afternoon";
+  return "";
+}
+
 export function parseLeaveApplyStart(
   text: string,
   todayIso: string,
-): { typeCode: WaLeaveType | null; dates: { from: string; to: string } | null; halfDay: boolean } | null {
+): {
+  typeCode: WaLeaveType | null;
+  dates: { from: string; to: string } | null;
+  halfDay: boolean;
+  halfDaySession: "" | "morning" | "afternoon";
+} | null {
   const t = (text || "").trim();
   if (!t || t.length > 200) return null;
   if (/^\s*leave\s*$/i.test(t)) return null;
@@ -65,7 +82,10 @@ export function parseLeaveApplyStart(
   return {
     typeCode,
     dates: parseLeaveDates(t, todayIso),
-    halfDay: /(?<![\p{L}\p{M}\p{N}])(half\s*day|aadha\s*din|आधा\s*दिन)(?![\p{L}\p{M}\p{N}])/iu.test(t),
+    halfDay:
+      /(?<![\p{L}\p{M}\p{N}])(half\s*day|aadha\s*din|आधा\s*दिन)(?![\p{L}\p{M}\p{N}])/iu.test(t) ||
+      parseHalfDaySession(t) !== "",
+    halfDaySession: parseHalfDaySession(t),
   };
 }
 

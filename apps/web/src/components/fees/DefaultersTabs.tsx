@@ -20,6 +20,8 @@ import { useEffect, useState } from "react";
 import { DefaultersPlaybook } from "@/components/fees/DefaultersPlaybook";
 import { DefaulterHoldPanel } from "@/components/fees/DefaulterHoldPanel";
 import { FeeAutopayPanel } from "@/components/fees/FeeAutopayPanel";
+import { useDemoSession } from "@/components/shell/SessionContext";
+import { canSeeModuleTab } from "@/lib/rbac";
 
 type Tab = "list" | "policy" | "autopay";
 
@@ -33,6 +35,19 @@ export function DefaultersTabs() {
   // Starts on "list" for the first render so server and client agree, then
   // reads the URL. Reading it during render would mismatch hydration.
   const [tab, setTab] = useState<Tab>("list");
+  // Someone holding only some Fees functions (withhold policy, auto-pay)
+  // sees only those tabs. The list is built from the fee desk, which only
+  // the Fees grant reads and writes, so no function opens it.
+  const session = useDemoSession();
+  const shown = (["list", "policy", "autopay"] as Tab[]).filter((t) =>
+    canSeeModuleTab(session, null, "fees", t),
+  );
+  const firstShown = shown[0] ?? null;
+
+  useEffect(() => {
+    if (firstShown && !shown.includes(tab)) setTab(firstShown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstShown, tab]);
 
   useEffect(() => {
     setTab(tabFromUrl());
@@ -59,33 +74,39 @@ export function DefaultersTabs() {
   return (
     <div className="space-y-4">
       <div role="tablist" aria-label="Defaulters" className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "list"}
-          className={tabClass(tab === "list")}
-          onClick={() => choose("list")}
-        >
-          Defaulters list
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "policy"}
-          className={tabClass(tab === "policy")}
-          onClick={() => choose("policy")}
-        >
-          Withhold policy &amp; approvals
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "autopay"}
-          className={tabClass(tab === "autopay")}
-          onClick={() => choose("autopay")}
-        >
-          Auto-pay
-        </button>
+        {shown.includes("list") ? (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "list"}
+            className={tabClass(tab === "list")}
+            onClick={() => choose("list")}
+          >
+            Defaulters list
+          </button>
+        ) : null}
+        {shown.includes("policy") ? (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "policy"}
+            className={tabClass(tab === "policy")}
+            onClick={() => choose("policy")}
+          >
+            Withhold policy &amp; approvals
+          </button>
+        ) : null}
+        {shown.includes("autopay") ? (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "autopay"}
+            className={tabClass(tab === "autopay")}
+            onClick={() => choose("autopay")}
+          >
+            Auto-pay
+          </button>
+        ) : null}
       </div>
 
       {tab === "autopay" ? (

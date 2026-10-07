@@ -14,7 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { loadMasters, type MastersState } from "@/lib/masters";
-import { hasPermission } from "@/lib/rbac";
+import { canWriteModuleTab } from "@/lib/rbac";
 import { resolveSessionStaff } from "@/lib/staffResolve";
 import {
   agreementStatusLabel,
@@ -123,7 +123,8 @@ export function StaffAgreementPanel({
 
   const canEdit = useMemo(() => {
     if (!masters) return false;
-    return hasPermission(session, masters, "staff", "edit");
+    // Staff edit, or Staff → Employment agreements (director, 6 Oct 2026).
+    return canWriteModuleTab(session, masters, "staff", "agreements");
   }, [masters, session]);
 
   const effectiveMode: Mode =
@@ -712,6 +713,7 @@ export function StaffAgreementPanel({
       ) : null}
 
       <ErpTableShell exportAs="staff_agreements" exportTitle="Staff agreements">
+        <div className="overflow-x-auto">
         <ErpTable>
           <ErpTableHead>
             <tr>
@@ -882,6 +884,7 @@ export function StaffAgreementPanel({
             ) : null}
           </ErpTableBody>
         </ErpTable>
+        </div>
       </ErpTableShell>
 
       {editingId && editingAgreement?.status === "draft" && canEdit ? (

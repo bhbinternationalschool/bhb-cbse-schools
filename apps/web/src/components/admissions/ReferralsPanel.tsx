@@ -208,6 +208,7 @@ export function ReferralsPanel({ admissions, sis, canEdit, by }: { admissions: A
         ) : null}
         <div className="mt-2">
           <ErpTableShell>
+            <div className="overflow-x-auto">
             <ErpTable>
               <ErpTableHead>
                 <tr>
@@ -263,6 +264,7 @@ export function ReferralsPanel({ admissions, sis, canEdit, by }: { admissions: A
                 )}
               </ErpTableBody>
             </ErpTable>
+            </div>
           </ErpTableShell>
         </div>
       </div>

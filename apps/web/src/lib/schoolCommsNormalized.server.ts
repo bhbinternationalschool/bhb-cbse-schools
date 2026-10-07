@@ -30,6 +30,44 @@ export type SchoolCommsDeskBundle = Pick<
 const META_SELECT =
   "notice_count, news_count, album_count, photo_count, last_published_at, updated_at";
 
+const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+
+function canonicalCommsRow(row: unknown): unknown {
+  if (!row || typeof row !== "object" || Array.isArray(row)) return row;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(row as Record<string, unknown>)) {
+    if (v === "" || v === null || v === undefined || v === false) continue;
+    if (typeof v === "string" && ISO_TIMESTAMP.test(v)) {
+      const t = Date.parse(v);
+      out[k] = Number.isFinite(t) ? new Date(t).toISOString() : v;
+      continue;
+    }
+    out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * A comms desk (notices / news / albums / photos) in one spelling, for
+ * comparing a function holder's push with what is stored
+ * (lib/deskFeatureAuth.ts).
+ *
+ * Read back from the tables, a row is not spelt the way the browser holds
+ * it: "2026-10-06T10:00:00+00:00" for "…:00.000Z", "" for a field the
+ * browser left out. Compared raw, every published notice looked edited on
+ * every save — so a role allowed to ADD notices but not change them was
+ * refused as soon as one was out. Empty values are dropped and timestamps
+ * re-spelt on both sides; the push*DeskToDb row builders fill the same
+ * defaults back in, so what is saved does not change.
+ */
+export function canonicalCommsDesk<T extends object>(desk: T): T {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(desk as Record<string, unknown>)) {
+    out[k] = Array.isArray(v) ? v.map(canonicalCommsRow) : v;
+  }
+  return out as T;
+}
+
 async function resolveCtx(): Promise<{
   sb: SupabaseClient;
   tenantId: string;

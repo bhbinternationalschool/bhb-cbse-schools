@@ -24,6 +24,8 @@ import {
   listPayrollAudit,
   loadPayroll,
   markPayrollPaid,
+  payrollRunPaymentDate,
+  todayIstDate,
   mergePreservedAdjustments,
   monthHasCommittedRun,
   payrollAuditActionLabel,
@@ -58,8 +60,10 @@ import {
   resolveSessionStaff,
 } from "@/lib/staffResolve";
 import { loadIncrementState } from "@/lib/salaryIncrement";
+import { canSeeModuleTab } from "@/lib/rbac";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { StepChainGuide, type StepDef } from "@/components/ui/StepTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import {
   ErpTable,
@@ -83,6 +87,21 @@ import {
   StaffMyPayslips,
 } from "@/components/payroll/StaffSelfService";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+
+/**
+ * One month's salary, in order: make the run, check it, get it approved,
+ * then pay and record it. The tabs stay as they are; a guide over them
+ * says which step this is and what comes next.
+ */
+const PAYROLL_CYCLE_STEPS: StepDef<PayTab>[] = [
+  { id: "runs", title: "Runs", what: "Start the month's payroll run (a draft) from the assigned salary structures, attendance and leave." },
+  { id: "detail", title: "Run detail", what: "Check every staff line — days, earnings, deductions, advances — then submit the run." },
+  { id: "approvals", title: "Approvals", what: "The approver approves the submitted run, or returns it for correction." },
+  { id: "payslips", title: "Payslips", what: "Each staff member's payslip for the approved month." },
+  { id: "print", title: "Print payslips", what: "Print or share the payslips in bulk." },
+  { id: "bank", title: "Bank file", what: "Make the bank upload file (NEFT) for the net salaries." },
+  { id: "tally", title: "Tally sync", what: "Send the month's salary entries to Tally." },
+];
 
 type PayTab =
   | "dashboard"
@@ -189,6 +208,17 @@ export function PayrollWorkspace() {
     if (!masters) return false;
     return canViewStaffAdvancesDesk(session, masters);
   }, [masters, session]);
+
+  // Read-only payroll tabs a Payroll FUNCTION opens (Masters → Roles →
+  // "Payroll runs & payslips") for someone without the whole module. Runs,
+  // approvals, holds and increments write payroll and stay with the module.
+  const fnTabs = useMemo(() => {
+    if (allowed) return [] as PayTab[];
+    return (["payslips", "print", "reports"] as PayTab[]).filter((t) =>
+      canSeeModuleTab(session, masters, "payroll", t),
+    );
+  }, [allowed, session, masters]);
+  const seesTab = (t: PayTab) => allowed || fnTabs.includes(t);
 
   const advancesEdit = useMemo(() => {
     if (!masters) return false;
@@ -429,14 +459,14 @@ export function PayrollWorkspace() {
     refresh();
   }
 
-  function onPaid() {
+  function onPaid(paidOn: string) {
     if (!selected) return;
-    const r = markPayrollPaid(selected.id, session.fullName);
+    const r = markPayrollPaid(selected.id, session.fullName, paidOn);
     if (!r.ok) {
       flash(r.error, true);
       return;
     }
-    flash("Marked as paid");
+    flash(`Marked as paid on ${paidOn}`);
     setSelectedId(r.run.id);
     refresh();
   }
@@ -633,24 +663,40 @@ export function PayrollWorkspace() {
           { id: "mine", label: "My payslip", tone: "violet" },
           { id: "myAdvances", label: "My advances", tone: "teal" },
         ]
-      : advancesDesk
-        ? [
-            { id: "advances", label: "Staff advances", tone: "teal" },
-            { id: "myAdvances", label: "My advances", tone: "teal" },
-          ]
-        : [
-            { id: "mine", label: "My payslip", tone: "violet" },
-            { id: "myAdvances", label: "My advances", tone: "teal" },
-          ];
+      : [
+          ...(fnTabs.includes("payslips")
+            ? [{ id: "payslips" as const, label: "Payslips", tone: "amber" as const }]
+            : []),
+          ...(fnTabs.includes("print")
+            ? [{ id: "print" as const, label: "Print payslips", tone: "navy" as const }]
+            : []),
+          ...(fnTabs.includes("reports")
+            ? [{ id: "reports" as const, label: "Reports", tone: "slate" as const }]
+            : []),
+          ...(advancesDesk
+            ? [
+                { id: "advances" as const, label: "Staff advances", tone: "teal" as const },
+                { id: "myAdvances" as const, label: "My advances", tone: "teal" as const },
+              ]
+            : [
+                { id: "mine" as const, label: "My payslip", tone: "violet" as const },
+                { id: "myAdvances" as const, label: "My advances", tone: "teal" as const },
+              ]),
+        ];
 
   useEffect(() => {
     if (allowed) return;
+    if (fnTabs.includes(tab)) return;
+    if (fnTabs.length > 0 && tab === "dashboard") {
+      setTab(fnTabs[0]!);
+      return;
+    }
     if (advancesDesk && tab !== "advances" && tab !== "myAdvances") {
       setTab("advances");
       return;
     }
     if (!advancesDesk && tab !== "mine" && tab !== "myAdvances") setTab("mine");
-  }, [allowed, advancesDesk, tab]);
+  }, [allowed, advancesDesk, fnTabs, tab]);
 
   return (
     <ErpWorkspaceShell
@@ -707,6 +753,12 @@ export function PayrollWorkspace() {
         value={tab}
         onChange={(id) => setTab(id as PayTab)}
         items={tabs}
+      />
+      <StepChainGuide
+        chains={[{ label: "Monthly payroll", steps: PAYROLL_CYCLE_STEPS }]}
+        value={tab}
+        onChange={setTab}
+        visible={tabs.map((t) => t.id)}
       />
 
       {tab === "dashboard" && allowed ? (
@@ -778,6 +830,7 @@ export function PayrollWorkspace() {
             </div>
           </div>
           <ErpTableShell exportAs="payroll_runs" exportTitle="Payroll runs">
+            <div className="overflow-x-auto">
             <ErpTable>
               <ErpTableHead>
                 <tr className="text-[11px] text-[var(--muted)]">
@@ -846,6 +899,7 @@ export function PayrollWorkspace() {
                 ) : null}
               </ErpTableBody>
             </ErpTable>
+            </div>
           </ErpTableShell>
         </div>
       ) : null}
@@ -891,7 +945,7 @@ export function PayrollWorkspace() {
         />
       ) : null}
 
-      {tab === "payslips" && allowed ? (
+      {tab === "payslips" && seesTab("payslips") ? (
         <PayslipsAdmin
           runs={runs.filter(
             (r) =>
@@ -906,11 +960,11 @@ export function PayrollWorkspace() {
         />
       ) : null}
 
-      {tab === "print" && allowed ? (
+      {tab === "print" && seesTab("print") ? (
         <PrintPayslipsPanel academicYearCode={ay} />
       ) : null}
 
-      {tab === "reports" && allowed ? (
+      {tab === "reports" && seesTab("reports") ? (
         <PayrollReportsPanel academicYearCode={ay} />
       ) : null}
 
@@ -979,7 +1033,7 @@ function RunDetail({
   canApprove: boolean;
   onPublish: () => void;
   onRecall: () => void;
-  onPaid: () => void;
+  onPaid: (paidOn: string) => void;
   onDelete: () => void;
   onExport: () => void;
   onExportRegister: (format: "xlsx" | "pdf") => void;
@@ -994,6 +1048,8 @@ function RunDetail({
   readOnly?: boolean;
 }) {
   const [workflowNote, setWorkflowNote] = useState("");
+  // The day the salary was paid; empty = the lines' own date, else today.
+  const [paidOnDraft, setPaidOnDraft] = useState("");
   const net = run.lines.reduce((s, l) => s + l.netPay, 0);
   const payable = run.lines.reduce(
     (s, l) => s + (l.amountPayable ?? (l.juneHold ? 0 : l.netPay)),
@@ -1183,10 +1239,23 @@ function RunDetail({
           ) : null}
           {run.status === "posted" ? (
             <>
+              {/* The day the salary was actually paid — the books date the
+                  payment on it (not the day this button is pressed). */}
+              <label className="flex items-center gap-1 text-[11px] font-semibold">
+                Paid on
+                <input
+                  type="date"
+                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-1.5 py-1 text-[11px]"
+                  value={paidOnDraft || payrollRunPaymentDate(run) || todayIstDate()}
+                  min={`${run.month}-01`}
+                  max={todayIstDate()}
+                  onChange={(e) => setPaidOnDraft(e.target.value)}
+                />
+              </label>
               <button
                 type="button"
                 className="rounded-lg bg-[var(--primary)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--primary-foreground)]"
-                onClick={onPaid}
+                onClick={() => onPaid(paidOnDraft || payrollRunPaymentDate(run) || todayIstDate())}
               >
                 Mark paid
               </button>
@@ -1244,6 +1313,7 @@ function RunDetail({
       </div>
 
       <ErpTableShell exportAs="payroll_run_lines" exportTitle="Payroll run lines">
+        <div className="overflow-x-auto">
         <ErpTable minWidth="min-w-[780px]">
           <ErpTableHead>
             <tr>
@@ -1603,6 +1673,7 @@ function RunDetail({
             })}
           </ErpTableBody>
         </ErpTable>
+        </div>
       </ErpTableShell>
     </div>
   );

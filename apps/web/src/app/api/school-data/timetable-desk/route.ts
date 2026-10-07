@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
+import { SCHOOL_DATA_DESK_RBAC } from "@/lib/apiRouteAuth.server";
 import {
-  authorizeSchoolDataDesk,
-  SCHOOL_DATA_DESK_RBAC,
-} from "@/lib/apiRouteAuth.server";
+  deskReadGate,
+  deskWriteGate,
+  featurePushOutcome,
+  featureSavedResponse,
+} from "@/lib/deskFeatureGate.server";
 import type { TimetableState } from "@/lib/timetable";
 import { timetableDualWriteDbEnabled } from "@/lib/timetableDbConfig";
 import {
@@ -13,8 +16,12 @@ import {
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["timetable-desk"], "GET");
-  if (!auth.ok) return auth.response
+  // A Timetable function holder reads the whole timetable: it is pinned on
+  // every classroom wall, and building one class's grid or arranging a
+  // substitute needs the bell schedule and every other grid (clashes).
+  // What they may CHANGE is decided per slice on POST.
+  const gate = await deskReadGate(req, SCHOOL_DATA_DESK_RBAC["timetable-desk"]);
+  if (gate.mode === "deny") return gate.response;
   const { bundle, meta, ok } = await fetchTimetableDeskFromDb();
   if (!ok) {
     return NextResponse.json(
@@ -25,6 +32,7 @@ export async function GET(req: Request) {
   return NextResponse.json({
     ok: true,
     ...bundle,
+    ...(gate.mode === "feature" ? { functionOnly: true } : {}),
     gridCount: bundle.grids.length,
     substitutionCount: bundle.substitutions.length,
     updatedAt: meta?.updatedAt || new Date().toISOString(),
@@ -33,8 +41,8 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["timetable-desk"], "POST");
-  if (!auth.ok) return auth.response
+  const gate = await deskWriteGate(req, SCHOOL_DATA_DESK_RBAC["timetable-desk"]);
+  if (gate.mode === "deny") return gate.response;
   if (!timetableDualWriteDbEnabled()) {
     return NextResponse.json({
       ok: true,
@@ -48,6 +56,23 @@ export async function POST(req: Request) {
     body = (await req.json()) as TimetableState;
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  // Function holders (e.g. Timetable → Substitutions): merged onto the
+  // stored desk, only their functions' slices — a class grid only for their
+  // own classes when the function is limited to them.
+  if (gate.mode === "feature") {
+    const stored = await fetchTimetableDeskFromDb();
+    if (!stored.ok) {
+      return NextResponse.json(
+        { ok: false, error: "Could not read the saved timetable — nothing was written. Try again." },
+        { status: 503 },
+      );
+    }
+    const merged = featurePushOutcome(gate, "timetable", stored.bundle, body);
+    if (!merged.ok) return merged.response;
+    if (!merged.changed) return featureSavedResponse(false);
+    body = merged.state as unknown as TimetableState;
   }
 
   const result = await pushTimetableDeskToDb({
@@ -82,6 +107,7 @@ export async function POST(req: Request) {
     );
   }
 
+  if (gate.mode === "feature") return featureSavedResponse(true);
   return NextResponse.json({
     ok: true,
     gridCount: body.grids?.length ?? 0,

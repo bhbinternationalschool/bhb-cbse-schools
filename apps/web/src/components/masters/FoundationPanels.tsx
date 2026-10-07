@@ -58,6 +58,7 @@ import { LeaveApprovalSettingsPanel } from "@/components/masters/LeaveApprovalSe
 import { StaffAttendanceSettingsPanel } from "@/components/masters/StaffAttendanceSettingsPanel";
 import { StaffLeaveTypesPanel } from "@/components/masters/StaffLeaveTypesPanel";
 import { StaffAttendanceRulesPanel } from "@/components/masters/StaffAttendanceRulesPanel";
+import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import {
   MastersEmptyRow,
@@ -276,6 +277,32 @@ function SchoolProfileTextField({
   );
 }
 
+/**
+ * School setup, in the order it is used: the profile first (its name and
+ * identity print on everything), then the school day (attendance for
+ * students and staff reads it), then EPF/ESIC (payroll only, set once).
+ * The order is advice — none of these reads another.
+ */
+type SchoolStep = "profile" | "timings" | "statutory";
+
+const SCHOOL_STEPS: StepDef<SchoolStep>[] = [
+  {
+    id: "profile",
+    title: "Profile",
+    what: "Legal name, board and affiliation, address, contact numbers, website, social links and the collections UPI — printed on certificates, receipts and parent messages.",
+  },
+  {
+    id: "timings",
+    title: "Timings",
+    what: "School day hours for students and staff: a school default, then class-group and class-wise overrides where they differ.",
+  },
+  {
+    id: "statutory",
+    title: "EPF / ESIC",
+    what: "Establishment IDs, contribution rates, wage ceilings and estimated late-payment penalty slabs used by payroll.",
+  },
+];
+
 export function SchoolProfilePanel({
   state,
   commit,
@@ -285,13 +312,22 @@ export function SchoolProfilePanel({
 }) {
   const p = state.schoolProfile;
   const [draft, setDraft] = useState(p);
+  const [schoolStep, setSchoolStep] = useState<SchoolStep>("profile");
 
   function set<K extends keyof typeof draft>(key: K, value: (typeof draft)[K]) {
     setDraft((d) => ({ ...d, [key]: value }));
   }
 
   return (
-    <div className="space-y-6">
+    <StepTabs
+      aria-label="School setup steps"
+      steps={SCHOOL_STEPS}
+      value={schoolStep}
+      onChange={setSchoolStep}
+    >
+    {/* Every step stays mounted: Timings and EPF/ESIC hold unsaved drafts in
+        their own state, which a step switch must not throw away. */}
+    <div className={schoolStep === "profile" ? "" : "hidden"}>
     <MastersTabStack
       intro="Legal identity, contact numbers, social links, and school day timing — used on certificates, receipts, attendance (students & staff), and parent communications."
       tables={
@@ -521,9 +557,14 @@ export function SchoolProfilePanel({
         </MastersWorkCard>
       }
     />
-    <SchoolTimingPanel state={state} commit={commit} />
-    <StatutoryConfigPanel state={state} commit={commit} />
     </div>
+    <div className={schoolStep === "timings" ? "" : "hidden"}>
+      <SchoolTimingPanel state={state} commit={commit} />
+    </div>
+    <div className={schoolStep === "statutory" ? "" : "hidden"}>
+      <StatutoryConfigPanel state={state} commit={commit} />
+    </div>
+    </StepTabs>
   );
 }
 
@@ -1200,6 +1241,15 @@ function HolidayRuleRow({
   );
 }
 
+/**
+ * Holidays, in the order a session's calendar is built: take the government
+ * calendar first (approved rows land published), then draft the school's own
+ * rules on top (weekly offs, class-group days, working-day overrides), then
+ * publish the drafts — attendance only uses published rules — and review
+ * what is live.
+ */
+type HolidaysStep = "import" | "build" | "publish" | "review";
+
 export function HolidaysPanel({
   state,
   commit,
@@ -1207,6 +1257,7 @@ export function HolidaysPanel({
   state: MastersState;
   commit: Commit;
 }) {
+  const [holStep, setHolStep] = useState<HolidaysStep>("import");
   const session = useDemoSession();
   const ayBounds = useMemo(() => {
     const code = session.academicYearCode;
@@ -1480,12 +1531,51 @@ export function HolidaysPanel({
     return { label: `${label} · ${sessionAy}`, days };
   }, [ayBounds.startsOn, ayBounds.endsOn, sessionAy]);
 
+  const holidaySteps: StepDef<HolidaysStep>[] = [
+    {
+      id: "import",
+      title: "Govt calendar",
+      what: "The UP government holiday calendar for this session — approve a row (or all gazetted & national) and it lands published, straight onto attendance.",
+      badge: upSuggestions.length || undefined,
+    },
+    {
+      id: "build",
+      title: "Build policy",
+      what: "Draft a holiday rule: who it applies to, school / class-group / class scope, one-off or weekly, full or half day, paid for staff, working-day overrides.",
+    },
+    {
+      id: "publish",
+      title: "Publish drafts",
+      what: "Publish a draft so attendance uses it, or remove it.",
+      badge: drafts.length || undefined,
+    },
+    {
+      id: "review",
+      title: "Published",
+      what: "Holidays live on attendance this session — notify families of a one-off holiday, or unpublish a rule.",
+      badge: published.length || undefined,
+    },
+  ];
+
   return (
     <MastersTabStack
       intro={`Holiday policy for session ${sessionAy}: lists and matrix follow the header session selector. Choose who it applies to (students / teachers / non-teaching / both), then school or class-group scope · one-off or weekly · publish to apply on attendance.`}
       tables={
-        <>
-          {upSuggestions.length > 0 ? (
+        <StepTabs
+          aria-label="Holiday steps"
+          steps={holidaySteps}
+          value={holStep}
+          onChange={setHolStep}
+        >
+          {holStep === "import" && upSuggestions.length === 0 ? (
+            <p className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-3 text-sm text-[var(--muted)]">
+              Nothing pending from the UP government calendar
+              {sessionAy === UP_HOLIDAY_CALENDAR_SESSION
+                ? " — every date is already covered."
+                : ` — it is loaded for ${UP_HOLIDAY_CALENDAR_SESSION} only.`}
+            </p>
+          ) : null}
+          {holStep === "import" && upSuggestions.length > 0 ? (
             <MastersTableCard
               title={`UP government calendar ${UP_HOLIDAY_CALENDAR_SESSION} (${upSuggestions.length} pending)`}
             >
@@ -1562,7 +1652,7 @@ export function HolidaysPanel({
               </ul>
             </MastersTableCard>
           ) : null}
-          <MastersTablesRow>
+          {holStep === "review" ? (
             <MastersTableCard title={`Published (${published.length})`}>
               <ul className="divide-y divide-[var(--border)]">
                 {published.map((h) => (
@@ -1590,6 +1680,8 @@ export function HolidaysPanel({
                 ) : null}
               </ul>
             </MastersTableCard>
+          ) : null}
+          {holStep === "publish" ? (
             <MastersTableCard title={`Drafts (${drafts.length})`}>
               <ul className="divide-y divide-[var(--border)]">
                 {drafts.map((h) => (
@@ -1625,7 +1717,8 @@ export function HolidaysPanel({
                 ) : null}
               </ul>
             </MastersTableCard>
-          </MastersTablesRow>
+          ) : null}
+          {holStep === "build" ? (
           <MastersTableCard
             title={`Group matrix · ${matrixMonth.label}`}
             className="mt-3"
@@ -1672,9 +1765,11 @@ export function HolidaysPanel({
               resolves per class → group; staff uses school-wide rules only.
             </p>
           </MastersTableCard>
-        </>
+          ) : null}
+        </StepTabs>
       }
       work={
+        holStep !== "build" ? null : (
         <MastersWorkCard
           title="Holiday policy builder"
           hint="Draft → Principal publish"
@@ -1885,6 +1980,7 @@ export function HolidaysPanel({
             </button>
           </div>
         </MastersWorkCard>
+        )
       }
     />
   );
@@ -2072,8 +2168,39 @@ export function StaffMastersPanel({
   );
 }
 
+/**
+ * Leave setup, in the order it is built: the leave types and their caps
+ * first (approval needs something to approve), then who approves, then how
+ * attendance is taken, then the rules that adjust it and who they apply to.
+ */
+type LeaveSetupStep = "types" | "approval" | "attendance" | "rules";
+
+const LEAVE_SETUP_STEPS: StepDef<LeaveSetupStep>[] = [
+  {
+    id: "types",
+    title: "Leave types & caps",
+    what: "The kinds of leave staff can take (CL, ML, EL…), days allotted per academic year and what carries forward. Everything after this uses these types.",
+  },
+  {
+    id: "approval",
+    title: "Approval flow",
+    what: "How a leave request is approved — automatically, or in one or two levels — and how many minutes after start count as late.",
+  },
+  {
+    id: "attendance",
+    title: "Attendance settings",
+    what: "How staff attendance is taken: self-punch, WhatsApp IN/OUT, campus geofence, auto-applying punch rules, and syncing approved leave into the register.",
+  },
+  {
+    id: "rules",
+    title: "Attendance rules",
+    what: "Punch rules (late and early buffers and the rest) — build a rule, then assign it to the staff it applies to.",
+  },
+];
+
 /** Leave types, approval settings, and staff attendance adjustment rules. */
 export function LeaveMastersPanel() {
+  const [leaveStep, setLeaveStep] = useState<LeaveSetupStep>("types");
   return (
     <div className="space-y-4">
       <p className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-3 text-sm text-[var(--muted)]">
@@ -2090,10 +2217,17 @@ export function LeaveMastersPanel() {
         </Link>
         ; mark punches in Attendance → Staff.
       </p>
-      <LeaveApprovalSettingsPanel />
-      <StaffAttendanceSettingsPanel />
-      <StaffLeaveTypesPanel />
-      <StaffAttendanceRulesPanel />
+      <StepTabs
+        aria-label="Leave setup steps"
+        steps={LEAVE_SETUP_STEPS}
+        value={leaveStep}
+        onChange={setLeaveStep}
+      >
+        {leaveStep === "types" ? <StaffLeaveTypesPanel /> : null}
+        {leaveStep === "approval" ? <LeaveApprovalSettingsPanel /> : null}
+        {leaveStep === "attendance" ? <StaffAttendanceSettingsPanel /> : null}
+        {leaveStep === "rules" ? <StaffAttendanceRulesPanel /> : null}
+      </StepTabs>
     </div>
   );
 }

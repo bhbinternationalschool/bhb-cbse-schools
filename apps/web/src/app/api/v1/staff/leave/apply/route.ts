@@ -6,7 +6,7 @@ import {
   loadStaffHrServer,
   saveStaffHrServer,
 } from "@/lib/api/v1/staffLeave";
-import { applyLeave, loadStaffHr } from "@/lib/staffHr";
+import { applyLeave, loadStaffHr, normalizeHalfDaySession } from "@/lib/staffHr";
 import { leadershipStaffIds } from "@/lib/staffHomeKind.server";
 import { sendPushToSubjects } from "@/lib/webPush.server";
 
@@ -19,6 +19,8 @@ type Body = {
   fromDate?: string;
   toDate?: string;
   halfDay?: boolean;
+  /** "morning" | "afternoon" — which half is taken off. */
+  halfDaySession?: string;
   reason?: string;
 };
 
@@ -41,6 +43,7 @@ export async function POST(request: Request) {
     const typeCode = (body.typeCode || "").trim().toUpperCase();
     const fromDate = (body.fromDate || "").trim();
     const halfDay = !!body.halfDay;
+    const halfDaySession = halfDay ? normalizeHalfDaySession(body.halfDaySession) : "";
     const toDate = halfDay ? fromDate : (body.toDate || "").trim() || fromDate;
     const reason = (body.reason || "").trim();
     if (!typeCode) throw new ApiError("bad_request", "Choose a leave type", 400);
@@ -62,6 +65,7 @@ export async function POST(request: Request) {
       fromDate,
       toDate,
       halfDay,
+      halfDaySession,
       reason,
       appliedBy: ctx.session.fullName || "Staff",
     });
@@ -75,8 +79,8 @@ export async function POST(request: Request) {
       action: "edit",
       entityType: "staff_leave",
       entityId: result.request.id,
-      summary: `Leave applied: ${typeCode} ${fromDate}${toDate !== fromDate ? ` to ${toDate}` : ""}${halfDay ? " (half day)" : ""}`,
-      after: { typeCode, fromDate, toDate, halfDay },
+      summary: `Leave applied: ${typeCode} ${fromDate}${toDate !== fromDate ? ` to ${toDate}` : ""}${halfDay ? ` (half day${halfDaySession ? `, ${halfDaySession} off` : ""})` : ""}`,
+      after: { typeCode, fromDate, toDate, halfDay, halfDaySession },
       ip: meta.ip,
       userAgent: meta.userAgent,
     });

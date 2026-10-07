@@ -10,6 +10,7 @@ import type {
 } from "@/lib/attendance";
 import { attendanceDualWriteDbEnabled } from "@/lib/attendanceDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { fetchAllPages } from "@/lib/supabase/pageAll";
 
 export type AttendanceDeskAncillary = Pick<
   AttendanceState,
@@ -177,29 +178,52 @@ export async function pushAttendanceDeskAncillaryToDb(
 }
 
 export async function fetchAttendanceDeskAncillaryFromDb(): Promise<AttendanceDeskAncillary> {
+  return (await readAttendanceDeskAncillary()).ancillary;
+}
+
+/**
+ * The ancillary as stored, and whether every part of it was read. The
+ * plain fetch above reads a failed table as empty — fine for a screen, not
+ * for a save that merges onto it (a function holder's push to
+ * school-data/attendance-registers), which must write nothing then.
+ */
+export async function readAttendanceDeskAncillary(): Promise<{
+  ok: boolean;
+  ancillary: AttendanceDeskAncillary;
+}> {
   const c = await ctx();
-  if (!c) return emptyAncillary();
+  if (!c) return { ok: false, ancillary: emptyAncillary() };
   const { sb, tenantId } = c;
 
-  const [{ data: policyRow }, { data: nudgeRows }, { data: exceptionRows }] =
-    await Promise.all([
-      sb
-        .from("attendance_desk_policy")
-        .select("*")
-        .eq("tenant_id", tenantId)
-        .maybeSingle(),
-      sb
-        .from("attendance_desk_absent_nudges")
-        .select("*")
-        .eq("tenant_id", tenantId)
-        .order("sent_at", { ascending: false })
-        .limit(500),
+  const [
+    { data: policyRow, error: policyErr },
+    { data: nudgeRows, error: nudgeErr },
+    { rows: exceptionRows, error: exceptionErr },
+  ] = await Promise.all([
+    sb
+      .from("attendance_desk_policy")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .maybeSingle(),
+    sb
+      .from("attendance_desk_absent_nudges")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .order("sent_at", { ascending: false })
+      .limit(500),
+    // Paged: the push prunes exceptions to the ids it is given, and
+    // PostgREST stops at 1,000 rows.
+    fetchAllPages<Record<string, unknown>>((from, to) =>
       sb
         .from("attendance_desk_exceptions")
         .select("*")
         .eq("tenant_id", tenantId)
-        .order("created_at", { ascending: false }),
-    ]);
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+  ]);
+  const ok = !policyErr && !nudgeErr && !exceptionErr;
 
   const policy: AttendancePolicy = policyRow
     ? {
@@ -212,7 +236,7 @@ export async function fetchAttendanceDeskAncillaryFromDb(): Promise<AttendanceDe
       }
     : defaultPolicy();
 
-  return {
+  const ancillary: AttendanceDeskAncillary = {
     policy,
     absentNudges: (nudgeRows ?? []).map(
       (r): AbsentNudgeLog => ({
@@ -247,6 +271,7 @@ export async function fetchAttendanceDeskAncillaryFromDb(): Promise<AttendanceDe
       }),
     ),
   };
+  return { ok, ancillary };
 }
 
 export async function fetchOpenExceptionCount(): Promise<number> {

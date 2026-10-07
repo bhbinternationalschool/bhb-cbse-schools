@@ -192,6 +192,7 @@ export function ExamReadinessDashboard(props: {
           </summary>
           <div className="px-3 pb-3">
             <ErpTableShell density="compact" exportAs={`exam_readiness_${b.term.code}`} exportTitle={`${b.term.label} · result readiness`}>
+              <div className="overflow-x-auto">
               <ErpTable minWidth="min-w-[640px]">
                 <ErpTableHead>
                   <tr>
@@ -213,6 +214,7 @@ export function ExamReadinessDashboard(props: {
                   ))}
                 </ErpTableBody>
               </ErpTable>
+              </div>
             </ErpTableShell>
           </div>
         </details>

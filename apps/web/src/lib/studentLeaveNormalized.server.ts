@@ -11,6 +11,7 @@ import type {
 } from "@/lib/studentLeave";
 import { studentLeaveDualWriteDbEnabled } from "@/lib/studentLeaveDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { fetchAllPages } from "@/lib/supabase/pageAll";
 
 export type StudentLeaveDeskSyncMeta = {
   requestCount: number;
@@ -235,8 +236,17 @@ export async function fetchStudentLeaveDeskFromDb(): Promise<{
   if (!ctx) return { bundle: empty, meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
+  // Paged: PostgREST stops at 1,000 rows, and the whole desk is pushed
+  // back (pruning) from a copy read here.
   const [{ data: requestRows, error: requestErr }, { data: metaRow }] = await Promise.all([
-    sb.from("student_leave_desk_requests").select("*").eq("tenant_id", tenantId),
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb
+        .from("student_leave_desk_requests")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ).then((r) => ({ data: r.rows, error: r.error ? { message: r.error } : null })),
     sb
       .from("student_leave_desk_sync_meta")
       .select(META_SELECT)

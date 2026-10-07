@@ -312,6 +312,7 @@ export function AdmissionsKbPanel({ masters, canEdit, by }: { masters: MastersSt
         </p>
       ) : (
         <ErpTableShell>
+          <div className="overflow-x-auto">
           <ErpTable>
             <ErpTableHead>
               <tr>
@@ -373,6 +374,7 @@ export function AdmissionsKbPanel({ masters, canEdit, by }: { masters: MastersSt
               })}
             </ErpTableBody>
           </ErpTable>
+          </div>
         </ErpTableShell>
       )}
 

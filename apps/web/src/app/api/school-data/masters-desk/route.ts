@@ -15,6 +15,11 @@ import {
 import { fetchMastersFromRowTables } from "@/lib/mastersRowTables.server";
 import { guardMastersOverwrite } from "@/lib/mastersWriteGuard";
 import { guardMastersRevision } from "@/lib/mastersRevisionGuard";
+import {
+  deskWriteGate,
+  featurePushOutcome,
+  featureSavedResponse,
+} from "@/lib/deskFeatureGate.server";
 
 export const runtime = "nodejs";
 
@@ -172,8 +177,11 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["masters-desk"], "POST");
-  if (!auth.ok) return auth.response
+  // The whole of Masters, or some of its functions (a teacher's Class
+  // subjects) — lib/deskFeatureGate.server.ts.
+  const gate = await deskWriteGate(req, SCHOOL_DATA_DESK_RBAC["masters-desk"]);
+  if (gate.mode === "deny") return gate.response;
+  const featureGate = gate.mode === "feature" ? gate : null;
   if (!mastersDualWriteDbEnabled()) {
     return NextResponse.json({
       ok: true,
@@ -190,7 +198,7 @@ export async function POST(req: Request) {
   }
 
   const { version: _v, baseUpdatedAt, ...rest } = body;
-  const state = { version: 2 as const, ...rest };
+  let state = { version: 2 as const, ...rest } as MastersState;
 
   const { bundle: stored, meta, readFailed } = await fetchMastersDeskFromDb();
 
@@ -228,7 +236,11 @@ export async function POST(req: Request) {
     baseUpdatedAt ?? null,
     meta?.updatedAt ?? meta?.lastUpdatedAt ?? null,
   );
-  if (!revision.allow) {
+  // Function-only writers are exempt: their browser is served the teaching
+  // subset with no revision, and their push is merged row by row onto the
+  // stored desk below — nothing of theirs can overwrite a newer save
+  // outside their own classes.
+  if (!revision.allow && !featureGate) {
     console.warn(
       `[masters-desk] rejected stale push`,
       `base=${baseUpdatedAt} stored=${revision.storedUpdatedAt}`,
@@ -244,6 +256,24 @@ export async function POST(req: Request) {
   }
   if (revision.reason === "unversioned" && meta) {
     console.warn("[masters-desk] unversioned push accepted (legacy client)");
+  }
+
+  // Function-only writers: the stored desk is the base, and only the slices
+  // their functions own are lifted in — row by row, inside their classes.
+  // Their browser holds the teaching subset only, so anything else in the
+  // push is not theirs to save and is ignored, never written.
+  if (featureGate) {
+    const className = new Map((stored.classes ?? []).map((c) => [c.id, c.name]));
+    const merged = featurePushOutcome(
+      featureGate,
+      "masters",
+      stored,
+      state,
+      (id) => className.get(id) || "That class",
+    );
+    if (!merged.ok) return merged.response;
+    if (!merged.changed) return featureSavedResponse(false);
+    state = { ...(merged.state as unknown as MastersState), version: 2 };
   }
 
   // A client must not be able to replace the class-id generation wholesale.
@@ -279,6 +309,11 @@ export async function POST(req: Request) {
       { error: pushed.error || "Masters push failed" },
       { status: 500 },
     );
+  }
+  if (featureGate) {
+    // No revision back: this browser holds the teaching subset and must
+    // never take it as a base for a whole-desk push.
+    return featureSavedResponse(true);
   }
   return NextResponse.json({
     ok: true,

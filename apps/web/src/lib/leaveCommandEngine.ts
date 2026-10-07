@@ -94,6 +94,7 @@ export type DeskLeave = {
   toDate: string;
   days: number;
   halfDay: boolean;
+  halfDaySession?: "" | "morning" | "afternoon";
   status: string;
   appliedAt: string;
   decidedBy: string;
