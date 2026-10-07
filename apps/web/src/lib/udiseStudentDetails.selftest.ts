@@ -19,6 +19,7 @@ import {
   udiseAadhaarVerifiedAgainstDob,
   udiseEmptyRow,
   udiseIsBlank,
+  udiseAdmissionDateIso,
   udiseNamesCompatible,
   udiseRowsToMatrix,
   isConfidentUdiseMatch,
@@ -245,6 +246,13 @@ const [mbu] = previewOf([
   rowOf({ fullName: "AARVI SINGH", pen: "23220880281", mbuStatus: "MBU Pending" }),
 ]);
 check("mbu: recorded as a fill, not a permanent flag", mbu?.tone, "fill");
+
+// The portal's admission date is dd/mm/yyyy, and an unknown one stays blank —
+// a child created from a UDISE+ row must never be "admitted" on import day.
+check("admission date dd/mm/yyyy", udiseAdmissionDateIso("10/02/2023"), "2023-02-10");
+check("admission date single digits", udiseAdmissionDateIso("1-7-2024"), "2024-07-01");
+check("admission date NA", udiseAdmissionDateIso("NA"), "");
+check("admission date blank", udiseAdmissionDateIso(""), "");
 
 if (failures) {
   console.error(`udiseStudentDetails selftest: ${failures} failure(s)`);

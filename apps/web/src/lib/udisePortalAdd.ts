@@ -139,8 +139,11 @@ export function buildUdiseAddPlan(s: SisStudent, hh: Household | undefined): Udi
   if (second) fields.push({ control: "secondaryMobile", kind: "text", value: second, label: "Alternate mobile", shown: second });
   if (s.isCwsn) fields.push({ control: "cwsnYN", kind: "radio", value: "1", label: "CWSN", shown: "Yes" });
   else left.push("CWSN (Yes/No)");
-  // Optional on the portal (rule 4.1.9); never guessed from the join date.
-  if (s.joinedOn) hints.push(`Admission date is optional. The ERP says joined this session on ${dmy(s.joinedOn) || s.joinedOn}; use the admission register's date if you fill it.`);
+  // Optional on the portal (rule 4.1.9). The ERP's joinedOn is NOT shown or
+  // filled here: until 7 Oct 2026 the student import overwrote the day of
+  // most join dates with the month (2023-02-10 → 2023-02-02), so a date read
+  // off the ERP would put that error on the government record.
+  hints.push("Admission date is optional. If you fill it, take it from the paper admission register, not from the ERP.");
   if (s.admissionNo) hints.push(`Admission no. ${s.admissionNo}`);
   return { fields, leftForYou: left, hints };
 }

@@ -26,6 +26,13 @@ assert.equal(val(full, "minorityId"), "7");
 assert.equal(val(full, "ewsYN"), "2");
 assert.equal(val(full, "bloodGroup"), "3");
 assert.equal(val(full, "admnNumber"), "A-1");
+// The ERP's joinedOn carried the day-overwritten-by-month fault (7 Oct 2026):
+// the admission date on the portal comes from the paper register, never from it.
+{
+  const p2 = buildUdiseFillPlan(st({ joinedOn: "2023-02-02" }), hh);
+  assert.equal(val(p2, "admnStartDate"), undefined, "admission date is never filled from joinedOn");
+  assert.ok(!/2023-02-02|02\/02\/2023/.test(JSON.stringify(p2)), "the ERP join date appears nowhere in the fill plan");
+}
 assert.equal(val(full, "rollNumber"), "12");
 assert.equal(val(full, "heightInCm"), "102");
 assert.equal(val(full, "weightInKg"), "16.5");
