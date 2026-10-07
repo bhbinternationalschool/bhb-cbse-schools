@@ -250,6 +250,7 @@ SELFTESTS=(
   test:udise-portal-api
   test:udise-portal-fill
   test:udise-portal-student-sync
+  test:udise-school-profile
   test:udise-portal-add
   test:udise-portal-reconcile
   test:lead-worklist

@@ -324,6 +324,7 @@
     "test:udise-portal-api": "npx tsx src/lib/udisePortalApi.selftest.ts",
     "test:udise-portal-fill": "npx tsx src/lib/udisePortalFill.selftest.ts",
     "test:udise-portal-student-sync": "npx tsx src/lib/udisePortalStudentSync.selftest.ts",
+    "test:udise-school-profile": "npx tsx src/lib/udiseSchoolProfile.selftest.ts",
     "test:udise-portal-add": "npx tsx src/lib/udisePortalAdd.selftest.ts",
     "test:udise-portal-reconcile": "npx tsx src/lib/udisePortalReconcile.selftest.ts",
     "test:lead-worklist": "npx tsx src/lib/leadWorklist.selftest.ts",

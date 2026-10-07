@@ -5,6 +5,7 @@ import Link from "next/link";
 import { UdisePortalSyncCard } from "@/components/students/UdisePortalSyncCard";
 import { UdiseSchoolAnswersCard } from "@/components/students/UdiseSchoolAnswersCard";
 import { UdiseTeacherSyncCard } from "@/components/students/UdiseTeacherSyncCard";
+import { UdiseSchoolProfileCard } from "@/components/students/UdiseSchoolProfileCard";
 import type { MastersState } from "@/lib/masters";
 import { studentsInSession, type SisState } from "@/lib/sis";
 import {
@@ -134,6 +135,9 @@ export function UdiseRobotPanel({
       </div>
       <div className="mt-3">
         <UdiseTeacherSyncCard />
+      </div>
+      <div className="mt-3">
+        <UdiseSchoolProfileCard />
       </div>
     </section>
   );
