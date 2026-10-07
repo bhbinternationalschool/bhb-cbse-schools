@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { UpiPayButton } from "@/components/payments/UpiPayButton";
+import { recordUpiProof, useRecordedUpiProofs } from "@/lib/upiProofsClient";
 import { loadMasters, type MastersState } from "@/lib/masters";
 import {
   formatInr,
@@ -47,6 +49,9 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
   );
   const [mode, setMode] = useState<PayrollPaymentMode>("cash");
   const [note, setNote] = useState("");
+  // The UPI payment made for the advance being issued (Pay by UPI button);
+  // recorded against the advance once it exists.
+  const [pendingUpi, setPendingUpi] = useState<{ utr: string; paidOn: string; payeeVpa: string } | null>(null);
   const [showClosed, setShowClosed] = useState(true);
 
   const [viewStaffId, setViewStaffId] = useState("");
@@ -96,6 +101,9 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
     }
     return [...list].sort((a, b) => b.givenDate.localeCompare(a.givenDate));
   }, [advances, showClosed, viewStaffId, tick]);
+  // UTRs recorded for these advances — from Pay by UPI or a screenshot
+  // confirmed on WhatsApp (api/payments/upi-proofs).
+  const upiPaid = useRecordedUpiProofs("staff_advance", visible.map((a) => a.id), tick);
 
   // Newest advance first; amounts sort by their rupees, not their labels.
   const advSort = useTableSort(
@@ -143,6 +151,22 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
       source: "cash",
     });
     if (!r.ok) return flash(r.error, true);
+    if (pendingUpi) {
+      const adv = r.advance;
+      void recordUpiProof({
+        utr: pendingUpi.utr,
+        amountPaise: Math.round(adv.amount * 100),
+        paidOn: pendingUpi.paidOn,
+        payeeName: adv.fullName,
+        payeeVpa: pendingUpi.payeeVpa,
+        targetKind: "staff_advance",
+        targetId: adv.id,
+        targetLabel: `Advance ${adv.givenDate} — ${adv.fullName}`,
+      }).then((rec) => {
+        if (!rec.ok) flash(`Advance issued, but the UTR was not recorded: ${rec.error}`, true);
+      });
+      setPendingUpi(null);
+    }
     flash(
       `Advance ${formatInr(r.advance.amount)} issued to ${r.advance.empCode}`,
     );
@@ -307,7 +331,27 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
             placeholder="Reason / reference"
           />
         </label>
-        <div className="flex items-end">
+        <div className="flex flex-wrap items-end gap-2">
+          {/* Pay it by UPI first; the UTR from the app's screenshot goes into
+              the note and the mode/date are set — then Issue advance. */}
+          {(() => {
+            const st = masters?.staff.find((x) => x.id === staffId);
+            return st && amount > 0 ? (
+              <UpiPayButton
+                payeeName={st.fullName}
+                payeeVpa={st.upiId || ""}
+                payeeMobile={st.mobile || ""}
+                amountPaise={Math.round(amount * 100)}
+                note={`Advance · ${st.empCode || st.fullName}`}
+                onPaid={(p) => {
+                  setPendingUpi({ utr: p.utr, paidOn: p.paidOn, payeeVpa: p.payeeVpa });
+                  setMode("upi");
+                  setGivenDate(p.paidOn);
+                  setNote((n) => [n.trim(), `UTR ${p.utr}`].filter(Boolean).join(" · "));
+                }}
+              />
+            ) : null;
+          })()}
           <button
             type="button"
             className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-xs font-semibold text-white"
@@ -472,6 +516,7 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
                       {a.givenDate}
                       <span className="block text-[10px] text-[var(--muted)]">
                         {a.paymentMode}
+                        {upiPaid.get(a.id) ? ` · UTR ${upiPaid.get(a.id)!.utr}` : ""}
                       </span>
                     </td>
                     <td className="py-2 pr-2">

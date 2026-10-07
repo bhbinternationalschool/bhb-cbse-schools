@@ -399,6 +399,28 @@ async function delegateActiveFlow(
   const mobile10 = waNormalizeLocal10(opts.fromWaId);
   const inbound = { ...opts, fromUnified: true as const };
 
+  // A UPI payment screenshot from staff who pay people: read it, find the
+  // payment it pays, ask with buttons (lib/waUpiProof.server; director,
+  // 7 Oct 2026). Ahead of attendance and the desk so a captioned screenshot
+  // is not read as a command; any other photo is left alone.
+  if (
+    (flow === "teacher" || flow === "staff" || flow === "owner") &&
+    opts.document?.mediaId &&
+    /^image\//i.test(opts.document.mimeType || "")
+  ) {
+    const { handleStaffUpiScreenshot, sendUpiProofReply } = await import("@/lib/waUpiProof.server");
+    const upi = await handleStaffUpiScreenshot({
+      fromWaId: opts.fromWaId,
+      mediaId: opts.document.mediaId,
+      mimeType: opts.document.mimeType,
+      waMessageId: opts.waMessageId,
+    });
+    if (upi.handled) {
+      const sent = await sendUpiProofReply(opts.fromWaId, upi.reply);
+      return { replied: sent, escalate: false, audience: upi.audience, stub: false };
+    }
+  }
+
   if (flow === "teacher" || flow === "staff" || flow === "owner") {
     // "Show my attendance", "Mera attendance present karna hai" — the
     // sender's own punch, in their own words. See detectOwnAttendanceAsk.
@@ -2304,6 +2326,17 @@ export async function handleWaUnifiedInbound(opts: {
   // "parent" flow (the common case) never has flows re-selected per
   // message, so a naive 7th-flow implementation would have this tap
   // silently swallowed by whatever bot the contact is already talking to.
+  // A tap on the UPI screenshot buttons (lib/waUpiProof.server) — self-
+  // describing, like RSVP taps, so it is caught before any flow routing.
+  if (rawText.startsWith("upiproof|")) {
+    const { handleUpiProofTap, sendUpiProofReply } = await import("@/lib/waUpiProof.server");
+    const tap = await handleUpiProofTap(opts.fromWaId, rawText);
+    if (tap.handled) {
+      const sent = await sendUpiProofReply(opts.fromWaId, tap.reply);
+      return { replied: sent, escalate: false, audience: tap.audience, stub: false };
+    }
+  }
+
   if (rawText.startsWith("evt_rsvp_")) {
     const { handleInboundEventRsvp } = await import("@/lib/waEventsRsvp.server");
     const handled = await handleInboundEventRsvp(opts.fromWaId, rawText);

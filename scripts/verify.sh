@@ -179,6 +179,8 @@ SELFTESTS=(
   test:ncf-official
   test:student-curriculum
   test:subject-masters
+  test:upi-pay
+  test:upi-proof-match
   test:expense-range
   test:payroll-paid-on
   test:masters-change-auth

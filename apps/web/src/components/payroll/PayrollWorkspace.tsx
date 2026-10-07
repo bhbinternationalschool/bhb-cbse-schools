@@ -4,6 +4,9 @@ import { useEffect, useMemo, useState, Fragment } from "react";
 import Link from "next/link";
 import { Wallet } from "lucide-react";
 import { loadMasters, currentAcademicYearCode, type MastersState } from "@/lib/masters";
+import type { StaffRecord } from "@/lib/foundationMasters";
+import { UpiPayButton, type UpiPaid } from "@/components/payments/UpiPayButton";
+import { recordUpiProof, useRecordedUpiProofs } from "@/lib/upiProofsClient";
 import {
   loadSalarySetup,
   normalizeSalarySettings,
@@ -24,6 +27,7 @@ import {
   listPayrollAudit,
   loadPayroll,
   markPayrollPaid,
+  recordPayrollLinePayment,
   payrollRunPaymentDate,
   todayIstDate,
   mergePreservedAdjustments,
@@ -926,6 +930,29 @@ export function PayrollWorkspace() {
             onRemoveLine={onRemoveLine}
             onEditComponent={onEditComponent}
             onEditAdjustments={onEditAdjustments}
+            onLinePaid={(staffId, p) => {
+              const r = recordPayrollLinePayment(selected.id, staffId, { mode: "upi", date: p.paidOn, ref: p.utr }, session.fullName);
+              if (!r.ok) {
+                flash(r.error, true);
+                return;
+              }
+              const line = selected.lines.find((x) => x.staffId === staffId);
+              void recordUpiProof({
+                utr: p.utr,
+                amountPaise: Math.round(((line?.amountPayable ?? line?.netPay) || 0) * 100),
+                paidOn: p.paidOn,
+                payeeName: line?.fullName || "",
+                payeeVpa: p.payeeVpa,
+                targetKind: "payroll_line",
+                targetId: `${selected.id}|${staffId}`,
+                targetLabel: `Salary ${selected.month} — ${line?.fullName || staffId}`,
+              }).then((rec) => {
+                if (!rec.ok) flash(`UTR saved on the line, but: ${rec.error}`, true);
+              });
+              flash(`UTR ${p.utr} recorded`);
+              refresh();
+            }}
+            staffById={(id) => masters?.staff.find((x) => x.id === id)}
             readOnly={readOnly}
           />
         ) : (
@@ -1021,6 +1048,8 @@ function RunDetail({
   onRemoveLine,
   onEditComponent,
   onEditAdjustments,
+  onLinePaid,
+  staffById,
   readOnly = false,
 }: {
   run: PayrollRun;
@@ -1045,9 +1074,18 @@ function RunDetail({
     staffId: string,
     patch: Parameters<typeof updateDraftLineAdjustments>[2],
   ) => void;
+  onLinePaid: (staffId: string, paid: UpiPaid) => void;
+  staffById: (id: string) => StaffRecord | undefined;
   readOnly?: boolean;
 }) {
   const [workflowNote, setWorkflowNote] = useState("");
+  // UTRs recorded for this run's salary lines — from the Pay UPI button or a
+  // screenshot confirmed on WhatsApp (api/payments/upi-proofs).
+  const upiPaid = useRecordedUpiProofs(
+    "payroll_line",
+    run.status === "posted" || run.status === "paid" ? run.lines.map((l) => `${run.id}|${l.staffId}`) : [],
+    run.lockVersion || 0,
+  );
   // The day the salary was paid; empty = the lines' own date, else today.
   const [paidOnDraft, setPaidOnDraft] = useState("");
   const net = run.lines.reduce((s, l) => s + l.netPay, 0);
@@ -1406,6 +1444,32 @@ function RunDetail({
                     </td>
                     <td className="px-3 py-2 text-right">
                       <span className="inline-flex items-center gap-1">
+                        {/* Pay this salary by UPI and record its UTR from the
+                            app's screenshot (director, 7 Oct 2026). */}
+                        {(run.status === "posted" || run.status === "paid") && !readOnly ? (
+                          (() => {
+                            const st = staffById(l.staffId);
+                            const amt = l.amountPayable ?? (l.juneHold ? 0 : l.netPay);
+                            return amt > 0 ? (
+                              <UpiPayButton
+                                label={
+                                  upiPaid.get(`${run.id}|${l.staffId}`)
+                                    ? `Paid ✓ ${upiPaid.get(`${run.id}|${l.staffId}`)!.utr.slice(-4)}`
+                                    : /UTR \d{12}/.test(l.note || "")
+                                      ? "Paid ✓ UPI"
+                                      : "Pay UPI"
+                                }
+                                payeeName={l.fullName}
+                                payeeVpa={st?.upiId || ""}
+                                payeeMobile={st?.mobile || ""}
+                                amountPaise={Math.round(amt * 100)}
+                                note={`Salary ${run.month} · ${l.empCode || l.fullName}`}
+                                earliest={`${run.month}-01`}
+                                onPaid={(p) => onLinePaid(l.staffId, p)}
+                              />
+                            ) : null;
+                          })()
+                        ) : null}
                         <button
                           type="button"
                           className="text-[11px] font-semibold text-[var(--brand-deep)]"

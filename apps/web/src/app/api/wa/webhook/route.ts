@@ -366,6 +366,23 @@ export async function POST(req: Request) {
         const hh = household;
         void trackServerWork((async () => {
           try {
+            // A member of staff who is also a parent here, sending a UPI
+            // payment screenshot, is recording a school payment — not
+            // homework or a UDISE document (lib/waUpiProof.server; director,
+            // 7 Oct 2026). Anyone else's photo goes on exactly as before.
+            if (media.mediaType === "image") {
+              const { handleStaffUpiScreenshot, sendUpiProofReply } = await import("@/lib/waUpiProof.server");
+              const upi = await handleStaffUpiScreenshot({
+                fromWaId: msg.fromWaId,
+                mediaId: media.mediaId,
+                mimeType: media.mimeType,
+                waMessageId: msg.waMessageId,
+              });
+              if (upi.handled) {
+                await sendUpiProofReply(msg.fromWaId, upi.reply);
+                return;
+              }
+            }
             // Homework first, and ONLY when homework is actually open for
             // this family — the same gate the transport pin uses. A family
             // the school has just asked for a photograph of finished work is

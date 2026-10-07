@@ -353,6 +353,8 @@
     "test:ncf-official": "npx tsx src/lib/ncfOfficial.selftest.ts",
     "test:student-curriculum": "npx tsx src/lib/studentCurriculum.selftest.ts",
     "test:subject-masters": "npx tsx src/lib/subjectMasters.selftest.ts",
+    "test:upi-pay": "npx tsx src/lib/upiPay.selftest.ts",
+    "test:upi-proof-match": "npx tsx src/lib/upiProofMatch.selftest.ts",
     "test:expense-range": "npx tsx src/lib/expenseRange.selftest.ts",
     "test:payroll-paid-on": "npx tsx src/lib/payrollPaidOn.selftest.ts",
     "test:masters-change-auth": "npx tsx src/lib/mastersChangeAuth.selftest.ts",

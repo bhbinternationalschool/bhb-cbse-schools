@@ -19,6 +19,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { UpiPayButton } from "@/components/payments/UpiPayButton";
 import { Check, FileText, Plus, Trash2, Undo2 } from "lucide-react";
 import { formatInr } from "@/lib/fees";
 import {
@@ -515,6 +516,21 @@ export function VoucherEntryPanel({
             onChange={(e) => setInstrumentRef(e.target.value)}
           />
         </label>
+        {/* Pay this voucher by UPI and take the UTR off the app's success
+            screenshot (director, 7 Oct 2026). Fills mode, UTR and date —
+            the voucher is still posted with the button below. */}
+        {kind === "payment" && totals.dr > 0 ? (
+          <UpiPayButton
+            payeeName={partyName.trim()}
+            amountPaise={totals.dr}
+            note={narration.trim() || "Payment"}
+            onPaid={(p) => {
+              setInstrumentMode("upi");
+              setInstrumentRef(p.utr);
+              setDate(p.paidOn);
+            }}
+          />
+        ) : null}
       </div>
 
       <div className="mt-3 space-y-2">

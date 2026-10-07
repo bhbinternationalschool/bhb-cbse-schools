@@ -1623,6 +1623,51 @@ export function recallPayrollToDraft(
 }
 
 /**
+ * One staff member's salary was paid (by UPI, from the ERP's "Pay by UPI" —
+ * director, 7 Oct 2026): record the mode, the day and the UPI reference on
+ * their line. Only on a posted or paid run, and only these three fields —
+ * the amounts the book already holds do not move. The reference is added to
+ * the line's note, where the payslip and the registers already show it.
+ */
+export function recordPayrollLinePayment(
+  runId: string,
+  staffId: string,
+  paid: { mode: PayrollPaymentMode; date: string; ref: string },
+  by: string,
+): { ok: true; run: PayrollRun } | { ok: false; error: string } {
+  const state = loadPayroll();
+  const run = state.runs.find((r) => r.id === runId);
+  if (!run) return { ok: false, error: "Run not found" };
+  if (run.status !== "posted" && run.status !== "paid") {
+    return { ok: false, error: "Publish the run before recording a salary payment" };
+  }
+  const line = run.lines.find((l) => l.staffId === staffId);
+  if (!line) return { ok: false, error: "That staff member is not on this run" };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(paid.date)) return { ok: false, error: "Enter the date it was paid" };
+  const ref = paid.ref.trim();
+  const note = ref && !(line.note || "").includes(ref)
+    ? [line.note?.trim(), `UTR ${ref}`].filter(Boolean).join(" · ")
+    : line.note || "";
+  const next: PayrollRun = {
+    ...run,
+    lines: run.lines.map((l) =>
+      l.staffId === staffId ? { ...l, paymentMode: paid.mode, paymentDate: paid.date, note } : l,
+    ),
+    lockVersion: (run.lockVersion || 0) + 1,
+  };
+  upsertPayrollRun(next);
+  appendPayrollAudit({
+    by,
+    action: "line_edited",
+    runId: next.id,
+    month: next.month,
+    academicYearCode: next.academicYearCode,
+    detail: `${line.fullName}: paid by ${paid.mode} on ${paid.date}${ref ? ` · UTR ${ref}` : ""}`,
+  });
+  return { ok: true, run: next };
+}
+
+/**
  * The day a run's salary was actually paid, as the office enters it — the
  * books date the salary payment on this day (payroll_ledger_post reads
  * paid_at in India time). Director, 7 Oct 2026: "it should be enter date for

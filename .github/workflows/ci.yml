@@ -171,6 +171,14 @@ jobs:
         working-directory: apps/web
         run: npm run test:subject-masters
 
+      - name: Self-test — UPI pay link and success-screenshot reading
+        working-directory: apps/web
+        run: npm run test:upi-pay
+
+      - name: Self-test — WhatsApp UPI screenshot finds the payment it pays
+        working-directory: apps/web
+        run: npm run test:upi-proof-match
+
       - name: Self-test — dashboard expense periods (India days, Monday weeks)
         working-directory: apps/web
         run: npm run test:expense-range
