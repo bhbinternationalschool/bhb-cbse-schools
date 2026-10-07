@@ -125,3 +125,47 @@ export async function setStudentPhotoByClassTeacher(
   }
   return r;
 }
+
+/**
+ * Height / weight / date measured (My class → Height & weight). These live in
+ * the `profile` jsonb, so the row's profile is read and only these three keys
+ * are changed — never the whole bag from the browser. Conditional on the
+ * revision the teacher read, like every class-teacher write.
+ */
+export async function setStudentMeasurements(
+  studentId: string,
+  values: { heightCm: string; weightKg: string; measuredOn: string },
+  revisionAt: string | undefined,
+): Promise<WriteResult> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
+  const cur = await ctx.sb
+    .from("sis_students")
+    .select("profile, updated_at")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("id", studentId)
+    .maybeSingle();
+  if (cur.error) return { ok: false, error: cur.error.message };
+  if (!cur.data) return { ok: false, error: "Record not found" };
+  const readAt = String(cur.data.updated_at || "");
+  if (revisionAt && readAt !== revisionAt) {
+    return { ok: false, conflict: true, error: "Someone else changed this child's record just now — reload and try again" };
+  }
+  const profile = (cur.data.profile && typeof cur.data.profile === "object" && !Array.isArray(cur.data.profile)
+    ? cur.data.profile
+    : {}) as Record<string, unknown>;
+  const next = { ...profile, heightCm: values.heightCm, weightKg: values.weightKg, measuredOn: values.measuredOn };
+  // Conditional on the revision just read, so a save landing between the
+  // read and this write is not overwritten.
+  const r = await conditionalUpdate("sis_students", studentId, { profile: next }, readAt || revisionAt);
+  if (r.ok) {
+    const sis = loadSis();
+    const i = sis.students.findIndex((s) => s.id === studentId);
+    if (i >= 0) {
+      const students = [...sis.students];
+      students[i] = { ...students[i]!, ...values, revisionAt: r.updatedAt };
+      writeSisLocalRaw({ ...sis, students });
+    }
+  }
+  return r;
+}

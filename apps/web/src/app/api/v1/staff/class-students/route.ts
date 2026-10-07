@@ -109,12 +109,32 @@ export async function GET(request: Request) {
         household: hh
           ? { id: hh.id, revisionAt: hh.revisionAt || "", fields: household }
           : null,
+        // My class → Height & weight.
+        measure: { heightCm: s.heightCm || "", weightKg: s.weightKg || "", measuredOn: s.measuredOn || "" },
         whatsapp: { number: wa || "", status: waStatus },
       };
     });
 
+    // The office / leadership see a section only when they pick one.
+    const taught = scope.unrestricted
+      ? new Set(studentsInSession(sis, scope.academicYearCode).map((st) => st.sectionId))
+      : new Set<string>();
+    const sections = scope.unrestricted
+      ? ctx.masters.sections
+          .map((x) => ({ id: x.id, label: `${className(x.classId)} ${x.name}`.trim(), classId: x.classId }))
+          .filter((x) => taught.has(x.id))
+          .sort((a, b) => {
+            const ia = ctx.masters.classes.findIndex((c) => c.id === a.classId);
+            const ib = ctx.masters.classes.findIndex((c) => c.id === b.classId);
+            return ia - ib || a.label.localeCompare(b.label);
+          })
+          .map(({ id, label }) => ({ id, label }))
+      : [];
+
     return apiOk({
       academicYearCode: scope.academicYearCode,
+      sections,
+      sectionId: only,
       // "unknown" is not "unchecked": say when the verdicts could not be read.
       verdictsAvailable: verdictRead.ok,
       students: rows,

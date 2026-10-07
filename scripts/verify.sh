@@ -248,6 +248,7 @@ SELFTESTS=(
   test:udise-robot
   test:udise-portal-api
   test:udise-portal-fill
+  test:student-measurements
   test:udise-portal-add
   test:udise-portal-reconcile
   test:lead-worklist

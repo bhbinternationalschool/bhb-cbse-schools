@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Camera, CheckCircle2, Phone, Users, XCircle } from "lucide-react";
+import { ClassMeasurements } from "@/components/staff/ClassMeasurements";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { uploadMedia } from "@/lib/mediaUpload";
 import { BLOOD_GROUPS, STUDENT_CATEGORIES } from "@/lib/sis";
@@ -26,8 +27,12 @@ type Row = {
   fields: Record<string, string>;
   household: { id: string; revisionAt: string; fields: Record<string, string> } | null;
   whatsapp: { number: string; status: WaStatus };
+  measure: { heightCm: string; weightKg: string; measuredOn: string };
 };
 type Data = {
+  /** Office / leadership only: every section, to pick one. */
+  sections: { id: string; label: string }[];
+  sectionId: string;
   verdictsAvailable: boolean;
   students: Row[];
   summary: { total: number; missing: number; notOn: number; unchecked: number };
@@ -93,16 +98,17 @@ function changed(before: Record<string, string>, after: Record<string, string>):
 export function MyClassWorkspace() {
   const [data, setData] = useState<Data | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<"all" | "wa">("wa");
+  const [filter, setFilter] = useState<"all" | "wa" | "measure">("wa");
   const [openId, setOpenId] = useState<string | null>(null);
+  const [sectionId, setSectionId] = useState("");
 
   const load = useCallback(async () => {
-    const r = await api<Data>("/api/v1/staff/class-students");
+    const r = await api<Data>(`/api/v1/staff/class-students${sectionId ? `?sectionId=${encodeURIComponent(sectionId)}` : ""}`);
     if (r.ok) {
       setData(r.data);
       setLoadError(null);
     } else setLoadError(r.error);
-  }, []);
+  }, [sectionId]);
 
   useEffect(() => {
     void load();
@@ -146,8 +152,22 @@ export function MyClassWorkspace() {
             </p>
           ) : null}
 
-          <div className="mt-3 flex gap-2">
-            {(["wa", "all"] as const).map((f) => (
+          {data.sections.length ? (
+            <label className="mt-3 block text-[11px] font-semibold text-[var(--muted)]">
+              Class
+              <select className="field mt-1 !py-2 w-full" value={sectionId} onChange={(e) => setSectionId(e.target.value)}>
+                <option value="">Pick a class…</option>
+                {data.sections.map((x) => (
+                  <option key={x.id} value={x.id}>
+                    {x.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            {(["wa", "all", "measure"] as const).map((f) => (
               <button
                 key={f}
                 type="button"
@@ -158,12 +178,20 @@ export function MyClassWorkspace() {
                     : "border border-[var(--border)] text-[var(--brand-deep)]"
                 }`}
               >
-                {f === "wa" ? "WhatsApp to fix" : "All children"}
+                {f === "wa" ? "WhatsApp to fix" : f === "all" ? "All children" : "Height & weight"}
               </button>
             ))}
           </div>
 
-          {rows.length === 0 ? (
+          {filter === "measure" ? (
+            data.students.length ? (
+              <ClassMeasurements key={sectionId || "mine"} rows={data.students} onSaved={() => void load()} />
+            ) : (
+              <p className="mt-4 text-sm text-[var(--muted)]">
+                {data.sections.length ? "Pick a class above." : "No children in your class."}
+              </p>
+            )
+          ) : rows.length === 0 ? (
             <p className="mt-4 text-sm text-[var(--muted)]">
               {filter === "wa" ? "Every family in your class is on WhatsApp." : "No children in your class."}
             </p>

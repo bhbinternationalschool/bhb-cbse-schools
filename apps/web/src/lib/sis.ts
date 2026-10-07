@@ -292,6 +292,8 @@ export type SisStudent = {
   /** Health record */
   heightCm: string;
   weightKg: string;
+  /** YYYY-MM-DD the height/weight were last measured (My class → Height & weight). */
+  measuredOn: string;
   /** Children With Special Needs (a.k.a. divyang / handicapped) */
   isCwsn: boolean;
   disabilityDetails: string;
@@ -713,6 +715,7 @@ export const STUDENT_PROFILE_KEYS = [
   "transportRoute",
   "heightCm",
   "weightKg",
+  "measuredOn",
   "isCwsn",
   "disabilityDetails",
   "medicalNotes",
@@ -880,6 +883,7 @@ export function normalizeStudent(s: Partial<SisStudent> & { id: string }): SisSt
     transportRoute: s.transportRoute ?? "",
     heightCm: s.heightCm ?? "",
     weightKg: s.weightKg ?? "",
+    measuredOn: s.measuredOn ?? "",
     isCwsn: !!s.isCwsn,
     disabilityDetails: s.disabilityDetails ?? "",
     medicalNotes: s.medicalNotes ?? "",
