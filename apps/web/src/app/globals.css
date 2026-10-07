@@ -249,6 +249,15 @@ body {
   color: var(--brand-deep);
 }
 
+/* The school letterhead (components/shared/SchoolLetterhead.tsx) prints in
+   the school's colours. Browsers drop colour on paper unless asked; a sheet's
+   own `print:text-black` must not turn the school's name black either. */
+.erp-print-brand,
+.erp-print-brand * {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
 /* Shared colourful module tabs */
 .module-tabs {
   scrollbar-width: thin;

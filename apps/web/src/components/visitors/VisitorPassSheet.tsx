@@ -1,9 +1,9 @@
 "use client";
 
+import { SchoolLetterhead } from "@/components/shared/SchoolLetterhead";
 import { useEffect, useState } from "react";
 import { qrDataUrlFor } from "@/lib/pdfQr";
 import { visitorPurposeLabel, type VisitorEntry } from "@/lib/visitors";
-import { schoolCityLine, schoolPrintName } from "@/lib/schoolIdentity";
 
 /** Single ad-hoc pass, not a batch — HTML + window.print(), mirrors
  * CertificateSheet.tsx's printCertificate() exactly. */
@@ -43,11 +43,8 @@ export function VisitorPassSheet({ entry }: { entry: VisitorEntry }) {
       id={`visitor-pass-${entry.id}`}
       className="visitor-pass-sheet relative mx-auto w-full max-w-sm overflow-hidden rounded-xl border border-[rgba(32,48,80,0.18)] bg-white p-5 text-[var(--brand-deep)]"
     >
-      <header className="border-b-2 border-[var(--brand-gold)] pb-2 text-center">
-        <p className="font-brand-name text-sm tracking-[0.12em]">{schoolPrintName()}</p>
-        <p className="mt-0.5 text-[11px] text-[var(--muted)]">
-          {schoolCityLine()}
-        </p>
+      <SchoolLetterhead size="sm" showContact={false} />
+      <header className="pb-2 text-center">
         <div className="mt-2 inline-block rounded bg-[var(--brand-deep)] px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-white">
           Visitor pass
         </div>

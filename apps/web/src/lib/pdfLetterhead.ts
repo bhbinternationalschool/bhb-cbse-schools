@@ -4,6 +4,7 @@ import {
   type SchoolProfile,
 } from "@/lib/foundationMasters";
 import { loadMasters, type MastersState } from "@/lib/masters";
+import { schoolAddressLine, schoolCrestUrl } from "@/lib/schoolIdentity";
 import { TENANT } from "@/lib/types";
 
 export type PdfLetterheadInfo = {
@@ -174,15 +175,12 @@ export async function resolveSchoolBrandAssets(
 }
 
 export function letterheadInfoFromMasters(masters?: MastersState): Omit<PdfLetterheadInfo, "logoDataUrl"> {
-  const profile = normalizeSchoolProfile(masters?.schoolProfile ?? loadMasters().schoolProfile);
-  const addressLine = [
-    profile.address,
-    profile.city,
-    profile.state,
-    profile.pincode,
-  ]
-    .filter(Boolean)
-    .join(", ");
+  const resolved = masters ?? loadMasters();
+  const profile = normalizeSchoolProfile(resolved.schoolProfile);
+  // schoolAddressLine drops a city/state/pincode the street line already
+  // carries; a plain join printed "…Varanasi, Uttar Pradesh 221202, Varanasi,
+  // Uttar Pradesh, 221202" on every PDF.
+  const addressLine = schoolAddressLine(resolved);
   // No affiliation on the letterhead. The school is state-recognised
   // (Nursery–VIII), not CBSE-affiliated: this line printed "CBSE Aff. …"
   // with a number, and "Affiliated to CBSE" without one, on every PDF the
@@ -199,8 +197,9 @@ export async function resolvePdfLetterhead(
   masters?: MastersState,
 ): Promise<PdfLetterheadInfo> {
   const base = letterheadInfoFromMasters(masters);
-  const profile = normalizeSchoolProfile(masters?.schoolProfile ?? loadMasters().schoolProfile);
-  const logoUrl = profile.logoUrl || TENANT.logoUrl;
+  // The crest, not the full logo: the logo carries the name and tagline under
+  // the shield, which at 52pt is unreadable beside the name printed in full.
+  const logoUrl = schoolCrestUrl(masters ?? loadMasters());
 
   if (!cachedLogoDataUrl) {
     // Same reason as above: a null is a miss to retry, not an answer to keep.

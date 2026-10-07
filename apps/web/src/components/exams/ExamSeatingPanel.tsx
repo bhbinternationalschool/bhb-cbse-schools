@@ -13,6 +13,8 @@
  * match the sheet in the invigilator's hand.
  */
 
+import { SchoolLetterhead } from "@/components/shared/SchoolLetterhead";
+import { schoolCrestUrl, schoolPrintName } from "@/lib/schoolIdentity";
 import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { useCallback, useMemo, useState } from "react";
 import {
@@ -599,12 +601,19 @@ export function ExamSeatingPanel({ academicYearCode, masters, terms }: Props) {
 
             {/* Bench slips — screen-hidden, and all that prints. */}
             <div className="hidden print:block">
+              <SchoolLetterhead size="sm" title="Exam seating · bench slips" className="mb-3" />
               <div className="grid grid-cols-2 gap-3">
                 {benchSlips(plan).map((slip) => (
                   <div
                     key={`${slip.roomName}-${slip.benchNumber}`}
-                    className="break-inside-avoid rounded border border-black p-3"
+                    className="erp-print-brand break-inside-avoid rounded border border-[var(--brand-deep)] p-3"
                   >
+                    {/* Each slip is cut out and stuck to a bench on its own. */}
+                    <div className="mb-1 flex items-center gap-1.5 border-b border-[var(--brand-gold)] pb-1">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={schoolCrestUrl()} alt="" width={18} height={18} className="h-[18px] w-[18px] object-contain" />
+                      <span className="font-brand-name text-[9px] text-[var(--brand-deep)]">{schoolPrintName()}</span>
+                    </div>
                     <p className="text-sm font-bold">
                       {slip.roomName} · Bench {slip.benchNumber}
                     </p>

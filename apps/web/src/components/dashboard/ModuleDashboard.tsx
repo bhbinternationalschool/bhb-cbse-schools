@@ -1,5 +1,6 @@
 "use client";
 
+import { PRINT_LETTERHEAD_CSS, printLetterheadHtml, printWhenImagesReady } from "@/lib/printLetterheadHtml";
 import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import { useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
@@ -953,12 +954,13 @@ function KpiDetailDrawer({
         th, td { border: 1px solid #e2e8f0; padding: 8px 10px; text-align: left; }
         th { background: #f8fafc; }
         td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        ${PRINT_LETTERHEAD_CSS}
       </style></head><body>
+      ${printLetterheadHtml()}
       ${node.innerHTML}
       </body></html>`);
     w.document.close();
-    w.focus();
-    w.print();
+    printWhenImagesReady(w);
   }
 
   return (
