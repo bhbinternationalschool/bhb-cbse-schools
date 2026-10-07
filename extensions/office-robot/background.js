@@ -130,6 +130,26 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
       );
     } else if (msg && msg.type === "apaar-fill") {
       reply(await erpFetch(`/api/v1/udise/robot/apaar-fill?pen=${encodeURIComponent(msg.pen || "")}`));
+    } else if (msg && msg.type === "student-details") {
+      // Each child's full portal record; the server keeps only its whitelist
+      // (lib/udisePortalStudentSync) and never an Aadhaar number.
+      reply(
+        await erpFetch("/api/v1/udise/robot/student-details", {
+          method: "POST",
+          body: JSON.stringify({ academicYearCode: msg.academicYearCode, students: msg.students || [] }),
+        }),
+      );
+    } else if (msg && msg.type === "student-enrolment") {
+      reply(
+        await erpFetch("/api/v1/udise/robot/student-enrolment", {
+          method: "POST",
+          body: JSON.stringify({ academicYearCode: msg.academicYearCode, pen: msg.pen, studentId: msg.studentId, ep: msg.ep || {} }),
+        }),
+      );
+    } else if (msg && msg.type === "pen-search-list") {
+      reply(await erpFetch("/api/v1/udise/robot/pen-search-list"));
+    } else if (msg && msg.type === "pen-candidates") {
+      reply(await erpFetch("/api/v1/udise/robot/pen-candidates", { method: "POST", body: JSON.stringify({ results: msg.results || [] }) }));
     } else if (msg && msg.type === "fill-data") {
       reply(await erpFetch(`/api/v1/udise/robot/fill?pen=${encodeURIComponent(msg.pen || "")}&v=2`));
     } else {
