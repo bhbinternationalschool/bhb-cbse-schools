@@ -179,6 +179,7 @@ SELFTESTS=(
   test:ncf-official
   test:student-curriculum
   test:subject-masters
+  test:expense-range
   test:masters-change-auth
   test:timetable-free-grid
   test:udise-teacher-apaar

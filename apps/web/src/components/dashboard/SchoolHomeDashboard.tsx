@@ -33,6 +33,8 @@ import { runFeeReport } from "@/lib/feeReportCatalog";
 import { Button } from "@/components/ui/button";
 import { BroadcastModal } from "@/components/dashboard/BroadcastModal";
 import { MessageCircle, Receipt } from "lucide-react";
+import { ExpenseKpiCard } from "@/components/dashboard/ExpenseKpiCard";
+import { hasPermission } from "@/lib/rbac";
 
 export function SchoolHomeDashboard() {
   const session = useDemoSession();
@@ -217,6 +219,13 @@ export function SchoolHomeDashboard() {
           alerts={statutoryAlerts.map((a) => ({ text: a.text, href: a.href }))}
         />
         <AnomalyGrid items={anomalyItems} />
+        {/* Expenses by today / week / month / range — only for those who may
+            see the school's money position (the report behind it needs
+            accounts_position on the server too). */}
+        {hasPermission(session, loadMasters(), "accounts_position", "view") &&
+        hasPermission(session, loadMasters(), "accounts", "view") ? (
+          <ExpenseKpiCard />
+        ) : null}
         <ModuleDashboardView model={model} variant="school" />
       </div>
     );
