@@ -637,7 +637,10 @@ export function openIssuesForStudent(studentId: string, state = loadLibrary()): 
 }
 
 export function overdueIssues(state = loadLibrary(), asOf = new Date().toISOString().slice(0, 10)) {
-  return state.issues.filter((i) => !i.returnedOn && i.dueOn < asOf);
+  // Most overdue first.
+  return state.issues
+    .filter((i) => !i.returnedOn && i.dueOn < asOf)
+    .sort((a, b) => (a.dueOn || "").localeCompare(b.dueOn || ""));
 }
 
 function nextAccessionNo(state: LibraryState, titleId: string): string {

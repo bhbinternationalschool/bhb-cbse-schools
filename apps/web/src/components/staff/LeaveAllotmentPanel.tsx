@@ -4,6 +4,7 @@
 import { useMemo, useState } from "react";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import {
   changeLeaveAllotment,
@@ -188,6 +189,7 @@ export function LeaveAllotmentPanel({
                     {t.code}
                   </th>
                 ))}
+                <th className="w-10 px-2 py-2" aria-label="Actions" />
               </tr>
             </ErpTableHead>
             <ErpTableBody hoverable>
@@ -208,6 +210,16 @@ export function LeaveAllotmentPanel({
                       </td>
                     );
                   })}
+                  <td className="px-2 py-1.5 text-right">
+                    <RowActionMenu
+                      row={s}
+                      label={`${s.fullName} actions`}
+                      actions={[
+                        { id: "only", label: "Select only this person", onSelect: (x) => setSelected(new Set([x.id])) },
+                        { id: "record", label: "Show this person's record", onSelect: (x) => setLogStaff(x.id) },
+                      ]}
+                    />
+                  </td>
                 </tr>
               ))}
             </ErpTableBody>

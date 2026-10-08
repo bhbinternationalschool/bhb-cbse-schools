@@ -271,7 +271,9 @@ export function MarketingPanel({ masters, admissions, canEdit, by }: { masters: 
                   </tr>
                 </ErpTableHead>
                 <ErpTableBody>
-                  {state.achievements.map((a: Achievement) => (
+                  {[...state.achievements]
+                    .sort((x, y) => (y.date || "").localeCompare(x.date || ""))
+                    .map((a: Achievement) => (
                     <tr key={a.id} className="text-xs align-top">
                       <td className="px-2 py-1.5">
                         <input

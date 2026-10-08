@@ -1204,7 +1204,10 @@ export function campaignMessagesOf(
   wa: WaCampaignsState,
   campaignId: string,
 ): CampaignMessage[] {
-  return wa.messages.filter((m) => m.campaignId === campaignId);
+  // Newest sent first; unsent (no sentAt) after them in queue order.
+  return wa.messages
+    .filter((m) => m.campaignId === campaignId)
+    .sort((a, b) => (b.sentAt || "").localeCompare(a.sentAt || ""));
 }
 
 export function previewCampaignSample(

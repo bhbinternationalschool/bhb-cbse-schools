@@ -169,7 +169,10 @@ export function PayrollWorkspace() {
 
   useEffect(() => {
     setMasters(loadMasters());
-    setRuns(loadPayroll().runs);
+    // Newest month first. The store is insertion-ordered (and a server
+    // reload has no ORDER BY), so the list read in whatever order runs were
+    // created or fetched (director, 8 Oct 2026: dated lists in date order).
+    setRuns([...loadPayroll().runs].sort((a, b) => b.month.localeCompare(a.month) || (b.createdAt || "").localeCompare(a.createdAt || "")));
   }, [tick]);
 
   useEffect(() => {

@@ -1,7 +1,7 @@
 "use client";
 // ratchet-allow: grids_without_row_menu — a weekly-off preview table (read-only settings preview)
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { CLOSURE_REASONS, type ClosureReasonCode } from "@/lib/holidayNotice";
 import Link from "next/link";
 import {
@@ -39,7 +39,6 @@ import {
   appliesToIncludesStudents,
   appliesToIncludesTeaching,
   classifyHolidayDay,
-  describeHolidayRule,
   previewHolidayDates,
   WEEKDAY_LABELS,
 } from "@/lib/holidayPolicy";
@@ -51,7 +50,7 @@ import {
 } from "@/lib/masters";
 import { useRouter } from "next/navigation";
 import { EditControl } from "@/components/masters/EditControl";
-import { RemoveControl } from "@/components/masters/RemoveControl";
+import { HolidayMonthTable } from "@/components/masters/HolidayMonthTable";
 import { SchoolTimingPanel } from "@/components/masters/SchoolTimingPanel";
 import { StatutoryConfigPanel } from "@/components/masters/StatutoryConfigPanel";
 import { LeaveApprovalSettingsPanel } from "@/components/masters/LeaveApprovalSettingsPanel";
@@ -633,9 +632,20 @@ export function AcademicPanel({
    * read across — which year is current, when each term starts and ends —
    * and that is a table's job even when it is short.
    */
+  // Years newest first; terms by year, then by start date. sortOrder alone
+  // was creation order, and every year's Term 1 shares sortOrder 1, so
+  // terms of different years interleaved (8 Oct 2026).
+  const sortedYears = state.academicYears
+    .slice()
+    .sort((a, b) => (b.startsOn || b.code).localeCompare(a.startsOn || a.code));
   const sortedTerms = state.academicTerms
     .slice()
-    .sort((a, b) => a.sortOrder - b.sortOrder);
+    .sort(
+      (a, b) =>
+        b.academicYearCode.localeCompare(a.academicYearCode) ||
+        (a.startsOn || "").localeCompare(b.startsOn || "") ||
+        a.sortOrder - b.sortOrder,
+    );
 
   const yearCols: DataTableColumn<(typeof state.academicYears)[number]>[] = [
     {
@@ -730,7 +740,7 @@ export function AcademicPanel({
           <MastersTableCard title="Academic years">
             <DataTable
               columns={yearCols}
-              rows={state.academicYears}
+              rows={sortedYears}
               rowKey={(y) => y.id}
               rowActions={yearActions}
               rowActionsLabel="Year actions"
@@ -1215,32 +1225,6 @@ function HolidayNotifyButton({ holiday }: { holiday: Holiday }) {
   );
 }
 
-function HolidayRuleRow({
-  h,
-  trailing,
-}: {
-  h: Holiday;
-  trailing: ReactNode;
-}) {
-  return (
-    <li className="flex flex-wrap items-start justify-between gap-2 px-4 py-3">
-      <div className="min-w-0 flex-1">
-        <div className="text-sm font-semibold text-[var(--brand-deep)]">
-          {h.title}{" "}
-          <span className="text-[10px] font-medium uppercase text-[var(--muted)]">
-            {h.kind}
-            {h.workingOverride ? " · working" : ""}
-          </span>
-        </div>
-        <p className="text-[11px] text-[var(--muted)]">
-          {describeHolidayRule(h)} · {h.academicYearCode}
-        </p>
-      </div>
-      {trailing}
-    </li>
-  );
-}
-
 /**
  * Holidays, in the order a session's calendar is built: take the government
  * calendar first (approved rows land published), then draft the school's own
@@ -1653,69 +1637,39 @@ export function HolidaysPanel({
             </MastersTableCard>
           ) : null}
           {holStep === "review" ? (
-            <MastersTableCard title={`Published (${published.length})`}>
-              <ul className="divide-y divide-[var(--border)]">
-                {published.map((h) => (
-                  <HolidayRuleRow
-                    key={h.id}
-                    h={h}
-                    trailing={
-                      <div className="flex items-center gap-2">
-                        {h.mode !== "weekly" ? <HolidayNotifyButton holiday={h} /> : null}
-                        <button
-                          type="button"
-                          className="text-[11px] font-semibold"
-                          onClick={() => unpublish(h.id)}
-                        >
-                          Unpublish
-                        </button>
-                      </div>
-                    }
-                  />
-                ))}
-                {published.length === 0 ? (
-                  <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">
-                    No published holidays
-                  </li>
-                ) : null}
-              </ul>
+            <MastersTableCard title={`Published (${published.length}) · month-wise`}>
+              <HolidayMonthTable
+                holidays={published}
+                sessionStart={ayBounds.startsOn}
+                sessionEnd={ayBounds.endsOn}
+                emptyText="No published holidays"
+                extra={(h) => (h.mode !== "weekly" ? <HolidayNotifyButton holiday={h} /> : null)}
+                actions={() => [
+                  { id: "unpublish", label: "Unpublish (back to drafts)", onSelect: (h) => unpublish(h.id) },
+                ]}
+              />
             </MastersTableCard>
           ) : null}
           {holStep === "publish" ? (
-            <MastersTableCard title={`Drafts (${drafts.length})`}>
-              <ul className="divide-y divide-[var(--border)]">
-                {drafts.map((h) => (
-                  <HolidayRuleRow
-                    key={h.id}
-                    h={h}
-                    trailing={
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          className="rounded-lg bg-[var(--primary)] px-2.5 py-1 text-[11px] font-semibold text-[var(--primary-foreground)]"
-                          onClick={() => publish(h.id)}
-                        >
-                          Publish
-                        </button>
-                        <RemoveControl
-                          check={{
-                            canRemove: true,
-                            blockers: [],
-                            confirmMessage: "Remove this holiday rule?",
-                            suggestion: "",
-                          }}
-                          onRemove={() => remove(h.id)}
-                        />
-                      </div>
-                    }
-                  />
-                ))}
-                {drafts.length === 0 ? (
-                  <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">
-                    No drafts
-                  </li>
-                ) : null}
-              </ul>
+            <MastersTableCard title={`Drafts (${drafts.length}) · month-wise`}>
+              <HolidayMonthTable
+                holidays={drafts}
+                sessionStart={ayBounds.startsOn}
+                sessionEnd={ayBounds.endsOn}
+                emptyText="No drafts"
+                actions={() => [
+                  { id: "publish", label: "Publish", onSelect: (h) => publish(h.id) },
+                  {
+                    id: "remove",
+                    label: "Remove",
+                    tone: "danger",
+                    separatorAbove: true,
+                    onSelect: (h) => {
+                      if (window.confirm(`Remove the holiday rule "${h.title}"?`)) remove(h.id);
+                    },
+                  },
+                ]}
+              />
             </MastersTableCard>
           ) : null}
           {holStep === "build" ? (
