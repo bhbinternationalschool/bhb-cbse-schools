@@ -33,7 +33,7 @@ import { runFeeReport } from "@/lib/feeReportCatalog";
 import { Button } from "@/components/ui/button";
 import { BroadcastModal } from "@/components/dashboard/BroadcastModal";
 import { MessageCircle, Receipt } from "lucide-react";
-import { ExpenseKpiCard } from "@/components/dashboard/ExpenseKpiCard";
+import { useExpenseKpi } from "@/components/dashboard/expenseKpi";
 import { hasPermission } from "@/lib/rbac";
 
 export function SchoolHomeDashboard() {
@@ -49,6 +49,12 @@ export function SchoolHomeDashboard() {
   // used to read the accounts desk, whose bank ledger holds fee receipts only
   // — see lib/accountsServerBook.ts.
   const serverBook = useServerBookPosition();
+  // Expenses tile — only for those who may see the school's money position
+  // (the report behind it needs accounts_position on the server too).
+  const expenseKpi = useExpenseKpi(
+    hasPermission(session, loadMasters(), "accounts_position", "view") &&
+      hasPermission(session, loadMasters(), "accounts", "view"),
+  );
 
   function generateFeeLedger() {
     const result = runFeeReport("fee_reconciliation_pack", {
@@ -131,6 +137,16 @@ export function SchoolHomeDashboard() {
     } else if (serverBook.status === "failed") {
       bankKpi.value = "—";
       bankKpi.hint = "server book unavailable";
+    }
+  }
+
+  // Expenses sit with the other money tiles in "Finance & store", right
+  // after the bank balance, at the same size (director, 8 Oct 2026).
+  if (expenseKpi) {
+    const finance = model.kpiSections?.find((s) => s.id === "finance");
+    if (finance) {
+      const at = finance.kpis.findIndex((k) => k.id === "bank");
+      finance.kpis.splice(at >= 0 ? at + 1 : finance.kpis.length, 0, expenseKpi);
     }
   }
 
@@ -219,13 +235,6 @@ export function SchoolHomeDashboard() {
           alerts={statutoryAlerts.map((a) => ({ text: a.text, href: a.href }))}
         />
         <AnomalyGrid items={anomalyItems} />
-        {/* Expenses by today / week / month / range — only for those who may
-            see the school's money position (the report behind it needs
-            accounts_position on the server too). */}
-        {hasPermission(session, loadMasters(), "accounts_position", "view") &&
-        hasPermission(session, loadMasters(), "accounts", "view") ? (
-          <ExpenseKpiCard />
-        ) : null}
         <ModuleDashboardView model={model} variant="school" />
       </div>
     );
