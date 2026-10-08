@@ -28,6 +28,11 @@ import {
   parseMyClassRosterQuery,
   markAskIsFresh,
   MY_SECTIONS_MARKER,
+  parseWhoseFeesAsk,
+  parseNameWithClass,
+  isVagueDocumentAsk,
+  parseStudentFeesQuery,
+  formatNearStudentMatches,
 } from "./erpCommands";
 import { detectOwnAttendanceAsk, staffAttAskLocationText } from "./waStaffAttendanceBotEngine";
 import { shouldRouteStaffAttendance } from "./waStaffAttendanceBotServer";
@@ -339,3 +344,42 @@ for (const [t, name] of [
 }
 
 console.log("  ok");
+
+/* ── The principal, 7 Oct 2026, 08:00 IST — four messages, no answer ───── */
+{
+  // "Send ma fees / What is balance" looked up a child called "Send Ma".
+  const feesNoChild = "Send ma fees \nWhat is balance";
+  assert.equal(parseErpCommandLocal(feesNoChild), null, "no child named → not a student lookup");
+  assert.equal(parseStudentFeesQuery(feesNoChild), null);
+  assert.equal(parseWhoseFeesAsk(feesNoChild), true, "asks whose fees instead");
+  assert.equal(parseWhoseFeesAsk("fees kitna baki hai"), true);
+  // …but never for a how-to, a period or a class question.
+  assert.equal(parseWhoseFeesAsk("Collect fee"), false);
+  assert.equal(parseWhoseFeesAsk("fees collected this week"), false);
+  assert.equal(parseWhoseFeesAsk("class 3 defaulters"), false);
+  assert.equal(parseWhoseFeesAsk("Arohi yadav fees"), false, "a named child is a lookup");
+
+  // "Arohi yadav class lkg" — a name with a class is always answered.
+  assert.deepEqual(parseNameWithClass("Arohi yadav class lkg"), { name: "arohi yadav", normalized: "arohi yadav class lkg" });
+  assert.deepEqual(parseNameWithClass("Arohi LKG A"), { name: "arohi", normalized: "arohi class lkg a" });
+  assert.deepEqual(parseNameWithClass("Vaibhav Pandey 4th"), { name: "vaibhav pandey", normalized: "vaibhav pandey class 4" });
+  assert.equal(parseNameWithClass("Good morning class 5"), null, "a greeting is not a child");
+  assert.equal(parseNameWithClass("Take 5A attendance"), null, "a command is not a child");
+  assert.equal(parseNameWithClass("Yes"), null);
+  // The lookup reads the class back out of the normalised wording.
+  assert.deepEqual(parseStudentFeesQuery("arohi yadav class lkg fees"), { name: "arohi yadav", section: { classKey: "lkg", sectionName: "" } });
+
+  // When the register has no Arohi Yadav, the nearest names, numbered.
+  const near = formatNearStudentMatches(
+    [{ fullName: "AROHI", classLabel: "UKG A", rollNo: "13", fatherName: "RAKESH KUMAR", admissionNo: "" }],
+    "arohi yadav",
+  );
+  assert.match(near, /No student called "arohi yadav" found\. Did you mean:/);
+  assert.match(near, /\*1\.\* AROHI — UKG A, roll 13, father RAKESH KUMAR/);
+
+  // "Please send me documents" — asks which and whose.
+  assert.equal(isVagueDocumentAsk("Please send me documents"), true);
+  assert.equal(isVagueDocumentAsk("Arohi documents"), false, "whose is named");
+  console.log("  ✓ principal 7 Oct: whose fees, name + class, nearest names, which documents");
+}
+

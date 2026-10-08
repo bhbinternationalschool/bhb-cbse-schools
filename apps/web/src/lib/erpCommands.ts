@@ -2140,6 +2140,11 @@ const FEE_STOP_WORDS = new Set([
   "store", "stationery", "book", "books", "copy", "copies", "uniform", "sell", "sale", "sales", "sold",
   "kitab", "kitaab", "transport", "bus", "van", "gaadi", "gadi", "vehicle", "tuition", "school",
   "स्टोर", "किताब", "ड्रेस", "ट्रांसपोर्ट", "बस", "गाड़ी",
+  // Asking for it to be sent or told: "Send ma fees, what is balance" (the
+  // principal, 7 Oct 2026) looked up a child called "Send Ma".
+  "send", "sent", "bhejo", "bhej", "bhejna", "bhejiye", "bhejie", "bhejdo", "ma", "mujhe", "muje",
+  "mere", "mera", "meri", "my", "give", "tell", "statement", "details", "detail", "a", "an", "and",
+  "भेजो", "भेजिए", "मुझे", "मेरे",
 ]);
 
 /**
@@ -2176,6 +2181,100 @@ export function parseStudentFeesQuery(text: string): StudentFeesQuery | null {
     return rollNo && section ? { name: "", section, rollNo, ...(focus ? { focus } : {}) } : null;
   }
   return { name, ...(section ? { section } : {}), ...(rollNo ? { rollNo } : {}), ...(focus ? { focus } : {}) };
+}
+
+/**
+ * A fee question about a child who has not been named yet: "Send me fees,
+ * what is balance", "fees kitna baki hai". The principal sent exactly this
+ * on 7 Oct 2026 and the desk looked up a child called "Send Ma". The answer
+ * is a question back — whose? — and the next name she types answers it.
+ * How-to ("collect fee") and period ("fees collected this week") questions
+ * are not this.
+ */
+export function parseWhoseFeesAsk(text: string): boolean {
+  const t = (text || "").trim();
+  if (!t || t.length > 100 || !FEE_WORDS.test(t)) return false;
+  if (parseStudentFeesQuery(t)) return false;
+  if (extractSectionRefs(t).length) return false;
+  if (parseFeeHelpQuery(t)) return false;
+  if (detectPastOrPeriod(t)) return false;
+  // School-wide words make it a collections / defaulters question.
+  if (/(?<![\p{L}\p{M}\p{N}])(defaulters?|collection|collected|school|total|sab|sabhi|all|class)(?![\p{L}\p{M}\p{N}])/iu.test(t)) return false;
+  return true;
+}
+
+const CLASS_ONLY_TOKEN = /(?:^|\s)(?:class|kaksha|कक्षा|std)?\s*(nursery|lkg|ukg|kg|pg|\d{1,2}(?:st|nd|rd|th)?|[ivx]{2,4})\s*([a-h])?$/i;
+
+/**
+ * A child's name with a class: "Arohi yadav class lkg", "Arohi LKG",
+ * "Vaibhav Pandey 4th", "Aarav 5B". The class makes it plainly a request
+ * about a child — so, unlike a bare name, it is always answered, and a name
+ * the roster does not have gets the nearest names rather than silence.
+ * Returns the name and a normalised wording ("arohi yadav class lkg") the
+ * student lookup reads the class from.
+ */
+export function parseNameWithClass(text: string): { name: string; normalized: string } | null {
+  const t = (text || "").trim().replace(/[?.!,]+$/g, "");
+  if (!t || t.length > 60) return null;
+  const low = t.toLowerCase();
+  let name = "";
+  let ck: string | null = null;
+  let sec = "";
+  const refs = extractSectionRefs(low);
+  if (refs.length === 1) {
+    ck = refs[0]!.classKey;
+    sec = refs[0]!.sectionName;
+    name = low
+      .replace(/(?<![\p{L}\p{M}\p{N}])(?:class|grade|std|kaksha|कक्षा)\s*[-:.]?\s*[a-z0-9]+(?:st|nd|rd|th)?\s*(?:-|\s)?\s*(?:section|sec\.?)?\s*[a-h]?(?![\p{L}\p{M}\p{N}])/gu, " ")
+      .replace(/(?<![a-z0-9])(\d{1,2}|[ivx]{1,4}|nursery|lkg|ukg|kg|pg)(?:st|nd|rd|th)?\s*-?\s*[a-h](?![a-z0-9])/g, " ");
+  } else if (!refs.length) {
+    const m = CLASS_ONLY_TOKEN.exec(low);
+    if (!m) return null;
+    ck = classKey(m[1]!.replace(/(st|nd|rd|th)$/, ""));
+    sec = (m[2] || "").toUpperCase();
+    name = low.slice(0, m.index);
+  } else {
+    return null;
+  }
+  if (!ck) return null;
+  name = name.replace(/\s+/g, " ").trim();
+  if (!name || !looksLikeBareName(name)) return null;
+  const words = name.split(" ");
+  if (words.every((w) => CHAT_WORDS.has(w))) return null;
+  // "take attendance 5A" is a command the parser missed, not a child.
+  if (words.some((w) => FOLLOW_UP_STOP_WORDS.has(w) || FEE_STOP_WORDS.has(w))) return null;
+  return { name, normalized: `${name} class ${ck}${sec ? ` ${sec.toLowerCase()}` : ""}` };
+}
+
+const DOC_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(documents?|docs?|papers?|kagaz|kaagaz|kagzat|दस्तावेज़?|कागज|कागजात)(?![\p{L}\p{M}\p{N}])/iu;
+
+/** "Please send me documents" — which, and whose, are both missing. */
+export function isVagueDocumentAsk(text: string): boolean {
+  const t = (text || "").trim();
+  if (!t || t.length > 80 || !DOC_WORDS.test(t)) return false;
+  const rest = t
+    .toLowerCase()
+    .replace(DOC_WORDS, " ")
+    .replace(/[^\p{L}\p{M}\s]/gu, " ")
+    .split(/\s+/)
+    .filter((w) => w && !FEE_STOP_WORDS.has(w) && !CHAT_WORDS.has(w) && !["all", "the", "send", "bhejo"].includes(w));
+  return rest.length === 0;
+}
+
+export function formatWhoseFeesAsk(firstName = ""): string {
+  return `${firstName ? `${firstName}, w` : "W"}hose fees? Send the child's name and class — e.g. _Arohi LKG_ or _Vaibhav Pandey 4A_ — and I'll send the balance.`;
+}
+
+export function formatVagueDocumentAsk(firstName = ""): string {
+  return [
+    `${firstName ? `${firstName}, w` : "W"}hich document, and for whom? I can send:`,
+    "• a child's fee balance — _Arohi LKG fees_",
+    "• a child's details — _Arohi LKG_",
+    "• a PDF report — _defaulters report pdf_, _attendance report pdf_",
+    "",
+    "Send *help* for everything, or *HUMAN* to ask the office.",
+  ].join("\n");
 }
 
 /**
@@ -3127,6 +3226,22 @@ function pickRowDetail(m: StudentPickRow, ambiguous: boolean): string {
  * called Yatharth: repeating the name reproduces the ambiguity. A number
  * is unambiguous by construction, and it is one keystroke.
  */
+/**
+ * Nobody by that name — but these are close: "Arohi Yadav" when the roster
+ * has an AROHI in UKG. Numbered, so a digit answers it. Never silence: the
+ * principal got "didn't understand" for a name that was merely misspelt
+ * (7 Oct 2026).
+ */
+export function formatNearStudentMatches(matches: StudentPickRow[], asked: string): string {
+  const lines = matches.map((m, i) => `*${i + 1}.* ${m.fullName} — ${pickRowDetail(m, false)}`);
+  return [
+    `No student called "${asked}" found. Did you mean:`,
+    ...lines,
+    "",
+    `Reply with the number (*1*–*${matches.length}*), or send the name as it is in the register.`,
+  ].join("\n");
+}
+
 export function formatStudentMatchesAsk(
   matches: StudentPickRow[],
   asked: string,
