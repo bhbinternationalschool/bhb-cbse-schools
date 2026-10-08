@@ -44,9 +44,12 @@ function isoDay(d: Date): string {
 function window(req: Request): { from: string; to: string } {
   const url = new URL(req.url);
   const to = url.searchParams.get("to") || isoDay(new Date());
+  // 35 days by default (was 7). The sweep is idempotent per settlement, and
+  // a week was shorter than the 28 Sep – 8 Oct key outage: by the time the
+  // key was fixed, the 29 Sep settlement was already outside the window.
   const from =
     url.searchParams.get("from") ||
-    isoDay(new Date(Date.now() - 7 * 86400 * 1000));
+    isoDay(new Date(Date.now() - 35 * 86400 * 1000));
   return { from, to };
 }
 

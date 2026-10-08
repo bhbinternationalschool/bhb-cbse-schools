@@ -403,6 +403,7 @@ jobs:
           npm run test:udise-portal-student-sync
           npm run test:udise-school-finance
           npm run test:udise-teacher-sync
+          npm run test:cashfree-settlements
           npm run test:holiday-calendar-view
           npm run test:student-working-days
           npm run test:leave-allotment
