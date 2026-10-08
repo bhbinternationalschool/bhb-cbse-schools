@@ -92,6 +92,8 @@ export type DirectCheckoutResult =
   | { kind: "checkout"; url: string; link: PaymentLink; totalPaise: number }
   /** The gateway is off or refused: the UPI page, where the family can still pay. */
   | { kind: "fallback"; url: string; link: PaymentLink; reason: string }
+  /** A gateway is configured and refused: tell the parent, do not switch to UPI. */
+  | { kind: "gateway_unavailable"; reason: string; household: Household }
   | { kind: "error"; error: string };
 
 export async function startDirectFeeCheckout(input: {
@@ -149,6 +151,13 @@ export async function startDirectFeeCheckout(input: {
   const gw = shouldUseCashfreeCheckout()
     ? await attachCashfreeToPaymentLink(attachOpts)
     : await attachRazorpayToPaymentLink(attachOpts);
+  // The UPI page is for a school with no gateway. A configured gateway that
+  // refuses is an outage, not a reason to switch the parent's payment method.
+  const { onlineGatewayExpected, logGatewayRefusal } = await import("@/lib/onlineGateway.server");
+  if (!gw.ok && onlineGatewayExpected()) {
+    logGatewayRefusal("pay/due", created.link.id, gw.error);
+    return { kind: "gateway_unavailable", reason: gw.error, household };
+  }
   const link = gw.link;
 
   const saved = await pushPaymentLinkToDb(link);
