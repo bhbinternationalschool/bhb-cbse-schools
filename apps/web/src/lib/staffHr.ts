@@ -369,7 +369,10 @@ function normalizeAllotmentChange(
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.round(v * 2) / 2 : 0);
   return {
     id: c.id || nid("lal"),
-    academicYearCode: c.academicYearCode || DEFAULT_AY,
+    // applyLeaveAllotment always stamps the year. A row without one stays
+    // yearless (kept, shown under no session) rather than being filed under
+    // the stale default year.
+    academicYearCode: c.academicYearCode || "",
     staffId: c.staffId,
     typeCode: String(c.typeCode).trim().toUpperCase(),
     mode,
