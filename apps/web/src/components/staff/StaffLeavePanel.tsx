@@ -37,13 +37,15 @@ import {
 import { hasFeaturePermission } from "@/lib/rbac";
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import { LeaveAllotmentPanel } from "@/components/staff/LeaveAllotmentPanel";
 
 type LeaveTab =
   | "request"
   | "manage"
   | "direct"
   | "adjust"
-  | "halfday";
+  | "halfday"
+  | "allot";
 
 export function StaffLeavePanel({ ay }: { ay: string }) {
   const session = useDemoSession();
@@ -119,7 +121,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
   }, [isManager, selfStaff]);
 
   useEffect(() => {
-    if (!isManager && (tab === "manage" || tab === "direct" || tab === "adjust" || tab === "halfday")) {
+    if (!isManager && (tab === "manage" || tab === "direct" || tab === "adjust" || tab === "halfday" || tab === "allot")) {
       setTab("request");
     }
   }, [isManager, tab]);
@@ -439,6 +441,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
           { id: "direct", label: "Direct leave" },
           { id: "adjust", label: "Adjust leave" },
           { id: "halfday", label: "Adjust half-day" },
+          { id: "allot", label: "Allot leave days" },
         ] as const)
       : []),
   ];
@@ -502,7 +505,9 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
                   ? ("amber" as const)
                   : t.id === "adjust"
                     ? ("violet" as const)
-                    : ("sky" as const),
+                    : t.id === "allot"
+                      ? ("teal" as const)
+                      : ("sky" as const),
         }))}
       />
 
@@ -680,6 +685,19 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
             disabled={!adjustId}
           />
         </div>
+      ) : null}
+
+      {tab === "allot" && isManager ? (
+        <LeaveAllotmentPanel
+          ay={ay}
+          hr={hr}
+          roster={roster}
+          by={session.fullName}
+          onChanged={(next, message) => {
+            setHr(next);
+            flash(message);
+          }}
+        />
       ) : null}
 
       {tab === "halfday" && isManager ? (

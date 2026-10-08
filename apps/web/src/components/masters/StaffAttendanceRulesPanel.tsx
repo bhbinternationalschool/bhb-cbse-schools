@@ -49,6 +49,8 @@ export function StaffAttendanceRulesPanel() {
 
   const [selectedStaff, setSelectedStaff] = useState<Set<string>>(new Set());
   const [assignRuleId, setAssignRuleId] = useState("");
+  /** Assign's own message, shown beside the button — the page-top banner is out of sight down here. */
+  const [assignMsg, setAssignMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const roster = useMemo(() => activeStaffSorted(loadMasters().staff ?? []), [state]);
 
@@ -161,22 +163,22 @@ export function StaffAttendanceRulesPanel() {
   function onAssign() {
     const result = assignRuleToStaff([...selectedStaff], assignRuleId);
     if (!result.ok) {
-      flash(result.error, true);
+      setAssignMsg({ ok: false, text: result.error });
       return;
     }
     setState(result.state);
-    flash(`Assigned rule to ${selectedStaff.size} staff`);
+    setAssignMsg({ ok: true, text: `Assigned ${result.state.rules.find((r) => r.id === assignRuleId)?.code ?? "rule"} to ${selectedStaff.size} staff` });
     setSelectedStaff(new Set());
   }
 
   function onClearSelected() {
     if (selectedStaff.size === 0) {
-      flash("Select staff to clear", true);
+      setAssignMsg({ ok: false, text: "Select staff to clear" });
       return;
     }
     const next = clearStaffRuleAssignments([...selectedStaff]);
     setState(next);
-    flash(`Cleared rules for ${selectedStaff.size} staff`);
+    setAssignMsg({ ok: true, text: `Cleared rules for ${selectedStaff.size} staff` });
     setSelectedStaff(new Set());
   }
 
@@ -497,7 +499,9 @@ export function StaffAttendanceRulesPanel() {
           </label>
           <button
             type="button"
-            className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)]"
+            className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
+            disabled={!assignRuleId || selectedStaff.size === 0}
+            title={!assignRuleId ? "Choose a rule first" : selectedStaff.size === 0 ? "Tick the staff first" : undefined}
             onClick={onAssign}
           >
             Assign to selected ({selectedStaff.size})
@@ -517,6 +521,11 @@ export function StaffAttendanceRulesPanel() {
             {selectedStaff.size === roster.length ? "Unselect all" : "Select all"}
           </button>
         </div>
+        {assignMsg ? (
+          <p className={`mb-3 rounded-lg px-3 py-2 text-xs font-medium ${assignMsg.ok ? "bg-[rgba(21,128,61,0.08)] text-[var(--success)]" : "bg-[var(--danger-soft)] text-[var(--danger)]"}`} role="status">
+            {assignMsg.text}
+          </p>
+        ) : null}
 
         <ErpTableShell className="max-h-[min(48vh,380px)] overflow-auto" exportAs="staff_attendance_rules" exportTitle="Staff attendance rules">
           <ErpTable minWidth="min-w-full">

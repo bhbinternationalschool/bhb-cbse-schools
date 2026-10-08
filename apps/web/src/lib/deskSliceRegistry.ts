@@ -72,6 +72,7 @@ export const DESK_SLICE_MODULE_DEFS: DeskSliceModuleDef[] = [
       "leaveRequests",
       "leaveBalances",
       "leaveEncashments",
+      "leaveAllotmentLog",
       "appraisalCycles",
       "appraisals",
     ],

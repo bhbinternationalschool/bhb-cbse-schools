@@ -153,7 +153,7 @@ export const PEOPLE_FEATURES: RbacFeatureDef[] = [
     label: "Leave approvals",
     blurb: "Staff leave applications, approvals, balances and encashments, and the leave report.",
     actions: CRUD,
-    slices: ["staff_hr/leaveRequests", "staff_hr/leaveBalances", "staff_hr/leaveEncashments"],
+    slices: ["staff_hr/leaveRequests", "staff_hr/leaveBalances", "staff_hr/leaveEncashments", "staff_hr/leaveAllotmentLog"],
     tabs: ["leave", "reports"],
   },
   {

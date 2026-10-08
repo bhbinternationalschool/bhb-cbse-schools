@@ -365,6 +365,7 @@
     "test:timetable-free-grid": "npx tsx src/lib/timetableFreeGrid.selftest.ts",
     "test:udise-teacher-apaar": "npx tsx src/lib/udiseTeacherApaar.selftest.ts",
     "test:udise-teacher-sync": "npx tsx src/lib/udiseTeacherSync.selftest.ts",
+    "test:leave-allotment": "npx tsx src/lib/leaveAllotment.selftest.ts",
     "test:class-group-message": "npx tsx src/lib/classGroupMessage.selftest.ts",
     "test:comms-reach": "npx tsx src/lib/commsReach.selftest.ts",
     "import:leads": "npx tsx scripts/import-lead-excels.ts",

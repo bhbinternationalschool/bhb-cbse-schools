@@ -132,6 +132,7 @@ export async function GET(req: Request, ctx: RouteCtx) {
           leaveRequests: ownOf("leaveRequests")(b.leaveRequests),
           leaveBalances: ownOf("leaveBalances")(b.leaveBalances),
           leaveEncashments: ownOf("leaveEncashments")(b.leaveEncashments),
+          leaveAllotmentLog: ownOf("leaveAllotmentLog")(b.leaveAllotmentLog),
           appraisals: ownOf("appraisals")(b.appraisals),
           ownOnly: true,
           rowCount: meta?.rowCount ?? 0,

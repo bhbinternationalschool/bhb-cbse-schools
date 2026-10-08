@@ -17,7 +17,7 @@ import { loadMasters, saveMasters } from "@/lib/masters";
 import { getGracePeriodMinutes } from "@/lib/staffHr";
 
 import { assertModulePermission } from "@/lib/rbacGuard";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { readCache, writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 export type { SchoolWeekTiming };
 
@@ -206,11 +206,18 @@ export function defaultRuleSteps(): RuleStep[] {
   ];
 }
 
+/**
+ * The two starter rules. Their ids are FIXED: until 8 Oct 2026 they were
+ * minted fresh on every read of a never-saved state, so the rule picked in
+ * "Assign rules to staff" no longer existed by the time Assign re-read it —
+ * the button failed every time ("Select an active rule", shown at the top of
+ * the page, out of sight) and nothing was ever saved.
+ */
 function seedRules(): AttendanceRule[] {
   const now = new Date().toISOString();
   return [
     {
-      id: nid("arl"),
+      id: "arl_seed_hd_time",
       code: "HD-TIME",
       name: "Half day by time",
       description: "School timing + late buffer + half day from punch-in/out cutoffs",
@@ -229,7 +236,7 @@ function seedRules(): AttendanceRule[] {
       updatedAt: now,
     },
     {
-      id: nid("arl"),
+      id: "arl_seed_hd_hrs",
       code: "HD-HRS",
       name: "Half day by hours",
       description: "School timing + buffer + half day when worked hours are short",
@@ -347,7 +354,8 @@ function normalizeState(
 export function loadAttendanceRules(): StaffAttendanceRulesState {
   if (typeof window === "undefined") return emptyAttendanceRulesState();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    // readCache: on a full browser store the last save lives in memory only.
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyAttendanceRulesState();
     const parsed = JSON.parse(raw) as StaffAttendanceRulesState;
     if (!parsed || parsed.version !== 1) return emptyAttendanceRulesState();
