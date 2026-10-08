@@ -187,6 +187,8 @@ SELFTESTS=(
   test:timetable-free-grid
   test:udise-teacher-apaar
   test:udise-teacher-sync
+  test:class-group-message
+  test:comms-reach
   test:wa-sender-routing
   test:receipt-repair
   test:projection-double-post

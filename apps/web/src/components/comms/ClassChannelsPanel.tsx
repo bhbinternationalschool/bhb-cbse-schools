@@ -5,7 +5,9 @@ import { useDemoSession } from "@/components/shell/SessionContext";
 import { applyClassChannelDraftToErp } from "@/lib/waClassChannelApply";
 import { loadMasters } from "@/lib/masters";
 import { TENANT } from "@/lib/types";
+import { composeClassGroupMessage, waShareUrl } from "@/lib/classGroupMessage";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
+import { ClassGroupMoveCard } from "@/components/comms/ClassGroupMoveCard";
 
 type Channel = {
   id: string;
@@ -284,6 +286,7 @@ export function ClassChannelsPanel() {
 
   return (
     <div className="space-y-5">
+      <ClassGroupMoveCard />
       <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
           Class WhatsApp channels
@@ -440,6 +443,38 @@ Then reply: YES`}
                     >
                       Cancel
                     </button>
+                    {(() => {
+                      // The move off personal class groups: the same post for the old group.
+                      const text = composeClassGroupMessage({
+                        kind: d.kind === "homework" ? "homework" : d.kind === "event" ? "event" : "notice",
+                        classLabel: ch?.label || "",
+                        date: (d.createdAt || "").slice(0, 10),
+                        subject: d.subjectName,
+                        title: d.title,
+                        bodyEn: d.body,
+                        dueAt: d.kind === "event" ? d.eventDate : d.dueAt,
+                        schoolName: TENANT.nameDisplay || TENANT.shortName,
+                      });
+                      return (
+                        <>
+                          <button
+                            type="button"
+                            className={btnOutline}
+                            onClick={() =>
+                              void navigator.clipboard
+                                .writeText(text)
+                                .then(() => flash("Copied — paste it in the class WhatsApp group"))
+                                .catch(() => setError("Could not copy — use “Share to WhatsApp”."))
+                            }
+                          >
+                            Copy for class group
+                          </button>
+                          <a className={btnOutline} href={waShareUrl(text)} target="_blank" rel="noreferrer">
+                            Share to WhatsApp
+                          </a>
+                        </>
+                      );
+                    })()}
                   </div>
                 </article>
               );

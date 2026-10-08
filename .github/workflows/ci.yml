@@ -403,6 +403,8 @@ jobs:
           npm run test:udise-portal-student-sync
           npm run test:udise-school-finance
           npm run test:udise-teacher-sync
+          npm run test:class-group-message
+          npm run test:comms-reach
           npm run test:udise-school-profile
           npm run test:student-measurements
           npm run test:udise-portal-add
