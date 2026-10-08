@@ -249,22 +249,61 @@ async function call(
   }
 }
 
+/**
+ * A V1 bearer token (/v1/authorize, valid ~5 min) for the few V1-only reads
+ * such as the wallet balance. Same client id, secret and 2FA signature as
+ * the V2 calls; asked for fresh each time — it is one cheap call before a
+ * run, and a cached token is exactly what goes stale in production.
+ */
+async function payoutV1Token(): Promise<{ ok: true; token: string } | { ok: false; error: string }> {
+  const h = payoutHeaders();
+  if (!h.ok) return { ok: false, error: h.error };
+  try {
+    const r = await fetch(`${payoutBaseUrl()}/v1/authorize`, {
+      method: "POST",
+      headers: {
+        "X-Client-Id": h.headers["x-client-id"],
+        "X-Client-Secret": h.headers["x-client-secret"],
+        "X-Cf-Signature": h.headers["X-Cf-Signature"],
+      },
+    });
+    const p = ((await r.json().catch(() => ({}))) ?? {}) as Record<string, unknown>;
+    const token = String(((p.data ?? {}) as Record<string, unknown>).token ?? "");
+    if (String(p.status ?? "").toUpperCase() !== "SUCCESS" || !token) {
+      return { ok: false, error: String(p.message || `Payouts authorize failed (HTTP ${r.status})`) };
+    }
+    return { ok: true, token };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Could not reach Payouts" };
+  }
+}
+
 /** What is left in the prefunded wallet. Checked before a run, not during it. */
 export async function payoutBalance(): Promise<{ ok: true; availablePaise: number } | { ok: false; error: string }> {
   if (!payoutKeysPresent()) return { ok: false, error: "Payouts is not configured" };
-  // /v1.2/getBalance, not /balance. Confirmed the hard way on 28 Sep: the live
-  // account answered a /balance read with 400 "paymentInstrumentId is invalid",
-  // which was the useful kind of failure — a 400 only comes back AFTER the
-  // credentials and the 2FA signature have been accepted, so it proved auth
-  // works and named the wrong endpoint in one go.
-  //
-  // paymentInstrumentId selects one fund source. Omitted here on purpose: the
-  // school has one wallet and this is a pre-flight check, so the account-level
-  // balance is what is wanted. If Cashfree insists on the id, the error is
-  // reported rather than swallowed — see the unreadable-balance branch below,
-  // which refuses to call an unknown balance zero.
-  const res = await call("/v1.2/getBalance", { method: "GET" });
+  // /v1.2/getBalance is a V1 endpoint: it takes a bearer token from
+  // /v1/authorize, not the V2 client-id/secret headers. Sent V2 headers it
+  // answers HTTP 200 {status:"ERROR", subCode:"403", "Token is not valid"} —
+  // which read here as "no balance we could read", so every pre-flight
+  // failed (found 8 Oct 2026). V2's /balance needs a paymentInstrumentId
+  // (400 without one, 28 Sep). The token route is proven live: authorize →
+  // "Token generated", then getBalance → balance + availableBalance.
+  const token = await payoutV1Token();
+  if (!token.ok) return { ok: false, error: token.error };
+  let res: { ok: true; payload: unknown } | { ok: false; error: string };
+  try {
+    const r = await fetch(`${payoutBaseUrl()}/v1.2/getBalance`, {
+      headers: { Authorization: `Bearer ${token.token}` },
+    });
+    res = { ok: true, payload: await r.json().catch(() => ({})) };
+  } catch (e) {
+    res = { ok: false, error: e instanceof Error ? e.message : "Could not reach Payouts" };
+  }
   if (!res.ok) return { ok: false, error: res.error };
+  const v1 = (res.payload ?? {}) as Record<string, unknown>;
+  if (String(v1.status ?? "").toUpperCase() === "ERROR") {
+    return { ok: false, error: String(v1.message || "Payouts refused the balance read") };
+  }
   const p = (res.payload ?? {}) as Record<string, unknown>;
   const data = (p.data ?? p) as Record<string, unknown>;
   const available = Number(data.available_balance ?? data.availableBalance ?? Number.NaN);

@@ -26,12 +26,31 @@ export async function POST(req: Request) {
   const timestamp = req.headers.get("x-webhook-timestamp") || "";
   const signature = req.headers.get("x-webhook-signature") || "";
   if (!verifyPayoutWebhook(raw, timestamp, signature, secret)) {
+    // Why it was refused, without a byte of the secret, signature or body:
+    // the 8 Oct 2026 dashboard test kept failing with nothing to go on.
+    console.warn("[payouts webhook] refused", JSON.stringify({
+      secretSet: !!secret,
+      hasTimestamp: !!timestamp,
+      hasSignature: !!signature,
+      version: req.headers.get("x-webhook-version") || "",
+      contentType: req.headers.get("content-type") || "",
+      bodyBytes: raw.length,
+      bodyLooksJson: raw.trimStart().startsWith("{"),
+      bodyHasSignatureField: /(^|&|")signature("|=)/.test(raw),
+      // Yes/no only: is it signed with some OTHER Cashfree secret we hold?
+      // (8 Oct: our own signed probe passed, Cashfree's Test did not.)
+      matchesPgSecret: !!signature && verifyPayoutWebhook(raw, timestamp, signature, process.env.CASHFREE_SECRET_KEY?.trim() || ""),
+      timestampSkewSeconds: Number.isFinite(Number(timestamp))
+        ? Math.round(Date.now() / 1000 - (Number(timestamp) > 1e12 ? Number(timestamp) / 1000 : Number(timestamp)))
+        : null,
+    }));
     return NextResponse.json({ ok: false, error: "Invalid signature" }, { status: 400 });
   }
   // Timestamps are sent in seconds or milliseconds; either way not stale.
   const ts = Number(timestamp);
   const tsSeconds = ts > 1e12 ? ts / 1000 : ts;
   if (Number.isFinite(tsSeconds) && Math.abs(Date.now() / 1000 - tsSeconds) > MAX_AGE_SECONDS) {
+    console.warn("[payouts webhook] refused: stale timestamp", timestamp);
     return NextResponse.json({ ok: false, error: "Stale webhook" }, { status: 400 });
   }
   let payload: unknown;
