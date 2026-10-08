@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — a tick-to-select picker for a bulk allotment and its read-only change record; neither row is a record to act on
 
 import { useMemo, useState } from "react";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
