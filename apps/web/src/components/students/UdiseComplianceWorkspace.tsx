@@ -30,6 +30,14 @@ import {
 import type { SisStudent } from "@/lib/sis";
 import { UdisePenApaarImportPanel } from "@/components/students/UdisePenApaarImportPanel";
 import { UdiseRobotPanel } from "@/components/students/UdiseRobotPanel";
+import { OfficeRobotInstallCard } from "@/components/students/OfficeRobotInstallCard";
+import { UdiseClassSheetsCard } from "@/components/students/UdiseClassSheetsCard";
+import { UdisePortalSyncCard } from "@/components/students/UdisePortalSyncCard";
+import { UdiseSchoolAnswersCard } from "@/components/students/UdiseSchoolAnswersCard";
+import { UdiseSchoolFinanceCard } from "@/components/students/UdiseSchoolFinanceCard";
+import { UdiseSchoolProfileCard } from "@/components/students/UdiseSchoolProfileCard";
+import { UdiseTeacherSyncCard } from "@/components/students/UdiseTeacherSyncCard";
+import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import {
   UdiseStudentListModal,
   type UdiseListRow,
@@ -230,6 +238,24 @@ function unregisteredRowsToList(rows: UdiseUnregisteredRow[]): UdiseListRow[] {
     mobile: r.primaryCallMobile || "—",
   }));
 }
+
+type UdiseStep = "setup" | "portal" | "sheets" | "worklist" | "teachers" | "profile";
+
+/**
+ * The UDISE+ page, step by step (director, 8 Oct 2026: "the page is becoming
+ * longer — split it in tabs"). Layout only: every step stays mounted (hidden
+ * when not shown), so a half-ticked review or half-typed figures survive a
+ * tab change.
+ */
+const UDISE_STEPS: StepDef<UdiseStep>[] = [
+  { id: "setup", title: "Robot & setup", what: "Install the robot in this Chrome, see today's to-do, and confirm the school answers once." },
+  { id: "portal", title: "Students: portal ↔ ERP", what: "What UDISE+ knows that the ERP is missing or has different — tick and apply; PEN finder, transfers, Dropbox." },
+  { id: "sheets", title: "Class sheets", what: "Height, weight, blood group and the other details only the class can collect." },
+  { id: "worklist", title: "Compliance worklist", what: "PEN, APAAR and Aadhaar gaps child by child; import the portal export; call and remind families." },
+  { id: "teachers", title: "Teachers", what: "UDISE+ Teacher module vs ERP Staff — bring details in, add missing staff." },
+  { id: "profile", title: "School profile", what: "The school's UDISE+ profile sections, and 1(c) receipts & expenditure." },
+];
+const UDISE_STEP_KEY = "bhb.udise.step";
 
 export function UdiseComplianceWorkspace({
   tick = 0,
@@ -518,6 +544,25 @@ export function UdiseComplianceWorkspace({
     );
   }
 
+  // The step this viewer last worked on (a per-browser convenience only).
+  const [udiseStep, setUdiseStep] = useState<UdiseStep>("setup");
+  useEffect(() => {
+    try {
+      const v = window.localStorage.getItem(UDISE_STEP_KEY) as UdiseStep | null;
+      if (v && UDISE_STEPS.some((x) => x.id === v)) setUdiseStep(v);
+    } catch {
+      // Private window / blocked storage: start at step 1.
+    }
+  }, []);
+  const pickUdiseStep = (v: UdiseStep) => {
+    setUdiseStep(v);
+    try {
+      window.localStorage.setItem(UDISE_STEP_KEY, v);
+    } catch {
+      // Not remembered — fine.
+    }
+  };
+
   if (!sis || !masters) {
     return (
       <p className="mt-4 text-sm text-[var(--muted)]">Loading UDISE+…</p>
@@ -526,7 +571,28 @@ export function UdiseComplianceWorkspace({
 
   return (
     <div className="mt-4 space-y-4">
-      <UdiseRobotPanel sis={sis} masters={masters} academicYearCode={ay} />
+      <StepTabs aria-label="UDISE+ work, step by step" steps={UDISE_STEPS} value={udiseStep} onChange={pickUdiseStep} />
+
+      <div className={udiseStep === "setup" ? "space-y-3" : "hidden"}>
+        <OfficeRobotInstallCard />
+        <UdiseRobotPanel sis={sis} masters={masters} academicYearCode={ay} />
+        <UdiseSchoolAnswersCard />
+      </div>
+      <div className={udiseStep === "portal" ? "space-y-3" : "hidden"}>
+        <UdisePortalSyncCard />
+      </div>
+      <div className={udiseStep === "sheets" ? "space-y-3" : "hidden"}>
+        <UdiseClassSheetsCard sis={sis} masters={masters} academicYearCode={ay} />
+      </div>
+      <div className={udiseStep === "teachers" ? "space-y-3" : "hidden"}>
+        <UdiseTeacherSyncCard />
+      </div>
+      <div className={udiseStep === "profile" ? "space-y-3" : "hidden"}>
+        <UdiseSchoolProfileCard />
+        <UdiseSchoolFinanceCard />
+      </div>
+
+      <div className={udiseStep === "worklist" ? "space-y-4" : "hidden"}>
 
       <div className="rounded-xl border border-[rgba(180,35,24,0.25)] bg-[rgba(180,35,24,0.06)] px-4 py-3">
         <p className="text-sm font-semibold text-[#8b1a12]">
@@ -1385,6 +1451,8 @@ export function UdiseComplianceWorkspace({
         )}
       </ErpTableShell>
       )}
+
+      </div>
 
       {kpiModal ? (
         <UdiseStudentListModal
