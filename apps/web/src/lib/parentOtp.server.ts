@@ -102,13 +102,29 @@ export async function issueParentOtp(opts: {
 
   const ctx = await getServerTenantContext();
   if (ctx) {
-    await ctx.sb.from("parent_otp_codes").insert({
+    // household_id is a uuid column; SIS household ids are "hh_…" text.
+    // Passing one made Postgres refuse the WHOLE row (PostgREST 400) — and
+    // the result was never checked, so the parent got a WhatsApp code that
+    // /verify could never find: "OTP expired or not requested" for every
+    // parent app login from 15 Aug to 8 Oct 2026 (staff logins pass no
+    // household and kept working). /verify re-resolves the household from
+    // the mobile, so the column is only kept for a real uuid.
+    const householdUuid =
+      opts.householdId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(opts.householdId)
+        ? opts.householdId
+        : null;
+    const { error } = await ctx.sb.from("parent_otp_codes").insert({
       tenant_id: ctx.tenantId,
       mobile,
       code_hash: hash,
-      household_id: opts.householdId || null,
+      household_id: householdUuid,
       expires_at: new Date(expiresAt).toISOString(),
     });
+    // A code that was not stored can never be verified: never send it.
+    if (error) {
+      console.error("[parent-otp] could not store the OTP:", error.message);
+      return { ok: false, reason: "Could not start the OTP — please try again in a minute" };
+    }
   } else {
     memoryOtps.set(otpKey("local", mobile), {
       hash,
