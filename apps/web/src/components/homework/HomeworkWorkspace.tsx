@@ -6,6 +6,7 @@ import Link from "next/link";
 import { BookOpen } from "lucide-react";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
+import { hasFeaturePermission, visibleModuleTabs } from "@/lib/rbac";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import {
@@ -107,6 +108,19 @@ export function HomeworkWorkspace() {
   const [subjectId, setSubjectId] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Someone holding only some Homework functions (Masters → Roles, e.g.
+  // Class diary) sees only their tabs.
+  const shownTabs = useMemo(
+    () => visibleModuleTabs(TABS, session, masters, "homework"),
+    [session, masters],
+  );
+  useEffect(() => {
+    if (!masters) return;
+    if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
+      setTab(shownTabs[0]!.id as HwTab);
+    }
+  }, [masters, shownTabs, tab]);
 
   // Compose
   const [title, setTitle] = useState("");
@@ -636,6 +650,8 @@ export function HomeworkWorkspace() {
             <input
               type="checkbox"
               checked={state.settings.examModeFreeze}
+              // The module's edit, or Homework → Exam-time freeze.
+              disabled={!hasFeaturePermission(session, masters, "homework.freeze", "edit")}
               onChange={(e) => {
                 setHomeworkExamFreeze(e.target.checked);
                 refresh();
@@ -774,7 +790,7 @@ export function HomeworkWorkspace() {
       ) : null}
 
       <ModuleTabs
-        items={TABS}
+        items={shownTabs}
         value={tab}
         onChange={(id) => setTab(id as HwTab)}
       />

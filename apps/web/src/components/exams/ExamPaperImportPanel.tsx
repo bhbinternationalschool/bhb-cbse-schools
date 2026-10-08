@@ -472,7 +472,7 @@ export function ExamPaperImportPanel({
           ) : null}
 
           <div className="overflow-x-auto">
-            <ErpTableShell><ErpTable minWidth="min-w-[640px]">
+            <ErpTableShell><div className="overflow-x-auto"><ErpTable minWidth="min-w-[640px]">
               <ErpTableHead>
                 <tr>
                   {["File", "Class", "Subject", "Exam", "Set", "Questions", "Marks", "Verdict"].map(
@@ -503,7 +503,7 @@ export function ExamPaperImportPanel({
                   </tr>
                 ) : null}
               </ErpTableBody>
-            </ErpTable></ErpTableShell>
+            </ErpTable></div></ErpTableShell>
           </div>
 
           {canEdit ? (

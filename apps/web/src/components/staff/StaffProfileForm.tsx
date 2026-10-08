@@ -1,5 +1,6 @@
 "use client";
 
+import { schoolCrestUrl, schoolPrintName } from "@/lib/schoolIdentity";
 import { useEffect, useMemo, useState } from "react";
 import { IfscCheck } from "@/components/ui/open-lookup-fields";
 import Link from "next/link";
@@ -21,7 +22,6 @@ import {
 } from "@/lib/foundationMasters";
 import { loadMasters, saveMasters, type MastersState } from "@/lib/masters";
 import { persistSeriesUse, suggestFromSeriesCode } from "@/lib/numberSeries";
-import { TENANT } from "@/lib/types";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import { StaffImageField } from "@/components/staff/StaffImageField";
 import { StaffDocUpload } from "@/components/staff/StaffDocUpload";
@@ -1215,11 +1215,21 @@ export function StaffProfileForm(props: Props) {
                 className="staff-idcard-sheet rounded-2xl border border-[rgba(32,48,80,0.15)] bg-gradient-to-br from-[#0f2744] to-[#1e3a5f] p-5 text-white shadow-md"
               >
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#f5d78e]">
-                      {TENANT.shortName || "School"}
-                    </p>
-                    <p className="mt-1 text-xs text-white/70">Staff identity card</p>
+                  <div className="flex items-center gap-2">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={schoolCrestUrl()}
+                      alt=""
+                      width={36}
+                      height={36}
+                      className="h-9 w-9 shrink-0 rounded bg-white/95 object-contain p-0.5"
+                    />
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#f5d78e]">
+                        {schoolPrintName()}
+                      </p>
+                      <p className="mt-1 text-xs text-white/70">Staff identity card</p>
+                    </div>
                   </div>
                   {draft.photoUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element

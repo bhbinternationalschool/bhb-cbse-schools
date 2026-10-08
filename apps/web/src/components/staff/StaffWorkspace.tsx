@@ -31,7 +31,7 @@ import {
   resolveSessionStaff,
 } from "@/lib/staffResolve";
 import { RemoveControl } from "@/components/masters/RemoveControl";
-import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { useModuleFilters } from "@/lib/moduleFilters";
 import { FilterBar } from "@/components/ui/filter-bar";
 import {
@@ -80,7 +80,7 @@ import { DocVerificationQueuePanel } from "@/components/students/DocVerification
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { StaffPresenceCard } from "@/components/staff/StaffPresenceCard";
 import { StaffGeoAdminPanel } from "@/components/staff/StaffGeoAdminPanel";
-import { hasPermission } from "@/lib/rbac";
+import { hasPermission, visibleModuleTabs } from "@/lib/rbac";
 
 type NamedCount = ErpChartRow;
 
@@ -122,6 +122,25 @@ type StaffMainTab =
   | "presence"
   | "gps";
 
+const STAFF_TABS: ModuleTabItem[] = [
+  { id: "dashboard", label: "Dashboard", tone: "navy" },
+  { id: "roster", label: "Roster", tone: "navy" },
+  { id: "duty_roster", label: "Duty roster", tone: "coral" },
+  { id: "allocate", label: "Allocate teaching", tone: "violet" },
+  { id: "assignments", label: "Who teaches what", tone: "sky" },
+  { id: "my_docs", label: "My docs", tone: "sky" },
+  { id: "agreements", label: "Agreements", tone: "teal" },
+  { id: "doc_verify", label: "Doc verify", tone: "amber" },
+  { id: "leave", label: "Leave", tone: "teal" },
+  { id: "requests", label: "Requests", tone: "coral" },
+  { id: "outdoor_duty", label: "Outdoor duty", tone: "sky" },
+  { id: "appraisal", label: "Appraisal", tone: "violet" },
+  { id: "payslips", label: "Payslips", tone: "green" },
+  { id: "reports", label: "Reports", tone: "amber" },
+  { id: "presence", label: "My presence", tone: "green" },
+  { id: "gps", label: "GPS presence", tone: "coral" },
+];
+
 export function StaffWorkspace() {
   const router = useRouter();
   const session = useDemoSession();
@@ -155,6 +174,19 @@ export function StaffWorkspace() {
     typeof window !== "undefined" ? loadMasters() : null,
   );
   const [notice, setNotice] = useState<string | null>(null);
+
+  // Someone holding only some Staff functions (director, 6 Oct 2026 — e.g.
+  // Leave approvals) sees only their tabs.
+  const shownTabs = useMemo(
+    () => visibleModuleTabs(STAFF_TABS, session, state ?? loadMasters(), "staff"),
+    [session, state],
+  );
+  useEffect(() => {
+    if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
+      setTab(shownTabs[0]!.id as StaffMainTab);
+    }
+  }, [shownTabs, tab]);
+
   const {
     filters: staffFilters,
     patch: patchStaffFilters,
@@ -386,24 +418,7 @@ export function StaffWorkspace() {
         aria-label="Staff"
         value={tab}
         onChange={(id) => setTab(id as StaffMainTab)}
-        items={[
-          { id: "dashboard", label: "Dashboard", tone: "navy" },
-          { id: "roster", label: "Roster", tone: "navy" },
-          { id: "duty_roster", label: "Duty roster", tone: "coral" },
-          { id: "allocate", label: "Allocate teaching", tone: "violet" },
-          { id: "assignments", label: "Who teaches what", tone: "sky" },
-          { id: "my_docs", label: "My docs", tone: "sky" },
-          { id: "agreements", label: "Agreements", tone: "teal" },
-          { id: "doc_verify", label: "Doc verify", tone: "amber" },
-          { id: "leave", label: "Leave", tone: "teal" },
-          { id: "requests", label: "Requests", tone: "coral" },
-          { id: "outdoor_duty", label: "Outdoor duty", tone: "sky" },
-          { id: "appraisal", label: "Appraisal", tone: "violet" },
-          { id: "payslips", label: "Payslips", tone: "green" },
-          { id: "reports", label: "Reports", tone: "amber" },
-          { id: "presence", label: "My presence", tone: "green" },
-          { id: "gps", label: "GPS presence", tone: "coral" },
-        ]}
+        items={shownTabs}
       />
 
       {tab === "dashboard" ? (
@@ -719,6 +734,7 @@ export function StaffWorkspace() {
         />
 
         <ErpTableShell>
+          <div className="overflow-x-auto">
           <ErpTable>
             <ErpTableHead>
               <tr>
@@ -876,6 +892,7 @@ export function StaffWorkspace() {
               ) : null}
             </ErpTableBody>
           </ErpTable>
+          </div>
         </ErpTableShell>
       </div>
 

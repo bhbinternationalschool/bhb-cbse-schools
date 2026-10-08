@@ -3,6 +3,7 @@ import {
   authorizeSchoolDataDesk,
   SCHOOL_DATA_DESK_RBAC,
 } from "@/lib/apiRouteAuth.server";
+import { deskReadGate, visibleSlices } from "@/lib/deskFeatureGate.server";
 import type { PayrollState } from "@/lib/payroll";
 import { payrollDualWriteDbEnabled } from "@/lib/payrollDbConfig";
 import {
@@ -13,8 +14,24 @@ import {
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["payroll-desk"], "GET");
-  if (!auth.ok) return auth.response
+  // The Payroll grant, or the read-only "Payroll runs & payslips" function,
+  // which owns both desk keys — its reader gets the whole desk, never a
+  // cut-down copy. Writing payslips stays module-level (POST below).
+  const gate = await deskReadGate(req, SCHOOL_DATA_DESK_RBAC["payroll-desk"]);
+  if (gate.mode === "deny") return gate.response;
+  if (gate.mode === "feature") {
+    const seen = visibleSlices("payroll", gate);
+    if (!seen.has("runs") || !seen.has("audit")) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Reading payroll runs needs the Payroll grant or the payslips function.",
+          reason: "feature_forbidden",
+        },
+        { status: 403 },
+      );
+    }
+  }
   const { bundle, meta, ok } = await fetchPayrollDeskFromDb();
   if (!ok) {
     return NextResponse.json(

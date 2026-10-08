@@ -52,22 +52,8 @@ export function StaffMyPayslips({ staffId }: { staffId: string }) {
     return slips.filter((s) => s.run.month === month);
   }, [slips, month]);
 
-  const school = useMemo(() => {
-    const m = loadMasters();
-    const name =
-      m.schoolProfile?.displayName ||
-      m.schoolProfile?.legalName ||
-      "BHB International School";
-    const addr = [
-      m.schoolProfile?.address,
-      m.schoolProfile?.city,
-      m.schoolProfile?.state,
-      m.schoolProfile?.pincode,
-    ]
-      .filter(Boolean)
-      .join(", ");
-    return { name, addr };
-  }, [tick]);
+  // Re-read when the slips refresh, so a Masters edit reaches the letterhead.
+  const masters = useMemo(() => loadMasters(), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     setTick((n) => n + 1);
@@ -139,8 +125,7 @@ export function StaffMyPayslips({ staffId }: { staffId: string }) {
               <StaffPayslipSummary run={run} line={line} />
             </div>
             <PrintablePayslip
-              schoolName={school.name}
-              schoolAddr={school.addr}
+              masters={masters}
               run={run}
               line={line}
             />

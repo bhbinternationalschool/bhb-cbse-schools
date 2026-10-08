@@ -184,6 +184,70 @@ export function computeFreeTeacherSlots(
   return out;
 }
 
+/** One teacher's day: free, or the class (and subject) they teach. */
+export type TeacherDayCell =
+  | { free: true }
+  | { free: false; classSection: string; subject: string; clash: boolean };
+
+export type TeacherDayRow = {
+  teacherId: string;
+  empCode: string;
+  teacherName: string;
+  cells: Record<number, TeacherDayCell>;
+  freeCount: number;
+};
+
+/**
+ * The free-period grid (director, 6 Oct 2026: "make free period also in
+ * table view for easily see who is free in which period"): every teaching
+ * staff member down the side, the day's periods across, each cell free or
+ * the class they are in. Same timetable source as computeFreeTeacherSlots,
+ * so the grid and the list never disagree. A teacher placed in two classes
+ * at once shows the clash rather than one of them.
+ */
+export function computeTeacherDayGrid(
+  masters: MastersState,
+  tt: TimetableState,
+  ay: string,
+  weekday: number,
+): { periods: ReturnType<typeof teachingPeriods>; rows: TeacherDayRow[]; freeByPeriod: Record<number, number> } {
+  const periods = teachingPeriods(tt.bellTemplate);
+  const busy = new Map<string, { classSection: string; subject: string; count: number }>();
+  for (const g of tt.grids) {
+    if (g.academicYearCode !== ay) continue;
+    for (const s of g.slots) {
+      if (!s.teacherId || s.weekday !== weekday) continue;
+      const key = `${s.teacherId}|${s.periodNo}`;
+      const prev = busy.get(key);
+      busy.set(key, {
+        classSection: prev ? `${prev.classSection} + ${classSectionLabel(masters, g.classId, g.sectionId)}` : classSectionLabel(masters, g.classId, g.sectionId),
+        subject: prev ? prev.subject : s.subjectId ? subjectLabel(masters, s.subjectId) : "",
+        count: (prev?.count ?? 0) + 1,
+      });
+    }
+  }
+  const freeByPeriod: Record<number, number> = {};
+  for (const p of periods) freeByPeriod[p.no] = 0;
+  const rows: TeacherDayRow[] = teachingStaff(masters)
+    .map((t) => {
+      const cells: Record<number, TeacherDayCell> = {};
+      let freeCount = 0;
+      for (const p of periods) {
+        const b = busy.get(`${t.id}|${p.no}`);
+        if (b) {
+          cells[p.no] = { free: false, classSection: b.classSection, subject: b.subject, clash: b.count > 1 };
+        } else {
+          cells[p.no] = { free: true };
+          freeCount++;
+          freeByPeriod[p.no] = (freeByPeriod[p.no] ?? 0) + 1;
+        }
+      }
+      return { teacherId: t.id, empCode: t.empCode, teacherName: t.fullName, cells, freeCount };
+    })
+    .sort((a, b) => a.teacherName.localeCompare(b.teacherName));
+  return { periods, rows, freeByPeriod };
+}
+
 function runFreePeriods(
   masters: MastersState,
   tt: TimetableState,

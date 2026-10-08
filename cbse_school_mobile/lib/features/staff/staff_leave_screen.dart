@@ -111,7 +111,7 @@ class StaffLeaveScreen extends StatelessWidget {
                         Expanded(
                           child: Text(
                             r.fromDate == r.toDate
-                                ? "${formatDateLabel(r.fromDate)}${r.halfDay ? " · half day" : ""}"
+                                ? "${formatDateLabel(r.fromDate)}${r.halfDay ? " · half day${r.halfDaySession.isNotEmpty ? " (${r.halfDaySession} off)" : ""}" : ""}"
                                 : "${formatDateLabel(r.fromDate)} – ${formatDateLabel(r.toDate)}",
                             style: AppText.bodyMediumInk.copyWith(
                               fontWeight: FontWeight.w600,
@@ -259,6 +259,9 @@ class _ApplyLeaveSheetState extends State<_ApplyLeaveSheet> {
   DateTime _from = DateTime.now();
   DateTime? _to;
   bool _halfDay = false;
+
+  /// "morning" | "afternoon" — asked whenever half day is on, never guessed.
+  String _halfDaySession = "";
   final _reason = TextEditingController();
   bool _busy = false;
   String? _error;
@@ -285,6 +288,10 @@ class _ApplyLeaveSheetState extends State<_ApplyLeaveSheet> {
   }
 
   Future<void> _submit() async {
+    if (_halfDay && _halfDaySession.isEmpty) {
+      setState(() => _error = "Half day: choose morning off or afternoon off.");
+      return;
+    }
     setState(() {
       _busy = true;
       _error = null;
@@ -295,6 +302,7 @@ class _ApplyLeaveSheetState extends State<_ApplyLeaveSheet> {
         fromDate: _iso(_from),
         toDate: _iso(_halfDay ? _from : (_to ?? _from)),
         halfDay: _halfDay,
+        halfDaySession: _halfDay ? _halfDaySession : "",
         reason: _reason.text.trim(),
       );
       Haptics.success();
@@ -387,8 +395,35 @@ class _ApplyLeaveSheetState extends State<_ApplyLeaveSheet> {
               dense: true,
               title: Text(context.l10n.halfDay, style: AppText.bodyMedium),
               value: _halfDay,
-              onChanged: (v) => setState(() => _halfDay = v),
+              onChanged: (v) => setState(() {
+                _halfDay = v;
+                if (!v) _halfDaySession = "";
+              }),
             ),
+            if (_halfDay) ...[
+              Text(
+                "Which half is off? Punch in for the other half, or the day counts as absent.",
+                style: AppText.bodySmallMuted,
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  for (final opt in const [
+                    ("morning", "Morning off"),
+                    ("afternoon", "Afternoon off"),
+                  ])
+                    ChoiceChip(
+                      label: Text(opt.$2),
+                      selected: _halfDaySession == opt.$1,
+                      onSelected: (_) =>
+                          setState(() => _halfDaySession = opt.$1),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
+            ],
             DictateField(
               label: context.l10n.reason,
               controller: _reason,

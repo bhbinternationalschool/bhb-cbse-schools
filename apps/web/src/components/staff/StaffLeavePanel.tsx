@@ -24,6 +24,7 @@ import {
   normalizeLeaveSettings,
   remainingBalance,
   saveStaffHr,
+  type HalfDaySession,
   type LeaveRequest,
   type LeaveStatus,
   type LeaveTypeCode,
@@ -33,6 +34,7 @@ import {
   canManageStaffLeave,
   resolveSessionStaff,
 } from "@/lib/staffResolve";
+import { hasFeaturePermission } from "@/lib/rbac";
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
@@ -61,6 +63,9 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
     new Date().toISOString().slice(0, 10),
   );
   const [halfDay, setHalfDay] = useState(false);
+  // Which half is taken off — asked whenever "Half day" is ticked, never
+  // guessed (director, 6 Oct 2026).
+  const [halfDaySession, setHalfDaySession] = useState<HalfDaySession>("");
   const [reason, setReason] = useState("");
   const [adjustId, setAdjustId] = useState("");
   const [halfDayId, setHalfDayId] = useState("");
@@ -99,7 +104,12 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
 
   const isManager = useMemo(() => {
     if (!masters) return false;
-    return canManageStaffLeave(session, masters);
+    // Staff → Leave approvals (director, 6 Oct 2026) manages leave without
+    // the whole Staff module; the server takes only its slices.
+    return (
+      canManageStaffLeave(session, masters) ||
+      hasFeaturePermission(session, masters, "staff.leave", "edit")
+    );
   }, [masters, session]);
 
   useEffect(() => {
@@ -243,11 +253,22 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
   function resetForm() {
     setReason("");
     setHalfDay(false);
+    setHalfDaySession("");
     if (!isManager && selfStaff) setStaffId(selfStaff.id);
+  }
+
+  /** A half day must say which half is taken off. */
+  function halfDaySessionMissing(): boolean {
+    if (halfDay && !halfDaySession) {
+      flash("Half day: choose morning off or afternoon off", true);
+      return true;
+    }
+    return false;
   }
 
   function onRequest(e: React.FormEvent) {
     e.preventDefault();
+    if (halfDaySessionMissing()) return;
     const targetId =
       !isManager && selfStaff ? selfStaff.id : staffId;
     if (!targetId) {
@@ -264,6 +285,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
       fromDate,
       toDate,
       halfDay,
+      halfDaySession,
       reason,
       appliedBy: session.fullName,
     });
@@ -282,6 +304,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
 
   function onDirect(e: React.FormEvent) {
     e.preventDefault();
+    if (halfDaySessionMissing()) return;
     if (!isManager) {
       flash("Only principal / admin can grant direct leave", true);
       return;
@@ -293,6 +316,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
       fromDate,
       toDate,
       halfDay,
+      halfDaySession,
       reason,
       appliedBy: session.fullName,
     });
@@ -314,11 +338,13 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
     setFromDate(r.fromDate);
     setToDate(r.toDate);
     setHalfDay(r.halfDay);
+    setHalfDaySession(r.halfDaySession ?? "");
     setReason(r.reason);
   }
 
   function onAdjust(e: React.FormEvent) {
     e.preventDefault();
+    if (halfDaySessionMissing()) return;
     if (!isManager) {
       flash("Only principal / admin can adjust leave", true);
       return;
@@ -332,6 +358,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
       fromDate,
       toDate,
       halfDay,
+      halfDaySession,
       typeCode,
       reason,
       adjustedBy: session.fullName,
@@ -490,6 +517,8 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
           fromDate={fromDate}
           toDate={toDate}
           halfDay={halfDay}
+          halfDaySession={halfDaySession}
+          onHalfDaySession={setHalfDaySession}
           reason={reason}
           daysPreview={daysPreview}
           leaveTypes={hr.leaveTypes}
@@ -523,6 +552,8 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
           fromDate={fromDate}
           toDate={toDate}
           halfDay={halfDay}
+          halfDaySession={halfDaySession}
+          onHalfDaySession={setHalfDaySession}
           reason={reason}
           daysPreview={daysPreview}
           leaveTypes={hr.leaveTypes}
@@ -608,7 +639,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
                         {r.typeCode} · {r.fromDate}
                         {r.toDate !== r.fromDate ? ` → ${r.toDate}` : ""} ·{" "}
                         {r.days}d · {r.status}
-                        {r.halfDay ? " · half" : ""}
+                        {r.halfDay ? ` · half${r.halfDaySession ? ` (${r.halfDaySession} off)` : ""}` : ""}
                       </div>
                     </button>
                   </li>
@@ -627,6 +658,8 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
             fromDate={fromDate}
             toDate={toDate}
             halfDay={halfDay}
+            halfDaySession={halfDaySession}
+            onHalfDaySession={setHalfDaySession}
             reason={reason}
             daysPreview={daysPreview}
             leaveTypes={hr.leaveTypes}
@@ -919,6 +952,8 @@ function LeaveForm({
   fromDate,
   toDate,
   halfDay,
+  halfDaySession,
+  onHalfDaySession,
   reason,
   daysPreview,
   leaveTypes,
@@ -942,6 +977,8 @@ function LeaveForm({
   fromDate: string;
   toDate: string;
   halfDay: boolean;
+  halfDaySession: HalfDaySession;
+  onHalfDaySession: (v: HalfDaySession) => void;
   reason: string;
   daysPreview: number;
   leaveTypes: { code: string; name: string; paid: boolean }[];
@@ -1008,6 +1045,32 @@ function LeaveForm({
           Half day (0.5)
         </label>
       </div>
+      {halfDay ? (
+        <fieldset className="text-sm" disabled={disabled}>
+          <legend className="mb-1 block text-[11px] text-[var(--muted)]">
+            Which half is off? The other half must be punched for the day to count as a half day.
+          </legend>
+          <div className="flex flex-wrap gap-4">
+            {(
+              [
+                ["morning", "Morning off (come in the afternoon)"],
+                ["afternoon", "Afternoon off (work the morning)"],
+              ] as const
+            ).map(([v, label]) => (
+              <label key={v} className="flex items-center gap-2 font-semibold text-[var(--brand-deep)]">
+                <input
+                  type="radio"
+                  name="halfDaySession"
+                  value={v}
+                  checked={halfDaySession === v}
+                  onChange={() => onHalfDaySession(v)}
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      ) : null}
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block text-sm">
           <span className="mb-1 block text-[11px] text-[var(--muted)]">From</span>

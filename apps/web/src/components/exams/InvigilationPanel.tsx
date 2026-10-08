@@ -261,10 +261,10 @@ export function InvigilationPanel({ academicYearCode, masters, terms }: Props) {
           </p>
 
           <div className="overflow-x-auto">
-            <ErpTableShell><ErpTable minWidth="min-w-[860px]">
+            <ErpTableShell><div className="overflow-x-auto"><ErpTable minWidth="min-w-[860px]">
               <ErpTableHead sticky>
                 <tr>
-                  <th className="sticky left-0 z-10 border border-[var(--border)] bg-[var(--surface-sunken)] p-2 text-left">
+                  <th className="sticky left-0 z-20 border border-[var(--border)] bg-[var(--surface-sunken)] p-2 text-left">
                     Class
                   </th>
                   {grid.dates.map((d) => {
@@ -295,7 +295,7 @@ export function InvigilationPanel({ academicYearCode, masters, terms }: Props) {
                   <tr key={classId}>
                     <th
                       scope="row"
-                      className="sticky left-0 z-10 border border-[var(--border)] bg-[var(--card)] p-2 text-left font-semibold"
+                      className="sticky left-0 z-[1] border border-[var(--border)] bg-[var(--card)] p-2 text-left font-semibold"
                     >
                       {className(classId)}
                     </th>
@@ -434,7 +434,7 @@ export function InvigilationPanel({ academicYearCode, masters, terms }: Props) {
                   </tr>
                 ))}
               </ErpTableBody>
-            </ErpTable></ErpTableShell>
+            </ErpTable></div></ErpTableShell>
           </div>
         </>
       )}

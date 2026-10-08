@@ -34,8 +34,8 @@ import { FilterExportButtons } from "@/components/reports/FilterExportButtons";
 import { describeFilters } from "@/lib/reportExport";
 import { TENANT } from "@/lib/types";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
-import { loadRbac, scopedClassIds } from "@/lib/rbac";
-import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { canSeeModuleTab, loadRbac, scopedClassIds, visibleModuleTabs } from "@/lib/rbac";
+import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ErpTableShell } from "@/components/ui/erp-roster";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
@@ -296,6 +296,49 @@ export function AttendanceWorkspace() {
     ).length;
   }, [tick, ay]);
 
+  // Someone holding only some Attendance functions (Masters → Roles) sees
+  // only their tabs. Student leave is its own module shown here, so its tab
+  // follows Student leave's grant as well as Attendance's.
+  const tabItems = useMemo(() => {
+    const all: ModuleTabItem[] = teacherMode
+      ? // A teacher's attendance: their classes, their own punch, leave.
+        // The school-wide dashboard, exceptions and staff reports are
+        // the office's.
+        [
+          { id: "students", label: "My classes", tone: "navy" },
+          { id: "staff", label: "My attendance", tone: "teal" },
+          { id: "leave", label: "Student leave", tone: "sky" },
+        ]
+      : [
+          { id: "dashboard", label: "Dashboard", tone: "navy" },
+          { id: "students", label: "Students", tone: "navy" },
+          { id: "staff", label: "Staff", tone: "teal" },
+          { id: "leave", label: "Student leave", tone: "sky" },
+          {
+            id: "exceptions",
+            label:
+              openExceptionCount > 0
+                ? `Exceptions (${openExceptionCount})`
+                : "Exceptions",
+            tone: "amber",
+          },
+          { id: "student-reports", label: "Student reports", tone: "amber" },
+          { id: "staff-reports", label: "Staff reports", tone: "violet" },
+        ];
+    const shown = visibleModuleTabs(all, session, masters, "attendance");
+    if (shown.some((t) => t.id === "leave")) return shown;
+    if (!canSeeModuleTab(session, masters, "student_leave", "leave")) return shown;
+    return all.filter((t) => t.id === "leave" || shown.includes(t));
+  }, [teacherMode, openExceptionCount, session, masters]);
+  useEffect(() => {
+    // Not before Masters load: roles are read from it, and a tab opened by
+    // link (?tab=leave) must not be thrown away on a half-known login.
+    if (!masters) return;
+    if (tabItems.length > 0 && !tabItems.some((t) => t.id === tab)) {
+      setTab(tabItems[0]!.id as AttTab);
+    }
+  }, [masters, tabItems, tab]);
+
   const recent = useMemo(() => {
     void tick;
     return listRecentRegisters(10);
@@ -473,33 +516,7 @@ export function AttendanceWorkspace() {
         aria-label="Attendance"
         value={tab}
         onChange={(id) => setTab(id as AttTab)}
-        items={
-          teacherMode
-            ? // A teacher's attendance: their classes, their own punch, leave.
-              // The school-wide dashboard, exceptions and staff reports are
-              // the office's.
-              [
-                { id: "students", label: "My classes", tone: "navy" },
-                { id: "staff", label: "My attendance", tone: "teal" },
-                { id: "leave", label: "Student leave", tone: "sky" },
-              ]
-            : [
-                { id: "dashboard", label: "Dashboard", tone: "navy" },
-                { id: "students", label: "Students", tone: "navy" },
-                { id: "staff", label: "Staff", tone: "teal" },
-                { id: "leave", label: "Student leave", tone: "sky" },
-                {
-                  id: "exceptions",
-                  label:
-                    openExceptionCount > 0
-                      ? `Exceptions (${openExceptionCount})`
-                      : "Exceptions",
-                  tone: "amber",
-                },
-                { id: "student-reports", label: "Student reports", tone: "amber" },
-                { id: "staff-reports", label: "Staff reports", tone: "violet" },
-              ]
-        }
+        items={tabItems}
       />
 
       {syncStatus.status === "failed" ? (

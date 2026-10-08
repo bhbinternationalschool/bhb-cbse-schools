@@ -77,6 +77,21 @@ console.log("waFailureReason.selftest.ts");
   );
 }
 
+// --- healthy ecosystem engagement (Oct 2026) --------------------------------
+{
+  assert.equal(
+    classifyWaFailure("This message was not delivered to maintain healthy ecosystem engagement.").kind,
+    "engagement_limit",
+    "Meta's marketing-frequency limit (131049) — not a 24-hour window: sending a template would not help",
+  );
+  assert.equal(classifyWaFailure("(#131049) Message not delivered").kind, "engagement_limit");
+  assert.equal(
+    waFailureBlamesNumber("This message was not delivered to maintain healthy ecosystem engagement."),
+    false,
+    "ecosystem engagement is not a number problem",
+  );
+}
+
 // --- only number-faults land on a fix-the-number list --------------------
 {
   assert.equal(waFailureBlamesNumber("Message undeliverable"), true);

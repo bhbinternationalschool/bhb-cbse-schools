@@ -56,6 +56,30 @@ if [ "$FLAVOR" = parent ] && [ "$KIND" = appbundle ]; then
   echo "Play Billing ON (tutor pass buys through Google Play in this build)"
 fi
 
+# Staff sign-in is Supabase email + password, so the staff build MUST carry
+# the project URL and its anon (publishable) key. Without them the login
+# screen answers "Staff login is not configured in this build (missing
+# Supabase keys)" — which is exactly what Google's reviewer saw and why Play
+# rejected BHB Staff 1.0.16 on 8 Oct 2026 ("login credentials are
+# incorrect"). Taken from the environment, else from the web app's
+# .env.local (NEXT_PUBLIC_* — public by design, they ship to every browser).
+if [ "$FLAVOR" = staff ]; then
+  ENV_LOCAL="../apps/web/.env.local"
+  if [ -z "${SUPABASE_URL:-}" ] && [ -f "$ENV_LOCAL" ]; then
+    SUPABASE_URL=$(grep -E '^NEXT_PUBLIC_SUPABASE_URL=' "$ENV_LOCAL" | head -1 | cut -d= -f2- | tr -d '"' || true)
+  fi
+  if [ -z "${SUPABASE_ANON_KEY:-}" ] && [ -f "$ENV_LOCAL" ]; then
+    SUPABASE_ANON_KEY=$(grep -E '^NEXT_PUBLIC_SUPABASE_ANON_KEY=' "$ENV_LOCAL" | head -1 | cut -d= -f2- | tr -d '"' || true)
+  fi
+  if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_ANON_KEY:-}" ]; then
+    echo "FAIL: staff build needs SUPABASE_URL and SUPABASE_ANON_KEY (env, or NEXT_PUBLIC_* in $ENV_LOCAL)." >&2
+    echo "      Without them staff email sign-in is dead in the built app." >&2
+    exit 1
+  fi
+  DEFINES+=(--dart-define=SUPABASE_URL="$SUPABASE_URL" --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY")
+  echo "Supabase sign-in keys: included (${SUPABASE_URL})"
+fi
+
 if ! flutter build "$KIND" --release --flavor "$FLAVOR" -t "lib/main_$FLAVOR.dart" "${DEFINES[@]+"${DEFINES[@]}"}"; then
   # Known false negative on this Mac: after a successful bundle, flutter runs
   # apkanalyzer (from cmdline-tools, not installed here) to confirm the debug
@@ -143,4 +167,16 @@ else
   fi
   echo "$PERMS" | grep -q ACCESS_FINE_LOCATION || { echo "FAIL: staff app lost ACCESS_FINE_LOCATION; the punch fence check will not work" >&2; exit 1; }
   echo "OK: staff app has foreground location only"
+  # Read the sign-in keys back out of the compiled code, the same way the
+  # permissions are read back: a define that did not land is a dead login.
+  if [ "$KIND" = appbundle ]; then
+    LIBAPP=$(unzip -p "$OUT" base/lib/arm64-v8a/libapp.so 2>/dev/null | strings | grep -c "$SUPABASE_URL" || true)
+  else
+    LIBAPP=$(unzip -p "$OUT" lib/arm64-v8a/libapp.so 2>/dev/null | strings | grep -c "$SUPABASE_URL" || true)
+  fi
+  if [ "${LIBAPP:-0}" -lt 1 ]; then
+    echo "FAIL: the built staff app does not contain $SUPABASE_URL — staff sign-in would be dead" >&2
+    exit 1
+  fi
+  echo "OK: staff sign-in keys are compiled in"
 fi

@@ -155,6 +155,7 @@ export async function createCashfreeCheckout(input: CreateCheckoutInput): Promis
       webhookUrl,
       notes: { kind: input.kind, ...input.notes },
     });
+    if (!link.ok) console.error("[cashfree] link refused", JSON.stringify({ kind: input.kind, ref: input.ref, error: link.error }));
     return link.ok
       ? { ok: true, orderId: link.id, checkoutUrl: link.linkUrl, externalId: link.id, mode: "links" }
       : link;
@@ -181,7 +182,13 @@ export async function createCashfreeCheckout(input: CreateCheckoutInput): Promis
     // order stays open to every rail at the fallback quote, as before.
     paymentMethods: input.methodGroup ? cashfreeOrderPaymentMethods(input.methodGroup) : undefined,
   });
-  if (!order.ok) return order;
+  if (!order.ok) {
+    // Cashfree's own words ("authentication Failed", "order_amount invalid"…).
+    // Every caller treats a refusal as an ordinary result, so this line is the
+    // only place it can be seen — ten days of refusals once went unlogged.
+    console.error("[cashfree] order refused", JSON.stringify({ kind: input.kind, ref: input.ref, error: order.error }));
+    return order;
+  }
 
   const ctx = await getServerTenantContext();
   if (!ctx) return { ok: false, error: "No tenant context" };
@@ -201,7 +208,10 @@ export async function createCashfreeCheckout(input: CreateCheckoutInput): Promis
     },
     { onConflict: "order_id" },
   );
-  if (error) return { ok: false, error: `Could not record checkout: ${error.message}` };
+  if (error) {
+    console.error("[cashfree] checkout not recorded", JSON.stringify({ kind: input.kind, ref: input.ref, error: error.message }));
+    return { ok: false, error: `Could not record checkout: ${error.message}` };
+  }
 
   return {
     ok: true,

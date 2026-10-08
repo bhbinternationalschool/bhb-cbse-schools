@@ -27,6 +27,7 @@
 export type WaFailureKind =
   | "not_on_whatsapp"
   | "needs_template"
+  | "engagement_limit"
   | "opted_out"
   | "template_problem"
   | "invalid_mobile"
@@ -62,6 +63,17 @@ const VERDICTS: Record<WaFailureKind, Omit<WaFailureVerdict, "kind">> = {
     label: "Needs an approved template",
     advice:
       "Nothing is wrong with this number. Free text only reaches a parent within 24 hours of their last message; send an approved template instead.",
+    numberAtFault: false,
+    retryable: true,
+  },
+  // Meta 131049, "not delivered to maintain healthy ecosystem engagement":
+  // Meta caps how many MARKETING messages one person receives from all
+  // businesses. It hits templates themselves, so "send a template" (the
+  // 24-hour advice) would not help; the number is fine.
+  engagement_limit: {
+    label: "Held back by Meta (marketing limit)",
+    advice:
+      "Nothing is wrong with this number. Meta held the message back because this person has recently received several marketing messages from businesses. Do not resend it now — send real notices as a Utility template, and try marketing messages again after a day or two.",
     numberAtFault: false,
     retryable: true,
   },
@@ -115,6 +127,10 @@ const PATTERNS: { kind: WaFailureKind; test: RegExp }[] = [
   {
     kind: "needs_template",
     test: /outside meta'?s? 24h|24[- ]?hour (session )?window|open conversation/i,
+  },
+  {
+    kind: "engagement_limit",
+    test: /maintain.*healthy.*ecosystem|healthy ecosystem engagement|131049/i,
   },
   { kind: "opted_out", test: /opted out|\bstop\b|131050/i },
   {

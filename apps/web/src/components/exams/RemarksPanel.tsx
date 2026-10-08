@@ -535,6 +535,7 @@ export function RemarksPanel(props: {
       </p>
 
       <ErpTableShell exportAs="report_card_remarks" exportTitle="Report card remarks">
+        <div className="overflow-x-auto">
         <ErpTable minWidth="min-w-full" className="text-xs sm:text-sm">
           <ErpTableHead>
             <tr>
@@ -716,6 +717,7 @@ export function RemarksPanel(props: {
             })}
           </ErpTableBody>
         </ErpTable>
+        </div>
       </ErpTableShell>
     </div>
   );

@@ -272,9 +272,25 @@ const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 export async function createPunchDisplay(
   label: string,
   by: string,
-): Promise<{ ok: true; token: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; token: string } | { ok: false; error: string; duplicate?: true }> {
   const ctx = await getServerTenantContext();
   if (!ctx) return { ok: false, error: "School database unavailable" };
+  // The same person switching on a same-named screen twice inside half a
+  // minute is a double tap, not a second screen — 6–8 Oct 2026 left pairs
+  // and threes of "Office tablet" created within milliseconds of each other.
+  const since = new Date(Date.now() - 30_000).toISOString();
+  const { data: recent } = await ctx.sb
+    .from("staff_punch_displays")
+    .select("id")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("created_by", by)
+    .eq("label", label.slice(0, 80))
+    .is("revoked_at", null)
+    .gte("created_at", since)
+    .limit(1);
+  if (recent && recent.length > 0) {
+    return { ok: false, duplicate: true, error: "This screen was switched on a moment ago — open /punch-screen on it." };
+  }
   const token = randomBytes(24).toString("base64url");
   const { error } = await ctx.sb.from("staff_punch_displays").insert({
     tenant_id: ctx.tenantId,

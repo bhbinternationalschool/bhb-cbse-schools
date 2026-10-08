@@ -1,5 +1,6 @@
 "use client";
 
+import { SchoolLetterhead } from "@/components/shared/SchoolLetterhead";
 import { useMemo, useState } from "react";
 import { formatInr } from "@/lib/fees";
 import type { MastersState } from "@/lib/masters";
@@ -168,6 +169,7 @@ export function FleetRosterPanel({
 
   return (
     <div className="mt-4 space-y-4">
+      <SchoolLetterhead printOnly title="Fleet rosters" />
       <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>

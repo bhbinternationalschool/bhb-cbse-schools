@@ -107,7 +107,7 @@ export async function POST(request: Request) {
       const where = validateScreenLocation({ lat: body.lat, lng: body.lng, accuracyM: body.accuracyM }, fence);
       if (!where.ok) throw new ApiError("forbidden", where.reason || "Outside the school", 403);
       const r = await createPunchDisplay(String(body.label || "Office screen"), by);
-      if (!r.ok) throw new ApiError("server_error", r.error, 503);
+      if (!r.ok) throw new ApiError(r.duplicate ? "conflict" : "server_error", r.error, r.duplicate ? 409 : 503);
       await writeAudit({
         session: ctx.session,
         module: "staff_attendance",

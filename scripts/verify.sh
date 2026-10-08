@@ -103,6 +103,7 @@ SELFTESTS=(
   test:staff-onboarding
   test:staff-leave-wa
   test:staff-register-leave
+  test:staff-half-day-session
   test:class-notice-wa
   test:wa-template-autopilot
   test:pin-review
@@ -178,6 +179,14 @@ SELFTESTS=(
   test:ncf-official
   test:student-curriculum
   test:subject-masters
+  test:upi-pay
+  test:upi-proof-match
+  test:expense-range
+  test:payroll-paid-on
+  test:masters-change-auth
+  test:timetable-free-grid
+  test:udise-teacher-apaar
+  test:udise-teacher-sync
   test:wa-sender-routing
   test:receipt-repair
   test:projection-double-post
@@ -237,6 +246,15 @@ SELFTESTS=(
   test:udise-upload-store
   test:udise-student-details
   test:udise-compliance
+  test:udise-robot
+  test:udise-portal-api
+  test:udise-portal-fill
+  test:udise-portal-student-sync
+  test:udise-school-finance
+  test:udise-school-profile
+  test:student-measurements
+  test:udise-portal-add
+  test:udise-portal-reconcile
   test:lead-worklist
   test:student-import
   test:student-import-mid-year

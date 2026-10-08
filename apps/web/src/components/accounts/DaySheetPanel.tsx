@@ -15,6 +15,7 @@
  * without being shown the school's position.
  */
 
+import { PRINT_LETTERHEAD_CSS, printLetterheadHtml, printWhenImagesReady } from "@/lib/printLetterheadHtml";
 import { useCallback, useEffect, useState } from "react";
 import {
   ErpTable,
@@ -105,8 +106,7 @@ export function DaySheetPanel({ onError, actorName }: AccountsPanelProps) {
     }
     w.document.write(printableDaySheet(sheet, actorName));
     w.document.close();
-    w.focus();
-    w.print();
+    printWhenImagesReady(w);
   }
 
   const net = sheet?.ok ? sheet.collections.totalPaise - sheet.expenses.totalPaise : 0;
@@ -181,7 +181,7 @@ function SideCard({ title, side }: { title: string; side: Side }) {
         <div className="mt-3 text-sm text-[var(--muted)]">Nothing recorded for this day.</div>
       ) : (
         <div className="mt-3">
-          <ErpTableShell><ErpTable minWidth="min-w-[320px]">
+          <ErpTableShell><div className="overflow-x-auto"><ErpTable minWidth="min-w-[320px]">
             <ErpTableHead>
               <tr className="text-[11px] text-[var(--muted)]">
                 <th className="px-3 py-2 text-left font-medium">Tender / head</th>
@@ -209,7 +209,7 @@ function SideCard({ title, side }: { title: string; side: Side }) {
                 )),
               ])}
             </ErpTableBody>
-          </ErpTable></ErpTableShell>
+          </ErpTable></div></ErpTableShell>
         </div>
       )}
     </div>
@@ -255,9 +255,11 @@ function printableDaySheet(sheet: DaySheet, actorName: string): string {
   .sign { margin-top: 34px; display: flex; gap: 34px; }
   .sign div { flex: 1; border-top: 1px solid #111; padding-top: 5px; font-size: 11px; }
   .warn { margin-top: 10px; border: 1px solid #111; padding: 6px 9px; font-weight: 700; }
+  ${PRINT_LETTERHEAD_CSS}
 </style></head><body>
+${printLetterheadHtml()}
 <h1>Daily collection &amp; expense sheet</h1>
-<div class="sub">BHB International School · ${esc(longDate(sheet.date))} · prepared by ${esc(actorName || "—")} · printed ${esc(new Date().toLocaleString("en-IN"))}</div>
+<div class="sub">${esc(longDate(sheet.date))} · prepared by ${esc(actorName || "—")} · printed ${esc(new Date().toLocaleString("en-IN"))}</div>
 ${sheet.truncated ? `<div class="warn">INCOMPLETE — this day has more entries than the sheet read. Do not sign.</div>` : ""}
 <div class="cols">
   <div class="col">

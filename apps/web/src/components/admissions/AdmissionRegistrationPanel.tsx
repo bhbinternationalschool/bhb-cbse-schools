@@ -44,6 +44,7 @@ import {
   MastersTableCard,
   MastersWorkCard,
 } from "@/components/masters/MastersLayout";
+import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import { SisParentMatchBanner } from "@/components/admissions/SisParentMatchBanner";
 import {
   ErpTable,
@@ -64,6 +65,28 @@ type SiblingDraft = {
   classSoughtId: string;
   feeAmountInr: string;
 };
+
+/**
+ * The selected child's registration, in the order the office does it: the
+ * registration fee is taken (or waived) first, then the child is sent to the
+ * student record, which mints the admission no. and SRN. Picking a child from
+ * the queue or this year's list happens above the steps; picking another
+ * child starts again at step 1.
+ */
+type RegStep = "take" | "send";
+
+const REG_STEPS: StepDef<RegStep>[] = [
+  {
+    id: "take",
+    title: "Take registration",
+    what: "Registration fee for the selected child — fee head and amount, then collect by any mode (partial OK), QR + WhatsApp, or waive.",
+  },
+  {
+    id: "send",
+    title: "Send to student record",
+    what: "Verify documents if pending, then create the student in Students (SIS) with admission no., SRN and today's admission date.",
+  },
+];
 
 function emptySiblingDraft(feeDefault: string): SiblingDraft {
   return {
@@ -203,6 +226,13 @@ export function AdmissionRegistrationPanel({
   /** After family save — land on take-fee with these sibling lead ids */
   const [collectFocusIds, setCollectFocusIds] = useState<string[]>([]);
   const takeFeeRef = useRef<HTMLDivElement | null>(null);
+  /** Step is per selected child: a newly picked child starts at "take". */
+  const [regStepFor, setRegStepFor] = useState<{
+    id: string | null;
+    step: RegStep;
+  }>({ id: null, step: "take" });
+  const regStep: RegStep =
+    regStepFor.id === selectedId ? regStepFor.step : "take";
 
   const [feeHeadId, setFeeHeadId] = useState(feeHeads[0]?.id || "");
   const [amountInr, setAmountInr] = useState("500");
@@ -1162,6 +1192,13 @@ export function AdmissionRegistrationPanel({
 
       {selected ? (
         <div className="space-y-4" ref={collectFocusIds.length === 0 ? takeFeeRef : undefined}>
+          <StepTabs
+            aria-label="Registration steps"
+            steps={REG_STEPS}
+            value={regStep}
+            onChange={(step) => setRegStepFor({ id: selectedId, step })}
+          >
+          {regStep === "take" ? (
           <MastersWorkCard
             title={`1 · Take registration — ${selected.childName}`}
             hint={
@@ -1465,7 +1502,9 @@ export function AdmissionRegistrationPanel({
               </div>
             ) : null}
           </MastersWorkCard>
+          ) : null}
 
+          {regStep === "send" ? (
           <MastersWorkCard
             title="2 · Send to student record"
             hint="Creates the student in Students (SIS) with Admission no., SRN, and admission date = today (send date). Parent-wise household for siblings."
@@ -1516,6 +1555,8 @@ export function AdmissionRegistrationPanel({
               ) : null}
             </div>
           </MastersWorkCard>
+          ) : null}
+          </StepTabs>
 
           {parentGroups.length > 0 ? (
             <MastersWorkCard

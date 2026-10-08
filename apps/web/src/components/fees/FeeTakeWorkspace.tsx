@@ -6,7 +6,12 @@ import Link from "next/link";
 import { IndianRupee } from "lucide-react";
 import { PaymentChannelSelect } from "@/components/accounts/PaymentChannelSelect";
 import type { AccountsState } from "@/lib/accountsTypes";
-import { canApproveConcession, canBackdateReceipt } from "@/lib/rbac";
+import {
+  canApproveConcession,
+  canBackdateReceipt,
+  canSeeModuleTab,
+  hasPermission,
+} from "@/lib/rbac";
 import {
   DEFAULT_FEE_BACKDATE_POLICY,
   earliestCollectionDate,
@@ -274,6 +279,31 @@ export function FeeTakeWorkspace() {
   const readOnly = useSessionReadOnly();
   const ay = session.academicYearCode;
   const [tab, setTab] = useState<Tab>("dashboard");
+  // Someone holding only some Fees functions (reports, receipt delivery, …)
+  // sees only their tabs. Collecting, voiding and adjustments write the fee
+  // desk, which stays with the Fees grant — no function opens those tabs.
+  const feesWhole = hasPermission(session, null, "fees", "view");
+  const showTab = (id: string) => feesWhole || canSeeModuleTab(session, null, "fees", id);
+  const FEE_TAB_ORDER: Tab[] = [
+    "dashboard",
+    "collect",
+    "receipts",
+    "delivery",
+    "cheques",
+    "manual",
+    "paylinks",
+    "wa_sis",
+    "dayclose",
+    "adjustments",
+    "vouchers",
+    "reports",
+  ];
+  const firstShownTab = feesWhole ? null : (FEE_TAB_ORDER.find((t) => showTab(t)) ?? null);
+  useEffect(() => {
+    if (!feesWhole && firstShownTab && !showTab(tab)) setTab(firstShownTab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feesWhole, firstShownTab, tab]);
+  const showDefaulters = feesWhole || ["list", "policy", "autopay"].some((t) => showTab(t));
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [sis, setSis] = useState<SisState | null>(null);
   // The search box owns its keystrokes (FeeSearchInput above) — only the
@@ -1755,112 +1785,138 @@ export function FeeTakeWorkspace() {
       notice={notice}
       toolbar={
         <div className={MODULE_TAB_CONTAINER_CLASS}>
-          <ModuleTabButton
-            active={tab === "dashboard"}
-            onClick={() => setTab("dashboard")}
-            tone="navy"
-            size="md"
-          >
-            Dashboard
-          </ModuleTabButton>
-          <ModuleTabButton
-            active={tab === "collect"}
-            onClick={() => setTab("collect")}
-            tone="green"
-            size="md"
-          >
-            Collect
-          </ModuleTabButton>
-          <ModuleTabButton
-            active={tab === "receipts"}
-            onClick={() => setTab("receipts")}
-            tone="teal"
-            size="md"
-          >
-            Receipts
-          </ModuleTabButton>
-          <ModuleTabButton
-            active={tab === "delivery"}
-            onClick={() => setTab("delivery")}
-            tone="teal"
-            size="md"
-          >
-            Delivered
-          </ModuleTabButton>
-          <ModuleTabButton
-            active={tab === "cheques"}
-            onClick={() => setTab("cheques")}
-            tone="amber"
-            size="md"
-          >
-            Cheques
-            {mounted && openChequeCount > 0 ? ` (${openChequeCount})` : ""}
-          </ModuleTabButton>
-          <ModuleTabButton
-            active={tab === "manual"}
-            onClick={() => setTab("manual")}
-            tone="slate"
-            size="md"
-          >
-            Manual book
-          </ModuleTabButton>
-          <ModuleTabButton
-            active={tab === "paylinks"}
-            onClick={() => setTab("paylinks")}
-            tone="sky"
-            size="md"
-          >
-            Pay links
-            {mounted && openPayLinkCount > 0 ? ` (${openPayLinkCount})` : ""}
-          </ModuleTabButton>
-          <ModuleTabButton
-            active={tab === "wa_sis"}
-            onClick={() => setTab("wa_sis")}
-            tone="teal"
-            size="md"
-          >
-            WA parents
-          </ModuleTabButton>
-          <ModuleTabButton
-            active={tab === "dayclose"}
-            onClick={() => setTab("dayclose")}
-            tone="coral"
-            size="md"
-          >
-            Day close{mounted && dayClosePending ? " ●" : ""}
-          </ModuleTabButton>
-          <ModuleTabButton
-            active={tab === "adjustments"}
-            onClick={() => setTab("adjustments")}
-            tone="violet"
-            size="md"
-          >
-            Adjustments
-            {mounted ? <FeeAdjustmentsBadge /> : null}
-          </ModuleTabButton>
-          <ModuleTabButton
-            active={tab === "vouchers"}
-            onClick={() => setTab("vouchers")}
-            tone="rose"
-            size="md"
-          >
-            Vouchers
-            {mounted && openChargeCount > 0 ? ` (${openChargeCount})` : ""}
-          </ModuleTabButton>
-          <ModuleTabButton
-            active={tab === "reports"}
-            onClick={() => setTab("reports")}
-            tone="green"
-            size="md"
-          >
-            Reports
-          </ModuleTabButton>
-          <Link
-            href="/fees/defaulters"
-            className="inline-flex items-center rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm font-bold text-[var(--danger)] transition hover:brightness-95"
-          >
-            Defaulters
-          </Link>
+          {showTab("dashboard") ? (
+            <ModuleTabButton
+              active={tab === "dashboard"}
+              onClick={() => setTab("dashboard")}
+              tone="navy"
+              size="md"
+            >
+              Dashboard
+            </ModuleTabButton>
+          ) : null}
+          {showTab("collect") ? (
+            <ModuleTabButton
+              active={tab === "collect"}
+              onClick={() => setTab("collect")}
+              tone="green"
+              size="md"
+            >
+              Collect
+            </ModuleTabButton>
+          ) : null}
+          {showTab("receipts") ? (
+            <ModuleTabButton
+              active={tab === "receipts"}
+              onClick={() => setTab("receipts")}
+              tone="teal"
+              size="md"
+            >
+              Receipts
+            </ModuleTabButton>
+          ) : null}
+          {showTab("delivery") ? (
+            <ModuleTabButton
+              active={tab === "delivery"}
+              onClick={() => setTab("delivery")}
+              tone="teal"
+              size="md"
+            >
+              Delivered
+            </ModuleTabButton>
+          ) : null}
+          {showTab("cheques") ? (
+            <ModuleTabButton
+              active={tab === "cheques"}
+              onClick={() => setTab("cheques")}
+              tone="amber"
+              size="md"
+            >
+              Cheques
+              {mounted && openChequeCount > 0 ? ` (${openChequeCount})` : ""}
+            </ModuleTabButton>
+          ) : null}
+          {showTab("manual") ? (
+            <ModuleTabButton
+              active={tab === "manual"}
+              onClick={() => setTab("manual")}
+              tone="slate"
+              size="md"
+            >
+              Manual book
+            </ModuleTabButton>
+          ) : null}
+          {showTab("paylinks") ? (
+            <ModuleTabButton
+              active={tab === "paylinks"}
+              onClick={() => setTab("paylinks")}
+              tone="sky"
+              size="md"
+            >
+              Pay links
+              {mounted && openPayLinkCount > 0 ? ` (${openPayLinkCount})` : ""}
+            </ModuleTabButton>
+          ) : null}
+          {showTab("wa_sis") ? (
+            <ModuleTabButton
+              active={tab === "wa_sis"}
+              onClick={() => setTab("wa_sis")}
+              tone="teal"
+              size="md"
+            >
+              WA parents
+            </ModuleTabButton>
+          ) : null}
+          {showTab("dayclose") ? (
+            <ModuleTabButton
+              active={tab === "dayclose"}
+              onClick={() => setTab("dayclose")}
+              tone="coral"
+              size="md"
+            >
+              Day close{mounted && dayClosePending ? " ●" : ""}
+            </ModuleTabButton>
+          ) : null}
+          {showTab("adjustments") ? (
+            <ModuleTabButton
+              active={tab === "adjustments"}
+              onClick={() => setTab("adjustments")}
+              tone="violet"
+              size="md"
+            >
+              Adjustments
+              {mounted ? <FeeAdjustmentsBadge /> : null}
+            </ModuleTabButton>
+          ) : null}
+          {showTab("vouchers") ? (
+            <ModuleTabButton
+              active={tab === "vouchers"}
+              onClick={() => setTab("vouchers")}
+              tone="rose"
+              size="md"
+            >
+              Vouchers
+              {mounted && openChargeCount > 0 ? ` (${openChargeCount})` : ""}
+            </ModuleTabButton>
+          ) : null}
+          {showTab("reports") ? (
+            <ModuleTabButton
+              active={tab === "reports"}
+              onClick={() => setTab("reports")}
+              tone="green"
+              size="md"
+            >
+              Reports
+            </ModuleTabButton>
+          ) : null}
+          {showDefaulters ? (
+            <Link
+              href="/fees/defaulters"
+              className="inline-flex items-center rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm font-bold text-[var(--danger)] transition hover:brightness-95"
+            >
+              Defaulters
+            </Link>
+          ) : null}
         </div>
       }
     >

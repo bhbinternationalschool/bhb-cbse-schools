@@ -255,6 +255,21 @@ function normName(name: string): string {
     .replace(/[^a-z0-9\u0900-\u097f ]/gi, "");
 }
 
+
+/**
+ * The portal's admission date (dd/mm/yyyy) as YYYY-MM-DD, or "" when absent.
+ *
+ * A child created from a UDISE+ row takes this, never today's date: an
+ * admission date we do not know stays blank rather than becoming the day
+ * someone ran the import.
+ */
+export function udiseAdmissionDateIso(raw: string | null | undefined): string {
+  const v = (raw || "").trim();
+  if (!v || udiseIsBlank(v)) return "";
+  const m = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.exec(v);
+  return m ? `${m[3]}-${m[2]!.padStart(2, "0")}-${m[1]!.padStart(2, "0")}` : "";
+}
+
 export function udiseNormName(name: string): string {
   return normName(name);
 }
@@ -1326,11 +1341,7 @@ function buildPatch(
   if (!(student.nationality || "").trim() && /^yes$/i.test((row.isIndianNational || "").trim())) {
     will.nationality = "Indian";
   }
-  // Admission date, dd/mm/yyyy on the portal.
-  fillIfBlank("joinedOn", row.admissionDate, (v) => {
-    const m = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.exec(v);
-    return m ? `${m[3]}-${m[2]!.padStart(2, "0")}-${m[1]!.padStart(2, "0")}` : "";
-  });
+  fillIfBlank("joinedOn", row.admissionDate, udiseAdmissionDateIso);
 
   const aval = (row.aadhaarValidation || "").trim();
   // Record the portal validation status only when it actually differs — this
@@ -2541,7 +2552,7 @@ export function migrateUdiseRowToSis(input: {
     academicYearCode: ay,
     studentType,
     feeGroupId,
-    joinedOn: new Date().toISOString().slice(0, 10),
+    joinedOn: udiseAdmissionDateIso(row.admissionDate),
     fatherName: row.fatherName,
     motherName: row.motherName,
     gender,
@@ -2699,7 +2710,7 @@ export function importUnmatchedUdiseRows(input: {
       academicYearCode: ay,
       studentType: input.studentType,
       feeGroupId,
-      joinedOn: new Date().toISOString().slice(0, 10),
+      joinedOn: udiseAdmissionDateIso(row.admissionDate),
       fatherName: row.fatherName,
       motherName: row.motherName,
       gender: mapUdiseGender(row.gender),

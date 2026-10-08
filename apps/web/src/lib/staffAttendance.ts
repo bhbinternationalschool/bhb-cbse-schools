@@ -9,7 +9,7 @@ import {
 import { ATTENDANCE_STATUSES, type AttendanceStatus } from "@/lib/attendance";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import { DEFAULT_AY } from "@/lib/masters";
-import { loadStaffHr } from "@/lib/staffHr";
+import { loadStaffHr, type HalfDaySession, type LeaveRequest } from "@/lib/staffHr";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
@@ -583,6 +583,59 @@ export function upsertStaffMarkInState(
 }
 
 /** Overlay approved leave onto marks for a date (LE or HD). */
+/** Every half-day-leave mark's note starts with this; the punch looks for it. */
+export const HALF_DAY_LEAVE_NOTE = "Half-day leave";
+
+/** True when this mark comes from an approved half-day leave. */
+export function isHalfDayLeaveMark(
+  m: Pick<StaffAttendanceMark, "note"> | undefined,
+): boolean {
+  return !!m && (m.note || "").startsWith(HALF_DAY_LEAVE_NOTE);
+}
+
+/**
+ * The register mark for a member of staff on approved half-day leave.
+ *
+ * Director, 6 Oct 2026: a half day counts only when the OTHER half is
+ * actually worked. Until the person punches in, the day is "A" with a note
+ * saying which half they still owe; the punch turns it into "HD". Before
+ * this an approved half-day leave was filed "HD" — counted present — even if
+ * the person never came in at all.
+ */
+export function halfDayLeaveMark(
+  cur: Pick<StaffAttendanceMark, "inTime" | "punchWay"> | undefined,
+  leave: { typeCode: string; halfDaySession?: HalfDaySession },
+): Pick<StaffAttendanceMark, "status" | "note" | "punchWay"> {
+  const session = leave.halfDaySession ?? "";
+  const off = session === "morning" ? "morning off" : session === "afternoon" ? "afternoon off" : "";
+  const other = session === "morning" ? "afternoon" : session === "afternoon" ? "morning" : "other half";
+  const head = `${HALF_DAY_LEAVE_NOTE} (${leave.typeCode}${off ? `, ${off}` : ""})`;
+  if (cur?.inTime && cur.inTime.trim()) {
+    return { status: "HD", note: `${head} · worked the ${other}`, punchWay: cur.punchWay || "leave_sync" };
+  }
+  return { status: "A", note: `${head} · not punched for the ${other}`, punchWay: "leave_sync" };
+}
+
+/** Approved half-day leave covering this staff member's date, if any. */
+export function approvedHalfDayLeaveFor(
+  staffId: string,
+  date: string,
+  academicYearCode: string,
+): LeaveRequest | null {
+  const hr = loadStaffHr();
+  return (
+    hr.leaveRequests.find(
+      (r) =>
+        r.status === "approved" &&
+        r.halfDay &&
+        r.staffId === staffId &&
+        r.academicYearCode === academicYearCode &&
+        r.fromDate <= date &&
+        r.toDate >= date,
+    ) ?? null
+  );
+}
+
 export function applyApprovedLeaveToMarks(
   marks: StaffAttendanceMark[],
   date: string,
@@ -602,12 +655,7 @@ export function applyApprovedLeaveToMarks(
     const leave = byStaff.get(m.staffId);
     if (!leave) return m;
     if (leave.halfDay) {
-      return {
-        ...m,
-        status: "HD" as const,
-        note: `Half-day leave (${leave.typeCode})`,
-        punchWay: "leave_sync" as const,
-      };
+      return { ...m, ...halfDayLeaveMark(m, leave) };
     }
     return {
       ...m,

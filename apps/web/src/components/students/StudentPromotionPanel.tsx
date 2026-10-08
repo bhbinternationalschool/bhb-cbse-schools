@@ -215,7 +215,7 @@ export function StudentPromotionPanel({
           Promote to next year
         </p>
         <p className="mt-1 text-[11px] text-[var(--muted)]">
-          Different from the class change above — this moves a class/section
+          Different from the single-student change (the other sub-tab) — this moves a class/section
           into a new academic year. Roll numbers reset in the new class;
           re-assign them afterward from the Overview tab.
         </p>

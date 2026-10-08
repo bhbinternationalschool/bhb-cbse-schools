@@ -235,6 +235,7 @@ export function ReportsCenterWorkspace() {
           </div>
 
           <ErpTableShell>
+            <div className="overflow-x-auto">
             <ErpTable>
               <ErpTableHead>
                 <tr>
@@ -297,6 +298,7 @@ export function ReportsCenterWorkspace() {
                 ) : null}
               </ErpTableBody>
             </ErpTable>
+            </div>
           </ErpTableShell>
         </section>
       ) : null}

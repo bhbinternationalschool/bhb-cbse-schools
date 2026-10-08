@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
+import { SCHOOL_DATA_DESK_RBAC } from "@/lib/apiRouteAuth.server";
 import {
-  authorizeSchoolDataDesk,
-  SCHOOL_DATA_DESK_RBAC,
-} from "@/lib/apiRouteAuth.server";
+  deskReadGate,
+  deskWriteGate,
+  featurePushOutcome,
+  featureSavedResponse,
+  stripDeskForFeatures,
+} from "@/lib/deskFeatureGate.server";
 import type { RteState } from "@/lib/rteEws";
 import { rteDualWriteDbEnabled } from "@/lib/rteDbConfig";
 import {
@@ -13,9 +17,12 @@ import {
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["rte-desk"], "GET");
-  if (!auth.ok) return auth.response
-  const { bundle, meta, ok } = await fetchRteDeskFromDb();
+  // The whole desk, or — holding RTE functions only (e.g. Govt list &
+  // admissions) — their slices; the rest comes back empty.
+  const gate = await deskReadGate(req, SCHOOL_DATA_DESK_RBAC["rte-desk"]);
+  if (gate.mode === "deny") return gate.response;
+  const { bundle: full, meta, ok } = await fetchRteDeskFromDb();
+  const bundle = gate.mode === "feature" ? stripDeskForFeatures("rte", full, gate) : full;
   if (!ok) {
     return NextResponse.json(
       { ok: false, error: "RTE desk fetch failed — tenant/db unavailable" },
@@ -27,8 +34,8 @@ export async function GET(req: Request) {
     seats: bundle.seats,
     applications: bundle.applications,
     settings: bundle.settings,
-    seatCount: bundle.seats.length,
-    applicationCount: bundle.applications.length,
+    seatCount: bundle.seats?.length ?? 0,
+    applicationCount: bundle.applications?.length ?? 0,
     updatedAt: meta?.updatedAt || new Date().toISOString(),
     meta,
   });
@@ -37,8 +44,8 @@ export async function GET(req: Request) {
 type RteDeskPostBody = Pick<RteState, "seats" | "applications" | "settings">;
 
 export async function POST(req: Request) {
-  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["rte-desk"], "POST");
-  if (!auth.ok) return auth.response
+  const gate = await deskWriteGate(req, SCHOOL_DATA_DESK_RBAC["rte-desk"]);
+  if (gate.mode === "deny") return gate.response;
   if (!rteDualWriteDbEnabled()) {
     return NextResponse.json({
       ok: true,
@@ -52,6 +59,24 @@ export async function POST(req: Request) {
     body = (await req.json()) as RteDeskPostBody;
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  // Function-only writers (director, 6 Oct 2026 — e.g. RTE → Govt list &
+  // admissions): merged onto the stored desk, their functions' slices only,
+  // row by row — never the body as sent. A desk we cannot read is unknown,
+  // not empty: nothing is written.
+  if (gate.mode === "feature") {
+    const stored = await fetchRteDeskFromDb();
+    if (!stored.ok) {
+      return NextResponse.json(
+        { ok: false, error: "Could not read the saved RTE desk — nothing was written. Try again." },
+        { status: 503 },
+      );
+    }
+    const merged = featurePushOutcome(gate, "rte", stored.bundle, body);
+    if (!merged.ok) return merged.response;
+    if (!merged.changed) return featureSavedResponse(false);
+    body = merged.state as unknown as RteDeskPostBody;
   }
 
   const result = await pushRteDeskToDb({
@@ -71,6 +96,7 @@ export async function POST(req: Request) {
     );
   }
 
+  if (gate.mode === "feature") return featureSavedResponse(true);
   return NextResponse.json({
     ok: true,
     seatCount: body.seats?.length ?? 0,

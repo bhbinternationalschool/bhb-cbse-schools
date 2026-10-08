@@ -15,6 +15,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Boxes } from "lucide-react";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { StepChainGuide, type StepDef } from "@/components/ui/StepTabs";
 import { CatalogueTab } from "@/components/inventory/CatalogueTab";
 import { CounterTab } from "@/components/inventory/CounterTab";
 import { ReportsTab } from "@/components/inventory/ReportsTab";
@@ -28,6 +29,8 @@ import { useInvBootstrap } from "@/lib/inventory/client";
 import { ensureMastersHydrated } from "@/lib/mastersPersistence";
 import { loadMasters } from "@/lib/masters";
 import { Button } from "@/components/ui/button";
+import { useDemoSession } from "@/components/shell/SessionContext";
+import { visibleModuleTabs } from "@/lib/rbac";
 
 type Tab =
   | "counter"
@@ -55,6 +58,19 @@ const TABS: {
 ];
 
 const TAB_IDS = TABS.map((t) => t.id);
+
+/**
+ * Setting the store up, in order: categories, units and stock locations;
+ * the vendors; the items; class kits made of items; then buying stock.
+ * Counter stays the first tab — it is the daily one.
+ */
+const STORE_SETUP_STEPS: StepDef<Tab>[] = [
+  { id: "masters", title: "Setup", what: "Item categories, units and stock locations — what every item is filed under." },
+  { id: "vendors", title: "Vendors", what: "The suppliers the store buys from." },
+  { id: "catalogue", title: "Catalogue", what: "Every item the store sells, with its price and tax." },
+  { id: "kits", title: "Kits by class", what: "The books-and-uniform kit each class buys, made of catalogue items." },
+  { id: "purchase", title: "Purchase", what: "Order from vendors, receive the goods into stock, and record the bills." },
+];
 
 export function InventoryWorkspace() {
   const [tab, setTab] = useState<Tab>("counter");
@@ -100,10 +116,24 @@ export function InventoryWorkspace() {
     };
   }, []);
 
+  // Someone holding only some Store functions (Counter, Purchase, …) sees
+  // only their tabs. The inventory routes enforce the same split, writes
+  // included (lib/inventory/route.server.ts).
+  const session = useDemoSession();
   const tabItems = useMemo(
-    () => TABS.map((t) => ({ id: t.id, label: t.label, tone: t.tone })),
-    [],
+    () =>
+      visibleModuleTabs(TABS, session, null, "store").map((t) => ({
+        id: t.id,
+        label: t.label,
+        tone: t.tone,
+      })),
+    [session],
   );
+  useEffect(() => {
+    if (tabItems.length > 0 && !tabItems.some((t) => t.id === tab)) {
+      setTab(tabItems[0]!.id as Tab);
+    }
+  }, [tabItems, tab]);
 
   return (
     <ErpWorkspaceShell
@@ -116,6 +146,11 @@ export function InventoryWorkspace() {
         value={tab}
         onChange={(id) => setTab(id as Tab)}
         aria-label="Store sections"
+      />
+      <StepChainGuide
+        chains={[{ label: "Store setup", steps: STORE_SETUP_STEPS }]}
+        value={tab}
+        onChange={setTab}
       />
 
       {boot.loading ? (

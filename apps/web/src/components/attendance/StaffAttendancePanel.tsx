@@ -1033,6 +1033,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
             ]}
           />
           <ErpTableShell exportAs="staff_attendance" exportTitle="Staff attendance">
+            <div className="overflow-x-auto">
             <ErpTable minWidth="min-w-[880px]">
               <ErpTableHead>
                 <tr>
@@ -1178,6 +1179,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
                 ) : null}
               </ErpTableBody>
             </ErpTable>
+            </div>
           </ErpTableShell>
         </>
       ) : null}

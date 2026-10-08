@@ -154,7 +154,25 @@ export async function fetchAccountsDeskFromApi() {
   }
 }
 
-export async function hydrateAccountsDeskFromDb(preferDb?: boolean) {
+/**
+ * True when this browser's desk is missing something the server has — a
+ * bank account, or the chart of accounts. Such a copy must take the server's,
+ * whatever the timestamps say: on 8 Oct 2026 a browser whose saved desk had
+ * lost both bank accounts (a full or cleared localStorage) kept its own copy
+ * for good, because its last save stamped it newer than the server, and the
+ * Masters screen showed no banks.
+ */
+export function localDeskIsMissingRemote(
+  local: Pick<AccountsState, "bankAccounts" | "coaAccounts"> | null | undefined,
+  remote: Pick<AccountsState, "bankAccounts" | "coaAccounts">,
+): boolean {
+  if (!local) return false;
+  const have = new Set((local.bankAccounts ?? []).map((b) => b.id));
+  if ((remote.bankAccounts ?? []).some((b) => !have.has(b.id))) return true;
+  return (local.coaAccounts ?? []).length === 0 && (remote.coaAccounts ?? []).length > 0;
+}
+
+export async function hydrateAccountsDeskFromDb(preferDb?: boolean, local?: AccountsState) {
   const remote = await fetchAccountsDeskFromApi();
   const emptyBundle = deskPayload({
     version: 1,
@@ -188,7 +206,8 @@ export async function hydrateAccountsDeskFromDb(preferDb?: boolean) {
     accountsReadFromDbClientEnabled() ||
     meta.coaCount === 0 ||
     (remote.updatedAt && remote.updatedAt >= meta.updatedAt) ||
-    remote.coaCount > meta.coaCount;
+    remote.coaCount > meta.coaCount ||
+    localDeskIsMissingRemote(local, remote.bundle);
 
   if (!shouldTake) return empty;
 

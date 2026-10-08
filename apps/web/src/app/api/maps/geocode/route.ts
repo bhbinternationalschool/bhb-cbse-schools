@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { geocodeAddressWithGoogle } from "@/lib/mapsGeocode";
 import { mapsRateLimited } from "@/lib/mapsRateLimit";
+import { requireStaffApi } from "@/lib/apiRouteAuth.server";
 
 const MAX_BATCH = 20;
 
@@ -8,9 +9,17 @@ const MAX_BATCH = 20;
  * Geocode one address or a small batch (household backfill).
  * POST { address: string } | { addresses: string[] }
  * GET  ?address=...
+ *
+ * Signed-in staff only. Every caller is an ERP screen (Transport stops and
+ * planner, the student form's household address); left open, anyone could
+ * spend the school's Google Maps quota through it — the rate limit only
+ * slowed them down (found 6 Oct 2026 sweeping /api for unauthenticated
+ * routes after the WhatsApp template submit/sync hole).
  */
 
 export async function GET(req: NextRequest) {
+  const auth = await requireStaffApi(req);
+  if (!auth.ok) return auth.response;
   if (mapsRateLimited(req)) {
     return NextResponse.json({ error: "Too many requests" }, { status: 429 });
   }
@@ -32,6 +41,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const auth = await requireStaffApi(req);
+  if (!auth.ok) return auth.response;
   if (mapsRateLimited(req)) {
     return NextResponse.json({ error: "Too many requests" }, { status: 429 });
   }
