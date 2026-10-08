@@ -15,6 +15,7 @@ import {
   type ModuleStatePersistence,
 } from "@/lib/moduleStatePersistence";
 import type { ModuleStateKey } from "@/lib/moduleStateRegistry";
+import { loadAttendanceResultOverrides, writeAttendanceResultOverridesLocalRaw } from "@/lib/attendanceResultOverrides";
 import { loadHolds, writeHoldsLocalRaw } from "@/lib/holds";
 import { loadFeeAdjustments, writeFeeAdjustmentsLocalRaw } from "@/lib/feeAdjustments";
 import { loadIncrementState, writeIncrementStateLocalRaw } from "@/lib/salaryIncrement";
@@ -118,6 +119,12 @@ const registry: Record<ModuleStateKey, ModuleStatePersistence<any>> = {
     isEmpty: (s) => noRows(s, ["assignments", "duties", "rooms", "plans"]),
     loadLocal: loadInvigilation,
     writeLocalRaw: writeInvigilationLocalRaw,
+  }),
+  attendance_result_overrides: createModuleStatePersistence({
+    key: "attendance_result_overrides",
+    isEmpty: (s) => noRows(s, ["overrides"]),
+    loadLocal: loadAttendanceResultOverrides,
+    writeLocalRaw: writeAttendanceResultOverridesLocalRaw,
   }),
   staff_attendance_rules: createModuleStatePersistence({
     key: "staff_attendance_rules",

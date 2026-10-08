@@ -35,6 +35,10 @@ export type MarkAttendanceInput = {
   date: string;
   marks: AttendanceMark[];
   remark?: string;
+  /** Push "marked absent" to parents (default true). False for a backdated
+   * month register: a parent must not be told today that their child was
+   * absent three weeks ago. */
+  notifyAbsent?: boolean;
 };
 
 export type MarkAttendanceResult =
@@ -85,7 +89,7 @@ export async function markAttendanceServer(
   // re-saving a register doesn't re-alert everyone. Best-effort.
   let push = { sent: 0, expired: 0, failed: 0 };
   try {
-    const absent = input.marks.filter((m) => m.status === "A");
+    const absent = input.notifyAbsent === false ? [] : input.marks.filter((m) => m.status === "A");
     if (absent.length) {
       await ensureSisHydratedServer();
       const sis = loadSis();

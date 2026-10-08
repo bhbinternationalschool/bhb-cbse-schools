@@ -36,6 +36,7 @@ import { TENANT } from "@/lib/types";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { canSeeModuleTab, loadRbac, scopedClassIds, visibleModuleTabs } from "@/lib/rbac";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
+import { MonthRegisterPanel } from "@/components/attendance/MonthRegisterPanel";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ErpTableShell } from "@/components/ui/erp-roster";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
@@ -54,6 +55,7 @@ import {
 type AttTab =
   | "dashboard"
   | "students"
+  | "month"
   | "staff"
   | "leave"
   | "exceptions"
@@ -71,6 +73,7 @@ export function AttendanceWorkspace() {
     const allowed: AttTab[] = [
       "dashboard",
       "students",
+      "month",
       "staff",
       "leave",
       "exceptions",
@@ -126,7 +129,7 @@ export function AttendanceWorkspace() {
 
   useEffect(() => {
     if (!teacherMode) return;
-    if (tab !== "students" && tab !== "staff" && tab !== "leave") setTab("students");
+    if (tab !== "students" && tab !== "month" && tab !== "staff" && tab !== "leave") setTab("students");
   }, [teacherMode, tab]);
 
   const ay =
@@ -193,6 +196,21 @@ export function AttendanceWorkspace() {
     setSectionId(first.sectionId);
     setMyClassAutoDone(true);
   }, [myClassSections, myClassAutoDone, classId, sectionId]);
+
+  /** Month register classes: a teacher's own; the office, every active section. */
+  const monthSections = useMemo(() => {
+    if (teacherMode) return myClassSections;
+    if (!masters) return [];
+    const order = new Map(masters.classes.map((c, i) => [c.id, i]));
+    return masters.sections
+      .filter((sec) => sec.isActive && masters.classes.some((c) => c.id === sec.classId && c.isActive))
+      .sort((a, b) => (order.get(a.classId) ?? 0) - (order.get(b.classId) ?? 0) || (a.name || "").localeCompare(b.name || ""))
+      .map((sec) => ({
+        classId: sec.classId,
+        sectionId: sec.id,
+        label: `${masters.classes.find((c) => c.id === sec.classId)?.name || "Class"} · ${sec.name || ""}`.trim(),
+      }));
+  }, [teacherMode, myClassSections, masters]);
 
   const classOptions = useMemo(() => {
     if (!masters) return [];
@@ -306,12 +324,14 @@ export function AttendanceWorkspace() {
         // the office's.
         [
           { id: "students", label: "My classes", tone: "navy" },
+          { id: "month", label: "Month register", tone: "violet" },
           { id: "staff", label: "My attendance", tone: "teal" },
           { id: "leave", label: "Student leave", tone: "sky" },
         ]
       : [
           { id: "dashboard", label: "Dashboard", tone: "navy" },
           { id: "students", label: "Students", tone: "navy" },
+          { id: "month", label: "Month register", tone: "violet" },
           { id: "staff", label: "Staff", tone: "teal" },
           { id: "leave", label: "Student leave", tone: "sky" },
           {
@@ -548,6 +568,8 @@ export function AttendanceWorkspace() {
           />
         </div>
       ) : null}
+
+      {tab === "month" ? <MonthRegisterPanel sections={monthSections} /> : null}
 
       {tab === "staff" ? (
         <div className="mt-5">
