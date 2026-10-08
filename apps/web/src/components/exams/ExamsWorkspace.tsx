@@ -1,6 +1,7 @@
 "use client";
 // ratchet-allow: grids_without_row_menu — the marks-entry grid and the promotion summary — cells are inputs, not a record list
 
+import { setAttendanceOverride } from "@/lib/attendanceResultOverrides";
 import {
   isRestrictedTeacher,
   useMyTeaching,
@@ -625,6 +626,8 @@ export function ExamsWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+  /** Results → the attendance figure being corrected for one child. */
+  const [attEdit, setAttEdit] = useState<{ studentId: string; present: string; working: string; note: string; error: string } | null>(null);
   const [reportStudentId, setReportStudentId] = useState<string | null>(null);
   const [preview, setPreview] = useState<ReportCard | null>(null);
   const [holdCheck, setHoldCheck] = useState<HoldCheck | null>(null);
@@ -692,6 +695,15 @@ export function ExamsWorkspace() {
     const onMasters = () => setMasters(loadMasters());
     window.addEventListener("bhb-masters-updated", onMasters);
     return () => window.removeEventListener("bhb-masters-updated", onMasters);
+  }, []);
+
+  // Corrected result attendance hydrates from module_local_state after
+  // first paint — repaint the results when it lands or changes.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onOverrides = () => setTick((t) => t + 1);
+    window.addEventListener("bhb-attendance-overrides", onOverrides);
+    return () => window.removeEventListener("bhb-attendance-overrides", onOverrides);
   }, []);
 
   useEffect(() => {
@@ -2944,6 +2956,7 @@ export function ExamsWorkspace() {
                       </th>
                       <ErpSortTh sort={resultSort} field="percent" align="right" className="px-4 py-2.5 text-right font-bold">%</ErpSortTh>
                       <ErpSortTh sort={resultSort} field="grade" className="px-4 py-2.5 text-right font-bold">Grade</ErpSortTh>
+                      <th className="px-4 py-2.5 font-bold" title="Present / working days — working days from the Masters holiday calendar, counted from the day after admission">Attendance</th>
                       <th className="px-4 py-2.5 font-bold">Pass</th>
                       <th className="px-4 py-2.5 font-bold">Decision</th>
                       <th className="px-4 py-2.5 font-bold">Next class</th>
@@ -2988,6 +3001,98 @@ export function ExamsWorkspace() {
                           </td>
                           <td className="px-2 py-2 text-right font-semibold">
                             {row.card?.overallGrade ?? "—"}
+                          </td>
+                          <td className="px-2 py-2 text-xs">
+                            {attEdit?.studentId === row.student.id ? (
+                              <div className="flex min-w-[15rem] flex-col gap-1">
+                                <div className="flex items-center gap-1">
+                                  <input className="field !py-1 w-16" inputMode="decimal" aria-label="Present days" value={attEdit.present} onChange={(e) => setAttEdit({ ...attEdit, present: e.target.value, error: "" })} />
+                                  <span>/</span>
+                                  <input className="field !py-1 w-16" inputMode="decimal" aria-label="Working days" value={attEdit.working} onChange={(e) => setAttEdit({ ...attEdit, working: e.target.value, error: "" })} />
+                                </div>
+                                <input className="field !py-1" placeholder="Why (kept with the result)" value={attEdit.note} onChange={(e) => setAttEdit({ ...attEdit, note: e.target.value, error: "" })} />
+                                {attEdit.error ? <span className="text-[var(--danger)]">{attEdit.error}</span> : null}
+                                <div className="flex gap-2">
+                                  <button
+                                    type="button"
+                                    className="font-semibold text-[var(--brand-mid)] underline"
+                                    onClick={() => {
+                                      const r = setAttendanceOverride({
+                                        academicYearCode: ay,
+                                        examTermId,
+                                        studentId: row.student.id,
+                                        presentDays: Number(attEdit.present),
+                                        workingDays: Number(attEdit.working),
+                                        note: attEdit.note,
+                                        by: session.fullName,
+                                      });
+                                      if (!r.ok) setAttEdit({ ...attEdit, error: r.error });
+                                      else {
+                                        setAttEdit(null);
+                                        setTick((t) => t + 1);
+                                      }
+                                    }}
+                                  >
+                                    Save
+                                  </button>
+                                  <button type="button" className="text-[var(--muted)] underline" onClick={() => setAttEdit(null)}>
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div>
+                                {row.card?.attendance ? (
+                                  <span className="tabular-nums font-semibold">
+                                    {row.card.attendance.presentDays}/{row.card.attendance.workingDays}
+                                    <span className="font-normal text-[var(--muted)]"> ({row.card.attendance.percent}%)</span>
+                                  </span>
+                                ) : (
+                                  <span className="text-[var(--muted)]">—</span>
+                                )}
+                                {row.card?.attendance?.edited ? (
+                                  <span
+                                    className="ml-1 rounded bg-[rgba(197,160,40,0.2)] px-1 text-[10px] font-semibold text-[var(--brand-deep)]"
+                                    title={`Edited by ${row.card.attendance.edited.by}: ${row.card.attendance.edited.note}. Registers say ${row.card.attendance.edited.computedPresent}/${row.card.attendance.edited.computedWorking}.`}
+                                  >
+                                    edited
+                                  </span>
+                                ) : row.card?.attendance?.unmarkedDays ? (
+                                  <span className="block text-[10px] text-[var(--danger)]">{row.card.attendance.unmarkedDays} day(s) not marked</span>
+                                ) : null}
+                                {row.card ? (
+                                  <div className="mt-0.5 flex gap-2 text-[10px]">
+                                    <button
+                                      type="button"
+                                      className="font-semibold text-[var(--brand-mid)] underline"
+                                      onClick={() =>
+                                        setAttEdit({
+                                          studentId: row.student.id,
+                                          present: String(row.card?.attendance?.presentDays ?? ""),
+                                          working: String(row.card?.attendance?.workingDays ?? ""),
+                                          note: row.card?.attendance?.edited?.note ?? "",
+                                          error: "",
+                                        })
+                                      }
+                                    >
+                                      Edit
+                                    </button>
+                                    {row.card.attendance?.edited ? (
+                                      <button
+                                        type="button"
+                                        className="text-[var(--muted)] underline"
+                                        onClick={() => {
+                                          setAttendanceOverride({ academicYearCode: ay, examTermId, studentId: row.student.id, presentDays: 0, workingDays: 0, note: "", by: session.fullName, clear: true });
+                                          setTick((t) => t + 1);
+                                        }}
+                                      >
+                                        Use registers
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                              </div>
+                            )}
                           </td>
                           <td className="px-2 py-2">
                             {!row.card ? (

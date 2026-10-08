@@ -4,6 +4,12 @@
  */
 
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { sessionDaysSummary } from "@/lib/studentWorkingDays";
+import {
+  findAttendanceOverride,
+  loadAttendanceResultOverrides,
+  type AttendanceResultOverridesState,
+} from "@/lib/attendanceResultOverrides";
 import type { ExamRoom } from "@/lib/examSeating";
 import {
   DEFAULT_AY,
@@ -36,7 +42,6 @@ import {
 } from "@/lib/holds";
 import {
   loadAttendance,
-  type AttendanceRegister,
   type AttendanceState,
 } from "@/lib/attendance";
 import type { Subject as MasterSubject } from "@/lib/foundationMasters";
@@ -689,6 +694,10 @@ export type ExamDeps = {
   masters?: MastersState;
   sis?: SisState;
   attendance?: AttendanceState;
+  /** Hand-corrected attendance per result (lib/attendanceResultOverrides). */
+  attendanceOverrides?: AttendanceResultOverridesState;
+  /** "Today" for the attendance count (tests pin it). */
+  todayIso?: string;
   /** Pre-computed HOLD_REPORT_CARD verdicts by student id. */
   holdChecks?: Map<string, HoldCheck>;
 };
@@ -2898,6 +2907,10 @@ export type ReportCard = {
     presentDays: number;
     workingDays: number;
     percent: number;
+    /** Working days nobody marked (computed figure only) — a gap, not presence. */
+    unmarkedDays?: number;
+    /** Set when a person corrected the figure for this result (who, why). */
+    edited?: { note: string; by: string; at: string; computedPresent: number; computedWorking: number } | null;
   } | null;
   holdBlocked: boolean;
   holdMessage: string;
@@ -2952,32 +2965,70 @@ function overallRemarkForReportCard(
   return { text: r.text, textHi: r.textHi, source: r.source };
 }
 
+/**
+ * The result's attendance (director, 8 Oct 2026): working days from the
+ * Masters holiday calendar for the child's class, counted from the working
+ * day after admission, up to the exam's last day (or today); present from
+ * the registers (P/L 1, HD ½). A person's correction for this exam term
+ * replaces it and is marked as edited. Until now this divided by "days a
+ * register was marked", which a skipped week turned into 100%.
+ */
 function attendanceSummaryForStudent(
-  studentId: string,
-  sectionId: string,
+  student: SisStudent,
   ay: string,
-  attendance?: AttendanceState,
+  term: ExamTerm,
+  deps: ExamDeps | undefined,
 ): ReportCard["attendance"] {
-  const regs = (attendance ?? loadAttendance()).registers.filter(
-    (r: AttendanceRegister) =>
-      r.academicYearCode === ay && r.sectionId === sectionId,
-  );
-  if (regs.length === 0) return null;
-  let present = 0;
-  let working = 0;
-  for (const r of regs) {
-    const mark = r.marks.find((m) => m.studentId === studentId);
-    if (!mark) continue;
-    working += 1;
-    if (mark.status === "P" || mark.status === "L" || mark.status === "HD") {
-      present += mark.status === "HD" ? 0.5 : 1;
+  let masters: MastersState | null = deps?.masters ?? null;
+  if (!masters) {
+    try {
+      masters = loadMasters();
+    } catch {
+      masters = null;
     }
   }
-  if (working === 0) return null;
+  const registers = (deps?.attendance ?? loadAttendance()).registers;
+  const computed = masters
+    ? sessionDaysSummary({
+        masters,
+        ay,
+        classId: student.classId,
+        studentId: student.id,
+        joinedOn: student.joinedOn,
+        registers,
+        until: (term.endsOn || "").slice(0, 10) || undefined,
+        today: deps?.todayIso ?? new Date().toISOString().slice(0, 10),
+      })
+    : null;
+  const override = findAttendanceOverride(
+    deps?.attendanceOverrides ?? loadAttendanceResultOverrides(),
+    ay,
+    term.id,
+    student.id,
+  );
+  if (override) {
+    return {
+      presentDays: override.presentDays,
+      workingDays: override.workingDays,
+      percent: Math.round((override.presentDays / override.workingDays) * 1000) / 10,
+      edited: {
+        note: override.note,
+        by: override.by,
+        at: override.at,
+        computedPresent: computed?.presentDays ?? 0,
+        computedWorking: computed?.workingDays ?? 0,
+      },
+    };
+  }
+  if (!computed || computed.workingDays === 0 || computed.percent === null) return null;
+  // Nothing at all marked for this child: no figure rather than "0 of 120".
+  if (computed.unmarkedDays === computed.workingDays) return null;
   return {
-    presentDays: present,
-    workingDays: working,
-    percent: Math.round((present / working) * 1000) / 10,
+    presentDays: computed.presentDays,
+    workingDays: computed.workingDays,
+    percent: computed.percent,
+    unmarkedDays: computed.unmarkedDays,
+    edited: null,
   };
 }
 
@@ -3389,12 +3440,7 @@ export function buildReportCard(input: {
         ? []
         : lines.filter((l) => l.absent).map((l) => l.subjectName),
       attendance: showAttendance
-        ? attendanceSummaryForStudent(
-            input.student.id,
-            input.student.sectionId,
-            ay,
-            input.deps?.attendance,
-          )
+        ? attendanceSummaryForStudent(input.student, ay, term, input.deps)
         : null,
       holdBlocked: !hold.allowed,
       holdMessage: hold.allowed ? "" : hold.message,
@@ -3509,12 +3555,7 @@ export function buildReportCard(input: {
     absent: absence,
     absentSubjects: absence ? [] : lines.filter((l) => l.absent).map((l) => l.subjectName),
     attendance: showAttendance
-      ? attendanceSummaryForStudent(
-          input.student.id,
-          input.student.sectionId,
-          ay,
-          input.deps?.attendance,
-        )
+      ? attendanceSummaryForStudent(input.student, ay, term, input.deps)
       : null,
     holdBlocked: !hold.allowed,
     holdMessage: hold.allowed ? "" : hold.message,
@@ -3689,6 +3730,7 @@ export function buildClassResultSheet(input: {
     masters,
     sis: input.deps?.sis ?? loadSis(),
     attendance: input.deps?.attendance ?? loadAttendance(),
+    attendanceOverrides: input.deps?.attendanceOverrides ?? loadAttendanceResultOverrides(),
     holdChecks:
       input.deps?.holdChecks ??
       checkHoldsForStudents(
