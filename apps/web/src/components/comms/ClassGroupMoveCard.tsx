@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReachReport } from "@/lib/commsReach";
 import { flattenTemplateParam } from "@/lib/classNoticeWa";
 import { TENANT } from "@/lib/types";
+import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 
 /** The parent app on Google Play (school.bhbinternational.parent, live since Oct 2026). */
 export const PARENT_APP_URL = "https://play.google.com/store/apps/details?id=school.bhbinternational.parent";
@@ -119,25 +121,26 @@ export function ClassGroupMoveCard() {
             WhatsApp from the school number costs a little per message (Meta&apos;s pricing); the app is free — the more families on the app, the
             cheaper daily homework is. A number Meta has not checked yet counts as reachable.
           </p>
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-left text-[var(--muted)]">
-                  <th className="py-1 pr-2">Class</th>
-                  <th className="py-1 pr-2 text-right">Families</th>
-                  <th className="py-1 pr-2 text-right">App</th>
-                  <th className="py-1 pr-2 text-right">WhatsApp only</th>
-                  <th className="py-1 text-right">Not reachable</th>
+          <ErpTableShell className="mt-3 overflow-x-auto" exportAs="class_reach" exportTitle="Reach per class">
+            <ErpTable className="text-xs" minWidth="min-w-[480px]">
+              <ErpTableHead>
+                <tr>
+                  <th className="px-3 py-2">Class</th>
+                  <th className="px-3 py-2 text-right">Families</th>
+                  <th className="px-3 py-2 text-right">App</th>
+                  <th className="px-3 py-2 text-right">WhatsApp only</th>
+                  <th className="px-3 py-2 text-right">Not reachable</th>
+                  <th className="w-10 px-2 py-2" aria-label="Actions" />
                 </tr>
-              </thead>
-              <tbody>
+              </ErpTableHead>
+              <ErpTableBody>
                 {report!.classes.map((c) => (
-                  <tr key={c.key} className="border-t border-[var(--border)]">
-                    <td className="py-1 pr-2 font-semibold text-[var(--brand-deep)]">{c.label}</td>
-                    <td className="py-1 pr-2 text-right">{c.families}</td>
-                    <td className="py-1 pr-2 text-right">{c.app}</td>
-                    <td className="py-1 pr-2 text-right">{c.whatsappOnly}</td>
-                    <td className="py-1 text-right">
+                  <tr key={c.key}>
+                    <td className="px-3 py-1.5 font-semibold text-[var(--brand-deep)]">{c.label}</td>
+                    <td className="px-3 py-1.5 text-right">{c.families}</td>
+                    <td className="px-3 py-1.5 text-right">{c.app}</td>
+                    <td className="px-3 py-1.5 text-right">{c.whatsappOnly}</td>
+                    <td className="px-3 py-1.5 text-right">
                       {c.unreachable ? (
                         <button type="button" className="font-semibold text-[var(--danger)] underline" onClick={() => setOpenClass(openClass === c.key ? null : c.key)}>
                           {c.unreachable} — who?
@@ -146,11 +149,25 @@ export function ClassGroupMoveCard() {
                         "0"
                       )}
                     </td>
+                    <td className="px-2 py-1 text-right">
+                      <RowActionMenu
+                        row={c}
+                        label="Class actions"
+                        actions={[
+                          {
+                            id: "who",
+                            label: openClass === c.key ? "Hide families to call" : "Show families to call",
+                            hidden: (x) => !x.unreachable,
+                            onSelect: (x) => setOpenClass(openClass === x.key ? null : x.key),
+                          },
+                        ]}
+                      />
+                    </td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </ErpTableBody>
+            </ErpTable>
+          </ErpTableShell>
           {openClass ? (
             <ul className="mt-2 space-y-1 rounded-lg bg-[var(--surface-sunken)] p-2 text-xs">
               {unreachableFor(openClass).map((f) => (
