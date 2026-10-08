@@ -1,6 +1,8 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — a field-by-field review of one teacher (ERP vs UDISE+ portal); each row is a field with an apply tick, not a record to open, edit or delete.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { defaultTicked, type TeacherSyncReview, type TeacherSyncRow } from "@/lib/udiseTeacherSync";
 
 const ENDPOINT = "/api/v1/udise/robot/teacher-details";
@@ -146,8 +148,10 @@ export function UdiseTeacherSyncCard() {
                     </span>
                   </p>
                   {r.unread.length ? <p className="text-[11px] text-[var(--muted)]">Portal forms: {r.unread.join("; ")}</p> : null}
-                  <table className="mt-1 w-full text-left text-[11px]">
-                    <thead>
+                  <ErpTableShell className="mt-1">
+                    <div className="overflow-x-auto">
+                    <ErpTable minWidth="min-w-[520px]" className="text-[11px]">
+                    <ErpTableHead>
                       <tr className="text-[var(--muted)]">
                         <th className="w-6" />
                         <th className="pr-2">Field</th>
@@ -155,8 +159,8 @@ export function UdiseTeacherSyncCard() {
                         <th className="pr-2">Portal</th>
                         <th>Note</th>
                       </tr>
-                    </thead>
-                    <tbody>
+                    </ErpTableHead>
+                    <ErpTableBody>
                       {r.items.map((i) => {
                         const k = tickKey(r.erpStaffId, i.field);
                         return (
@@ -190,8 +194,10 @@ export function UdiseTeacherSyncCard() {
                           </tr>
                         );
                       })}
-                    </tbody>
-                  </table>
+                    </ErpTableBody>
+                  </ErpTable>
+                    </div>
+                  </ErpTableShell>
                 </div>
               ))}
             </div>

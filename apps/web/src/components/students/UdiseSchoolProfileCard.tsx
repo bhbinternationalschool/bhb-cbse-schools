@@ -1,6 +1,8 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — detail tables, not an operational list: a question-by-question copy of the UDISE+ School Profile and the 1A-vs-ERP comparison. There is no row to act on; a difference is fixed in Masters → School profile or on the portal.
 
 import { useEffect, useMemo, useState } from "react";
+import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import type {
   ErpSchoolFacts,
   ProfileDiff,
@@ -131,16 +133,18 @@ export function UdiseSchoolProfileCard() {
                   {expanded && c ? (
                     <div className="max-h-80 overflow-auto border-t border-[var(--border)] px-2.5 py-2">
                       {n ? (
-                        <table className="w-full text-left text-xs">
-                          <thead>
+                        <ErpTableShell>
+                          <div className="overflow-x-auto">
+                          <ErpTable minWidth="min-w-[420px]" className="text-xs">
+                          <ErpTableHead>
                             <tr className="text-[11px] text-[var(--muted)]">
                               <th className="py-0.5 pr-2 font-medium">Question</th>
                               <th className="py-0.5 font-medium">Portal answer</th>
                             </tr>
-                          </thead>
-                          <tbody>
+                          </ErpTableHead>
+                          <ErpTableBody>
                             {Object.entries(c.fields).map(([control, f]) => (
-                              <tr key={control} className="border-t border-[var(--border)] align-top">
+                              <tr key={control} className="align-top">
                                 <td className="py-0.5 pr-2">
                                   {f.label || control}
                                   {f.locked ? <span className="text-[var(--muted)]"> · locked</span> : null}
@@ -154,8 +158,10 @@ export function UdiseSchoolProfileCard() {
                                 </td>
                               </tr>
                             ))}
-                          </tbody>
-                        </table>
+                          </ErpTableBody>
+                        </ErpTable>
+                          </div>
+                        </ErpTableShell>
                       ) : (
                         <p className="whitespace-pre-wrap text-[11px] text-[var(--muted)]">
                           No boxes on this section — the portal showed text only:
@@ -198,18 +204,20 @@ export function UdiseSchoolProfileCard() {
                     : "No differences on the items both sides know."}
                 </p>
                 {data.compare1A.rows.length ? (
-                  <table className="mt-1 w-full text-left text-xs">
-                    <thead>
+                  <ErpTableShell className="mt-1">
+                    <div className="overflow-x-auto">
+                    <ErpTable minWidth="min-w-[480px]" className="text-xs">
+                    <ErpTableHead>
                       <tr className="text-[11px] text-[var(--muted)]">
                         <th className="py-0.5 pr-2 font-medium">Item</th>
                         <th className="py-0.5 pr-2 font-medium">UDISE+ 1A</th>
                         <th className="py-0.5 pr-2 font-medium">ERP</th>
                         <th className="py-0.5 font-medium" />
                       </tr>
-                    </thead>
-                    <tbody>
+                    </ErpTableHead>
+                    <ErpTableBody>
                       {data.compare1A.rows.map((r) => (
-                        <tr key={r.item} className="border-t border-[var(--border)] align-top">
+                        <tr key={r.item} className="align-top">
                           <td className="py-0.5 pr-2">{r.item}</td>
                           <td className="py-0.5 pr-2">{r.portal || "—"}</td>
                           <td className="py-0.5 pr-2">{r.erp || "—"}</td>
@@ -226,8 +234,10 @@ export function UdiseSchoolProfileCard() {
                           </td>
                         </tr>
                       ))}
-                    </tbody>
-                  </table>
+                    </ErpTableBody>
+                  </ErpTable>
+                    </div>
+                  </ErpTableShell>
                 ) : (
                   <p className="mt-1 text-[11px] text-[var(--muted)]">
                     The robot found no 1A boxes it could match to the ERP&apos;s items.
