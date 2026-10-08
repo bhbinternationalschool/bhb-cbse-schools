@@ -539,10 +539,18 @@
     const who = current();
     const addPage = onAddPage();
     const addForm = onAddForm();
-    panel.style.display = form || list || addPage || addForm || who ? "" : "none";
-    checkBtn.style.display = list ? "" : "none";
-    fetchBtn.style.display = list ? "" : "none";
-    queueStartBtn.style.display = list && lastMissing.length && !who ? "" : "none";
+    // On every Teacher-module page (director, 8 Oct 2026: the panel flashed
+    // on the dashboard and vanished). Check / Fetch read the portal's own
+    // data, so they work from any page once signed in; only "Fill" needs a
+    // form open.
+    panel.style.display = "";
+    // The portal redraws its page between steps; put the panel back if a
+    // redraw took it away.
+    if (!panel.isConnected) document.body.append(panel);
+    const signedIn = !!token() && !!schoolId();
+    checkBtn.style.display = signedIn && !who ? "" : "none";
+    fetchBtn.style.display = signedIn && !who ? "" : "none";
+    queueStartBtn.style.display = lastMissing.length && !who ? "" : "none";
     queueStartBtn.textContent = `Add missing staff (${lastMissing.length})`;
     fillBtn.style.display = form ? "" : "none";
     queueBox.style.display = who ? "" : "none";
@@ -559,10 +567,24 @@
     else if (who && addPage) say("Press “Choose staff type and press Go” — or choose Staff Type yourself and press Go.");
     else if (who && addForm) say("Press “Fill new teacher from ERP”, check the yellow fields, then the portal's Save.");
     else if (who) say(`Open Add New Staff to add ${who.name}.`);
-    else if (list) say("“Check teachers against the ERP” shows who matches; “Fetch all teachers from portal” sends the portal's details to the ERP for review.");
+    else if (signedIn) {
+      say(
+        list
+          ? "“Check teachers against the ERP” shows who matches; “Fetch all teachers from portal” sends the portal's details to the ERP for review."
+          : "“Check teachers against the ERP” and “Fetch all teachers from portal” work from here. To fill a teacher's form, open the teacher and press “Fill this step from ERP”.",
+      );
+    } else say("Sign in to the UDISE+ Teacher module (open its Dashboard once), then the robot's buttons appear here.");
   }
 
   window.addEventListener("hashchange", onPage);
   document.body.append(panel);
   setTimeout(onPage, 1500);
+  // A redraw that does not change the address (a dialog, a reload of the
+  // view) can also drop the panel: check again whenever the page settles.
+  new MutationObserver(() => {
+    if (!panel.isConnected) {
+      document.body.append(panel);
+      onPage();
+    }
+  }).observe(document.body, { childList: true });
 })();

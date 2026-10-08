@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BHB Office Robot",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "BHB International School staff: syncs UDISE+ students, teachers, APAAR and school profile with the school ERP. You check and save.",
   "permissions": [
     "storage"
