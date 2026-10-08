@@ -58,7 +58,8 @@ const scopeQ = renderScopeQuestion({
 });
 assert.match(scopeQ, /how far has the class done/i);
 assert.match(scopeQ, /5\. More about Operations on Numbers/);
-assert.match(scopeQ, /just the number/);
+assert.match(scopeQ, /number or name of the last chapter/);
+assert.match(scopeQ, /or chapter name like \*More about Operations on Numbers\*/, "a real chapter from the list is the example");
 assert.ok(
   renderScopeQuestion({ childName: "A", subjectLabel: "M", paperLabel: "M", hindi: false, isToday: false,
     chapters: Array.from({ length: 30 }, (_, i) => ({ position: i + 1, name: `Ch ${i + 1}`, topics: [] })) })
