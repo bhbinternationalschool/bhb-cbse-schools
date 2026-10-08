@@ -832,4 +832,16 @@ assert.equal(bare.asked[0]!.answer, undefined);
   assert.notEqual(readScopeAnswer("ok", computer).kind, "position", "ok ends the evening");
 }
 
+// An English question with no Hindi version says the answer is in English —
+// read from the question, not the child's chat language; a Hindi question
+// never gets it; WhatsApp bold is one asterisk.
+{
+  const en = renderQuestion({ number: 1, question: "What is photosynthesis?", hindi: false });
+  assert.match(en, /_\(Answer in \*English\*\)_$/);
+  assert.doesNotMatch(en, /\*\*/);
+  assert.match(renderQuestion({ number: 1, question: "What is photosynthesis?", hindi: true }), /उत्तर \*English\* में लिखें/);
+  assert.doesNotMatch(renderQuestion({ number: 1, question: "संज्ञा किसे कहते हैं?", hindi: false }), /English/);
+  assert.doesNotMatch(renderQuestion({ number: 1, question: "What is a noun?", questionHi: "संज्ञा क्या है?", hindi: false }), /Answer in/);
+}
+
 console.log("ok");

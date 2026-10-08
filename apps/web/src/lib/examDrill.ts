@@ -934,7 +934,18 @@ function clean(v: unknown, max: number): string {
  */
 export function renderQuestion(input: { number: number; question: string; questionHi?: string; hindi: boolean }): string {
   const head = input.questionHi ? `Question ${input.number} / प्रश्न ${input.number}` : input.hindi ? `प्रश्न ${input.number}` : `Question ${input.number}`;
-  return [`❓ *${head}*`, "", input.question, ...(input.questionHi ? ["", `🇮🇳 ${input.questionHi}`] : [])].join("\n");
+  const parts: string[] = [`❓ *${head}*`, ""];
+  parts.push(input.question);
+  if (input.questionHi) {
+    parts.push("", `🇮🇳 ${input.questionHi}`);
+  } else if (!/[\u0900-\u097F]/.test(input.question)) {
+    // The question is in English with no Hindi version: the answer is
+    // expected in English. Read from the question itself, never from the
+    // child's chat language — a Hindi paper's question is in Devanagari and
+    // gets no such line. (WhatsApp bold is a single *.)
+    parts.push("", input.hindi ? "_(उत्तर *English* में लिखें)_" : "_(Answer in *English*)_");
+  }
+  return parts.join("\n");
 }
 
 /**
