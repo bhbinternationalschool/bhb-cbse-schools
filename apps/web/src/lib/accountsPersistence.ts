@@ -77,7 +77,7 @@ const hydrateAccountsOnce = async (): Promise<boolean> => {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed } = await hydrateAccountsDeskFromDb(readFromDb);
+  const { bundle, changed } = await hydrateAccountsDeskFromDb(readFromDb, loadAccounts());
   if (changed && (bundle.coaAccounts.length > 0 || readFromDb)) {
     writeAccountsLocalRaw(
       mergeDbDeskIntoAccountsState(loadAccounts(), bundle, { preferDb: readFromDb }),

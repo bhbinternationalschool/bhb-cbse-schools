@@ -32,6 +32,7 @@ import type {
   VendorBillLine,
 } from "@/lib/accountsTypes";
 import { accountsDualWriteDbEnabled } from "@/lib/accountsDbConfig";
+import { syncModeBankMapFromBanks } from "@/lib/accountsNormalize";
 import { getServerTenantContext } from "@/lib/serverTenant";
 
 export type AccountsDeskSyncMeta = {
@@ -1002,7 +1003,13 @@ export async function pushAccountsDeskToDb(
   const cashLedger = state.cashLedger ?? [];
   const bankAccounts = state.bankAccounts ?? [];
   const bankLedger = state.bankLedger ?? [];
-  const modeBankMap = state.modeBankMap ?? [];
+  // Which bank each payment mode lands in is derived from the banks' own
+  // modes. A browser that lost its copy sends an empty map; that wiped the
+  // table on every save (8 Oct 2026). Empty → derive from the banks sent;
+  // still empty → leave the table alone.
+  const modeBankMap = (state.modeBankMap ?? []).length
+    ? state.modeBankMap!
+    : syncModeBankMapFromBanks(bankAccounts);
   const reconSessions = state.reconSessions ?? [];
   const expenseCategories = state.expenseCategories ?? [];
   const expenseVouchers = state.expenseVouchers ?? [];
@@ -1099,7 +1106,11 @@ export async function pushAccountsDeskToDb(
     ),
   ]);
 
-  await sb.from("accounts_desk_mode_bank_map").delete().eq("tenant_id", tenantId);
+  if (modeBankMap.length) {
+    await sb.from("accounts_desk_mode_bank_map").delete().eq("tenant_id", tenantId);
+  } else {
+    console.warn("[accounts_desk_mode_bank_map] refusing to clear: the payload holds no mapping and no banks.");
+  }
 
   const reconLineRows = reconSessions.flatMap((session) =>
     (session.lines ?? []).map((line, idx) =>
@@ -1345,9 +1356,13 @@ export async function fetchAccountsDeskFromDb(): Promise<{
       bankLedger: (bankLedgerRows ?? []).map((r) =>
         rowToBankLedger(r as Record<string, unknown>),
       ),
-      modeBankMap: (modeBankMapRows ?? []).map((r) =>
-        rowToModeBankMap(r as Record<string, unknown>),
-      ),
+      // An empty table reads as the mapping the banks imply, never as "no
+      // bank takes UPI".
+      modeBankMap: (modeBankMapRows ?? []).length
+        ? (modeBankMapRows ?? []).map((r) => rowToModeBankMap(r as Record<string, unknown>))
+        : syncModeBankMapFromBanks(
+            (bankAccountRows ?? []).map((r) => rowToBankAccount(r as Record<string, unknown>)),
+          ),
       reconSessions: (reconSessionRows ?? []).map((r) => {
         const rec = r as Record<string, unknown>;
         const lines = (reconLinesBySession.get(String(rec.id)) ?? []).map((line) =>
