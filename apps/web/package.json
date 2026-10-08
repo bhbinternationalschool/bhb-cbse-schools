@@ -251,6 +251,7 @@
     "test:wa-failure-reason": "npx tsx src/lib/waFailureReason.selftest.ts",
     "test:wa-household-numbers": "npx tsx src/lib/waHouseholdNumbers.selftest.ts",
     "test:wa-audience-spec": "npx tsx src/lib/waAudienceSpec.selftest.ts",
+    "test:wa-audience-households": "npx tsx src/lib/waAudienceHouseholds.selftest.ts",
     "test:wa-tutor-bot": "npx tsx src/lib/waTutorBotEngine.selftest.ts",
     "test:wa-student-link": "npx tsx src/lib/waStudentLinkEngine.selftest.ts",
     "test:leave-command": "npx tsx src/lib/leaveCommandEngine.selftest.ts",

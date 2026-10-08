@@ -403,6 +403,7 @@ SELFTESTS=(
   test:wa-failure-reason
   test:wa-household-numbers
   test:wa-audience-spec
+  test:wa-audience-households
   test:wa-tutor-bot
   test:wa-student-link
   test:leave-command

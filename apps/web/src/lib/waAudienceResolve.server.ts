@@ -13,7 +13,12 @@
 
 import "server-only";
 
-import { loadSis, type Household, type SisStudent } from "@/lib/sis";
+import { loadSis, type SisStudent } from "@/lib/sis";
+import {
+  householdHits,
+  sessionParentHits,
+  type HouseholdHit,
+} from "@/lib/waAudienceHouseholds";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { ensureFeesHydratedServer } from "@/lib/feesPersistence.server";
 import { loadServerMasters } from "@/lib/api/v1/auth";
@@ -80,31 +85,15 @@ function targetSectionIds(
   return want.size ? want : null;
 }
 
-type HouseholdHit = { household: Household; students: SisStudent[] };
-
-function householdHits(
-  studentFilter: (s: SisStudent) => boolean,
-  sis: { households: Household[]; students: SisStudent[] },
-): HouseholdHit[] {
-  const byHousehold = new Map<string, SisStudent[]>();
-  for (const s of sis.students) {
-    if (s.status !== "active" || !s.householdId) continue;
-    if (!studentFilter(s)) continue;
-    const list = byHousehold.get(s.householdId) ?? [];
-    list.push(s);
-    byHousehold.set(s.householdId, list);
-  }
-  const out: HouseholdHit[] = [];
-  for (const [householdId, students] of byHousehold) {
-    const household = sis.households.find((h) => h.id === householdId);
-    if (!household) continue;
-    out.push({ household, students });
-  }
-  return out;
-}
-
 export async function resolveWaAudience(
   spec: WaAudienceSpec,
+  opts?: {
+    /**
+     * The session to aim at — the sender's session year. Families are this
+     * session's families; omitted, the school's current year is used.
+     */
+    academicYearCode?: string;
+  },
 ): Promise<WaAudienceResolution> {
   const masters = await loadServerMasters();
   const label = describeWaAudience(spec, {
@@ -200,27 +189,27 @@ export async function resolveWaAudience(
   // ── Everything else is families ────────────────────────────────────────
   await ensureSisHydratedServer().catch(() => false);
   const sis = loadSis();
-  const ay = currentAcademicYearCode(masters);
+  const ay =
+    (opts?.academicYearCode || "").trim() || currentAcademicYearCode(masters);
 
   let hits: HouseholdHit[] = [];
 
   if (spec.kind === "parents") {
     const want = targetSectionIds(spec, masters);
-    hits = householdHits(
-      (s) => (want ? want.has(s.sectionId) : true),
-      { households: sis.households ?? [], students: sis.students ?? [] },
-    );
+    hits = sessionParentHits(sis, ay, want);
     if (spec.languageUnset) {
       hits = hits.filter(
         (h) => !(h.household.preferredLanguage || "").trim(),
       );
     }
   } else if (spec.kind === "students") {
+    // Hand-picked rows are taken as picked: the ids name the exact rows.
     const want = new Set(spec.studentIds);
-    hits = householdHits((s) => want.has(s.id), {
-      households: sis.households ?? [],
-      students: sis.students ?? [],
-    });
+    hits = householdHits(
+      (s) => want.has(s.id),
+      sis.students ?? [],
+      sis.households ?? [],
+    );
   } else {
     // fee_stage — the recovery stage is computed, not stored on the student.
     await ensureFeesHydratedServer().catch(() => false);
@@ -230,11 +219,14 @@ export async function resolveWaAudience(
       sis,
       masters,
     }).filter((d) => wantStages.has(d.stage));
+    // listLiveDefaulters is already scoped to `ay`, so these are this
+    // session's rows.
     const wantStudents = new Set(defaulters.map((d) => d.studentId));
-    hits = householdHits((s) => wantStudents.has(s.id), {
-      households: sis.households ?? [],
-      students: sis.students ?? [],
-    });
+    hits = householdHits(
+      (s) => wantStudents.has(s.id),
+      sis.students ?? [],
+      sis.households ?? [],
+    );
   }
 
   // Every number every one of these families has, asked about once.
