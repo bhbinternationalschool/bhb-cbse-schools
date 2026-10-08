@@ -19,9 +19,13 @@ assert.deepEqual(expenseRange("week", early), { from: "2026-10-05", to: "2026-10
 assert.deepEqual(expenseRange("week", new Date("2026-10-11T06:00:00Z")), { from: "2026-10-05", to: "2026-10-11" });
 // Monday → itself.
 assert.deepEqual(expenseRange("week", new Date("2026-10-05T06:00:00Z")), { from: "2026-10-05", to: "2026-10-05" });
+// Last week from Wed 7 Oct → Mon 28 Sep – Sun 4 Oct (crosses the month).
+assert.deepEqual(expenseRange("lastweek", early), { from: "2026-09-28", to: "2026-10-04" });
+// On a Monday, last week is the seven days just ended.
+assert.deepEqual(expenseRange("lastweek", new Date("2026-10-05T06:00:00Z")), { from: "2026-09-28", to: "2026-10-04" });
 assert.deepEqual(expenseRange("month", early), { from: "2026-10-01", to: "2026-10-07" });
 assert.deepEqual(expenseRange("range", early, "2026-04-01", "2026-09-30"), { from: "2026-04-01", to: "2026-09-30" });
 assert.equal(expenseRange("range", early, "2026-09-30", "2026-04-01"), null, "backwards");
 assert.equal(expenseRange("range", early, "2026-04-01", ""), null, "half a range");
 
-console.log("  ✓ expense periods — India days, Monday weeks, month to date, whole ranges");
+console.log("  ✓ expense periods — India days, Monday weeks, last week, month to date, whole ranges");
