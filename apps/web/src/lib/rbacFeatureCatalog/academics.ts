@@ -32,7 +32,7 @@ export const ACADEMICS_FEATURES: RbacFeatureDef[] = [
     actions: CRUD,
     slices: ["registers"],
     classScoped: true,
-    tabs: ["students"],
+    tabs: ["students", "month"],
   },
   {
     id: "attendance.policy",

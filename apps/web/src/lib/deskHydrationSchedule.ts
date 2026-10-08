@@ -74,7 +74,7 @@ const ROUTE_MODULE_STATES: Record<string, import("@/lib/moduleStateRegistry").Mo
   payroll: ["salary_increment", "salary_hold", "salary_account", "tally_sync"],
   staff: ["duty_roster", "staff_attendance_rules"],
   attendance: ["staff_attendance_rules"],
-  exams: ["exam_invigilation"],
+  exams: ["exam_invigilation", "attendance_result_overrides"],
   complaints: ["complaints"],
   discipline: ["discipline"],
   health: ["health"],

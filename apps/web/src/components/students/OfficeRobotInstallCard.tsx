@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 export const OFFICE_ROBOT_STORE_URL = "https://chromewebstore.google.com/detail/kajdmnaicmdapckbapocgjkbjmejiioh";
 export const OFFICE_ROBOT_ID = "kajdmnaicmdapckbapocgjkbjmejiioh";
 /** The newest version this ERP's robot features expect (extensions/office-robot/manifest.json). */
-export const OFFICE_ROBOT_LATEST = "1.4.0";
+export const OFFICE_ROBOT_LATEST = "1.4.1";
 
 function older(a: string, b: string): boolean {
   const x = a.split(".").map(Number);
