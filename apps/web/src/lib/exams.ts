@@ -1477,7 +1477,19 @@ export function listExamTerms(
   const s = state ?? loadExams();
   return s.terms
     .filter((t) => t.isActive && t.academicYearCode === ay)
-    .sort((a, b) => a.sortOrder - b.sortOrder);
+    .sort(compareExamTermsByDate);
+}
+
+/**
+ * Exams in the order they are held (8 Oct 2026): by the exam window's start
+ * date; terms without dates keep their sortOrder after the dated ones.
+ * sortOrder alone was creation order, so a Half-Yearly created before PT-1
+ * was listed first.
+ */
+export function compareExamTermsByDate(a: ExamTerm, b: ExamTerm): number {
+  const ka = (a.startsOn || "").slice(0, 10) || "9999-99-99";
+  const kb = (b.startsOn || "").slice(0, 10) || "9999-99-99";
+  return ka.localeCompare(kb) || a.sortOrder - b.sortOrder;
 }
 
 export function listAllExamTerms(
@@ -1487,7 +1499,7 @@ export function listAllExamTerms(
   const s = state ?? loadExams();
   return s.terms
     .filter((t) => t.academicYearCode === ay)
-    .sort((a, b) => a.sortOrder - b.sortOrder);
+    .sort(compareExamTermsByDate);
 }
 
 export function createExamTerm(input: {

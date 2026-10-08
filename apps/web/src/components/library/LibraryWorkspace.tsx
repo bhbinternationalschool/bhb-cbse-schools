@@ -365,7 +365,9 @@ export function LibraryWorkspace() {
   }, [staffRoster, borrowerQuery, borrowerType]);
 
   const openLoans = useMemo(
-    () => state.issues.filter((i) => !i.returnedOn),
+    // Soonest due first. Insertion order plus the 20-row cap kept the
+    // oldest loans, so a newly issued book never showed (8 Oct 2026).
+    () => state.issues.filter((i) => !i.returnedOn).sort((a, b) => (a.dueOn || "").localeCompare(b.dueOn || "") || (b.issuedOn || "").localeCompare(a.issuedOn || "")),
     [state.issues],
   );
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   BarChart3,
@@ -452,8 +452,22 @@ export function EventsWorkspace() {
             {events.length === 0 ? (
               <p className="text-sm text-muted-foreground">No events yet.</p>
             ) : (
-              events.map((e) => (
-                <Card key={e.id} size="sm">
+              [...events]
+                .sort((a, b) => (a.startsOn || "").localeCompare(b.startsOn || "") || (a.title || "").localeCompare(b.title || ""))
+                .map((e, i, arr) => (
+                <Fragment key={e.id}>
+                {/* Month by month (8 Oct 2026), like the holiday table. */}
+                {i === 0 || (arr[i - 1].startsOn || "").slice(0, 7) !== (e.startsOn || "").slice(0, 7) ? (
+                  <h3 className="mt-2 border-b border-[var(--border)] pb-1 text-sm font-bold text-[var(--brand-deep)]">
+                    {e.startsOn
+                      ? new Date(`${e.startsOn.slice(0, 7)}-01T12:00:00Z`).toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" })
+                      : "No date"}
+                    <span className="ml-2 text-xs font-normal text-[var(--muted)]">
+                      {arr.filter((x) => (x.startsOn || "").slice(0, 7) === (e.startsOn || "").slice(0, 7)).length} event(s)
+                    </span>
+                  </h3>
+                ) : null}
+                <Card size="sm">
                   <CardHeader>
                     <CardTitle className="flex flex-wrap items-center gap-2">
                       {e.title}
@@ -504,6 +518,7 @@ export function EventsWorkspace() {
                     />
                   </CardFooter>
                 </Card>
+                </Fragment>
               ))
             )}
           </div>

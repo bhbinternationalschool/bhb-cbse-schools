@@ -388,25 +388,37 @@ export function PtmWorkspace() {
     setFbDigestError(null);
   }, [eventId]);
 
-  const activeEvents = useMemo(() => {
+  // Date order (8 Oct 2026): coming PTMs soonest first, then past ones
+  // newest first. The store is newest-CREATED first, which read randomly.
+  const eventsByDate = useMemo(() => {
     if (!state) return [];
-    return state.events.filter(
-      (e) => e.academicYearCode === ay && e.isActive,
-    );
-  }, [state, ay]);
+    const today = new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10);
+    const up = state.events.filter((e) => (e.date || "") >= today).sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+    const past = state.events.filter((e) => (e.date || "") < today).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+    return [...up, ...past];
+  }, [state]);
+
+  const activeEvents = useMemo(
+    () => eventsByDate.filter((e) => e.academicYearCode === ay && e.isActive),
+    [eventsByDate, ay],
+  );
 
   const eventSlots = useMemo(() => {
     if (!state || !eventId) return [];
     // A teacher's desk also carries the slot behind each visible booking
     // (for its time); the Slots tab lists only their own.
-    return state.slots.filter(
-      (s) => s.eventId === eventId && (!teacherMode || s.teacherStaffId === myStaffId),
-    );
+    return state.slots
+      .filter((s) => s.eventId === eventId && (!teacherMode || s.teacherStaffId === myStaffId))
+      .sort((a, b) => (a.startAt || "").localeCompare(b.startAt || "") || (a.teacherName || "").localeCompare(b.teacherName || ""));
   }, [state, eventId, teacherMode, myStaffId]);
 
   const eventBookings = useMemo(() => {
     if (!state || !eventId) return [];
-    return state.bookings.filter((b) => b.eventId === eventId);
+    // In meeting order (slot time), the order the teacher sees parents.
+    const startOf = new Map(state.slots.map((s) => [s.id, s.startAt || ""]));
+    return state.bookings
+      .filter((b) => b.eventId === eventId)
+      .sort((a, b) => (startOf.get(a.slotId) ?? "").localeCompare(startOf.get(b.slotId) ?? ""));
   }, [state, eventId]);
 
   const selectedEvent = useMemo(
@@ -802,7 +814,7 @@ export function PtmWorkspace() {
             {state.events.length === 0 ? (
               <p className="text-sm text-muted-foreground">No events yet.</p>
             ) : (
-              state.events.map((e) => (
+              eventsByDate.map((e) => (
                 <Card key={e.id} size="sm">
                   <CardHeader>
                     <CardTitle className="flex flex-wrap items-center gap-2">

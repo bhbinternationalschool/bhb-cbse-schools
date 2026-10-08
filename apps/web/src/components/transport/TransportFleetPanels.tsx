@@ -193,8 +193,12 @@ export function FinancePanel({
   const [expiry, setExpiry] = useState("");
   const [fee, setFee] = useState("400");
 
+  // Soonest due first, sorted BEFORE the 20-row cap: each new loan's schedule
+  // is prepended, so a new loan's future EMIs used to hide older loans'
+  // overdue ones (8 Oct 2026).
   const dueEmis = state.emiSchedule
     .filter((e) => e.status === "due" || e.status === "overdue")
+    .sort((a, b) => (a.dueOn || "").localeCompare(b.dueOn || ""))
     .slice(0, 20);
 
   return (

@@ -2304,7 +2304,10 @@ export function markPayablePaid(
 
 export function listOpenPayables(state?: TransportState): FleetPayable[] {
   const s = state ?? loadTransport();
-  return s.payables.filter((p) => p.status !== "paid");
+  // Soonest due first — the store prepends, so it read newest-entered first.
+  return s.payables
+    .filter((p) => p.status !== "paid")
+    .sort((a, b) => (a.dueOn || "").localeCompare(b.dueOn || ""));
 }
 
 /* ─── Fuel ─────────────────────────────────────────────────── */

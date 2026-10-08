@@ -172,7 +172,14 @@ export async function listEvents(): Promise<EvtEvent[]> {
   if (error) throw new EvtError(error.message, 500);
   const rows = (data ?? []) as Row[];
   const cats = await categoriesOf(ctx, rows.map((r) => str(r.id)));
-  return rows.map((r) => rowToEvent(r, cats.get(str(r.id)) ?? []));
+  // By event date (8 Oct 2026): coming events soonest first, then past ones
+  // newest first; an event with no date yet goes last. The query's
+  // created_at order is kept as the tie-break.
+  const today = new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10);
+  const events = rows.map((r) => rowToEvent(r, cats.get(str(r.id)) ?? []));
+  const up = events.filter((e) => e.eventDate && e.eventDate >= today).sort((a, b) => a.eventDate.localeCompare(b.eventDate));
+  const past = events.filter((e) => e.eventDate && e.eventDate < today).sort((a, b) => b.eventDate.localeCompare(a.eventDate));
+  return [...up, ...past, ...events.filter((e) => !e.eventDate)];
 }
 
 function slugify(name: string): string {
