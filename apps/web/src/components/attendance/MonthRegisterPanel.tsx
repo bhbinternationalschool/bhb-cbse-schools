@@ -5,7 +5,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ErpTable } from "@/components/ui/erp-roster";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 import type { AttendanceStatus } from "@/lib/attendance";
-import type { MonthDay, MonthStudent } from "@/lib/attendanceMonthRegister";
+import { monthRegisterExport, type MonthDay, type MonthStudent } from "@/lib/attendanceMonthRegister";
+import { ExportMenu } from "@/components/ui/erp-grid";
 
 type Section = { classId: string; sectionId: string; label: string };
 type View = {
@@ -242,6 +243,16 @@ export function MonthRegisterPanel({ sections }: { sections: Section[] }) {
               ))}
             </select>
           </label>
+          {view && view.students.length ? (
+            <ExportMenu
+              title={`Attendance register — ${pick?.label ?? ""} — ${monthLabel(view.month)}`}
+              subtitle={`Session ${view.academicYearCode} · P present, A absent, L late, HD half day, LE leave, H holiday, – before admission${changedCount ? ` · includes ${changedCount} unsaved change(s)` : ""}`}
+              fileBaseName={`attendance_register_${(pick?.label ?? "class").replace(/[^A-Za-z0-9]+/g, "_")}_${view.month}`}
+              columns={monthRegisterExport({ days: view.days, students: [], markOf: () => "" }).columns}
+              rows={() => monthRegisterExport({ days: view.days, students: sort.rows, markOf: (stu, date) => valueOf(stu, date) }).rows}
+              onMessage={(m) => setMsg({ ok: !/fail|nothing/i.test(m), text: `Exported ${m}` })}
+            />
+          ) : null}
         </div>
       </div>
 

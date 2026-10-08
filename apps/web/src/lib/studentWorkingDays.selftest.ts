@@ -9,7 +9,7 @@ import {
   classCalendar,
   sessionDaysSummary,
 } from "@/lib/studentWorkingDays";
-import { buildMonthView, planMonthSave, sessionMonths } from "@/lib/attendanceMonthRegister";
+import { buildMonthView, monthRegisterExport, planMonthSave, sessionMonths } from "@/lib/attendanceMonthRegister";
 import type { SisStudent } from "@/lib/sis";
 import { findAttendanceOverride, normalizeAttendanceResultOverrides } from "@/lib/attendanceResultOverrides";
 
@@ -110,6 +110,25 @@ if (!("error" in view)) {
   assert.equal(view.students[1].startsOn, "2026-10-03");
   assert.equal(view.days.find((d) => d.date === "2026-10-08")?.future, true);
   assert.equal(view.students[0].month.workingDays, 5);
+
+  // Export: a column per day, H on holidays, – before admission, blank when
+  // unmarked or in the future, totals per child and a headcount row.
+  const ex = monthRegisterExport({ days: view.days, students: view.students, markOf: (st, d) => st.marks[d] ?? "" });
+  assert.equal(ex.columns.length, 3 + 31 + 5);
+  assert.equal(ex.columns.find((c) => c.key === "d02")?.header, "2 H", "2 Oct is a holiday");
+  assert.equal(ex.columns.find((c) => c.key === "d01")?.header, "1 Th");
+  const anu = ex.rows.find((r) => r.student === "ANU")!;
+  const bablu = ex.rows.find((r) => r.student === "BABLU")!;
+  assert.deepEqual([anu.d01, anu.d02, anu.d03, anu.d04, anu.d06, anu.d07, anu.d08], ["P", "H", "HD", "H", "LE", "", ""]);
+  assert.equal(bablu.d01, "–", "before admission");
+  assert.equal(bablu.d03, "A");
+  assert.equal(anu.monthP, 1 + 0.5 + 1, "P + HD½ + L");
+  assert.equal(anu.monthW, 5);
+  const head = ex.rows[ex.rows.length - 1];
+  assert.equal(head.student, "Present (headcount)");
+  assert.equal(head.d01, 1, "ANU present; BABLU not admitted");
+  assert.equal(head.d03, 0.5, "HD counts half; A counts 0");
+  assert.equal(head.d02, "H");
 }
 assert.ok("error" in buildMonthView({ masters, ay: AY, classId: "c1", month: "2027-05", students, registers, today: "2026-10-07" }), "outside the session");
 

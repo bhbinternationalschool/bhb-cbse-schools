@@ -221,3 +221,75 @@ export function planMonthSave(input: {
   plan.sort((a, z) => a.date.localeCompare(z.date));
   return { plan, refused };
 }
+
+/* ─── Export (Excel / CSV / PDF) ─────────────────────────────── */
+
+export type MonthExportColumn = { key: string; header: string; width?: number; align?: "left" | "right" };
+export type MonthExportRow = Record<string, string | number | null>;
+
+const WEEKDAY_SHORT = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+const exportWeight = (s: string) => (s === "P" || s === "L" ? 1 : s === "HD" ? 0.5 : 0);
+
+/**
+ * The month register as a sheet (director, 8 Oct 2026: export options):
+ * one row per child in the order the screen shows, one column per day —
+ * the mark, "H" on a holiday, "–" before admission, blank if unmarked —
+ * then this month's and the session's present / working days and %, and a
+ * last "Present" row with each day's headcount. `markOf` is what the screen
+ * shows, so unsaved edits export as they look.
+ */
+export function monthRegisterExport(input: {
+  days: MonthDay[];
+  students: MonthStudent[];
+  markOf: (s: MonthStudent, date: string) => string;
+}): { columns: MonthExportColumn[]; rows: MonthExportRow[] } {
+  const dayKey = (d: MonthDay) => `d${d.date.slice(8)}`;
+  const columns: MonthExportColumn[] = [
+    { key: "roll", header: "Roll", width: 0.6 },
+    { key: "student", header: "Student", width: 2.6 },
+    { key: "admNo", header: "Adm. No.", width: 1.2 },
+    ...input.days.map((d) => ({
+      key: dayKey(d),
+      header: `${Number(d.date.slice(8))} ${d.working ? WEEKDAY_SHORT[new Date(`${d.date}T12:00:00Z`).getUTCDay()] : "H"}`,
+      width: 0.45,
+    })),
+    { key: "monthP", header: "Month P", width: 0.8, align: "right" },
+    { key: "monthW", header: "Month W", width: 0.8, align: "right" },
+    { key: "sessionP", header: "Session P", width: 0.9, align: "right" },
+    { key: "sessionW", header: "Session W", width: 0.9, align: "right" },
+    { key: "pct", header: "Session %", width: 0.9, align: "right" },
+  ];
+  const headcount = new Map<string, number>();
+  const rows: MonthExportRow[] = input.students.map((s) => {
+    const row: MonthExportRow = { roll: s.rollNo || "", student: s.name, admNo: s.admissionNo || "" };
+    let mp = 0;
+    let mw = 0;
+    for (const d of input.days) {
+      if (!d.working) {
+        row[dayKey(d)] = "H";
+        continue;
+      }
+      if (d.date < s.startsOn) {
+        row[dayKey(d)] = "–";
+        continue;
+      }
+      const v = d.future ? "" : input.markOf(s, d.date);
+      row[dayKey(d)] = v;
+      if (!d.future) {
+        mw += 1;
+        mp += exportWeight(v);
+        headcount.set(d.date, (headcount.get(d.date) ?? 0) + exportWeight(v));
+      }
+    }
+    row.monthP = mp;
+    row.monthW = mw;
+    row.sessionP = s.session.presentDays;
+    row.sessionW = s.session.workingDays;
+    row.pct = s.session.percent ?? "";
+    return row;
+  });
+  const total: MonthExportRow = { roll: "", student: "Present (headcount)", admNo: "" };
+  for (const d of input.days) total[dayKey(d)] = !d.working ? "H" : d.future ? "" : (headcount.get(d.date) ?? 0);
+  rows.push(total);
+  return { columns, rows };
+}
