@@ -94,6 +94,27 @@ export type LeaveBalance = {
   used: number;
 };
 
+/**
+ * One change to a member of staff's leave allotment — director, 8 Oct 2026:
+ * "someone 10 days, someone 8, add or remove days, with a record of which
+ * staff's leave went up or down". Kept forever; nothing edits or deletes a
+ * row. `days` is what was entered; before/after are the allotment itself.
+ */
+export type LeaveAllotmentMode = "set" | "add" | "remove";
+export type LeaveAllotmentChange = {
+  id: string;
+  academicYearCode: string;
+  staffId: string;
+  typeCode: LeaveTypeCode;
+  mode: LeaveAllotmentMode;
+  days: number;
+  before: number;
+  after: number;
+  reason: string;
+  changedBy: string;
+  changedAt: string;
+};
+
 export type LeaveEncashment = {
   id: string;
   academicYearCode: string;
@@ -172,6 +193,8 @@ export type StaffHrState = {
   leaveRequests: LeaveRequest[];
   leaveBalances: LeaveBalance[];
   leaveEncashments: LeaveEncashment[];
+  /** Every allotment change, newest first. */
+  leaveAllotmentLog: LeaveAllotmentChange[];
   appraisalCycles: AppraisalCycle[];
   appraisals: AppraisalRecord[];
   staffRequests: StaffRequestTicket[];
@@ -338,6 +361,27 @@ function normalizeBalance(b: Partial<LeaveBalance>): LeaveBalance | null {
   };
 }
 
+function normalizeAllotmentChange(
+  c: Partial<LeaveAllotmentChange>,
+): LeaveAllotmentChange | null {
+  if (!c || !c.staffId || !c.typeCode) return null;
+  const mode: LeaveAllotmentMode = c.mode === "add" || c.mode === "remove" ? c.mode : "set";
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.round(v * 2) / 2 : 0);
+  return {
+    id: c.id || nid("lal"),
+    academicYearCode: c.academicYearCode || DEFAULT_AY,
+    staffId: c.staffId,
+    typeCode: String(c.typeCode).trim().toUpperCase(),
+    mode,
+    days: num(c.days),
+    before: num(c.before),
+    after: num(c.after),
+    reason: c.reason || "",
+    changedBy: c.changedBy || "",
+    changedAt: c.changedAt || new Date().toISOString(),
+  };
+}
+
 function normalizeEncashment(
   e: Partial<LeaveEncashment>,
 ): LeaveEncashment | null {
@@ -475,6 +519,7 @@ export function emptyStaffHrState(): StaffHrState {
     leaveRequests: [],
     leaveBalances: [],
     leaveEncashments: [],
+    leaveAllotmentLog: [],
     appraisalCycles: [],
     appraisals: [],
     staffRequests: [],
@@ -510,6 +555,11 @@ function normalizeState(raw: Partial<StaffHrState>): StaffHrState {
       ? raw.leaveEncashments
           .map(normalizeEncashment)
           .filter((e): e is LeaveEncashment => !!e)
+      : [],
+    leaveAllotmentLog: Array.isArray(raw.leaveAllotmentLog)
+      ? raw.leaveAllotmentLog
+          .map(normalizeAllotmentChange)
+          .filter((c): c is LeaveAllotmentChange => !!c)
       : [],
     appraisalCycles: Array.isArray(raw.appraisalCycles)
       ? raw.appraisalCycles
@@ -577,7 +627,8 @@ export function staffHrStateIsEmpty(state: StaffHrState): boolean {
   return (
     (state.leaveRequests?.length ?? 0) === 0 &&
     (state.appraisals?.length ?? 0) === 0 &&
-    (state.leaveEncashments?.length ?? 0) === 0
+    (state.leaveEncashments?.length ?? 0) === 0 &&
+    (state.leaveAllotmentLog?.length ?? 0) === 0
   );
 }
 
@@ -1610,6 +1661,126 @@ export function carryForwardLeaveBalances(input: {
   const next = { ...state, leaveBalances: balances };
   saveStaffHr(next);
   return { ok: true, state: next, staffUpdated, daysCarried };
+}
+
+/**
+ * Change the allotment of one leave type for many staff at once: set it to N
+ * days, or add / remove N days. Pure — returns the next state and the
+ * records it wrote; `changeLeaveAllotment` saves it.
+ *
+ * Refused (nobody changes) if any one person would end up with less leave
+ * than they have already taken, or below zero — a partial bulk change is
+ * worse than none. A person whose allotment would not move gets no record.
+ */
+export function applyLeaveAllotment(
+  state: StaffHrState,
+  input: {
+    staffIds: string[];
+    typeCode: LeaveTypeCode;
+    academicYearCode: string;
+    mode: LeaveAllotmentMode;
+    days: number;
+    reason: string;
+    changedBy: string;
+    staff: StaffRecord[];
+    now?: string;
+  },
+):
+  | { ok: true; state: StaffHrState; changes: LeaveAllotmentChange[] }
+  | { ok: false; error: string } {
+  const ids = [...new Set(input.staffIds.filter(Boolean))];
+  if (!ids.length) return { ok: false, error: "Select at least one member of staff" };
+  const raw = Number(input.days);
+  if (!Number.isFinite(raw) || raw < 0) return { ok: false, error: "Days must be zero or more" };
+  if (Math.round(raw * 2) !== raw * 2) return { ok: false, error: "Days go in whole or half days (e.g. 8 or 8.5)" };
+  if (raw > 365) return { ok: false, error: "More than 365 days is not an allotment" };
+  if (input.mode !== "set" && raw === 0) return { ok: false, error: "Enter how many days to add or remove" };
+  const reason = (input.reason || "").trim();
+  if (!reason) return { ok: false, error: "Write a reason — it goes in the record" };
+  const type = state.leaveTypes.find((t) => t.code === String(input.typeCode).toUpperCase());
+  if (!type) return { ok: false, error: "Leave type not found" };
+
+  const ay = input.academicYearCode;
+  const withBalances = ensureBalancesForAy(state, input.staff, ay);
+  const names = new Map(input.staff.map((s) => [s.id, s.fullName]));
+  const now = input.now || new Date().toISOString();
+  const changes: LeaveAllotmentChange[] = [];
+  const nextAllotted = new Map<string, number>();
+  const blocked: string[] = [];
+  for (const id of ids) {
+    const bal = withBalances.leaveBalances.find(
+      (b) => b.staffId === id && b.typeCode === type.code && b.academicYearCode === ay,
+    );
+    const before = bal?.allotted ?? type.defaultDaysPerYear;
+    const after =
+      input.mode === "set" ? raw : input.mode === "add" ? before + raw : before - raw;
+    const used = bal?.used ?? 0;
+    const minimum = Math.max(0, used + (bal?.encashed ?? 0) - (bal?.carriedForward ?? 0));
+    if (after < minimum) {
+      blocked.push(`${names.get(id) || id} (${used} ${type.code} taken${minimum > used ? `, ${minimum - used} encashed` : ""})`);
+      continue;
+    }
+    if (after === before) continue;
+    nextAllotted.set(id, after);
+    changes.push({
+      id: nid("lal"),
+      academicYearCode: ay,
+      staffId: id,
+      typeCode: type.code,
+      mode: input.mode,
+      days: raw,
+      before,
+      after,
+      reason,
+      changedBy: input.changedBy,
+      changedAt: now,
+    });
+  }
+  if (blocked.length) {
+    return {
+      ok: false,
+      error: `Not changed — this would leave less ${type.code} than already taken for: ${blocked.join("; ")}`,
+    };
+  }
+  if (!changes.length) return { ok: false, error: `Nothing to change — the ${type.code} allotment is already that` };
+
+  const leaveBalances = withBalances.leaveBalances.map((b) =>
+    b.academicYearCode === ay && b.typeCode === type.code && nextAllotted.has(b.staffId)
+      ? { ...b, allotted: nextAllotted.get(b.staffId)! }
+      : b,
+  );
+  // A staff id with no balance row (not on the active roster) gets one.
+  for (const [staffId, allotted] of nextAllotted) {
+    if (leaveBalances.some((b) => b.staffId === staffId && b.typeCode === type.code && b.academicYearCode === ay)) continue;
+    leaveBalances.push({
+      id: nid("lb"),
+      academicYearCode: ay,
+      staffId,
+      typeCode: type.code,
+      allotted,
+      carriedForward: 0,
+      encashed: 0,
+      used: 0,
+    });
+  }
+  return {
+    ok: true,
+    state: {
+      ...withBalances,
+      leaveBalances,
+      leaveAllotmentLog: [...changes, ...(withBalances.leaveAllotmentLog ?? [])],
+    },
+    changes,
+  };
+}
+
+/** applyLeaveAllotment on the saved state, then save it. */
+export function changeLeaveAllotment(
+  input: Parameters<typeof applyLeaveAllotment>[1],
+): ReturnType<typeof applyLeaveAllotment> {
+  const res = applyLeaveAllotment(loadStaffHr(), input);
+  if (res.ok) saveStaffHr(res.state);
+  return res;
 }
 
 /** Encash unused paid leave (stub — records days; payroll amount is manual). */
