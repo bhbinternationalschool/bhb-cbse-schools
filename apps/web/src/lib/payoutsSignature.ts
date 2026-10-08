@@ -81,3 +81,29 @@ export function verifyPayoutWebhook(rawBody: string, timestamp: string, signatur
   const b = Buffer.from(signature);
   return a.length === b.length && timingSafeEqual(a, b);
 }
+
+/**
+ * Cashfree Payouts V1 webhook signature — the signature travels IN the body
+ * (a `signature` field), not in headers. Every other field, sorted by key,
+ * values concatenated, HMAC-SHA256 with the client secret, base64.
+ *
+ * Found 8 Oct 2026: the dashboard's Test sent JSON with a body `signature`
+ * and no x-webhook-* headers even with V2 selected, so a V2-only check
+ * refused every call. Values are taken as sent (numbers via String()).
+ */
+export function verifyPayoutWebhookV1(fields: Record<string, unknown>, secret: string): boolean {
+  const signature = typeof fields.signature === "string" ? fields.signature : "";
+  if (!signature || !secret) return false;
+  const message = Object.keys(fields)
+    .filter((k) => k !== "signature")
+    .sort()
+    .map((k) => {
+      const v = fields[k];
+      return v === null || v === undefined ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
+    })
+    .join("");
+  const expected = createHmac("sha256", secret).update(message).digest("base64");
+  const a = Buffer.from(expected);
+  const b = Buffer.from(signature);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
