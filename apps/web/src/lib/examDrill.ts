@@ -938,9 +938,12 @@ export function renderQuestion(input: { number: number; question: string; questi
   parts.push(input.question);
   if (input.questionHi) {
     parts.push("", `🇮🇳 ${input.questionHi}`);
-  } else if (!input.hindi) {
-    // English-only paper: remind student to answer in English only
-    parts.push("", "_(Answer in **English** only)_");
+  } else if (!/[\u0900-\u097F]/.test(input.question)) {
+    // The question is in English with no Hindi version: the answer is
+    // expected in English. Read from the question itself, never from the
+    // child's chat language — a Hindi paper's question is in Devanagari and
+    // gets no such line. (WhatsApp bold is a single *.)
+    parts.push("", input.hindi ? "_(उत्तर *English* में लिखें)_" : "_(Answer in *English*)_");
   }
   return parts.join("\n");
 }
