@@ -1,8 +1,8 @@
 import "package:flutter/material.dart";
-import "package:url_launcher/url_launcher.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
+import "../../core/billing/open_checkout.dart";
 import "../../core/ui/haptics.dart";
 import "module_shell.dart";
 import "receipts_screen.dart";
@@ -132,7 +132,7 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
       if (uri == null) {
         throw ApiException(l10n.modFeesCouldNotStartPayment, 400);
       }
-      final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      final opened = await openCheckout(uri);
       if (!opened) {
         throw ApiException(l10n.modFeesNoBrowserForPaymentPage, 0);
       }
@@ -204,11 +204,11 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _openInBrowser(String url) async {
+  Future<void> _openPaymentPage(String url) async {
     final l10n = context.l10n;
     final uri = Uri.tryParse(url);
     if (uri == null ||
-        !await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+        !await openCheckout(uri)) {
       throw ApiException(l10n.modFeesNoBrowserForPage, 0);
     }
   }
@@ -226,7 +226,7 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
         await reload();
         return;
       }
-      await _openInBrowser(url);
+      await _openPaymentPage(url);
       _awaitingAutopay = true;
       Haptics.success();
     } on ApiException catch (e) {
@@ -240,7 +240,7 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
 
   Future<void> _approveAutopay(String url) async {
     try {
-      await _openInBrowser(url);
+      await _openPaymentPage(url);
       _awaitingAutopay = true;
     } on ApiException catch (e) {
       _toast(e.message);
