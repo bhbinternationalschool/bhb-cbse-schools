@@ -1299,10 +1299,29 @@ h3,
   margin-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px)) !important;
 }
 
+/* A bare table (print sheets, card tables with no frame) becomes its own
+ * sideways scroller so it cannot widen the phone page. A table whose parent
+ * already scrolls stays a real table: a second, inner scroller would pin
+ * sticky headers/columns to a box that never moves and fight the frame
+ * for every swipe — the "table gets stuck" report. */
 .bhb-mobile-app table {
   display: block;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+}
+
+.bhb-mobile-app
+  :is(
+    .overflow-auto,
+    .overflow-x-auto,
+    .overflow-y-auto,
+    .overflow-scroll,
+    .overflow-x-scroll,
+    .overflow-y-scroll
+  )
+  > table {
+  display: table;
+  overflow: visible;
 }
 
 .bhb-mobile-app .bhb-parent-mobile-app input,
