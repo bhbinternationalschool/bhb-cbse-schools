@@ -388,14 +388,18 @@ export function ErpTable({
   children,
   className,
   minWidth = "min-w-[720px]",
+  style,
 }: {
   children: ReactNode;
   className?: string;
   minWidth?: string;
+  /** e.g. the month register's display:table override of the phone rule. */
+  style?: CSSProperties;
 }) {
   return (
     <table
       className={cn("w-full text-left text-sm", minWidth, className)}
+      style={style}
     >
       {children}
     </table>

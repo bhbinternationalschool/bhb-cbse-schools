@@ -1,8 +1,11 @@
 "use client";
 
+// ratchet-allow: grids_without_row_menu — an attendance ENTRY grid: every cell is an input (like the marks-entry grids); a per-row menu has nothing to act on.
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AttendanceStatus } from "@/lib/attendance";
 import type { MonthDay, MonthStudent } from "@/lib/attendanceMonthRegister";
+import { ErpTable } from "@/components/ui/erp-roster";
 
 type Section = { classId: string; sectionId: string; label: string };
 type View = {
@@ -243,7 +246,7 @@ export function MonthRegisterPanel({ sections }: { sections: Section[] }) {
               {display:block; overflow-x:auto}" — that made the table its OWN scroll box
               inside this one, so the sticky names/dates stuck to a box that never
               scrolls and slid away, and two nested scrollers fought on phones. */}
-          <table className="w-max min-w-full border-separate border-spacing-0 text-[11px]" style={{ display: "table", overflow: "visible" }}>
+          <ErpTable minWidth="min-w-full" className="w-max border-separate border-spacing-0 text-[11px]" style={{ display: "table", overflow: "visible" }}>
             <thead className="sticky top-0 z-20 bg-[var(--card)]">
               <tr>
                 <th className="sticky left-0 z-30 w-[7.5rem] min-w-[7.5rem] border-b sm:w-auto sm:min-w-[11rem] border-[var(--border)] bg-[var(--card)] px-2 py-1 text-left">Student</th>
@@ -319,7 +322,7 @@ export function MonthRegisterPanel({ sections }: { sections: Section[] }) {
                 </tr>
               ) : null}
             </tbody>
-          </table>
+          </ErpTable>
         </div>
       ) : busy ? (
         <p className="text-xs text-[var(--muted)]">Loading…</p>

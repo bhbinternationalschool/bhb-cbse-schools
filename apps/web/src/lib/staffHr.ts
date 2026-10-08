@@ -364,12 +364,13 @@ function normalizeBalance(b: Partial<LeaveBalance>): LeaveBalance | null {
 function normalizeAllotmentChange(
   c: Partial<LeaveAllotmentChange>,
 ): LeaveAllotmentChange | null {
-  if (!c || !c.staffId || !c.typeCode) return null;
+  // A record with no year is dropped, not filed under a guessed one.
+  if (!c || !c.staffId || !c.typeCode || !c.academicYearCode) return null;
   const mode: LeaveAllotmentMode = c.mode === "add" || c.mode === "remove" ? c.mode : "set";
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.round(v * 2) / 2 : 0);
   return {
     id: c.id || nid("lal"),
-    academicYearCode: c.academicYearCode || DEFAULT_AY,
+    academicYearCode: c.academicYearCode,
     staffId: c.staffId,
     typeCode: String(c.typeCode).trim().toUpperCase(),
     mode,

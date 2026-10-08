@@ -52,6 +52,7 @@ import {
 import { useRouter } from "next/navigation";
 import { EditControl } from "@/components/masters/EditControl";
 import { RemoveControl } from "@/components/masters/RemoveControl";
+import { HolidayMonthTable } from "@/components/masters/HolidayMonthTable";
 import { SchoolTimingPanel } from "@/components/masters/SchoolTimingPanel";
 import { StatutoryConfigPanel } from "@/components/masters/StatutoryConfigPanel";
 import { LeaveApprovalSettingsPanel } from "@/components/masters/LeaveApprovalSettingsPanel";
@@ -1653,69 +1654,39 @@ export function HolidaysPanel({
             </MastersTableCard>
           ) : null}
           {holStep === "review" ? (
-            <MastersTableCard title={`Published (${published.length})`}>
-              <ul className="divide-y divide-[var(--border)]">
-                {published.map((h) => (
-                  <HolidayRuleRow
-                    key={h.id}
-                    h={h}
-                    trailing={
-                      <div className="flex items-center gap-2">
-                        {h.mode !== "weekly" ? <HolidayNotifyButton holiday={h} /> : null}
-                        <button
-                          type="button"
-                          className="text-[11px] font-semibold"
-                          onClick={() => unpublish(h.id)}
-                        >
-                          Unpublish
-                        </button>
-                      </div>
-                    }
-                  />
-                ))}
-                {published.length === 0 ? (
-                  <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">
-                    No published holidays
-                  </li>
-                ) : null}
-              </ul>
+            <MastersTableCard title={`Published (${published.length}) · month-wise`}>
+              <HolidayMonthTable
+                holidays={published}
+                sessionStart={ayBounds.startsOn}
+                sessionEnd={ayBounds.endsOn}
+                emptyText="No published holidays"
+                extra={(h) => (h.mode !== "weekly" ? <HolidayNotifyButton holiday={h} /> : null)}
+                actions={() => [
+                  { id: "unpublish", label: "Unpublish (back to drafts)", onSelect: (h) => unpublish(h.id) },
+                ]}
+              />
             </MastersTableCard>
           ) : null}
           {holStep === "publish" ? (
-            <MastersTableCard title={`Drafts (${drafts.length})`}>
-              <ul className="divide-y divide-[var(--border)]">
-                {drafts.map((h) => (
-                  <HolidayRuleRow
-                    key={h.id}
-                    h={h}
-                    trailing={
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          className="rounded-lg bg-[var(--primary)] px-2.5 py-1 text-[11px] font-semibold text-[var(--primary-foreground)]"
-                          onClick={() => publish(h.id)}
-                        >
-                          Publish
-                        </button>
-                        <RemoveControl
-                          check={{
-                            canRemove: true,
-                            blockers: [],
-                            confirmMessage: "Remove this holiday rule?",
-                            suggestion: "",
-                          }}
-                          onRemove={() => remove(h.id)}
-                        />
-                      </div>
-                    }
-                  />
-                ))}
-                {drafts.length === 0 ? (
-                  <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">
-                    No drafts
-                  </li>
-                ) : null}
-              </ul>
+            <MastersTableCard title={`Drafts (${drafts.length}) · month-wise`}>
+              <HolidayMonthTable
+                holidays={drafts}
+                sessionStart={ayBounds.startsOn}
+                sessionEnd={ayBounds.endsOn}
+                emptyText="No drafts"
+                actions={() => [
+                  { id: "publish", label: "Publish", onSelect: (h) => publish(h.id) },
+                  {
+                    id: "remove",
+                    label: "Remove",
+                    tone: "danger",
+                    separatorAbove: true,
+                    onSelect: (h) => {
+                      if (window.confirm(`Remove the holiday rule "${h.title}"?`)) remove(h.id);
+                    },
+                  },
+                ]}
+              />
             </MastersTableCard>
           ) : null}
           {holStep === "build" ? (
