@@ -283,7 +283,7 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
               My class records
             </span>
             <span className="block text-xs text-[var(--muted)]">
-              WhatsApp numbers to fix, details and photos
+              Class sheet for UDISE+ (height, weight, blood group…), WhatsApp numbers, details and photos
             </span>
           </span>
           <ArrowRight className="h-4 w-4 shrink-0 text-[var(--muted)]" />

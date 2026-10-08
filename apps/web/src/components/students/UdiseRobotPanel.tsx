@@ -2,12 +2,6 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { OfficeRobotInstallCard } from "@/components/students/OfficeRobotInstallCard";
-import { UdisePortalSyncCard } from "@/components/students/UdisePortalSyncCard";
-import { UdiseSchoolAnswersCard } from "@/components/students/UdiseSchoolAnswersCard";
-import { UdiseSchoolFinanceCard } from "@/components/students/UdiseSchoolFinanceCard";
-import { UdiseTeacherSyncCard } from "@/components/students/UdiseTeacherSyncCard";
-import { UdiseSchoolProfileCard } from "@/components/students/UdiseSchoolProfileCard";
 import type { MastersState } from "@/lib/masters";
 import { studentsInSession, type SisState } from "@/lib/sis";
 import {
@@ -123,29 +117,11 @@ export function UdiseRobotPanel({
         Each child&apos;s next step, worked out from the ERP every time this opens. A step drops off by itself once the
         portal export is imported below or the family&apos;s document arrives on WhatsApp — nothing to tick.
         To refresh from the portal without downloading Excel, log in to UDISE+ in Chrome with the BHB Office Robot
-        extension and press <strong>Send portal list to ERP</strong>, then Apply below.
+        extension and press <strong>Send portal list to ERP</strong>, then Apply it in step 4 (Compliance worklist).
       </p>
       <div className="mt-3 flex flex-col gap-3 md:flex-row">
         {renderGroup("portal", `Office — on the UDISE+ portal (${board.portalTaskCount})`, "Log in to UDISE+ and do these.")}
         {renderGroup("family", `Families (${board.familyTaskCount})`, "Only the parent can give these. WhatsApp asks them weekly.")}
-      </div>
-      <div className="mt-3">
-        <OfficeRobotInstallCard />
-      </div>
-      <div className="mt-3">
-        <UdisePortalSyncCard />
-      </div>
-      <div className="mt-3">
-        <UdiseSchoolAnswersCard />
-      </div>
-      <div className="mt-3">
-        <UdiseTeacherSyncCard />
-      </div>
-      <div className="mt-3">
-        <UdiseSchoolProfileCard />
-      </div>
-      <div className="mt-3">
-        <UdiseSchoolFinanceCard />
       </div>
     </section>
   );
