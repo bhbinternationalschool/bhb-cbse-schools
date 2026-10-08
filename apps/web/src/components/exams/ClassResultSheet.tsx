@@ -4,13 +4,12 @@
  * tint and theme-aware colours, all of which are wrong on paper — a sheet that
  * followed dark mode would print white ink on white stock. */
 
+import { SchoolLetterhead } from "@/components/shared/SchoolLetterhead";
 import {
   promotionDecisionLabel,
   type ClassResultSheet,
 } from "@/lib/exams";
 import {
-  schoolAddressLine,
-  schoolPrintName,
   schoolShortName,
   schoolStatutoryLine,
 } from "@/lib/schoolIdentity";
@@ -57,15 +56,11 @@ export function ClassResultSheetView({
       </div>
 
       <div className="certificate-inner relative px-4 py-5 sm:px-6 sm:py-7">
+        <SchoolLetterhead />
         <header className="border-b-2 border-[var(--brand-gold)] pb-3 text-center">
-          <p className="font-brand-name text-sm tracking-[0.12em] text-[var(--brand-deep)] sm:text-base">
-            {schoolPrintName()}
-          </p>
-          <p className="mt-0.5 text-[11px] text-[var(--muted)]">
-            {[schoolAddressLine(), schoolStatutoryLine()]
-              .filter(Boolean)
-              .join(" · ")}
-          </p>
+          {schoolStatutoryLine() ? (
+            <p className="mt-1 text-[10px] text-[var(--muted)]">{schoolStatutoryLine()}</p>
+          ) : null}
           <h1 className="mt-3 text-lg font-bold uppercase tracking-wide text-[var(--brand-deep)]">
             Class result sheet
           </h1>

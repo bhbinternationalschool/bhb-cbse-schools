@@ -1,5 +1,6 @@
 "use client";
 
+import { PRINT_LETTERHEAD_CSS, printLetterheadHtml, printWhenImagesReady } from "@/lib/printLetterheadHtml";
 import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import { useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
@@ -40,6 +41,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { ErpTable, ErpTableBody } from "@/components/ui/erp-roster";
+import { StaffLeaveDecideList } from "@/components/dashboard/StaffLeaveDecideList";
 
 export type DashboardTone =
   | "navy"
@@ -88,6 +90,8 @@ export type DashboardKpi = {
   detailTitle?: string;
   detailColumns?: DashboardTableColumn[];
   detailRows?: DashboardTableRow[];
+  /** Live actions in the detail drawer instead of the static rows. */
+  detailAction?: "staff_leave_decide";
 };
 
 export type DashboardQuickLink = {
@@ -950,12 +954,13 @@ function KpiDetailDrawer({
         th, td { border: 1px solid #e2e8f0; padding: 8px 10px; text-align: left; }
         th { background: #f8fafc; }
         td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        ${PRINT_LETTERHEAD_CSS}
       </style></head><body>
+      ${printLetterheadHtml()}
       ${node.innerHTML}
       </body></html>`);
     w.document.close();
-    w.focus();
-    w.print();
+    printWhenImagesReady(w);
   }
 
   return (
@@ -991,7 +996,9 @@ function KpiDetailDrawer({
           </button>
         </div>
         <div className="p-4 sm:p-5">
-          {kpi.detailColumns && kpi.detailRows ? (
+          {kpi.detailAction === "staff_leave_decide" ? (
+            <StaffLeaveDecideList />
+          ) : kpi.detailColumns && kpi.detailRows ? (
             <>
               <div className="mb-3 flex flex-wrap items-center justify-end gap-2 print:hidden">
                 <button

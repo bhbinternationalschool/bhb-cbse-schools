@@ -73,9 +73,10 @@ import { loadReportsCenterRecent } from "@/lib/reportsCenter";
 import { audienceLabel, loadSchoolComms } from "@/lib/schoolComms";
 import { applicationStatusLabel, loadRte } from "@/lib/rteEws";
 import { countActiveHouseholds, loadSis } from "@/lib/sis";
-import { loadStaffAttendance, summarizeStaffMarks } from "@/lib/staffAttendance";
+import { loadStaffAttendance, staffMarkTotals } from "@/lib/staffAttendance";
 import { loadStaffHr } from "@/lib/staffHr";
 import {
+  bellForClass,
   loadTimetable,
   teacherLabel,
   teachingPeriods,
@@ -656,6 +657,7 @@ function staffDash(academicYearCode?: string): ModuleDashboardModel {
         tone: "coral",
         tab: "leave",
         detailTitle: "Pending leave requests",
+        detailAction: "staff_leave_decide",
         detailColumns: [
           { key: "empCode", label: "Code" },
           { key: "fullName", label: "Name" },
@@ -1051,11 +1053,13 @@ function attendanceDash(academicYearCode?: string): ModuleDashboardModel {
   let staffLeave = 0;
   let staffHalf = 0;
   for (const r of staffTodayRegs) {
-    const counts = summarizeStaffMarks(r.marks || []);
-    staffPresent += counts.P ?? 0;
-    staffAbsent += counts.A ?? 0;
-    staffLeave += counts.LE ?? 0;
-    staffHalf += counts.HD ?? 0;
+    // Late (L) and half-day (HD) staff came to work. Counting only "P" showed
+    // "Staff present 0" on 6 Oct 2026 while two staff had punched in late.
+    const t = staffMarkTotals(r.marks || []);
+    staffPresent += t.present;
+    staffAbsent += t.absent;
+    staffLeave += t.leave;
+    staffHalf += t.halfDay;
   }
 
   const days = lastNDays(7);
@@ -1066,7 +1070,7 @@ function attendanceDash(academicYearCode?: string): ModuleDashboardModel {
     }
     let staff = 0;
     for (const r of staffRegisters.filter((x) => x.date === d)) {
-      staff += summarizeStaffMarks(r.marks || []).P ?? 0;
+      staff += staffMarkTotals(r.marks || []).present;
     }
     return { label: dayLabel(d), value: students + staff };
   });
@@ -1954,13 +1958,19 @@ function timetableDash(academicYearCode?: string): ModuleDashboardModel {
   const masters = loadMasters();
   const state = loadTimetable();
   const grids = state.grids.filter((g) => inAcademicYear(g, academicYearCode));
-  const teaching = teachingPeriods(state.bellTemplate);
-
-  const possibleSlots = grids.length * teaching.length;
-  const filledSlots = grids.reduce(
-    (s, g) => s + g.slots.filter((sl) => sl.teacherId).length,
-    0,
-  );
+  // A week's teaching periods per class, on that class's own bell. This
+  // used to be one DAY's periods per class (13 grids × 7 = 91) set against
+  // the whole week's filled slots (441), and showed "485%" (6 Oct 2026).
+  const weekdays = new Set(state.workingWeekdays.length ? state.workingWeekdays : [1, 2, 3, 4, 5, 6]);
+  let possibleSlots = 0;
+  let filledSlots = 0;
+  for (const g of grids) {
+    const periodNos = new Set(teachingPeriods(bellForClass(state, g.classId)).map((p) => p.no));
+    possibleSlots += periodNos.size * weekdays.size;
+    filledSlots += g.slots.filter(
+      (sl) => sl.teacherId && weekdays.has(sl.weekday) && periodNos.has(sl.periodNo),
+    ).length;
+  }
   const fillPercent =
     possibleSlots > 0 ? Math.round((filledSlots / possibleSlots) * 100) : 0;
 

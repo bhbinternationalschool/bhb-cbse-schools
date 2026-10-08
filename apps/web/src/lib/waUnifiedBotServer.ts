@@ -104,6 +104,7 @@ import {
   leaveTypeLabel,
   leaveUsedInMonth,
   leaveVerdict,
+  parseHalfDaySession,
   parseLeaveApplyStart,
   parseLeaveCodeDecision,
   parseLeaveDates,
@@ -204,6 +205,7 @@ export type WaUnifiedSession = {
     from?: string;
     to?: string;
     halfDay?: boolean;
+    halfDaySession?: "" | "morning" | "afternoon";
     reason?: string;
     lwpWhy?: string;
     at: string;
@@ -396,6 +398,28 @@ async function delegateActiveFlow(
 }> {
   const mobile10 = waNormalizeLocal10(opts.fromWaId);
   const inbound = { ...opts, fromUnified: true as const };
+
+  // A UPI payment screenshot from staff who pay people: read it, find the
+  // payment it pays, ask with buttons (lib/waUpiProof.server; director,
+  // 7 Oct 2026). Ahead of attendance and the desk so a captioned screenshot
+  // is not read as a command; any other photo is left alone.
+  if (
+    (flow === "teacher" || flow === "staff" || flow === "owner") &&
+    opts.document?.mediaId &&
+    /^image\//i.test(opts.document.mimeType || "")
+  ) {
+    const { handleStaffUpiScreenshot, sendUpiProofReply } = await import("@/lib/waUpiProof.server");
+    const upi = await handleStaffUpiScreenshot({
+      fromWaId: opts.fromWaId,
+      mediaId: opts.document.mediaId,
+      mimeType: opts.document.mimeType,
+      waMessageId: opts.waMessageId,
+    });
+    if (upi.handled) {
+      const sent = await sendUpiProofReply(opts.fromWaId, upi.reply);
+      return { replied: sent, escalate: false, audience: upi.audience, stub: false };
+    }
+  }
 
   if (flow === "teacher" || flow === "staff" || flow === "owner") {
     // "Show my attendance", "Mera attendance present karna hai" — the
@@ -1519,6 +1543,7 @@ async function submitLeave(opts: {
     fromDate: draft.from!,
     toDate: draft.halfDay ? draft.from! : draft.to!,
     halfDay: !!draft.halfDay,
+    halfDaySession: draft.halfDay ? draft.halfDaySession || "" : "",
     reason: `${draft.reason}${draft.askedType && draft.askedType !== draft.typeCode ? ` (asked as ${draft.askedType}: ${draft.lwpWhy})` : ""} · via WhatsApp`,
     appliedBy: staff.fullName || "Staff",
   });
@@ -1532,7 +1557,7 @@ async function submitLeave(opts: {
   const dates = formatLeaveDates(req.fromDate, req.toDate, req.halfDay);
   if (req.status === "approved") {
     const { markApprovedLeaveOnRegisters } = await import("@/lib/staffAttendance.server");
-    await markApprovedLeaveOnRegisters({ staffId: staff.id, fromDate: req.fromDate, toDate: req.toDate, halfDay: req.halfDay, typeCode: req.typeCode, by: "Leave (auto-approved)" });
+    await markApprovedLeaveOnRegisters({ staffId: staff.id, fromDate: req.fromDate, toDate: req.toDate, halfDay: req.halfDay, halfDaySession: req.halfDaySession, typeCode: req.typeCode, by: "Leave (auto-approved)" });
     return `✅ ${leaveTypeLabel(req.typeCode)} on ${dates} is approved and marked.`;
   }
 
@@ -1673,6 +1698,7 @@ export async function handleLeaveCodeDecision(opts: { fromWaId: string; text: st
       fromDate: req.fromDate,
       toDate: req.toDate,
       halfDay: req.halfDay,
+      halfDaySession: req.halfDaySession,
       typeCode: req.typeCode,
       by: `Leave approved by ${byName}`,
     });
@@ -1802,7 +1828,8 @@ async function staffLeaveStep(opts: {
             ...draft,
             typeCode,
             ...(dates ? { from: dates.from, to: dates.to } : {}),
-            halfDay: draft.halfDay || /half\s*day/i.test(t),
+            halfDay: draft.halfDay || /half\s*day/i.test(t) || parseHalfDaySession(t) !== "",
+            halfDaySession: draft.halfDaySession || parseHalfDaySession(t),
           });
         }
         if (words <= 4 && !/[?？]/.test(t)) return say(`Please reply *1* for CL or *2* for ML.\n\n${composeLeaveAskType()}`, "staff_leave_apply");
@@ -1869,7 +1896,7 @@ async function staffLeaveStep(opts: {
   if (!start && /^\s*leave\s*$/i.test(text)) {
     const leaders = await leadershipContacts();
     const approver = [...leaders.principal, ...leaders.admin, ...leaders.owner].some((c) => c.staffId === staff.id);
-    if (!approver) start = { typeCode: null, dates: null, halfDay: false };
+    if (!approver) start = { typeCode: null, dates: null, halfDay: false, halfDaySession: "" };
   }
   if (!start) return null;
   return go({
@@ -1878,6 +1905,7 @@ async function staffLeaveStep(opts: {
     from: start.dates?.from,
     to: start.dates?.to,
     halfDay: start.halfDay,
+    halfDaySession: start.halfDaySession,
     reason: leaveReasonFrom(text) || undefined,
     at: nowIso(),
   });
@@ -2298,6 +2326,17 @@ export async function handleWaUnifiedInbound(opts: {
   // "parent" flow (the common case) never has flows re-selected per
   // message, so a naive 7th-flow implementation would have this tap
   // silently swallowed by whatever bot the contact is already talking to.
+  // A tap on the UPI screenshot buttons (lib/waUpiProof.server) — self-
+  // describing, like RSVP taps, so it is caught before any flow routing.
+  if (rawText.startsWith("upiproof|")) {
+    const { handleUpiProofTap, sendUpiProofReply } = await import("@/lib/waUpiProof.server");
+    const tap = await handleUpiProofTap(opts.fromWaId, rawText);
+    if (tap.handled) {
+      const sent = await sendUpiProofReply(opts.fromWaId, tap.reply);
+      return { replied: sent, escalate: false, audience: tap.audience, stub: false };
+    }
+  }
+
   if (rawText.startsWith("evt_rsvp_")) {
     const { handleInboundEventRsvp } = await import("@/lib/waEventsRsvp.server");
     const handled = await handleInboundEventRsvp(opts.fromWaId, rawText);

@@ -69,9 +69,16 @@ import {
   reconcileLeadsWithSis,
   verifySuspectedLeadWithSis,
 } from "@/lib/admissionsSisReconcile";
-import { canAccessModule, hasPermission, loadRbac } from "@/lib/rbac";
+import {
+  canAccessModule,
+  canWriteModuleTab,
+  hasAnyFeatureInModule,
+  hasPermission,
+  loadRbac,
+  visibleModuleTabs,
+} from "@/lib/rbac";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
-import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { FollowUpDialog } from "@/components/admissions/FollowUpDialog";
 import { LeadWorklistPanel } from "@/components/admissions/LeadWorklistPanel";
@@ -131,6 +138,7 @@ import { HOUSEHOLD_LANGUAGES } from "@/lib/householdPrefs";
 import { LEAD_CONCERNS, PREVIOUS_BOARDS } from "@/lib/admissionsEnquiryForm";
 import { AdmissionReportsPanel } from "@/components/admissions/AdmissionReportsPanel";
 import { waTemplateLanguageFor } from "@/lib/householdPrefs";
+import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 
 type AdmTab =
   | "dashboard"
@@ -147,6 +155,33 @@ type AdmTab =
   | "village_market"
   | "referrals"
   | "reports";
+
+/** Tabs open to everyone with the screen (lead lists or not). */
+const OPEN_TABS = new Set<string>(["dashboard", "enquiry", "survey"]);
+
+const ADM_TABS: (ModuleTabItem & { id: AdmTab })[] = [
+  { id: "dashboard", label: "Dashboard", tone: "navy" },
+  { id: "enquiry", label: "Walk-in enquiry", tone: "teal" },
+  { id: "survey", label: "Field survey", tone: "coral" },
+  { id: "leads", label: "Lead details (CRM)", tone: "navy" },
+  { id: "import", label: "Upload leads", tone: "amber" },
+  { id: "registration", label: "Registration", tone: "green" },
+  { id: "rte", label: "RTE / EWS", tone: "sky" },
+  { id: "campaigns", label: "WA campaigns", tone: "teal" },
+  { id: "crm_chat", label: "CRM parent chat", tone: "navy" },
+  { id: "kb", label: "Knowledge base", tone: "sky" },
+  { id: "marketing", label: "Marketing", tone: "coral" },
+  { id: "village_market", label: "Village market", tone: "sky" },
+  { id: "referrals", label: "Referrals & stories", tone: "amber" },
+  { id: "reports", label: "Report", tone: "green" },
+];
+/**
+ * Walk-in desk form: the household first, because the primary mobile decides
+ * whether this is a new family or a sibling of an existing one; then the
+ * children and Save. One form across both steps — inactive steps are hidden,
+ * never unmounted, so nothing typed is lost and Save sees every field.
+ */
+type EnquiryStep = "household" | "children";
 
 export function AdmissionsWorkspace() {
   const session = useDemoSession();
@@ -165,6 +200,7 @@ export function AdmissionsWorkspace() {
   const [showLeadFilters, setShowLeadFilters] = useState(false);
   const [showWaCheck, setShowWaCheck] = useState(false);
   const [tab, setTab] = useState<AdmTab>("dashboard");
+  const [enquiryStep, setEnquiryStep] = useState<EnquiryStep>("household");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -343,19 +379,46 @@ export function AdmissionsWorkspace() {
     };
   }, []);
 
-  const allowed = useMemo(() => {
-    if (!masters) return false;
-    return canAccessModule(session, masters, "admissions", loadRbac());
+  // Someone holding only some Admissions functions (director, 6 Oct 2026 —
+  // Masters → Roles) sees only their tabs. The RTE / EWS tab is the RTE
+  // module's own screen embedded here, so it follows RTE's grants.
+  const shownTabs = useMemo(() => {
+    if (!masters) return [];
+    const rbac = loadRbac();
+    const rteOk =
+      hasPermission(session, masters, "admissions", "view", rbac) ||
+      hasAnyFeatureInModule(session, masters, "rte", "view", rbac);
+    return visibleModuleTabs(ADM_TABS, session, masters, "admissions", rbac).filter(
+      (t) => t.id !== "rte" || rteOk,
+    );
   }, [masters, session]);
 
-  const canCreate = useMemo(() => {
-    if (sessionReadOnly) return false;
+  /** Holds Admissions functions but not the module itself. */
+  const functionOnly = useMemo(
+    () =>
+      !!masters &&
+      !hasPermission(session, masters, "admissions", "view", loadRbac()) &&
+      shownTabs.length > 0,
+    [masters, session, shownTabs],
+  );
+
+  const allowed = useMemo(() => {
     if (!masters) return false;
-    return (
-      hasPermission(session, masters, "admissions", "create") ||
-      hasPermission(session, masters, "admissions", "edit")
-    );
-  }, [masters, session, sessionReadOnly]);
+    return canAccessModule(session, masters, "admissions", loadRbac()) || functionOnly;
+  }, [masters, session, functionOnly]);
+
+  /** May add or change things on this tab — the module, or its function. */
+  const canWriteTab = useMemo(
+    () => (t: AdmTab) =>
+      !sessionReadOnly &&
+      !!masters &&
+      (canWriteModuleTab(session, masters, "admissions", t, "create") ||
+        canWriteModuleTab(session, masters, "admissions", t, "edit")),
+    [masters, session, sessionReadOnly],
+  );
+
+  // Leads: walk-in enquiry, CRM, upload — one function (Enquiries & leads).
+  const canCreate = useMemo(() => canWriteTab("leads"), [canWriteTab]);
 
   const isAdmissionsManager = useMemo(() => {
     const code = (session.roleCode || "").toLowerCase();
@@ -371,9 +434,12 @@ export function AdmissionsWorkspace() {
 
   const canBrowseLeadLists = useMemo(() => {
     if (isAdmissionsManager) return true;
+    // A function holder's lists are already cut to their functions by the
+    // server (admissions-desk), and their tabs by shownTabs.
+    if (functionOnly) return true;
     if (!state) return false;
     return isLeadCaller(state, session.staffId);
-  }, [state, isAdmissionsManager, session.staffId]);
+  }, [state, isAdmissionsManager, session.staffId, functionOnly]);
 
   useEffect(() => {
     if (callerOnly && filter !== "mine") setFilter("mine");
@@ -397,6 +463,18 @@ export function AdmissionsWorkspace() {
       setTab("enquiry");
     }
   }, [canBrowseLeadLists, tab]);
+
+  const tabItems = useMemo(
+    () => shownTabs.filter((t) => canBrowseLeadLists || OPEN_TABS.has(t.id)),
+    [shownTabs, canBrowseLeadLists],
+  );
+
+  // A function holder lands on a tab of theirs, not on one they cannot open.
+  useEffect(() => {
+    if (tabItems.length > 0 && !tabItems.some((t) => t.id === tab)) {
+      setTab(tabItems[0]!.id as AdmTab);
+    }
+  }, [tabItems, tab]);
 
   const counts = useMemo(
     () => (state ? funnelCounts(state) : null),
@@ -1160,26 +1238,7 @@ export function AdmissionsWorkspace() {
           }
           setTab(next);
         }}
-        items={[
-          { id: "dashboard", label: "Dashboard", tone: "navy" },
-          { id: "enquiry", label: "Walk-in enquiry", tone: "teal" },
-          { id: "survey", label: "Field survey", tone: "coral" },
-          ...(canBrowseLeadLists
-            ? ([
-                { id: "leads", label: "Lead details (CRM)", tone: "navy" },
-                { id: "import", label: "Upload leads", tone: "amber" },
-                { id: "registration", label: "Registration", tone: "green" },
-                { id: "rte", label: "RTE / EWS", tone: "sky" },
-                { id: "campaigns", label: "WA campaigns", tone: "teal" },
-                { id: "crm_chat", label: "CRM parent chat", tone: "navy" },
-                { id: "kb", label: "Knowledge base", tone: "sky" },
-                { id: "marketing", label: "Marketing", tone: "coral" },
-                { id: "village_market", label: "Village market", tone: "sky" },
-                { id: "referrals", label: "Referrals & stories", tone: "amber" },
-                { id: "reports", label: "Report", tone: "green" },
-              ] as const)
-            : []),
-        ]}
+        items={tabItems}
       />
 
       {!canBrowseLeadLists ? (
@@ -1206,7 +1265,7 @@ export function AdmissionsWorkspace() {
           state={state}
           masters={masters}
           by={session.fullName}
-          canEdit={canCreate}
+          canEdit={canWriteTab("survey")}
           onCommit={commit}
           onOpenCrm={(id) => openLead(id)}
           onOpenRegistration={() => setTab("registration")}
@@ -2025,7 +2084,7 @@ export function AdmissionsWorkspace() {
           masters={masters}
           sis={sis}
           by={session.fullName}
-          canEdit={canCreate}
+          canEdit={canWriteTab("registration")}
           onCommit={commit}
           onOpenCrmLead={(id) => openLead(id)}
         />
@@ -2038,21 +2097,21 @@ export function AdmissionsWorkspace() {
           admissions={state}
           masters={masters}
           by={session.fullName}
-          canEdit={canCreate}
+          canEdit={canWriteTab("campaigns")}
           onAdmissionsCommit={commit}
         />
       ) : null}
 
       {tab === "crm_chat" ? (
-        <AdmissionCrmChatInbox by={session.fullName} canEdit={canCreate} />
+        <AdmissionCrmChatInbox by={session.fullName} canEdit={canWriteTab("crm_chat")} />
       ) : null}
 
       {tab === "kb" ? (
-        <AdmissionsKbPanel masters={masters} canEdit={canCreate} by={session.fullName} />
+        <AdmissionsKbPanel masters={masters} canEdit={canWriteTab("kb")} by={session.fullName} />
       ) : null}
 
       {tab === "marketing" ? (
-        <MarketingPanel masters={masters} admissions={state} canEdit={canCreate} by={session.fullName} />
+        <MarketingPanel masters={masters} admissions={state} canEdit={canWriteTab("marketing")} by={session.fullName} />
       ) : null}
 
       {tab === "village_market" ? (
@@ -2060,12 +2119,12 @@ export function AdmissionsWorkspace() {
           lat={TENANT.schoolLat}
           lon={TENANT.schoolLng}
           academicYearCode={session.academicYearCode || ""}
-          canEdit={canCreate}
+          canEdit={canWriteTab("village_market")}
         />
       ) : null}
 
       {tab === "referrals" && state ? (
-        <ReferralsPanel admissions={state} sis={sis} canEdit={canCreate} by={session.fullName} />
+        <ReferralsPanel admissions={state} sis={sis} canEdit={canWriteTab("referrals")} by={session.fullName} />
       ) : null}
 
       {tab === "reports" ? (
@@ -2152,7 +2211,27 @@ export function AdmissionsWorkspace() {
               Your role can view admissions but not create enquiries.
             </p>
           ) : (
-            <>
+            <StepTabs
+              aria-label="Walk-in enquiry steps"
+              steps={[
+                {
+                  id: "household",
+                  title: "Household",
+                  what: "Enquiry date, primary mobile (an existing number links siblings), parents, locality and address, and an optional second guardian.",
+                },
+                {
+                  id: "children",
+                  title: "Children & save",
+                  what: "Each child to enquire for (name, class sought…), then Save the enquiry and household.",
+                  badge:
+                    childrenRows.filter((c) => c.childName.trim()).length ||
+                    undefined,
+                },
+              ] satisfies StepDef<EnquiryStep>[]}
+              value={enquiryStep}
+              onChange={setEnquiryStep}
+            >
+              <div className={enquiryStep === "household" ? "" : "hidden"}>
               <MastersWorkCard
                 title="1 · Walk-in household / parents"
                 hint="Primary mobile identifies the family. Matching an existing number links this child as a sibling."
@@ -2325,7 +2404,9 @@ export function AdmissionsWorkspace() {
                   </div>
                 </div>
               </MastersWorkCard>
+              </div>
 
+              <div className={enquiryStep === "children" ? "space-y-4" : "hidden"}>
               <MastersWorkCard
                 title={`2 · Children (${childrenRows.length})`}
                 hint="Add as many children as needed. Each gets their own enquiry under this household."
@@ -2474,7 +2555,8 @@ export function AdmissionsWorkspace() {
                       : "Save enquiry + household"}
                 </button>
               </div>
-            </>
+              </div>
+            </StepTabs>
           )}
         </div>
       ) : null}

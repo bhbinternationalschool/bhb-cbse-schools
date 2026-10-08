@@ -25,6 +25,8 @@
  * which run after the stubs are in place.
  */
 import assert from "node:assert/strict";
+import { localDeskIsMissingRemote } from "./accountsNormalizedClient";
+import { syncModeBankMapFromBanks } from "./accountsNormalize";
 
 // isSupabaseConfigured() gates both the blob sync and the desk sync, and is
 // read per call rather than at load, so clearing the env here is enough to
@@ -1050,6 +1052,29 @@ function assertSubledgersTieToGl(label: string): void {
   assertBooksBalance("unroutable tender");
   assertSubledgersTieToGl("unroutable tender");
   console.log("  ok  a tender with no bank refuses the whole receipt, then replays cleanly");
+}
+
+
+/* ── A browser that lost its bank accounts takes the server's (8 Oct 2026) ── */
+{
+  const ubi = { id: "bnk_ubi", isActive: true, paymentModes: ["upi", "neft", "rtgs", "cheque", "card"] };
+  const beena = { id: "bnk_beena", isActive: true, paymentModes: ["upi"] };
+  const coa = [{ id: "coa_1" }];
+  // Lost both banks: take the server's, whatever the timestamps say.
+  assert.equal(localDeskIsMissingRemote({ bankAccounts: [], coaAccounts: coa } as never, { bankAccounts: [ubi, beena], coaAccounts: coa } as never), true);
+  // Lost one.
+  assert.equal(localDeskIsMissingRemote({ bankAccounts: [ubi], coaAccounts: coa } as never, { bankAccounts: [ubi, beena], coaAccounts: coa } as never), true);
+  // Has everything (or more — a bank added here, not yet saved): keep it.
+  assert.equal(localDeskIsMissingRemote({ bankAccounts: [ubi, beena], coaAccounts: coa } as never, { bankAccounts: [ubi], coaAccounts: coa } as never), false);
+  // Lost the chart of accounts.
+  assert.equal(localDeskIsMissingRemote({ bankAccounts: [ubi], coaAccounts: [] } as never, { bankAccounts: [ubi], coaAccounts: coa } as never), true);
+  assert.equal(localDeskIsMissingRemote(null, { bankAccounts: [ubi], coaAccounts: coa } as never), false);
+  // The payment-mode map is derivable from the banks — first active bank per mode.
+  const map = syncModeBankMapFromBanks([ubi, beena] as never);
+  assert.ok(map.length > 0);
+  assert.ok(map.every((m) => m.bankId === "bnk_ubi"), "UBI is listed first and takes every mode it has");
+  assert.deepEqual(syncModeBankMapFromBanks([]), [], "no banks → no map (and the server leaves the table alone)");
+  console.log("  ✓ lost bank accounts come back from the server; mode map derived, never wiped");
 }
 
 console.log("\nAll accounts checks passed.");

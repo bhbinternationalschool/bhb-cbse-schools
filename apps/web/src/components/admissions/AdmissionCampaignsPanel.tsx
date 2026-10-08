@@ -55,6 +55,7 @@ import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import type { CampaignMessage } from "@/lib/waCampaigns";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 import { SequencesPanel } from "@/components/admissions/SequencesPanel";
+import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import { openWaMe } from "@/lib/waMe";
 import { SCHOOL_DEFAULT_WA_LANGUAGE } from "@/lib/householdPrefs";
 
@@ -62,6 +63,45 @@ const inp =
   "w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm";
 
 type PanelTab = "lists" | "campaigns" | "sequences" | "queue";
+
+/**
+ * A campaign needs a saved audience list, and the queue needs an enqueued or
+ * scheduled campaign — so lists, then campaigns, then queue & dispatch.
+ * Sequences (timed drips on a list) are a separate track and come last.
+ * Dispatch and the per-message log stay one step: the log is what a
+ * dispatch just did.
+ */
+function campaignSteps(
+  lists: number,
+  campaigns: number,
+  sequences: number,
+): StepDef<PanelTab>[] {
+  return [
+    {
+      id: "lists",
+      title: "Audience lists",
+      what: "Filter CRM leads and save the filter as a reusable audience list.",
+      badge: lists,
+    },
+    {
+      id: "campaigns",
+      title: "Campaigns",
+      what: "Pick a list and a template, set a schedule, then Enqueue or Schedule the messages.",
+      badge: campaigns,
+    },
+    {
+      id: "queue",
+      title: "Queue & dispatch",
+      what: "Send the due messages (live via WhatsApp when configured, otherwise stub or open WhatsApp) and see each message's status for the selected campaign.",
+    },
+    {
+      id: "sequences",
+      title: "Sequences",
+      what: "Optional: a timed series of messages to a list, from a start date or an event date.",
+      badge: sequences,
+    },
+  ];
+}
 
 const CAMPAIGN_MESSAGE_COLUMNS: DataTableColumn<CampaignMessage>[] = [
   { key: "childName", header: "Child", value: (m) => m.childName, sortable: true },
@@ -398,30 +438,16 @@ export function AdmissionCampaignsPanel({
         </p>
       ) : null}
 
-      <div className="flex flex-wrap gap-2">
-        {(
-          [
-            ["lists", "Audience lists"],
-            ["campaigns", "Campaigns"],
-            ["sequences", "Sequences"],
-            ["queue", "Queue & dispatch"],
-          ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setPanel(id)}
-            className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ${
-              panel === id
-                ? "bg-[var(--brand-deep)] text-white"
-                : "bg-[rgba(32,48,80,0.06)] text-[var(--muted)]"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
+      <StepTabs
+        aria-label="WhatsApp campaign steps"
+        steps={campaignSteps(
+          wa.lists.length,
+          wa.campaigns.length,
+          wa.sequences.length,
+        )}
+        value={panel}
+        onChange={setPanel}
+      >
       {panel === "lists" ? (
         <div className="grid gap-4 lg:grid-cols-2">
           <MastersWorkCard
@@ -936,7 +962,9 @@ export function AdmissionCampaignsPanel({
         </div>
       ) : null}
 
-      {panel === "sequences" ? (
+      {/* Hidden, not unmounted: a sequence being drafted lives in
+          SequencesPanel's own state. */}
+      <div className={panel === "sequences" ? "" : "hidden"}>
         <SequencesPanel
           wa={wa}
           admissions={admissions}
@@ -946,7 +974,7 @@ export function AdmissionCampaignsPanel({
           onAdmissionsCommit={onAdmissionsCommit}
           onError={(m) => setNotice(m)}
         />
-      ) : null}
+      </div>
 
       {panel === "queue" ? (
         <div className="space-y-4">
@@ -1016,6 +1044,7 @@ export function AdmissionCampaignsPanel({
           </MastersTableCard>
         </div>
       ) : null}
+      </StepTabs>
     </div>
   );
 }

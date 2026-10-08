@@ -62,6 +62,7 @@ export function leaveRequestJson(
     toDate: r.toDate,
     days: r.days,
     halfDay: r.halfDay,
+    halfDaySession: r.halfDay ? r.halfDaySession || "" : "",
     reason: r.reason,
     status: r.status,
     statusLabel:

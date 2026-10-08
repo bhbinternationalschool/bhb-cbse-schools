@@ -1622,9 +1622,82 @@ export function recallPayrollToDraft(
   return { ok: true, run: next };
 }
 
+/**
+ * One staff member's salary was paid (by UPI, from the ERP's "Pay by UPI" —
+ * director, 7 Oct 2026): record the mode, the day and the UPI reference on
+ * their line. Only on a posted or paid run, and only these three fields —
+ * the amounts the book already holds do not move. The reference is added to
+ * the line's note, where the payslip and the registers already show it.
+ */
+export function recordPayrollLinePayment(
+  runId: string,
+  staffId: string,
+  paid: { mode: PayrollPaymentMode; date: string; ref: string },
+  by: string,
+): { ok: true; run: PayrollRun } | { ok: false; error: string } {
+  const state = loadPayroll();
+  const run = state.runs.find((r) => r.id === runId);
+  if (!run) return { ok: false, error: "Run not found" };
+  if (run.status !== "posted" && run.status !== "paid") {
+    return { ok: false, error: "Publish the run before recording a salary payment" };
+  }
+  const line = run.lines.find((l) => l.staffId === staffId);
+  if (!line) return { ok: false, error: "That staff member is not on this run" };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(paid.date)) return { ok: false, error: "Enter the date it was paid" };
+  const ref = paid.ref.trim();
+  const note = ref && !(line.note || "").includes(ref)
+    ? [line.note?.trim(), `UTR ${ref}`].filter(Boolean).join(" · ")
+    : line.note || "";
+  const next: PayrollRun = {
+    ...run,
+    lines: run.lines.map((l) =>
+      l.staffId === staffId ? { ...l, paymentMode: paid.mode, paymentDate: paid.date, note } : l,
+    ),
+    lockVersion: (run.lockVersion || 0) + 1,
+  };
+  upsertPayrollRun(next);
+  appendPayrollAudit({
+    by,
+    action: "line_edited",
+    runId: next.id,
+    month: next.month,
+    academicYearCode: next.academicYearCode,
+    detail: `${line.fullName}: paid by ${paid.mode} on ${paid.date}${ref ? ` · UTR ${ref}` : ""}`,
+  });
+  return { ok: true, run: next };
+}
+
+/**
+ * The day a run's salary was actually paid, as the office enters it — the
+ * books date the salary payment on this day (payroll_ledger_post reads
+ * paid_at in India time). Director, 7 Oct 2026: "it should be enter date for
+ * marked paid" — it used to be the moment the button was pressed.
+ * Not in the future, and not before the run's own month began.
+ */
+export function payrollPaidOnError(month: string, paidOn: string, today: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(paidOn)) return "Enter the date the salary was paid";
+  if (paidOn > today) return "The paid date cannot be in the future";
+  if (/^\d{4}-\d{2}$/.test(month) && paidOn < `${month}-01`) {
+    return `The paid date cannot be before ${month}-01 — the month this salary is for`;
+  }
+  return null;
+}
+
+/** Today's date in India (YYYY-MM-DD), whatever the browser's zone. */
+export function todayIstDate(now = new Date()): string {
+  return new Date(now.getTime() + 330 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+/** The lines' own payment date when they all agree, else "" (the office picks). */
+export function payrollRunPaymentDate(run: Pick<PayrollRun, "lines">): string {
+  const dates = [...new Set(run.lines.map((l) => (l.paymentDate || "").slice(0, 10)).filter(Boolean))];
+  return dates.length === 1 ? dates[0]! : "";
+}
+
 export function markPayrollPaid(
   runId: string,
   by: string,
+  paidOn?: string,
 ): { ok: true; run: PayrollRun } | { ok: false; error: string } {
   const state = loadPayroll();
   const run = state.runs.find((r) => r.id === runId);
@@ -1635,11 +1708,21 @@ export function markPayrollPaid(
       error: "Publish to salary account before marking paid",
     };
   }
+  const now = new Date();
+  const todayIst = todayIstDate(now);
+  let paidAt = now.toISOString();
+  if (paidOn !== undefined) {
+    const err = payrollPaidOnError(run.month, paidOn, todayIst);
+    if (err) return { ok: false, error: err };
+    // Midday in India, so the date reads the same in every zone the book
+    // and the screens use.
+    paidAt = new Date(`${paidOn}T12:00:00+05:30`).toISOString();
+  }
   const next: PayrollRun = {
     ...run,
     status: "paid",
     paidBy: by,
-    paidAt: new Date().toISOString(),
+    paidAt,
     lockVersion: (run.lockVersion || 0) + 1,
   };
   upsertPayrollRun(next);
@@ -1649,7 +1732,7 @@ export function markPayrollPaid(
     runId: next.id,
     month: next.month,
     academicYearCode: next.academicYearCode,
-    detail: `Marked paid · lock v${next.lockVersion}`,
+    detail: `Marked paid${paidOn ? ` · paid on ${paidOn}` : ""} · lock v${next.lockVersion}`,
   });
   return { ok: true, run: next };
 }

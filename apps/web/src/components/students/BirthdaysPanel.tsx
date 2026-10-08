@@ -211,6 +211,7 @@ export function BirthdaysPanel({ canEdit }: { canEdit: boolean }) {
         ) : (
           <div className="mt-2">
             <ErpTableShell exportAs="birthdays_today" exportTitle="Birthdays">
+              <div className="overflow-x-auto">
               <ErpTable>
                 <ErpTableHead>
                   <tr>
@@ -272,6 +273,7 @@ export function BirthdaysPanel({ canEdit }: { canEdit: boolean }) {
                   })}
                 </ErpTableBody>
               </ErpTable>
+              </div>
             </ErpTableShell>
           </div>
         )}
@@ -308,6 +310,7 @@ export function BirthdaysPanel({ canEdit }: { canEdit: boolean }) {
         ) : (
           <div className="mt-2">
             <ErpTableShell exportAs="birthdays_staff_today" exportTitle="Staff birthdays">
+              <div className="overflow-x-auto">
               <ErpTable>
                 <ErpTableHead>
                   <tr>
@@ -369,6 +372,7 @@ export function BirthdaysPanel({ canEdit }: { canEdit: boolean }) {
                   })}
                 </ErpTableBody>
               </ErpTable>
+              </div>
             </ErpTableShell>
           </div>
         )}

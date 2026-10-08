@@ -4,7 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { TENANT } from "@/lib/types";
 
-const TOKEN_KEY = "bhb_punch_screen_token";
+/** This device's screen key — PunchPhonesPanel reuses it rather than make a new screen. */
+export const PUNCH_SCREEN_TOKEN_KEY = "bhb_punch_screen_token";
+const TOKEN_KEY = PUNCH_SCREEN_TOKEN_KEY;
 
 type Code = { code: string; expiresAt: number; windowMs: number; now: number; label: string; windowEnd?: string };
 type Closed = { closed: true; now: number; label: string; windowStart: string; windowEnd: string; opensToday: boolean; reason: string };

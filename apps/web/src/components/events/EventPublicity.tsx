@@ -8,6 +8,7 @@
  * cross-posting to the connected social channels.
  */
 
+import { schoolCrestUrl, schoolLogoUrl, schoolPrintName } from "@/lib/schoolIdentity";
 import { useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
 import { loadSis } from "@/lib/sis";
@@ -387,9 +388,11 @@ export function EventPublicity({
       {/* Print target: A4 poster then square graphic */}
       <div className="evt-poster-sheet print-target space-y-6">
         {/* A4 poster */}
-        <div className="evt-poster-page relative mx-auto w-full max-w-[794px] overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface)] p-10 text-center text-[var(--brand-deep)]" style={{ aspectRatio: "794/1123" }}>
-          <p className="text-[13px] font-extrabold tracking-[0.3em] text-[var(--brand-accent)]">
-            {TENANT.nameDisplay.toUpperCase()}
+        <div className="evt-poster-page erp-print-brand relative mx-auto w-full max-w-[794px] overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface)] p-10 text-center text-[var(--brand-deep)]" style={{ aspectRatio: "794/1123" }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={schoolLogoUrl()} alt="" width={96} height={96} className="mx-auto mb-2 h-24 w-24 object-contain" />
+          <p className="font-brand-name text-[16px] font-extrabold tracking-[0.24em] text-[var(--brand-deep)]">
+            {schoolPrintName().toUpperCase()}
           </p>
           <p className="mt-1 text-[10px] tracking-[0.14em] text-[#5a6a8a]">
             {TENANT.city?.toUpperCase?.() ?? ""} · PRESENTS
@@ -439,9 +442,11 @@ export function EventPublicity({
         </div>
 
         {/* Square graphic (social / status) */}
-        <div className="evt-poster-page relative mx-auto w-full max-w-[540px] overflow-hidden rounded-lg bg-[#203050] p-8 text-center text-white" style={{ aspectRatio: "1/1" }}>
+        <div className="evt-poster-page erp-print-brand relative mx-auto w-full max-w-[540px] overflow-hidden rounded-lg bg-[#203050] p-8 text-center text-white" style={{ aspectRatio: "1/1" }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={schoolCrestUrl()} alt="" width={56} height={56} className="mx-auto mb-2 h-14 w-14 rounded-lg bg-white/95 object-contain p-1" />
           <p className="text-[11px] font-extrabold tracking-[0.26em] text-[#f0d878]">
-            {TENANT.nameDisplay.toUpperCase()}
+            {schoolPrintName().toUpperCase()}
           </p>
           <h3 className="mt-4 text-3xl font-extrabold leading-tight">{event.name}</h3>
           <p className="mt-2 text-sm font-bold text-[#f0d878]">{displayDate(event.eventDate)}</p>

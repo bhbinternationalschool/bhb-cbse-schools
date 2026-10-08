@@ -1,6 +1,7 @@
 "use client";
 /* ratchet-allow: raw_table — the <table> here is inside an HTML string written into a print popup, not JSX — there is no component to shell */
 
+import { PRINT_LETTERHEAD_CSS, printLetterheadHtml, printWhenImagesReady } from "@/lib/printLetterheadHtml";
 import Link from "next/link";
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import { Fragment, useEffect, useMemo, useState } from "react";
@@ -213,7 +214,9 @@ function printExpenseVoucher(v: ExpenseVoucher, state: AccountsState) {
       th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
       th { background: #f4f6f9; }
       h2 { font-size: 14px; margin: 20px 0 6px; }
+      ${PRINT_LETTERHEAD_CSS}
     </style></head><body>
+    ${printLetterheadHtml()}
     <h1>Expense voucher ${v.voucherNo || v.id.slice(-8)}</h1>
     <div class="meta">Date: ${v.date} · Paid on: ${v.paidOn || "—"} · Status: ${v.paymentStatus}</div>
     <div class="meta">${v.narration || ""}</div>
@@ -230,12 +233,13 @@ function printExpenseVoucher(v: ExpenseVoucher, state: AccountsState) {
       <tfoot><tr><th colspan="3">Paid</th><th style="text-align:right">${formatInr(v.paidPaise)}</th></tr></tfoot>
     </table>
     </body></html>`;
-  const win = window.open("", "_blank", "noopener,noreferrer");
+  // No "noopener": with it window.open returns null, and this returned
+  // before printing anything.
+  const win = window.open("", "_blank");
   if (!win) return;
   win.document.write(html);
   win.document.close();
-  win.focus();
-  win.print();
+  printWhenImagesReady(win);
 }
 
 const CARD =

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { loadMasters, type MastersState } from "@/lib/masters";
+import { SchoolLetterhead } from "@/components/shared/SchoolLetterhead";
 import {
   currentMonthIso,
   formatInr,
@@ -103,19 +104,6 @@ export function PrintPayslipsPanel({
     }
     return lines.filter((l) => selectedIds.includes(l.staffId));
   }, [run, mode, lines, staffId, selectedIds]);
-
-  const schoolName =
-    masters?.schoolProfile?.displayName ||
-    masters?.schoolProfile?.legalName ||
-    "BHB International School";
-  const schoolAddr = [
-    masters?.schoolProfile?.address,
-    masters?.schoolProfile?.city,
-    masters?.schoolProfile?.state,
-    masters?.schoolProfile?.pincode,
-  ]
-    .filter(Boolean)
-    .join(", ");
 
   function toggleStaff(id: string) {
     setSelectedIds((prev) =>
@@ -267,8 +255,7 @@ export function PrintPayslipsPanel({
           printLines.map((line) => (
             <PrintablePayslip
               key={line.staffId}
-              schoolName={schoolName}
-              schoolAddr={schoolAddr}
+              masters={masters}
               run={run}
               line={line}
             />
@@ -284,13 +271,12 @@ export function PrintPayslipsPanel({
 }
 
 export function PrintablePayslip({
-  schoolName,
-  schoolAddr,
+  masters,
   run,
   line,
 }: {
-  schoolName: string;
-  schoolAddr: string;
+  /** Masters already loaded by the caller; read from storage otherwise. */
+  masters?: MastersState | null;
   run: PayrollRun;
   line: PayrollStaffLine;
 }) {
@@ -299,20 +285,11 @@ export function PrintablePayslip({
   const employer = line.components.filter((c) => c.kind === "employer");
 
   return (
-    <article className="payslip-sheet break-inside-avoid rounded-xl border border-[rgba(32,48,80,0.14)] bg-white p-5 shadow-sm print:break-after-page print:rounded-none print:border print:border-black print:shadow-none">
-      <header className="border-b border-[rgba(32,48,80,0.12)] pb-3 text-center print:border-black">
-        <h1 className="font-display text-lg font-bold text-[var(--brand-deep)] print:text-black">
-          {schoolName}
-        </h1>
-        {schoolAddr ? (
-          <p className="mt-0.5 text-[10px] text-[var(--muted)] print:text-black">
-            {schoolAddr}
-          </p>
-        ) : null}
-        <p className="mt-2 text-sm font-semibold uppercase tracking-wide text-[var(--brand-deep)] print:text-black">
-          Salary payslip · {monthLabel(run.month)}
-        </p>
-      </header>
+    <article className="payslip-sheet erp-print-brand break-inside-avoid rounded-xl border-2 border-[var(--brand-deep)] bg-white p-5 shadow-sm print:break-after-page print:rounded-none print:shadow-none">
+      <SchoolLetterhead
+        masters={masters}
+        title={`Salary payslip · ${monthLabel(run.month)}`}
+      />
 
       <div className="mt-3 grid gap-1 text-xs sm:grid-cols-2">
         <p>
@@ -349,7 +326,7 @@ export function PrintablePayslip({
 
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <div>
-          <h3 className="mb-1 border-b border-[rgba(32,48,80,0.1)] pb-1 text-[11px] font-bold uppercase text-[var(--muted)] print:border-black print:text-black">
+          <h3 className="mb-1 border-b border-[var(--brand-gold)] pb-1 text-[11px] font-bold uppercase text-[var(--brand-deep)]">
             Earnings
           </h3>
           <ul className="space-y-0.5 text-sm">
@@ -366,7 +343,7 @@ export function PrintablePayslip({
           </ul>
         </div>
         <div>
-          <h3 className="mb-1 border-b border-[rgba(32,48,80,0.1)] pb-1 text-[11px] font-bold uppercase text-[var(--muted)] print:border-black print:text-black">
+          <h3 className="mb-1 border-b border-[var(--brand-gold)] pb-1 text-[11px] font-bold uppercase text-[var(--brand-deep)]">
             Deductions
           </h3>
           <ul className="space-y-0.5 text-sm">
@@ -386,7 +363,7 @@ export function PrintablePayslip({
 
       {employer.length > 0 ? (
         <div className="mt-3">
-          <h3 className="mb-1 text-[11px] font-bold uppercase text-[var(--muted)] print:text-black">
+          <h3 className="mb-1 text-[11px] font-bold uppercase text-[var(--brand-deep)]">
             Employer contributions (not deducted from staff)
           </h3>
           <ul className="space-y-0.5 text-xs text-[var(--muted)] print:text-black">
@@ -400,7 +377,7 @@ export function PrintablePayslip({
         </div>
       ) : null}
 
-      <div className="mt-4 flex flex-wrap items-end justify-between gap-3 border-t border-[rgba(32,48,80,0.12)] pt-3 print:border-black">
+      <div className="mt-4 flex flex-wrap items-end justify-between gap-3 border-t-2 border-[var(--brand-deep)] pt-3">
         <div className="text-xs text-[var(--muted)] print:text-black">
           <p>
             Attendance: P {line.daysPresent} · A {line.daysAbsent} · HD{" "}
@@ -422,10 +399,10 @@ export function PrintablePayslip({
           {line.note ? <p className="mt-0.5">Note: {line.note}</p> : null}
         </div>
         <div className="text-right">
-          <p className="text-[10px] uppercase text-[var(--muted)] print:text-black">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--brand-gold)]">
             Net pay
           </p>
-          <p className="text-xl font-bold text-[var(--brand-deep)] print:text-black">
+          <p className="text-xl font-bold text-[var(--brand-deep)]">
             {formatInr(line.netPay)}
           </p>
           <p className="text-[10px] text-[var(--muted)] print:text-black">

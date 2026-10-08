@@ -5,6 +5,8 @@ import {
   SCHOOL_DATA_DESK_RBAC,
 } from "@/lib/apiRouteAuth.server";
 import { requestMeta } from "@/lib/api/v1/auth";
+import { deskReadGate, visibleSlices } from "@/lib/deskFeatureGate.server";
+import { FEE_DESK_KEYS } from "@/lib/rbacFeatureCatalog/money";
 import { auditArrayDiff } from "@/lib/auditDeskDiff.server";
 import type { CollectionVoucher, FeesState } from "@/lib/fees";
 import type { FeeDeskAncillary } from "@/lib/feesDeskAncillary.server";
@@ -29,8 +31,26 @@ export const runtime = "nodejs";
 
 /** GET — pull full fee desk from normalized tables */
 export async function GET(req: Request) {
-  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["fees-vouchers"], "GET");
-  if (!auth.ok) return auth.response
+  // The Fees grant, or the read-only "Fee dashboard & reports" function.
+  // That function owns every desk key, so its reader gets the same whole
+  // desk — never a cut-down copy that a later save from the same browser
+  // could push back over the receipts. Any other fee function reads nothing
+  // here: its screens work through their own routes.
+  const gate = await deskReadGate(req, SCHOOL_DATA_DESK_RBAC["fees-vouchers"]);
+  if (gate.mode === "deny") return gate.response;
+  if (gate.mode === "feature") {
+    const seen = visibleSlices("fees", gate);
+    if (!FEE_DESK_KEYS.every((k) => seen.has(k))) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Reading the fee desk needs the Fees grant or the fee reports function.",
+          reason: "feature_forbidden",
+        },
+        { status: 403 },
+      );
+    }
+  }
   try {
     const result = await cachedDeskJson({
       cacheKey: "fees-vouchers",

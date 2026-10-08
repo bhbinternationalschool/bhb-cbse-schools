@@ -68,7 +68,15 @@ import {
   pendingApproverHint,
   writeStudentLeaveLocalRaw,
 } from "@/lib/studentLeave";
-import { householdWhatsApp, loadSis, studentsInSession, type SisStudent } from "@/lib/sis";
+import { hasStoredAadhaar, householdWhatsApp, loadSis, studentsInSession, type SisStudent } from "@/lib/sis";
+import {
+  buildUdiseRobotBoard,
+  formatUdiseStudentReply,
+  formatUdiseSummaryReply,
+  udiseMissing,
+  udiseQuestionFocus,
+  udiseRobotTasksFor,
+} from "@/lib/udiseRobot";
 import { computeHouseholdDues, getDayCloseForDate, loadFees, openFeeDues } from "@/lib/fees";
 import { flagFutureDues } from "@/lib/feeDueFuture";
 import { listLiveDefaulters } from "@/lib/playbook";
@@ -198,6 +206,12 @@ import {
   formatMarkAttendancePrompt,
   markAskIsFresh,
   parseBareClassQuery,
+  parseWhoseFeesAsk,
+  parseNameWithClass,
+  isVagueDocumentAsk,
+  formatWhoseFeesAsk,
+  formatVagueDocumentAsk,
+  formatNearStudentMatches,
   parseMarkAskReply,
 } from "@/lib/erpCommands";
 import { isCancelOpenWork, isClassChannelPostPrefix } from "@/lib/staffOnboarding";
@@ -306,6 +320,11 @@ type CommandStore = {
    * 29 Sep 2026 to a teacher trying to take the register.
    */
   sectionAsk?: Record<string, { at: string; commandId: string; text: string }>;
+  /**
+   * "Whose fees?" — asked when a fee question named no child (7 Oct 2026).
+   * The next name, with or without a class, answers it.
+   */
+  studentAsk?: Record<string, { at: string; commandId: string }>;
 };
 
 let memoryStore: CommandStore = {
@@ -821,6 +840,23 @@ export async function handleErpStaffCommand(
   }
   if (!parsed) parsed = parseErpCommandLocal(text);
 
+  // "Whose fees?" answered: the name (and class) the desk just asked for.
+  const studentAsk = (store.studentAsk ?? {})[actor];
+  if (!parsed && studentAsk && pickIsFresh(studentAsk.at, nowMs)) {
+    const withClass = parseNameWithClass(text);
+    if (withClass || looksLikeBareName(text)) {
+      const rest = { ...(store.studentAsk ?? {}) };
+      delete rest[actor];
+      store = { ...store, studentAsk: rest };
+      await writeStore(store);
+      parsed = {
+        commandId: studentAsk.commandId,
+        fields: { student: withClass ? withClass.normalized : text.trim() },
+        source: "local",
+      };
+    }
+  }
+
   // Paused: answer anything command-shaped without spending a model call,
   // and leave everything else to the bots that were going to answer it.
   if (store.paused) {
@@ -835,6 +871,24 @@ export async function handleErpStaffCommand(
   // On WhatsApp the older bots still answer whatever this is not, so only
   // command-shaped text is worth a model call. In the app the bar exists
   // for commands alone, so anything beyond a stray tap gets the parser.
+  // A fee question with no child in it, or "send me documents": ask which,
+  // rather than guess (the principal, 7 Oct 2026: "Send ma fees, what is
+  // balance" looked up a child called "Send Ma").
+  if (!parsed && inbound.staff) {
+    const first = (inbound.staff.fullName || "").split(" ")[0] || "";
+    if (parseWhoseFeesAsk(text)) {
+      const st = await readStore();
+      await writeStore({
+        ...st,
+        studentAsk: { ...(st.studentAsk ?? {}), [actor]: { at: new Date(nowMs).toISOString(), commandId: "student_fees" } },
+      });
+      return { handled: true, audience: "erp_command_ask", text: formatWhoseFeesAsk(first) };
+    }
+    if (isVagueDocumentAsk(text)) {
+      return { handled: true, audience: "erp_command_ask", text: formatVagueDocumentAsk(first) };
+    }
+  }
+
   const worthParsing =
     inbound.channel === "app" ? text.length >= 4 && text.length <= 300 : looksLikeCommand(text);
   if (!parsed && worthParsing) {
@@ -946,7 +1000,17 @@ export async function handleErpStaffCommand(
     }
   }
 
-  // 4c. A child's name on its own, with no list before it — "Sujit kumar",
+  // 4c0. A name WITH a class — "Arohi yadav class lkg", "Aarav 5B". The
+  // class makes it a plain request about a child, so it is always answered:
+  // the record, or the nearest names when the register has no such child.
+  if (!parsed && inbound.staff) {
+    const withClass = parseNameWithClass(text);
+    if (withClass) {
+      parsed = { commandId: "student_details", fields: { student: withClass.normalized }, source: "local" };
+    }
+  }
+
+    // 4c. A child's name on its own, with no list before it — "Sujit kumar",
   // "Aarav singh", "Om". Answered only when the roster plainly has that
   // child (unpromptedNameMatches); anything else stays quiet as before.
   let onlyStudentIds: Set<string> | null = null;
@@ -990,12 +1054,14 @@ export async function handleErpStaffCommand(
   // A command was read. Whatever the desk asked last is no longer the
   // question on the table: a "4" after the next command must not mark a
   // register shown two replies ago.
-  if ((store.markAsk ?? {})[actor] || (store.sectionAsk ?? {})[actor]) {
+  if ((store.markAsk ?? {})[actor] || (store.sectionAsk ?? {})[actor] || (store.studentAsk ?? {})[actor]) {
     const ma = { ...(store.markAsk ?? {}) };
     const sa = { ...(store.sectionAsk ?? {}) };
+    const sta = { ...(store.studentAsk ?? {}) };
     delete ma[actor];
     delete sa[actor];
-    store = { ...store, markAsk: ma, sectionAsk: sa };
+    delete sta[actor];
+    store = { ...store, markAsk: ma, sectionAsk: sa, studentAsk: sta };
   }
 
   // 2b. Hourly cap per staff member.
@@ -1358,6 +1424,37 @@ export async function handleErpStaffCommand(
     const matches = pinned
       ? [{ student: pinned, score: 3 }]
       : matchStudents(q, pool, { academicYearCode: ay, sectionId });
+    // Nobody by that name: offer the nearest — same first name anywhere in
+    // the school — instead of "couldn't find" (7 Oct 2026: "Arohi Yadav"
+    // when the register has AROHI).
+    if (!matches.length && q.name && !resolvedFollowUpSections && !onlyStudentIds) {
+      const firstWord = q.name.split(/\s+/)[0] || "";
+      const near = firstWord.length >= 3
+        ? matchStudents({ name: firstWord }, sis.students, { academicYearCode: ay, limit: 6 })
+        : [];
+      if (near.length) {
+        await rememberPick(
+          actor,
+          command.id,
+          text,
+          near.map((m, i) => ({ n: i + 1, label: m.student.fullName, commandId: command.id, studentId: m.student.id })),
+        );
+        return {
+          handled: true,
+          audience: "erp_command_ask",
+          text: formatNearStudentMatches(
+            near.map((m) => ({
+              fullName: m.student.fullName,
+              classLabel: label(m.student),
+              rollNo: m.student.rollNo,
+              fatherName: m.student.fatherName,
+              admissionNo: m.student.admissionNo,
+            })),
+            asked.replace(/\s+class\s+\S+(\s+[a-h])?$/i, ""),
+          ),
+        };
+      }
+    }
     if (matches.length !== 1) {
       // Remember the list so a bare number answers it, in the order it is
       // about to be printed — the numbering IS the list.
@@ -2684,6 +2781,10 @@ async function runReadCommand(
       return plain(studentDetails(resolved, session));
     case "class_roster":
       return classRoster(resolved, session);
+    case "udise_student":
+      return plain(udiseStudent(resolved));
+    case "udise_summary":
+      return plain(udiseSummary(resolved, session));
     case "top_dues":
       return topDues(resolved, session, todayIso);
     case "store_summary":
@@ -3435,6 +3536,64 @@ async function collectionToday(
     monthToDatePaise,
     monthLabel,
     formatInr,
+  });
+}
+
+function udiseStudent(resolved: Record<string, string>): string {
+  const sis = loadSis();
+  const masters = loadMasters();
+  const s = sis.students.find((st) => st.id === resolved.studentId);
+  if (!s) return "That student record has gone missing. Please try again.";
+  const onFile = hasStoredAadhaar({ number: s.aadhaarNumber, last4: s.aadhaarLast4 });
+  // The portal's own words when it has reported; never the number itself.
+  const state =
+    s.aadhaarVerification === "verified_udise"
+      ? "on file · validated on UDISE+"
+      : /fail/i.test(s.udiseAadhaarValidationStatus || "")
+        ? `on file · portal says "${s.udiseAadhaarValidationStatus}"`
+        : "on file · not yet validated on UDISE+";
+  return formatUdiseStudentReply({
+    fullName: s.fullName,
+    classLabel: classLabel(masters, s.classId, s.sectionId).replace(" · ", " "),
+    pen: s.pen,
+    apaarId: s.apaarId,
+    tasks: udiseRobotTasksFor(s),
+    aadhaarOnFile: onFile,
+    aadhaarState: state,
+    apaarConsent: s.apaarConsent,
+  });
+}
+
+/**
+ * The robot's board for the school or one class ("class 3 without PEN").
+ * The class is read from the question here rather than by the desk's
+ * section step: it is optional, and a whole school is a valid answer.
+ */
+function udiseSummary(resolved: Record<string, string>, session: DemoSession): string {
+  const sis = loadSis();
+  const masters = loadMasters();
+  const text = resolved.text || "";
+  let students = studentsInSession(sis, session.academicYearCode).filter((s) => s.status === "active");
+  let scopeLabel = "School";
+  const ref = extractSectionRefs(text)[0];
+  if (ref) {
+    const res = resolveClassOrSectionRef(ref, masters);
+    if (!res.ok) return formatSectionProblem(res.reason, res.options, text);
+    const ids = new Set(res.sections.map((x) => x.sectionId));
+    students = students.filter((s) => ids.has(s.sectionId));
+    scopeLabel = res.wholeClass ? `Class ${res.className}` : res.sections.map((x) => x.label).join(", ");
+  }
+  const focus = udiseQuestionFocus(text);
+  const board = buildUdiseRobotBoard(students);
+  const label = (s: SisStudent) => classLabel(masters, s.classId, s.sectionId).replace(" · ", " ");
+  // The school-wide board alone is enough; a class or a focus asks for names.
+  const listed = focus || ref ? students.filter((s) => udiseMissing(s, focus)) : [];
+  listed.sort((a, b) => label(a).localeCompare(label(b)) || a.fullName.localeCompare(b.fullName));
+  return formatUdiseSummaryReply({
+    scopeLabel,
+    focus,
+    board,
+    matching: listed.map((s) => ({ fullName: s.fullName, classLabel: label(s) })),
   });
 }
 

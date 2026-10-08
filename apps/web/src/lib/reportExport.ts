@@ -202,6 +202,11 @@ export async function downloadPdfReport(input: ReportExportInput): Promise<void>
 
   const bands = bandColumns(input.columns, usable);
   const titleSize = 14;
+  // Every exported page carries the school's letterhead — logo, name in the
+  // brand navy, address. This is the salary register's PDF and forty other
+  // "Export → PDF" buttons; they used to start with the report title alone.
+  const { drawPdfLetterhead, resolvePdfLetterhead } = await import("@/lib/pdfLetterhead");
+  const letterhead = await resolvePdfLetterhead();
 
   bands.forEach((cols, bandIndex) => {
     if (bandIndex > 0) doc.addPage();
@@ -213,7 +218,7 @@ export async function downloadPdfReport(input: ReportExportInput): Promise<void>
     let y = margin;
 
     function drawHeaderBlock() {
-      y = margin;
+      y = drawPdfLetterhead(doc, letterhead, margin, usable, pageW) + 4;
       doc.setFont("helvetica", "bold");
       doc.setFontSize(titleSize);
       doc.setTextColor(32, 48, 80);

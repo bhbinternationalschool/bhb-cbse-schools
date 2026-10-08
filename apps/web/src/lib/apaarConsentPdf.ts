@@ -22,6 +22,8 @@ import { CONSENT_VOLUNTARY_EN, consentSentenceEn } from "@/lib/apaarConsent";
 
 export type ApaarConsentRecordInput = {
   schoolName: string;
+  /** PNG bytes of the school crest, printed beside the name; omitted = no logo. */
+  logoPng?: Buffer | null;
   schoolPlace: string;
   udiseCode: string;
   student: {
@@ -73,10 +75,19 @@ export function renderApaarConsentRecordPdf(input: ApaarConsentRecordInput): Buf
   const R = W - 56;
   let y = 64;
 
-  doc.setTextColor(20, 30, 60);
+  if (input.logoPng) {
+    try {
+      doc.addImage(input.logoPng.toString("base64"), "PNG", L, y - 30, 48, 48, undefined, "MEDIUM");
+    } catch {
+      /* a bad image must not cost the parent's record */
+    }
+  }
+  // The school's name in its brand navy, as on every other document.
+  doc.setTextColor(32, 48, 80);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(15);
   doc.text(input.schoolName, W / 2, y, { align: "center" });
+  doc.setTextColor(20, 30, 60);
   y += 16;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9.5);

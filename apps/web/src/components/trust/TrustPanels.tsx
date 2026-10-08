@@ -52,6 +52,12 @@ export type TrustPanelProps = {
   onFlash: (message: string) => void;
   onError: (message: string) => void;
   actorName: string;
+  /**
+   * Paying posts a cost line and a cash/bank entry on desks a Trust
+   * function holder cannot save; the server refuses their "paid" flag, so
+   * the button is not offered (default: offered).
+   */
+  canPay?: boolean;
 };
 
 const CARD =
@@ -487,6 +493,7 @@ export function LabourPanel({
   onRefresh,
   onFlash,
   onError,
+  canPay = true,
 }: TrustPanelProps) {
   const accounts = loadAccounts();
   const poolId = accounts.cashPools.find((p) => p.code === "main")?.id ?? "";
@@ -570,7 +577,7 @@ export function LabourPanel({
                       {
                         id: "pay",
                         label: "Pay this instalment",
-                        hidden: (x) => x.paidStatus !== "unpaid",
+                        hidden: (x) => !canPay || x.paidStatus !== "unpaid",
                         onSelect: (x) => pay(x.id),
                       },
                     ]}

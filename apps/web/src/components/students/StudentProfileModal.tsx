@@ -568,6 +568,7 @@ export function StudentProfileModal({
                 <Empty text="No fee dues found for this student." />
               ) : (
                 <ErpTableShell>
+                  <div className="overflow-x-auto">
                   <ErpTable>
                     <ErpTableHead>
                       <tr>
@@ -606,6 +607,7 @@ export function StudentProfileModal({
                       ))}
                     </ErpTableBody>
                   </ErpTable>
+                  </div>
                 </ErpTableShell>
               )}
             </div>
@@ -627,6 +629,7 @@ export function StudentProfileModal({
                         {rc.overallGrade || "—"}
                       </span>
                     </div>
+                    <div className="overflow-x-auto">
                     <ErpTable>
                       <ErpTableBody>
                         {rc.lines.map((l) => (
@@ -646,6 +649,7 @@ export function StudentProfileModal({
                         ))}
                       </ErpTableBody>
                     </ErpTable>
+                    </div>
                   </ErpTableShell>
                 ))
               )}

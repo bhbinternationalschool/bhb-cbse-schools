@@ -14,6 +14,7 @@ import { startDirectFeeCheckout } from "@/lib/duePayCheckout.server";
 import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { resolvePublicOrigin } from "@/lib/payGoToken";
 import { TENANT } from "@/lib/types";
+import { GATEWAY_UNAVAILABLE_EN, GATEWAY_UNAVAILABLE_HI } from "@/lib/onlineGateway.server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -50,8 +51,17 @@ export async function GET(req: Request, ctx: { params: Promise<{ token: string }
   });
 
   if (r.kind === "checkout" || r.kind === "fallback") {
-    if (r.kind === "fallback") console.warn("[pay/due] gateway unavailable, UPI page instead:", r.reason);
+    // Only a school with no gateway at all reaches the UPI page now.
+    if (r.kind === "fallback") console.warn("[pay/due] no gateway configured, UPI page:", r.reason);
     return NextResponse.redirect(r.url, 302);
+  }
+  if (r.kind === "gateway_unavailable") {
+    const hindi = waTemplateLanguageFor(r.household) === "hi";
+    return page(
+      hindi ? "ऑनलाइन भुगतान अभी उपलब्ध नहीं है" : "Online payment is not available right now",
+      hindi ? [GATEWAY_UNAVAILABLE_HI, GATEWAY_UNAVAILABLE_EN] : [GATEWAY_UNAVAILABLE_EN, GATEWAY_UNAVAILABLE_HI],
+      503,
+    );
   }
   if (r.kind === "nothing_due") {
     const hindi = waTemplateLanguageFor(r.household ?? {}) === "hi";

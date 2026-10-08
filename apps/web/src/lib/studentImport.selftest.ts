@@ -17,7 +17,14 @@
  * birth day fell after the 12th was correct, and 82 of the 93 whose birth day
  * fell on or before the 12th were wrong.
  */
-import { normalizeDateField, excelSerialToIso } from "@/lib/studentImport";
+import {
+  normalizeDateField,
+  excelSerialToIso,
+  detectDateOrder,
+  rowsToFieldMaps,
+  workbookToStudentImportCsv,
+} from "@/lib/studentImport";
+import * as XLSX from "xlsx";
 import { formatDobLong } from "@/lib/dobFormat";
 
 let failures = 0;
@@ -76,8 +83,76 @@ check("excel serial", normalizeDateField("43831"), excelSerialToIso(43831));
 check("blank", normalizeDateField("   "), "");
 check("unparseable is returned as-is", normalizeDateField("not a date"), "not a date");
 
-if (failures) {
-  console.error(`studentImport selftest: ${failures} failure(s)`);
-  process.exit(1);
+// ── The admission-date incident (2026-10-07) ──────────────────────────────
+//
+// The same parser wrote sis_students.joined_on, and the old ERP's file was
+// M/D/Y: 382 join dates came out with day equal to month ("3/10/23" →
+// 2023-03-03). After the 4 Sep fix the same file would have SWAPPED them
+// instead (→ 2023-10-03), which leaves no signature at all. So: read the
+// column's convention, and read Excel date cells as dates, not as text.
+
+// A column decides its own convention from its unambiguous values.
+check("order: M/D/Y column", detectDateOrder(["3/10/23", "4/29/25", ""]) ?? "null", "MDY");
+check("order: D/M/Y column", detectDateOrder(["10/3/23", "29/4/25"]) ?? "null", "DMY");
+check("order: no evidence", detectDateOrder(["3/10/23", "4/4/23"]) ?? "null", "null");
+check("order: contradicts itself", detectDateOrder(["29/4/25", "4/29/25"]) ?? "null", "null");
+check("order: ISO ignored", detectDateOrder(["2023-03-10", "2025-04-29"]) ?? "null", "null");
+check("M/D/Y ambiguous", normalizeDateField("3/10/23", "MDY"), "2023-03-10");
+check("M/D/Y unambiguous unaffected", normalizeDateField("4/29/25", "MDY"), "2025-04-29");
+check("D/M/Y forced still reads day>12", normalizeDateField("29/4/25", "MDY"), "2025-04-29");
+
+// The old ERP's CSV, as it was really imported (header on row 4, M/D/YY).
+{
+  const csv = [
+    "BHB International School,,,,",
+    "Student Report(2023-2024),,,,",
+    "Class -Nursery A,,,,",
+    "Sr,Student Name,AdmissionNumber,Admission Date,Date of birth",
+    "1,AYUSH SINGH,BHB-21/2023,3/10/23,10/11/19",
+    "2,SAGAR RAJBHAR,BHB-43/2023,4/17/23,5/4/15",
+    "3,PIYUSH PATEL,BHB-79/2023,7/1/23,1/3/17",
+  ].join("\n");
+  const { rows } = rowsToFieldMaps(csv);
+  const got = rows.map((r) => `${r.fields.joinedOn}|${r.fields.dob}`).join(" ");
+  check(
+    "old-ERP CSV reads M/D/Y per column",
+    got,
+    "2023-03-10|2019-10-11 2023-04-17|2015-05-04 2023-07-01|2017-01-03",
+  );
 }
-console.log("studentImport selftest: ok");
+
+// The old ERP's .xlsx: real date cells, number format m/d/yy. The CSV we make
+// from it must carry ISO dates, so nothing downstream has to guess.
+async function xlsxCase() {
+  const ws = XLSX.utils.aoa_to_sheet([
+    ["BHB International School"],
+    ["Student Report(2023-2024)"],
+    ["Class -Nursery A"],
+    ["Sr", "Student Name", "AdmissionNumber", "Admission Date", "Date of birth"],
+    [1, "AYUSH SINGH", "BHB-21/2023", 44995, 43749], // 10 Mar 2023, 11 Oct 2019
+    [2, "PIYUSH PATEL", "BHB-79/2023", 45108, 42738], // 1 Jul 2023, 3 Jan 2017
+  ]);
+  for (const a of ["D5", "E5", "D6", "E6"]) {
+    ws[a]!.z = "m/d/yy";
+    delete ws[a]!.w;
+  }
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Table");
+  const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+  const { csv, detectedSession } = await workbookToStudentImportCsv(buf);
+  check("xlsx session", detectedSession, "2023-24");
+  const { rows } = rowsToFieldMaps(csv);
+  check(
+    "xlsx date cells become ISO",
+    rows.map((r) => `${r.fields.joinedOn}|${r.fields.dob}`).join(" "),
+    "2023-03-10|2019-10-11 2023-07-01|2017-01-03",
+  );
+}
+
+void xlsxCase().then(() => {
+  if (failures) {
+    console.error(`studentImport selftest: ${failures} failure(s)`);
+    process.exit(1);
+  }
+  console.log("studentImport selftest: ok");
+});

@@ -150,6 +150,8 @@ const SIGN_SKEW_MS = 2 * 60_000;
  * registered number).
  */
 export async function POST(request: Request) {
+  // Who was refused, for the log line below — filled once the caller is known.
+  let who = "";
   try {
     // An app build the server no longer understands is told to update,
     // rather than failing the punch for a reason the staff member can't fix.
@@ -157,6 +159,7 @@ export async function POST(request: Request) {
       throw new ApiError("upgrade_required", APP_UPDATE_MESSAGE, 426);
     }
     const ctx = await resolveApiAuth(request);
+    who = ctx.session.staffId || "";
     await ensureSchoolMirrorHydrated();
 
     const body = (await request.json()) as PunchBody;
@@ -323,6 +326,13 @@ export async function POST(request: Request) {
       firstRegistration: device.firstRegistration,
     });
   } catch (e) {
+    // A refused punch used to leave only "POST 400" in the request log, so on
+    // 6 Oct 2026 nobody could tell why a staff member's 08:00 punch failed.
+    // The reason is the message the phone was shown; it names no secret.
+    const status = e instanceof ApiError ? e.status : 500;
+    console.warn(
+      `[staff punch] refused ${status} ${who || "unknown caller"}: ${(e as Error)?.message || String(e)}`,
+    );
     return apiErr(e);
   }
 }

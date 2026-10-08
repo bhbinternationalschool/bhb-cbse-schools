@@ -13,7 +13,7 @@ import {
   type AttendancePunchWay,
 } from "@/lib/staffAttendance";
 import {
-  fetchStaffAttendanceSettingsFromDb,
+  fetchStaffAttendanceSettingsFromDbStrict,
   pushStaffAttendanceSettingsToDb,
   type StaffAttendanceDeskAncillary,
 } from "@/lib/staffAttendanceDeskAncillary.server";
@@ -415,18 +415,22 @@ export type StaffAttendanceDeskSnapshot = {
 };
 
 export async function fetchStaffAttendanceDeskFromDb(): Promise<StaffAttendanceDeskSnapshot> {
-  const [{ registers, meta, ok }, settings, outdoor] = await Promise.all([
+  const [{ registers, meta, ok }, settingsRead, outdoor] = await Promise.all([
     fetchStaffAttendanceRegistersFromDb(),
-    fetchStaffAttendanceSettingsFromDb(),
+    fetchStaffAttendanceSettingsFromDbStrict(),
     fetchStaffAttendanceOutdoorDutyFromDb(),
   ]);
   return {
     registers,
-    ancillary: { settings, outdoorDuty: outdoor.outdoorDuty },
+    ancillary: {
+      settings: settingsRead ?? defaultAttendanceSettings(),
+      outdoorDuty: outdoor.outdoorDuty,
+    },
     meta,
-    // Either slice failing to read means this snapshot is not a confirmed
-    // empty state — merging it as truth could blank what the client holds.
-    ok: ok && outdoor.ok,
+    // Any slice failing to read means this snapshot is not a confirmed
+    // state — merging it as truth could blank what the client holds, and
+    // unread settings would replace the exempt list with an empty one.
+    ok: ok && outdoor.ok && settingsRead !== null,
   };
 }
 

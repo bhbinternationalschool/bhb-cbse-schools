@@ -6,6 +6,14 @@ import {
 } from "@/lib/apiRouteAuth.server";
 import type { DeskModuleId } from "@/lib/deskCutover";
 import { hasPermission } from "@/lib/rbac";
+import {
+  deskFeatureGateFor,
+  featurePushOutcome,
+  featureSavedResponse,
+  stripDeskForFeatures,
+  visibleSlices,
+  type FeatureGate,
+} from "@/lib/deskFeatureGate.server";
 import { deskSliceDef, deskSliceEnvDualWrite } from "@/lib/deskSliceRegistry";
 import {
   fetchDeskSliceFromDb,
@@ -57,6 +65,25 @@ async function ownRbacResponse(req: Request): Promise<NextResponse | null> {
   });
 }
 
+/** A function holder's read: their slices of this desk, the rest empty. */
+async function featureReadResponse(id: DeskModuleId, gate: FeatureGate): Promise<NextResponse> {
+  const { bundle, meta, ok, error } = await fetchDeskSliceFromDb(id);
+  if (!ok) {
+    return NextResponse.json({ ok: false, error: error || "Desk read failed" }, { status: 503 });
+  }
+  const rbacModule = DESK_SLICE_RBAC[id] ?? "settings";
+  return NextResponse.json(
+    {
+      ok: true,
+      ...stripDeskForFeatures(rbacModule, bundle as Record<string, unknown>, gate, { prefix: `${id}/` }),
+      rowCount: meta?.rowCount ?? 0,
+      // No revision: this copy is partial and must never be a base.
+      updatedAt: "",
+    },
+    { headers: { "Cache-Control": "private, no-store" } },
+  );
+}
+
 export async function GET(req: Request, ctx: RouteCtx) {
   const { module } = await ctx.params;
   const id = parseModuleId(module);
@@ -69,6 +96,12 @@ export async function GET(req: Request, ctx: RouteCtx) {
     if (id === "rbac" && auth.response.status === 403) {
       const self = await ownRbacResponse(req);
       if (self) return self;
+    }
+    // Functions of the module (Masters → Roles): their slices of this desk,
+    // named "<desk>/<key>" in lib/rbacFeatureCatalog.
+    if (auth.response.status === 403) {
+      const gate = await deskFeatureGateFor(req, rbacModule, "read");
+      if (gate) return featureReadResponse(id, gate);
     }
     return auth.response;
   }
@@ -83,16 +116,23 @@ export async function GET(req: Request, ctx: RouteCtx) {
     if (!canEdit) {
       const me = auth.ctx.session.staffId || "";
       const b = bundle as Record<string, unknown>;
-      const own = (rows: unknown) =>
-        Array.isArray(rows) ? rows.filter((r) => !!me && (r as { staffId?: string }).staffId === me) : [];
+      // A Staff function (e.g. leave approvals) shows its slices whole.
+      const fGate = await deskFeatureGateFor(req, "staff", "read");
+      const whole = fGate ? visibleSlices("staff", fGate, "staff_hr/") : new Set<string>();
+      const ownOf = (key: string) => (rows: unknown) =>
+        whole.has(key)
+          ? rows
+          : Array.isArray(rows)
+            ? rows.filter((r) => !!me && (r as { staffId?: string }).staffId === me)
+            : [];
       return NextResponse.json(
         {
           ok: true,
           ...b,
-          leaveRequests: own(b.leaveRequests),
-          leaveBalances: own(b.leaveBalances),
-          leaveEncashments: own(b.leaveEncashments),
-          appraisals: own(b.appraisals),
+          leaveRequests: ownOf("leaveRequests")(b.leaveRequests),
+          leaveBalances: ownOf("leaveBalances")(b.leaveBalances),
+          leaveEncashments: ownOf("leaveEncashments")(b.leaveEncashments),
+          appraisals: ownOf("appraisals")(b.appraisals),
           ownOnly: true,
           rowCount: meta?.rowCount ?? 0,
           updatedAt: meta?.updatedAt || "",
@@ -128,7 +168,13 @@ export async function POST(req: Request, ctx: RouteCtx) {
   }
   const rbacModule = DESK_SLICE_RBAC[id] ?? "settings";
   const auth = await requireStaffPermission(req, rbacModule, "edit");
-  if (!auth.ok) return auth.response;
+  // Functions of the module may save their slices of this desk only.
+  let featureGate: FeatureGate | null = null;
+  if (!auth.ok) {
+    if (auth.response.status !== 403 || id === "rbac") return auth.response;
+    featureGate = await deskFeatureGateFor(req, rbacModule, "write");
+    if (!featureGate) return auth.response;
+  }
 
   const def = deskSliceDef(id)!;
   if (!deskSliceEnvDualWrite(def.envPrefix)) {
@@ -150,7 +196,28 @@ export async function POST(req: Request, ctx: RouteCtx) {
   // today: it exists so that a screen which really does clear a desk has a
   // way through the shrink guard, rather than the guard being loosened for
   // everyone the first time it fires.
-  const allowShrink = new URL(req.url).searchParams.get("allowShrink") === "1";
+  const allowShrink =
+    !featureGate && new URL(req.url).searchParams.get("allowShrink") === "1";
+  if (featureGate) {
+    const stored = await fetchDeskSliceFromDb(id);
+    if (!stored.ok) {
+      return NextResponse.json(
+        { ok: false, error: "Could not read the saved desk — nothing was written. Try again." },
+        { status: 503 },
+      );
+    }
+    const merged = featurePushOutcome(
+      featureGate,
+      rbacModule,
+      stored.bundle as Record<string, unknown>,
+      body,
+      undefined,
+      { prefix: `${id}/` },
+    );
+    if (!merged.ok) return merged.response;
+    if (!merged.changed) return featureSavedResponse(false);
+    body = { ...(merged.state as typeof body), version: body.version };
+  }
   const result = await pushDeskSliceToDb(id, body, { allowShrink });
   if (!result.ok) {
     return NextResponse.json(
@@ -163,6 +230,7 @@ export async function POST(req: Request, ctx: RouteCtx) {
     invalidateServerRbacCache();
   }
 
+  if (featureGate) return featureSavedResponse(true);
   const { meta } = await fetchDeskSliceFromDb(id);
   return NextResponse.json({
     ok: true,

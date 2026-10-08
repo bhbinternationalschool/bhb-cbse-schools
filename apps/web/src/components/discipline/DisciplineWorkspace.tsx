@@ -8,7 +8,7 @@ import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { field } from "@/components/ui/erp-ui";
 import { VoiceDictateButton } from "@/components/teaching/VoiceDictateButton";
 import { DEFAULT_AY, loadMasters, type MastersState, currentAcademicYearCode} from "@/lib/masters";
-import { hasPermission } from "@/lib/rbac";
+import { canWriteModuleTab, visibleModuleTabs } from "@/lib/rbac";
 import { classSectionLabel } from "@/lib/timetable";
 import { loadSis, type SisState, type SisStudent, studentsInSession} from "@/lib/sis";
 import {
@@ -101,14 +101,25 @@ export function DisciplineWorkspace() {
     window.setTimeout(() => setNotice(null), 4000);
   }
 
+  // The module grant, or the "Incident register" function (which owns the
+  // whole discipline book, so it covers every tab here).
   const canApprove = useMemo(
-    () => (masters ? hasPermission(session, masters, "discipline", "approve") : false),
-    [session, masters],
+    () => (masters ? canWriteModuleTab(session, masters, "discipline", tab, "approve") : false),
+    [session, masters, tab],
   );
   const canEdit = useMemo(
-    () => (masters ? hasPermission(session, masters, "discipline", "edit") : false),
+    () => (masters ? canWriteModuleTab(session, masters, "discipline", tab) : false),
+    [session, masters, tab],
+  );
+  const shownTabs = useMemo(
+    () => visibleModuleTabs(TABS, session, masters, "discipline"),
     [session, masters],
   );
+  useEffect(() => {
+    if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
+      setTab(shownTabs[0]!.id as Tab);
+    }
+  }, [shownTabs, tab]);
 
   /**
    * Teacher mode (2026-09-29). A class or subject teacher sees and records
@@ -480,7 +491,7 @@ export function DisciplineWorkspace() {
       notice={notice}
       error={error}
     >
-      <ModuleTabs value={tab} onChange={(id) => setTab(id as Tab)} items={TABS} />
+      <ModuleTabs value={tab} onChange={(id) => setTab(id as Tab)} items={shownTabs} />
 
       {teacherMode ? (
         <p className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-xs text-[var(--muted)]">

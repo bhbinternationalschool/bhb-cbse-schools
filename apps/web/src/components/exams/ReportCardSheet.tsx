@@ -4,11 +4,10 @@
  * tint and theme-aware colours, all of which are wrong on paper — a sheet that
  * followed dark mode would print white ink on white stock. */
 
+import { SchoolLetterhead } from "@/components/shared/SchoolLetterhead";
 import { type ReportCard } from "@/lib/exams";
 import { StudentAvatar } from "@/components/students/StudentAvatar";
 import {
-  schoolAddressLine,
-  schoolPrintName,
   schoolShortName,
   schoolStatutoryLine,
 } from "@/lib/schoolIdentity";
@@ -113,13 +112,11 @@ export function ReportCardSheet({ card }: { card: ReportCard }) {
       ) : null}
 
       <div className={`certificate-inner relative ${compact ? "px-4 py-4 sm:px-6 sm:py-5" : "px-5 py-6 sm:px-8 sm:py-8"}`}>
+        <SchoolLetterhead size={compact ? "sm" : "md"} />
         <header className="border-b-2 border-[var(--brand-gold)] pb-3 text-center">
-          <p className="font-brand-name text-sm tracking-[0.12em] text-[var(--brand-deep)] sm:text-base">
-            {schoolPrintName()}
-          </p>
-          <p className="mt-0.5 text-[11px] text-[var(--muted)]">
-            {[schoolAddressLine(), schoolStatutoryLine()].filter(Boolean).join(" · ")}
-          </p>
+          {schoolStatutoryLine() ? (
+            <p className="mt-1 text-[10px] text-[var(--muted)]">{schoolStatutoryLine()}</p>
+          ) : null}
           <h1 className={`mt-3 font-bold uppercase tracking-wide text-[var(--brand-deep)] ${compact ? "text-base" : "text-lg"}`}>
             {p.title}
           </h1>

@@ -15,6 +15,8 @@ import {
 } from "@/lib/staffAttendanceRules";
 import {
   applyApprovedLeaveToMarks,
+  halfDayLeaveMark,
+  isHalfDayLeaveMark,
   attendanceExemptStaffIds,
   defaultStaffMarks,
   emptyStaffAttendanceState,
@@ -191,9 +193,15 @@ function punchGeoFromInput(
 }
 
 /** Half-day leave already on the mark: the punch records times, the leave
- * decides the status. */
-function halfDayLeave(m: { status: string; punchWay?: string } | undefined): boolean {
-  return !!m && m.status === "HD" && m.punchWay === "leave_sync";
+ * decides the status — "HD" once the person has come in for the other half
+ * (lib/staffAttendance.ts halfDayLeaveMark). */
+function halfDayLeave(m: { note?: string } | undefined): boolean {
+  return isHalfDayLeaveMark(m ? { note: m.note || "" } : undefined);
+}
+
+/** The half-day note once the other half has been punched. */
+function workedHalfNote(note: string): string {
+  return note.replace(" · not punched for the ", " · worked the ");
 }
 
 /** Masters → Attendance rules as saved (module_local_state). Unreadable or
@@ -333,11 +341,33 @@ export async function applyWhatsAppStaffPunch(opts: {
 
   // Staff who keep no attendance stay off the register (same list the
   // office desk uses); everyone else starts "Not punched" (A).
-  const exempt = await exemptStaffIdsServer(settings);
   const existingReg = findStaffRegister(state, date, ay);
-  let marks = existingReg
-    ? [...existingReg.marks]
-    : defaultStaffMarks(roster.filter((s) => !exempt.has(s.id)));
+  let marks: ReturnType<typeof defaultStaffMarks>;
+  // The roster a NEW register is built from (upsertStaffMarkInState). Until
+  // 6 Oct 2026 this was masters.staff unfiltered: the exempt list was applied
+  // to `marks` but not to the register actually saved, so the first punch of
+  // a day that the office desk had not opened yet filed all 16 exempt staff
+  // (director and admins included) as "A".
+  let registerRoster = roster;
+  if (existingReg) {
+    marks = [...existingReg.marks];
+  } else {
+    // A new day's register lists everyone who keeps attendance. Who is exempt
+    // must come from a confirmed read of the settings row: on 6 Oct 2026 an
+    // unread row became the defaults' empty list and the first punch filed
+    // all 16 exempt staff as "A". Better to refuse this punch for a minute.
+    const { fetchStaffAttendanceSettingsFromDbStrict } = await import(
+      "@/lib/staffAttendanceDeskAncillary.server"
+    );
+    const confirmed = await fetchStaffAttendanceSettingsFromDbStrict();
+    if (!confirmed) {
+      console.error("[staff punch] no confirmed settings — not creating today's register");
+      return saveFailed;
+    }
+    const exempt = await exemptStaffIdsServer(confirmed);
+    registerRoster = roster.filter((s) => !exempt.has(s.id));
+    marks = defaultStaffMarks(registerRoster);
+  }
 
   if (settings.syncLeaveToAttendance) {
     marks = applyApprovedLeaveToMarks(marks, date, ay);
@@ -365,7 +395,7 @@ export async function applyWhatsAppStaffPunch(opts: {
     const status = halfDayLeave(cur) ? "HD" : graded.status;
     const noteParts = [
       qr ? `${channelLabel} punch-in` : `${channelLabel} campus punch-in`,
-      halfDayLeave(cur) ? cur!.note : `${graded.label} (${graded.ruleName})`,
+      halfDayLeave(cur) ? workedHalfNote(cur!.note) : `${graded.label} (${graded.ruleName})`,
       altMobile ? "alt mobile" : null,
       qr ? null : `~${formatDistanceLabel(check.distanceM)} from school`,
     ].filter(Boolean);
@@ -380,7 +410,7 @@ export async function applyWhatsAppStaffPunch(opts: {
       punchWay,
       punchGeo: geoAudit,
       markedBy,
-      roster,
+      roster: registerRoster,
     });
     state = merged.state;
     if (!(await saveStaffPunchRegister(state, merged.register)).ok) return saveFailed;
@@ -421,7 +451,7 @@ export async function applyWhatsAppStaffPunch(opts: {
   const gradedOut = gradeStaffPunch(rules, opts.staff.id, date, cur.inTime, time);
   const noteParts = [
     qr ? `${channelLabel} punch` : `${channelLabel} campus punch`,
-    halfDayLeave(cur) ? cur.note : `${gradedOut.label} (${gradedOut.ruleName})`,
+    halfDayLeave(cur) ? workedHalfNote(cur.note) : `${gradedOut.label} (${gradedOut.ruleName})`,
     `OUT ${time}`,
     opts.earlyOutNote || null,
     altMobile ? "alt mobile" : null,
@@ -439,7 +469,7 @@ export async function applyWhatsAppStaffPunch(opts: {
     punchWay,
     punchGeo: geoAudit,
     markedBy,
-    roster,
+    roster: registerRoster,
   });
   state = merged.state;
   if (!(await saveStaffPunchRegister(state, merged.register)).ok) return saveFailed;
@@ -492,6 +522,7 @@ export async function markApprovedLeaveOnRegisters(opts: {
   fromDate: string;
   toDate: string;
   halfDay: boolean;
+  halfDaySession?: import("@/lib/staffHr").HalfDaySession;
   typeCode: string;
   by: string;
 }): Promise<number> {
@@ -502,14 +533,21 @@ export async function markApprovedLeaveOnRegisters(opts: {
   let marked = 0;
   const end = opts.halfDay ? opts.fromDate : opts.toDate;
   for (let d = opts.fromDate; d <= end; ) {
-    if (findStaffRegister(state, d, ay)) {
+    const reg = findStaffRegister(state, d, ay);
+    if (reg) {
+      const cur = reg.marks.find((m) => m.staffId === opts.staffId);
+      // A half day counts only once the other half is punched; a punch
+      // already on the register keeps its times and becomes "HD".
+      const leaveMark = opts.halfDay
+        ? halfDayLeaveMark(cur, { typeCode: opts.typeCode, halfDaySession: opts.halfDaySession })
+        : { status: "LE" as const, note: `On leave (${opts.typeCode})`, punchWay: "leave_sync" as const };
       const merged = upsertStaffMarkInState(state, {
         academicYearCode: ay,
         date: d,
         staffId: opts.staffId,
-        status: opts.halfDay ? "HD" : "LE",
-        note: opts.halfDay ? `Half-day leave (${opts.typeCode})` : `On leave (${opts.typeCode})`,
-        punchWay: "leave_sync",
+        status: leaveMark.status,
+        note: leaveMark.note,
+        punchWay: leaveMark.punchWay,
         markedBy: opts.by,
         roster,
       });
@@ -620,7 +658,9 @@ export async function applyOutdoorDutyServer(opts: {
   const { startOutdoorDuty, endOutdoorDuty } = await import("@/lib/staffAttendance");
   const state = await loadStaffAttendanceFresh();
   const masters = loadMasters();
-  const roster = masters.staff ?? [];
+  // Same rule as a punch: a register this creates leaves exempt staff off.
+  const outdoorExempt = await exemptStaffIdsServer(normalizeAttendanceSettings(state.settings));
+  const roster = (masters.staff ?? []).filter((s) => !outdoorExempt.has(s.id));
   const r =
     opts.action === "start"
       ? startOutdoorDuty({
