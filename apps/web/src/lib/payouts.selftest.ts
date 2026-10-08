@@ -35,7 +35,8 @@ import {
   shouldRetryTransfer,
   type PayoutStatus,
 } from "@/lib/payouts";
-import { payoutSignatureFrom, verifyPayoutWebhook } from "@/lib/payoutsSignature";
+import { payoutSignatureFrom, verifyPayoutWebhook, verifyPayoutWebhookV1 } from "@/lib/payoutsSignature";
+import { createHmac as v1Hmac } from "node:crypto";
 
 console.log("payouts.selftest.ts");
 
@@ -331,3 +332,29 @@ console.log("payouts.selftest.ts");
 }
 
 console.log("  ok");
+
+{
+  // V1 webhooks sign inside the body: fields except `signature`, sorted by
+  // key, values joined, HMAC-SHA256 with the client secret, base64. The
+  // dashboard Test sends this shape even with V2 chosen (8 Oct 2026).
+  const secret = "test_payout_secret";
+  const fields: Record<string, unknown> = { event: "TRANSFER_SUCCESS", transferId: "sal_v1", referenceId: 987, utr: "UTR42", acknowledged: 1, eventTime: "2026-10-08 15:30:00" };
+  const msg = Object.keys(fields).sort().map((k) => String(fields[k])).join("");
+  const signed = { ...fields, signature: v1Hmac("sha256", secret).update(msg).digest("base64") };
+  assert.equal(verifyPayoutWebhookV1(signed, secret), true, "a V1 body signature verifies");
+  assert.equal(verifyPayoutWebhookV1({ ...signed, utr: "UTR43" }, secret), false, "a changed field fails");
+  assert.equal(verifyPayoutWebhookV1(signed, "other"), false, "another secret fails");
+  assert.equal(verifyPayoutWebhookV1(fields, secret), false, "no signature, nothing trusted");
+  assert.equal(verifyPayoutWebhookV1(signed, ""), false, "no secret configured, nothing trusted");
+  const v = readPayoutTransfer(signed);
+  assert.deepEqual(
+    v && { id: v.transferId, ref: v.cfTransferId, status: v.status, utr: v.utr },
+    { id: "sal_v1", ref: "987", status: "SUCCESS", utr: "UTR42" },
+    "a V1 TRANSFER_SUCCESS reads as SUCCESS with its UTR",
+  );
+  assert.equal(readPayoutTransfer({ event: "TRANSFER_FAILED", transferId: "sal_v1", reason: "Bank declined" })?.status, "FAILED");
+  assert.equal(readPayoutTransfer({ event: "TRANSFER_SOMETHING_NEW", transferId: "sal_v1" })?.status, "UNKNOWN", "never guessed into SUCCESS");
+  assert.equal(readPayoutTransfer({ event: "LOW_BALANCE_ALERT", currentBalance: 500 }), null, "not a transfer");
+  console.log("payouts V1 webhook: ok");
+}
+

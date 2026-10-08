@@ -14,7 +14,7 @@
 import { NextResponse } from "next/server";
 import { readPayoutTransfer } from "@/lib/payouts";
 import { recordTransferView } from "@/lib/payouts.server";
-import { verifyPayoutWebhook } from "@/lib/payoutsSignature";
+import { verifyPayoutWebhook, verifyPayoutWebhookV1 } from "@/lib/payoutsSignature";
 
 export const runtime = "nodejs";
 
@@ -25,26 +25,39 @@ export async function POST(req: Request) {
   const raw = await req.text();
   const timestamp = req.headers.get("x-webhook-timestamp") || "";
   const signature = req.headers.get("x-webhook-signature") || "";
-  if (!verifyPayoutWebhook(raw, timestamp, signature, secret)) {
-    // Why it was refused, without a byte of the secret, signature or body:
-    // the 8 Oct 2026 dashboard test kept failing with nothing to go on.
+  // V2 signs in headers; V1 (what the dashboard Test sends, 8 Oct 2026)
+  // signs inside the body. Either, verified, is accepted — nothing else.
+  let v1Fields: Record<string, unknown> | null = null;
+  if (!timestamp && !signature) {
+    try {
+      const parsed = raw.trimStart().startsWith("{")
+        ? (JSON.parse(raw) as unknown)
+        : Object.fromEntries(new URLSearchParams(raw));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) v1Fields = parsed as Record<string, unknown>;
+    } catch {
+      v1Fields = null;
+    }
+  }
+  const v2ok = !!timestamp && !!signature && verifyPayoutWebhook(raw, timestamp, signature, secret);
+  const v1ok = !v2ok && !!v1Fields && verifyPayoutWebhookV1(v1Fields, secret);
+  if (!v2ok && !v1ok) {
+    // Why it was refused, without a byte of the secret, signature or body.
     console.warn("[payouts webhook] refused", JSON.stringify({
       secretSet: !!secret,
+      format: v1Fields ? "v1-body" : "v2-headers",
       hasTimestamp: !!timestamp,
-      hasSignature: !!signature,
-      version: req.headers.get("x-webhook-version") || "",
+      hasSignature: !!signature || typeof v1Fields?.signature === "string",
       contentType: req.headers.get("content-type") || "",
       bodyBytes: raw.length,
-      bodyLooksJson: raw.trimStart().startsWith("{"),
-      bodyHasSignatureField: /(^|&|")signature("|=)/.test(raw),
-      // Yes/no only: is it signed with some OTHER Cashfree secret we hold?
-      // (8 Oct: our own signed probe passed, Cashfree's Test did not.)
-      matchesPgSecret: !!signature && verifyPayoutWebhook(raw, timestamp, signature, process.env.CASHFREE_SECRET_KEY?.trim() || ""),
-      timestampSkewSeconds: Number.isFinite(Number(timestamp))
-        ? Math.round(Date.now() / 1000 - (Number(timestamp) > 1e12 ? Number(timestamp) / 1000 : Number(timestamp)))
-        : null,
+      fieldNames: v1Fields ? Object.keys(v1Fields).sort().join(",") : "",
+      matchesPgSecretV1: !!v1Fields && verifyPayoutWebhookV1(v1Fields, process.env.CASHFREE_SECRET_KEY?.trim() || ""),
     }));
     return NextResponse.json({ ok: false, error: "Invalid signature" }, { status: 400 });
+  }
+  if (v1ok) {
+    const view = readPayoutTransfer(v1Fields);
+    if (view) await recordTransferView(view);
+    return NextResponse.json({ ok: true });
   }
   // Timestamps are sent in seconds or milliseconds; either way not stale.
   const ts = Number(timestamp);

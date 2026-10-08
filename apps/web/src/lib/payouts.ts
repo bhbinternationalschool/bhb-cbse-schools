@@ -279,6 +279,20 @@ export type PayoutTransferView = {
 export function readPayoutTransfer(payload: unknown): PayoutTransferView | null {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
   const p = payload as Record<string, unknown>;
+  // V1 webhook (flat, camelCase): {event: "TRANSFER_SUCCESS", transferId,
+  // referenceId, utr, ...}. The status lives in the event name.
+  if (typeof p.event === "string" && p.transferId != null && p.transfer_id == null) {
+    const ev = p.event.toUpperCase().replace(/^TRANSFER_/, "");
+    const amount = Number(p.amount ?? 0);
+    return {
+      transferId: String(p.transferId),
+      cfTransferId: p.referenceId != null ? String(p.referenceId) : "",
+      status: readPayoutStatus(ev),
+      amountPaise: Number.isFinite(amount) ? Math.round(amount * 100) : 0,
+      utr: String(p.utr ?? ""),
+      statusDescription: String(p.reason ?? "").trim(),
+    };
+  }
   const obj = (v: unknown): Record<string, unknown> =>
     v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
   // Webhooks nest under data; the API reply is the object itself. Whichever
