@@ -60,7 +60,11 @@ export async function POST(req: Request) {
     );
   }
 
-  const resolved = await resolveWaAudience(parsed.spec);
+  // Aim at the sender's session: SIS keeps a row per child per year, all
+  // "active", so without a year a parents send reaches past families too.
+  const resolved = await resolveWaAudience(parsed.spec, {
+    academicYearCode: auth.ctx.session.academicYearCode,
+  });
   if (!resolved.ok) {
     return NextResponse.json(
       { error: resolved.error || "Could not work out the audience" },
