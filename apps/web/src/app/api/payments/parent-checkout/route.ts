@@ -5,6 +5,12 @@
  * live gateway checkout is attached. The webhook settles it like any link.
  */
 
+import {
+  GATEWAY_UNAVAILABLE_EN,
+  GATEWAY_UNAVAILABLE_HI,
+  logGatewayRefusal,
+  onlineGatewayExpected,
+} from "@/lib/onlineGateway.server";
 import { NextResponse } from "next/server";
 import {
   buildEnrichedPaymentSharePayload,
@@ -90,6 +96,17 @@ export async function POST(req: Request) {
   const gw = shouldUseCashfreeCheckout()
     ? await attachCashfreeToPaymentLink(attachOpts)
     : await attachRazorpayToPaymentLink(attachOpts);
+
+  // A configured gateway that refuses is an outage: say so. The app used to
+  // fall through to shareUrl — the old UPI QR / GPay page — and did for ten
+  // days in Sep–Oct 2026 without anyone knowing. See lib/onlineGateway.server.
+  if (!gw.ok && onlineGatewayExpected()) {
+    logGatewayRefusal("parent-checkout", created.link.id, gw.error);
+    return NextResponse.json(
+      { error: `${GATEWAY_UNAVAILABLE_EN}\n${GATEWAY_UNAVAILABLE_HI}`, gatewayUnavailable: true },
+      { status: 503 },
+    );
+  }
 
   const link = gw.ok ? gw.link : created.link;
 

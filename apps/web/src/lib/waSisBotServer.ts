@@ -634,6 +634,14 @@ async function buildPayLinkReply(
   const gw = shouldUseCashfreeCheckout()
     ? await attachCashfreeToPaymentLink(attachOpts)
     : await attachRazorpayToPaymentLink(attachOpts);
+  // The UPI fallback below is for a school with no gateway. A configured one
+  // that refuses is an outage: say so rather than switch the payment method.
+  const { onlineGatewayExpected, logGatewayRefusal, GATEWAY_UNAVAILABLE_EN, GATEWAY_UNAVAILABLE_HI } =
+    await import("@/lib/onlineGateway.server");
+  if (!gw.ok && onlineGatewayExpected()) {
+    logGatewayRefusal("wa-pay", link.id, gw.error);
+    return { escalate: false, text: hindi ? GATEWAY_UNAVAILABLE_HI : GATEWAY_UNAVAILABLE_EN };
+  }
   if (gw.ok) {
     link = gw.link;
     payUrl = gw.checkoutUrl;
