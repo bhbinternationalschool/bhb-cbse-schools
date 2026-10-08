@@ -206,6 +206,12 @@ import {
   formatMarkAttendancePrompt,
   markAskIsFresh,
   parseBareClassQuery,
+  parseWhoseFeesAsk,
+  parseNameWithClass,
+  isVagueDocumentAsk,
+  formatWhoseFeesAsk,
+  formatVagueDocumentAsk,
+  formatNearStudentMatches,
   parseMarkAskReply,
 } from "@/lib/erpCommands";
 import { isCancelOpenWork, isClassChannelPostPrefix } from "@/lib/staffOnboarding";
@@ -314,6 +320,11 @@ type CommandStore = {
    * 29 Sep 2026 to a teacher trying to take the register.
    */
   sectionAsk?: Record<string, { at: string; commandId: string; text: string }>;
+  /**
+   * "Whose fees?" — asked when a fee question named no child (7 Oct 2026).
+   * The next name, with or without a class, answers it.
+   */
+  studentAsk?: Record<string, { at: string; commandId: string }>;
 };
 
 let memoryStore: CommandStore = {
@@ -829,6 +840,23 @@ export async function handleErpStaffCommand(
   }
   if (!parsed) parsed = parseErpCommandLocal(text);
 
+  // "Whose fees?" answered: the name (and class) the desk just asked for.
+  const studentAsk = (store.studentAsk ?? {})[actor];
+  if (!parsed && studentAsk && pickIsFresh(studentAsk.at, nowMs)) {
+    const withClass = parseNameWithClass(text);
+    if (withClass || looksLikeBareName(text)) {
+      const rest = { ...(store.studentAsk ?? {}) };
+      delete rest[actor];
+      store = { ...store, studentAsk: rest };
+      await writeStore(store);
+      parsed = {
+        commandId: studentAsk.commandId,
+        fields: { student: withClass ? withClass.normalized : text.trim() },
+        source: "local",
+      };
+    }
+  }
+
   // Paused: answer anything command-shaped without spending a model call,
   // and leave everything else to the bots that were going to answer it.
   if (store.paused) {
@@ -843,6 +871,24 @@ export async function handleErpStaffCommand(
   // On WhatsApp the older bots still answer whatever this is not, so only
   // command-shaped text is worth a model call. In the app the bar exists
   // for commands alone, so anything beyond a stray tap gets the parser.
+  // A fee question with no child in it, or "send me documents": ask which,
+  // rather than guess (the principal, 7 Oct 2026: "Send ma fees, what is
+  // balance" looked up a child called "Send Ma").
+  if (!parsed && inbound.staff) {
+    const first = (inbound.staff.fullName || "").split(" ")[0] || "";
+    if (parseWhoseFeesAsk(text)) {
+      const st = await readStore();
+      await writeStore({
+        ...st,
+        studentAsk: { ...(st.studentAsk ?? {}), [actor]: { at: new Date(nowMs).toISOString(), commandId: "student_fees" } },
+      });
+      return { handled: true, audience: "erp_command_ask", text: formatWhoseFeesAsk(first) };
+    }
+    if (isVagueDocumentAsk(text)) {
+      return { handled: true, audience: "erp_command_ask", text: formatVagueDocumentAsk(first) };
+    }
+  }
+
   const worthParsing =
     inbound.channel === "app" ? text.length >= 4 && text.length <= 300 : looksLikeCommand(text);
   if (!parsed && worthParsing) {
@@ -954,7 +1000,17 @@ export async function handleErpStaffCommand(
     }
   }
 
-  // 4c. A child's name on its own, with no list before it — "Sujit kumar",
+  // 4c0. A name WITH a class — "Arohi yadav class lkg", "Aarav 5B". The
+  // class makes it a plain request about a child, so it is always answered:
+  // the record, or the nearest names when the register has no such child.
+  if (!parsed && inbound.staff) {
+    const withClass = parseNameWithClass(text);
+    if (withClass) {
+      parsed = { commandId: "student_details", fields: { student: withClass.normalized }, source: "local" };
+    }
+  }
+
+    // 4c. A child's name on its own, with no list before it — "Sujit kumar",
   // "Aarav singh", "Om". Answered only when the roster plainly has that
   // child (unpromptedNameMatches); anything else stays quiet as before.
   let onlyStudentIds: Set<string> | null = null;
@@ -998,12 +1054,14 @@ export async function handleErpStaffCommand(
   // A command was read. Whatever the desk asked last is no longer the
   // question on the table: a "4" after the next command must not mark a
   // register shown two replies ago.
-  if ((store.markAsk ?? {})[actor] || (store.sectionAsk ?? {})[actor]) {
+  if ((store.markAsk ?? {})[actor] || (store.sectionAsk ?? {})[actor] || (store.studentAsk ?? {})[actor]) {
     const ma = { ...(store.markAsk ?? {}) };
     const sa = { ...(store.sectionAsk ?? {}) };
+    const sta = { ...(store.studentAsk ?? {}) };
     delete ma[actor];
     delete sa[actor];
-    store = { ...store, markAsk: ma, sectionAsk: sa };
+    delete sta[actor];
+    store = { ...store, markAsk: ma, sectionAsk: sa, studentAsk: sta };
   }
 
   // 2b. Hourly cap per staff member.
@@ -1366,6 +1424,37 @@ export async function handleErpStaffCommand(
     const matches = pinned
       ? [{ student: pinned, score: 3 }]
       : matchStudents(q, pool, { academicYearCode: ay, sectionId });
+    // Nobody by that name: offer the nearest — same first name anywhere in
+    // the school — instead of "couldn't find" (7 Oct 2026: "Arohi Yadav"
+    // when the register has AROHI).
+    if (!matches.length && q.name && !resolvedFollowUpSections && !onlyStudentIds) {
+      const firstWord = q.name.split(/\s+/)[0] || "";
+      const near = firstWord.length >= 3
+        ? matchStudents({ name: firstWord }, sis.students, { academicYearCode: ay, limit: 6 })
+        : [];
+      if (near.length) {
+        await rememberPick(
+          actor,
+          command.id,
+          text,
+          near.map((m, i) => ({ n: i + 1, label: m.student.fullName, commandId: command.id, studentId: m.student.id })),
+        );
+        return {
+          handled: true,
+          audience: "erp_command_ask",
+          text: formatNearStudentMatches(
+            near.map((m) => ({
+              fullName: m.student.fullName,
+              classLabel: label(m.student),
+              rollNo: m.student.rollNo,
+              fatherName: m.student.fatherName,
+              admissionNo: m.student.admissionNo,
+            })),
+            asked.replace(/\s+class\s+\S+(\s+[a-h])?$/i, ""),
+          ),
+        };
+      }
+    }
     if (matches.length !== 1) {
       // Remember the list so a bare number answers it, in the order it is
       // about to be printed — the numbering IS the list.
