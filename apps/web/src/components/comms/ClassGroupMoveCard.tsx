@@ -2,26 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReachReport } from "@/lib/commsReach";
-import { flattenTemplateParam } from "@/lib/classNoticeWa";
+import { MOVE_NOTICE_BODY, MOVE_NOTICE_TITLE } from "@/lib/classGroupMoveNotice";
 import { TENANT } from "@/lib/types";
 import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
-
-/** The parent app on Google Play (school.bhbinternational.parent, live since Oct 2026). */
-export const PARENT_APP_URL = "https://play.google.com/store/apps/details?id=school.bhbinternational.parent";
-
-/** The notice to every family: Hindi first (parents' default), then English. Template params take no newlines. */
-export const MOVE_NOTICE_TITLE = "Class updates now from the school / कक्षा सूचनाएँ अब स्कूल से";
-export const MOVE_NOTICE_BODY = flattenTemplateParam(
-  [
-    "प्रिय अभिभावक, अब से गृहकार्य, कक्षा डायरी और विद्यालय की सूचनाएँ इसी आधिकारिक स्कूल व्हाट्सऐप नंबर से और BHB International School ऐप में आएँगी।",
-    `कृपया यह नंबर 'BHB School' नाम से सेव करें और ऐप डाउनलोड करें: ${PARENT_APP_URL}`,
-    "कुछ सप्ताह बाद कक्षा के व्हाट्सऐप ग्रुप में केवल विद्यालय ही संदेश भेजेगा।",
-    "| Dear parent, from now on homework, the class diary and school notices will come from this official school WhatsApp number and in the BHB International School app.",
-    `Please save this number as 'BHB School' and download the app: ${PARENT_APP_URL}`,
-    "In a few weeks the class WhatsApp groups will become announcement-only.",
-  ].join(" "),
-);
 
 type DryRun = { recipientCount: number; sample?: string[]; skippedNotOnWhatsApp?: number; skippedNoNumber?: number; skippedOptOut?: number; skippedNoTemplate?: number };
 
@@ -59,7 +43,7 @@ export function ClassGroupMoveCard() {
   // "parents" audience, which also reaches stale earlier-year rows.
   const audience = useMemo(() => ({ kind: "students" as const, studentIds: report?.studentIds ?? [] }), [report]);
   const variables = useMemo(
-    () => ({ schoolName: TENANT.name, noticeTitle: MOVE_NOTICE_TITLE.slice(0, 60), noticeBody: MOVE_NOTICE_BODY }),
+    () => ({ schoolName: TENANT.name, noticeTitle: MOVE_NOTICE_TITLE, noticeBody: MOVE_NOTICE_BODY }),
     [],
   );
 

@@ -65,5 +65,12 @@
             <action android:name="android.intent.action.VIEW"/>
             <data android:scheme="http"/>
         </intent>
+        <!-- Payment pages open in a Chrome Custom Tab inside the app
+             (core/billing/open_checkout.dart). Android 11+ hides the Custom
+             Tabs service without this, and url_launcher falls back to the
+             external browser. -->
+        <intent>
+            <action android:name="android.support.customtabs.action.CustomTabsService"/>
+        </intent>
     </queries>
 </manifest>

@@ -1,7 +1,7 @@
 name: cbse_school_mobile
 description: BHB International School ERP — staff & parent mobile app.
 publish_to: "none"
-version: 1.0.18+19
+version: 1.0.19+20
 
 environment:
   sdk: ^3.12.2

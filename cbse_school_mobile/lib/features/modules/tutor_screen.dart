@@ -10,6 +10,7 @@ import "../../core/ui/motion.dart";
 import "../../core/ui/spacing.dart";
 import "video_player_screen.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../../core/billing/open_checkout.dart";
 import "../../core/billing/play_billing.dart";
 import "../../core/config/app_config.dart";
 import "../../l10n/app_localizations.dart";
@@ -1222,7 +1223,7 @@ class _PassSheetState extends State<_PassSheet> {
       if (uri == null) {
         throw ApiException(l.tutCouldNotOpenPaymentPage, 502);
       }
-      final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      final opened = await openCheckout(uri);
       if (!opened) {
         throw ApiException(l.tutNoBrowserForPaymentPage, 0);
       }
