@@ -238,11 +238,15 @@ export function MonthRegisterPanel({ sections }: { sections: Section[] }) {
       {msg ? <p className={`rounded-lg px-3 py-2 text-xs ${msg.ok ? "bg-[rgba(21,128,61,0.08)] text-[var(--success)]" : "bg-[var(--danger-soft)] text-[var(--danger)]"}`}>{msg.text}</p> : null}
 
       {view ? (
-        <div className="max-h-[70vh] overflow-auto rounded-lg border border-[var(--border)]">
-          <table className="border-separate border-spacing-0 text-[11px]">
+        <div className="max-h-[70vh] max-w-full overflow-auto rounded-lg border border-[var(--border)] [-webkit-overflow-scrolling:touch]" tabIndex={0} aria-label="Month register — scroll sideways for more days">
+          {/* display:table + overflow:visible override globals.css ".bhb-mobile-app table
+              {display:block; overflow-x:auto}" — that made the table its OWN scroll box
+              inside this one, so the sticky names/dates stuck to a box that never
+              scrolls and slid away, and two nested scrollers fought on phones. */}
+          <table className="w-max min-w-full border-separate border-spacing-0 text-[11px]" style={{ display: "table", overflow: "visible" }}>
             <thead className="sticky top-0 z-20 bg-[var(--card)]">
               <tr>
-                <th className="sticky left-0 z-30 min-w-[11rem] border-b border-[var(--border)] bg-[var(--card)] px-2 py-1 text-left">Student</th>
+                <th className="sticky left-0 z-30 w-[7.5rem] min-w-[7.5rem] border-b sm:w-auto sm:min-w-[11rem] border-[var(--border)] bg-[var(--card)] px-2 py-1 text-left">Student</th>
                 {view.days.map((d) => {
                   const wd = new Date(`${d.date}T12:00:00Z`).getUTCDay();
                   const can = !!view.canEdit && d.working && !d.future;
@@ -250,7 +254,7 @@ export function MonthRegisterPanel({ sections }: { sections: Section[] }) {
                     <th
                       key={d.date}
                       title={d.working ? (d.half ? `Half day — ${d.label}` : can ? "Tap to mark blanks Present for this day" : "") : d.label}
-                      className={`w-8 border-b border-[var(--border)] px-0.5 py-1 text-center font-semibold ${d.working ? "" : "bg-[var(--surface-sunken)] text-[var(--muted)]"} ${d.date === view.today ? "text-[var(--accent,#C5A028)]" : ""}`}
+                      className={`w-8 min-w-[2rem] border-b border-[var(--border)] px-0.5 py-1 text-center font-semibold ${d.working ? "" : "bg-[var(--surface-sunken)] text-[var(--muted)]"} ${d.date === view.today ? "text-[var(--accent,#C5A028)]" : ""}`}
                     >
                       <button type="button" disabled={!can} onClick={() => fillPresent(d)} className="w-full disabled:cursor-default">
                         <span className="block">{Number(d.date.slice(8))}</span>
@@ -259,8 +263,8 @@ export function MonthRegisterPanel({ sections }: { sections: Section[] }) {
                     </th>
                   );
                 })}
-                <th className="border-b border-l border-[var(--border)] px-2 py-1 text-center" title="This month: present / working days">Month P/W</th>
-                <th className="border-b border-[var(--border)] px-2 py-1 text-center" title="Session so far (as saved): present / working days">Session P/W</th>
+                <th className="whitespace-nowrap border-b border-l border-[var(--border)] px-2 py-1 text-center" title="This month: present / working days">Month P/W</th>
+                <th className="whitespace-nowrap border-b border-[var(--border)] px-2 py-1 text-center" title="Session so far (as saved): present / working days">Session P/W</th>
                 <th className="border-b border-[var(--border)] px-2 py-1 text-center">%</th>
               </tr>
             </thead>
@@ -275,7 +279,7 @@ export function MonthRegisterPanel({ sections }: { sections: Section[] }) {
                 }
                 return (
                   <tr key={s.id}>
-                    <td className="sticky left-0 z-10 border-b border-[var(--border)] bg-[var(--card)] px-2 py-1">
+                    <td className="sticky left-0 z-10 max-w-[7.5rem] border-b border-[var(--border)] bg-[var(--card)] px-2 py-1 leading-tight sm:max-w-none">
                       <span className="font-semibold text-[var(--brand-deep)]">{s.rollNo ? `${s.rollNo}. ` : ""}{s.name}</span>
                       {s.joinedOn && s.startsOn > (view.days[0]?.date ?? "") ? (
                         <span className="block text-[10px] text-[var(--muted)]">admitted {s.joinedOn}</span>
@@ -284,10 +288,10 @@ export function MonthRegisterPanel({ sections }: { sections: Section[] }) {
                     {view.days.map((d) => {
                       const v = valueOf(s, d.date);
                       const edited = edits[d.date]?.[s.id] !== undefined;
-                      if (!d.working) return <td key={d.date} className="border-b border-[var(--border)] bg-[var(--surface-sunken)]" />;
-                      if (d.date < s.startsOn) return <td key={d.date} className="border-b border-[var(--border)] text-center text-[var(--muted)]" title={`Admitted ${s.joinedOn}`}>–</td>;
+                      if (!d.working) return <td key={d.date} className="min-w-[2rem] border-b border-[var(--border)] bg-[var(--surface-sunken)]" />;
+                      if (d.date < s.startsOn) return <td key={d.date} className="min-w-[2rem] border-b border-[var(--border)] text-center text-[var(--muted)]" title={`Admitted ${s.joinedOn}`}>–</td>;
                       return (
-                        <td key={d.date} className="border-b border-[var(--border)] p-0.5 text-center">
+                        <td key={d.date} className="min-w-[2rem] border-b border-[var(--border)] p-0.5 text-center">
                           <button
                             type="button"
                             disabled={!markable(s, d)}
@@ -300,8 +304,8 @@ export function MonthRegisterPanel({ sections }: { sections: Section[] }) {
                         </td>
                       );
                     })}
-                    <td className="border-b border-l border-[var(--border)] px-2 text-center font-semibold">{mp}/{mw}</td>
-                    <td className="border-b border-[var(--border)] px-2 text-center">{s.session.presentDays}/{s.session.workingDays}</td>
+                    <td className="whitespace-nowrap border-b border-l border-[var(--border)] px-2 text-center font-semibold">{mp}/{mw}</td>
+                    <td className="whitespace-nowrap border-b border-[var(--border)] px-2 text-center">{s.session.presentDays}/{s.session.workingDays}</td>
                     <td className="border-b border-[var(--border)] px-2 text-center">
                       {s.session.percent === null ? "—" : `${s.session.percent}%`}
                       {s.session.unmarkedDays ? <span className="block text-[10px] text-[var(--danger)]">{s.session.unmarkedDays} unmarked</span> : null}
