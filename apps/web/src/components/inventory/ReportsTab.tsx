@@ -40,6 +40,7 @@ import {
   type InvSaleStatus,
 } from "@/lib/inventory/types";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type ReportId =
   | "dashboard"
@@ -305,7 +306,23 @@ function InventoryParity() {
  */
 function RepeatPurchases() {
   const r = useAsync(() => invApi.repeatPurchases(), []);
-  const rows = r.data ?? [];
+  const data = r.data;
+  const rows = useMemo(() => data ?? [], [data]);
+  // Closest-together sales first, as the report always opened.
+  const sort = useTableSort(
+    rows,
+    {
+      student: (row) => row.buyerName,
+      klass: (row) =>
+        row.classId ? `${row.classId}${row.sectionId ? `-${row.sectionId}` : ""}` : null,
+      item: (row) => row.itemName,
+      sales: (row) => row.saleCount,
+      qty: (row) => row.totalQty,
+      value: (row) => row.totalPaise,
+      apart: (row) => row.minutesApart,
+    },
+    "apart",
+  );
 
   if (r.loading) return <InvSpinner label="Looking for repeats" />;
   if (r.error) return <InvAlert error={r.error} />;
@@ -322,19 +339,19 @@ function RepeatPurchases() {
           <ErpTable minWidth="min-w-full">
             <ErpTableHead>
               <tr>
-                <th className="pb-2 text-left">Student</th>
-                <th className="pb-2 text-left">Class</th>
-                <th className="pb-2 text-left">Item</th>
-                <th className="pb-2 text-right">Sales</th>
-                <th className="pb-2 text-right">Qty</th>
-                <th className="pb-2 text-right">Value</th>
+                <ErpSortTh sort={sort} field="student" className="px-0 py-0 pb-2 text-left">Student</ErpSortTh>
+                <ErpSortTh sort={sort} field="klass" className="px-0 py-0 pb-2 text-left">Class</ErpSortTh>
+                <ErpSortTh sort={sort} field="item" className="px-0 py-0 pb-2 text-left">Item</ErpSortTh>
+                <ErpSortTh sort={sort} field="sales" align="right" className="px-0 py-0 pb-2 text-right">Sales</ErpSortTh>
+                <ErpSortTh sort={sort} field="qty" align="right" className="px-0 py-0 pb-2 text-right">Qty</ErpSortTh>
+                <ErpSortTh sort={sort} field="value" align="right" className="px-0 py-0 pb-2 text-right">Value</ErpSortTh>
                 <th className="pb-2 text-left">Receipts</th>
-                <th className="pb-2 text-left">Apart</th>
+                <ErpSortTh sort={sort} field="apart" className="px-0 py-0 pb-2 text-left">Apart</ErpSortTh>
                 <th className="w-10 px-2 py-2" aria-label="Actions" />
               </tr>
             </ErpTableHead>
             <ErpTableBody>
-              {rows.map((row) => {
+              {sort.rows.map((row) => {
                 // Two sales inside an hour is almost never a real repeat.
                 const suspicious = row.minutesApart < 60;
                 return (

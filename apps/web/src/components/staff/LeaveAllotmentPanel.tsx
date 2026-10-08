@@ -58,19 +58,23 @@ export function LeaveAllotmentPanel({
     hr.leaveBalances.find((b) => b.staffId === staffId && b.typeCode === code && b.academicYearCode === ay);
   const type = hr.leaveTypes.find((t) => t.code === typeCode);
 
-  const sort = useTableSort(
-    roster,
-    {
-      staff: (s) => s.fullName,
-      allotted: (s) => balanceOf(s.id, typeCode)?.allotted ?? type?.defaultDaysPerYear ?? 0,
-      left: (s) => {
-        const b = balanceOf(s.id, typeCode);
-        return b ? remainingBalance(b) : type?.defaultDaysPerYear ?? 0;
-      },
+  // Each leave-type column sorts by the days left of THAT type (keys t_<code>),
+  // so the heading means the same thing whichever type is selected above.
+  const sortColumns: Record<string, (s: StaffRecord) => number | string | null> = {
+    staff: (s) => s.fullName,
+    allotted: (s) => balanceOf(s.id, typeCode)?.allotted ?? type?.defaultDaysPerYear ?? 0,
+    left: (s) => {
+      const b = balanceOf(s.id, typeCode);
+      return b ? remainingBalance(b) : type?.defaultDaysPerYear ?? 0;
     },
-    "staff",
-    "asc",
-  );
+  };
+  for (const t of hr.leaveTypes) {
+    sortColumns[`t_${t.code}`] = (s) => {
+      const b = balanceOf(s.id, t.code);
+      return b ? remainingBalance(b) : t.defaultDaysPerYear;
+    };
+  }
+  const sort = useTableSort(roster, sortColumns, "staff", "asc");
 
   const log = useMemo(
     () =>
@@ -83,6 +87,21 @@ export function LeaveAllotmentPanel({
     const s = roster.find((x) => x.id === id);
     return s ? `${s.empCode} · ${s.fullName}` : id;
   };
+  // Newest change first, as the record has always read.
+  const logSort = useTableSort(
+    log,
+    {
+      when: (c) => c.changedAt,
+      staff: (c) => nameOf(c.staffId),
+      type: (c) => c.typeCode,
+      change: (c) => c.after - c.before,
+      after: (c) => c.after,
+      reason: (c) => c.reason,
+      by: (c) => c.changedBy,
+    },
+    "when",
+    "desc",
+  );
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -185,9 +204,9 @@ export function LeaveAllotmentPanel({
                 <th className="w-10 px-3 py-2" />
                 <ErpSortTh sort={sort} field="staff">Staff</ErpSortTh>
                 {hr.leaveTypes.map((t) => (
-                  <th key={t.code} className={`px-3 py-2 text-center ${t.code === typeCode ? "text-[var(--brand-deep)]" : ""}`}>
+                  <ErpSortTh key={t.code} sort={sort} field={`t_${t.code}`} className={`px-3 py-2 text-center ${t.code === typeCode ? "text-[var(--brand-deep)]" : ""}`}>
                     {t.code}
-                  </th>
+                  </ErpSortTh>
                 ))}
                 <th className="w-10 px-2 py-2" aria-label="Actions" />
               </tr>
@@ -244,17 +263,17 @@ export function LeaveAllotmentPanel({
             <ErpTable>
               <ErpTableHead sticky>
                 <tr>
-                  <th className="px-3 py-2">When</th>
-                  <th className="px-3 py-2">Staff</th>
-                  <th className="px-3 py-2">Leave</th>
-                  <th className="px-3 py-2">Change</th>
-                  <th className="px-3 py-2 text-center">Before → after</th>
-                  <th className="px-3 py-2">Reason</th>
-                  <th className="px-3 py-2">By</th>
+                  <ErpSortTh sort={logSort} field="when" className="px-3 py-2">When</ErpSortTh>
+                  <ErpSortTh sort={logSort} field="staff" className="px-3 py-2">Staff</ErpSortTh>
+                  <ErpSortTh sort={logSort} field="type" className="px-3 py-2">Leave</ErpSortTh>
+                  <ErpSortTh sort={logSort} field="change" className="px-3 py-2">Change</ErpSortTh>
+                  <ErpSortTh sort={logSort} field="after" className="px-3 py-2 text-center">Before → after</ErpSortTh>
+                  <ErpSortTh sort={logSort} field="reason" className="px-3 py-2">Reason</ErpSortTh>
+                  <ErpSortTh sort={logSort} field="by" className="px-3 py-2">By</ErpSortTh>
                 </tr>
               </ErpTableHead>
               <ErpTableBody>
-                {log.map((c) => (
+                {logSort.rows.map((c) => (
                   <tr key={c.id}>
                     <td className="whitespace-nowrap px-3 py-2 text-xs">{new Date(c.changedAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</td>
                     <td className="px-3 py-2 text-xs font-medium text-[var(--brand-deep)]">{nameOf(c.staffId)}</td>

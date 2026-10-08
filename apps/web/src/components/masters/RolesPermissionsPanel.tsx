@@ -63,7 +63,10 @@ export function RolesPermissionsPanel() {
   const assignSort = useTableSort(
     state?.assignments ?? [],
     {
-      role: (a) => a.roleId,
+      staff: (a) =>
+        masters?.staff?.find((s) => s.id === a.staffId)?.fullName || a.staffId,
+      // By the role's name as shown, not its id.
+      role: (a) => state?.roles.find((r) => r.id === a.roleId)?.name || a.roleId,
       expires: (a) => a.expiresOn || "",
     },
     "role",
@@ -823,7 +826,7 @@ export function RolesPermissionsPanel() {
               <ErpTable>
                 <ErpTableHead>
                   <tr>
-                    <th className="px-3 py-2">Staff</th>
+                    <ErpSortTh sort={assignSort} field="staff" className="px-3 py-2">Staff</ErpSortTh>
                     <ErpSortTh sort={assignSort} field="role" className="px-3 py-2">Role</ErpSortTh>
                     <ErpSortTh sort={assignSort} field="expires" className="px-3 py-2">Expires</ErpSortTh>
                     <th className="px-3 py-2">Note</th>

@@ -2,6 +2,7 @@
 // ratchet-allow: grids_without_row_menu — report output — the worst-10 rows are a reading of someone else's portal on a date, with nothing on this side to act on
 
 import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { announceReady, readHandoffMessage } from "@/lib/nucleusHandoff";
 import { ExternalLink, RefreshCw } from "lucide-react";
@@ -14,6 +15,8 @@ import {
 import type { AssessmentSummary, NucleusAssessmentRow } from "@/lib/nucleusAssessments";
 
 const NUCLEUS_URL = "https://nucleus.leadgroup.co.in";
+
+const NO_ROWS: NucleusProgressRow[] = [];
 
 type AssessmentSnapshot = {
   id: string;
@@ -155,6 +158,18 @@ export function NucleusProgressPanel({ academicYearCode }: { academicYearCode: s
 
   const today = new Date().toISOString().slice(0, 10);
   const stale = snapshot ? readingIsStale(snapshot.capturedOn, today) : false;
+  // `worst` arrives ranked furthest-behind first; that stays the opening order.
+  const worstSort = useTableSort(
+    snapshot?.summary.worst ?? NO_ROWS,
+    {
+      teacher: (r) => r.teacherName,
+      klass: (r) => `${r.classLabel} · ${r.subjectLabel}`,
+      done: (r) => r.currentPlans,
+      behind: (r) => Math.abs(r.gapPlans),
+    },
+    "behind",
+    "desc",
+  );
 
   return (
     <section className="space-y-4">
@@ -213,14 +228,14 @@ export function NucleusProgressPanel({ academicYearCode }: { academicYearCode: s
               <ErpTable minWidth="min-w-[520px]">
                 <ErpTableHead>
                   <tr>
-                    <th className="px-3 py-2 font-bold">Teacher</th>
-                    <th className="px-3 py-2 font-bold">Class · subject</th>
-                    <th className="px-3 py-2 font-bold">Marked done</th>
-                    <th className="px-3 py-2 font-bold">Behind by</th>
+                    <ErpSortTh sort={worstSort} field="teacher" className="px-3 py-2 font-bold">Teacher</ErpSortTh>
+                    <ErpSortTh sort={worstSort} field="klass" className="px-3 py-2 font-bold">Class · subject</ErpSortTh>
+                    <ErpSortTh sort={worstSort} field="done" className="px-3 py-2 font-bold">Marked done</ErpSortTh>
+                    <ErpSortTh sort={worstSort} field="behind" className="px-3 py-2 font-bold">Behind by</ErpSortTh>
                   </tr>
                 </ErpTableHead>
                 <ErpTableBody>
-                  {snapshot.summary.worst.map((r) => (
+                  {worstSort.rows.map((r) => (
                     <tr key={r.position} className="border-t border-[var(--border)]">
                       <td className="px-3 py-2 font-semibold text-[var(--brand-deep)]">
                         {r.teacherName}

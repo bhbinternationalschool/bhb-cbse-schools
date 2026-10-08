@@ -182,6 +182,19 @@ export function BirthdaysPanel({ canEdit }: { canEdit: boolean }) {
     "name",
   );
 
+  const staffSort = useTableSort(
+    todayStaff,
+    {
+      name: (r) => r.fullName,
+      mobile: (r) => r.mobile || null,
+      sent: (r) =>
+        state.log.some(
+          (e) => e.date === date && e.subject === "staff" && e.subjectId === r.staffId && e.status === "sent",
+        ),
+    },
+    "name",
+  );
+
   return (
     <div className="mt-4 space-y-4">
       {notice ? <p className="rounded-lg bg-[var(--success-soft)] px-3 py-1.5 text-xs font-semibold text-[var(--success)]">{notice}</p> : null}
@@ -315,14 +328,14 @@ export function BirthdaysPanel({ canEdit }: { canEdit: boolean }) {
                 <ErpTableHead>
                   <tr>
                     <th className="px-2 py-2 text-left">Card</th>
-                    <th className="px-2 py-2 text-left">Staff member</th>
-                    <th className="px-2 py-2 text-left">WhatsApp</th>
-                    <th className="px-2 py-2 text-left">Status today</th>
+                    <ErpSortTh sort={staffSort} field="name" className="px-2 py-2 text-left">Staff member</ErpSortTh>
+                    <ErpSortTh sort={staffSort} field="mobile" className="px-2 py-2 text-left">WhatsApp</ErpSortTh>
+                    <ErpSortTh sort={staffSort} field="sent" className="px-2 py-2 text-left">Status today</ErpSortTh>
                     <th className="px-2 py-2" />
                   </tr>
                 </ErpTableHead>
                 <ErpTableBody>
-                  {todayStaff.map((row) => {
+                  {staffSort.rows.map((row) => {
                     const log = logToday.filter((e) => e.subject === "staff" && e.subjectId === row.staffId);
                     return (
                       <tr key={row.staffId} className="text-xs align-top">

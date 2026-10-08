@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ErpTable } from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 import type { AttendanceStatus } from "@/lib/attendance";
 import type { MonthDay, MonthStudent } from "@/lib/attendanceMonthRegister";
 
@@ -97,6 +98,35 @@ export function MonthRegisterPanel({ sections }: { sections: Section[] }) {
     return e !== undefined ? e : (stu.marks[date] ?? "");
   };
   const markable = (stu: MonthStudent, d: MonthDay) => !!view?.canEdit && d.working && !d.future && d.date >= stu.startsOn;
+
+  /** This month's present / working days for a child, including unsaved edits. */
+  const monthTally = (stu: MonthStudent): { present: number; working: number } => {
+    let working = 0;
+    let present = 0;
+    for (const d of view?.days ?? []) {
+      if (!d.working || d.future || d.date < stu.startsOn) continue;
+      working += 1;
+      present += weight(valueOf(stu, d.date));
+    }
+    return { present, working };
+  };
+
+  // Sortable like every name table (director, 8 Oct 2026): roll order by
+  // default — the register's own order — or by name, this month's
+  // attendance, or the session percentage.
+  const sort = useTableSort(
+    view?.students ?? [],
+    {
+      roll: (x) => Number(x.rollNo) || 9999,
+      name: (x) => x.name,
+      month: (x) => {
+        const t = monthTally(x);
+        return t.working ? t.present / t.working : -1;
+      },
+      session: (x) => x.session.percent ?? -1,
+    },
+    "roll",
+  );
 
   const setCell = (stu: MonthStudent, date: string, next: Cell) => {
     setEdits((prev) => {
@@ -247,7 +277,16 @@ export function MonthRegisterPanel({ sections }: { sections: Section[] }) {
           <ErpTable minWidth="min-w-full" className="w-max border-separate border-spacing-0 text-[11px]">
             <thead className="sticky top-0 z-20 bg-[var(--card)]">
               <tr>
-                <th className="sticky left-0 z-30 w-[7.5rem] min-w-[7.5rem] border-b sm:w-auto sm:min-w-[11rem] border-[var(--border)] bg-[var(--card)] px-2 py-1 text-left">Student</th>
+                <th className="sticky left-0 z-30 w-[7.5rem] min-w-[7.5rem] border-b sm:w-auto sm:min-w-[11rem] border-[var(--border)] bg-[var(--card)] px-2 py-1 text-left" aria-sort={sort.field === "roll" || sort.field === "name" ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
+                  <span className="flex items-center gap-2 text-[10px] uppercase tracking-wide">
+                    <button type="button" className={`inline-flex items-center gap-0.5 hover:text-[var(--brand-deep)] ${sort.field === "roll" ? "text-[var(--brand-deep)]" : ""}`} onClick={() => sort.toggle("roll")} title="Sort by roll number">
+                      Roll <span aria-hidden className={sort.field === "roll" ? "" : "opacity-35"}>{sort.field === "roll" && sort.dir === "desc" ? "▼" : "▲"}</span>
+                    </button>
+                    <button type="button" className={`inline-flex items-center gap-0.5 hover:text-[var(--brand-deep)] ${sort.field === "name" ? "text-[var(--brand-deep)]" : ""}`} onClick={() => sort.toggle("name")} title="Sort by student name">
+                      Student <span aria-hidden className={sort.field === "name" ? "" : "opacity-35"}>{sort.field === "name" && sort.dir === "desc" ? "▼" : "▲"}</span>
+                    </button>
+                  </span>
+                </th>
                 {view.days.map((d) => {
                   const wd = new Date(`${d.date}T12:00:00Z`).getUTCDay();
                   const can = !!view.canEdit && d.working && !d.future;
@@ -264,20 +303,14 @@ export function MonthRegisterPanel({ sections }: { sections: Section[] }) {
                     </th>
                   );
                 })}
-                <th className="whitespace-nowrap border-b border-l border-[var(--border)] px-2 py-1 text-center" title="This month: present / working days">Month P/W</th>
+                <ErpSortTh sort={sort} field="month" className="whitespace-nowrap border-b border-l border-[var(--border)] px-2 py-1 text-center text-[10px]">Month P/W</ErpSortTh>
                 <th className="whitespace-nowrap border-b border-[var(--border)] px-2 py-1 text-center" title="Session so far (as saved): present / working days">Session P/W</th>
-                <th className="border-b border-[var(--border)] px-2 py-1 text-center">%</th>
+                <ErpSortTh sort={sort} field="session" className="border-b border-[var(--border)] px-2 py-1 text-center text-[10px]">%</ErpSortTh>
               </tr>
             </thead>
             <tbody>
-              {view.students.map((s) => {
-                let mw = 0;
-                let mp = 0;
-                for (const d of view.days) {
-                  if (!d.working || d.future || d.date < s.startsOn) continue;
-                  mw += 1;
-                  mp += weight(valueOf(s, d.date));
-                }
+              {sort.rows.map((s) => {
+                const { present: mp, working: mw } = monthTally(s);
                 return (
                   <tr key={s.id}>
                     <td className="sticky left-0 z-10 max-w-[7.5rem] border-b border-[var(--border)] bg-[var(--card)] px-2 py-1 leading-tight sm:max-w-none">

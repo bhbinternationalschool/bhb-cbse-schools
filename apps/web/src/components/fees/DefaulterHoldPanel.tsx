@@ -346,6 +346,17 @@ export function DefaulterHoldPanel() {
     () => (standing ?? []).filter((d) => d.holdCode === gateCode),
     [standing, gateCode],
   );
+  const standingSort = useTableSort(
+    standingHere,
+    {
+      child: (d) => nameOf(d.studentId),
+      decision: (d) => (d.decision === "disallow" ? "Withheld" : "Let through"),
+      decided: (d) => d.decidedAt,
+      by: (d) => d.decidedBy,
+      reason: (d) => d.reason,
+    },
+    "child",
+  );
   const liftKeys = standingHere
     .filter((d) => d.decision === "disallow")
     .map((d) => d.studentId);
@@ -735,15 +746,15 @@ export function DefaulterHoldPanel() {
                 <ErpTableHead>
                   <tr>
                     <th className="w-8 px-2 py-2" />
-                    <th className="px-2 py-2 text-left">Child</th>
-                    <th className="px-2 py-2 text-left">Decision</th>
-                    <th className="px-2 py-2 text-left">Decided</th>
-                    <th className="px-2 py-2 text-left">By</th>
-                    <th className="px-2 py-2 text-left">Reason</th>
+                    <ErpSortTh sort={standingSort} field="child" className="px-2 py-2 text-left">Child</ErpSortTh>
+                    <ErpSortTh sort={standingSort} field="decision" className="px-2 py-2 text-left">Decision</ErpSortTh>
+                    <ErpSortTh sort={standingSort} field="decided" className="px-2 py-2 text-left">Decided</ErpSortTh>
+                    <ErpSortTh sort={standingSort} field="by" className="px-2 py-2 text-left">By</ErpSortTh>
+                    <ErpSortTh sort={standingSort} field="reason" className="px-2 py-2 text-left">Reason</ErpSortTh>
                   </tr>
                 </ErpTableHead>
                 <ErpTableBody>
-                  {standingHere.map((d) => (
+                  {standingSort.rows.map((d) => (
                     <tr
                       key={`${d.studentId}-${d.holdCode}`}
                       className="border-t border-[var(--border)]"

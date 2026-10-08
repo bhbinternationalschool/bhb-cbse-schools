@@ -66,6 +66,7 @@ import { ConcessionCaseFileInline } from "@/components/masters/ConcessionCaseFil
 import { RemoveControl } from "@/components/masters/RemoveControl";
 import { useDemoSessionOptional } from "@/components/shell/SessionContext";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 import type { RowAction } from "@/components/ui/erp-grid";
 
 type Commit = (s: MastersState, msg?: string) => void;
@@ -1979,6 +1980,8 @@ function ConcessionStudentListDrawer({
         th { background: #f8fafc; font-weight: 600; }
         td.num { text-align: center; width: 36px; }
         .status { text-transform: capitalize; }
+        th button { all: unset; }
+        th button span[aria-hidden] { display: none; }
         ${PRINT_LETTERHEAD_CSS}
       </style></head><body>
       ${printLetterheadHtml()}
@@ -2139,54 +2142,90 @@ function ConcessionFamilyPrintTable({
   return (
     <div className="space-y-3">
       {families.map((family) => (
-        <ErpTableShell
+        <ConcessionFamilyTable
           key={family.householdId || family.rows[0]?.id}
-          className="overflow-x-auto"
-        >
-          <p className="border-b border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide text-[var(--brand-deep)]">
-            {family.fatherName || "No father on file"}
-            <span className="ml-2 font-normal normal-case text-[var(--muted)]">
-              {family.rows.length} child
-              {family.rows.length === 1 ? "" : "ren"} on discount
-            </span>
-          </p>
-          <ErpTable minWidth="min-w-[640px]">
-            <ErpTableHead>
-              <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
-                <th className="px-3 py-2">Admission no.</th>
-                <th className="px-3 py-2">Student</th>
-                <th className="px-3 py-2">Class</th>
-                {showPolicy ? <th className="px-3 py-2">Discount</th> : null}
-                <th className="px-3 py-2">Sibling</th>
-                <th className="px-3 py-2">Status</th>
-                <th className="px-3 py-2">Ground</th>
-                <th className="px-3 py-2">From</th>
-              </tr>
-            </ErpTableHead>
-            <ErpTableBody>
-              {family.rows.map((row) => (
-                <tr key={row.id} className="text-[var(--brand-deep)]">
-                  <td className="px-3 py-2 font-medium">{row.admissionNo}</td>
-                  <td className="px-3 py-2">{row.studentName}</td>
-                  <td className="px-3 py-2">{row.classLabel}</td>
-                  {showPolicy ? (
-                    <td className="px-3 py-2">{row.concessionName}</td>
-                  ) : null}
-                  <td className="px-3 py-2 text-[var(--muted)]">
-                    {row.siblingNote}
-                  </td>
-                  <td className="status px-3 py-2 capitalize">{row.status}</td>
-                  <td className="px-3 py-2">{row.groundLabel}</td>
-                  <td className="whitespace-nowrap px-3 py-2">
-                    {row.effectiveFrom}
-                  </td>
-                </tr>
-              ))}
-            </ErpTableBody>
-          </ErpTable>
-        </ErpTableShell>
+          family={family}
+          showPolicy={showPolicy}
+        />
       ))}
     </div>
+  );
+}
+
+/** Sort keys shared by both concession lists — underlying values, not display text. */
+function concessionSortColumns() {
+  return {
+    admNo: (r: ConcessionStudentListRow) => r.admissionNo,
+    student: (r: ConcessionStudentListRow) => r.studentName,
+    father: (r: ConcessionStudentListRow) => r.fatherName,
+    class: (r: ConcessionStudentListRow) => r.classLabel,
+    discount: (r: ConcessionStudentListRow) => r.concessionName,
+    sibling: (r: ConcessionStudentListRow) => r.siblingNote,
+    status: (r: ConcessionStudentListRow) => r.status,
+    ground: (r: ConcessionStudentListRow) => r.groundLabel,
+    // ISO date, or "—" when the grant has none (sorts last, not first).
+    from: (r: ConcessionStudentListRow) => (r.effectiveFrom === "—" ? null : r.effectiveFrom),
+    reason: (r: ConcessionStudentListRow) => r.reason,
+  };
+}
+
+/**
+ * One family's table. Its own component so each family gets its own sort
+ * state (hooks cannot run inside the families .map). Default "class" keeps the
+ * list's built order (class, then name), which is also what gets printed.
+ */
+function ConcessionFamilyTable({
+  family,
+  showPolicy,
+}: {
+  family: ConcessionFamilyGroup;
+  showPolicy: boolean;
+}) {
+  const sort = useTableSort(family.rows, concessionSortColumns(), "class");
+  return (
+    <ErpTableShell className="overflow-x-auto">
+      <p className="border-b border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide text-[var(--brand-deep)]">
+        {family.fatherName || "No father on file"}
+        <span className="ml-2 font-normal normal-case text-[var(--muted)]">
+          {family.rows.length} child
+          {family.rows.length === 1 ? "" : "ren"} on discount
+        </span>
+      </p>
+      <ErpTable minWidth="min-w-[640px]">
+        <ErpTableHead>
+          <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+            <ErpSortTh sort={sort} field="admNo" className="px-3 py-2">Admission no.</ErpSortTh>
+            <ErpSortTh sort={sort} field="student" className="px-3 py-2">Student</ErpSortTh>
+            <ErpSortTh sort={sort} field="class" className="px-3 py-2">Class</ErpSortTh>
+            {showPolicy ? <ErpSortTh sort={sort} field="discount" className="px-3 py-2">Discount</ErpSortTh> : null}
+            <ErpSortTh sort={sort} field="sibling" className="px-3 py-2">Sibling</ErpSortTh>
+            <ErpSortTh sort={sort} field="status" className="px-3 py-2">Status</ErpSortTh>
+            <ErpSortTh sort={sort} field="ground" className="px-3 py-2">Ground</ErpSortTh>
+            <ErpSortTh sort={sort} field="from" className="px-3 py-2">From</ErpSortTh>
+          </tr>
+        </ErpTableHead>
+        <ErpTableBody>
+          {sort.rows.map((row) => (
+            <tr key={row.id} className="text-[var(--brand-deep)]">
+              <td className="px-3 py-2 font-medium">{row.admissionNo}</td>
+              <td className="px-3 py-2">{row.studentName}</td>
+              <td className="px-3 py-2">{row.classLabel}</td>
+              {showPolicy ? (
+                <td className="px-3 py-2">{row.concessionName}</td>
+              ) : null}
+              <td className="px-3 py-2 text-[var(--muted)]">
+                {row.siblingNote}
+              </td>
+              <td className="status px-3 py-2 capitalize">{row.status}</td>
+              <td className="px-3 py-2">{row.groundLabel}</td>
+              <td className="whitespace-nowrap px-3 py-2">
+                {row.effectiveFrom}
+              </td>
+            </tr>
+          ))}
+        </ErpTableBody>
+      </ErpTable>
+    </ErpTableShell>
   );
 }
 
@@ -2197,6 +2236,8 @@ function ConcessionStudentPrintTable({
   rows: ConcessionStudentListRow[];
   showPolicy: boolean;
 }) {
+  // Default "class" keeps the built order (class, then name) — also the printed order.
+  const sort = useTableSort(rows, concessionSortColumns(), "class");
   if (rows.length === 0) return <EmptyList filtered />;
 
   return (
@@ -2205,19 +2246,19 @@ function ConcessionStudentPrintTable({
         <ErpTableHead>
           <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
             <th className="px-3 py-2.5">#</th>
-            <th className="px-3 py-2.5">Admission no.</th>
-            <th className="px-3 py-2.5">Student</th>
-            <th className="px-3 py-2.5">Father</th>
-            <th className="px-3 py-2.5">Class</th>
-            {showPolicy ? <th className="px-3 py-2.5">Discount</th> : null}
-            <th className="px-3 py-2.5">Status</th>
-            <th className="px-3 py-2.5">Ground</th>
-            <th className="px-3 py-2.5">From</th>
-            <th className="px-3 py-2.5">Reason</th>
+            <ErpSortTh sort={sort} field="admNo" className="px-3 py-2.5">Admission no.</ErpSortTh>
+            <ErpSortTh sort={sort} field="student" className="px-3 py-2.5">Student</ErpSortTh>
+            <ErpSortTh sort={sort} field="father" className="px-3 py-2.5">Father</ErpSortTh>
+            <ErpSortTh sort={sort} field="class" className="px-3 py-2.5">Class</ErpSortTh>
+            {showPolicy ? <ErpSortTh sort={sort} field="discount" className="px-3 py-2.5">Discount</ErpSortTh> : null}
+            <ErpSortTh sort={sort} field="status" className="px-3 py-2.5">Status</ErpSortTh>
+            <ErpSortTh sort={sort} field="ground" className="px-3 py-2.5">Ground</ErpSortTh>
+            <ErpSortTh sort={sort} field="from" className="px-3 py-2.5">From</ErpSortTh>
+            <ErpSortTh sort={sort} field="reason" className="px-3 py-2.5">Reason</ErpSortTh>
           </tr>
         </ErpTableHead>
         <ErpTableBody>
-          {rows.map((row, idx) => (
+          {sort.rows.map((row, idx) => (
             <tr key={row.id} className="text-[var(--brand-deep)]">
               <td className="num px-3 py-2 tabular-nums text-[var(--muted)]">
                 {idx + 1}

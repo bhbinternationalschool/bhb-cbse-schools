@@ -177,7 +177,7 @@ export function StaffOutdoorDutyPanel() {
           <ErpTable>
             <ErpTableHead>
               <tr>
-                {isManager ? <th className="px-4 py-2">Staff</th> : null}
+                {isManager ? <ErpSortTh sort={dutySort} field="staff" className="px-4 py-2">Staff</ErpSortTh> : null}
                 <ErpSortTh sort={dutySort} field="purpose">Purpose</ErpSortTh>
                 <ErpSortTh sort={dutySort} field="destination">Destination</ErpSortTh>
                 <ErpSortTh sort={dutySort} field="out">Out</ErpSortTh>

@@ -422,6 +422,22 @@ export function TeachingWorkspace() {
     () => summarizeByTeacher(coverage.rows),
     [coverage.rows],
   );
+  const perTeacherSort = useTableSort(
+    perTeacher,
+    {
+      teacher: (row) => (masters ? teacherLabel(masters, row.staffId) : row.staffId),
+      scheduled: (row) => row.summary.expectedPeriods,
+      taught: (row) => row.summary.delivered + row.summary.substituted,
+      notTaught: (row) => row.summary.notDelivered,
+      unlogged: (row) => row.summary.unlogged,
+      taughtPct: (row) => row.summary.deliveryPercent,
+      loggedPct: (row) => row.summary.logPercent,
+      // No location-bearing logs shows "—": unknown, so it sorts last.
+      offCampus: (row) =>
+        row.summary.locationChecked === 0 ? null : row.summary.offCampus,
+    },
+    "teacher",
+  );
 
   /* ---------------------------------------------------------------- */
   /* Syllabus plan                                                    */
@@ -945,14 +961,14 @@ export function TeachingWorkspace() {
             <ErpTable minWidth="min-w-[820px]">
               <ErpTableHead>
                 <tr>
-                  <th className="px-3 py-2">Teacher</th>
-                  <th className="px-3 py-2">Scheduled</th>
-                  <th className="px-3 py-2">Taught</th>
-                  <th className="px-3 py-2">Not taught</th>
-                  <th className="px-3 py-2">Not logged</th>
-                  <th className="px-3 py-2">Taught %</th>
-                  <th className="px-3 py-2">Logged %</th>
-                  <th className="px-3 py-2">Off campus</th>
+                  <ErpSortTh sort={perTeacherSort} field="teacher" className="px-3 py-2">Teacher</ErpSortTh>
+                  <ErpSortTh sort={perTeacherSort} field="scheduled" className="px-3 py-2">Scheduled</ErpSortTh>
+                  <ErpSortTh sort={perTeacherSort} field="taught" className="px-3 py-2">Taught</ErpSortTh>
+                  <ErpSortTh sort={perTeacherSort} field="notTaught" className="px-3 py-2">Not taught</ErpSortTh>
+                  <ErpSortTh sort={perTeacherSort} field="unlogged" className="px-3 py-2">Not logged</ErpSortTh>
+                  <ErpSortTh sort={perTeacherSort} field="taughtPct" className="px-3 py-2">Taught %</ErpSortTh>
+                  <ErpSortTh sort={perTeacherSort} field="loggedPct" className="px-3 py-2">Logged %</ErpSortTh>
+                  <ErpSortTh sort={perTeacherSort} field="offCampus" className="px-3 py-2">Off campus</ErpSortTh>
                 </tr>
               </ErpTableHead>
               <ErpTableBody>
@@ -966,7 +982,7 @@ export function TeachingWorkspace() {
                     </td>
                   </tr>
                 ) : (
-                  perTeacher.map((row) => (
+                  perTeacherSort.rows.map((row) => (
                     <tr key={row.staffId}>
                       <td className="px-3 py-2">
                         {teacherLabel(masters, row.staffId)}

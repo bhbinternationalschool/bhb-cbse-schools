@@ -336,6 +336,20 @@ export function StudentUpdatePanel({
     "asc",
   );
 
+  // Parent photos: a photo column sorts "missing" first, so the gaps surface.
+  const parentPhotoSort = useTableSort(
+    photoRoster,
+    {
+      student: (s) => s.fullName,
+      father: (s) => (s.fatherPhotoUrl ? 1 : 0),
+      mother: (s) => (s.motherPhotoUrl ? 1 : 0),
+      guardian: (s) =>
+        sis && householdOf(sis, s.householdId)?.guardianPhotoUrl ? 1 : 0,
+    },
+    "student",
+    "asc",
+  );
+
   function flash(msg: string) {
     setNotice(msg);
     setError(null);
@@ -677,15 +691,15 @@ export function StudentUpdatePanel({
               <ErpTable>
                 <ErpTableHead>
                   <tr>
-                    <th className="px-3 py-2 font-semibold">Student</th>
-                    <th className="px-3 py-2 font-semibold">Father</th>
-                    <th className="px-3 py-2 font-semibold">Mother</th>
-                    <th className="px-3 py-2 font-semibold">Guardian</th>
+                    <ErpSortTh sort={parentPhotoSort} field="student" className="px-3 py-2 font-semibold">Student</ErpSortTh>
+                    <ErpSortTh sort={parentPhotoSort} field="father" className="px-3 py-2 font-semibold">Father</ErpSortTh>
+                    <ErpSortTh sort={parentPhotoSort} field="mother" className="px-3 py-2 font-semibold">Mother</ErpSortTh>
+                    <ErpSortTh sort={parentPhotoSort} field="guardian" className="px-3 py-2 font-semibold">Guardian</ErpSortTh>
                     <th className="w-10 px-2 py-2" aria-label="Actions" />
                   </tr>
                 </ErpTableHead>
                 <ErpTableBody>
-                  {photoRoster.map((s) => {
+                  {parentPhotoSort.rows.map((s) => {
                     const hh = householdOf(sis, s.householdId);
                     return (
                       <tr key={s.id}>

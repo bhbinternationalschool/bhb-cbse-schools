@@ -10,6 +10,7 @@ import {
   remitStatusLabel,
   statutoryRemitCsv,
   type StatutoryRemitBatch,
+  type StatutoryRemitLine,
 } from "@/lib/statutoryRemit";
 import {
   computeEstimatedPenalty,
@@ -25,6 +26,7 @@ import {
   ErpTableShell,
 } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 const RECEIPT_ACCEPT = "application/pdf,image/jpeg,image/png";
 const RECEIPT_MAX_BYTES = 15 * 1024 * 1024;
@@ -218,80 +220,7 @@ export function StatutoryRemitPanel() {
                 </div>
 
                 {openId === b.id ? (
-                  <div className="mt-3 space-y-3">
-                    <ErpTableShell className="overflow-x-auto" exportAs="pf_ecr" exportTitle="PF ECR">
-                      <ErpTable minWidth="min-w-[720px]" className="text-[11px]">
-                        <ErpTableHead>
-                          <tr>
-                            <th className="px-2 py-1.5 font-medium">Staff</th>
-                            <th className="px-2 py-1.5 font-medium">UAN</th>
-                            <th className="px-2 py-1.5 font-medium">EPF wages</th>
-                            <th className="px-2 py-1.5 font-medium">EE</th>
-                            <th className="px-2 py-1.5 font-medium">EPS</th>
-                            <th className="px-2 py-1.5 font-medium">ER</th>
-                            <th className="px-2 py-1.5 font-medium">EDLI</th>
-                            <th className="w-10 px-2 py-2" aria-label="Actions" />
-                          </tr>
-                        </ErpTableHead>
-                        <ErpTableBody>
-                          {b.lines.map((l) => (
-                            <tr key={l.staffId}>
-                              <td className="px-2 py-1.5">
-                                {l.fullName}
-                                <div className="text-[var(--muted)]">{l.empCode}</div>
-                              </td>
-                              <td className="px-2 py-1.5">{l.uanNumber || "—"}</td>
-                              <td className="px-2 py-1.5">{formatInr(l.epfWages)}</td>
-                              <td className="px-2 py-1.5">{formatInr(l.pfEmployee)}</td>
-                              <td className="px-2 py-1.5">{formatInr(l.epsAmount)}</td>
-                              <td className="px-2 py-1.5">
-                                {formatInr(Math.max(0, l.pfEmployer - l.epsAmount))}
-                              </td>
-                              <td className="px-2 py-1.5">{formatInr(l.edliAmount)}</td>
-                              <td className="px-2 py-1.5 text-right">
-                                <RowActionMenu row={l} label="Staff actions" actions={[{ id: "open", label: "Open staff record", onSelect: (x) => { window.location.href = `/staff/${encodeURIComponent(String(x.staffId))}/edit`; } }]} />
-                              </td>
-                            </tr>
-                          ))}
-                        </ErpTableBody>
-                      </ErpTable>
-                    </ErpTableShell>
-                    <ErpTableShell className="overflow-x-auto">
-                      <ErpTable minWidth="min-w-[520px]" className="text-[11px]">
-                        <ErpTableHead>
-                          <tr>
-                            <th className="px-2 py-1.5 font-medium">Staff</th>
-                            <th className="px-2 py-1.5 font-medium">IP number</th>
-                            <th className="px-2 py-1.5 font-medium">IP contribution</th>
-                            <th className="px-2 py-1.5 font-medium">Employer</th>
-                            <th className="px-2 py-1.5 font-medium">Total</th>
-                            <th className="w-10 px-2 py-2" aria-label="Actions" />
-                          </tr>
-                        </ErpTableHead>
-                        <ErpTableBody>
-                          {b.lines
-                            .filter((l) => l.esicEmployee + l.esicEmployer > 0)
-                            .map((l) => (
-                              <tr key={l.staffId}>
-                                <td className="px-2 py-1.5">
-                                  {l.fullName}
-                                  <div className="text-[var(--muted)]">{l.empCode}</div>
-                                </td>
-                                <td className="px-2 py-1.5">{l.esicIpNumber || "—"}</td>
-                                <td className="px-2 py-1.5">{formatInr(l.esicEmployee)}</td>
-                                <td className="px-2 py-1.5">{formatInr(l.esicEmployer)}</td>
-                                <td className="px-2 py-1.5 font-semibold">
-                                  {formatInr(l.esicEmployee + l.esicEmployer)}
-                                </td>
-                                <td className="px-2 py-1.5 text-right">
-                                  <RowActionMenu row={l} label="Staff actions" actions={[{ id: "open", label: "Open staff record", onSelect: (x) => { window.location.href = `/staff/${encodeURIComponent(String(x.staffId))}/edit`; } }]} />
-                                </td>
-                              </tr>
-                            ))}
-                        </ErpTableBody>
-                      </ErpTable>
-                    </ErpTableShell>
-                  </div>
+                  <RemitBatchTables lines={b.lines} />
                 ) : null}
 
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -517,6 +446,112 @@ export function StatutoryRemitPanel() {
           ) : null}
         </ul>
       </div>
+    </div>
+  );
+}
+
+/** One batch's PF and ESIC tables, each sortable by its own columns. */
+function RemitBatchTables({ lines }: { lines: StatutoryRemitLine[] }) {
+  const pfSort = useTableSort(
+    lines,
+    {
+      staff: (l) => l.fullName,
+      uan: (l) => l.uanNumber,
+      wages: (l) => l.epfWages,
+      ee: (l) => l.pfEmployee,
+      eps: (l) => l.epsAmount,
+      er: (l) => Math.max(0, l.pfEmployer - l.epsAmount),
+      edli: (l) => l.edliAmount,
+    },
+    "staff",
+  );
+  const esicLines = useMemo(
+    () => lines.filter((l) => l.esicEmployee + l.esicEmployer > 0),
+    [lines],
+  );
+  const esicSort = useTableSort(
+    esicLines,
+    {
+      staff: (l) => l.fullName,
+      ip: (l) => l.esicIpNumber,
+      ee: (l) => l.esicEmployee,
+      er: (l) => l.esicEmployer,
+      total: (l) => l.esicEmployee + l.esicEmployer,
+    },
+    "staff",
+  );
+  return (
+    <div className="mt-3 space-y-3">
+      <ErpTableShell className="overflow-x-auto" exportAs="pf_ecr" exportTitle="PF ECR">
+        <ErpTable minWidth="min-w-[720px]" className="text-[11px]">
+          <ErpTableHead>
+            <tr>
+              <ErpSortTh sort={pfSort} field="staff" className="px-2 py-1.5 font-medium">Staff</ErpSortTh>
+              <ErpSortTh sort={pfSort} field="uan" className="px-2 py-1.5 font-medium">UAN</ErpSortTh>
+              <ErpSortTh sort={pfSort} field="wages" className="px-2 py-1.5 font-medium">EPF wages</ErpSortTh>
+              <ErpSortTh sort={pfSort} field="ee" className="px-2 py-1.5 font-medium">EE</ErpSortTh>
+              <ErpSortTh sort={pfSort} field="eps" className="px-2 py-1.5 font-medium">EPS</ErpSortTh>
+              <ErpSortTh sort={pfSort} field="er" className="px-2 py-1.5 font-medium">ER</ErpSortTh>
+              <ErpSortTh sort={pfSort} field="edli" className="px-2 py-1.5 font-medium">EDLI</ErpSortTh>
+              <th className="w-10 px-2 py-2" aria-label="Actions" />
+            </tr>
+          </ErpTableHead>
+          <ErpTableBody>
+            {pfSort.rows.map((l) => (
+              <tr key={l.staffId}>
+                <td className="px-2 py-1.5">
+                  {l.fullName}
+                  <div className="text-[var(--muted)]">{l.empCode}</div>
+                </td>
+                <td className="px-2 py-1.5">{l.uanNumber || "—"}</td>
+                <td className="px-2 py-1.5">{formatInr(l.epfWages)}</td>
+                <td className="px-2 py-1.5">{formatInr(l.pfEmployee)}</td>
+                <td className="px-2 py-1.5">{formatInr(l.epsAmount)}</td>
+                <td className="px-2 py-1.5">
+                  {formatInr(Math.max(0, l.pfEmployer - l.epsAmount))}
+                </td>
+                <td className="px-2 py-1.5">{formatInr(l.edliAmount)}</td>
+                <td className="px-2 py-1.5 text-right">
+                  <RowActionMenu row={l} label="Staff actions" actions={[{ id: "open", label: "Open staff record", onSelect: (x) => { window.location.href = `/staff/${encodeURIComponent(String(x.staffId))}/edit`; } }]} />
+                </td>
+              </tr>
+            ))}
+          </ErpTableBody>
+        </ErpTable>
+      </ErpTableShell>
+      <ErpTableShell className="overflow-x-auto">
+        <ErpTable minWidth="min-w-[520px]" className="text-[11px]">
+          <ErpTableHead>
+            <tr>
+              <ErpSortTh sort={esicSort} field="staff" className="px-2 py-1.5 font-medium">Staff</ErpSortTh>
+              <ErpSortTh sort={esicSort} field="ip" className="px-2 py-1.5 font-medium">IP number</ErpSortTh>
+              <ErpSortTh sort={esicSort} field="ee" className="px-2 py-1.5 font-medium">IP contribution</ErpSortTh>
+              <ErpSortTh sort={esicSort} field="er" className="px-2 py-1.5 font-medium">Employer</ErpSortTh>
+              <ErpSortTh sort={esicSort} field="total" className="px-2 py-1.5 font-medium">Total</ErpSortTh>
+              <th className="w-10 px-2 py-2" aria-label="Actions" />
+            </tr>
+          </ErpTableHead>
+          <ErpTableBody>
+            {esicSort.rows.map((l) => (
+                <tr key={l.staffId}>
+                  <td className="px-2 py-1.5">
+                    {l.fullName}
+                    <div className="text-[var(--muted)]">{l.empCode}</div>
+                  </td>
+                  <td className="px-2 py-1.5">{l.esicIpNumber || "—"}</td>
+                  <td className="px-2 py-1.5">{formatInr(l.esicEmployee)}</td>
+                  <td className="px-2 py-1.5">{formatInr(l.esicEmployer)}</td>
+                  <td className="px-2 py-1.5 font-semibold">
+                    {formatInr(l.esicEmployee + l.esicEmployer)}
+                  </td>
+                  <td className="px-2 py-1.5 text-right">
+                    <RowActionMenu row={l} label="Staff actions" actions={[{ id: "open", label: "Open staff record", onSelect: (x) => { window.location.href = `/staff/${encodeURIComponent(String(x.staffId))}/edit`; } }]} />
+                  </td>
+                </tr>
+              ))}
+          </ErpTableBody>
+        </ErpTable>
+      </ErpTableShell>
     </div>
   );
 }

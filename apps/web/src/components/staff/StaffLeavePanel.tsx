@@ -238,6 +238,17 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
     });
   }, [hr, masters, roster, ay, isManager, selfStaff]);
 
+  // Leave types are configurable, so each type column sorts by days left.
+  type BalanceRow = (typeof balances)[number];
+  const balanceColumns: Record<string, (r: BalanceRow) => number | string | null> = {
+    staff: (r) => r.staff.fullName,
+  };
+  for (const t of hr?.leaveTypes ?? []) {
+    balanceColumns[`t_${t.code}`] = (r) =>
+      r.byType.find((b) => b.code === t.code)?.remaining ?? null;
+  }
+  const balanceSort = useTableSort(balances, balanceColumns, "staff");
+
   function flash(msg: string, isError = false) {
     if (isError) {
       setError(msg);
@@ -796,17 +807,17 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
           <ErpTable>
             <ErpTableHead>
               <tr>
-                <th className="px-4 py-2">Staff</th>
+                <ErpSortTh sort={balanceSort} field="staff" className="px-4 py-2">Staff</ErpSortTh>
                 {hr.leaveTypes.map((t) => (
-                  <th key={t.code} className="px-3 py-2 text-center">
+                  <ErpSortTh key={t.code} sort={balanceSort} field={`t_${t.code}`} className="px-3 py-2 text-center">
                     {t.code}
-                  </th>
+                  </ErpSortTh>
                 ))}
                 <th className="w-10 px-2 py-2" aria-label="Actions" />
               </tr>
             </ErpTableHead>
             <ErpTableBody>
-              {balances.map(({ staff, byType }) => (
+              {balanceSort.rows.map(({ staff, byType }) => (
                 <tr key={staff.id}>
                   <td className="px-4 py-2 font-medium text-[var(--brand-deep)]">
                     {staff.empCode} · {staff.fullName}
@@ -909,7 +920,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
                 <ErpSortTh sort={leaveSort} field="days">Days</ErpSortTh>
                 <ErpSortTh sort={leaveSort} field="status">Status</ErpSortTh>
                 <ErpSortTh sort={leaveSort} field="origin">Origin</ErpSortTh>
-                <th className="px-3 py-2">By</th>
+                <ErpSortTh sort={leaveSort} field="by" className="px-3 py-2">By</ErpSortTh>
                 <th className="w-10 px-2 py-2" aria-label="Actions" />
               </tr>
             </ErpTableHead>
