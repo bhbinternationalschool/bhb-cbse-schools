@@ -1480,12 +1480,26 @@ export function ExamsWorkspace() {
     return { sheet: built } as const;
   }, [tab, tick, examTermId, classId, sectionId, roster, classLabel, ay, examDeps]);
 
-  // The result sheet, best first; grade and pass sort too. Decision is a picker, not a value.
+  // The result sheet, best first; every column sorts (decision by its label).
   const resultSort = useTableSort(
     classResult?.sheet?.rows ?? [],
     {
       percent: (row) => row.card ? row.card.percent : -1,
       grade: (row) => row.card?.overallGrade ?? "",
+      student: (row) => row.student.fullName,
+      attendance: (row) => row.card?.attendance?.percent ?? null,
+      pass: (row) => (row.card ? row.passed : null),
+      decision: (row) => promotionDecisionLabel(row.record?.decision ?? "pending"),
+      // Mirrors the Next class cell, so the order matches what is shown.
+      next: (row) => {
+        const d = row.record?.decision ?? "pending";
+        if (d === "promoted") {
+          return row.nextClass
+            ? `${row.nextClass.name}${row.nextSection ? `-${row.nextSection.name}` : ""}`
+            : "No next class";
+        }
+        return d === "detained" ? "Same class" : null;
+      },
     },
     "percent",
     "desc",
@@ -2951,15 +2965,15 @@ export function ExamsWorkspace() {
                 <ErpTable minWidth="min-w-full" className="text-xs sm:text-sm">
                   <ErpTableHead>
                     <tr>
-                      <th className="px-4 py-2.5 font-bold text-[var(--brand-deep)]">
+                      <ErpSortTh sort={resultSort} field="student" className="px-4 py-2.5 font-bold text-[var(--brand-deep)]">
                         Student
-                      </th>
+                      </ErpSortTh>
                       <ErpSortTh sort={resultSort} field="percent" align="right" className="px-4 py-2.5 text-right font-bold">%</ErpSortTh>
                       <ErpSortTh sort={resultSort} field="grade" className="px-4 py-2.5 text-right font-bold">Grade</ErpSortTh>
-                      <th className="px-4 py-2.5 font-bold" title="Present / working days — working days from the Masters holiday calendar, counted from the day after admission">Attendance</th>
-                      <th className="px-4 py-2.5 font-bold">Pass</th>
-                      <th className="px-4 py-2.5 font-bold">Decision</th>
-                      <th className="px-4 py-2.5 font-bold">Next class</th>
+                      <ErpSortTh sort={resultSort} field="attendance" className="px-4 py-2.5 font-bold"><span title="Present / working days — working days from the Masters holiday calendar, counted from the day after admission">Attendance</span></ErpSortTh>
+                      <ErpSortTh sort={resultSort} field="pass" className="px-4 py-2.5 font-bold">Pass</ErpSortTh>
+                      <ErpSortTh sort={resultSort} field="decision" className="px-4 py-2.5 font-bold">Decision</ErpSortTh>
+                      <ErpSortTh sort={resultSort} field="next" className="px-4 py-2.5 font-bold">Next class</ErpSortTh>
                     </tr>
                   </ErpTableHead>
                   <ErpTableBody>

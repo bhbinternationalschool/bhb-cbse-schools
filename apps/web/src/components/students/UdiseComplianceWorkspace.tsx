@@ -1107,7 +1107,7 @@ export function UdiseComplianceWorkspace({
                 <ErpTableHead>
                   <tr>
                     <th className="px-2 py-2 font-medium">#</th>
-                    <ErpSortTh sort={udiseSort} field="student" className="px-2 py-2 font-medium">Student</ErpSortTh>
+                    <ErpSortTh sort={unregSort} field="student" className="px-2 py-2 font-medium">Student</ErpSortTh>
                     <ErpSortTh sort={unregSort} field="klass" className="px-2 py-2 font-medium">Class</ErpSortTh>
                     <th className="px-2 py-2 font-medium">Aadhaar</th>
                     <ErpSortTh sort={unregSort} field="reason" className="px-2 py-2 font-medium">Reason</ErpSortTh>
@@ -1291,7 +1291,7 @@ export function UdiseComplianceWorkspace({
             <ErpTableHead>
               <tr>
                 <th className="px-2 py-2 font-medium">Priority</th>
-                <ErpSortTh sort={unregSort} field="student" className="px-2 py-2 font-medium">Student</ErpSortTh>
+                <ErpSortTh sort={udiseSort} field="student" className="px-2 py-2 font-medium">Student</ErpSortTh>
                 <ErpSortTh sort={udiseSort} field="klass" className="px-2 py-2 font-medium">Class / UDISE+</ErpSortTh>
                 <th className="px-2 py-2 font-medium">Missing</th>
                 <th className="px-2 py-2 font-medium">Aadhaar / validation</th>

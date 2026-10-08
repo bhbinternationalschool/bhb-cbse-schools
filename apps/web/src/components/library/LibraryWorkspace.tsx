@@ -398,6 +398,27 @@ export function LibraryWorkspace() {
     histStudentId,
     histStaffId,
   ]);
+  // Newest loan first, as the history always opened.
+  const historySort = useTableSort(
+    filteredHistory,
+    {
+      title: (i) => titleForIssue(i),
+      accession: (i) => {
+        const acc = accessionForIssue(i);
+        return acc === "—" ? null : acc;
+      },
+      borrower: (i) =>
+        borrowerLabel(i, { students: sis?.students, staff: staffRoster }),
+      issued: (i) => i.issuedOn,
+      due: (i) => i.dueOn || null,
+      // Still out: no return date yet, so it sorts with the blanks.
+      returned: (i) => i.returnedOn || null,
+      condition: (i) => conditionLabel(i.issueCondition),
+      fine: (i) => i.finePaise || 0,
+    },
+    "issued",
+    "desc",
+  );
 
   function flashErr(msg: string) {
     setError(msg);
@@ -1458,14 +1479,14 @@ export function LibraryWorkspace() {
               <ErpTable minWidth="min-w-[64rem]">
                 <ErpTableHead>
                   <tr>
-                    <th className="px-4 py-2.5 font-bold">Title</th>
-                    <th className="px-4 py-2.5 font-bold">Accession</th>
-                    <th className="px-4 py-2.5 font-bold">Borrower</th>
-                    <th className="px-4 py-2.5 font-bold">Issued</th>
-                    <th className="px-4 py-2.5 font-bold">Due</th>
-                    <th className="px-4 py-2.5 font-bold">Returned</th>
-                    <th className="px-4 py-2.5 font-bold">Condition</th>
-                    <th className="px-4 py-2.5 font-bold">Fine</th>
+                    <ErpSortTh sort={historySort} field="title" className="px-4 py-2.5 font-bold">Title</ErpSortTh>
+                    <ErpSortTh sort={historySort} field="accession" className="px-4 py-2.5 font-bold">Accession</ErpSortTh>
+                    <ErpSortTh sort={historySort} field="borrower" className="px-4 py-2.5 font-bold">Borrower</ErpSortTh>
+                    <ErpSortTh sort={historySort} field="issued" className="px-4 py-2.5 font-bold">Issued</ErpSortTh>
+                    <ErpSortTh sort={historySort} field="due" className="px-4 py-2.5 font-bold">Due</ErpSortTh>
+                    <ErpSortTh sort={historySort} field="returned" className="px-4 py-2.5 font-bold">Returned</ErpSortTh>
+                    <ErpSortTh sort={historySort} field="condition" className="px-4 py-2.5 font-bold">Condition</ErpSortTh>
+                    <ErpSortTh sort={historySort} field="fine" className="px-4 py-2.5 font-bold">Fine</ErpSortTh>
                   </tr>
                 </ErpTableHead>
                 <ErpTableBody>
@@ -1479,7 +1500,7 @@ export function LibraryWorkspace() {
                       </td>
                     </tr>
                   ) : (
-                    filteredHistory.map((issue) => (
+                    historySort.rows.map((issue) => (
                       <tr key={issue.id} className="hover:bg-[var(--surface-sunken)]">
                         <td className="px-4 py-2 font-medium">
                           {titleForIssue(issue)}

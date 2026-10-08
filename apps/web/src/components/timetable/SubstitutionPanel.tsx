@@ -71,6 +71,25 @@ export function SubstitutionPanel(props: {
   const [blockPreview, setBlockPreview] = useState<AutoArrangeResult | null>(
     null,
   );
+  const blockSubs = useMemo(
+    () => blockPreview?.substitutions ?? [],
+    [blockPreview],
+  );
+  // The block preview is its own list, so it gets its own sort.
+  const blockSort = useTableSort(
+    blockSubs,
+    {
+      period: (s) => s.periodNo,
+      klass: (s) => classSectionLabel(masters, s.classId, s.sectionId),
+      subject: (s) => subjectLabel(masters, s.subjectId),
+      teacher: (s) =>
+        s.substituteTeacherId
+          ? teacherLabel(masters, s.substituteTeacherId)
+          : null,
+    },
+    "period",
+    "asc",
+  );
   const [blockBusy, setBlockBusy] = useState(false);
   const [confirmedBlock, setConfirmedBlock] = useState<{
     teacherLabel: string;
@@ -652,16 +671,14 @@ export function SubstitutionPanel(props: {
                 <ErpTable minWidth="min-w-[560px]" className="border-collapse">
                   <ErpTableHead>
                     <tr>
-                      <ErpSortTh sort={subSort} field="period" className="border border-[var(--border)] p-2">Period</ErpSortTh>
-                      <ErpSortTh sort={subSort} field="klass" className="border border-[var(--border)] p-2">Class</ErpSortTh>
-                      <ErpSortTh sort={subSort} field="subject" className="border border-[var(--border)] p-2">Subject</ErpSortTh>
-                      <th className="border border-[var(--border)] p-2">
-                        Substitute
-                      </th>
+                      <ErpSortTh sort={blockSort} field="period" className="border border-[var(--border)] p-2">Period</ErpSortTh>
+                      <ErpSortTh sort={blockSort} field="klass" className="border border-[var(--border)] p-2">Class</ErpSortTh>
+                      <ErpSortTh sort={blockSort} field="subject" className="border border-[var(--border)] p-2">Subject</ErpSortTh>
+                      <ErpSortTh sort={blockSort} field="teacher" className="border border-[var(--border)] p-2">Substitute</ErpSortTh>
                     </tr>
                   </ErpTableHead>
                   <ErpTableBody>
-                    {blockPreview.substitutions.map((s) => (
+                    {blockSort.rows.map((s) => (
                       <tr key={s.id}>
                         <td className="border border-[var(--border)] p-2 font-semibold">
                           P{s.periodNo}
@@ -764,15 +781,9 @@ export function SubstitutionPanel(props: {
             <ErpTable minWidth="min-w-[720px]" className="border-collapse">
               <ErpTableHead>
                 <tr>
-                  <th className="border border-[var(--border)] p-2">
-                    Period
-                  </th>
-                  <th className="border border-[var(--border)] p-2">
-                    Class
-                  </th>
-                  <th className="border border-[var(--border)] p-2">
-                    Subject
-                  </th>
+                  <ErpSortTh sort={subSort} field="period" className="border border-[var(--border)] p-2">Period</ErpSortTh>
+                  <ErpSortTh sort={subSort} field="klass" className="border border-[var(--border)] p-2">Class</ErpSortTh>
+                  <ErpSortTh sort={subSort} field="subject" className="border border-[var(--border)] p-2">Subject</ErpSortTh>
                   <ErpSortTh sort={subSort} field="absent" className="border border-[var(--border)] p-2">Absent teacher</ErpSortTh>
                   <th className="border border-[var(--border)] p-2">
                     Substitute

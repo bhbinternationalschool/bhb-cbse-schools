@@ -63,6 +63,14 @@ export function FreePeriodsPanel({
       return true;
     });
   }, [dayGrid, query, onlyFree, periodNo]);
+  const gridSort = useTableSort(
+    gridRows,
+    {
+      teacher: (r) => r.teacherName,
+      free: (r) => r.freeCount,
+    },
+    "teacher",
+  );
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -171,7 +179,7 @@ export function FreePeriodsPanel({
             <ErpTable minWidth="min-w-[640px]">
               <ErpTableHead sticky>
                 <tr>
-                  <th className="sticky left-0 z-20 bg-[var(--surface-sunken)] px-3 py-2 text-left font-semibold">Teacher</th>
+                  <ErpSortTh sort={gridSort} field="teacher" className="sticky left-0 z-20 bg-[var(--surface-sunken)] px-3 py-2 text-left font-semibold">Teacher</ErpSortTh>
                   {dayGrid.periods.map((p) => (
                     <th
                       key={p.no}
@@ -181,12 +189,12 @@ export function FreePeriodsPanel({
                       <span className="block text-[10px] font-normal text-[var(--muted)]">{p.startTime}–{p.endTime}</span>
                     </th>
                   ))}
-                  <th className="px-2 py-2 text-center font-semibold">Free</th>
+                  <ErpSortTh sort={gridSort} field="free" className="px-2 py-2 text-center font-semibold">Free</ErpSortTh>
                   <th className="w-10 px-2 py-2" aria-label="Actions" />
                 </tr>
               </ErpTableHead>
               <ErpTableBody>
-                {gridRows.map((r) => (
+                {gridSort.rows.map((r) => (
                   <tr key={r.teacherId}>
                     <td className="sticky left-0 z-[1] bg-[var(--card)] px-3 py-1.5">
                       <span className="block font-medium text-[var(--brand-deep)]">{r.teacherName}</span>

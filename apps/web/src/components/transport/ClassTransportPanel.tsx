@@ -9,6 +9,7 @@ import { serviceModeLabel, type TransportState } from "@/lib/transport";
 import {
   buildClassTransportRows,
   buildStudentTransportProfiles,
+  type ClassTransportRow,
 } from "@/lib/transportPlanner";
 import {
   ErpTable,
@@ -16,6 +17,7 @@ import {
   ErpTableHead,
 } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 /**
  * Who rides, by class and section.
@@ -147,75 +149,98 @@ export function ClassTransportPanel({
               Nobody in this section is on a bus.
             </p>
           ) : (
-            <div className="overflow-x-auto border-t border-[var(--border)]">
-              <ErpTable minWidth="min-w-[38rem]">
-                <ErpTableHead>
-                  <tr>
-                    <th className="px-3 py-2 text-left font-bold">Student</th>
-                    <th className="px-3 py-2 text-left font-bold">Adm no</th>
-                    <th className="px-3 py-2 text-left font-bold">Bus</th>
-                    <th className="px-3 py-2 text-left font-bold">Stop</th>
-                    <th className="px-3 py-2 text-right font-bold">
-                      Per month
-                    </th>
-                    <th className="w-10 px-2 py-2" aria-label="Actions" />
-                  </tr>
-                </ErpTableHead>
-                <ErpTableBody>
-                  {row.riders.map((r) => (
-                    <tr
-                      key={r.studentId}
-                      className="border-t border-[var(--border)]"
-                    >
-                      <td className="px-3 py-1.5 font-semibold text-[var(--brand-deep)]">
-                        {r.fullName}
-                        {r.serviceMode !== "both" ? (
-                          <span className="ml-1 rounded bg-[var(--surface-sunken)] px-1 text-[9px] font-bold uppercase text-[var(--muted)]">
-                            {serviceModeLabel(r.serviceMode)}
-                          </span>
-                        ) : null}
-                        {r.boardingSuspended ? (
-                          <span className="ml-1 font-bold text-[var(--danger)]">
-                            suspended
-                          </span>
-                        ) : null}
-                      </td>
-                      <td className="px-3 py-1.5 text-[var(--muted)]">
-                        {r.admissionNo}
-                      </td>
-                      <td className="px-3 py-1.5">{r.routeLabel}</td>
-                      <td className="px-3 py-1.5">
-                        {r.stopLinkBroken ? (
-                          <span
-                            className="font-semibold text-[var(--warning)]"
-                            title="Points at a stop that no longer exists — repair it from Riders by bus"
-                          >
-                            ⚠ link broken
-                          </span>
-                        ) : (
-                          r.stopName || "—"
-                        )}
-                      </td>
-                      <td className="px-3 py-1.5 text-right tabular-nums">
-                        {r.monthlyFeePaise > 0 ? (
-                          formatInr(r.monthlyFeePaise)
-                        ) : (
-                          <span className="font-semibold text-[var(--danger)]">
-                            nil
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-2 py-1.5 text-right">
-                        <RowActionMenu row={r} label="Rider actions" actions={[{ id: "open", label: "Open student profile", onSelect: (x) => { window.location.href = `/students/${encodeURIComponent(String(x.studentId))}/edit`; } }]} />
-                      </td>
-                    </tr>
-                  ))}
-                </ErpTableBody>
-              </ErpTable>
-            </div>
+            <ClassRidersTable riders={row.riders} />
           )}
         </section>
       ))}
+    </div>
+  );
+}
+
+/** One section's riders; each section keeps its own sort. */
+function ClassRidersTable({
+  riders,
+}: {
+  riders: ClassTransportRow["riders"];
+}) {
+  const sort = useTableSort(
+    riders,
+    {
+      student: (r) => r.fullName,
+      adm: (r) => r.admissionNo,
+      bus: (r) => r.routeLabel,
+      // A broken stop link is shown as a warning, not a stop — it sorts last.
+      stop: (r) => (r.stopLinkBroken ? null : r.stopName),
+      fee: (r) => r.monthlyFeePaise,
+    },
+    "student",
+  );
+  return (
+    <div className="overflow-x-auto border-t border-[var(--border)]">
+      <ErpTable minWidth="min-w-[38rem]">
+        <ErpTableHead>
+          <tr>
+            <ErpSortTh sort={sort} field="student" className="px-3 py-2 text-left font-bold">Student</ErpSortTh>
+            <ErpSortTh sort={sort} field="adm" className="px-3 py-2 text-left font-bold">Adm no</ErpSortTh>
+            <ErpSortTh sort={sort} field="bus" className="px-3 py-2 text-left font-bold">Bus</ErpSortTh>
+            <ErpSortTh sort={sort} field="stop" className="px-3 py-2 text-left font-bold">Stop</ErpSortTh>
+            <ErpSortTh sort={sort} field="fee" align="right" className="px-3 py-2 text-right font-bold">
+              Per month
+            </ErpSortTh>
+            <th className="w-10 px-2 py-2" aria-label="Actions" />
+          </tr>
+        </ErpTableHead>
+        <ErpTableBody>
+          {sort.rows.map((r) => (
+            <tr
+              key={r.studentId}
+              className="border-t border-[var(--border)]"
+            >
+              <td className="px-3 py-1.5 font-semibold text-[var(--brand-deep)]">
+                {r.fullName}
+                {r.serviceMode !== "both" ? (
+                  <span className="ml-1 rounded bg-[var(--surface-sunken)] px-1 text-[9px] font-bold uppercase text-[var(--muted)]">
+                    {serviceModeLabel(r.serviceMode)}
+                  </span>
+                ) : null}
+                {r.boardingSuspended ? (
+                  <span className="ml-1 font-bold text-[var(--danger)]">
+                    suspended
+                  </span>
+                ) : null}
+              </td>
+              <td className="px-3 py-1.5 text-[var(--muted)]">
+                {r.admissionNo}
+              </td>
+              <td className="px-3 py-1.5">{r.routeLabel}</td>
+              <td className="px-3 py-1.5">
+                {r.stopLinkBroken ? (
+                  <span
+                    className="font-semibold text-[var(--warning)]"
+                    title="Points at a stop that no longer exists — repair it from Riders by bus"
+                  >
+                    ⚠ link broken
+                  </span>
+                ) : (
+                  r.stopName || "—"
+                )}
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums">
+                {r.monthlyFeePaise > 0 ? (
+                  formatInr(r.monthlyFeePaise)
+                ) : (
+                  <span className="font-semibold text-[var(--danger)]">
+                    nil
+                  </span>
+                )}
+              </td>
+              <td className="px-2 py-1.5 text-right">
+                <RowActionMenu row={r} label="Rider actions" actions={[{ id: "open", label: "Open student profile", onSelect: (x) => { window.location.href = `/students/${encodeURIComponent(String(x.studentId))}/edit`; } }]} />
+              </td>
+            </tr>
+          ))}
+        </ErpTableBody>
+      </ErpTable>
     </div>
   );
 }

@@ -302,6 +302,24 @@ export function AdmissionFieldSurveyPanel({
       return b === beatFilter;
     });
   }, [leads, beatFilter]);
+  // Newest capture first, as the list always opened.
+  const leadSort = useTableSort(
+    filtered,
+    {
+      lead: (l) => l.enquiryNo,
+      beat: (l) =>
+        state.surveyBeats.find((b) => b.id === l.surveyBeatId)?.name ||
+        (l.campaignNote || "").trim() ||
+        (l.locality || "").trim() ||
+        null,
+      child: (l) => l.childName,
+      status: (l) => l.stage,
+      agent: (l) => l.assignedTo || l.createdBy || null,
+      date: (l) => l.leadDate || l.createdAt || null,
+    },
+    "date",
+    "desc",
+  );
 
   const openSelectedIds = useMemo(
     () =>
@@ -1495,18 +1513,18 @@ export function AdmissionFieldSurveyPanel({
             <ErpTableHead>
               <tr>
                 {canEdit ? <th className="px-2 py-2"> </th> : null}
-                <th className="px-3 py-2">Lead</th>
-                <th className="px-3 py-2">Beat</th>
-                <th className="px-3 py-2">Child / parent</th>
-                <th className="px-3 py-2">Status</th>
-                <th className="px-3 py-2">Agent</th>
+                <ErpSortTh sort={leadSort} field="lead" className="px-3 py-2">Lead</ErpSortTh>
+                <ErpSortTh sort={leadSort} field="beat" className="px-3 py-2">Beat</ErpSortTh>
+                <ErpSortTh sort={leadSort} field="child" className="px-3 py-2">Child / parent</ErpSortTh>
+                <ErpSortTh sort={leadSort} field="status" className="px-3 py-2">Status</ErpSortTh>
+                <ErpSortTh sort={leadSort} field="agent" className="px-3 py-2">Agent</ErpSortTh>
                 <th className="px-3 py-2">Photo</th>
-                <th className="px-3 py-2">Date</th>
+                <ErpSortTh sort={leadSort} field="date" className="px-3 py-2">Date</ErpSortTh>
                 <th className="w-10 px-2 py-2" aria-label="Actions" />
               </tr>
             </ErpTableHead>
             <ErpTableBody hoverable>
-              {filtered.map((l) => {
+              {leadSort.rows.map((l) => {
                 const beatLabel =
                   state.surveyBeats.find((b) => b.id === l.surveyBeatId)
                     ?.name ||

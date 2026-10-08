@@ -98,6 +98,8 @@ export function StaffRequestsPanel() {
       type: (t) => t.type,
       subject: (t) => t.subject,
       status: (t) => t.status,
+      assignedTo: (t) =>
+        t.assignedToStaffId ? staffLabel(t.assignedToStaffId) : null,
       date: (t) => t.updatedAt || t.createdAt,
     },
     "date",
@@ -177,11 +179,11 @@ export function StaffRequestsPanel() {
           <ErpTable>
             <ErpTableHead>
               <tr>
-                <th className="px-4 py-2">Raised by</th>
+                <ErpSortTh sort={reqSort} field="raisedBy" className="px-4 py-2">Raised by</ErpSortTh>
                 <ErpSortTh sort={reqSort} field="type">Type</ErpSortTh>
                 <ErpSortTh sort={reqSort} field="subject">Subject</ErpSortTh>
                 <ErpSortTh sort={reqSort} field="status">Status</ErpSortTh>
-                {isManager ? <th className="px-3 py-2">Assigned to</th> : null}
+                {isManager ? <ErpSortTh sort={reqSort} field="assignedTo" className="px-3 py-2">Assigned to</ErpSortTh> : null}
                 <ErpSortTh sort={reqSort} field="date">Date</ErpSortTh>
                 {isManager ? <th className="px-3 py-2">Action</th> : null}
               </tr>

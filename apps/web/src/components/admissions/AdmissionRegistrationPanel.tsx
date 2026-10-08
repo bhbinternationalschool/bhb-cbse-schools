@@ -216,6 +216,19 @@ export function AdmissionRegistrationPanel({
     () => (masters.classes ?? []).filter((c) => c.isActive),
     [masters],
   );
+  const admissionsSort = useTableSort(
+    yearAdmissions,
+    {
+      student: ({ student: s }) => s.fullName,
+      klass: ({ student: s }) =>
+        classes.find((c) => c.id === s.classId)?.name ?? null,
+      father: ({ student: s }) => s.fatherName || null,
+      // Money received so far; a registration never started has no figure.
+      regFee: ({ lead }) =>
+        lead ? registrationCollectedPaise(state, lead.id) : null,
+    },
+    "student",
+  );
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected =
@@ -988,10 +1001,10 @@ export function AdmissionRegistrationPanel({
                     label="Select all admissions shown"
                   />
                 </th>
-                <th className="px-3 py-2 text-left font-medium">Student</th>
-                <th className="px-3 py-2 text-left font-medium">Class</th>
-                <th className="px-3 py-2 text-left font-medium">Father · mobile</th>
-                <th className="px-3 py-2 text-right font-medium">Reg. fee</th>
+                <ErpSortTh sort={admissionsSort} field="student" className="px-3 py-2 text-left font-medium">Student</ErpSortTh>
+                <ErpSortTh sort={admissionsSort} field="klass" className="px-3 py-2 text-left font-medium">Class</ErpSortTh>
+                <ErpSortTh sort={admissionsSort} field="father" className="px-3 py-2 text-left font-medium">Father · mobile</ErpSortTh>
+                <ErpSortTh sort={admissionsSort} field="regFee" align="right" className="px-3 py-2 text-right font-medium">Reg. fee</ErpSortTh>
                 <th className="px-3 py-2 text-right font-medium" />
               </tr>
             </ErpTableHead>
@@ -999,7 +1012,7 @@ export function AdmissionRegistrationPanel({
               {yearAdmissions.length === 0 ? (
                 <MastersEmptyRow colSpan={5} label="No admissions recorded this session yet" />
               ) : (
-                yearAdmissions.map(({ student: s, lead }) => {
+                admissionsSort.rows.map(({ student: s, lead }) => {
                   const cls =
                     classes.find((c) => c.id === s.classId)?.name ?? "—";
                   const collected = lead

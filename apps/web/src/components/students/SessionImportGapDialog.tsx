@@ -179,7 +179,7 @@ export function SessionImportGapDialog({
               </tr>
             </ErpTableHead>
             <ErpTableBody>
-              {missing.map((row) => {
+              {gapSort.rows.map((row) => {
                 const action = choices[row.studentId] ?? "leave";
                 return (
                   <tr key={row.studentId}>

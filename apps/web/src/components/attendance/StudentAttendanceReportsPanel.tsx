@@ -20,6 +20,7 @@ import {
   ErpTableHead,
   ErpTableShell,
 } from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -63,6 +64,25 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
     columns: { key: string; header: string }[];
     rows: Record<string, string | number | null | undefined>[];
   } | null>(null);
+
+  // Every report column sorts; until a heading is clicked the rows keep the
+  // order the report produced. Numeric text ("12", "4.5") sorts as a number.
+  const previewRows = useMemo(() => preview?.rows ?? [], [preview]);
+  const previewColumns: Record<
+    string,
+    (row: Record<string, string | number | null | undefined>) => string | number | null
+  > = {};
+  for (const c of preview?.columns ?? []) {
+    previewColumns[c.key] = (row) => {
+      const v = row[c.key];
+      if (v == null) return null;
+      if (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v))) {
+        return Number(v);
+      }
+      return v;
+    };
+  }
+  const previewSort = useTableSort(previewRows, previewColumns, "__report_order__");
 
   useEffect(() => {
     setMasters(loadMasters());
@@ -543,14 +563,14 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
                 <ErpTableHead sticky>
                   <tr>
                     {preview.columns.map((c) => (
-                      <th key={c.key} className="px-3 py-2 whitespace-nowrap">
+                      <ErpSortTh key={c.key} sort={previewSort} field={c.key} className="px-3 py-2 whitespace-nowrap">
                         {c.header}
-                      </th>
+                      </ErpSortTh>
                     ))}
                   </tr>
                 </ErpTableHead>
                 <ErpTableBody>
-                  {preview.rows.map((row, i) => (
+                  {previewSort.rows.map((row, i) => (
                     <tr key={i}>
                       {preview.columns.map((c) => (
                         <td

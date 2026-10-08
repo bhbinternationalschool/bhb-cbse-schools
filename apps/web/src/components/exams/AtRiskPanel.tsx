@@ -30,6 +30,7 @@ import { openWaMe } from "@/lib/waMe";
 import { retentionOutreachText } from "@/lib/retentionOutreach";
 import { TENANT } from "@/lib/types";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 const LEVEL_TONE: Record<RiskLevel, string> = {
   high: "bg-[var(--danger)]/15 text-[var(--danger)]",
@@ -102,6 +103,19 @@ export function AtRiskPanel(props: {
     withMarks: rows.filter((r) => r.facts.percent != null).length,
   };
   const visible = showAll ? rows : flagged;
+  // Default keeps the pre-ranked order: highest risk score first (ties stay by name).
+  const riskSort = useTableSort(
+    visible,
+    {
+      risk: (x) => x.result.score,
+      student: (x) => x.facts.fullName,
+      why: (x) => x.result.flags.length,
+      term: (x) => x.facts.percent,
+      att: (x) => x.facts.attendancePercent,
+    },
+    "risk",
+    "desc",
+  );
 
   async function draftNotes() {
     if (!canEdit || busy || flagged.length === 0) return;
@@ -228,17 +242,17 @@ export function AtRiskPanel(props: {
           <ErpTable>
             <ErpTableHead>
               <tr>
-                <th className="px-3 py-2 text-left">Student</th>
-                <th className="px-2 py-2 text-left">Level</th>
-                <th className="px-2 py-2 text-left">Why</th>
-                <th className="px-2 py-2 text-right">{term.label}</th>
-                <th className="px-2 py-2 text-right">Att.</th>
+                <ErpSortTh sort={riskSort} field="student" className="px-3 py-2 text-left">Student</ErpSortTh>
+                <ErpSortTh sort={riskSort} field="risk" className="px-2 py-2 text-left">Level</ErpSortTh>
+                <ErpSortTh sort={riskSort} field="why" className="px-2 py-2 text-left">Why</ErpSortTh>
+                <ErpSortTh sort={riskSort} field="term" align="right" className="px-2 py-2 text-right">{term.label}</ErpSortTh>
+                <ErpSortTh sort={riskSort} field="att" align="right" className="px-2 py-2 text-right">Att.</ErpSortTh>
                 <th className="px-3 py-2 text-left">What to do (AI draft)</th>
                 <th className="w-10 px-2 py-2" aria-label="Actions" />
               </tr>
             </ErpTableHead>
             <ErpTableBody>
-              {visible.map(({ facts: f, result: r }: { facts: StudentRiskFacts; result: StudentRiskResult }) => {
+              {riskSort.rows.map(({ facts: f, result: r }: { facts: StudentRiskFacts; result: StudentRiskResult }) => {
                 const st = roster.find((s) => s.id === f.studentId);
                 const note = notes.get(f.studentId);
                 return (

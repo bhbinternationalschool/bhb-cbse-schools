@@ -42,8 +42,12 @@ export function useTableSort<
   initialDir: SortDir = "asc",
 ): TableSort<T, Extract<keyof C, string>> {
   type K = Extract<keyof C, string>;
-  const [field, setField] = useState<K>(initialField);
-  const [dir, setDir] = useState<SortDir>(initialDir);
+  // One state object, so a click is one pure update. Field and direction used
+  // to be two states with setDir called INSIDE setField's updater; React may
+  // run an updater twice (StrictMode does), which flipped the direction back
+  // and a second click on a heading never gave Z→A (found 8 Oct 2026).
+  const [state, setState] = useState<{ field: K; dir: SortDir }>({ field: initialField, dir: initialDir });
+  const { field, dir } = state;
 
   const sorted = useMemo(() => {
     const get = columns[field];
@@ -59,16 +63,11 @@ export function useTableSort<
     field,
     dir,
     toggle: (next: K) =>
-      setField((cur) => {
-        // Same column flips direction; a new column starts ascending, which is
-        // what people expect when they first click a heading.
-        if (cur === next) {
-          setDir((d) => nextSortDir(d));
-          return cur;
-        }
-        setDir("asc");
-        return next;
-      }),
+      // Same column flips direction; a new column starts ascending, which is
+      // what people expect when they first click a heading.
+      setState((cur) =>
+        cur.field === next ? { field: cur.field, dir: nextSortDir(cur.dir) } : { field: next, dir: "asc" },
+      ),
   };
 }
 
