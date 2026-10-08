@@ -37,6 +37,12 @@ export async function POST(req: Request) {
       bodyBytes: raw.length,
       bodyLooksJson: raw.trimStart().startsWith("{"),
       bodyHasSignatureField: /(^|&|")signature("|=)/.test(raw),
+      // Yes/no only: is it signed with some OTHER Cashfree secret we hold?
+      // (8 Oct: our own signed probe passed, Cashfree's Test did not.)
+      matchesPgSecret: !!signature && verifyPayoutWebhook(raw, timestamp, signature, process.env.CASHFREE_SECRET_KEY?.trim() || ""),
+      timestampSkewSeconds: Number.isFinite(Number(timestamp))
+        ? Math.round(Date.now() / 1000 - (Number(timestamp) > 1e12 ? Number(timestamp) / 1000 : Number(timestamp)))
+        : null,
     }));
     return NextResponse.json({ ok: false, error: "Invalid signature" }, { status: 400 });
   }
