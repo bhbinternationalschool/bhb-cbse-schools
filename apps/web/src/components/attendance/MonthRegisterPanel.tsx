@@ -1,11 +1,10 @@
 "use client";
-
-// ratchet-allow: grids_without_row_menu — an attendance ENTRY grid: every cell is an input (like the marks-entry grids); a per-row menu has nothing to act on.
+// ratchet-allow: grids_without_row_menu — an attendance mark-entry grid; each cell is the action, a row is a child, not a record to act on
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ErpTable } from "@/components/ui/erp-roster";
 import type { AttendanceStatus } from "@/lib/attendance";
 import type { MonthDay, MonthStudent } from "@/lib/attendanceMonthRegister";
-import { ErpTable } from "@/components/ui/erp-roster";
 
 type Section = { classId: string; sectionId: string; label: string };
 type View = {
@@ -242,11 +241,10 @@ export function MonthRegisterPanel({ sections }: { sections: Section[] }) {
 
       {view ? (
         <div className="max-h-[70vh] max-w-full overflow-auto rounded-lg border border-[var(--border)] [-webkit-overflow-scrolling:touch]" tabIndex={0} aria-label="Month register — scroll sideways for more days">
-          {/* display:table + overflow:visible override globals.css ".bhb-mobile-app table
-              {display:block; overflow-x:auto}" — that made the table its OWN scroll box
-              inside this one, so the sticky names/dates stuck to a box that never
-              scrolls and slid away, and two nested scrollers fought on phones. */}
-          <ErpTable minWidth="min-w-full" className="w-max border-separate border-spacing-0 text-[11px]" style={{ display: "table", overflow: "visible" }}>
+          {/* A direct child of this overflow-auto frame, so globals.css keeps it a
+              real table on phones (not a second scroller) and the sticky
+              names/dates pin to this frame. */}
+          <ErpTable minWidth="min-w-full" className="w-max border-separate border-spacing-0 text-[11px]">
             <thead className="sticky top-0 z-20 bg-[var(--card)]">
               <tr>
                 <th className="sticky left-0 z-30 w-[7.5rem] min-w-[7.5rem] border-b sm:w-auto sm:min-w-[11rem] border-[var(--border)] bg-[var(--card)] px-2 py-1 text-left">Student</th>
