@@ -55,6 +55,7 @@ import {
 } from "@/components/homework/HomeworkPageScan";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { TENANT } from "@/lib/types";
+import { composeClassGroupMessage, waShareUrl } from "@/lib/classGroupMessage";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import { DeskListActions } from "@/components/ui/desk-list-actions";
 import { VoiceDictateButton } from "@/components/teaching/VoiceDictateButton";
@@ -176,6 +177,40 @@ export function HomeworkWorkspace() {
 
   const teacherName = session.fullName || "Teacher";
   const teacherStaffId = session.staffId || "";
+
+  /** The same post, worded for the old class WhatsApp group (no child named). */
+  function groupTextForPost(p: HomeworkPost): string {
+    return composeClassGroupMessage({
+      kind: "homework",
+      classLabel: masters ? classLabel(masters, p.classId, p.sectionId) : "",
+      date: p.date,
+      subject: masters ? subjectLabel(masters, p.subjectId) : "",
+      title: p.title,
+      bodyEn: p.bodyEn,
+      bodyHi: p.bodyHi,
+      dueAt: p.dueAt,
+      schoolName: TENANT.nameDisplay || TENANT.shortName,
+    });
+  }
+  function groupTextForDiary(d: DiaryEntry): string {
+    return composeClassGroupMessage({
+      kind: "diary",
+      classLabel: masters ? classLabel(masters, d.classId, d.sectionId) : "",
+      date: d.date,
+      title: d.title,
+      bodyEn: d.bodyEn,
+      bodyHi: d.bodyHi,
+      schoolName: TENANT.nameDisplay || TENANT.shortName,
+    });
+  }
+  async function copyForGroup(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      flash("Copied — paste it in the class WhatsApp group");
+    } catch {
+      setError("Could not copy — use “Share to WhatsApp” instead.");
+    }
+  }
 
   function flash(msg: string) {
     setNotice(msg);
@@ -903,6 +938,22 @@ export function HomeworkWorkspace() {
                         >
                           Notify WhatsApp
                         </button>
+                        <button
+                          type="button"
+                          className="text-xs text-[var(--brand-deep)] underline"
+                          title="During the move off personal class groups: the same post, worded for the group"
+                          onClick={() => void copyForGroup(groupTextForPost(p))}
+                        >
+                          Copy for class group
+                        </button>
+                        <a
+                          className="text-xs text-[var(--brand-deep)] underline"
+                          href={waShareUrl(groupTextForPost(p))}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Share to WhatsApp
+                        </a>
                         {!readOnly ? (
                           <button
                             type="button"
@@ -982,6 +1033,21 @@ export function HomeworkWorkspace() {
                     >
                       Notify WhatsApp
                     </button>
+                    <button
+                      type="button"
+                      className="text-xs text-[var(--brand-deep)] underline"
+                      onClick={() => void copyForGroup(groupTextForDiary(d))}
+                    >
+                      Copy for class group
+                    </button>
+                    <a
+                      className="text-xs text-[var(--brand-deep)] underline"
+                      href={waShareUrl(groupTextForDiary(d))}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Share to WhatsApp
+                    </a>
                   </div>
                 </li>
               ))}
