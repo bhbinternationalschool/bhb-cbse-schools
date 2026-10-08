@@ -1,7 +1,8 @@
 "use client";
 
 import { PRINT_LETTERHEAD_CSS, printLetterheadHtml } from "@/lib/printLetterheadHtml";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { PUNCH_SCREEN_TOKEN_KEY } from "@/components/staff/PunchScreen";
 import QRCode from "qrcode";
 
 type Device = {
@@ -89,6 +90,7 @@ export function PunchPhonesPanel({ canDecidePhones }: { canDecidePhones: boolean
   const [label, setLabel] = useState("Office tablet");
   const [notice, setNotice] = useState<string | null>(null);
   const [pairing, setPairing] = useState<{ code: string; expiresAt: string } | null>(null);
+  const opening = useRef(false);
 
   const load = useCallback(async () => {
     const res = await fetch("/api/v1/staff/attendance/punch-devices", { cache: "no-store" }).catch(() => null);
@@ -143,15 +145,51 @@ export function PunchPhonesPanel({ canDecidePhones }: { canDecidePhones: boolean
   }
 
   async function openScreenHere() {
-    // Only inside the school: the server checks this device's location.
-    const { readDeviceLocation } = await import("@/lib/deviceLocation");
-    const here = await readDeviceLocation();
-    if ("error" in here) {
-      setError(here.error);
-      return;
+    // One tap, one screen. Reading the location takes seconds, and every tap
+    // in that wait used to register another "Office tablet" — they came in
+    // pairs and threes (6–8 Oct 2026).
+    if (opening.current) return;
+    opening.current = true;
+    setBusy(true);
+    try {
+      // A device that is already a screen opens as that screen. The office
+      // pressed this every morning and got a new "Office tablet" each day;
+      // the old ones stayed on the list as "last seen" rows that kept growing.
+      // Only a key the server says is switched off (401) is replaced.
+      let existing = "";
+      try {
+        existing = window.localStorage.getItem(PUNCH_SCREEN_TOKEN_KEY) || "";
+      } catch {
+        /* private mode: no saved screen */
+      }
+      if (existing) {
+        const res = await fetch("/api/public/punch-screen", {
+          headers: { Authorization: `Bearer ${existing}` },
+          cache: "no-store",
+        }).catch(() => null);
+        if (!res || res.status !== 401) {
+          window.location.href = "/punch-screen";
+          return;
+        }
+        try {
+          window.localStorage.removeItem(PUNCH_SCREEN_TOKEN_KEY);
+        } catch {
+          /* ignore */
+        }
+      }
+      // Only inside the school: the server checks this device's location.
+      const { readDeviceLocation } = await import("@/lib/deviceLocation");
+      const here = await readDeviceLocation();
+      if ("error" in here) {
+        setError(here.error);
+        return;
+      }
+      const r = await act({ action: "screen_create", label, lat: here.lat, lng: here.lng, accuracyM: here.accuracyM });
+      if (r?.token) window.location.href = `/punch-screen#k=${r.token}`;
+    } finally {
+      opening.current = false;
+      setBusy(false);
     }
-    const r = await act({ action: "screen_create", label, lat: here.lat, lng: here.lng, accuracyM: here.accuracyM });
-    if (r?.token) window.location.href = `/punch-screen#k=${r.token}`;
   }
 
   if (!data) {
@@ -215,7 +253,10 @@ export function PunchPhonesPanel({ canDecidePhones }: { canDecidePhones: boolean
         {data.screens.map((s) => (
           <div key={s.id} className="flex items-center justify-between gap-2 text-sm">
             <span>
-              {s.label} <span className="text-xs text-[var(--muted)]">· by {s.created_by} · last seen {day(s.last_seen_at)}</span>
+              {s.label}{" "}
+              <span className="text-xs text-[var(--muted)]">
+                · by {s.created_by} · {s.last_seen_at ? `last seen ${day(s.last_seen_at)}` : "never used — switch it off"}
+              </span>
             </span>
             <button type="button" className={btn} disabled={busy} onClick={() => void act({ action: "screen_revoke", id: s.id }, `Switch off “${s.label}”?`)}>
               Switch off
