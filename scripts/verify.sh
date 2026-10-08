@@ -187,6 +187,7 @@ SELFTESTS=(
   test:timetable-free-grid
   test:udise-teacher-apaar
   test:udise-teacher-sync
+  test:cashfree-settlements
   test:holiday-calendar-view
   test:student-working-days
   test:leave-allotment

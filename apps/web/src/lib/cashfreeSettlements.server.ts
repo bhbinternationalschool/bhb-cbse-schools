@@ -153,26 +153,51 @@ export function settlementFromWebhook(
   };
 }
 
-/** A row from POST /pg/settlements. */
-function settlementFromList(s: Record<string, unknown>): PgSettlement | null {
-  const id = str(s.cf_settlement_id ?? s.settlement_id);
+/**
+ * A row from POST /pg/settlements.
+ *
+ * The 2025-01-01 API nests the row like the recon feed does —
+ * settlement_details { cf_settlement_id, utr, amount_settled, service_charge,
+ * service_tax, adjustment, settlement_date, settlement_initiated_on,
+ * settlement_type } and payment_details { payment_amount } — with nothing at
+ * the top level. Until 8 Oct 2026 this read only the flat shape, found no
+ * cf_settlement_id on any row and dropped them all: the sweep "saw 0
+ * settlements" every day and the ₹2,500 paid on 26 Sep (settled 29 Sep, UTR
+ * HDFCH01289751481) sat in clearing. Both shapes are read now; the nested
+ * fields win.
+ *
+ * The nested row carries no status. A row in the settlement list with a UTR
+ * and a settlement date IS a completed transfer to the bank, so that is
+ * SUCCESS; without both it is PENDING — never assumed paid.
+ */
+export function settlementFromList(s: Record<string, unknown>): PgSettlement | null {
+  const obj = (v: unknown): Record<string, unknown> =>
+    v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  const sd = { ...s, ...obj(s.settlement_details) };
+  const pd = obj(s.payment_details);
+  const id = str(sd.cf_settlement_id ?? sd.settlement_id);
   if (!id) return null;
+  const utr = str(sd.utr);
+  const settledAtRaw = sd.settlement_date ?? sd.settlement_time ?? sd.settled_on;
+  const explicit = str(sd.status).toUpperCase();
   return {
     cfSettlementId: id,
-    utr: str(s.utr),
-    status: str(s.status).toUpperCase(),
-    settlementType: str(s.type ?? s.settlement_type).toUpperCase(),
-    paymentAmountPaise: rupeesToPaise(s.amount ?? s.payment_amount),
-    amountSettledPaise: rupeesToPaise(s.amount_settled),
-    serviceChargePaise: rupeesToPaise(s.service_charge),
-    serviceTaxPaise: rupeesToPaise(s.service_tax),
-    settlementChargePaise: rupeesToPaise(s.settlement_charge),
-    settlementTaxPaise: rupeesToPaise(s.settlement_tax),
-    adjustmentPaise: rupeesToPaise(s.adjustment),
-    settledOn: (iso(s.settlement_time) ?? "").slice(0, 10) || null,
-    initiatedAt: iso(s.payment_time),
-    settledAt: iso(s.settlement_time),
-    bankAccountLast4: last4(s.settlement_bank_account_number),
+    utr,
+    status: explicit || (utr && iso(settledAtRaw) ? "SUCCESS" : "PENDING"),
+    settlementType: str(sd.settlement_type ?? sd.type).toUpperCase(),
+    paymentAmountPaise: rupeesToPaise(pd.payment_amount ?? sd.payment_amount ?? sd.amount),
+    amountSettledPaise: rupeesToPaise(sd.amount_settled ?? sd.settlement_amount),
+    serviceChargePaise: rupeesToPaise(sd.service_charge),
+    serviceTaxPaise: rupeesToPaise(sd.service_tax),
+    settlementChargePaise: rupeesToPaise(sd.settlement_charge),
+    settlementTaxPaise: rupeesToPaise(sd.settlement_tax),
+    adjustmentPaise: rupeesToPaise(sd.adjustment),
+    // The date as Cashfree states it (IST), not the UTC date of the instant:
+    // a settlement at 00:30 IST must not be filed the day before.
+    settledOn: /^\d{4}-\d{2}-\d{2}/.test(str(settledAtRaw)) ? str(settledAtRaw).slice(0, 10) : (iso(settledAtRaw) ?? "").slice(0, 10) || null,
+    initiatedAt: iso(sd.settlement_initiated_on ?? sd.payment_time),
+    settledAt: iso(settledAtRaw),
+    bankAccountLast4: last4(sd.settlement_bank_account_number),
     raw: redactSettlement(s),
   };
 }
