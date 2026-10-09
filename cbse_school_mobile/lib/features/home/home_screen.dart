@@ -1,4 +1,5 @@
 import "package:flutter/material.dart";
+import "../../core/ui/running_strip.dart";
 import "../../core/guide/screen_guides.dart";
 import "package:flutter_svg/flutter_svg.dart";
 import "package:url_launcher/url_launcher.dart";
@@ -455,6 +456,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ),
+            // Notices and news scrolling across, as on the web ERP.
+            RunningStrip(
+              api: widget.api,
+              onOpen: () => _openModule("Notices", child),
+            ),
             Padding(
               padding: Insets.pageBelowHeader,
               child: Column(
@@ -643,7 +649,10 @@ class _Header extends StatelessWidget {
                         ),
                       ),
                     ),
-                    const ScreenGuideButton(guideId: "parent-home", screenLabel: "Home"),
+                    const ScreenGuideButton(
+                      guideId: "parent-home",
+                      screenLabel: "Home",
+                    ),
                     _RoundAction(
                       icon: Icons.notifications_none_rounded,
                       tooltip: context.l10n.notices,
