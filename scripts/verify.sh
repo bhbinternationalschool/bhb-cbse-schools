@@ -398,6 +398,7 @@ SELFTESTS=(
   test:syllabus-outcomes-import
   test:transport-overlap-billing
   test:masters-transport-no-prune
+  test:slice-cas
   test:wa-contact-state
   test:wa-delivery-log
   test:wa-meta-account-alerts

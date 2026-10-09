@@ -46,9 +46,13 @@ const pushOf = (src: string, fn: string, next: string) =>
   const push = pushOf(src, "pushTransportDeskToDb", "fetchTransportDeskFromDb");
   assert.ok(push.length > 500, "found the transport push");
   assert.equal(/\.delete\(\)/.test(push), false, "no transport slice is deleted by a save");
-  assert.ok(/value = mergeSliceById\(stored\.get\(key\), payload as unknown\[\]\)/.test(push), "lists are merged by id, not replaced");
-  assert.ok(push.indexOf("if (readErr)") < push.indexOf('.from("transport_desk_slices").upsert('), "nothing is written when the stored desk cannot be read");
-  assert.ok(/key === "gpsPings"[\s\S]*?\.slice\(0, 500\)/.test(push), "GPS pings stay a 500-ping rolling buffer");
+  // The per-slice merge lives in mergeTransportSlice (pure, so the
+  // conditional write can re-apply it to a fresher copy — test:slice-cas).
+  const merge = pushOf(src.replace("function mergeTransportSlice", "export async function mergeTransportSlice"), "mergeTransportSlice", "pushTransportDeskToDb");
+  assert.ok(/mergeSliceById\(stored, incoming as unknown\[\]\)/.test(merge), "lists are merged by id, not replaced");
+  assert.ok(/key === "gpsPings"[\s\S]*?\.slice\(0, 500\)/.test(merge), "GPS pings stay a 500-ping rolling buffer");
+  assert.ok(/mergeTransportSlice\(key, storedNow, payload\)/.test(push), "the save writes through that merge");
+  assert.ok(push.indexOf("if (readErr)") < push.indexOf("casWriteSlice("), "nothing is written when the stored desk cannot be read");
 }
 
 console.log("mastersTransportNoPrune.selftest: all assertions passed");
