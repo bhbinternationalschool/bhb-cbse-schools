@@ -319,8 +319,20 @@ export function PrincipalCockpit() {
         />
         <KpiCard
           label="Student attendance"
-          value={`${displaySnap.attendance.studentMarkedPct}%`}
-          hint={`${displaySnap.attendance.sectionsMarked} sections marked`}
+          value={displaySnap.attendance.sectionsMarked ? `${displaySnap.attendance.studentMarkedPct}%` : "—"}
+          hint={
+            displaySnap.attendance.sectionsMarked
+              ? [
+                  displaySnap.attendance.studentsMarked != null
+                    ? `${displaySnap.attendance.studentsMarked} of ${displaySnap.students.activeCount} children marked`
+                    : "",
+                  `${displaySnap.attendance.sectionsMarked} sections marked`,
+                  displaySnap.alerts.attendanceRegistersPending ? `${displaySnap.alerts.attendanceRegistersPending} pending` : "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ")
+              : "No registers marked yet today"
+          }
           href="/attendance"
           tone="teal"
         />

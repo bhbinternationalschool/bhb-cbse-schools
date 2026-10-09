@@ -334,6 +334,8 @@
     "test:student-import": "npx tsx src/lib/studentImport.selftest.ts",
     "test:student-import-mid-year": "npx tsx src/lib/studentImportMidYear.selftest.ts",
     "test:payment-link-amount": "npx tsx src/lib/paymentLinkAmount.selftest.ts",
+    "test:payment-link-reuse": "npx tsx src/lib/paymentLinkReuse.selftest.ts",
+    "test:attendance-today": "npx tsx src/lib/attendanceToday.selftest.ts",
     "test:sis-wire-payload": "npx tsx src/lib/sisWirePayload.selftest.ts",
     "test:print-palette": "npx tsx src/lib/printPalette.selftest.ts",
     "test:receipt-head-grouping": "npx tsx src/lib/receiptHeadGrouping.selftest.ts",

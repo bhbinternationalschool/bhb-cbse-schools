@@ -33,6 +33,7 @@ import { listUnifiedPayables } from "@/lib/accountsPayables";
 import { dashboardSnapshot } from "@/lib/accountsReports";
 import { loadAccounts } from "@/lib/accountsStore";
 import { loadAttendance, summarizeMarks } from "@/lib/attendance";
+import { attendanceCoverageNote, todayAttendanceFigures } from "@/lib/attendanceToday";
 import { loadCertificates } from "@/lib/certificates";
 import { loadExams } from "@/lib/exams";
 import { buildFeesDashboardModel, feeCollectionModeBreakupRupees } from "@/lib/feeDashboard";
@@ -2682,19 +2683,14 @@ export function buildSchoolDashboard(
     const todayRegs = (att.registers ?? []).filter(
       (r) => inAcademicYear(r, ay) && r.date === today,
     );
-    let stuPresent = 0;
-    let stuAbsent = 0;
-    let stuLeave = 0;
-    for (const r of todayRegs) {
-      const s = summarizeMarks(r.marks || []);
-      stuPresent += s.present;
-      stuAbsent += s.absent;
-      stuLeave += s.leave;
-    }
-    const stuMarked = stuPresent + stuAbsent + stuLeave;
-    const attPct = stuMarked
-      ? Math.round((stuPresent / stuMarked) * 100)
-      : 0;
+    const todayAtt = todayAttendanceFigures(todayRegs);
+    const stuMarked = todayAtt.marked;
+    const attPct = todayAtt.pct;
+    const attCoverage = attendanceCoverageNote(
+      todayAtt,
+      new Set(activeStudents.map((s) => s.sectionId).filter(Boolean)).size,
+      activeStudents.length,
+    );
 
     const staffList = masters.staff ?? [];
     const activeStaff = staffList.filter(isStaffActive).length;
@@ -2785,7 +2781,12 @@ export function buildSchoolDashboard(
               label: "Attendance today",
               value: stuMarked ? `${attPct}%` : "—",
               hint: stuMarked
-                ? `${stuPresent} present · ${stuAbsent} absent · ${stuLeave} leave`
+                ? [
+                    `${todayAtt.present + todayAtt.late} present${todayAtt.halfDay ? ` · ${todayAtt.halfDay} half-day` : ""} · ${todayAtt.absent} absent · ${todayAtt.leave} leave`,
+                    attCoverage ? `only ${attCoverage}` : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" — ")
                 : "No registers marked yet today",
               tone: "green",
               href: "/attendance",

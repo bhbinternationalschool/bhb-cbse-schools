@@ -293,6 +293,58 @@ export function duesToPaymentLines(dues: FeeDueLine[]): PaymentLinkLine[] {
   }));
 }
 
+/** "dueKey:paise|…" in key order — two links asking for the same money. */
+function linesKey(lines: { dueKey: string; amountPaise: number }[]): string {
+  return lines
+    .map((l) => `${l.dueKey}:${l.amountPaise}`)
+    .sort()
+    .join("|");
+}
+
+/**
+ * An open link already asking this family for exactly this money, from the
+ * same place (its note), still good past today — or undefined.
+ *
+ * Every tap used to mint a new link and a new gateway order (director,
+ * 9 Oct 2026: one family had 13 links for the same ₹19,300; a parent's
+ * double tap made two open orders 17 seconds apart). Two live orders for
+ * one set of dues means a parent can pay twice, and the second payment
+ * books nothing and needs a manual refund. The note is part of the match
+ * because it carries what the gateway order was made for (the rail a
+ * parent picked in the app), so a link is reused only for the same ask.
+ */
+export function findReusablePaymentLink(
+  links: PaymentLink[],
+  want: { householdId: string; studentId: string; note: string; lines: PaymentLinkLine[]; amountPaise: number },
+  today: string,
+): PaymentLink | undefined {
+  const key = linesKey(want.lines);
+  return links.find(
+    (l) =>
+      l.status === "open" &&
+      l.expiresOn > today &&
+      l.householdId === want.householdId &&
+      l.studentId === want.studentId &&
+      (l.note || "") === want.note &&
+      l.amountPaise === want.amountPaise &&
+      linesKey(l.lines) === key,
+  );
+}
+
+/**
+ * The gateway checkout of a link createPaymentLink handed back as reused,
+ * when it already has one on this gateway — the caller sends the payer
+ * there instead of making another order. "" for a new link.
+ */
+export function reusableCheckoutUrl(
+  created: { link: PaymentLink; reused?: boolean },
+  gateway: string,
+): string {
+  if (!created.reused) return "";
+  const l = created.link;
+  return l.gatewayMode === gateway && l.gatewayCheckoutUrl ? l.gatewayCheckoutUrl : "";
+}
+
 export function createPaymentLink(input: {
   householdId: string;
   studentId: string;
@@ -315,8 +367,13 @@ export function createPaymentLink(input: {
    * the receipt the payment will produce.
    */
   targetPaise?: number;
+  /**
+   * Always mint a new link, even when an open one asks for the same money.
+   * Only auto-pay sets this: its link is tied to one debit.
+   */
+  fresh?: boolean;
 }):
-  | { ok: true; link: PaymentLink }
+  | { ok: true; link: PaymentLink; reused?: boolean }
   | { ok: false; error: string } {
   const open = openFeeDues(input.dues).filter((d) => d.balancePaise > 0);
   if (open.length === 0) {
@@ -353,6 +410,16 @@ export function createPaymentLink(input: {
     return { ok: false, error: "Amount must be positive" };
   }
 
+  const note = input.note?.trim() ?? "";
+  if (!input.fresh) {
+    const existing = findReusablePaymentLink(
+      refreshExpired(loadPayments()).links,
+      { householdId: input.householdId, studentId: input.studentId, note, lines, amountPaise },
+      todayIso(),
+    );
+    if (existing) return { ok: true, link: existing, reused: true };
+  }
+
   const link = normalizeLink({
     id: id("pl"),
     code: shortCode(),
@@ -371,7 +438,7 @@ export function createPaymentLink(input: {
     paidAt: null,
     voucherId: null,
     receiptNo: null,
-    note: input.note?.trim() ?? "",
+    note,
   });
 
   const state = loadPayments();

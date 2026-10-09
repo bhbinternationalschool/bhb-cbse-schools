@@ -706,6 +706,7 @@ async function raiseForMandate(m: AutopayMandate, todayIso: string, dryRun: bool
       expiresInDays: 10,
       note: `Auto-pay debit ${paymentId}`,
       targetPaise: share,
+      fresh: true,
     });
     if (!created.ok) {
       await releaseLinks(linkIds);

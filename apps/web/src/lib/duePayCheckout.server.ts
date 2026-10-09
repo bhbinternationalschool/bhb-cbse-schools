@@ -16,6 +16,7 @@
  * money the school cannot record.
  */
 
+import { singleFlight } from "@/lib/singleFlight";
 import {
   computeHouseholdDues,
   loadFees,
@@ -28,6 +29,7 @@ import {
   buildPaymentShareUrlAbsolute,
   createPaymentLink,
   loadPayments,
+  reusableCheckoutUrl,
   writePaymentsLocalRaw,
   type PaymentLink,
 } from "@/lib/payments";
@@ -102,6 +104,16 @@ export async function startDirectFeeCheckout(input: {
   scope: DuePayScope;
   appOrigin: string;
 }): Promise<DirectCheckoutResult> {
+  // A double tap (or WhatsApp's preview fetch racing the tap) runs once.
+  return singleFlight(`pay-due:${input.householdId}:${input.studentId ?? ""}:${input.scope}`, () => startDirectFeeCheckoutOnce(input));
+}
+
+async function startDirectFeeCheckoutOnce(input: {
+  householdId: string;
+  studentId?: string;
+  scope: DuePayScope;
+  appOrigin: string;
+}): Promise<DirectCheckoutResult> {
   // HYDRATED, not merely loaded. ensureSchoolMirrorLoaded only reads a local
   // file, which does not exist on Cloud Run: the first live test (14 Sep 2026)
   // found no fee structure, computed no dues, and told a family who owed
@@ -139,8 +151,13 @@ export async function startDirectFeeCheckout(input: {
     writePaymentsLocalRaw({ ...state, links: [created.link, ...state.links] });
   }
 
-  const { pushPaymentLinkToDb } = await import("@/lib/paymentsNormalized.server");
   const { attachCashfreeToPaymentLink, shouldUseCashfreeCheckout } = await import("@/lib/cashfree.server");
+  // The family tapped this link (or the reminder) before and that checkout is
+  // still open for the same money: send them back to it, not to a new order.
+  const reuseUrl = reusableCheckoutUrl(created, shouldUseCashfreeCheckout() ? "cashfree" : "razorpay");
+  if (reuseUrl) return { kind: "checkout", url: reuseUrl, link: created.link, totalPaise };
+
+  const { pushPaymentLinkToDb } = await import("@/lib/paymentsNormalized.server");
   const { attachRazorpayToPaymentLink } = await import("@/lib/razorpay.server");
   const attachOpts = {
     link: created.link,

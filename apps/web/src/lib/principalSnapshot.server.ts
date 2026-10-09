@@ -11,7 +11,8 @@ import { ensurePaymentsHydratedServer } from "@/lib/paymentsPersistence";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { loadSis } from "@/lib/sis";
 import { loadAdmissions, funnelCounts } from "@/lib/admissions";
-import { loadAttendance, summarizeMarks, todayIso } from "@/lib/attendance";
+import { loadAttendance, todayIso } from "@/lib/attendance";
+import { todayAttendanceFigures } from "@/lib/attendanceToday";
 import { computeFeeKpis } from "@/lib/feeFinance";
 import { storeDuesSummary } from "@/lib/inventory/sales.server";
 import { fetchOpenDuesSummary } from "@/lib/feesDeskAncillary.server";
@@ -49,6 +50,8 @@ export type PrincipalSnapshot = {
     studentLeave: number;
     studentMarkedPct: number;
     sectionsMarked: number;
+    /** Children with a mark today (the percentage is of these, not of all). */
+    studentsMarked?: number;
   };
   staff: {
     activeCount: number;
@@ -165,16 +168,7 @@ export async function buildPrincipalSnapshot(
   const todayRegs = (att.registers ?? []).filter(
     (r) => r.academicYearCode === ay && r.date === today,
   );
-  let stuPresent = 0;
-  let stuAbsent = 0;
-  let stuLeave = 0;
-  for (const r of todayRegs) {
-    const s = summarizeMarks(r.marks || []);
-    stuPresent += s.present;
-    stuAbsent += s.absent;
-    stuLeave += s.leave;
-  }
-  const stuMarked = stuPresent + stuAbsent + stuLeave;
+  const todayAtt = todayAttendanceFigures(todayRegs);
   const activeSections = masters.sections.filter((s) => s.isActive);
   const markedSectionIds = new Set(todayRegs.map((r) => r.sectionId));
   // Per section, not a single school-wide check: holidays can be scoped to
@@ -236,13 +230,14 @@ export async function buildPrincipalSnapshot(
     students: { activeCount: activeStudents },
     attendance: {
       date: today,
-      studentPresent: stuPresent,
-      studentAbsent: stuAbsent,
-      studentLeave: stuLeave,
-      studentMarkedPct: stuMarked
-        ? Math.round((stuPresent / stuMarked) * 100)
-        : 0,
-      sectionsMarked: todayRegs.length,
+      // Late children were present; half-days show here as present too
+      // (the percentage weighs them ½).
+      studentPresent: todayAtt.present + todayAtt.late + todayAtt.halfDay,
+      studentAbsent: todayAtt.absent,
+      studentLeave: todayAtt.leave,
+      studentMarkedPct: todayAtt.pct,
+      sectionsMarked: todayAtt.sectionsMarked,
+      studentsMarked: todayAtt.marked,
     },
     staff: {
       activeCount: activeStaff,

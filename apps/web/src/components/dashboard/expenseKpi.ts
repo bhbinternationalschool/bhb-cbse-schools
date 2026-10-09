@@ -15,7 +15,10 @@ import { expenseRange, type ExpensePreset } from "@/lib/expenseRange";
  * Read from the server book (Ledger v2 income & expenditure — the same
  * figures as Accounts → Book reports), never from the accounts desk. An
  * expense counts on its voucher date; a posted payroll run is booked on the
- * last day of its month.
+ * last day of its month — so "Last week" can hold a whole month's salary
+ * and "This month" none until month end (director, 9 Oct 2026: last week
+ * looked wrong — it was September's payroll, dated 30 Sep). Each figure
+ * names the salary inside it so that is visible, not a surprise.
  */
 
 type Line = { code: string; name: string; amountPaise: number };
@@ -42,6 +45,11 @@ async function readReport(from: string, to: string): Promise<Report | null> {
   } catch {
     return null;
   }
+}
+
+/** Salary & Wages (5070) inside a period — the month-end payroll accrual. */
+function salaryPaise(r: Report): number {
+  return r.expenditure.flatMap((s) => s.lines).filter((l) => l.code === "5070").reduce((n, l) => n + l.amountPaise, 0);
 }
 
 function dateLabel(iso: string): string {
@@ -76,7 +84,10 @@ export function useExpenseKpi(allowed: boolean): DashboardKpi | null {
     if (!reports) return "…";
     const r = reports[id];
     // Unreadable is not zero.
-    return r ? formatInr(r.totalExpenditurePaise) : "—";
+    if (!r) return "—";
+    const salary = salaryPaise(r);
+    const total = formatInr(r.totalExpenditurePaise);
+    return salary && salary !== r.totalExpenditurePaise ? `${total} (salary ${formatInr(salary)})` : salary ? `${total} (salary)` : total;
   };
   const range = expenseRange("month", new Date())!;
   const heads = (month?.expenditure ?? [])
@@ -89,7 +100,9 @@ export function useExpenseKpi(allowed: boolean): DashboardKpi | null {
     label: "Expenses · this month",
     value: fig("month"),
     breakdown: PERIODS.filter((p) => p.id !== "month").map((p) => ({ label: p.label, value: fig(p.id) })),
-    hint: reports && !month ? "Server book unavailable" : "From the books · tap for heads",
+    hint: reports && !month
+      ? "Server book unavailable"
+      : "From the books · salary is booked on the month's last day · tap for heads",
     tone: "rose",
     href: "/accounts?tab=bookreports",
     detailTitle: `Expenses ${dateLabel(range.from)} – ${dateLabel(range.to)} by head (other dates: Accounts → Book reports)`,
