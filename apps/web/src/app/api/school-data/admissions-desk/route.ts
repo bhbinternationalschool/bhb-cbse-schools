@@ -22,6 +22,9 @@ import {
   pushAdmissionDeskToDb,
 } from "@/lib/admissionsNormalized.server";
 import { readStampsParam, type RowStamps } from "@/lib/rowStampClient";
+import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
+import { featureAuthorizedDeletes } from "@/lib/deskNamedDeletesFeature.server";
+import { FIELD_OPS_DELETABLE } from "@/lib/admissionsFieldOpsMerge";
 
 /** The stamps of the rows a response carries (a cut desk gets only its rows'). */
 function stampsFor(state: Partial<AdmissionsState>, all: RowStamps): RowStamps {
@@ -199,7 +202,7 @@ export async function POST(req: Request) {
     });
   }
 
-  let body: { state?: Partial<AdmissionsState>; stamps?: unknown };
+  let body: { state?: Partial<AdmissionsState>; stamps?: unknown; deletes?: unknown };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -212,6 +215,9 @@ export async function POST(req: Request) {
   let normalized = normalizeAdmissionsState(body.state);
   // The rows this browser changed and the stamp each was changed from.
   const stamps = readStampsParam(body.stamps, ADMISSION_SLICES);
+  // Survey-team members and lead callers the desk removed — named, never
+  // inferred from what this copy lacks.
+  let deletes = readNamedDeletes(body.deletes, FIELD_OPS_DELETABLE);
 
   // Function-only writers (director, 6 Oct 2026 — e.g. Admissions → Field
   // survey): merged onto the stored desk, their functions' slices only, row
@@ -236,6 +242,13 @@ export async function POST(req: Request) {
     if (!merged.ok) return merged.response;
     if (!merged.changed) return featureSavedResponse(false);
     const next = merged.state as unknown as AdmissionsState;
+    // A function holder's removal counts only where their functions dropped it.
+    deletes = featureAuthorizedDeletes(
+      deletes,
+      { admission_survey_team: "surveyTeam", admission_lead_callers: "leadCallerStaffIds" },
+      stored.state,
+      next,
+    );
     for (const k of SEQ_KEYS) {
       const pushed = Number(sent[k]);
       if (Number.isFinite(pushed) && pushed > next[k]) next[k] = Math.round(pushed);
@@ -243,7 +256,7 @@ export async function POST(req: Request) {
     normalized = normalizeAdmissionsState(next);
   }
 
-  const result = await pushAdmissionDeskToDb(normalized, { stamps });
+  const result = await pushAdmissionDeskToDb(normalized, { stamps, deletes });
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error || "Sync failed" },

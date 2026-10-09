@@ -3,6 +3,7 @@
  * Beats/attendance live in admissions state; offline drafts in a separate localStorage key.
  */
 
+import { recordDeskDeletion } from "@/lib/deskNamedDeletes";
 import {
   createEnquiry,
   loadAdmissions,
@@ -740,6 +741,8 @@ export function removeSurveyTeamMember(
   memberId: string,
 ): AdmissionsState {
   const s = ensureSurveyMasters(state);
+  // Named, so the save removes them — a save never deletes by absence.
+  if (typeof window !== "undefined") recordDeskDeletion("admissions", "admission_survey_team", [memberId]);
   return {
     ...s,
     surveyTeam: s.surveyTeam.filter((m) => m.id !== memberId),

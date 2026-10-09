@@ -67,7 +67,7 @@ void (async () => {
   assert.ok(/stamps: \{\s*households: stampsOf\(hhRows\)/.test(push), "the load returns each row's stamp");
   assert.ok(/normalizeAdmissionLead\(\{ \.\.\.lead, updatedAt: new Date\(\)\.toISOString\(\) \}\)/.test(push), "a single-lead server write moves the lead's stamp on");
   const route = read("../app/api/school-data/admissions-desk/route.ts");
-  assert.ok(/readStampsParam\(body\.stamps, ADMISSION_SLICES\)/.test(route) && /pushAdmissionDeskToDb\(normalized, \{ stamps \}\)/.test(route));
+  assert.ok(/readStampsParam\(body\.stamps, ADMISSION_SLICES\)/.test(route) && /pushAdmissionDeskToDb\(normalized, \{ stamps(, deletes)? \}\)/.test(route));
   assert.ok(/stamps: stampsFor\(stripped, stamps\)/.test(route) && /^\s*stamps,$/m.test(route), "both GET shapes carry stamps");
   const client = read("admissionsNormalizedClient.ts");
   assert.ok(/stamps: sentStamps/.test(client) && /applyStampedSave\(\s*ADMISSIONS_DESK/.test(client) && /onStampConflicts\(ADMISSIONS_DESK, body\.conflicts\)/.test(client));
