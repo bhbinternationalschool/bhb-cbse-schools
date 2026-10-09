@@ -201,6 +201,8 @@ SELFTESTS=(
   test:projection-double-post
   test:holiday-import
   test:payment-link-amount
+  test:payment-link-reuse
+  test:attendance-today
   test:sis-wire-payload
   test:print-palette
   test:receipt-head-grouping

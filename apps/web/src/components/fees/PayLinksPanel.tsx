@@ -124,8 +124,22 @@ export function PayLinksPanel({
     onOpenReceipt(result.voucherId);
   }
 
-  function onCancel(link: PaymentLink) {
+  async function onCancel(link: PaymentLink) {
     if (!window.confirm(`Cancel payment link ${link.code}?`)) return;
+    // Close the gateway order first: a cancelled link whose order stays open
+    // on Cashfree can still be paid, and that payment books nothing.
+    if (link.gatewayMode === "cashfree") {
+      const res = await fetch("/api/payments/cancel-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ linkId: link.id }),
+      }).catch(() => null);
+      const body = (await res?.json().catch(() => ({}))) as { error?: string } | undefined;
+      if (!res?.ok) {
+        setError(body?.error || "Could not close the online payment for this link — try again.");
+        return;
+      }
+    }
     cancelPaymentLink(link.id);
     refresh();
     onChanged();
@@ -249,7 +263,7 @@ export function PayLinksPanel({
                     <button
                       type="button"
                       className="rounded-lg px-2.5 py-1 text-[11px] font-semibold text-[#dc2626]"
-                      onClick={() => onCancel(link)}
+                      onClick={() => void onCancel(link)}
                     >
                       Cancel
                     </button>
