@@ -37,7 +37,7 @@ import {
 } from "@/lib/sis";
 import { ensureRteEwsTagIds } from "@/lib/studentTags";
 import { TENANT } from "@/lib/types";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 const STORAGE_KEY = "bhb_rte_ews_v1";
@@ -236,7 +236,7 @@ function normalizeState(raw: Partial<RteState> | null): RteState {
 export function loadRte(): RteState {
   if (typeof window === "undefined") return emptyRteState();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyRteState();
     return normalizeState(JSON.parse(raw) as Partial<RteState>);
   } catch {

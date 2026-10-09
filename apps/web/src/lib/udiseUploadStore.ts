@@ -28,7 +28,7 @@
  * earlier one carried.
  */
 
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache, removeCache } from "@/lib/browserStorage";
 import {
   cleanApaar,
   cleanPen,
@@ -330,7 +330,7 @@ export function loadUdiseUpload(): StoredUdiseUpload | null {
   if (typeof window === "undefined") return null;
   let raw: string | null = null;
   try {
-    raw = window.localStorage.getItem(KEY);
+    raw = readCache(KEY);
   } catch {
     // A browser with site data blocked throws on read. No working file is a
     // fine answer; a crashed panel is not.
@@ -359,7 +359,7 @@ export function saveUdiseUpload(value: StoredUdiseUpload): boolean {
 export function clearUdiseUpload(): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.removeItem(KEY);
+    removeCache(KEY);
     // The first design's copy, raw rows under one header. Never read again.
     window.localStorage.removeItem("bhb_udise_upload_v1");
   } catch {

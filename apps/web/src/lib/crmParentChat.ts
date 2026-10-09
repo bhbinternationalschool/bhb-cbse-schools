@@ -22,7 +22,7 @@ import {
 import { formatInr } from "@/lib/masters";
 
 import { assertModulePermission } from "@/lib/rbacGuard";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 const STORAGE_KEY = "bhb_crm_parent_chat_v1";
 
@@ -141,7 +141,7 @@ export function normalizeCrmParentChatState(
 export function loadCrmParentChat(): CrmParentChatState {
   if (typeof window === "undefined") return defaultCrmParentChatState();
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return defaultCrmParentChatState();
     return normalizeCrmParentChatState(
       JSON.parse(raw) as Partial<CrmParentChatState>,
@@ -154,7 +154,7 @@ export function loadCrmParentChat(): CrmParentChatState {
 export function saveCrmParentChat(state: CrmParentChatState): void {
   if (!assertModulePermission("admissions", "edit", "saveCrmParentChat")) return;
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(
+  writeCacheOrInvalidate(
     STORAGE_KEY,
     JSON.stringify({ ...state, audience: CRM_CHAT_AUDIENCE }),
   );

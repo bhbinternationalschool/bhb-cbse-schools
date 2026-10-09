@@ -5,7 +5,7 @@
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { formatInr } from "@/lib/masters";
 import { TENANT } from "@/lib/types";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 const STORAGE_KEY = "bhb_fee_recovery_tasks_v1";
@@ -55,7 +55,7 @@ export function emptyFeeRecoveryTasks(): FeeRecoveryTasksState {
 export function loadFeeRecoveryTasks(): FeeRecoveryTasksState {
   if (typeof window === "undefined") return emptyFeeRecoveryTasks();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyFeeRecoveryTasks();
     const parsed = JSON.parse(raw) as Partial<FeeRecoveryTasksState>;
     return {

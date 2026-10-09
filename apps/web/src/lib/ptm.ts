@@ -17,7 +17,7 @@ import {
   exportFilterReport,
   type ReportColumn,
 } from "@/lib/reportExport";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 const STORAGE_KEY = "bhb_ptm_v1";
@@ -125,7 +125,7 @@ export function loadPtm(): PtmState {
     return emptyPtmState();
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyPtmState();
     return normalizeState(JSON.parse(raw) as Partial<PtmState>);
   } catch {

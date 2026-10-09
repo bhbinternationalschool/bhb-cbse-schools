@@ -12,7 +12,7 @@
  */
 
 import { assertModulePermission } from "@/lib/rbacGuard";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 export type IdCardKind = "student" | "staff";
@@ -217,7 +217,7 @@ export function normalizeIdCardTemplateState(raw: unknown): IdCardTemplateState 
 export function loadIdCardTemplateState(): IdCardTemplateState {
   if (typeof window === "undefined") return emptyIdCardTemplateState();
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyIdCardTemplateState();
     return normalizeIdCardTemplateState(JSON.parse(raw));
   } catch {

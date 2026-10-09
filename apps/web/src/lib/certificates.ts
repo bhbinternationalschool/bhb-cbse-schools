@@ -25,7 +25,7 @@ import {
   type SisStudent,
   type StudentCategory,
 } from "@/lib/sis";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 export type CertificateKind =
@@ -356,7 +356,7 @@ export function emptyCertificatesState(): CertificatesState {
 export function loadCertificates(): CertificatesState {
   if (typeof window === "undefined") return emptyCertificatesState();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyCertificatesState();
     const parsed = JSON.parse(raw) as CertificatesState;
     if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.issues)) {

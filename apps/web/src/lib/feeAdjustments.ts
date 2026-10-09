@@ -15,7 +15,7 @@ import {
 } from "@/lib/masters";
 import { openFeeDues, type FeeDueLine } from "@/lib/fees";
 import { loadSis, saveSis, type SisStudent } from "@/lib/sis";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 import { bulkWaiverPlan, newWaiverBatchId, type WaivableLine } from "@/lib/feeAdjustmentsMerge";
 
@@ -128,7 +128,7 @@ let memoryAdjustments: FeeAdjustment[] | null = null;
 export function loadFeeAdjustments(): FeeAdjustment[] {
   if (typeof window === "undefined") return memoryAdjustments ?? [];
   try {
-    const raw = localStorage.getItem(ADJUST_KEY);
+    const raw = readCache(ADJUST_KEY);
     if (!raw) return [];
     if (adjustCache && adjustCache.raw === raw) return adjustCache.rows;
     const parsed = JSON.parse(raw) as FeeAdjustment[];
@@ -144,7 +144,7 @@ export function saveFeeAdjustments(rows: FeeAdjustment[]) {
   if (!assertModulePermission("fees", "edit", "saveFeeAdjustments")) return;
 
   if (typeof window === "undefined") return;
-  localStorage.setItem(ADJUST_KEY, JSON.stringify(rows));
+  writeCacheOrInvalidate(ADJUST_KEY, JSON.stringify(rows));
   void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("fee_adjustments", { rows: rows })));
 }
 

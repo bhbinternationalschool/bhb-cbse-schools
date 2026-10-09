@@ -1,5 +1,5 @@
 import { assertModulePermission } from "@/lib/rbacGuard";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 /**
@@ -491,7 +491,7 @@ export function loadModuleRegistry(): ModuleRegistryState {
 export function readModuleRegistryStorage(): ModuleRegistryState {
   if (typeof window === "undefined") return emptyState();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyState();
     const parsed = JSON.parse(raw) as Partial<ModuleRegistryState>;
     return {

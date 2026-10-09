@@ -11,7 +11,7 @@
 
 import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { assertModulePermission } from "@/lib/rbacGuard";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { householdOf, householdWhatsApp, type SisState } from "@/lib/sis";
 import { listAssignmentsForDate, type DutyRosterState } from "@/lib/dutyRoster";
 import { trackServerWork } from "@/lib/serverWork";
@@ -220,7 +220,7 @@ export function normalizeVisitorState(raw: unknown): VisitorState {
 export function loadVisitors(): VisitorState {
   if (typeof window === "undefined") return emptyVisitorState();
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyVisitorState();
     return normalizeVisitorState(JSON.parse(raw));
   } catch {

@@ -142,6 +142,21 @@ export function readCache(key: string): string | null {
   }
 }
 
+/**
+ * Remove a cached key — the stored copy AND any in-memory copy a full store
+ * left behind. A bare localStorage.removeItem would leave readCache returning
+ * the stale memory copy.
+ */
+export function removeCache(key: string): void {
+  memoryCopies.delete(key);
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    /* storage unavailable — nothing to remove */
+  }
+}
+
 export function writeCacheOrInvalidate(key: string, value: string): boolean {
   if (typeof window === "undefined") return false;
   const stored = writeCacheOrInvalidateInner(key, value);

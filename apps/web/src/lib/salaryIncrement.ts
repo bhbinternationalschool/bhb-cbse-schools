@@ -17,7 +17,7 @@ import {
 } from "@/lib/salarySetup";
 
 import { assertModulePermission } from "@/lib/rbacGuard";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 export type IncrementCycle = "april" | "anniversary" | "hold_month";
 export type IncrementMode = "percent" | "fixed";
@@ -164,7 +164,7 @@ export function loadIncrementState(): IncrementState {
     return { version: 1, policy: defaultIncrementPolicy(), batches: [] };
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) {
       const seed: IncrementState = {
         version: 1,

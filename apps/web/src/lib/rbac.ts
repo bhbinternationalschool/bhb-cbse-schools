@@ -14,7 +14,7 @@ import { canAccessModuleHref } from "@/lib/moduleRegistry";
 import { getSessionActor } from "@/lib/sessionActor";
 import { assertSessionWritable } from "@/lib/sessionWriteGuard";
 import { isProtectedSuperAdminEmail } from "@/lib/superAdmin";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 import {
   RBAC_FEATURES,
@@ -955,7 +955,7 @@ export function removeUserGrant(state: RbacState, id: string): RbacState {
 export function loadRbac(): RbacState {
   if (typeof window === "undefined") return defaultRbacState();
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return defaultRbacState();
     return normalizeRbacState(JSON.parse(raw) as Partial<RbacState>);
   } catch {
@@ -980,7 +980,7 @@ export function saveRbac(state: RbacState): void {
     }
   }
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(
+  writeCacheOrInvalidate(
     STORAGE_KEY,
     JSON.stringify(normalizeRbacState(state)),
   );

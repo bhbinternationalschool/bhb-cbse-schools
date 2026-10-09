@@ -22,7 +22,7 @@ import {
 import { loadMasters, type MastersState } from "@/lib/masters";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { TENANT } from "@/lib/types";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 const SETTINGS_KEY = "bhb_udise_compliance_v1";
@@ -160,7 +160,7 @@ function defaultSettings(): UdiseComplianceSettings {
 export function loadUdiseComplianceSettings(): UdiseComplianceSettings {
   if (typeof window === "undefined") return defaultSettings();
   try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
+    const raw = readCache(SETTINGS_KEY);
     if (!raw) return defaultSettings();
     const p = JSON.parse(raw) as Partial<UdiseComplianceSettings>;
     return {
@@ -188,7 +188,7 @@ export function saveUdiseComplianceSettings(
     Math.min(90, Number(next.reminderIntervalDays) || 7),
   );
   if (typeof window !== "undefined") {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+    writeCacheOrInvalidate(SETTINGS_KEY, JSON.stringify(next));
     void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("udise_compliance", { settings: next })));
   }
   return next;

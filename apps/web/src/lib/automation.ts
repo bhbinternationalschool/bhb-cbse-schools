@@ -5,7 +5,7 @@
 
 import type { WaTemplateLanguage } from "@/lib/waTemplates";
 import { nextCronRunIst } from "@/lib/automationSchedule";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { SCHOOL_DEFAULT_WA_LANGUAGE } from "@/lib/householdPrefs";
 import { trackServerWork } from "@/lib/serverWork";
 
@@ -512,7 +512,7 @@ export function normalizeAutomationState(
 export function loadAutomation(): AutomationState {
   if (typeof window === "undefined") return emptyAutomation();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) {
       const seeded = emptyAutomation();
       writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(seeded));

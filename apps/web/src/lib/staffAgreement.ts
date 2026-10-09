@@ -11,7 +11,7 @@ import {
   suggestFromSeriesCode,
 } from "@/lib/numberSeries";
 import type { StaffRecord } from "@/lib/foundationMasters";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 export type AgreementTemplateId =
@@ -319,7 +319,7 @@ function normalizeAgreement(a: Partial<StaffAgreement>): StaffAgreement {
 export function loadAgreements(): AgreementState {
   if (typeof window === "undefined") return { version: 1, agreements: [] };
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return { version: 1, agreements: [] };
     const parsed = JSON.parse(raw) as Partial<AgreementState>;
     return {

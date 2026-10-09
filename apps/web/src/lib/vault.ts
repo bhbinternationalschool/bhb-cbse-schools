@@ -10,7 +10,7 @@ import {
   exportFilterReport,
   type ReportColumn,
 } from "@/lib/reportExport";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 const STORAGE_KEY = "bhb_vault_v1";
@@ -103,7 +103,7 @@ export function loadVault(): VaultState {
     return emptyVaultState();
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyVaultState();
     const parsed = JSON.parse(raw) as Partial<VaultState>;
     return {

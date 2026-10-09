@@ -13,7 +13,7 @@
  * Persisted through module_local_state ("admissions_kb").
  */
 
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import type { MastersState } from "@/lib/masters";
 import { feeSummaryForClass } from "@/lib/admissionDocumentLinks";
@@ -136,7 +136,7 @@ export function normalizeAdmissionsKb(raw: unknown): AdmissionsKbState {
 export function loadAdmissionsKb(): AdmissionsKbState {
   if (typeof window === "undefined") return emptyAdmissionsKb();
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     return raw ? normalizeAdmissionsKb(JSON.parse(raw)) : emptyAdmissionsKb();
   } catch {
     return emptyAdmissionsKb();

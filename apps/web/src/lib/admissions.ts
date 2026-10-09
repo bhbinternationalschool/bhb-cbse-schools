@@ -13,7 +13,7 @@ import {
 import { normalizePhotoConsent, type PhotoConsent } from "@/lib/photoConsent";
 import { sanitizeStoredMediaUrl } from "@/lib/media";
 import { normalizeHouseholdLanguage } from "@/lib/householdPrefs";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { stripEmptyList } from "@/lib/wirePayload";
 import {
   currentAcademicYearCode,
@@ -1378,7 +1378,7 @@ export function loadAdmissions(): AdmissionsState {
     return defaultAdmissionsState();
   }
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     // A cache too small to hold 2.37 MB must not read as "no leads".
     if (!raw) return memoryAdmissionsState ?? defaultAdmissionsState();
     return normalizeAdmissionsState(
