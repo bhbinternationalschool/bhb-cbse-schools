@@ -29,6 +29,7 @@ import {
   ShieldAlert,
   HeartPulse,
   ToggleLeft,
+  Lightbulb,
   UserPlus,
   Users,
   UsersRound,
@@ -138,6 +139,14 @@ export const HUB_GROUPS: HubGroup[] = [
         blurb: "Feature switches",
         detail: "Turn optional products on or off for this tenant.",
         icon: ToggleLeft,
+        tone: "navy",
+      },
+      {
+        href: "/modules/requests",
+        title: "Module requests",
+        blurb: "Staff ideas & stuck points",
+        detail: "Changes staff asked the assistant for, and where they got stuck. Approve to have them built.",
+        icon: Lightbulb,
         tone: "navy",
       },
       {
