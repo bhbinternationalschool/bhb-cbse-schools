@@ -47,6 +47,7 @@ import {
 } from "@/lib/accountsJournal";
 import {
 } from "@/lib/accountsCashBank";
+import { recordAccountsDeletion } from "@/lib/accountsNormalizedClient";
 
 /* ─── Vendors + bills ──────────────────────────────────────── */
 
@@ -117,6 +118,7 @@ export function deleteVendor(
   if (!vendor) return fail("Vendor not found");
   const check = checkVendorRemoval(vendorId, state);
   if (!check.canRemove) return fail(check.suggestion);
+  recordAccountsDeletion("accounts_desk_vendors", vendorId);
   saveAccounts({
     ...state,
     vendors: state.vendors.filter((v) => v.id !== vendorId),
