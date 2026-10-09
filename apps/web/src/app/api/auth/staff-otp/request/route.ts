@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import { issueParentOtp } from "@/lib/parentOtp.server";
+import { issueParentOtp, normalizeMobile10 } from "@/lib/parentOtp.server";
 import { resolvePersonByMobile } from "@/lib/authProvisioning.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
+import { noteUnknownLoginServer } from "@/lib/loginUnknownNumbers.server";
 
 export const runtime = "nodejs";
 
@@ -20,6 +21,8 @@ export async function POST(request: Request) {
     // number must never receive an OTP that could sign in as someone else.
     const person = await resolvePersonByMobile("staff", mobile);
     if (!person) {
+      const m10 = normalizeMobile10(mobile);
+      if (m10) await noteUnknownLoginServer(m10, "staff");
       return NextResponse.json(
         { error: "No staff record found for this mobile. Contact school office." },
         { status: 404 },
