@@ -11,6 +11,7 @@ import { ensurePaymentsHydratedServer } from "@/lib/paymentsPersistence";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { loadSis } from "@/lib/sis";
 import { loadAdmissions, funnelCounts } from "@/lib/admissions";
+import { withoutReviewDemo } from "@/lib/reviewDemoRecords";
 import { loadAttendance, todayIso } from "@/lib/attendance";
 import { todayAttendanceFigures } from "@/lib/attendanceToday";
 import { computeFeeKpis } from "@/lib/feeFinance";
@@ -160,7 +161,7 @@ export async function buildPrincipalSnapshot(
   // The school's own size, which every app showed nowhere. Same filter the
   // principal lists use, so the tile and the list it opens agree.
   const sis = loadSis();
-  const activeStudents = (sis.students ?? []).filter(
+  const activeStudents = withoutReviewDemo(sis).students.filter(
     (st) => st.status === "active" && st.academicYearCode === ay,
   ).length;
 

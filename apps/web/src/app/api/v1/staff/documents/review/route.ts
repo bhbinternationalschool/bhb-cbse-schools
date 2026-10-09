@@ -3,7 +3,7 @@ import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { assertPermission, requestMeta, resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
-import { loadSis, type StudentDocKey } from "@/lib/sis";
+import { loadSisForStaff, type StudentDocKey } from "@/lib/sis";
 import { updateStudentDocsInDb } from "@/lib/sisProfile.server";
 import { scopeAllows, staffSectionScope } from "@/lib/api/v1/staffScope";
 import { sendPushToSubject } from "@/lib/webPush.server";
@@ -40,7 +40,7 @@ export async function POST(request: Request) {
     const scope = await staffSectionScope(ctx);
     await ensureSchoolMirrorHydrated();
     await ensureSisHydratedServer();
-    const sis = loadSis();
+    const sis = loadSisForStaff();
     const student = sis.students.find((s) => s.id === studentId);
     if (!student) throw new ApiError("not_found", "Student not found", 404);
     if (!scopeAllows(scope, student.classId, student.sectionId)) {

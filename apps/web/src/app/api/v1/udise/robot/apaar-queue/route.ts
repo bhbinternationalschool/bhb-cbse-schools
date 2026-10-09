@@ -13,7 +13,7 @@
 import { NextResponse } from "next/server";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { loadSis, studentsInSession } from "@/lib/sis";
+import { loadSisForStaff, studentsInSession } from "@/lib/sis";
 import { apaarReadiness } from "@/lib/udiseCompliance";
 import { buildApaarQueue, type PortalApaarChild } from "@/lib/udiseApaarFill";
 
@@ -44,7 +44,7 @@ export async function POST(req: Request) {
       apaarIdStatusDesc: String(p.apaarIdStatusDesc || ""),
     }));
   await ensureSchoolMirrorHydrated();
-  const sis = loadSis();
+  const sis = loadSisForStaff();
   const ready = new Set(
     studentsInSession(sis, auth.ctx.session.academicYearCode)
       .filter((s) => s.status === "active" && apaarReadiness(s).ready)

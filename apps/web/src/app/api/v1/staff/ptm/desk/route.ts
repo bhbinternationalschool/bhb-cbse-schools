@@ -4,7 +4,7 @@ import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { ensurePtmHydratedServer } from "@/lib/ptmPersistence";
 import { loadPtm } from "@/lib/ptm";
-import { loadSis } from "@/lib/sis";
+import { loadSisForStaff } from "@/lib/sis";
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
 import { scopedPtmState } from "@/lib/ptmTeacherScope.server";
 
@@ -30,7 +30,7 @@ export async function GET(request: Request) {
 
     await ensureSchoolMirrorHydrated();
     await Promise.all([ensureSisHydratedServer(), ensurePtmHydratedServer()]);
-    const state = scopedPtmState({ state: loadPtm(), scope, staffId, sis: loadSis() });
+    const state = scopedPtmState({ state: loadPtm(), scope, staffId, sis: loadSisForStaff() });
     return apiOk({ staffId, unrestricted: scope.unrestricted, state });
   } catch (e) {
     return apiErr(e);

@@ -8,7 +8,7 @@ import { ensureAttendanceHydratedServer } from "@/lib/attendancePersistence";
 import { loadAttendance } from "@/lib/attendance";
 import { markAttendanceServer } from "@/lib/attendanceMark.server";
 import { buildMonthView, planMonthSave, sessionMonths, type MonthSaveDay } from "@/lib/attendanceMonthRegister";
-import { loadSis, studentsInSession } from "@/lib/sis";
+import { loadSisForStaff, studentsInSession } from "@/lib/sis";
 import { istToday } from "@/lib/dailyBrief.server";
 
 export const runtime = "nodejs";
@@ -36,7 +36,7 @@ async function sectionContext(request: Request, classId: string, sectionId: stri
   await ensureSchoolMirrorHydrated();
   const scope = await assertSectionScope(ctx, classId, sectionId);
   const ay = scope.unrestricted ? ayParam || scope.academicYearCode : scope.academicYearCode;
-  const students = studentsInSession(loadSis(), ay).filter(
+  const students = studentsInSession(loadSisForStaff(), ay).filter(
     (s) => s.classId === classId && s.sectionId === sectionId && s.status === "active",
   );
   const canEdit = scope.unrestricted || scope.classTeacherOf.has(sectionKey(classId, sectionId));

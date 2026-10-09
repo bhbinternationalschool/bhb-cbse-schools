@@ -9,7 +9,7 @@
 import { NextResponse } from "next/server";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { isRealPortalId, loadSis, studentsInSession } from "@/lib/sis";
+import { isRealPortalId, loadSisForStaff, studentsInSession } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
 import { apaarReadiness } from "@/lib/udiseCompliance";
 import { buildApaarFillPlan } from "@/lib/udiseApaarFill";
@@ -24,7 +24,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: "This child has no PEN on the portal." }, { status: 400 });
   }
   await ensureSchoolMirrorHydrated();
-  const sis = loadSis();
+  const sis = loadSisForStaff();
   const matches = studentsInSession(sis, auth.ctx.session.academicYearCode).filter(
     (s) => s.status === "active" && s.pen.replace(/\D/g, "") === pen,
   );

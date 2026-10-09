@@ -8,7 +8,7 @@ import {
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { assertSectionScope } from "@/lib/api/v1/staffScope";
 import { markAttendanceServer } from "@/lib/attendanceMark.server";
-import { loadSis, studentsInSession } from "@/lib/sis";
+import { loadSisForStaff, studentsInSession } from "@/lib/sis";
 import type { AttendanceMark, AttendanceStatus } from "@/lib/attendance";
 
 export const runtime = "nodejs";
@@ -49,7 +49,7 @@ export async function POST(request: Request) {
       ? body.academicYearCode || scope.academicYearCode
       : scope.academicYearCode;
     const inSection = new Set(
-      studentsInSession(loadSis(), academicYearCode)
+      studentsInSession(loadSisForStaff(), academicYearCode)
         .filter((s) => s.classId === body.classId && s.sectionId === body.sectionId)
         .map((s) => s.id),
     );

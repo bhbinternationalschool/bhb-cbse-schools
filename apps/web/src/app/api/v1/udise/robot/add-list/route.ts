@@ -12,7 +12,7 @@ import { NextResponse } from "next/server";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { loadMasters } from "@/lib/masters";
-import { householdOf, loadSis, studentsInSession } from "@/lib/sis";
+import { householdOf, loadSisForStaff, studentsInSession } from "@/lib/sis";
 import { listUdiseAddCandidates, type PortalListEntry } from "@/lib/udisePortalAdd";
 
 export const runtime = "nodejs";
@@ -42,7 +42,7 @@ export async function POST(req: Request) {
     }));
 
   await ensureSchoolMirrorHydrated();
-  const sis = loadSis();
+  const sis = loadSisForStaff();
   const masters = loadMasters();
   const res = listUdiseAddCandidates({
     students: studentsInSession(sis, auth.ctx.session.academicYearCode),

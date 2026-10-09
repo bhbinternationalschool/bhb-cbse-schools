@@ -5,7 +5,7 @@ import { ensureAttendanceHydratedServer } from "@/lib/attendancePersistence";
 import { ensureTimetableHydratedServer } from "@/lib/timetablePersistence";
 import { findRegister, loadAttendance } from "@/lib/attendance";
 import { loadTimetable, periodBell } from "@/lib/timetable";
-import { loadSis, studentsInSession } from "@/lib/sis";
+import { loadSisForStaff, studentsInSession } from "@/lib/sis";
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
 
 export const runtime = "nodejs";
@@ -70,7 +70,7 @@ export async function GET(request: Request) {
 
     let classTeacherOf: Record<string, unknown> | null = null;
     if (primary) {
-      const students = studentsInSession(loadSis(), ay).filter(
+      const students = studentsInSession(loadSisForStaff(), ay).filter(
         (s) => s.classId === primary.classId && s.sectionId === primary.sectionId,
       );
       const register = findRegister(ay, primary.sectionId, date, loadAttendance());

@@ -6,7 +6,7 @@ import { ensurePtmHydratedServer, pushPtmRemoteServer } from "@/lib/ptmPersisten
 import { loadPtm, writePtmLocalRaw, type PtmBookingStatus, type PtmFeedback, type PtmState } from "@/lib/ptm";
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
-import { loadSis } from "@/lib/sis";
+import { loadSisForStaff } from "@/lib/sis";
 import { ptmBookingInScope } from "@/lib/ptmTeacherScope.server";
 
 export const runtime = "nodejs";
@@ -53,7 +53,7 @@ export async function POST(request: Request) {
         booking,
         scope,
         staffId: ctx.session.staffId || "",
-        sis: loadSis(),
+        sis: loadSisForStaff(),
       })
     ) {
       throw new ApiError("forbidden", "Not your PTM slot, and the child is not in one of your classes", 403);

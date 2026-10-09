@@ -25,7 +25,7 @@ import {
   scheduleClientSchoolMirrorSync,
   setMirrorSlice,
 } from "@/lib/schoolDataMirror";
-import { loadSis } from "@/lib/sis";
+import { isHiddenReviewDemoHousehold, loadSis } from "@/lib/sis";
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
@@ -252,9 +252,12 @@ export function getPaymentLinkByCode(
 }
 
 export function listPaymentLinks(state?: PaymentsState): PaymentLink[] {
-  return [...(state ?? loadPayments()).links].sort((a, b) =>
-    b.createdAt.localeCompare(a.createdAt),
-  );
+  // Staff screens do not show the Play review family's links (see
+  // hideReviewDemoFromStaff in lib/sis). loadSis() is what learns its ids.
+  if (typeof window !== "undefined") loadSis();
+  return [...(state ?? loadPayments()).links]
+    .filter((l) => !isHiddenReviewDemoHousehold(l.householdId))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export function openPaymentLinkCount(state?: PaymentsState): number {

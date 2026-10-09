@@ -9,7 +9,7 @@ import { NextResponse } from "next/server";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { loadMasters } from "@/lib/masters";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { loadSis } from "@/lib/sis";
+import { loadSisForStaff } from "@/lib/sis";
 import { checkPageChildren, type PageChild } from "@/lib/udiseStudentsCheck";
 
 export const runtime = "nodejs";
@@ -24,7 +24,7 @@ export async function POST(req: Request) {
     .map((r) => ({ pen: String(r.pen ?? "").slice(0, 20), name: String(r.name ?? "").slice(0, 120), dob: String(r.dob ?? "").slice(0, 12) }));
   if (!rows.length) return NextResponse.json({ ok: false, error: "No children found on this page" }, { status: 400 });
   await ensureSchoolMirrorHydrated();
-  const sis = loadSis();
+  const sis = loadSisForStaff();
   const masters = loadMasters();
   const cls = (s: { classId: string; sectionId: string }) =>
     [masters.classes.find((c) => c.id === s.classId)?.name, masters.sections.find((x) => x.id === s.sectionId)?.name].filter(Boolean).join(" ") || "class not set";

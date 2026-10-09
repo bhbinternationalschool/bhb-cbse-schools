@@ -9,7 +9,7 @@ import { NextResponse } from "next/server";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { loadMasters } from "@/lib/masters";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { isRealPortalId, loadSis, studentsInSession } from "@/lib/sis";
+import { isRealPortalId, loadSisForStaff, studentsInSession } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
 import { readPenCandidates } from "@/lib/udisePortalStudents.server";
 
@@ -22,7 +22,7 @@ export async function GET(req: Request) {
   if (!pens) return NextResponse.json({ ok: false, error: "Could not read the PEN finder results — try again." }, { status: 503 });
   await ensureSchoolMirrorHydrated();
   const ours = String(loadMasters().schoolProfile?.udiseCode || TENANT.udiseCode || "").replace(/\D/g, "");
-  const children = studentsInSession(loadSis(), auth.ctx.session.academicYearCode)
+  const children = studentsInSession(loadSisForStaff(), auth.ctx.session.academicYearCode)
     .filter((s) => s.status === "active" && !isRealPortalId(s.pen) && pens[s.id]?.searched)
     .flatMap((s) =>
       (pens[s.id]?.hits ?? [])

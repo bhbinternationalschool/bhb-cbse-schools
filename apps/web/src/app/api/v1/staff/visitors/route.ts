@@ -14,7 +14,7 @@ import { VISITOR_PURPOSES } from "@/lib/visitors";
 import { classLabelOf } from "@/lib/api/v1/staffFees";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
-import { loadSis } from "@/lib/sis";
+import { loadSisForStaff } from "@/lib/sis";
 
 export const runtime = "nodejs";
 
@@ -36,7 +36,7 @@ export async function GET(request: Request) {
 
     await ensureSchoolMirrorHydrated();
     await ensureSisHydratedServer();
-    const sis = loadSis();
+    const sis = loadSisForStaff();
     const ay = ctx.session.academicYearCode;
     const students = new Map(
       sis.students

@@ -4,7 +4,7 @@ import { requestMeta, resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { sectionKey, staffSectionScope, type StaffScope } from "@/lib/api/v1/staffScope";
-import { loadSis, studentsInSession, type SisStudent } from "@/lib/sis";
+import { loadSisForStaff, studentsInSession, type SisStudent } from "@/lib/sis";
 import { readWaNumberVerdicts } from "@/lib/waNumberVerdicts.server";
 import {
   CLASS_TEACHER_HOUSEHOLD_FIELDS,
@@ -61,7 +61,7 @@ export async function GET(request: Request) {
     const { ctx, scope } = await context(request);
     const url = new URL(request.url);
     const only = url.searchParams.get("sectionId")?.trim() || "";
-    const sis = loadSis();
+    const sis = loadSisForStaff();
     const verdictRead = await readWaNumberVerdicts();
 
     const students = studentsInSession(sis, scope.academicYearCode)
@@ -176,7 +176,7 @@ export async function PATCH(request: Request) {
     const body = (await request.json().catch(() => ({}))) as Body;
     const id = (body.id || "").trim();
     if (!id) throw new ApiError("bad_request", "id required", 400);
-    const sis = loadSis();
+    const sis = loadSisForStaff();
     const inSession = studentsInSession(sis, scope.academicYearCode);
 
     let summary = "";

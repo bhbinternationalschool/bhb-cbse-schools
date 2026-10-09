@@ -12,7 +12,7 @@ import { loadAttendance, summarizeMarks, todayIso } from "@/lib/attendance";
 import { computeStudentDues, loadFees, openFeeDues } from "@/lib/fees";
 import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
 import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
-import { householdWhatsApp, loadSis } from "@/lib/sis";
+import { householdWhatsApp, loadSisForStaff } from "@/lib/sis";
 import { loadStaffAttendance } from "@/lib/staffAttendance";
 
 export const runtime = "nodejs";
@@ -55,7 +55,7 @@ export async function GET(request: Request) {
     switch (kind) {
       case "defaulters": {
         await Promise.all([ensureSisHydratedServer(), ensurePaymentsHydratedServer()]);
-        const sis = loadSis();
+        const sis = loadSisForStaff();
         const fees = loadFees();
         type Row = {
           householdId: string;
