@@ -74,6 +74,7 @@
     "test:exam-paper-import": "npx tsx src/lib/examPaperImport.selftest.ts",
     "test:answer-key-parse": "npx tsx src/lib/answerKeyParse.selftest.ts",
     "test:desk-shrink-guard": "npx tsx src/lib/deskSliceShrinkGuard.selftest.ts",
+    "test:desk-slice-no-prune": "npx tsx src/lib/deskSliceNoPrune.selftest.ts",
     "test:nucleus-manifest": "npx tsx src/lib/nucleusManifest.selftest.ts",
     "test:nucleus-capture": "npx tsx src/lib/nucleusCapture.selftest.ts",
     "test:nucleus-handoff": "npx tsx src/lib/nucleusHandoff.selftest.ts",

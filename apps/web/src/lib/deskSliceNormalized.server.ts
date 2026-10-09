@@ -11,6 +11,7 @@ import {
 } from "@/lib/deskSliceRegistry";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { judgeDeskShrink } from "@/lib/deskSliceShrinkGuard";
+import { mergeSliceById } from "@/lib/sliceMergeById";
 
 export type DeskSliceSyncMeta = {
   sliceCount: number;
@@ -114,50 +115,68 @@ export async function pushDeskSliceToDb(
       );
     }
   }
-  const slices = stateToSlices(def, rest);
-
-  const rows = slices
-    .filter(({ key, payload }) => {
-      if (def.objectSlices.includes(key)) {
-        return payload != null && payload !== "";
-      }
-      return Array.isArray(payload) && payload.length > 0;
-    })
-    .map(({ key, payload }) => ({
-      tenant_id: tenantId,
-      slice_key: key,
-      payload,
-      updated_at: now,
-    }));
-
   const slicesTable = `${def.deskPrefix}_desk_slices`;
   const { data: existing, error: existingErr } = await sb
     .from(slicesTable)
-    .select("slice_key")
+    .select("slice_key, payload")
     .eq("tenant_id", tenantId);
   if (existingErr) {
-    // Cannot see what is there → cannot safely decide what to prune.
+    // Cannot see what is there → cannot safely decide what to write.
     return { ok: false, error: existingErr.message };
   }
+  const stored = new Map<string, unknown>();
+  for (const r of existing ?? []) {
+    stored.set(String((r as { slice_key: string }).slice_key), (r as { payload: unknown }).payload);
+  }
+
   // A payload that carries no slice keys at all is not an instruction to
   // wipe the desk — it is a client that never held this module's state
   // (pushed before its own hydration finished, or after localStorage was
-  // cleared). The empty-state guard in createDeskSlicePersistence ran only
-  // AFTER this delete, which is how module toggles / templates / rules
-  // "reset themselves" (ensure-desk then re-seeded defaults). Explicit
-  // empty arrays (`rules: []`) are still honoured — deleting the last row
-  // is a real edit. Unknown ≠ empty.
+  // cleared). Unknown ≠ empty.
   const carriesNoKeys = allSliceKeys(def).every((k) => rest[k] === undefined);
-  if (carriesNoKeys && (existing?.length ?? 0) > 0) {
-    return { ok: false, error: "Refusing to sync: payload carries no slice keys" };
+  if (carriesNoKeys) {
+    if (stored.size > 0) return { ok: false, error: "Refusing to sync: payload carries no slice keys" };
+    return { ok: true };
   }
+
+  // No slice is deleted by absence. A slice this push does not carry is left
+  // as stored — it used to be deleted, along with every slice sent empty.
+  // A slice it DOES carry is written as sent, an empty list included:
+  // deleting the last row is a real edit. Merge slices (see the registry)
+  // keep every stored row the push lacks.
+  const merge = new Set(def.mergeSlices ?? []);
+  const rows = stateToSlices(def, rest)
+    .filter(({ key, payload }) => {
+      if (def.objectSlices.includes(key)) return payload !== undefined && payload !== null && payload !== "";
+      return Array.isArray(payload);
+    })
+    .map(({ key, payload }) => {
+      let value: unknown = payload;
+      if (merge.has(key) && Array.isArray(payload)) {
+        value = mergeSliceById(stored.get(key), payload);
+        const cap = def.mergeCaps?.[key];
+        if (cap) {
+          value = (value as Record<string, unknown>[])
+            .slice()
+            .sort((x, y) => String(y[cap.newestBy] ?? "").localeCompare(String(x[cap.newestBy] ?? "")))
+            .slice(0, cap.max);
+        }
+      }
+      return { tenant_id: tenantId, slice_key: key, payload: value, updated_at: now };
+    });
+
+  // What the desk holds after this push: written slices as written, the
+  // rest as stored.
+  const after: Record<string, unknown> = {};
+  for (const [k, v] of stored) after[k] = v;
+  for (const r of rows) after[r.slice_key] = r.payload;
+  const incomingRows = countPayloadRows(def, after);
 
   // The guard above catches a client that holds nothing at all. It does not
   // catch one that holds almost nothing — a browser that never hydrated this
   // desk and has since created a single row. That payload is a well-formed
   // array and looks exactly like a real edit; only its size gives it away.
   // See deskSliceShrinkGuard for the incident this is here to prevent.
-  const incomingRows = countPayloadRows(def, rest);
   const { data: meta } = await sb
     .from(`${def.deskPrefix}_desk_sync_meta`)
     .select("row_count")
@@ -174,29 +193,16 @@ export async function pushDeskSliceToDb(
     );
     return { ok: false, error: shrink.reason };
   }
-  const keep = new Set(rows.map((r) => String(r.slice_key)));
-  const stale = (existing ?? [])
-    .map((r) => String((r as { slice_key: string }).slice_key))
-    .filter((k) => !keep.has(k));
-  if (stale.length > 0) {
-    await sb
-      .from(slicesTable)
-      .delete()
-      .eq("tenant_id", tenantId)
-      .in("slice_key", stale);
-  }
 
   if (rows.length > 0) {
     const { error } = await sb.from(slicesTable).upsert(rows);
     if (error) return { ok: false, error: error.message };
-  } else {
-    await sb.from(slicesTable).delete().eq("tenant_id", tenantId);
   }
 
   await sb.from(`${def.deskPrefix}_desk_sync_meta`).upsert(
     {
       tenant_id: tenantId,
-      slice_count: rows.length,
+      slice_count: Object.keys(after).length,
       row_count: incomingRows,
       last_updated_at: now,
       updated_at: now,
