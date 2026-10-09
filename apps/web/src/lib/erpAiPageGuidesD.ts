@@ -101,6 +101,26 @@ export const PAGE_GUIDES_D: ErpAiPageGuideDef[] = [
     ],
   },
   {
+    id: "comms-onapp",
+    paths: ["/comms"],
+    tab: "onapp",
+    pageLabel: "Parents on app",
+    title: "See which families have the parent app and when they last opened it",
+    module: "notices",
+    chipLabel: "How Parents on app works",
+    steps: [
+      "The boxes at the top count families on the app, phones, and who opened it today or this week.",
+      "Each class is folded; click a class to see its families on the app, most recently active first.",
+      "**Opened** is the last time any of that family's phones opened the app, in India time. Red means not for 7 days or more.",
+      "Open **Not on the app yet** under a class to see the families to nudge.",
+      "Type a parent, child or mobile number in the search box; matching classes open by themselves.",
+    ],
+    stuckTips: [
+      "If a family says they installed the app but is not listed, they have not signed in yet — the list counts sign-ins, not downloads.",
+      "Click **Refresh** to load the latest numbers.",
+    ],
+  },
+  {
     id: "website",
     paths: ["/website"],
     pageLabel: "Website",
