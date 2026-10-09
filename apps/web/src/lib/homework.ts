@@ -54,6 +54,13 @@ export type HomeworkPost = {
   referenceAnswer: string;
   status: HomeworkPostStatus;
   createdAt: string;
+  /**
+   * When this post was last created, edited or withdrawn. A save skips a
+   * post the database holds at a later time, so an older copy can't put an
+   * edit or a withdrawal back. "" on a copy from before this existed (or a
+   * sample): such a copy never overwrites a stored post.
+   */
+  updatedAt?: string;
   /** When parents were last WhatsApp-notified for this post */
   whatsappNotifiedAt: string;
   whatsappNotifiedCount: number;
@@ -75,6 +82,8 @@ export type DiaryEntry = {
   bodyEn: string;
   bodyHi: string;
   createdAt: string;
+  /** When this entry was last created or edited — see HomeworkPost.updatedAt. */
+  updatedAt?: string;
 };
 
 export type HomeworkSubmission = {
@@ -196,6 +205,7 @@ function normalizePost(p: Partial<HomeworkPost>): HomeworkPost {
     referenceAnswer: p.referenceAnswer || "",
     status: p.status === "withdrawn" ? "withdrawn" : "published",
     createdAt: p.createdAt || nowIso(),
+    updatedAt: p.updatedAt || "",
     whatsappNotifiedAt: p.whatsappNotifiedAt || "",
     whatsappNotifiedCount:
       typeof p.whatsappNotifiedCount === "number" ? p.whatsappNotifiedCount : 0,
@@ -218,6 +228,7 @@ function normalizeDiary(d: Partial<DiaryEntry>): DiaryEntry {
     bodyEn: d.bodyEn || "",
     bodyHi: d.bodyHi || "",
     createdAt: d.createdAt || nowIso(),
+    updatedAt: d.updatedAt || "",
   };
 }
 
@@ -399,6 +410,7 @@ export function createHomeworkPost(
     id: nid("hw"),
     status: "published",
     createdAt: nowIso(),
+    updatedAt: nowIso(),
     attachments: input.attachments || [],
   });
   const next = { ...state, posts: [post, ...state.posts] };
@@ -461,6 +473,7 @@ export function importClassroomHomeworkPosts(
       status: "published",
       source: "google_classroom",
       createdAt: nowIso(),
+      updatedAt: nowIso(),
       attachments: item.attachments || [],
       aiTutorHint: "",
     });
@@ -488,7 +501,7 @@ export function withdrawHomeworkPost(
   const i = state.posts.findIndex((p) => p.id === postId);
   if (i < 0) return { ok: false, error: "Post not found" };
   const posts = [...state.posts];
-  posts[i] = { ...posts[i], status: "withdrawn" };
+  posts[i] = { ...posts[i], status: "withdrawn", updatedAt: nowIso() };
   saveHomework({ ...state, posts });
   return { ok: true };
 }
@@ -510,6 +523,7 @@ export function updateHomeworkPost(
     attachments: input.attachments ?? prev.attachments,
     status: prev.status,
     createdAt: prev.createdAt,
+    updatedAt: nowIso(),
   });
   const posts = [...state.posts];
   posts[i] = post;
@@ -544,6 +558,7 @@ export function createDiaryEntry(
     ...input,
     id: nid("dy"),
     createdAt: nowIso(),
+    updatedAt: nowIso(),
   });
   saveHomework({ ...state, diary: [entry, ...state.diary] });
   return { ok: true, entry };
@@ -564,6 +579,7 @@ export function updateDiaryEntry(
     ...prev,
     ...input,
     createdAt: prev.createdAt,
+    updatedAt: nowIso(),
   });
   const diary = [...state.diary];
   diary[i] = entry;

@@ -226,6 +226,7 @@ SELFTESTS=(
   test:ptm-row-stamps
   test:attendance-row-stamps
   test:admissions-field-ops-merge
+  test:homework-newer-wins
   test:notifications-readers-only-grow
   test:attendance-side-lists-forward-only
   test:school-comms-newer-wins
