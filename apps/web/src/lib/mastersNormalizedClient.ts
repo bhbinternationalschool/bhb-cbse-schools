@@ -258,6 +258,7 @@ async function pushMastersDeskApi(
     if (res.status === 409) {
       const rehydrate =
         body?.reason === "stale" ||
+        body?.reason === "unversioned" ||
         body?.reason === "regenerated" ||
         body?.reason === "wipe";
       console.warn(`[masters-db] push refused (${body?.reason})`, body?.error);
@@ -265,6 +266,9 @@ async function pushMastersDeskApi(
         body?.reason === "stale"
           ? "Masters changed on another device — your last change was NOT saved. " +
               "The screen will refresh with the current data; please re-apply it."
+          : body?.reason === "unversioned"
+            ? "Your last change was NOT saved — this device had not loaded the school's " +
+                "masters yet. The screen will refresh with the current data; please re-apply it."
           : body?.reason === "regenerated"
             ? "Your last change was NOT saved. This device is holding an older " +
               "copy of the class list, so the server refused it to protect the " +

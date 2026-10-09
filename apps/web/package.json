@@ -91,6 +91,7 @@
     "test:exam-formula-catalog": "npx tsx src/lib/examFormulaCatalog.selftest.ts",
     "test:masters-revision-guard": "npx tsx src/lib/mastersRevisionGuard.selftest.ts",
     "test:masters-revision-lifecycle": "npx tsx src/lib/mastersRevisionLifecycle.selftest.ts",
+    "test:masters-revision-everywhere": "npx tsx src/lib/mastersRevisionEverywhere.selftest.ts",
     "test:tenant-wipe-expiry": "npx tsx src/lib/tenantDataWipe.selftest.ts",
     "test:masters-cold-client": "NEXT_PUBLIC_SUPABASE_URL=https://selftest.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=selftest-anon npx tsx src/lib/mastersColdClient.selftest.ts",
     "test:data-contract": "npx tsx src/lib/data/contract.selftest.ts",
