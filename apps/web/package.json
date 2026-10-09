@@ -387,6 +387,7 @@
     "test:leave-allotment": "npx tsx src/lib/leaveAllotment.selftest.ts",
     "test:class-group-message": "npx tsx src/lib/classGroupMessage.selftest.ts",
     "test:comms-reach": "npx tsx src/lib/commsReach.selftest.ts",
+    "test:wa-timeline": "npx tsx src/lib/waTimeline.selftest.ts",
     "import:leads": "npx tsx scripts/import-lead-excels.ts",
     "import:fee-discounts": "npx tsx scripts/import-fee-discounts-excel.ts",
     "clear:collections": "npx tsx scripts/clear-fee-collections.ts",
