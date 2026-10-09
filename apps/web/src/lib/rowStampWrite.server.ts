@@ -58,6 +58,12 @@ export async function writeStampedRows(
     delete patch.id;
     delete patch.tenant_id;
     delete patch.created_at;
+    // The new stamp must differ from the old one, or a second stale copy
+    // holding the same stamp would still match. Rows whose updated_at is a
+    // record's own time (an admission lead's) may not have moved on.
+    const at = Date.parse(String(patch.updated_at ?? ""));
+    const was = Date.parse(from);
+    if (!(at > was)) patch.updated_at = new Date(Math.max(Date.now(), (was || 0) + 1)).toISOString();
     const { data, error } = await sb
       .from(table)
       .update(patch)

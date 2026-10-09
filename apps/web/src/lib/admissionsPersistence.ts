@@ -12,6 +12,7 @@ import {
 } from "@/lib/admissions";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import {
+  captureAdmissionStamps,
   hydrateAdmissionsDeskFromDb,
   scheduleAdmissionsDeskSync,
 } from "@/lib/admissionsNormalizedClient";
@@ -160,7 +161,7 @@ export async function ensureAdmissionsHydrated(): Promise<boolean> {
     }
   }
 
-  const { state: deskState, changed: deskChanged, ok } =
+  const { state: deskState, changed: deskChanged, ok, stamps: deskStamps } =
     await hydrateAdmissionsDeskFromDb(admissionsReadFromDbEnabled());
   if (!ok) {
     if (typeof window !== "undefined") {
@@ -197,6 +198,10 @@ export async function ensureAdmissionsHydrated(): Promise<boolean> {
       changed = true;
     }
   }
+
+  // Which version of each row this browser now holds: its saves send only
+  // rows changed since, stamped, so they can't overwrite newer ones.
+  captureAdmissionStamps(deskStamps, normalizeAdmissionsState(loadAdmissions()));
 
   if (changed && typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("bhb-admissions-hydrated"));
