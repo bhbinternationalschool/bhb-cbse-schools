@@ -13,6 +13,7 @@ import { NextResponse } from "next/server";
 import { requireJobSecret } from "@/lib/apiRouteAuth.server";
 import { normalizeAutomationState, type AutomationState } from "@/lib/automation";
 import { runAutomationTick } from "@/lib/automationTick.server";
+import { AutomationStateUnreadable } from "@/lib/automationState.server";
 
 export const runtime = "nodejs";
 
@@ -44,14 +45,23 @@ export async function POST(req: Request) {
     body = {};
   }
 
-  const report = await runAutomationTick({
-    originUrl: req.url,
-    state: body.state ? normalizeAutomationState(body.state) : undefined,
-    forceRuleIds: Array.isArray(body.forceRuleIds)
-      ? body.forceRuleIds.map(String)
-      : undefined,
-    dryRun: !!body.dryRun,
-  });
+  let report: Awaited<ReturnType<typeof runAutomationTick>>;
+  try {
+    report = await runAutomationTick({
+      originUrl: req.url,
+      state: body.state ? normalizeAutomationState(body.state) : undefined,
+      forceRuleIds: Array.isArray(body.forceRuleIds)
+        ? body.forceRuleIds.map(String)
+        : undefined,
+      dryRun: !!body.dryRun,
+    });
+  } catch (e) {
+    if (e instanceof AutomationStateUnreadable) {
+      console.error("[automation] tick refused:", e.message);
+      return NextResponse.json({ ok: false, error: e.message, reason: "state_unreadable" }, { status: 503 });
+    }
+    throw e;
+  }
 
   return NextResponse.json({
     ok: true,

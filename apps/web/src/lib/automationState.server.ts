@@ -20,8 +20,23 @@ import {
 } from "@/lib/deskSliceNormalized.server";
 import { fetchServerBlob, pushServerBlob } from "@/lib/serverBlob";
 
+/**
+ * The automation desk could not be read. Unknown is not empty: a tick that
+ * went on would evaluate the legacy blob or an empty state — re-sending
+ * cards that blob still shows as approved — and save that back over the
+ * desk. Callers answer 503 and do nothing.
+ */
+export class AutomationStateUnreadable extends Error {
+  constructor(detail: string) {
+    super(`Could not read the automation desk — nothing was evaluated, sent or saved (${detail}).`);
+    this.name = "AutomationStateUnreadable";
+  }
+}
+
 export async function loadAutomationFromDb(): Promise<AutomationState> {
-  const { bundle } = await fetchDeskSliceFromDb("automation");
+  const read = await fetchDeskSliceFromDb("automation");
+  if (!read.ok) throw new AutomationStateUnreadable(read.error || "read failed");
+  const { bundle } = read;
   if (Array.isArray(bundle.rules) && bundle.rules.length > 0) {
     return normalizeAutomationState({
       version: 1,
