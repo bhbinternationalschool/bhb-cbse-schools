@@ -1,6 +1,7 @@
 "use client";
 
 import { AppPopupsPanel } from "@/components/comms/AppPopupsPanel";
+import { ParentsOnAppPanel } from "@/components/comms/ParentsOnAppPanel";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Images, Megaphone } from "lucide-react";
@@ -83,6 +84,7 @@ type CommsTab =
   | "whatsapp"
   | "answers"
   | "popups"
+  | "onapp"
   | "reports";
 
 const TABS: ModuleTabItem[] = [
@@ -96,6 +98,7 @@ const TABS: ModuleTabItem[] = [
   { id: "inbox", label: "Inbox", tone: "slate" },
   { id: "answers", label: "Answer book", tone: "teal" },
   { id: "popups", label: "App pop-ups", tone: "amber" },
+  { id: "onapp", label: "Parents on app", tone: "teal" },
   { id: "reports", label: "Reports", tone: "coral" },
 ];
 
@@ -154,6 +157,7 @@ function tabFromSearch(raw: string | null, path: string): CommsTab {
     raw === "notices" ||
     raw === "whatsapp" ||
     raw === "popups" ||
+    raw === "onapp" ||
     raw === "reports"
   ) {
     return raw;
@@ -1335,6 +1339,7 @@ export function CommsWorkspace() {
       ) : null}
 
       {tab === "popups" ? <AppPopupsPanel canEdit={!readOnly} /> : null}
+      {tab === "onapp" ? <ParentsOnAppPanel /> : null}
 
       {tab === "social" ? (
         <StepTabs

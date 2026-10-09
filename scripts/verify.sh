@@ -203,6 +203,7 @@ SELFTESTS=(
   test:class-group-message
   test:comms-reach
   test:wa-timeline
+  test:parents-on-app
   test:wa-sender-routing
   test:receipt-repair
   test:projection-double-post
@@ -221,7 +222,8 @@ SELFTESTS=(
   test:class-channel-subject
   test:review-demo-hidden
   test:payment-link-reuse
-  student-leave-status-guard
+  test:student-leave-status-guard
+  test:payment-link-status-guard
   test:attendance-today
   test:sis-wire-payload
   test:print-palette

@@ -79,6 +79,9 @@ export async function POST(req: Request) {
   return NextResponse.json({
     ok: true,
     count: result.linkCount,
+    // Links this browser held at an older status (e.g. still "open" after
+    // the payment came in): kept as stored; the browser reloads them.
+    kept: result.kept ?? [],
     updatedAt: new Date().toISOString(),
   });
 }

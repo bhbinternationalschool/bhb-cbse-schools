@@ -76,12 +76,23 @@ async function pushPaymentsDeskApi(state: PaymentsState) {
       updatedAt?: string;
       count?: number;
       error?: string;
+      kept?: string[];
     } | null;
     if (res.ok && body?.ok) {
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         linkCount: body.count ?? state.links.length,
       });
+      // This browser held some links at an older status than the server
+      // (paid since it loaded): reload them rather than keep showing "open".
+      if (body.kept?.length) {
+        void Promise.all([import("@/lib/deskHydrateGuard"), import("@/lib/deskHydrationSchedule")]).then(
+          ([guard, sched]) => {
+            guard.resetDeskHydrated("payments");
+            return sched.ensureAllDeskHydrated();
+          },
+        );
+      }
     } else if (!res.ok) {
       console.warn("[payments-db] desk push failed", body?.error || res.status);
     }
