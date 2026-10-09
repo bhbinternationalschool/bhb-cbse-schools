@@ -69,10 +69,12 @@ export function createDeskSlicePersistence<T extends { version: number }>(opts: 
 
   async function pushRemoteServer(
     state: T,
+    pushOpts?: { deletes?: Record<string, readonly string[]> },
   ): Promise<{ ok: boolean; error?: string }> {
     const desk = await pushDeskSliceToDb(
       opts.moduleId,
       state as T & Record<string, unknown>,
+      pushOpts?.deletes ? { deletes: pushOpts.deletes } : undefined,
     );
     if (!desk.ok) return { ok: false, error: desk.error };
 

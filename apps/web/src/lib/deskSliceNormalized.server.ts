@@ -84,6 +84,13 @@ export async function pushDeskSliceToDb(
      * asked for a bulk deletion — never as a way past a surprising refusal.
      */
     allowShrink?: boolean;
+    /**
+     * Rows this save deletes, by slice and id. A merge slice keeps every
+     * stored row a save lacks, so a deletion has to be said: the server
+     * writers that remove a row (a withdrawn leave request, a superseded
+     * follow-up) name it here. Applied to merge slices only.
+     */
+    deletes?: Record<string, readonly string[]>;
   },
 ): Promise<{ ok: boolean; error?: string }> {
   const def = resolveDef(id);
@@ -164,6 +171,20 @@ export async function pushDeskSliceToDb(
       }
       return { tenant_id: tenantId, slice_key: key, payload: value, updated_at: now };
     });
+
+  // Named deletes: removed from the merged list — or, for a merge slice
+  // this save did not carry, from the stored list, which is then written.
+  for (const [key, ids] of Object.entries(opts?.deletes ?? {})) {
+    if (!merge.has(key) || !ids.length) continue;
+    const gone = new Set(ids);
+    const drop = (list: unknown) =>
+      (Array.isArray(list) ? list : []).filter(
+        (r) => !(r && typeof r === "object" && gone.has(String((r as { id?: unknown }).id))),
+      );
+    const row = rows.find((r) => r.slice_key === key);
+    if (row) row.payload = drop(row.payload);
+    else if (stored.has(key)) rows.push({ tenant_id: tenantId, slice_key: key, payload: drop(stored.get(key)), updated_at: now });
+  }
 
   // What the desk holds after this push: written slices as written, the
   // rest as stored.
