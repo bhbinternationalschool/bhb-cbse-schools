@@ -11,6 +11,8 @@ import {
   recordDeskSyncFailure,
   recordDeskSyncSuccess,
 } from "@/lib/deskSyncStatus";
+import { confirmDeskDeletes, pendingDeskDeletes } from "@/lib/deskNamedDeletes";
+import { ATTENDANCE_DESK } from "@/lib/attendanceDeletes";
 
 const META_KEY = "bhb_attendance_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -71,6 +73,7 @@ export function scheduleAttendanceDeskSync(state: AttendanceState) {
 async function pushAttendanceDeskApi(
   state: AttendanceState,
 ): Promise<{ ok: boolean; error?: string }> {
+  const sentDeletes = pendingDeskDeletes(ATTENDANCE_DESK);
   try {
     const res = await fetch("/api/school-data/attendance-registers", {
       method: "POST",
@@ -80,6 +83,8 @@ async function pushAttendanceDeskApi(
         policy: state.policy,
         absentNudges: state.absentNudges ?? [],
         exceptions: state.exceptions ?? [],
+        // Deletions are named, never inferred from what this browser lacks.
+        deletes: sentDeletes,
       }),
     });
     const body = (await res.json().catch(() => null)) as {
@@ -93,6 +98,7 @@ async function pushAttendanceDeskApi(
     // two calls once sat after the returns below and never ran, so a
     // refused student-register save showed no warning at all.)
     if (res.ok && body?.ok) {
+      confirmDeskDeletes(ATTENDANCE_DESK, sentDeletes);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         registerCount: body.count ?? state.registers.length,

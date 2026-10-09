@@ -129,6 +129,7 @@ SELFTESTS=(
   test:fee-adjustments-merge
   test:parent-bot-clarify
   test:office-backlog
+  test:comms-attendance-leave-no-prune
   test:automation-send-rules
   test:fee-family-reminder
   test:fleet-keep-rule
