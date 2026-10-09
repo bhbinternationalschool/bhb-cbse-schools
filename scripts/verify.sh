@@ -201,6 +201,7 @@ SELFTESTS=(
   test:projection-double-post
   test:holiday-import
   test:payment-link-amount
+  test:install-platform
   test:homework-no-prune
   test:class-channel-subject
   test:review-demo-hidden
