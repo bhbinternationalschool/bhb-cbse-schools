@@ -98,6 +98,7 @@ export function AppShell({
     const labels: Record<string, string> = {
       sis: "student records",
       ptm: "PTM",
+      admissions: "admissions",
       rbac: "roles & permissions",
       module_registry: "module settings",
       wa_templates: "WhatsApp templates",

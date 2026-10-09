@@ -16,7 +16,9 @@ import {
 } from "@/lib/admissions";
 import { admissionsDualWriteDbEnabled } from "@/lib/admissionsDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
-import { fetchAllPages } from "@/lib/supabase/pageAll";
+import { fetchAllPages, fetchByIds } from "@/lib/supabase/pageAll";
+import { stampsOf, writeStampedRows } from "@/lib/rowStampWrite.server";
+import type { RowConflicts, RowStamps } from "@/lib/rowStampClient";
 
 export type AdmissionDeskSyncMeta = {
   householdCount: number;
@@ -329,9 +331,35 @@ async function restorePartialLeads(
   });
 }
 
+/** The admissions lists saved row by row, in write order. */
+export const ADMISSION_SLICES = ["households", "leads", "registrationPayments"] as const;
+export type AdmissionSlice = (typeof ADMISSION_SLICES)[number];
+const ADMISSION_SLICE_TABLE: Record<AdmissionSlice, string> = {
+  households: "admission_desk_households",
+  leads: "admission_desk_leads",
+  registrationPayments: "admission_desk_registration_payments",
+};
+const ADMISSION_SEQ_KEYS = [
+  "nextEnquirySeq",
+  "nextApplicationSeq",
+  "nextHouseholdSeq",
+  "nextRegPaySeq",
+  "nextBeatSeq",
+] as const;
+
+export type AdmissionPushOpts = {
+  /**
+   * A browser's save: per list, the rows it changed and the `updated_at`
+   * each was changed from ("" = new). Only those are written, each only
+   * while still at that stamp; the rest come back as conflicts.
+   */
+  stamps?: RowStamps;
+};
+
 export async function pushAdmissionDeskToDb(
   state: AdmissionsState,
-): Promise<{ ok: boolean; error?: string }> {
+  opts: AdmissionPushOpts = {},
+): Promise<{ ok: boolean; error?: string; stamps?: RowStamps; conflicts?: RowConflicts }> {
   if (!admissionsDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
@@ -339,40 +367,61 @@ export async function pushAdmissionDeskToDb(
   const now = new Date().toISOString();
   const normalized = normalizeAdmissionsState(state);
 
-  const households = normalized.households ?? [];
+  // No stale copy over a newer row (2026-10-09): every lead the save held
+  // was upserted, so an office tab that loaded a lead before the WhatsApp
+  // bot, a counsellor's call log or the registration link changed it wrote
+  // the old lead back — and with it the old stage.
+  //  - A browser (stamps) writes only the rows it changed, each only while
+  //    still at the stamp it loaded; the rest come back as conflicts.
+  //  - Anyone else (server writers, the blob backfill, a browser on an
+  //    older build) holds the whole desk: a lead or household is skipped
+  //    when the stored one is newer than this copy's (`updatedAt`).
+  const picks = (slice: AdmissionSlice) => {
+    if (!opts.stamps) return () => true;
+    const sent = opts.stamps[slice] ?? {};
+    return (id: string) => id in sent;
+  };
+  // A browser's changed row is an edit made now.
+  const touched = <T extends { updatedAt: string }>(r: T): T => (opts.stamps ? { ...r, updatedAt: now } : r);
+
+  const households = (normalized.households ?? []).filter((h) => picks("households")(h.id)).map(touched);
   // Stubs from the projected list get their missing 59 fields back from the
   // database before anything is written. See restorePartialLeads.
-  const leads = await restorePartialLeads(sb, tenantId, normalized.leads ?? []);
-  const payments = normalized.registrationPayments ?? [];
-
-  // Write first, prune afterwards.
-  //
-  // These are separate round trips with no enclosing transaction, so a
-  // failure part-way through is possible. Deleting first meant a failed
-  // upsert left rows deleted and not re-written — permanent data loss.
-  // Writing first inverts the failure mode: an interrupted push leaves
-  // stale extra rows, which the next successful push prunes. Recoverable
-  // beats destructive.
-  let r = await upsertChunks(
+  const leads = await restorePartialLeads(
     sb,
-    "admission_desk_households",
-    households.map((h) => householdToRow(tenantId, h)),
+    tenantId,
+    (normalized.leads ?? []).filter((l) => picks("leads")(l.id)).map(touched),
   );
-  if (!r.ok) return r;
+  const payments = (normalized.registrationPayments ?? []).filter((p) => picks("registrationPayments")(p.id));
+  const rows: Record<AdmissionSlice, Record<string, unknown>[]> = {
+    households: households.map((h) => householdToRow(tenantId, h)),
+    leads: leads.map((l) => leadToRow(tenantId, l)),
+    registrationPayments: payments.map((p) => paymentToRow(tenantId, p)),
+  };
 
-  r = await upsertChunks(
-    sb,
-    "admission_desk_leads",
-    leads.map((l) => leadToRow(tenantId, l)),
-  );
-  if (!r.ok) return r;
-
-  r = await upsertChunks(
-    sb,
-    "admission_desk_registration_payments",
-    payments.map((p) => paymentToRow(tenantId, p)),
-  );
-  if (!r.ok) return r;
+  const newStamps: RowStamps = {};
+  const conflicts: RowConflicts = {};
+  for (const slice of ADMISSION_SLICES) {
+    const table = ADMISSION_SLICE_TABLE[slice];
+    if (opts.stamps) {
+      const w = await writeStampedRows(sb, table, tenantId, rows[slice], opts.stamps[slice] ?? {});
+      if (!w.ok) return w;
+      newStamps[slice] = w.stamps;
+      if (w.conflicts.length) conflicts[slice] = w.conflicts;
+      continue;
+    }
+    let write = rows[slice];
+    if (slice !== "registrationPayments") {
+      const newer = await storedNewer(sb, tenantId, table, write);
+      if (!newer.ok) return newer;
+      if (newer.ids.size) {
+        console.warn(`[admissions-db] ${table}: kept ${newer.ids.size} newer row(s) over a stale copy`);
+        write = write.filter((r) => !newer.ids.has(String(r.id)));
+      }
+    }
+    const r = await upsertChunks(sb, table, write);
+    if (!r.ok) return r;
+  }
 
   // No prune by absence. Leads and households are never deleted in the UI
   // (a merged duplicate is marked lost), and they are written by many hands
@@ -383,7 +432,18 @@ export async function pushAdmissionDeskToDb(
   // enrolled leads were protected, the fresh enquiries were not. Registration
   // payments were already append-only.
 
+  // The number counters only move forward: a stale copy rewinding one
+  // hands out an enquiry or receipt number twice.
+  const { data: storedOps, error: opsErr } = await sb
+    .from("admission_desk_field_ops")
+    .select("sequences_json")
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+  if (opsErr) return { ok: false, error: `Could not read the number counters: ${opsErr.message}` };
+  const storedSeq = ((storedOps as { sequences_json?: Record<string, unknown> } | null)?.sequences_json ?? {});
   const ops = fieldOpsFromState(normalized);
+  const seq = (k: (typeof ADMISSION_SEQ_KEYS)[number]) =>
+    Math.max(Number(ops[k]) || 0, Number(storedSeq[k]) || 0);
   await sb.from("admission_desk_field_ops").upsert({
     tenant_id: tenantId,
     ops_json: {
@@ -395,40 +455,84 @@ export async function pushAdmissionDeskToDb(
       leadCallerStaffIds: ops.leadCallerStaffIds,
     },
     sequences_json: {
-      nextEnquirySeq: ops.nextEnquirySeq,
-      nextApplicationSeq: ops.nextApplicationSeq,
-      nextHouseholdSeq: ops.nextHouseholdSeq,
-      nextRegPaySeq: ops.nextRegPaySeq,
-      nextBeatSeq: ops.nextBeatSeq,
+      nextEnquirySeq: seq("nextEnquirySeq"),
+      nextApplicationSeq: seq("nextApplicationSeq"),
+      nextHouseholdSeq: seq("nextHouseholdSeq"),
+      nextRegPaySeq: seq("nextRegPaySeq"),
+      nextBeatSeq: seq("nextBeatSeq"),
     },
     updated_at: now,
   });
 
-  let lastLeadAt: string | null = null;
-  for (const l of leads) {
-    if (!lastLeadAt || l.updatedAt > lastLeadAt) lastLeadAt = l.updatedAt;
-  }
+  // Counts from the database, not from this copy (it may be partly written).
+  await touchAdmissionMeta(sb, tenantId, now).catch(() => undefined);
+  if (Object.keys(conflicts).length) console.warn("[admissions-db] kept newer rows over a stale copy", conflicts);
+  return { ok: true, stamps: newStamps, conflicts };
+}
 
-  const openCount = leads.filter(
-    (l) => l.stage !== "enrolled" && l.stage !== "lost",
-  ).length;
-  const enrolledCount = leads.filter((l) => l.stage === "enrolled").length;
-
-  await sb.from("admission_desk_sync_meta").upsert(
-    {
-      tenant_id: tenantId,
-      household_count: households.length,
-      lead_count: leads.length,
-      open_lead_count: openCount,
-      enrolled_lead_count: enrolledCount,
-      registration_payment_count: payments.length,
-      last_lead_at: lastLeadAt,
-      updated_at: now,
-    },
-    { onConflict: "tenant_id" },
+/**
+ * Rows the database holds at a later `updated_at` than this copy's — a
+ * whole-desk writer's stale copy of them must not be written. A failed read
+ * writes nothing (unknown is not "older").
+ */
+export async function storedNewer(
+  sb: SupabaseClient,
+  tenantId: string,
+  table: string,
+  rows: Record<string, unknown>[],
+): Promise<{ ok: true; ids: Set<string> } | { ok: false; error: string }> {
+  const ids = new Set<string>();
+  if (!rows.length) return { ok: true, ids };
+  const mine = new Map(rows.map((r) => [String(r.id), Date.parse(String(r.updated_at ?? ""))]));
+  const res = await fetchByIds<Record<string, unknown>>(
+    [...mine.keys()],
+    (chunk, from, to) =>
+      sb
+        .from(table)
+        .select("id, updated_at")
+        .eq("tenant_id", tenantId)
+        .in("id", chunk)
+        .order("id", { ascending: true })
+        .range(from, to),
+    { chunkSize: 150 },
   );
+  if (res.error) return { ok: false, error: `Could not read the stored rows to compare: ${res.error}` };
+  for (const s of res.rows) {
+    const at = Date.parse(String(s.updated_at ?? ""));
+    const own = mine.get(String(s.id));
+    if (Number.isFinite(at) && (!Number.isFinite(own) || at > (own as number))) ids.add(String(s.id));
+  }
+  return { ok: true, ids };
+}
 
-  return { ok: true };
+/** Recount the desk meta from the tables, so a hydrate sees the change. */
+async function touchAdmissionMeta(sb: SupabaseClient, tenantId: string, now: string): Promise<void> {
+  const count = (table: string) =>
+    sb.from(table).select("id", { count: "exact", head: true }).eq("tenant_id", tenantId);
+  const [hh, all, enrolled, lost, pay, latest] = await Promise.all([
+    count("admission_desk_households"),
+    count("admission_desk_leads"),
+    count("admission_desk_leads").eq("stage", "enrolled"),
+    count("admission_desk_leads").eq("stage", "lost"),
+    count("admission_desk_registration_payments"),
+    sb
+      .from("admission_desk_leads")
+      .select("updated_at")
+      .eq("tenant_id", tenantId)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  const row: Record<string, unknown> = { tenant_id: tenantId, updated_at: now };
+  // A failed count leaves the old figure alone rather than writing a zero.
+  const ok = (r: { error: unknown; count: number | null }) => !r.error && typeof r.count === "number";
+  if (ok(hh)) row.household_count = hh.count;
+  if (ok(all)) row.lead_count = all.count;
+  if (ok(enrolled)) row.enrolled_lead_count = enrolled.count;
+  if (ok(all) && ok(enrolled) && ok(lost)) row.open_lead_count = all.count! - enrolled.count! - lost.count!;
+  if (ok(pay)) row.registration_payment_count = pay.count;
+  if (!latest.error) row.last_lead_at = (latest.data as { updated_at?: string } | null)?.updated_at ?? null;
+  await sb.from("admission_desk_sync_meta").upsert(row, { onConflict: "tenant_id" });
 }
 
 /**
@@ -502,10 +606,12 @@ export async function fetchAdmissionDeskFromDb(): Promise<{
   meta: AdmissionDeskSyncMeta | null;
   /** false = tenant/query could not be resolved; state is NOT a confirmed empty state. */
   ok: boolean;
+  /** Each row's `updated_at`, per list — what a browser's save is stamped with. */
+  stamps: RowStamps;
 }> {
   const ctx = await resolveCtx();
   if (!ctx) {
-    return { state: defaultAdmissionsState(), meta: null, ok: false };
+    return { state: defaultAdmissionsState(), meta: null, ok: false, stamps: {} };
   }
   const { sb, tenantId } = ctx;
 
@@ -558,7 +664,7 @@ export async function fetchAdmissionDeskFromDb(): Promise<{
       leadErr?.message,
       payErr?.message,
     );
-    return { state: defaultAdmissionsState(), meta: null, ok: false };
+    return { state: defaultAdmissionsState(), meta: null, ok: false, stamps: {} };
   }
 
   const households = (hhRows ?? []).map((r) =>
@@ -605,6 +711,11 @@ export async function fetchAdmissionDeskFromDb(): Promise<{
     state: fieldOpsToState(null, base),
     meta: mapMetaRow(metaRow as Record<string, unknown> | null),
     ok: true,
+    stamps: {
+      households: stampsOf(hhRows),
+      leads: stampsOf(leadRows as Record<string, unknown>[]),
+      registrationPayments: stampsOf(payRows),
+    },
   };
 }
 
@@ -618,7 +729,9 @@ export async function pushAdmissionLeadToDb(
 
   const { error } = await sb
     .from("admission_desk_leads")
-    .upsert(leadToRow(tenantId, normalizeAdmissionLead(lead)));
+    // A fresh stamp, on the lead too: a browser holding it from before is
+    // refused, and a whole-desk writer's older copy is skipped.
+    .upsert(leadToRow(tenantId, normalizeAdmissionLead({ ...lead, updatedAt: new Date().toISOString() })));
   if (error) return { ok: false, error: error.message };
 
   await sb.from("admission_desk_sync_meta").upsert(
