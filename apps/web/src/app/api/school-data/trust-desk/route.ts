@@ -147,10 +147,15 @@ export async function POST(req: Request) {
   }
 
   if (gate.mode === "feature") {
-    if (result.conflicts && Object.keys(result.conflicts).length) {
-      return NextResponse.json({ ok: true, functionOnly: true, changed: true, conflicts: result.conflicts });
-    }
-    return featureSavedResponse(true);
+    // No desk revision for a function holder, on purpose — but its rows'
+    // new versions, so its next edit is made from the version it wrote.
+    return NextResponse.json({
+      ok: true,
+      functionOnly: true,
+      changed: true,
+      revs: result.revs ?? {},
+      conflicts: result.conflicts ?? {},
+    });
   }
   return NextResponse.json({
     ok: true,

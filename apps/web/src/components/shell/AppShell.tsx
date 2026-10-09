@@ -109,6 +109,8 @@ export function AppShell({
       fee_recovery_tasks: "fee recovery tasks",
       erp_chat: "chat",
       staff_chat: "staff chat",
+      trust: "trust projects",
+      transport: "transport",
     };
     function onSyncError(e: Event) {
       const d = (e as CustomEvent<{ id?: string; label?: string; error?: string }>).detail;
@@ -137,9 +139,26 @@ export function AppShell({
         });
       });
     }
+    // A save refused row by row because those rows changed elsewhere first
+    // (per-row versions, sliceRevMerge). The desk is reloaded with the newer
+    // copy; the person has to look and re-apply — say so, plainly.
+    function onDeskConflict(e: Event) {
+      const d = (e as CustomEvent<{ id?: string; count?: number }>).detail;
+      const what = labels[d?.id ?? ""] || d?.id || "this module";
+      const n = d?.count ?? 1;
+      void import("@/components/shell/Toast").then(({ pushToast }) => {
+        pushToast({
+          kind: "error",
+          message: `${n === 1 ? "One change" : `${n} changes`} to ${what} were NOT saved: someone else changed ${n === 1 ? "that entry" : "those entries"} first. The screen now shows the current version — please check it and make your change again.`,
+          durationMs: 0,
+        });
+      });
+    }
+    window.addEventListener("bhb-desk-conflict", onDeskConflict);
     window.addEventListener("bhb-sync-error", onSyncError);
     window.addEventListener("bhb:sync-status", onSyncStatus);
     return () => {
+      window.removeEventListener("bhb-desk-conflict", onDeskConflict);
       window.removeEventListener("bhb-sync-error", onSyncError);
       window.removeEventListener("bhb:sync-status", onSyncStatus);
     };

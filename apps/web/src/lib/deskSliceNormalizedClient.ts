@@ -15,6 +15,30 @@ import {
   pendingDeskDeletes,
   recordDeskDeletion,
 } from "@/lib/deskNamedDeletes";
+import {
+  applySaveRevs,
+  buildSaveRevs,
+  captureRevBase,
+  onSaveConflicts,
+  type RevSlices,
+} from "@/lib/sliceRevClient";
+
+/** The merged lists of a module, for per-row versions (undefined if none). */
+function deskRevConfig(id: DeskModuleId): RevSlices | undefined {
+  const def = deskSliceDef(id);
+  if (!def?.mergeSlices?.length) return undefined;
+  return { slices: def.mergeSlices, keyField: (s) => def.mergeKeys?.[s] ?? "id" };
+}
+
+/** After a load: the server's row versions, as this browser now holds the rows. */
+export function captureDeskSliceRevs(
+  id: DeskModuleId,
+  server: Record<string, unknown> | undefined,
+  local: Record<string, unknown>,
+) {
+  const cfg = deskRevConfig(id);
+  if (cfg && server) captureRevBase(deskKey(id), server, local, cfg);
+}
 
 type DeskMeta = { updatedAt: string; rowCount: number };
 
@@ -168,23 +192,35 @@ async function pushDeskSliceApi(
   if (generation !== (generations.get(id) ?? 0)) return; // superseded
   try {
     const sentDeletes = pendingDeskDeletes(deskKey(id));
+    // Which rows this save changed, and from which server version: only
+    // those are written, and only if nobody changed them first.
+    const revCfg = deskRevConfig(id);
+    const sentRevs = revCfg ? buildSaveRevs(deskKey(id), state, revCfg) : undefined;
     const res = await fetch(`/api/school-data/desk-slice/${id}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // Deletions are named, never inferred from what this browser lacks.
-      body: JSON.stringify(
-        Object.keys(sentDeletes).length ? { ...state, deletes: sentDeletes } : state,
-      ),
+      body: JSON.stringify({
+        ...state,
+        ...(Object.keys(sentDeletes).length ? { deletes: sentDeletes } : {}),
+        ...(sentRevs ? { revs: sentRevs } : {}),
+      }),
     });
     const body = (await res.json().catch(() => null)) as {
       ok?: boolean;
       updatedAt?: string;
       rowCount?: number;
       error?: string;
+      revs?: Record<string, Record<string, number>>;
+      conflicts?: Record<string, string[]>;
     } | null;
     if (res.ok && body?.ok) {
       confirmDeskDeletes(deskKey(id), sentDeletes);
       rememberDeskSliceKnownIds(id, state);
+      if (revCfg && sentRevs) {
+        applySaveRevs(deskKey(id), state, sentRevs, body, revCfg);
+        onSaveConflicts(deskKey(id), id, body.conflicts);
+      }
       writeMeta(id, {
         updatedAt: body.updatedAt || new Date().toISOString(),
         rowCount: body.rowCount ?? readMeta(id).rowCount,
@@ -225,7 +261,13 @@ async function pushDeskSliceApi(
 export async function hydrateDeskSliceFromDb(
   id: DeskModuleId,
   preferDb?: boolean,
-): Promise<{ bundle: Record<string, unknown>; changed: boolean; ok: boolean }> {
+): Promise<{
+  bundle: Record<string, unknown>;
+  changed: boolean;
+  ok: boolean;
+  /** What the server sent (rows with their `_rev`), even when not taken. */
+  server?: Record<string, unknown>;
+}> {
   const def = deskSliceDef(id);
   if (!def || !isSupabaseConfigured()) {
     return { bundle: {}, changed: false, ok: true };
@@ -259,12 +301,12 @@ export async function hydrateDeskSliceFromDb(
       meta.rowCount === 0 ||
       (body.updatedAt && body.updatedAt >= meta.updatedAt) ||
       remoteRows > meta.rowCount;
-    if (!shouldTake) return { bundle: {}, changed: false, ok: true };
+    if (!shouldTake) return { bundle: {}, changed: false, ok: true, server: bundle };
     writeMeta(id, {
       updatedAt: body.updatedAt || new Date().toISOString(),
       rowCount: remoteRows,
     });
-    return { bundle, changed: true, ok: true };
+    return { bundle, changed: true, ok: true, server: bundle };
   } catch {
     return { bundle: {}, changed: false, ok: false };
   }
