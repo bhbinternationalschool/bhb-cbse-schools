@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { mergeSliceById } from "./sliceMergeById";
+import { isTrustDemoRow, withoutTrustDemo } from "./trustDemoSeed";
 
 console.log("waThreadsTrustNoPrune.selftest.ts");
 
@@ -40,7 +41,7 @@ const read = (f: string) => readFileSync(join(__dirname, f), "utf8");
   const src = read("trustNormalized.server.ts");
   const push = src.slice(src.indexOf("export async function pushTrustDeskToDb"), src.indexOf("export async function fetchTrustDeskFromDb"));
   assert.equal(/\.delete\(\)/.test(push), false, "no trust slice is ever deleted by a save");
-  assert.ok(/payload: mergeSliceById\(stored\.get\(key\), payload as unknown\[\]\)/.test(push), "collections are merged by id, not replaced");
+  assert.ok(/mergeSliceById\(stored\.get\(key\), payload as unknown\[\]\)/.test(push), "collections are merged by id, not replaced");
   assert.ok(push.indexOf("if (readErr)") < push.indexOf('.from("trust_desk_slices").upsert('), "nothing is written when the stored desk cannot be read");
   const trust = read("trust.ts");
   const seed = trust.slice(trust.indexOf("export function seedTrustIfEmpty"));
@@ -58,6 +59,29 @@ const read = (f: string) => readFileSync(join(__dirname, f), "utf8");
   assert.deepEqual(mergeSliceById(undefined, [{ id: "a" }]), [{ id: "a" }]);
   // Stored rows without an id are not carried forward (they cannot be matched).
   assert.deepEqual(mergeSliceById([{ v: 9 }], [{ id: "a" }]), [{ id: "a" }]);
+}
+
+// ── The trust demo seed is refused and cleared ─────────────────────────────
+{
+  const push = read("trustNormalized.server.ts");
+  assert.ok(/payload: withoutTrustDemo\(key, mergeSliceById\(/.test(push), "demo rows are dropped from every written slice");
+  assert.ok(/const clean = withoutTrustDemo\(key, kept\);/.test(push), "and from stored slices the push did not carry");
+
+  // Exactly the rows seedTrustIfEmpty wrote…
+  assert.ok(isTrustDemoRow("projects", { id: "prj_x", code: "CAP/25-26/001", name: "New Primary Wing — Block B", note: "Demo seed project" }));
+  assert.ok(isTrustDemoRow("workItems", { id: "wrk_x", code: "WRK-01", name: "Classroom flooring — GF", qtyPlanned: 2500 }));
+  assert.ok(isTrustDemoRow("contractors", { id: "con_x", name: "Sharma Civil Contractors", gstin: "09AABCS1234A1Z5" }));
+  assert.ok(isTrustDemoRow("rateCard", { id: "rc_x", workName: "Electrical point", ratePaise: 45000, locality: "Lucknow" }));
+  // …and nothing that merely resembles them.
+  assert.equal(isTrustDemoRow("projects", { code: "CAP/25-26/001", name: "New Primary Wing — Block B", note: "" }), false);
+  assert.equal(isTrustDemoRow("workItems", { code: "WRK-01", name: "Classroom flooring — GF", qtyPlanned: 1800 }), false);
+  assert.equal(isTrustDemoRow("contractors", { name: "Sharma Civil Contractors", gstin: "09AAACS9999Z1Z1" }), false);
+  assert.equal(isTrustDemoRow("rateCard", { workName: "Electrical point", ratePaise: 45000, locality: "Varanasi" }), false);
+  assert.equal(isTrustDemoRow("raBills", { name: "Sharma Civil Contractors", gstin: "09AABCS1234A1Z5" }), false);
+  assert.deepEqual(
+    withoutTrustDemo("contractors", [{ id: "a", name: "Real Builders" }, { id: "b", name: "Sharma Civil Contractors", gstin: "09AABCS1234A1Z5" }]),
+    [{ id: "a", name: "Real Builders" }],
+  );
 }
 
 console.log("waThreadsTrustNoPrune.selftest: all assertions passed");

@@ -7,6 +7,7 @@ import type { TrustState } from "@/lib/trust";
 import { trustDualWriteDbEnabled } from "@/lib/trustDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { mergeSliceById } from "@/lib/sliceMergeById";
+import { withoutTrustDemo } from "@/lib/trustDemoSeed";
 
 export type TrustSliceKey = keyof Omit<TrustState, "version">;
 
@@ -113,14 +114,26 @@ export async function pushTrustDeskToDb(
     stored.set(String((r as { slice_key: string }).slice_key), (r as { payload: unknown }).payload);
   }
 
+  // The demo seed (trustDemoSeed.ts) is refused on the way in and dropped
+  // from what is stored: a browser still holding it cannot push it back, and
+  // the first save after this ships clears it from the desk.
   const rows = slices
     .filter((s) => Array.isArray(s.payload) && s.payload.length > 0)
     .map(({ key, payload }) => ({
       tenant_id: tenantId,
       slice_key: key,
-      payload: mergeSliceById(stored.get(key), payload as unknown[]),
+      payload: withoutTrustDemo(key, mergeSliceById(stored.get(key), payload as unknown[])),
       updated_at: now,
     }));
+  for (const key of TRUST_SLICE_KEYS) {
+    if (rows.some((r) => r.slice_key === key)) continue;
+    const kept = stored.get(key);
+    if (!Array.isArray(kept)) continue;
+    const clean = withoutTrustDemo(key, kept);
+    if (clean.length !== kept.length) {
+      rows.push({ tenant_id: tenantId, slice_key: key, payload: clean, updated_at: now });
+    }
+  }
 
   if (rows.length > 0) {
     const { error } = await sb.from("trust_desk_slices").upsert(rows);
