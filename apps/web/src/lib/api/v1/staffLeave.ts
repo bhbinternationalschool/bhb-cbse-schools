@@ -36,8 +36,12 @@ export async function readStaffHrServer(): Promise<
   return deskRead ? { ok: true, state: loadStaffHr() } : { ok: false };
 }
 
-export async function saveStaffHrServer(state: StaffHrState): Promise<void> {
-  const pushed = await pushStaffHrRemoteServer(state);
+export async function saveStaffHrServer(
+  state: StaffHrState,
+  /** Rows this save removes — say them: the desk merges leave requests. */
+  opts?: { deletes?: { leaveRequests?: string[] } },
+): Promise<void> {
+  const pushed = await pushStaffHrRemoteServer(state, opts);
   if (!pushed.ok) {
     console.warn("[staff-leave-v1] desk push failed", pushed.error);
     throw new ApiError("server_error", "Could not save — try again", 503);

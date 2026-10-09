@@ -38,14 +38,29 @@ assert.deepEqual(deskSliceDef("automation")?.mergeCaps?.runs?.max, 200);
 assert.deepEqual(merged("erp_chat"), ["messages", "threads"]);
 assert.deepEqual(merged("staff_chat"), ["messages", "threads"]);
 assert.deepEqual(merged("wa_templates"), ["templates"]);
-assert.deepEqual(merged("staff_hr"), ["appraisalCycles", "appraisals", "leaveAllotmentLog", "leaveEncashments"]);
-for (const id of ["rbac", "exam_papers", "staff_advances", "fee_recovery_tasks"] as const) {
+assert.deepEqual(merged("staff_hr"), ["appraisalCycles", "appraisals", "leaveAllotmentLog", "leaveEncashments", "leaveRequests"]);
+assert.deepEqual(merged("fee_recovery_tasks"), ["meetings"]);
+assert.deepEqual(deskSliceDef("fee_recovery_tasks")?.mergeCaps?.meetings?.max, 2000);
+for (const id of ["rbac", "exam_papers", "staff_advances"] as const) {
   assert.deepEqual(merged(id), [], `${id}: the UI or the server deletes rows — replaced, not merged`);
 }
 // Every merge slice is a real list of its module.
-for (const id of ["automation", "erp_chat", "staff_chat", "wa_templates", "staff_hr"] as const) {
+for (const id of ["automation", "erp_chat", "staff_chat", "wa_templates", "staff_hr", "fee_recovery_tasks"] as const) {
   const def = deskSliceDef(id)!;
   for (const k of def.mergeSlices ?? []) assert.ok(def.sliceKeys.includes(k), `${id}.${k} is a slice`);
+}
+
+// ── Named deletes on merge slices ─────────────────────────────────────────
+// A merge slice keeps what a save lacks, so a server path that removes a row
+// must name it — or the row comes back.
+assert.ok(/deletes\?: Record<string, readonly string\[\]>/.test(push), "the push takes named deletes");
+assert.ok(/if \(!merge\.has\(key\) \|\| !ids\.length\) continue;/.test(push), "named deletes apply to merge slices");
+{
+  const withdraw = readFileSync(join(__dirname, "../app/api/v1/staff/leave/withdraw/route.ts"), "utf8");
+  assert.ok(/saveStaffHrServer\(next, \{ deletes: \{ leaveRequests: \[id\] \} \}\)/.test(withdraw), "a withdrawn leave request is named");
+  const followups = readFileSync(join(__dirname, "api/v1/feeFollowups.server.ts"), "utf8");
+  assert.ok(/saveFeeFollowups\(next, replaced\)/.test(followups), "a replaced open follow-up is named");
+  assert.ok(/\{ deletes: \{ meetings: deleteIds \} \}/.test(followups));
 }
 
 console.log("deskSliceNoPrune.selftest: all assertions passed");

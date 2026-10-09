@@ -92,11 +92,17 @@ export const DESK_SLICE_MODULE_DEFS: DeskSliceModuleDef[] = [
     objectSlices: ["leaveSettings"],
     signalSlice: "leaveTypes",
     // Written by the staff app and the WhatsApp leave command as well as the
-    // office; never deleted in the UI. leaveTypes, leaveRequests and
-    // leaveBalances stay replaced: the withdraw route deletes a request on
-    // the server, and types/balances are deleted in the UI — merging would
-    // bring those back. They need named deletes first.
-    mergeSlices: ["leaveEncashments", "leaveAllotmentLog", "appraisalCycles", "appraisals"],
+    // office. Leave requests are applied and decided from the phone and on
+    // WhatsApp, and never deleted in the UI; the one server path that removes
+    // a request (withdraw) names it. leaveTypes and leaveBalances stay
+    // replaced: the UI deletes those.
+    mergeSlices: [
+      "leaveRequests",
+      "leaveEncashments",
+      "leaveAllotmentLog",
+      "appraisalCycles",
+      "appraisals",
+    ],
   },
   {
     id: "staff_advances",
@@ -137,6 +143,11 @@ export const DESK_SLICE_MODULE_DEFS: DeskSliceModuleDef[] = [
     sliceKeys: ["meetings"],
     objectSlices: [],
     signalSlice: "meetings",
+    // The staff app logs follow-ups on the server; the desk never deletes
+    // one. The server replaces a family's open follow-up by naming it, and
+    // keeps the newest 2,000.
+    mergeSlices: ["meetings"],
+    mergeCaps: { meetings: { max: 2000, newestBy: "createdAt" } },
   },
   {
     id: "automation",

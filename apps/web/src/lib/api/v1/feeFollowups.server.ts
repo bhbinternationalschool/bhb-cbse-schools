@@ -31,11 +31,14 @@ export async function loadFeeFollowups(): Promise<FeeRecoveryTasksState> {
 
 export async function saveFeeFollowups(
   state: FeeRecoveryTasksState,
+  /** Follow-ups this save removes — the desk merges meetings, so say them. */
+  deleteIds: string[] = [],
 ): Promise<{ ok: boolean; error?: string }> {
-  return pushDeskSliceToDb("fee_recovery_tasks", {
-    ...state,
-    version: 1,
-  } as FeeRecoveryTasksState & Record<string, unknown>);
+  return pushDeskSliceToDb(
+    "fee_recovery_tasks",
+    { ...state, version: 1 } as FeeRecoveryTasksState & Record<string, unknown>,
+    deleteIds.length ? { deletes: { meetings: deleteIds } } : undefined,
+  );
 }
 
 function nid(prefix: string) {
@@ -88,14 +91,17 @@ export async function logFeeFollowup(
     createdBy: input.by,
     mobile: input.mobile,
   };
-  const kept = state.meetings.filter(
-    (m) => !(m.studentId === input.studentId && m.status === "scheduled"),
-  );
+  const isOpen = (m: FeeRecoveryMeeting) =>
+    m.studentId === input.studentId && m.status === "scheduled";
+  const replaced = state.meetings.filter(isOpen).map((m) => m.id);
+  const kept = state.meetings.filter((m) => !isOpen(m));
   const next: FeeRecoveryTasksState = {
     version: 1,
     meetings: [meeting, ...kept].slice(0, 2000),
   };
-  const saved = await saveFeeFollowups(next);
+  // The family's previous open follow-up is replaced, by name: the desk
+  // merges meetings, so leaving it out would keep it.
+  const saved = await saveFeeFollowups(next, replaced);
   if (!saved.ok) return { ok: false, error: saved.error || "Could not save" };
   return { ok: true, meeting };
 }

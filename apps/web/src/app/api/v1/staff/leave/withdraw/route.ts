@@ -30,7 +30,8 @@ export async function POST(request: Request) {
       ...state,
       leaveRequests: state.leaveRequests.filter((r) => r.id !== id),
     };
-    await saveStaffHrServer(next);
+    // Named: the desk merges leave requests, so leaving it out would keep it.
+    await saveStaffHrServer(next, { deletes: { leaveRequests: [id] } });
 
     const meta = requestMeta(request);
     await writeAudit({
