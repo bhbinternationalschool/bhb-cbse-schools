@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { pwaManifestHref } from "@/lib/pwaApps";
 import { installPlatform, type InstallPlatform } from "@/lib/installPlatform";
 import { TENANT } from "@/lib/types";
@@ -18,6 +18,20 @@ const PARENT_APK_URL = `${BUCKET}/bhb-parent-app.apk`;
 const DRIVER_APK_URL = `${BUCKET}/bhb-school-app.apk`;
 
 const PLAY_GREEN = "#01875f";
+
+// Store-listing colours, fixed in both themes (a light island, like the
+// visitor kiosk): set once here and read as var(--pl-*) below.
+const LISTING_PALETTE = {
+  background: "#ffffff",
+  color: "#202124",
+  colorScheme: "light",
+  "--pl-ink": "#202124",
+  "--pl-muted": "#5f6368",
+  "--pl-line": "#dadce0",
+  "--pl-note": "#fef7e0",
+  "--pl-step": "#e8f0fe",
+  "--pl-step-ink": "#1a73e8",
+} as CSSProperties;
 
 const FEATURES: { icon: string; en: string; hi: string }[] = [
   { icon: "🕘", en: "Attendance punch (office QR)", hi: "हाज़िरी — QR पंच" },
@@ -106,7 +120,7 @@ export function StaffAppListing() {
   return (
     // A fixed light page, like a store listing: the ERP's dark theme would
     // otherwise darken the background under these fixed text colours.
-    <main className="min-h-screen" style={{ background: "#ffffff", color: "#202124", colorScheme: "light" }}>
+    <main className="min-h-screen" style={LISTING_PALETTE}>
       <div className="mx-auto max-w-xl px-4 pb-16 pt-6 sm:pt-10">
         {/* ── Listing header, Play Store style ─────────────────────── */}
         <header className="flex items-start gap-4">
@@ -123,33 +137,33 @@ export function StaffAppListing() {
             <p className="mt-0.5 text-sm font-medium" style={{ color: PLAY_GREEN }}>
               {TENANT.name}
             </p>
-            <p className="mt-0.5 text-xs text-[#5f6368]">Teachers · Office · Principal</p>
+            <p className="mt-0.5 text-xs text-[var(--pl-muted)]">Teachers · Office · Principal</p>
           </div>
         </header>
 
-        <dl className="mt-5 grid grid-cols-3 divide-x divide-[#dadce0] text-center">
+        <dl className="mt-5 grid grid-cols-3 divide-x divide-[var(--pl-line)] text-center">
           <div className="px-2">
             <dt className="text-sm font-medium">Free</dt>
-            <dd className="text-[11px] text-[#5f6368]">no ads</dd>
+            <dd className="text-[11px] text-[var(--pl-muted)]">no ads</dd>
           </div>
           <div className="px-2">
             <dt className="text-sm font-medium">हिंदी · English</dt>
-            <dd className="text-[11px] text-[#5f6368]">language</dd>
+            <dd className="text-[11px] text-[var(--pl-muted)]">language</dd>
           </div>
           <div className="px-2">
             <dt className="text-sm font-medium">&lt; 1 MB</dt>
-            <dd className="text-[11px] text-[#5f6368]">updates itself</dd>
+            <dd className="text-[11px] text-[var(--pl-muted)]">updates itself</dd>
           </div>
         </dl>
 
         {/* ── The one button ───────────────────────────────────────── */}
         <div className="mt-6">
           {installed ? (
-            <div className="rounded-lg border border-[#dadce0] p-4 text-sm">
+            <div className="rounded-lg border border-[var(--pl-line)] p-4 text-sm">
               <p className="font-medium" style={{ color: PLAY_GREEN }}>
                 ✓ Installed
               </p>
-              <p className="mt-1 text-[#5f6368]">
+              <p className="mt-1 text-[var(--pl-muted)]">
                 Open <strong>BHB Staff</strong> from your home screen and sign in with your registered mobile.
                 <br />
                 होम स्क्रीन पर <strong>BHB Staff</strong> खोलें और अपने मोबाइल नंबर से लॉग-इन करें।
@@ -164,7 +178,7 @@ export function StaffAppListing() {
               >
                 Open in Chrome to install
               </a>
-              <p className="mt-2 text-xs text-[#5f6368]">
+              <p className="mt-2 text-xs text-[var(--pl-muted)]">
                 This link opened inside WhatsApp. Chrome installs the app. / यह लिंक WhatsApp के अंदर खुला है — इंस्टॉल
                 करने के लिए Chrome में खोलें।
               </p>
@@ -179,7 +193,7 @@ export function StaffAppListing() {
               >
                 {copied ? "Link copied — paste it in Safari" : "Copy link, then open Safari"}
               </button>
-              <p className="mt-2 text-xs text-[#5f6368]">
+              <p className="mt-2 text-xs text-[var(--pl-muted)]">
                 On iPhone the app is added from <strong>Safari</strong>. Open Safari, paste the link, then tap Install.
                 <br />
                 iPhone पर ऐप Safari से जुड़ता है — लिंक Safari में खोलें।
@@ -195,7 +209,7 @@ export function StaffAppListing() {
               >
                 Install from Chrome’s menu
               </button>
-              <p className="mt-2 text-xs text-[#5f6368]">
+              <p className="mt-2 text-xs text-[var(--pl-muted)]">
                 Tap Chrome’s <strong>⋮</strong> menu → <strong>Install app</strong> (or <strong>Add to Home screen</strong>
                 ). Already installed? Open <strong>BHB Staff</strong> from your home screen.
                 <br />
@@ -213,7 +227,7 @@ export function StaffAppListing() {
               >
                 {prompt ? "Install on this computer" : "Open this page on your phone"}
               </button>
-              <p className="mt-2 text-xs text-[#5f6368]">
+              <p className="mt-2 text-xs text-[var(--pl-muted)]">
                 On a phone, open <strong>{TENANT.domain}/downloads</strong>.
               </p>
             </>
@@ -233,19 +247,19 @@ export function StaffAppListing() {
         {/* ── What's in it ─────────────────────────────────────────── */}
         <section className="mt-8">
           <h2 className="text-base font-medium">About this app</h2>
-          <p className="mt-2 text-sm leading-relaxed text-[#5f6368]">
+          <p className="mt-2 text-sm leading-relaxed text-[var(--pl-muted)]">
             The school ERP for teachers and office staff — punch your attendance at the office QR, post homework, take
             class attendance, enter marks and run the fees counter. Same login as the website.
           </p>
           <ul className="mt-4 grid grid-cols-2 gap-2">
             {FEATURES.map((f) => (
-              <li key={f.en} className="flex items-start gap-2 rounded-lg border border-[#dadce0] p-2.5 text-xs">
+              <li key={f.en} className="flex items-start gap-2 rounded-lg border border-[var(--pl-line)] p-2.5 text-xs">
                 <span aria-hidden className="text-base leading-none">
                   {f.icon}
                 </span>
                 <span>
-                  <span className="block font-medium text-[#202124]">{f.en}</span>
-                  <span className="block text-[#5f6368]">{f.hi}</span>
+                  <span className="block font-medium text-[var(--pl-ink)]">{f.en}</span>
+                  <span className="block text-[var(--pl-muted)]">{f.hi}</span>
                 </span>
               </li>
             ))}
@@ -254,15 +268,15 @@ export function StaffAppListing() {
 
         <section className="mt-8">
           <h2 className="text-base font-medium">Always the newest version</h2>
-          <p className="mt-2 text-sm leading-relaxed text-[#5f6368]">
+          <p className="mt-2 text-sm leading-relaxed text-[var(--pl-muted)]">
             Nothing to update, ever. Each time you open BHB Staff it loads the latest version, so every phone is on the
             same one. / ऐप हर बार खुलने पर अपने-आप नया हो जाता है — अपडेट करने की ज़रूरत नहीं।
           </p>
         </section>
 
-        <section className="mt-8 rounded-lg bg-[#fef7e0] p-4">
+        <section className="mt-8 rounded-lg bg-[var(--pl-note)] p-4">
           <h2 className="text-sm font-medium">Have the old “BHB School” staff app (APK)?</h2>
-          <p className="mt-1 text-xs leading-relaxed text-[#5f6368]">
+          <p className="mt-1 text-xs leading-relaxed text-[var(--pl-muted)]">
             Install BHB Staff above, then remove the old one: hold its icon → <strong>App info</strong> →{" "}
             <strong>Uninstall</strong>. Attendance cannot be punched from the old app.
             <br />
@@ -273,16 +287,16 @@ export function StaffAppListing() {
         {/* ── Other apps ───────────────────────────────────────────── */}
         <section className="mt-10">
           <h2 className="text-base font-medium">More from {TENANT.shortName}</h2>
-          <ul className="mt-3 divide-y divide-[#dadce0] rounded-lg border border-[#dadce0]">
+          <ul className="mt-3 divide-y divide-[var(--pl-line)] rounded-lg border border-[var(--pl-line)]">
             <li className="flex items-center gap-3 p-3">
               <Image src="/icon-192.png" alt="" width={44} height={44} className="h-11 w-11 rounded-[22%]" />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium">BHB Parent</p>
-                <p className="text-xs text-[#5f6368]">Fees, homework, attendance, notices · Android</p>
+                <p className="text-xs text-[var(--pl-muted)]">Fees, homework, attendance, notices · Android</p>
               </div>
               <a
                 href={PARENT_APK_URL}
-                className="rounded-full border border-[#dadce0] px-3 py-1.5 text-xs font-medium"
+                className="rounded-full border border-[var(--pl-line)] px-3 py-1.5 text-xs font-medium"
                 style={{ color: PLAY_GREEN }}
               >
                 Download
@@ -292,18 +306,18 @@ export function StaffAppListing() {
               <Image src="/icon-192.png" alt="" width={44} height={44} className="h-11 w-11 rounded-[22%]" />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium">BHB Transport</p>
-                <p className="text-xs text-[#5f6368]">Bus drivers & attendants · routes, boarding, live bus · Android</p>
+                <p className="text-xs text-[var(--pl-muted)]">Bus drivers & attendants · routes, boarding, live bus · Android</p>
               </div>
               <a
                 href={DRIVER_APK_URL}
-                className="rounded-full border border-[#dadce0] px-3 py-1.5 text-xs font-medium"
+                className="rounded-full border border-[var(--pl-line)] px-3 py-1.5 text-xs font-medium"
                 style={{ color: PLAY_GREEN }}
               >
                 Download
               </a>
             </li>
           </ul>
-          <p className="mt-2 text-[11px] leading-relaxed text-[#5f6368]">
+          <p className="mt-2 text-[11px] leading-relaxed text-[var(--pl-muted)]">
             Android may warn about “unknown sources” for these two — tap Settings → allow → Install.
           </p>
         </section>
@@ -316,31 +330,31 @@ export function StaffAppListing() {
             <p className="text-base font-medium">Add BHB Staff to your Home Screen</p>
             <ol className="mt-4 space-y-3 text-sm">
               <li className="flex gap-3">
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#e8f0fe] text-xs font-medium text-[#1a73e8]">1</span>
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--pl-step)] text-xs font-medium text-[var(--pl-step-ink)]">1</span>
                 <span>
                   Tap <ShareGlyph /> <strong>Share</strong> at the bottom of Safari.
-                  <span className="block text-xs text-[#5f6368]">नीचे Share बटन दबाएँ।</span>
+                  <span className="block text-xs text-[var(--pl-muted)]">नीचे Share बटन दबाएँ।</span>
                 </span>
               </li>
               <li className="flex gap-3">
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#e8f0fe] text-xs font-medium text-[#1a73e8]">2</span>
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--pl-step)] text-xs font-medium text-[var(--pl-step-ink)]">2</span>
                 <span>
                   Scroll down, tap <strong>Add to Home Screen</strong> ⊕.
-                  <span className="block text-xs text-[#5f6368]">नीचे स्क्रॉल करके “Add to Home Screen” दबाएँ।</span>
+                  <span className="block text-xs text-[var(--pl-muted)]">नीचे स्क्रॉल करके “Add to Home Screen” दबाएँ।</span>
                 </span>
               </li>
               <li className="flex gap-3">
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#e8f0fe] text-xs font-medium text-[#1a73e8]">3</span>
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--pl-step)] text-xs font-medium text-[var(--pl-step-ink)]">3</span>
                 <span>
                   Tap <strong>Add</strong>. Open <strong>BHB Staff</strong> from your Home Screen and sign in.
-                  <span className="block text-xs text-[#5f6368]">“Add” दबाएँ, फिर होम स्क्रीन से ऐप खोलें।</span>
+                  <span className="block text-xs text-[var(--pl-muted)]">“Add” दबाएँ, फिर होम स्क्रीन से ऐप खोलें।</span>
                 </span>
               </li>
             </ol>
             <button
               type="button"
               onClick={() => setIosSheet(false)}
-              className="mt-6 w-full rounded-lg border border-[#dadce0] py-2.5 text-sm font-medium"
+              className="mt-6 w-full rounded-lg border border-[var(--pl-line)] py-2.5 text-sm font-medium"
             >
               Done
             </button>
