@@ -321,6 +321,7 @@ SELFTESTS=(
   test:exam-paper-import
   test:answer-key-parse
   test:desk-shrink-guard
+  test:desk-slice-no-prune
   test:nucleus-manifest
   test:nucleus-capture
   test:nucleus-handoff
