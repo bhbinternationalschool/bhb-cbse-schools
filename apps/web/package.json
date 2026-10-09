@@ -366,6 +366,7 @@
     "test:student-leave-status-guard": "npx tsx src/lib/studentLeaveStatusGuard.selftest.ts",
     "test:ptm-row-stamps": "npx tsx src/lib/ptmRowStamps.selftest.ts",
     "test:attendance-row-stamps": "npx tsx src/lib/attendanceRowStamps.selftest.ts",
+    "test:school-comms-newer-wins": "npx tsx src/lib/schoolCommsNewerWins.selftest.ts",
     "test:staff-attendance-row-stamps": "npx tsx src/lib/staffAttendanceRowStamps.selftest.ts",
     "test:admissions-row-stamps": "npx tsx src/lib/admissionsRowStamps.selftest.ts",
     "test:payment-link-status-guard": "npx tsx src/lib/paymentLinkStatusGuard.selftest.ts",
