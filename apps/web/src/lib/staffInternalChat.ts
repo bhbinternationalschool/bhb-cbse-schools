@@ -7,7 +7,7 @@ import type { MastersState } from "@/lib/masters";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import { resolveSessionStaff } from "@/lib/staffResolve";
 import type { SessionLike } from "@/lib/rbac";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 export type StaffChatMessage = {
@@ -93,7 +93,7 @@ export function normalizeStaffChatState(raw: unknown): StaffChatState {
 export function loadStaffChat(): StaffChatState {
   if (typeof window === "undefined") return emptyStaffChatState();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyStaffChatState();
     return normalizeStaffChatState(JSON.parse(raw));
   } catch {

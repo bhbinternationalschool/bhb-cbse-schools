@@ -15,7 +15,7 @@
  * Persisted through module_local_state ("referrals").
  */
 
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import type { AdmissionLead } from "@/lib/admissions";
 import { ungroundedNumbers } from "@/lib/aiGrounding";
@@ -132,7 +132,7 @@ export function normalizeReferrals(raw: unknown): ReferralsState {
 export function loadReferrals(): ReferralsState {
   if (typeof window === "undefined") return emptyReferrals();
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     return raw ? normalizeReferrals(JSON.parse(raw)) : emptyReferrals();
   } catch {
     return emptyReferrals();

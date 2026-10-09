@@ -83,7 +83,7 @@ import {
   type InstallmentPlanInterval,
   type PlanAllocation,
 } from "@/lib/installmentPlans";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache, removeCache } from "@/lib/browserStorage";
 import {
   recordAccountsPostingFailure,
   type AccountsPostingAction,
@@ -1150,7 +1150,7 @@ function persistFeesClient(state: FeesState, opts?: { sync?: boolean }) {
       "[fees] localStorage quota exceeded — using IndexedDB + server mirror",
     );
     try {
-      localStorage.removeItem(STORAGE_KEY);
+      removeCache(STORAGE_KEY);
     } catch {
       /* ignore */
     }
@@ -1190,7 +1190,7 @@ export function loadFees(): FeesState {
       }));
     }
 
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (raw) {
       feesWorkingCopy = parseFeesJson(raw);
       return feesWorkingCopy;
@@ -1577,7 +1577,7 @@ export async function wipeFeeCollections(): Promise<{
     try {
       writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(compact));
     } catch {
-      localStorage.removeItem(STORAGE_KEY);
+      removeCache(STORAGE_KEY);
     }
     const idb = await import("@/lib/feesLocalStore");
     if (idb.feesIdbAvailable()) {

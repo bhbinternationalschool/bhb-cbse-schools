@@ -18,7 +18,7 @@
 import { isoDateWeekday } from "@/lib/examTimetable";
 import type { MastersState } from "@/lib/masters";
 import { teacherLabel } from "@/lib/timetable";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 export type DutyType = "assembly" | "gate" | "lunch" | "bus_escort" | "event";
@@ -149,7 +149,7 @@ export function normalizeDutyRosterState(raw: unknown): DutyRosterState {
 export function loadDutyRoster(): DutyRosterState {
   if (typeof window === "undefined") return emptyDutyRosterState();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyDutyRosterState();
     return normalizeDutyRosterState(JSON.parse(raw));
   } catch {

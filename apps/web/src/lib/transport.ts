@@ -12,7 +12,7 @@ import {
   type ClassGroupCode,
 } from "@/lib/masters";
 import { checkHold } from "@/lib/holds";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { serverTransportDeskIsEmpty } from "@/lib/transportHydrationState";
 import { TENANT } from "@/lib/types";
 import { trackServerWork } from "@/lib/serverWork";
@@ -980,7 +980,7 @@ export function loadTransport(): TransportState {
   // is why the dues paths hydrate before they compute.
   if (typeof window === "undefined") return memoryTransportState ?? emptyTransport();
   try {
-    const raw2 = localStorage.getItem(STORAGE_KEY);
+    const raw2 = readCache(STORAGE_KEY);
     // A cache that could not be written (or was evicted to make room for
     // another desk) must not read as "no routes". See memoryTransportState.
     if (!raw2 && memoryTransportState) return memoryTransportState;

@@ -26,7 +26,7 @@ import {
   setMirrorSlice,
 } from "@/lib/schoolDataMirror";
 import { loadSis } from "@/lib/sis";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 export type PaymentLinkStatus =
@@ -117,7 +117,7 @@ export function loadPayments(): PaymentsState {
     return emptyPaymentsState();
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyPaymentsState();
     const parsed = JSON.parse(raw) as PaymentsState;
     if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.links)) {

@@ -10,7 +10,7 @@ import type {
   StaffStream,
 } from "@/lib/foundationMasters";
 import { DEFAULT_AY } from "@/lib/masters";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 export type SalaryHeadKind = "earning" | "deduction" | "employer";
@@ -419,7 +419,7 @@ export function defaultSalarySetupState(): SalarySetupState {
 export function loadSalarySetup(): SalarySetupState {
   if (typeof window === "undefined") return defaultSalarySetupState();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) {
       const seed = defaultSalarySetupState();
       writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(seed));

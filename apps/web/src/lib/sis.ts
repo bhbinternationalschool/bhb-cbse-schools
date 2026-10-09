@@ -6,7 +6,7 @@
 import { activeSessionCode } from "@/lib/sessionWriteGuard";
 import { normalizePhotoConsent, type PhotoConsent } from "@/lib/photoConsent";
 import { assertModulePermission } from "@/lib/rbacGuard";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { stripEmptyDocsList, stripEmptyList } from "@/lib/wirePayload";
 import {
   DEFAULT_AY,
@@ -1540,7 +1540,7 @@ export function loadSis(): SisState {
   }
   // A cache that could not be written must not read as "no students".
   // See memorySisState.
-  const cachedRaw = localStorage.getItem(STORAGE_KEY);
+  const cachedRaw = readCache(STORAGE_KEY);
   if (!cachedRaw && memorySisState) return memorySisState;
 
   try {

@@ -18,7 +18,7 @@ import {
   exportFilterReport,
   type ReportColumn,
 } from "@/lib/reportExport";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 const STORAGE_KEY = "bhb_student_leave_v1";
@@ -107,7 +107,7 @@ export function loadStudentLeave(): StudentLeaveState {
     return emptyStudentLeaveState();
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyStudentLeaveState();
     const parsed = JSON.parse(raw) as Partial<StudentLeaveState>;
     return {

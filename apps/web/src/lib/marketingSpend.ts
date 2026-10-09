@@ -6,7 +6,7 @@
  * Persisted through module_local_state ("marketing_spend").
  */
 
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { sourceLabel, type AdmissionLead, type AdmissionSource } from "@/lib/admissions";
 import { trackServerWork } from "@/lib/serverWork";
@@ -57,7 +57,7 @@ export function normalizeMarketingSpend(raw: unknown): MarketingSpendState {
 export function loadMarketingSpend(): MarketingSpendState {
   if (typeof window === "undefined") return emptyMarketingSpend();
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     return raw ? normalizeMarketingSpend(JSON.parse(raw)) : emptyMarketingSpend();
   } catch {
     return emptyMarketingSpend();

@@ -11,7 +11,7 @@
  */
 
 import { assertModulePermission } from "@/lib/rbacGuard";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 export type ComplaintCategory =
@@ -143,7 +143,7 @@ export function normalizeComplaintState(raw: unknown): ComplaintState {
 export function loadComplaints(): ComplaintState {
   if (typeof window === "undefined") return emptyComplaintState();
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyComplaintState();
     return normalizeComplaintState(JSON.parse(raw));
   } catch {

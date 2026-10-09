@@ -28,7 +28,7 @@
  * imported back would close a cycle.
  */
 
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { isFeatureRefusalMessage } from "@/lib/deskFeatureAuth";
 
 const STORAGE_KEY = "bhb_desk_sync_status_v1";
@@ -49,7 +49,7 @@ type StatusMap = Record<string, DeskSyncState>;
 function readAll(): StatusMap {
   if (typeof window === "undefined") return {};
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw) as unknown;
     return parsed && typeof parsed === "object" ? (parsed as StatusMap) : {};

@@ -55,7 +55,7 @@ import {
   repairOrphanedCancelledVoucherLedger,
   syncModeBankMapFromBanks,
 } from "@/lib/accountsNormalize";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 const STORAGE_KEY = "bhb_accounts_v1";
@@ -87,7 +87,7 @@ export function loadAccounts(): AccountsState {
     return emptyAccounts();
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     // A cache that could not be written must not read as "no bank accounts".
     if (!raw) return memoryAccountsState ?? emptyAccounts();
     const parsed = JSON.parse(raw) as Partial<AccountsState>;

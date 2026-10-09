@@ -8,7 +8,7 @@ import {
 } from "@/lib/rbacGuard";
 import { DEFAULT_AY } from "@/lib/masters";
 import type { StaffRecord } from "@/lib/foundationMasters";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 export type LeaveTypeCode = string;
@@ -587,7 +587,7 @@ export function loadStaffHr(): StaffHrState {
     return serverStaffHrCache ?? emptyStaffHrState();
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyStaffHrState();
     const parsed = JSON.parse(raw) as StaffHrState;
     if (!parsed || parsed.version !== 1) return emptyStaffHrState();

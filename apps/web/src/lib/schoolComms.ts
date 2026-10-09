@@ -6,7 +6,7 @@
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { DEFAULT_AY } from "@/lib/masters";
 import { TENANT } from "@/lib/types";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 const STORAGE_KEY = "bhb_school_comms_v1";
@@ -279,7 +279,7 @@ export function loadSchoolComms(): SchoolCommsState {
     return emptySchoolComms();
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptySchoolComms();
     return normalize(JSON.parse(raw) as Partial<SchoolCommsState>);
   } catch {

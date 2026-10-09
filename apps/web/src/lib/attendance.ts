@@ -19,7 +19,7 @@ import {
 } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
 import { openWaMe, waMeUrl } from "@/lib/waMe";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 export type AttendanceStatus = "P" | "A" | "L" | "HD" | "LE";
@@ -275,7 +275,7 @@ export function loadAttendance(): AttendanceState {
     return emptyAttendanceState();
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyAttendanceState();
     return normalizeAttendanceState(JSON.parse(raw));
   } catch {

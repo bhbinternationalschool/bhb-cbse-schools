@@ -16,7 +16,7 @@
 import { tombstonesOf, withTombstone } from "@/lib/moduleStateMerge";
 import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { assertModulePermission } from "@/lib/rbacGuard";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { householdOf, householdWhatsApp, type SisState } from "@/lib/sis";
 import { trackServerWork } from "@/lib/serverWork";
 
@@ -197,7 +197,7 @@ export function normalizeHealthState(raw: unknown): HealthState {
 export function loadHealth(): HealthState {
   if (typeof window === "undefined") return emptyHealthState();
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyHealthState();
     return normalizeHealthState(JSON.parse(raw));
   } catch {

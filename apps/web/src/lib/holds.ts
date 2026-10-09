@@ -18,7 +18,7 @@ import {
 } from "@/lib/fees";
 import { loadMasters, type MastersState } from "@/lib/masters";
 import { loadSis, type SisState } from "@/lib/sis";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import {
   gateForHold,
   standingDecisionFor,
@@ -161,7 +161,7 @@ function normalizeReportCardHoldStage(
 export function loadHolds(): HoldsState {
   if (typeof window === "undefined") return emptyState();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyState();
     const parsed = JSON.parse(raw) as HoldsState;
     return {

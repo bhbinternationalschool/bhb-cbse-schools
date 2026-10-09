@@ -15,7 +15,7 @@ import {
   schoolShortName,
 } from "@/lib/schoolIdentity";
 import { TENANT } from "@/lib/types";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 export type ExamPaperQuestionType =
@@ -1098,7 +1098,7 @@ export function loadExamPapers(): ExamPapersState {
   if (typeof window === "undefined") return emptyExamPapersState();
   if (heldInMemory) return heldInMemory;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyExamPapersState();
     return normalizeExamPapersState(JSON.parse(raw));
   } catch {

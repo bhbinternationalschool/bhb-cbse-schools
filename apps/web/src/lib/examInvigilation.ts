@@ -26,7 +26,7 @@ import type { TimetableState } from "@/lib/timetable";
 import { teacherLabel, teachingPeriods } from "@/lib/timetable";
 import { isoDateWeekday } from "@/lib/examTimetable";
 import { absentTeachersForDate, type AbsentTeacher } from "@/lib/timetableSubstitution";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 export type InvigilationAssignment = {
@@ -89,7 +89,7 @@ export function normalizeInvigilationState(raw: unknown): InvigilationState {
 export function loadInvigilation(): InvigilationState {
   if (typeof window === "undefined") return emptyInvigilationState();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyInvigilationState();
     return normalizeInvigilationState(JSON.parse(raw));
   } catch {
