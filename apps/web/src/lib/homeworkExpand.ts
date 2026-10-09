@@ -389,10 +389,12 @@ export function renderHomeworkExpansion(f: HomeworkExpandFacts): HomeworkExpansi
 export function resolutionNoteForTeacher(r: HomeworkResolution, ref: HomeworkReference): string {
   if (r.kind === "chapter") return "";
   if (r.kind === "ambiguous") {
-    return `⚠️ Could not tell which chapter — ${r.reason}. Reply with the chapter number to add it, or YES to send as written.`;
+    return `⚠️ Could not tell which chapter — ${r.reason}. Reply NO and send it again with the chapter (e.g. _ch 6_), or YES to send as written.`;
   }
+  // "Reply with the number" used to be offered here, and nothing read that
+  // reply (9 Oct 2026) — the teacher's "6" fell through to the fallback.
   if (r.reason === "no_match" && ref.chapterPosition > 0) {
-    return `⚠️ This book has no chapter ${ref.chapterPosition}. Reply with the right number, or YES to send as written.`;
+    return `⚠️ This book has no chapter ${ref.chapterPosition}. Reply NO and send it again with the right chapter, or YES to send as written.`;
   }
   return "";
 }

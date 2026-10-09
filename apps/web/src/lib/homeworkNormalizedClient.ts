@@ -14,6 +14,38 @@ const META_KEY = "bhb_homework_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let pending: HomeworkState | null = null;
 
+/**
+ * Diary entries deleted here and not yet confirmed by the server. A save never
+ * deletes by absence any more, so a deletion has to be said; kept across
+ * reloads so a failed push still carries it next time.
+ */
+const DIARY_DELETES_KEY = "bhb_homework_diary_deletes_v1";
+
+function readDiaryDeletes(): string[] {
+  try {
+    const raw = localStorage.getItem(DIARY_DELETES_KEY);
+    const v = raw ? (JSON.parse(raw) as unknown) : [];
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeDiaryDeletes(ids: string[]) {
+  try {
+    if (ids.length) localStorage.setItem(DIARY_DELETES_KEY, JSON.stringify(ids));
+    else localStorage.removeItem(DIARY_DELETES_KEY);
+  } catch {
+    /* the next save still carries what is in memory */
+  }
+}
+
+/** Record that the user deleted a diary entry; the next desk push sends it. */
+export function recordHomeworkDiaryDeletion(id: string) {
+  if (typeof window === "undefined" || !id) return;
+  writeDiaryDeletes([...new Set([...readDiaryDeletes(), id])]);
+}
+
 type DeskMeta = {
   updatedAt: string;
   postCount: number;
@@ -65,6 +97,7 @@ export function scheduleHomeworkDeskSync(state: HomeworkState) {
 }
 
 async function pushHomeworkDeskApi(state: HomeworkState) {
+  const deleteDiaryIds = readDiaryDeletes();
   try {
     const res = await fetch("/api/school-data/homework-desk", {
       method: "POST",
@@ -75,6 +108,7 @@ async function pushHomeworkDeskApi(state: HomeworkState) {
         submissions: state.submissions,
         seen: state.seen,
         settings: state.settings,
+        deleteDiaryIds,
       }),
     });
     const body = (await res.json().catch(() => null)) as {
@@ -84,6 +118,11 @@ async function pushHomeworkDeskApi(state: HomeworkState) {
       error?: string;
     } | null;
     if (res.ok && body?.ok) {
+      // Only now is it safe to forget the deletions this push carried.
+      if (deleteDiaryIds.length) {
+        const sent = new Set(deleteDiaryIds);
+        writeDiaryDeletes(readDiaryDeletes().filter((id) => !sent.has(id)));
+      }
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         postCount: body.postCount ?? state.posts.length,

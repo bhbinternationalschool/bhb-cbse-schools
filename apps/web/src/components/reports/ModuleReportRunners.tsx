@@ -14,10 +14,7 @@ import {
   type HomeworkReportFormat,
   type HomeworkReportId,
 } from "@/lib/homework";
-import {
-  loadAccounts,
-  seedAccountsIfEmpty,
-} from "@/lib/accountsStore";
+import { loadAccounts } from "@/lib/accountsStore";
 import type { AccountsState } from "@/lib/accountsTypes";
 import {
   TRANSPORT_REPORTS,
@@ -112,9 +109,19 @@ export function AccountsReportsRunner() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const s = seedAccountsIfEmpty();
-    setState(s);
-    if (!coaId && s.coaAccounts[0]) setCoaId(s.coaAccounts[0].id);
+    let live = true;
+    void (async () => {
+      // Pull the school's desk before seeding; a fresh browser would
+      // otherwise push a seeded chart of its own.
+      const { ensureAccountsSeeded } = await import("@/lib/accountsPersistence");
+      const s = await ensureAccountsSeeded();
+      if (!live) return;
+      setState(s);
+      if (!coaId && s.coaAccounts[0]) setCoaId(s.coaAccounts[0].id);
+    })();
+    return () => {
+      live = false;
+    };
   }, []);
 
   function run(id: AccountsReportId) {
