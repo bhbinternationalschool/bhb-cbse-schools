@@ -6,7 +6,7 @@
 import type { MastersState } from "@/lib/masters";
 import type { PayrollPaymentMode, PayrollRun } from "@/lib/payroll";
 import { assertStaffAdvancesPermission } from "@/lib/rbacGuard";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 export type AdvanceStatus = "open" | "closed";
 
@@ -63,7 +63,7 @@ function nid(prefix: string) {
 export function loadAdvances(): AdvanceState {
   if (typeof window === "undefined") return { version: 1, advances: [] };
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return { version: 1, advances: [] };
     const parsed = JSON.parse(raw) as Partial<AdvanceState>;
     return {

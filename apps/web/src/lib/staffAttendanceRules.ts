@@ -93,7 +93,7 @@ export function schoolTimingFromMasters(): SchoolWeekTiming {
 export function migrateLegacyTimingIntoMasters() {
   if (typeof window === "undefined") return;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return;
     const parsed = JSON.parse(raw) as StaffAttendanceRulesState;
     if (!parsed?.schoolTiming) return;
@@ -120,7 +120,7 @@ export function migrateLegacyTimingIntoMasters() {
     }
     // Drop legacy copy from rules store
     const { schoolTiming: _drop, ...rest } = parsed;
-    localStorage.setItem(
+    writeCacheOrInvalidate(
       STORAGE_KEY,
       JSON.stringify({ ...rest, version: 1 }),
     );

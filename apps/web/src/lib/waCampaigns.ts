@@ -20,7 +20,7 @@ import { formatInr } from "@/lib/fees";
 import { TENANT } from "@/lib/types";
 
 import { assertModulePermission } from "@/lib/rbacGuard";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 const STORAGE_KEY = "bhb_wa_campaigns_v1";
 export const WA_ME_BATCH_CAP = 20;
@@ -426,7 +426,7 @@ export function normalizeWaCampaignsState(
 export function loadWaCampaigns(): WaCampaignsState {
   if (typeof window === "undefined") return defaultWaCampaignsState();
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return defaultWaCampaignsState();
     return normalizeWaCampaignsState(
       JSON.parse(raw) as Partial<WaCampaignsState>,

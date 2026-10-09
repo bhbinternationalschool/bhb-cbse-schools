@@ -8,7 +8,7 @@
  * Persisted through module_local_state ("school_achievements").
  */
 
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { trackServerWork } from "@/lib/serverWork";
 
@@ -141,7 +141,7 @@ export function normalizeSchoolAchievements(raw: unknown): SchoolAchievementsSta
 export function loadSchoolAchievements(): SchoolAchievementsState {
   if (typeof window === "undefined") return emptySchoolAchievements();
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     return raw ? normalizeSchoolAchievements(JSON.parse(raw)) : emptySchoolAchievements();
   } catch {
     return emptySchoolAchievements();

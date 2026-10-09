@@ -6,7 +6,7 @@
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { getSessionActor } from "@/lib/sessionActor";
 import type { CommsAudience } from "@/lib/schoolComms";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 const STORAGE_KEY = "bhb_notifications_v1";
@@ -53,7 +53,7 @@ export function emptyNotifications(): NotificationsState {
 export function loadNotifications(): NotificationsState {
   if (typeof window === "undefined") return emptyNotifications();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyNotifications();
     const parsed = JSON.parse(raw) as Partial<NotificationsState>;
     return {

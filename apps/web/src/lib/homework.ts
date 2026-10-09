@@ -17,7 +17,7 @@ import {
   exportFilterReport,
   type ReportColumn,
 } from "@/lib/reportExport";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 const STORAGE_KEY = "bhb_homework_v1";
@@ -258,7 +258,7 @@ export function loadHomework(): HomeworkState {
     return emptyHomeworkState();
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyHomeworkState();
     return normalizeState(JSON.parse(raw) as Partial<HomeworkState>);
   } catch {

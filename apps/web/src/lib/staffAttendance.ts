@@ -10,7 +10,7 @@ import { ATTENDANCE_STATUSES, type AttendanceStatus } from "@/lib/attendance";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import { DEFAULT_AY } from "@/lib/masters";
 import { loadStaffHr, type HalfDaySession, type LeaveRequest } from "@/lib/staffHr";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 /** How this attendance mark was captured */
@@ -380,7 +380,7 @@ export function loadStaffAttendance(): StaffAttendanceState {
     return emptyStaffAttendanceState();
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyStaffAttendanceState();
     const parsed = JSON.parse(raw) as StaffAttendanceState;
     if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.registers)) {

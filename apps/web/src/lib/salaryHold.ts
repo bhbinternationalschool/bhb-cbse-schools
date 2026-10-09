@@ -20,7 +20,7 @@ import {
 
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { isSuperAdminSession } from "@/lib/superAdmin";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 export type JuneHoldStatus =
   | "held"
@@ -150,7 +150,7 @@ export function loadSalaryHold(): SalaryHoldState {
     };
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) {
       const seed: SalaryHoldState = {
         version: 1,

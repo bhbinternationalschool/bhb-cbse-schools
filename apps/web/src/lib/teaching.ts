@@ -20,7 +20,7 @@
  */
 
 import { assertModulePermission } from "@/lib/rbacGuard";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
 import { isoDateWeekday } from "@/lib/examTimetable";
 import type { MastersState } from "@/lib/masters";
@@ -621,7 +621,7 @@ export function dedupeLogs(logs: TeachingLog[]): TeachingLog[] {
 export function loadTeaching(): TeachingState {
   if (typeof window === "undefined") return emptyTeachingState();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyTeachingState();
     return normalizeTeachingState(JSON.parse(raw));
   } catch {

@@ -19,7 +19,7 @@
  * modules import it, so anything it imported back would close a cycle.
  */
 
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 
 const STORAGE_KEY = "bhb_accounts_posting_failures_v1";
 const MAX_ROWS = 200;
@@ -54,7 +54,7 @@ export type AccountsPostingFailure = {
 function readAll(): AccountsPostingFailure[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     return Array.isArray(parsed) ? (parsed as AccountsPostingFailure[]) : [];

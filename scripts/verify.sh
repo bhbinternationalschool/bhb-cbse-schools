@@ -188,6 +188,7 @@ SELFTESTS=(
   test:udise-teacher-apaar
   test:udise-teacher-sync
   test:desk-probe-allowlist
+  test:full-storage-loaders
   test:cashfree-settlements
   test:holiday-calendar-view
   test:student-working-days

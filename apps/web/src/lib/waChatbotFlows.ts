@@ -12,7 +12,7 @@ import {
 } from "@/lib/waStaffBotPrompts";
 import { TRANSPORT_BOT_PROMPTS } from "@/lib/waTransportBotPrompts";
 import { VISITOR_PURPOSE_OPTIONS } from "@/lib/waUnifiedBotEngine";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 const STORAGE_KEY = "bhb_wa_chatbot_flows_v1";
@@ -317,7 +317,7 @@ export function defaultWaChatbotFlowsState(): WaChatbotFlowsState {
 export function loadWaChatbotFlows(): WaChatbotFlowsState {
   if (typeof window === "undefined") return defaultWaChatbotFlowsState();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return defaultWaChatbotFlowsState();
     const parsed = JSON.parse(raw) as WaChatbotFlowsState;
     if (!parsed?.flows?.length) return defaultWaChatbotFlowsState();

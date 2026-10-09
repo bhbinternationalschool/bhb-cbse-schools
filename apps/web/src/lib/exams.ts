@@ -99,7 +99,7 @@ export function coScholasticSubjectAreasForClass(
   }
   return out;
 }
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 import {
   componentFailed,
@@ -1301,7 +1301,7 @@ export function loadExams(): ExamsState {
     return emptyState();
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyState();
     const parsed = JSON.parse(raw) as ExamsState;
     const terms =

@@ -18,7 +18,7 @@ import {
 } from "@/lib/salarySetup";
 
 import { assertModulePermission } from "@/lib/rbacGuard";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 export type TallyJvSide = "debit" | "credit";
 
@@ -79,7 +79,7 @@ function nid(prefix: string) {
 export function loadTallySync(): TallySyncState {
   if (typeof window === "undefined") return { version: 1, records: [] };
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return { version: 1, records: [] };
     const parsed = JSON.parse(raw) as Partial<TallySyncState>;
     return {

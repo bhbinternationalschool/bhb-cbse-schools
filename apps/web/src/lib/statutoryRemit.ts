@@ -1,5 +1,5 @@
 import { assertModulePermission } from "@/lib/rbacGuard";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { loadMasters } from "@/lib/masters";
 import { normalizeStatutoryConfig } from "@/lib/foundationMasters";
 import {
@@ -270,7 +270,7 @@ function normalizeBatch(b: Partial<StatutoryRemitBatch>): StatutoryRemitBatch {
 export function loadStatutoryRemit(): StatutoryRemitState {
   if (typeof window === "undefined") return { version: 1, batches: [] };
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return { version: 1, batches: [] };
     const parsed = JSON.parse(raw) as Partial<StatutoryRemitState>;
     return {

@@ -8,7 +8,7 @@ import {
   capitaliseTrustProject,
   postTrustCostLineToCwip,
 } from "@/lib/accountsCapex";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 /* ─── Types ─────────────────────────────────────────────────── */
@@ -421,7 +421,7 @@ function normalizeCostLine(c: Partial<TrustCostLine>): TrustCostLine {
 export function loadTrust(): TrustState {
   if (typeof window === "undefined") return emptyTrust();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyTrust();
     const parsed = JSON.parse(raw) as Partial<TrustState>;
     return {

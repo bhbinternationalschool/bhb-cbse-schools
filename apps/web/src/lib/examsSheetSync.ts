@@ -36,7 +36,7 @@ import {
   recordDeskSyncFailure,
   recordDeskSyncSuccess,
 } from "@/lib/deskSyncStatus";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 
 const PENDING_KEY = "bhb_exams_pending_sheets_v1";
 const CONFLICT_KEY = "bhb_exams_sheet_conflicts_v1";
@@ -69,7 +69,7 @@ type PendingMap = Record<string, PendingSheetPush>;
 function readJson<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
   try {
-    const raw = localStorage.getItem(key);
+    const raw = readCache(key);
     if (!raw) return fallback;
     const parsed = JSON.parse(raw) as unknown;
     return parsed && typeof parsed === "object" ? (parsed as T) : fallback;

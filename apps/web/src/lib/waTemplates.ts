@@ -2,7 +2,7 @@
  * School-wide WhatsApp Business template registry (Meta WABA).
  * Store: localStorage `bhb_wa_templates_v1` + Supabase blob `wa_templates_state`.
  */
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 const STORAGE_KEY = "bhb_wa_templates_v1";
@@ -1770,7 +1770,7 @@ export function withSeedText(t: WaTemplate): WaTemplate {
 export function loadWaTemplates(): WaTemplatesState {
   if (typeof window === "undefined") return emptyWaTemplates();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) {
       const seeded = emptyWaTemplates();
       writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(seeded));

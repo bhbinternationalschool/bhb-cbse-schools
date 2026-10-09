@@ -9,7 +9,7 @@ import {
   type ReportColumn,
 } from "@/lib/reportExport";
 import { TENANT } from "@/lib/types";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
 export type LibraryCopyStatus =
@@ -512,7 +512,7 @@ export function loadLibrary(): LibraryState {
     return emptyLibraryState();
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyLibraryState();
     return migrateLibraryState(JSON.parse(raw));
   } catch {

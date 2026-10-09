@@ -20,7 +20,7 @@
  */
 
 import { parseCanvaDesignId } from "@/lib/canvaBirthday";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { householdLanguage, SCHOOL_DEFAULT_WA_LANGUAGE, type HouseholdLanguage, type HouseholdPrefsLike } from "@/lib/householdPrefs";
 import { trackServerWork } from "@/lib/serverWork";
@@ -433,7 +433,7 @@ export function emptyBirthdayState(): BirthdayState {
 export function loadBirthdayState(): BirthdayState {
   if (typeof window === "undefined") return emptyBirthdayState();
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     return raw ? normalizeBirthdayState(JSON.parse(raw)) : emptyBirthdayState();
   } catch {
     return emptyBirthdayState();

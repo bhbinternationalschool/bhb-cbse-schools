@@ -6,7 +6,7 @@
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { DEFAULT_AY } from "@/lib/masters";
 import type { MastersState } from "@/lib/masters";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 import {
   bellFacts,
@@ -471,7 +471,7 @@ export function normalizeTimetableState(raw: unknown): TimetableState {
 export function loadTimetable(): TimetableState {
   if (typeof window === "undefined") return emptyTimetableState();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyTimetableState();
     return normalizeTimetableState(JSON.parse(raw));
   } catch {

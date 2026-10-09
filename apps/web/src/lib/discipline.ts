@@ -16,7 +16,7 @@
 import { tombstonesOf, withTombstone } from "@/lib/moduleStateMerge";
 import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { assertModulePermission } from "@/lib/rbacGuard";
-import { writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { householdOf, householdWhatsApp, type SisState } from "@/lib/sis";
 import { trackServerWork } from "@/lib/serverWork";
 
@@ -160,7 +160,7 @@ export function normalizeDisciplineState(raw: unknown): DisciplineState {
 export function loadDiscipline(): DisciplineState {
   if (typeof window === "undefined") return emptyDisciplineState();
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyDisciplineState();
     return normalizeDisciplineState(JSON.parse(raw));
   } catch {
