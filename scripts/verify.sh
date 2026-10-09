@@ -168,6 +168,7 @@ SELFTESTS=(
   test:wa-known-parent-role
   test:wa-inbound-parse
   test:wa-bot-silence
+  test:wa-sis-bot-unknown-intent
   test:sis-bot-thread-merge
   test:job-applications
   test:online-classes
@@ -291,6 +292,7 @@ SELFTESTS=(
   test:ai-school-status
   test:exam-formula-catalog
   test:household-prefs
+  test:household-prefs-language-gate
   test:item-analytics
   test:item-score-import
   test:exam-paper-import

@@ -443,6 +443,7 @@ jobs:
           npm run test:ai-school-status
           npm run test:exam-formula-catalog
           npm run test:household-prefs
+          npm run test:household-prefs-language-gate
           npm run test:item-analytics
           npm run test:fleet-edge-link
           npm run test:fleet-edge-push
@@ -486,6 +487,7 @@ jobs:
           npm run test:sis-class-teacher
           npm run test:punch-code
           npm run test:wa-language-gate
+          npm run test:wa-sis-bot-unknown-intent
           npm run test:answer-sheet-ai
           npm run test:voice-dictation
           npm run test:punch-devices

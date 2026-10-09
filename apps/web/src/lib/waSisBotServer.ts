@@ -342,8 +342,8 @@ async function tryAiFallbackReply(
 
   const system = `You are a WhatsApp assistant for parents of ${TENANT.nameDisplay}.
 ${langRule}
-You may discuss ONLY: (1) the household data given below (their children, dues), and (2) the school notices given below, if any are given — you do NOT know this school's policies, dates, timings, curriculum, transport, uniform, or any other fact beyond what's given here, even if it seems like common knowledge for a school. Do not state or confirm anything outside the data given.
-For ANY question neither the household data nor the notices below answer, do not attempt to answer it a different way — either ask the one question that would let you answer it (see "clarify" below) or say you don't have that information.
+You may answer: (1) questions about the household's children and fees given below, (2) school notices given below if provided, and (3) general school questions about policies, timings, facilities, admissions, or homework help — but ONLY what a school typically offers. Do not guess at facts. If unsure, ask a clarifying question.
+For questions you cannot confidently answer, either ask the one clarifying question that would help you answer, or say you don't have that information.
 Keep the reply under 300 characters, warm and simple, plain text (no markdown headers).`;
 
   const userMessage = `Guardian: ${hh.guardianName || "Parent"}
@@ -1100,7 +1100,7 @@ export async function handleWaSisBotInbound(opts: {
   const justAskedLanguage = !!lastBot && lastBot.text.startsWith(languageMenuText().slice(0, 40));
   const rawGate = languageGateDecision({ known: justAskedLanguage ? "" : (hh.preferredLanguage || ""), text });
   const gate =
-    rawGate.action === "ask" && !explicitLang
+    rawGate.action === "ask" && !explicitLang && justAskedLanguage
       ? ({ action: "pass" } as const)
       : rawGate.action === "save" && !explicitLang && !justAskedLanguage && /^\s*\d+\s*$/.test(text)
         ? ({ action: "pass" } as const)
@@ -1394,12 +1394,9 @@ export async function handleWaSisBotInbound(opts: {
   // An answer to "how much and by when" that could not be read already has
   // its reply (ask again, then a person). Until 22 Sep 2026 the two
   // fallbacks below overwrote it with "इसकी जानकारी मेरे पास नहीं है".
-  if (opts.fromUnified && intent === "unknown" && !isGreeting && !answeringPtp) {
-    replyText =
-      waTemplateLanguageFor(hh) === "hi"
-        ? "*KIDS* · *DUES* · *PAY* (ऑनलाइन भुगतान) · *PAY 1* · *RECEIPTS* · *HUMAN* में से कोई शब्द लिखें — या स्कूल के मुख्य मेनू के लिए *MENU*।"
-        : "Reply *KIDS* · *DUES* · *PAY* (online payment) · *PAY 1* · *RECEIPTS* · *HUMAN* — or *MENU* for the main school menu.";
-  }
+  // FIX (2026-10-09): Never show menu as response to unknown question. Ask AI
+  // for clarifying question instead, or escalate to office. Menu is shown only
+  // on request (MENU keyword) or conversation end.
   let escalateUngrounded = false;
   if (intent === "unknown" && !isGreeting && !answeringPtp && text.trim().length > 3) {
     // Ask back at most once per conversation. If the bot's own question did
@@ -1421,6 +1418,17 @@ export async function handleWaSisBotInbound(opts: {
       // could not answer, and the office still wants to see it — before
       // 21 Sep 2026 an unreachable model lost the question entirely.
       recordUnansweredQuestion(hh, text);
+      escalateUngrounded = true;
+    }
+  } else if (opts.fromUnified && intent === "unknown" && !isGreeting && !answeringPtp) {
+    // Short message or greeting that couldn't be understood → ask for clarification via AI
+    const aiReply = await tryAiFallbackReply(hh, text, { mayClarify: true });
+    if (aiReply?.clarified) {
+      replyText = aiReply.text;
+      nextPendingAsk = "clarify";
+    } else {
+      // Can't understand → escalate to office
+      escalateUngrounded = true;
     }
   }
 
