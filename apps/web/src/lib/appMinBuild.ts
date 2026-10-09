@@ -23,8 +23,10 @@ export type AppFlavor = "staff" | "parent";
 export const APP_MIN_BUILD: Record<AppFlavor, number> = {
   // 14 (1.0.13) is the first build that signs QR punches (#380).
   staff: 14,
-  // No parent build is too old yet.
-  parent: 0,
+  // 25 (1.0.24): director, 9 Oct 2026 — every parent on the build with the
+  // pick-up pin, running strip, pop-ups and guides. Takes effect at deploy,
+  // so deploy only once 1.0.24 is live on Play (else no update to give them).
+  parent: 25,
 };
 
 export const APP_UPDATE_MESSAGE =
