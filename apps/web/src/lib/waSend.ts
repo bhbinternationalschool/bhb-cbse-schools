@@ -60,7 +60,7 @@ export function waOutboundConfigured(): boolean {
   return !!(process.env.WA_BSP_TOKEN && process.env.WA_BSP_URL);
 }
 
-export async function sendWhatsAppText(opts: {
+async function sendWhatsAppTextRaw(opts: {
   toMobile: string;
   body: string;
   clientMessageId?: string;
@@ -194,7 +194,7 @@ export async function sendWhatsAppText(opts: {
  * shape for it is not standard. A failure is not worth failing the reply
  * over — the address and the link have already been sent.
  */
-export async function sendWhatsAppLocation(opts: {
+async function sendWhatsAppLocationRaw(opts: {
   toMobile: string;
   latitude: number;
   longitude: number;
@@ -280,7 +280,7 @@ export async function sendWhatsAppLocation(opts: {
  * so the window is open. Meta's document limit is 100 MB; ours is far lower
  * (a report is a few hundred KB).
  */
-export async function sendWhatsAppDocument(opts: {
+async function sendWhatsAppDocumentRaw(opts: {
   toMobile: string;
   bytes: Buffer;
   filename: string;
@@ -336,7 +336,7 @@ export async function sendWhatsAppDocument(opts: {
   }
 }
 
-export async function sendWaFlowMessage(opts: {
+async function sendWaFlowMessageRaw(opts: {
   toMobile: string;
   flowId: string;
   flowToken: string;
@@ -454,7 +454,7 @@ export type WaTemplateComponent = {
 /**
  * Send a Meta-approved WhatsApp template (incl. media header / carousel components).
  */
-export async function sendWhatsAppTemplate(opts: {
+async function sendWhatsAppTemplateRaw(opts: {
   toMobile: string;
   name: string;
   language: string;
@@ -612,6 +612,61 @@ export function shouldRetryWithFallback(opts: {
  * accepts but later fails to deliver (reported async via the delivery
  * webhook) is not retried here.
  */
+/* ── Every send is logged (wa_messages) ────────────────────────────
+ * The five senders below are the only way this app puts a message on
+ * WhatsApp (plus lib/waInteractive's buttons, which log themselves), so
+ * logging here records homework, receipts, reminders, broadcasts, bot and
+ * staff replies alike — the ERP's chat view reads this (director, 9 Oct
+ * 2026). The *Raw functions do the sending, unchanged.
+ */
+
+async function logged<R extends { ok: boolean; providerId?: string; error?: string; mode: string }>(
+  send: Promise<R>,
+  entry: { to: string; kind: string; body?: string; templateName?: string; templateParams?: string[]; phoneNumberId?: string },
+): Promise<R> {
+  const result = await send;
+  const { logWaOutbound } = await import("@/lib/waMessageLog.server");
+  await logWaOutbound({ ...entry, result });
+  return result;
+}
+
+export async function sendWhatsAppText(opts: Parameters<typeof sendWhatsAppTextRaw>[0]) {
+  return logged(sendWhatsAppTextRaw(opts), { to: opts.toMobile, kind: "text", body: opts.body, phoneNumberId: opts.fromPhoneNumberId });
+}
+
+export async function sendWhatsAppLocation(opts: Parameters<typeof sendWhatsAppLocationRaw>[0]) {
+  return logged(sendWhatsAppLocationRaw(opts), {
+    to: opts.toMobile,
+    kind: "location",
+    body: [opts.name, opts.address, `${opts.latitude},${opts.longitude}`].filter(Boolean).join(" · "),
+    phoneNumberId: opts.fromPhoneNumberId,
+  });
+}
+
+export async function sendWhatsAppDocument(opts: Parameters<typeof sendWhatsAppDocumentRaw>[0]) {
+  return logged(sendWhatsAppDocumentRaw(opts), {
+    to: opts.toMobile,
+    kind: "document",
+    body: [`📄 ${opts.filename}`, opts.caption].filter(Boolean).join("\n"),
+    phoneNumberId: opts.fromPhoneNumberId,
+  });
+}
+
+export async function sendWaFlowMessage(opts: Parameters<typeof sendWaFlowMessageRaw>[0]) {
+  return logged(sendWaFlowMessageRaw(opts), { to: opts.toMobile, kind: "flow", body: [opts.headerText, opts.bodyText].filter(Boolean).join("\n") });
+}
+
+export async function sendWhatsAppTemplate(opts: Parameters<typeof sendWhatsAppTemplateRaw>[0]) {
+  const { templateParamsOf } = await import("@/lib/waMessageLog.server");
+  return logged(sendWhatsAppTemplateRaw(opts), {
+    to: opts.toMobile,
+    kind: "template",
+    templateName: opts.name,
+    templateParams: templateParamsOf(opts.components),
+    phoneNumberId: opts.fromPhoneNumberId,
+  });
+}
+
 export async function sendWaWithFailover(opts: {
   primaryMobile: string;
   fallbackMobile?: string;

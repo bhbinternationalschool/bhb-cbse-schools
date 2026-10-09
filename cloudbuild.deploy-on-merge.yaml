@@ -121,6 +121,7 @@ availableSecrets:
 substitutions:
   _REGION: asia-southeast1
 
-timeout: 3600s
+# Must outlast the inner cloudbuild.yaml build (3600s) it waits on.
+timeout: 5400s
 options:
   logging: CLOUD_LOGGING_ONLY

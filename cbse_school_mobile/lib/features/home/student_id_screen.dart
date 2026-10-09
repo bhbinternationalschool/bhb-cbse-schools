@@ -1,4 +1,5 @@
 import "package:flutter/material.dart";
+import "../../core/guide/screen_guides.dart";
 import "package:qr_flutter/qr_flutter.dart";
 
 import "../../core/api/api_client.dart";
@@ -22,6 +23,7 @@ class StudentIdScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        actions: [ScreenGuideButton(guideId: "student-id", screenLabel: "student-id")],
         title: Text(context.l10n.studentId, style: AppText.titleMedium),
       ),
       body: Center(

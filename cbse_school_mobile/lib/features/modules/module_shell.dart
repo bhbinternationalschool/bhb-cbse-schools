@@ -5,6 +5,7 @@ import "../../core/theme/app_theme.dart";
 import "../../core/ui/motion.dart";
 import "../../core/ui/spacing.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../../core/guide/screen_guides.dart";
 
 /// Shared chrome for module screens: navy app bar, pull-to-refresh list,
 /// one loading/error/empty pattern so every module behaves the same way.
@@ -20,7 +21,12 @@ class ModuleShell<T> extends StatefulWidget {
     this.isEmpty,
     this.floatingActionButton,
     this.bottomBar,
+    this.guideId,
   });
+
+  /// The screen's guide (core/guide). Adds the ? button and lets the
+  /// "same error twice" watch know which screen the user is on.
+  final String? guideId;
 
   final String title;
   final String? subtitle;
@@ -107,7 +113,11 @@ class _ModuleShellState<T> extends State<ModuleShell<T>> {
         // Every inner screen gets the language switch here, so a gateman or
         // driver can flip the app without first finding a settings page in a
         // language he cannot read.
-        actions: const [LanguageToggle(onLight: true)],
+        actions: [
+          if (widget.guideId != null)
+            ScreenGuideButton(guideId: widget.guideId!, screenLabel: widget.title),
+          const LanguageToggle(onLight: true),
+        ],
       ),
       floatingActionButton: data == null
           ? null

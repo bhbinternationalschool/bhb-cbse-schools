@@ -16,6 +16,7 @@ class ChatInboxScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<List<ChatThreadInfo>>(
+      guideId: "chat-inbox",
       title: "Messages",
       load: api.fetchChatThreads,
       emptyIcon: Icons.chat_bubble_outline,

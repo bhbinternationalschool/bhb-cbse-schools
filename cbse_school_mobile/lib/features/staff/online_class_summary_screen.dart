@@ -1,5 +1,6 @@
 import "package:flutter/material.dart";
 
+import "../../core/guide/screen_guides.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
@@ -137,7 +138,8 @@ class _OnlineClassSummaryScreenState extends State<OnlineClassSummaryScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text("Class summary · ${widget.c.sectionLabel}")),
+      appBar: AppBar(
+        actions: [ScreenGuideButton(guideId: "online-class-summary", screenLabel: "online-class-summary")],title: Text("Class summary · ${widget.c.sectionLabel}")),
       body: !_loaded
           ? const Center(child: CircularProgressIndicator())
           : ListView(

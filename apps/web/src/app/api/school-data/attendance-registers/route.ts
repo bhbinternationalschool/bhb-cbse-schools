@@ -15,7 +15,11 @@ import {
   fetchAttendanceDeskFromDb,
   fetchAttendanceRegistersFromDb,
   pushAttendanceDeskToDb,
+  ATTENDANCE_DELETABLE_TABLES,
+  ATTENDANCE_TABLE_SLICES,
 } from "@/lib/attendanceNormalized.server";
+import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
+import { featureAuthorizedDeletes } from "@/lib/deskNamedDeletesFeature.server";
 import {
   deskFeatureGateFor,
   featurePushOutcome,
@@ -140,7 +144,7 @@ export async function GET(req: Request) {
 }
 
 type DeskPostBody = Pick<AttendanceState, "registers"> &
-  Partial<AttendanceDeskAncillary>;
+  Partial<AttendanceDeskAncillary> & { deletes?: unknown };
 
 /** POST — push attendance desk snapshot (registers + policy + nudges + exceptions) */
 export async function POST(req: Request) {
@@ -189,6 +193,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  // Deletions are named by the desk, never inferred from what it lacks.
+  let deletes = readNamedDeletes(body.deletes, ATTENDANCE_DELETABLE_TABLES);
+
   // Function holders (e.g. Attendance → Exceptions): merged onto the stored
   // desk, only their functions' slices — never the body as sent.
   if (gate) {
@@ -206,6 +213,7 @@ export async function POST(req: Request) {
     const merged = featurePushOutcome(gate, "attendance", stored, body);
     if (!merged.ok) return merged.response;
     if (!merged.changed) return featureSavedResponse(false);
+    deletes = featureAuthorizedDeletes(deletes, ATTENDANCE_TABLE_SLICES, stored, merged.state);
     body = merged.state as unknown as DeskPostBody;
   }
 
@@ -214,7 +222,7 @@ export async function POST(req: Request) {
     policy: body.policy,
     absentNudges: body.absentNudges ?? [],
     exceptions: body.exceptions ?? [],
-  });
+  }, deletes);
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error || "Sync failed" },

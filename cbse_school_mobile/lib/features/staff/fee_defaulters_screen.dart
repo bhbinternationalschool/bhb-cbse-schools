@@ -45,6 +45,7 @@ class _FeeDefaultersScreenState extends State<FeeDefaultersScreen> {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<FeeDefaulterList>(
+      guideId: "fee-defaulters",
       key: ValueKey("$_query|$_min"),
       title: "Fee defaulters",
       load: () => widget.api.fetchFeeDefaulters(q: _query, minRupees: _min),

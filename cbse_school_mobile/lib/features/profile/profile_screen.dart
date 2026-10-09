@@ -34,6 +34,7 @@ class ProfileScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<ParentProfile>(
+      guideId: "profile",
       title: context.l10n.profProfile,
       load: api.fetchProfile,
       builder: (context, profile, reload) => ListView(

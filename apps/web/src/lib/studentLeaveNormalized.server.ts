@@ -11,6 +11,7 @@ import type {
 } from "@/lib/studentLeave";
 import { studentLeaveDualWriteDbEnabled } from "@/lib/studentLeaveDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { deleteNamedIds, type NamedDeletes } from "@/lib/deskNamedDeletes.server";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
 
 export type StudentLeaveDeskSyncMeta = {
@@ -33,63 +34,6 @@ async function resolveCtx(): Promise<{
   tenantId: string;
 } | null> {
   return getServerTenantContext();
-}
-
-/**
- * Delete rows the client no longer holds — never on an empty payload.
- *
- * An empty keep-set means every stored row is "stale", so this deleted the
- * entire table. That is never what a sync means: a client with nothing to say
- * is a client whose cache was dropped, not an instruction to erase the
- * school's records.
- *
- * It is not hypothetical. On 2026-08-11 the attendance register for the
- * previous day was gone — pushed away by a phone whose localStorage had been
- * dropped on quota, with the emptiness check running AFTER the delete. This
- * same function is copied into 20 modules and called from 86 places, almost
- * none of them guarded, covering bank and cash ledgers, payroll runs, fee
- * cheques, library issues and 1,919 admission records.
- *
- * This floor stops the catastrophic case everywhere at once. It does NOT make
- * a partial payload safe — a client holding 3 of 900 rows still prunes 897.
- * That needs per-module scoping, the way attendance now prunes only within
- * the dates its payload covers. See docs/TODO.md.
- *
- * The read error is also surfaced now. It was discarded, which happened to
- * fail safe here (no data → nothing deleted), but "we could not read the
- * table" and "the table is empty" must not be the same value in a function
- * that deletes.
- */
-async function deleteStale(
-  sb: SupabaseClient,
-  tenantId: string,
-  table: string,
-  keepIds: Set<string>,
-) {
-  if (keepIds.size === 0) {
-    console.warn(
-      `[${table}] refusing to prune: the payload holds no ids at all. ` +
-        "An empty client is not an instruction to delete every row.",
-    );
-    return;
-  }
-  const { data, error } = await sb
-    .from(table)
-    .select("id")
-    .eq("tenant_id", tenantId);
-  if (error) {
-    console.error(
-      `[${table}] prune skipped — could not read existing ids:`,
-      error.message,
-    );
-    return;
-  }
-  const stale = (data ?? [])
-    .map((r) => String((r as { id: string }).id))
-    .filter((id) => !keepIds.has(id));
-  if (stale.length > 0) {
-    await sb.from(table).delete().in("id", stale);
-  }
 }
 
 async function upsertChunks(
@@ -180,8 +124,16 @@ function mapMetaRow(
   };
 }
 
+/** The only leave table a desk save deletes from — by named id. */
+export const STUDENT_LEAVE_DELETABLE_TABLES = ["student_leave_desk_requests"] as const;
+/** Desk slice each deletable table stores (for function-only writers). */
+export const STUDENT_LEAVE_TABLE_SLICES: Record<string, string> = {
+  student_leave_desk_requests: "requests",
+};
+
 export async function pushStudentLeaveDeskToDb(
   state: StudentLeaveState,
+  deletes: NamedDeletes = {},
 ): Promise<{ ok: boolean; error?: string }> {
   if (!studentLeaveDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
@@ -189,13 +141,13 @@ export async function pushStudentLeaveDeskToDb(
   const { sb, tenantId } = ctx;
   const now = new Date().toISOString();
 
-  const requests = state.requests ?? [];
-  await deleteStale(
-    sb,
-    tenantId,
-    "student_leave_desk_requests",
-    new Set(requests.map((r) => r.id)),
-  );
+  // No prune by absence. Parents file and cancel leave from the app, which
+  // writes on the server; an office tab that read earlier deleted those
+  // requests on its next save — and a parent's push from a server whose read
+  // had failed held one request and deleted every other. A request goes only
+  // when the office deleted it (pending or cancelled), named.
+  const gone = new Set(deletes["student_leave_desk_requests"] ?? []);
+  const requests = (state.requests ?? []).filter((r) => !gone.has(r.id));
 
   const r = await upsertChunks(
     sb,
@@ -203,6 +155,8 @@ export async function pushStudentLeaveDeskToDb(
     requests.map((req) => requestToRow(tenantId, req)),
   );
   if (!r.ok) return r;
+  const del = await deleteNamedIds(sb, tenantId, "student_leave_desk_requests", [...gone]);
+  if (!del.ok) return del;
 
   let lastRequestAt: string | null = null;
   for (const req of requests) {

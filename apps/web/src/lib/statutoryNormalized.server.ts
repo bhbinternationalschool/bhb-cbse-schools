@@ -14,7 +14,13 @@ import type {
 import type { StatutoryEstablishmentConfig } from "@/lib/foundationMasters";
 import { normalizeStatutoryConfig } from "@/lib/foundationMasters";
 import { statutoryDualWriteDbEnabled } from "@/lib/statutoryDbConfig";
+import {
+  deleteChildrenNotKept,
+  deleteNamedIds,
+  type NamedDeletes,
+} from "@/lib/deskNamedDeletes.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { fetchAllPages } from "@/lib/supabase/pageAll";
 
 export type StatutoryDeskSyncMeta = {
   batchCount: number;
@@ -37,39 +43,6 @@ async function resolveCtx(): Promise<{
   tenantId: string;
 } | null> {
   return getServerTenantContext();
-}
-
-/** Same empty-keepIds guard as payrollNormalized.server.ts's deleteStale — do not weaken. */
-async function deleteStale(
-  sb: SupabaseClient,
-  tenantId: string,
-  table: string,
-  keepIds: Set<string>,
-) {
-  if (keepIds.size === 0) {
-    console.warn(
-      `[${table}] refusing to prune: the payload holds no ids at all. ` +
-        "An empty client is not an instruction to delete every row.",
-    );
-    return;
-  }
-  const { data, error } = await sb
-    .from(table)
-    .select("id")
-    .eq("tenant_id", tenantId);
-  if (error) {
-    console.error(
-      `[${table}] prune skipped — could not read existing ids:`,
-      error.message,
-    );
-    return;
-  }
-  const stale = (data ?? [])
-    .map((r) => String((r as { id: string }).id))
-    .filter((id) => !keepIds.has(id));
-  if (stale.length > 0) {
-    await sb.from(table).delete().in("id", stale);
-  }
 }
 
 async function upsertChunks(
@@ -249,9 +222,13 @@ function configToRow(
   };
 }
 
+/** The only statutory table a desk save deletes from — by named id. */
+export const STATUTORY_DELETABLE_TABLES = ["statutory_desk_batches"] as const;
+
 export async function pushStatutoryDeskToDb(
   state: StatutoryRemitState,
   config: StatutoryEstablishmentConfig,
+  deletes: NamedDeletes = {},
 ): Promise<{ ok: boolean; error?: string }> {
   if (!statutoryDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
@@ -259,7 +236,8 @@ export async function pushStatutoryDeskToDb(
   const { sb, tenantId } = ctx;
   const now = nowIso();
 
-  const batches = state.batches ?? [];
+  const goneBatches = new Set(deletes["statutory_desk_batches"] ?? []);
+  const batches = (state.batches ?? []).filter((b) => !goneBatches.has(b.id));
 
   const lineKeep = new Set<string>();
   const lineRows: Record<string, unknown>[] = [];
@@ -271,16 +249,6 @@ export async function pushStatutoryDeskToDb(
     });
   }
 
-  await Promise.all([
-    deleteStale(
-      sb,
-      tenantId,
-      "statutory_desk_batches",
-      new Set(batches.map((b) => b.id)),
-    ),
-    deleteStale(sb, tenantId, "statutory_desk_lines", lineKeep),
-  ]);
-
   const tables: [string, Record<string, unknown>[]][] = [
     ["statutory_desk_batches", batches.map((b) => batchToRow(tenantId, b))],
     ["statutory_desk_lines", lineRows],
@@ -289,6 +257,22 @@ export async function pushStatutoryDeskToDb(
     const r = await upsertChunks(sb, table, rows);
     if (!r.ok) return r;
   }
+
+  // No prune by absence. A batch the desk removed is named (lines cascade).
+  // A batch's lines are rewritten when it is re-synced from its payroll run,
+  // so lines past the new count are removed — only under batches this
+  // payload carries in full.
+  const delBatches = await deleteNamedIds(sb, tenantId, "statutory_desk_batches", [...goneBatches]);
+  if (!delBatches.ok) return delBatches;
+  const delLines = await deleteChildrenNotKept(
+    sb,
+    tenantId,
+    "statutory_desk_lines",
+    "batch_id",
+    batches.map((b) => b.id),
+    lineKeep,
+  );
+  if (!delLines.ok) return delLines;
 
   const { error: configErr } = await sb
     .from("statutory_establishment_config")
@@ -332,14 +316,20 @@ export async function fetchStatutoryDeskFromDb(): Promise<{
   if (!ctx) return { bundle: empty, meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
+  // Paged: PostgREST stops at 1,000 rows and calls it success; a batch read
+  // back short of lines would be saved back short.
+  const page = (table: string) =>
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from(table).select("*").eq("tenant_id", tenantId).order("id").range(from, to),
+    ).then((r) => ({ data: r.rows, error: r.error ? { message: r.error } : null }));
   const [
     { data: batchRows, error: batchErr },
     { data: lineRows, error: lineErr },
     { data: configRow },
     { data: metaRow },
   ] = await Promise.all([
-    sb.from("statutory_desk_batches").select("*").eq("tenant_id", tenantId),
-    sb.from("statutory_desk_lines").select("*").eq("tenant_id", tenantId),
+    page("statutory_desk_batches"),
+    page("statutory_desk_lines"),
     sb
       .from("statutory_establishment_config")
       .select("*")
@@ -362,7 +352,11 @@ export async function fetchStatutoryDeskFromDb(): Promise<{
   }
 
   const linesByBatch = new Map<string, StatutoryRemitLine[]>();
-  for (const row of lineRows ?? []) {
+  // In line order: line ids are positional.
+  const orderedLines = [...(lineRows ?? [])].sort(
+    (a, b) => Number(a.line_index ?? 0) - Number(b.line_index ?? 0),
+  );
+  for (const row of orderedLines) {
     const r = row as Record<string, unknown>;
     const batchId = String(r.batch_id);
     const list = linesByBatch.get(batchId) ?? [];

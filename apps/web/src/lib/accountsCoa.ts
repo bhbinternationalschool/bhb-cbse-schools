@@ -25,6 +25,7 @@ import {
   loadAccounts,
   saveAccounts,
 } from "@/lib/accountsStore";
+import { recordAccountsDeletion } from "@/lib/accountsNormalizedClient";
 
 
 export function upsertCoaAccount(
@@ -113,6 +114,7 @@ export function deleteCoaAccount(
   if (!account) return fail("Account not found");
   const check = checkCoaAccountRemoval(coaId, state);
   if (!check.canRemove) return fail(check.suggestion);
+  recordAccountsDeletion("accounts_desk_coa_accounts", coaId);
   saveAccounts({
     ...state,
     coaAccounts: state.coaAccounts.filter((c) => c.id !== coaId),

@@ -224,14 +224,29 @@ export type TeacherMatch =
   | { kind: "none" };
 
 /**
+ * A National Code, or "" when the value is not one.
+ *
+ * Until UDISE+ issues a code, its list says "Will Be Generated Shortly" —
+ * 13 of the school's 30 portal staff on 9 Oct 2026. That sentence was copied
+ * into NEHA PATHAK's ERP record as her code, so every one of the 13 "had" her
+ * code: all matched to her, and the review told the office their code was
+ * "on Neha Pathak's record". Real codes are letters then digits (TR30222856,
+ * TP07405881); anything else is no code at all.
+ */
+export function realNationalCode(v: unknown): string {
+  const c = String(v ?? "").trim().toUpperCase().replace(/\s+/g, "");
+  return /^[A-Z]{1,4}\d{5,12}$/.test(c) ? c : "";
+}
+
+/**
  * The ERP staff member a portal teacher is. The portal's National Code
  * stored in the ERP (Staff → OASIS / UDISE id) settles it; otherwise the
  * same name AND the same date of birth. A name alone is never an identity.
  */
 export function matchPortalTeacher(staff: StaffRecord[], t: PortalTeacher): TeacherMatch {
-  const code = String(t.nationalCode || "").trim().toUpperCase();
+  const code = realNationalCode(t.nationalCode);
   if (code) {
-    const byCode = staff.filter((s) => (s.oasisId || "").trim().toUpperCase() === code);
+    const byCode = staff.filter((s) => realNationalCode(s.oasisId) === code);
     if (byCode.length === 1) return { kind: "matched", staff: byCode[0]!, by: "national_code" };
     if (byCode.length > 1) return { kind: "unsure", candidates: byCode };
   }
@@ -420,7 +435,7 @@ export function buildTeacherBoard(staff: StaffRecord[], portal: PortalTeacher[],
     if (m.kind === "unsure") for (const c of m.candidates) maybe.set(c.id, `may be the portal's ${t.staffName}`);
     if (m.kind !== "matched") {
       return {
-        nationalCode: t.nationalCode,
+        nationalCode: realNationalCode(t.nationalCode),
         portalName: t.staffName,
         match: m.kind,
         erpStaffId: "",
@@ -443,20 +458,23 @@ export function buildTeacherBoard(staff: StaffRecord[], portal: PortalTeacher[],
     if (pAcad && eAcad && pAcad !== eAcad) differences.push(`Academic qualification: portal "${t.academicQualification}", ERP "${s.qualification}"`);
     const pGender = portalCode(t.gender);
     if (pGender && GENDER[s.gender] && pGender !== GENDER[s.gender]) differences.push(`Gender: portal "${t.gender}", ERP ${s.gender}`);
+    const code = realNationalCode(t.nationalCode);
     return {
-      nationalCode: t.nationalCode,
+      nationalCode: code,
       portalName: t.staffName,
       match: "matched",
       erpStaffId: s.id,
       erpName: s.fullName,
-      codeMissingInErp: (s.oasisId || "").trim().toUpperCase() !== String(t.nationalCode || "").trim().toUpperCase(),
+      // Only a real portal code can be "missing" from the ERP.
+      codeMissingInErp: !!code && realNationalCode(s.oasisId) !== code,
       differences,
     };
   });
   const isTeaching = (s: StaffRecord) => s.stream === "teaching";
   const missing = active.filter((s) => !seen.has(s.id) && (isTeaching(s) || opts.nonTeachingRead === true));
   for (const s of missing) {
-    if (!maybe.has(s.id) && (s.oasisId || "").trim()) maybe.set(s.id, `holds National Code ${s.oasisId.trim()}`);
+    const held = realNationalCode(s.oasisId);
+    if (!maybe.has(s.id) && held) maybe.set(s.id, `holds National Code ${held}`);
   }
   const notOnPortal = missing
     .filter((s) => !maybe.has(s.id))

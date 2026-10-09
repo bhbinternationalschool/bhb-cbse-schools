@@ -272,19 +272,15 @@ create_job "bhb-drive-archive-receipts" "45 15 * * *" \
   "${APP_URL}/api/drive/archive/receipts/tick?limit=120" \
   "Asia/Kolkata" "300s"
 
-# Staff GPS presence: evaluates geofence/staleness and alerts on state changes.
+# Staff GPS presence (bhb-staff-geo-tick) — DELETED 2026-10-09.
 #
-# PAUSED as of 2026-08-29 — the geo-fence is switched off in Staff → GPS and no
-# staff have consented, so every tick was a cold start that did nothing. Resume
-# it when the feature is turned on:
-#   gcloud scheduler jobs resume bhb-staff-geo-tick --location=asia-southeast1
-#
-# The window is the configured school day (08:00-14:30 Mon-Sat) plus an hour of
-# margin either side, to cover the grace and staleness settings. It ran */5 all
-# day, every day, which is 288 ticks for a 6.5-hour feature.
-create_job "bhb-staff-geo-tick" "*/5 7-15 * * 1-6" \
-  "${APP_URL}/api/staff-geo/tick" \
-  "Asia/Kolkata" "300s" "paused"
+# It sat paused from 2026-08-29 (geo-fence off in Staff → GPS, no staff
+# consented), and a paused job is still billed. Recreate it when the feature
+# is turned on:
+#   gcloud scheduler jobs create http bhb-staff-geo-tick --location=asia-southeast1 \
+#     --schedule="*/5 7-15 * * 1-6" --time-zone=Asia/Kolkata \
+#     --uri="${APP_URL}/api/staff-geo/tick" --attempt-deadline=300s  # + the auth flags create_job uses
+# or restore its create_job line from git history.
 
 # Online classes: the "starting soon" push 15 minutes before a scheduled
 # class, and closing any class still marked live half an hour after its end

@@ -20,6 +20,7 @@ import {
 } from "@/lib/reportExport";
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
+import { recordStudentLeaveDeletion } from "@/lib/studentLeaveNormalizedClient";
 
 const STORAGE_KEY = "bhb_student_leave_v1";
 
@@ -257,6 +258,7 @@ export function deleteStudentLeaveRequest(
       error: "Only pending or cancelled requests can be deleted",
     };
   }
+  recordStudentLeaveDeletion(id);
   saveStudentLeave({
     ...state,
     requests: state.requests.filter((r) => r.id !== id),

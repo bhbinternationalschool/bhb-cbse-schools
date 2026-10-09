@@ -20,7 +20,11 @@ import { ptmDualWriteDbEnabled } from "@/lib/ptmDbConfig";
 import {
   fetchPtmDeskFromDb,
   pushPtmDeskToDb,
+  PTM_DELETABLE_TABLES,
+  PTM_TABLE_SLICES,
 } from "@/lib/ptmNormalized.server";
+import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
+import { featureAuthorizedDeletes } from "@/lib/deskNamedDeletesFeature.server";
 
 export const runtime = "nodejs";
 
@@ -113,7 +117,7 @@ export async function GET(req: Request) {
 type PtmDeskPostBody = Pick<
   PtmState,
   "events" | "slots" | "bookings" | "feedback"
->;
+> & { deletes?: unknown };
 
 /** POST — push full PTM desk snapshot */
 export async function POST(req: Request) {
@@ -162,6 +166,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  // Deletions are named by the desk, never inferred from what it lacks.
+  let deletes = readNamedDeletes(body.deletes, PTM_DELETABLE_TABLES);
+
   // Function holders (e.g. PTM → Meeting slots): merged onto the stored
   // desk, only their functions' slices — never the body as sent.
   if (gate) {
@@ -175,6 +182,7 @@ export async function POST(req: Request) {
     const merged = featurePushOutcome(gate, "ptm", stored.bundle, body);
     if (!merged.ok) return merged.response;
     if (!merged.changed) return featureSavedResponse(false);
+    deletes = featureAuthorizedDeletes(deletes, PTM_TABLE_SLICES, stored.bundle, merged.state);
     body = merged.state as unknown as PtmDeskPostBody;
   }
 
@@ -184,7 +192,7 @@ export async function POST(req: Request) {
     slots: Array.isArray(body.slots) ? body.slots : [],
     bookings: Array.isArray(body.bookings) ? body.bookings : [],
     feedback: Array.isArray(body.feedback) ? body.feedback : [],
-  });
+  }, deletes);
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error || "Sync failed" },

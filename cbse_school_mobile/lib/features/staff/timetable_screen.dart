@@ -16,6 +16,7 @@ class TimetableScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<StaffTimetable>(
+      guideId: "timetable",
       title: "My timetable",
       load: api.fetchStaffTimetable,
       emptyIcon: Icons.calendar_view_week_outlined,

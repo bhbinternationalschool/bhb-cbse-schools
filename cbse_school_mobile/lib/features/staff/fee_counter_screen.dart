@@ -1,5 +1,6 @@
 import "dart:math";
 
+import "../../core/guide/screen_guides.dart";
 import "package:flutter/material.dart";
 import "package:flutter/services.dart";
 
@@ -69,6 +70,7 @@ class _FeeCounterScreenState extends State<FeeCounterScreen> {
     final hits = _hits;
     return Scaffold(
       appBar: AppBar(
+        actions: [ScreenGuideButton(guideId: "fee-counter", screenLabel: "fee-counter")],
         title: Text(context.l10n.collectFees, style: AppText.titleMedium),
       ),
       body: Column(
@@ -437,6 +439,7 @@ class _CounterScreenState extends State<CounterScreen> {
     final c = _counter;
     return Scaffold(
       appBar: AppBar(
+        actions: [ScreenGuideButton(guideId: "fee-counter-student", screenLabel: "fee-counter-student")],
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

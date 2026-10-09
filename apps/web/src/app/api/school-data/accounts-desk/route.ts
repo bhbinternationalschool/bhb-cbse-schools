@@ -6,9 +6,11 @@ import {
 import type { AccountsState } from "@/lib/accountsTypes";
 import { accountsDualWriteDbEnabled } from "@/lib/accountsDbConfig";
 import {
+  ACCOUNTS_DELETABLE_TABLES,
   fetchAccountsDeskFromDb,
   pushAccountsDeskToDb,
 } from "@/lib/accountsNormalized.server";
+import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
 
 export const runtime = "nodejs";
 
@@ -32,7 +34,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, skipped: true });
   }
 
-  let body: Omit<AccountsState, "version">;
+  let body: Omit<AccountsState, "version"> & { deletes?: unknown };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -64,7 +66,7 @@ export async function POST(req: Request) {
       expenseApprovalPaise: 1_000_000,
       pettyThresholdPaise: 200_000,
     },
-  });
+  }, readNamedDeletes(body.deletes, ACCOUNTS_DELETABLE_TABLES));
   if (!result.ok) {
     return NextResponse.json({ ok: false, error: result.error }, { status: 502 });
   }

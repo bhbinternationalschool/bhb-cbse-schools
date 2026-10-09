@@ -8,6 +8,7 @@ import { getSessionActor } from "@/lib/sessionActor";
 import type { CommsAudience } from "@/lib/schoolComms";
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
+import { recordNotificationsDeletion } from "@/lib/notificationsNormalizedClient";
 
 const STORAGE_KEY = "bhb_notifications_v1";
 
@@ -220,6 +221,8 @@ export function pruneNotifications(): NotificationsState {
   }
   const state = loadNotifications();
   const next = { ...state, items: state.items.slice(0, 50) };
+  // An explicit clear: named, because a save no longer deletes what it omits.
+  recordNotificationsDeletion(state.items.slice(50).map((n) => n.id));
   saveNotifications(next);
   return next;
 }

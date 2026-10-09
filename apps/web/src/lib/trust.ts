@@ -10,6 +10,7 @@ import {
 } from "@/lib/accountsCapex";
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
 
 /* ─── Types ─────────────────────────────────────────────────── */
 
@@ -587,6 +588,12 @@ export function suggestRate(
 export function seedTrustIfEmpty(): TrustState {
   const state = loadTrust();
   if (state.projects.length > 0) return state;
+  // A school's desk is never seeded with a demo project, a made-up contractor
+  // (and GSTIN) and a sample rate card. It ran on any empty browser BEFORE the
+  // desk was pulled, and its save replaced the school's trust desk with the
+  // demo (on 9 Oct 2026 the production desk held exactly that). Only an
+  // offline, database-less dev build gets the sample.
+  if (isSupabaseConfigured()) return state;
 
   const project = normalizeProject({
     code: "CAP/25-26/001",

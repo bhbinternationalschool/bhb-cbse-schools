@@ -1,4 +1,5 @@
 import "dart:async";
+import "../../core/guide/screen_guides.dart";
 import "dart:math" as math;
 
 import "package:flutter/material.dart";
@@ -111,6 +112,7 @@ class _BusLiveMapScreenState extends State<BusLiveMapScreen> {
               : "${l.busNo.isEmpty ? l.routeName : l.busNo} · ${widget.childName}",
         ),
         actions: [
+          ScreenGuideButton(guideId: "bus-live", screenLabel: "bus-live"),
           IconButton(
             tooltip: context.l10n.refresh,
             onPressed: _load,

@@ -1,4 +1,8 @@
 import "package:flutter/material.dart";
+import "../profile/child_profile_screen.dart";
+import "../../core/popups/app_popups.dart";
+import "../../core/ui/running_strip.dart";
+import "../../core/guide/screen_guides.dart";
 import "package:flutter_svg/flutter_svg.dart";
 import "package:url_launcher/url_launcher.dart";
 
@@ -219,6 +223,24 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
       _loadStats(summary);
+      // The school's pop-up, if any — once per app open (core/popups).
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        AppPopups.maybeShow(
+          context,
+          widget.api,
+          openDocuments: (studentId) => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) =>
+                  ChildProfileScreen(api: widget.api, studentId: studentId),
+            ),
+          ),
+          openRoute: (route) {
+            _pendingRoute = route;
+            _consumePendingRoute();
+          },
+        );
+      });
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
@@ -454,6 +476,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ),
+            // Notices and news scrolling across, as on the web ERP.
+            RunningStrip(
+              api: widget.api,
+              onOpen: () => _openModule("Notices", child),
+            ),
             Padding(
               padding: Insets.pageBelowHeader,
               child: Column(
@@ -641,6 +668,10 @@ class _Header extends StatelessWidget {
                           fontWeight: FontWeight.w500,
                         ),
                       ),
+                    ),
+                    const ScreenGuideButton(
+                      guideId: "parent-home",
+                      screenLabel: "Home",
                     ),
                     _RoundAction(
                       icon: Icons.notifications_none_rounded,

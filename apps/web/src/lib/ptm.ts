@@ -20,6 +20,7 @@ import {
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { recordPtmDeletion } from "@/lib/ptmNormalizedClient";
 
 const STORAGE_KEY = "bhb_ptm_v1";
 
@@ -275,6 +276,7 @@ export function deletePtmEvent(
       error: "Cancel or complete all bookings before deleting this event",
     };
   }
+  if (typeof window !== "undefined") recordPtmDeletion("ptm_desk_events", [eventId]);
   savePtm({
     ...state,
     events: state.events.filter((e) => e.id !== eventId),
@@ -305,6 +307,7 @@ export function deletePtmSlot(
       error: "Slot has active bookings — cancel them first",
     };
   }
+  if (typeof window !== "undefined") recordPtmDeletion("ptm_desk_slots", [slotId]);
   savePtm({
     ...state,
     slots: state.slots.filter((s) => s.id !== slotId),

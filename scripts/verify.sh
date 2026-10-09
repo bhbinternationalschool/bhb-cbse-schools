@@ -85,6 +85,7 @@ SELFTESTS=(
   test:sis-prune
   test:attendance-prune
   test:prune-floor
+  test:desk-named-deletes
   test:sis-delete
   test:sis-guard-fallback
   test:audit-redaction
@@ -124,9 +125,12 @@ SELFTESTS=(
   test:aadhaar-certificate
   test:staff-chat-bare
   test:job-desk
+  test:admissions-library-rte-ptm-exams-no-prune
   test:fee-adjustments-merge
+  test:wa-threads-trust-no-prune
   test:parent-bot-clarify
   test:office-backlog
+  test:comms-attendance-leave-no-prune
   test:automation-send-rules
   test:fee-family-reminder
   test:fleet-keep-rule
@@ -196,11 +200,18 @@ SELFTESTS=(
   test:leave-allotment
   test:class-group-message
   test:comms-reach
+  test:wa-timeline
   test:wa-sender-routing
   test:receipt-repair
   test:projection-double-post
   test:holiday-import
   test:payment-link-amount
+  test:accounts-no-prune
+  test:app-popups
+  test:module-requests
+  test:weekly-holiday-range
+  test:push-voice
+  test:udise-national-code-placeholder
   test:install-platform
   test:homework-no-prune
   test:accounts-seed-after-pull
@@ -274,7 +285,9 @@ SELFTESTS=(
   test:udise-portal-reconcile
   test:lead-worklist
   test:student-import
+  test:fees-payments-no-prune
   test:student-import-mid-year
+  test:payroll-statutory-vault-no-prune
   test:cash-pool-orphans
   test:academic-risk
   test:admissions-ai

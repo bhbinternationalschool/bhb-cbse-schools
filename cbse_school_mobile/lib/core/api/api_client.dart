@@ -6,6 +6,8 @@ import "package:http/http.dart" as http;
 import "package:http_parser/http_parser.dart";
 
 import "../config/app_config.dart";
+import "../guide/screen_guides.dart";
+import "../popups/app_popups.dart";
 import "../i18n/locale_controller.dart";
 import "../update/app_build.dart";
 
@@ -2795,6 +2797,10 @@ class ApiClient {
     }
     // 426: this build is too old for the server — AppUpdateGate takes over.
     if (res.statusCode == 426) AppBuild.updateRequired.value = true;
+    // The screen guide watches for the same error twice (core/guide).
+    if (res.statusCode != 401 && res.statusCode != 426) {
+      ScreenGuides.noteError(message);
+    }
     throw ApiException(message, res.statusCode);
   }
 
@@ -3051,6 +3057,103 @@ class ApiClient {
       "studentId": studentId,
     }),
   );
+
+  /// The screen guide (core/guide): ask the AI to write up a change request,
+  /// or the one question it still needs. Returns the server's `draft` map:
+  /// `{ready:false, question}` or `{ready:true, kind, title, problem, wanted, suggestion}`.
+  Future<Map<String, dynamic>> appGuideDraft({
+    required String screen,
+    required String screenLabel,
+    required List<Map<String, String>> history,
+  }) async {
+    final data = await _postData("/api/v1/app-guide", {
+      "action": "draft",
+      "screen": screen,
+      "screenLabel": screenLabel,
+      "history": history,
+    });
+    return (data["draft"] as Map<String, dynamic>?) ?? const {};
+  }
+
+  /// Sends a written-up change request to the director's inbox.
+  Future<void> appGuideSubmit({
+    required String screen,
+    required String screenLabel,
+    required List<Map<String, String>> history,
+    required Map<String, dynamic> card,
+  }) async {
+    await _postData("/api/v1/app-guide", {
+      "action": "submit",
+      "screen": screen,
+      "screenLabel": screenLabel,
+      "history": history,
+      "card": card,
+    });
+  }
+
+  /// Counts a screen where someone hit the same error twice. Best effort.
+  Future<void> appGuideStuck({required String screen, required String message}) async {
+    try {
+      await http.post(
+        _uri("/api/v1/app-guide"),
+        headers: await _authHeaders(),
+        body: jsonEncode({"action": "stuck", "screen": screen, "message": message}),
+      );
+    } catch (_) {
+      /* never in the user's way */
+    }
+  }
+
+  /// The family's bus pickup point: riders, current pin, the stops of their
+  /// routes, the school, and whether they said "Not now" before.
+  Future<Map<String, dynamic>> fetchPickupPin() =>
+      _getData("/api/v1/transport/pickup-pin");
+
+  /// Saves one pickup point for every riding child. Throws [ApiException]
+  /// (with the server's reason, e.g. too far from school) if not stored.
+  Future<Map<String, dynamic>> savePickupPin({
+    required double lat,
+    required double lng,
+    double? accuracyM,
+  }) =>
+      _postData("/api/v1/transport/pickup-pin", {
+        "action": "save",
+        "lat": lat,
+        "lng": lng,
+        "accuracyM": ?accuracyM,
+      });
+
+  /// "Not now" — recorded so the family is not asked again.
+  Future<void> declinePickupPin() async {
+    await _postData("/api/v1/transport/pickup-pin", {"action": "decline"});
+  }
+
+  /// Pop-ups meant for this person now (core/popups). Empty when none.
+  Future<List<AppPopup>> fetchAppPopups() async {
+    final data = await _getData("/api/v1/app/popups");
+    return ((data["popups"] as List?) ?? const [])
+        .map((p) => AppPopup.fromJson(p as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Records "shown" / "dismissed" / "done". Best effort.
+  Future<void> appPopupEvent(String popupId, String event) async {
+    try {
+      await http.post(
+        _uri("/api/v1/app/popups"),
+        headers: await _authHeaders(),
+        body: jsonEncode({"popupId": popupId, "action": event}),
+      );
+    } catch (_) {
+      /* never in the user's way */
+    }
+  }
+
+  /// Completes a pop-up's form (Aadhaar numbers, a consent answer). Throws
+  /// [ApiException] with the server's reason if it was not saved.
+  Future<void> appPopupDone(String popupId, Map<String, dynamic> value) async {
+    await _postData("/api/v1/app/popups", {"popupId": popupId, "action": "done", ...value});
+  }
 
   /// Reports an AI reply as wrong, unsafe or offensive.
   ///

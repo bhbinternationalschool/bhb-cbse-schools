@@ -5,7 +5,7 @@ import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/component
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import type { RowAction } from "@/components/ui/erp-grid";
 import type { Holiday } from "@/lib/foundationMasters";
-import { appliesToLabel, WEEKDAY_LABELS } from "@/lib/holidayPolicy";
+import { appliesToLabel, WEEKDAY_LABELS, weeklyRuleIsWholeSession } from "@/lib/holidayPolicy";
 import {
   compareWeeklyRules,
   duplicateHolidayIds,
@@ -13,6 +13,7 @@ import {
   holidayDayCount,
   holidaysByMonth,
   isWeeklyRule,
+  weeklyRuleWhen,
 } from "@/lib/holidayCalendarView";
 
 function scopeLabel(h: Holiday): string {
@@ -66,10 +67,11 @@ export function HolidayMonthTable({
       {weekly.length ? (
         <ErpTableShell density="compact">
           <div className="overflow-x-auto">
-            <ErpTable minWidth="min-w-[560px]">
+            <ErpTable minWidth="min-w-[700px]">
               <ErpTableHead>
                 <tr>
                   <th className="px-3 py-2">Every week</th>
+                  <th className="px-3 py-2">When</th>
                   <th className="px-3 py-2">Holiday</th>
                   <th className="px-3 py-2">For</th>
                   <th className="px-3 py-2">Applies to</th>
@@ -81,6 +83,13 @@ export function HolidayMonthTable({
                   <tr key={h.id}>
                     <td className="px-3 py-2 font-semibold text-[var(--brand-deep)]">
                       {typeof h.weekday === "number" ? WEEKDAY_LABELS[h.weekday] : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-xs whitespace-nowrap">
+                      {weeklyRuleIsWholeSession(h) ? (
+                        <span className="text-[var(--muted)]">Whole session</span>
+                      ) : (
+                        <span className="font-semibold text-[var(--brand-deep)]">{weeklyRuleWhen(h, false)}</span>
+                      )}
                     </td>
                     <td className="px-3 py-2">
                       {h.title} <Kind h={h} />

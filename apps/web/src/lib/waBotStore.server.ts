@@ -33,6 +33,13 @@ const LOCAL_FILE = path.join(process.cwd(), ".data", "wa_bot_threads_bundle.json
 
 let cache: WaBotPersistBundle | null = null;
 let loaded = false;
+/**
+ * The last load could not read the desk and fell back to an empty bundle.
+ * Unknown is not empty: until a read succeeds, no slice may be written — a
+ * slice saved on top of that empty fallback replaced the stored slice (every
+ * SIS or CRM thread) with the one conversation in hand.
+ */
+let deskUnreadable = false;
 
 function emptyBundle(): WaBotPersistBundle {
   return {
@@ -60,11 +67,14 @@ async function loadBundle(): Promise<WaBotPersistBundle> {
   );
   const { deskSkipBlobPush } = await import("@/lib/deskCutover");
 
+  let readFailed = false;
   if (waThreadsReadFromDbEnabled()) {
     const desk = await fetchWaThreadsDeskFromDb();
-    if ((desk.meta?.sliceCount ?? 0) > 0) {
+    if (!desk.ok) readFailed = true;
+    if (desk.ok && (desk.meta?.sliceCount ?? 0) > 0) {
       cache = desk.bundle;
       loaded = true;
+      deskUnreadable = false;
       return cache;
     }
   }
@@ -87,6 +97,7 @@ async function loadBundle(): Promise<WaBotPersistBundle> {
         tutor: remote.state.tutor ?? null,
       };
       loaded = true;
+      deskUnreadable = false;
       return cache;
     }
   }
@@ -97,6 +108,7 @@ async function loadBundle(): Promise<WaBotPersistBundle> {
     if (parsed?.version === 1) {
       cache = parsed;
       loaded = true;
+      deskUnreadable = false;
       return parsed;
     }
   } catch {
@@ -104,43 +116,23 @@ async function loadBundle(): Promise<WaBotPersistBundle> {
   }
 
   const desk = await fetchWaThreadsDeskFromDb();
-  if ((desk.meta?.sliceCount ?? 0) > 0) {
+  if (!desk.ok) readFailed = true;
+  if (desk.ok && (desk.meta?.sliceCount ?? 0) > 0) {
     cache = desk.bundle;
     loaded = true;
+    deskUnreadable = false;
     return cache;
   }
 
+  if (readFailed) {
+    // Not cached: the next call reads again.
+    deskUnreadable = true;
+    return emptyBundle();
+  }
   cache = emptyBundle();
   loaded = true;
+  deskUnreadable = false;
   return cache;
-}
-
-async function saveBundle(bundle: WaBotPersistBundle): Promise<void> {
-  cache = { ...bundle, version: 1, updatedAt: new Date().toISOString() };
-  loaded = true;
-
-  const { pushWaThreadsDeskToDb } = await import(
-    "@/lib/waThreadsNormalized.server"
-  );
-  const desk = await pushWaThreadsDeskToDb(cache);
-  if (!desk.ok) {
-    // Not a warning. This is the school's WhatsApp history not being saved;
-    // on 2026-09-11 it was logged at warn level for ninety minutes while
-    // seven families' conversations existed only in one container's memory.
-    console.error("[wa-bot-store] DESK PUSH FAILED — bot threads are NOT persisting:", desk.error);
-  }
-
-  const { deskSkipBlobPush } = await import("@/lib/deskCutover");
-  if (!deskSkipBlobPush("wa_threads")) {
-    void trackServerWork(pushServerBlob("wa_bot_threads_state", cache));
-  }
-
-  try {
-    await fs.mkdir(path.dirname(LOCAL_FILE), { recursive: true });
-    await fs.writeFile(LOCAL_FILE, JSON.stringify(cache, null, 2), "utf8");
-  } catch {
-    /* ephemeral disk */
-  }
 }
 
 export async function loadWaBotSlice<T>(
@@ -182,6 +174,13 @@ export async function saveWaBotSlice<T>(
   value: T,
 ): Promise<void> {
   const bundle = await loadBundle();
+  if (deskUnreadable) {
+    console.error(
+      `[wa-bot-store] NOT saving the ${key} slice: the desk could not be read, ` +
+        "and writing on top of an empty fallback would replace the stored conversations.",
+    );
+    return;
+  }
   // Nothing changed → nothing to write. Several bot paths save on every
   // message whether or not their slice moved.
   try {

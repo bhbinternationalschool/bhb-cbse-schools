@@ -90,6 +90,7 @@ class _OnlineClassQaScreenState extends State<OnlineClassQaScreen> {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<List<ParentClassQuestion>>(
+      guideId: "online-class-qa-parent",
       title: context.l10n.oclQuestionsFromTheTeacher,
       subtitle: "${widget.title} · ${widget.child.fullName}",
       load: () => widget.api.fetchOnlineClassQuestions(
