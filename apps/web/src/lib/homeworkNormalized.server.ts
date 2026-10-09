@@ -14,7 +14,7 @@ import type {
 } from "@/lib/homework";
 import { homeworkDualWriteDbEnabled } from "@/lib/homeworkDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
-import { fetchAllPages } from "@/lib/supabase/pageAll";
+import { fetchAllPages, fetchByIds } from "@/lib/supabase/pageAll";
 
 export type HomeworkDeskSyncMeta = {
   postCount: number;
@@ -83,7 +83,8 @@ function postToRow(tenantId: string, p: HomeworkPost): Record<string, unknown> {
     source: p.source === "google_classroom" ? "google_classroom" : "erp",
     google_course_work_id: p.googleCourseWorkId || "",
     google_course_id: p.googleCourseId || "",
-    updated_at: now,
+    // The post's own time — see writeHomeworkLists. "" = an older copy.
+    updated_at: p.updatedAt || "",
   };
 }
 
@@ -115,6 +116,7 @@ function rowToPost(r: Record<string, unknown>): HomeworkPost {
     source: r.source === "google_classroom" ? "google_classroom" : "erp",
     googleCourseWorkId: String(r.google_course_work_id || ""),
     googleCourseId: String(r.google_course_id || ""),
+    updatedAt: String(r.updated_at || ""),
   };
 }
 
@@ -133,7 +135,7 @@ function diaryToRow(tenantId: string, d: DiaryEntry): Record<string, unknown> {
     body_en: d.bodyEn || "",
     body_hi: d.bodyHi || "",
     created_at: d.createdAt || now,
-    updated_at: now,
+    updated_at: d.updatedAt || "",
   };
 }
 
@@ -150,6 +152,7 @@ function rowToDiary(r: Record<string, unknown>): DiaryEntry {
     bodyEn: String(r.body_en || ""),
     bodyHi: String(r.body_hi || ""),
     createdAt: String(r.created_at),
+    updatedAt: String(r.updated_at || ""),
   };
 }
 
@@ -282,33 +285,8 @@ export async function pushHomeworkDeskToDb(
     if (delErr) return { ok: false, error: `Diary delete failed: ${delErr.message}` };
   }
 
-  let r = await upsertChunks(
-    sb,
-    "homework_desk_posts",
-    posts.map((p) => postToRow(tenantId, p)),
-  );
-  if (!r.ok) return r;
-
-  r = await upsertChunks(
-    sb,
-    "homework_desk_diary",
-    diary.map((d) => diaryToRow(tenantId, d)),
-  );
-  if (!r.ok) return r;
-
-  r = await upsertChunks(
-    sb,
-    "homework_desk_submissions",
-    submissions.map((s) => submissionToRow(tenantId, s)),
-  );
-  if (!r.ok) return r;
-
-  r = await upsertChunks(
-    sb,
-    "homework_desk_seen",
-    seen.map((s) => seenToRow(tenantId, s)),
-  );
-  if (!r.ok) return r;
+  const w = await writeHomeworkLists(sb, tenantId, { posts, diary, submissions, seen });
+  if (!w.ok) return w;
 
   await sb.from("homework_desk_settings").upsert(
     {
@@ -319,26 +297,143 @@ export async function pushHomeworkDeskToDb(
     { onConflict: "tenant_id" },
   );
 
-  let lastPostAt: string | null = null;
-  for (const p of posts) {
-    const at = p.createdAt || p.date;
-    if (at && (!lastPostAt || at > lastPostAt)) lastPostAt = at;
+  await touchHomeworkMeta(sb, tenantId, now).catch(() => undefined);
+  return { ok: true };
+}
+
+/**
+ * Write the four homework lists without putting an older copy back
+ * (2026-10-10). Every save upserted every row it held — the office desk,
+ * a teacher's phone, and a staff-app post (which pushes the server's whole
+ * cached desk) — so an older copy undid edits and withdrawals, blanked the
+ * remark a teacher sent on WhatsApp, and reset "WhatsApp sent" (a later
+ * re-publish could message the families again).
+ *  - Posts and diary entries carry their own `updatedAt`: one the database
+ *    holds at a later time is skipped; a copy without one (older builds,
+ *    samples) only ever adds. "WhatsApp sent" never goes backwards.
+ *  - Submissions are made once; afterwards only the teacher's fields move,
+ *    and only forward: an acknowledgement or remark is written when it is
+ *    newer than the stored one, a filing note only where there is none.
+ *  - "Seen" marks are only ever added.
+ * A failed read writes nothing.
+ */
+export async function writeHomeworkLists(
+  sb: SupabaseClient,
+  tenantId: string,
+  lists: { posts: HomeworkPost[]; diary: DiaryEntry[]; submissions: HomeworkSubmission[]; seen: HomeworkSeen[] },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const now = new Date().toISOString();
+  const at = (v: unknown) => {
+    const t = Date.parse(String(v ?? ""));
+    return Number.isFinite(t) ? t : -Infinity;
+  };
+  const readStored = <T extends Record<string, unknown>>(table: string, cols: string, ids: string[]) =>
+    fetchByIds<T>(ids, (chunk, from, to) =>
+      sb.from(table).select(cols).eq("tenant_id", tenantId).in("id", chunk).order("id", { ascending: true }).range(from, to) as unknown as PromiseLike<{
+        data: T[] | null;
+        error: { message: string } | null;
+      }>,
+    );
+
+  // Posts and diary: newer wins.
+  for (const [table, rows, cols] of [
+    ["homework_desk_posts", lists.posts.map((p) => postToRow(tenantId, p)), "id, updated_at, whatsapp_notified_at, whatsapp_notified_count"],
+    ["homework_desk_diary", lists.diary.map((d) => diaryToRow(tenantId, d)), "id, updated_at"],
+  ] as const) {
+    if (!rows.length) continue;
+    const stored = await readStored<Record<string, unknown>>(table, cols, rows.map((r) => String(r.id)));
+    if (stored.error) return { ok: false, error: `Could not read the stored homework: ${stored.error}` };
+    const byId = new Map(stored.rows.map((r) => [String(r.id), r]));
+    let kept = 0;
+    const write = rows.flatMap((r) => {
+      const cur = byId.get(String(r.id));
+      if (!cur) return [{ ...r, updated_at: r.updated_at || now }];
+      if (!(at(r.updated_at) >= at(cur.updated_at))) {
+        kept += 1;
+        return [];
+      }
+      if (table !== "homework_desk_posts") return [r];
+      // "WhatsApp sent" only moves forward.
+      return at(cur.whatsapp_notified_at) > at(r.whatsapp_notified_at)
+        ? [{ ...r, whatsapp_notified_at: cur.whatsapp_notified_at, whatsapp_notified_count: cur.whatsapp_notified_count }]
+        : [r];
+    });
+    if (kept) console.warn(`[homework-db] ${table}: kept ${kept} newer row(s) over a stale copy`);
+    const up = await upsertChunks(sb, table, write);
+    if (!up.ok) return { ok: false, error: up.error || "write failed" };
   }
 
-  await sb.from("homework_desk_sync_meta").upsert(
-    {
-      tenant_id: tenantId,
-      post_count: posts.length,
-      diary_count: diary.length,
-      submission_count: submissions.length,
-      seen_count: seen.length,
-      last_post_at: lastPostAt,
-      updated_at: now,
-    },
-    { onConflict: "tenant_id" },
-  );
+  // Submissions: made once; the teacher's fields only move forward.
+  if (lists.submissions.length) {
+    const T = "homework_desk_submissions";
+    const stored = await readStored<Record<string, unknown>>(
+      T,
+      "id, teacher_ack_at, teacher_remark, remark_at, drive_note",
+      lists.submissions.map((x) => x.id),
+    );
+    if (stored.error) return { ok: false, error: `Could not read the stored submissions: ${stored.error}` };
+    const byId = new Map(stored.rows.map((r) => [String(r.id), r]));
+    const fresh = lists.submissions.filter((x) => !byId.has(x.id)).map((x) => submissionToRow(tenantId, x));
+    for (let i = 0; i < fresh.length; i += 200) {
+      const { error } = await sb.from(T).upsert(fresh.slice(i, i + 200), { onConflict: "id", ignoreDuplicates: true });
+      if (error) return { ok: false, error: error.message };
+    }
+    for (const x of lists.submissions) {
+      const cur = byId.get(x.id);
+      if (!cur) continue;
+      const patch: Record<string, unknown> = {};
+      if (x.teacherAckAt && at(x.teacherAckAt) > at(cur.teacher_ack_at)) {
+        patch.teacher_ack_at = x.teacherAckAt;
+        patch.teacher_ack_by = x.teacherAckBy || "";
+      }
+      if (x.remarkAt && x.teacherRemark && at(x.remarkAt) > at(cur.remark_at)) {
+        patch.teacher_remark = x.teacherRemark;
+        patch.remark_at = x.remarkAt;
+      }
+      if (x.driveNote && !cur.drive_note) patch.drive_note = x.driveNote;
+      if (!Object.keys(patch).length) continue;
+      const { error } = await sb.from(T).update(patch).eq("tenant_id", tenantId).eq("id", x.id);
+      if (error) return { ok: false, error: error.message };
+    }
+  }
 
+  // Seen marks: only ever added.
+  const seenRows = lists.seen.map((x) => seenToRow(tenantId, x));
+  for (let i = 0; i < seenRows.length; i += 500) {
+    const { error } = await sb
+      .from("homework_desk_seen")
+      .upsert(seenRows.slice(i, i + 500), { onConflict: "id", ignoreDuplicates: true });
+    if (error) return { ok: false, error: error.message };
+  }
   return { ok: true };
+}
+
+/** Recount the desk meta from the tables (a copy may be partial or old). */
+async function touchHomeworkMeta(sb: SupabaseClient, tenantId: string, now: string): Promise<void> {
+  const count = (table: string) =>
+    sb.from(table).select("id", { count: "exact", head: true }).eq("tenant_id", tenantId);
+  const [p, d, x, s, latest] = await Promise.all([
+    count("homework_desk_posts"),
+    count("homework_desk_diary"),
+    count("homework_desk_submissions"),
+    count("homework_desk_seen"),
+    sb
+      .from("homework_desk_posts")
+      .select("created_at")
+      .eq("tenant_id", tenantId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  const row: Record<string, unknown> = { tenant_id: tenantId, updated_at: now };
+  // A failed count leaves the old figure alone rather than writing a zero.
+  const ok = (r: { error: unknown; count: number | null }) => !r.error && typeof r.count === "number";
+  if (ok(p)) row.post_count = p.count;
+  if (ok(d)) row.diary_count = d.count;
+  if (ok(x)) row.submission_count = x.count;
+  if (ok(s)) row.seen_count = s.count;
+  if (!latest.error) row.last_post_at = (latest.data as { created_at?: string } | null)?.created_at ?? null;
+  await sb.from("homework_desk_sync_meta").upsert(row, { onConflict: "tenant_id" });
 }
 
 async function pushTeacherHomework(
@@ -357,16 +452,8 @@ async function pushTeacherHomework(
   const myPostIds = new Set(posts.map((p) => p.id));
   const submissions = (state.submissions ?? []).filter((x) => myPostIds.has(x.postId));
 
-  let r = await upsertChunks(sb, "homework_desk_posts", posts.map((p) => postToRow(tenantId, p)));
-  if (!r.ok) return r;
-  r = await upsertChunks(sb, "homework_desk_diary", diary.map((d) => diaryToRow(tenantId, d)));
-  if (!r.ok) return r;
-  r = await upsertChunks(
-    sb,
-    "homework_desk_submissions",
-    submissions.map((x) => submissionToRow(tenantId, x)),
-  );
-  if (!r.ok) return r;
+  const w = await writeHomeworkLists(sb, tenantId, { posts, diary, submissions, seen: [] });
+  if (!w.ok) return w;
 
   // Their own diary entries they deleted — named, never inferred from what
   // an hours-old phone copy happens not to hold.
