@@ -13,6 +13,7 @@ import type { InstallmentPlan, PlanAllocation } from "@/lib/installmentPlans";
 import type { FeeDeskAncillary } from "@/lib/feesDeskAncillary.types";
 import { feesDualWriteDbEnabled } from "@/lib/feesDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { fetchAllPages } from "@/lib/supabase/pageAll";
 import { replaceChildRows } from "./replaceChildRows.server";
 
 export type { FeeDeskAncillary };
@@ -308,30 +309,49 @@ export async function pushFeeDeskAncillaryToDb(
   return { ok: true };
 }
 
-export async function fetchFeeDeskAncillaryFromDb(): Promise<FeeDeskAncillary> {
+export async function fetchFeeDeskAncillaryFromDb(): Promise<{
+  ancillary: FeeDeskAncillary;
+  /** false = a read failed; the lists are unknown, NOT empty. */
+  ok: boolean;
+  error?: string;
+}> {
   const c = await ctx();
-  if (!c) return emptyAncillary();
+  if (!c) return { ancillary: emptyAncillary(), ok: false, error: "Supabase tenant not configured" };
   const { sb, tenantId } = c;
 
-  const [
-    { data: chequeRows },
-    { data: bookRows },
-    { data: closeRows },
-    { data: chargeRows },
-    { data: chargeLineRows },
-    { data: planRows },
-    { data: allocRows },
-    { data: carriedRows },
-  ] = await Promise.all([
-    sb.from("fee_desk_cheques").select("*").eq("tenant_id", tenantId),
-    sb.from("fee_desk_manual_books").select("*").eq("tenant_id", tenantId),
-    sb.from("fee_desk_day_closes").select("*").eq("tenant_id", tenantId),
-    sb.from("fee_desk_charge_vouchers").select("*").eq("tenant_id", tenantId),
-    sb.from("fee_desk_charge_voucher_lines").select("*").eq("tenant_id", tenantId),
-    sb.from("fee_desk_installment_plans").select("*").eq("tenant_id", tenantId),
-    sb.from("fee_desk_plan_allocations").select("*").eq("tenant_id", tenantId),
-    sb.from("fee_desk_carried_forward").select("*").eq("tenant_id", tenantId),
+  // Paged: PostgREST stops at 1,000 rows and calls it success. Cheques, plan
+  // allocations and day closes grow with every receipt, and a list cut at a
+  // thousand reached the browser short. Errors are kept: the server's own
+  // fee pushes (settlement, the staff app's collect) start from this read.
+  const page = (table: string) =>
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from(table).select("*").eq("tenant_id", tenantId).order("id").range(from, to),
+    );
+  const results = await Promise.all([
+    page("fee_desk_cheques"),
+    page("fee_desk_manual_books"),
+    page("fee_desk_day_closes"),
+    page("fee_desk_charge_vouchers"),
+    page("fee_desk_charge_voucher_lines"),
+    page("fee_desk_installment_plans"),
+    page("fee_desk_plan_allocations"),
+    page("fee_desk_carried_forward"),
   ]);
+  const failed = results.find((r) => r.error);
+  if (failed?.error) {
+    console.error("[fees-db] ancillary fetch failed", failed.error);
+    return { ancillary: emptyAncillary(), ok: false, error: failed.error };
+  }
+  const [
+    chequeRows,
+    bookRows,
+    closeRows,
+    chargeRows,
+    chargeLineRows,
+    planRows,
+    allocRows,
+    carriedRows,
+  ] = results.map((r) => r.rows);
 
   const linesByCharge = new Map<string, ChargeVoucher["lines"]>();
   for (const row of chargeLineRows ?? []) {
@@ -347,7 +367,7 @@ export async function fetchFeeDeskAncillaryFromDb(): Promise<FeeDeskAncillary> {
     linesByCharge.set(cid, list);
   }
 
-  return {
+  const ancillary: FeeDeskAncillary = {
     cheques: (chequeRows ?? []).map(
       (r): ChequeInstrument => ({
         id: String(r.id),
@@ -451,6 +471,7 @@ export async function fetchFeeDeskAncillaryFromDb(): Promise<FeeDeskAncillary> {
       };
     }),
   };
+  return { ancillary, ok: true };
 }
 
 export async function rebuildFeeOpenDuesCache(

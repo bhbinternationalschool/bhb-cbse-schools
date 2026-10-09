@@ -15,7 +15,15 @@ export const runtime = "nodejs";
 export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["accounts-desk"], "GET");
   if (!auth.ok) return auth.response
-  const { bundle, meta } = await fetchAccountsDeskFromDb();
+  const { bundle, meta, ok, error } = await fetchAccountsDeskFromDb();
+  // Unknown is not empty: a failed read answered 200 with an empty desk, and
+  // the browser took it as the school's accounts.
+  if (!ok) {
+    return NextResponse.json(
+      { ok: false, error: `Could not read the accounts desk: ${error || "read failed"}` },
+      { status: 503 },
+    );
+  }
   return NextResponse.json({
     ok: true,
     ...bundle,

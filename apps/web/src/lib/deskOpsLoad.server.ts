@@ -59,6 +59,7 @@ export async function saveOpsAdmissions(state: AdmissionsState): Promise<void> {
 
 export async function loadOpsFees(): Promise<FeesState> {
   const desk = await fetchFeeDeskFromDb();
+  if (!desk.ok) throw new Error("Could not read the fee desk — nothing was changed.");
   return mergeDbDeskIntoFeesState(emptyFees(), desk, { preferDb: true });
 }
 

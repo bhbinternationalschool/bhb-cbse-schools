@@ -189,6 +189,7 @@
     "test:exam-drill": "npx tsx src/lib/examDrill.selftest.ts",
     "test:drill-skills": "npx tsx src/lib/drillSkills.selftest.ts",
     "test:fee-server-persistence": "npx tsx src/lib/feeServerPersistence.selftest.ts",
+    "test:accounts-fees-paged-reads": "npx tsx src/lib/accountsFeesPagedReads.selftest.ts",
     "test:exam-seating": "npx tsx src/lib/examSeating.selftest.ts",
     "test:rbac-scope": "npx tsx src/lib/rbacScope.selftest.ts",
     "test:rbac-user-grants": "npx tsx src/lib/rbacUserGrants.selftest.ts",

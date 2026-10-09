@@ -143,6 +143,7 @@ SELFTESTS=(
   test:exam-drill
   test:drill-skills
   test:fee-server-persistence
+  test:accounts-fees-paged-reads
   test:exam-seating
   test:roster-name-case
   test:review-demo-records

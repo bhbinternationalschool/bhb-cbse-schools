@@ -838,9 +838,11 @@ export async function feeVoucherExistsInDb(
 }
 
 export async function fetchFeeDeskFromDb(): Promise<FeeDeskSnapshot> {
-  const [{ vouchers, meta, ok }, ancillary] = await Promise.all([
+  const [{ vouchers, meta, ok }, anc] = await Promise.all([
     fetchFeeVouchersFromDb(),
     fetchFeeDeskAncillaryFromDb(),
   ]);
-  return { vouchers, ancillary, meta, ok };
+  // Both halves must have been read: cheques, plans and day closes that
+  // failed to load are unknown, not "none".
+  return { vouchers, ancillary: anc.ancillary, meta, ok: ok && anc.ok };
 }
