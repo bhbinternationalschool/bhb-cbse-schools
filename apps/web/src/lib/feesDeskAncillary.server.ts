@@ -14,6 +14,7 @@ import type { FeeDeskAncillary } from "@/lib/feesDeskAncillary.types";
 import { feesDualWriteDbEnabled } from "@/lib/feesDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { replaceChildRows } from "./replaceChildRows.server";
+import { deleteNamedIds, type NamedDeletes } from "@/lib/deskNamedDeletes.server";
 
 export type { FeeDeskAncillary };
 
@@ -33,47 +34,22 @@ async function ctx() {
   return getServerTenantContext();
 }
 
-async function deleteStale(
-  sb: Awaited<ReturnType<typeof ctx>> extends infer C
-    ? C extends { sb: infer S }
-      ? S
-      : never
-    : never,
-  tenantId: string,
-  table: string,
-  keepIds: Set<string>,
-) {
-  // An empty keep-set means every stored row is "stale", which would delete
-  // the whole table. A client with nothing to say has lost its cache; it is
-  // not asking for the school's records to be erased. See the identical guard
-  // in the *Normalized.server.ts modules and docs/TODO.md.
-  if (keepIds.size === 0) {
-    console.warn(
-      `[${table}] refusing to prune: the payload holds no ids at all.`,
-    );
-    return;
-  }
-  const { data, error } = await sb
-    .from(table)
-    .select("id")
-    .eq("tenant_id", tenantId);
-  if (error) {
-    console.error(
-      `[${table}] prune skipped — could not read existing ids:`,
-      error.message,
-    );
-    return;
-  }
-  const stale = (data ?? [])
-    .map((r) => String((r as { id: string }).id))
-    .filter((id) => !keepIds.has(id));
-  if (stale.length > 0) {
-    await sb.from(table).delete().in("id", stale);
-  }
-}
+/** The only fee-ancillary table a desk save deletes from — by named id. */
+export const FEE_ANCILLARY_DELETABLE_TABLES = ["fee_desk_day_closes"] as const;
 
+/**
+ * No prune by absence. Each of these tables used to lose every row the
+ * payload lacked — and the payload is often the SERVER's cached copy (gateway
+ * settlement, the staff app's collect, refunds), which watches only vouchers
+ * for change. Cheques, plans, charge vouchers and carried-forward dues are
+ * only ever voided or have their status changed, so nothing is deleted for
+ * them. A day close replaced by a newer session for the same date and
+ * counter is named. A voided receipt's plan allocations are removed because
+ * the payload says the receipt is voided — scoped to those receipt ids.
+ */
 export async function pushFeeDeskAncillaryToDb(
   ancillary: FeeDeskAncillary,
+  opts: { deletes?: NamedDeletes; voidedVoucherIds?: readonly string[] } = {},
 ): Promise<{ ok: boolean; error?: string }> {
   if (!feesDualWriteDbEnabled()) return { ok: true };
   const c = await ctx();
@@ -82,7 +58,6 @@ export async function pushFeeDeskAncillaryToDb(
   const now = new Date().toISOString();
 
   const cheques = ancillary.cheques ?? [];
-  await deleteStale(sb, tenantId, "fee_desk_cheques", new Set(cheques.map((x) => x.id)));
   if (cheques.length) {
     const rows = cheques.map((ch: ChequeInstrument) => ({
       id: ch.id,
@@ -111,7 +86,6 @@ export async function pushFeeDeskAncillaryToDb(
   }
 
   const books = ancillary.manualBooks ?? [];
-  await deleteStale(sb, tenantId, "fee_desk_manual_books", new Set(books.map((x) => x.id)));
   if (books.length) {
     const rows = books.map((b: ManualBookSeries) => ({
       id: b.id,
@@ -125,8 +99,8 @@ export async function pushFeeDeskAncillaryToDb(
     if (error) return { ok: false, error: error.message };
   }
 
-  const closes = ancillary.dayCloses ?? [];
-  await deleteStale(sb, tenantId, "fee_desk_day_closes", new Set(closes.map((x) => x.id)));
+  const goneCloses = new Set(opts.deletes?.["fee_desk_day_closes"] ?? []);
+  const closes = (ancillary.dayCloses ?? []).filter((d) => !goneCloses.has(d.id));
   if (closes.length) {
     const rows = closes.map((d: DayCloseSession) => ({
       id: d.id,
@@ -157,13 +131,10 @@ export async function pushFeeDeskAncillaryToDb(
     if (error) return { ok: false, error: error.message };
   }
 
+  const delCloses = await deleteNamedIds(sb, tenantId, "fee_desk_day_closes", [...goneCloses]);
+  if (!delCloses.ok) return delCloses;
+
   const charges = ancillary.chargeVouchers ?? [];
-  await deleteStale(
-    sb,
-    tenantId,
-    "fee_desk_charge_vouchers",
-    new Set(charges.map((x) => x.id)),
-  );
   const chargeLineRows: Record<string, unknown>[] = [];
   for (const cv of charges) {
     for (const line of cv.lines ?? []) {
@@ -216,12 +187,6 @@ export async function pushFeeDeskAncillaryToDb(
   }
 
   const plans = ancillary.installmentPlans ?? [];
-  await deleteStale(
-    sb,
-    tenantId,
-    "fee_desk_installment_plans",
-    new Set(plans.map((x) => x.id)),
-  );
   if (plans.length) {
     const rows = plans.map((p: InstallmentPlan) => ({
       id: p.id,
@@ -239,13 +204,22 @@ export async function pushFeeDeskAncillaryToDb(
     if (error) return { ok: false, error: error.message };
   }
 
-  const allocs = ancillary.planAllocations ?? [];
-  await deleteStale(
-    sb,
-    tenantId,
-    "fee_desk_plan_allocations",
-    new Set(allocs.map((x) => x.id)),
-  );
+  // A voided receipt no longer pays anything towards a plan. The UI drops
+  // its allocations; the payload says which receipts are voided, so their
+  // allocations are removed here — and only theirs.
+  const voided = new Set(opts.voidedVoucherIds ?? []);
+  const allocs = (ancillary.planAllocations ?? []).filter((a) => !voided.has(a.voucherId));
+  if (voided.size) {
+    const ids = [...voided];
+    for (let i = 0; i < ids.length; i += 100) {
+      const { error } = await sb
+        .from("fee_desk_plan_allocations")
+        .delete()
+        .eq("tenant_id", tenantId)
+        .in("voucher_id", ids.slice(i, i + 100));
+      if (error) return { ok: false, error: `fee_desk_plan_allocations: ${error.message}` };
+    }
+  }
   if (allocs.length) {
     const rows = allocs.map((a: PlanAllocation) => ({
       id: a.id,
@@ -263,12 +237,6 @@ export async function pushFeeDeskAncillaryToDb(
   }
 
   const carried = ancillary.carriedForwardDues ?? [];
-  await deleteStale(
-    sb,
-    tenantId,
-    "fee_desk_carried_forward",
-    new Set(carried.map((x) => x.id)),
-  );
   if (carried.length) {
     const rows = carried.map((c: CarriedForwardDue) => ({
       id: c.id,

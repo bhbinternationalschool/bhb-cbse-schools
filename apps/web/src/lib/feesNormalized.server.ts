@@ -20,6 +20,7 @@ import {
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { feesDualWriteDbEnabled } from "@/lib/feesDbConfig";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
+import type { NamedDeletes } from "@/lib/deskNamedDeletes.server";
 
 export type FeeDeskSyncMeta = {
   voucherCount: number;
@@ -759,7 +760,7 @@ export type FeeDeskSnapshot = {
 /** Push full fee desk (vouchers + ancillary) and rebuild open dues cache. */
 export async function pushFeeDeskToDb(
   state: Pick<FeesState, "vouchers"> & FeeDeskAncillary,
-  opts?: { academicYearCode?: string; rebuildOpenDues?: boolean },
+  opts?: { academicYearCode?: string; rebuildOpenDues?: boolean; deletes?: NamedDeletes },
 ): Promise<{ ok: boolean; error?: string; voucherCount: number; openDuesCount?: number }> {
   const voucherResult = await pushFeeVouchersToDb(state.vouchers ?? []);
   if (!voucherResult.ok) {
@@ -778,6 +779,9 @@ export async function pushFeeDeskToDb(
     planAllocations: state.planAllocations ?? [],
     carriedForwardDues: state.carriedForwardDues ?? [],
     chargeVouchers: state.chargeVouchers ?? [],
+  }, {
+    deletes: opts?.deletes,
+    voidedVoucherIds: (state.vouchers ?? []).filter((v) => v.voidedAt).map((v) => v.id),
   });
   if (!ancillaryResult.ok) {
     return {

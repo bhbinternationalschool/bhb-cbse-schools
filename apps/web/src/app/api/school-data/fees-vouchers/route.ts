@@ -9,7 +9,11 @@ import { deskReadGate, visibleSlices } from "@/lib/deskFeatureGate.server";
 import { FEE_DESK_KEYS } from "@/lib/rbacFeatureCatalog/money";
 import { auditArrayDiff } from "@/lib/auditDeskDiff.server";
 import type { CollectionVoucher, FeesState } from "@/lib/fees";
-import type { FeeDeskAncillary } from "@/lib/feesDeskAncillary.server";
+import {
+  FEE_ANCILLARY_DELETABLE_TABLES,
+  type FeeDeskAncillary,
+} from "@/lib/feesDeskAncillary.server";
+import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
 import {
   fetchFeeDeskFromDb,
   feesDualWriteDbEnabled,
@@ -82,6 +86,7 @@ type DeskPostBody = Pick<FeesState, "vouchers"> &
   Partial<FeeDeskAncillary> & {
     rebuildOpenDues?: boolean;
     academicYearCode?: string;
+    deletes?: unknown;
   };
 
 /** POST — push fee desk snapshot (vouchers + ancillary) + rebuild open dues */
@@ -126,6 +131,8 @@ export async function POST(req: Request) {
   const result = await pushFeeDeskToDb(state, {
     academicYearCode: body.academicYearCode,
     rebuildOpenDues: body.rebuildOpenDues,
+    // Deletions are named by the desk, never inferred from what it lacks.
+    deletes: readNamedDeletes(body.deletes, FEE_ANCILLARY_DELETABLE_TABLES),
   });
   if (!result.ok) {
     return NextResponse.json(

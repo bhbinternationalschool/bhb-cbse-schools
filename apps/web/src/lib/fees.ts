@@ -89,6 +89,7 @@ import {
   type AccountsPostingAction,
 } from "@/lib/accountsPostingFailures";
 import { trackServerWork } from "@/lib/serverWork";
+import { recordFeeDayCloseDeletion } from "@/lib/feesNormalizedClient";
 
 export type DueKind =
   | "academic"
@@ -4941,6 +4942,17 @@ function upsertDayClose(session: DayCloseSession, fees: FeesState): FeesState {
         d.counterId === session.counterId
       ),
   );
+  // A session this replaces is deleted on the server by name — a save no
+  // longer deletes what it leaves out.
+  const replaced = fees.dayCloses
+    .filter(
+      (d) =>
+        d.closeDate === session.closeDate &&
+        d.counterId === session.counterId &&
+        d.id !== session.id,
+    )
+    .map((d) => d.id);
+  if (replaced.length && typeof window !== "undefined") recordFeeDayCloseDeletion(replaced);
   return {
     ...fees,
     dayCloses: [session, ...withoutSameDate],

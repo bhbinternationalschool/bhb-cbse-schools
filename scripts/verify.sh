@@ -85,6 +85,7 @@ SELFTESTS=(
   test:sis-prune
   test:attendance-prune
   test:prune-floor
+  test:desk-named-deletes
   test:sis-delete
   test:sis-guard-fallback
   test:audit-redaction
@@ -269,6 +270,7 @@ SELFTESTS=(
   test:udise-portal-reconcile
   test:lead-worklist
   test:student-import
+  test:fees-payments-no-prune
   test:student-import-mid-year
   test:cash-pool-orphans
   test:academic-risk

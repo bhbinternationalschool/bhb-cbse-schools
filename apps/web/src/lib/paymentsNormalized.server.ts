@@ -11,7 +11,7 @@ import type {
 } from "@/lib/payments";
 import { paymentsDualWriteDbEnabled } from "@/lib/paymentsDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
-import { fetchAllPages } from "@/lib/supabase/pageAll";
+import { fetchAllPages, fetchByIds } from "@/lib/supabase/pageAll";
 import { replaceChildRows } from "./replaceChildRows.server";
 
 export type PaymentGatewayProvider = "razorpay" | "cashfree" | "demo" | "manual";
@@ -47,62 +47,6 @@ async function resolveCtx(): Promise<{
   tenantId: string;
 } | null> {
   return getServerTenantContext();
-}
-
-/**
- * Delete rows the client no longer holds — never on an empty payload.
- *
- * An empty keep-set means every stored row is "stale", so this deleted the
- * entire table. That is never what a sync means: a client with nothing to say
- * is a client whose cache was dropped, not an instruction to erase the
- * school's records.
- *
- * It is not hypothetical. On 2026-08-11 the attendance register for the
- * previous day was gone — pushed away by a phone whose localStorage had been
- * dropped on quota, with the emptiness check running AFTER the delete. This
- * same function is copied into 20 modules and called from 86 places, almost
- * none of them guarded, covering bank and cash ledgers, payroll runs, fee
- * cheques, library issues and 1,919 admission records.
- *
- * This floor stops the catastrophic case everywhere at once. It does NOT make
- * a partial payload safe — a client holding 3 of 900 rows still prunes 897.
- * That needs per-module scoping, the way attendance now prunes only within
- * the dates its payload covers. See docs/TODO.md.
- *
- * The read error is also surfaced now. It was discarded, which happened to
- * fail safe here (no data → nothing deleted), but "we could not read the
- * table" and "the table is empty" must not be the same value in a function
- * that deletes.
- */
-async function deleteStale(
-  sb: SupabaseClient,
-  tenantId: string,
-  table: string,
-  keepIds: Set<string>,
-) {
-  if (keepIds.size === 0) {
-    console.warn(
-      `[${table}] refusing to prune: the payload holds no ids at all. ` +
-        "An empty client is not an instruction to delete every row.",
-    );
-    return;
-  }
-  const { data, error } = await sb
-    .from(table)
-    .select("id")
-    .eq("tenant_id", tenantId);
-  if (error) {
-    console.error(
-      `[${table}] prune skipped — could not read existing ids:`,
-      error.message,
-    );
-    return;
-  }
-  const stale = (data ?? [])
-    .map((r) => String((r as { id: string }).id))
-    .filter((id) => !keepIds.has(id));
-  const del = await deleteIdsInChunks(sb, table, tenantId, stale);
-  if (!del.ok) console.error(`[${table}] prune failed:`, del.error);
 }
 
 /**
@@ -235,7 +179,11 @@ export async function pushPaymentLinksToDb(
   const now = new Date().toISOString();
   const active = links ?? [];
 
-  await deleteStale(sb, tenantId, "payment_desk_links", new Set(active.map((l) => l.id)));
+  // No prune. Links are written by many hands that never pass through this
+  // browser — /pay/due, the WhatsApp bot, autopay, parent checkout, gateway
+  // webhooks — and by the server from its own cached copy. A link is never
+  // hard-deleted (cancel, expire and paid are statuses), so deleting the
+  // links a payload lacks only ever erased someone else's, paid ones included.
 
   if (!active.length) {
     await sb.from("payment_desk_sync_meta").upsert(
@@ -367,11 +315,20 @@ export async function fetchPaymentLinksFromDb(): Promise<{
     { data: lineRows, error: lErr },
     { data: metaRow, error: metaErr },
   ] = await Promise.all([
-    sb
-      .from("payment_desk_link_lines")
-      .select("*")
-      .eq("tenant_id", tenantId)
-      .in("payment_link_id", ids),
+    // Paged and chunked: a link's lines that fall past the 1,000-row cap
+    // reach the browser missing, and its next save would delete them.
+    fetchByIds<Record<string, unknown>>(
+      ids,
+      (chunk, from, to) =>
+        sb
+          .from("payment_desk_link_lines")
+          .select("*")
+          .eq("tenant_id", tenantId)
+          .in("payment_link_id", chunk)
+          .order("id", { ascending: true })
+          .range(from, to),
+      { chunkSize: 50 },
+    ).then((r) => ({ data: r.rows, error: r.error ? { message: r.error } : null })),
     sb
       .from("payment_desk_sync_meta")
       .select(META_SELECT)
