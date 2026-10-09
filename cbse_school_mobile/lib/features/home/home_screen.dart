@@ -1,4 +1,5 @@
 import "package:flutter/material.dart";
+import "../../core/guide/screen_guides.dart";
 import "package:flutter_svg/flutter_svg.dart";
 import "package:url_launcher/url_launcher.dart";
 
@@ -642,6 +643,7 @@ class _Header extends StatelessWidget {
                         ),
                       ),
                     ),
+                    const ScreenGuideButton(guideId: "parent-home", screenLabel: "Home"),
                     _RoundAction(
                       icon: Icons.notifications_none_rounded,
                       tooltip: context.l10n.notices,

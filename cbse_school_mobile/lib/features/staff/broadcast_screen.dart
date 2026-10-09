@@ -1,5 +1,6 @@
 import "package:flutter/material.dart";
 
+import "../../core/guide/screen_guides.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/i18n/locale_controller.dart";
@@ -230,7 +231,8 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
     final templates = _templates;
     final t = _template;
     return Scaffold(
-      appBar: AppBar(title: Text(context.l10n.broadcastMessage)),
+      appBar: AppBar(
+        actions: [ScreenGuideButton(guideId: "broadcast", screenLabel: "broadcast")],title: Text(context.l10n.broadcastMessage)),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [

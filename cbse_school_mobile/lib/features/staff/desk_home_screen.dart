@@ -1,5 +1,6 @@
 import "package:flutter/material.dart";
 
+import "../../core/guide/screen_guides.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../modules/chat_inbox_screen.dart";
@@ -350,6 +351,7 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
                       ],
                     ),
                   ),
+                  const ScreenGuideButton(guideId: "desk-home", screenLabel: "Home"),
                   IconButton(
                     tooltip: context.l10n.signOut,
                     onPressed: _signOut,

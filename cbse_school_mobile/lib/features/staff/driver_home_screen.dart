@@ -1,4 +1,5 @@
 import "package:flutter/material.dart";
+import "../../core/guide/screen_guides.dart";
 import "package:url_launcher/url_launcher.dart";
 
 import "../../core/api/api_client.dart";
@@ -183,6 +184,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                       ],
                     ),
                   ),
+                  const ScreenGuideButton(guideId: "driver-home", screenLabel: "Home"),
                   IconButton(
                     tooltip: context.l10n.signOutCrew,
                     onPressed: _signOut,

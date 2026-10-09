@@ -28,6 +28,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<List<DocReviewItem>>(
+      guideId: "documents-review",
       key: ValueKey(_filter),
       title: "Documents",
       subtitle: _filter == "pending" ? "Waiting for verification" : "Reviewed",

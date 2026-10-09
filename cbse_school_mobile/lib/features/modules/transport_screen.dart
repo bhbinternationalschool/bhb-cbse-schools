@@ -21,6 +21,7 @@ class TransportScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<MyTransport>(
+      guideId: "transport",
       title: context.l10n.transport,
       load: api.fetchMyTransport,
       builder: (context, mine, reload) => ListView(

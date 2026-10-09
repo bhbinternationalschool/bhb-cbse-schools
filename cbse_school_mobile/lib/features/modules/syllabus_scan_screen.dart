@@ -1,5 +1,6 @@
 import "dart:convert";
 
+import "../../core/guide/screen_guides.dart";
 import "package:flutter/material.dart";
 import "package:image_picker/image_picker.dart";
 
@@ -140,6 +141,7 @@ class _SyllabusScanScreenState extends State<SyllabusScanScreen> {
     final scan = _scan;
     return Scaffold(
       appBar: AppBar(
+        actions: [ScreenGuideButton(guideId: "syllabus-scan", screenLabel: "syllabus-scan")],
         title: Text(context.l10n.scanSyllabus, style: AppText.titleMedium),
       ),
       body: ListView(

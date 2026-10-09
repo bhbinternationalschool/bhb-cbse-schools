@@ -1,5 +1,6 @@
 import "dart:async";
 
+import "../../core/guide/screen_guides.dart";
 import "package:flutter/material.dart";
 
 import "../../core/api/api_client.dart";
@@ -99,7 +100,8 @@ class _OnlineClassQaTeacherScreenState extends State<OnlineClassQaTeacherScreen>
   Widget build(BuildContext context) {
     final w = _wall;
     return Scaffold(
-      appBar: AppBar(title: Text("Q&A · ${widget.c.sectionLabel}")),
+      appBar: AppBar(
+        actions: [ScreenGuideButton(guideId: "online-class-qa-teacher", screenLabel: "online-class-qa-teacher")],title: Text("Q&A · ${widget.c.sectionLabel}")),
       body: Column(
         children: [
           if (_canAsk)
