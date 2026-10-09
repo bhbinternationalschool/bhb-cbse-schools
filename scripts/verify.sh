@@ -224,6 +224,7 @@ SELFTESTS=(
   test:payment-link-reuse
   test:student-leave-status-guard
   test:ptm-row-stamps
+  test:attendance-row-stamps
   test:admissions-row-stamps
   test:payment-link-status-guard
   test:attendance-today

@@ -100,6 +100,7 @@ export function AppShell({
       ptm: "PTM",
       admissions: "admissions",
       rbac: "roles & permissions",
+      attendance: "attendance registers",
       module_registry: "module settings",
       wa_templates: "WhatsApp templates",
       automation: "automation rules",

@@ -10,6 +10,7 @@ import {
   type AttendanceState,
 } from "@/lib/attendance";
 import {
+  captureAttendanceStamps,
   hydrateAttendanceDeskFromDb,
   scheduleAttendanceDeskSync,
 } from "@/lib/attendanceNormalizedClient";
@@ -87,7 +88,7 @@ export async function ensureAttendanceHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { registers, ancillary, changed, ok } =
+  const { registers, ancillary, changed, ok, stamps } =
     await hydrateAttendanceDeskFromDb(readFromDb);
   if (!ok) return false;
 
@@ -105,6 +106,9 @@ export async function ensureAttendanceHydrated(): Promise<boolean> {
     writeAttendanceLocalRaw(merged);
     normChanged = true;
   }
+  // Which version of each register this browser now holds: its saves send
+  // only registers changed since, stamped, so they can't overwrite newer ones.
+  captureAttendanceStamps(stamps, loadAttendance());
 
   // Hydration is pull-only under desk-as-truth — see feesPersistence.ts for
   // the measured cost of pushing here (audit 2026-08-18). Legacy blob mode
