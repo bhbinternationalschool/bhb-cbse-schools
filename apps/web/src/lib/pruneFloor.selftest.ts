@@ -2,7 +2,8 @@
  * No sync may delete a whole table because a client turned up empty.
  *
  * `deleteStale` was copy-pasted into 20 modules and called from 91 places.
- * It is 19 now: the store desk's copy went with the Store/Purchase rebuild on
+ * It is 18 now: homework's copy went on 9 Oct 2026 (PR #468 — saves name their
+ * deletions instead). Before that, 19: the store desk's copy went with the Store/Purchase rebuild on
  * 2026-08-23, whose replacement module has no client-push sync and therefore
  * nothing to prune. The floor below still applies to every remaining copy.
  * An audit on 2026-08-11 found 86 of those calls unguarded: they passed the
@@ -48,8 +49,8 @@ const files = fs
   // prune-by-absence, from Oct 2026), so the count may only fall. A new copy
   // is a new way to erase other people's records — don't add one.
   assert.ok(
-    files.length <= 19,
-    `found ${files.length} deleteStale modules, more than the 19 known — ` +
+    files.length <= 18,
+    `found ${files.length} deleteStale modules, more than the 18 known — ` +
       "a desk save must delete named ids (deskNamedDeletes), not absent ones",
   );
 
