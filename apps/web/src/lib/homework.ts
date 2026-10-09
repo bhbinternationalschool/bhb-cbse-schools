@@ -19,6 +19,7 @@ import {
 } from "@/lib/reportExport";
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
+import { recordHomeworkDiaryDeletion } from "@/lib/homeworkNormalizedClient";
 
 const STORAGE_KEY = "bhb_homework_v1";
 
@@ -577,6 +578,7 @@ export function deleteDiaryEntry(
   if (!state.diary.some((d) => d.id === entryId)) {
     return { ok: false, error: "Diary entry not found" };
   }
+  recordHomeworkDiaryDeletion(entryId);
   saveHomework({
     ...state,
     diary: state.diary.filter((d) => d.id !== entryId),

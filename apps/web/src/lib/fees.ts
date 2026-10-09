@@ -3326,8 +3326,15 @@ function runAccountsPosting(
     m: typeof import("@/lib/accountsPostings"),
   ) => { ok: true } | { ok: false; error: string },
 ): void {
-  void trackServerWork(import("@/lib/accountsPostings")
-    .then((m) => {
+  // Postings need the school's own cash pools and chart. Pull the accounts
+  // desk before the posting seeds anything, or a fresh browser would post
+  // against (and push) a seeded desk of its own.
+  void trackServerWork(Promise.all([
+    import("@/lib/accountsPersistence"),
+    import("@/lib/accountsPostings"),
+  ])
+    .then(async ([p, m]) => {
+      await p.ensureAccountsSeeded();
       const res = post(m);
       if (!res.ok) {
         recordAccountsPostingFailure({ ...spec, reason: res.error });

@@ -167,6 +167,8 @@ export async function retryAccountsPostingFailures(): Promise<{
   if (open.length === 0) return { attempted: 0, resolved: 0, stillFailing: 0 };
 
   const postings = await import("@/lib/accountsPostings");
+  const { ensureAccountsSeeded } = await import("@/lib/accountsPersistence");
+  await ensureAccountsSeeded();
   let resolved = 0;
 
   for (const row of open) {

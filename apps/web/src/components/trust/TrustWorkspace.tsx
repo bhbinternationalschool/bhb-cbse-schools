@@ -111,6 +111,11 @@ export function TrustWorkspace() {
       ]);
       await withHydrationSlot(() => ensureTrustHydrated());
       refresh();
+      // Paying a cost line posts to accounts and needs the school's cash
+      // pools; pull that desk here so the panels read the real ones.
+      const { ensureAccountsSeeded } = await import("@/lib/accountsPersistence");
+      await withHydrationSlot(() => ensureAccountsSeeded());
+      refresh();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

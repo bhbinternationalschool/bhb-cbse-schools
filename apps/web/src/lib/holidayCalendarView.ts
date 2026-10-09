@@ -33,6 +33,23 @@ export function isWeeklyRule(h: Holiday): boolean {
   return (h.mode || "one_off") === "weekly";
 }
 
+/**
+ * When a weekly rule applies: "Whole session", or its stretch and how many
+ * of those weekdays it takes — "3 Aug – 24 Aug 2026 · 4 days".
+ */
+export function weeklyRuleWhen(h: Holiday, wholeSession: boolean): string {
+  if (wholeSession) return "Whole session";
+  const from = iso(h.startsOn);
+  const to = iso(h.endsOn || h.startsOn);
+  if (!from || !to || to < from || typeof h.weekday !== "number") return "—";
+  const skip = new Set((h.exceptionDates ?? []).map(iso));
+  let n = 0;
+  for (let d = dt(from); d <= dt(to); d.setUTCDate(d.getUTCDate() + 1)) {
+    if (d.getUTCDay() === h.weekday && !skip.has(d.toISOString().slice(0, 10))) n += 1;
+  }
+  return `${holidayDateLabel(h)} · ${n} day${n === 1 ? "" : "s"}`;
+}
+
 /** The dates a one-off holiday covers, less its exception dates. */
 export function holidayDates(h: Holiday): string[] {
   const from = iso(h.startsOn);
