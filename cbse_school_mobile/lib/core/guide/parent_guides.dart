@@ -615,4 +615,33 @@ const List<ScreenGuide> parentScreenGuides = [
       "अगर \"कुछ भी अपलोड नहीं हुआ।\" दिखे, तो इंटरनेट देखकर फिर से अपलोड करें।",
     ],
   ),
+  ScreenGuide(
+    id: "pickup-pin",
+    titleEn: "Set where your child boards the bus",
+    titleHi: "बच्चा बस में कहाँ चढ़ता है, वह जगह लगाएँ",
+    stepsEn: [
+      "Stand at the spot where your child boards and tap **Use my current location**, or tap that spot on the map.",
+      "Blue dots are the bus's stops and the school icon is the school — use them to find your place.",
+      "Move the red pin by tapping again until it sits exactly where your child waits.",
+      "Tap **Save pickup point** and check the children named, then **Save**.",
+      "Changed home? Open this screen again and save a new point.",
+    ],
+    stepsHi: [
+      "जहाँ बच्चा बस में चढ़ता है वहाँ खड़े होकर **मेरी अभी की लोकेशन लगाएँ** दबाएँ, या मैप पर उस जगह टैप करें।",
+      "नीले बिंदु बस के स्टॉप हैं और स्कूल का निशान स्कूल है — इनसे अपनी जगह ढूँढें।",
+      "लाल पिन ठीक उस जगह आने तक दोबारा टैप करें जहाँ बच्चा इंतज़ार करता है।",
+      "**पिकअप पॉइंट सेव करें** दबाएँ, बच्चों के नाम देखें, फिर **सेव करें**।",
+      "घर बदल गया? यह स्क्रीन फिर खोलें और नई जगह सेव करें।",
+    ],
+    tipsEn: [
+      "If it says the point is too far from school, you are probably away from home — set it from home or tap the right spot on the map.",
+      "If location permission was not given, you can still tap the map to place the pin.",
+      "Saving a point does not change the bus stop by itself — the transport office decides the stop.",
+    ],
+    tipsHi: [
+      "अगर लिखा आए कि जगह स्कूल से बहुत दूर है, तो शायद आप घर से बाहर हैं — घर से लगाएँ या मैप पर सही जगह टैप करें।",
+      "लोकेशन की अनुमति नहीं दी, तब भी मैप पर टैप करके पिन लगा सकते हैं।",
+      "जगह सेव करने से बस स्टॉप अपने-आप नहीं बदलता — स्टॉप ट्रांसपोर्ट ऑफ़िस तय करता है।",
+    ],
+  ),
 ];

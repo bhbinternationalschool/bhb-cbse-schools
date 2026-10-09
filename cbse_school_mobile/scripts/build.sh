@@ -144,7 +144,8 @@ if [ "$FLAVOR" = parent ]; then
   # RECORD_AUDIO is deliberately NOT in this list: the AI tutor's voice input
   # needs the microphone (runtime prompt only, no declaration form), and
   # recognition runs through the phone's own speech service.
-  BAD=$(echo "$PERMS" | grep -E 'LOCATION|CAMERA|FOREGROUND_SERVICE|READ_MEDIA|READ_EXTERNAL_STORAGE|RECEIVE_BOOT_COMPLETED' || true)
+  # Foreground location is allowed (the pickup-point pin); background is not.
+  BAD=$(echo "$PERMS" | grep -E 'BACKGROUND_LOCATION|FOREGROUND_SERVICE|CAMERA|READ_MEDIA|READ_EXTERNAL_STORAGE|RECEIVE_BOOT_COMPLETED' || true)
   if [ -n "$BAD" ]; then
     echo "FAIL: the parent app must not carry these — a plugin's manifest is" >&2
     echo "merging them in; add tools:node=\"remove\" lines to" >&2
