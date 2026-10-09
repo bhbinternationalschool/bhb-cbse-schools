@@ -11,7 +11,8 @@ import {
 } from "@/lib/deskSliceRegistry";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { judgeDeskShrink } from "@/lib/deskSliceShrinkGuard";
-import { mergeSliceById } from "@/lib/sliceMergeById";
+import { mergeWithRevs } from "@/lib/sliceRevMerge";
+import { casWriteSlice } from "@/lib/sliceCas.server";
 
 export type DeskSliceSyncMeta = {
   sliceCount: number;
@@ -75,23 +76,14 @@ function resolveDef(id: DeskModuleId): DeskSliceModuleDef | null {
   return deskSliceDef(id) ?? null;
 }
 
-/**
- * mergeSliceById for lists whose rows are keyed by another field (staff HR
- * leave types by `code`): pushed rows win for their keys, stored rows the
- * push lacks are kept.
- */
-function mergeSliceByKey(stored: unknown, incoming: unknown[], field: string): unknown[] {
-  const keyOf = (r: unknown) =>
-    r && typeof r === "object" && typeof (r as Record<string, unknown>)[field] === "string"
-      ? String((r as Record<string, unknown>)[field])
-      : "";
-  const pushed = new Set(incoming.map(keyOf).filter(Boolean));
-  const kept = (Array.isArray(stored) ? stored : []).filter((r) => {
-    const k = keyOf(r);
-    return k !== "" && !pushed.has(k);
-  });
-  return [...incoming, ...kept];
-}
+export type DeskSlicePushResult = {
+  ok: boolean;
+  error?: string;
+  /** slice → key → the new `_rev` of each row this save wrote. */
+  revs?: Record<string, Record<string, number>>;
+  /** slice → keys changed from a version that is no longer current (not written). */
+  conflicts?: Record<string, string[]>;
+};
 
 export async function pushDeskSliceToDb(
   id: DeskModuleId,
@@ -109,8 +101,15 @@ export async function pushDeskSliceToDb(
      * follow-up) name it here. Applied to merge slices only.
      */
     deletes?: Record<string, readonly string[]>;
+    /**
+     * slice → key → the `_rev` the save changed that row from (0 = new).
+     * Sent by a browser that tracks versions: only those rows are written,
+     * and only if still at that `_rev` (sliceRevMerge). Without it the save's
+     * rows win as before, with `_rev` bumped on every real change.
+     */
+    revs?: Record<string, Record<string, number>>;
   },
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<DeskSlicePushResult> {
   const def = resolveDef(id);
   if (!def) return { ok: false, error: "Unknown desk slice module" };
   if (!deskSliceEnvDualWrite(def.envPrefix)) return { ok: true };
@@ -165,54 +164,51 @@ export async function pushDeskSliceToDb(
   }
 
   // No slice is deleted by absence. A slice this push does not carry is left
-  // as stored — it used to be deleted, along with every slice sent empty.
-  // A slice it DOES carry is written as sent, an empty list included:
-  // deleting the last row is a real edit. Merge slices (see the registry)
-  // keep every stored row the push lacks.
+  // as stored. A slice it DOES carry is written as sent, an empty list
+  // included: deleting the last row is a real edit. Merge slices keep every
+  // stored row the push lacks, apply per-row versions (sliceRevMerge), keep
+  // their newest-N caps, and drop only the rows a save names (deletes).
   const merge = new Set(def.mergeSlices ?? []);
-  const rows = stateToSlices(def, rest)
-    .filter(({ key, payload }) => {
-      if (def.objectSlices.includes(key)) return payload !== undefined && payload !== null && payload !== "";
-      return Array.isArray(payload);
-    })
-    .map(({ key, payload }) => {
-      let value: unknown = payload;
-      if (merge.has(key) && Array.isArray(payload)) {
-        const mergeKey = def.mergeKeys?.[key];
-        value = mergeKey
-          ? mergeSliceByKey(stored.get(key), payload, mergeKey)
-          : mergeSliceById(stored.get(key), payload);
-        const cap = def.mergeCaps?.[key];
-        if (cap) {
-          value = (value as Record<string, unknown>[])
-            .slice()
-            .sort((x, y) => String(y[cap.newestBy] ?? "").localeCompare(String(x[cap.newestBy] ?? "")))
-            .slice(0, cap.max);
-        }
-      }
-      return { tenant_id: tenantId, slice_key: key, payload: value, updated_at: now };
-    });
+  const carried = stateToSlices(def, rest).filter(({ key, payload }) => {
+    if (def.objectSlices.includes(key)) return payload !== undefined && payload !== null && payload !== "";
+    return Array.isArray(payload);
+  });
+  const deleteOnly = Object.keys(opts?.deletes ?? {}).filter(
+    (k) => merge.has(k) && (opts?.deletes?.[k]?.length ?? 0) > 0 && !carried.some((c) => c.key === k),
+  );
 
-  // Named deletes: removed from the merged list — or, for a merge slice
-  // this save did not carry, from the stored list, which is then written.
-  for (const [key, ids] of Object.entries(opts?.deletes ?? {})) {
-    if (!merge.has(key) || !ids.length) continue;
-    const gone = new Set(ids);
+  /** What one slice becomes, given what is stored for it now. Pure. */
+  const sliceValue = (key: string, storedNow: unknown, incoming: unknown) => {
+    if (def.objectSlices.includes(key) || !merge.has(key)) {
+      return { value: incoming, revs: {} as Record<string, number>, conflicts: [] as string[] };
+    }
     const field = def.mergeKeys?.[key] ?? "id";
-    const drop = (list: unknown) =>
-      (Array.isArray(list) ? list : []).filter(
+    const merged = Array.isArray(incoming)
+      ? mergeWithRevs(storedNow, incoming, { key: field, base: opts?.revs?.[key], union: def.mergeUnion?.[key] })
+      : { rows: Array.isArray(storedNow) ? storedNow : [], revs: {}, conflicts: [] };
+    let value: unknown[] = merged.rows;
+    const cap = def.mergeCaps?.[key];
+    if (cap) {
+      value = (value as Record<string, unknown>[])
+        .slice()
+        .sort((x, y) => String(y[cap.newestBy] ?? "").localeCompare(String(x[cap.newestBy] ?? "")))
+        .slice(0, cap.max);
+    }
+    const gone = new Set(opts?.deletes?.[key] ?? []);
+    if (gone.size) {
+      value = value.filter(
         (r) => !(r && typeof r === "object" && gone.has(String((r as Record<string, unknown>)[field]))),
       );
-    const row = rows.find((r) => r.slice_key === key);
-    if (row) row.payload = drop(row.payload);
-    else if (stored.has(key)) rows.push({ tenant_id: tenantId, slice_key: key, payload: drop(stored.get(key)), updated_at: now });
-  }
+    }
+    return { value, revs: merged.revs, conflicts: merged.conflicts };
+  };
 
-  // What the desk holds after this push: written slices as written, the
-  // rest as stored.
+  // What the desk holds after this push (from the copy read above): the
+  // shrink guard judges that, before anything is written.
   const after: Record<string, unknown> = {};
   for (const [k, v] of stored) after[k] = v;
-  for (const r of rows) after[r.slice_key] = r.payload;
+  for (const { key, payload } of carried) after[key] = sliceValue(key, stored.get(key), payload).value;
+  for (const key of deleteOnly) after[key] = sliceValue(key, stored.get(key), undefined).value;
   const incomingRows = countPayloadRows(def, after);
 
   // The guard above catches a client that holds nothing at all. It does not
@@ -237,23 +233,40 @@ export async function pushDeskSliceToDb(
     return { ok: false, error: shrink.reason };
   }
 
-  if (rows.length > 0) {
-    const { error } = await sb.from(slicesTable).upsert(rows);
-    if (error) return { ok: false, error: error.message };
+  // Each slice is written only if nobody wrote it since it was read
+  // (casWriteSlice); otherwise it is re-read and the merge re-applied, so two
+  // saves at once can't drop each other's rows.
+  const revs: Record<string, Record<string, number>> = {};
+  const conflicts: Record<string, string[]> = {};
+  for (const key of [...carried.map((c) => c.key), ...deleteOnly]) {
+    const incoming = rest[key];
+    let last = { revs: {} as Record<string, number>, conflicts: [] as string[] };
+    const written = await casWriteSlice(sb, slicesTable, tenantId, key, (storedNow) => {
+      const r = sliceValue(key, storedNow, deleteOnly.includes(key) ? undefined : incoming);
+      last = { revs: r.revs, conflicts: r.conflicts };
+      return r.value;
+    });
+    if (!written.ok) return { ok: false, error: written.error, revs, conflicts };
+    after[key] = written.payload;
+    if (Object.keys(last.revs).length) revs[key] = last.revs;
+    if (last.conflicts.length) conflicts[key] = last.conflicts;
+  }
+  if (Object.keys(conflicts).length) {
+    console.warn(`[desk-slice] ${id}: rows changed elsewhere first, not overwritten:`, JSON.stringify(conflicts));
   }
 
   await sb.from(`${def.deskPrefix}_desk_sync_meta`).upsert(
     {
       tenant_id: tenantId,
       slice_count: Object.keys(after).length,
-      row_count: incomingRows,
+      row_count: countPayloadRows(def, after),
       last_updated_at: now,
       updated_at: now,
     },
     { onConflict: "tenant_id" },
   );
 
-  return { ok: true };
+  return { ok: true, revs, conflicts };
 }
 
 export async function fetchDeskSliceFromDb(id: DeskModuleId): Promise<{

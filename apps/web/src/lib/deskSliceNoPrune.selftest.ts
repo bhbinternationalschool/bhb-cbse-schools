@@ -24,10 +24,10 @@ assert.ok(push.length > 500, "found the push");
 
 assert.equal(/\.delete\(\)/.test(push), false, "no slice row is deleted by a save");
 assert.ok(/return Array\.isArray\(payload\);/.test(push), "a carried list is written, empty included");
-assert.ok(/mergeSliceById\(stored\.get\(key\), payload\)/.test(push) && /mergeSliceByKey\(stored\.get\(key\), payload, mergeKey\)/.test(push), "merge slices keep stored rows");
-assert.ok(push.indexOf("if (existingErr)") < push.indexOf(".from(slicesTable).upsert("), "nothing is written when the desk cannot be read");
+assert.ok(/mergeWithRevs\(storedNow, incoming, \{ key: field, base: opts\?\.revs\?\.\[key\], union: def\.mergeUnion\?\.\[key\] \}\)/.test(push), "merge slices keep stored rows (with per-row versions)");
+assert.ok(push.indexOf("if (existingErr)") < push.indexOf("casWriteSlice("), "nothing is written when the desk cannot be read");
 assert.ok(/countPayloadRows\(def, after\)/.test(push), "the shrink guard judges what the desk holds afterwards");
-assert.ok(push.indexOf("judgeDeskShrink(") < push.indexOf(".from(slicesTable).upsert("), "the shrink guard runs before the write");
+assert.ok(push.indexOf("judgeDeskShrink(") < push.indexOf("casWriteSlice("), "the shrink guard runs before the write");
 
 // The lists written outside this browser merge; the ones the server or the
 // UI deletes from stay replaced until they carry named deletes.
@@ -56,7 +56,7 @@ for (const id of ["automation", "erp_chat", "staff_chat", "wa_templates", "staff
 // A merge slice keeps what a save lacks, so a server path that removes a row
 // must name it — or the row comes back.
 assert.ok(/deletes\?: Record<string, readonly string\[\]>/.test(push), "the push takes named deletes");
-assert.ok(/if \(!merge\.has\(key\) \|\| !ids\.length\) continue;/.test(push), "named deletes apply to merge slices");
+assert.ok(/if \(def\.objectSlices\.includes\(key\) \|\| !merge\.has\(key\)\) \{/.test(push) && /const gone = new Set\(opts\?\.deletes\?\.\[key\] \?\? \[\]\);/.test(push), "named deletes apply to merge slices");
 {
   const withdraw = readFileSync(join(__dirname, "../app/api/v1/staff/leave/withdraw/route.ts"), "utf8");
   assert.ok(/saveStaffHrServer\(next, \{ deletes: \{ leaveRequests: \[id\] \} \}\)/.test(withdraw), "a withdrawn leave request is named");

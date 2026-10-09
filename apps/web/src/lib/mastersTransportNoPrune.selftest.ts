@@ -49,9 +49,9 @@ const pushOf = (src: string, fn: string, next: string) =>
   // The per-slice merge lives in mergeTransportSlice (pure, so the
   // conditional write can re-apply it to a fresher copy — test:slice-cas).
   const merge = pushOf(src.replace("function mergeTransportSlice", "export async function mergeTransportSlice"), "mergeTransportSlice", "pushTransportDeskToDb");
-  assert.ok(/mergeSliceById\(stored, incoming as unknown\[\]\)/.test(merge), "lists are merged by id, not replaced");
+  assert.ok(/mergeWithRevs\(stored, incoming as unknown\[\], \{ base \}\)/.test(merge), "lists are merged by id (with per-row versions), not replaced");
   assert.ok(/key === "gpsPings"[\s\S]*?\.slice\(0, 500\)/.test(merge), "GPS pings stay a 500-ping rolling buffer");
-  assert.ok(/mergeTransportSlice\(key, storedNow, payload\)/.test(push), "the save writes through that merge");
+  assert.ok(/mergeTransportSlice\(key, storedNow, payload, opts\.revs\?\.\[key\]\)/.test(push), "the save writes through that merge");
   assert.ok(push.indexOf("if (readErr)") < push.indexOf("casWriteSlice("), "nothing is written when the stored desk cannot be read");
 }
 

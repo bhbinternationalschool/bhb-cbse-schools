@@ -27,6 +27,8 @@ export type DeskSliceModuleDef = {
   mergeSlices?: string[];
   /** Newest-N cap kept after a merge, for logs the client also trims. */
   mergeCaps?: Record<string, { max: number; newestBy: string }>;
+  /** Fields combined, not replaced, when a row is saved from an older version (chat read receipts). */
+  mergeUnion?: Record<string, string[]>;
   /** Merge slices whose rows are keyed by a field other than `id`. */
   mergeKeys?: Record<string, string>;
   /**
@@ -204,6 +206,7 @@ export const DESK_SLICE_MODULE_DEFS: DeskSliceModuleDef[] = [
     // Every staff browser saves the chat; a thread or message is never
     // deleted, so one device's save must not drop another's messages.
     mergeSlices: ["threads", "messages"],
+    mergeUnion: { messages: ["readBy"] },
   },
   {
     id: "staff_chat",
@@ -215,6 +218,7 @@ export const DESK_SLICE_MODULE_DEFS: DeskSliceModuleDef[] = [
     objectSlices: [],
     signalSlice: "threads",
     mergeSlices: ["threads", "messages"],
+    mergeUnion: { messages: ["readBy"] },
   },
 ];
 

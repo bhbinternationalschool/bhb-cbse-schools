@@ -7,7 +7,7 @@ import type { TransportState } from "@/lib/transport";
 import { defaultFeePolicy } from "@/lib/transport";
 import { transportDualWriteDbEnabled } from "@/lib/transportDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
-import { mergeSliceById } from "@/lib/sliceMergeById";
+import { mergeWithRevs, rowRev } from "@/lib/sliceRevMerge";
 import { casWriteSlice } from "@/lib/sliceCas.server";
 
 export type TransportSliceKey = keyof Omit<TransportState, "version">;
@@ -157,12 +157,15 @@ export async function appendBoardingEventToDb(event: {
   const written = await casWriteSlice(sb, "transport_desk_slices", tenantId, "boardingEvents", (stored) => {
     const existing = Array.isArray(stored) ? (stored as Record<string, unknown>[]) : [];
     const prior = existing.find(sameSlot);
+    // A changed or new event gets a new server version, so an office tab
+    // holding the older copy can't write it back (sliceRevMerge).
     return prior
       ? existing.map((e) =>
           sameSlot(e)
             ? {
                 ...e,
                 ...event,
+                _rev: rowRev(e) + 1,
                 id: (e.id as string) ?? event.id,
                 // A later offboard must not erase the earlier boarding pin.
                 boardedLocation: event.boardedLocation ?? e.boardedLocation ?? null,
@@ -171,7 +174,7 @@ export async function appendBoardingEventToDb(event: {
               }
             : e,
         )
-      : [event, ...existing];
+      : [{ ...event, _rev: 1 }, ...existing];
   });
   if (!written.ok) return { ok: false, error: written.error };
   return { ok: true };
@@ -183,21 +186,40 @@ export async function appendBoardingEventToDb(event: {
  * row); GPS pings kept as the newest 500, as on the device. Pure, so a
  * conditional write can re-apply it to a fresher copy.
  */
-function mergeTransportSlice(key: string, stored: unknown, incoming: unknown): unknown {
-  if (key === "feePolicy") return incoming;
-  let value: unknown = mergeSliceById(stored, incoming as unknown[]);
+function mergeTransportSlice(
+  key: string,
+  stored: unknown,
+  incoming: unknown,
+  base?: Record<string, number>,
+): { value: unknown; revs: Record<string, number>; conflicts: string[] } {
+  if (key === "feePolicy") return { value: incoming, revs: {}, conflicts: [] };
+  // Per-row server versions (sliceRevMerge): a browser's changed row lands
+  // only if the stored row is still at the version it changed it from.
+  const merged = mergeWithRevs(stored, incoming as unknown[], { base });
+  let value: unknown = merged.rows;
   if (key === "gpsPings") {
     value = (value as { recordedAt?: string }[])
       .slice()
       .sort((x, y) => String(y.recordedAt ?? "").localeCompare(String(x.recordedAt ?? "")))
       .slice(0, 500);
   }
-  return value;
+  return { value, revs: merged.revs, conflicts: merged.conflicts };
 }
+
+export type TransportPushResult = {
+  ok: boolean;
+  error?: string;
+  /** slice → id → the new `_rev` of each row this save wrote. */
+  revs?: Record<string, Record<string, number>>;
+  /** slice → ids changed from a version that is no longer current (not written). */
+  conflicts?: Record<string, string[]>;
+};
 
 export async function pushTransportDeskToDb(
   state: TransportState,
-): Promise<{ ok: boolean; error?: string }> {
+  /** slice → id → the `_rev` each changed row was changed from. */
+  opts: { revs?: Record<string, Record<string, number>> } = {},
+): Promise<TransportPushResult> {
   if (!transportDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
@@ -237,12 +259,19 @@ export async function pushTransportDeskToDb(
   });
   if (carried.length === 0) return { ok: true };
   const rows: { slice_key: string; payload: unknown }[] = [];
+  const revs: Record<string, Record<string, number>> = {};
+  const conflicts: Record<string, string[]> = {};
   for (const { key, payload } of carried) {
-    const written = await casWriteSlice(sb, "transport_desk_slices", tenantId, key, (storedNow) =>
-      mergeTransportSlice(key, storedNow, payload),
-    );
-    if (!written.ok) return { ok: false, error: written.error };
+    let last = { revs: {} as Record<string, number>, conflicts: [] as string[] };
+    const written = await casWriteSlice(sb, "transport_desk_slices", tenantId, key, (storedNow) => {
+      const r = mergeTransportSlice(key, storedNow, payload, opts.revs?.[key]);
+      last = { revs: r.revs, conflicts: r.conflicts };
+      return r.value;
+    });
+    if (!written.ok) return { ok: false, error: written.error, revs, conflicts };
     rows.push({ slice_key: key, payload: written.payload });
+    if (Object.keys(last.revs).length) revs[key] = last.revs;
+    if (last.conflicts.length) conflicts[key] = last.conflicts;
   }
 
   const count = (key: TransportSliceKey): number => {
@@ -264,7 +293,7 @@ export async function pushTransportDeskToDb(
     { onConflict: "tenant_id" },
   );
 
-  return { ok: true };
+  return { ok: true, revs, conflicts };
 }
 
 export async function fetchTransportDeskFromDb(): Promise<{
