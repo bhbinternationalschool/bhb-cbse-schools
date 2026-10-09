@@ -101,6 +101,7 @@ export function AppShell({
       admissions: "admissions",
       rbac: "roles & permissions",
       attendance: "attendance registers",
+      staff_attendance: "the staff register",
       module_registry: "module settings",
       wa_templates: "WhatsApp templates",
       automation: "automation rules",
