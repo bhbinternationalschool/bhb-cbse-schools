@@ -222,6 +222,7 @@ SELFTESTS=(
   test:class-channel-subject
   test:review-demo-hidden
   test:payment-link-reuse
+  test:student-leave-status-guard
   test:payment-link-status-guard
   test:attendance-today
   test:sis-wire-payload

@@ -87,9 +87,20 @@ async function pushStudentLeaveDeskApi(state: StudentLeaveState) {
       updatedAt?: string;
       requestCount?: number;
       error?: string;
+      kept?: string[];
     } | null;
     if (res.ok && body?.ok) {
       confirmDeskDeletes(STUDENT_LEAVE_DESK, sentDeletes);
+      // Requests decided or withdrawn elsewhere were not overwritten by this
+      // copy: reload the desk so they show as they are.
+      if (body.kept?.length) {
+        void Promise.all([import("@/lib/deskHydrateGuard"), import("@/lib/deskHydrationSchedule")]).then(
+          ([guard, sched]) => {
+            guard.resetDeskHydrated("student_leave");
+            return sched.ensureAllDeskHydrated();
+          },
+        );
+      }
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         requestCount: body.requestCount ?? state.requests.length,

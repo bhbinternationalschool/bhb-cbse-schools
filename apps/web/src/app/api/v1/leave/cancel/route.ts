@@ -58,6 +58,10 @@ export async function POST(request: Request) {
       console.warn("[leave-v1] db push failed", pushed.error);
       throw new ApiError("server_error", "Could not save — try again", 503);
     }
+    // Decided between the read and the save: the decision stands.
+    if (pushed.kept?.includes(id)) {
+      throw new ApiError("conflict", "This request was already decided — it can no longer be cancelled", 409);
+    }
 
     const meta = requestMeta(request);
     await writeAudit({

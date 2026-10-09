@@ -126,9 +126,17 @@ export async function POST(req: Request) {
     );
   }
 
-  if (gate) return featureSavedResponse(true);
+  // Requests decided or withdrawn elsewhere are kept as stored; the browser
+  // reloads them.
+  const kept = result.kept ?? [];
+  if (gate) {
+    return kept.length
+      ? NextResponse.json({ ok: true, functionOnly: true, changed: true, unchanged: false, kept })
+      : featureSavedResponse(true);
+  }
   return NextResponse.json({
     ok: true,
+    kept,
     requestCount: body.requests?.length ?? 0,
     updatedAt: new Date().toISOString(),
   });
