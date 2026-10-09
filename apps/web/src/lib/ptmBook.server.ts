@@ -193,7 +193,7 @@ export async function bookPtmSlotServer(opts: {
     slots: state.slots,
     bookings: state.bookings,
     feedback: state.feedback,
-  });
+  }, {}, { only: { bookings: [result.booking.id] } });
   if (!dbPush.ok) console.warn("[ptm] db push failed", dbPush.error);
 
   const slot = state.slots.find((s) => s.id === opts.slotId)!;

@@ -16,6 +16,8 @@ import { ptmDualWriteDbEnabled } from "@/lib/ptmDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { deleteNamedIds, type NamedDeletes } from "@/lib/deskNamedDeletes.server";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
+import { stampsOf, writeStampedRows } from "@/lib/rowStampWrite.server";
+import type { RowConflicts, RowStamps } from "@/lib/rowStampClient";
 
 export type PtmDeskSyncMeta = {
   eventCount: number;
@@ -215,10 +217,32 @@ export const PTM_TABLE_SLICES: Record<string, string> = {
   ptm_desk_slots: "slots",
 };
 
+/** The four PTM lists, in write order (a slot needs its event, and so on). */
+export const PTM_SLICES = ["events", "slots", "bookings", "feedback"] as const;
+export type PtmSlice = (typeof PTM_SLICES)[number];
+const PTM_SLICE_TABLE: Record<PtmSlice, string> = {
+  events: "ptm_desk_events",
+  slots: "ptm_desk_slots",
+  bookings: "ptm_desk_bookings",
+  feedback: "ptm_desk_feedback",
+};
+
+export type PtmPushOpts = {
+  /**
+   * A browser's save: per list, the rows it changed and the `updated_at`
+   * each was changed from ("" = new). Only those rows are written, each
+   * only while still at that stamp; the rest are conflicts.
+   */
+  stamps?: RowStamps;
+  /** A server writer: the rows it changed. Only those are written. */
+  only?: Partial<Record<PtmSlice, string[]>>;
+};
+
 export async function pushPtmDeskToDb(
   state: PtmState,
   deletes: NamedDeletes = {},
-): Promise<{ ok: boolean; error?: string }> {
+  opts: PtmPushOpts = {},
+): Promise<{ ok: boolean; error?: string; stamps?: RowStamps; conflicts?: RowConflicts }> {
   if (!ptmDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
@@ -246,38 +270,40 @@ export async function pushPtmDeskToDb(
   // with them (on delete cascade) every slot, booking and feedback. Events
   // and slots go only when the user deleted them, named; their bookings and
   // feedback follow by cascade.
-  let r = await upsertChunks(
-    sb,
-    "ptm_desk_events",
-    events.map((e) => eventToRow(tenantId, e)),
-  );
-  if (!r.ok) return r;
-
-  r = await upsertChunks(
-    sb,
-    "ptm_desk_slots",
-    slots.map((s) => slotToRow(tenantId, s)),
-  );
-  if (!r.ok) return r;
-
-  r = await upsertChunks(
-    sb,
-    "ptm_desk_bookings",
-    bookings.map((b) => bookingToRow(tenantId, b)),
-  );
-  if (!r.ok) return r;
-
-  r = await upsertChunks(
-    sb,
-    "ptm_desk_feedback",
-    feedback.map((f) => feedbackToRow(tenantId, f)),
-  );
-  if (!r.ok) return r;
-
-  let lastBookedAt: string | null = null;
-  for (const b of bookings) {
-    const at = b.bookedAt;
-    if (at && (!lastBookedAt || at > lastBookedAt)) lastBookedAt = at;
+  //
+  // No stale copy over a newer row (2026-10-09). Every row the save held
+  // was upserted, so a tab that loaded a booking before the parent
+  // cancelled it wrote "booked" back, and a teacher's slot edit or feedback
+  // was undone by the next office save. A browser now sends the rows it
+  // changed with the stamp it loaded (written only while still at it); a
+  // server writer names the rows it changed. A save with neither (the blob
+  // backfill, a browser on an older build) writes everything as before.
+  const rows: Record<PtmSlice, Record<string, unknown>[]> = {
+    events: events.map((e) => eventToRow(tenantId, e)),
+    slots: slots.map((x) => slotToRow(tenantId, x)),
+    bookings: bookings.map((b) => bookingToRow(tenantId, b)),
+    feedback: feedback.map((f) => feedbackToRow(tenantId, f)),
+  };
+  const newStamps: RowStamps = {};
+  const conflicts: RowConflicts = {};
+  for (const slice of PTM_SLICES) {
+    const table = PTM_SLICE_TABLE[slice];
+    if (opts.stamps) {
+      const sent = opts.stamps[slice] ?? {};
+      const mine = rows[slice].filter((r) => String(r.id) in sent);
+      const w = await writeStampedRows(sb, table, tenantId, mine, sent);
+      if (!w.ok) return w;
+      newStamps[slice] = w.stamps;
+      if (w.conflicts.length) conflicts[slice] = w.conflicts;
+      continue;
+    }
+    const only = opts.only ? new Set(opts.only[slice] ?? []) : null;
+    const r = await upsertChunks(
+      sb,
+      table,
+      only ? rows[slice].filter((x) => only.has(String(x.id))) : rows[slice],
+    );
+    if (!r.ok) return r;
   }
 
   for (const table of PTM_DELETABLE_TABLES) {
@@ -285,26 +311,45 @@ export async function pushPtmDeskToDb(
     if (!del.ok) return del;
   }
 
-  await sb.from("ptm_desk_sync_meta").upsert(
-    {
-      tenant_id: tenantId,
-      event_count: events.length,
-      slot_count: slots.length,
-      booking_count: bookings.length,
-      feedback_count: feedback.length,
-      last_booked_at: lastBookedAt,
-      updated_at: now,
-    },
-    { onConflict: "tenant_id" },
-  );
+  // Counts from the database, not from this copy (it may be partly written).
+  await touchPtmMeta(sb, tenantId, now).catch(() => undefined);
+  if (Object.keys(conflicts).length) console.warn("[ptm-db] kept newer rows over a stale copy", conflicts);
+  return { ok: true, stamps: newStamps, conflicts };
+}
 
-  return { ok: true };
+/** Recount the desk meta from the tables, so a hydrate sees the change. */
+async function touchPtmMeta(sb: SupabaseClient, tenantId: string, now: string): Promise<void> {
+  const count = (table: string) =>
+    sb.from(table).select("id", { count: "exact", head: true }).eq("tenant_id", tenantId);
+  const [ev, sl, bk, fb, latest] = await Promise.all([
+    count("ptm_desk_events"),
+    count("ptm_desk_slots"),
+    count("ptm_desk_bookings"),
+    count("ptm_desk_feedback"),
+    sb
+      .from("ptm_desk_bookings")
+      .select("booked_at")
+      .eq("tenant_id", tenantId)
+      .order("booked_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  const row: Record<string, unknown> = { tenant_id: tenantId, updated_at: now };
+  // A failed count leaves the old figure alone rather than writing a zero.
+  if (!ev.error && typeof ev.count === "number") row.event_count = ev.count;
+  if (!sl.error && typeof sl.count === "number") row.slot_count = sl.count;
+  if (!bk.error && typeof bk.count === "number") row.booking_count = bk.count;
+  if (!fb.error && typeof fb.count === "number") row.feedback_count = fb.count;
+  if (!latest.error) row.last_booked_at = (latest.data as { booked_at?: string } | null)?.booked_at ?? null;
+  await sb.from("ptm_desk_sync_meta").upsert(row, { onConflict: "tenant_id" });
 }
 
 export async function fetchPtmDeskFromDb(): Promise<{
   bundle: PtmDeskBundle;
   meta: PtmDeskSyncMeta | null;
   ok: boolean;
+  /** Each row's `updated_at`, per list — what a browser's save is stamped with. */
+  stamps: RowStamps;
 }> {
   const ctx = await resolveCtx();
   const empty: PtmDeskBundle = {
@@ -313,7 +358,7 @@ export async function fetchPtmDeskFromDb(): Promise<{
     bookings: [],
     feedback: [],
   };
-  if (!ctx) return { bundle: empty, meta: null, ok: false };
+  if (!ctx) return { bundle: empty, meta: null, ok: false, stamps: {} };
   const { sb, tenantId } = ctx;
 
   // Paged: PostgREST stops at 1,000 rows. A short copy merged and pushed
@@ -347,7 +392,7 @@ export async function fetchPtmDeskFromDb(): Promise<{
       "[ptm-db] fetchPtmDeskFromDb query error",
       eventRes.error || slotRes.error || bookingRes.error || feedbackRes.error || metaRes.error,
     );
-    return { bundle: empty, meta: null, ok: false };
+    return { bundle: empty, meta: null, ok: false, stamps: {} };
   }
 
   const eventRows = eventRes.data;
@@ -369,5 +414,11 @@ export async function fetchPtmDeskFromDb(): Promise<{
     },
     meta: mapMetaRow(metaRow as Record<string, unknown> | null),
     ok: true,
+    stamps: {
+      events: stampsOf(eventRows),
+      slots: stampsOf(slotRows),
+      bookings: stampsOf(bookingRows),
+      feedback: stampsOf(feedbackRows),
+    },
   };
 }

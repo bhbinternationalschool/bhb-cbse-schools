@@ -52,7 +52,7 @@ export async function POST(request: Request) {
       slots: state.slots,
       bookings: state.bookings,
       feedback: state.feedback,
-    });
+    }, {}, { only: { bookings: [bookingId] } });
     if (!dbPush.ok) console.warn("[ptm-v1] db push failed", dbPush.error);
 
     const meta = requestMeta(request);

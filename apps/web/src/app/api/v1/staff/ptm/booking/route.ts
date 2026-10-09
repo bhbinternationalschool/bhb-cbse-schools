@@ -66,6 +66,7 @@ export async function POST(request: Request) {
     const hasFeedback =
       !!fb && !!((fb.strengths || "").trim() || (fb.areas || "").trim() || (fb.followUp || "").trim());
     let feedback = state.feedback;
+    let feedbackId = "";
     if (hasFeedback && fb) {
       const record: PtmFeedback = {
         id: nid("ptmf"),
@@ -77,6 +78,7 @@ export async function POST(request: Request) {
         createdAt: new Date().toISOString(),
         createdBy: ctx.session.fullName || "Teacher",
       };
+      feedbackId = record.id;
       feedback = [record, ...feedback.filter((f) => f.bookingId !== bookingId)];
     }
     const finalStatus: PtmBookingStatus = hasFeedback ? "completed" : status;
@@ -88,7 +90,10 @@ export async function POST(request: Request) {
       feedback,
     };
     writePtmLocalRaw(next);
-    const pushed = await pushPtmRemoteServer(next);
+    // Only this booking and its feedback: the rest of this copy may be stale.
+    const pushed = await pushPtmRemoteServer(next, {
+      only: { bookings: [bookingId], feedback: feedbackId ? [feedbackId] : [] },
+    });
     if (!pushed.ok) {
       console.warn("[staff-ptm-v1] db push failed", pushed.error);
       throw new ApiError("server_error", "Could not save — try again", 503);

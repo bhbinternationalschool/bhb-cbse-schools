@@ -97,6 +97,7 @@ export function AppShell({
   useEffect(() => {
     const labels: Record<string, string> = {
       sis: "student records",
+      ptm: "PTM",
       rbac: "roles & permissions",
       module_registry: "module settings",
       wa_templates: "WhatsApp templates",

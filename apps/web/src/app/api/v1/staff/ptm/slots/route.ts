@@ -39,9 +39,13 @@ function staffOf(ctx: ApiAuthContext): { id: string; name: string } {
   return { id, name };
 }
 
-async function save(next: PtmState) {
+/** Writes only the slots named (the rest of this copy may be stale). */
+async function save(
+  next: PtmState,
+  change: { only: { slots: string[] }; deletes?: Record<string, string[]> },
+) {
   writePtmLocalRaw(next);
-  const pushed = await pushPtmRemoteServer(next);
+  const pushed = await pushPtmRemoteServer(next, change);
   if (!pushed.ok) {
     console.warn("[staff-ptm-slots-v1] db push failed", pushed.error);
     throw new ApiError("server_error", "Could not save — try again", 503);
@@ -109,7 +113,7 @@ export async function POST(request: Request) {
         roomOrLink,
       };
     });
-    await save({ ...state, slots: [...created, ...state.slots] });
+    await save({ ...state, slots: [...created, ...state.slots] }, { only: { slots: created.map((x) => x.id) } });
 
     const meta = requestMeta(request);
     await writeAudit({
@@ -161,6 +165,11 @@ export async function DELETE(request: Request) {
       ...state,
       slots: state.slots.filter((s) => s.id !== slotId),
       bookings: state.bookings.filter((b) => b.slotId !== slotId),
+    }, {
+      // Named: a desk save never deletes by absence, so without this the
+      // slot stayed in the database. Its cancelled bookings go by cascade.
+      only: { slots: [] },
+      deletes: { ptm_desk_slots: [slotId] },
     });
 
     const meta = requestMeta(request);

@@ -10,6 +10,25 @@ import {
   recordDeskSyncSuccess,
 } from "@/lib/deskSyncStatus";
 import { confirmDeskDeletes, pendingDeskDeletes, recordDeskDeletion } from "@/lib/deskNamedDeletes";
+import {
+  applyStampedSave,
+  buildStampedSave,
+  captureRowStamps,
+  onStampConflicts,
+  type RowConflicts,
+  type RowStamps,
+} from "@/lib/rowStampClient";
+
+/** The PTM lists a save is stamped per row on. */
+export const PTM_STAMP_SLICES = ["events", "slots", "bookings", "feedback"] as const;
+
+/**
+ * After a load: which version of each row this browser now holds. Called
+ * with the server's stamps whether or not the load replaced local rows.
+ */
+export function capturePtmStamps(stamps: RowStamps, local: PtmState) {
+  captureRowStamps(PTM_DESK, stamps, local as unknown as Record<string, unknown>, PTM_STAMP_SLICES);
+}
 
 const PTM_DESK = "ptm";
 
@@ -72,6 +91,9 @@ export function schedulePtmDeskSync(state: PtmState) {
 
 async function pushPtmDeskApi(state: PtmState) {
   const sentDeletes = pendingDeskDeletes(PTM_DESK);
+  // Only the rows this browser changed, each with the stamp it loaded —
+  // never a stale copy of a row someone else changed since.
+  const sentStamps = buildStampedSave(PTM_DESK, state as unknown as Record<string, unknown>, PTM_STAMP_SLICES);
   try {
     const res = await fetch("/api/school-data/ptm-desk", {
       method: "POST",
@@ -83,6 +105,7 @@ async function pushPtmDeskApi(state: PtmState) {
         feedback: state.feedback,
         // Deletions are named, never inferred from what this browser lacks.
         deletes: sentDeletes,
+        stamps: sentStamps,
       }),
     });
     const body = (await res.json().catch(() => null)) as {
@@ -90,9 +113,13 @@ async function pushPtmDeskApi(state: PtmState) {
       updatedAt?: string;
       eventCount?: number;
       error?: string;
+      stamps?: RowStamps;
+      conflicts?: RowConflicts;
     } | null;
     if (res.ok && body?.ok) {
       confirmDeskDeletes(PTM_DESK, sentDeletes);
+      applyStampedSave(PTM_DESK, state as unknown as Record<string, unknown>, sentStamps, body, PTM_STAMP_SLICES);
+      onStampConflicts(PTM_DESK, body.conflicts);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         eventCount: body.eventCount ?? state.events.length,
@@ -112,6 +139,7 @@ async function pushPtmDeskApi(state: PtmState) {
 
 export async function fetchPtmDeskFromApi(): Promise<{
   bundle: Pick<PtmState, "events" | "slots" | "bookings" | "feedback">;
+  stamps: RowStamps;
   updatedAt: string;
   eventCount: number;
 } | null> {
@@ -127,6 +155,7 @@ export async function fetchPtmDeskFromApi(): Promise<{
       slots?: PtmState["slots"];
       bookings?: PtmState["bookings"];
       feedback?: PtmState["feedback"];
+      stamps?: RowStamps;
       updatedAt?: string;
       eventCount?: number;
     };
@@ -138,6 +167,7 @@ export async function fetchPtmDeskFromApi(): Promise<{
         bookings: body.bookings ?? [],
         feedback: body.feedback ?? [],
       },
+      stamps: body.stamps ?? {},
       updatedAt: body.updatedAt || "",
       eventCount: body.eventCount ?? body.events.length,
     };
@@ -150,7 +180,7 @@ type PtmDeskBundle = Pick<PtmState, "events" | "slots" | "bookings" | "feedback"
 
 export async function hydratePtmDeskFromDb(
   preferDb?: boolean,
-): Promise<{ bundle: PtmDeskBundle; changed: boolean; ok: boolean }> {
+): Promise<{ bundle: PtmDeskBundle; changed: boolean; ok: boolean; stamps: RowStamps }> {
   const remote = await fetchPtmDeskFromApi();
   const empty: PtmDeskBundle = {
     events: [],
@@ -158,7 +188,7 @@ export async function hydratePtmDeskFromDb(
     bookings: [],
     feedback: [],
   };
-  if (!remote) return { bundle: empty, changed: false, ok: false };
+  if (!remote) return { bundle: empty, changed: false, ok: false, stamps: {} };
 
   const meta = readMeta();
   const shouldTake =
@@ -168,12 +198,12 @@ export async function hydratePtmDeskFromDb(
     (remote.updatedAt && remote.updatedAt >= meta.updatedAt) ||
     remote.eventCount > meta.eventCount;
 
-  if (!shouldTake) return { bundle: empty, changed: false, ok: true };
+  if (!shouldTake) return { bundle: empty, changed: false, ok: true, stamps: remote.stamps };
 
   writeMeta({
     updatedAt: remote.updatedAt,
     eventCount: remote.eventCount,
   });
 
-  return { bundle: remote.bundle, changed: true, ok: true };
+  return { bundle: remote.bundle, changed: true, ok: true, stamps: remote.stamps };
 }
