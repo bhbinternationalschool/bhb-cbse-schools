@@ -169,7 +169,11 @@ export async function ensureAccountsHydratedServer(): Promise<boolean> {
   }
 
   const dbDesk = await fetchAccountsDeskFromDb();
-  if (dbDesk.bundle.coaAccounts.length > 0 || accountsReadFromDbEnabled()) {
+  // A failed read is not an empty desk: merging it with preferDb replaced the
+  // server's accounts copy with nothing.
+  if (!dbDesk.ok) {
+    console.error("[accounts] server hydrate: desk read failed —", dbDesk.error);
+  } else if (dbDesk.bundle.coaAccounts.length > 0 || accountsReadFromDbEnabled()) {
     state = mergeDbDeskIntoAccountsState(state, dbDesk.bundle, {
       preferDb:
         accountsReadFromDbEnabled() || (state.coaAccounts?.length ?? 0) === 0,

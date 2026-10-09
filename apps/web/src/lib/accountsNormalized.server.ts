@@ -35,6 +35,7 @@ import { accountsDualWriteDbEnabled } from "@/lib/accountsDbConfig";
 import { syncModeBankMapFromBanks } from "@/lib/accountsNormalize";
 import { deleteNamedIds, type NamedDeletes } from "@/lib/deskNamedDeletes.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { fetchAllPages } from "@/lib/supabase/pageAll";
 
 export type AccountsDeskSyncMeta = {
   coaCount: number;
@@ -1100,6 +1101,9 @@ export async function pushAccountsDeskToDb(
 export async function fetchAccountsDeskFromDb(): Promise<{
   bundle: AccountsDeskBundle;
   meta: AccountsDeskSyncMeta | null;
+  /** false = a read failed; the bundle is unknown, NOT an empty desk. */
+  ok: boolean;
+  error?: string;
 }> {
   const ctx = await resolveCtx();
   const empty: AccountsDeskBundle = {
@@ -1124,8 +1128,59 @@ export async function fetchAccountsDeskFromDb(): Promise<{
     fiscalYears: [],
     settings: DEFAULT_SETTINGS,
   };
-  if (!ctx) return { bundle: empty, meta: null };
+  if (!ctx) return { bundle: empty, meta: null, ok: false, error: "Supabase tenant not configured" };
   const { sb, tenantId } = ctx;
+
+  // Every list is read in pages. PostgREST stops at 1,000 rows and reports
+  // the cut as success: the cash and bank ledgers and the journal lines pass
+  // that, and a browser handed the first thousand would show — and, while
+  // saves pruned, push back — a ledger missing the rest. Read errors are
+  // kept, not dropped: a failed read must not look like an empty desk.
+  const page = (table: string, orderBy = "id") =>
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from(table).select("*").eq("tenant_id", tenantId).order(orderBy).range(from, to),
+    ).then((r) => ({ data: r.rows, error: r.error ? { message: r.error } : null }));
+
+  const results = await Promise.all([
+    page("accounts_desk_cash_pools"),
+    page("accounts_desk_cash_ledger"),
+    page("accounts_desk_bank_accounts"),
+    page("accounts_desk_bank_ledger"),
+    page("accounts_desk_mode_bank_map", "mode"),
+    page("accounts_desk_recon_sessions"),
+    page("accounts_desk_recon_lines"),
+    page("accounts_desk_expense_categories"),
+    page("accounts_desk_expense_vouchers"),
+    page("accounts_desk_expense_voucher_lines"),
+    page("accounts_desk_recurring_rules"),
+    page("accounts_desk_vendors"),
+    page("accounts_desk_vendor_bills"),
+    page("accounts_desk_vendor_bill_lines"),
+    page("accounts_desk_payables"),
+    page("accounts_desk_trustees"),
+    page("accounts_desk_owner_loans"),
+    page("accounts_desk_owner_loan_schedule"),
+    page("accounts_desk_owner_cash_handovers"),
+    page("accounts_desk_coa_accounts"),
+    page("accounts_desk_journal_entries"),
+    page("accounts_desk_journal_lines"),
+    page("accounts_desk_fiscal_years"),
+    sb
+      .from("accounts_desk_settings")
+      .select("expense_approval_paise, petty_threshold_paise")
+      .eq("tenant_id", tenantId)
+      .maybeSingle(),
+    sb
+      .from("accounts_desk_sync_meta")
+      .select(META_SELECT)
+      .eq("tenant_id", tenantId)
+      .maybeSingle(),
+  ]);
+  const failed = results.find((r) => r.error);
+  if (failed?.error) {
+    console.error("[accounts-db] fetch failed", failed.error.message);
+    return { bundle: empty, meta: null, ok: false, error: failed.error.message };
+  }
 
   const [
     { data: cashPoolRows },
@@ -1153,41 +1208,7 @@ export async function fetchAccountsDeskFromDb(): Promise<{
     { data: fiscalYearRows },
     { data: settingsRow },
     { data: metaRow },
-  ] = await Promise.all([
-    sb.from("accounts_desk_cash_pools").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_cash_ledger").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_bank_accounts").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_bank_ledger").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_mode_bank_map").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_recon_sessions").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_recon_lines").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_expense_categories").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_expense_vouchers").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_expense_voucher_lines").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_recurring_rules").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_vendors").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_vendor_bills").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_vendor_bill_lines").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_payables").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_trustees").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_owner_loans").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_owner_loan_schedule").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_owner_cash_handovers").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_coa_accounts").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_journal_entries").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_journal_lines").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_fiscal_years").select("*").eq("tenant_id", tenantId),
-    sb
-      .from("accounts_desk_settings")
-      .select("expense_approval_paise, petty_threshold_paise")
-      .eq("tenant_id", tenantId)
-      .maybeSingle(),
-    sb
-      .from("accounts_desk_sync_meta")
-      .select(META_SELECT)
-      .eq("tenant_id", tenantId)
-      .maybeSingle(),
-  ]);
+  ] = results;
 
   const reconLinesBySession = sortLinesByIndex<Record<string, unknown>>(
     (reconLineRows ?? []) as Record<string, unknown>[],
@@ -1301,5 +1322,6 @@ export async function fetchAccountsDeskFromDb(): Promise<{
           updatedAt: String((metaRow as { updated_at: string }).updated_at),
         }
       : null,
+    ok: true,
   };
 }
