@@ -43,63 +43,6 @@ async function resolveCtx(): Promise<{
   return getServerTenantContext();
 }
 
-/**
- * Delete rows the client no longer holds — never on an empty payload.
- *
- * An empty keep-set means every stored row is "stale", so this deleted the
- * entire table. That is never what a sync means: a client with nothing to say
- * is a client whose cache was dropped, not an instruction to erase the
- * school's records.
- *
- * It is not hypothetical. On 2026-08-11 the attendance register for the
- * previous day was gone — pushed away by a phone whose localStorage had been
- * dropped on quota, with the emptiness check running AFTER the delete. This
- * same function is copied into 20 modules and called from 86 places, almost
- * none of them guarded, covering bank and cash ledgers, payroll runs, fee
- * cheques, library issues and 1,919 admission records.
- *
- * This floor stops the catastrophic case everywhere at once. It does NOT make
- * a partial payload safe — a client holding 3 of 900 rows still prunes 897.
- * That needs per-module scoping, the way attendance now prunes only within
- * the dates its payload covers. See docs/TODO.md.
- *
- * The read error is also surfaced now. It was discarded, which happened to
- * fail safe here (no data → nothing deleted), but "we could not read the
- * table" and "the table is empty" must not be the same value in a function
- * that deletes.
- */
-async function deleteStale(
-  sb: SupabaseClient,
-  tenantId: string,
-  table: string,
-  keepIds: Set<string>,
-) {
-  if (keepIds.size === 0) {
-    console.warn(
-      `[${table}] refusing to prune: the payload holds no ids at all. ` +
-        "An empty client is not an instruction to delete every row.",
-    );
-    return;
-  }
-  const { data, error } = await sb
-    .from(table)
-    .select("id")
-    .eq("tenant_id", tenantId);
-  if (error) {
-    console.error(
-      `[${table}] prune skipped — could not read existing ids:`,
-      error.message,
-    );
-    return;
-  }
-  const stale = (data ?? [])
-    .map((r) => String((r as { id: string }).id))
-    .filter((id) => !keepIds.has(id));
-  if (stale.length > 0) {
-    await sb.from(table).delete().in("id", stale);
-  }
-}
-
 async function upsertChunks(
   sb: SupabaseClient,
   table: string,
@@ -307,6 +250,7 @@ export type HomeworkTeacherSave = {
 export async function pushHomeworkDeskToDb(
   state: HomeworkState,
   teacher?: HomeworkTeacherSave,
+  opts?: { deleteDiaryIds?: string[] },
 ): Promise<{ ok: boolean; error?: string }> {
   if (!homeworkDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
@@ -314,7 +258,7 @@ export async function pushHomeworkDeskToDb(
   const { sb, tenantId } = ctx;
   const now = new Date().toISOString();
 
-  if (teacher) return pushTeacherHomework(sb, tenantId, now, state, teacher);
+  if (teacher) return pushTeacherHomework(sb, tenantId, now, state, teacher, opts?.deleteDiaryIds ?? []);
 
   const posts = state.posts ?? [];
   const diary = state.diary ?? [];
@@ -322,17 +266,21 @@ export async function pushHomeworkDeskToDb(
   const seen = state.seen ?? [];
   const settings = state.settings ?? { examModeFreeze: false };
 
-  await Promise.all([
-    deleteStale(sb, tenantId, "homework_desk_posts", new Set(posts.map((p) => p.id))),
-    deleteStale(sb, tenantId, "homework_desk_diary", new Set(diary.map((d) => d.id))),
-    deleteStale(
-      sb,
-      tenantId,
-      "homework_desk_submissions",
-      new Set(submissions.map((s) => s.id)),
-    ),
-    deleteStale(sb, tenantId, "homework_desk_seen", new Set(seen.map((s) => s.id))),
-  ]);
+  // Nothing is deleted for being absent from this copy (9 Oct 2026). The
+  // office's save used to prune every post it did not hold, and a browser
+  // that had not re-read since a teacher posted from the staff app erased
+  // that homework seconds later — three posts on 9 Oct alone. Posts are
+  // never deleted by the desk (withdrawn is a status), nor are submissions
+  // or "seen" marks; the one real delete — a diary entry — is named.
+  const deleteDiaryIds = (opts?.deleteDiaryIds ?? []).filter((id) => typeof id === "string" && id);
+  if (deleteDiaryIds.length) {
+    const { error: delErr } = await sb
+      .from("homework_desk_diary")
+      .delete()
+      .eq("tenant_id", tenantId)
+      .in("id", deleteDiaryIds);
+    if (delErr) return { ok: false, error: `Diary delete failed: ${delErr.message}` };
+  }
 
   let r = await upsertChunks(
     sb,
@@ -399,6 +347,7 @@ async function pushTeacherHomework(
   now: string,
   state: HomeworkState,
   teacher: HomeworkTeacherSave,
+  deleteDiaryIds: string[],
 ): Promise<{ ok: boolean; error?: string }> {
   if (!teacher.staffId) return { ok: false, error: "Your login is not linked to a staff record" };
   const mine = <T extends { teacherStaffId: string; classId: string; sectionId: string }>(r: T) =>
@@ -419,17 +368,18 @@ async function pushTeacherHomework(
   );
   if (!r.ok) return r;
 
-  // Their own diary entries that their copy no longer holds were deleted
-  // by them. Read first: an unreadable table is not "nothing to keep".
-  const { data: theirs, error: readErr } = await sb
-    .from("homework_desk_diary")
-    .select("id, class_id, section_id")
-    .eq("tenant_id", tenantId)
-    .eq("teacher_staff_id", teacher.staffId);
-  if (!readErr) {
-    const keep = new Set(diary.map((d) => d.id));
+  // Their own diary entries they deleted — named, never inferred from what
+  // an hours-old phone copy happens not to hold.
+  if (deleteDiaryIds.length) {
+    const { data: theirs, error: readErr } = await sb
+      .from("homework_desk_diary")
+      .select("id, class_id, section_id")
+      .eq("tenant_id", tenantId)
+      .eq("teacher_staff_id", teacher.staffId)
+      .in("id", deleteDiaryIds);
+    if (readErr) return { ok: false, error: readErr.message };
     const gone = (theirs ?? [])
-      .filter((d) => !keep.has(String(d.id)) && teacher.allows(String(d.class_id), String(d.section_id)))
+      .filter((d) => teacher.allows(String(d.class_id), String(d.section_id)))
       .map((d) => String(d.id));
     if (gone.length) {
       await sb.from("homework_desk_diary").delete().eq("tenant_id", tenantId).in("id", gone);

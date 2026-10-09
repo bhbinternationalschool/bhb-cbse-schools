@@ -64,7 +64,10 @@ export async function GET(req: Request) {
 type HomeworkDeskPostBody = Pick<
   HomeworkState,
   "posts" | "diary" | "submissions" | "seen" | "settings"
->;
+> & {
+  /** Diary entries the user deleted. Nothing else is ever deleted by a save. */
+  deleteDiaryIds?: unknown[];
+};
 
 /** POST — push full homework desk snapshot */
 export async function POST(req: Request) {
@@ -134,7 +137,9 @@ export async function POST(req: Request) {
     submissions: Array.isArray(body.submissions) ? body.submissions : [],
     seen: Array.isArray(body.seen) ? body.seen : [],
     settings: body.settings ?? { examModeFreeze: false },
-  }, teacher);
+  }, teacher, {
+    deleteDiaryIds: Array.isArray(body.deleteDiaryIds) ? body.deleteDiaryIds.filter((x): x is string => typeof x === "string") : [],
+  });
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error || "Sync failed" },
