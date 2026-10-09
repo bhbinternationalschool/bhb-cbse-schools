@@ -12,7 +12,8 @@ import type {
 import { studentLeaveDualWriteDbEnabled } from "@/lib/studentLeaveDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { deleteNamedIds, type NamedDeletes } from "@/lib/deskNamedDeletes.server";
-import { fetchAllPages } from "@/lib/supabase/pageAll";
+import { fetchAllPages, fetchByIds } from "@/lib/supabase/pageAll";
+import { planStudentLeavePush } from "@/lib/studentLeavePushPlan";
 
 export type StudentLeaveDeskSyncMeta = {
   requestCount: number;
@@ -41,9 +42,10 @@ async function upsertChunks(
   table: string,
   rows: Record<string, unknown>[],
   chunk = 200,
+  opts?: { onConflict?: string; ignoreDuplicates?: boolean },
 ): Promise<{ ok: boolean; error?: string }> {
   for (let i = 0; i < rows.length; i += chunk) {
-    const { error } = await sb.from(table).upsert(rows.slice(i, i + chunk));
+    const { error } = await sb.from(table).upsert(rows.slice(i, i + chunk), opts);
     if (error) return { ok: false, error: error.message };
   }
   return { ok: true };
@@ -134,7 +136,7 @@ export const STUDENT_LEAVE_TABLE_SLICES: Record<string, string> = {
 export async function pushStudentLeaveDeskToDb(
   state: StudentLeaveState,
   deletes: NamedDeletes = {},
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; kept?: string[] }> {
   if (!studentLeaveDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
@@ -147,36 +149,61 @@ export async function pushStudentLeaveDeskToDb(
   // had failed held one request and deleted every other. A request goes only
   // when the office deleted it (pending or cancelled), named.
   const gone = new Set(deletes["student_leave_desk_requests"] ?? []);
-  const requests = (state.requests ?? []).filter((r) => !gone.has(r.id));
+  const requests = (state.requests ?? []).filter((r) => r?.id && !gone.has(r.id));
 
-  const r = await upsertChunks(
+  // No stale copy over a decision. A request leaves "pending" once, on the
+  // staff app, WhatsApp, the parent app or this desk — and an office tab
+  // still holding it as pending wrote "pending" back. Read what is stored;
+  // a failed read writes nothing (unknown is not "not there").
+  const stored = await fetchByIds<Record<string, unknown>>(
+    requests.map((r) => r.id),
+    (chunk, from, to) =>
+      sb
+        .from("student_leave_desk_requests")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .in("id", chunk)
+        .order("id", { ascending: true })
+        .range(from, to),
+    { chunkSize: 100 },
+  );
+  if (stored.error) return { ok: false, error: stored.error };
+  const plan = planStudentLeavePush(
+    requests,
+    new Map(stored.rows.map((r) => [String(r.id), rowToRequest(r)])),
+  );
+  const kept = [...plan.kept];
+
+  const ins = await upsertChunks(
     sb,
     "student_leave_desk_requests",
-    requests.map((req) => requestToRow(tenantId, req)),
+    plan.insert.map((req) => requestToRow(tenantId, req)),
+    200,
+    { onConflict: "id", ignoreDuplicates: true },
   );
-  if (!r.ok) return r;
+  if (!ins.ok) return ins;
+  for (const req of plan.update) {
+    const row = requestToRow(tenantId, req);
+    delete row.id;
+    delete row.tenant_id;
+    delete row.created_at;
+    const { data, error } = await sb
+      .from("student_leave_desk_requests")
+      .update(row)
+      .eq("tenant_id", tenantId)
+      .eq("id", req.id)
+      .eq("status", "pending")
+      .select("id");
+    if (error) return { ok: false, error: error.message };
+    if (!data?.length) kept.push(req.id); // decided between the read and the write
+  }
   const del = await deleteNamedIds(sb, tenantId, "student_leave_desk_requests", [...gone]);
   if (!del.ok) return del;
 
-  let lastRequestAt: string | null = null;
-  for (const req of requests) {
-    const at = req.createdAt;
-    if (at && (!lastRequestAt || at > lastRequestAt)) lastRequestAt = at;
-  }
-
-  await sb.from("student_leave_desk_sync_meta").upsert(
-    {
-      tenant_id: tenantId,
-      request_count: requests.length,
-      pending_count: requests.filter((x) => x.status === "pending").length,
-      approved_count: requests.filter((x) => x.status === "approved").length,
-      last_request_at: lastRequestAt,
-      updated_at: now,
-    },
-    { onConflict: "tenant_id" },
-  );
-
-  return { ok: true };
+  // Counts from the database, not from this copy (it may be partly kept).
+  await touchStudentLeaveMeta(sb, tenantId, now).catch(() => undefined);
+  if (kept.length) console.warn("[student-leave-db] kept decided requests over a stale copy", kept);
+  return { ok: true, kept };
 }
 
 export async function fetchStudentLeaveDeskFromDb(): Promise<{
@@ -256,16 +283,24 @@ async function touchStudentLeaveMeta(
     if (status) q = q.eq("status", status);
     return q;
   };
-  const [all, pending, approved] = await Promise.all([
+  const [all, pending, approved, latest] = await Promise.all([
     count(),
     count("pending"),
     count("approved"),
+    sb
+      .from("student_leave_desk_requests")
+      .select("created_at")
+      .eq("tenant_id", tenantId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
   const row: Record<string, unknown> = { tenant_id: tenantId, updated_at: now };
   // A failed count leaves the old figure alone rather than writing a zero.
   if (!all.error && typeof all.count === "number") row.request_count = all.count;
   if (!pending.error && typeof pending.count === "number") row.pending_count = pending.count;
   if (!approved.error && typeof approved.count === "number") row.approved_count = approved.count;
+  if (!latest.error) row.last_request_at = (latest.data as { created_at?: string } | null)?.created_at ?? null;
   await sb.from("student_leave_desk_sync_meta").upsert(row, { onConflict: "tenant_id" });
 }
 

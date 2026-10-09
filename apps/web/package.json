@@ -363,6 +363,7 @@
     "test:class-channel-subject": "npx tsx src/lib/classChannelSubject.selftest.ts",
     "test:review-demo-hidden": "npx tsx src/lib/reviewDemoHidden.selftest.ts",
     "test:payment-link-reuse": "npx tsx src/lib/paymentLinkReuse.selftest.ts",
+    "student-leave-status-guard": "npx tsx src/lib/studentLeaveStatusGuard.selftest.ts",
     "test:attendance-today": "npx tsx src/lib/attendanceToday.selftest.ts",
     "test:sis-wire-payload": "npx tsx src/lib/sisWirePayload.selftest.ts",
     "test:print-palette": "npx tsx src/lib/printPalette.selftest.ts",

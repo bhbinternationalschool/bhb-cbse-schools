@@ -221,6 +221,7 @@ SELFTESTS=(
   test:class-channel-subject
   test:review-demo-hidden
   test:payment-link-reuse
+  student-leave-status-guard
   test:attendance-today
   test:sis-wire-payload
   test:print-palette

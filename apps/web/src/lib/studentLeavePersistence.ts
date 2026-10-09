@@ -53,25 +53,27 @@ export function scheduleStudentLeaveSync(state: StudentLeaveState) {
 
 export async function pushStudentLeaveRemoteServer(
   state: StudentLeaveState,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; kept?: string[] }> {
   const { pushStudentLeaveDeskToDb } = await import(
     "@/lib/studentLeaveNormalized.server"
   );
   const desk = await pushStudentLeaveDeskToDb(state);
   if (!desk.ok) return { ok: false, error: desk.error };
+  const kept = desk.kept ?? [];
 
   const { deskSkipBlobPush } = await import("@/lib/deskCutover");
-  if (deskSkipBlobPush("student_leave")) return { ok: true };
+  if (deskSkipBlobPush("student_leave")) return { ok: true, kept };
 
   const { fetchServerBlob, pushServerBlob } = await import("@/lib/serverBlob");
   const remote = await fetchServerBlob<StudentLeaveState>("student_leave_state");
   const remoteCount = remote.state?.requests?.length ?? 0;
   const nextCount = state.requests?.length ?? 0;
   if (nextCount < remoteCount && remote.state) {
-    return { ok: true };
+    return { ok: true, kept };
   }
 
-  return pushServerBlob("student_leave_state", state);
+  const blobRes = await pushServerBlob("student_leave_state", state);
+  return { ...blobRes, kept };
 }
 
 /**
