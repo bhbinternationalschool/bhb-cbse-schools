@@ -13,6 +13,9 @@ import type {
 import { schoolCommsDualWriteDbEnabled } from "@/lib/schoolCommsDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { deleteNamedIds, type NamedDeletes } from "@/lib/deskNamedDeletes.server";
+import { emptySchoolComms } from "@/lib/schoolComms";
+import { storedNewerIds } from "@/lib/rowStampWrite.server";
+import { fetchAllPages } from "@/lib/supabase/pageAll";
 
 export type SchoolCommsDeskSyncMeta = {
   noticeCount: number;
@@ -91,6 +94,102 @@ async function upsertChunks(
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+/**
+ * The sample notices / album an empty browser seeds before it has read the
+ * desk, exactly as seeded. Stamped "now", they would win over the stored
+ * rows with the same ids; untouched, they are only ever added.
+ */
+const SEED_ROWS = (() => {
+  const seed = emptySchoolComms();
+  return new Map<string, string>(
+    [...seed.notices, ...seed.albums].map((r) => [r.id, `${r.title}\u0000${"body" in r ? r.body : r.description}`]),
+  );
+})();
+const isUntouchedSeed = (r: Record<string, unknown>) =>
+  SEED_ROWS.get(String(r.id)) === `${r.title}\u0000${r.body ?? r.description}`;
+
+/**
+ * Write a comms list without putting an older copy back (2026-10-10).
+ *
+ * The comms, news and gallery desks each upserted every row they held, so a
+ * tab that loaded a notice before someone edited, archived or published it
+ * (another office tab, the scheduled-publish cron, the WhatsApp class
+ * channel) wrote its old copy back. Notices, news and albums move their own
+ * `updatedAt` on every edit: a row the database holds at a later time is
+ * skipped. Photos are never edited — added or deleted only — so they are
+ * insert-only. A failed read writes nothing.
+ */
+export async function writeCommsRows(
+  sb: SupabaseClient,
+  tenantId: string,
+  table: string,
+  rows: Record<string, unknown>[],
+): Promise<{ ok: true; kept: number } | { ok: false; error: string }> {
+  if (!rows.length) return { ok: true, kept: 0 };
+  const insertOnly = (r: Record<string, unknown>) => table === "school_comms_desk_photos" || isUntouchedSeed(r);
+  const fresh = rows.filter(insertOnly);
+  for (let i = 0; i < fresh.length; i += 200) {
+    const { error } = await sb
+      .from(table)
+      .upsert(fresh.slice(i, i + 200), { onConflict: "id", ignoreDuplicates: true });
+    if (error) return { ok: false, error: error.message };
+  }
+  const rest = rows.filter((r) => !insertOnly(r));
+  const newer = await storedNewerIds(sb, tenantId, table, rest);
+  if (!newer.ok) return newer;
+  if (newer.ids.size) console.warn(`[school-comms-db] ${table}: kept ${newer.ids.size} newer row(s) over a stale copy`);
+  const r = await upsertChunks(sb, table, rest.filter((x) => !newer.ids.has(String(x.id))));
+  if (!r.ok) return { ok: false, error: r.error || "write failed" };
+  return { ok: true, kept: newer.ids.size };
+}
+
+/** Recount the desk meta from the tables (each desk's copy holds only part). */
+async function touchCommsMeta(sb: SupabaseClient, tenantId: string, now: string): Promise<void> {
+  const count = (table: string) =>
+    sb.from(table).select("id", { count: "exact", head: true }).eq("tenant_id", tenantId);
+  const latest = (table: string) =>
+    sb
+      .from(table)
+      .select("published_at")
+      .eq("tenant_id", tenantId)
+      .eq("status", "published")
+      .order("published_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+  const [nt, nw, al, ph, l1, l2, l3] = await Promise.all([
+    count("school_comms_desk_notices"),
+    count("school_comms_desk_news"),
+    count("school_comms_desk_albums"),
+    count("school_comms_desk_photos"),
+    latest("school_comms_desk_notices"),
+    latest("school_comms_desk_news"),
+    latest("school_comms_desk_albums"),
+  ]);
+  const row: Record<string, unknown> = { tenant_id: tenantId, updated_at: now };
+  // A failed count leaves the old figure alone rather than writing a zero.
+  const ok = (r: { error: unknown; count: number | null }) => !r.error && typeof r.count === "number";
+  if (ok(nt)) row.notice_count = nt.count;
+  if (ok(nw)) row.news_count = nw.count;
+  if (ok(al)) row.album_count = al.count;
+  if (ok(ph)) row.photo_count = ph.count;
+  if (!l1.error && !l2.error && !l3.error) {
+    const times = [l1, l2, l3]
+      .map((x) => (x.data as { published_at?: string } | null)?.published_at)
+      .filter((t): t is string => !!t)
+      .sort();
+    row.last_published_at = times.at(-1) ?? null;
+  }
+  await sb.from("school_comms_desk_sync_meta").upsert(row, { onConflict: "tenant_id" });
+}
+
+/** Every row of a comms table — paged: PostgREST stops at 1,000 rows. */
+async function readAllComms(sb: SupabaseClient, tenantId: string, table: string) {
+  const r = await fetchAllPages<Record<string, unknown>>((from, to) =>
+    sb.from(table).select("*").eq("tenant_id", tenantId).order("id", { ascending: true }).range(from, to),
+  );
+  return { data: r.rows, error: r.error ? { message: r.error } : null };
 }
 
 function noticeToRow(tenantId: string, n: SchoolNotice): Record<string, unknown> {
@@ -311,7 +410,7 @@ export async function pushSchoolCommsDeskToDb(
   ];
 
   for (const [table, rows] of tables) {
-    const r = await upsertChunks(sb, table, rows);
+    const r = await writeCommsRows(sb, tenantId, table, rows);
     if (!r.ok) return r;
   }
   {
@@ -319,27 +418,7 @@ export async function pushSchoolCommsDeskToDb(
     if (!del.ok) return del;
   }
 
-  let lastPublishedAt: string | null = null;
-  for (const item of [...notices, ...news, ...albums]) {
-    if (item.status === "published" && item.publishedAt) {
-      const at = item.publishedAt;
-      if (!lastPublishedAt || at > lastPublishedAt) lastPublishedAt = at;
-    }
-  }
-
-  await sb.from("school_comms_desk_sync_meta").upsert(
-    {
-      tenant_id: tenantId,
-      notice_count: notices.length,
-      news_count: news.length,
-      album_count: albums.length,
-      photo_count: photos.length,
-      last_published_at: lastPublishedAt,
-      updated_at: now,
-    },
-    { onConflict: "tenant_id" },
-  );
-
+  await touchCommsMeta(sb, tenantId, now).catch(() => undefined);
   return { ok: true };
 }
 
@@ -366,10 +445,10 @@ export async function fetchSchoolCommsDeskFromDb(): Promise<{
     { data: photoRows, error: photoErr },
     { data: metaRow },
   ] = await Promise.all([
-    sb.from("school_comms_desk_notices").select("*").eq("tenant_id", tenantId),
-    sb.from("school_comms_desk_news").select("*").eq("tenant_id", tenantId),
-    sb.from("school_comms_desk_albums").select("*").eq("tenant_id", tenantId),
-    sb.from("school_comms_desk_photos").select("*").eq("tenant_id", tenantId),
+    readAllComms(sb, tenantId, "school_comms_desk_notices"),
+    readAllComms(sb, tenantId, "school_comms_desk_news"),
+    readAllComms(sb, tenantId, "school_comms_desk_albums"),
+    readAllComms(sb, tenantId, "school_comms_desk_photos"),
     sb
       .from("school_comms_desk_sync_meta")
       .select(META_SELECT)
@@ -440,7 +519,7 @@ export async function pushGalleryDeskToDb(
     ["school_comms_desk_photos", photos.map((p) => photoToRow(tenantId, p))],
   ];
   for (const [table, rows] of tables) {
-    const r = await upsertChunks(sb, table, rows);
+    const r = await writeCommsRows(sb, tenantId, table, rows);
     if (!r.ok) return r;
   }
   {
@@ -451,25 +530,7 @@ export async function pushGalleryDeskToDb(
     if (!del.ok) return del;
   }
 
-  const { data: metaRow } = await sb
-    .from("school_comms_desk_sync_meta")
-    .select(META_SELECT)
-    .eq("tenant_id", tenantId)
-    .maybeSingle();
-
-  await sb.from("school_comms_desk_sync_meta").upsert(
-    {
-      tenant_id: tenantId,
-      notice_count: Number(metaRow?.notice_count ?? 0),
-      news_count: Number(metaRow?.news_count ?? 0),
-      album_count: albums.length,
-      photo_count: photos.length,
-      last_published_at: metaRow?.last_published_at ?? null,
-      updated_at: now,
-    },
-    { onConflict: "tenant_id" },
-  );
-
+  await touchCommsMeta(sb, tenantId, now).catch(() => undefined);
   return { ok: true };
 }
 
@@ -489,8 +550,8 @@ export async function fetchGalleryDeskFromDb(): Promise<{
     { data: photoRows, error: photoErr },
     { data: metaRow },
   ] = await Promise.all([
-    sb.from("school_comms_desk_albums").select("*").eq("tenant_id", tenantId),
-    sb.from("school_comms_desk_photos").select("*").eq("tenant_id", tenantId),
+    readAllComms(sb, tenantId, "school_comms_desk_albums"),
+    readAllComms(sb, tenantId, "school_comms_desk_photos"),
     sb
       .from("school_comms_desk_sync_meta")
       .select("album_count, photo_count, updated_at")
@@ -545,46 +606,14 @@ export async function pushNewsDeskToDb(
   const goneNews = goneOf(deletes, "school_comms_desk_news");
   const news = (bundle.news ?? []).filter((n) => !goneNews.has(n.id));
 
-  const rows = news.map((n) => newsToRow(tenantId, n));
-  if (rows.length > 0) {
-    const r = await upsertChunks(sb, "school_comms_desk_news", rows);
-    if (!r.ok) return r;
-  }
+  const r = await writeCommsRows(sb, tenantId, "school_comms_desk_news", news.map((n) => newsToRow(tenantId, n)));
+  if (!r.ok) return r;
   {
     const del = await applyNamedCommsDeletes(sb, tenantId, deletes, ["school_comms_desk_news"]);
     if (!del.ok) return del;
   }
 
-  const { data: metaRow } = await sb
-    .from("school_comms_desk_sync_meta")
-    .select(META_SELECT)
-    .eq("tenant_id", tenantId)
-    .maybeSingle();
-
-  let lastPublishedAt: string | null = metaRow?.last_published_at
-    ? String(metaRow.last_published_at)
-    : null;
-  for (const item of news) {
-    if (item.status === "published" && item.publishedAt) {
-      if (!lastPublishedAt || item.publishedAt > lastPublishedAt) {
-        lastPublishedAt = item.publishedAt;
-      }
-    }
-  }
-
-  await sb.from("school_comms_desk_sync_meta").upsert(
-    {
-      tenant_id: tenantId,
-      notice_count: Number(metaRow?.notice_count ?? 0),
-      news_count: news.length,
-      album_count: Number(metaRow?.album_count ?? 0),
-      photo_count: Number(metaRow?.photo_count ?? 0),
-      last_published_at: lastPublishedAt,
-      updated_at: now,
-    },
-    { onConflict: "tenant_id" },
-  );
-
+  await touchCommsMeta(sb, tenantId, now).catch(() => undefined);
   return { ok: true };
 }
 
@@ -601,7 +630,7 @@ export async function fetchNewsDeskFromDb(): Promise<{
 
   const [{ data: newsRows, error: newsErr }, { data: metaRow }] =
     await Promise.all([
-      sb.from("school_comms_desk_news").select("*").eq("tenant_id", tenantId),
+      readAllComms(sb, tenantId, "school_comms_desk_news"),
       sb
         .from("school_comms_desk_sync_meta")
         .select("news_count, updated_at")
