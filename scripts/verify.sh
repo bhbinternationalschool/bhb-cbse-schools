@@ -127,6 +127,7 @@ SELFTESTS=(
   test:job-desk
   test:admissions-library-rte-ptm-exams-no-prune
   test:fee-adjustments-merge
+  test:wa-threads-trust-no-prune
   test:parent-bot-clarify
   test:office-backlog
   test:comms-attendance-leave-no-prune

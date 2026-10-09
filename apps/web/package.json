@@ -168,6 +168,7 @@
     "test:job-desk": "npx tsx src/lib/jobDesk.selftest.ts",
     "test:admissions-library-rte-ptm-exams-no-prune": "npx tsx src/lib/admissionsLibraryRtePtmExamsNoPrune.selftest.ts",
     "test:fee-adjustments-merge": "npx tsx src/lib/feeAdjustmentsMerge.selftest.ts",
+    "test:wa-threads-trust-no-prune": "npx tsx src/lib/waThreadsTrustNoPrune.selftest.ts",
     "test:parent-bot-clarify": "npx tsx src/lib/parentBotClarify.selftest.ts",
     "test:office-backlog": "npx tsx src/lib/officeBacklog.selftest.ts",
     "test:comms-attendance-leave-no-prune": "npx tsx src/lib/commsAttendanceLeaveNoPrune.selftest.ts",
