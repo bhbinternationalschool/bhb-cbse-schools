@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The voice clips are named only by string (the server's channel id and the
+     app's channel list), so resource shrinking would think they are unused. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@raw/bhb_voice_*" />

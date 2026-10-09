@@ -3,6 +3,7 @@
  * Teachers post → draft → YES confirms → fills ERP modules + broadcasts to parents/teachers.
  */
 
+import { matchSubject } from "@/lib/classChannelSubject";
 import { promises as fs } from "fs";
 import path from "path";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
@@ -211,22 +212,6 @@ function matchClassSection(
     sectionId: sec.id,
     label: `${cls.name || cls.id} · ${sec.name || ""}`.trim(),
   };
-}
-
-function matchSubject(
-  masters: MastersState,
-  hint: string,
-): { id: string; name: string } | null {
-  if (!hint) return null;
-  const subjects = masters.subjects ?? [];
-  const h = hint.toLowerCase();
-  const hit = subjects.find((s) => {
-    const en = (s.nameEn || "").toLowerCase();
-    const code = (s.code || "").toLowerCase();
-    return en === h || en.includes(h) || code === h;
-  });
-  if (!hit) return null;
-  return { id: hit.id, name: hit.nameEn || hit.code || hit.id };
 }
 
 export function buildChannelMembers(
@@ -929,6 +914,13 @@ export async function markClassChannelDraftApplied(
   await writeStore(store);
 }
 
+/** The newest pending draft id across all of this number's class threads. */
+function pendingDraftForMobile(store: { threads: { mobile: string; pendingDraftId?: string | null }[]; drafts: { id: string; status: string; createdAt: string }[] }, mobile: string): string {
+  const ids = new Set(store.threads.filter((t) => t.mobile === mobile && t.pendingDraftId).map((t) => String(t.pendingDraftId)));
+  const pending = store.drafts.filter((d) => ids.has(d.id) && d.status === "pending").sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return pending[0]?.id ?? "";
+}
+
 /**
  * The class-channel draft this teacher's number is waiting to confirm, or
  * null. Used to know whether a plain "yes" is for that draft or for
@@ -1071,7 +1063,10 @@ export async function handleWaClassChannelInbound(msg: {
     const teachers = ch.members.filter((m) => m.role !== "parent").length;
     replyText = `${ch.label}\nTeachers: ${teachers}\nParents (WhatsApp): ${parents}\nTotal members: ${ch.members.length}`;
   } else if (parsed.kind === "confirm") {
-    const draftId = thread.pendingDraftId;
+    // YES names no class, so `thread` is the teacher's first section. The
+    // draft may be for any of their sections (9 Oct 2026: a draft for a
+    // teacher's second class answered "No pending draft").
+    const draftId = pendingDraftForMobile(store, mobile) || thread.pendingDraftId;
     if (!draftId) {
       replyText = "No pending draft. Send HW / NOTICE / … first.";
     } else {
@@ -1133,8 +1128,9 @@ export async function handleWaClassChannelInbound(msg: {
       }
     }
   } else if (parsed.kind === "cancel") {
-    if (thread.pendingDraftId) {
-      await cancelClassChannelDraft(thread.pendingDraftId);
+    const cancelId = pendingDraftForMobile(store, mobile) || thread.pendingDraftId;
+    if (cancelId) {
+      await cancelClassChannelDraft(cancelId);
       replyText = "Draft cancelled.";
     } else {
       replyText = "No pending draft to cancel.";
