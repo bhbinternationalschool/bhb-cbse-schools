@@ -187,6 +187,7 @@ SELFTESTS=(
   test:timetable-free-grid
   test:udise-teacher-apaar
   test:udise-teacher-sync
+  test:desk-probe-allowlist
   test:full-storage-loaders
   test:cashfree-settlements
   test:holiday-calendar-view

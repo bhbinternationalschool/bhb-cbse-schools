@@ -101,9 +101,27 @@ async function deleteStale(
   const stale = (data ?? [])
     .map((r) => String((r as { id: string }).id))
     .filter((id) => !keepIds.has(id));
-  if (stale.length > 0) {
-    await sb.from(table).delete().in("id", stale);
+  const del = await deleteIdsInChunks(sb, table, tenantId, stale);
+  if (!del.ok) console.error(`[${table}] prune failed:`, del.error);
+}
+
+/**
+ * Delete rows by id in chunks. One .in("id", [...]) with hundreds of long
+ * ids ("pl_…:acad:stu_…:fsl_…") makes a URL past PostgREST's limit and the
+ * whole DELETE is refused (400) — 21 times on 8–9 Oct 2026, unnoticed
+ * because nothing read the error.
+ */
+async function deleteIdsInChunks(
+  sb: NonNullable<Awaited<ReturnType<typeof getServerTenantContext>>>["sb"],
+  table: string,
+  tenantId: string,
+  ids: string[],
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  for (let i = 0; i < ids.length; i += 50) {
+    const { error } = await sb.from(table).delete().eq("tenant_id", tenantId).in("id", ids.slice(i, i + 50));
+    if (error) return { ok: false, error: error.message };
   }
+  return { ok: true };
 }
 
 function linkToRows(
@@ -263,12 +281,16 @@ export async function pushPaymentLinksToDb(
         .order("id", { ascending: true })
         .range(from, to),
   );
+  // Only lines that are GONE from a link are deleted — the rest are upserted
+  // below. Deleting every line of every active link in one request made a URL
+  // too long for PostgREST: the delete was refused (400) and a line removed
+  // from a link (a waived fee) lived on beside the current ones.
+  const currentLineIds = new Set(lines.map((l) => String((l as { id: string }).id)));
   const staleLineIds = (existingLines ?? [])
-    .filter((r) => linkIds.has(String(r.payment_link_id)))
+    .filter((r) => linkIds.has(String(r.payment_link_id)) && !currentLineIds.has(String(r.id)))
     .map((r) => String(r.id));
-  if (staleLineIds.length) {
-    await sb.from("payment_desk_link_lines").delete().in("id", staleLineIds);
-  }
+  const delLines = await deleteIdsInChunks(sb, "payment_desk_link_lines", tenantId, staleLineIds);
+  if (!delLines.ok) return { ok: false, count: 0, error: `Could not remove old link lines: ${delLines.error}` };
 
   for (let i = 0; i < lines.length; i += 500) {
     const { error } = await sb
