@@ -204,6 +204,7 @@ SELFTESTS=(
   test:install-platform
   test:homework-no-prune
   test:accounts-seed-after-pull
+  test:ptm-rte-seed-after-pull
   test:class-channel-subject
   test:review-demo-hidden
   test:payment-link-reuse
