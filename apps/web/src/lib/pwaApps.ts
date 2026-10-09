@@ -195,15 +195,3 @@ export function parentPwaInstallCopy(): {
     iosHint: "Tap Share → Add to Home Screen for fees & homework.",
   };
 }
-
-export function loginPwaInstallCopy(): {
-  title: string;
-  subtitle: string;
-  iosHint: string;
-} {
-  return {
-    title: "Install BHB School app",
-    subtitle: "One icon — sign in as parent, staff or field",
-    iosHint: "Add to Home Screen, then sign in with your role.",
-  };
-}
