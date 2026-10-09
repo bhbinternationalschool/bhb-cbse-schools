@@ -13,7 +13,8 @@ import type { InstallmentPlan, PlanAllocation } from "@/lib/installmentPlans";
 import type { FeeDeskAncillary } from "@/lib/feesDeskAncillary.types";
 import { feesDualWriteDbEnabled } from "@/lib/feesDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
-import { fetchAllPages } from "@/lib/supabase/pageAll";
+import { fetchAllPages, fetchByIds } from "@/lib/supabase/pageAll";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { replaceChildRows } from "./replaceChildRows.server";
 import { deleteNamedIds, type NamedDeletes } from "@/lib/deskNamedDeletes.server";
 
@@ -37,6 +38,77 @@ async function ctx() {
 
 /** The only fee-ancillary table a desk save deletes from — by named id. */
 export const FEE_ANCILLARY_DELETABLE_TABLES = ["fee_desk_day_closes"] as const;
+
+type Row = Record<string, unknown>;
+const at = (v: unknown) => {
+  const t = Date.parse(String(v ?? ""));
+  return Number.isFinite(t) ? t : -Infinity;
+};
+const CHEQUE_RANK: Record<string, number> = { received: 0, deposited: 1, cleared: 2, bounced: 2 };
+const closeActionAt = (r: Row) => Math.max(at(r.created_at), at(r.submitted_at), at(r.resolved_at));
+
+/**
+ * Whether the stored row is further along than this copy of it — a copy
+ * that must not be written (2026-10-10). Every save upserted every row it
+ * held, and the payload is often the server's cached desk (gateway
+ * settlement, the staff app's collect, refunds): a cheque cleared at the
+ * counter went back to "received", a voided charge came back, a cancelled
+ * plan became active again, a submitted day close went back to draft.
+ */
+export const FEE_STALE_RULES: Record<string, { cols: string; stale: (stored: Row, mine: Row) => boolean }> = {
+  // received → deposited → cleared | bounced; never backwards, and the two
+  // ends are final.
+  fee_desk_cheques: {
+    cols: "id, status",
+    stale: (s, m) => {
+      const a = CHEQUE_RANK[String(s.status)] ?? 0;
+      const b = CHEQUE_RANK[String(m.status)] ?? 0;
+      return a > b || (a === 2 && s.status !== m.status);
+    },
+  },
+  // draft → submitted → approved | rejected → (resubmitted). The latest
+  // action wins; approved is final.
+  fee_desk_day_closes: {
+    cols: "id, status, created_at, submitted_at, resolved_at",
+    stale: (s, m) => (s.status === "approved" && m.status !== "approved") || closeActionAt(s) > closeActionAt(m),
+  },
+  // Voided stays voided.
+  fee_desk_charge_vouchers: { cols: "id, voided_at", stale: (s, m) => !!s.voided_at && !m.voided_at },
+  fee_desk_carried_forward: { cols: "id, voided_at", stale: (s, m) => !!s.voided_at && !m.voided_at },
+  // Completed ↔ active is real (voiding a receipt reopens a plan);
+  // cancelled is final.
+  fee_desk_installment_plans: { cols: "id, status", stale: (s, m) => s.status === "cancelled" && m.status !== "cancelled" },
+};
+
+/** `rows` without those whose stored copy is further along. A failed read writes nothing. */
+export async function withoutStale(
+  sb: SupabaseClient,
+  tenantId: string,
+  table: string,
+  rows: Row[],
+): Promise<{ ok: true; rows: Row[]; kept: string[] } | { ok: false; error: string }> {
+  const rule = FEE_STALE_RULES[table];
+  if (!rule || !rows.length) return { ok: true, rows, kept: [] };
+  const stored = await fetchByIds<Row>(rows.map((r) => String(r.id)), (chunk, from, to) =>
+    sb.from(table).select(rule.cols).eq("tenant_id", tenantId).in("id", chunk).order("id", { ascending: true }).range(from, to) as unknown as PromiseLike<{
+      data: Row[] | null;
+      error: { message: string } | null;
+    }>,
+  );
+  if (stored.error) return { ok: false, error: `${table}: could not read the stored rows (${stored.error}) — nothing was written` };
+  const byId = new Map(stored.rows.map((r) => [String(r.id), r]));
+  const kept: string[] = [];
+  const out = rows.filter((r) => {
+    const cur = byId.get(String(r.id));
+    if (cur && rule.stale(cur, r)) {
+      kept.push(String(r.id));
+      return false;
+    }
+    return true;
+  });
+  if (kept.length) console.warn(`[fees-db] ${table}: kept ${kept.length} stored row(s) further along than this copy`);
+  return { ok: true, rows: out, kept };
+}
 
 /**
  * No prune by absence. Each of these tables used to lose every row the
@@ -82,7 +154,9 @@ export async function pushFeeDeskAncillaryToDb(
       cheque_json: {},
       updated_at: now,
     }));
-    const { error } = await sb.from("fee_desk_cheques").upsert(rows, { onConflict: "id" });
+    const fresh = await withoutStale(sb, tenantId, "fee_desk_cheques", rows);
+    if (!fresh.ok) return fresh;
+    const { error } = await sb.from("fee_desk_cheques").upsert(fresh.rows, { onConflict: "id" });
     if (error) return { ok: false, error: error.message };
   }
 
@@ -128,7 +202,9 @@ export async function pushFeeDeskAncillaryToDb(
       },
       updated_at: now,
     }));
-    const { error } = await sb.from("fee_desk_day_closes").upsert(rows, { onConflict: "id" });
+    const fresh = await withoutStale(sb, tenantId, "fee_desk_day_closes", rows);
+    if (!fresh.ok) return fresh;
+    const { error } = await sb.from("fee_desk_day_closes").upsert(fresh.rows, { onConflict: "id" });
     if (error) return { ok: false, error: error.message };
   }
 
@@ -150,6 +226,7 @@ export async function pushFeeDeskAncillaryToDb(
       });
     }
   }
+  const skippedCharges = new Set<string>();
   if (charges.length) {
     const rows = charges.map((cv: ChargeVoucher) => ({
       id: cv.id,
@@ -170,12 +247,17 @@ export async function pushFeeDeskAncillaryToDb(
       voided_by: cv.voidedBy || "",
       updated_at: now,
     }));
+    const fresh = await withoutStale(sb, tenantId, "fee_desk_charge_vouchers", rows);
+    if (!fresh.ok) return fresh;
+    for (const id of fresh.kept) skippedCharges.add(id);
     const { error } = await sb
       .from("fee_desk_charge_vouchers")
-      .upsert(rows, { onConflict: "id" });
+      .upsert(fresh.rows, { onConflict: "id" });
     if (error) return { ok: false, error: error.message };
   }
-  if (chargeLineRows.length) {
+  // A charge whose stored copy is further along keeps its stored lines too.
+  const lineRows = chargeLineRows.filter((l) => !skippedCharges.has(String(l.charge_voucher_id)));
+  if (lineRows.length) {
     // One transaction. A charge voucher stripped of its lines is a charge
     // with an amount and nothing saying what was charged for.
     const write = await replaceChildRows(sb, {
@@ -184,8 +266,12 @@ export async function pushFeeDeskAncillaryToDb(
       // Only charges that arrived WITH lines. Matching every charge in the
       // payload wiped the stored lines of any charge sent without its lines
       // (a compacted or stale copy) — the receipt-lines wipe, again.
-      match: { charge_voucher_id: charges.filter((c) => (c.lines ?? []).length > 0).map((c) => c.id) },
-      rows: chargeLineRows,
+      match: {
+        charge_voucher_id: charges
+          .filter((c) => (c.lines ?? []).length > 0 && !skippedCharges.has(c.id))
+          .map((c) => c.id),
+      },
+      rows: lineRows,
     });
     if (!write.ok) return { ok: false, error: write.error };
   }
@@ -202,9 +288,11 @@ export async function pushFeeDeskAncillaryToDb(
       plan_json: p,
       updated_at: now,
     }));
+    const fresh = await withoutStale(sb, tenantId, "fee_desk_installment_plans", rows);
+    if (!fresh.ok) return fresh;
     const { error } = await sb
       .from("fee_desk_installment_plans")
-      .upsert(rows, { onConflict: "id" });
+      .upsert(fresh.rows, { onConflict: "id" });
     if (error) return { ok: false, error: error.message };
   }
 
@@ -225,9 +313,10 @@ export async function pushFeeDeskAncillaryToDb(
       amount_paise: a.amountPaise,
       created_at: a.createdAt,
     }));
+    // Made with the receipt and never changed — only ever added.
     const { error } = await sb
       .from("fee_desk_plan_allocations")
-      .upsert(rows, { onConflict: "id" });
+      .upsert(rows, { onConflict: "id", ignoreDuplicates: true });
     if (error) return { ok: false, error: error.message };
   }
   if (voided.size) {
@@ -262,22 +351,28 @@ export async function pushFeeDeskAncillaryToDb(
       },
       updated_at: now,
     }));
+    const fresh = await withoutStale(sb, tenantId, "fee_desk_carried_forward", rows);
+    if (!fresh.ok) return fresh;
     const { error } = await sb
       .from("fee_desk_carried_forward")
-      .upsert(rows, { onConflict: "id" });
+      .upsert(fresh.rows, { onConflict: "id" });
     if (error) return { ok: false, error: error.message };
   }
 
-  await sb.from("fee_desk_sync_meta").upsert(
-    {
-      tenant_id: tenantId,
-      cheque_count: cheques.length,
-      charge_voucher_count: charges.filter((c) => !c.voidedAt).length,
-      ancillary_updated_at: now,
-      updated_at: now,
-    },
-    { onConflict: "tenant_id" },
-  );
+  // Counts from the tables, not from this copy (it may be partly written).
+  const [chq, chg] = await Promise.all([
+    sb.from("fee_desk_cheques").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId),
+    sb
+      .from("fee_desk_charge_vouchers")
+      .select("id", { count: "exact", head: true })
+      .eq("tenant_id", tenantId)
+      .is("voided_at", null),
+  ]);
+  const meta: Record<string, unknown> = { tenant_id: tenantId, ancillary_updated_at: now, updated_at: now };
+  // A failed count leaves the old figure alone rather than writing a zero.
+  if (!chq.error && typeof chq.count === "number") meta.cheque_count = chq.count;
+  if (!chg.error && typeof chg.count === "number") meta.charge_voucher_count = chg.count;
+  await sb.from("fee_desk_sync_meta").upsert(meta, { onConflict: "tenant_id" });
 
   return { ok: true };
 }
