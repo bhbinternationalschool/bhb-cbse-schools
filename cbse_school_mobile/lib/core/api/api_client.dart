@@ -3103,6 +3103,30 @@ class ApiClient {
     }
   }
 
+  /// The family's bus pickup point: riders, current pin, the stops of their
+  /// routes, the school, and whether they said "Not now" before.
+  Future<Map<String, dynamic>> fetchPickupPin() =>
+      _getData("/api/v1/transport/pickup-pin");
+
+  /// Saves one pickup point for every riding child. Throws [ApiException]
+  /// (with the server's reason, e.g. too far from school) if not stored.
+  Future<Map<String, dynamic>> savePickupPin({
+    required double lat,
+    required double lng,
+    double? accuracyM,
+  }) =>
+      _postData("/api/v1/transport/pickup-pin", {
+        "action": "save",
+        "lat": lat,
+        "lng": lng,
+        "accuracyM": ?accuracyM,
+      });
+
+  /// "Not now" — recorded so the family is not asked again.
+  Future<void> declinePickupPin() async {
+    await _postData("/api/v1/transport/pickup-pin", {"action": "decline"});
+  }
+
   /// Reports an AI reply as wrong, unsafe or offensive.
   ///
   /// The reply text is sent back because the server keeps only a hash of

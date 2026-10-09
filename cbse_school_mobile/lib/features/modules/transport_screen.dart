@@ -4,6 +4,7 @@ import "package:url_launcher/url_launcher.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
+import "pickup_pin_screen.dart";
 import "bus_live_map_screen.dart";
 import "bus_routes_screen.dart";
 import "module_shell.dart";
@@ -159,6 +160,29 @@ class _ChildCard extends StatelessWidget {
                   },
                   icon: const Icon(Icons.location_on_outlined, size: 18),
                   label: Text(context.l10n.busLiveBusLocation),
+                ),
+              ),
+              const SizedBox(height: 6),
+              // Where this child boards — a pin the transport office plans
+              // stops from (pickup_pin_screen.dart). One pin for every
+              // riding child of the family.
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Haptics.tap();
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => PickupPinScreen(api: api),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.push_pin_outlined, size: 18),
+                  label: Text(
+                    Localizations.localeOf(context).languageCode == "hi"
+                        ? "मेरा पिकअप पॉइंट लगाएँ"
+                        : "Set my pickup point",
+                  ),
                 ),
               ),
             ] else ...[

@@ -107,7 +107,7 @@ async function closeRequest(
  * A webhook has no session to ask, and answering for the wrong year would
  * report "no riding children" to a family whose child rides every day.
  */
-async function ridersOfHousehold(
+export async function ridersOfHousehold(
   householdId: string,
 ): Promise<{ studentId: string; fullName: string }[]> {
   const [desk, sisRes] = await Promise.all([
