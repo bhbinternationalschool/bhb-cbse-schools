@@ -421,6 +421,7 @@ SELFTESTS=(
   test:slice-cas
   test:slice-rev-merge
   test:slice-rev-server
+  test:slice-rev-client
   test:wa-contact-state
   test:wa-delivery-log
   test:wa-meta-account-alerts

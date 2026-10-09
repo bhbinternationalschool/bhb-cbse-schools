@@ -12,6 +12,7 @@ import {
 import {
   hydrateTrustDeskFromDb,
   scheduleTrustDeskSync,
+  captureTrustRevs,
 } from "@/lib/trustNormalizedClient";
 import { mergeDbDeskIntoTrustState } from "@/lib/trustNormalizedMerge";
 import { trustReadFromDbEnabled } from "@/lib/trustDbConfig";
@@ -77,7 +78,7 @@ export async function ensureTrustHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed, ok } = await hydrateTrustDeskFromDb(readFromDb);
+  const { bundle, changed, ok, server } = await hydrateTrustDeskFromDb(readFromDb);
   if (!ok) {
     // Fetch failed — do not lock hydration flag; caller can retry later.
     return blobChanged;
@@ -92,6 +93,8 @@ export async function ensureTrustHydrated(): Promise<boolean> {
     );
     normChanged = true;
   }
+  // Each row's server version, against this browser's copy of it.
+  captureTrustRevs(server, loadTrust());
 
   // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
 

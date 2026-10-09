@@ -12,6 +12,7 @@ import {
 import {
   hydrateTransportDeskFromDb,
   scheduleTransportDeskSync,
+  captureTransportRevs,
 } from "@/lib/transportNormalizedClient";
 import { mergeDbDeskIntoTransportState } from "@/lib/transportNormalizedMerge";
 import { transportReadFromDbEnabled } from "@/lib/transportDbConfig";
@@ -82,7 +83,7 @@ async function hydrateTransportOnce(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed, ok } = await hydrateTransportDeskFromDb(readFromDb);
+  const { bundle, changed, ok, server } = await hydrateTransportDeskFromDb(readFromDb);
   if (!ok) {
     // Fetch failed — do not lock hydration flag; caller can retry later.
     return blobChanged;
@@ -101,6 +102,8 @@ async function hydrateTransportOnce(): Promise<boolean> {
     );
     normChanged = true;
   }
+  // Each row's server version, against this browser's copy of it.
+  captureTransportRevs(server, loadTransport());
 
   // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
 

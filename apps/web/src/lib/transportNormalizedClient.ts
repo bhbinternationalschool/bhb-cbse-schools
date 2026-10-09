@@ -10,6 +10,13 @@ import {
   recordDeskSyncSuccess,
 } from "@/lib/deskSyncStatus";
 import { recordTransportDeskAnswer } from "@/lib/transportHydrationState";
+import {
+  applySaveRevs,
+  buildSaveRevs,
+  captureRevBase,
+  onSaveConflicts,
+  type RevSlices,
+} from "@/lib/sliceRevClient";
 
 const META_KEY = "bhb_transport_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -129,12 +136,44 @@ export function scheduleTransportDeskSync(state: TransportState) {
   }, DESK_PUSH_DEBOUNCE_MS);
 }
 
+/** The transport lists that carry per-row server versions (every list). */
+const TRANSPORT_REV: RevSlices = {
+  slices: [
+    "routes",
+    "assignments",
+    "vehicles",
+    "dealers",
+    "fuelStockLocations",
+    "fuelPurchases",
+    "fuelRefillLogs",
+    "payables",
+    "vehicleLoans",
+    "emiSchedule",
+    "insurancePolicies",
+    "certificateRenewals",
+    "serviceJobCards",
+    "repairRequests",
+    "boardingEvents",
+    "gpsPings",
+    "staffRiders",
+  ],
+};
+
+/** After a load: the server's row versions, as this browser now holds the rows. */
+export function captureTransportRevs(server: Record<string, unknown> | undefined, local: TransportState) {
+  if (server) captureRevBase("transport", server, local as unknown as Record<string, unknown>, TRANSPORT_REV);
+}
+
 async function pushTransportDeskApi(state: TransportState) {
   try {
+    // Which rows this save changed, and from which server version: only
+    // those are written, and only if nobody changed them first (a driver's
+    // boarding tap included).
+    const sentRevs = buildSaveRevs("transport", state as unknown as Record<string, unknown>, TRANSPORT_REV);
     const res = await fetch("/api/school-data/transport-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(state),
+      body: JSON.stringify({ ...state, revs: sentRevs }),
     });
     const body = (await res.json().catch(() => null)) as {
       ok?: boolean;
@@ -142,8 +181,12 @@ async function pushTransportDeskApi(state: TransportState) {
       routeCount?: number;
       vehicleCount?: number;
       error?: string;
+      revs?: Record<string, Record<string, number>>;
+      conflicts?: Record<string, string[]>;
     } | null;
     if (res.ok && body?.ok) {
+      applySaveRevs("transport", state as unknown as Record<string, unknown>, sentRevs, body, TRANSPORT_REV);
+      onSaveConflicts("transport", "transport", body.conflicts);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         routeCount: body.routeCount ?? state.routes.length,
@@ -170,6 +213,8 @@ export async function hydrateTransportDeskFromDb(
   changed: boolean;
   /** false = fetch failed; bundle is NOT a confirmed empty state. */
   ok: boolean;
+  /** What the server sent (rows with their `_rev`), even when not taken. */
+  server?: Record<string, unknown>;
 }> {
   const empty = {
     feePolicy: {
@@ -266,14 +311,14 @@ export async function hydrateTransportDeskFromDb(
       remoteRoutes > meta.routeCount ||
       bundle.routes.length > 0 ||
       bundle.vehicles.length > 0;
-    if (!shouldTake) return { bundle: empty, changed: false, ok: true };
+    if (!shouldTake) return { bundle: empty, changed: false, ok: true, server: bundle };
     writeMeta({
       updatedAt: body.updatedAt || new Date().toISOString(),
       routeCount: remoteRoutes,
       vehicleCount: body.vehicleCount ?? bundle.vehicles.length,
       assignmentCount: remoteAssignments,
     });
-    return { bundle, changed: true, ok: true };
+    return { bundle, changed: true, ok: true, server: bundle };
   } catch {
     return { bundle: empty, changed: false, ok: false };
   }

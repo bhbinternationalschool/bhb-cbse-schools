@@ -19,6 +19,7 @@ import {
   hydrateDeskSliceFromDb,
   scheduleDeskSliceSync,
   rememberDeskSliceKnownIds,
+  captureDeskSliceRevs,
 } from "@/lib/deskSliceNormalizedClient";
 import { mergeDeskSliceBundle } from "@/lib/deskSliceMerge";
 import { pushDeskSliceToDb } from "@/lib/deskSliceNormalized.server";
@@ -99,7 +100,7 @@ export function createDeskSlicePersistence<T extends { version: number }>(opts: 
       : await blob.ensureHydrated();
 
     let normChanged = false;
-    const { bundle, changed, ok } = await hydrateDeskSliceFromDb(
+    const { bundle, changed, ok, server } = await hydrateDeskSliceFromDb(
       opts.moduleId,
       readFromDb,
     );
@@ -116,6 +117,12 @@ export function createDeskSlicePersistence<T extends { version: number }>(opts: 
     // of these rows deleted it (deskSliceNormalizedClient names it).
     rememberDeskSliceKnownIds(
       opts.moduleId,
+      opts.loadLocal() as unknown as Record<string, unknown>,
+    );
+    // And each row's server version, against this browser's copy of it.
+    captureDeskSliceRevs(
+      opts.moduleId,
+      server,
       opts.loadLocal() as unknown as Record<string, unknown>,
     );
 
