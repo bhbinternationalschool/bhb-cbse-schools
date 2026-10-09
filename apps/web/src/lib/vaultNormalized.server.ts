@@ -10,7 +10,9 @@ import type {
   VaultState,
 } from "@/lib/vault";
 import { vaultDualWriteDbEnabled } from "@/lib/vaultDbConfig";
+import { deleteNamedIds, type NamedDeletes } from "@/lib/deskNamedDeletes.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { fetchAllPages } from "@/lib/supabase/pageAll";
 
 export type VaultDeskSyncMeta = {
   documentCount: number;
@@ -32,63 +34,6 @@ async function resolveCtx(): Promise<{
   tenantId: string;
 } | null> {
   return getServerTenantContext();
-}
-
-/**
- * Delete rows the client no longer holds — never on an empty payload.
- *
- * An empty keep-set means every stored row is "stale", so this deleted the
- * entire table. That is never what a sync means: a client with nothing to say
- * is a client whose cache was dropped, not an instruction to erase the
- * school's records.
- *
- * It is not hypothetical. On 2026-08-11 the attendance register for the
- * previous day was gone — pushed away by a phone whose localStorage had been
- * dropped on quota, with the emptiness check running AFTER the delete. This
- * same function is copied into 20 modules and called from 86 places, almost
- * none of them guarded, covering bank and cash ledgers, payroll runs, fee
- * cheques, library issues and 1,919 admission records.
- *
- * This floor stops the catastrophic case everywhere at once. It does NOT make
- * a partial payload safe — a client holding 3 of 900 rows still prunes 897.
- * That needs per-module scoping, the way attendance now prunes only within
- * the dates its payload covers. See docs/TODO.md.
- *
- * The read error is also surfaced now. It was discarded, which happened to
- * fail safe here (no data → nothing deleted), but "we could not read the
- * table" and "the table is empty" must not be the same value in a function
- * that deletes.
- */
-async function deleteStale(
-  sb: SupabaseClient,
-  tenantId: string,
-  table: string,
-  keepIds: Set<string>,
-) {
-  if (keepIds.size === 0) {
-    console.warn(
-      `[${table}] refusing to prune: the payload holds no ids at all. ` +
-        "An empty client is not an instruction to delete every row.",
-    );
-    return;
-  }
-  const { data, error } = await sb
-    .from(table)
-    .select("id")
-    .eq("tenant_id", tenantId);
-  if (error) {
-    console.error(
-      `[${table}] prune skipped — could not read existing ids:`,
-      error.message,
-    );
-    return;
-  }
-  const stale = (data ?? [])
-    .map((r) => String((r as { id: string }).id))
-    .filter((id) => !keepIds.has(id));
-  if (stale.length > 0) {
-    await sb.from(table).delete().in("id", stale);
-  }
 }
 
 async function upsertChunks(
@@ -157,8 +102,12 @@ function countExpiringSoon(docs: VaultDocument[]): number {
   }).length;
 }
 
+/** The only vault table a desk save deletes from — by named id. */
+export const VAULT_DELETABLE_TABLES = ["vault_desk_documents"] as const;
+
 export async function pushVaultDeskToDb(
   state: VaultState,
+  deletes: NamedDeletes = {},
 ): Promise<{ ok: boolean; error?: string }> {
   if (!vaultDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
@@ -166,15 +115,9 @@ export async function pushVaultDeskToDb(
   const { sb, tenantId } = ctx;
   const now = new Date().toISOString();
 
-  const documents = state.documents ?? [];
+  const gone = new Set(deletes["vault_desk_documents"] ?? []);
+  const documents = (state.documents ?? []).filter((d) => !gone.has(d.id));
   const settings = state.settings ?? { digestMobiles: "" };
-
-  await deleteStale(
-    sb,
-    tenantId,
-    "vault_desk_documents",
-    new Set(documents.map((d) => d.id)),
-  );
 
   const r = await upsertChunks(
     sb,
@@ -182,6 +125,10 @@ export async function pushVaultDeskToDb(
     documents.map((d) => docToRow(tenantId, d)),
   );
   if (!r.ok) return r;
+  // No prune by absence: a document leaves the vault only when the user
+  // deletes it, and that deletion arrives named.
+  const del = await deleteNamedIds(sb, tenantId, "vault_desk_documents", [...gone]);
+  if (!del.ok) return del;
 
   await sb.from("vault_desk_settings").upsert(
     {
@@ -227,7 +174,10 @@ export async function fetchVaultDeskFromDb(): Promise<{
   const { sb, tenantId } = ctx;
 
   const [docRes, settingsRes, metaRes] = await Promise.all([
-    sb.from("vault_desk_documents").select("*").eq("tenant_id", tenantId),
+    // Paged: PostgREST stops at 1,000 rows and calls it success.
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from("vault_desk_documents").select("*").eq("tenant_id", tenantId).order("id").range(from, to),
+    ).then((r) => ({ data: r.rows, error: r.error ? { message: r.error } : null })),
     sb
       .from("vault_desk_settings")
       .select("digest_mobiles, last_expiry_digest_at")

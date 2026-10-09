@@ -50,6 +50,7 @@ import {
   type SalarySetupState,
 } from "@/lib/salarySetup";
 import { trackServerWork } from "@/lib/serverWork";
+import { recordPayrollRunDeletion } from "@/lib/payrollNormalizedClient";
 
 export type PayrollRunStatus =
   | "draft"
@@ -1753,6 +1754,7 @@ export function deletePayrollRun(runId: string, by = "system"): boolean {
     academicYearCode: run.academicYearCode,
     detail: `Deleted ${run.status} run · ${run.lines.length} staff`,
   };
+  if (typeof window !== "undefined") recordPayrollRunDeletion(run.id);
   savePayroll({
     version: 2,
     runs: state.runs.filter((r) => r.id !== runId),
