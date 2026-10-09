@@ -169,6 +169,9 @@ export function AccountsWorkspace() {
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as AccountsTab);
     else if (raw && LEGACY_TAB_MAP[raw]) setTab(LEGACY_TAB_MAP[raw]);
   }, []);
+  // Until the school's desk has been pulled (below), seedAccountsIfEmpty only
+  // reads — it neither seeds nor saves, so a fresh browser cannot push a
+  // seeded chart and cash pools over the real ones.
   const [state, setState] = useState<AccountsState | null>(() =>
     typeof window !== "undefined" ? seedAccountsIfEmpty() : null,
   );
@@ -210,10 +213,10 @@ export function AccountsWorkspace() {
     if (typeof window === "undefined") return;
     void (async () => {
       const { withHydrationSlot } = await import("@/lib/deskHydrateGuard");
-      const { ensureAccountsHydrated } = await import(
+      const { ensureAccountsSeeded } = await import(
         "@/lib/accountsPersistence"
       );
-      await withHydrationSlot(() => ensureAccountsHydrated());
+      await withHydrationSlot(() => ensureAccountsSeeded());
       refresh();
     })();
   }, []);
