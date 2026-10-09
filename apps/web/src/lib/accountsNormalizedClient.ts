@@ -6,6 +6,30 @@ import type { AccountsState } from "@/lib/accountsTypes";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 import { trackDeskPush } from "@/lib/deskSyncStatus";
+import {
+  confirmDeskDeletes,
+  pendingDeskDeletes,
+  recordDeskDeletion,
+} from "@/lib/deskNamedDeletes";
+
+/** Name the accounts desk uses in deskNamedDeletes. */
+const ACCOUNTS_DESK = "accounts";
+
+/**
+ * The user deleted a master row (bank account, chart head, expense category,
+ * vendor). A save no longer deletes what it leaves out, so the deletion has to
+ * be said; it rides every push until the server confirms it.
+ */
+export function recordAccountsDeletion(
+  table:
+    | "accounts_desk_bank_accounts"
+    | "accounts_desk_coa_accounts"
+    | "accounts_desk_expense_categories"
+    | "accounts_desk_vendors",
+  id: string,
+) {
+  recordDeskDeletion(ACCOUNTS_DESK, table, [id]);
+}
 
 const META_KEY = "bhb_accounts_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -96,10 +120,12 @@ function deskPayload(state: AccountsState) {
  */
 async function pushAccountsDeskApi(state: AccountsState) {
   await trackDeskPush("accounts", async () => {
+    const sentDeletes = pendingDeskDeletes(ACCOUNTS_DESK);
     const res = await fetch("/api/school-data/accounts-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(deskPayload(state)),
+      // Deletions are named, never inferred from what this browser lacks.
+      body: JSON.stringify({ ...deskPayload(state), deletes: sentDeletes }),
     });
     const body = (await res.json().catch(() => null)) as {
       ok?: boolean;
@@ -109,6 +135,7 @@ async function pushAccountsDeskApi(state: AccountsState) {
     } | null;
 
     if (res.ok && body?.ok) {
+      confirmDeskDeletes(ACCOUNTS_DESK, sentDeletes);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         coaCount: body.coaCount ?? state.coaAccounts.length,
