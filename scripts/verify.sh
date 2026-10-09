@@ -323,6 +323,7 @@ SELFTESTS=(
   test:answer-key-parse
   test:desk-shrink-guard
   test:desk-slice-no-prune
+  test:desk-slice-client-deletes
   test:nucleus-manifest
   test:nucleus-capture
   test:nucleus-handoff

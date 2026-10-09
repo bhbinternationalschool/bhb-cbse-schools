@@ -199,6 +199,12 @@ export async function POST(req: Request, ctx: RouteCtx) {
   // everyone the first time it fires.
   const allowShrink =
     !featureGate && new URL(req.url).searchParams.get("allowShrink") === "1";
+
+  // Deletions are named by the browser (rows it knew and has dropped — see
+  // deskSliceNormalizedClient), only for the slices the UI deletes from.
+  // Nothing a save merely lacks is deleted.
+  let deletes = readSliceDeletes(body.deletes, def.clientDeleteSlices ?? []);
+  delete (body as Record<string, unknown>).deletes;
   if (featureGate) {
     const stored = await fetchDeskSliceFromDb(id);
     if (!stored.ok) {
@@ -217,9 +223,17 @@ export async function POST(req: Request, ctx: RouteCtx) {
     );
     if (!merged.ok) return merged.response;
     if (!merged.changed) return featureSavedResponse(false);
+    // A function holder's deletion counts only if it was named AND the
+    // gate's merge actually dropped that row (its role may delete it).
+    deletes = gateAuthorizedSliceDeletes(
+      deletes,
+      def.mergeKeys ?? {},
+      stored.bundle as Record<string, unknown>,
+      merged.state as Record<string, unknown>,
+    );
     body = { ...(merged.state as typeof body), version: body.version };
   }
-  const result = await pushDeskSliceToDb(id, body, { allowShrink });
+  const result = await pushDeskSliceToDb(id, body, { allowShrink, deletes });
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error || "Sync failed" },
@@ -240,4 +254,40 @@ export async function POST(req: Request, ctx: RouteCtx) {
     // clock reading that would differ from the stored one.
     updatedAt: meta?.updatedAt || new Date().toISOString(),
   });
+}
+
+/** `deletes: { slice: ids[] }` from a push, kept only for the allowed slices. */
+function readSliceDeletes(raw: unknown, allowed: readonly string[]): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  for (const slice of allowed) {
+    const v = (raw as Record<string, unknown>)[slice];
+    if (!Array.isArray(v)) continue;
+    const ids = [...new Set(v.filter((x): x is string => typeof x === "string" && x !== ""))];
+    if (ids.length) out[slice] = ids.slice(0, 500);
+  }
+  return out;
+}
+
+function gateAuthorizedSliceDeletes(
+  named: Record<string, string[]>,
+  keys: Record<string, string>,
+  stored: Record<string, unknown>,
+  merged: Record<string, unknown>,
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const [slice, ids] of Object.entries(named)) {
+    const field = keys[slice] ?? "id";
+    const keysOf = (list: unknown) =>
+      new Set(
+        (Array.isArray(list) ? list : [])
+          .map((r) => (r && typeof r === "object" ? (r as Record<string, unknown>)[field] : undefined))
+          .filter((k): k is string => typeof k === "string" && k !== ""),
+      );
+    const before = keysOf(stored[slice]);
+    const after = keysOf(merged[slice]);
+    const ok = ids.filter((k) => before.has(k) && !after.has(k));
+    if (ok.length) out[slice] = ok;
+  }
+  return out;
 }

@@ -27,6 +27,15 @@ export type DeskSliceModuleDef = {
   mergeSlices?: string[];
   /** Newest-N cap kept after a merge, for logs the client also trims. */
   mergeCaps?: Record<string, { max: number; newestBy: string }>;
+  /** Merge slices whose rows are keyed by a field other than `id`. */
+  mergeKeys?: Record<string, string>;
+  /**
+   * Merge slices the UI deletes rows from. The browser names those
+   * deletions — rows it knew from the server and has since dropped (see
+   * deskSliceNormalizedClient) — and only those are deleted. Everything
+   * else a save lacks is kept.
+   */
+  clientDeleteSlices?: string[];
 };
 
 export const DESK_SLICE_MODULE_DEFS: DeskSliceModuleDef[] = [
@@ -39,6 +48,11 @@ export const DESK_SLICE_MODULE_DEFS: DeskSliceModuleDef[] = [
     sliceKeys: ["roles", "assignments", "audit", "userGrants"],
     objectSlices: ["mobile"],
     signalSlice: "roles",
+    // Roles, assignments and per-user grants are deleted in the UI (named,
+    // not inferred); the audit is append-only, newest 200 kept.
+    mergeSlices: ["roles", "assignments", "userGrants", "audit"],
+    mergeCaps: { audit: { max: 200, newestBy: "at" } },
+    clientDeleteSlices: ["roles", "assignments", "userGrants"],
   },
   {
     id: "certificates",
@@ -61,6 +75,9 @@ export const DESK_SLICE_MODULE_DEFS: DeskSliceModuleDef[] = [
     // What the school taught the paper importer about its publisher's words.
     objectSlices: ["importMappings"],
     signalSlice: "papers",
+    // Papers, banked questions and blueprints are deleted in the UI — named.
+    mergeSlices: ["papers", "bank", "blueprints"],
+    clientDeleteSlices: ["papers", "bank", "blueprints"],
   },
   {
     id: "wa_templates",
@@ -94,15 +111,20 @@ export const DESK_SLICE_MODULE_DEFS: DeskSliceModuleDef[] = [
     // Written by the staff app and the WhatsApp leave command as well as the
     // office. Leave requests are applied and decided from the phone and on
     // WhatsApp, and never deleted in the UI; the one server path that removes
-    // a request (withdraw) names it. leaveTypes and leaveBalances stay
-    // replaced: the UI deletes those.
+    // a request (withdraw) names it.
     mergeSlices: [
       "leaveRequests",
       "leaveEncashments",
       "leaveAllotmentLog",
       "appraisalCycles",
       "appraisals",
+      "leaveTypes",
+      "leaveBalances",
     ],
+    // Leave types are keyed by code. Types and balances are deleted in the UI
+    // (removing a type drops its balances) — named.
+    mergeKeys: { leaveTypes: "code" },
+    clientDeleteSlices: ["leaveTypes", "leaveBalances"],
   },
   {
     id: "staff_advances",
@@ -113,6 +135,9 @@ export const DESK_SLICE_MODULE_DEFS: DeskSliceModuleDef[] = [
     sliceKeys: ["advances"],
     objectSlices: [],
     signalSlice: "advances",
+    // Voiding an advance removes it — named.
+    mergeSlices: ["advances"],
+    clientDeleteSlices: ["advances"],
   },
   {
     id: "staff_agreements",

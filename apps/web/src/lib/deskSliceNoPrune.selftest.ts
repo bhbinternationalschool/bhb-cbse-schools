@@ -24,7 +24,7 @@ assert.ok(push.length > 500, "found the push");
 
 assert.equal(/\.delete\(\)/.test(push), false, "no slice row is deleted by a save");
 assert.ok(/return Array\.isArray\(payload\);/.test(push), "a carried list is written, empty included");
-assert.ok(/value = mergeSliceById\(stored\.get\(key\), payload\)/.test(push), "merge slices keep stored rows");
+assert.ok(/mergeSliceById\(stored\.get\(key\), payload\)/.test(push) && /mergeSliceByKey\(stored\.get\(key\), payload, mergeKey\)/.test(push), "merge slices keep stored rows");
 assert.ok(push.indexOf("if (existingErr)") < push.indexOf(".from(slicesTable).upsert("), "nothing is written when the desk cannot be read");
 assert.ok(/countPayloadRows\(def, after\)/.test(push), "the shrink guard judges what the desk holds afterwards");
 assert.ok(push.indexOf("judgeDeskShrink(") < push.indexOf(".from(slicesTable).upsert("), "the shrink guard runs before the write");
@@ -38,14 +38,16 @@ assert.deepEqual(deskSliceDef("automation")?.mergeCaps?.runs?.max, 200);
 assert.deepEqual(merged("erp_chat"), ["messages", "threads"]);
 assert.deepEqual(merged("staff_chat"), ["messages", "threads"]);
 assert.deepEqual(merged("wa_templates"), ["templates"]);
-assert.deepEqual(merged("staff_hr"), ["appraisalCycles", "appraisals", "leaveAllotmentLog", "leaveEncashments", "leaveRequests"]);
+assert.deepEqual(merged("staff_hr"), ["appraisalCycles", "appraisals", "leaveAllotmentLog", "leaveBalances", "leaveEncashments", "leaveRequests", "leaveTypes"]);
 assert.deepEqual(merged("fee_recovery_tasks"), ["meetings"]);
 assert.deepEqual(deskSliceDef("fee_recovery_tasks")?.mergeCaps?.meetings?.max, 2000);
-for (const id of ["rbac", "exam_papers", "staff_advances"] as const) {
-  assert.deepEqual(merged(id), [], `${id}: the UI or the server deletes rows — replaced, not merged`);
-}
+// The lists the UI deletes from merge too, with the browser naming its
+// deletions (test:desk-slice-client-deletes).
+assert.deepEqual(merged("rbac"), ["assignments", "audit", "roles", "userGrants"]);
+assert.deepEqual(merged("exam_papers"), ["bank", "blueprints", "papers"]);
+assert.deepEqual(merged("staff_advances"), ["advances"]);
 // Every merge slice is a real list of its module.
-for (const id of ["automation", "erp_chat", "staff_chat", "wa_templates", "staff_hr", "fee_recovery_tasks"] as const) {
+for (const id of ["automation", "erp_chat", "staff_chat", "wa_templates", "staff_hr", "fee_recovery_tasks", "rbac", "exam_papers", "staff_advances"] as const) {
   const def = deskSliceDef(id)!;
   for (const k of def.mergeSlices ?? []) assert.ok(def.sliceKeys.includes(k), `${id}.${k} is a slice`);
 }

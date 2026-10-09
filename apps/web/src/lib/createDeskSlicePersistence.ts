@@ -18,6 +18,7 @@ import { deskSliceDef, deskSliceEnvReadFromDb } from "@/lib/deskSliceRegistry";
 import {
   hydrateDeskSliceFromDb,
   scheduleDeskSliceSync,
+  rememberDeskSliceKnownIds,
 } from "@/lib/deskSliceNormalizedClient";
 import { mergeDeskSliceBundle } from "@/lib/deskSliceMerge";
 import { pushDeskSliceToDb } from "@/lib/deskSliceNormalized.server";
@@ -111,6 +112,12 @@ export function createDeskSlicePersistence<T extends { version: number }>(opts: 
       );
       normChanged = true;
     }
+    // What the server holds, as of this load: a later save that drops one
+    // of these rows deleted it (deskSliceNormalizedClient names it).
+    rememberDeskSliceKnownIds(
+      opts.moduleId,
+      opts.loadLocal() as unknown as Record<string, unknown>,
+    );
 
     // Hydration must never push. Writing the merged local copy straight back
     // is how a client with a stale cache overwrites the desk on every

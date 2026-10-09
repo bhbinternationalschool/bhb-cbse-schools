@@ -75,6 +75,24 @@ function resolveDef(id: DeskModuleId): DeskSliceModuleDef | null {
   return deskSliceDef(id) ?? null;
 }
 
+/**
+ * mergeSliceById for lists whose rows are keyed by another field (staff HR
+ * leave types by `code`): pushed rows win for their keys, stored rows the
+ * push lacks are kept.
+ */
+function mergeSliceByKey(stored: unknown, incoming: unknown[], field: string): unknown[] {
+  const keyOf = (r: unknown) =>
+    r && typeof r === "object" && typeof (r as Record<string, unknown>)[field] === "string"
+      ? String((r as Record<string, unknown>)[field])
+      : "";
+  const pushed = new Set(incoming.map(keyOf).filter(Boolean));
+  const kept = (Array.isArray(stored) ? stored : []).filter((r) => {
+    const k = keyOf(r);
+    return k !== "" && !pushed.has(k);
+  });
+  return [...incoming, ...kept];
+}
+
 export async function pushDeskSliceToDb(
   id: DeskModuleId,
   state: { version: number } & Record<string, unknown>,
@@ -160,7 +178,10 @@ export async function pushDeskSliceToDb(
     .map(({ key, payload }) => {
       let value: unknown = payload;
       if (merge.has(key) && Array.isArray(payload)) {
-        value = mergeSliceById(stored.get(key), payload);
+        const mergeKey = def.mergeKeys?.[key];
+        value = mergeKey
+          ? mergeSliceByKey(stored.get(key), payload, mergeKey)
+          : mergeSliceById(stored.get(key), payload);
         const cap = def.mergeCaps?.[key];
         if (cap) {
           value = (value as Record<string, unknown>[])
@@ -177,9 +198,10 @@ export async function pushDeskSliceToDb(
   for (const [key, ids] of Object.entries(opts?.deletes ?? {})) {
     if (!merge.has(key) || !ids.length) continue;
     const gone = new Set(ids);
+    const field = def.mergeKeys?.[key] ?? "id";
     const drop = (list: unknown) =>
       (Array.isArray(list) ? list : []).filter(
-        (r) => !(r && typeof r === "object" && gone.has(String((r as { id?: unknown }).id))),
+        (r) => !(r && typeof r === "object" && gone.has(String((r as Record<string, unknown>)[field]))),
       );
     const row = rows.find((r) => r.slice_key === key);
     if (row) row.payload = drop(row.payload);
