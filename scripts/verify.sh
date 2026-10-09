@@ -223,6 +223,7 @@ SELFTESTS=(
   test:review-demo-hidden
   test:payment-link-reuse
   test:student-leave-status-guard
+  test:ptm-row-stamps
   test:payment-link-status-guard
   test:attendance-today
   test:sis-wire-payload

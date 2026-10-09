@@ -21,14 +21,28 @@ import {
   fetchPtmDeskFromDb,
   pushPtmDeskToDb,
   PTM_DELETABLE_TABLES,
+  PTM_SLICES,
   PTM_TABLE_SLICES,
 } from "@/lib/ptmNormalized.server";
+import { readStampsParam, type RowStamps } from "@/lib/rowStampClient";
 import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
 import { featureAuthorizedDeletes } from "@/lib/deskNamedDeletesFeature.server";
 
 export const runtime = "nodejs";
 
 type PtmDeskBody = Pick<PtmState, "events" | "slots" | "bookings" | "feedback">;
+
+/** The stamps of the rows a response carries (a cut desk gets only its rows'). */
+function stampsFor(desk: PtmDeskBody, all: RowStamps): RowStamps {
+  const out: RowStamps = {};
+  for (const slice of PTM_SLICES) {
+    const from = all[slice] ?? {};
+    const m: Record<string, string> = {};
+    for (const r of desk[slice] ?? []) if (from[r.id]) m[r.id] = from[r.id];
+    out[slice] = m;
+  }
+  return out;
+}
 
 /**
  * A PTM function holder's copy: their slices, plus the events and slots
@@ -56,7 +70,7 @@ export async function GET(req: Request) {
     gate = await deskFeatureGateFor(req, "ptm", "read");
     if (!gate) return auth.response;
   }
-  const { bundle, meta, ok } = await fetchPtmDeskFromDb();
+  const { bundle, meta, ok, stamps } = await fetchPtmDeskFromDb();
   if (!ok) {
     return NextResponse.json(
       { ok: false, error: "PTM desk fetch failed — tenant/db unavailable" },
@@ -91,6 +105,7 @@ export async function GET(req: Request) {
           slots: cut.slots,
           bookings: cut.bookings,
           feedback: cut.feedback,
+          stamps: stampsFor(cut, stamps),
           eventCount: cut.events.length,
           ...(gate ? { functionOnly: true } : {}),
           updatedAt: meta?.updatedAt || new Date().toISOString(),
@@ -107,6 +122,7 @@ export async function GET(req: Request) {
     slots: desk.slots,
     bookings: desk.bookings,
     feedback: desk.feedback,
+    stamps: stampsFor(desk, stamps),
     eventCount: desk.events.length,
     ...(gate ? { functionOnly: true } : {}),
     updatedAt: meta?.updatedAt || new Date().toISOString(),
@@ -117,7 +133,7 @@ export async function GET(req: Request) {
 type PtmDeskPostBody = Pick<
   PtmState,
   "events" | "slots" | "bookings" | "feedback"
-> & { deletes?: unknown };
+> & { deletes?: unknown; stamps?: unknown };
 
 /** POST — push full PTM desk snapshot */
 export async function POST(req: Request) {
@@ -168,6 +184,8 @@ export async function POST(req: Request) {
 
   // Deletions are named by the desk, never inferred from what it lacks.
   let deletes = readNamedDeletes(body.deletes, PTM_DELETABLE_TABLES);
+  // The rows this browser changed and the stamp each was changed from.
+  const stamps = readStampsParam(body.stamps, PTM_SLICES);
 
   // Function holders (e.g. PTM → Meeting slots): merged onto the stored
   // desk, only their functions' slices — never the body as sent.
@@ -192,7 +210,7 @@ export async function POST(req: Request) {
     slots: Array.isArray(body.slots) ? body.slots : [],
     bookings: Array.isArray(body.bookings) ? body.bookings : [],
     feedback: Array.isArray(body.feedback) ? body.feedback : [],
-  }, deletes);
+  }, deletes, { stamps });
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error || "Sync failed" },
@@ -200,9 +218,14 @@ export async function POST(req: Request) {
     );
   }
 
-  if (gate) return featureSavedResponse(true);
+  const answer = { stamps: result.stamps ?? {}, conflicts: result.conflicts ?? {} };
+  if (gate) {
+    const saved = featureSavedResponse(true);
+    return NextResponse.json({ ...(await saved.json()), ...answer }, { status: saved.status });
+  }
   return NextResponse.json({
     ok: true,
+    ...answer,
     eventCount: body.events?.length ?? 0,
     updatedAt: new Date().toISOString(),
   });
