@@ -15,6 +15,7 @@ class MyCollectionsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<DayCollections>(
+      guideId: "my-collections",
       title: "My collections",
       load: () => api.fetchMyCollections(),
       emptyIcon: Icons.account_balance_wallet_outlined,

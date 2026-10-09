@@ -26,6 +26,7 @@ class _StaffComplaintsScreenState extends State<StaffComplaintsScreen> {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<StaffComplaintList>(
+      guideId: "complaints-staff",
       key: ValueKey(_filter),
       title: "Complaints",
       subtitle: _filter == "open" ? "Open" : "Resolved",

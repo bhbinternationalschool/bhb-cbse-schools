@@ -19,6 +19,7 @@ class PtmTeacherScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<List<PtmTeacherEvent>>(
+      guideId: "ptm-teacher",
       title: "PTM",
       subtitle: "My slots and bookings",
       load: api.fetchTeacherPtm,

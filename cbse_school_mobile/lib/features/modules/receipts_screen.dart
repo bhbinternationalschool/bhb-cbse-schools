@@ -18,6 +18,7 @@ class ReceiptsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<List<ReceiptInfo>>(
+      guideId: "receipts",
       title: context.l10n.modFeeReceiptsTitle,
       load: api.fetchReceipts,
       emptyIcon: Icons.receipt_long_outlined,

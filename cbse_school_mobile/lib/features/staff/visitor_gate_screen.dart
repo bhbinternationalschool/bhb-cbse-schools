@@ -20,6 +20,7 @@ class VisitorGateScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<GateBoard>(
+      guideId: "visitor-gate",
       title: "Visitor gate",
       load: api.fetchGateBoard,
       emptyIcon: Icons.meeting_room_outlined,

@@ -30,6 +30,7 @@ class ChildProfileScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<ParentProfile>(
+      guideId: "child-profile",
       title: context.l10n.profStudentProfile,
       load: api.fetchProfile,
       builder: (context, profile, reload) {

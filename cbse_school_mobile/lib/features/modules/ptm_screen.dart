@@ -88,6 +88,7 @@ class PtmScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<List<PtmEventInfo>>(
+      guideId: "ptm",
       title: context.l10n.modPtmTitle,
       subtitle: child.fullName,
       load: () => api.fetchPtmOverview(child.id),

@@ -1,5 +1,8 @@
 import "package:flutter/material.dart";
 
+import "../../core/popups/app_popups.dart";
+import "../../core/ui/running_strip.dart";
+import "../../core/guide/screen_guides.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "command_bar.dart";
@@ -193,6 +196,10 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
   @override
   void initState() {
     super.initState();
+    // The school's pop-up for staff, if any — once per app open (core/popups).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) AppPopups.maybeShow(context, widget.api);
+    });
     _load();
   }
 
@@ -312,6 +319,10 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                       ],
                     ),
                   ),
+                  const ScreenGuideButton(
+                    guideId: "principal-home",
+                    screenLabel: "Home",
+                  ),
                   IconButton(
                     tooltip: context.l10n.signOut,
                     onPressed: _signOut,
@@ -319,6 +330,11 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                   ),
                 ],
               ),
+            ),
+            // Notices and news scrolling across, as on the web ERP.
+            RunningStrip(
+              api: widget.api,
+              onOpen: () => _push(NoticesScreen(api: widget.api)),
             ),
             Padding(
               padding: const EdgeInsets.all(16),
@@ -394,7 +410,9 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                             const SizedBox(height: 6),
                             for (final m in snap.todayByMode)
                               Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 2),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 2,
+                                ),
                                 child: Row(
                                   mainAxisAlignment:
                                       MainAxisAlignment.spaceBetween,

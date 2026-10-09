@@ -22,6 +22,7 @@ class GalleryScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<List<GalleryAlbum>>(
+      guideId: "gallery",
       title: context.l10n.gallery,
       subtitle: context.l10n.homeSchoolPhotos,
       load: api.fetchGalleryAlbums,

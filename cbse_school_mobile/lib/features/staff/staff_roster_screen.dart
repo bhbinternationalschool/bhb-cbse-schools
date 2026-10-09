@@ -29,6 +29,7 @@ class StaffRosterScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<StaffRoster>(
+      guideId: "staff-contacts",
       title: "Staff contacts",
       load: api.fetchStaffRoster,
       emptyIcon: Icons.badge_outlined,

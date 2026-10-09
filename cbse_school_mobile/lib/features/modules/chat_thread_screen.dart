@@ -1,5 +1,6 @@
 import "package:flutter/material.dart";
 
+import "../../core/guide/screen_guides.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "module_shell.dart";
@@ -98,6 +99,7 @@ class _ChatThreadScreenState extends State<ChatThreadScreen> {
     final thread = _thread;
     return Scaffold(
       appBar: AppBar(
+        actions: [ScreenGuideButton(guideId: "chat", screenLabel: "chat")],
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

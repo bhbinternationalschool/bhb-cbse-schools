@@ -101,6 +101,7 @@ class RegistersScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<RegistersList>(
+      guideId: "registers",
       title: "Today's attendance registers",
       load: api.fetchRegistersToday,
       emptyIcon: Icons.school_outlined,
@@ -195,6 +196,7 @@ class StaffAttendanceTodayScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<StaffAttendanceToday>(
+      guideId: "staff-today",
       title: "Staff attendance today",
       load: api.fetchStaffAttendanceToday,
       emptyIcon: Icons.badge_outlined,
@@ -259,6 +261,7 @@ class FollowUpsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<List<FollowUpLead>>(
+      guideId: "follow-ups",
       title: "Admission follow-ups due",
       load: api.fetchFollowUpsDue,
       emptyIcon: Icons.task_alt_outlined,

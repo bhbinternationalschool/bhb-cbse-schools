@@ -27,6 +27,7 @@ class _StudentLeaveQueueScreenState extends State<StudentLeaveQueueScreen> {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<List<StudentLeaveQueueItem>>(
+      guideId: "student-leave-queue",
       key: ValueKey(_filter),
       title: "Leave requests",
       subtitle: _filter == "pending" ? "From parents, waiting" : "Decided",

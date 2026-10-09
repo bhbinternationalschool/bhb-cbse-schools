@@ -27,6 +27,7 @@ class StudentsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<AttendanceRoster>(
+      guideId: "students",
       title: "Students · $title",
       load: () => api.fetchAttendanceRoster(
         classId: classId,

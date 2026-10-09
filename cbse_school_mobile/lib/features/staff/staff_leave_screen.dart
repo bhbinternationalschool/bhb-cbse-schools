@@ -18,6 +18,7 @@ class StaffLeaveScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<StaffLeaveInfo>(
+      guideId: "my-leave",
       title: "My leave",
       load: api.fetchMyLeave,
       emptyIcon: Icons.event_outlined,
