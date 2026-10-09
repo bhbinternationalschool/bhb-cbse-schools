@@ -7,6 +7,7 @@ import {
   buildStampedSave,
   captureRowStamps,
   readStampsParam,
+  type RowConflicts,
 } from "./rowStampClient";
 import { stampsOf, writeStampedRows } from "./rowStampWrite.server";
 
@@ -78,8 +79,9 @@ async function save(module: string, bookings: { id: string; status?: string; not
     .filter((b) => b.id in sent.bookings)
     .map((b) => ({ ...b, tenant_id: T, updated_at: "client-time" }));
   const w = await writeStampedRows(sb, "ptm_desk_bookings", T, rows, sent.bookings);
-  assert.ok(w.ok);
-  const answer = { stamps: { bookings: w.stamps }, conflicts: w.conflicts.length ? { bookings: w.conflicts } : {} };
+  if (!w.ok) throw new Error(w.error);
+  const conflicts: RowConflicts = w.conflicts.length ? { bookings: w.conflicts } : {};
+  const answer = { stamps: { bookings: w.stamps }, conflicts };
   applyStampedSave(module, state, sent, answer, slices);
   return { sent: sent.bookings, conflicts: w.conflicts };
 }
