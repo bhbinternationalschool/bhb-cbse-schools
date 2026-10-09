@@ -19,7 +19,7 @@ console.log("admissionsRowStamps.selftest.ts");
 process.env.NEXT_PUBLIC_SUPABASE_URL ||= "http://localhost";
 
 void (async () => {
-  const { storedNewer } = await import("./admissionsNormalized.server");
+  const { storedNewerIds: storedNewer } = await import("./rowStampWrite.server");
 
   // ── storedNewer on a fake table ──────────────────────────────────────────
   const stored = [
@@ -58,9 +58,9 @@ void (async () => {
   // ── Wiring ───────────────────────────────────────────────────────────────
   const read = (f: string) => readFileSync(join(__dirname, f), "utf8");
   const push = read("admissionsNormalized.server.ts");
-  const body = push.slice(push.indexOf("export async function pushAdmissionDeskToDb("), push.indexOf("export async function storedNewer("));
+  const body = push.slice(push.indexOf("export async function pushAdmissionDeskToDb("), push.indexOf("async function touchAdmissionMeta("));
   assert.ok(/writeStampedRows\(sb, table, tenantId, rows\[slice\], opts\.stamps\[slice\] \?\? \{\}\)/.test(body), "a browser's save is written stamped");
-  assert.ok(/storedNewer\(sb, tenantId, table, write\)/.test(body) && /if \(!newer\.ok\) return newer;/.test(body), "whole-desk writers skip newer stored rows; a failed read writes nothing");
+  assert.ok(/storedNewerIds\(sb, tenantId, table, write\)/.test(body) && /if \(!newer\.ok\) return newer;/.test(body), "whole-desk writers skip newer stored rows; a failed read writes nothing");
   assert.ok(/Math\.max\(Number\(ops\[k\]\) \|\| 0, Number\(storedSeq\[k\]\) \|\| 0\)/.test(body), "number counters never rewind");
   assert.ok(/if \(opsErr\) return/.test(body), "an unreadable counter row writes nothing");
   assert.ok(/touchAdmissionMeta\(sb, tenantId, now\)/.test(body), "meta counts come from the tables");

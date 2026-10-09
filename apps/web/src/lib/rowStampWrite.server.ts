@@ -10,6 +10,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { fetchByIds } from "@/lib/supabase/pageAll";
 
 export type StampedWriteResult =
   | { ok: true; stamps: Record<string, string>; conflicts: string[] }
@@ -77,4 +78,39 @@ export async function writeStampedRows(
   }
 
   return { ok: true, stamps: written, conflicts };
+}
+
+/**
+ * Rows the database holds at a later `updated_at` than this copy's — a
+ * whole-desk writer's stale copy of them must not be written. A failed read
+ * writes nothing (unknown is not "older").
+ */
+export async function storedNewerIds(
+  sb: SupabaseClient,
+  tenantId: string,
+  table: string,
+  rows: Record<string, unknown>[],
+): Promise<{ ok: true; ids: Set<string> } | { ok: false; error: string }> {
+  const ids = new Set<string>();
+  if (!rows.length) return { ok: true, ids };
+  const mine = new Map(rows.map((r) => [String(r.id), Date.parse(String(r.updated_at ?? ""))]));
+  const res = await fetchByIds<Record<string, unknown>>(
+    [...mine.keys()],
+    (chunk, from, to) =>
+      sb
+        .from(table)
+        .select("id, updated_at")
+        .eq("tenant_id", tenantId)
+        .in("id", chunk)
+        .order("id", { ascending: true })
+        .range(from, to),
+    { chunkSize: 150 },
+  );
+  if (res.error) return { ok: false, error: `Could not read the stored rows to compare: ${res.error}` };
+  for (const s of res.rows) {
+    const at = Date.parse(String(s.updated_at ?? ""));
+    const own = mine.get(String(s.id));
+    if (Number.isFinite(at) && (!Number.isFinite(own) || at > (own as number))) ids.add(String(s.id));
+  }
+  return { ok: true, ids };
 }
