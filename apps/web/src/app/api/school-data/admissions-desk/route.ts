@@ -17,9 +17,23 @@ import {
 } from "@/lib/admissions";
 import { admissionsDualWriteDbEnabled } from "@/lib/admissionsDbConfig";
 import {
+  ADMISSION_SLICES,
   fetchAdmissionDeskFromDb,
   pushAdmissionDeskToDb,
 } from "@/lib/admissionsNormalized.server";
+import { readStampsParam, type RowStamps } from "@/lib/rowStampClient";
+
+/** The stamps of the rows a response carries (a cut desk gets only its rows'). */
+function stampsFor(state: Partial<AdmissionsState>, all: RowStamps): RowStamps {
+  const out: RowStamps = {};
+  for (const slice of ADMISSION_SLICES) {
+    const from = all[slice] ?? {};
+    const m: Record<string, string> = {};
+    for (const r of (state[slice] ?? []) as { id: string }[]) if (from[r.id]) m[r.id] = from[r.id];
+    out[slice] = m;
+  }
+  return out;
+}
 
 export const runtime = "nodejs";
 
@@ -44,7 +58,7 @@ const SEQ_KEYS = [
  * the shared desk cache — that copy (and its ETag) is the whole desk.
  */
 async function featureDeskResponse(gate: FeatureGate): Promise<NextResponse> {
-  const { state, ok } = await fetchAdmissionDeskFromDb();
+  const { state, ok, stamps } = await fetchAdmissionDeskFromDb();
   if (!ok) {
     return NextResponse.json(
       { ok: false, error: "Admissions desk fetch failed — tenant/db unavailable" },
@@ -56,6 +70,7 @@ async function featureDeskResponse(gate: FeatureGate): Promise<NextResponse> {
     {
       ok: true,
       state: stripped,
+      stamps: stampsFor(stripped, stamps),
       leadCount: stripped.leads?.length ?? 0,
       householdCount: stripped.households?.length ?? 0,
       functionOnly: true,
@@ -134,7 +149,7 @@ export async function GET(req: Request) {
       tables: ["admission_desk_leads", "admission_desk_households", "admission_desk_registration_payments", "admission_desk_field_ops"],
       ifNoneMatch: req.headers.get("if-none-match"),
       build: async () => {
-        const { state, meta, ok } = await fetchAdmissionDeskFromDb();
+        const { state, meta, ok, stamps } = await fetchAdmissionDeskFromDb();
         if (!ok) throw new Error("Admissions desk fetch failed — tenant/db unavailable");
 
         // Drop empty strings and nulls the client rebuilds anyway — 37.5% of this
@@ -154,6 +169,8 @@ export async function GET(req: Request) {
         return ({
         ok: true,
         state: wireState,
+        // Each row's updated_at: the browser's saves are stamped with them.
+        stamps,
         leadCount: state.leads.length,
         householdCount: state.households.length,
         updatedAt: meta?.updatedAt || new Date().toISOString(),
@@ -182,7 +199,7 @@ export async function POST(req: Request) {
     });
   }
 
-  let body: { state?: Partial<AdmissionsState> };
+  let body: { state?: Partial<AdmissionsState>; stamps?: unknown };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -193,6 +210,8 @@ export async function POST(req: Request) {
   }
 
   let normalized = normalizeAdmissionsState(body.state);
+  // The rows this browser changed and the stamp each was changed from.
+  const stamps = readStampsParam(body.stamps, ADMISSION_SLICES);
 
   // Function-only writers (director, 6 Oct 2026 — e.g. Admissions → Field
   // survey): merged onto the stored desk, their functions' slices only, row
@@ -224,7 +243,7 @@ export async function POST(req: Request) {
     normalized = normalizeAdmissionsState(next);
   }
 
-  const result = await pushAdmissionDeskToDb(normalized);
+  const result = await pushAdmissionDeskToDb(normalized, { stamps });
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error || "Sync failed" },
@@ -232,9 +251,14 @@ export async function POST(req: Request) {
     );
   }
 
-  if (gate.mode === "feature") return featureSavedResponse(true);
+  const answer = { stamps: result.stamps ?? {}, conflicts: result.conflicts ?? {} };
+  if (gate.mode === "feature") {
+    const saved = featureSavedResponse(true);
+    return NextResponse.json({ ...(await saved.json()), ...answer }, { status: saved.status });
+  }
   return NextResponse.json({
     ok: true,
+    ...answer,
     leadCount: normalized.leads.length,
     householdCount: normalized.households.length,
     updatedAt: new Date().toISOString(),

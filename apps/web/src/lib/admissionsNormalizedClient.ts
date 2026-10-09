@@ -9,6 +9,23 @@ import {
   recordDeskSyncFailure,
   recordDeskSyncSuccess,
 } from "@/lib/deskSyncStatus";
+import {
+  applyStampedSave,
+  buildStampedSave,
+  captureRowStamps,
+  onStampConflicts,
+  type RowConflicts,
+  type RowStamps,
+} from "@/lib/rowStampClient";
+
+const ADMISSIONS_DESK = "admissions";
+/** The admissions lists a save is stamped per row on. */
+export const ADMISSION_STAMP_SLICES = ["households", "leads", "registrationPayments"] as const;
+
+/** After a load: which version of each row this browser now holds. */
+export function captureAdmissionStamps(stamps: RowStamps, local: AdmissionsState) {
+  captureRowStamps(ADMISSIONS_DESK, stamps, local as unknown as Record<string, unknown>, ADMISSION_STAMP_SLICES);
+}
 
 const META_KEY = "bhb_admissions_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -65,20 +82,37 @@ export function scheduleAdmissionsDeskSync(state: AdmissionsState) {
 }
 
 async function pushAdmissionsDeskApi(state: AdmissionsState) {
+  // Only the leads, households and payments this browser changed, each with
+  // the stamp it loaded — never a stale copy of one changed elsewhere since.
+  const sentStamps = buildStampedSave(
+    ADMISSIONS_DESK,
+    state as unknown as Record<string, unknown>,
+    ADMISSION_STAMP_SLICES,
+  );
   try {
     const res = await fetch("/api/school-data/admissions-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
-      body: JSON.stringify({ state }),
+      body: JSON.stringify({ state, stamps: sentStamps }),
     });
     const body = (await res.json().catch(() => null)) as {
       ok?: boolean;
       updatedAt?: string;
       leadCount?: number;
       error?: string;
+      stamps?: RowStamps;
+      conflicts?: RowConflicts;
     } | null;
     if (res.ok && body?.ok) {
+      applyStampedSave(
+        ADMISSIONS_DESK,
+        state as unknown as Record<string, unknown>,
+        sentStamps,
+        body,
+        ADMISSION_STAMP_SLICES,
+      );
+      onStampConflicts(ADMISSIONS_DESK, body.conflicts);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         leadCount: body.leadCount ?? state.leads.length,
@@ -98,6 +132,7 @@ async function pushAdmissionsDeskApi(state: AdmissionsState) {
 
 export async function fetchAdmissionsDeskFromApi(): Promise<{
   state: AdmissionsState;
+  stamps: RowStamps;
   updatedAt: string;
   leadCount: number;
 } | null> {
@@ -111,12 +146,14 @@ export async function fetchAdmissionsDeskFromApi(): Promise<{
     if (!res.ok) return null;
     const body = (await res.json()) as {
       state?: AdmissionsState;
+      stamps?: RowStamps;
       updatedAt?: string;
       leadCount?: number;
     };
     if (!body.state) return null;
     return {
       state: body.state,
+      stamps: body.stamps ?? {},
       updatedAt: body.updatedAt || "",
       leadCount: body.leadCount ?? body.state.leads?.length ?? 0,
     };
@@ -127,9 +164,9 @@ export async function fetchAdmissionsDeskFromApi(): Promise<{
 
 export async function hydrateAdmissionsDeskFromDb(
   preferDb?: boolean,
-): Promise<{ state: AdmissionsState | null; changed: boolean; ok: boolean }> {
+): Promise<{ state: AdmissionsState | null; changed: boolean; ok: boolean; stamps: RowStamps }> {
   const remote = await fetchAdmissionsDeskFromApi();
-  if (!remote) return { state: null, changed: false, ok: false };
+  if (!remote) return { state: null, changed: false, ok: false, stamps: {} };
 
   const meta = readMeta();
   const shouldTake =
@@ -139,12 +176,12 @@ export async function hydrateAdmissionsDeskFromDb(
     (remote.updatedAt && remote.updatedAt >= meta.updatedAt) ||
     remote.leadCount > meta.leadCount;
 
-  if (!shouldTake) return { state: null, changed: false, ok: true };
+  if (!shouldTake) return { state: null, changed: false, ok: true, stamps: remote.stamps };
 
   writeMeta({
     updatedAt: remote.updatedAt,
     leadCount: remote.leadCount,
   });
 
-  return { state: remote.state, changed: true, ok: true };
+  return { state: remote.state, changed: true, ok: true, stamps: remote.stamps };
 }
