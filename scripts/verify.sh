@@ -201,6 +201,8 @@ SELFTESTS=(
   test:projection-double-post
   test:holiday-import
   test:payment-link-amount
+  test:homework-no-prune
+  test:class-channel-subject
   test:review-demo-hidden
   test:payment-link-reuse
   test:attendance-today
