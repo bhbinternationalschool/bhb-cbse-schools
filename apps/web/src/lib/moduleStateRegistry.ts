@@ -33,7 +33,8 @@ export type ModuleStateKey =
   | "marketing_spend"
   | "birthday_settings"
   | "attendance_result_overrides"
-  | "login_unknown_numbers";
+  | "login_unknown_numbers"
+  | "module_requests";
 
 export const MODULE_STATE_DEFS: Record<
   ModuleStateKey,
@@ -65,6 +66,7 @@ export const MODULE_STATE_DEFS: Record<
   birthday_settings: { rbac: "students", label: "birthday cards & greetings" },
   attendance_result_overrides: { rbac: "exams", label: "attendance corrections on results" },
   login_unknown_numbers: { rbac: "students", label: "app logins from unknown numbers" },
+  module_requests: { rbac: "settings", label: "module change requests & stuck points" },
 };
 
 export function isModuleStateKey(raw: string): raw is ModuleStateKey {

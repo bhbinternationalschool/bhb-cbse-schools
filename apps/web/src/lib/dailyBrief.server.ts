@@ -807,6 +807,25 @@ async function readDefaulters(
 
 /* ── The brief ─────────────────────────────────────────────────────── */
 
+/** Requests waiting for the director and screens people got stuck on today (IST). */
+async function readModuleRequestsForBrief(
+  dateIso: string,
+): Promise<{ waiting: number; newToday: number; stuckToday: number } | null> {
+  try {
+    const { readModuleRequests } = await import("@/lib/moduleRequests.server");
+    const st = await readModuleRequests();
+    if (!st) return null;
+    const istDay = (iso: string) => (iso ? new Date(new Date(iso).getTime() + 330 * 60_000).toISOString().slice(0, 10) : "");
+    return {
+      waiting: st.requests.filter((r) => r.status === "new").length,
+      newToday: st.requests.filter((r) => r.status === "new" && istDay(r.createdAt) === dateIso).length,
+      stuckToday: st.stuck.filter((x) => istDay(x.lastAt) === dateIso).length,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function buildDailyBrief(
   opts: { dateIso?: string; aiNote?: string } = {},
 ): Promise<DailyBrief> {
@@ -833,6 +852,8 @@ export async function buildDailyBrief(
     new Set(staff.absentRows.map((r) => r.staffId)),
   );
 
+  const moduleRequests = await readModuleRequestsForBrief(dateIso);
+
   return {
     ...emptyBrief(dateIso, TENANT.nameDisplay),
     collection,
@@ -841,6 +862,7 @@ export async function buildDailyBrief(
     staff,
     defaulters,
     homework,
+    ...(moduleRequests ? { moduleRequests } : {}),
     aiNote: opts.aiNote || "",
   };
 }

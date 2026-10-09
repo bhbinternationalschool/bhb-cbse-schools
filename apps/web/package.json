@@ -334,6 +334,7 @@
     "test:student-import": "npx tsx src/lib/studentImport.selftest.ts",
     "test:student-import-mid-year": "npx tsx src/lib/studentImportMidYear.selftest.ts",
     "test:payment-link-amount": "npx tsx src/lib/paymentLinkAmount.selftest.ts",
+    "test:module-requests": "npx tsx src/lib/moduleRequests.selftest.ts",
     "test:weekly-holiday-range": "npx tsx src/lib/weeklyHolidayRange.selftest.ts",
     "test:push-voice": "npx tsx src/lib/pushVoice.selftest.ts",
     "test:udise-national-code-placeholder": "npx tsx src/lib/udiseNationalCodePlaceholder.selftest.ts",
