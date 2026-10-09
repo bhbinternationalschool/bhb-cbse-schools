@@ -335,6 +335,7 @@
     "test:student-import": "npx tsx src/lib/studentImport.selftest.ts",
     "test:fees-payments-no-prune": "npx tsx src/lib/feesPaymentsNoPrune.selftest.ts",
     "test:student-import-mid-year": "npx tsx src/lib/studentImportMidYear.selftest.ts",
+    "test:payroll-statutory-vault-no-prune": "npx tsx src/lib/payrollStatutoryVaultNoPrune.selftest.ts",
     "test:payment-link-amount": "npx tsx src/lib/paymentLinkAmount.selftest.ts",
     "test:accounts-no-prune": "npx tsx src/lib/accountsNoPrune.selftest.ts",
     "test:app-popups": "npx tsx src/lib/appPopups.selftest.ts",

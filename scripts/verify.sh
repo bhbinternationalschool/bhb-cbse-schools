@@ -283,6 +283,7 @@ SELFTESTS=(
   test:student-import
   test:fees-payments-no-prune
   test:student-import-mid-year
+  test:payroll-statutory-vault-no-prune
   test:cash-pool-orphans
   test:academic-risk
   test:admissions-ai
