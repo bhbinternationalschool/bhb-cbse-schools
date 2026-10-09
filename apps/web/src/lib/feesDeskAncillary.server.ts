@@ -180,7 +180,10 @@ export async function pushFeeDeskAncillaryToDb(
     const write = await replaceChildRows(sb, {
       table: "fee_desk_charge_voucher_lines",
       tenantId,
-      match: { charge_voucher_id: charges.map((c) => c.id) },
+      // Only charges that arrived WITH lines. Matching every charge in the
+      // payload wiped the stored lines of any charge sent without its lines
+      // (a compacted or stale copy) — the receipt-lines wipe, again.
+      match: { charge_voucher_id: charges.filter((c) => (c.lines ?? []).length > 0).map((c) => c.id) },
       rows: chargeLineRows,
     });
     if (!write.ok) return { ok: false, error: write.error };

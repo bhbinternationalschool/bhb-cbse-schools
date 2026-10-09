@@ -53,7 +53,10 @@ const read = (f: string) => readFileSync(join(__dirname, f), "utf8");
   assert.ok(/FEE_ANCILLARY_DELETABLE_TABLES = \["fee_desk_day_closes"\] as const/.test(src));
 
   // The charge-voucher lines stay a per-parent replacement.
-  assert.ok(/match: \{ charge_voucher_id: charges\.map/.test(push), "charge lines replaced per voucher only");
+  assert.ok(
+    /match: \{ charge_voucher_id: charges\.filter\(\(c\) => \(c\.lines \?\? \[\]\)\.length > 0\)\.map/.test(push),
+    "charge lines replaced only for vouchers that arrived with lines",
+  );
 
   const fees = read("fees.ts");
   assert.ok(/recordFeeDayCloseDeletion\(replaced\)/.test(fees), "a replaced day close is named");
