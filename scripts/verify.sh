@@ -85,6 +85,7 @@ SELFTESTS=(
   test:sis-prune
   test:attendance-prune
   test:prune-floor
+  test:desk-named-deletes
   test:sis-delete
   test:sis-guard-fallback
   test:audit-redaction
@@ -124,6 +125,7 @@ SELFTESTS=(
   test:aadhaar-certificate
   test:staff-chat-bare
   test:job-desk
+  test:admissions-library-rte-ptm-exams-no-prune
   test:fee-adjustments-merge
   test:parent-bot-clarify
   test:office-backlog
