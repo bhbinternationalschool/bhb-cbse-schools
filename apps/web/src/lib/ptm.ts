@@ -19,6 +19,7 @@ import {
 } from "@/lib/reportExport";
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { recordPtmDeletion } from "@/lib/ptmNormalizedClient";
 
 const STORAGE_KEY = "bhb_ptm_v1";
@@ -168,6 +169,13 @@ export function ptmStateIsEmpty(state: PtmState): boolean {
 export function seedPtmIfEmpty(ay?: string): PtmState {
   const existing = loadPtm();
   if (existing.events.length > 0) return existing;
+  // Not a default: a made-up "Term PTM" dated today with five 10:00 slots
+  // in "Room 12" under whichever teacher came first — visible to parents and
+  // bookable. It ran on any empty browser BEFORE the desk was pulled and
+  // pushed at once (which deleted every real event, bookings cascading,
+  // while the desk pruned). A school's PTM desk holds only the events its
+  // office creates; only an offline, database-less dev build gets the sample.
+  if (isSupabaseConfigured()) return existing;
   const masters = loadMasters();
   const classIds = masters.classes
     .filter((c) => c.isActive !== false)

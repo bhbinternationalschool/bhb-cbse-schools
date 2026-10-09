@@ -5,6 +5,7 @@
 import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
 import {
   loadRte,
+  markRteDeskPulled,
   rteStateIsEmpty,
   writeRteLocalRaw,
   type RteState,
@@ -83,6 +84,8 @@ export async function ensureRteHydrated(): Promise<boolean> {
     return blobChanged;
   }
   markDeskHydrated(MODULE);
+  // The desk has really been read: only now may an empty one be seeded.
+  markRteDeskPulled();
   if (
     changed &&
     (bundle.seats.length > 0 ||

@@ -39,6 +39,7 @@ import { ensureRteEwsTagIds } from "@/lib/studentTags";
 import { TENANT } from "@/lib/types";
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { recordRteDeletion } from "@/lib/rteNormalizedClient";
 
 const STORAGE_KEY = "bhb_rte_ews_v1";
@@ -1756,9 +1757,27 @@ export function sortGovtAllottedApps(apps: QuotaApplication[]): QuotaApplication
   });
 }
 
+/**
+ * Whether this browser has pulled the RTE desk from the server at least once
+ * in this page session. Not isDeskHydrated: that is a 15 s TTL, and a failed
+ * pull is not a pull.
+ */
+let rteDeskPulled = false;
+export function markRteDeskPulled() {
+  rteDeskPulled = true;
+}
+
 export function seedRteIfEmpty(ay?: string): RteState {
   const existing = loadRte();
   if (existing.seats.length > 0 || existing.applications.length > 0) {
+    return existing;
+  }
+  // An empty BROWSER is not an empty desk. The workspace ran this before its
+  // pull, minting quota seats with fresh ids for every class and pushing
+  // them at once — which deleted every stored seat while the desk pruned,
+  // and adds a duplicate set now that it does not. In a browser that syncs,
+  // seed only once the desk has been pulled and is still empty.
+  if (typeof window !== "undefined" && isSupabaseConfigured() && !rteDeskPulled) {
     return existing;
   }
   const year = ay || DEFAULT_AY;
