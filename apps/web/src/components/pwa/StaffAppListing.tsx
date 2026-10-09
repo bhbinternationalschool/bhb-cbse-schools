@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useEffect, useState, type CSSProperties } from "react";
-import { pwaManifestHref } from "@/lib/pwaApps";
+import { pwaManifestHref, STAFF_PLAY_TEST_URL } from "@/lib/pwaApps";
 import { installPlatform, type InstallPlatform } from "@/lib/installPlatform";
 import { TENANT } from "@/lib/types";
 
@@ -15,10 +15,6 @@ type BeforeInstallPromptEvent = Event & {
 // by 3 Oct 2026) and updates itself. The bucket's parent APK was a 9 Sep
 // test build: no OTP fix, no in-app checkout, and — signed with the upload
 // key, not Play's — it can never take a Play update (director, 9 Oct 2026).
-// BHB Staff on Play is in INTERNAL TESTING (director, 9 Oct 2026): only the
-// staff Gmail addresses on the tester list can join. The first tap opens
-// "Become a tester", then Play installs and updates the app.
-const STAFF_PLAY_TEST_URL = "https://play.google.com/apps/internaltest/4701007545375064542";
 const PARENT_PLAY_URL = "https://play.google.com/store/apps/details?id=school.bhbinternational.parent";
 // The driver app is not on Play: an APK in a public bucket (Cloud Run cannot
 // serve a 60 MB response).
