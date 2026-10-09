@@ -125,6 +125,7 @@ SELFTESTS=(
   test:aadhaar-certificate
   test:staff-chat-bare
   test:job-desk
+  test:admissions-library-rte-ptm-exams-no-prune
   test:fee-adjustments-merge
   test:parent-bot-clarify
   test:office-backlog

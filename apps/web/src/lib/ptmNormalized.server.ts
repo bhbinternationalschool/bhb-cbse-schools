@@ -14,6 +14,7 @@ import type {
 } from "@/lib/ptm";
 import { ptmDualWriteDbEnabled } from "@/lib/ptmDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { deleteNamedIds, type NamedDeletes } from "@/lib/deskNamedDeletes.server";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
 
 export type PtmDeskSyncMeta = {
@@ -40,63 +41,6 @@ async function resolveCtx(): Promise<{
   tenantId: string;
 } | null> {
   return getServerTenantContext();
-}
-
-/**
- * Delete rows the client no longer holds — never on an empty payload.
- *
- * An empty keep-set means every stored row is "stale", so this deleted the
- * entire table. That is never what a sync means: a client with nothing to say
- * is a client whose cache was dropped, not an instruction to erase the
- * school's records.
- *
- * It is not hypothetical. On 2026-08-11 the attendance register for the
- * previous day was gone — pushed away by a phone whose localStorage had been
- * dropped on quota, with the emptiness check running AFTER the delete. This
- * same function is copied into 20 modules and called from 86 places, almost
- * none of them guarded, covering bank and cash ledgers, payroll runs, fee
- * cheques, library issues and 1,919 admission records.
- *
- * This floor stops the catastrophic case everywhere at once. It does NOT make
- * a partial payload safe — a client holding 3 of 900 rows still prunes 897.
- * That needs per-module scoping, the way attendance now prunes only within
- * the dates its payload covers. See docs/TODO.md.
- *
- * The read error is also surfaced now. It was discarded, which happened to
- * fail safe here (no data → nothing deleted), but "we could not read the
- * table" and "the table is empty" must not be the same value in a function
- * that deletes.
- */
-async function deleteStale(
-  sb: SupabaseClient,
-  tenantId: string,
-  table: string,
-  keepIds: Set<string>,
-) {
-  if (keepIds.size === 0) {
-    console.warn(
-      `[${table}] refusing to prune: the payload holds no ids at all. ` +
-        "An empty client is not an instruction to delete every row.",
-    );
-    return;
-  }
-  const { data, error } = await sb
-    .from(table)
-    .select("id")
-    .eq("tenant_id", tenantId);
-  if (error) {
-    console.error(
-      `[${table}] prune skipped — could not read existing ids:`,
-      error.message,
-    );
-    return;
-  }
-  const stale = (data ?? [])
-    .map((r) => String((r as { id: string }).id))
-    .filter((id) => !keepIds.has(id));
-  if (stale.length > 0) {
-    await sb.from(table).delete().in("id", stale);
-  }
 }
 
 async function upsertChunks(
@@ -263,8 +207,17 @@ function mapMetaRow(
   };
 }
 
+/** The PTM tables a desk save deletes from — by named id only. */
+export const PTM_DELETABLE_TABLES = ["ptm_desk_events", "ptm_desk_slots"] as const;
+/** Desk slice each deletable table stores (for function-only writers). */
+export const PTM_TABLE_SLICES: Record<string, string> = {
+  ptm_desk_events: "events",
+  ptm_desk_slots: "slots",
+};
+
 export async function pushPtmDeskToDb(
   state: PtmState,
+  deletes: NamedDeletes = {},
 ): Promise<{ ok: boolean; error?: string }> {
   if (!ptmDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
@@ -272,28 +225,27 @@ export async function pushPtmDeskToDb(
   const { sb, tenantId } = ctx;
   const now = new Date().toISOString();
 
-  const events = state.events ?? [];
-  const slots = state.slots ?? [];
-  const bookings = state.bookings ?? [];
-  const feedback = state.feedback ?? [];
+  const goneEvents = new Set(deletes["ptm_desk_events"] ?? []);
+  const goneSlots = new Set(deletes["ptm_desk_slots"] ?? []);
+  const events = (state.events ?? []).filter((e) => !goneEvents.has(e.id));
+  const slots = (state.slots ?? []).filter(
+    (x) => !goneSlots.has(x.id) && !goneEvents.has(x.eventId),
+  );
+  // Rows under a deleted event or slot are not written back first.
+  const goneBookings = new Set(
+    (state.bookings ?? [])
+      .filter((b) => goneSlots.has(b.slotId) || goneEvents.has(b.eventId))
+      .map((b) => b.id),
+  );
+  const bookings = (state.bookings ?? []).filter((b) => !goneBookings.has(b.id));
+  const feedback = (state.feedback ?? []).filter((f) => !goneBookings.has(f.bookingId));
 
-  await Promise.all([
-    deleteStale(sb, tenantId, "ptm_desk_events", new Set(events.map((e) => e.id))),
-    deleteStale(sb, tenantId, "ptm_desk_slots", new Set(slots.map((s) => s.id))),
-    deleteStale(
-      sb,
-      tenantId,
-      "ptm_desk_bookings",
-      new Set(bookings.map((b) => b.id)),
-    ),
-    deleteStale(
-      sb,
-      tenantId,
-      "ptm_desk_feedback",
-      new Set(feedback.map((f) => f.id)),
-    ),
-  ]);
-
+  // No prune by absence. Parents book and teachers add slots and feedback
+  // through the apps, and an empty browser seeds a sample event before it
+  // has pulled the desk — that seed used to delete every other event, and
+  // with them (on delete cascade) every slot, booking and feedback. Events
+  // and slots go only when the user deleted them, named; their bookings and
+  // feedback follow by cascade.
   let r = await upsertChunks(
     sb,
     "ptm_desk_events",
@@ -326,6 +278,11 @@ export async function pushPtmDeskToDb(
   for (const b of bookings) {
     const at = b.bookedAt;
     if (at && (!lastBookedAt || at > lastBookedAt)) lastBookedAt = at;
+  }
+
+  for (const table of PTM_DELETABLE_TABLES) {
+    const del = await deleteNamedIds(sb, tenantId, table, deletes[table]);
+    if (!del.ok) return del;
   }
 
   await sb.from("ptm_desk_sync_meta").upsert(

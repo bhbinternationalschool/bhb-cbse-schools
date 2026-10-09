@@ -11,6 +11,7 @@ import {
 import { TENANT } from "@/lib/types";
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
+import { recordLibraryDeletion } from "@/lib/libraryNormalizedClient";
 
 export type LibraryCopyStatus =
   | "available"
@@ -678,6 +679,9 @@ function syncCopiesForTitle(state: LibraryState, titleId: string, target: number
       .filter((c) => c.status === "available" && !openCopyIds.has(c.id))
       .slice(0, current - target);
     const removeIds = new Set(removable.map((c) => c.id));
+    if (removeIds.size && typeof window !== "undefined") {
+      recordLibraryDeletion("library_desk_copies", [...removeIds]);
+    }
     state.copies = state.copies.filter((c) => !removeIds.has(c.id));
   }
 
@@ -852,6 +856,13 @@ export function deleteTitle(titleId: string): { ok: true } | { ok: false; reason
   });
   if (open) return { ok: false, reason: "Cannot delete — copies are currently issued" };
 
+  if (typeof window !== "undefined") {
+    recordLibraryDeletion("library_desk_titles", [titleId]);
+    recordLibraryDeletion(
+      "library_desk_copies",
+      state.copies.filter((c) => c.titleId === titleId).map((c) => c.id),
+    );
+  }
   state.titles = state.titles.filter((t) => t.id !== titleId);
   state.copies = state.copies.filter((c) => c.titleId !== titleId);
   saveLibrary(state);
@@ -914,6 +925,7 @@ export function deleteProcurementDoc(docId: string): { ok: true } | { ok: false;
   if (!state.procurementDocs.some((d) => d.id === docId)) {
     return { ok: false, reason: "Document not found" };
   }
+  if (typeof window !== "undefined") recordLibraryDeletion("library_desk_procurement_docs", [docId]);
   state.procurementDocs = state.procurementDocs.filter((d) => d.id !== docId);
   saveLibrary(state);
   return { ok: true };

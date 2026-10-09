@@ -46,6 +46,7 @@ import {
 } from "@/lib/attendance";
 import type { Subject as MasterSubject } from "@/lib/foundationMasters";
 import { ncfTagForSubject } from "@/lib/cbseSubjectGroups";
+import { recordExamsDeletion } from "@/lib/examsNormalizedClient";
 
 /**
  * A subject graded, not marked: Masters calls it co-scholastic, or its NCF
@@ -1689,6 +1690,13 @@ export function deleteExamTerm(
         "Cannot delete — student marks exist. Deactivate instead, or clear marks first.",
     };
   }
+  if (typeof window !== "undefined") {
+    recordExamsDeletion("exam_desk_terms", [termId]);
+    recordExamsDeletion(
+      "exam_desk_date_sheet",
+      state.dateSheet.filter((row) => row.examTermId === termId).map((row) => row.id),
+    );
+  }
   saveExams({
     ...state,
     terms: state.terms.filter((t) => t.id !== termId),
@@ -1814,6 +1822,7 @@ export function deleteExamRoom(roomId: string): { ok: true } | { ok: false; erro
       error: "Children are seated in this room by a saved plan. Clear that plan first.",
     };
   }
+  if (typeof window !== "undefined") recordExamsDeletion("exam_desk_rooms", [roomId]);
   saveExams({ ...state, rooms: state.rooms.filter((r) => r.id !== roomId) });
   return { ok: true };
 }
@@ -1858,6 +1867,7 @@ export function saveSeatingPlan(input: {
 
 export function deleteSeatingPlan(planId: string): { ok: true } {
   const state = loadExams();
+  if (typeof window !== "undefined") recordExamsDeletion("exam_desk_seating", [planId]);
   saveExams({ ...state, seating: state.seating.filter((p) => p.id !== planId) });
   return { ok: true };
 }
@@ -1969,6 +1979,7 @@ export function deleteExamDateSheetEntry(
   if (!state.dateSheet.some((row) => row.id === entryId)) {
     return { ok: false, error: "Date-sheet entry not found" };
   }
+  if (typeof window !== "undefined") recordExamsDeletion("exam_desk_date_sheet", [entryId]);
   const saved = saveExams({
     ...state,
     dateSheet: state.dateSheet.filter((row) => row.id !== entryId),
