@@ -86,7 +86,6 @@ SELFTESTS=(
   test:attendance-prune
   test:prune-floor
   test:desk-named-deletes
-  test:accounts-no-prune
   test:sis-delete
   test:sis-guard-fallback
   test:audit-redaction
@@ -203,6 +202,7 @@ SELFTESTS=(
   test:projection-double-post
   test:holiday-import
   test:payment-link-amount
+  test:accounts-no-prune
   test:app-popups
   test:module-requests
   test:weekly-holiday-range
