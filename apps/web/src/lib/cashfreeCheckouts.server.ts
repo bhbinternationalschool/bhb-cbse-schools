@@ -25,6 +25,7 @@ import {
   createCashfreeOrder,
   fetchCashfreeOrderPayment,
   fetchCashfreePaymentStatus,
+  terminateCashfreeOrder,
 } from "@/lib/cashfree.server";
 import { cashfreePayPageUrl, isCashfreeOrderId } from "@/lib/cashfreeCheckout";
 import {
@@ -449,4 +450,64 @@ export async function settleCashfreeCheckout(opts: {
     eventJson: result.ok ? { source: opts.source, raw: opts.event } : { error: result.error, source: opts.source, raw: opts.event },
   });
   return result;
+}
+
+export type CloseOrdersOutcome = {
+  closed: string[];
+  /** Orders the family had already paid — the link must not stay cancelled. */
+  paid: string[];
+  errors: string[];
+};
+
+/**
+ * Close the Cashfree orders of fee links that can no longer be paid in the
+ * ERP. `linkIds` are links a clerk is cancelling right now (their DB row may
+ * not say "cancelled" yet — the desk syncs a moment later); without it, every
+ * ACTIVE fee order whose link the database already shows cancelled, paid or
+ * expired is closed (the settlement sweep runs this, and it cleans up the
+ * links cancelled before this existed).
+ */
+export async function closeOrdersForDeadLinks(linkIds?: string[]): Promise<CloseOrdersOutcome> {
+  const out: CloseOrdersOutcome = { closed: [], paid: [], errors: [] };
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ...out, errors: ["No tenant context"] };
+  let q = ctx.sb
+    .from("cashfree_checkouts")
+    .select("order_id, ref")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("kind", "fee_link")
+    .eq("status", "active");
+  if (linkIds) q = q.in("ref", linkIds.length ? linkIds : ["-"]);
+  const { data: rows, error } = await q;
+  if (error) return { ...out, errors: [error.message] };
+  let targets = (rows ?? []) as { order_id: string; ref: string }[];
+  if (!linkIds && targets.length) {
+    const { data: links, error: le } = await ctx.sb
+      .from("payment_desk_links")
+      .select("id, status")
+      .eq("tenant_id", ctx.tenantId)
+      .in("id", targets.map((t) => t.ref));
+    if (le) return { ...out, errors: [le.message] };
+    const dead = new Set(
+      ((links ?? []) as { id: string; status: string }[]).filter((l) => l.status !== "open").map((l) => l.id),
+    );
+    targets = targets.filter((t) => dead.has(t.ref));
+  }
+  for (const t of targets) {
+    const r = await terminateCashfreeOrder(t.order_id);
+    if (!r.ok) {
+      if (r.paid) out.paid.push(t.ref);
+      else out.errors.push(`${t.order_id}: ${r.error}`);
+      continue;
+    }
+    const { error: ue } = await ctx.sb
+      .from("cashfree_checkouts")
+      .update({ status: "expired" })
+      .eq("tenant_id", ctx.tenantId)
+      .eq("order_id", t.order_id)
+      .eq("status", "active");
+    if (ue) out.errors.push(`${t.order_id}: closed on Cashfree, row not updated: ${ue.message}`);
+    out.closed.push(t.ref);
+  }
+  return out;
 }

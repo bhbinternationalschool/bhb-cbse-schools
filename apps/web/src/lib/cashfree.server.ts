@@ -265,6 +265,38 @@ export async function fetchCashfreeOrderStatus(orderId: string): Promise<Cashfre
   };
 }
 
+export type CashfreeTerminateResult =
+  | { ok: true; status: string }
+  | { ok: false; paid: boolean; error: string };
+
+/**
+ * PATCH /pg/orders/{order_id} {order_status: TERMINATED} — close an order so
+ * it can no longer be paid. Cancelling a pay-link in the ERP used to leave its
+ * order ACTIVE on Cashfree (9 Oct 2026: six cancelled links, ₹44,350, still
+ * payable), and a payment on a cancelled link books nothing. An order that is
+ * already expired or terminated counts as closed; a PAID one is refused so the
+ * caller does not cancel a link the family has paid.
+ */
+export async function terminateCashfreeOrder(orderId: string): Promise<CashfreeTerminateResult> {
+  if (!cashfreeKeysPresent()) return { ok: false, paid: false, error: "Cashfree keys not configured" };
+  const res = await fetch(`${cashfreeBaseUrl()}/orders/${encodeURIComponent(orderId)}`, {
+    method: "PATCH",
+    headers: cashfreeAuthHeaders(),
+    body: JSON.stringify({ order_status: "TERMINATED" }),
+  });
+  const data = (await res.json().catch(() => ({}))) as { order_status?: string; message?: string };
+  if (res.ok && data.order_status) return { ok: true, status: data.order_status };
+  // Refused: find out why from the order itself.
+  const now = await fetchCashfreeOrderStatus(orderId);
+  if (now.ok) {
+    if (now.status === "PAID") return { ok: false, paid: true, error: "The family has already paid this order" };
+    if (now.status === "EXPIRED" || now.status === "TERMINATED" || now.status === "TERMINATION_REQUESTED") {
+      return { ok: true, status: now.status };
+    }
+  }
+  return { ok: false, paid: false, error: data.message || `Cashfree HTTP ${res.status}` };
+}
+
 /**
  * The successful payment on an order — its Cashfree payment id and bank
  * reference (UTR), for the receipt. Null when nothing has succeeded.

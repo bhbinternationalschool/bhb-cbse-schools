@@ -100,7 +100,18 @@ export async function POST(req: Request) {
 
   const range = window(req);
   const outcome = await syncCashfreeSettlements({ ...range, actor });
+  // The same daily run closes gateway orders whose pay-link was cancelled,
+  // paid another way or expired in the ERP, so none of them stays payable.
+  const { closeOrdersForDeadLinks } = await import("@/lib/cashfreeCheckouts.server");
+  const orders = await closeOrdersForDeadLinks();
+  if (orders.errors.length) console.error("[cashfree] could not close dead-link orders", JSON.stringify(orders.errors));
   // Errors are reported, not thrown: a partial sweep that stored eight of ten
   // settlements has done real work, and the next run retries the rest.
-  return NextResponse.json({ ok: outcome.errors.length === 0, ...range, ...outcome });
+  return NextResponse.json({
+    ok: outcome.errors.length === 0,
+    ...range,
+    ...outcome,
+    deadLinkOrdersClosed: orders.closed.length,
+    deadLinkOrdersPaid: orders.paid,
+  });
 }
