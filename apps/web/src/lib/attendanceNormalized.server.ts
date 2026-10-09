@@ -28,6 +28,7 @@ import {
 } from "@/lib/deskNamedDeletes.server";
 import { fetchAllPages, fetchByIds } from "@/lib/supabase/pageAll";
 import { replaceChildRows } from "./replaceChildRows.server";
+import { stampsOf, writeStampedRows } from "@/lib/rowStampWrite.server";
 
 export type AttendanceDeskSyncMeta = {
   registerCount: number;
@@ -131,7 +132,15 @@ function rowToRegister(
 export async function pushAttendanceRegistersToDb(
   registers: AttendanceRegister[],
   deleteIds: readonly string[] = [],
-): Promise<{ ok: boolean; count: number; error?: string }> {
+  /**
+   * A browser's save: the registers it changed and the `updated_at` each
+   * was changed from ("" = new). Only those are written — a register and
+   * its marks only while the stored register is still at that stamp; the
+   * rest come back as conflicts. Without it (blob backfill, a browser on an
+   * older build) every register is written as before.
+   */
+  stamps?: Record<string, string>,
+): Promise<{ ok: boolean; count: number; error?: string; stamps?: Record<string, string>; conflicts?: string[] }> {
   if (!attendanceDualWriteDbEnabled()) {
     return { ok: true, count: 0 };
   }
@@ -141,7 +150,11 @@ export async function pushAttendanceRegistersToDb(
   const now = new Date().toISOString();
 
   const gone = new Set(deleteIds);
-  const named = (registers ?? []).filter((r) => !gone.has(r.id));
+  // No stale copy over a newer register (2026-10-09): every register the
+  // office tab held was upserted with its marks, so a class teacher's
+  // marking on the app, or a mark changed by approved leave, after the tab
+  // loaded was put back to the tab's old marks on its next save.
+  const named = (registers ?? []).filter((r) => !gone.has(r.id) && (!stamps || r.id in stamps));
   // One register per section, year and date (a unique key). When the stored
   // one for that slot has a different id — a teacher marked it from the app
   // after this browser last read — the stored register stands and this copy
@@ -193,34 +206,36 @@ export async function pushAttendanceRegistersToDb(
   // for today, saved through /api/v1/attendance/mark or by leave approval
   // after the office tab last read. A register leaves only when the user
   // deleted it, named — see deleteNamedIds below.
-  if (!active.length) {
-    await sb.from("attendance_desk_sync_meta").upsert(
-      {
-        tenant_id: tenantId,
-        register_count: 0,
-        last_marked_at: null,
-        updated_at: now,
-      },
-      { onConflict: "tenant_id" },
+  let written = active;
+  let newStamps: Record<string, string> | undefined;
+  const conflicts: string[] = [];
+  if (stamps) {
+    // The header is the register's version: written conditionally first;
+    // only registers whose header landed get their marks written.
+    const w = await writeStampedRows(
+      sb,
+      "attendance_desk_registers",
+      tenantId,
+      active.map((r) => registerToRows(tenantId, r).header),
+      stamps,
     );
-    return { ok: true, count: 0 };
+    if (!w.ok) return { ok: false, count: 0, error: w.error };
+    newStamps = w.stamps;
+    conflicts.push(...w.conflicts);
+    written = active.filter((r) => r.id in w.stamps);
+    if (conflicts.length) console.warn("[attendance-db] kept newer registers over a stale copy", conflicts);
   }
 
   const headers: Record<string, unknown>[] = [];
   const marks: Record<string, unknown>[] = [];
-  let lastMarkedAt: string | null = null;
-
-  for (const r of active) {
+  for (const r of written) {
     const { header, marks: mrows } = registerToRows(tenantId, r);
     headers.push(header);
     marks.push(...mrows);
-    if (!lastMarkedAt || String(header.marked_at) > lastMarkedAt) {
-      lastMarkedAt = String(header.marked_at);
-    }
   }
 
   const chunk = 200;
-  for (let i = 0; i < headers.length; i += chunk) {
+  for (let i = 0; !stamps && i < headers.length; i += chunk) {
     const { error } = await sb
       .from("attendance_desk_registers")
       .upsert(headers.slice(i, i + chunk));
@@ -243,22 +258,35 @@ export async function pushAttendanceRegistersToDb(
     tenantId,
     "attendance_desk_marks",
     "register_id",
-    active.filter((r) => (r.marks ?? []).length > 0).map((r) => r.id),
+    written.filter((r) => (r.marks ?? []).length > 0).map((r) => r.id),
     keepMarks,
   );
   if (!delMarks.ok) return { ok: false, count: 0, error: delMarks.error };
 
-  await sb.from("attendance_desk_sync_meta").upsert(
-    {
-      tenant_id: tenantId,
-      register_count: active.length,
-      last_marked_at: lastMarkedAt,
-      updated_at: now,
-    },
-    { onConflict: "tenant_id" },
-  );
+  // Counts from the database, not from this copy (it may be partly written).
+  // An empty save used to set the count to 0.
+  await touchAttendanceMeta(sb, tenantId, now).catch(() => undefined);
 
-  return { ok: true, count: active.length };
+  return { ok: true, count: written.length, stamps: newStamps, conflicts };
+}
+
+/** Recount the desk meta from the registers, so a hydrate sees the change. */
+async function touchAttendanceMeta(sb: SupabaseClient, tenantId: string, now: string): Promise<void> {
+  const [all, latest] = await Promise.all([
+    sb.from("attendance_desk_registers").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId),
+    sb
+      .from("attendance_desk_registers")
+      .select("marked_at")
+      .eq("tenant_id", tenantId)
+      .order("marked_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  const row: Record<string, unknown> = { tenant_id: tenantId, updated_at: now };
+  // A failed count leaves the old figure alone rather than writing a zero.
+  if (!all.error && typeof all.count === "number") row.register_count = all.count;
+  if (!latest.error) row.last_marked_at = (latest.data as { marked_at?: string } | null)?.marked_at ?? null;
+  await sb.from("attendance_desk_sync_meta").upsert(row, { onConflict: "tenant_id" });
 }
 
 export async function fetchAttendanceRegistersFromDb(): Promise<{
@@ -266,9 +294,11 @@ export async function fetchAttendanceRegistersFromDb(): Promise<{
   meta: AttendanceDeskSyncMeta | null;
   /** false = tenant/query could not be resolved; result is NOT a confirmed empty state. */
   ok: boolean;
+  /** Each register's `updated_at` — what a browser's save is stamped with. */
+  stamps: Record<string, string>;
 }> {
   const ctx = await resolveCtx();
-  if (!ctx) return { registers: [], meta: null, ok: false };
+  if (!ctx) return { registers: [], meta: null, ok: false, stamps: {} };
   const { sb, tenantId } = ctx;
 
   // Paged, ordered by id for stable pages; sorted by date afterwards so the
@@ -288,7 +318,7 @@ export async function fetchAttendanceRegistersFromDb(): Promise<{
 
   if (hErr) {
     console.warn("[attendance-db] fetch failed", hErr.message);
-    return { registers: [], meta: null, ok: false };
+    return { registers: [], meta: null, ok: false, stamps: {} };
   }
 
   if (!headers?.length) {
@@ -299,12 +329,13 @@ export async function fetchAttendanceRegistersFromDb(): Promise<{
       .maybeSingle();
     if (metaErr) {
       console.warn("[attendance-db] meta fetch failed", metaErr.message);
-      return { registers: [], meta: null, ok: false };
+      return { registers: [], meta: null, ok: false, stamps: {} };
     }
     return {
       registers: [],
       meta: mapMetaRow(metaRow as Record<string, unknown> | null),
       ok: true,
+      stamps: {},
     };
   }
 
@@ -334,7 +365,7 @@ export async function fetchAttendanceRegistersFromDb(): Promise<{
 
   if (mErr || metaErr) {
     console.warn("[attendance-db] fetch failed", mErr?.message, metaErr?.message);
-    return { registers: [], meta: null, ok: false };
+    return { registers: [], meta: null, ok: false, stamps: {} };
   }
 
   const marksByRegister = new Map<string, Record<string, unknown>[]>();
@@ -356,6 +387,7 @@ export async function fetchAttendanceRegistersFromDb(): Promise<{
     registers,
     meta: mapMetaRow(metaRow as Record<string, unknown> | null),
     ok: true,
+    stamps: stampsOf(headers),
   };
 }
 
@@ -428,14 +460,19 @@ export const ATTENDANCE_TABLE_SLICES: Record<string, string> = {
 export async function pushAttendanceDeskToDb(
   state: Pick<AttendanceState, "registers"> & Partial<AttendanceDeskAncillary>,
   deletes: NamedDeletes = {},
+  /** A browser's register stamps (see pushAttendanceRegistersToDb). */
+  stamps?: Record<string, string>,
 ): Promise<{
   ok: boolean;
   error?: string;
   registerCount: number;
+  stamps?: Record<string, string>;
+  conflicts?: string[];
 }> {
   const regResult = await pushAttendanceRegistersToDb(
     state.registers ?? [],
     deletes["attendance_desk_registers"] ?? [],
+    stamps,
   );
   if (!regResult.ok) {
     return {
@@ -458,11 +495,12 @@ export async function pushAttendanceDeskToDb(
     };
   }
 
-  return { ok: true, registerCount: regResult.count };
+  return { ok: true, registerCount: regResult.count, stamps: regResult.stamps, conflicts: regResult.conflicts };
 }
 
 export type AttendanceDeskSnapshot = {
   registers: AttendanceRegister[];
+  stamps: Record<string, string>;
   ancillary: AttendanceDeskAncillary;
   meta: AttendanceDeskSyncMeta | null;
   /** false = tenant/query could not be resolved; result is NOT a confirmed empty state. */
@@ -470,11 +508,11 @@ export type AttendanceDeskSnapshot = {
 };
 
 export async function fetchAttendanceDeskFromDb(): Promise<AttendanceDeskSnapshot> {
-  const [{ registers, meta, ok }, ancillary] = await Promise.all([
+  const [{ registers, meta, ok, stamps }, ancillary] = await Promise.all([
     fetchAttendanceRegistersFromDb(),
     fetchAttendanceDeskAncillaryFromDb(),
   ]);
-  return { registers, ancillary, meta, ok };
+  return { registers, ancillary, meta, ok, stamps };
 }
 
 /** Push a single register after API mark (incremental). */

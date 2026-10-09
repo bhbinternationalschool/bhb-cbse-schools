@@ -28,10 +28,13 @@ import {
   type FeatureGate,
 } from "@/lib/deskFeatureGate.server";
 
+import { readStampsParam } from "@/lib/rowStampClient";
+
 export const runtime = "nodejs";
 
 type DeskBody = {
   registers?: AttendanceRegister[];
+  stamps?: { registers?: Record<string, string> };
   ancillary?: Partial<AttendanceDeskAncillary>;
   count?: number;
 } & Record<string, unknown>;
@@ -56,7 +59,15 @@ function scopeDeskBody(body: string, sections: Set<string>): DeskBody {
         ),
       }
     : desk.ancillary;
-  return { ...desk, registers, ancillary, count: registers.length };
+  return { ...desk, registers, ancillary, count: registers.length, stamps: stampsOf(registers, desk) };
+}
+
+/** The stamps of the registers a cut desk carries — not every register's. */
+function stampsOf(registers: AttendanceRegister[], desk: DeskBody): { registers: Record<string, string> } {
+  const all = desk.stamps?.registers ?? {};
+  const out: Record<string, string> = {};
+  for (const r of registers) if (all[r.id]) out[r.id] = all[r.id];
+  return { registers: out };
 }
 
 /**
@@ -75,6 +86,7 @@ function featureDeskBody(desk: DeskBody, gate: FeatureGate): DeskBody {
   return {
     ...desk,
     registers: cut.registers,
+    stamps: stampsOf(cut.registers, desk),
     ancillary: desk.ancillary
       ? { ...desk.ancillary, absentNudges: cut.absentNudges, exceptions: cut.exceptions }
       : desk.ancillary,
@@ -118,6 +130,8 @@ export async function GET(req: Request) {
         return {
           ok: true,
           registers: desk.registers,
+          // Each register's updated_at: the browser's saves are stamped with them.
+          stamps: { registers: desk.stamps },
           ancillary: desk.ancillary,
           count: desk.registers.length,
           updatedAt: desk.meta?.updatedAt || new Date().toISOString(),
@@ -144,7 +158,7 @@ export async function GET(req: Request) {
 }
 
 type DeskPostBody = Pick<AttendanceState, "registers"> &
-  Partial<AttendanceDeskAncillary> & { deletes?: unknown };
+  Partial<AttendanceDeskAncillary> & { deletes?: unknown; stamps?: unknown };
 
 /** POST — push attendance desk snapshot (registers + policy + nudges + exceptions) */
 export async function POST(req: Request) {
@@ -195,6 +209,8 @@ export async function POST(req: Request) {
 
   // Deletions are named by the desk, never inferred from what it lacks.
   let deletes = readNamedDeletes(body.deletes, ATTENDANCE_DELETABLE_TABLES);
+  // The registers this browser changed and the stamp each was changed from.
+  const stamps = readStampsParam(body.stamps, ["registers"])?.registers;
 
   // Function holders (e.g. Attendance → Exceptions): merged onto the stored
   // desk, only their functions' slices — never the body as sent.
@@ -222,7 +238,7 @@ export async function POST(req: Request) {
     policy: body.policy,
     absentNudges: body.absentNudges ?? [],
     exceptions: body.exceptions ?? [],
-  }, deletes);
+  }, deletes, stamps);
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error || "Sync failed" },
@@ -230,9 +246,17 @@ export async function POST(req: Request) {
     );
   }
 
-  if (gate) return featureSavedResponse(true);
+  const answer = {
+    stamps: { registers: result.stamps ?? {} },
+    conflicts: result.conflicts?.length ? { registers: result.conflicts } : {},
+  };
+  if (gate) {
+    const saved = featureSavedResponse(true);
+    return NextResponse.json({ ...(await saved.json()), ...answer }, { status: saved.status });
+  }
   return NextResponse.json({
     ok: true,
+    ...answer,
     count: result.registerCount,
     updatedAt: new Date().toISOString(),
   });

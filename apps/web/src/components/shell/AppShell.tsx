@@ -99,6 +99,7 @@ export function AppShell({
       sis: "student records",
       ptm: "PTM",
       rbac: "roles & permissions",
+      attendance: "attendance registers",
       module_registry: "module settings",
       wa_templates: "WhatsApp templates",
       automation: "automation rules",
