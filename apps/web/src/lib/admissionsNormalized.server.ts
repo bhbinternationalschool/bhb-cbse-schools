@@ -19,6 +19,8 @@ import { getServerTenantContext } from "@/lib/serverTenant";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
 import { stampsOf, storedNewerIds, writeStampedRows } from "@/lib/rowStampWrite.server";
 import type { RowConflicts, RowStamps } from "@/lib/rowStampClient";
+import { mergeFieldOps, type FieldOpsLists } from "@/lib/admissionsFieldOpsMerge";
+import type { NamedDeletes } from "@/lib/deskNamedDeletes.server";
 
 export type AdmissionDeskSyncMeta = {
   householdCount: number;
@@ -354,6 +356,8 @@ export type AdmissionPushOpts = {
    * while still at that stamp; the rest come back as conflicts.
    */
   stamps?: RowStamps;
+  /** Named removals from the survey lists (team members, lead callers). */
+  deletes?: NamedDeletes;
 };
 
 export async function pushAdmissionDeskToDb(
@@ -436,24 +440,23 @@ export async function pushAdmissionDeskToDb(
   // hands out an enquiry or receipt number twice.
   const { data: storedOps, error: opsErr } = await sb
     .from("admission_desk_field_ops")
-    .select("sequences_json")
+    .select("ops_json, sequences_json")
     .eq("tenant_id", tenantId)
     .maybeSingle();
-  if (opsErr) return { ok: false, error: `Could not read the number counters: ${opsErr.message}` };
+  if (opsErr) return { ok: false, error: `Could not read the number counters and survey lists: ${opsErr.message}` };
   const storedSeq = ((storedOps as { sequences_json?: Record<string, unknown> } | null)?.sequences_json ?? {});
   const ops = fieldOpsFromState(normalized);
+  // The survey lists merge onto the stored ones — see admissionsFieldOpsMerge.
+  const lists = mergeFieldOps(
+    ((storedOps as { ops_json?: Partial<FieldOpsLists> } | null)?.ops_json ?? null),
+    ops,
+    opts.deletes ?? {},
+  );
   const seq = (k: (typeof ADMISSION_SEQ_KEYS)[number]) =>
     Math.max(Number(ops[k]) || 0, Number(storedSeq[k]) || 0);
   await sb.from("admission_desk_field_ops").upsert({
     tenant_id: tenantId,
-    ops_json: {
-      surveyBeats: ops.surveyBeats,
-      surveyAttendance: ops.surveyAttendance,
-      surveyExternals: ops.surveyExternals,
-      surveyTeam: ops.surveyTeam,
-      surveySessions: ops.surveySessions,
-      leadCallerStaffIds: ops.leadCallerStaffIds,
-    },
+    ops_json: lists,
     sequences_json: {
       nextEnquirySeq: seq("nextEnquirySeq"),
       nextApplicationSeq: seq("nextApplicationSeq"),

@@ -4,6 +4,7 @@
  * Demo store: localStorage `bhb_admissions_v1`.
  */
 
+import { recordDeskDeletion } from "@/lib/deskNamedDeletes";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import {
   carryOverFromSibling,
@@ -4539,7 +4540,11 @@ export function setLeadCallerAssigned(
   if (!id) return state;
   const set = new Set(state.leadCallerStaffIds || []);
   if (assigned) set.add(id);
-  else set.delete(id);
+  else {
+    set.delete(id);
+    // Named, so the save removes it — a save never deletes by absence.
+    if (typeof window !== "undefined") recordDeskDeletion("admissions", "admission_lead_callers", [id]);
+  }
   return { ...state, leadCallerStaffIds: [...set] };
 }
 

@@ -17,6 +17,7 @@ import {
   type RowConflicts,
   type RowStamps,
 } from "@/lib/rowStampClient";
+import { confirmDeskDeletes, pendingDeskDeletes } from "@/lib/deskNamedDeletes";
 
 const ADMISSIONS_DESK = "admissions";
 /** The admissions lists a save is stamped per row on. */
@@ -89,12 +90,14 @@ async function pushAdmissionsDeskApi(state: AdmissionsState) {
     state as unknown as Record<string, unknown>,
     ADMISSION_STAMP_SLICES,
   );
+  // Survey-team members and lead callers this browser removed, named.
+  const sentDeletes = pendingDeskDeletes(ADMISSIONS_DESK);
   try {
     const res = await fetch("/api/school-data/admissions-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
-      body: JSON.stringify({ state, stamps: sentStamps }),
+      body: JSON.stringify({ state, stamps: sentStamps, deletes: sentDeletes }),
     });
     const body = (await res.json().catch(() => null)) as {
       ok?: boolean;
@@ -105,6 +108,7 @@ async function pushAdmissionsDeskApi(state: AdmissionsState) {
       conflicts?: RowConflicts;
     } | null;
     if (res.ok && body?.ok) {
+      confirmDeskDeletes(ADMISSIONS_DESK, sentDeletes);
       applyStampedSave(
         ADMISSIONS_DESK,
         state as unknown as Record<string, unknown>,
