@@ -419,6 +419,8 @@ SELFTESTS=(
   test:transport-overlap-billing
   test:masters-transport-no-prune
   test:slice-cas
+  test:slice-rev-merge
+  test:slice-rev-server
   test:wa-contact-state
   test:wa-delivery-log
   test:wa-meta-account-alerts

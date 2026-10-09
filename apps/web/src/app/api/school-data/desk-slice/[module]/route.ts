@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readRevsParam } from "@/lib/sliceRevMerge";
 import {
   DESK_SLICE_RBAC,
   requireStaffApi,
@@ -205,6 +206,10 @@ export async function POST(req: Request, ctx: RouteCtx) {
   // Nothing a save merely lacks is deleted.
   let deletes = readSliceDeletes(body.deletes, def.clientDeleteSlices ?? []);
   delete (body as Record<string, unknown>).deletes;
+  // Which rows this browser changed, and from which `_rev` (only the merge
+  // slices). Absent = an older browser: its rows win as before.
+  const revs = readRevsParam(body.revs, def.mergeSlices ?? []);
+  delete (body as Record<string, unknown>).revs;
   if (featureGate) {
     const stored = await fetchDeskSliceFromDb(id);
     if (!stored.ok) {
@@ -233,7 +238,7 @@ export async function POST(req: Request, ctx: RouteCtx) {
     );
     body = { ...(merged.state as typeof body), version: body.version };
   }
-  const result = await pushDeskSliceToDb(id, body, { allowShrink, deletes });
+  const result = await pushDeskSliceToDb(id, body, { allowShrink, deletes, revs });
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error || "Sync failed" },
@@ -245,10 +250,19 @@ export async function POST(req: Request, ctx: RouteCtx) {
     invalidateServerRbacCache();
   }
 
-  if (featureGate) return featureSavedResponse(true);
+  if (featureGate) {
+    if (result.conflicts && Object.keys(result.conflicts).length) {
+      return NextResponse.json({ ok: true, functionOnly: true, changed: true, conflicts: result.conflicts });
+    }
+    return featureSavedResponse(true);
+  }
   const { meta } = await fetchDeskSliceFromDb(id);
   return NextResponse.json({
     ok: true,
+    // New `_rev` of each row written, and rows refused because they changed
+    // elsewhere first — the browser updates its versions / reloads.
+    revs: result.revs ?? {},
+    conflicts: result.conflicts ?? {},
     rowCount: meta?.rowCount ?? 0,
     // The revision the desk actually recorded, not a fresh client-facing
     // clock reading that would differ from the stored one.

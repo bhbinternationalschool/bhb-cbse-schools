@@ -41,8 +41,8 @@ const read = (f: string) => readFileSync(join(__dirname, f), "utf8");
   const src = read("trustNormalized.server.ts");
   const push = src.slice(src.indexOf("export async function pushTrustDeskToDb"), src.indexOf("export async function fetchTrustDeskFromDb"));
   assert.equal(/\.delete\(\)/.test(push), false, "no trust slice is ever deleted by a save");
-  assert.ok(/mergeSliceById\(stored\.get\(key\), payload as unknown\[\]\)/.test(push), "collections are merged by id, not replaced");
-  assert.ok(push.indexOf("if (readErr)") < push.indexOf('.from("trust_desk_slices").upsert('), "nothing is written when the stored desk cannot be read");
+  assert.ok(/mergeWithRevs\(storedNow, incoming, \{ base: opts\.revs\?\.\[key\] \}\)/.test(push), "collections are merged by id (with per-row versions), not replaced");
+  assert.ok(push.indexOf("if (readErr)") < push.indexOf("casWriteSlice("), "nothing is written when the stored desk cannot be read");
   const trust = read("trust.ts");
   const seed = trust.slice(trust.indexOf("export function seedTrustIfEmpty"));
   assert.ok(seed.indexOf("if (isSupabaseConfigured()) return state;") > 0 && seed.indexOf("if (isSupabaseConfigured()) return state;") < seed.indexOf("saveTrust("), "a live desk is never seeded with demo rows");
@@ -64,8 +64,8 @@ const read = (f: string) => readFileSync(join(__dirname, f), "utf8");
 // ── The trust demo seed is refused and cleared ─────────────────────────────
 {
   const push = read("trustNormalized.server.ts");
-  assert.ok(/payload: withoutTrustDemo\(key, mergeSliceById\(/.test(push), "demo rows are dropped from every written slice");
-  assert.ok(/const clean = withoutTrustDemo\(key, kept\);/.test(push), "and from stored slices the push did not carry");
+  assert.ok(/value: withoutTrustDemo\(key, m\.rows\)/.test(push), "demo rows are dropped from every written slice");
+  assert.ok(/withoutTrustDemo\(key, kept\)\.length !== kept\.length\) toWrite\.push\(key\)/.test(push), "and from stored slices the push did not carry");
 
   // Exactly the rows seedTrustIfEmpty wrote…
   assert.ok(isTrustDemoRow("projects", { id: "prj_x", code: "CAP/25-26/001", name: "New Primary Wing — Block B", note: "Demo seed project" }));

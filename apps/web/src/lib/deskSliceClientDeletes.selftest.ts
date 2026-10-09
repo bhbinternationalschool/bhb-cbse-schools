@@ -115,11 +115,11 @@ const rows = (...ids: string[]) => ids.map((id) => ({ id }));
   const route = read("../app/api/school-data/desk-slice/[module]/route.ts");
   assert.ok(/readSliceDeletes\(body\.deletes, def\.clientDeleteSlices \?\? \[\]\)/.test(route), "the route accepts deletes for those slices only");
   assert.ok(/deletes = gateAuthorizedSliceDeletes\(/.test(route), "function holders: named AND dropped by the gate");
-  assert.ok(/pushDeskSliceToDb\(id, body, \{ allowShrink, deletes \}\)/.test(route));
+  assert.ok(/pushDeskSliceToDb\(id, body, \{ allowShrink, deletes, revs \}\)/.test(route));
 
   const server = read("deskSliceNormalized.server.ts");
   assert.ok(/const field = def\.mergeKeys\?\.\[key\] \?\? "id";/.test(server), "named deletes respect the slice's key");
-  assert.ok(/mergeSliceByKey\(stored\.get\(key\), payload, mergeKey\)/.test(server), "keyed slices merge by their key");
+  assert.ok(/mergeWithRevs\(storedNow, incoming, \{ key: field,/.test(server), "keyed slices merge by their key");
 }
 
 console.log("deskSliceClientDeletes.selftest: all assertions passed");

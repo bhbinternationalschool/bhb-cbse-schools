@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readRevsParam } from "@/lib/sliceRevMerge";
 import { SCHOOL_DATA_DESK_RBAC } from "@/lib/apiRouteAuth.server";
 import {
   deskReadGate,
@@ -12,6 +13,7 @@ import { trustDualWriteDbEnabled } from "@/lib/trustDbConfig";
 import {
   fetchTrustDeskFromDb,
   pushTrustDeskToDb,
+  TRUST_SLICE_KEYS,
 } from "@/lib/trustNormalized.server";
 
 export const runtime = "nodejs";
@@ -88,12 +90,15 @@ export async function POST(req: Request) {
     });
   }
 
-  let body: TrustState;
+  let body: TrustState & { revs?: unknown };
   try {
-    body = (await req.json()) as TrustState;
+    body = (await req.json()) as TrustState & { revs?: unknown };
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
+  // Which rows this browser changed, and from which `_rev`. Absent = an older
+  // browser: its rows win as before.
+  const revs = readRevsParam(body.revs, TRUST_SLICE_KEYS);
 
   // Function-only writers (e.g. Trust → Site materials): merged onto the
   // stored desk, only their functions' slices — never the body as sent.
@@ -133,7 +138,7 @@ export async function POST(req: Request) {
     raBills: body.raBills ?? [],
     costLines: body.costLines ?? [],
     rateCard: body.rateCard ?? [],
-  });
+  }, { revs });
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error || "Sync failed" },
@@ -141,9 +146,18 @@ export async function POST(req: Request) {
     );
   }
 
-  if (gate.mode === "feature") return featureSavedResponse(true);
+  if (gate.mode === "feature") {
+    if (result.conflicts && Object.keys(result.conflicts).length) {
+      return NextResponse.json({ ok: true, functionOnly: true, changed: true, conflicts: result.conflicts });
+    }
+    return featureSavedResponse(true);
+  }
   return NextResponse.json({
     ok: true,
+    // New `_rev` of each row written, and rows refused because they changed
+    // elsewhere first — the browser updates its versions / reloads.
+    revs: result.revs ?? {},
+    conflicts: result.conflicts ?? {},
     projectCount: body.projects?.length ?? 0,
     updatedAt: new Date().toISOString(),
   });
