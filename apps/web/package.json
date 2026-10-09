@@ -18,6 +18,7 @@
     "test:receipt-lookup": "npx tsx src/lib/receiptLookup.selftest.ts",
     "test:school-receipt-no": "npx tsx src/lib/schoolReceiptNo.selftest.ts",
     "test:transport-overlap-billing": "npx tsx src/lib/transportOverlapBilling.selftest.ts",
+    "test:masters-transport-no-prune": "npx tsx src/lib/mastersTransportNoPrune.selftest.ts",
     "test:playbook": "npx tsx src/lib/playbook.selftest.ts",
     "test:report-remark-ai": "npx tsx src/lib/reportRemarkAi.selftest.ts",
     "test:lesson-plan-ai": "npx tsx src/lib/lessonPlanAi.selftest.ts",
