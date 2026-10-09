@@ -10,6 +10,8 @@ import {
   type WaChatCategory,
 } from "@/lib/waChatCategories";
 import { loadWaTemplates, type WaTemplate } from "@/lib/waTemplates";
+import { istTime } from "@/lib/waTimeline";
+import { WaTimelineView } from "@/components/comms/WaTimelineView";
 import {
   MastersTableCard,
   MastersWorkCard,
@@ -121,6 +123,7 @@ export function WaChatHubPanel({
   const [templateId, setTemplateId] = useState("");
   const [approvedTemplates, setApprovedTemplates] = useState<WaTemplate[]>([]);
   const [busy, setBusy] = useState(false);
+  const [timelineKey, setTimelineKey] = useState(0);
   const [configured, setConfigured] = useState(false);
   const [summary, setSummary] = useState<string | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -422,6 +425,7 @@ export function WaChatHubPanel({
         return;
       }
       setReply("");
+      setTimelineKey((k) => k + 1);
       await refresh();
     } finally {
       setBusy(false);
@@ -495,6 +499,7 @@ export function WaChatHubPanel({
         return;
       }
       setTemplateId("");
+      setTimelineKey((k) => k + 1);
       await refresh();
     } finally {
       setBusy(false);
@@ -623,14 +628,14 @@ export function WaChatHubPanel({
           }
           hint={
             selected
-              ? `Updated ${selected.updatedAt.slice(0, 16).replace("T", " ")}`
+              ? `Updated ${istTime(selected.updatedAt, true)}`
               : "Select a thread"
           }
         >
           {!selected ? (
             <p className="text-[12px] text-[var(--muted)]">
-              Choose a thread to see parent/staff messages (in) and bot replies
-              (out).
+              Choose a thread to see everything this number and the school said on
+              WhatsApp — bot, staff, office and automations — like the app.
             </p>
           ) : (
             <div className="space-y-3">
@@ -664,26 +669,9 @@ export function WaChatHubPanel({
                   {summary}
                 </div>
               ) : null}
-              <div className="max-h-80 space-y-2 overflow-y-auto rounded-lg border border-[var(--border)] bg-[rgba(248,248,240,0.6)] p-2">
-                {selected.messages.map((m) => (
-                  <div
-                    key={m.id}
-                    className={`rounded-lg px-2 py-1.5 text-[12px] whitespace-pre-wrap ${
-                      m.direction === "in"
-                        ? "bg-[var(--card)] border-l-2 border-[var(--tone-teal)]"
-                        : m.role === "staff"
-                          ? "bg-[rgba(15,118,110,0.15)]"
-                          : "bg-[var(--surface-sunken)] border-l-2 border-[#64748b]"
-                    }`}
-                  >
-                    <p className="text-[9px] font-semibold uppercase text-[var(--muted)]">
-                      {m.direction === "in" ? "Received" : "Bot / staff"} ·{" "}
-                      {m.by || "—"} · {m.at.slice(11, 16)}
-                    </p>
-                    {m.text}
-                  </div>
-                ))}
-              </div>
+              {/* Everything this number and the school said — bot, staff,
+                  office and every automation — not just this category's thread. */}
+              <WaTimelineView mobile={selected.mobile} refreshKey={timelineKey} />
               {canEdit ? (
                 <div className="space-y-2 border-t border-[var(--border)] pt-3">
                   <textarea
@@ -786,7 +774,7 @@ export function WaChatHubPanel({
                       <p className="text-[11px] text-[var(--muted)]">
                         {item.mediaType} · {item.filename || item.mimeType || "file"}
                         {" · "}
-                        {item.receivedAt.slice(0, 16).replace("T", " ")}
+                        {istTime(item.receivedAt, true)}
                         {item.reviewedAt ? ` · reviewed by ${item.reviewedBy}` : ""}
                       </p>
                       {item.caption ? (

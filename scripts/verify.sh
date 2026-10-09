@@ -196,6 +196,7 @@ SELFTESTS=(
   test:leave-allotment
   test:class-group-message
   test:comms-reach
+  test:wa-timeline
   test:wa-sender-routing
   test:receipt-repair
   test:projection-double-post
