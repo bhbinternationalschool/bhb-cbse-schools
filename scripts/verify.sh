@@ -59,6 +59,7 @@ SELFTESTS=(
   test:masters-write-guard
   test:masters-revision-guard
   test:masters-revision-lifecycle
+  test:masters-revision-everywhere
   test:masters-cold-client
   test:masters-freeze
   test:session-year

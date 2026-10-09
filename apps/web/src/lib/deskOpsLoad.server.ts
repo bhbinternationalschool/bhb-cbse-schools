@@ -78,8 +78,12 @@ export async function loadOpsMasters(): Promise<MastersState> {
   return emptyMastersShell();
 }
 
-export async function saveOpsMasters(state: MastersState): Promise<void> {
-  const result = await pushMastersDeskToDb(state);
+/** `baseUpdatedAt`: the masters revision the state was read at (sync meta). */
+export async function saveOpsMasters(
+  state: MastersState,
+  baseUpdatedAt: string | null,
+): Promise<void> {
+  const result = await pushMastersDeskToDb(state, { baseUpdatedAt });
   if (!result.ok) throw new Error(result.error || "masters desk push failed");
 }
 

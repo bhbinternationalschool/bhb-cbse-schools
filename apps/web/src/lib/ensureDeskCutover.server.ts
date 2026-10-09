@@ -244,7 +244,11 @@ async function ensurePrimaryModule(id: DeskModuleId): Promise<EnsureDeskAction> 
       }
       const deskRows = meta?.sliceCount ?? 0;
       if (deskRows === 0) {
-        const ok = (await pushMastersDeskToDb(emptyMastersShell())).ok;
+        const ok = (await pushMastersDeskToDb(emptyMastersShell(), {
+          // Bootstrap only: with no revision the writer refuses any desk
+          // that has ever been written.
+          baseUpdatedAt: null,
+        })).ok;
         return {
           module: id,
           action: ok ? "seed" : "skip",

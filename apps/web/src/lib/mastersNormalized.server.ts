@@ -113,9 +113,33 @@ function slicesToBundle(
   return bundle;
 }
 
+export type MastersPushOutcome = {
+  ok: boolean;
+  error?: string;
+  updatedAt?: string;
+  /** Set when the write was refused for its revision: the caller answers 409. */
+  conflict?: "stale" | "unversioned";
+};
+
+/**
+ * Write masters — only on top of the revision the writer read.
+ *
+ * `baseUpdatedAt` is the desk revision (sync meta `updated_at`) the caller's
+ * copy came from. The route checked it for browsers, but every other writer
+ * (the mirror push, the ops loader, the cutover) wrote unconditionally, and
+ * the route itself let a browser with NO revision through as "legacy" —
+ * which is exactly a browser that never loaded masters. Now the writer
+ * itself refuses:
+ *  - no revision while the desk has one ("unversioned"),
+ *  - a revision the desk has moved past ("stale"),
+ * and claims the new revision with a conditional update, so of two saves
+ * from the same base only one lands. Only a desk that has never been written
+ * (no sync meta) accepts a write without a revision.
+ */
 export async function pushMastersDeskToDb(
   state: MastersState,
-): Promise<{ ok: boolean; error?: string; updatedAt?: string }> {
+  opts: { baseUpdatedAt: string | null },
+): Promise<MastersPushOutcome> {
   if (!mastersDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
@@ -146,6 +170,53 @@ export async function pushMastersDeskToDb(
   if (rows.length === 0) {
     return { ok: false, error: "Masters push carried no slices — nothing was written." };
   }
+
+  const { data: metaNow, error: metaErr } = await sb
+    .from("masters_desk_sync_meta")
+    .select("updated_at")
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+  if (metaErr) {
+    return { ok: false, error: `Could not read the masters revision — nothing was written: ${metaErr.message}` };
+  }
+  const storedRev = (metaNow as { updated_at?: string } | null)?.updated_at ?? null;
+  if (storedRev) {
+    const base = (opts.baseUpdatedAt ?? "").trim();
+    if (!base) {
+      return {
+        ok: false,
+        conflict: "unversioned",
+        error:
+          "This copy of masters was never loaded from the server, so it cannot be saved over it. " +
+          "The screen will refresh with the current data; re-apply your change.",
+      };
+    }
+    if (Date.parse(base) !== Date.parse(storedRev)) {
+      return {
+        ok: false,
+        conflict: "stale",
+        error:
+          "Masters changed on another device after this one loaded them. Refusing the save so the " +
+          "newer version is not overwritten — the screen will refresh; re-apply your change.",
+      };
+    }
+    // Claim the new revision only if nobody moved it since the read above.
+    const { data: claimed, error: claimErr } = await sb
+      .from("masters_desk_sync_meta")
+      .update({ updated_at: now, last_updated_at: now })
+      .eq("tenant_id", tenantId)
+      .eq("updated_at", storedRev)
+      .select("tenant_id");
+    if (claimErr) return { ok: false, error: claimErr.message };
+    if (!claimed?.length) {
+      return {
+        ok: false,
+        conflict: "stale",
+        error: "Another save to masters landed at the same moment — this one was not written. Re-apply your change.",
+      };
+    }
+  }
+
   {
     const { error } = await sb.from("masters_desk_slices").upsert(rows);
     if (error) return { ok: false, error: error.message };
