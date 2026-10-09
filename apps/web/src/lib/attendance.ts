@@ -65,6 +65,12 @@ export type AttendancePolicy = {
   absentNudgeEnabled: boolean;
   /** Cap how many wa.me tabs open after one save */
   absentNudgeMaxOpen: number;
+  /**
+   * When these settings were last changed. A save writes the policy only
+   * when this is newer than the stored one, so a tab holding the old
+   * cut-off can't put it back. "" on a copy from before this existed.
+   */
+  updatedAt?: string;
 };
 
 export type AbsentNudgeLog = {
@@ -215,6 +221,7 @@ function normalizePolicy(raw?: Partial<AttendancePolicy> | null): AttendancePoli
           DEFAULT_ATTENDANCE_POLICY.absentNudgeMaxOpen,
       ),
     ),
+    updatedAt: raw?.updatedAt || "",
   };
 }
 
@@ -448,7 +455,7 @@ export function saveAttendancePolicy(
     return { ok: false, error: "Not allowed to edit attendance settings" };
   }
   const state = loadAttendance();
-  const policy = normalizePolicy({ ...state.policy, ...patch });
+  const policy = normalizePolicy({ ...state.policy, ...patch, updatedAt: new Date().toISOString() });
   saveAttendance({ ...state, policy });
   return { ok: true, policy };
 }
