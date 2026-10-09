@@ -209,20 +209,11 @@ export async function pushFeeDeskAncillaryToDb(
 
   // A voided receipt no longer pays anything towards a plan. The UI drops
   // its allocations; the payload says which receipts are voided, so their
-  // allocations are removed here — and only theirs.
+  // allocations are removed — and only theirs. Written first, removed
+  // second: the two sets never overlap (allocations of voided receipts are
+  // not written), and a failed write then happens before anything is gone.
   const voided = new Set(opts.voidedVoucherIds ?? []);
   const allocs = (ancillary.planAllocations ?? []).filter((a) => !voided.has(a.voucherId));
-  if (voided.size) {
-    const ids = [...voided];
-    for (let i = 0; i < ids.length; i += 100) {
-      const { error } = await sb
-        .from("fee_desk_plan_allocations")
-        .delete()
-        .eq("tenant_id", tenantId)
-        .in("voucher_id", ids.slice(i, i + 100));
-      if (error) return { ok: false, error: `fee_desk_plan_allocations: ${error.message}` };
-    }
-  }
   if (allocs.length) {
     const rows = allocs.map((a: PlanAllocation) => ({
       id: a.id,
@@ -237,6 +228,17 @@ export async function pushFeeDeskAncillaryToDb(
       .from("fee_desk_plan_allocations")
       .upsert(rows, { onConflict: "id" });
     if (error) return { ok: false, error: error.message };
+  }
+  if (voided.size) {
+    const ids = [...voided];
+    for (let i = 0; i < ids.length; i += 100) {
+      const { error } = await sb
+        .from("fee_desk_plan_allocations")
+        .delete()
+        .eq("tenant_id", tenantId)
+        .in("voucher_id", ids.slice(i, i + 100));
+      if (error) return { ok: false, error: `fee_desk_plan_allocations: ${error.message}` };
+    }
   }
 
   const carried = ancillary.carriedForwardDues ?? [];
