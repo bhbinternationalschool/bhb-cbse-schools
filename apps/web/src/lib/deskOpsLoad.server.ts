@@ -68,7 +68,10 @@ export async function saveOpsFees(state: FeesState): Promise<void> {
 }
 
 export async function loadOpsMasters(): Promise<MastersState> {
-  const { bundle } = await fetchMastersDeskFromDb();
+  const { bundle, readFailed } = await fetchMastersDeskFromDb();
+  // Unknown is not empty: an empty shell handed to a caller that then saves
+  // it would be written over the school's masters.
+  if (readFailed) throw new Error("Could not read the saved masters — nothing was changed.");
   if ((bundle.classes?.length ?? 0) > 0 || (bundle.feeHeads?.length ?? 0) > 0) {
     return { version: 2, ...bundle };
   }

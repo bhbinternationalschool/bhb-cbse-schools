@@ -1,8 +1,3 @@
-/* ratchet-allow: unguarded_replace — this deletes only the STALE slice keys (the
-   complement of what is about to be written) and then upserts the live set over
-   rows that already exist. A failed upsert therefore loses nothing: the slices
-   it would have rewritten are still there, unchanged. That is a prune, not the
-   wipe-then-refill shape that emptied the fee book. */
 /**
  * Masters desk — Supabase slice rows (masters_desk_slices).
  */
@@ -129,10 +124,17 @@ export async function pushMastersDeskToDb(
   const stripped = stripStaffFromMastersForBlob(state);
   const slices = stateToSlices(stripped);
 
+  // A slice the push does not carry is left as stored — absence is not a
+  // deletion. This deleted every slice a push lacked or sent empty, so a
+  // client (or a server copy) missing a key erased that master, and a push
+  // carrying nothing wiped the desk. A slice the push DOES carry is written
+  // as sent, an empty array included: removing the last holiday is a real
+  // edit, and the route's revision lock is what keeps a stale copy from
+  // making it.
   const rows = slices
     .filter(({ key, payload }) => {
       if (MASTERS_OBJECT_SLICES.includes(key)) return payload != null;
-      return Array.isArray(payload) && payload.length > 0;
+      return Array.isArray(payload);
     })
     .map(({ key, payload }) => ({
       tenant_id: tenantId,
@@ -141,36 +143,22 @@ export async function pushMastersDeskToDb(
       updated_at: now,
     }));
 
-  const { data: existing } = await sb
-    .from("masters_desk_slices")
-    .select("slice_key")
-    .eq("tenant_id", tenantId);
-  const keep = new Set<string>(rows.map((r) => String(r.slice_key)));
-  const stale = (existing ?? [])
-    .map((r) => String((r as { slice_key: string }).slice_key))
-    .filter((k) => !keep.has(k));
-  if (stale.length > 0) {
-    await sb
-      .from("masters_desk_slices")
-      .delete()
-      .eq("tenant_id", tenantId)
-      .in("slice_key", stale);
+  if (rows.length === 0) {
+    return { ok: false, error: "Masters push carried no slices — nothing was written." };
   }
-
-  if (rows.length > 0) {
+  {
     const { error } = await sb.from("masters_desk_slices").upsert(rows);
     if (error) return { ok: false, error: error.message };
-  } else {
-    await sb.from("masters_desk_slices").delete().eq("tenant_id", tenantId);
   }
 
   await sb.from("masters_desk_sync_meta").upsert(
     {
       tenant_id: tenantId,
-      slice_count: rows.length,
-      class_count: state.classes?.length ?? 0,
-      fee_head_count: state.feeHeads?.length ?? 0,
-      subject_count: state.subjects?.length ?? 0,
+      slice_count: rows.filter((r) => !Array.isArray(r.payload) || r.payload.length > 0).length,
+      // Counts only for slices this push carried; the rest stay as recorded.
+      ...(Array.isArray(state.classes) ? { class_count: state.classes.length } : {}),
+      ...(Array.isArray(state.feeHeads) ? { fee_head_count: state.feeHeads.length } : {}),
+      ...(Array.isArray(state.subjects) ? { subject_count: state.subjects.length } : {}),
       last_updated_at: now,
       updated_at: now,
     },
