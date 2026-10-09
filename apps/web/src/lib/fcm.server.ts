@@ -13,6 +13,7 @@
 
 import { GoogleAuth } from "google-auth-library";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { pushVoiceChannel, pushVoiceKind, type PushVoiceLang } from "@/lib/pushVoice";
 
 const FCM_PROJECT_ID =
   process.env.FCM_PROJECT_ID ||
@@ -134,12 +135,17 @@ async function sendOne(
   accessToken: string,
   token: string,
   payload: FcmPayload,
+  voiceLang: PushVoiceLang = "hi",
 ): Promise<{ outcome: SendOutcome; error?: string }> {
+  // The spoken line for this kind of alert (lib/pushVoice). The app shows
+  // a foreground notification on the same channel, so it is in data too.
+  const voice = pushVoiceChannel(pushVoiceKind(payload.url, payload.data?.kind), voiceLang);
   const data: Record<string, string> = {
     ...(payload.data || {}),
     title: payload.title,
     body: payload.body,
     url: payload.url || "",
+    voice,
   };
   const message = {
     message: {
@@ -150,9 +156,11 @@ async function sendOne(
         priority: "HIGH",
         // No click_action: firebase_messaging ≥7 opens the launcher activity
         // itself and surfaces the tap via onMessageOpenedApp/getInitialMessage.
+        // An app without this channel (older than the voice release) falls
+        // back to its default channel and the normal sound.
         notification: {
-          channel_id: "bhb_default",
-          sound: "default",
+          channel_id: voice,
+          sound: voice,
         },
       },
       apns: {
@@ -185,6 +193,25 @@ async function sendOne(
 }
 
 /**
+ * Staff hear English. A parent hears Hindi unless the family chose English
+ * (the chatbot's language menu); a family the roster cannot find gets the
+ * school's default, Hindi.
+ */
+async function voiceLanguageFor(subjectType: string, subjectId: string): Promise<PushVoiceLang> {
+  if (subjectType !== "parent") return "en";
+  try {
+    const [{ loadSis }, { waTemplateLanguageFor, SCHOOL_DEFAULT_WA_LANGUAGE }] = await Promise.all([
+      import("@/lib/sis"),
+      import("@/lib/householdPrefs"),
+    ]);
+    const hh = loadSis().households.find((h) => h.id === subjectId);
+    return hh ? waTemplateLanguageFor(hh) : SCHOOL_DEFAULT_WA_LANGUAGE;
+  } catch {
+    return "hi";
+  }
+}
+
+/**
  * Push one payload to every app install registered for a subject. Dead
  * tokens are deleted; other failures are logged and skipped. Never throws.
  */
@@ -204,10 +231,11 @@ export async function sendFcmToSubject(
     return { ...zero, failed: tokens.length };
   }
 
+  const voiceLang = await voiceLanguageFor(subjectType, subjectId);
   const out = { ...zero };
   for (const row of tokens) {
     try {
-      const r = await sendOne(accessToken, row.token, payload);
+      const r = await sendOne(accessToken, row.token, payload, voiceLang);
       if (r.outcome === "sent") out.sent += 1;
       else if (r.outcome === "expired") {
         await deleteDeviceToken(row.token);
