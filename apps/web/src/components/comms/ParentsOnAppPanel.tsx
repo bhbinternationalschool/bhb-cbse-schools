@@ -152,7 +152,7 @@ export function ParentsOnAppPanel() {
                 <span className="flex items-center gap-2 text-[11px] text-[var(--muted)]">
                   <span className="font-semibold text-[var(--tone-teal)]">{c.onApp.length}</span> of {c.families} families on app
                   <span className="inline-block h-1.5 w-20 overflow-hidden rounded-full bg-[var(--border)]" aria-hidden>
-                    <span className="block h-full bg-[var(--tone-teal)]" style={{ width: `${share}%` }} />
+                    <span className="block h-full bg-[var(--tone-teal-solid)]" style={{ width: `${share}%` }} />
                   </span>
                 </span>
               </summary>
