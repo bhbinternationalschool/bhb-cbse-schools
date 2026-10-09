@@ -10,6 +10,7 @@ import {
   type StaffAttendanceState,
 } from "@/lib/staffAttendance";
 import {
+  captureStaffAttendanceStamps,
   hydrateStaffAttendanceDeskFromDb,
   scheduleStaffAttendanceDeskSync,
 } from "@/lib/staffAttendanceNormalizedClient";
@@ -85,7 +86,7 @@ export async function ensureStaffAttendanceHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { registers, ancillary, changed, ok } =
+  const { registers, ancillary, changed, ok, stamps } =
     await hydrateStaffAttendanceDeskFromDb(readFromDb);
   if (!ok) {
     // Fetch failed — do not lock hydration flag; caller can retry later.
@@ -101,6 +102,9 @@ export async function ensureStaffAttendanceHydrated(): Promise<boolean> {
     writeStaffAttendanceLocalRaw(merged);
     normChanged = true;
   }
+  // Which version of each register this browser now holds: its saves send
+  // only registers changed since, stamped, so they can't undo a punch.
+  captureStaffAttendanceStamps(stamps, loadStaffAttendance());
 
   // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
 
