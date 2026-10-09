@@ -54,8 +54,8 @@ const read = (f: string) => readFileSync(join(__dirname, f), "utf8");
 
   // The charge-voucher lines stay a per-parent replacement.
   assert.ok(
-    /match: \{ charge_voucher_id: charges\.filter\(\(c\) => \(c\.lines \?\? \[\]\)\.length > 0\)\.map/.test(push),
-    "charge lines replaced only for vouchers that arrived with lines",
+    /charge_voucher_id: charges\s*\.filter\(\(c\) => \(c\.lines \?\? \[\]\)\.length > 0 && !skippedCharges\.has\(c\.id\)\)\s*\.map/.test(push),
+    "charge lines replaced only for vouchers that arrived with lines (and were written)",
   );
 
   const fees = read("fees.ts");
