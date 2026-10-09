@@ -8,6 +8,7 @@ import { TENANT } from "@/lib/types";
 import { composeClassGroupMessage, waShareUrl } from "@/lib/classGroupMessage";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import { ClassGroupMoveCard } from "@/components/comms/ClassGroupMoveCard";
+import { UnknownLoginsCard } from "@/components/comms/UnknownLoginsCard";
 
 type Channel = {
   id: string;
@@ -287,6 +288,7 @@ export function ClassChannelsPanel() {
   return (
     <div className="space-y-5">
       <ClassGroupMoveCard />
+      <UnknownLoginsCard />
       <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
           Class WhatsApp channels

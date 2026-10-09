@@ -403,6 +403,7 @@ jobs:
           npm run test:udise-portal-student-sync
           npm run test:udise-school-finance
           npm run test:udise-teacher-sync
+          npm run test:login-unknown-numbers
           npm run test:desk-probe-allowlist
           npm run test:full-storage-loaders
           npm run test:cashfree-settlements

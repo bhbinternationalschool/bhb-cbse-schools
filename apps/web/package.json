@@ -366,6 +366,7 @@
     "test:timetable-free-grid": "npx tsx src/lib/timetableFreeGrid.selftest.ts",
     "test:udise-teacher-apaar": "npx tsx src/lib/udiseTeacherApaar.selftest.ts",
     "test:udise-teacher-sync": "npx tsx src/lib/udiseTeacherSync.selftest.ts",
+    "test:login-unknown-numbers": "npx tsx src/lib/loginUnknownNumbers.selftest.ts",
     "test:desk-probe-allowlist": "npx tsx src/lib/deskProbeAllowlist.selftest.ts",
     "test:full-storage-loaders": "npx tsx src/lib/fullStorageLoaders.selftest.ts",
     "test:cashfree-settlements": "npx tsx src/lib/cashfreeSettlements.selftest.ts",

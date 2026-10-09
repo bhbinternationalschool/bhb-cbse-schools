@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { issueParentOtp } from "@/lib/parentOtp.server";
+import { issueParentOtp, normalizeMobile10 } from "@/lib/parentOtp.server";
+import { noteUnknownLoginServer } from "@/lib/loginUnknownNumbers.server";
 import { resolveHouseholdByMobileServer } from "@/lib/parentHousehold.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { isReviewLoginMobile } from "@/lib/reviewLogin.server";
@@ -34,6 +35,10 @@ export async function POST(request: Request) {
     // children", and the OTP it then received unlocked that family.
     const found = await resolveHouseholdByMobileServer(mobile);
     if (!found) {
+      // The office's call list (Comms → WhatsApp → Class groups): a family
+      // who wants the app but whose number the ERP does not have.
+      const m10 = normalizeMobile10(mobile);
+      if (m10) await noteUnknownLoginServer(m10, "parent");
       return NextResponse.json(
         { error: "No parent record found for this mobile. Contact school office." },
         { status: 404 },

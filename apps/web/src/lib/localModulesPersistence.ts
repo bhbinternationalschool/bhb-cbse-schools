@@ -15,6 +15,7 @@ import {
   type ModuleStatePersistence,
 } from "@/lib/moduleStatePersistence";
 import type { ModuleStateKey } from "@/lib/moduleStateRegistry";
+import { emptyUnknownLoginState } from "@/lib/loginUnknownNumbers";
 import { loadAttendanceResultOverrides, writeAttendanceResultOverridesLocalRaw } from "@/lib/attendanceResultOverrides";
 import { loadHolds, writeHoldsLocalRaw } from "@/lib/holds";
 import { loadFeeAdjustments, writeFeeAdjustmentsLocalRaw } from "@/lib/feeAdjustments";
@@ -119,6 +120,14 @@ const registry: Record<ModuleStateKey, ModuleStatePersistence<any>> = {
     isEmpty: (s) => noRows(s, ["assignments", "duties", "rooms", "plans"]),
     loadLocal: loadInvigilation,
     writeLocalRaw: writeInvigilationLocalRaw,
+  }),
+  // Written only by the server (OTP requests from numbers the ERP does not
+  // know); a browser holds no copy, so the server copy always wins.
+  login_unknown_numbers: createModuleStatePersistence({
+    key: "login_unknown_numbers",
+    isEmpty: () => true,
+    loadLocal: emptyUnknownLoginState,
+    writeLocalRaw: () => undefined,
   }),
   attendance_result_overrides: createModuleStatePersistence({
     key: "attendance_result_overrides",
