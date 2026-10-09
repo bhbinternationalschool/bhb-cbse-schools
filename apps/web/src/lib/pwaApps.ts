@@ -118,6 +118,13 @@ export function pwaManifestHref(appId: PwaAppId): string {
   return `/pwa/${appId}/manifest.webmanifest`;
 }
 
+/**
+ * BHB Staff on Google Play — INTERNAL TESTING join link (director, 9 Oct
+ * 2026). Only staff Gmails on the tester list can join; everyone else uses
+ * the website app. Android only; there is no iPhone staff app.
+ */
+export const STAFF_PLAY_TEST_URL = "https://play.google.com/apps/internaltest/4701007545375064542";
+
 export function pwaDismissKey(appId: PwaAppId): string {
   return `bhb_pwa_dismiss_${appId}`;
 }
