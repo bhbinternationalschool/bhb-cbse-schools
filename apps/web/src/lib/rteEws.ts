@@ -39,6 +39,7 @@ import { ensureRteEwsTagIds } from "@/lib/studentTags";
 import { TENANT } from "@/lib/types";
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
+import { recordRteDeletion } from "@/lib/rteNormalizedClient";
 
 const STORAGE_KEY = "bhb_rte_ews_v1";
 
@@ -408,6 +409,7 @@ export function deleteQuotaSeat(
   if (!state.seats.some((s) => s.id === id)) {
     return { ok: false, error: "Seat row not found" };
   }
+  if (typeof window !== "undefined") recordRteDeletion("rte_desk_seats", [id]);
   saveRte({ ...state, seats: state.seats.filter((s) => s.id !== id) });
   return { ok: true };
 }
@@ -594,6 +596,7 @@ export function deleteQuotaApplication(
   if (!state.applications.some((a) => a.id === id)) {
     return { ok: false, error: "Application not found" };
   }
+  if (typeof window !== "undefined") recordRteDeletion("rte_desk_applications", [id]);
   saveRte({
     ...state,
     applications: state.applications.filter((a) => a.id !== id),

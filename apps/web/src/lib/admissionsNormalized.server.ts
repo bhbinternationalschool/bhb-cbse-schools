@@ -53,63 +53,6 @@ async function resolveCtx(): Promise<{
   return getServerTenantContext();
 }
 
-/**
- * Delete rows the client no longer holds — never on an empty payload.
- *
- * An empty keep-set means every stored row is "stale", so this deleted the
- * entire table. That is never what a sync means: a client with nothing to say
- * is a client whose cache was dropped, not an instruction to erase the
- * school's records.
- *
- * It is not hypothetical. On 2026-08-11 the attendance register for the
- * previous day was gone — pushed away by a phone whose localStorage had been
- * dropped on quota, with the emptiness check running AFTER the delete. This
- * same function is copied into 20 modules and called from 86 places, almost
- * none of them guarded, covering bank and cash ledgers, payroll runs, fee
- * cheques, library issues and 1,919 admission records.
- *
- * This floor stops the catastrophic case everywhere at once. It does NOT make
- * a partial payload safe — a client holding 3 of 900 rows still prunes 897.
- * That needs per-module scoping, the way attendance now prunes only within
- * the dates its payload covers. See docs/TODO.md.
- *
- * The read error is also surfaced now. It was discarded, which happened to
- * fail safe here (no data → nothing deleted), but "we could not read the
- * table" and "the table is empty" must not be the same value in a function
- * that deletes.
- */
-async function deleteStale(
-  sb: SupabaseClient,
-  tenantId: string,
-  table: string,
-  keepIds: Set<string>,
-) {
-  if (keepIds.size === 0) {
-    console.warn(
-      `[${table}] refusing to prune: the payload holds no ids at all. ` +
-        "An empty client is not an instruction to delete every row.",
-    );
-    return;
-  }
-  const { data, error } = await sb
-    .from(table)
-    .select("id")
-    .eq("tenant_id", tenantId);
-  if (error) {
-    console.error(
-      `[${table}] prune skipped — could not read existing ids:`,
-      error.message,
-    );
-    return;
-  }
-  const stale = (data ?? [])
-    .map((r) => String((r as { id: string }).id))
-    .filter((id) => !keepIds.has(id));
-  if (stale.length > 0) {
-    await sb.from(table).delete().in("id", stale);
-  }
-}
-
 async function upsertChunks(
   sb: SupabaseClient,
   table: string,
@@ -431,59 +374,14 @@ export async function pushAdmissionDeskToDb(
   );
   if (!r.ok) return r;
 
-  // Registration payments are MONEY and append-only — a payment the pushing
-  // client does not hold means an unhydrated client, never a deletion. Same
-  // rule (and same 2026-08-26 lesson) as fee receipts: the server keeps them.
-  // Leads carrying a payment or an enrolment are protected for the same
-  // reason — pruning them would orphan money and admission records; only
-  // plain unpaid leads still follow the client's snapshot.
-  {
-    const { rows: paidRows } = await fetchAllPages<{ lead_id: string }>((from, to) =>
-      sb
-        .from("admission_desk_registration_payments")
-        .select("lead_id")
-        .eq("tenant_id", tenantId)
-        .order("id", { ascending: true })
-        .range(from, to),
-    );
-    const paidLeadIds = new Set(
-      (paidRows ?? []).map((r) => String((r as { lead_id: string }).lead_id)),
-    );
-    // Paged — 948 leads today. An unpaged read here would have let the prune
-    // below delete every lead past the thousandth that the pushing browser
-    // did not carry.
-    const { rows: linkedRows } = await fetchAllPages<{ id: string; sis_student_id: string | null }>(
-      (from, to) =>
-        sb
-          .from("admission_desk_leads")
-          .select("id, sis_student_id")
-          .eq("tenant_id", tenantId)
-          .order("id", { ascending: true })
-          .range(from, to),
-    );
-    const keepLeads = new Set(leads.map((l) => l.id));
-    for (const r of (linkedRows ?? []) as { id: string; sis_student_id: string | null }[]) {
-      if (paidLeadIds.has(r.id) || (r.sis_student_id ?? "") !== "") {
-        keepLeads.add(String(r.id));
-      }
-    }
-    await deleteStale(sb, tenantId, "admission_desk_leads", keepLeads);
-
-    // Households referenced by any surviving lead stay too.
-    const { rows: leadHh } = await fetchAllPages<{ household_id: string | null }>((from, to) =>
-      sb
-        .from("admission_desk_leads")
-        .select("household_id")
-        .eq("tenant_id", tenantId)
-        .order("id", { ascending: true })
-        .range(from, to),
-    );
-    const keepHh = new Set(households.map((h) => h.id));
-    for (const r of (leadHh ?? []) as { household_id: string | null }[]) {
-      if (r.household_id) keepHh.add(String(r.household_id));
-    }
-    await deleteStale(sb, tenantId, "admission_desk_households", keepHh);
-  }
+  // No prune by absence. Leads and households are never deleted in the UI
+  // (a merged duplicate is marked lost), and they are written by many hands
+  // that never pass through this browser: the public enquiry form inserts
+  // directly, the WhatsApp bot upserts single leads, Google lead forms, the
+  // survey-day and staff-app captures all push from the server. Any of those
+  // landing after this copy was read used to be deleted by it — the paid and
+  // enrolled leads were protected, the fresh enquiries were not. Registration
+  // payments were already append-only.
 
   const ops = fieldOpsFromState(normalized);
   await sb.from("admission_desk_field_ops").upsert({

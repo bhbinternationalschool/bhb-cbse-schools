@@ -9,6 +9,17 @@ import {
   recordDeskSyncFailure,
   recordDeskSyncSuccess,
 } from "@/lib/deskSyncStatus";
+import { confirmDeskDeletes, pendingDeskDeletes, recordDeskDeletion } from "@/lib/deskNamedDeletes";
+
+const RTE_DESK = "rte";
+
+/** A seat row or application the user deleted; the next push deletes it by id. */
+export function recordRteDeletion(
+  table: "rte_desk_seats" | "rte_desk_applications",
+  ids: string[],
+) {
+  recordDeskDeletion(RTE_DESK, table, ids);
+}
 
 const META_KEY = "bhb_rte_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -62,6 +73,7 @@ export function scheduleRteDeskSync(state: RteState) {
 }
 
 async function pushRteDeskApi(state: RteState) {
+  const sentDeletes = pendingDeskDeletes(RTE_DESK);
   try {
     const res = await fetch("/api/school-data/rte-desk", {
       method: "POST",
@@ -70,6 +82,8 @@ async function pushRteDeskApi(state: RteState) {
         seats: state.seats,
         applications: state.applications,
         settings: state.settings,
+        // Deletions are named, never inferred from what this browser lacks.
+        deletes: sentDeletes,
       }),
     });
     const body = (await res.json().catch(() => null)) as {
@@ -80,6 +94,7 @@ async function pushRteDeskApi(state: RteState) {
       error?: string;
     } | null;
     if (res.ok && body?.ok) {
+      confirmDeskDeletes(RTE_DESK, sentDeletes);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         seatCount: body.seatCount ?? state.seats.length,

@@ -11,6 +11,7 @@ import type {
 } from "@/lib/rteEws";
 import { rteDualWriteDbEnabled } from "@/lib/rteDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { deleteNamedIds, type NamedDeletes } from "@/lib/deskNamedDeletes.server";
 
 export type RteDeskSyncMeta = {
   seatCount: number;
@@ -35,63 +36,6 @@ async function resolveCtx(): Promise<{
   tenantId: string;
 } | null> {
   return getServerTenantContext();
-}
-
-/**
- * Delete rows the client no longer holds — never on an empty payload.
- *
- * An empty keep-set means every stored row is "stale", so this deleted the
- * entire table. That is never what a sync means: a client with nothing to say
- * is a client whose cache was dropped, not an instruction to erase the
- * school's records.
- *
- * It is not hypothetical. On 2026-08-11 the attendance register for the
- * previous day was gone — pushed away by a phone whose localStorage had been
- * dropped on quota, with the emptiness check running AFTER the delete. This
- * same function is copied into 20 modules and called from 86 places, almost
- * none of them guarded, covering bank and cash ledgers, payroll runs, fee
- * cheques, library issues and 1,919 admission records.
- *
- * This floor stops the catastrophic case everywhere at once. It does NOT make
- * a partial payload safe — a client holding 3 of 900 rows still prunes 897.
- * That needs per-module scoping, the way attendance now prunes only within
- * the dates its payload covers. See docs/TODO.md.
- *
- * The read error is also surfaced now. It was discarded, which happened to
- * fail safe here (no data → nothing deleted), but "we could not read the
- * table" and "the table is empty" must not be the same value in a function
- * that deletes.
- */
-async function deleteStale(
-  sb: SupabaseClient,
-  tenantId: string,
-  table: string,
-  keepIds: Set<string>,
-) {
-  if (keepIds.size === 0) {
-    console.warn(
-      `[${table}] refusing to prune: the payload holds no ids at all. ` +
-        "An empty client is not an instruction to delete every row.",
-    );
-    return;
-  }
-  const { data, error } = await sb
-    .from(table)
-    .select("id")
-    .eq("tenant_id", tenantId);
-  if (error) {
-    console.error(
-      `[${table}] prune skipped — could not read existing ids:`,
-      error.message,
-    );
-    return;
-  }
-  const stale = (data ?? [])
-    .map((r) => String((r as { id: string }).id))
-    .filter((id) => !keepIds.has(id));
-  if (stale.length > 0) {
-    await sb.from(table).delete().in("id", stale);
-  }
 }
 
 async function upsertChunks(
@@ -249,31 +193,27 @@ function lastApplicationAt(apps: QuotaApplication[]): string | null {
   );
 }
 
+/** The RTE tables a desk save deletes from — by named id only. */
+export const RTE_DELETABLE_TABLES = ["rte_desk_seats", "rte_desk_applications"] as const;
+/** Desk slice each deletable table stores (for function-only writers). */
+export const RTE_TABLE_SLICES: Record<string, string> = {
+  rte_desk_seats: "seats",
+  rte_desk_applications: "applications",
+};
+
 export async function pushRteDeskToDb(
   state: RteState,
+  deletes: NamedDeletes = {},
 ): Promise<{ ok: boolean; error?: string }> {
   if (!rteDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
   const { sb, tenantId } = ctx;
-  const seats = state.seats ?? [];
-  const applications = state.applications ?? [];
+  const goneSeats = new Set(deletes["rte_desk_seats"] ?? []);
+  const goneApps = new Set(deletes["rte_desk_applications"] ?? []);
+  const seats = (state.seats ?? []).filter((s) => !goneSeats.has(s.id));
+  const applications = (state.applications ?? []).filter((a) => !goneApps.has(a.id));
   const now = nowIso();
-
-  await Promise.all([
-    deleteStale(
-      sb,
-      tenantId,
-      "rte_desk_seats",
-      new Set(seats.map((s) => s.id)),
-    ),
-    deleteStale(
-      sb,
-      tenantId,
-      "rte_desk_applications",
-      new Set(applications.map((a) => a.id)),
-    ),
-  ]);
 
   const seatRows = seats.map((s) => seatToRow(tenantId, s));
   if (seatRows.length > 0) {
@@ -285,6 +225,14 @@ export async function pushRteDeskToDb(
   if (appRows.length > 0) {
     const up = await upsertChunks(sb, "rte_desk_applications", appRows);
     if (!up.ok) return up;
+  }
+
+  // No prune by absence. An empty browser seeds quota seats with fresh ids
+  // before it has pulled the desk; that seed used to delete every stored seat,
+  // other years' included. Seats and applications leave only when named.
+  for (const table of RTE_DELETABLE_TABLES) {
+    const del = await deleteNamedIds(sb, tenantId, table, deletes[table]);
+    if (!del.ok) return del;
   }
 
   const { error: settingsErr } = await sb

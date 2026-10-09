@@ -7,6 +7,7 @@ import {
   type StatutoryDue,
 } from "@/lib/statutoryCompliance";
 import { trackServerWork } from "@/lib/serverWork";
+import { recordStatutoryBatchDeletion } from "@/lib/statutoryNormalizedClient";
 /**
  * PF / ESIC remittance to Government.
  * When staff avails PF and/or ESIC, employee deduction + employer
@@ -347,7 +348,12 @@ export function syncRemitFromPayrollRun(input: {
   }
 
   if (remitLines.length === 0) {
-    // Remove empty pending batch for this run if any
+    // Remove empty pending batch for this run if any — by name, since a save
+    // no longer deletes what it leaves out.
+    const removed = state.batches
+      .filter((b) => b.payrollRunId === input.runId && b.status === "pending_deposit")
+      .map((b) => b.id);
+    if (removed.length && typeof window !== "undefined") recordStatutoryBatchDeletion(removed);
     const next = {
       ...state,
       batches: state.batches.filter(

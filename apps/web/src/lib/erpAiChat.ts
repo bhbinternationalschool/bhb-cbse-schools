@@ -37,6 +37,12 @@ export type ErpAiMessage = {
   steps?: string[];
   /** ERP command desk — a write command waiting for Confirm / Cancel. */
   confirm?: { token: string; summary: string; yesId: string; noId: string };
+  /** The module guide offers to send what the user just said as a change request. */
+  offerRequest?: boolean;
+  /** A change request written up and waiting for the user to send it. */
+  requestCard?: { kind: "change" | "bug" | "stuck"; title: string; problem: string; wanted: string; suggestion: string };
+  /** Part of a change-request conversation (sent to the drafting route, not the chat). */
+  requestThread?: boolean;
 };
 
 export type ErpAiQuickPrompt = {

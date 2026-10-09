@@ -254,8 +254,21 @@ export async function POST(req: Request) {
       { status: 409 },
     );
   }
-  if (revision.reason === "unversioned" && meta) {
-    console.warn("[masters-desk] unversioned push accepted (legacy client)");
+  // No revision at all, against a desk that has one, is a browser that never
+  // loaded masters — "legacy client" was the label, but it is precisely the
+  // empty, un-pulled copy every guard here exists to stop. Refused; the
+  // client rehydrates.
+  if (revision.reason === "unversioned" && meta && !featureGate) {
+    console.warn("[masters-desk] rejected unversioned push");
+    return NextResponse.json(
+      {
+        error:
+          "This copy of masters was never loaded from the server, so it cannot be saved over it. " +
+          "The screen will refresh with the current data; re-apply your change.",
+        reason: "unversioned",
+      },
+      { status: 409 },
+    );
   }
 
   // Function-only writers: the stored desk is the base, and only the slices
@@ -303,8 +316,21 @@ export async function POST(req: Request) {
   // Awaited: the previous fire-and-forget meant a failed write still returned
   // ok:true, so a client could believe its masters were saved when they were
   // not.
-  const pushed = await pushMastersDeskToDb(state);
+  // The writer re-checks the revision and claims the next one atomically. A
+  // function holder's push was merged onto the desk read above, so that read
+  // is its base.
+  const pushed = await pushMastersDeskToDb(state, {
+    baseUpdatedAt: featureGate
+      ? (meta?.updatedAt ?? meta?.lastUpdatedAt ?? null)
+      : (baseUpdatedAt ?? null),
+  });
   if (!pushed.ok) {
+    if (pushed.conflict) {
+      return NextResponse.json(
+        { error: pushed.error, reason: pushed.conflict },
+        { status: 409 },
+      );
+    }
     return NextResponse.json(
       { error: pushed.error || "Masters push failed" },
       { status: 500 },

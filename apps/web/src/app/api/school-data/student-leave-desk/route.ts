@@ -17,7 +17,11 @@ import { studentLeaveDualWriteDbEnabled } from "@/lib/studentLeaveDbConfig";
 import {
   fetchStudentLeaveDeskFromDb,
   pushStudentLeaveDeskToDb,
+  STUDENT_LEAVE_DELETABLE_TABLES,
+  STUDENT_LEAVE_TABLE_SLICES,
 } from "@/lib/studentLeaveNormalized.server";
+import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
+import { featureAuthorizedDeletes } from "@/lib/deskNamedDeletesFeature.server";
 
 export const runtime = "nodejs";
 
@@ -43,7 +47,7 @@ export async function GET(req: Request) {
   });
 }
 
-type StudentLeaveDeskPostBody = Pick<StudentLeaveState, "requests">;
+type StudentLeaveDeskPostBody = Pick<StudentLeaveState, "requests"> & { deletes?: unknown };
 
 /** POST — push full student leave desk snapshot */
 export async function POST(req: Request) {
@@ -92,6 +96,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  // Deletions are named by the desk, never inferred from what it lacks.
+  let deletes = readNamedDeletes(body.deletes, STUDENT_LEAVE_DELETABLE_TABLES);
+
   // Function holders: merged onto the stored desk, request by request.
   if (gate) {
     const stored = await fetchStudentLeaveDeskFromDb();
@@ -104,13 +111,14 @@ export async function POST(req: Request) {
     const merged = featurePushOutcome(gate, "student_leave", stored.bundle, body);
     if (!merged.ok) return merged.response;
     if (!merged.changed) return featureSavedResponse(false);
+    deletes = featureAuthorizedDeletes(deletes, STUDENT_LEAVE_TABLE_SLICES, stored.bundle, merged.state);
     body = merged.state as unknown as StudentLeaveDeskPostBody;
   }
 
   const result = await pushStudentLeaveDeskToDb({
     version: 1,
     requests: Array.isArray(body.requests) ? body.requests : [],
-  });
+  }, deletes);
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error || "Sync failed" },

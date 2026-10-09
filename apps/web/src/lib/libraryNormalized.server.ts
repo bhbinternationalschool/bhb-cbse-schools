@@ -19,6 +19,8 @@ import {
 } from "@/lib/library";
 import { libraryDualWriteDbEnabled } from "@/lib/libraryDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { deleteNamedIds, type NamedDeletes } from "@/lib/deskNamedDeletes.server";
+import { fetchAllPages } from "@/lib/supabase/pageAll";
 
 export type LibraryDeskSyncMeta = {
   titleCount: number;
@@ -45,63 +47,6 @@ async function resolveCtx(): Promise<{
   tenantId: string;
 } | null> {
   return getServerTenantContext();
-}
-
-/**
- * Delete rows the client no longer holds — never on an empty payload.
- *
- * An empty keep-set means every stored row is "stale", so this deleted the
- * entire table. That is never what a sync means: a client with nothing to say
- * is a client whose cache was dropped, not an instruction to erase the
- * school's records.
- *
- * It is not hypothetical. On 2026-08-11 the attendance register for the
- * previous day was gone — pushed away by a phone whose localStorage had been
- * dropped on quota, with the emptiness check running AFTER the delete. This
- * same function is copied into 20 modules and called from 86 places, almost
- * none of them guarded, covering bank and cash ledgers, payroll runs, fee
- * cheques, library issues and 1,919 admission records.
- *
- * This floor stops the catastrophic case everywhere at once. It does NOT make
- * a partial payload safe — a client holding 3 of 900 rows still prunes 897.
- * That needs per-module scoping, the way attendance now prunes only within
- * the dates its payload covers. See docs/TODO.md.
- *
- * The read error is also surfaced now. It was discarded, which happened to
- * fail safe here (no data → nothing deleted), but "we could not read the
- * table" and "the table is empty" must not be the same value in a function
- * that deletes.
- */
-async function deleteStale(
-  sb: SupabaseClient,
-  tenantId: string,
-  table: string,
-  keepIds: Set<string>,
-) {
-  if (keepIds.size === 0) {
-    console.warn(
-      `[${table}] refusing to prune: the payload holds no ids at all. ` +
-        "An empty client is not an instruction to delete every row.",
-    );
-    return;
-  }
-  const { data, error } = await sb
-    .from(table)
-    .select("id")
-    .eq("tenant_id", tenantId);
-  if (error) {
-    console.error(
-      `[${table}] prune skipped — could not read existing ids:`,
-      error.message,
-    );
-    return;
-  }
-  const stale = (data ?? [])
-    .map((r) => String((r as { id: string }).id))
-    .filter((id) => !keepIds.has(id));
-  if (stale.length > 0) {
-    await sb.from(table).delete().in("id", stale);
-  }
 }
 
 async function upsertChunks(
@@ -360,8 +305,16 @@ function rowToProcurement(r: Record<string, unknown>): LibraryProcurementDoc {
   };
 }
 
+/** The library tables a desk save deletes from — by named id only. */
+export const LIBRARY_DELETABLE_TABLES = [
+  "library_desk_titles",
+  "library_desk_copies",
+  "library_desk_procurement_docs",
+] as const;
+
 export async function pushLibraryDeskToDb(
   state: LibraryState,
+  deletes: NamedDeletes = {},
 ): Promise<{ ok: boolean; error?: string }> {
   if (!libraryDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
@@ -369,10 +322,14 @@ export async function pushLibraryDeskToDb(
   const { sb, tenantId } = ctx;
   const now = new Date().toISOString();
 
-  const titles = state.titles ?? [];
-  const copies = state.copies ?? [];
+  const gone = (t: string) => new Set(deletes[t] ?? []);
+  const goneTitles = gone("library_desk_titles");
+  const goneCopies = gone("library_desk_copies");
+  const goneDocs = gone("library_desk_procurement_docs");
+  const titles = (state.titles ?? []).filter((t) => !goneTitles.has(t.id));
+  const copies = (state.copies ?? []).filter((c) => !goneCopies.has(c.id) && !goneTitles.has(c.titleId));
   const issues = state.issues ?? [];
-  const procurementDocs = state.procurementDocs ?? [];
+  const procurementDocs = (state.procurementDocs ?? []).filter((d) => !goneDocs.has(d.id));
   const settings = state.settings ?? {
     maxBooksPerStudent: 2,
     maxBooksPerStaff: 3,
@@ -380,18 +337,11 @@ export async function pushLibraryDeskToDb(
     finePaisePerDay: 500,
   };
 
-  await Promise.all([
-    deleteStale(sb, tenantId, "library_desk_titles", new Set(titles.map((t) => t.id))),
-    deleteStale(sb, tenantId, "library_desk_copies", new Set(copies.map((c) => c.id))),
-    deleteStale(sb, tenantId, "library_desk_issues", new Set(issues.map((i) => i.id))),
-    deleteStale(
-      sb,
-      tenantId,
-      "library_desk_procurement_docs",
-      new Set(procurementDocs.map((d) => d.id)),
-    ),
-  ]);
-
+  // No prune by absence. Issues (the loan history) are never deleted —
+  // a return sets returnedOn. A title, a copy or a procurement document goes
+  // only when the user deleted it, and the deletion arrives named. Deleting
+  // a title or copy cascades to its loans in the database, so only named ids
+  // may ever reach that delete.
   let r = await upsertChunks(
     sb,
     "library_desk_titles",
@@ -419,6 +369,11 @@ export async function pushLibraryDeskToDb(
     procurementDocs.map((d) => procurementToRow(tenantId, d)),
   );
   if (!r.ok) return r;
+
+  for (const table of LIBRARY_DELETABLE_TABLES) {
+    const del = await deleteNamedIds(sb, tenantId, table, deletes[table]);
+    if (!del.ok) return del;
+  }
 
   await sb.from("library_desk_settings").upsert(
     {
@@ -477,6 +432,12 @@ export async function fetchLibraryDeskFromDb(): Promise<{
   if (!ctx) return { bundle: empty, meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
+  // Paged: PostgREST stops at 1,000 rows and calls it success. Copies and
+  // loans pass that; a browser handed the first thousand would not see the rest.
+  const page = (table: string) =>
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from(table).select("*").eq("tenant_id", tenantId).order("id").range(from, to),
+    ).then((r) => ({ data: r.rows, error: r.error ? { message: r.error } : null }));
   const [
     { data: titleRows, error: titleErr },
     { data: copyRows, error: copyErr },
@@ -485,10 +446,10 @@ export async function fetchLibraryDeskFromDb(): Promise<{
     { data: settingsRow, error: settingsErr },
     { data: metaRow },
   ] = await Promise.all([
-    sb.from("library_desk_titles").select("*").eq("tenant_id", tenantId),
-    sb.from("library_desk_copies").select("*").eq("tenant_id", tenantId),
-    sb.from("library_desk_issues").select("*").eq("tenant_id", tenantId),
-    sb.from("library_desk_procurement_docs").select("*").eq("tenant_id", tenantId),
+    page("library_desk_titles"),
+    page("library_desk_copies"),
+    page("library_desk_issues"),
+    page("library_desk_procurement_docs"),
     sb
       .from("library_desk_settings")
       .select(

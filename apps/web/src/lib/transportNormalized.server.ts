@@ -1,5 +1,3 @@
-/* ratchet-allow: unguarded_replace — prune of stale slice keys only, and this one
-   additionally refuses to delete PROTECTED keys. See mastersNormalized.server.ts. */
 /**
  * Transport desk — Supabase slice rows (transport_desk_slices).
  */
@@ -9,6 +7,8 @@ import type { TransportState } from "@/lib/transport";
 import { defaultFeePolicy } from "@/lib/transport";
 import { transportDualWriteDbEnabled } from "@/lib/transportDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { mergeSliceById } from "@/lib/sliceMergeById";
+import { casWriteSlice } from "@/lib/sliceCas.server";
 
 export type TransportSliceKey = keyof Omit<TransportState, "version">;
 
@@ -146,50 +146,53 @@ export async function appendBoardingEventToDb(event: {
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
   const { sb, tenantId } = ctx;
 
-  const { data, error: readErr } = await sb
-    .from("transport_desk_slices")
-    .select("payload")
-    .eq("tenant_id", tenantId)
-    .eq("slice_key", "boardingEvents")
-    .maybeSingle();
-  if (readErr) return { ok: false, error: readErr.message };
-
-  const existing = Array.isArray(data?.payload)
-    ? (data!.payload as Record<string, unknown>[])
-    : [];
-
   const sameSlot = (e: Record<string, unknown>) =>
     e.studentId === event.studentId &&
     e.date === event.date &&
     e.trip === event.trip &&
     e.routeId === event.routeId;
 
-  const prior = existing.find(sameSlot);
-  const merged = prior
-    ? existing.map((e) =>
-        sameSlot(e)
-          ? {
-              ...e,
-              ...event,
-              id: (e.id as string) ?? event.id,
-              // A later offboard must not erase the earlier boarding pin.
-              boardedLocation: event.boardedLocation ?? e.boardedLocation ?? null,
-              offboardedLocation:
-                event.offboardedLocation ?? e.offboardedLocation ?? null,
-            }
-          : e,
-      )
-    : [event, ...existing];
-
-  const now = nowIso();
-  const { error } = await sb.from("transport_desk_slices").upsert({
-    tenant_id: tenantId,
-    slice_key: "boardingEvents",
-    payload: merged,
-    updated_at: now,
+  // Conditional write: if a desk save (or another phone) wrote the boarding
+  // log after this read, re-read and re-apply — never overwrite it.
+  const written = await casWriteSlice(sb, "transport_desk_slices", tenantId, "boardingEvents", (stored) => {
+    const existing = Array.isArray(stored) ? (stored as Record<string, unknown>[]) : [];
+    const prior = existing.find(sameSlot);
+    return prior
+      ? existing.map((e) =>
+          sameSlot(e)
+            ? {
+                ...e,
+                ...event,
+                id: (e.id as string) ?? event.id,
+                // A later offboard must not erase the earlier boarding pin.
+                boardedLocation: event.boardedLocation ?? e.boardedLocation ?? null,
+                offboardedLocation:
+                  event.offboardedLocation ?? e.offboardedLocation ?? null,
+              }
+            : e,
+        )
+      : [event, ...existing];
   });
-  if (error) return { ok: false, error: error.message };
+  if (!written.ok) return { ok: false, error: written.error };
   return { ok: true };
+}
+
+/**
+ * What a desk save writes for one slice: the fee policy as sent; every list
+ * merged by id into what is stored (nothing in the transport UI deletes a
+ * row); GPS pings kept as the newest 500, as on the device. Pure, so a
+ * conditional write can re-apply it to a fresher copy.
+ */
+function mergeTransportSlice(key: string, stored: unknown, incoming: unknown): unknown {
+  if (key === "feePolicy") return incoming;
+  let value: unknown = mergeSliceById(stored, incoming as unknown[]);
+  if (key === "gpsPings") {
+    value = (value as { recordedAt?: string }[])
+      .slice()
+      .sort((x, y) => String(y.recordedAt ?? "").localeCompare(String(x.recordedAt ?? "")))
+      .slice(0, 500);
+  }
+  return value;
 }
 
 export async function pushTransportDeskToDb(
@@ -202,87 +205,59 @@ export async function pushTransportDeskToDb(
   const now = nowIso();
   const slices = stateToSlices(state);
 
-  const rows = slices
-    .filter(({ key, payload }) => {
-      if (key === "feePolicy") return payload != null;
-      return Array.isArray(payload) && payload.length > 0;
-    })
-    .map(({ key, payload }) => ({
-      tenant_id: tenantId,
-      slice_key: key,
-      payload,
-      updated_at: now,
-    }));
-
-  const { data: existing } = await sb
+  // No slice is deleted and no collection is replaced. Each slice row holds a
+  // whole list, and a save used to delete every list it lacked (2026-08-21:
+  // an unauthenticated page load erased routes and assignments, after which
+  // four were protected) and overwrite every list it carried with its own
+  // copy — so an office tab overwrote the boarding log the drivers' phones
+  // append on the server. Nothing in the transport UI deletes a row
+  // (routes deactivate, assignments end), so a save MERGES by id: its rows
+  // win for their ids and every stored row it lacks is kept. A desk we cannot
+  // read is unknown, not empty — nothing is written.
+  const { data: storedRows, error: readErr } = await sb
     .from("transport_desk_slices")
-    .select("slice_key")
+    .select("slice_key, payload")
     .eq("tenant_id", tenantId);
-  const existingKeys = (existing ?? []).map((r) =>
-    String((r as { slice_key: string }).slice_key),
-  );
-  const keep = new Set<string>(rows.map((r) => String(r.slice_key)));
-  const stale = existingKeys.filter((k) => !keep.has(k));
-
-  // A slice going missing from the payload is treated as "delete it". That is
-  // only ever right when the client actually knows the desk is empty — and a
-  // client that failed to hydrate (a 401, a timeout) looks exactly the same
-  // from here. On 2026-08-21 an unauthenticated page load pushed an empty
-  // state and hard-deleted the live routes and assignments.
-  //
-  // Nothing in the UI empties these arrays anyway: deactivating a route sets
-  // isActive=false and ending an assignment sets effectiveTo, both of which
-  // keep the row. So an empty array arriving on top of a populated slice is a
-  // bug every time, and refusing it costs nothing.
-  const PROTECTED = new Set([
-    "routes",
-    "assignments",
-    "vehicles",
-    // Staff riders are assignments too — losing them silently takes people
-    // off the bus and stops any payroll recovery against them.
-    "staffRiders",
-  ]);
-  const refused = stale.filter((k) => PROTECTED.has(k));
-  if (refused.length > 0) {
-    return {
-      ok: false,
-      error:
-        `Refusing to clear transport ${refused.join(", ")} — the client sent ` +
-        `an empty desk while the database holds data. This is almost always ` +
-        `an unhydrated client, not a deletion.`,
-    };
+  if (readErr) {
+    return { ok: false, error: `Could not read the saved transport desk — nothing was written: ${readErr.message}` };
+  }
+  const stored = new Map<string, unknown>();
+  for (const r of storedRows ?? []) {
+    stored.set(String((r as { slice_key: string }).slice_key), (r as { payload: unknown }).payload);
   }
 
-  const deletable = stale.filter((k) => !PROTECTED.has(k));
-  if (deletable.length > 0) {
-    await sb
-      .from("transport_desk_slices")
-      .delete()
-      .eq("tenant_id", tenantId)
-      .in("slice_key", deletable);
+  // Each carried slice is merged into the stored one and written only if no
+  // other write (a driver's boarding tap, another office tab) landed since it
+  // was read — otherwise re-read and re-merged (casWriteSlice). A plain
+  // upsert let the second of two simultaneous writers silently drop the
+  // first one's change.
+  const carried = slices.filter(({ key, payload }) => {
+    if (key === "feePolicy") return payload != null;
+    return Array.isArray(payload) && payload.length > 0;
+  });
+  if (carried.length === 0) return { ok: true };
+  const rows: { slice_key: string; payload: unknown }[] = [];
+  for (const { key, payload } of carried) {
+    const written = await casWriteSlice(sb, "transport_desk_slices", tenantId, key, (storedNow) =>
+      mergeTransportSlice(key, storedNow, payload),
+    );
+    if (!written.ok) return { ok: false, error: written.error };
+    rows.push({ slice_key: key, payload: written.payload });
   }
 
-  if (rows.length > 0) {
-    const { error } = await sb.from("transport_desk_slices").upsert(rows);
-    if (error) return { ok: false, error: error.message };
-  } else if (existingKeys.length > 0) {
-    // Same reasoning, the whole-desk case: an empty push against a populated
-    // desk wipes everything. Never do it implicitly.
-    return {
-      ok: false,
-      error:
-        "Refusing to clear the whole transport desk — the client sent nothing " +
-        "while the database holds data.",
-    };
-  }
+  const count = (key: TransportSliceKey): number => {
+    const row = rows.find((r) => r.slice_key === key);
+    const v = row ? row.payload : stored.get(key);
+    return Array.isArray(v) ? v.length : 0;
+  };
 
   await sb.from("transport_desk_sync_meta").upsert(
     {
       tenant_id: tenantId,
-      slice_count: rows.length,
-      route_count: state.routes?.length ?? 0,
-      vehicle_count: state.vehicles?.length ?? 0,
-      assignment_count: state.assignments?.length ?? 0,
+      slice_count: new Set([...stored.keys(), ...rows.map((r) => r.slice_key)]).size,
+      route_count: count("routes"),
+      vehicle_count: count("vehicles"),
+      assignment_count: count("assignments"),
       last_updated_at: now,
       updated_at: now,
     },

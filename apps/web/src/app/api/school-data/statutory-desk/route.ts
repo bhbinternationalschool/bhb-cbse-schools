@@ -12,7 +12,9 @@ import { statutoryDualWriteDbEnabled } from "@/lib/statutoryDbConfig";
 import {
   fetchStatutoryDeskFromDb,
   pushStatutoryDeskToDb,
+  STATUTORY_DELETABLE_TABLES,
 } from "@/lib/statutoryNormalized.server";
+import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
 
 export const runtime = "nodejs";
 
@@ -45,6 +47,7 @@ export async function POST(req: Request) {
 
   let body: Pick<StatutoryRemitState, "batches"> & {
     config?: Partial<StatutoryEstablishmentConfig>;
+    deletes?: unknown;
   };
   try {
     body = (await req.json()) as typeof body;
@@ -55,6 +58,7 @@ export async function POST(req: Request) {
   const result = await pushStatutoryDeskToDb(
     { version: 1, batches: body.batches ?? [] },
     normalizeStatutoryConfig(body.config),
+    readNamedDeletes(body.deletes, STATUTORY_DELETABLE_TABLES),
   );
   if (!result.ok) {
     return NextResponse.json({ ok: false, error: result.error }, { status: 502 });

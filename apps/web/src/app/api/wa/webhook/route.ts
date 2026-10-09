@@ -171,6 +171,18 @@ export async function POST(req: Request) {
       continue;
     }
     await recordInboundMessage(msg.fromWaId, msg.text);
+    // Every inbound message, before any handler takes it — homework replies,
+    // relay answers and documents included (wa_messages; the chat view).
+    {
+      const { logWaInbound } = await import("@/lib/waMessageLog.server");
+      await logWaInbound({
+        from: msg.fromWaId,
+        text: msg.text || msg.mediaNote || (msg.location ? `📍 ${msg.location.name || ""} ${msg.location.lat},${msg.location.lng}`.trim() : ""),
+        waMessageId: msg.waMessageId,
+        replyToWaMessageId: (msg as { replyToWaMessageId?: string }).replyToWaMessageId,
+        kind: msg.media ? msg.media.mediaType : msg.location ? "location" : "text",
+      });
+    }
 
     // A teacher answering a child's homework: "#A7K2 well done".
     //

@@ -222,6 +222,9 @@ async function ensurePrimaryModule(id: DeskModuleId): Promise<EnsureDeskAction> 
     }
     case "fees": {
       const desk = await fetchFeeDeskFromDb();
+      // A failed read shows 0 vouchers; backfilling the old blob on top of
+      // that would overwrite the real desk with it.
+      if (!desk.ok) return { module: id, action: "skip", detail: "fee desk unreadable" };
       const deskRows = desk.vouchers.length;
       const blob = await fetchServerBlob<FeesState>("fees_state");
       const blobRows = blob.state?.vouchers?.length ?? 0;
@@ -244,7 +247,11 @@ async function ensurePrimaryModule(id: DeskModuleId): Promise<EnsureDeskAction> 
       }
       const deskRows = meta?.sliceCount ?? 0;
       if (deskRows === 0) {
-        const ok = (await pushMastersDeskToDb(emptyMastersShell())).ok;
+        const ok = (await pushMastersDeskToDb(emptyMastersShell(), {
+          // Bootstrap only: with no revision the writer refuses any desk
+          // that has ever been written.
+          baseUpdatedAt: null,
+        })).ok;
         return {
           module: id,
           action: ok ? "seed" : "skip",

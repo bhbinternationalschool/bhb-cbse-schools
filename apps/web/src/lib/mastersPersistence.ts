@@ -82,7 +82,10 @@ export async function pushMastersRemoteServer(
   state: MastersState,
 ): Promise<{ ok: boolean; error?: string }> {
   const { pushMastersDeskToDb } = await import("@/lib/mastersNormalized.server");
-  const desk = await pushMastersDeskToDb(state);
+  // A server-side copy carries no desk revision, so it can only bootstrap a
+  // desk that has never been written — never overwrite one (the writer
+  // refuses "unversioned"). Masters edits go through the browser's push.
+  const desk = await pushMastersDeskToDb(state, { baseUpdatedAt: null });
   if (!desk.ok) return { ok: false, error: desk.error };
 
   const { deskSkipMirrorBlobSlice } = await import("@/lib/deskCutover");

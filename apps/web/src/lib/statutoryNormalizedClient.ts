@@ -13,6 +13,14 @@ import {
   recordDeskSyncFailure,
   recordDeskSyncSuccess,
 } from "@/lib/deskSyncStatus";
+import { confirmDeskDeletes, pendingDeskDeletes, recordDeskDeletion } from "@/lib/deskNamedDeletes";
+
+const STATUTORY_DESK = "statutory";
+
+/** Remittance batches the desk removed; the next push deletes them by id. */
+export function recordStatutoryBatchDeletion(ids: string[]) {
+  recordDeskDeletion(STATUTORY_DESK, "statutory_desk_batches", ids);
+}
 
 const META_KEY = "bhb_statutory_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -61,12 +69,14 @@ export function scheduleStatutoryDeskSync(state: StatutoryRemitState) {
 }
 
 async function pushStatutoryDeskApi(state: StatutoryRemitState) {
+  const sentDeletes = pendingDeskDeletes(STATUTORY_DESK);
   try {
     const config = normalizeStatutoryConfig(loadMasters().statutoryConfig);
     const res = await fetch("/api/school-data/statutory-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ batches: state.batches, config }),
+      // Deletions are named, never inferred from what this browser lacks.
+      body: JSON.stringify({ batches: state.batches, config, deletes: sentDeletes }),
     });
     const body = (await res.json().catch(() => null)) as {
       ok?: boolean;
@@ -75,6 +85,7 @@ async function pushStatutoryDeskApi(state: StatutoryRemitState) {
       error?: string;
     } | null;
     if (res.ok && body?.ok) {
+      confirmDeskDeletes(STATUTORY_DESK, sentDeletes);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         batchCount: body.batchCount ?? state.batches.length,

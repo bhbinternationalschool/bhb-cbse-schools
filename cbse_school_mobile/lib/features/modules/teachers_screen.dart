@@ -35,6 +35,7 @@ class TeachersScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<TeacherContacts>(
+      guideId: "teachers",
       title: context.l10n.modTeachersTitle,
       subtitle: child.fullName,
       load: () => api.fetchTeacherContacts(studentId: child.id),

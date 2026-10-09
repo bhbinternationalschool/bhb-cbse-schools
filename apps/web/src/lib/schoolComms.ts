@@ -8,6 +8,7 @@ import { DEFAULT_AY } from "@/lib/masters";
 import { TENANT } from "@/lib/types";
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
+import { recordSchoolCommsDeletion } from "@/lib/schoolCommsNormalizedClient";
 
 const STORAGE_KEY = "bhb_school_comms_v1";
 
@@ -821,6 +822,7 @@ export function deleteNotice(
   if (!state.notices.some((n) => n.id === id)) {
     return { ok: false, error: "Not found" };
   }
+  recordSchoolCommsDeletion("school_comms_desk_notices", [id]);
   const next = { ...state, notices: state.notices.filter((n) => n.id !== id) };
   saveSchoolComms(next);
   return { ok: true, state: next };
@@ -834,6 +836,7 @@ export function deleteNews(
   if (!state.news.some((n) => n.id === id)) {
     return { ok: false, error: "Not found" };
   }
+  recordSchoolCommsDeletion("school_comms_desk_news", [id]);
   const next = { ...state, news: state.news.filter((n) => n.id !== id) };
   saveSchoolComms(next);
   return { ok: true, state: next };
@@ -847,6 +850,11 @@ export function deleteAlbum(
   if (!state.albums.some((a) => a.id === id)) {
     return { ok: false, error: "Not found" };
   }
+  recordSchoolCommsDeletion("school_comms_desk_albums", [id]);
+  recordSchoolCommsDeletion(
+    "school_comms_desk_photos",
+    state.photos.filter((p) => p.albumId === id).map((p) => p.id),
+  );
   const next = {
     ...state,
     albums: state.albums.filter((a) => a.id !== id),
@@ -863,6 +871,7 @@ export function deleteGalleryPhoto(
   const state = loadSchoolComms();
   const photo = state.photos.find((p) => p.id === id);
   if (!photo) return { ok: false, error: "Not found" };
+  recordSchoolCommsDeletion("school_comms_desk_photos", [id]);
   const photos = state.photos.filter((p) => p.id !== id);
   let albums = state.albums;
   const alb = albums.find((a) => a.id === photo.albumId);

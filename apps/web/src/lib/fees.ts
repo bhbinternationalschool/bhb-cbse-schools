@@ -89,6 +89,7 @@ import {
   type AccountsPostingAction,
 } from "@/lib/accountsPostingFailures";
 import { trackServerWork } from "@/lib/serverWork";
+import { recordFeeDayCloseDeletion } from "@/lib/feesNormalizedClient";
 
 export type DueKind =
   | "academic"
@@ -3325,8 +3326,15 @@ function runAccountsPosting(
     m: typeof import("@/lib/accountsPostings"),
   ) => { ok: true } | { ok: false; error: string },
 ): void {
-  void trackServerWork(import("@/lib/accountsPostings")
-    .then((m) => {
+  // Postings need the school's own cash pools and chart. Pull the accounts
+  // desk before the posting seeds anything, or a fresh browser would post
+  // against (and push) a seeded desk of its own.
+  void trackServerWork(Promise.all([
+    import("@/lib/accountsPersistence"),
+    import("@/lib/accountsPostings"),
+  ])
+    .then(async ([p, m]) => {
+      await p.ensureAccountsSeeded();
       const res = post(m);
       if (!res.ok) {
         recordAccountsPostingFailure({ ...spec, reason: res.error });
@@ -4941,6 +4949,17 @@ function upsertDayClose(session: DayCloseSession, fees: FeesState): FeesState {
         d.counterId === session.counterId
       ),
   );
+  // A session this replaces is deleted on the server by name — a save no
+  // longer deletes what it leaves out.
+  const replaced = fees.dayCloses
+    .filter(
+      (d) =>
+        d.closeDate === session.closeDate &&
+        d.counterId === session.counterId &&
+        d.id !== session.id,
+    )
+    .map((d) => d.id);
+  if (replaced.length && typeof window !== "undefined") recordFeeDayCloseDeletion(replaced);
   return {
     ...fees,
     dayCloses: [session, ...withoutSameDate],

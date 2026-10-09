@@ -1,5 +1,3 @@
-/* ratchet-allow: unguarded_replace — prune of stale slice keys only; see the note
-   in mastersNormalized.server.ts. */
 /**
  * WhatsApp bot threads desk — Supabase slice rows (wa_desk_bot_slices).
  */
@@ -155,22 +153,9 @@ export async function pushWaThreadsDeskToDb(
     });
   }
 
-  const { data: existing } = await sb
-    .from("wa_desk_bot_slices")
-    .select("slice_key")
-    .eq("tenant_id", tenantId);
-  const keep = new Set(rows.map((r) => String(r.slice_key)));
-  const stale = (existing ?? [])
-    .map((r) => String((r as { slice_key: string }).slice_key))
-    .filter((k) => !keep.has(k));
-  if (stale.length > 0) {
-    await sb
-      .from("wa_desk_bot_slices")
-      .delete()
-      .eq("tenant_id", tenantId)
-      .in("slice_key", stale);
-  }
-
+  // No prune. A slice this bundle does not carry is a slice it does not hold
+  // — not a conversation history to delete. This deleted every slice the
+  // bundle lacked, and wiped the table when it carried none.
   if (rows.length > 0) {
     // One upsert per slice, not one for the bundle. On 2026-09-04 and again
     // on 2026-09-11 a single slice the table would not accept (a CHECK that
@@ -187,10 +172,9 @@ export async function pushWaThreadsDeskToDb(
     }
     if (failed.length === rows.length) return { ok: false, error: failed.join(" · ") };
     if (failed.length) console.error("[wa-threads] bundle saved WITHOUT", failed.join(" · "));
-  } else {
-    await sb.from("wa_desk_bot_slices").delete().eq("tenant_id", tenantId);
   }
 
+  if (rows.length === 0) return { ok: true };
   const threadCount = countThreadsInBundle(bundle);
   await sb.from("wa_desk_sync_meta").upsert(
     {
@@ -209,13 +193,15 @@ export async function pushWaThreadsDeskToDb(
 export async function fetchWaThreadsDeskFromDb(): Promise<{
   bundle: WaThreadsDeskBundle;
   meta: WaThreadsDeskSyncMeta | null;
+  /** false = the read failed; the bundle is NOT a confirmed empty desk. */
+  ok: boolean;
 }> {
   const ctx = await resolveCtx();
   const empty = emptyBundle();
-  if (!ctx) return { bundle: empty, meta: null };
+  if (!ctx) return { bundle: empty, meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
-  const [{ data: sliceRows }, { data: metaRow }] = await Promise.all([
+  const [{ data: sliceRows, error: sliceErr }, { data: metaRow, error: metaErr }] = await Promise.all([
     sb.from("wa_desk_bot_slices").select("*").eq("tenant_id", tenantId),
     sb
       .from("wa_desk_sync_meta")
@@ -223,6 +209,13 @@ export async function fetchWaThreadsDeskFromDb(): Promise<{
       .eq("tenant_id", tenantId)
       .maybeSingle(),
   ]);
+
+  // A failed read used to come back as an empty bundle, indistinguishable
+  // from a desk with no conversations.
+  if (sliceErr || metaErr) {
+    console.error("[wa-threads] fetch failed", sliceErr?.message, metaErr?.message);
+    return { bundle: empty, meta: null, ok: false };
+  }
 
   const bundle: WaBotPersistBundle = { ...empty };
   let latestAt = "";
@@ -241,6 +234,7 @@ export async function fetchWaThreadsDeskFromDb(): Promise<{
   bundle.updatedAt = latestAt || metaRow?.updated_at || nowIso();
 
   return {
+    ok: true,
     bundle,
     meta: metaRow
       ? {

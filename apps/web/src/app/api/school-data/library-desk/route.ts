@@ -6,9 +6,11 @@ import {
 import type { LibraryState } from "@/lib/library";
 import { libraryDualWriteDbEnabled } from "@/lib/libraryDbConfig";
 import {
+  LIBRARY_DELETABLE_TABLES,
   fetchLibraryDeskFromDb,
   pushLibraryDeskToDb,
 } from "@/lib/libraryNormalized.server";
+import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
 
 export const runtime = "nodejs";
 
@@ -41,7 +43,7 @@ export async function POST(req: Request) {
   let body: Pick<
     LibraryState,
     "titles" | "ebooks" | "copies" | "issues" | "procurementDocs" | "settings"
-  >;
+  > & { deletes?: unknown };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -61,7 +63,7 @@ export async function POST(req: Request) {
       loanDays: 14,
       finePaisePerDay: 500,
     },
-  });
+  }, readNamedDeletes(body.deletes, LIBRARY_DELETABLE_TABLES));
   if (!result.ok) {
     return NextResponse.json({ ok: false, error: result.error }, { status: 502 });
   }

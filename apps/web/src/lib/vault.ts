@@ -12,6 +12,7 @@ import {
 } from "@/lib/reportExport";
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
+import { recordVaultDocumentDeletion } from "@/lib/vaultNormalizedClient";
 
 const STORAGE_KEY = "bhb_vault_v1";
 
@@ -248,6 +249,7 @@ export function deleteVaultDocument(
   if (!state.documents.some((d) => d.id === id)) {
     return { ok: false, error: "Not found" };
   }
+  if (typeof window !== "undefined") recordVaultDocumentDeletion([id]);
   saveVault({
     ...state,
     documents: state.documents.filter((d) => d.id !== id),

@@ -11,7 +11,13 @@ import type {
   PayrollState,
 } from "@/lib/payroll";
 import { payrollDualWriteDbEnabled } from "@/lib/payrollDbConfig";
+import {
+  deleteChildrenNotKept,
+  deleteNamedIds,
+  type NamedDeletes,
+} from "@/lib/deskNamedDeletes.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { fetchAllPages } from "@/lib/supabase/pageAll";
 
 export type PayrollDeskSyncMeta = {
   runCount: number;
@@ -31,63 +37,6 @@ async function resolveCtx(): Promise<{
   tenantId: string;
 } | null> {
   return getServerTenantContext();
-}
-
-/**
- * Delete rows the client no longer holds — never on an empty payload.
- *
- * An empty keep-set means every stored row is "stale", so this deleted the
- * entire table. That is never what a sync means: a client with nothing to say
- * is a client whose cache was dropped, not an instruction to erase the
- * school's records.
- *
- * It is not hypothetical. On 2026-08-11 the attendance register for the
- * previous day was gone — pushed away by a phone whose localStorage had been
- * dropped on quota, with the emptiness check running AFTER the delete. This
- * same function is copied into 20 modules and called from 86 places, almost
- * none of them guarded, covering bank and cash ledgers, payroll runs, fee
- * cheques, library issues and 1,919 admission records.
- *
- * This floor stops the catastrophic case everywhere at once. It does NOT make
- * a partial payload safe — a client holding 3 of 900 rows still prunes 897.
- * That needs per-module scoping, the way attendance now prunes only within
- * the dates its payload covers. See docs/TODO.md.
- *
- * The read error is also surfaced now. It was discarded, which happened to
- * fail safe here (no data → nothing deleted), but "we could not read the
- * table" and "the table is empty" must not be the same value in a function
- * that deletes.
- */
-async function deleteStale(
-  sb: SupabaseClient,
-  tenantId: string,
-  table: string,
-  keepIds: Set<string>,
-) {
-  if (keepIds.size === 0) {
-    console.warn(
-      `[${table}] refusing to prune: the payload holds no ids at all. ` +
-        "An empty client is not an instruction to delete every row.",
-    );
-    return;
-  }
-  const { data, error } = await sb
-    .from(table)
-    .select("id")
-    .eq("tenant_id", tenantId);
-  if (error) {
-    console.error(
-      `[${table}] prune skipped — could not read existing ids:`,
-      error.message,
-    );
-    return;
-  }
-  const stale = (data ?? [])
-    .map((r) => String((r as { id: string }).id))
-    .filter((id) => !keepIds.has(id));
-  if (stale.length > 0) {
-    await sb.from(table).delete().in("id", stale);
-  }
 }
 
 async function upsertChunks(
@@ -301,8 +250,12 @@ function rowToAudit(r: Record<string, unknown>): PayrollAuditEntry {
   };
 }
 
+/** The only payroll table a desk save deletes from — by named id. */
+export const PAYROLL_DELETABLE_TABLES = ["payroll_desk_runs"] as const;
+
 export async function pushPayrollDeskToDb(
   state: PayrollState,
+  deletes: NamedDeletes = {},
 ): Promise<{ ok: boolean; error?: string }> {
   if (!payrollDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
@@ -310,7 +263,8 @@ export async function pushPayrollDeskToDb(
   const { sb, tenantId } = ctx;
   const now = nowIso();
 
-  const runs = state.runs ?? [];
+  const goneRuns = new Set(deletes["payroll_desk_runs"] ?? []);
+  const runs = (state.runs ?? []).filter((r) => !goneRuns.has(r.id));
   const audit = state.audit ?? [];
 
   const lineKeep = new Set<string>();
@@ -323,12 +277,6 @@ export async function pushPayrollDeskToDb(
     });
   }
 
-  await Promise.all([
-    deleteStale(sb, tenantId, "payroll_desk_runs", new Set(runs.map((r) => r.id))),
-    deleteStale(sb, tenantId, "payroll_desk_run_lines", lineKeep),
-    deleteStale(sb, tenantId, "payroll_desk_audit", new Set(audit.map((a) => a.id))),
-  ]);
-
   const tables: [string, Record<string, unknown>[]][] = [
     ["payroll_desk_runs", runs.map((r) => runToRow(tenantId, r))],
     ["payroll_desk_run_lines", lineRows],
@@ -339,6 +287,23 @@ export async function pushPayrollDeskToDb(
     const r = await upsertChunks(sb, table, rows);
     if (!r.ok) return r;
   }
+
+  // No prune by absence. A run the user deleted is named (its lines go with
+  // it, on delete cascade). A run's lines are positional, so a draft that
+  // lost a staff line leaves its last index behind: remove those — only under
+  // runs this payload carries in full. The audit trail is append-only; the
+  // browser keeps the newest 500 and used to delete everything older.
+  const delRuns = await deleteNamedIds(sb, tenantId, "payroll_desk_runs", [...goneRuns]);
+  if (!delRuns.ok) return delRuns;
+  const delLines = await deleteChildrenNotKept(
+    sb,
+    tenantId,
+    "payroll_desk_run_lines",
+    "run_id",
+    runs.map((r) => r.id),
+    lineKeep,
+  );
+  if (!delLines.ok) return delLines;
 
   const draftCount = runs.filter((r) => r.status === "draft").length;
   const lineCount = runs.reduce((n, r) => n + (r.lines?.length ?? 0), 0);
@@ -375,15 +340,22 @@ export async function fetchPayrollDeskFromDb(): Promise<{
   if (!ctx) return { bundle: empty, meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
+  // Paged: PostgREST stops at 1,000 rows and calls it success. Run lines pass
+  // that in a few months, and a run that reached the browser short of lines
+  // would be saved back short.
+  const page = (table: string) =>
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from(table).select("*").eq("tenant_id", tenantId).order("id").range(from, to),
+    ).then((r) => ({ data: r.rows, error: r.error ? { message: r.error } : null }));
   const [
     { data: runRows, error: runErr },
     { data: lineRows, error: lineErr },
     { data: auditRows, error: auditErr },
     { data: metaRow },
   ] = await Promise.all([
-    sb.from("payroll_desk_runs").select("*").eq("tenant_id", tenantId),
-    sb.from("payroll_desk_run_lines").select("*").eq("tenant_id", tenantId),
-    sb.from("payroll_desk_audit").select("*").eq("tenant_id", tenantId),
+    page("payroll_desk_runs"),
+    page("payroll_desk_run_lines"),
+    page("payroll_desk_audit"),
     sb
       .from("payroll_desk_sync_meta")
       .select(META_SELECT)
@@ -402,7 +374,12 @@ export async function fetchPayrollDeskFromDb(): Promise<{
   }
 
   const linesByRun = new Map<string, PayrollStaffLine[]>();
-  for (const row of lineRows ?? []) {
+  // In line order: line ids are positional, so a run read back shuffled
+  // would be written back with every line under a different id.
+  const orderedLines = [...(lineRows ?? [])].sort(
+    (a, b) => Number(a.line_index ?? 0) - Number(b.line_index ?? 0),
+  );
+  for (const row of orderedLines) {
     const r = row as Record<string, unknown>;
     const runId = String(r.run_id);
     const list = linesByRun.get(runId) ?? [];

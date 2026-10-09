@@ -9,6 +9,17 @@ import {
   recordDeskSyncFailure,
   recordDeskSyncSuccess,
 } from "@/lib/deskSyncStatus";
+import { confirmDeskDeletes, pendingDeskDeletes, recordDeskDeletion } from "@/lib/deskNamedDeletes";
+
+const LIBRARY_DESK = "library";
+
+/** Titles, copies or procurement documents the user deleted; the next push deletes them by id. */
+export function recordLibraryDeletion(
+  table: "library_desk_titles" | "library_desk_copies" | "library_desk_procurement_docs",
+  ids: string[],
+) {
+  recordDeskDeletion(LIBRARY_DESK, table, ids);
+}
 
 const META_KEY = "bhb_library_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -57,6 +68,7 @@ export function scheduleLibraryDeskSync(state: LibraryState) {
 }
 
 async function pushLibraryDeskApi(state: LibraryState) {
+  const sentDeletes = pendingDeskDeletes(LIBRARY_DESK);
   try {
     const res = await fetch("/api/school-data/library-desk", {
       method: "POST",
@@ -67,6 +79,8 @@ async function pushLibraryDeskApi(state: LibraryState) {
         issues: state.issues,
         procurementDocs: state.procurementDocs,
         settings: state.settings,
+        // Deletions are named, never inferred from what this browser lacks.
+        deletes: sentDeletes,
       }),
     });
     const body = (await res.json().catch(() => null)) as {
@@ -76,6 +90,7 @@ async function pushLibraryDeskApi(state: LibraryState) {
       error?: string;
     } | null;
     if (res.ok && body?.ok) {
+      confirmDeskDeletes(LIBRARY_DESK, sentDeletes);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         titleCount: body.titleCount ?? state.titles.length,

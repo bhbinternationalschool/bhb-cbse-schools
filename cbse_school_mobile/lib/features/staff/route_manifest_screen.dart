@@ -1,4 +1,5 @@
 import "package:flutter/material.dart";
+import "../../core/guide/screen_guides.dart";
 import "package:geolocator/geolocator.dart";
 
 import "../../core/api/api_client.dart";
@@ -155,6 +156,7 @@ class _RouteManifestScreenState extends State<RouteManifestScreen> {
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
         actions: [
+          ScreenGuideButton(guideId: "route-manifest", screenLabel: "route-manifest"),
           IconButton(
             onPressed: _load,
             icon: const Icon(Icons.refresh),

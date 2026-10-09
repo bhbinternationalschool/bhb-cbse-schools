@@ -9,6 +9,14 @@ import {
   recordDeskSyncFailure,
   recordDeskSyncSuccess,
 } from "@/lib/deskSyncStatus";
+import { confirmDeskDeletes, pendingDeskDeletes, recordDeskDeletion } from "@/lib/deskNamedDeletes";
+
+const VAULT_DESK = "vault";
+
+/** Documents the user deleted; the next push deletes them by id. */
+export function recordVaultDocumentDeletion(ids: string[]) {
+  recordDeskDeletion(VAULT_DESK, "vault_desk_documents", ids);
+}
 
 const META_KEY = "bhb_vault_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -65,6 +73,7 @@ export function scheduleVaultDeskSync(state: VaultState) {
 }
 
 async function pushVaultDeskApi(state: VaultState) {
+  const sentDeletes = pendingDeskDeletes(VAULT_DESK);
   try {
     const res = await fetch("/api/school-data/vault-desk", {
       method: "POST",
@@ -72,6 +81,8 @@ async function pushVaultDeskApi(state: VaultState) {
       body: JSON.stringify({
         documents: state.documents,
         settings: state.settings,
+        // Deletions are named, never inferred from what this browser lacks.
+        deletes: sentDeletes,
       }),
     });
     const body = (await res.json().catch(() => null)) as {
@@ -81,6 +92,7 @@ async function pushVaultDeskApi(state: VaultState) {
       error?: string;
     } | null;
     if (res.ok && body?.ok) {
+      confirmDeskDeletes(VAULT_DESK, sentDeletes);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         documentCount: body.documentCount ?? state.documents.length,

@@ -166,6 +166,22 @@ export async function sendWhatsAppListMessage(opts: {
   return { ...r, mode: "meta" };
 }
 
+/** Buttons and lists go out here, not through lib/waSend — log them for the chat view too. */
+async function logInteractive(
+  to: string,
+  body: string,
+  options: string[],
+  r: { ok: boolean; mode: string; error?: string; providerId?: string },
+): Promise<void> {
+  const { logWaOutbound } = await import("@/lib/waMessageLog.server");
+  await logWaOutbound({
+    to,
+    kind: "interactive",
+    body: [body, options.length ? options.map((o) => `[${o}]`).join(" ") : ""].filter(Boolean).join("\n"),
+    result: { ok: r.ok, mode: r.mode, providerId: r.providerId, error: r.error },
+  });
+}
+
 /** Send interactive menu; fall back to plain text listing options. */
 export async function sendWhatsAppInteractive(opts: {
   toMobile: string;
@@ -186,6 +202,7 @@ export async function sendWhatsAppInteractive(opts: {
       buttons: menu.buttons,
     });
     if (r.ok) {
+      await logInteractive(toMobile, menu.body, menu.buttons.map((b) => b.title), r);
       return { ok: true, mode: r.mode, usedInteractive: true };
     }
   }
@@ -198,6 +215,7 @@ export async function sendWhatsAppInteractive(opts: {
       sections: menu.sections,
     });
     if (r.ok) {
+      await logInteractive(toMobile, menu.body, menu.sections.flatMap((x) => x.rows.map((row) => row.title)), r);
       return { ok: true, mode: r.mode, usedInteractive: true };
     }
   }

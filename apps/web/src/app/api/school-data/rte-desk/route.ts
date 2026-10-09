@@ -12,7 +12,11 @@ import { rteDualWriteDbEnabled } from "@/lib/rteDbConfig";
 import {
   fetchRteDeskFromDb,
   pushRteDeskToDb,
+  RTE_DELETABLE_TABLES,
+  RTE_TABLE_SLICES,
 } from "@/lib/rteNormalized.server";
+import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
+import { featureAuthorizedDeletes } from "@/lib/deskNamedDeletesFeature.server";
 
 export const runtime = "nodejs";
 
@@ -41,7 +45,7 @@ export async function GET(req: Request) {
   });
 }
 
-type RteDeskPostBody = Pick<RteState, "seats" | "applications" | "settings">;
+type RteDeskPostBody = Pick<RteState, "seats" | "applications" | "settings"> & { deletes?: unknown };
 
 export async function POST(req: Request) {
   const gate = await deskWriteGate(req, SCHOOL_DATA_DESK_RBAC["rte-desk"]);
@@ -61,6 +65,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  // Deletions are named by the desk, never inferred from what it lacks.
+  let deletes = readNamedDeletes(body.deletes, RTE_DELETABLE_TABLES);
+
   // Function-only writers (director, 6 Oct 2026 — e.g. RTE → Govt list &
   // admissions): merged onto the stored desk, their functions' slices only,
   // row by row — never the body as sent. A desk we cannot read is unknown,
@@ -76,6 +83,7 @@ export async function POST(req: Request) {
     const merged = featurePushOutcome(gate, "rte", stored.bundle, body);
     if (!merged.ok) return merged.response;
     if (!merged.changed) return featureSavedResponse(false);
+    deletes = featureAuthorizedDeletes(deletes, RTE_TABLE_SLICES, stored.bundle, merged.state);
     body = merged.state as unknown as RteDeskPostBody;
   }
 
@@ -88,7 +96,7 @@ export async function POST(req: Request) {
       autoApplyFeeWaiver: true,
       note: "",
     },
-  });
+  }, deletes);
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error || "Sync failed" },

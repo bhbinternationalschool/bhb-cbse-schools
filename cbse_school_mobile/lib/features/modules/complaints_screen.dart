@@ -28,6 +28,7 @@ class ComplaintsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<ComplaintList>(
+      guideId: "complaints",
       title: context.l10n.modComplaintsTitle,
       load: api.fetchComplaints,
       emptyIcon: Icons.support_agent_outlined,

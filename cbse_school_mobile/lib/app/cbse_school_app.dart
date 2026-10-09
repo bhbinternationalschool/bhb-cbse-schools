@@ -1,5 +1,6 @@
 import "dart:async";
 
+import "../core/guide/screen_guides.dart";
 import "package:flutter/material.dart";
 import "package:go_router/go_router.dart";
 
@@ -104,6 +105,8 @@ class _CbseSchoolAppState extends State<CbseSchoolApp> {
   @override
   void initState() {
     super.initState();
+    // The screen guide sends suggestions and stuck points (core/guide).
+    ScreenGuides.api = _api;
     unawaited(_locale.load());
     _api.beforeSignOut = _push.unregister;
     _push.init().then((_) {

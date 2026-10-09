@@ -52,6 +52,7 @@ class PayslipsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<PayslipList>(
+      guideId: "payslips",
       title: "Payslips",
       load: api.fetchPayslips,
       emptyIcon: Icons.receipt_long_outlined,

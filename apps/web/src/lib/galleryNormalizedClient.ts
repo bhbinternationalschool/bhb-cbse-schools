@@ -9,6 +9,13 @@ import {
   recordDeskSyncFailure,
   recordDeskSyncSuccess,
 } from "@/lib/deskSyncStatus";
+import { confirmDeskDeletes, pendingDeskDeletes } from "@/lib/deskNamedDeletes";
+
+const COMMS_DESK = "school_comms";
+
+// Shared with schoolCommsNormalizedClient: one record of comms deletions.
+// This push applies only its own tables, so it sends — and confirms — only those.
+const OWN_TABLES = ["school_comms_desk_albums", "school_comms_desk_photos"];
 
 const META_KEY = "bhb_gallery_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -52,11 +59,15 @@ async function pushGalleryDeskApi(bundle: {
   albums: ReturnType<typeof loadSchoolComms>["albums"];
   photos: ReturnType<typeof loadSchoolComms>["photos"];
 }) {
+  const sentDeletes = Object.fromEntries(
+    Object.entries(pendingDeskDeletes(COMMS_DESK)).filter(([t]) => OWN_TABLES.includes(t)),
+  );
   try {
     const res = await fetch("/api/school-data/gallery-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(bundle),
+      // Deletions are named, never inferred from what this browser lacks.
+      body: JSON.stringify({ ...bundle, deletes: sentDeletes }),
     });
     const body = (await res.json().catch(() => null)) as {
       ok?: boolean;
@@ -65,6 +76,7 @@ async function pushGalleryDeskApi(bundle: {
       error?: string;
     } | null;
     if (res.ok && body?.ok) {
+      confirmDeskDeletes(COMMS_DESK, sentDeletes);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         albumCount: body.albumCount ?? bundle.albums.length,

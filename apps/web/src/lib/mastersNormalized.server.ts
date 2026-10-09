@@ -1,8 +1,3 @@
-/* ratchet-allow: unguarded_replace — this deletes only the STALE slice keys (the
-   complement of what is about to be written) and then upserts the live set over
-   rows that already exist. A failed upsert therefore loses nothing: the slices
-   it would have rewritten are still there, unchanged. That is a prune, not the
-   wipe-then-refill shape that emptied the fee book. */
 /**
  * Masters desk — Supabase slice rows (masters_desk_slices).
  */
@@ -118,9 +113,33 @@ function slicesToBundle(
   return bundle;
 }
 
+export type MastersPushOutcome = {
+  ok: boolean;
+  error?: string;
+  updatedAt?: string;
+  /** Set when the write was refused for its revision: the caller answers 409. */
+  conflict?: "stale" | "unversioned";
+};
+
+/**
+ * Write masters — only on top of the revision the writer read.
+ *
+ * `baseUpdatedAt` is the desk revision (sync meta `updated_at`) the caller's
+ * copy came from. The route checked it for browsers, but every other writer
+ * (the mirror push, the ops loader, the cutover) wrote unconditionally, and
+ * the route itself let a browser with NO revision through as "legacy" —
+ * which is exactly a browser that never loaded masters. Now the writer
+ * itself refuses:
+ *  - no revision while the desk has one ("unversioned"),
+ *  - a revision the desk has moved past ("stale"),
+ * and claims the new revision with a conditional update, so of two saves
+ * from the same base only one lands. Only a desk that has never been written
+ * (no sync meta) accepts a write without a revision.
+ */
 export async function pushMastersDeskToDb(
   state: MastersState,
-): Promise<{ ok: boolean; error?: string; updatedAt?: string }> {
+  opts: { baseUpdatedAt: string | null },
+): Promise<MastersPushOutcome> {
   if (!mastersDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
@@ -129,10 +148,17 @@ export async function pushMastersDeskToDb(
   const stripped = stripStaffFromMastersForBlob(state);
   const slices = stateToSlices(stripped);
 
+  // A slice the push does not carry is left as stored — absence is not a
+  // deletion. This deleted every slice a push lacked or sent empty, so a
+  // client (or a server copy) missing a key erased that master, and a push
+  // carrying nothing wiped the desk. A slice the push DOES carry is written
+  // as sent, an empty array included: removing the last holiday is a real
+  // edit, and the route's revision lock is what keeps a stale copy from
+  // making it.
   const rows = slices
     .filter(({ key, payload }) => {
       if (MASTERS_OBJECT_SLICES.includes(key)) return payload != null;
-      return Array.isArray(payload) && payload.length > 0;
+      return Array.isArray(payload);
     })
     .map(({ key, payload }) => ({
       tenant_id: tenantId,
@@ -141,36 +167,69 @@ export async function pushMastersDeskToDb(
       updated_at: now,
     }));
 
-  const { data: existing } = await sb
-    .from("masters_desk_slices")
-    .select("slice_key")
-    .eq("tenant_id", tenantId);
-  const keep = new Set<string>(rows.map((r) => String(r.slice_key)));
-  const stale = (existing ?? [])
-    .map((r) => String((r as { slice_key: string }).slice_key))
-    .filter((k) => !keep.has(k));
-  if (stale.length > 0) {
-    await sb
-      .from("masters_desk_slices")
-      .delete()
-      .eq("tenant_id", tenantId)
-      .in("slice_key", stale);
+  if (rows.length === 0) {
+    return { ok: false, error: "Masters push carried no slices — nothing was written." };
   }
 
-  if (rows.length > 0) {
+  const { data: metaNow, error: metaErr } = await sb
+    .from("masters_desk_sync_meta")
+    .select("updated_at")
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+  if (metaErr) {
+    return { ok: false, error: `Could not read the masters revision — nothing was written: ${metaErr.message}` };
+  }
+  const storedRev = (metaNow as { updated_at?: string } | null)?.updated_at ?? null;
+  if (storedRev) {
+    const base = (opts.baseUpdatedAt ?? "").trim();
+    if (!base) {
+      return {
+        ok: false,
+        conflict: "unversioned",
+        error:
+          "This copy of masters was never loaded from the server, so it cannot be saved over it. " +
+          "The screen will refresh with the current data; re-apply your change.",
+      };
+    }
+    if (Date.parse(base) !== Date.parse(storedRev)) {
+      return {
+        ok: false,
+        conflict: "stale",
+        error:
+          "Masters changed on another device after this one loaded them. Refusing the save so the " +
+          "newer version is not overwritten — the screen will refresh; re-apply your change.",
+      };
+    }
+    // Claim the new revision only if nobody moved it since the read above.
+    const { data: claimed, error: claimErr } = await sb
+      .from("masters_desk_sync_meta")
+      .update({ updated_at: now, last_updated_at: now })
+      .eq("tenant_id", tenantId)
+      .eq("updated_at", storedRev)
+      .select("tenant_id");
+    if (claimErr) return { ok: false, error: claimErr.message };
+    if (!claimed?.length) {
+      return {
+        ok: false,
+        conflict: "stale",
+        error: "Another save to masters landed at the same moment — this one was not written. Re-apply your change.",
+      };
+    }
+  }
+
+  {
     const { error } = await sb.from("masters_desk_slices").upsert(rows);
     if (error) return { ok: false, error: error.message };
-  } else {
-    await sb.from("masters_desk_slices").delete().eq("tenant_id", tenantId);
   }
 
   await sb.from("masters_desk_sync_meta").upsert(
     {
       tenant_id: tenantId,
-      slice_count: rows.length,
-      class_count: state.classes?.length ?? 0,
-      fee_head_count: state.feeHeads?.length ?? 0,
-      subject_count: state.subjects?.length ?? 0,
+      slice_count: rows.filter((r) => !Array.isArray(r.payload) || r.payload.length > 0).length,
+      // Counts only for slices this push carried; the rest stay as recorded.
+      ...(Array.isArray(state.classes) ? { class_count: state.classes.length } : {}),
+      ...(Array.isArray(state.feeHeads) ? { fee_head_count: state.feeHeads.length } : {}),
+      ...(Array.isArray(state.subjects) ? { subject_count: state.subjects.length } : {}),
       last_updated_at: now,
       updated_at: now,
     },

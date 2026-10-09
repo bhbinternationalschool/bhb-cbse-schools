@@ -21,6 +21,7 @@ import { TENANT } from "@/lib/types";
 import { openWaMe, waMeUrl } from "@/lib/waMe";
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
+import { recordAttendanceDeletion } from "@/lib/attendanceDeletes";
 
 export type AttendanceStatus = "P" | "A" | "L" | "HD" | "LE";
 
@@ -748,6 +749,11 @@ export function deleteRegister(
   const state = loadAttendance();
   const i = state.registers.findIndex((r) => r.id === registerId);
   if (i < 0) return { ok: false, error: "Register not found" };
+  recordAttendanceDeletion("attendance_desk_registers", [registerId]);
+  recordAttendanceDeletion(
+    "attendance_desk_absent_nudges",
+    state.absentNudges.filter((n) => n.registerId === registerId).map((n) => n.id),
+  );
   const next: AttendanceState = {
     ...state,
     registers: state.registers.filter((r) => r.id !== registerId),
@@ -946,9 +952,21 @@ export function rebuildExceptionsInto(state: AttendanceState): AttendanceState {
     );
   }
 
+  const exceptions = [...openManual, ...auto, ...kept].slice(0, 800);
+  // Open automatic exceptions are re-derived under fresh ids on every
+  // rebuild; the ones this rebuild superseded are deleted by name (a save no
+  // longer deletes what it leaves out). Resolved ones and disputes are never
+  // superseded here, and the 800 cap only trims this browser's copy.
+  const now = new Set(exceptions.map((e) => e.id));
+  recordAttendanceDeletion(
+    "attendance_desk_exceptions",
+    state.exceptions
+      .filter((e) => e.status === "open" && e.kind !== "parent_dispute" && !now.has(e.id))
+      .map((e) => e.id),
+  );
   return {
     ...state,
-    exceptions: [...openManual, ...auto, ...kept].slice(0, 800),
+    exceptions,
   };
 }
 
@@ -1067,6 +1085,11 @@ export function fileParentAttendanceDispute(input: {
         e.studentId === st.id &&
         e.date === input.date
       ),
+  );
+  // A dispute this one replaces is deleted by name.
+  recordAttendanceDeletion(
+    "attendance_desk_exceptions",
+    state.exceptions.filter((e) => !withoutDup.includes(e)).map((e) => e.id),
   );
   const next = {
     ...state,

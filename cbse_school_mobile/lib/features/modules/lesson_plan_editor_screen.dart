@@ -1,5 +1,6 @@
 import "package:flutter/material.dart";
 
+import "../../core/guide/screen_guides.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "dictate_field.dart";
@@ -89,6 +90,7 @@ class _LessonPlanEditorScreenState extends State<LessonPlanEditorScreen> {
     final p = widget.period;
     return Scaffold(
       appBar: AppBar(
+        actions: [ScreenGuideButton(guideId: "lesson-plan", screenLabel: "lesson-plan")],
         title: Text(context.l10n.newLessonPlan, style: AppText.titleMedium),
       ),
       body: ListView(

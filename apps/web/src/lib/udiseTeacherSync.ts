@@ -37,6 +37,7 @@ import {
   portalCode,
   portalDate,
   professionalQualCode,
+  realNationalCode,
   subjectCode,
   teacherTypeCode,
   teachingGroups,
@@ -408,14 +409,21 @@ export function compareTeacher(
     else if (s.email.trim().toLowerCase() !== pE) push("email", s.email, pE, "differs", pE);
   }
 
-  const pC = String(L.nationalCode || "").trim().toUpperCase();
+  // A real code only: "Will Be Generated Shortly" is the portal saying it has
+  // none yet, and once it sat on one ERP record it claimed 13 teachers.
+  const pC = realNationalCode(L.nationalCode);
+  const eC = realNationalCode(s.oasisId);
+  const eRaw = (s.oasisId || "").trim();
   if (pC) {
-    const holder = others.find((o) => (o.oasisId || "").trim().toUpperCase() === pC);
+    const holder = others.find((o) => realNationalCode(o.oasisId) === pC);
     const value = holder ? null : pC;
     const note = holder ? `That code is on ${holder.fullName}'s ERP record — sort it out by hand.` : undefined;
-    if (!s.oasisId.trim()) push("nationalCode", "", pC, "bring_into_erp", value, note);
-    else if (s.oasisId.trim().toUpperCase() !== pC) push("nationalCode", s.oasisId, pC, "differs", value, note);
+    if (!eC) push("nationalCode", eRaw, pC, "bring_into_erp", value, note);
+    else if (eC !== pC) push("nationalCode", s.oasisId, pC, "differs", value, note);
+  } else if (eRaw && !eC) {
+    push("nationalCode", eRaw, "not issued yet", "differs", "", `"${eRaw}" is not a National Code — Apply clears it.`);
   }
+
 
   // Nature of appointment — only "Contract" is one ERP value; "Regular" is
   // Confirmed OR Probation, and the ERP's Temporary is not on the portal scale.
