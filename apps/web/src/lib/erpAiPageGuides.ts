@@ -3,18 +3,25 @@
  */
 
 import type { ErpAiChatContext, ErpAiLink, ErpAiMessage } from "@/lib/erpAiChat";
-import { canAccessHref, hasPermission, type RbacModule } from "@/lib/rbac";
+import { canAccessHref, hasPermission } from "@/lib/rbac";
+import type { ErpAiPageGuide, ErpAiPageGuideDef } from "@/lib/erpAiPageGuideTypes";
+import { PAGE_GUIDES_A } from "@/lib/erpAiPageGuidesA";
+import { PAGE_GUIDES_B } from "@/lib/erpAiPageGuidesB";
+import { PAGE_GUIDES_C } from "@/lib/erpAiPageGuidesC";
+import { PAGE_GUIDES_D } from "@/lib/erpAiPageGuidesD";
 
-export type ErpAiPageGuide = {
-  id: string;
-  pageLabel: string;
-  title: string;
-  module: RbacModule;
-  steps: string[];
-  links?: ErpAiLink[];
-  /** Shown on the proactive chip */
-  chipLabel: string;
-};
+export type { ErpAiPageGuide } from "@/lib/erpAiPageGuideTypes";
+
+/**
+ * Guides for every other screen and for the big modules' tabs (director,
+ * 9 Oct 2026: "a guide in every module"). Matched by path and tab before the
+ * original per-module guides below, so a tab gets its own walkthrough.
+ */
+export const MORE_PAGE_GUIDES: ErpAiPageGuideDef[] = [...PAGE_GUIDES_A, ...PAGE_GUIDES_B, ...PAGE_GUIDES_C, ...PAGE_GUIDES_D];
+
+function onPath(p: string, base: string): boolean {
+  return p === base || p.startsWith(`${base}/`);
+}
 
 const PAGE_GUIDES: ErpAiPageGuide[] = [
   {
@@ -231,6 +238,19 @@ export function resolveErpAiPageGuide(
   tab: string | null,
 ): ErpAiPageGuide | null {
   const p = pathname.replace(/\/$/, "") || "/home";
+
+  // 1. A guide written for this exact tab.
+  if (tab) {
+    const byTab = MORE_PAGE_GUIDES.find((g) => g.tab === tab && g.paths.some((b) => onPath(p, b)));
+    if (byTab) return byTab;
+  }
+  const original = resolveOriginalGuide(p, tab);
+  if (original) return original;
+  // 2. A whole-screen guide for a screen the originals do not cover.
+  return MORE_PAGE_GUIDES.find((g) => !g.tab && g.paths.some((b) => onPath(p, b))) ?? null;
+}
+
+function resolveOriginalGuide(p: string, tab: string | null): ErpAiPageGuide | null {
 
   if (p === "/home" || p === "") return PAGE_GUIDES.find((g) => g.id === "home")!;
   if (p === "/fees/defaulters") return PAGE_GUIDES.find((g) => g.id === "fees-defaulters")!;
