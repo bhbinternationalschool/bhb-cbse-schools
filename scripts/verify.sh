@@ -225,6 +225,7 @@ SELFTESTS=(
   test:student-leave-status-guard
   test:ptm-row-stamps
   test:attendance-row-stamps
+  test:notifications-readers-only-grow
   test:admissions-row-stamps
   test:payment-link-status-guard
   test:attendance-today
