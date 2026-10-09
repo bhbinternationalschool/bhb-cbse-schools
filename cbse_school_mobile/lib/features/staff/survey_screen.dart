@@ -21,6 +21,7 @@ class SurveyScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<SurveySetup>(
+      guideId: "field-survey",
       title: "Field survey",
       load: api.fetchSurveySetup,
       emptyIcon: Icons.map_outlined,

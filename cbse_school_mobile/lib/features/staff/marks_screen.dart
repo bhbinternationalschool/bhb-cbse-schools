@@ -1,4 +1,5 @@
 import "package:flutter/material.dart";
+import "../../core/guide/screen_guides.dart";
 import "package:flutter/services.dart";
 
 import "../../core/api/api_client.dart";
@@ -21,6 +22,7 @@ class MarksScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<List<ExamTermInfo>>(
+      guideId: "marks",
       title: "Marks",
       subtitle: "Choose the exam",
       load: api.fetchExamTerms,
@@ -248,6 +250,7 @@ class _MarkEntryScreenState extends State<MarkEntryScreen> {
     final sub = _subject;
     return Scaffold(
       appBar: AppBar(
+        actions: [ScreenGuideButton(guideId: "mark-entry", screenLabel: "mark-entry")],
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -445,6 +448,7 @@ class DateSheetScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<List<DateSheetRow>>(
+      guideId: "date-sheet",
       title: "Exam date sheet",
       load: () => api.fetchDateSheet(),
       emptyIcon: Icons.event_note_outlined,

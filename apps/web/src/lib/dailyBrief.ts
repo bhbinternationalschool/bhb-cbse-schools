@@ -182,6 +182,11 @@ export type DailyBrief = {
   homework?: BriefHomework;
   /** The AI paragraph on what is still open. Empty when it could not run. */
   aiNote: string;
+  /**
+   * Module requests waiting for the director, and stuck points seen today
+   * (Settings → Modules → Requests). Absent = not computed.
+   */
+  moduleRequests?: { waiting: number; newToday: number; stuckToday: number };
 };
 
 export function rupees(paise: number): string {
@@ -525,6 +530,15 @@ export function composeBriefSummary(b: DailyBrief): string {
     lines.push(
       `📞 ${b.defaulters.rows.length} families owe ${rupees(b.defaulters.totalPaise)} — calling list is in the PDF`,
     );
+  }
+
+  const mr = b.moduleRequests;
+  if (mr && (mr.waiting || mr.stuckToday)) {
+    const bits = [
+      mr.waiting ? `${mr.waiting} change request${mr.waiting === 1 ? "" : "s"} waiting for you${mr.newToday ? ` (${mr.newToday} new today)` : ""}` : "",
+      mr.stuckToday ? `${mr.stuckToday} screen${mr.stuckToday === 1 ? "" : "s"} where staff got stuck today` : "",
+    ].filter(Boolean);
+    lines.push(`💡 ${bits.join(" · ")} — ERP → Modules → Requests`);
   }
 
   if (b.aiNote.trim()) lines.push(`\n${b.aiNote.trim()}`);

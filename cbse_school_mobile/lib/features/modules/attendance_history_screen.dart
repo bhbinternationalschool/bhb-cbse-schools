@@ -32,6 +32,7 @@ class AttendanceHistoryScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<AttendanceHistory>(
+      guideId: "attendance-history",
       title: context.l10n.modAttendanceTitle,
       subtitle: child.fullName,
       load: () => api.fetchAttendanceHistory(child.id),

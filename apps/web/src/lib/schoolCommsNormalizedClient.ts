@@ -9,6 +9,25 @@ import {
   recordDeskSyncFailure,
   recordDeskSyncSuccess,
 } from "@/lib/deskSyncStatus";
+import { confirmDeskDeletes, pendingDeskDeletes, recordDeskDeletion } from "@/lib/deskNamedDeletes";
+
+const COMMS_DESK = "school_comms";
+
+/**
+ * A notice, news item, album or photo the user deleted. The comms, news and
+ * gallery pushes all carry it until the server confirms.
+ */
+export function recordSchoolCommsDeletion(
+  table:
+    | "school_comms_desk_notices"
+    | "school_comms_desk_news"
+    | "school_comms_desk_albums"
+    | "school_comms_desk_photos",
+  ids: string[],
+) {
+  if (typeof window === "undefined" || ids.length === 0) return;
+  recordDeskDeletion(COMMS_DESK, table, ids);
+}
 
 const META_KEY = "bhb_school_comms_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -59,11 +78,14 @@ export function scheduleSchoolCommsDeskSync(state: SchoolCommsState) {
 }
 
 async function pushSchoolCommsDeskApi(state: SchoolCommsState) {
+  const sentDeletes = pendingDeskDeletes(COMMS_DESK);
   try {
     const res = await fetch("/api/school-data/school-comms-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      // Deletions are named, never inferred from what this browser lacks.
       body: JSON.stringify({
+        deletes: sentDeletes,
         notices: state.notices,
         news: state.news,
         albums: state.albums,
@@ -77,6 +99,7 @@ async function pushSchoolCommsDeskApi(state: SchoolCommsState) {
       error?: string;
     } | null;
     if (res.ok && body?.ok) {
+      confirmDeskDeletes(COMMS_DESK, sentDeletes);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         noticeCount: body.noticeCount ?? state.notices.length,

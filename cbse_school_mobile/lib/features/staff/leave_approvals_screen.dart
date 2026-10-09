@@ -25,6 +25,7 @@ class _LeaveApprovalsScreenState extends State<LeaveApprovalsScreen> {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<List<StaffLeaveRequest>>(
+      guideId: "staff-leave-approvals",
       key: ValueKey(_filter),
       title: "Staff leave",
       subtitle: _filter == "pending" ? "Waiting for your decision" : "Decided",

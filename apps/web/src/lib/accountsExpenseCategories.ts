@@ -31,6 +31,7 @@ import {
 } from "@/lib/accountsLookups";
 import {
 } from "@/lib/accountsJournal";
+import { recordAccountsDeletion } from "@/lib/accountsNormalizedClient";
 
 /* ─── Expense categories + vouchers ───────────────────────── */
 
@@ -135,6 +136,7 @@ export function deleteExpenseCategory(
   if (!cat) return fail("Category not found");
   const check = checkExpenseCategoryRemoval(categoryId, state);
   if (!check.canRemove) return fail(check.suggestion);
+  recordAccountsDeletion("accounts_desk_expense_categories", categoryId);
   saveAccounts({
     ...state,
     expenseCategories: state.expenseCategories.filter((c) => c.id !== categoryId),

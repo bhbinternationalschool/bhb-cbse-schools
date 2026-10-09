@@ -13,6 +13,7 @@ class NoticesScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<List<CommsItem>>(
+      guideId: "notices",
       title: context.l10n.homeNoticesAndNews,
       load: api.fetchCommsFeed,
       emptyIcon: Icons.campaign_outlined,

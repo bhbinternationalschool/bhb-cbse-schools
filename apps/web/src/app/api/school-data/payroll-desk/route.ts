@@ -6,7 +6,9 @@ import {
 import { deskReadGate, visibleSlices } from "@/lib/deskFeatureGate.server";
 import type { PayrollState } from "@/lib/payroll";
 import { payrollDualWriteDbEnabled } from "@/lib/payrollDbConfig";
+import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
 import {
+  PAYROLL_DELETABLE_TABLES,
   fetchPayrollDeskFromDb,
   pushPayrollDeskToDb,
 } from "@/lib/payrollNormalized.server";
@@ -55,7 +57,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, skipped: true });
   }
 
-  let body: Pick<PayrollState, "runs" | "audit">;
+  let body: Pick<PayrollState, "runs" | "audit"> & { deletes?: unknown };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -66,7 +68,7 @@ export async function POST(req: Request) {
     version: 2,
     runs: body.runs ?? [],
     audit: body.audit ?? [],
-  });
+  }, readNamedDeletes(body.deletes, PAYROLL_DELETABLE_TABLES));
   if (!result.ok) {
     return NextResponse.json({ ok: false, error: result.error }, { status: 502 });
   }

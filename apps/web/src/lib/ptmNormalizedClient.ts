@@ -9,6 +9,14 @@ import {
   recordDeskSyncFailure,
   recordDeskSyncSuccess,
 } from "@/lib/deskSyncStatus";
+import { confirmDeskDeletes, pendingDeskDeletes, recordDeskDeletion } from "@/lib/deskNamedDeletes";
+
+const PTM_DESK = "ptm";
+
+/** A PTM event or slot the user deleted; the next push deletes it by id. */
+export function recordPtmDeletion(table: "ptm_desk_events" | "ptm_desk_slots", ids: string[]) {
+  recordDeskDeletion(PTM_DESK, table, ids);
+}
 
 const META_KEY = "bhb_ptm_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -63,6 +71,7 @@ export function schedulePtmDeskSync(state: PtmState) {
 }
 
 async function pushPtmDeskApi(state: PtmState) {
+  const sentDeletes = pendingDeskDeletes(PTM_DESK);
   try {
     const res = await fetch("/api/school-data/ptm-desk", {
       method: "POST",
@@ -72,6 +81,8 @@ async function pushPtmDeskApi(state: PtmState) {
         slots: state.slots,
         bookings: state.bookings,
         feedback: state.feedback,
+        // Deletions are named, never inferred from what this browser lacks.
+        deletes: sentDeletes,
       }),
     });
     const body = (await res.json().catch(() => null)) as {
@@ -81,6 +92,7 @@ async function pushPtmDeskApi(state: PtmState) {
       error?: string;
     } | null;
     if (res.ok && body?.ok) {
+      confirmDeskDeletes(PTM_DESK, sentDeletes);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         eventCount: body.eventCount ?? state.events.length,

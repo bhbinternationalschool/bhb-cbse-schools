@@ -10,6 +10,7 @@ import type {
 } from "@/lib/attendance";
 import { attendanceDualWriteDbEnabled } from "@/lib/attendanceDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { deleteNamedIds, type NamedDeletes } from "@/lib/deskNamedDeletes.server";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
 
 export type AttendanceDeskAncillary = Pick<
@@ -38,43 +39,9 @@ async function ctx() {
   return getServerTenantContext();
 }
 
-async function deleteStale(
-  sb: NonNullable<Awaited<ReturnType<typeof ctx>>>["sb"],
-  tenantId: string,
-  table: string,
-  keepIds: Set<string>,
-) {
-  // An empty keep-set means every stored row is "stale", which would delete
-  // the whole table. A client with nothing to say has lost its cache; it is
-  // not asking for the school's records to be erased. See the identical guard
-  // in the *Normalized.server.ts modules and docs/TODO.md.
-  if (keepIds.size === 0) {
-    console.warn(
-      `[${table}] refusing to prune: the payload holds no ids at all.`,
-    );
-    return;
-  }
-  const { data, error } = await sb
-    .from(table)
-    .select("id")
-    .eq("tenant_id", tenantId);
-  if (error) {
-    console.error(
-      `[${table}] prune skipped — could not read existing ids:`,
-      error.message,
-    );
-    return;
-  }
-  const stale = (data ?? [])
-    .map((r) => String((r as { id: string }).id))
-    .filter((id) => !keepIds.has(id));
-  if (stale.length > 0) {
-    await sb.from(table).delete().in("id", stale);
-  }
-}
-
 export async function pushAttendanceDeskAncillaryToDb(
   ancillary: AttendanceDeskAncillary,
+  deletes: NamedDeletes = {},
 ): Promise<{ ok: boolean; error?: string }> {
   if (!attendanceDualWriteDbEnabled()) return { ok: true };
   const c = await ctx();
@@ -99,13 +66,15 @@ export async function pushAttendanceDeskAncillaryToDb(
   );
   if (pErr) return { ok: false, error: pErr.message };
 
-  const nudges = (ancillary.absentNudges ?? []).slice(0, 500);
-  await deleteStale(
-    sb,
-    tenantId,
-    "attendance_desk_absent_nudges",
-    new Set(nudges.map((x) => x.id)),
-  );
+  // No prune by absence. The browser keeps 500 nudges and rebuilds open
+  // exceptions under fresh ids; saves used to delete everything else. Now a
+  // nudge goes with the register the user deleted, and an exception the
+  // rebuild superseded (or a duplicate dispute) is named — see attendance.ts.
+  const goneNudges = new Set(deletes["attendance_desk_absent_nudges"] ?? []);
+  const goneExceptions = new Set(deletes["attendance_desk_exceptions"] ?? []);
+  const nudges = (ancillary.absentNudges ?? [])
+    .filter((n) => !goneNudges.has(n.id))
+    .slice(0, 500);
   if (nudges.length) {
     const rows = nudges.map((n: AbsentNudgeLog) => ({
       id: n.id,
@@ -128,13 +97,14 @@ export async function pushAttendanceDeskAncillaryToDb(
     if (error) return { ok: false, error: error.message };
   }
 
-  const exceptions = ancillary.exceptions ?? [];
-  await deleteStale(
-    sb,
-    tenantId,
-    "attendance_desk_exceptions",
-    new Set(exceptions.map((x) => x.id)),
-  );
+  // One row per id: the same exception twice in a batch fails the upsert.
+  const exceptions = [
+    ...new Map(
+      (ancillary.exceptions ?? [])
+        .filter((e) => !goneExceptions.has(e.id))
+        .map((e) => [e.id, e] as const),
+    ).values(),
+  ];
   if (exceptions.length) {
     const rows = exceptions.map((e: AttendanceException) => ({
       id: e.id,
@@ -159,6 +129,14 @@ export async function pushAttendanceDeskAncillaryToDb(
       .from("attendance_desk_exceptions")
       .upsert(rows, { onConflict: "id" });
     if (error) return { ok: false, error: error.message };
+  }
+
+  for (const [table, ids] of [
+    ["attendance_desk_absent_nudges", goneNudges],
+    ["attendance_desk_exceptions", goneExceptions],
+  ] as const) {
+    const del = await deleteNamedIds(sb, tenantId, table, [...ids]);
+    if (!del.ok) return del;
   }
 
   const openCount = exceptions.filter((e) => e.status !== "resolved").length;

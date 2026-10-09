@@ -45,10 +45,13 @@ const files = fs
 
 // ── Every implementation is guarded ───────────────────────────────────────
 {
+  // Copies are being removed module by module (named deletes instead of
+  // prune-by-absence, from Oct 2026), so the count may only fall. A new copy
+  // is a new way to erase other people's records — don't add one.
   assert.ok(
-    files.length >= 18,
-    `expected the 18 known deleteStale modules, found ${files.length} — if a ` +
-      "module was removed, update this test deliberately",
+    files.length <= 18,
+    `found ${files.length} deleteStale modules, more than the 18 known — ` +
+      "a desk save must delete named ids (deskNamedDeletes), not absent ones",
   );
 
   for (const f of files) {

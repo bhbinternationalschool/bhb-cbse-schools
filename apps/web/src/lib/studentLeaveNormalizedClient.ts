@@ -9,6 +9,15 @@ import {
   recordDeskSyncFailure,
   recordDeskSyncSuccess,
 } from "@/lib/deskSyncStatus";
+import { confirmDeskDeletes, pendingDeskDeletes, recordDeskDeletion } from "@/lib/deskNamedDeletes";
+
+const STUDENT_LEAVE_DESK = "student_leave";
+
+/** A leave request the office deleted; the next push deletes it by id. */
+export function recordStudentLeaveDeletion(id: string) {
+  if (typeof window === "undefined") return;
+  recordDeskDeletion(STUDENT_LEAVE_DESK, "student_leave_desk_requests", [id]);
+}
 
 const META_KEY = "bhb_student_leave_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -65,11 +74,13 @@ export function scheduleStudentLeaveDeskSync(state: StudentLeaveState) {
 }
 
 async function pushStudentLeaveDeskApi(state: StudentLeaveState) {
+  const sentDeletes = pendingDeskDeletes(STUDENT_LEAVE_DESK);
   try {
     const res = await fetch("/api/school-data/student-leave-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requests: state.requests }),
+      // Deletions are named, never inferred from what this browser lacks.
+      body: JSON.stringify({ requests: state.requests, deletes: sentDeletes }),
     });
     const body = (await res.json().catch(() => null)) as {
       ok?: boolean;
@@ -78,6 +89,7 @@ async function pushStudentLeaveDeskApi(state: StudentLeaveState) {
       error?: string;
     } | null;
     if (res.ok && body?.ok) {
+      confirmDeskDeletes(STUDENT_LEAVE_DESK, sentDeletes);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         requestCount: body.requestCount ?? state.requests.length,

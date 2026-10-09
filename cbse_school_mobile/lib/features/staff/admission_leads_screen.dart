@@ -34,6 +34,7 @@ class _AdmissionLeadsScreenState extends State<AdmissionLeadsScreen> {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<AdmissionLeadList>(
+      guideId: "admission-leads",
       key: ValueKey("$_filter|$_query"),
       title: "Admission leads",
       subtitle: switch (_filter) {

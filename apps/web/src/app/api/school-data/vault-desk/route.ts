@@ -8,7 +8,9 @@ import { vaultDualWriteDbEnabled } from "@/lib/vaultDbConfig";
 import {
   fetchVaultDeskFromDb,
   pushVaultDeskToDb,
+  VAULT_DELETABLE_TABLES,
 } from "@/lib/vaultNormalized.server";
+import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
 
 export const runtime = "nodejs";
 
@@ -32,7 +34,7 @@ export async function GET(req: Request) {
   });
 }
 
-type VaultDeskPostBody = Pick<VaultState, "documents" | "settings">;
+type VaultDeskPostBody = Pick<VaultState, "documents" | "settings"> & { deletes?: unknown };
 
 export async function POST(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["vault-desk"], "POST");
@@ -56,7 +58,7 @@ export async function POST(req: Request) {
     version: 1,
     documents: Array.isArray(body.documents) ? body.documents : [],
     settings: body.settings ?? { digestMobiles: "" },
-  });
+  }, readNamedDeletes(body.deletes, VAULT_DELETABLE_TABLES));
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error || "Sync failed" },

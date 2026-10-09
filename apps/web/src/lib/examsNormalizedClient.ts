@@ -10,6 +10,17 @@ import {
   recordDeskSyncFailure,
   recordDeskSyncSuccess,
 } from "@/lib/deskSyncStatus";
+import { confirmDeskDeletes, pendingDeskDeletes, recordDeskDeletion } from "@/lib/deskNamedDeletes";
+
+const EXAMS_DESK = "exams";
+
+/** Exam setup rows the user deleted; the next push deletes them by id. */
+export function recordExamsDeletion(
+  table: "exam_desk_terms" | "exam_desk_date_sheet" | "exam_desk_rooms" | "exam_desk_seating",
+  ids: string[],
+) {
+  recordDeskDeletion(EXAMS_DESK, table, ids);
+}
 
 const META_KEY = "bhb_exams_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -66,6 +77,7 @@ export function scheduleExamsDeskSync(state: ExamsState) {
 }
 
 async function pushExamsDeskApi(state: ExamsState) {
+  const sentDeletes = pendingDeskDeletes(EXAMS_DESK);
   try {
     const res = await fetch("/api/school-data/exams-desk", {
       method: "POST",
@@ -78,6 +90,8 @@ async function pushExamsDeskApi(state: ExamsState) {
         dateSheet: state.dateSheet,
         policy: state.policy,
         promotions: state.promotions,
+        // Deletions are named, never inferred from what this browser lacks.
+        deletes: sentDeletes,
       }),
     });
     const body = (await res.json().catch(() => null)) as {
@@ -87,6 +101,7 @@ async function pushExamsDeskApi(state: ExamsState) {
       error?: string;
     } | null;
     if (res.ok && body?.ok) {
+      confirmDeskDeletes(EXAMS_DESK, sentDeletes);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         sheetCount: body.sheetCount ?? state.sheets.length,

@@ -1,100 +1,65 @@
 /**
- * A partial attendance push must never delete history.
+ * An attendance push must never delete a register it does not name.
  *
  * On 2026-08-11 the database held exactly one attendance register: today's.
  * The register for 2026-08-10, marked the day before, was gone. Nobody
- * deleted it.
+ * deleted it: pushAttendanceRegistersToDb called deleteStale with the ids the
+ * client happened to be holding, and a phone whose cache was dropped on quota
+ * pushed one register. The fix then scoped the prune to the dates a payload
+ * covered — which still erased teachers' registers for TODAY, saved from the
+ * app or by a leave approval after the office tab last read.
  *
- * pushAttendanceRegistersToDb called deleteStale unconditionally with the ids
- * the client happened to be holding, so every push deleted every register not
- * in that payload. And the `if (!active.length)` guard ran AFTER the delete,
- * so an EMPTY payload wiped the whole attendance history first and noticed
- * second. The browser cache was being dropped on quota all that day, so the
- * client pushed partial state and the server obligingly pruned the rest.
- *
- * sis_students has been protected from exactly this since the roster
- * incident: pruning requires the caller to declare a complete snapshot, and
- * test:sis-prune enforces it. Attendance never got the same guard, and lost a
- * day of a real class's attendance.
- *
- * The rule: a push is a statement about the dates it covers, not about every
- * date that has ever existed.
+ * The rule now: a push is not a statement about which registers exist on any
+ * date. A register leaves only when the user deleted it and the push names
+ * it. And when the stored register for a section and date has a different id
+ * (the unique key allows one), the stored one stands and the stale copy is
+ * skipped — the old prune settled that collision by deleting the teacher's.
  *
  * Run: npx tsx src/lib/attendancePrune.selftest.ts
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
-type Reg = { id: string; date: string };
+const src = readFileSync(join(__dirname, "attendanceNormalized.server.ts"), "utf8");
+const push = src.slice(
+  src.indexOf("export async function pushAttendanceRegistersToDb"),
+  src.indexOf("export async function fetchAttendanceRegistersFromDb"),
+);
+assert.ok(push.length > 500, "found the register push");
 
-/** Exactly the prune in pushAttendanceRegistersToDb. */
-function pruneIds(active: Reg[], stored: Reg[]): string[] {
-  if (active.length === 0) return [];
-  const coveredDates = new Set(active.map((r) => r.date).filter(Boolean));
-  const keepIds = new Set(active.map((r) => r.id));
-  return stored
-    .filter((r) => coveredDates.has(r.date))
-    .map((r) => r.id)
-    .filter((id) => !keepIds.has(id));
+// ── No prune by absence, not even within covered dates ────────────────────
+assert.equal(/deleteStale/.test(src), false, "no prune-by-absence helper");
+assert.equal(
+  /from\("attendance_desk_registers"\)\s*\.delete\(/.test(push),
+  false,
+  "registers are never deleted directly by a push",
+);
+assert.equal(/coveredDates/.test(push), false, "no date-scoped prune");
+assert.ok(
+  /deleteNamedIds\(sb, tenantId, "attendance_desk_registers", \[\.\.\.gone\]\)/.test(push),
+  "a register goes only by named id",
+);
+
+// ── Marks: written first, removed only under registers that carried marks ─
+assert.equal(/from\("attendance_desk_marks"\)\s*\.delete\(/.test(push), false, "no delete-then-insert of marks");
+assert.ok(/deleteChildrenNotKept\(\s*sb,\s*tenantId,\s*"attendance_desk_marks",\s*"register_id"/.test(push));
+assert.ok(push.indexOf('.from("attendance_desk_marks")\n      .upsert') < push.indexOf("deleteChildrenNotKept("), "marks upserted before any removal");
+
+// ── The collision rule, as the push applies it ────────────────────────────
+type Reg = { id: string; sectionId: string; academicYearCode: string; date: string };
+function written(payload: Reg[], stored: Reg[]): string[] {
+  const key = (r: Reg) => `${r.sectionId}|${r.academicYearCode}|${r.date}`;
+  const bySlot = new Map(stored.map((r) => [key(r), r.id]));
+  return payload.filter((r) => !bySlot.has(key(r)) || bySlot.get(key(r)) === r.id).map((r) => r.id);
 }
-
-const yesterday: Reg = { id: "ar_yday", date: "2026-08-10" };
-const today: Reg = { id: "ar_today", date: "2026-08-11" };
-
-// ── The loss that happened ────────────────────────────────────────────────
 {
-  // The client holds only today — its cache was dropped on quota.
-  const deleted = pruneIds([today], [yesterday, today]);
-  assert.deepEqual(
-    deleted,
-    [],
-    "a push covering only 2026-08-11 must not touch 2026-08-10. This exact " +
-      "case deleted a real class's attendance for the previous day.",
-  );
+  const teacher: Reg = { id: "ar_teacher", sectionId: "s1", academicYearCode: "2026-27", date: "2026-10-09" };
+  const office: Reg = { id: "ar_office", sectionId: "s1", academicYearCode: "2026-27", date: "2026-10-09" };
+  const other: Reg = { id: "ar_other", sectionId: "s2", academicYearCode: "2026-27", date: "2026-10-09" };
+  assert.deepEqual(written([office, other], [teacher]), ["ar_other"], "the stored register for the slot stands");
+  assert.deepEqual(written([teacher], [teacher]), ["ar_teacher"], "the same register is written normally");
 }
-
-// ── An empty payload deletes NOTHING ──────────────────────────────────────
-// The old code ran the delete before checking this, so an empty push wiped
-// every register the school had.
-{
-  assert.deepEqual(
-    pruneIds([], [yesterday, today]),
-    [],
-    "an empty push is a client with no data, never an instruction to erase " +
-      "the attendance history",
-  );
-}
-
-// ── Within a covered date, a removal still applies ────────────────────────
-// Otherwise a register deleted in the UI would come back on the next sync,
-// which is the bug the prune existed to solve.
-{
-  const dupToday: Reg = { id: "ar_today_old", date: "2026-08-11" };
-  assert.deepEqual(
-    pruneIds([today], [dupToday, today, yesterday]),
-    ["ar_today_old"],
-    "a stale register for a date the payload DOES cover is still pruned",
-  );
-}
-
-// ── Multiple dates in one payload ─────────────────────────────────────────
-{
-  const other: Reg = { id: "ar_other", date: "2026-08-09" };
-  const staleToday: Reg = { id: "ar_stale", date: "2026-08-11" };
-  assert.deepEqual(
-    pruneIds([today, yesterday], [today, yesterday, staleToday, other]),
-    ["ar_stale"],
-    "covered dates are pruned, uncovered ones (2026-08-09) are left alone",
-  );
-}
-
-// ── A register with no date is never grounds to delete ────────────────────
-{
-  const undated: Reg = { id: "ar_undated", date: "" };
-  assert.deepEqual(
-    pruneIds([undated], [yesterday, today]),
-    [],
-    "a payload that covers no identifiable date prunes nothing",
-  );
-}
+assert.ok(/stored && stored !== r\.id/.test(push), "the push skips a copy whose slot holds another id");
 
 console.log("attendancePrune.selftest: all assertions passed");

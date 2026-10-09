@@ -67,7 +67,7 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Your location is used only while punching attendance or recording that you taught a period, to confirm you are on the school campus.</string>
+	<string>Your location is used only when you ask for it: staff punching attendance or logging a period (to confirm you are on campus), and parents setting their child's bus pickup point.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>During school timing the app shares your location with the school to confirm presence on campus, including when the app is closed. Only your latest position is kept.</string>
 	<key>NSCameraUsageDescription</key>

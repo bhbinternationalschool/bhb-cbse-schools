@@ -13,7 +13,11 @@ import {
   canonicalCommsDesk,
   fetchSchoolCommsDeskFromDb,
   pushSchoolCommsDeskToDb,
+  SCHOOL_COMMS_DELETABLE_TABLES,
+  SCHOOL_COMMS_TABLE_SLICES,
 } from "@/lib/schoolCommsNormalized.server";
+import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
+import { featureAuthorizedDeletes } from "@/lib/deskNamedDeletesFeature.server";
 
 export const runtime = "nodejs";
 
@@ -47,12 +51,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, skipped: true });
   }
 
-  let body: Pick<SchoolCommsState, "notices" | "news" | "albums" | "photos">;
+  let body: Pick<SchoolCommsState, "notices" | "news" | "albums" | "photos"> & { deletes?: unknown };
   try {
     body = (await req.json()) as typeof body;
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
+
+  // Deletions are named by the desk, never inferred from what it lacks.
+  let deletes = readNamedDeletes(body.deletes, SCHOOL_COMMS_DELETABLE_TABLES);
 
   // Function-only writers (Notices → Notices & circulars): merged onto the
   // stored desk, their notices only — never the body as sent. Their copy of
@@ -74,6 +81,7 @@ export async function POST(req: Request) {
     );
     if (!merged.ok) return merged.response;
     if (!merged.changed) return featureSavedResponse(false);
+    deletes = featureAuthorizedDeletes(deletes, SCHOOL_COMMS_TABLE_SLICES, canonicalCommsDesk(stored.bundle), merged.state);
     body = merged.state as unknown as typeof body;
   }
 
@@ -83,7 +91,7 @@ export async function POST(req: Request) {
     news: body.news ?? [],
     albums: body.albums ?? [],
     photos: body.photos ?? [],
-  });
+  }, deletes);
   if (!result.ok) {
     return NextResponse.json({ ok: false, error: result.error }, { status: 502 });
   }

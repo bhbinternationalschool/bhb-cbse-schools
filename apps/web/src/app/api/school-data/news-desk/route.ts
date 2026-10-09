@@ -13,7 +13,11 @@ import {
   canonicalCommsDesk,
   fetchNewsDeskFromDb,
   pushNewsDeskToDb,
+  SCHOOL_COMMS_DELETABLE_TABLES,
+  SCHOOL_COMMS_TABLE_SLICES,
 } from "@/lib/schoolCommsNormalized.server";
+import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
+import { featureAuthorizedDeletes } from "@/lib/deskNamedDeletesFeature.server";
 
 export const runtime = "nodejs";
 
@@ -49,12 +53,15 @@ export async function POST(req: Request) {
     });
   }
 
-  let body: NewsDeskBundle;
+  let body: NewsDeskBundle & { deletes?: unknown };
   try {
     body = (await req.json()) as NewsDeskBundle;
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
+
+  // Deletions are named by the desk, never inferred from what it lacks.
+  let deletes = readNamedDeletes(body.deletes, SCHOOL_COMMS_DELETABLE_TABLES);
 
   // Function-only writers (News → News stories): merged onto the stored
   // desk, row by row — never the body as sent.
@@ -74,12 +81,13 @@ export async function POST(req: Request) {
     );
     if (!merged.ok) return merged.response;
     if (!merged.changed) return featureSavedResponse(false);
+    deletes = featureAuthorizedDeletes(deletes, SCHOOL_COMMS_TABLE_SLICES, canonicalCommsDesk(stored.bundle), merged.state);
     body = merged.state as unknown as NewsDeskBundle;
   }
 
   const result = await pushNewsDeskToDb({
     news: Array.isArray(body.news) ? body.news : [],
-  });
+  }, deletes);
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error || "Sync failed" },

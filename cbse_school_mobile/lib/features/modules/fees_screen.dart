@@ -432,6 +432,7 @@ class _FeesScreenState extends State<FeesScreen> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<_FeesData>(
+      guideId: "fees",
       title: context.l10n.modFeesTitle,
       subtitle: widget.child.fullName,
       load: _load,

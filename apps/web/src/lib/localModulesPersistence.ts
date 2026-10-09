@@ -10,6 +10,8 @@
  * import, so this file may import them statically without a cycle).
  */
 
+import { emptyModuleRequestsState } from "@/lib/moduleRequests";
+import { emptyAppPopupsState } from "@/lib/appPopups";
 import {
   createModuleStatePersistence,
   type ModuleStatePersistence,
@@ -127,6 +129,20 @@ const registry: Record<ModuleStateKey, ModuleStatePersistence<any>> = {
     key: "login_unknown_numbers",
     isEmpty: () => true,
     loadLocal: emptyUnknownLoginState,
+    writeLocalRaw: () => undefined,
+  }),
+  // Written only by the server (Comms → App pop-ups saves through its route).
+  app_popups: createModuleStatePersistence({
+    key: "app_popups",
+    isEmpty: () => true,
+    loadLocal: emptyAppPopupsState,
+    writeLocalRaw: () => undefined,
+  }),
+  // Written only by the server (the module guide and the director's inbox).
+  module_requests: createModuleStatePersistence({
+    key: "module_requests",
+    isEmpty: () => true,
+    loadLocal: emptyModuleRequestsState,
     writeLocalRaw: () => undefined,
   }),
   attendance_result_overrides: createModuleStatePersistence({

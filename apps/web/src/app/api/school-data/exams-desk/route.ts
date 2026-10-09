@@ -19,7 +19,11 @@ import {
   fetchExamSetupFromDb,
   pushExamDeskToDb,
   type ExamDeskBundle,
+  EXAMS_DELETABLE_TABLES,
+  EXAMS_TABLE_SLICES,
 } from "@/lib/examsNormalized.server";
+import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
+import { featureAuthorizedDeletes } from "@/lib/deskNamedDeletesFeature.server";
 import type { RbacAction } from "@/lib/rbac";
 
 export const runtime = "nodejs";
@@ -78,7 +82,7 @@ export async function GET(req: Request) {
 
 type ExamsDeskPostBody = Partial<
   Pick<ExamsState, "terms" | "subjects" | "dateSheet" | "sheets" | "policy" | "promotions" | "rooms" | "seating">
->;
+> & { deletes?: unknown };
 
 /**
  * POST — push the exam SETUP: terms, subjects, date sheet, policy and
@@ -140,6 +144,9 @@ export async function POST(req: Request) {
     );
   }
 
+  // Deletions are named by the desk, never inferred from what it lacks.
+  let deletes = readNamedDeletes(body.deletes, EXAMS_DELETABLE_TABLES);
+
   // Function holders (e.g. Exams → Date sheet): merged onto the stored
   // setup, only their functions' slices — never the body as sent. Sheets
   // are never written here, so a stray copy is dropped before the check.
@@ -151,11 +158,13 @@ export async function POST(req: Request) {
         { status: 503 },
       );
     }
-    const { sheets: _ignored, ...setup } = body;
+    const { sheets: _ignored, deletes: _named, ...setup } = body;
     void _ignored;
+    void _named;
     const merged = featurePushOutcome(gate, "exams", stored.bundle, setup);
     if (!merged.ok) return merged.response;
     if (!merged.changed) return featureSavedResponse(false);
+    deletes = featureAuthorizedDeletes(deletes, EXAMS_TABLE_SLICES, stored.bundle, merged.state);
     body = merged.state as ExamsDeskPostBody;
   }
 
@@ -171,7 +180,7 @@ export async function POST(req: Request) {
     sheets: [],
     policy: body.policy!,
     promotions: Array.isArray(body.promotions) ? body.promotions : [],
-  });
+  }, deletes);
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error || "Sync failed" },

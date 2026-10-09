@@ -7,6 +7,12 @@
  * (see waTransportBotPrompts.ts) — never from here.
  */
 import {
+  buildModuleRequestSystemPrompt,
+  buildModuleRequestUserPrompt,
+  parseModuleRequestDraft,
+  type ModuleRequestDraft,
+} from "@/lib/moduleRequestDraft";
+import {
   HOMEWORK_PAGE_SCAN_PROMPT_VERSION,
   buildHomeworkPageScanPrompt,
   buildHomeworkPageScanSystem,
@@ -2695,4 +2701,34 @@ export async function suggestAnswerSheetMarks(opts: {
   noteAiBudgetUse(requester, (r.usage.promptTokens ?? 0) + (r.usage.completionTokens ?? 0));
 
   return { ok: true, result: parsed, generationId };
+}
+
+/**
+ * The module guide's change request: a card the director can approve, or the
+ * one question still needed. Personal to the conversation — not cacheable.
+ * See lib/moduleRequestDraft.ts.
+ */
+export async function generateModuleRequestJson(opts: {
+  pageLabel: string;
+  module: string;
+  pathname: string;
+  tab: string;
+  transcript: { role: "user" | "assistant"; text: string }[];
+}): Promise<
+  | { ok: true; draft: ModuleRequestDraft; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const r = await callLlmJson(
+    {
+      system: buildModuleRequestSystemPrompt(),
+      userMessage: buildModuleRequestUserPrompt(opts),
+      maxTokens: 900,
+      temperature: 0.3,
+      geminiMaxTokens: 4096,
+      meta: { route: "module-request-draft", promptVersion: "v1" },
+    },
+    parseModuleRequestDraft,
+  );
+  if (r.ok) return { ok: true, draft: r.data, engine: r.engine, generationId: r.generationId };
+  return { ok: false, error: r.error || "AI is not configured", engine: r.engine };
 }

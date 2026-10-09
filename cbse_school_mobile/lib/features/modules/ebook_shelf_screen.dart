@@ -21,6 +21,7 @@ class EbookShelfScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<EbookShelf>(
+      guideId: "ebooks",
       title: context.l10n.tutLibrary,
       subtitle: context.l10n.tutEBooks,
       load: api.fetchEbookShelf,

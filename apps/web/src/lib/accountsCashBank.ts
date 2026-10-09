@@ -45,6 +45,7 @@ import {
   postJournal,
   resolveFiscalYearForDate,
 } from "@/lib/accountsJournal";
+import { recordAccountsDeletion } from "@/lib/accountsNormalizedClient";
 
 /* ─── Cash book ────────────────────────────────────────────── */
 /**
@@ -188,6 +189,7 @@ export function deleteBankAccount(
   if (!check.canRemove) return fail(check.suggestion);
 
   const bankAccounts = state.bankAccounts.filter((b) => b.id !== bankId);
+  recordAccountsDeletion("accounts_desk_bank_accounts", bankId);
   saveAccounts({
     ...state,
     bankAccounts,

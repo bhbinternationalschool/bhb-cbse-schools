@@ -20,6 +20,7 @@ import {
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { feesDualWriteDbEnabled } from "@/lib/feesDbConfig";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
+import type { NamedDeletes } from "@/lib/deskNamedDeletes.server";
 
 export type FeeDeskSyncMeta = {
   voucherCount: number;
@@ -759,7 +760,7 @@ export type FeeDeskSnapshot = {
 /** Push full fee desk (vouchers + ancillary) and rebuild open dues cache. */
 export async function pushFeeDeskToDb(
   state: Pick<FeesState, "vouchers"> & FeeDeskAncillary,
-  opts?: { academicYearCode?: string; rebuildOpenDues?: boolean },
+  opts?: { academicYearCode?: string; rebuildOpenDues?: boolean; deletes?: NamedDeletes },
 ): Promise<{ ok: boolean; error?: string; voucherCount: number; openDuesCount?: number }> {
   const voucherResult = await pushFeeVouchersToDb(state.vouchers ?? []);
   if (!voucherResult.ok) {
@@ -778,6 +779,9 @@ export async function pushFeeDeskToDb(
     planAllocations: state.planAllocations ?? [],
     carriedForwardDues: state.carriedForwardDues ?? [],
     chargeVouchers: state.chargeVouchers ?? [],
+  }, {
+    deletes: opts?.deletes,
+    voidedVoucherIds: (state.vouchers ?? []).filter((v) => v.voidedAt).map((v) => v.id),
   });
   if (!ancillaryResult.ok) {
     return {
@@ -838,9 +842,11 @@ export async function feeVoucherExistsInDb(
 }
 
 export async function fetchFeeDeskFromDb(): Promise<FeeDeskSnapshot> {
-  const [{ vouchers, meta, ok }, ancillary] = await Promise.all([
+  const [{ vouchers, meta, ok }, anc] = await Promise.all([
     fetchFeeVouchersFromDb(),
     fetchFeeDeskAncillaryFromDb(),
   ]);
-  return { vouchers, ancillary, meta, ok };
+  // Both halves must have been read: cheques, plans and day closes that
+  // failed to load are unknown, not "none".
+  return { vouchers, ancillary: anc.ancillary, meta, ok: ok && anc.ok };
 }

@@ -27,6 +27,7 @@ import {
 } from "@/lib/exams";
 import { examsDualWriteDbEnabled } from "@/lib/examsDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { deleteNamedIds, type NamedDeletes } from "@/lib/deskNamedDeletes.server";
 import { fetchAllPages, fetchByIds } from "@/lib/supabase/pageAll";
 import { replaceChildRows } from "./replaceChildRows.server";
 import { sameInstant } from "@/lib/examsSheetVersion";
@@ -60,63 +61,6 @@ async function resolveCtx(): Promise<{
   tenantId: string;
 } | null> {
   return getServerTenantContext();
-}
-
-/**
- * Delete rows the client no longer holds — never on an empty payload.
- *
- * An empty keep-set means every stored row is "stale", so this deleted the
- * entire table. That is never what a sync means: a client with nothing to say
- * is a client whose cache was dropped, not an instruction to erase the
- * school's records.
- *
- * It is not hypothetical. On 2026-08-11 the attendance register for the
- * previous day was gone — pushed away by a phone whose localStorage had been
- * dropped on quota, with the emptiness check running AFTER the delete. This
- * same function is copied into 20 modules and called from 86 places, almost
- * none of them guarded, covering bank and cash ledgers, payroll runs, fee
- * cheques, library issues and 1,919 admission records.
- *
- * This floor stops the catastrophic case everywhere at once. It does NOT make
- * a partial payload safe — a client holding 3 of 900 rows still prunes 897.
- * That needs per-module scoping, the way attendance now prunes only within
- * the dates its payload covers. See docs/TODO.md.
- *
- * The read error is also surfaced now. It was discarded, which happened to
- * fail safe here (no data → nothing deleted), but "we could not read the
- * table" and "the table is empty" must not be the same value in a function
- * that deletes.
- */
-async function deleteStale(
-  sb: SupabaseClient,
-  tenantId: string,
-  table: string,
-  keepIds: Set<string>,
-) {
-  if (keepIds.size === 0) {
-    console.warn(
-      `[${table}] refusing to prune: the payload holds no ids at all. ` +
-        "An empty client is not an instruction to delete every row.",
-    );
-    return;
-  }
-  const { data, error } = await sb
-    .from(table)
-    .select("id")
-    .eq("tenant_id", tenantId);
-  if (error) {
-    console.error(
-      `[${table}] prune skipped — could not read existing ids:`,
-      error.message,
-    );
-    return;
-  }
-  const stale = (data ?? [])
-    .map((r) => String((r as { id: string }).id))
-    .filter((id) => !keepIds.has(id));
-  if (stale.length > 0) {
-    await sb.from(table).delete().in("id", stale);
-  }
 }
 
 function termToRow(tenantId: string, t: ExamTerm): Record<string, unknown> {
@@ -466,8 +410,24 @@ async function upsertChunks(
   return { ok: true };
 }
 
+/** The exam setup tables a desk save deletes from — by named id only. */
+export const EXAMS_DELETABLE_TABLES = [
+  "exam_desk_terms",
+  "exam_desk_date_sheet",
+  "exam_desk_rooms",
+  "exam_desk_seating",
+] as const;
+/** Desk slice each deletable table stores (for function-only writers). */
+export const EXAMS_TABLE_SLICES: Record<string, string> = {
+  exam_desk_terms: "terms",
+  exam_desk_date_sheet: "dateSheet",
+  exam_desk_rooms: "rooms",
+  exam_desk_seating: "seating",
+};
+
 export async function pushExamDeskToDb(
   state: ExamsState,
+  deletes: NamedDeletes = {},
 ): Promise<{ ok: boolean; error?: string }> {
   if (!examsDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
@@ -475,12 +435,17 @@ export async function pushExamDeskToDb(
   const { sb, tenantId } = ctx;
   const now = new Date().toISOString();
 
-  const terms = state.terms ?? [];
+  const gone = (t: string) => new Set(deletes[t] ?? []);
+  const goneTerms = gone("exam_desk_terms");
+  const goneDates = gone("exam_desk_date_sheet");
+  const goneRooms = gone("exam_desk_rooms");
+  const goneSeating = gone("exam_desk_seating");
+  const terms = (state.terms ?? []).filter((t) => !goneTerms.has(t.id));
   const subjects = state.subjects ?? [];
-  const dateSheet = state.dateSheet ?? [];
+  const dateSheet = (state.dateSheet ?? []).filter((d) => !goneDates.has(d.id));
   const promotions = state.promotions ?? [];
-  const rooms = state.rooms ?? [];
-  const seating = state.seating ?? [];
+  const rooms = (state.rooms ?? []).filter((r) => !goneRooms.has(r.id));
+  const seating = (state.seating ?? []).filter((p) => !goneSeating.has(p.id));
   const policy = normalizeExamPolicy(state.policy);
 
   // Sheets are NOT written here any more. They arrive one at a time through
@@ -489,30 +454,9 @@ export async function pushExamDeskToDb(
   // sheets other teachers had saved since this tab last hydrated — marks
   // cascade-deleted with them. This push is setup only: terms, subjects, the
   // date sheet, promotions and the policy.
-  await Promise.all([
-    deleteStale(sb, tenantId, "exam_desk_terms", new Set(terms.map((t) => t.id))),
-    deleteStale(
-      sb,
-      tenantId,
-      "exam_desk_subjects",
-      new Set(subjects.map((s) => s.id)),
-    ),
-    deleteStale(
-      sb,
-      tenantId,
-      "exam_desk_date_sheet",
-      new Set(dateSheet.map((d) => d.id)),
-    ),
-    deleteStale(
-      sb,
-      tenantId,
-      "exam_desk_promotions",
-      new Set(promotions.map((p) => p.id)),
-    ),
-    deleteStale(sb, tenantId, "exam_desk_rooms", new Set(rooms.map((r) => r.id))),
-    deleteStale(sb, tenantId, "exam_desk_seating", new Set(seating.map((p) => p.id))),
-  ]);
-
+  // No prune by absence (any more than for sheets): subjects and promotions
+  // are never deleted in the UI; a term, a date-sheet row, a room or a
+  // seating plan goes only when the user deleted it, and arrives named.
   let r = await upsertChunks(
     sb,
     "exam_desk_terms",
@@ -535,9 +479,11 @@ export async function pushExamDeskToDb(
   if (!r.ok) return r;
 
   // Deleting an exam (allowed only while it has no marks) drops its sheets
-  // locally; mirror that for sheets that have no marks and whose exam is gone.
-  if (terms.length > 0) {
-    await deleteOrphanEmptySheets(sb, tenantId, new Set(terms.map((t) => t.id)));
+  // locally; mirror that for that exam's sheets that have no marks. Only an
+  // exam the user deleted, by name — "a term this browser does not hold"
+  // included every exam another office user had just created.
+  if (goneTerms.size > 0) {
+    await deleteEmptySheetsOfTerms(sb, tenantId, [...goneTerms]);
   }
 
   r = await upsertChunks(
@@ -552,6 +498,11 @@ export async function pushExamDeskToDb(
 
   r = await upsertChunks(sb, "exam_desk_seating", seating.map((x) => seatingToRow(tenantId, x)));
   if (!r.ok) return r;
+
+  for (const table of EXAMS_DELETABLE_TABLES) {
+    const del = await deleteNamedIds(sb, tenantId, table, deletes[table]);
+    if (!del.ok) return del;
+  }
 
   await sb.from("exam_desk_policy").upsert({
     tenant_id: tenantId,
@@ -616,36 +567,36 @@ async function writeSyncMeta(
   );
 }
 
-async function deleteOrphanEmptySheets(
+async function deleteEmptySheetsOfTerms(
   sb: SupabaseClient,
   tenantId: string,
-  keepTermIds: Set<string>,
+  termIds: string[],
 ): Promise<void> {
   const { data, error } = await sb
     .from("exam_desk_sheets")
-    .select("id, exam_term_id")
-    .eq("tenant_id", tenantId);
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .in("exam_term_id", termIds);
   if (error || !data) return;
-  const orphans = data
-    .filter((r) => !keepTermIds.has(String(r.exam_term_id)))
-    .map((r) => String(r.id));
-  if (orphans.length === 0) return;
+  const sheets = data.map((r) => String(r.id));
+  if (sheets.length === 0) return;
   const { data: marked } = await sb
     .from("exam_desk_marks")
     .select("mark_sheet_id")
     .eq("tenant_id", tenantId)
-    .in("mark_sheet_id", orphans)
+    .in("mark_sheet_id", sheets)
     .not("marks_obtained", "is", null)
-    .limit(orphans.length);
+    .limit(sheets.length);
   const hasMarks = new Set((marked ?? []).map((r) => String(r.mark_sheet_id)));
-  const empty = orphans.filter((id) => !hasMarks.has(id));
+  const empty = sheets.filter((id) => !hasMarks.has(id));
   if (empty.length === 0) return;
   const { error: delErr } = await sb
     .from("exam_desk_sheets")
     .delete()
+    .eq("tenant_id", tenantId)
     .in("id", empty);
   if (delErr) {
-    console.error("[exam_desk_sheets] orphan cleanup failed:", delErr.message);
+    console.error("[exam_desk_sheets] deleted-exam cleanup failed:", delErr.message);
   }
 }
 

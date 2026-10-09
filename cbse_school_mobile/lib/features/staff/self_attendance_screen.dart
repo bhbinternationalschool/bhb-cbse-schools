@@ -1,4 +1,5 @@
 import "dart:async";
+import "../../core/guide/screen_guides.dart";
 import "dart:math" as math;
 
 import "package:flutter/material.dart";
@@ -217,6 +218,7 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        actions: [ScreenGuideButton(guideId: "self-attendance", screenLabel: "self-attendance")],
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

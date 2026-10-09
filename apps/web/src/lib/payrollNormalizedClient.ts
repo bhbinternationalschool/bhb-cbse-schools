@@ -9,6 +9,14 @@ import {
   recordDeskSyncFailure,
   recordDeskSyncSuccess,
 } from "@/lib/deskSyncStatus";
+import { confirmDeskDeletes, pendingDeskDeletes, recordDeskDeletion } from "@/lib/deskNamedDeletes";
+
+const PAYROLL_DESK = "payroll";
+
+/** A draft/pending run the user deleted; the next push deletes it by id. */
+export function recordPayrollRunDeletion(runId: string) {
+  recordDeskDeletion(PAYROLL_DESK, "payroll_desk_runs", [runId]);
+}
 
 const META_KEY = "bhb_payroll_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -59,11 +67,13 @@ export function schedulePayrollDeskSync(state: PayrollState) {
 }
 
 async function pushPayrollDeskApi(state: PayrollState) {
+  const sentDeletes = pendingDeskDeletes(PAYROLL_DESK);
   try {
     const res = await fetch("/api/school-data/payroll-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ runs: state.runs, audit: state.audit }),
+      // Deletions are named, never inferred from what this browser lacks.
+      body: JSON.stringify({ runs: state.runs, audit: state.audit, deletes: sentDeletes }),
     });
     const body = (await res.json().catch(() => null)) as {
       ok?: boolean;
@@ -72,6 +82,7 @@ async function pushPayrollDeskApi(state: PayrollState) {
       error?: string;
     } | null;
     if (res.ok && body?.ok) {
+      confirmDeskDeletes(PAYROLL_DESK, sentDeletes);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         runCount: body.runCount ?? state.runs.length,

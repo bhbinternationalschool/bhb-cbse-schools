@@ -26,6 +26,7 @@ import {
   staffAttendanceReadFromDbEnabled,
 } from "@/lib/staffAttendanceDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { deleteChildrenNotKept } from "@/lib/deskNamedDeletes.server";
 import { fetchAllPages, fetchByIds } from "@/lib/supabase/pageAll";
 import { replaceChildRows } from "./replaceChildRows.server";
 
@@ -63,63 +64,6 @@ async function resolveCtx(): Promise<{
   tenantId: string;
 } | null> {
   return getServerTenantContext();
-}
-
-/**
- * Delete rows the client no longer holds — never on an empty payload.
- *
- * An empty keep-set means every stored row is "stale", so this deleted the
- * entire table. That is never what a sync means: a client with nothing to say
- * is a client whose cache was dropped, not an instruction to erase the
- * school's records.
- *
- * It is not hypothetical. On 2026-08-11 the attendance register for the
- * previous day was gone — pushed away by a phone whose localStorage had been
- * dropped on quota, with the emptiness check running AFTER the delete. This
- * same function is copied into 20 modules and called from 86 places, almost
- * none of them guarded, covering bank and cash ledgers, payroll runs, fee
- * cheques, library issues and 1,919 admission records.
- *
- * This floor stops the catastrophic case everywhere at once. It does NOT make
- * a partial payload safe — a client holding 3 of 900 rows still prunes 897.
- * That needs per-module scoping, the way attendance now prunes only within
- * the dates its payload covers. See docs/TODO.md.
- *
- * The read error is also surfaced now. It was discarded, which happened to
- * fail safe here (no data → nothing deleted), but "we could not read the
- * table" and "the table is empty" must not be the same value in a function
- * that deletes.
- */
-async function deleteStale(
-  sb: SupabaseClient,
-  tenantId: string,
-  table: string,
-  keepIds: Set<string>,
-) {
-  if (keepIds.size === 0) {
-    console.warn(
-      `[${table}] refusing to prune: the payload holds no ids at all. ` +
-        "An empty client is not an instruction to delete every row.",
-    );
-    return;
-  }
-  const { data, error } = await sb
-    .from(table)
-    .select("id")
-    .eq("tenant_id", tenantId);
-  if (error) {
-    console.error(
-      `[${table}] prune skipped — could not read existing ids:`,
-      error.message,
-    );
-    return;
-  }
-  const stale = (data ?? [])
-    .map((r) => String((r as { id: string }).id))
-    .filter((id) => !keepIds.has(id));
-  if (stale.length > 0) {
-    await sb.from(table).delete().in("id", stale);
-  }
 }
 
 function registerToRows(
@@ -193,14 +137,46 @@ export async function pushStaffAttendanceRegistersToDb(
   if (!ctx) return { ok: false, count: 0, error: "Supabase tenant not configured" };
   const { sb, tenantId } = ctx;
   const now = new Date().toISOString();
-  const active = registers ?? [];
+  // One register per academic year and date (a unique key). When the stored
+  // one for that day has a different id — the server made it at the first
+  // punch, after this browser last read — the stored register stands and
+  // this copy is skipped. The old prune settled the same collision by
+  // deleting the stored register and every punch in it.
+  const dates = [...new Set((registers ?? []).map((r) => r.date).filter(Boolean))];
+  const storedByDay = new Map<string, string>();
+  if (dates.length) {
+    const { rows, error } = await fetchByIds<{
+      id: string;
+      academic_year_code: string;
+      attendance_date: string;
+    }>(dates, (chunk, from, to) =>
+      sb
+        .from("staff_attendance_desk_registers")
+        .select("id, academic_year_code, attendance_date")
+        .eq("tenant_id", tenantId)
+        .in("attendance_date", chunk)
+        .order("id")
+        .range(from, to),
+    );
+    if (error) return { ok: false, count: 0, error };
+    for (const r of rows) {
+      storedByDay.set(`${r.academic_year_code}|${String(r.attendance_date).slice(0, 10)}`, r.id);
+    }
+  }
+  const active = (registers ?? []).filter((r) => {
+    const stored = storedByDay.get(`${r.academicYearCode}|${r.date}`);
+    if (stored && stored !== r.id) {
+      console.warn(`[staff-attendance-db] kept stored register ${stored} for ${r.date}; skipped this copy (${r.id})`);
+      return false;
+    }
+    return true;
+  });
 
-  await deleteStale(
-    sb,
-    tenantId,
-    "staff_attendance_desk_registers",
-    new Set(active.map((r) => r.id)),
-  );
+  // No prune by absence. Registers are never deleted in the UI, and the
+  // server creates them: the first QR/app punch, a WhatsApp punch, survey
+  // day, outdoor duty and leave approval each write today's register. An
+  // office tab that read before the first punch deleted today's register —
+  // every punch in it — on its next save.
 
   if (!active.length) {
     await sb.from("staff_attendance_desk_sync_meta").upsert(
@@ -235,30 +211,26 @@ export async function pushStaffAttendanceRegistersToDb(
     if (error) return { ok: false, count: 0, error: error.message };
   }
 
-  const regIds = new Set(active.map((r) => r.id));
-  // Paged: 1,812 marks already, and one request returns 1,000.
-  const { rows: existingMarks } = await fetchAllPages<{ id: string; register_id: string }>(
-    (from, to) =>
-      sb
-        .from("staff_attendance_desk_marks")
-        .select("id, register_id")
-        .eq("tenant_id", tenantId)
-        .order("id", { ascending: true })
-        .range(from, to),
-  );
-  const staleMarkIds = (existingMarks ?? [])
-    .filter((m) => regIds.has(String(m.register_id)))
-    .map((m) => String(m.id));
-  if (staleMarkIds.length) {
-    await sb.from("staff_attendance_desk_marks").delete().in("id", staleMarkIds);
-  }
-
+  // Marks are written first, then a register's marks that its new copy no
+  // longer lists are removed — only for registers that arrived WITH marks.
+  // This used to delete every mark of every pushed register and then insert:
+  // a failed insert left the day's punches gone.
   for (let i = 0; i < marks.length; i += 500) {
     const { error } = await sb
       .from("staff_attendance_desk_marks")
       .upsert(marks.slice(i, i + 500));
     if (error) return { ok: false, count: 0, error: error.message };
   }
+  const keepMarks = new Set(marks.map((m) => String((m as { id: string }).id)));
+  const delMarks = await deleteChildrenNotKept(
+    sb,
+    tenantId,
+    "staff_attendance_desk_marks",
+    "register_id",
+    active.filter((r) => (r.marks ?? []).length > 0).map((r) => r.id),
+    keepMarks,
+  );
+  if (!delMarks.ok) return { ok: false, count: 0, error: delMarks.error };
 
   await sb.from("staff_attendance_desk_sync_meta").upsert(
     {
