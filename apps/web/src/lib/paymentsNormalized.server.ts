@@ -12,6 +12,7 @@ import type {
 import { paymentsDualWriteDbEnabled } from "@/lib/paymentsDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { fetchAllPages, fetchByIds } from "@/lib/supabase/pageAll";
+import { linkStatusRegresses } from "@/lib/paymentLinkStatusGuard";
 import { replaceChildRows } from "./replaceChildRows.server";
 
 export type PaymentGatewayProvider = "razorpay" | "cashfree" | "demo" | "manual";
@@ -171,7 +172,7 @@ function mapMetaRow(
 
 export async function pushPaymentLinksToDb(
   links: PaymentLink[],
-): Promise<{ ok: boolean; count: number; error?: string }> {
+): Promise<{ ok: boolean; count: number; error?: string; kept?: string[] }> {
   if (!paymentsDualWriteDbEnabled()) return { ok: true, count: 0 };
   const ctx = await resolveCtx();
   if (!ctx) return { ok: false, count: 0, error: "Supabase tenant not configured" };
@@ -199,11 +200,50 @@ export async function pushPaymentLinksToDb(
     return { ok: true, count: 0 };
   }
 
+  // A link's status only moves forward (paymentLinkStatusGuard): a save may
+  // not write "open" back over a paid, cancelled or expired link, nor take a
+  // paid one out of "paid". Those links keep their stored row — header and
+  // lines — and the rest of the save goes through. The stored statuses must
+  // be read to know: if they can't be, nothing is written.
+  const storedStatus = new Map<string, string>();
+  {
+    const read = await fetchByIds<{ id: string; status: string }>(
+      active.map((l) => l.id),
+      (chunk, from, to) =>
+        sb
+          .from("payment_desk_links")
+          .select("id, status")
+          .eq("tenant_id", tenantId)
+          .in("id", chunk)
+          .order("id", { ascending: true })
+          .range(from, to),
+      { chunkSize: 50 },
+    );
+    if (read.error) {
+      return { ok: false, count: 0, error: `Could not read the stored links — nothing was written: ${read.error}` };
+    }
+    for (const r of read.rows) storedStatus.set(String(r.id), String(r.status));
+  }
+  const kept: string[] = [];
+  const writable = active.filter((l) => {
+    if (linkStatusRegresses(storedStatus.get(l.id), l.status)) {
+      kept.push(l.id);
+      return false;
+    }
+    return true;
+  });
+  if (kept.length) {
+    console.warn(
+      `[payments-db] kept ${kept.length} link(s) as stored — the save would have moved their status backwards:`,
+      kept.slice(0, 20).join(", "),
+    );
+  }
+
   const headers: Record<string, unknown>[] = [];
   const lines: Record<string, unknown>[] = [];
   let lastPaidAt: string | null = null;
 
-  for (const link of active) {
+  for (const link of writable) {
     const { header, lines: lrows } = linkToRows(tenantId, link);
     headers.push(header);
     lines.push(...lrows);
@@ -219,7 +259,7 @@ export async function pushPaymentLinksToDb(
     if (error) return { ok: false, count: 0, error: error.message };
   }
 
-  const linkIds = new Set(active.map((l) => l.id));
+  const linkIds = new Set(writable.map((l) => l.id));
   const { rows: existingLines } = await fetchAllPages<{ id: string; payment_link_id: string }>(
     (from, to) =>
       sb
@@ -247,8 +287,8 @@ export async function pushPaymentLinksToDb(
     if (error) return { ok: false, count: 0, error: error.message };
   }
 
-  const openCount = active.filter((l) => l.status === "open").length;
-  const paidCount = active.filter((l) => l.status === "paid").length;
+  const openCount = writable.filter((l) => l.status === "open").length;
+  const paidCount = writable.filter((l) => l.status === "paid").length;
 
   await sb.from("payment_desk_sync_meta").upsert(
     {
@@ -262,7 +302,7 @@ export async function pushPaymentLinksToDb(
     { onConflict: "tenant_id" },
   );
 
-  return { ok: true, count: active.length };
+  return { ok: true, count: writable.length, kept };
 }
 
 export async function fetchPaymentLinksFromDb(): Promise<{
@@ -365,12 +405,13 @@ export async function fetchPaymentLinksFromDb(): Promise<{
 
 export async function pushPaymentDeskToDb(
   state: Pick<PaymentsState, "links">,
-): Promise<{ ok: boolean; error?: string; linkCount: number }> {
+): Promise<{ ok: boolean; error?: string; linkCount: number; kept?: string[] }> {
   const result = await pushPaymentLinksToDb(state.links ?? []);
   return {
     ok: result.ok,
     error: result.error,
     linkCount: result.count,
+    kept: result.kept,
   };
 }
 
@@ -448,6 +489,23 @@ export async function pushPaymentLinkToDb(
   if (!ctx) return { ok: false, error: "No tenant" };
   const { sb, tenantId } = ctx;
   const { header, lines } = linkToRows(tenantId, link);
+
+  // Same rule as the whole-desk save: never move a stored link backwards
+  // (a stale server copy patching gateway details onto a link already paid).
+  {
+    const { data: cur, error: curErr } = await sb
+      .from("payment_desk_links")
+      .select("status")
+      .eq("tenant_id", tenantId)
+      .eq("id", link.id)
+      .maybeSingle();
+    if (curErr) return { ok: false, error: `Could not read the stored link — nothing was written: ${curErr.message}` };
+    const stored = (cur as { status?: string } | null)?.status;
+    if (linkStatusRegresses(stored, link.status)) {
+      console.warn(`[payments-db] kept link ${link.id} as stored (${stored}); refused a write moving it to ${link.status}`);
+      return { ok: true };
+    }
+  }
 
   const { error: hErr } = await sb.from("payment_desk_links").upsert(header);
   if (hErr) return { ok: false, error: hErr.message };
