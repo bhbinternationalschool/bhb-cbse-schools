@@ -29,6 +29,7 @@ import { getServerTenantContext } from "@/lib/serverTenant";
 import { deleteChildrenNotKept } from "@/lib/deskNamedDeletes.server";
 import { fetchAllPages, fetchByIds } from "@/lib/supabase/pageAll";
 import { replaceChildRows } from "./replaceChildRows.server";
+import { stampsOf, writeStampedRows } from "@/lib/rowStampWrite.server";
 
 export type StaffAttendanceDeskSyncMeta = {
   registerCount: number;
@@ -129,7 +130,15 @@ function rowToRegister(
 
 export async function pushStaffAttendanceRegistersToDb(
   registers: StaffAttendanceRegister[],
-): Promise<{ ok: boolean; count: number; error?: string }> {
+  /**
+   * A browser's save: the registers it changed and the `updated_at` each
+   * was changed from ("" = new). Only those are written — a register and
+   * its marks only while the stored register is still at that stamp; the
+   * rest come back as conflicts. Without it (blob backfill, a browser on an
+   * older build) every register is written as before.
+   */
+  stamps?: Record<string, string>,
+): Promise<{ ok: boolean; count: number; error?: string; stamps?: Record<string, string>; conflicts?: string[] }> {
   if (!staffAttendanceDualWriteDbEnabled()) {
     return { ok: true, count: 0 };
   }
@@ -163,7 +172,11 @@ export async function pushStaffAttendanceRegistersToDb(
       storedByDay.set(`${r.academic_year_code}|${String(r.attendance_date).slice(0, 10)}`, r.id);
     }
   }
-  const active = (registers ?? []).filter((r) => {
+  // No stale copy over a newer register (2026-10-10): every register the
+  // office tab held was upserted with its marks, so a punch made after the
+  // tab loaded — the morning's QR punches — went back to "Not punched" on
+  // its next save.
+  const active = (registers ?? []).filter((r) => !stamps || r.id in stamps).filter((r) => {
     const stored = storedByDay.get(`${r.academicYearCode}|${r.date}`);
     if (stored && stored !== r.id) {
       console.warn(`[staff-attendance-db] kept stored register ${stored} for ${r.date}; skipped this copy (${r.id})`);
@@ -178,33 +191,35 @@ export async function pushStaffAttendanceRegistersToDb(
   // office tab that read before the first punch deleted today's register —
   // every punch in it — on its next save.
 
-  if (!active.length) {
-    await sb.from("staff_attendance_desk_sync_meta").upsert(
-      {
-        tenant_id: tenantId,
-        register_count: 0,
-        last_marked_at: null,
-        updated_at: now,
-      },
-      { onConflict: "tenant_id" },
+  let written = active;
+  let newStamps: Record<string, string> | undefined;
+  const conflicts: string[] = [];
+  if (stamps) {
+    // The header is the register's version: written conditionally first;
+    // only registers whose header landed get their marks written.
+    const w = await writeStampedRows(
+      sb,
+      "staff_attendance_desk_registers",
+      tenantId,
+      active.map((r) => registerToRows(tenantId, r).header),
+      stamps,
     );
-    return { ok: true, count: 0 };
+    if (!w.ok) return { ok: false, count: 0, error: w.error };
+    newStamps = w.stamps;
+    conflicts.push(...w.conflicts);
+    written = active.filter((r) => r.id in w.stamps);
+    if (conflicts.length) console.warn("[staff-attendance-db] kept newer registers over a stale copy", conflicts);
   }
 
   const headers: Record<string, unknown>[] = [];
   const marks: Record<string, unknown>[] = [];
-  let lastMarkedAt: string | null = null;
-
-  for (const r of active) {
+  for (const r of written) {
     const { header, marks: mrows } = registerToRows(tenantId, r);
     headers.push(header);
     marks.push(...mrows);
-    if (!lastMarkedAt || String(header.marked_at) > lastMarkedAt) {
-      lastMarkedAt = String(header.marked_at);
-    }
   }
 
-  for (let i = 0; i < headers.length; i += 200) {
+  for (let i = 0; !stamps && i < headers.length; i += 200) {
     const { error } = await sb
       .from("staff_attendance_desk_registers")
       .upsert(headers.slice(i, i + 200));
@@ -227,22 +242,35 @@ export async function pushStaffAttendanceRegistersToDb(
     tenantId,
     "staff_attendance_desk_marks",
     "register_id",
-    active.filter((r) => (r.marks ?? []).length > 0).map((r) => r.id),
+    written.filter((r) => (r.marks ?? []).length > 0).map((r) => r.id),
     keepMarks,
   );
   if (!delMarks.ok) return { ok: false, count: 0, error: delMarks.error };
 
-  await sb.from("staff_attendance_desk_sync_meta").upsert(
-    {
-      tenant_id: tenantId,
-      register_count: active.length,
-      last_marked_at: lastMarkedAt,
-      updated_at: now,
-    },
-    { onConflict: "tenant_id" },
-  );
+  // Counts from the database, not from this copy (it may be partly written).
+  // An empty save used to set the count to 0.
+  await touchStaffAttendanceMeta(sb, tenantId, now).catch(() => undefined);
 
-  return { ok: true, count: active.length };
+  return { ok: true, count: written.length, stamps: newStamps, conflicts };
+}
+
+/** Recount the desk meta from the registers, so a hydrate sees the change. */
+async function touchStaffAttendanceMeta(sb: SupabaseClient, tenantId: string, now: string): Promise<void> {
+  const [all, latest] = await Promise.all([
+    sb.from("staff_attendance_desk_registers").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId),
+    sb
+      .from("staff_attendance_desk_registers")
+      .select("marked_at")
+      .eq("tenant_id", tenantId)
+      .order("marked_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  const row: Record<string, unknown> = { tenant_id: tenantId, updated_at: now };
+  // A failed count leaves the old figure alone rather than writing a zero.
+  if (!all.error && typeof all.count === "number") row.register_count = all.count;
+  if (!latest.error) row.last_marked_at = (latest.data as { marked_at?: string } | null)?.marked_at ?? null;
+  await sb.from("staff_attendance_desk_sync_meta").upsert(row, { onConflict: "tenant_id" });
 }
 
 export async function fetchStaffAttendanceRegistersFromDb(): Promise<{
@@ -250,9 +278,11 @@ export async function fetchStaffAttendanceRegistersFromDb(): Promise<{
   meta: StaffAttendanceDeskSyncMeta | null;
   /** false = tenant/query could not be resolved; result is NOT a confirmed empty state. */
   ok: boolean;
+  /** Each register's `updated_at` — what a browser's save is stamped with. */
+  stamps: Record<string, string>;
 }> {
   const ctx = await resolveCtx();
-  if (!ctx) return { registers: [], meta: null, ok: false };
+  if (!ctx) return { registers: [], meta: null, ok: false, stamps: {} };
   const { sb, tenantId } = ctx;
 
   const headersRes = await fetchAllPages<Record<string, unknown>>((from, to) =>
@@ -270,7 +300,7 @@ export async function fetchStaffAttendanceRegistersFromDb(): Promise<{
 
   if (hErr) {
     console.warn("[staff-attendance-db] fetch registers failed", hErr.message);
-    return { registers: [], meta: null, ok: false };
+    return { registers: [], meta: null, ok: false, stamps: {} };
   }
 
   if (!headers?.length) {
@@ -283,6 +313,7 @@ export async function fetchStaffAttendanceRegistersFromDb(): Promise<{
       registers: [],
       meta: mapMetaRow(metaRow as Record<string, unknown> | null),
       ok: true,
+      stamps: {},
     };
   }
 
@@ -310,7 +341,7 @@ export async function fetchStaffAttendanceRegistersFromDb(): Promise<{
 
   if (mErr) {
     console.warn("[staff-attendance-db] fetch marks failed", mErr.message);
-    return { registers: [], meta: null, ok: false };
+    return { registers: [], meta: null, ok: false, stamps: {} };
   }
 
   const marksByRegister = new Map<string, Record<string, unknown>[]>();
@@ -332,19 +363,24 @@ export async function fetchStaffAttendanceRegistersFromDb(): Promise<{
     registers,
     meta: mapMetaRow(metaRow as Record<string, unknown> | null),
     ok: true,
+    stamps: stampsOf(headers),
   };
 }
 
 export async function pushStaffAttendanceDeskToDb(
   state: Pick<StaffAttendanceState, "registers" | "settings"> &
     Partial<Pick<StaffAttendanceState, "outdoorDuty">>,
+  /** A browser's register stamps (see pushStaffAttendanceRegistersToDb). */
+  stamps?: Record<string, string>,
 ): Promise<{
   ok: boolean;
   error?: string;
   registerCount: number;
   outdoorDutyCount?: number;
+  stamps?: Record<string, string>;
+  conflicts?: string[];
 }> {
-  const regResult = await pushStaffAttendanceRegistersToDb(state.registers ?? []);
+  const regResult = await pushStaffAttendanceRegistersToDb(state.registers ?? [], stamps);
   if (!regResult.ok) {
     return { ok: false, error: regResult.error, registerCount: 0 };
   }
@@ -375,11 +411,14 @@ export async function pushStaffAttendanceDeskToDb(
     ok: true,
     registerCount: regResult.count,
     outdoorDutyCount: odResult.count,
+    stamps: regResult.stamps,
+    conflicts: regResult.conflicts,
   };
 }
 
 export type StaffAttendanceDeskSnapshot = {
   registers: StaffAttendanceRegister[];
+  stamps: Record<string, string>;
   ancillary: StaffAttendanceDeskAncillary;
   meta: StaffAttendanceDeskSyncMeta | null;
   /** false = tenant/query could not be resolved; result is NOT a confirmed empty state. */
@@ -387,13 +426,14 @@ export type StaffAttendanceDeskSnapshot = {
 };
 
 export async function fetchStaffAttendanceDeskFromDb(): Promise<StaffAttendanceDeskSnapshot> {
-  const [{ registers, meta, ok }, settingsRead, outdoor] = await Promise.all([
+  const [{ registers, meta, ok, stamps }, settingsRead, outdoor] = await Promise.all([
     fetchStaffAttendanceRegistersFromDb(),
     fetchStaffAttendanceSettingsFromDbStrict(),
     fetchStaffAttendanceOutdoorDutyFromDb(),
   ]);
   return {
     registers,
+    stamps,
     ancillary: {
       settings: settingsRead ?? defaultAttendanceSettings(),
       outdoorDuty: outdoor.outdoorDuty,
@@ -408,6 +448,13 @@ export async function fetchStaffAttendanceDeskFromDb(): Promise<StaffAttendanceD
 
 export async function pushStaffAttendanceRegisterToDb(
   register: StaffAttendanceRegister,
+  /**
+   * The staff whose marks this write changed (a punch, a leave day, an
+   * outdoor-duty mark). Only their marks are written; anyone else's row is
+   * added only if the database has none. Without it, the whole register's
+   * marks are replaced.
+   */
+  onlyStaffIds?: readonly string[],
 ): Promise<{ ok: boolean; error?: string }> {
   if (!staffAttendanceDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
@@ -415,10 +462,36 @@ export async function pushStaffAttendanceRegisterToDb(
   const { sb, tenantId } = ctx;
   const { header, marks } = registerToRows(tenantId, register);
 
+  // updated_at moves on with every write: an office tab holding the older
+  // register is refused rather than putting this punch back.
   const { error: hErr } = await sb
     .from("staff_attendance_desk_registers")
     .upsert(header);
   if (hErr) return { ok: false, error: hErr.message };
+
+  if (onlyStaffIds) {
+    // One punch, one row (2026-10-10). The register was read fresh, changed
+    // for one person and all its marks replaced — two staff punching at the
+    // same moment on two instances each wrote the other back to "Not
+    // punched". Now: rows missing in the database are added (a new day's
+    // register), never over one that exists; then only the named staff's
+    // rows are written.
+    const mine = new Set(onlyStaffIds);
+    const { error: fillErr } = await sb
+      .from("staff_attendance_desk_marks")
+      .upsert(marks.filter((m) => !mine.has(String(m.staff_id))), { onConflict: "id", ignoreDuplicates: true });
+    if (fillErr) return { ok: false, error: fillErr.message };
+    const own = marks.filter((m) => mine.has(String(m.staff_id)));
+    if (own.length) {
+      const { error: ownErr } = await sb.from("staff_attendance_desk_marks").upsert(own);
+      if (ownErr) return { ok: false, error: ownErr.message };
+    }
+    await sb.from("staff_attendance_desk_sync_meta").upsert(
+      { tenant_id: tenantId, last_marked_at: register.markedAt || header.updated_at, updated_at: header.updated_at },
+      { onConflict: "tenant_id" },
+    );
+    return { ok: true };
+  }
 
   // One transaction — see attendanceNormalized.server.ts for why.
   const marksWrite = await replaceChildRows(sb, {
