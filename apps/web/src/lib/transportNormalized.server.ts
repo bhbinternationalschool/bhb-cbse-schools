@@ -8,6 +8,7 @@ import { defaultFeePolicy } from "@/lib/transport";
 import { transportDualWriteDbEnabled } from "@/lib/transportDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { mergeSliceById } from "@/lib/sliceMergeById";
+import { casWriteSlice } from "@/lib/sliceCas.server";
 
 export type TransportSliceKey = keyof Omit<TransportState, "version">;
 
@@ -145,50 +146,53 @@ export async function appendBoardingEventToDb(event: {
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
   const { sb, tenantId } = ctx;
 
-  const { data, error: readErr } = await sb
-    .from("transport_desk_slices")
-    .select("payload")
-    .eq("tenant_id", tenantId)
-    .eq("slice_key", "boardingEvents")
-    .maybeSingle();
-  if (readErr) return { ok: false, error: readErr.message };
-
-  const existing = Array.isArray(data?.payload)
-    ? (data!.payload as Record<string, unknown>[])
-    : [];
-
   const sameSlot = (e: Record<string, unknown>) =>
     e.studentId === event.studentId &&
     e.date === event.date &&
     e.trip === event.trip &&
     e.routeId === event.routeId;
 
-  const prior = existing.find(sameSlot);
-  const merged = prior
-    ? existing.map((e) =>
-        sameSlot(e)
-          ? {
-              ...e,
-              ...event,
-              id: (e.id as string) ?? event.id,
-              // A later offboard must not erase the earlier boarding pin.
-              boardedLocation: event.boardedLocation ?? e.boardedLocation ?? null,
-              offboardedLocation:
-                event.offboardedLocation ?? e.offboardedLocation ?? null,
-            }
-          : e,
-      )
-    : [event, ...existing];
-
-  const now = nowIso();
-  const { error } = await sb.from("transport_desk_slices").upsert({
-    tenant_id: tenantId,
-    slice_key: "boardingEvents",
-    payload: merged,
-    updated_at: now,
+  // Conditional write: if a desk save (or another phone) wrote the boarding
+  // log after this read, re-read and re-apply — never overwrite it.
+  const written = await casWriteSlice(sb, "transport_desk_slices", tenantId, "boardingEvents", (stored) => {
+    const existing = Array.isArray(stored) ? (stored as Record<string, unknown>[]) : [];
+    const prior = existing.find(sameSlot);
+    return prior
+      ? existing.map((e) =>
+          sameSlot(e)
+            ? {
+                ...e,
+                ...event,
+                id: (e.id as string) ?? event.id,
+                // A later offboard must not erase the earlier boarding pin.
+                boardedLocation: event.boardedLocation ?? e.boardedLocation ?? null,
+                offboardedLocation:
+                  event.offboardedLocation ?? e.offboardedLocation ?? null,
+              }
+            : e,
+        )
+      : [event, ...existing];
   });
-  if (error) return { ok: false, error: error.message };
+  if (!written.ok) return { ok: false, error: written.error };
   return { ok: true };
+}
+
+/**
+ * What a desk save writes for one slice: the fee policy as sent; every list
+ * merged by id into what is stored (nothing in the transport UI deletes a
+ * row); GPS pings kept as the newest 500, as on the device. Pure, so a
+ * conditional write can re-apply it to a fresher copy.
+ */
+function mergeTransportSlice(key: string, stored: unknown, incoming: unknown): unknown {
+  if (key === "feePolicy") return incoming;
+  let value: unknown = mergeSliceById(stored, incoming as unknown[]);
+  if (key === "gpsPings") {
+    value = (value as { recordedAt?: string }[])
+      .slice()
+      .sort((x, y) => String(y.recordedAt ?? "").localeCompare(String(x.recordedAt ?? "")))
+      .slice(0, 500);
+  }
+  return value;
 }
 
 export async function pushTransportDeskToDb(
@@ -222,30 +226,23 @@ export async function pushTransportDeskToDb(
     stored.set(String((r as { slice_key: string }).slice_key), (r as { payload: unknown }).payload);
   }
 
-  const rows = slices
-    .filter(({ key, payload }) => {
-      if (key === "feePolicy") return payload != null;
-      return Array.isArray(payload) && payload.length > 0;
-    })
-    .map(({ key, payload }) => {
-      let value: unknown = payload;
-      if (key !== "feePolicy") {
-        value = mergeSliceById(stored.get(key), payload as unknown[]);
-        // GPS pings are a rolling buffer: the newest 500, as on the device.
-        if (key === "gpsPings") {
-          value = (value as { recordedAt?: string }[])
-            .slice()
-            .sort((x, y) => String(y.recordedAt ?? "").localeCompare(String(x.recordedAt ?? "")))
-            .slice(0, 500);
-        }
-      }
-      return { tenant_id: tenantId, slice_key: key, payload: value, updated_at: now };
-    });
-
-  if (rows.length === 0) return { ok: true };
-  {
-    const { error } = await sb.from("transport_desk_slices").upsert(rows);
-    if (error) return { ok: false, error: error.message };
+  // Each carried slice is merged into the stored one and written only if no
+  // other write (a driver's boarding tap, another office tab) landed since it
+  // was read — otherwise re-read and re-merged (casWriteSlice). A plain
+  // upsert let the second of two simultaneous writers silently drop the
+  // first one's change.
+  const carried = slices.filter(({ key, payload }) => {
+    if (key === "feePolicy") return payload != null;
+    return Array.isArray(payload) && payload.length > 0;
+  });
+  if (carried.length === 0) return { ok: true };
+  const rows: { slice_key: string; payload: unknown }[] = [];
+  for (const { key, payload } of carried) {
+    const written = await casWriteSlice(sb, "transport_desk_slices", tenantId, key, (storedNow) =>
+      mergeTransportSlice(key, storedNow, payload),
+    );
+    if (!written.ok) return { ok: false, error: written.error };
+    rows.push({ slice_key: key, payload: written.payload });
   }
 
   const count = (key: TransportSliceKey): number => {
