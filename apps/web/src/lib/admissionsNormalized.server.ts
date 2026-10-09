@@ -16,8 +16,8 @@ import {
 } from "@/lib/admissions";
 import { admissionsDualWriteDbEnabled } from "@/lib/admissionsDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
-import { fetchAllPages, fetchByIds } from "@/lib/supabase/pageAll";
-import { stampsOf, writeStampedRows } from "@/lib/rowStampWrite.server";
+import { fetchAllPages } from "@/lib/supabase/pageAll";
+import { stampsOf, storedNewerIds, writeStampedRows } from "@/lib/rowStampWrite.server";
 import type { RowConflicts, RowStamps } from "@/lib/rowStampClient";
 
 export type AdmissionDeskSyncMeta = {
@@ -412,7 +412,7 @@ export async function pushAdmissionDeskToDb(
     }
     let write = rows[slice];
     if (slice !== "registrationPayments") {
-      const newer = await storedNewer(sb, tenantId, table, write);
+      const newer = await storedNewerIds(sb, tenantId, table, write);
       if (!newer.ok) return newer;
       if (newer.ids.size) {
         console.warn(`[admissions-db] ${table}: kept ${newer.ids.size} newer row(s) over a stale copy`);
@@ -468,41 +468,6 @@ export async function pushAdmissionDeskToDb(
   await touchAdmissionMeta(sb, tenantId, now).catch(() => undefined);
   if (Object.keys(conflicts).length) console.warn("[admissions-db] kept newer rows over a stale copy", conflicts);
   return { ok: true, stamps: newStamps, conflicts };
-}
-
-/**
- * Rows the database holds at a later `updated_at` than this copy's — a
- * whole-desk writer's stale copy of them must not be written. A failed read
- * writes nothing (unknown is not "older").
- */
-export async function storedNewer(
-  sb: SupabaseClient,
-  tenantId: string,
-  table: string,
-  rows: Record<string, unknown>[],
-): Promise<{ ok: true; ids: Set<string> } | { ok: false; error: string }> {
-  const ids = new Set<string>();
-  if (!rows.length) return { ok: true, ids };
-  const mine = new Map(rows.map((r) => [String(r.id), Date.parse(String(r.updated_at ?? ""))]));
-  const res = await fetchByIds<Record<string, unknown>>(
-    [...mine.keys()],
-    (chunk, from, to) =>
-      sb
-        .from(table)
-        .select("id, updated_at")
-        .eq("tenant_id", tenantId)
-        .in("id", chunk)
-        .order("id", { ascending: true })
-        .range(from, to),
-    { chunkSize: 150 },
-  );
-  if (res.error) return { ok: false, error: `Could not read the stored rows to compare: ${res.error}` };
-  for (const s of res.rows) {
-    const at = Date.parse(String(s.updated_at ?? ""));
-    const own = mine.get(String(s.id));
-    if (Number.isFinite(at) && (!Number.isFinite(own) || at > (own as number))) ids.add(String(s.id));
-  }
-  return { ok: true, ids };
 }
 
 /** Recount the desk meta from the tables, so a hydrate sees the change. */
