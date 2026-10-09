@@ -35,6 +35,7 @@ class HomeworkScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<HomeworkFeed>(
+      guideId: "homework",
       title: context.l10n.modHomeworkTitle,
       subtitle: subtitle,
       load: () => api.fetchHomeworkFeed(

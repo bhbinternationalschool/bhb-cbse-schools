@@ -22,6 +22,7 @@ class LeaveScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<LeaveList>(
+      guideId: "leave",
       title: context.l10n.profLeave,
       subtitle: child.fullName,
       load: () => api.fetchLeaveList(studentId: child.id),

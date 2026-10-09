@@ -78,6 +78,7 @@ class _OnlineClassesScreenState extends State<OnlineClassesScreen> {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<OnlineClassList>(
+      guideId: "online-classes-parent",
       title: context.l10n.oclOnlineClasses,
       subtitle: child.fullName,
       load: () => api.fetchOnlineClasses(child.id),

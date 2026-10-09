@@ -1,5 +1,6 @@
 import "package:flutter/material.dart";
 
+import "../../core/guide/screen_guides.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
@@ -118,6 +119,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        actions: [ScreenGuideButton(guideId: "take-attendance", screenLabel: "take-attendance")],
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

@@ -88,6 +88,7 @@ class _OnlineClassesTeacherScreenState extends State<OnlineClassesTeacherScreen>
   @override
   Widget build(BuildContext context) {
     return ModuleShell<StaffOnlineClassListing>(
+      guideId: "online-classes-teacher",
       title: "Online classes",
       subtitle: switch (_range) {
         "today" => "Today",

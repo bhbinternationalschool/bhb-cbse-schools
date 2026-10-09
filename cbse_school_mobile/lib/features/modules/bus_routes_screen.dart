@@ -16,6 +16,7 @@ class BusRoutesScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<List<TransportRouteInfo>>(
+      guideId: "bus-routes",
       title: "All bus routes",
       load: api.fetchTransportRoutes,
       emptyIcon: Icons.directions_bus_outlined,

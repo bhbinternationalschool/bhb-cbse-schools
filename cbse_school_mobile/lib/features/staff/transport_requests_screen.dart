@@ -28,6 +28,7 @@ class _TransportRequestsScreenState extends State<TransportRequestsScreen> {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<List<TransportRequestInfo>>(
+      guideId: "transport-requests",
       key: ValueKey(_filter),
       title: "Transport requests",
       subtitle: switch (_filter) {

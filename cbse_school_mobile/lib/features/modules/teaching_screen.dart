@@ -266,6 +266,7 @@ class TeachingScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ModuleShell<TeachingDay>(
+      guideId: "period-log",
       title: "Period log",
       subtitle: "Today's teaching",
       load: () => api.fetchTeachingDay(),
