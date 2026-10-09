@@ -1,4 +1,7 @@
 import "package:flutter/material.dart";
+import "../../core/popups/app_popups.dart";
+import "../modules/notices_screen.dart";
+import "../../core/ui/running_strip.dart";
 import "../../core/guide/screen_guides.dart";
 import "package:url_launcher/url_launcher.dart";
 
@@ -42,6 +45,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   @override
   void initState() {
     super.initState();
+    // The school's pop-up for staff, if any — once per app open (core/popups).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) AppPopups.maybeShow(context, widget.api);
+    });
     _load();
   }
 
@@ -184,13 +191,25 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                       ],
                     ),
                   ),
-                  const ScreenGuideButton(guideId: "driver-home", screenLabel: "Home"),
+                  const ScreenGuideButton(
+                    guideId: "driver-home",
+                    screenLabel: "Home",
+                  ),
                   IconButton(
                     tooltip: context.l10n.signOutCrew,
                     onPressed: _signOut,
                     icon: const Icon(Icons.logout, color: Colors.white),
                   ),
                 ],
+              ),
+            ),
+            // Notices and news scrolling across, as on the web ERP.
+            RunningStrip(
+              api: widget.api,
+              onOpen: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => NoticesScreen(api: widget.api),
+                ),
               ),
             ),
             Padding(

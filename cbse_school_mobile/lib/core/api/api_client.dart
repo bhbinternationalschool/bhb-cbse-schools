@@ -7,6 +7,7 @@ import "package:http_parser/http_parser.dart";
 
 import "../config/app_config.dart";
 import "../guide/screen_guides.dart";
+import "../popups/app_popups.dart";
 import "../i18n/locale_controller.dart";
 import "../update/app_build.dart";
 
@@ -3125,6 +3126,33 @@ class ApiClient {
   /// "Not now" — recorded so the family is not asked again.
   Future<void> declinePickupPin() async {
     await _postData("/api/v1/transport/pickup-pin", {"action": "decline"});
+  }
+
+  /// Pop-ups meant for this person now (core/popups). Empty when none.
+  Future<List<AppPopup>> fetchAppPopups() async {
+    final data = await _getData("/api/v1/app/popups");
+    return ((data["popups"] as List?) ?? const [])
+        .map((p) => AppPopup.fromJson(p as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Records "shown" / "dismissed" / "done". Best effort.
+  Future<void> appPopupEvent(String popupId, String event) async {
+    try {
+      await http.post(
+        _uri("/api/v1/app/popups"),
+        headers: await _authHeaders(),
+        body: jsonEncode({"popupId": popupId, "action": event}),
+      );
+    } catch (_) {
+      /* never in the user's way */
+    }
+  }
+
+  /// Completes a pop-up's form (Aadhaar numbers, a consent answer). Throws
+  /// [ApiException] with the server's reason if it was not saved.
+  Future<void> appPopupDone(String popupId, Map<String, dynamic> value) async {
+    await _postData("/api/v1/app/popups", {"popupId": popupId, "action": "done", ...value});
   }
 
   /// Reports an AI reply as wrong, unsafe or offensive.
