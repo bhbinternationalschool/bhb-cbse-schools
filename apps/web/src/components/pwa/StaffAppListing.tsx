@@ -11,10 +11,14 @@ type BeforeInstallPromptEvent = Event & {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 };
 
-// The parent and driver apps are Android APKs in a public bucket (Cloud Run
-// cannot serve a 60 MB response). See the old /download page's note.
+// Parents install from Google Play, where the app is published (approved
+// by 3 Oct 2026) and updates itself. The bucket's parent APK was a 9 Sep
+// test build: no OTP fix, no in-app checkout, and — signed with the upload
+// key, not Play's — it can never take a Play update (director, 9 Oct 2026).
+const PARENT_PLAY_URL = "https://play.google.com/store/apps/details?id=school.bhbinternational.parent";
+// The driver app is not on Play: an APK in a public bucket (Cloud Run cannot
+// serve a 60 MB response).
 const BUCKET = "https://storage.googleapis.com/school-erp-prod-493619-public-downloads";
-const PARENT_APK_URL = `${BUCKET}/bhb-parent-app.apk`;
 const DRIVER_APK_URL = `${BUCKET}/bhb-school-app.apk`;
 
 const PLAY_GREEN = "#01875f";
@@ -291,15 +295,15 @@ export function StaffAppListing() {
             <li className="flex items-center gap-3 p-3">
               <Image src="/icon-192.png" alt="" width={44} height={44} className="h-11 w-11 rounded-[22%]" />
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium">BHB Parent</p>
-                <p className="text-xs text-[var(--pl-muted)]">Fees, homework, attendance, notices · Android</p>
+                <p className="text-sm font-medium">BHB International School — parents</p>
+                <p className="text-xs text-[var(--pl-muted)]">Fees, homework, attendance, notices · on Google Play</p>
               </div>
               <a
-                href={PARENT_APK_URL}
+                href={PARENT_PLAY_URL}
                 className="rounded-full border border-[var(--pl-line)] px-3 py-1.5 text-xs font-medium"
                 style={{ color: PLAY_GREEN }}
               >
-                Download
+                Get it on Play
               </a>
             </li>
             <li className="flex items-center gap-3 p-3">
@@ -318,7 +322,9 @@ export function StaffAppListing() {
             </li>
           </ul>
           <p className="mt-2 text-[11px] leading-relaxed text-[var(--pl-muted)]">
-            Android may warn about “unknown sources” for these two — tap Settings → allow → Install.
+            Parents: install from Google Play — it updates itself. If you installed the parent app from a file earlier,
+            uninstall that one first. Transport app: Android may warn about “unknown sources” — tap Settings → allow →
+            Install.
           </p>
         </section>
       </div>
