@@ -281,6 +281,7 @@ SELFTESTS=(
   test:udise-portal-reconcile
   test:lead-worklist
   test:student-import
+  test:fees-payments-no-prune
   test:student-import-mid-year
   test:cash-pool-orphans
   test:academic-risk
