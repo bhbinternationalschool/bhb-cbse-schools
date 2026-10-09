@@ -10,7 +10,7 @@ import {
   loadExams,
   subjectsForMarkEntry,
 } from "@/lib/exams";
-import { loadSis } from "@/lib/sis";
+import { loadSisForStaff } from "@/lib/sis";
 import { assertSectionScope, scopeAllowsSubjectCode } from "@/lib/api/v1/staffScope";
 
 export const runtime = "nodejs";
@@ -44,7 +44,7 @@ export async function GET(request: Request) {
     const term = state.terms.find((t) => t.id === termId && t.academicYearCode === ay);
     if (!term) throw new ApiError("not_found", "Exam term not found", 404);
 
-    const sis = loadSis();
+    const sis = loadSisForStaff();
     const students = sis.students
       .filter(
         (s) =>

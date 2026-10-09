@@ -2,7 +2,7 @@ import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { assertPermission, resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
-import { loadSis, type StudentDocKey } from "@/lib/sis";
+import { loadSisForStaff, type StudentDocKey } from "@/lib/sis";
 import { scopeAllows, staffSectionScope } from "@/lib/api/v1/staffScope";
 import { DOC_LABELS } from "@/lib/api/v1/studentDocs";
 
@@ -28,7 +28,7 @@ export async function GET(request: Request) {
     await ensureSchoolMirrorHydrated();
     await ensureSisHydratedServer();
     const ay = ctx.session.academicYearCode;
-    const sis = loadSis();
+    const sis = loadSisForStaff();
     const classNameOf = (id: string) =>
       ctx.masters.classes.find((c) => c.id === id)?.name || "";
     const sectionNameOf = (id: string) =>

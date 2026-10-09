@@ -3,7 +3,7 @@ import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { assertPermission, requestMeta, resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
-import { loadSis } from "@/lib/sis";
+import { loadSisForStaff } from "@/lib/sis";
 import {
   HEALTH_VISIT_REASONS,
   emptyHealthState,
@@ -51,7 +51,7 @@ export async function GET(request: Request) {
 
     await ensureSchoolMirrorHydrated();
     await ensureSisHydratedServer();
-    const sis = loadSis();
+    const sis = loadSisForStaff();
     const ay = ctx.session.academicYearCode;
     const wanted = sis.students.filter(
       (s) =>
@@ -128,7 +128,7 @@ export async function POST(request: Request) {
     const scope = await staffSectionScope(ctx);
     await ensureSchoolMirrorHydrated();
     await ensureSisHydratedServer();
-    const sis = loadSis();
+    const sis = loadSisForStaff();
     const student = sis.students.find((s) => s.id === studentId);
     if (!student) throw new ApiError("not_found", "Student not found", 404);
     if (!scopeAllows(scope, student.classId, student.sectionId)) {

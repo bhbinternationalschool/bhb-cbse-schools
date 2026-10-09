@@ -4,7 +4,7 @@ import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { ensurePtmHydratedServer } from "@/lib/ptmPersistence";
 import { loadPtm, modeLabel, ptmBookingMobile } from "@/lib/ptm";
-import { loadSis } from "@/lib/sis";
+import { loadSisForStaff } from "@/lib/sis";
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
 
 export const runtime = "nodejs";
@@ -29,7 +29,7 @@ export async function GET(request: Request) {
     await Promise.all([ensureSisHydratedServer(), ensurePtmHydratedServer()]);
     const ay = ctx.session.academicYearCode;
     const state = loadPtm();
-    const sis = loadSis();
+    const sis = loadSisForStaff();
     const studentById = new Map(sis.students.map((s) => [s.id, s]));
     const classNameOf = (id: string) =>
       ctx.masters.classes.find((c) => c.id === id)?.name || "";

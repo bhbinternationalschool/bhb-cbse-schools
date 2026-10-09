@@ -16,7 +16,7 @@ import {
   setStudentLeaveAttendanceAppliedInDb,
 } from "@/lib/studentLeaveNormalized.server";
 import { applyApprovedLeaveToRegisters } from "@/lib/studentLeaveAttendance.server";
-import { loadSis } from "@/lib/sis";
+import { loadSisForStaff } from "@/lib/sis";
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
 import { sendPushToSubject } from "@/lib/webPush.server";
 import { needsLeadership } from "@/lib/api/v1/studentLeaveRules";
@@ -70,7 +70,7 @@ export async function POST(request: Request) {
     const req = found.request;
     if (!req) throw new ApiError("not_found", "Request not found", 404);
     if (req.status !== "pending") throw new ApiError("bad_request", `Already ${req.status}`, 400);
-    const sis = loadSis();
+    const sis = loadSisForStaff();
     const student = sis.students.find((s) => s.id === req.studentId);
     if (!student) throw new ApiError("not_found", "Student not found", 404);
 

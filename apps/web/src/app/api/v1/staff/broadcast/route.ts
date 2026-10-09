@@ -26,7 +26,7 @@ import { listSectionParentContacts } from "@/lib/homework";
 import { inferStaffIsOwner } from "@/lib/waRoleResolver";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { loadSis } from "@/lib/sis";
+import { loadSisForStaff } from "@/lib/sis";
 import { listOptedOutSet, toE164India } from "@/lib/waContactState.server";
 import { POST as dispatchPost } from "@/app/api/wa/dispatch/route";
 import { sendPushToSubjects } from "@/lib/webPush.server";
@@ -96,7 +96,7 @@ export async function POST(req: Request) {
 
   await Promise.all([ensureSisHydratedServer(), ensureSchoolMirrorHydrated()]);
 
-  const actor = chatSelfFromSession(ctx.session, ctx.masters, loadSis());
+  const actor = chatSelfFromSession(ctx.session, ctx.masters, loadSisForStaff());
   if (!actor || actor.kind !== "staff" || !actor.staffId) {
     return NextResponse.json(
       { error: "Could not resolve your staff record" },
@@ -144,7 +144,7 @@ export async function POST(req: Request) {
     const contacts = listSectionParentContacts(
       sectionId,
       ctx.session.academicYearCode,
-      loadSis(),
+      loadSisForStaff(),
     );
     numbers = Array.from(new Set(contacts.map((c) => c.mobile).filter(Boolean)));
     pushSubjectType = "parent";

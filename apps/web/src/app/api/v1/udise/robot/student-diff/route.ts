@@ -9,7 +9,7 @@ import { NextResponse } from "next/server";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { loadMasters } from "@/lib/masters";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { householdOf, isRealPortalId, loadSis, studentsInSession } from "@/lib/sis";
+import { householdOf, isRealPortalId, loadSisForStaff, studentsInSession } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
 import { readPenCandidates, readPortalStudents } from "@/lib/udisePortalStudents.server";
 import { reconcilePortalWithErp } from "@/lib/udisePortalReconcile";
@@ -24,7 +24,7 @@ export async function GET(req: Request) {
   const [copyYear, pens] = await Promise.all([readPortalStudents(ay), readPenCandidates()]);
   if (!copyYear || !pens) return NextResponse.json({ ok: false, error: "Could not read the robot's copy — try again." }, { status: 503 });
   await ensureSchoolMirrorHydrated();
-  const sis = loadSis();
+  const sis = loadSisForStaff();
   const masters = loadMasters();
   const cls = (id: string, sec: string) =>
     [masters.classes.find((c) => c.id === id)?.name, masters.sections.find((x) => x.id === sec)?.name].filter(Boolean).join(" ");

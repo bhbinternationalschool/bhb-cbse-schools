@@ -3,7 +3,7 @@ import { assertPermission, resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureAttendanceHydratedServer } from "@/lib/attendancePersistence";
 import { findRegister, loadAttendance } from "@/lib/attendance";
-import { loadSis, studentsInSession } from "@/lib/sis";
+import { loadSisForStaff, studentsInSession } from "@/lib/sis";
 import { assertSectionScope } from "@/lib/api/v1/staffScope";
 
 export const runtime = "nodejs";
@@ -40,7 +40,7 @@ export async function GET(request: Request) {
     // The working year, not the cookie's: a session minted before
     // 2026-09-06 says 2025-26 and would show "no students" for every class.
     const ay = scope.academicYearCode;
-    const students = studentsInSession(loadSis(), ay)
+    const students = studentsInSession(loadSisForStaff(), ay)
       .filter((s) => s.classId === classId && s.sectionId === sectionId)
       .sort((a, b) => {
         const ra = parseInt(a.rollNo, 10) || 9999;

@@ -14,7 +14,7 @@ import { NextResponse } from "next/server";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { loadMasters } from "@/lib/masters";
-import { householdOf, isRealPortalId, loadSis, studentsInSession, type SisStudent } from "@/lib/sis";
+import { householdOf, isRealPortalId, loadSisForStaff, studentsInSession, type SisStudent } from "@/lib/sis";
 import { portalClassIdFor } from "@/lib/udisePortalAdd";
 import { buildUdiseFillPlan, type UdiseFillExtras } from "@/lib/udisePortalFill";
 import { householdRoadDistance, readUdiseSchoolAnswers } from "@/lib/udiseSchoolAnswers.server";
@@ -37,7 +37,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: "The form shows no PEN for this child." }, { status: 400 });
   }
   await ensureSchoolMirrorHydrated();
-  const sis = loadSis();
+  const sis = loadSisForStaff();
   // One row per child (studentsInSession) — never the raw list, which holds
   // a row per year and would make every child look like two.
   const matches = studentsInSession(sis, auth.ctx.session.academicYearCode).filter(

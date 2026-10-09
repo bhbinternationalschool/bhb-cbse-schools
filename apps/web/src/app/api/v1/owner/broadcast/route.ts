@@ -15,7 +15,7 @@ import {
   listAllStaffMobiles,
 } from "@/lib/bulkRecipients";
 import { listOptedOutSet, toE164India } from "@/lib/waContactState.server";
-import { loadSis } from "@/lib/sis";
+import { loadSisForStaff } from "@/lib/sis";
 import { loadMasters } from "@/lib/masters";
 import { sendPushToSubjects } from "@/lib/webPush.server";
 import { fetchServerBlob } from "@/lib/serverBlob";
@@ -177,9 +177,9 @@ export async function POST(req: Request) {
   if (!dryRun && pushText) {
     const subjectIds =
       audience === "parents"
-        ? loadSis().households.map((h) => h.id)
+        ? loadSisForStaff().households.map((h) => h.id)
         : audience === "parents_language_unset"
-          ? loadSis().households.filter((h) => !(h.preferredLanguage || "").trim()).map((h) => h.id)
+          ? loadSisForStaff().households.filter((h) => !(h.preferredLanguage || "").trim()).map((h) => h.id)
           : (loadMasters().staff ?? [])
               .filter((s) => s.status === "active")
               .map((s) => s.id);

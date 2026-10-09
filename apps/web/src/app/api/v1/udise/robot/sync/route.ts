@@ -13,7 +13,7 @@ import { NextResponse } from "next/server";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { syncUdisePortalPull } from "@/lib/udiseRobotSync.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { householdOf, loadSis, studentsInSession } from "@/lib/sis";
+import { householdOf, loadSisForStaff, studentsInSession } from "@/lib/sis";
 import { reconcilePortalWithErp, type PortalChild } from "@/lib/udisePortalReconcile";
 
 export const runtime = "nodejs";
@@ -48,7 +48,7 @@ export async function POST(req: Request) {
   // Who on the portal is who in the ERP, even under another name — read
   // only, for the office to act on (never applied by the robot).
   await ensureSchoolMirrorHydrated();
-  const sis = loadSis();
+  const sis = loadSisForStaff();
   const active = studentsInSession(sis, s.academicYearCode).filter((x) => x.status === "active");
   const reconcile = reconcilePortalWithErp({
     portal: (body.students as PortalChild[]).filter((p) => p && typeof p === "object"),

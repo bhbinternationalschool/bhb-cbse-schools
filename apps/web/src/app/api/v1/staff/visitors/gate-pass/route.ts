@@ -5,7 +5,7 @@ import { assertMobileFeature } from "@/lib/api/v1/mobileAccess.server";
 import { releaseOnGatePass } from "@/lib/api/v1/staffVisitors.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
-import { loadSis } from "@/lib/sis";
+import { loadSisForStaff } from "@/lib/sis";
 import { classLabelOf } from "@/lib/api/v1/staffFees";
 
 export const runtime = "nodejs";
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
 
     await ensureSchoolMirrorHydrated();
     await ensureSisHydratedServer();
-    const student = loadSis().students.find(
+    const student = loadSisForStaff().students.find(
       (s) =>
         s.id === pass.studentId &&
         s.academicYearCode === ctx.session.academicYearCode,

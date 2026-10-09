@@ -2,7 +2,7 @@ import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { assertPermission, resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
-import { loadSis } from "@/lib/sis";
+import { loadSisForStaff } from "@/lib/sis";
 import {
   COMPLAINT_STATUSES,
   complaintCategoryLabel,
@@ -37,7 +37,7 @@ export async function GET(request: Request) {
     if (tickets === null) {
       throw new ApiError("server_error", "Complaints are unavailable right now", 503);
     }
-    const sis = loadSis();
+    const sis = loadSisForStaff();
     const studentById = new Map(sis.students.map((s) => [s.id, s]));
     const classNameOf = (id: string) =>
       ctx.masters.classes.find((c) => c.id === id)?.name || "";

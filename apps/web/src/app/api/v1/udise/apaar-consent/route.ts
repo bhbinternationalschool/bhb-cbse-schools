@@ -6,6 +6,7 @@
  * names a child and a parent's mobile.
  */
 
+import { loadSisForStaff } from "@/lib/sis";
 import { NextResponse } from "next/server";
 import { requireStaffApi } from "@/lib/apiRouteAuth.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
@@ -58,7 +59,7 @@ export async function GET(req: Request) {
 
   const { loadSis, householdOf } = await import("@/lib/sis");
   const { waTemplateLanguageFor } = await import("@/lib/householdPrefs");
-  const hh = s.householdId ? householdOf(loadSis(), s.householdId) : undefined;
+  const hh = s.householdId ? householdOf(loadSisForStaff(), s.householdId) : undefined;
   const { apaarConsentRecordInput } = await import("@/lib/apaarConsent.server");
   const { renderApaarConsentRecordPdf } = await import("@/lib/apaarConsentPdf");
   const pdf = renderApaarConsentRecordPdf(

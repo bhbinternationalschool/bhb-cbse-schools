@@ -4,7 +4,7 @@ import { requestMeta, resolveApiAuth } from "@/lib/api/v1/auth";
 import { sectionKey, staffSectionScope } from "@/lib/api/v1/staffScope";
 import { checkSheetRow, type SheetValues } from "@/lib/classDetailsSheet";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { loadSis, studentsInSession } from "@/lib/sis";
+import { loadSisForStaff, studentsInSession } from "@/lib/sis";
 import { setStudentSheetValues } from "@/lib/sisClassTeacher.server";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 
@@ -44,7 +44,7 @@ export async function POST(request: Request) {
 
     await ensureSchoolMirrorHydrated();
     await ensureSisHydratedServer();
-    const inSession = studentsInSession(loadSis(), scope.academicYearCode);
+    const inSession = studentsInSession(loadSisForStaff(), scope.academicYearCode);
 
     const results: { id: string; ok: boolean; error?: string; conflict?: boolean; updatedAt?: string }[] = [];
     const savedRows: { id: string; values: SheetValues }[] = [];

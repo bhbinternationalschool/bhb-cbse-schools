@@ -7,6 +7,7 @@ import { activeSessionCode } from "@/lib/sessionWriteGuard";
 import { normalizePhotoConsent, type PhotoConsent } from "@/lib/photoConsent";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { reviewDemoHouseholdIds, withoutReviewDemo } from "@/lib/reviewDemoRecords";
 import { stripEmptyDocsList, stripEmptyList } from "@/lib/wirePayload";
 import {
   DEFAULT_AY,
@@ -1529,6 +1530,51 @@ export function alignSisToMasters(
 
 const DEMO_CLEARED_KEY = "bhb_demo_roster_cleared_v1";
 
+/** Household ids of the Play review family seen in this browser's roster. */
+const hiddenReviewDemoHouseholds = new Set<string>();
+
+/**
+ * The Play review family, as staff should see it: not at all (director,
+ * 9 Oct 2026 — "those 2 students are confusing to school staff"). Fees,
+ * attendance, transport, exams, lists and counts all read the roster through
+ * loadSis(), so dropping the family here hides it from every staff screen.
+ *
+ * Browser only. The server roster (parent app, the review login) still has
+ * it, and the browser can never delete it: roster pushes are upserts, and a
+ * deletion has to be named explicitly (recordSisDeletion) — absence from this
+ * copy deletes nothing. See lib/reviewDemoRecords.ts.
+ */
+function hideReviewDemoFromStaff(state: SisState): SisState {
+  const demo = reviewDemoHouseholdIds(state);
+  if (demo.size === 0) return state;
+  for (const id of demo) hiddenReviewDemoHouseholds.add(id);
+  const kept = withoutReviewDemo(state);
+  return { ...state, households: kept.households, students: kept.students };
+}
+
+let staffViewOf: SisState | null = null;
+let staffView: SisState | null = null;
+
+/**
+ * The roster for a STAFF request on the server (staff app, attendance,
+ * principal lists, UDISE…): the Play review family removed. A read-only view
+ * — never save it back, and never use it for the parent app or the review
+ * login, which must still find the family.
+ */
+export function loadSisForStaff(): SisState {
+  const full = loadSis();
+  if (staffViewOf === full && staffView) return staffView;
+  const kept = withoutReviewDemo(full);
+  staffViewOf = full;
+  staffView = kept.students.length === full.students.length ? full : { ...full, households: kept.households, students: kept.students };
+  return staffView;
+}
+
+/** True for a household id of the hidden review family (payment links etc.). */
+export function isHiddenReviewDemoHousehold(householdId: string | null | undefined): boolean {
+  return !!householdId && hiddenReviewDemoHouseholds.has(householdId);
+}
+
 export function loadSis(): SisState {
   const masters = ensureStudentClassLinks(loadMasters());
   if (typeof window === "undefined") {
@@ -1569,6 +1615,7 @@ export function loadSis(): SisState {
             }))
           : [],
       };
+      next = hideReviewDemoFromStaff(next);
       // One-time wipe of built-in demo people so live testing starts clean
       if (
         !localStorage.getItem(DEMO_CLEARED_KEY) &&

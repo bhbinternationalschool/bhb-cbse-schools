@@ -4,7 +4,7 @@ import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { ensureStudentLeaveHydratedServer } from "@/lib/studentLeavePersistence";
 import { loadStudentLeave } from "@/lib/studentLeave";
-import { loadSis } from "@/lib/sis";
+import { loadSisForStaff } from "@/lib/sis";
 import { listAllComplaintTickets } from "@/lib/complaintsServer";
 import { scopeAllows, staffSectionScope } from "@/lib/api/v1/staffScope";
 import { complaintInScope, OPEN_STATUSES } from "@/lib/api/v1/staffComplaints";
@@ -28,7 +28,7 @@ export async function GET(request: Request) {
     await ensureSchoolMirrorHydrated();
     await Promise.all([ensureSisHydratedServer(), ensureStudentLeaveHydratedServer()]);
     const ay = ctx.session.academicYearCode;
-    const sis = loadSis();
+    const sis = loadSisForStaff();
     const studentById = new Map(sis.students.map((s) => [s.id, s]));
     const inScope = (studentId: string) => {
       const st = studentById.get(studentId);

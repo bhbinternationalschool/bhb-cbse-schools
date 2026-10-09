@@ -3,7 +3,7 @@ import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { assertPermission, requestMeta, resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
-import { loadSis } from "@/lib/sis";
+import { loadSisForStaff } from "@/lib/sis";
 import { complaintStatusLabel, type ComplaintStatus } from "@/lib/complaints";
 import { listAllComplaintTickets, updateComplaintTicketServer } from "@/lib/complaintsServer";
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
@@ -49,7 +49,7 @@ export async function POST(request: Request) {
     }
     const ticket = tickets.find((t) => t.id === id);
     if (!ticket) throw new ApiError("not_found", "Ticket not found", 404);
-    const sis = loadSis();
+    const sis = loadSisForStaff();
     const studentById = new Map(sis.students.map((s) => [s.id, s]));
     if (!complaintInScope(ctx, scope, ticket, studentById)) {
       throw new ApiError("forbidden", "Not a complaint for your class", 403);

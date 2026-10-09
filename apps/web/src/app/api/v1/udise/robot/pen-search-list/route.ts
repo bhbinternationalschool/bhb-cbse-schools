@@ -8,7 +8,7 @@
 import { NextResponse } from "next/server";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { isRealPortalId, loadSis, studentsInSession } from "@/lib/sis";
+import { isRealPortalId, loadSisForStaff, studentsInSession } from "@/lib/sis";
 
 export const runtime = "nodejs";
 
@@ -21,7 +21,7 @@ export async function GET(req: Request) {
   const auth = await requireStaffPermission(req, "compliance", "edit");
   if (!auth.ok) return auth.response;
   await ensureSchoolMirrorHydrated();
-  const sis = loadSis();
+  const sis = loadSisForStaff();
   const children = studentsInSession(sis, auth.ctx.session.academicYearCode)
     .filter((s) => s.status === "active" && !isRealPortalId(s.pen))
     .map((s) => ({

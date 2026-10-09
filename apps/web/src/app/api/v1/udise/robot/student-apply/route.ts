@@ -17,7 +17,7 @@ import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { writeAudit } from "@/lib/audit.server";
 import { loadMasters } from "@/lib/masters";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { householdOf, isRealPortalId, loadSis, studentsInSession } from "@/lib/sis";
+import { householdOf, isRealPortalId, loadSisForStaff, studentsInSession } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
 import { applyPortalValues, readPenCandidates, readPortalStudents } from "@/lib/udisePortalStudents.server";
 import { diffStudent, matchCopies, proposedValue, type SyncField } from "@/lib/udisePortalStudentSync";
@@ -37,7 +37,7 @@ export async function POST(req: Request) {
   const [copyYear, pens] = await Promise.all([readPortalStudents(ay), readPenCandidates()]);
   if (!copyYear || !pens) return NextResponse.json({ ok: false, error: "Could not read the robot's copy — nothing written." }, { status: 503 });
   await ensureSchoolMirrorHydrated();
-  const sis = loadSis();
+  const sis = loadSisForStaff();
   const active = studentsInSession(sis, ay).filter((s) => s.status === "active");
   const hhOf = (s: (typeof active)[number]) => (s.householdId ? householdOf(sis, s.householdId) : undefined);
   const { matched } = matchCopies(Object.values(copyYear.byPen), active, (s) => {

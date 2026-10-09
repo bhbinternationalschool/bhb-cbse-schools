@@ -12,7 +12,7 @@ import { buildReachReport } from "@/lib/commsReach";
 import { loadMasters } from "@/lib/masters";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
-import { householdOf, loadSis, studentsInSession } from "@/lib/sis";
+import { householdOf, loadSisForStaff, studentsInSession } from "@/lib/sis";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
 import { readWaNumberVerdicts } from "@/lib/waNumberVerdicts.server";
 
@@ -41,7 +41,7 @@ export async function GET(req: Request) {
   if (!verdicts.ok) return NextResponse.json({ ok: false, error: "Could not read the WhatsApp number checks — try again." }, { status: 503 });
 
   await ensureSchoolMirrorHydrated();
-  const sis = loadSis();
+  const sis = loadSisForStaff();
   const masters = loadMasters();
   const notOn = new Set<string>();
   const on = new Set<string>();
