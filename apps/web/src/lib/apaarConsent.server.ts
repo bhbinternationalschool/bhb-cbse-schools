@@ -56,7 +56,7 @@ export async function apaarConsentRecordInput(
   };
 }
 
-async function fileConsentRecord(s: SisStudent, answer: "given" | "refused", at: string, by: string, hindi: boolean): Promise<string> {
+export async function fileConsentRecord(s: SisStudent, answer: "given" | "refused", at: string, by: string, hindi: boolean): Promise<string> {
   try {
     const { renderApaarConsentRecordPdf, apaarConsentRecordFileName } = await import("@/lib/apaarConsentPdf");
     const pdf = renderApaarConsentRecordPdf(await apaarConsentRecordInput(s, answer, at, by, hindi));

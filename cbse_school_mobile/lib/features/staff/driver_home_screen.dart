@@ -1,4 +1,5 @@
 import "package:flutter/material.dart";
+import "../../core/popups/app_popups.dart";
 import "../modules/notices_screen.dart";
 import "../../core/ui/running_strip.dart";
 import "../../core/guide/screen_guides.dart";
@@ -44,6 +45,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   @override
   void initState() {
     super.initState();
+    // The school's pop-up for staff, if any — once per app open (core/popups).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) AppPopups.maybeShow(context, widget.api);
+    });
     _load();
   }
 

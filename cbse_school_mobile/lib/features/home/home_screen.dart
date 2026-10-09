@@ -1,4 +1,6 @@
 import "package:flutter/material.dart";
+import "../profile/child_profile_screen.dart";
+import "../../core/popups/app_popups.dart";
 import "../../core/ui/running_strip.dart";
 import "../../core/guide/screen_guides.dart";
 import "package:flutter_svg/flutter_svg.dart";
@@ -221,6 +223,24 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
       _loadStats(summary);
+      // The school's pop-up, if any — once per app open (core/popups).
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        AppPopups.maybeShow(
+          context,
+          widget.api,
+          openDocuments: (studentId) => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) =>
+                  ChildProfileScreen(api: widget.api, studentId: studentId),
+            ),
+          ),
+          openRoute: (route) {
+            _pendingRoute = route;
+            _consumePendingRoute();
+          },
+        );
+      });
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
