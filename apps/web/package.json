@@ -334,6 +334,7 @@
     "test:student-import": "npx tsx src/lib/studentImport.selftest.ts",
     "test:student-import-mid-year": "npx tsx src/lib/studentImportMidYear.selftest.ts",
     "test:payment-link-amount": "npx tsx src/lib/paymentLinkAmount.selftest.ts",
+    "test:udise-national-code-placeholder": "npx tsx src/lib/udiseNationalCodePlaceholder.selftest.ts",
     "test:install-platform": "npx tsx src/lib/installPlatform.selftest.ts",
     "test:homework-no-prune": "npx tsx src/lib/homeworkNoPrune.selftest.ts",
     "test:accounts-seed-after-pull": "npx tsx src/lib/accountsSeedAfterPull.selftest.ts",

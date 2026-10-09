@@ -201,6 +201,7 @@ SELFTESTS=(
   test:projection-double-post
   test:holiday-import
   test:payment-link-amount
+  test:udise-national-code-placeholder
   test:install-platform
   test:homework-no-prune
   test:accounts-seed-after-pull
