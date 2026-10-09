@@ -15,6 +15,10 @@ type BeforeInstallPromptEvent = Event & {
 // by 3 Oct 2026) and updates itself. The bucket's parent APK was a 9 Sep
 // test build: no OTP fix, no in-app checkout, and — signed with the upload
 // key, not Play's — it can never take a Play update (director, 9 Oct 2026).
+// BHB Staff on Play is in INTERNAL TESTING (director, 9 Oct 2026): only the
+// staff Gmail addresses on the tester list can join. The first tap opens
+// "Become a tester", then Play installs and updates the app.
+const STAFF_PLAY_TEST_URL = "https://play.google.com/apps/internaltest/4701007545375064542";
 const PARENT_PLAY_URL = "https://play.google.com/store/apps/details?id=school.bhbinternational.parent";
 // The driver app is not on Play: an APK in a public bucket (Cloud Run cannot
 // serve a 60 MB response).
@@ -160,8 +164,30 @@ export function StaffAppListing() {
           </div>
         </dl>
 
+        {/* ── Android: the Play app first (staff testers) ─────────────── */}
+        {platform === "android" || platform === "android-inapp" ? (
+          <div className="mt-6">
+            <a
+              href={STAFF_PLAY_TEST_URL}
+              className="block w-full rounded-lg py-3 text-center text-sm font-medium text-white"
+              style={{ background: PLAY_GREEN }}
+            >
+              Get BHB Staff on Google Play
+            </a>
+            <p className="mt-2 text-xs leading-relaxed text-[var(--pl-muted)]">
+              For staff whose Gmail is on the school&rsquo;s tester list: tap, choose <strong>Become a tester</strong>,
+              then <strong>Install</strong>. Play keeps it updated. Use the same Gmail that is signed in to Play Store.
+              <br />
+              जिन स्टाफ़ की Gmail सूची में है: दबाएँ → <strong>Become a tester</strong> → <strong>Install</strong>।
+            </p>
+            <p className="mt-4 text-xs font-medium text-[var(--pl-muted)]">
+              Not on the list, or no Gmail? Install the website app instead:
+            </p>
+          </div>
+        ) : null}
+
         {/* ── The one button ───────────────────────────────────────── */}
-        <div className="mt-6">
+        <div className={platform === "android" || platform === "android-inapp" ? "mt-2" : "mt-6"}>
           {installed ? (
             <div className="rounded-lg border border-[var(--pl-line)] p-4 text-sm">
               <p className="font-medium" style={{ color: PLAY_GREEN }}>
@@ -281,10 +307,11 @@ export function StaffAppListing() {
         <section className="mt-8 rounded-lg bg-[var(--pl-note)] p-4">
           <h2 className="text-sm font-medium">Have the old “BHB School” staff app (APK)?</h2>
           <p className="mt-1 text-xs leading-relaxed text-[var(--pl-muted)]">
-            Install BHB Staff above, then remove the old one: hold its icon → <strong>App info</strong> →{" "}
-            <strong>Uninstall</strong>. Attendance cannot be punched from the old app.
+            <strong>Uninstall it first</strong> — hold its icon → <strong>App info</strong> → <strong>Uninstall</strong>{" "}
+            — then get BHB Staff from Google Play above. The Play app cannot install over the old file (same app,
+            different signature), and attendance cannot be punched from the old app.
             <br />
-            पुराना स्टाफ़ ऐप हटा दें — उससे हाज़िरी नहीं लगती। <em>Bus drivers and attendants keep their app.</em>
+            पहले पुराना स्टाफ़ ऐप हटाएँ, फिर ऊपर Google Play से BHB Staff लें। <em>Bus drivers and attendants keep their app.</em>
           </p>
         </section>
 
