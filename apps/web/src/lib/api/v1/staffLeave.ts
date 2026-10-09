@@ -4,6 +4,7 @@ import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import {
   ensureStaffHrHydratedServer,
   pushStaffHrRemoteServer,
+  staffHrServerCopyIsFromDesk,
 } from "@/lib/staffHrPersistence";
 import {
   ensureBalancesForAy,
@@ -41,6 +42,12 @@ export async function saveStaffHrServer(
   /** Rows this save removes — say them: the desk merges leave requests. */
   opts?: { deletes?: { leaveRequests?: string[] } },
 ): Promise<void> {
+  // Unknown is not empty: a state built on a failed desk read (the legacy
+  // blob, or nothing) would be pushed over the school's leave desk.
+  if (!staffHrServerCopyIsFromDesk()) {
+    console.error("[staff-leave-v1] refusing to save: the leave desk could not be read");
+    throw new ApiError("server_error", "Could not read the leave desk — nothing was saved. Try again.", 503);
+  }
   const pushed = await pushStaffHrRemoteServer(state, opts);
   if (!pushed.ok) {
     console.warn("[staff-leave-v1] desk push failed", pushed.error);

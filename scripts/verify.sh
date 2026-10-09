@@ -424,6 +424,7 @@ SELFTESTS=(
   test:daily-brief
   test:automation-approvals
   test:automation-schedule
+  test:server-fallback-saves
   test:wa-number-gap
   test:session-scoped-students
   test:counter-discount-settled

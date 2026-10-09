@@ -21,6 +21,7 @@ import {
 import { approveRefusal, cardBuiltAt } from "@/lib/automationSendRules";
 import { dispatchAutomationApproval } from "@/lib/automationDispatch.server";
 import {
+  AutomationStateUnreadable,
   loadAutomationFromDb,
   saveAutomationToDb,
 } from "@/lib/automationState.server";
@@ -54,7 +55,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "approvalId is required" }, { status: 400 });
   }
 
-  const before = await loadAutomationFromDb();
+  let before: Awaited<ReturnType<typeof loadAutomationFromDb>>;
+  try {
+    before = await loadAutomationFromDb();
+  } catch (e) {
+    if (e instanceof AutomationStateUnreadable) {
+      return NextResponse.json({ ok: false, error: e.message, reason: "state_unreadable" }, { status: 503 });
+    }
+    throw e;
+  }
   const item = before.approvals.find((a) => a.id === approvalId);
   if (!item) {
     return NextResponse.json({ error: "Approval not found" }, { status: 404 });
