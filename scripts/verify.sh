@@ -203,6 +203,13 @@ SELFTESTS=(
   test:holiday-import
   test:payment-link-amount
   test:accounts-no-prune
+  test:weekly-holiday-range
+  test:push-voice
+  test:udise-national-code-placeholder
+  test:install-platform
+  test:homework-no-prune
+  test:accounts-seed-after-pull
+  test:class-channel-subject
   test:review-demo-hidden
   test:payment-link-reuse
   test:attendance-today

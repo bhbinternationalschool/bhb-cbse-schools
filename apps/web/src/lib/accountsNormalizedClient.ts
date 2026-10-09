@@ -224,7 +224,7 @@ export async function hydrateAccountsDeskFromDb(preferDb?: boolean, local?: Acco
     fiscalYears: [],
     settings: { expenseApprovalPaise: 1_000_000, pettyThresholdPaise: 200_000 },
   });
-  const empty = { bundle: emptyBundle, changed: false };
+  const empty = { bundle: emptyBundle, changed: false, fetched: false };
   if (!remote) return empty;
 
   const meta = readMeta();
@@ -236,8 +236,8 @@ export async function hydrateAccountsDeskFromDb(preferDb?: boolean, local?: Acco
     remote.coaCount > meta.coaCount ||
     localDeskIsMissingRemote(local, remote.bundle);
 
-  if (!shouldTake) return empty;
+  if (!shouldTake) return { ...empty, fetched: true };
 
   writeMeta({ updatedAt: remote.updatedAt, coaCount: remote.coaCount });
-  return { bundle: remote.bundle, changed: true };
+  return { bundle: remote.bundle, changed: true, fetched: true };
 }

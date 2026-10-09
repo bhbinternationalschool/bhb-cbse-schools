@@ -33,6 +33,31 @@ class PushService {
   final ApiClient api;
 
   static const _channelId = "bhb_default";
+
+  /// One channel per spoken line (director, 9 Oct 2026). The server picks
+  /// `bhb_voice_<kind>_<hi|en>` per notification (apps/web/src/lib/pushVoice.ts);
+  /// each channel's sound is the clip of the same name in res/raw, so Android
+  /// speaks it even when the app is closed. Channel sounds cannot be changed
+  /// after creation — a new clip needs a new channel id.
+  static const _voiceKinds = {
+    "homework": ("Homework", "होमवर्क"),
+    "attendance": ("Attendance", "हाज़िरी"),
+    "fees": ("Fees", "फीस"),
+    "message": ("Messages", "संदेश"),
+    "leave": ("Leave", "छुट्टी"),
+    "notice": ("Notices", "सूचनाएँ"),
+  };
+
+  static Iterable<String> get _voiceChannelIds => _voiceKinds.keys.expand(
+    (k) => ["bhb_voice_${k}_hi", "bhb_voice_${k}_en"],
+  );
+
+  static String _voiceChannelName(String id) {
+    final parts = id.split("_"); // bhb voice <kind> <lang>
+    final names = _voiceKinds[parts[2]];
+    if (names == null) return id;
+    return parts[3] == "hi" ? "${names.$2} (हिंदी आवाज़)" : "${names.$1} (English voice)";
+  }
   // Shown in the phone's notification settings, so in the app's language.
   // Re-creating the channel at every start renames it after a switch.
   static String get _channelName => LocaleController.strings.sysPushChannelName;
@@ -86,6 +111,22 @@ class PushService {
             importance: Importance.high,
           ),
         );
+    final androidLocal = _local
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
+    for (final id in _voiceChannelIds) {
+      await androidLocal?.createNotificationChannel(
+        AndroidNotificationChannel(
+          id,
+          _voiceChannelName(id),
+          description: _channelDescription,
+          importance: Importance.high,
+          playSound: true,
+          sound: RawResourceAndroidNotificationSound(id),
+        ),
+      );
+    }
 
     // iOS: show banners while the app is in the foreground too.
     await FirebaseMessaging.instance
@@ -187,18 +228,31 @@ class PushService {
     if (title == null && body == null) return;
     // iOS shows its own banner via the presentation options above.
     if (Platform.isIOS) return;
+    // The spoken line the server chose, when this app has that channel.
+    final voice = m.data["voice"];
+    final voiced = voice is String && _voiceChannelIds.contains(voice);
     await _local.show(
       m.hashCode,
       title,
       body,
       NotificationDetails(
-        android: AndroidNotificationDetails(
-          _channelId,
-          _channelName,
-          channelDescription: _channelDescription,
-          importance: Importance.high,
-          priority: Priority.high,
-        ),
+        android: voiced
+            ? AndroidNotificationDetails(
+                voice,
+                _voiceChannelName(voice),
+                channelDescription: _channelDescription,
+                importance: Importance.high,
+                priority: Priority.high,
+                playSound: true,
+                sound: RawResourceAndroidNotificationSound(voice),
+              )
+            : AndroidNotificationDetails(
+                _channelId,
+                _channelName,
+                channelDescription: _channelDescription,
+                importance: Importance.high,
+                priority: Priority.high,
+              ),
       ),
       payload: jsonEncode(m.data),
     );

@@ -1992,6 +1992,10 @@ async function delegateStaffAware(
   }
 
   // 2. The first message of a working morning: their own attendance first.
+  const isTeacherClassPost = (t: string) => {
+    const words = /(?<![\p{L}\p{M}\p{N}])(hw|homework|h\.w\.?|classwork|cw|diary|notice)(?![\p{L}\p{M}\p{N}])/iu;
+    return words.test(t) && isLikelyClassChannelPost(t);
+  };
   if (!work && staff && text && !opts.location) {
     const { todayIso, hour } = istNow();
     const attendanceWord = detectStaffAttBotIntent(text) !== "unknown" || !!detectOwnAttendanceAsk(text);
@@ -2020,7 +2024,12 @@ async function delegateStaffAware(
       if (
         shouldAskMorningAttendance({ flow, todayIso, istHour: hour, lastAskedOn, punchedIn, workingDay: true }) &&
         !attendanceWord &&
-        !isStaffHumanAsk(text)
+        !isStaffHumanAsk(text) &&
+        // Homework or a notice goes through first (9 Oct 2026): parked
+        // behind the attendance question, it was replayed only after a
+        // WhatsApp punch — and a teacher who punches at the biometric never
+        // sends one, so the homework never reached the class.
+        !(flow === "teacher" && isTeacherClassPost(text))
       ) {
         const next = await patchSession(mobile10, session, { morningAskOn: todayIso, morningAskAt: nowIso() });
         const meaningful = !GREETING_ONLY.test(text) && !parseSkipOwnAttendance(text);

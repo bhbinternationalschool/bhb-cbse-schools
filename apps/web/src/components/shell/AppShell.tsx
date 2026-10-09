@@ -17,7 +17,7 @@ import { UserAccountMenu } from "./UserAccountMenu";
 import { PwaInstallBanner } from "@/components/pwa/PwaInstallBanner";
 import { UpdateBar } from "@/components/pwa/UpdateBar";
 import { StaffBottomNav } from "@/components/pwa/StaffBottomNav";
-import { staffPwaInstallCopy } from "@/lib/pwaApps";
+import { STAFF_PLAY_TEST_URL, staffPwaInstallCopy } from "@/lib/pwaApps";
 import { useMobileAppShell, usePwaStandalone } from "@/lib/pwaStandalone";
 import { TENANT } from "@/lib/types";
 import type { DemoSession } from "@/lib/auth";
@@ -411,6 +411,7 @@ export function AppShell({
             title={staffPwa.title}
             subtitle={staffPwa.subtitle}
             iosHint={staffPwa.iosHint}
+            androidPlayUrl={STAFF_PLAY_TEST_URL}
             className="px-4 pt-2 sm:px-6"
           />
         ) : null}
