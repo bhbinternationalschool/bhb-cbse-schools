@@ -166,6 +166,7 @@
     "test:staff-chat-bare": "npx tsx src/lib/staffChatBare.selftest.ts",
     "test:job-desk": "npx tsx src/lib/jobDesk.selftest.ts",
     "test:fee-adjustments-merge": "npx tsx src/lib/feeAdjustmentsMerge.selftest.ts",
+    "test:wa-threads-trust-no-prune": "npx tsx src/lib/waThreadsTrustNoPrune.selftest.ts",
     "test:parent-bot-clarify": "npx tsx src/lib/parentBotClarify.selftest.ts",
     "test:office-backlog": "npx tsx src/lib/officeBacklog.selftest.ts",
     "test:automation-send-rules": "npx tsx src/lib/automationSendRules.selftest.ts",

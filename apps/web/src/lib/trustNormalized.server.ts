@@ -1,5 +1,3 @@
-/* ratchet-allow: unguarded_replace — prune of stale slice keys only; see the note
-   in mastersNormalized.server.ts. */
 /**
  * Trust desk — Supabase slice rows (trust_desk_slices).
  */
@@ -8,6 +6,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { TrustState } from "@/lib/trust";
 import { trustDualWriteDbEnabled } from "@/lib/trustDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { mergeSliceById } from "@/lib/sliceMergeById";
 
 export type TrustSliceKey = keyof Omit<TrustState, "version">;
 
@@ -94,44 +93,51 @@ export async function pushTrustDeskToDb(
   const now = nowIso();
   const slices = stateToSlices(state);
 
+  // Each slice row holds a whole collection, so writing a slice used to be
+  // "these are the only projects / bills / contractors there are": a stale or
+  // empty browser replaced the stored collection with its own, and a slice it
+  // did not hold was deleted outright (an empty push wiped the desk). Nothing
+  // in the Trust UI deletes a row, so a save now MERGES by id: its rows win
+  // for the ids it carries, every stored row it lacks is kept, and no slice
+  // is ever deleted. A desk we cannot read is unknown, not empty — nothing is
+  // written.
+  const { data: storedRows, error: readErr } = await sb
+    .from("trust_desk_slices")
+    .select("slice_key, payload")
+    .eq("tenant_id", tenantId);
+  if (readErr) {
+    return { ok: false, error: `Could not read the saved trust desk — nothing was written: ${readErr.message}` };
+  }
+  const stored = new Map<string, unknown>();
+  for (const r of storedRows ?? []) {
+    stored.set(String((r as { slice_key: string }).slice_key), (r as { payload: unknown }).payload);
+  }
+
   const rows = slices
     .filter((s) => Array.isArray(s.payload) && s.payload.length > 0)
     .map(({ key, payload }) => ({
       tenant_id: tenantId,
       slice_key: key,
-      payload,
+      payload: mergeSliceById(stored.get(key), payload as unknown[]),
       updated_at: now,
     }));
-
-  const { data: existing } = await sb
-    .from("trust_desk_slices")
-    .select("slice_key")
-    .eq("tenant_id", tenantId);
-  const keep = new Set<string>(rows.map((r) => String(r.slice_key)));
-  const stale = (existing ?? [])
-    .map((r) => String((r as { slice_key: string }).slice_key))
-    .filter((k) => !keep.has(k));
-  if (stale.length > 0) {
-    await sb
-      .from("trust_desk_slices")
-      .delete()
-      .eq("tenant_id", tenantId)
-      .in("slice_key", stale);
-  }
 
   if (rows.length > 0) {
     const { error } = await sb.from("trust_desk_slices").upsert(rows);
     if (error) return { ok: false, error: error.message };
-  } else {
-    await sb.from("trust_desk_slices").delete().eq("tenant_id", tenantId);
   }
 
+  const merged = (key: TrustSliceKey): unknown[] => {
+    const row = rows.find((r) => r.slice_key === key);
+    const v = row ? row.payload : stored.get(key);
+    return Array.isArray(v) ? v : [];
+  };
   await sb.from("trust_desk_sync_meta").upsert(
     {
       tenant_id: tenantId,
-      slice_count: rows.length,
-      project_count: state.projects?.length ?? 0,
-      work_item_count: state.workItems?.length ?? 0,
+      slice_count: TRUST_SLICE_KEYS.filter((k) => merged(k).length > 0).length,
+      project_count: merged("projects").length,
+      work_item_count: merged("workItems").length,
       last_updated_at: now,
       updated_at: now,
     },
