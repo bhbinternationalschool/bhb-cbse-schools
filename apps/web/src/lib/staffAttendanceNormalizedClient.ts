@@ -13,6 +13,23 @@ import {
   recordDeskSyncFailure,
   recordDeskSyncSuccess,
 } from "@/lib/deskSyncStatus";
+import {
+  applyStampedSave,
+  buildStampedSave,
+  captureRowStamps,
+  onStampConflicts,
+  type RowConflicts,
+  type RowStamps,
+} from "@/lib/rowStampClient";
+
+const STAFF_ATTENDANCE_DESK = "staff_attendance";
+/** Registers are saved one by one, each stamped with the version it was loaded at. */
+const STAMP_SLICES = ["registers"] as const;
+
+/** After a load: which version of each register this browser now holds. */
+export function captureStaffAttendanceStamps(stamps: RowStamps, local: StaffAttendanceState) {
+  captureRowStamps(STAFF_ATTENDANCE_DESK, stamps, local as unknown as Record<string, unknown>, STAMP_SLICES);
+}
 
 const META_KEY = "bhb_staff_attendance_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -75,6 +92,9 @@ export function scheduleStaffAttendanceDeskSync(state: StaffAttendanceState) {
 }
 
 async function pushStaffAttendanceDeskApi(state: StaffAttendanceState) {
+  // Only the registers this browser changed, each with the stamp it loaded
+  // — never its old copy of a day someone has punched into since.
+  const sentStamps = buildStampedSave(STAFF_ATTENDANCE_DESK, state as unknown as Record<string, unknown>, STAMP_SLICES);
   try {
     const res = await fetch("/api/school-data/staff-attendance-registers", {
       method: "POST",
@@ -83,6 +103,7 @@ async function pushStaffAttendanceDeskApi(state: StaffAttendanceState) {
         registers: state.registers ?? [],
         settings: state.settings,
         outdoorDuty: state.outdoorDuty ?? [],
+        stamps: sentStamps,
       }),
     });
     const body = (await res.json().catch(() => null)) as {
@@ -91,8 +112,12 @@ async function pushStaffAttendanceDeskApi(state: StaffAttendanceState) {
       count?: number;
       outdoorDutyCount?: number;
       error?: string;
+      stamps?: RowStamps;
+      conflicts?: RowConflicts;
     } | null;
     if (res.ok && body?.ok) {
+      applyStampedSave(STAFF_ATTENDANCE_DESK, state as unknown as Record<string, unknown>, sentStamps, body, STAMP_SLICES);
+      onStampConflicts(STAFF_ATTENDANCE_DESK, body.conflicts);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         registerCount: body.count ?? state.registers.length,
@@ -117,6 +142,7 @@ async function pushStaffAttendanceDeskApi(state: StaffAttendanceState) {
 
 export async function fetchStaffAttendanceDeskFromApi(): Promise<{
   registers: StaffAttendanceState["registers"];
+  stamps: RowStamps;
   ancillary: StaffAttendanceDeskAncillary;
   updatedAt: string;
   count: number;
@@ -130,6 +156,7 @@ export async function fetchStaffAttendanceDeskFromApi(): Promise<{
     if (!res.ok) return null;
     const body = (await res.json()) as {
       registers?: StaffAttendanceState["registers"];
+      stamps?: RowStamps;
       ancillary?: StaffAttendanceDeskAncillary;
       updatedAt?: string;
       count?: number;
@@ -137,6 +164,7 @@ export async function fetchStaffAttendanceDeskFromApi(): Promise<{
     if (!Array.isArray(body.registers)) return null;
     return {
       registers: body.registers,
+      stamps: body.stamps ?? {},
       ancillary: body.ancillary ?? {
         settings: defaultAttendanceSettings(),
         outdoorDuty: [],
@@ -157,6 +185,7 @@ export async function hydrateStaffAttendanceDeskFromDb(
   changed: boolean;
   /** false = fetch failed/unauthenticated; caller must not treat result as confirmed-empty. */
   ok: boolean;
+  stamps: RowStamps;
 }> {
   const remote = await fetchStaffAttendanceDeskFromApi();
   if (!remote) {
@@ -165,6 +194,7 @@ export async function hydrateStaffAttendanceDeskFromDb(
       ancillary: { settings: defaultAttendanceSettings(), outdoorDuty: [] },
       changed: false,
       ok: false,
+      stamps: {},
     };
   }
 
@@ -181,7 +211,7 @@ export async function hydrateStaffAttendanceDeskFromDb(
     remoteOutdoor > meta.outdoorDutyCount;
 
   if (!shouldTake) {
-    return { registers: [], ancillary: remote.ancillary, changed: false, ok: true };
+    return { registers: [], ancillary: remote.ancillary, changed: false, ok: true, stamps: remote.stamps };
   }
 
   writeMeta({
@@ -194,5 +224,6 @@ export async function hydrateStaffAttendanceDeskFromDb(
     ancillary: remote.ancillary,
     changed: true,
     ok: true,
+    stamps: remote.stamps,
   };
 }

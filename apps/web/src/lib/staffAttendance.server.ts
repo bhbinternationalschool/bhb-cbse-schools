@@ -122,11 +122,13 @@ async function loadStaffAttendanceFresh(): Promise<StaffAttendanceState> {
 async function saveStaffPunchRegister(
   state: StaffAttendanceState,
   register: import("@/lib/staffAttendance").StaffAttendanceRegister,
+  /** Whose mark this write changed: only that row is written. */
+  staffId: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const { pushStaffAttendanceRegisterToDb } = await import(
     "@/lib/staffAttendanceNormalized.server"
   );
-  const pushed = await pushStaffAttendanceRegisterToDb(register).catch(
+  const pushed = await pushStaffAttendanceRegisterToDb(register, [staffId]).catch(
     (e: unknown) => ({ ok: false as const, error: (e as Error)?.message || String(e) }),
   );
   if (!pushed.ok) {
@@ -413,7 +415,7 @@ export async function applyWhatsAppStaffPunch(opts: {
       roster: registerRoster,
     });
     state = merged.state;
-    if (!(await saveStaffPunchRegister(state, merged.register)).ok) return saveFailed;
+    if (!(await saveStaffPunchRegister(state, merged.register, opts.staff.id)).ok) return saveFailed;
     const mark = merged.register.marks.find((m) => m.staffId === opts.staff.id)!;
     return {
       ok: true,
@@ -472,7 +474,7 @@ export async function applyWhatsAppStaffPunch(opts: {
     roster: registerRoster,
   });
   state = merged.state;
-  if (!(await saveStaffPunchRegister(state, merged.register)).ok) return saveFailed;
+  if (!(await saveStaffPunchRegister(state, merged.register, opts.staff.id)).ok) return saveFailed;
   const mark = merged.register.marks.find((m) => m.staffId === opts.staff.id)!;
   return {
     ok: true,
@@ -554,7 +556,7 @@ export async function markApprovedLeaveOnRegisters(opts: {
       state = merged.state;
       // One day's register at a time, confirmed by the database — the same
       // way a punch is saved.
-      if ((await saveStaffPunchRegister(state, merged.register)).ok) marked += 1;
+      if ((await saveStaffPunchRegister(state, merged.register, opts.staffId)).ok) marked += 1;
     }
     const next = new Date(`${d}T00:00:00Z`);
     next.setUTCDate(next.getUTCDate() + 1);
@@ -628,7 +630,7 @@ export async function applyStaffDayMarkServer(opts: {
     markedBy: opts.markedBy,
     roster,
   });
-  const saved = await saveStaffPunchRegister(merged.state, merged.register);
+  const saved = await saveStaffPunchRegister(merged.state, merged.register, opts.staffId);
   return saved.ok
     ? { ok: true }
     : { ok: false, error: "Attendance could not be saved to the school database. Please try again." };
@@ -696,7 +698,7 @@ export async function applyOutdoorDutyServer(opts: {
     console.error("[outdoor duty] session push failed", od.error);
     return { ok: false, error: "Outdoor duty could not be saved to the school database. Please try again." };
   }
-  const saved = await saveStaffPunchRegister(r.state, r.register);
+  const saved = await saveStaffPunchRegister(r.state, r.register, opts.staff.id);
   if (!saved.ok) {
     return { ok: false, error: "Outdoor duty was saved but the day's attendance was not. Please try again." };
   }

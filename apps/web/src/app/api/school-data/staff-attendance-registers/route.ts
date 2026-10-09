@@ -22,6 +22,8 @@ import {
   staffAttendanceDualWriteDbEnabled,
 } from "@/lib/staffAttendanceNormalized.server";
 
+import { readStampsParam } from "@/lib/rowStampClient";
+
 export const runtime = "nodejs";
 
 /** GET — pull full staff attendance desk from normalized tables */
@@ -70,9 +72,14 @@ export async function GET(req: Request) {
     registers = cut.registers;
     outdoorDuty = cut.outdoorDuty;
   }
+  // Each register's updated_at (only for the registers served): the
+  // browser's saves are stamped with them.
+  const served = new Set(registers.map((r) => r.id));
+  const stamps = { registers: Object.fromEntries(Object.entries(desk.stamps).filter(([id]) => served.has(id))) };
   return NextResponse.json({
     ok: true,
     registers,
+    stamps,
     ancillary: { ...desk.ancillary, outdoorDuty },
     settings: desk.ancillary.settings,
     outdoorDuty,
@@ -84,7 +91,7 @@ export async function GET(req: Request) {
 }
 
 type DeskPostBody = Pick<StaffAttendanceState, "registers" | "settings"> &
-  Partial<StaffAttendanceDeskAncillary>;
+  Partial<StaffAttendanceDeskAncillary> & { stamps?: unknown };
 
 
 /** POST — push staff attendance desk snapshot */
@@ -134,6 +141,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  // The registers this browser changed and the stamp each was changed from.
+  const stamps = readStampsParam(body.stamps, ["registers"])?.registers;
+
   // Function holders: merged onto the stored desk, only their functions'
   // slices — never the body as sent.
   if (gate) {
@@ -164,7 +174,7 @@ export async function POST(req: Request) {
     registers: Array.isArray(body.registers) ? body.registers : [],
     settings: body.settings,
     outdoorDuty: Array.isArray(body.outdoorDuty) ? body.outdoorDuty : [],
-  });
+  }, stamps);
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error || "Sync failed" },
@@ -172,9 +182,17 @@ export async function POST(req: Request) {
     );
   }
 
-  if (gate) return featureSavedResponse(true);
+  const answer = {
+    stamps: { registers: result.stamps ?? {} },
+    conflicts: result.conflicts?.length ? { registers: result.conflicts } : {},
+  };
+  if (gate) {
+    const saved = featureSavedResponse(true);
+    return NextResponse.json({ ...(await saved.json()), ...answer }, { status: saved.status });
+  }
   return NextResponse.json({
     ok: true,
+    ...answer,
     count: result.registerCount,
     outdoorDutyCount: result.outdoorDutyCount ?? 0,
     updatedAt: new Date().toISOString(),
