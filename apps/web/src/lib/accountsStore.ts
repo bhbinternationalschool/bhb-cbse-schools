@@ -57,6 +57,7 @@ import {
 } from "@/lib/accountsNormalize";
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
+import { accountsNormalizedSyncEnabled } from "@/lib/accountsNormalizedClient";
 
 const STORAGE_KEY = "bhb_accounts_v1";
 
@@ -246,8 +247,47 @@ export function repairOrphanCashLedger(state: AccountsState): AccountsState {
   };
 }
 
-/** Seed a starter chart of accounts, cash pools, one bank, categories, one trustee. */
+/**
+ * Whether this page has read the school's accounts desk from the server.
+ *
+ * Set only when the GET actually returned a desk — not when a pull merely
+ * finished (a failed fetch still marks the module hydrated) and not by the
+ * 15s `isDeskHydrated` TTL, which says "recently", not "ever". It is never
+ * cleared: once the real desk is in this browser it stays the base every
+ * later save builds on.
+ */
+let accountsDeskPulled = false;
+
+export function markAccountsDeskPulled(): void {
+  accountsDeskPulled = true;
+}
+
+/**
+ * May the seed run (and save) here?
+ *
+ * Not in a browser that syncs the normalized desk until that desk has been
+ * pulled. A fresh or cleared browser holds nothing, so the seed would build a
+ * chart, three cash pools, categories, a trustee and a fiscal year with fresh
+ * random ids and push them at once — before the school's own desk arrived.
+ * With the old prune that push erased the real masters; without it, it adds
+ * a second "Main Cash Box" and friends beside them (9 Oct 2026).
+ */
+export function accountsSeedAllowed(): boolean {
+  if (typeof window === "undefined") return true;
+  if (!accountsNormalizedSyncEnabled()) return true;
+  return accountsDeskPulled;
+}
+
+/**
+ * Seed a starter chart of accounts, cash pools, one bank, categories, one trustee.
+ *
+ * Before the desk has been pulled (see accountsSeedAllowed) this only reads:
+ * no seed, no migrations, no save. Callers that need pools to exist — fee
+ * postings, capex — await `ensureAccountsSeeded()` in accountsPersistence,
+ * which pulls first.
+ */
 export function seedAccountsIfEmpty(): AccountsState {
+  if (!accountsSeedAllowed()) return loadAccounts();
   let state = loadAccounts();
   // Gate the seed on what it actually creates.
   //

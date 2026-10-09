@@ -20,6 +20,11 @@ type Props = {
   iosHint: string;
   className?: string;
   compact?: boolean;
+  /**
+   * On Android, send people to this Play link instead of installing the
+   * website (director, 9 Oct 2026: the staff banner → BHB Staff on Play).
+   */
+  androidPlayUrl?: string;
 };
 
 export function PwaInstallBanner({
@@ -29,7 +34,9 @@ export function PwaInstallBanner({
   iosHint,
   className = "",
   compact = false,
+  androidPlayUrl,
 }: Props) {
+  const [playOffer, setPlayOffer] = useState(false);
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(
     null,
   );
@@ -61,6 +68,16 @@ export function PwaInstallBanner({
       return;
     }
 
+    if (androidPlayUrl && /Android/i.test(navigator.userAgent)) {
+      let playDismissed = false;
+      try {
+        playDismissed = localStorage.getItem(`${dismissKey}_play`) === "1";
+      } catch {
+        /* show it */
+      }
+      if (!playDismissed) setPlayOffer(true);
+    }
+
     const isIos =
       /iphone|ipad|ipod/i.test(navigator.userAgent) &&
       !(window as Window & { MSStream?: unknown }).MSStream;
@@ -88,7 +105,7 @@ export function PwaInstallBanner({
 
     window.addEventListener("beforeinstallprompt", onBip);
     return () => window.removeEventListener("beforeinstallprompt", onBip);
-  }, [appId]);
+  }, [appId, androidPlayUrl]);
 
   function dismiss() {
     setDismissed(true);
@@ -109,6 +126,40 @@ export function PwaInstallBanner({
   }
 
   if (installed) return null;
+
+  if (playOffer && androidPlayUrl) {
+    const closePlay = () => {
+      setPlayOffer(false);
+      try {
+        localStorage.setItem(`${pwaDismissKey(appId)}_play`, "1");
+      } catch {
+        /* ignore */
+      }
+    };
+    return (
+      <div className={`${compact ? "px-3 py-1" : "mx-auto max-w-lg px-4 pb-2"} ${className}`}>
+        <div
+          className="flex items-center gap-3 rounded-xl px-3 py-2.5 shadow-md"
+          style={{ background: `linear-gradient(135deg, ${TENANT.primaryColor}, ${TENANT.primaryMid})` }}
+        >
+          <img src={TENANT.logoCrestUrl} alt="" className="h-11 w-11 rounded-lg bg-white/10" />
+          <div className="min-w-0 flex-1 text-white">
+            <p className="text-[12px] font-bold">Get BHB Staff on Google Play</p>
+            <p className="text-[10px] text-white/80">For staff on the tester list · Play keeps it updated</p>
+          </div>
+          <a
+            href={androidPlayUrl}
+            className="shrink-0 rounded-lg bg-[var(--brand-gold)] px-3 py-1.5 text-[11px] font-bold text-[var(--brand-deep)]"
+          >
+            Get
+          </a>
+          <button type="button" className="shrink-0 text-[10px] text-white/70" onClick={closePlay} aria-label="Dismiss">
+            ✕
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const wrap = compact
     ? "px-3 py-1"
