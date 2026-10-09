@@ -9,6 +9,13 @@ import {
   recordDeskSyncFailure,
   recordDeskSyncSuccess,
 } from "@/lib/deskSyncStatus";
+import { confirmDeskDeletes, pendingDeskDeletes } from "@/lib/deskNamedDeletes";
+
+const COMMS_DESK = "school_comms";
+
+// Shared with schoolCommsNormalizedClient: one record of comms deletions.
+// This push applies only its own tables, so it sends — and confirms — only those.
+const OWN_TABLES = ["school_comms_desk_news"];
 
 const META_KEY = "bhb_news_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -48,11 +55,15 @@ export function scheduleNewsDeskSync() {
 async function pushNewsDeskApi(bundle: {
   news: ReturnType<typeof loadSchoolComms>["news"];
 }) {
+  const sentDeletes = Object.fromEntries(
+    Object.entries(pendingDeskDeletes(COMMS_DESK)).filter(([t]) => OWN_TABLES.includes(t)),
+  );
   try {
     const res = await fetch("/api/school-data/news-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(bundle),
+      // Deletions are named, never inferred from what this browser lacks.
+      body: JSON.stringify({ ...bundle, deletes: sentDeletes }),
     });
     const body = (await res.json().catch(() => null)) as {
       ok?: boolean;
@@ -61,6 +72,7 @@ async function pushNewsDeskApi(bundle: {
       error?: string;
     } | null;
     if (res.ok && body?.ok) {
+      confirmDeskDeletes(COMMS_DESK, sentDeletes);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         newsCount: body.newsCount ?? bundle.news.length,

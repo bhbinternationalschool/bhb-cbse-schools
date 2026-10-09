@@ -12,6 +12,7 @@ import type {
 } from "@/lib/schoolComms";
 import { schoolCommsDualWriteDbEnabled } from "@/lib/schoolCommsDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { deleteNamedIds, type NamedDeletes } from "@/lib/deskNamedDeletes.server";
 
 export type SchoolCommsDeskSyncMeta = {
   noticeCount: number;
@@ -73,63 +74,6 @@ async function resolveCtx(): Promise<{
   tenantId: string;
 } | null> {
   return getServerTenantContext();
-}
-
-/**
- * Delete rows the client no longer holds — never on an empty payload.
- *
- * An empty keep-set means every stored row is "stale", so this deleted the
- * entire table. That is never what a sync means: a client with nothing to say
- * is a client whose cache was dropped, not an instruction to erase the
- * school's records.
- *
- * It is not hypothetical. On 2026-08-11 the attendance register for the
- * previous day was gone — pushed away by a phone whose localStorage had been
- * dropped on quota, with the emptiness check running AFTER the delete. This
- * same function is copied into 20 modules and called from 86 places, almost
- * none of them guarded, covering bank and cash ledgers, payroll runs, fee
- * cheques, library issues and 1,919 admission records.
- *
- * This floor stops the catastrophic case everywhere at once. It does NOT make
- * a partial payload safe — a client holding 3 of 900 rows still prunes 897.
- * That needs per-module scoping, the way attendance now prunes only within
- * the dates its payload covers. See docs/TODO.md.
- *
- * The read error is also surfaced now. It was discarded, which happened to
- * fail safe here (no data → nothing deleted), but "we could not read the
- * table" and "the table is empty" must not be the same value in a function
- * that deletes.
- */
-async function deleteStale(
-  sb: SupabaseClient,
-  tenantId: string,
-  table: string,
-  keepIds: Set<string>,
-) {
-  if (keepIds.size === 0) {
-    console.warn(
-      `[${table}] refusing to prune: the payload holds no ids at all. ` +
-        "An empty client is not an instruction to delete every row.",
-    );
-    return;
-  }
-  const { data, error } = await sb
-    .from(table)
-    .select("id")
-    .eq("tenant_id", tenantId);
-  if (error) {
-    console.error(
-      `[${table}] prune skipped — could not read existing ids:`,
-      error.message,
-    );
-    return;
-  }
-  const stale = (data ?? [])
-    .map((r) => String((r as { id: string }).id))
-    .filter((id) => !keepIds.has(id));
-  if (stale.length > 0) {
-    await sb.from(table).delete().in("id", stale);
-  }
 }
 
 async function upsertChunks(
@@ -302,8 +246,47 @@ function rowToPhoto(r: Record<string, unknown>): GalleryPhoto {
   };
 }
 
+/** The comms tables a desk save deletes from — by named id only. */
+export const SCHOOL_COMMS_DELETABLE_TABLES = [
+  "school_comms_desk_notices",
+  "school_comms_desk_news",
+  "school_comms_desk_albums",
+  "school_comms_desk_photos",
+] as const;
+/** Desk slice each deletable table stores (for function-only writers). */
+export const SCHOOL_COMMS_TABLE_SLICES: Record<string, string> = {
+  school_comms_desk_notices: "notices",
+  school_comms_desk_news: "news",
+  school_comms_desk_albums: "albums",
+  school_comms_desk_photos: "photos",
+};
+
+/**
+ * No prune by absence. Notices are published by the WhatsApp class channel
+ * and the scheduled-publish cron on the server; the comms, news and gallery
+ * pushes each deleted whatever this browser's copy lacked — and the server
+ * loader fell back to a stale blob on a failed read. A notice, a news item,
+ * an album (with its photos) or a photo goes only when the user deleted it,
+ * and the deletion arrives named.
+ */
+async function applyNamedCommsDeletes(
+  sb: SupabaseClient,
+  tenantId: string,
+  deletes: NamedDeletes,
+  tables: readonly string[],
+): Promise<{ ok: boolean; error?: string }> {
+  for (const table of tables) {
+    const del = await deleteNamedIds(sb, tenantId, table, deletes[table]);
+    if (!del.ok) return del;
+  }
+  return { ok: true };
+}
+
+const goneOf = (deletes: NamedDeletes, table: string) => new Set(deletes[table] ?? []);
+
 export async function pushSchoolCommsDeskToDb(
   state: SchoolCommsState,
+  deletes: NamedDeletes = {},
 ): Promise<{ ok: boolean; error?: string }> {
   if (!schoolCommsDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
@@ -311,17 +294,14 @@ export async function pushSchoolCommsDeskToDb(
   const { sb, tenantId } = ctx;
   const now = nowIso();
 
-  const notices = state.notices ?? [];
-  const news = state.news ?? [];
-  const albums = state.albums ?? [];
-  const photos = state.photos ?? [];
-
-  await Promise.all([
-    deleteStale(sb, tenantId, "school_comms_desk_notices", new Set(notices.map((n) => n.id))),
-    deleteStale(sb, tenantId, "school_comms_desk_news", new Set(news.map((n) => n.id))),
-    deleteStale(sb, tenantId, "school_comms_desk_albums", new Set(albums.map((a) => a.id))),
-    deleteStale(sb, tenantId, "school_comms_desk_photos", new Set(photos.map((p) => p.id))),
-  ]);
+  const goneNotices = goneOf(deletes, "school_comms_desk_notices");
+  const goneNews = goneOf(deletes, "school_comms_desk_news");
+  const goneAlbums = goneOf(deletes, "school_comms_desk_albums");
+  const gonePhotos = goneOf(deletes, "school_comms_desk_photos");
+  const notices = (state.notices ?? []).filter((n) => !goneNotices.has(n.id));
+  const news = (state.news ?? []).filter((n) => !goneNews.has(n.id));
+  const albums = (state.albums ?? []).filter((a) => !goneAlbums.has(a.id));
+  const photos = (state.photos ?? []).filter((p) => !gonePhotos.has(p.id));
 
   const tables: [string, Record<string, unknown>[]][] = [
     ["school_comms_desk_notices", notices.map((n) => noticeToRow(tenantId, n))],
@@ -333,6 +313,10 @@ export async function pushSchoolCommsDeskToDb(
   for (const [table, rows] of tables) {
     const r = await upsertChunks(sb, table, rows);
     if (!r.ok) return r;
+  }
+  {
+    const del = await applyNamedCommsDeletes(sb, tenantId, deletes, SCHOOL_COMMS_DELETABLE_TABLES);
+    if (!del.ok) return del;
   }
 
   let lastPublishedAt: string | null = null;
@@ -438,6 +422,7 @@ export type GalleryDeskSyncMeta = {
 
 export async function pushGalleryDeskToDb(
   bundle: GalleryDeskBundle,
+  deletes: NamedDeletes = {},
 ): Promise<{ ok: boolean; error?: string }> {
   const { galleryDualWriteDbEnabled } = await import("@/lib/galleryDbConfig");
   if (!galleryDualWriteDbEnabled()) return { ok: true };
@@ -445,23 +430,10 @@ export async function pushGalleryDeskToDb(
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
   const { sb, tenantId } = ctx;
   const now = nowIso();
-  const albums = bundle.albums ?? [];
-  const photos = bundle.photos ?? [];
-
-  await Promise.all([
-    deleteStale(
-      sb,
-      tenantId,
-      "school_comms_desk_albums",
-      new Set(albums.map((a) => a.id)),
-    ),
-    deleteStale(
-      sb,
-      tenantId,
-      "school_comms_desk_photos",
-      new Set(photos.map((p) => p.id)),
-    ),
-  ]);
+  const goneAlbums = goneOf(deletes, "school_comms_desk_albums");
+  const gonePhotos = goneOf(deletes, "school_comms_desk_photos");
+  const albums = (bundle.albums ?? []).filter((a) => !goneAlbums.has(a.id));
+  const photos = (bundle.photos ?? []).filter((p) => !gonePhotos.has(p.id));
 
   const tables: [string, Record<string, unknown>[]][] = [
     ["school_comms_desk_albums", albums.map((a) => albumToRow(tenantId, a))],
@@ -470,6 +442,13 @@ export async function pushGalleryDeskToDb(
   for (const [table, rows] of tables) {
     const r = await upsertChunks(sb, table, rows);
     if (!r.ok) return r;
+  }
+  {
+    const del = await applyNamedCommsDeletes(sb, tenantId, deletes, [
+      "school_comms_desk_albums",
+      "school_comms_desk_photos",
+    ]);
+    if (!del.ok) return del;
   }
 
   const { data: metaRow } = await sb
@@ -555,6 +534,7 @@ export type NewsDeskSyncMeta = {
 
 export async function pushNewsDeskToDb(
   bundle: NewsDeskBundle,
+  deletes: NamedDeletes = {},
 ): Promise<{ ok: boolean; error?: string }> {
   const { newsDualWriteDbEnabled } = await import("@/lib/newsDbConfig");
   if (!newsDualWriteDbEnabled()) return { ok: true };
@@ -562,19 +542,17 @@ export async function pushNewsDeskToDb(
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
   const { sb, tenantId } = ctx;
   const now = nowIso();
-  const news = bundle.news ?? [];
-
-  await deleteStale(
-    sb,
-    tenantId,
-    "school_comms_desk_news",
-    new Set(news.map((n) => n.id)),
-  );
+  const goneNews = goneOf(deletes, "school_comms_desk_news");
+  const news = (bundle.news ?? []).filter((n) => !goneNews.has(n.id));
 
   const rows = news.map((n) => newsToRow(tenantId, n));
   if (rows.length > 0) {
     const r = await upsertChunks(sb, "school_comms_desk_news", rows);
     if (!r.ok) return r;
+  }
+  {
+    const del = await applyNamedCommsDeletes(sb, tenantId, deletes, ["school_comms_desk_news"]);
+    if (!del.ok) return del;
   }
 
   const { data: metaRow } = await sb

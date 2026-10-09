@@ -85,6 +85,7 @@ SELFTESTS=(
   test:sis-prune
   test:attendance-prune
   test:prune-floor
+  test:desk-named-deletes
   test:sis-delete
   test:sis-guard-fallback
   test:audit-redaction
@@ -127,6 +128,7 @@ SELFTESTS=(
   test:fee-adjustments-merge
   test:parent-bot-clarify
   test:office-backlog
+  test:comms-attendance-leave-no-prune
   test:automation-send-rules
   test:fee-family-reminder
   test:fleet-keep-rule
