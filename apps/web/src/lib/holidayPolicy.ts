@@ -297,7 +297,9 @@ export function describeHolidayRule(h: Holiday): string {
   if ((h.mode || "one_off") === "weekly") {
     const w =
       typeof h.weekday === "number" ? WEEKDAY_LABELS[h.weekday] : "?";
-    bits.push(`Every ${w}`);
+    bits.push(
+      weeklyRuleIsWholeSession(h) ? `Every ${w}` : `Every ${w}, ${h.startsOn} → ${h.endsOn}`,
+    );
   } else {
     bits.push(
       h.endsOn !== h.startsOn
@@ -315,6 +317,25 @@ export function describeHolidayRule(h: Holiday): string {
     bits.push("Paid for staff");
   }
   return bits.join(" · ");
+}
+
+/**
+ * True when a weekly rule runs the whole academic session ("every Sunday",
+ * "Pre-Primary Saturday off") rather than a stretch of it ("Sawan Somvaar":
+ * the four Mondays 3–24 Aug 2026). A fortnight's grace at each end, so a rule
+ * entered from 10 April still counts as the session's.
+ *
+ * 9 Oct 2026: the timetable treated EVERY weekly rule as permanent and took
+ * Monday out of the class timetable for the whole year, though the holiday
+ * itself was four Mondays.
+ */
+export function weeklyRuleIsWholeSession(h: Pick<Holiday, "startsOn" | "endsOn" | "academicYearCode">): boolean {
+  const y = Number(String(h.academicYearCode || "").slice(0, 4));
+  if (!y) return true;
+  const from = String(h.startsOn || "").slice(0, 10);
+  const to = String(h.endsOn || "").slice(0, 10);
+  if (!from || !to) return true;
+  return from <= `${y}-04-15` && to >= `${y + 1}-03-15`;
 }
 
 export type WeeklyClassHoliday = {
@@ -340,6 +361,9 @@ export function listWeeklyClassHolidays(
     if (h.academicYearCode !== academicYearCode) continue;
     if ((h.mode || "one_off") !== "weekly") continue;
     if (h.workingOverride) continue;
+    // A weekly rule for part of the session is a set of dated days off, not a
+    // change to the week — the daily views already skip those dates.
+    if (!weeklyRuleIsWholeSession(h)) continue;
     if (typeof h.weekday !== "number" || h.weekday < 0 || h.weekday > 6) {
       continue;
     }
