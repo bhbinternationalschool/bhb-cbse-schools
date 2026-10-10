@@ -9,8 +9,10 @@
 
 import { NextResponse } from "next/server";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
-import { normalizeAppPopup, type AppPopup } from "@/lib/appPopups";
-import { familyFacts, readAppPopups, writeAppPopups } from "@/lib/appPopups.server";
+import { aadhaarInScope, normalizeAppPopup, type AppPopup } from "@/lib/appPopups";
+import { familyFacts, readAppPopups, schoolAadhaarGaps, writeAppPopups } from "@/lib/appPopups.server";
+import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
+import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { loadSis, type SisStudent } from "@/lib/sis";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
@@ -52,7 +54,7 @@ async function stats(popups: AppPopup[]) {
       for (const kids of byHousehold.values()) {
         const f = familyFacts(kids, p.consentKey && p.consentKey !== "apaar" ? [p.consentKey] : []);
         if (p.rule === "missing_docs" && f.missingDocs.length) n += 1;
-        if (p.rule === "missing_aadhaar" && f.missingAadhaar.length) n += 1;
+        if (p.rule === "missing_aadhaar" && aadhaarInScope(f.missingAadhaar, p.aadhaarScope).length) n += 1;
         if (p.rule === "consent_pending" && (p.consentKey || "apaar") === "apaar" && f.pendingConsents.includes("apaar")) n += 1;
       }
       out[p.id]!.pendingNow = n;
@@ -66,7 +68,13 @@ export async function GET(req: Request) {
   if (!auth.ok) return auth.response;
   const state = await readAppPopups();
   if (!state) return NextResponse.json({ ok: false, error: "Could not read app pop-ups" }, { status: 503 });
-  return NextResponse.json({ ok: true, popups: state.popups, stats: await stats(state.popups) }, { headers: { "Cache-Control": "no-store" } });
+  await ensureSchoolMirrorHydrated();
+  const ay = currentAcademicYearCode(loadMasters());
+  const aadhaarCounts = await schoolAadhaarGaps(ay).catch(() => null);
+  return NextResponse.json(
+    { ok: true, popups: state.popups, stats: await stats(state.popups), aadhaarCounts },
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }
 
 export async function POST(req: Request) {

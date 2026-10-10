@@ -170,6 +170,7 @@
     "test:nucleus-assessments": "npx tsx src/lib/nucleusAssessments.selftest.ts",
     "test:wa-parent-guide": "npx tsx src/lib/waParentGuide.selftest.ts",
     "test:parent-bot-day-app": "npx tsx src/lib/sisParentBotDayApp.selftest.ts",
+    "test:comms-tab-access": "npx tsx src/lib/commsTabAccess.selftest.ts",
     "test:fee-store-discount": "npx tsx src/lib/feeStoreDiscount.selftest.ts",
     "test:udise-nudge": "npx tsx src/lib/udiseNudge.selftest.ts",
     "test:apaar-consent": "npx tsx src/lib/apaarConsent.selftest.ts",

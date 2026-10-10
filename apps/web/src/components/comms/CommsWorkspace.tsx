@@ -2,6 +2,7 @@
 
 import { AppPopupsPanel } from "@/components/comms/AppPopupsPanel";
 import { ParentsOnAppPanel } from "@/components/comms/ParentsOnAppPanel";
+import { commsTabIsOfficeOnly } from "@/lib/commsTabAccess";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Images, Megaphone } from "lucide-react";
@@ -156,6 +157,7 @@ function tabFromSearch(raw: string | null, path: string): CommsTab {
     raw === "inbox" ||
     raw === "notices" ||
     raw === "whatsapp" ||
+    raw === "answers" ||
     raw === "popups" ||
     raw === "onapp" ||
     raw === "reports"
@@ -410,11 +412,13 @@ export function CommsWorkspace() {
   useEffect(() => {
     const masters = loadMasters();
     const rbac = loadRbac();
-    setShownTabs(
-      hasPermission(session, masters, "notices", "view", rbac)
-        ? TABS
-        : TABS.filter((t) => canAccessHref(session, masters, `/comms?tab=${t.id}`, rbac)),
-    );
+    const office = hasPermission(session, masters, "notices", "edit", rbac);
+    const base = hasPermission(session, masters, "notices", "view", rbac)
+      ? TABS
+      : TABS.filter((t) => canAccessHref(session, masters, `/comms?tab=${t.id}`, rbac));
+    // Office tabs (WhatsApp chats, pop-ups, Parents on app…) need notices ·
+    // edit; a teacher's view grant reads notices, news and the gallery.
+    setShownTabs(office ? base : base.filter((t) => !commsTabIsOfficeOnly(t.id)));
   }, [session]);
   useEffect(() => {
     if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
@@ -494,6 +498,43 @@ export function CommsWorkspace() {
    * The news list stays cards. A story leads with its cover photograph, and
    * a table would drop the one thing the website shows.
    */
+  // Visible on every row (director, 10 Oct 2026: "there is no option for
+  // notices to edit/remove or stop showing") — the ⋯ menu had them, but
+  // nobody found it. Stopping = archived: the apps, the running strip and
+  // the website show only published notices.
+  type NoticeRow = (typeof noticesFiltered)[number];
+  function noticeStatusLabel(n: NoticeRow): string {
+    if (n.status === "published") return "Showing";
+    if (n.status === "archived") return "Stopped";
+    return n.scheduledPublishAt ? "Scheduled" : "Draft";
+  }
+  function publishNoticeRow(n: NoticeRow) {
+    const r = setNoticeStatus(n.id, "published");
+    if (r.ok) {
+      setComms(r.state);
+      flash(n.status === "archived" ? "Showing again" : "Published");
+      const notice = r.state.notices.find((x) => x.id === n.id);
+      // A notice brought back is not news again — no second cross-post.
+      if (notice && n.status !== "archived") crossPostNotice(notice);
+    } else setError(r.error);
+  }
+  function stopNoticeRow(n: NoticeRow) {
+    const r = setNoticeStatus(n.id, "archived");
+    if (r.ok) {
+      setComms(r.state);
+      flash("Stopped — no longer shown to parents or staff");
+    } else setError(r.error);
+  }
+  function deleteNoticeRow(n: NoticeRow) {
+    if (!window.confirm(`Delete "${n.title}"? This cannot be undone. (To only hide it, use Stop showing.)`)) return;
+    const r = deleteNotice(n.id);
+    if (r.ok) {
+      setComms(r.state);
+      if (editNoticeId === n.id) resetNoticeForm();
+      flash("Notice deleted");
+    } else setError(r.error);
+  }
+
   const noticeCols: DataTableColumn<(typeof noticesFiltered)[number]>[] = [
     {
       key: "title", header: "Notice", sortable: true,
@@ -511,44 +552,69 @@ export function CommsWorkspace() {
       ),
     },
     { key: "audience", header: "Audience", value: (n) => audienceLabel(n.audience), sortable: true },
-    { key: "status", header: "Status", value: (n) => n.status, sortable: true },
+    {
+      key: "status", header: "Status", sortable: true,
+      value: (n) => noticeStatusLabel(n),
+      render: (n) => {
+        const label = noticeStatusLabel(n);
+        const tone =
+          label === "Showing" ? "text-[var(--tone-teal)]" : label === "Stopped" ? "text-[var(--danger)]" : "text-[var(--muted)]";
+        return <span className={`text-[11px] font-semibold ${tone}`}>{label}</span>;
+      },
+    },
     {
       key: "published", header: "Published", sortable: true,
       value: (n) => n.publishedAt || "",
       render: (n) =>
         n.publishedAt ? (
-          new Date(n.publishedAt).toLocaleString()
+          new Date(n.publishedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })
         ) : (
           <span className="text-[var(--muted)]">—</span>
         ),
     },
+    ...(readOnly
+      ? []
+      : [
+          {
+            key: "actions",
+            header: "Actions",
+            value: () => "",
+            render: (n: NoticeRow) => (
+              <span className="flex flex-wrap gap-1.5">
+                <button type="button" className="rounded-md border border-[var(--border)] px-2 py-0.5 text-[11px] font-semibold text-[var(--brand-deep)]" onClick={() => beginEditNotice(n)}>
+                  Edit
+                </button>
+                {n.status === "published" ? (
+                  <button type="button" className="rounded-md border border-[var(--border)] px-2 py-0.5 text-[11px] font-semibold text-[var(--brand-deep)]" onClick={() => stopNoticeRow(n)}>
+                    Stop showing
+                  </button>
+                ) : (
+                  <button type="button" className="rounded-md border border-[var(--border)] px-2 py-0.5 text-[11px] font-semibold text-[var(--tone-teal)]" onClick={() => publishNoticeRow(n)}>
+                    {n.status === "archived" ? "Show again" : "Publish"}
+                  </button>
+                )}
+                <button type="button" className="rounded-md border border-[var(--border)] px-2 py-0.5 text-[11px] font-semibold text-[var(--danger)]" onClick={() => deleteNoticeRow(n)}>
+                  Delete
+                </button>
+              </span>
+            ),
+          } satisfies DataTableColumn<NoticeRow>,
+        ]),
   ];
 
   const noticeActions: RowAction<(typeof noticesFiltered)[number]>[] = [
     { id: "edit", label: "Edit", hidden: () => readOnly, onSelect: (n) => beginEditNotice(n) },
     {
-      id: "publish", label: "Publish",
+      id: "publish",
+      label: "Publish / show again",
       hidden: (n) => readOnly || n.status === "published",
-      onSelect: (n) => {
-        const r = setNoticeStatus(n.id, "published");
-        if (r.ok) {
-          setComms(r.state);
-          flash("Published");
-          const notice = r.state.notices.find((x) => x.id === n.id);
-          if (notice) crossPostNotice(notice);
-        } else setError(r.error);
-      },
+      onSelect: (n) => publishNoticeRow(n),
     },
     {
-      id: "archive", label: "Archive",
+      id: "archive",
+      label: "Stop showing",
       hidden: (n) => readOnly || n.status !== "published",
-      onSelect: (n) => {
-        const r = setNoticeStatus(n.id, "archived");
-        if (r.ok) {
-          setComms(r.state);
-          flash("Archived");
-        } else setError(r.error);
-      },
+      onSelect: (n) => stopNoticeRow(n),
     },
     {
       id: "social", label: "Post to social",
@@ -559,14 +625,7 @@ export function CommsWorkspace() {
     {
       id: "delete", label: "Delete", tone: "danger", separatorAbove: true,
       hidden: () => readOnly,
-      onSelect: (n) => {
-        const r = deleteNotice(n.id);
-        if (r.ok) {
-          setComms(r.state);
-          if (editNoticeId === n.id) resetNoticeForm();
-          flash("Notice deleted");
-        } else setError(r.error);
-      },
+      onSelect: (n) => deleteNoticeRow(n),
     },
   ];
 
