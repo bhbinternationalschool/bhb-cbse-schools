@@ -2,6 +2,9 @@ import { aadhaarChecksumValid, aadhaarDigits } from "@/lib/aadhaar";
 import { apaarConsentPending } from "@/lib/apaarConsent";
 import { fileConsentRecord } from "@/lib/apaarConsent.server";
 import {
+  aadhaarInScope,
+  countAadhaarGaps,
+  type AadhaarGapCounts,
   normalizeAppPopupsState,
   popupApplies,
   type AppPopup,
@@ -14,7 +17,7 @@ import { writeAudit } from "@/lib/audit.server";
 import { readModuleLocalState, writeModuleLocalState } from "@/lib/moduleLocalState.server";
 import { REQUIRED_STUDENT_DOCS } from "@/lib/parentProfile";
 import { getServerTenantContext } from "@/lib/serverTenant";
-import { docHasFile, hasStoredAadhaar, loadSis, type SisStudent } from "@/lib/sis";
+import { docHasFile, hasStoredAadhaar, loadSis, loadSisForStaff, type SisStudent } from "@/lib/sis";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { pushSisToDb, rowToStudent } from "@/lib/sisNormalized.server";
 
@@ -80,6 +83,23 @@ export function familyFacts(children: SisStudent[], customConsentKeys: string[])
   };
 }
 
+/**
+ * Aadhaar gaps across the school, one row per child of this session (most
+ * children carry a row per academic year — counting rows would count them
+ * twice), the Play review family left out.
+ */
+export async function schoolAadhaarGaps(sessionAy: string): Promise<AadhaarGapCounts> {
+  await ensureSisHydratedServer();
+  const visible = loadSisForStaff().students.filter((s) => s.status === "active" && s.householdId);
+  const visibleIds = new Set(visible.map((s) => s.id));
+  const rows: { children: number; missing: string[] }[] = [];
+  for (const hh of new Set(visible.map((s) => s.householdId))) {
+    const kids = (await householdChildren(hh, sessionAy)).filter((k) => visibleIds.has(k.id));
+    rows.push({ children: kids.length, missing: familyFacts(kids, []).missingAadhaar });
+  }
+  return countAadhaarGaps(rows);
+}
+
 export async function readPopupEvents(subjectKey: string): Promise<PopupEvent[] | null> {
   const ctx = await getServerTenantContext();
   if (!ctx) return null;
@@ -133,7 +153,7 @@ export function popupsFor(
     .map((p) => {
       let targets: PopupForApp["targets"] = [];
       if (p.form === "aadhaar") {
-        targets = facts.missingAadhaar.map((k) =>
+        targets = aadhaarInScope(facts.missingAadhaar, p.aadhaarScope).map((k) =>
           k === "father"
             ? { key: k, label: "Father", labelHi: "पिता" }
             : k === "mother"

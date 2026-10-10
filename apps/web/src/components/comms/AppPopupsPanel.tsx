@@ -2,11 +2,17 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
-import type { AppPopup } from "@/lib/appPopups";
+import type { AadhaarGapCounts, AadhaarScope, AppPopup } from "@/lib/appPopups";
 import { loadMasters } from "@/lib/masters";
 import { uploadMedia } from "@/lib/mediaUpload";
 
 type Stats = Record<string, { shown: number; dismissed: number; done: number; pendingNow?: number }>;
+
+const AADHAAR_SCOPES: { id: AadhaarScope; label: string }[] = [
+  { id: "all", label: "Child + father + mother" },
+  { id: "child", label: "Only the child" },
+  { id: "parents", label: "Only father and mother" },
+];
 
 const RULES: { id: AppPopup["rule"]; label: string; form: AppPopup["form"]; hint: string }[] = [
   { id: "missing_docs", label: "Child's documents missing", form: "documents", hint: "Families whose child has no birth certificate, photo, Aadhaar card or address proof uploaded. The pop-up opens the upload." },
@@ -28,6 +34,7 @@ function blank(): AppPopup {
     consentKey: "",
     consentText: "",
     consentTextHi: "",
+    aadhaarScope: "all",
     audience: "parents",
     targetMode: "all",
     classIds: [],
@@ -67,6 +74,7 @@ const APP_SCREENS: { route: string; label: string }[] = [
 export function AppPopupsPanel({ canEdit }: { canEdit: boolean }) {
   const [popups, setPopups] = useState<AppPopup[] | null>(null);
   const [stats, setStats] = useState<Stats>({});
+  const [gaps, setGaps] = useState<AadhaarGapCounts | null>(null);
   const [draft, setDraft] = useState<AppPopup | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -75,10 +83,11 @@ export function AppPopupsPanel({ canEdit }: { canEdit: boolean }) {
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/comms/app-popups", { cache: "no-store" });
-      const body = (await res.json()) as { ok?: boolean; popups?: AppPopup[]; stats?: Stats; error?: string };
+      const body = (await res.json()) as { ok?: boolean; popups?: AppPopup[]; stats?: Stats; aadhaarCounts?: AadhaarGapCounts | null; error?: string };
       if (!res.ok || !body.ok) throw new Error(body.error || `HTTP ${res.status}`);
       setPopups(body.popups ?? []);
       setStats(body.stats ?? {});
+      setGaps(body.aadhaarCounts ?? null);
       setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load");
@@ -255,6 +264,49 @@ export function AppPopupsPanel({ canEdit }: { canEdit: boolean }) {
               </select>
             </label>
           )}
+
+          {draft.form === "aadhaar" || draft.rule === "missing_aadhaar" ? (
+            <div className="space-y-2 rounded-lg border border-[var(--border)] bg-[var(--card)] p-2.5">
+              <label className="block">
+                <span className="text-xs font-semibold">Ask for whose Aadhaar?</span>
+                <select
+                  className={field}
+                  value={draft.aadhaarScope}
+                  onChange={(e) => set({ aadhaarScope: e.target.value as AadhaarScope })}
+                >
+                  {AADHAAR_SCOPES.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-[11px] text-[var(--muted)]">Only the numbers still missing are asked; the pop-up stops for a family once they are filled.</span>
+              </label>
+              {gaps ? (
+                <div className="space-y-1.5">
+                  <p className="text-[11px] font-semibold text-[var(--muted)]">Missing right now ({gaps.families} families, {gaps.children} children on roll)</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { k: "Children", v: gaps.childrenMissing, sub: `in ${gaps.familiesChildMissing} families` },
+                      { k: "Fathers", v: gaps.fatherMissing, sub: "families" },
+                      { k: "Mothers", v: gaps.motherMissing, sub: "families" },
+                    ].map((c) => (
+                      <div key={c.k} className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5">
+                        <p className="text-[10px] font-semibold uppercase text-[var(--muted)]">{c.k}</p>
+                        <p className="text-base font-bold text-[var(--brand-deep)]">{c.v}</p>
+                        <p className="text-[10px] text-[var(--muted)]">{c.sub}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-[var(--ink)]">
+                    This pop-up would reach <strong>{gaps.reach[draft.aadhaarScope]}</strong> families with “{AADHAAR_SCOPES.find((o) => o.id === draft.aadhaarScope)?.label}”.
+                  </p>
+                </div>
+              ) : (
+                <p className="text-[11px] text-[var(--muted)]">Counts could not be loaded just now.</p>
+              )}
+            </div>
+          ) : null}
 
           {draft.form === "consent" ? (
             <div className="grid gap-2 sm:grid-cols-2">
