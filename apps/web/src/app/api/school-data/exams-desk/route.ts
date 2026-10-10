@@ -20,8 +20,12 @@ import {
   pushExamDeskToDb,
   type ExamDeskBundle,
   EXAMS_DELETABLE_TABLES,
+  EXAMS_STAMPED_SLICES,
   EXAMS_TABLE_SLICES,
 } from "@/lib/examsNormalized.server";
+import { readStampsParam, type RowStamps } from "@/lib/rowStampClient";
+import { stampsForServerMerge } from "@/lib/deskStamps.server";
+import { rowFingerprint } from "@/lib/sliceRevClient";
 import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
 import { featureAuthorizedDeletes } from "@/lib/deskNamedDeletesFeature.server";
 import type { RbacAction } from "@/lib/rbac";
@@ -64,7 +68,7 @@ export async function GET(req: Request) {
   // The whole desk, or — holding Exams functions only — their part of it.
   const gate = await deskReadGate(req, SCHOOL_DATA_DESK_RBAC["exams-desk"]);
   if (gate.mode === "deny") return gate.response;
-  const { bundle: full, meta } = await fetchExamDeskFromDb();
+  const { bundle: full, meta, stamps, policyStamp } = await fetchExamDeskFromDb();
   const bundle = gate.mode === "feature" ? featureExamBundle(full, gate) : full;
   return NextResponse.json({
     ok: true,
@@ -74,15 +78,21 @@ export async function GET(req: Request) {
     sheets: bundle.sheets,
     policy: bundle.policy,
     promotions: bundle.promotions,
+    // Rooms and seating plans were never served (10 Oct 2026): a browser
+    // started with none and its save carried none, so they never persisted.
+    rooms: bundle.rooms,
+    seating: bundle.seating,
     sheetCount: bundle.sheets.length,
     updatedAt: meta?.updatedAt || new Date().toISOString(),
     meta,
+    stamps,
+    policyStamp,
   });
 }
 
 type ExamsDeskPostBody = Partial<
   Pick<ExamsState, "terms" | "subjects" | "dateSheet" | "sheets" | "policy" | "promotions" | "rooms" | "seating">
-> & { deletes?: unknown };
+> & { deletes?: unknown; stamps?: unknown; settingsBase?: string | null };
 
 /**
  * POST — push the exam SETUP: terms, subjects, date sheet, policy and
@@ -146,6 +156,9 @@ export async function POST(req: Request) {
 
   // Deletions are named by the desk, never inferred from what it lacks.
   let deletes = readNamedDeletes(body.deletes, EXAMS_DELETABLE_TABLES);
+  // No stamps = a tab from before 10 Oct 2026: it may add, never replace.
+  let stamps: RowStamps | undefined = readStampsParam(body.stamps, EXAMS_STAMPED_SLICES);
+  let policyBase: string | null = typeof body.settingsBase === "string" ? body.settingsBase : null;
 
   // Function holders (e.g. Exams → Date sheet): merged onto the stored
   // setup, only their functions' slices — never the body as sent. Sheets
@@ -166,6 +179,21 @@ export async function POST(req: Request) {
     if (!merged.changed) return featureSavedResponse(false);
     deletes = featureAuthorizedDeletes(deletes, EXAMS_TABLE_SLICES, stored.bundle, merged.state);
     body = merged.state as ExamsDeskPostBody;
+    // Merged onto the copy just read: what differs goes at that read's stamps.
+    const after = body as Record<string, unknown>;
+    const before = stored.bundle as unknown as Record<string, unknown>;
+    stamps = Object.fromEntries(
+      EXAMS_STAMPED_SLICES.map((slice) => [
+        slice,
+        stampsForServerMerge(
+          (before[slice] as unknown[]) ?? [],
+          (after[slice] as unknown[]) ?? [],
+          stored.stamps?.[slice],
+        ),
+      ]),
+    );
+    policyBase =
+      rowFingerprint(stored.bundle.policy) !== rowFingerprint(after.policy) ? (stored.policyStamp ?? "") : null;
   }
 
   const result = await pushExamDeskToDb({
@@ -180,7 +208,7 @@ export async function POST(req: Request) {
     sheets: [],
     policy: body.policy!,
     promotions: Array.isArray(body.promotions) ? body.promotions : [],
-  }, deletes);
+  }, deletes, { stamps, policyBase });
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error || "Sync failed" },
@@ -188,11 +216,23 @@ export async function POST(req: Request) {
     );
   }
 
-  if (gate) return featureSavedResponse(true);
+  if (gate) {
+    // A row another device changed between our read and our write stands.
+    if (Object.values(result.conflicts ?? {}).some((ids) => ids.length)) {
+      return NextResponse.json(
+        { ok: false, error: "Someone changed this exam setup a moment ago — reload and re-apply your change.", reason: "stale" },
+        { status: 409 },
+      );
+    }
+    return featureSavedResponse(true);
+  }
   const { bundle } = await fetchExamDeskFromDb();
   return NextResponse.json({
     ok: true,
     sheetCount: bundle.sheets.length,
     updatedAt: new Date().toISOString(),
+    stamps: result.stamps,
+    conflicts: result.conflicts,
+    settingsStamp: result.settingsStamp,
   });
 }
