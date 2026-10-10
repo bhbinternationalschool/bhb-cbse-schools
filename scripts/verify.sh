@@ -125,6 +125,7 @@ SELFTESTS=(
   test:comms-tab-access
   test:fee-store-discount
   test:masters-subject-guard
+  test:subject-requests
   test:udise-nudge
   test:apaar-consent
   test:aadhaar-certificate

@@ -21,6 +21,7 @@ import "survey_screen.dart";
 import "marks_screen.dart";
 import "payslips_screen.dart";
 import "ptm_teacher_screen.dart";
+import "my_subjects_screen.dart";
 import "section_picker.dart";
 import "self_attendance_screen.dart";
 import "staff_complaints_screen.dart";
@@ -107,6 +108,12 @@ const _staffModules = [
     "complaints_handle",
   ),
   _StaffModule("PTM", Icons.groups_outlined, ModuleTone.purple, "ptm_meet"),
+  _StaffModule(
+    "My subjects",
+    Icons.library_books_outlined,
+    ModuleTone.blue,
+    "subject_requests",
+  ),
   _StaffModule(
     "Documents",
     Icons.folder_open_outlined,
@@ -411,6 +418,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         await _pushScreen(StaffComplaintsScreen(api: widget.api));
       case "PTM":
         await _pushScreen(PtmTeacherScreen(api: widget.api));
+      case "My subjects":
+        await _pushScreen(MySubjectsScreen(api: widget.api));
       case "Documents":
         await _pushScreen(DocumentsScreen(api: widget.api));
       case "Collect fees":

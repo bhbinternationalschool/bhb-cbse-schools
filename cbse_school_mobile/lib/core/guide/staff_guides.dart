@@ -591,6 +591,35 @@ const List<ScreenGuide> staffScreenGuides = [
     ],
   ),
   ScreenGuide(
+    id: "my-subjects",
+    titleEn: "Ask to change a class's subjects",
+    titleHi: "कक्षा के विषय बदलने का अनुरोध करें",
+    stepsEn: [
+      "Tap a class to see the subjects it studies.",
+      "To take a subject out, tap the minus icon next to it.",
+      "To add one, tap **Ask to add a subject** and pick it — or choose **Not in the list** to ask for a new subject.",
+      "Write **Why?** and tap **Send to office**.",
+      "The answer shows under **My requests**: Waiting, Approved or Declined.",
+    ],
+    stepsHi: [
+      "कक्षा पर टैप करें — उसके विषय दिखेंगे।",
+      "कोई विषय हटवाना हो तो उसके आगे माइनस का निशान दबाएँ।",
+      "विषय जुड़वाना हो तो **Ask to add a subject** दबाकर चुनें — या नया विषय माँगने के लिए **Not in the list** चुनें।",
+      "**Why?** में कारण लिखें और **Send to office** दबाएँ।",
+      "जवाब **My requests** में दिखेगा: Waiting, Approved या Declined।",
+    ],
+    tipsEn: [
+      "Nothing changes until the principal or office approves it in the web ERP.",
+      "To cancel a request that is still waiting, tap **Withdraw**.",
+      "If no class is shown, the office has not given you classes yet (Staff → Duties).",
+    ],
+    tipsHi: [
+      "प्रधानाचार्य या ऑफिस के वेब ERP में स्वीकृत करने तक कुछ नहीं बदलता।",
+      "जो अनुरोध अभी प्रतीक्षा में है उसे रद्द करने के लिए **Withdraw** दबाएँ।",
+      "अगर कोई कक्षा न दिखे, तो ऑफिस ने अभी आपको कक्षाएँ नहीं दी हैं (Staff → Duties)।",
+    ],
+  ),
+  ScreenGuide(
     id: "complaints-staff",
     titleEn: "Handle a parent's complaint",
     titleHi: "अभिभावक की शिकायत निपटाएँ",

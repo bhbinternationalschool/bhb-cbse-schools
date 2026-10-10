@@ -82,6 +82,7 @@ import {
   loadRbac,
 } from "@/lib/rbac";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
+import { SubjectRequestsCard } from "@/components/masters/SubjectRequestsCard";
 
 type Tab =
   | "overview"
@@ -370,7 +371,14 @@ export function MastersWorkspace() {
           <ClassesPanel state={state} commit={commit} />
         ) : null}
         {tab === "subjects" ? (
-          <SubjectsPanel state={state} commit={commit} />
+          <div className="space-y-3">
+            <SubjectRequestsCard
+              subjects={state.subjects ?? []}
+              canEdit={!readOnly}
+              onMastersChanged={() => setState(loadMasters())}
+            />
+            <SubjectsPanel state={state} commit={commit} />
+          </div>
         ) : null}
         {tab === "series" ? (
           <NumberSeriesPanel state={state} commit={commit} />
