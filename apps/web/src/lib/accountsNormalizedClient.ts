@@ -11,6 +11,16 @@ import {
   pendingDeskDeletes,
   recordDeskDeletion,
 } from "@/lib/deskNamedDeletes";
+import {
+  applyStampedSave,
+  buildStampedSave,
+  captureRowStamps,
+  onStampConflicts,
+  type RowConflicts,
+  type RowStamps,
+} from "@/lib/rowStampClient";
+import { rowFingerprint } from "@/lib/sliceRevClient";
+import { ACCOUNTS_STAMPED_SLICES } from "@/lib/accountsStampSlices";
 
 /** Name the accounts desk uses in deskNamedDeletes. */
 const ACCOUNTS_DESK = "accounts";
@@ -105,6 +115,49 @@ function deskPayload(state: AccountsState) {
 }
 
 /**
+ * Stamped saves (10 Oct 2026). The load hands over each row's stamp; a save
+ * sends only the rows this browser changed, each with the stamp it changed
+ * it from, and the server refuses any row that moved on in between. Settings
+ * ride the same way with their own stamp. All of it is page memory.
+ */
+const STAMP_MODULE = "accounts";
+let settingsBase: { stamp: string; hash: number } | null = null;
+
+/** After a load the browser took: remember the server's stamps. */
+export function captureAccountsStamps(
+  bundle: Record<string, unknown>,
+  stamps: RowStamps | undefined,
+  settingsStamp: string | undefined,
+) {
+  captureRowStamps(STAMP_MODULE, stamps ?? {}, bundle, ACCOUNTS_STAMPED_SLICES);
+  settingsBase = { stamp: settingsStamp ?? "", hash: rowFingerprint(bundle.settings ?? {}) };
+}
+
+/** What a save sends: the changed rows only, their stamps, and settings if changed. */
+export function stampedPayload(state: AccountsState) {
+  const stamps = buildStampedSave(
+    STAMP_MODULE,
+    state as unknown as Record<string, unknown>,
+    ACCOUNTS_STAMPED_SLICES,
+  );
+  const whole = deskPayload(state) as Record<string, unknown>;
+  const body: Record<string, unknown> = { ...whole };
+  // Only the rows that changed travel; the rest are already on the server.
+  for (const slice of ACCOUNTS_STAMPED_SLICES) {
+    const changed = stamps[slice] ?? {};
+    body[slice] = ((whole[slice] as { id?: string }[] | undefined) ?? []).filter(
+      (r) => r && typeof r.id === "string" && r.id in changed,
+    );
+  }
+  const settingsChanged = !settingsBase || rowFingerprint(state.settings ?? {}) !== settingsBase.hash;
+  return {
+    body: { ...body, stamps, settingsBase: settingsChanged ? (settingsBase?.stamp ?? "") : null },
+    stamps,
+    settingsChanged,
+  };
+}
+
+/**
  * Push the accounts desk to the server, and record whether it landed.
  *
  * The previous version lost a failure two ways: the `catch` fired only when
@@ -121,21 +174,37 @@ function deskPayload(state: AccountsState) {
 async function pushAccountsDeskApi(state: AccountsState) {
   await trackDeskPush("accounts", async () => {
     const sentDeletes = pendingDeskDeletes(ACCOUNTS_DESK);
+    const sent = stampedPayload(state);
     const res = await fetch("/api/school-data/accounts-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // Deletions are named, never inferred from what this browser lacks.
-      body: JSON.stringify({ ...deskPayload(state), deletes: sentDeletes }),
+      body: JSON.stringify({ ...sent.body, deletes: sentDeletes }),
     });
     const body = (await res.json().catch(() => null)) as {
       ok?: boolean;
       updatedAt?: string;
       coaCount?: number;
       error?: string;
+      stamps?: RowStamps;
+      conflicts?: RowConflicts;
+      settingsStamp?: string;
     } | null;
 
     if (res.ok && body?.ok) {
       confirmDeskDeletes(ACCOUNTS_DESK, sentDeletes);
+      applyStampedSave(
+        STAMP_MODULE,
+        state as unknown as Record<string, unknown>,
+        sent.stamps,
+        body,
+        ACCOUNTS_STAMPED_SLICES,
+      );
+      if (sent.settingsChanged && body.settingsStamp) {
+        settingsBase = { stamp: body.settingsStamp, hash: rowFingerprint(state.settings ?? {}) };
+      }
+      // Rows another PC changed first were not written: reload, and say so.
+      onStampConflicts(STAMP_MODULE, body.conflicts);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         coaCount: body.coaCount ?? state.coaAccounts.length,
@@ -169,12 +238,16 @@ export async function fetchAccountsDeskFromApi() {
       ok?: boolean;
       updatedAt?: string;
       coaCount?: number;
+      stamps?: RowStamps;
+      settingsStamp?: string;
     };
     if (!Array.isArray(body.coaAccounts)) return null;
     return {
       bundle: deskPayload(body as AccountsState),
       updatedAt: body.updatedAt || "",
       coaCount: body.coaCount ?? body.coaAccounts.length,
+      stamps: body.stamps,
+      settingsStamp: body.settingsStamp,
     };
   } catch {
     return null;
@@ -239,5 +312,7 @@ export async function hydrateAccountsDeskFromDb(preferDb?: boolean, local?: Acco
   if (!shouldTake) return { ...empty, fetched: true };
 
   writeMeta({ updatedAt: remote.updatedAt, coaCount: remote.coaCount });
+  // The rows as the server holds them are the base of the next save.
+  captureAccountsStamps(remote.bundle as Record<string, unknown>, remote.stamps, remote.settingsStamp);
   return { bundle: remote.bundle, changed: true, fetched: true };
 }

@@ -295,7 +295,8 @@ export async function addStaffAltMobile(
   if (replaced !== m10) {
     const { error: upErr } = await ctx.sb
       .from("sis_staff")
-      .update({ profile: { ...profile, altMobile: m10 } })
+      // updated_at moves so an office tab holding the old record can't save it back.
+      .update({ profile: { ...profile, altMobile: m10 }, updated_at: new Date().toISOString() })
       .eq("tenant_id", ctx.tenantId)
       .eq("id", staffId);
     if (upErr) return { ok: false, error: upErr.message };
