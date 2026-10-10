@@ -1421,6 +1421,12 @@ export async function handleWaSisBotInbound(opts: {
       // could not answer, and the office still wants to see it — before
       // 21 Sep 2026 an unreachable model lost the question entirely.
       recordUnansweredQuestion(hh, text);
+      // …and a person must see it now. Until 10 Oct 2026 this path sent the
+      // keyword menu and marked nothing, so the question waited for no one
+      // (salvaged from the nightly #464). Same reply and hand-off as a
+      // question the model could not ground.
+      replyText = composeSisUngroundedReply(hindi);
+      escalateUngrounded = true;
     }
   }
 
