@@ -11,6 +11,7 @@ import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../../core/i18n/locale_controller.dart";
 import "../../core/punch/punch_device_key.dart";
+import "../../core/punch/phone_id.dart";
 
 /// The six digits from the office QR ("…/punch?c=482913") or as typed.
 String punchCodeFrom(String raw) {
@@ -161,6 +162,7 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
         signature: signature,
         ts: ts,
         deviceLabel: "BHB staff app",
+        phoneId: await PhoneId.get(),
       );
       if (!mounted) return;
       Haptics.success();

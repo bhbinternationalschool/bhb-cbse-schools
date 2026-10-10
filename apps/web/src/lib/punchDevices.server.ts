@@ -69,7 +69,7 @@ export async function verifyPunchSignature(
 }
 
 export type DeviceCheck =
-  | { ok: true; firstRegistration: boolean }
+  | { ok: true; firstRegistration: boolean; rekeyed?: boolean }
   | {
       ok: false;
       reason: "other_staff" | "not_registered" | "unavailable";
@@ -87,6 +87,8 @@ export async function checkPunchDevice(input: {
   staffId: string;
   jwk: PunchJwk;
   label: string;
+  /** SHA-256 of the phone's Android ID from the staff app; "" when unknown. */
+  phoneId?: string;
   /** This punch — kept on a pending phone so approval records it at this time. */
   attempt?: PunchAttempt;
 }): Promise<DeviceCheck> {
@@ -98,7 +100,7 @@ export async function checkPunchDevice(input: {
 
   const { data, error } = await sb
     .from("staff_punch_devices")
-    .select("id, staff_id, device_id, status")
+    .select("id, staff_id, device_id, status, phone_id")
     .eq("tenant_id", tenantId)
     .eq("status", "active")
     .or(`staff_id.eq.${input.staffId},device_id.eq.${deviceId}`);
@@ -106,7 +108,8 @@ export async function checkPunchDevice(input: {
     console.warn("[punch-devices] read failed", error.message);
     return { ok: false, reason: "unavailable" };
   }
-  const rows = (data ?? []) as Pick<PunchDeviceRow, "id" | "staff_id" | "device_id" | "status">[];
+  const rows = (data ?? []) as (Pick<PunchDeviceRow, "id" | "staff_id" | "device_id" | "status"> & { phone_id?: string })[];
+  const phoneId = /^[a-f0-9]{64}$/.test(input.phoneId ?? "") ? input.phoneId! : "";
   const phoneOwner = rows.find((r) => r.device_id === deviceId);
   if (phoneOwner && phoneOwner.staff_id !== input.staffId) {
     return { ok: false, reason: "other_staff", otherStaffId: phoneOwner.staff_id };
@@ -114,11 +117,44 @@ export async function checkPunchDevice(input: {
   const mine = rows.find((r) => r.staff_id === input.staffId);
   if (mine && mine.device_id === deviceId) {
     try {
-      await sb.from("staff_punch_devices").update({ last_used_at: now }).eq("id", mine.id);
+      // An older row learns its phone id on the next punch, so the NEXT
+      // reinstall of the app on this phone is recognised.
+      await sb
+        .from("staff_punch_devices")
+        .update(phoneId && !mine.phone_id ? { last_used_at: now, phone_id: phoneId } : { last_used_at: now })
+        .eq("id", mine.id);
     } catch {
       /* best effort — the punch is what matters */
     }
     return { ok: true, firstRegistration: false };
+  }
+  if (mine && phoneId && mine.phone_id === phoneId) {
+    // The same phone with a new key: the app was reinstalled (or its data
+    // cleared). Not a new phone — the new key replaces the old one, and the
+    // office is not asked (10 Oct 2026: five such asks in one afternoon).
+    const { error: revErr } = await sb
+      .from("staff_punch_devices")
+      .update({ status: "revoked", decided_by: "same phone, new app key", decided_at: now, updated_at: now })
+      .eq("id", mine.id)
+      .eq("status", "active");
+    if (revErr) return { ok: false, reason: "unavailable" };
+    const { error: reErr } = await sb.from("staff_punch_devices").insert({
+      tenant_id: tenantId,
+      staff_id: input.staffId,
+      device_id: deviceId,
+      public_key: input.jwk,
+      status: "active",
+      label: input.label.slice(0, 80),
+      phone_id: phoneId,
+      decided_by: "same phone (app reinstalled)",
+      decided_at: now,
+      last_used_at: now,
+    });
+    if (reErr) {
+      console.warn("[punch-devices] re-key failed", reErr.message);
+      return { ok: false, reason: "unavailable" };
+    }
+    return { ok: true, firstRegistration: false, rekeyed: true };
   }
   if (mine) {
     // A different phone. Keep one pending ask per staff+phone, carrying
@@ -151,6 +187,7 @@ export async function checkPunchDevice(input: {
         public_key: input.jwk,
         status: "pending",
         label,
+        phone_id: phoneId,
         attempts: input.attempt ? mergePunchAttempt([], input.attempt, Date.now()) : [],
       });
       if (pendErr && pendErr.code !== "23505") {
@@ -167,6 +204,7 @@ export async function checkPunchDevice(input: {
     public_key: input.jwk,
     status: "active",
     label: input.label.slice(0, 80),
+    phone_id: phoneId,
     decided_by: "first punch",
     decided_at: now,
     last_used_at: now,

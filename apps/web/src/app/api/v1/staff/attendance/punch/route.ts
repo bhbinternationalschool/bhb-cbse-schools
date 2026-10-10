@@ -1,4 +1,6 @@
 import { writeAudit } from "@/lib/audit.server";
+import { appBuildFromHeaders } from "@/lib/appMinBuild";
+import { STAFF_PLAY_TEST_URL } from "@/lib/pwaApps";
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { requestMeta, resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
@@ -235,6 +237,19 @@ export async function POST(request: Request) {
         );
       }
     }
+    // Android phones punch in the BHB Staff app only (director, 10 Oct 2026):
+    // the website and the app keep separate keys, so moving between them
+    // made the same phone ask for approval again every day. iPhones have no
+    // staff app and keep punching on the website.
+    const ua = request.headers.get("user-agent") || "";
+    if (/android/i.test(ua) && appBuildFromHeaders(request.headers).flavor !== "staff") {
+      throw new ApiError(
+        "forbidden",
+        `On an Android phone, punch in the BHB Staff app — it remembers your phone. Get it here: ${STAFF_PLAY_TEST_URL}`,
+        403,
+        { reason: "use_app" },
+      );
+    }
     const jwk = cleanJwk(body.device.jwk);
     const ts = Number(body.device.ts);
     if (!jwk || !body.device.signature || !Number.isFinite(ts)) {
@@ -260,6 +275,7 @@ export async function POST(request: Request) {
       staffId: staff.id,
       jwk,
       label: String(body.device.label || ""),
+      phoneId: String((body.device as { phoneId?: unknown }).phoneId ?? ""),
       attempt: { kind: body.kind, at: new Date().toISOString() },
     }).catch((e: unknown) => {
       console.warn("[punch] device check threw", (e as Error)?.message);
@@ -303,7 +319,7 @@ export async function POST(request: Request) {
       action: "edit",
       entityType: "punch",
       entityId: staff.id,
-      summary: `${printed ? `Printed-QR (v${options.printedQrVersion})` : "Office-QR"} punch-${result.kind} at ${result.time} from own phone${device.firstRegistration ? " (phone registered on this punch)" : ""}`,
+      summary: `${printed ? `Printed-QR (v${options.printedQrVersion})` : "Office-QR"} punch-${result.kind} at ${result.time} from own phone${device.firstRegistration ? " (phone registered on this punch)" : device.rekeyed ? " (same phone, app reinstalled — key replaced)" : ""}`,
       after: {
         kind: result.kind,
         time: result.time,
