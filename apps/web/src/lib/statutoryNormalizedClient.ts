@@ -14,6 +14,10 @@ import {
   recordDeskSyncSuccess,
 } from "@/lib/deskSyncStatus";
 import { confirmDeskDeletes, pendingDeskDeletes, recordDeskDeletion } from "@/lib/deskNamedDeletes";
+import { afterStampedDeskSave, captureDeskStamps, stampedDeskBody } from "@/lib/deskStampsClient";
+import type { RowConflicts, RowStamps } from "@/lib/rowStampClient";
+
+const STATUTORY_SLICES = ["batches"] as const;
 
 const STATUTORY_DESK = "statutory";
 
@@ -72,20 +76,28 @@ async function pushStatutoryDeskApi(state: StatutoryRemitState) {
   const sentDeletes = pendingDeskDeletes(STATUTORY_DESK);
   try {
     const config = normalizeStatutoryConfig(loadMasters().statutoryConfig);
+    const holder = { batches: state.batches, config } as Record<string, unknown>;
+    // Only the batches this browser changed (and the config if it changed).
+    const sent = stampedDeskBody("statutory", holder, STATUTORY_SLICES, "config");
+    if (!sent.anything && !Object.values(sentDeletes).some((ids) => ids?.length)) return;
     const res = await fetch("/api/school-data/statutory-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // Deletions are named, never inferred from what this browser lacks.
-      body: JSON.stringify({ batches: state.batches, config, deletes: sentDeletes }),
+      body: JSON.stringify({ ...sent.body, deletes: sentDeletes }),
     });
     const body = (await res.json().catch(() => null)) as {
       ok?: boolean;
       updatedAt?: string;
       batchCount?: number;
       error?: string;
+      stamps?: RowStamps;
+      conflicts?: RowConflicts;
+      settingsStamp?: string;
     } | null;
     if (res.ok && body?.ok) {
       confirmDeskDeletes(STATUTORY_DESK, sentDeletes);
+      afterStampedDeskSave("statutory", holder, STATUTORY_SLICES, sent, body, "config");
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         batchCount: body.batchCount ?? state.batches.length,
@@ -112,6 +124,8 @@ export async function fetchStatutoryDeskFromApi() {
       config?: StatutoryEstablishmentConfig;
       updatedAt?: string;
       batchCount?: number;
+      stamps?: RowStamps;
+      configStamp?: string;
     };
     if (!Array.isArray(body.batches)) return null;
     return {
@@ -121,6 +135,8 @@ export async function fetchStatutoryDeskFromApi() {
       },
       updatedAt: body.updatedAt || "",
       batchCount: body.batchCount ?? body.batches.length,
+      stamps: body.stamps,
+      configStamp: body.configStamp,
     };
   } catch {
     return null;
@@ -150,5 +166,14 @@ export async function hydrateStatutoryDeskFromDb(preferDb?: boolean) {
   if (!shouldTake) return { ...empty, bundle: remote.bundle, ok: true };
 
   writeMeta({ updatedAt: remote.updatedAt, batchCount: remote.batchCount });
+  // The batches and config as the server holds them are the next save's base.
+  captureDeskStamps(
+    "statutory",
+    remote.bundle as Record<string, unknown>,
+    STATUTORY_SLICES,
+    remote.stamps,
+    remote.configStamp,
+    "config",
+  );
   return { bundle: remote.bundle, changed: true, ok: true };
 }

@@ -6,6 +6,7 @@
  * shared constant from a bot engine must import it from a client-safe module
  * (see waTransportBotPrompts.ts) — never from here.
  */
+import { buildPopupTextPrompt, parsePopupDraft, parsePopupTranslation, type PopupTextRequest } from "@/lib/appPopupText";
 import {
   buildModuleRequestSystemPrompt,
   buildModuleRequestUserPrompt,
@@ -751,6 +752,34 @@ Include 2-4 relevant variables in the body.`;
     error: r.error || "Set OPENAI_API_KEY or GEMINI_API_KEY for AI template drafts",
     engine: r.engine,
   };
+}
+
+/**
+ * App pop-up text (Comms → App pop-ups): the message written from the title
+ * in English and Hindi, or one field translated into the other language.
+ * Draft only — the office reads it, can change it, and saves the pop-up.
+ */
+export async function generateAppPopupTextJson(req: PopupTextRequest): Promise<
+  | { ok: true; draft?: { title: string; titleHi: string; body: string; bodyHi: string }; text?: string; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const { system, user } = buildPopupTextPrompt(req);
+  const opts = {
+    system,
+    userMessage: user,
+    maxTokens: 700,
+    temperature: req.mode === "draft" ? 0.5 : 0.2,
+    geminiMaxTokens: 3072,
+    meta: { route: "app-popup-text", promptVersion: "v1", cacheable: req.mode === "translate" },
+  };
+  if (req.mode === "draft") {
+    const r = await callLlmJson(opts, (t) => parsePopupDraft(t, req.bodyMax));
+    if (r.ok) return { ok: true, draft: r.data, engine: r.engine, generationId: r.generationId };
+    return { ok: false, error: r.error || "AI is not set up on the server", engine: r.engine };
+  }
+  const r = await callLlmJson(opts, (t) => parsePopupTranslation(t, req.max));
+  if (r.ok) return { ok: true, text: r.data.text, engine: r.engine, generationId: r.generationId };
+  return { ok: false, error: r.error || "AI is not set up on the server", engine: r.engine };
 }
 
 /**

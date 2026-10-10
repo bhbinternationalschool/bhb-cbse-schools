@@ -145,6 +145,10 @@ class _CbseSchoolAppState extends State<CbseSchoolApp> {
           builder: (context, child) => AppUpdateGate(
             apiBaseUrl: widget.config.apiBaseUrl,
             messenger: _messenger,
+            onSignOut: () async {
+              await _api.signOut();
+              _router.go("/login");
+            },
             child: child ?? const SizedBox.shrink(),
           ),
         ),

@@ -7,8 +7,10 @@ import { deskReadGate, visibleSlices } from "@/lib/deskFeatureGate.server";
 import type { PayrollState } from "@/lib/payroll";
 import { payrollDualWriteDbEnabled } from "@/lib/payrollDbConfig";
 import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
+import { readStampsParam } from "@/lib/rowStampClient";
 import {
   PAYROLL_DELETABLE_TABLES,
+  PAYROLL_STAMPED_SLICES,
   fetchPayrollDeskFromDb,
   pushPayrollDeskToDb,
 } from "@/lib/payrollNormalized.server";
@@ -34,7 +36,7 @@ export async function GET(req: Request) {
       );
     }
   }
-  const { bundle, meta, ok } = await fetchPayrollDeskFromDb();
+  const { bundle, meta, ok, stamps } = await fetchPayrollDeskFromDb();
   if (!ok) {
     return NextResponse.json(
       { ok: false, error: "Failed to fetch payroll desk" },
@@ -47,6 +49,7 @@ export async function GET(req: Request) {
     runCount: bundle.runs.length,
     updatedAt: meta?.updatedAt || new Date().toISOString(),
     meta,
+    stamps,
   });
 }
 
@@ -57,7 +60,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, skipped: true });
   }
 
-  let body: Pick<PayrollState, "runs" | "audit"> & { deletes?: unknown };
+  let body: Pick<PayrollState, "runs" | "audit"> & { deletes?: unknown; stamps?: unknown };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -68,7 +71,10 @@ export async function POST(req: Request) {
     version: 2,
     runs: body.runs ?? [],
     audit: body.audit ?? [],
-  }, readNamedDeletes(body.deletes, PAYROLL_DELETABLE_TABLES));
+  }, readNamedDeletes(body.deletes, PAYROLL_DELETABLE_TABLES), {
+    // No stamps = a tab from before 10 Oct 2026: it may add, never replace.
+    stamps: readStampsParam(body.stamps, PAYROLL_STAMPED_SLICES),
+  });
   if (!result.ok) {
     return NextResponse.json({ ok: false, error: result.error }, { status: 502 });
   }
@@ -77,5 +83,7 @@ export async function POST(req: Request) {
     ok: true,
     runCount: body.runs?.length ?? 0,
     updatedAt: new Date().toISOString(),
+    stamps: result.stamps,
+    conflicts: result.conflicts,
   });
 }

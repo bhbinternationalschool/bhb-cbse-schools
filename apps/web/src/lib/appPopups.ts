@@ -13,6 +13,8 @@
  * already gave the Aadhaar never sees the Aadhaar pop-up. Pure.
  */
 
+import type { SisStudent } from "@/lib/sis";
+
 export type AppPopupKind = "poster" | "info" | "form";
 export type AppPopupForm = "none" | "aadhaar" | "consent" | "documents";
 export type AppPopupAudience = "parents" | "staff";
@@ -178,7 +180,13 @@ export function countAadhaarGaps(families: { children: number; missing: string[]
  *   matches their record NOW;
  * - not over-shown: "once" = never after it was shown, "daily" = not again
  *   today, "until_done" = every open until the form is done (or the rule
- *   stops matching). Done always ends it.
+ *   stops matching).
+ *
+ * "Done" ends a pop-up — except an Aadhaar or documents form, which ends
+ * only when the family's record is complete (10 Oct 2026): a parent who
+ * saves one child's number and leaves a sibling's empty is asked again for
+ * the sibling, and only for what is still missing (popupsFor lists the gaps
+ * and drops the pop-up once there are none).
  */
 export function popupApplies(
   p: AppPopup,
@@ -197,7 +205,8 @@ export function popupApplies(
   }
 
   const mine = events.filter((e) => e.popupId === p.id);
-  if (mine.some((e) => e.event === "done")) return false;
+  const recordDriven = p.form === "aadhaar" || p.form === "documents";
+  if (!recordDriven && mine.some((e) => e.event === "done")) return false;
   if (p.frequency === "once") return !mine.some((e) => e.event === "shown");
   if (p.frequency === "daily") return !mine.some((e) => e.event === "shown" && e.createdAt.slice(0, 10) === who.today);
   return true;
@@ -240,4 +249,27 @@ export function isValidAadhaar(raw: string): boolean {
 export function maskAadhaarNumber(raw: string): string {
   const n = String(raw ?? "").replace(/\D/g, "");
   return n.length === 12 ? `XXXX-XXXX-${n.slice(8)}` : "";
+}
+
+/**
+ * Children on roll, one row each. SIS keeps a row per child per academic
+ * year and older rows stay "active" (erp-stale-academic-year-rows): a child
+ * who left this year has an inactive 2026-27 row and an active 2025-26 one,
+ * and was counted as on roll — their family would be asked for Aadhaar.
+ * Each child's row for `sessionAy` decides (else their newest row), and the
+ * child counts only if that row is active.
+ */
+export function childrenOnRoll(students: SisStudent[], sessionAy: string): SisStudent[] {
+  const byKey = new Map<string, SisStudent>();
+  for (const s of students) {
+    const key = `${s.householdId}|${s.admissionNo || s.id}`;
+    const prev = byKey.get(key);
+    const better =
+      !prev ||
+      (sessionAy && s.academicYearCode === sessionAy && prev.academicYearCode !== sessionAy) ||
+      (!(sessionAy && prev.academicYearCode === sessionAy) && s.academicYearCode > prev.academicYearCode) ||
+      (s.academicYearCode === prev.academicYearCode && s.status === "active" && prev.status !== "active");
+    if (better) byKey.set(key, s);
+  }
+  return [...byKey.values()].filter((s) => s.status === "active");
 }

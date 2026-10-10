@@ -9,6 +9,7 @@ import { composeClassGroupMessage, waShareUrl } from "@/lib/classGroupMessage";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import { ClassGroupMoveCard } from "@/components/comms/ClassGroupMoveCard";
 import { UnknownLoginsCard } from "@/components/comms/UnknownLoginsCard";
+import { ParentLinksCard } from "@/components/comms/ParentLinksCard";
 
 type Channel = {
   id: string;
@@ -288,6 +289,7 @@ export function ClassChannelsPanel() {
   return (
     <div className="space-y-5">
       <ClassGroupMoveCard />
+      <ParentLinksCard />
       <UnknownLoginsCard />
       <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-semibold text-[var(--brand-deep)]">

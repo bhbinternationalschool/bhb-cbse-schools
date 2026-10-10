@@ -216,6 +216,11 @@ SELFTESTS=(
   test:payment-link-amount
   test:accounts-no-prune
   test:app-popups
+  test:app-popup-preview
+  test:app-popup-text
+  test:app-popups-on-roll
+  test:parent-family-inactive
+  test:parent-number-link
   test:module-requests
   test:weekly-holiday-range
   test:push-voice
@@ -231,6 +236,7 @@ SELFTESTS=(
   test:ptm-row-stamps
   test:accounts-row-stamps
   test:staff-row-stamps
+  test:desk-stamps
   test:attendance-row-stamps
   test:fee-extras-forward-only
   test:admissions-field-ops-merge
@@ -408,6 +414,7 @@ SELFTESTS=(
   test:fee-autopay
   test:secure-id
   test:payouts
+  test:cashgram
   test:diksha-index
   test:teacher-contact
   test:question-bank

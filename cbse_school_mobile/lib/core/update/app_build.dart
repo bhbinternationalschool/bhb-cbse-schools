@@ -21,6 +21,11 @@ class AppBuild {
   /// any request answered 426. [AppUpdateGate] then blocks the app.
   static final ValueNotifier<bool> updateRequired = ValueNotifier(false);
 
+  /// The server's reason when the school has made every child of this
+  /// family inactive (`family_inactive`). [AppUpdateGate] then closes the
+  /// app with that message until the parent signs out.
+  static final ValueNotifier<String?> familyInactive = ValueNotifier(null);
+
   static Future<void> load(String appFlavor) async {
     flavor = appFlavor;
     try {

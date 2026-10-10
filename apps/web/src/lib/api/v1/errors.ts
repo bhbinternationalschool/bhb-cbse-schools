@@ -7,6 +7,8 @@ export type ApiErrorCode =
   | "bad_request"
   | "conflict"
   | "upgrade_required"
+  /** Every child of this parent's family is inactive — the app is closed to them. */
+  | "family_inactive"
   | "server_error";
 
 export class ApiError extends Error {

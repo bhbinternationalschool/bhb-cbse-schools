@@ -62,6 +62,14 @@ export const L_STOCK_WRITTEN_OFF = "5066";
  * of online collections — anything else is a break worth chasing.
  */
 export const L_PG_CLEARING = "1100";
+/**
+ * The Cashfree Payouts wallet: a prefunded balance the school tops up by NEFT
+ * and Cashfree pays out of (refund links, staff payouts). Not the bank — the
+ * bank statement shows the top-up leaving, not each payout — so a payout
+ * booked against 1010 would state a bank balance the bank never shows.
+ * A top-up is a transfer (Dr 1110 / Cr 1010), never an expense.
+ */
+export const L_PAYOUTS_WALLET = "1110";
 /** The gateway's own fee. GST on it goes to 1080 and is claimable. */
 export const L_PG_CHARGES = "5080";
 /**
@@ -118,6 +126,7 @@ export function defaultLedgerAccounts(): LedgerAccountSeed[] {
     { code: L_STAFF_ADVANCES, name: "Staff Advances", kind: "asset", parentCode: "1", scheduleGroup: G.currentAssets, isControl: true },
     { code: L_GST_INPUT, name: "GST Input Credit", kind: "asset", parentCode: "1", scheduleGroup: G.currentAssets },
     { code: L_PG_CLEARING, name: "Payment Gateway Clearing", kind: "asset", parentCode: "1", scheduleGroup: G.currentAssets },
+    { code: L_PAYOUTS_WALLET, name: "Cashfree Payouts Wallet", kind: "asset", parentCode: "1", scheduleGroup: G.currentAssets },
     // Perpetual inventory: goods are capitalised here when received and
     // relieved as they are sold or written off, so this balance tracks the
     // store's own valuation continuously rather than only at a period end.

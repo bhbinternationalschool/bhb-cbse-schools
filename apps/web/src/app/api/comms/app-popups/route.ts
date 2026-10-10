@@ -10,7 +10,8 @@
 import { NextResponse } from "next/server";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { aadhaarInScope, normalizeAppPopup, type AppPopup } from "@/lib/appPopups";
-import { familyFacts, readAppPopups, schoolAadhaarGaps, writeAppPopups } from "@/lib/appPopups.server";
+import { popupTextTooLong } from "@/lib/appPopupText";
+import { childrenOnRoll, familyFacts, readAppPopups, schoolAadhaarGaps, writeAppPopups } from "@/lib/appPopups.server";
 import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
@@ -20,8 +21,10 @@ import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-async function stats(popups: AppPopup[]) {
-  const out: Record<string, { shown: number; dismissed: number; done: number; pendingNow?: number }> = {};
+async function stats(popups: AppPopup[], ay: string) {
+  const out: Record<string, { shown: number; dismissed: number; done: number; pendingNow?: number; completeNow?: number }> = {};
+  // Families (hh:<id>) who saved something on each pop-up.
+  const savedBy = new Map<string, Set<string>>();
   for (const p of popups) out[p.id] = { shown: 0, dismissed: 0, done: 0 };
   const ctx = await getServerTenantContext();
   if (ctx && popups.length) {
@@ -39,25 +42,33 @@ async function stats(popups: AppPopup[]) {
       seen.add(k);
       const st = out[String(r.popup_id)];
       if (st && (r.event === "shown" || r.event === "dismissed" || r.event === "done")) st[r.event as "shown"] += 1;
+      if (r.event === "done") savedBy.set(String(r.popup_id), (savedBy.get(String(r.popup_id)) ?? new Set()).add(String(r.subject_key)));
     }
   }
   const rulePopups = popups.filter((p) => p.targetMode === "rule");
   if (rulePopups.length) {
     await ensureSisHydratedServer();
+    // One row per child on roll — not every year's row (see childrenOnRoll).
     const byHousehold = new Map<string, SisStudent[]>();
-    for (const s of loadSis().students) {
-      if (s.status !== "active" || !s.householdId) continue;
+    for (const s of childrenOnRoll(loadSis().students.filter((x) => x.householdId), ay)) {
       byHousehold.set(s.householdId, [...(byHousehold.get(s.householdId) ?? []), s]);
     }
     for (const p of rulePopups) {
       let n = 0;
-      for (const kids of byHousehold.values()) {
+      let complete = 0;
+      const saved = savedBy.get(p.id) ?? new Set<string>();
+      for (const [hh, kids] of byHousehold) {
         const f = familyFacts(kids, p.consentKey && p.consentKey !== "apaar" ? [p.consentKey] : []);
-        if (p.rule === "missing_docs" && f.missingDocs.length) n += 1;
-        if (p.rule === "missing_aadhaar" && aadhaarInScope(f.missingAadhaar, p.aadhaarScope).length) n += 1;
-        if (p.rule === "consent_pending" && (p.consentKey || "apaar") === "apaar" && f.pendingConsents.includes("apaar")) n += 1;
+        const pending =
+          (p.rule === "missing_docs" && f.missingDocs.length > 0) ||
+          (p.rule === "missing_aadhaar" && aadhaarInScope(f.missingAadhaar, p.aadhaarScope).length > 0) ||
+          (p.rule === "consent_pending" && (p.consentKey || "apaar") === "apaar" && f.pendingConsents.includes("apaar"));
+        if (pending) n += 1;
+        // Finished through this pop-up: saved here, and nothing left to ask.
+        else if (saved.has(`hh:${hh}`)) complete += 1;
       }
       out[p.id]!.pendingNow = n;
+      out[p.id]!.completeNow = complete;
     }
   }
   return out;
@@ -72,7 +83,7 @@ export async function GET(req: Request) {
   const ay = currentAcademicYearCode(loadMasters());
   const aadhaarCounts = await schoolAadhaarGaps(ay).catch(() => null);
   return NextResponse.json(
-    { ok: true, popups: state.popups, stats: await stats(state.popups), aadhaarCounts },
+    { ok: true, popups: state.popups, stats: await stats(state.popups, ay), aadhaarCounts },
     { headers: { "Cache-Control": "no-store" } },
   );
 }
@@ -99,6 +110,12 @@ export async function POST(req: Request) {
   const prev = state.popups.find((p) => p.id === id);
   const popup = normalizeAppPopup({ ...raw, id, createdBy: prev?.createdBy || by, createdAt: prev?.createdAt || now, updatedAt: now });
   if (!popup) return NextResponse.json({ ok: false, error: "A pop-up needs a title." }, { status: 400 });
+  // One phone screen, no scrolling (lib/appPopupText) — checked here too, not only in the editor.
+  // Only when the words change: stopping or starting an older, longer pop-up still works.
+  const textKeys = ["title", "titleHi", "body", "bodyHi", "consentText", "consentTextHi", "form", "imageUrl"] as const;
+  const textChanged = !prev || textKeys.some((k) => prev[k] !== popup[k]);
+  const tooLong = textChanged ? popupTextTooLong(popup) : "";
+  if (tooLong) return NextResponse.json({ ok: false, error: tooLong }, { status: 400 });
   if (popup.form === "consent" && !popup.consentText.trim()) {
     return NextResponse.json({ ok: false, error: "Write the consent text the parent agrees to." }, { status: 400 });
   }

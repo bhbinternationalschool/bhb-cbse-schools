@@ -21,6 +21,18 @@ import { libraryDualWriteDbEnabled } from "@/lib/libraryDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { deleteNamedIds, type NamedDeletes } from "@/lib/deskNamedDeletes.server";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
+import {
+  countDeskRows,
+  settingsStampOf,
+  writeDeskRows,
+  writeDeskSettings,
+  type StampedDeskPushResult,
+} from "@/lib/deskStamps.server";
+import { stampsOf } from "@/lib/rowStampWrite.server";
+import type { RowConflicts, RowStamps } from "@/lib/rowStampClient";
+
+/** Library lists saved row by row with stamps (10 Oct 2026). */
+export const LIBRARY_STAMPED_SLICES = ["titles", "copies", "issues", "procurementDocs"] as const;
 
 export type LibraryDeskSyncMeta = {
   titleCount: number;
@@ -49,18 +61,6 @@ async function resolveCtx(): Promise<{
   return getServerTenantContext();
 }
 
-async function upsertChunks(
-  sb: SupabaseClient,
-  table: string,
-  rows: Record<string, unknown>[],
-  chunk = 200,
-): Promise<{ ok: boolean; error?: string }> {
-  for (let i = 0; i < rows.length; i += chunk) {
-    const { error } = await sb.from(table).upsert(rows.slice(i, i + chunk));
-    if (error) return { ok: false, error: error.message };
-  }
-  return { ok: true };
-}
 
 function parsePackedPublisher(publisherRaw: string): {
   publisher: string;
@@ -312,10 +312,16 @@ export const LIBRARY_DELETABLE_TABLES = [
   "library_desk_procurement_docs",
 ] as const;
 
+/**
+ * Save the library desk. Stamped (`opts.stamps`): only the rows named, each
+ * at the stamp the browser loaded — an old tab can no longer bring back an
+ * open loan someone returned. Unstamped: new rows only (deskStamps.server).
+ */
 export async function pushLibraryDeskToDb(
   state: LibraryState,
   deletes: NamedDeletes = {},
-): Promise<{ ok: boolean; error?: string }> {
+  opts: { stamps?: RowStamps; settingsBase?: string | null } = {},
+): Promise<StampedDeskPushResult> {
   if (!libraryDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
@@ -342,77 +348,80 @@ export async function pushLibraryDeskToDb(
   // only when the user deleted it, and the deletion arrives named. Deleting
   // a title or copy cascades to its loans in the database, so only named ids
   // may ever reach that delete.
-  let r = await upsertChunks(
-    sb,
-    "library_desk_titles",
-    titles.map((t) => titleToRow(tenantId, t)),
-  );
-  if (!r.ok) return r;
-
-  r = await upsertChunks(
-    sb,
-    "library_desk_copies",
-    copies.map((c) => copyToRow(tenantId, c)),
-  );
-  if (!r.ok) return r;
-
-  r = await upsertChunks(
-    sb,
-    "library_desk_issues",
-    issues.map((i) => issueToRow(tenantId, i)),
-  );
-  if (!r.ok) return r;
-
-  r = await upsertChunks(
-    sb,
-    "library_desk_procurement_docs",
-    procurementDocs.map((d) => procurementToRow(tenantId, d)),
-  );
-  if (!r.ok) return r;
+  const stamped = opts.stamps !== undefined;
+  const lists: [(typeof LIBRARY_STAMPED_SLICES)[number], string, Record<string, unknown>[]][] = [
+    ["titles", "library_desk_titles", titles.map((t) => titleToRow(tenantId, t))],
+    ["copies", "library_desk_copies", copies.map((c) => copyToRow(tenantId, c))],
+    ["issues", "library_desk_issues", issues.map((i) => issueToRow(tenantId, i))],
+    ["procurementDocs", "library_desk_procurement_docs", procurementDocs.map((d) => procurementToRow(tenantId, d))],
+  ];
+  const stamps: RowStamps = {};
+  const conflicts: RowConflicts = {};
+  let kept = 0;
+  for (const [slice, table, rows] of lists) {
+    const w = await writeDeskRows(sb, tenantId, table, rows, stamped ? (opts.stamps![slice] ?? {}) : undefined);
+    if (!w.ok) return w;
+    stamps[slice] = w.stamps;
+    if (w.conflicts.length) conflicts[slice] = w.conflicts;
+    kept += w.kept;
+  }
 
   for (const table of LIBRARY_DELETABLE_TABLES) {
     const del = await deleteNamedIds(sb, tenantId, table, deletes[table]);
-    if (!del.ok) return del;
+    if (!del.ok) return { ok: false, error: del.error || `${table}: delete failed` };
   }
 
-  await sb.from("library_desk_settings").upsert(
+  const set = await writeDeskSettings(
+    sb,
+    tenantId,
+    "library_desk_settings",
     {
-      tenant_id: tenantId,
       max_books_per_student: settings.maxBooksPerStudent ?? 2,
       max_books_per_staff: settings.maxBooksPerStaff ?? 3,
       loan_days: settings.loanDays ?? 14,
       fine_paise_per_day: settings.finePaisePerDay ?? 500,
-      updated_at: now,
     },
-    { onConflict: "tenant_id" },
+    stamped,
+    opts.settingsBase,
   );
+  if (!set.ok) return set;
+  if (set.conflict) conflicts.settings = ["settings"];
 
-  const openIssues = issues.filter((i) => !i.returnedOn);
-  let lastIssueAt: string | null = null;
-  for (const i of issues) {
-    const at = i.issuedOn;
-    if (at && (!lastIssueAt || at > lastIssueAt)) lastIssueAt = at;
-  }
-
+  // Counted from the tables: a stamped save carries only what changed.
+  const [titleCount, copyCount, issueCount, openIssueCount, lastIssue] = await Promise.all([
+    countDeskRows(sb, tenantId, "library_desk_titles"),
+    countDeskRows(sb, tenantId, "library_desk_copies"),
+    countDeskRows(sb, tenantId, "library_desk_issues"),
+    countDeskRows(sb, tenantId, "library_desk_issues", { column: "returned_on", value: null }),
+    sb
+      .from("library_desk_issues")
+      .select("issued_on")
+      .eq("tenant_id", tenantId)
+      .order("issued_on", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
   await sb.from("library_desk_sync_meta").upsert(
     {
       tenant_id: tenantId,
-      title_count: titles.length,
-      copy_count: copies.length,
-      issue_count: issues.length,
-      open_issue_count: openIssues.length,
-      last_issue_at: lastIssueAt,
+      title_count: titleCount,
+      copy_count: copyCount,
+      issue_count: issueCount,
+      open_issue_count: openIssueCount,
+      last_issue_at: (lastIssue.data as { issued_on?: string } | null)?.issued_on ?? null,
       updated_at: now,
     },
     { onConflict: "tenant_id" },
   );
 
-  return { ok: true };
+  return { ok: true, stamps, conflicts, settingsStamp: set.stamp, kept };
 }
 
 export async function fetchLibraryDeskFromDb(): Promise<{
   bundle: LibraryDeskBundle;
   meta: LibraryDeskSyncMeta | null;
+  stamps?: RowStamps;
+  settingsStamp?: string;
   /** false = tenant/query could not be resolved; bundle is NOT a confirmed empty state. */
   ok: boolean;
 }> {
@@ -453,7 +462,7 @@ export async function fetchLibraryDeskFromDb(): Promise<{
     sb
       .from("library_desk_settings")
       .select(
-        "max_books_per_student, max_books_per_staff, loan_days, fine_paise_per_day",
+        "max_books_per_student, max_books_per_staff, loan_days, fine_paise_per_day, updated_at",
       )
       .eq("tenant_id", tenantId)
       .maybeSingle(),
@@ -508,6 +517,13 @@ export async function fetchLibraryDeskFromDb(): Promise<{
           updatedAt: String((metaRow as { updated_at: string }).updated_at),
         }
       : null,
+    stamps: {
+      titles: stampsOf(titleRows as Record<string, unknown>[]),
+      copies: stampsOf(copyRows as Record<string, unknown>[]),
+      issues: stampsOf(issueRows as Record<string, unknown>[]),
+      procurementDocs: stampsOf(procurementRows as Record<string, unknown>[]),
+    },
+    settingsStamp: settingsStampOf(settingsRow),
     ok: true,
   };
 }
