@@ -2785,6 +2785,7 @@ class ApiClient {
     String message = LocaleController.strings.apiRequestFailed(
       res.statusCode.toString(),
     );
+    String code = "";
     try {
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       final err = body["error"];
@@ -2792,9 +2793,13 @@ class ApiClient {
       if (err is Map && err["message"] is String) {
         message = err["message"] as String;
       }
+      code = "${(err is Map ? err["code"] : null) ?? body["code"] ?? ""}";
     } catch (_) {
       /* keep default */
     }
+    // The school made every child of this family inactive: the app closes
+    // with the school's message (AppUpdateGate) — not a screen of errors.
+    if (code == "family_inactive") AppBuild.familyInactive.value = message;
     // 426: this build is too old for the server — AppUpdateGate takes over.
     if (res.statusCode == 426) AppBuild.updateRequired.value = true;
     // The screen guide watches for the same error twice (core/guide).

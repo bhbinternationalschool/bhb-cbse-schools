@@ -68,6 +68,14 @@ export async function POST(request: Request) {
       );
     }
 
+    // A family the school has made inactive is not signed in (review login aside).
+    if (!isReviewLogin) {
+      const { readFamilyRollStatus, FAMILY_INACTIVE_MESSAGE } = await import("@/lib/parentFamilyStatus.server");
+      if ((await readFamilyRollStatus(hh.id, resolvedAy)) === "inactive") {
+        return NextResponse.json({ error: FAMILY_INACTIVE_MESSAGE, code: "family_inactive" }, { status: 403 });
+      }
+    }
+
     const session: DemoSession = {
       persona: "parent",
       fullName: hh.guardianName || "Parent",

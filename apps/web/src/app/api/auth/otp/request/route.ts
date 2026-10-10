@@ -45,6 +45,12 @@ export async function POST(request: Request) {
       );
     }
 
+    // A family the school has made inactive gets no code — and is told why.
+    const { familyRollStatus, FAMILY_INACTIVE_MESSAGE } = await import("@/lib/parentFamilyStatus.server");
+    if (familyRollStatus(found.students, "") === "inactive") {
+      return NextResponse.json({ error: FAMILY_INACTIVE_MESSAGE, code: "family_inactive" }, { status: 403 });
+    }
+
     const result = await issueParentOtp({
       mobile,
       householdId: found.household.id,
