@@ -385,6 +385,7 @@
     "test:attendance-side-lists-forward-only": "npx tsx src/lib/attendanceSideListsForwardOnly.selftest.ts",
     "test:school-comms-newer-wins": "npx tsx src/lib/schoolCommsNewerWins.selftest.ts",
     "test:class-gallery": "npx tsx src/lib/classGallery.selftest.ts",
+    "test:class-media-link": "npx tsx src/lib/classMediaLinkToken.selftest.ts",
     "test:staff-attendance-row-stamps": "npx tsx src/lib/staffAttendanceRowStamps.selftest.ts",
     "test:admissions-row-stamps": "npx tsx src/lib/admissionsRowStamps.selftest.ts",
     "test:payment-link-status-guard": "npx tsx src/lib/paymentLinkStatusGuard.selftest.ts",

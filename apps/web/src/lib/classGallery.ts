@@ -150,3 +150,17 @@ export function parseModerationVerdict(text: string): { verdict: "ok" | "hold"; 
   if (r.verdict === "hold") return { verdict: "hold", reason: reason || "Flagged by the AI check" };
   return null;
 }
+
+/** Days an item stays in the bucket; after that it is served from Drive (director, 10 Oct 2026). */
+export const CLASS_GALLERY_KEEP_DAYS = 30;
+
+/** Is this item's bucket copy due to go? Only a passed item, only once its Drive copy is confirmed. */
+export function bucketCopyDue(
+  item: { reviewStatus?: ReviewStatus; uploadedAt: string; storageEvicted?: boolean },
+  driveCopied: boolean,
+  nowMs: number,
+): boolean {
+  if (!driveCopied || item.storageEvicted || (item.reviewStatus ?? "ok") !== "ok") return false;
+  const t = Date.parse(item.uploadedAt);
+  return Number.isFinite(t) && nowMs - t >= CLASS_GALLERY_KEEP_DAYS * 86_400_000;
+}

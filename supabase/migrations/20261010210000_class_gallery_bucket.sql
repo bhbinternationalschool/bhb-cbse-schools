@@ -61,3 +61,10 @@ alter table public.school_comms_desk_photos
 create index if not exists school_comms_desk_photos_review_pending
   on public.school_comms_desk_photos (tenant_id, review_status)
   where review_status = 'pending';
+
+-- The bucket is the fast, private place parents' phones play from — for 30
+-- days (director, 10 Oct 2026). After that, once the Drive copy is confirmed,
+-- the bucket copy is deleted and the ERP serves the item from Drive. The only
+-- copy is never deleted.
+alter table public.school_comms_desk_photos
+  add column if not exists storage_evicted_at timestamptz;

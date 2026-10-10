@@ -9,6 +9,8 @@ import {
   classGalleryType,
   cleanEventName,
   CLASS_GALLERY_TYPES,
+  bucketCopyDue,
+  CLASS_GALLERY_KEEP_DAYS,
   parentMaySee,
   parseModerationVerdict,
   reviewStatusOf,
@@ -98,5 +100,21 @@ assert.ok(/'class-gallery',\s*'class-gallery',\s*false/.test(mig), "the bucket i
 for (const t of Object.keys(CLASS_GALLERY_TYPES)) assert.ok(mig.includes(`'${t}'`), `bucket allows ${t}`);
 assert.ok(/524288000/.test(mig), "the bucket takes a 500 MB video");
 assert.ok(/review_status text not null default 'ok'/.test(mig), "items before the check stay visible");
+
+// 30 days in the bucket, then Drive — never the only copy.
+assert.equal(CLASS_GALLERY_KEEP_DAYS, 30);
+const day = 86_400_000;
+const t0 = Date.parse("2026-10-10T00:00:00Z");
+const item = (days: number, extra: Record<string, unknown> = {}) => ({ uploadedAt: new Date(t0 - days * day).toISOString(), reviewStatus: "ok" as const, ...extra });
+assert.equal(bucketCopyDue(item(31), true, t0), true, "past 30 days with a Drive copy: goes");
+assert.equal(bucketCopyDue(item(29), true, t0), false, "inside 30 days: stays");
+assert.equal(bucketCopyDue(item(90), false, t0), false, "no Drive copy: the only copy is never deleted");
+assert.equal(bucketCopyDue(item(90, { reviewStatus: "held" }), true, t0), false, "a held item waits for the principal");
+assert.equal(bucketCopyDue(item(90, { storageEvicted: true }), true, t0), false, "already gone");
+assert.equal(bucketCopyDue({ uploadedAt: "", reviewStatus: "ok" }, true, t0), false, "no date: stays");
+assert.ok(/\.is\("storage_evicted_at", null\)/.test(review) && /onDrive\.has\(/.test(review), "eviction needs a confirmed Drive copy");
+assert.ok(/media\.evicted/.test(media) && /fromDrive\(media\.driveFileId, request\)/.test(media), "old items are served from Drive");
+assert.ok(/verifyClassMediaLink\(id, q\.get\("exp"\), q\.get\("sig"\)\)/.test(media), "the player's link is signed");
+assert.ok(/storage_evicted_at timestamptz/.test(mig));
 
 console.log("classGallery.selftest: all assertions passed");

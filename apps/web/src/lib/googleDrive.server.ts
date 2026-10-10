@@ -278,8 +278,19 @@ export async function getDriveFileMeta(
   };
 }
 
-export async function getDriveFileContent(driveFileId: string): Promise<
-  | { ok: true; meta: DriveFileMeta; body: ReadableStream<Uint8Array> }
+export async function getDriveFileContent(
+  driveFileId: string,
+  opts: { range?: string } = {},
+): Promise<
+  | {
+      ok: true;
+      meta: DriveFileMeta;
+      body: ReadableStream<Uint8Array>;
+      /** 206 when a byte range was asked for and served (video seeking). */
+      status: number;
+      contentRange: string;
+      contentLength: string;
+    }
   | { ok: false; error: string }
 > {
   const token = await ensureDriveAccessToken();
@@ -291,12 +302,24 @@ export async function getDriveFileContent(driveFileId: string): Promise<
   try {
     const res = await fetch(
       `${DRIVE_API}/files/${encodeURIComponent(driveFileId)}?alt=media`,
-      { headers: { Authorization: `Bearer ${token.accessToken}` } },
+      {
+        headers: {
+          Authorization: `Bearer ${token.accessToken}`,
+          ...(opts.range ? { Range: opts.range } : {}),
+        },
+      },
     );
     if (!res.ok || !res.body) {
       return { ok: false, error: `Drive content HTTP ${res.status}` };
     }
-    return { ok: true, meta: meta.meta, body: res.body };
+    return {
+      ok: true,
+      meta: meta.meta,
+      body: res.body,
+      status: res.status,
+      contentRange: res.headers.get("content-range") || "",
+      contentLength: res.headers.get("content-length") || "",
+    };
   } catch (e) {
     return {
       ok: false,

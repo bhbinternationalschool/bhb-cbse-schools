@@ -18,12 +18,15 @@ import { getServerTenantContext } from "@/lib/serverTenant";
 import { rowToAlbum, rowToPhoto, touchCommsMeta } from "@/lib/schoolCommsNormalized.server";
 import {
   CLASS_GALLERY_BUCKET,
+  CLASS_GALLERY_KEEP_DAYS,
   MODERATION_PROMPT,
   MODERATION_SYSTEM,
   REVIEW_MAX_ATTEMPTS,
   classGalleryDriveFolder,
   classMediaUrl,
+  bucketCopyDue,
   parseModerationVerdict,
+  reviewStatusOf,
   type ReviewStatus,
 } from "@/lib/classGallery";
 
@@ -321,8 +324,10 @@ export async function listItemsForReview() {
  * The tick's sweep: pending items nobody is checking, then passed items whose
  * Drive copy has not landed. Stops at the deadline; the rest wait for the next tick.
  */
-export async function sweepClassGallery(deadline: number): Promise<{ checked: number; held: number; copied: number }> {
-  const out = { checked: 0, held: 0, copied: 0 };
+export async function sweepClassGallery(
+  deadline: number,
+): Promise<{ checked: number; held: number; copied: number; movedToDrive: number }> {
+  const out = { checked: 0, held: 0, copied: 0, movedToDrive: 0 };
   const ctx = await getServerTenantContext();
   if (!ctx) return out;
   const { sb, tenantId } = ctx;
@@ -340,25 +345,35 @@ export async function sweepClassGallery(deadline: number): Promise<{ checked: nu
     if (s !== "pending") out.checked += 1;
     if (s === "held") out.held += 1;
   }
-  const since = new Date(Date.now() - 7 * 86_400_000).toISOString();
+  out.movedToDrive = await dropOldBucketCopies(deadline).catch((e: unknown) => {
+    console.warn("[class-gallery] 30-day cleanup failed", e);
+    return 0;
+  });
+  // Every passed item still only in the bucket (a full Drive before the
+  // Education upgrade leaves some behind; they land once there is room).
   const { data: passed } = await sb
     .from(PHOTOS)
     .select("id, storage_path")
     .eq("tenant_id", tenantId)
     .eq("review_status", "ok")
     .neq("storage_path", "")
-    .gt("uploaded_at", since)
-    .limit(200);
+    .is("storage_evicted_at", null)
+    .order("uploaded_at", { ascending: false })
+    .limit(150);
   if (!passed?.length) return out;
   const { data: copied } = await sb
     .from("drive_archive")
-    .select("ref, drive_file_id, attempts")
+    .select("ref, drive_file_id, attempts, updated_at")
     .eq("tenant_id", tenantId)
     .eq("kind", "media")
     .in("ref", passed.map((p) => `${CLASS_GALLERY_BUCKET}/${p.storage_path}`));
-  // Copied, or tried five times (a dead Drive grant shows in the archive list, not as endless retries).
+  // Copied — or failed five times and tried within the last day: a full or
+  // disconnected Drive is retried daily, not every ten minutes.
+  const dayAgo = Date.now() - 86_400_000;
   const done = new Set(
-    (copied ?? []).filter((c) => c.drive_file_id || Number(c.attempts) >= 5).map((c) => String(c.ref)),
+    (copied ?? [])
+      .filter((c) => c.drive_file_id || (Number(c.attempts) >= 5 && Date.parse(String(c.updated_at)) > dayAgo))
+      .map((c) => String(c.ref)),
   );
   for (const p of passed) {
     if (done.has(`${CLASS_GALLERY_BUCKET}/${p.storage_path}`)) continue;
@@ -366,4 +381,58 @@ export async function sweepClassGallery(deadline: number): Promise<{ checked: nu
     if (await copyClassItemToDrive(String(p.id))) out.copied += 1;
   }
   return out;
+}
+
+/**
+ * After CLASS_GALLERY_KEEP_DAYS the bucket copy goes and Drive serves the item
+ * — but only for a passed item whose Drive copy is confirmed (drive_archive
+ * holds its file id). The only copy is never deleted; an item whose Drive
+ * copy failed stays in the bucket until it lands.
+ */
+async function dropOldBucketCopies(deadline: number): Promise<number> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return 0;
+  const { sb, tenantId } = ctx;
+  const cutoff = new Date(Date.now() - CLASS_GALLERY_KEEP_DAYS * 86_400_000).toISOString();
+  const { data: old, error } = await sb
+    .from(PHOTOS)
+    .select("id, storage_path, uploaded_at, review_status, storage_evicted_at")
+    .eq("tenant_id", tenantId)
+    .eq("review_status", "ok")
+    .neq("storage_path", "")
+    .is("storage_evicted_at", null)
+    .lt("uploaded_at", cutoff)
+    .limit(150);
+  if (error || !old?.length) return 0;
+  const refs = old.map((p) => `${CLASS_GALLERY_BUCKET}/${p.storage_path}`);
+  const { data: copies, error: ce } = await sb
+    .from("drive_archive")
+    .select("ref, drive_file_id")
+    .eq("tenant_id", tenantId)
+    .eq("kind", "media")
+    .in("ref", refs);
+  if (ce) return 0;
+  const onDrive = new Set((copies ?? []).filter((c) => c.drive_file_id).map((c) => String(c.ref)));
+  let moved = 0;
+  for (const p of old) {
+    if (Date.now() > deadline - 30_000) break;
+    const item = {
+      reviewStatus: reviewStatusOf(p.review_status),
+      uploadedAt: String(p.uploaded_at),
+      storageEvicted: !!p.storage_evicted_at,
+    };
+    if (!bucketCopyDue(item, onDrive.has(`${CLASS_GALLERY_BUCKET}/${p.storage_path}`), Date.now())) continue;
+    // Mark first: a reader that sees the mark goes to Drive, which already has it.
+    const { error: me } = await sb
+      .from(PHOTOS)
+      .update({ storage_evicted_at: new Date().toISOString() })
+      .eq("tenant_id", tenantId)
+      .eq("id", p.id)
+      .is("storage_evicted_at", null);
+    if (me) continue;
+    const { error: re } = await sb.storage.from(CLASS_GALLERY_BUCKET).remove([String(p.storage_path)]);
+    if (re) console.warn("[class-gallery] bucket delete failed", p.id, re.message);
+    moved += 1;
+  }
+  return moved;
 }

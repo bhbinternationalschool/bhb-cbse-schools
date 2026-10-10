@@ -391,6 +391,7 @@ export function rowToPhoto(r: Record<string, unknown>): GalleryPhoto {
     storagePath: String(r.storage_path || ""),
     reviewStatus: reviewStatusOf(r.review_status),
     reviewNote: String(r.review_note || ""),
+    storageEvicted: !!r.storage_evicted_at,
   };
 }
 

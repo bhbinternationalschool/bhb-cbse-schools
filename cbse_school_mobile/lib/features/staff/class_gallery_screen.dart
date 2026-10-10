@@ -1,6 +1,7 @@
 import "package:flutter/material.dart";
 import "package:image_picker/image_picker.dart";
 import "package:url_launcher/url_launcher.dart";
+import "package:video_compress/video_compress.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
@@ -340,6 +341,9 @@ class _Upload {
 
   /// After upload: "ok", "held" or "pending" (still being checked).
   String status = "";
+
+  /// 0..1 while a video is shrunk to 720p before it uploads; null otherwise.
+  double? shrinking;
 }
 
 class _ClassEventScreenState extends State<ClassEventScreen> {
@@ -386,6 +390,42 @@ class _ClassEventScreenState extends State<ClassEventScreen> {
     await _runQueue();
   }
 
+  /// A phone video shrunk to 720p before it uploads (director, 10 Oct 2026):
+  /// a five-minute clip goes from ~500 MB to ~60–100 MB — quicker on mobile
+  /// data for the teacher and the parents. If shrinking fails, or would not
+  /// make it smaller, the original goes as it is.
+  Future<XFile> _shrink(_Upload u) async {
+    if (mounted) setState(() => u.shrinking = 0);
+    final sub = VideoCompress.compressProgress$.subscribe((p) {
+      if (mounted) {
+        setState(() => u.shrinking = (p / 100).clamp(0, 1).toDouble());
+      }
+    });
+    try {
+      final info = await VideoCompress.compressVideo(
+        u.file.path,
+        quality: VideoQuality.Res1280x720Quality,
+        includeAudio: true,
+      );
+      final out = info?.file;
+      if (out == null) return u.file;
+      final before = await u.file.length();
+      final after = await out.length();
+      return after > 0 && after < before
+          ? XFile(
+              out.path,
+              mimeType: "video/mp4",
+              name: "${u.file.name.split(".").first}.mp4",
+            )
+          : u.file;
+    } catch (_) {
+      return u.file;
+    } finally {
+      sub.unsubscribe();
+      if (mounted) setState(() => u.shrinking = null);
+    }
+  }
+
   Future<void> _runQueue() async {
     if (_running) return;
     _running = true;
@@ -393,13 +433,14 @@ class _ClassEventScreenState extends State<ClassEventScreen> {
       for (final u
           in _uploads.where((u) => !u.done && u.error.isEmpty).toList()) {
         try {
-          final length = await u.file.length();
+          final file = u.isVideo ? await _shrink(u) : u.file;
+          final length = await file.length();
           final status = await widget.api.uploadClassMedia(
             albumId: widget.albumId,
-            fileName: u.file.name,
-            contentType: u.file.mimeType ?? "",
+            fileName: file.name,
+            contentType: file == u.file ? (u.file.mimeType ?? "") : "video/mp4",
             length: length,
-            open: () => u.file.openRead(),
+            open: () => file.openRead(),
             onProgress: (p) {
               if (mounted) setState(() => u.progress = p);
             },
@@ -425,6 +466,8 @@ class _ClassEventScreenState extends State<ClassEventScreen> {
       }
     } finally {
       _running = false;
+      // The shrunk copies are only for the upload.
+      await VideoCompress.deleteAllCache().catchError((_) => null);
     }
   }
 
@@ -533,6 +576,23 @@ class _ClassEventScreenState extends State<ClassEventScreen> {
                                 ? AppColors.warning
                                 : AppColors.success,
                           ),
+                        )
+                      : u.shrinking != null
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _t(
+                                "Making the video smaller…",
+                                "वीडियो छोटा किया जा रहा है…",
+                              ),
+                              style: AppText.labelMediumMuted,
+                            ),
+                            const SizedBox(height: 4),
+                            LinearProgressIndicator(
+                              value: u.shrinking == 0 ? null : u.shrinking,
+                            ),
+                          ],
                         )
                       : u.progress >= 1
                       ? Text(

@@ -62,6 +62,8 @@ export type GalleryPhoto = {
   reviewStatus?: "pending" | "ok" | "held" | "removed";
   /** Why the check held it (for the principal). */
   reviewNote?: string;
+  /** Class-gallery items past their 30 days: the bucket copy is gone, Drive serves it. */
+  storageEvicted?: boolean;
 };
 
 export type GalleryAlbum = {

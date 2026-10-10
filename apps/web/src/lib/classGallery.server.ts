@@ -224,10 +224,20 @@ export function parentSections(householdStudents: SisStudent[], sessionAy: strin
   return new Set(childrenOnRoll(householdStudents, sessionAy).map((s) => sectionKey(s.classId, s.sectionId)));
 }
 
-/** One item, for the media route: its storage path and its album's audience. */
-export async function readClassMedia(
-  photoId: string,
-): Promise<{ path: string; url: string; sectionIds: string[]; reviewStatus: ReviewStatus } | null> {
+/**
+ * One item, for the media route: where it lives (the bucket, or — after its
+ * 30 days — Drive), its album's audience and its review status.
+ */
+export async function readClassMedia(photoId: string): Promise<{
+  path: string;
+  url: string;
+  sectionIds: string[];
+  reviewStatus: ReviewStatus;
+  mediaKind: "photo" | "video";
+  /** Set once the bucket copy is gone: Drive serves it. */
+  driveFileId: string;
+  evicted: boolean;
+} | null> {
   const { sb, tenantId } = await db();
   const { data: p, error } = await sb.from("school_comms_desk_photos").select("*").eq("tenant_id", tenantId).eq("id", photoId).maybeSingle();
   if (error) throw new ApiError("server_error", "Could not read — try again", 503);
@@ -240,10 +250,24 @@ export async function readClassMedia(
     .eq("id", photo.albumId)
     .maybeSingle();
   if (ae) throw new ApiError("server_error", "Could not read — try again", 503);
+  let driveFileId = "";
+  if (photo.storageEvicted && photo.storagePath) {
+    const { data: d } = await sb
+      .from("drive_archive")
+      .select("drive_file_id")
+      .eq("tenant_id", tenantId)
+      .eq("kind", "media")
+      .eq("ref", `${CLASS_GALLERY_BUCKET}/${photo.storagePath}`)
+      .maybeSingle();
+    driveFileId = String((d as { drive_file_id?: string } | null)?.drive_file_id || "");
+  }
   return {
     path: photo.storagePath || "",
     url: photo.url,
     reviewStatus: photo.reviewStatus ?? "ok",
+    mediaKind: photo.mediaKind === "video" ? "video" : "photo",
+    driveFileId,
+    evicted: !!photo.storageEvicted,
     sectionIds: Array.isArray((a as { section_ids?: unknown } | null)?.section_ids) ? ((a as { section_ids: string[] }).section_ids) : [],
   };
 }
