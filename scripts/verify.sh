@@ -121,6 +121,7 @@ SELFTESTS=(
   test:tutor-guide
   test:wa-markdown
   test:wa-parent-guide
+  test:parent-bot-day-app
   test:udise-nudge
   test:apaar-consent
   test:aadhaar-certificate
