@@ -33,11 +33,13 @@ export async function writeDeskRows(
   table: string,
   rows: Record<string, unknown>[],
   stamps: Record<string, string> | undefined,
+  /** The table's unique key for inserts — "tenant_id,id" where id alone is not unique. */
+  conflictKey = "id",
 ): Promise<DeskRowsResult> {
   if (stamps) {
     const changed = rows.filter((r) => String(r.id) in stamps);
     if (!changed.length) return { ok: true, stamps: {}, conflicts: [], kept: 0, landed: new Set() };
-    const res = await writeStampedRows(sb, table, tenantId, changed, stamps);
+    const res = await writeStampedRows(sb, table, tenantId, changed, stamps, conflictKey);
     if (!res.ok) return { ok: false, error: `${table}: ${res.error}` };
     return { ok: true, stamps: res.stamps, conflicts: res.conflicts, kept: 0, landed: new Set(Object.keys(res.stamps)) };
   }
@@ -46,7 +48,7 @@ export async function writeDeskRows(
     const part = rows.slice(i, i + 200);
     const { data, error } = await sb
       .from(table)
-      .upsert(part, { onConflict: "id", ignoreDuplicates: true })
+      .upsert(part, { onConflict: conflictKey, ignoreDuplicates: true })
       .select("id");
     if (error) return { ok: false, error: `${table}: ${error.message}` };
     for (const d of data ?? []) landed.add(String(d.id));
