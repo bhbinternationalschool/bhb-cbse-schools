@@ -406,6 +406,7 @@ SELFTESTS=(
   test:fee-autopay
   test:secure-id
   test:payouts
+  test:cashgram
   test:diksha-index
   test:teacher-contact
   test:question-bank

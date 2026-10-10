@@ -507,6 +507,7 @@ jobs:
           npm run test:fee-autopay
           npm run test:secure-id
           npm run test:payouts
+          npm run test:cashgram
           npm run test:diksha-index
           npm run test:teacher-contact
           npm run test:parent-profile
