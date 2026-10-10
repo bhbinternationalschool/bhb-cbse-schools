@@ -78,6 +78,9 @@ export type PayoutSettings = {
   refundApproval: CashgramApprovalRule;
   /** With refundApproval "above": links above this wait for the owner. */
   refundApprovalAbovePaise: number;
+  /** Who approves paying a vendor bill or voucher from the wallet. */
+  paymentApproval: CashgramApprovalRule;
+  paymentApprovalAbovePaise: number;
   updatedBy: string;
   updatedAt: string;
 };
@@ -89,6 +92,8 @@ export async function getPayoutSettings(): Promise<PayoutSettings> {
     testPassedAt: "",
     refundApproval: "owner",
     refundApprovalAbovePaise: 0,
+    paymentApproval: "owner",
+    paymentApprovalAbovePaise: 0,
     updatedBy: "",
     updatedAt: "",
   };
@@ -104,6 +109,8 @@ export async function getPayoutSettings(): Promise<PayoutSettings> {
     testPassedAt: r.test_passed_at ? String(r.test_passed_at) : "",
     refundApproval: readApprovalRule(r.refund_approval),
     refundApprovalAbovePaise: Math.max(0, Number(r.refund_approval_above_paise ?? 0) || 0),
+    paymentApproval: readApprovalRule(r.payment_approval),
+    paymentApprovalAbovePaise: Math.max(0, Number(r.payment_approval_above_paise ?? 0) || 0),
     updatedBy: String(r.updated_by ?? ""),
     updatedAt: String(r.updated_at ?? ""),
   };
@@ -116,6 +123,8 @@ async function savePayoutSettings(
     test_passed_at: string | null;
     refund_approval: CashgramApprovalRule;
     refund_approval_above_paise: number;
+    payment_approval: CashgramApprovalRule;
+    payment_approval_above_paise: number;
   }>,
   by: string,
 ) {
@@ -151,6 +160,17 @@ export async function setRefundApproval(
   const above = Math.max(0, Math.round(Number(abovePaise) || 0));
   if (rule === "above" && above < 100) return { ok: false, error: "Give the amount above which the owner approves" };
   return savePayoutSettings({ refund_approval: rule, refund_approval_above_paise: rule === "above" ? above : 0 }, by);
+}
+
+/** The school's rule for who approves a vendor / voucher payment. Owner only (route). */
+export async function setPaymentApproval(
+  rule: CashgramApprovalRule,
+  abovePaise: number,
+  by: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const above = Math.max(0, Math.round(Number(abovePaise) || 0));
+  if (rule === "above" && above < 100) return { ok: false, error: "Give the amount above which the owner approves" };
+  return savePayoutSettings({ payment_approval: rule, payment_approval_above_paise: rule === "above" ? above : 0 }, by);
 }
 
 /** The owner's switch. Turning ON needs a passed ₹1 test. */
@@ -555,6 +575,20 @@ async function settleTransferEffects(view: PayoutTransferView): Promise<void> {
       if (!st.testPassedAt) {
         await savePayoutSettings({ test_transfer_id: view.transferId, test_passed_at: new Date().toISOString() }, row.requestedBy || "test");
       }
+    }
+    return;
+  }
+  // A vendor bill or voucher paid by transfer: its request does the booking
+  // (payoutRequests.server) — settle the bill / post the voucher from the
+  // wallet on SUCCESS, free the request on a failure.
+  if (t.target_kind === "payout_request" && t.target_id) {
+    const req = await import("@/lib/payoutRequests.server");
+    if (view.status === "SUCCESS") {
+      await req.applyPayoutRequest(t.target_id, view.utr || `transfer ${view.transferId}`, /^\d{12}$/.test(view.utr) ? view.utr : "");
+    } else if (view.status === "REVERSED") {
+      await req.flagRequestReversed(t.target_id);
+    } else if (view.status === "FAILED" || view.status === "REJECTED") {
+      await req.requestChildDied(t.target_id, view.statusDescription || `Transfer ${view.status.toLowerCase()}`);
     }
     return;
   }

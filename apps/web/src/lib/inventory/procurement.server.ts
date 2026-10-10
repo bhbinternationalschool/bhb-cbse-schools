@@ -987,7 +987,30 @@ export async function listVendorBills(opts: {
  * by the same code that writes them. A bill showing more paid than it is worth
  * hides either a keying error or a duplicate payment.
  */
+/**
+ * A vendor payment entered by a person. "cashfree" is refused here: it books
+ * the payment from the Payouts wallet (1110), and only Cashfree's own
+ * confirmation may say the wallet paid (recordVendorPaymentFromWallet).
+ */
 export async function recordVendorPayment(
+  input: Parameters<typeof payVendorBill>[0],
+  actor: string,
+): ReturnType<typeof payVendorBill> {
+  if (String(input.mode || "").toLowerCase() === "cashfree") {
+    throw new InvError("Paying from the Cashfree wallet is done with the Pay from Cashfree button, not entered by hand", 400);
+  }
+  return payVendorBill(input, actor);
+}
+
+/** Server only: Cashfree confirmed the wallet paid this bill. */
+export async function recordVendorPaymentFromWallet(
+  input: Omit<Parameters<typeof payVendorBill>[0], "mode">,
+  actor: string,
+): ReturnType<typeof payVendorBill> {
+  return payVendorBill({ ...input, mode: "cashfree" }, actor);
+}
+
+async function payVendorBill(
   input: {
     billId: string;
     paidOn?: string;
