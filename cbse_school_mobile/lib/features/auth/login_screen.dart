@@ -5,6 +5,7 @@ import "../../core/api/api_client.dart";
 import "../../core/config/app_config.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/i18n/locale_controller.dart";
+import "link_number_screen.dart";
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({
@@ -44,6 +45,10 @@ class _LoginScreenState extends State<LoginScreen> {
   String? _error;
   String? _info;
 
+  /// The server's reason for the last failure ("unknown_number" offers
+  /// "Link this number to my child").
+  String _errorCode = "";
+
   /// The parent build has no staff sign-in at all, so `_staffMode` stays false
   /// there for the life of the screen.
   bool get _showAudienceToggle => widget.audience == AppAudience.staff;
@@ -62,11 +67,17 @@ class _LoginScreenState extends State<LoginScreen> {
       _busy = true;
       _error = null;
       _info = null;
+      _errorCode = "";
     });
     try {
       await action();
     } on ApiException catch (e) {
-      if (mounted) setState(() => _error = e.message);
+      if (mounted) {
+        setState(() {
+          _error = e.message;
+          _errorCode = e.code;
+        });
+      }
     } catch (_) {
       if (mounted) {
         setState(() => _error = context.l10n.authCouldNotReachServerTryAgain);
@@ -271,6 +282,33 @@ class _LoginScreenState extends State<LoginScreen> {
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ],
+                  ],
+                  // A parent on a phone the school never recorded links it
+                  // to their child (ERP lib/parentNumberLink).
+                  if (!_staffMode && _errorCode == "unknown_number") ...[
+                    const SizedBox(height: 10),
+                    FilledButton.tonalIcon(
+                      icon: const Icon(Icons.link),
+                      label: Text(
+                        Localizations.localeOf(context).languageCode == "hi"
+                            ? "यह नंबर अपने बच्चे से जोड़ें"
+                            : "Link this number to my child",
+                      ),
+                      onPressed: _busy
+                          ? null
+                          : () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => LinkNumberScreen(
+                                  api: widget.api,
+                                  mobile: _mobile.text.trim(),
+                                  onSignedIn: () {
+                                    Navigator.of(context).pop();
+                                    widget.onSignedIn();
+                                  },
+                                ),
+                              ),
+                            ),
+                    ),
                   ],
                   if (_info != null) ...[
                     const SizedBox(height: 12),

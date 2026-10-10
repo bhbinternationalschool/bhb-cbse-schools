@@ -362,6 +362,7 @@
     "test:app-popup-text": "npx tsx src/lib/appPopupText.selftest.ts",
     "test:app-popups-on-roll": "npx tsx src/lib/appPopupsOnRoll.selftest.ts",
     "test:parent-family-inactive": "npx tsx src/lib/parentFamilyInactive.selftest.ts",
+    "test:parent-number-link": "npx tsx src/lib/parentNumberLink.selftest.ts",
     "test:module-requests": "npx tsx src/lib/moduleRequests.selftest.ts",
     "test:weekly-holiday-range": "npx tsx src/lib/weeklyHolidayRange.selftest.ts",
     "test:push-voice": "npx tsx src/lib/pushVoice.selftest.ts",
