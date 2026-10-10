@@ -9,6 +9,9 @@ import {
   classGalleryType,
   cleanEventName,
   CLASS_GALLERY_TYPES,
+  parentMaySee,
+  parseModerationVerdict,
+  reviewStatusOf,
 } from "./classGallery";
 
 console.log("classGallery.selftest.ts");
@@ -35,10 +38,11 @@ assert.equal(classGalleryType("video/mp4", "x"), "video/mp4");
 assert.equal(classGalleryType("", "clip.mov"), "video/quicktime");
 assert.equal(classGalleryType("application/pdf", "a.pdf"), "", "not a photo or video");
 assert.equal(classGalleryFileProblem("image/jpeg", 2_000_000), "");
-assert.match(classGalleryFileProblem("video/mp4", 150 * 1024 * 1024), /limit is 100 MB/);
+assert.equal(classGalleryFileProblem("video/mp4", 450 * 1024 * 1024), "", "a five-minute video fits");
+assert.match(classGalleryFileProblem("video/mp4", 600 * 1024 * 1024), /limit is 500 MB \(about 5 minutes\)/);
 assert.match(classGalleryFileProblem("image/jpeg", 20 * 1024 * 1024), /limit is 15 MB/);
 assert.match(classGalleryFileProblem("", 10), /Only photos/);
-assert.equal(CLASS_GALLERY_TYPES["video/mp4"]!.maxBytes, 100 * 1024 * 1024);
+assert.equal(CLASS_GALLERY_TYPES["video/mp4"]!.maxBytes, 500 * 1024 * 1024);
 
 // ── Paths and folders ──────────────────────────────────────────────────────
 assert.equal(classGalleryPath("cls_x|sec_a", "alb_1", "pho_2", "jpg"), "cls_x_sec_a/alb_1/pho_2.jpg", "no '|' or '..' in a storage key");
@@ -56,7 +60,33 @@ assert.ok(/createSignedUrl\(path, 10 \* 60\)/.test(read("classGallery.server.ts"
 const server = read("classGallery.server.ts");
 assert.ok(/assertMaySection\(ctx, album\.sectionIds!\[0\]!\)/.test(server), "only that class's teacher (or leadership) adds");
 assert.ok(/opts\.path !== classGalleryPath\(/.test(server), "only a path the server issued is recorded");
-assert.ok(/classGalleryDriveFolder\(album\.academicYearCode, album\.classLabel/.test(server), "Drive: Class gallery / year / class / event");
+const review = read("classGalleryReview.server.ts");
+assert.ok(/classGalleryDriveFolder\(album\.academicYearCode, album\.classLabel/.test(review), "Drive: Class gallery / year / class / event");
+assert.ok(/if \(photo\.reviewStatus !== "ok" \|\| !photo\.storagePath\) return false/.test(review), "only a passed item goes to Drive");
+assert.ok(/review_status: "pending"/.test(server) && /reviewClassItem\(opts\.photoId, deadline\)/.test(server), "an upload starts pending and is checked");
+assert.ok(/attempts \+ 1 < REVIEW_MAX_ATTEMPTS\) return "pending"/.test(review) && /"The AI check could not run/.test(review), "an AI that cannot answer never passes an item");
+assert.ok(/\.eq\("review_attempts", attempts\)/.test(review), "one checker at a time");
+assert.ok(/settle\(photoId, "removed"/.test(review) && /storage\.from\(CLASS_GALLERY_BUCKET\)\.remove/.test(review), "remove deletes the file, keeps the row");
+assert.ok(/!p\.url \|\| !parentMaySee\(p\)/.test(albums), "albums list only passed items");
+assert.ok(/media\.reviewStatus === "ok"/.test(media), "a parent's file request needs a passed item");
+assert.ok(/review_status: p\.storagePath \? "pending" : "ok"/.test(read("schoolCommsNormalized.server.ts")), "a desk save never passes a class item");
+assert.ok(/postableSections\(ctx\)\)\.unrestricted/.test(read("../app/api/v1/staff/class-gallery/review/route.ts")), "only leadership decides");
+assert.ok(/sweepClassGallery\(/.test(read("../app/api/comms/scheduled-publish/tick/route.ts")), "the tick finishes checks");
+
+// The verdict: only a clear "ok" passes.
+assert.deepEqual(parseModerationVerdict('{"verdict":"ok","reason":"x"}'), { verdict: "ok", reason: "" });
+assert.deepEqual(parseModerationVerdict('{"verdict":"hold","reason":"Child changing clothes"}'), { verdict: "hold", reason: "Child changing clothes" });
+assert.equal(parseModerationVerdict('{"verdict":"hold"}')!.reason, "Flagged by the AI check");
+assert.equal(parseModerationVerdict('{"verdict":"maybe"}'), null);
+assert.equal(parseModerationVerdict("not json"), null);
+assert.equal(parseModerationVerdict(""), null);
+assert.equal(parentMaySee({ reviewStatus: "pending" }), false);
+assert.equal(parentMaySee({ reviewStatus: "held" }), false);
+assert.equal(parentMaySee({ reviewStatus: "removed" }), false);
+assert.equal(parentMaySee({ reviewStatus: "ok" }), true);
+assert.equal(parentMaySee({}), true, "school-wide photos from before the check");
+assert.equal(reviewStatusOf("held"), "held");
+assert.equal(reviewStatusOf(undefined), "ok");
 assert.ok(/\.eq\("section_ids", "\{\}"\)/.test(read("../app/api/website/publishable/route.ts")), "never on the website");
 assert.ok(/!a\.sectionIds\?\.length/.test(read("../components/parent/ParentCommsPortal.tsx")), "not in the web parent portal's school albums");
 const comms = read("schoolCommsNormalized.server.ts");
@@ -66,5 +96,7 @@ assert.ok(/features\.push\("class_gallery"\)/.test(read("../app/api/v1/staff/fea
 const mig = readFileSync(join(__dirname, "../../../../supabase/migrations/20261010210000_class_gallery_bucket.sql"), "utf8");
 assert.ok(/'class-gallery',\s*'class-gallery',\s*false/.test(mig), "the bucket is private");
 for (const t of Object.keys(CLASS_GALLERY_TYPES)) assert.ok(mig.includes(`'${t}'`), `bucket allows ${t}`);
+assert.ok(/524288000/.test(mig), "the bucket takes a 500 MB video");
+assert.ok(/review_status text not null default 'ok'/.test(mig), "items before the check stay visible");
 
 console.log("classGallery.selftest: all assertions passed");

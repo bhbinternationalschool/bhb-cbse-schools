@@ -58,6 +58,10 @@ export type GalleryPhoto = {
   mediaKind?: "photo" | "video";
   /** Class-gallery items: the path in the private class-gallery bucket. */
   storagePath?: string;
+  /** Class-gallery items: "pending" until checked; parents see only "ok". */
+  reviewStatus?: "pending" | "ok" | "held" | "removed";
+  /** Why the check held it (for the principal). */
+  reviewNote?: string;
 };
 
 export type GalleryAlbum = {

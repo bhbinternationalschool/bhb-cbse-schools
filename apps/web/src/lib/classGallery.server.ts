@@ -7,7 +7,6 @@ import type { ApiAuthContext } from "@/lib/api/v1/auth";
 import { ApiError } from "@/lib/api/v1/errors";
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
 import { childrenOnRoll } from "@/lib/appPopups";
-import { archiveToDrive } from "@/lib/driveArchive.server";
 import type { MastersState } from "@/lib/masters";
 import type { GalleryAlbum } from "@/lib/schoolComms";
 import { albumToRow, photoToRow, rowToAlbum, rowToPhoto, touchCommsMeta } from "@/lib/schoolCommsNormalized.server";
@@ -16,13 +15,14 @@ import type { SisStudent } from "@/lib/sis";
 import {
   CLASS_GALLERY_BUCKET,
   CLASS_GALLERY_TYPES,
-  classGalleryDriveFolder,
   classGalleryFileProblem,
   classGalleryPath,
   classGalleryType,
   classMediaUrl,
   cleanEventName,
+  reviewStatusOf,
   sectionKey,
+  type ReviewStatus,
 } from "@/lib/classGallery";
 
 const id = (prefix: string) => `${prefix}_${randomBytes(6).toString("base64url")}`;
@@ -65,18 +65,23 @@ export async function listClassEvents(section: string) {
     .limit(200);
   if (error) throw new ApiError("server_error", "Could not read the class gallery — try again", 503);
   const albums = (data ?? []).map((r) => rowToAlbum(r as Record<string, unknown>));
-  const counts = new Map<string, { photos: number; videos: number; cover: string }>();
+  type Count = { photos: number; videos: number; checking: number; held: number; cover: string };
+  const counts = new Map<string, Count>();
   if (albums.length) {
     const { data: ph, error: pe } = await sb
       .from("school_comms_desk_photos")
-      .select("id, album_id, media_kind")
+      .select("id, album_id, media_kind, review_status")
       .eq("tenant_id", tenantId)
       .in("album_id", albums.map((a) => a.id))
+      .neq("review_status", "removed")
       .limit(5000);
     if (pe) throw new ApiError("server_error", "Could not read the class gallery — try again", 503);
     for (const p of ph ?? []) {
-      const c = counts.get(String(p.album_id)) ?? { photos: 0, videos: 0, cover: "" };
-      if (p.media_kind === "video") c.videos += 1;
+      const c = counts.get(String(p.album_id)) ?? { photos: 0, videos: 0, checking: 0, held: 0, cover: "" };
+      const status = reviewStatusOf(p.review_status);
+      if (status === "pending") c.checking += 1;
+      else if (status === "held") c.held += 1;
+      else if (p.media_kind === "video") c.videos += 1;
       else {
         c.photos += 1;
         if (!c.cover) c.cover = classMediaUrl(String(p.id));
@@ -91,6 +96,8 @@ export async function listClassEvents(section: string) {
     createdBy: a.createdBy,
     photos: counts.get(a.id)?.photos ?? 0,
     videos: counts.get(a.id)?.videos ?? 0,
+    checking: counts.get(a.id)?.checking ?? 0,
+    held: counts.get(a.id)?.held ?? 0,
     coverUrl: counts.get(a.id)?.cover ?? "",
   }));
 }
@@ -162,10 +169,16 @@ export async function startClassUpload(ctx: ApiAuthContext, opts: { albumId: str
   return { photoId, path, uploadUrl: data.signedUrl, contentType: type, kind: CLASS_GALLERY_TYPES[type]!.kind };
 }
 
-/** After the phone's upload: record the item, then copy it to Drive. */
+/**
+ * After the phone's upload: record the item as "pending", then run the AI
+ * check (lib/classGalleryReview) — parents see it only once it passes, and
+ * only a passed item is copied to Drive. A check that does not finish in
+ * time is finished by the scheduled tick.
+ */
 export async function finishClassUpload(
   ctx: ApiAuthContext,
   opts: { albumId: string; photoId: string; path: string; caption: string },
+  deadline: number,
 ) {
   const album = await albumOf(opts.albumId);
   await assertMaySection(ctx, album.sectionIds![0]!);
@@ -177,46 +190,33 @@ export async function finishClassUpload(
   const type = Object.entries(CLASS_GALLERY_TYPES).find(([, t]) => t.ext === ext)?.[0] ?? "";
   if (!type) throw new ApiError("bad_request", "Unknown file type", 400);
   const { sb, tenantId } = await db();
-  const dl = await sb.storage.from(CLASS_GALLERY_BUCKET).download(opts.path);
-  if (dl.error || !dl.data) throw new ApiError("bad_request", "The file did not arrive — please try again.", 400);
-  const buf = Buffer.from(await dl.data.arrayBuffer());
+  const parent = opts.path.split("/").slice(0, -1).join("/");
+  const name = opts.path.split("/").pop() || "";
+  const { data: listed, error: le } = await sb.storage.from(CLASS_GALLERY_BUCKET).list(parent, { search: name, limit: 5 });
+  if (le || !(listed ?? []).some((f) => f.name === name)) {
+    throw new ApiError("bad_request", "The file did not arrive — please try again.", 400);
+  }
   const now = new Date().toISOString();
   const kind = CLASS_GALLERY_TYPES[type]!.kind;
-  const row = photoToRow(tenantId, {
-    id: opts.photoId,
-    albumId: album.id,
-    url: classMediaUrl(opts.photoId),
-    caption: String(opts.caption ?? "").slice(0, 200),
-    uploadedAt: now,
-    uploadedBy: ctx.session.fullName || "Class teacher",
-    mediaKind: kind,
-    storagePath: opts.path,
-  });
+  const row = {
+    ...photoToRow(tenantId, {
+      id: opts.photoId,
+      albumId: album.id,
+      url: classMediaUrl(opts.photoId),
+      caption: String(opts.caption ?? "").slice(0, 200),
+      uploadedAt: now,
+      uploadedBy: ctx.session.fullName || "Class teacher",
+      mediaKind: kind,
+      storagePath: opts.path,
+    }),
+    review_status: "pending",
+  };
   const { error } = await sb.from("school_comms_desk_photos").upsert(row, { onConflict: "id", ignoreDuplicates: true });
   if (error) throw new ApiError("server_error", "Could not save — try again", 503);
-  // The event's cover: its first photo.
-  if (kind === "photo" && !album.coverUrl) {
-    await sb
-      .from("school_comms_desk_albums")
-      .update({ cover_url: classMediaUrl(opts.photoId), updated_at: now })
-      .eq("tenant_id", tenantId)
-      .eq("id", album.id)
-      .eq("cover_url", "");
-  }
   await touchCommsMeta(sb, tenantId, now).catch(() => undefined);
-
-  // Drive: Class gallery / <year> / <class> / <event> / <file>. A Drive
-  // failure is recorded (drive_archive) and never loses the upload.
-  const drive = await archiveToDrive({
-    kind: "media",
-    ref: `${CLASS_GALLERY_BUCKET}/${opts.path}`,
-    folderPath: classGalleryDriveFolder(album.academicYearCode, album.classLabel || "", album.title),
-    fileName: `${now.slice(0, 10)}_${opts.photoId}.${ext}`,
-    mimeType: type,
-    data: buf,
-  }).catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }));
-  if (!drive.ok) console.warn("[class-gallery] drive copy failed", drive.error);
-  return { id: opts.photoId, url: classMediaUrl(opts.photoId), kind, drive: drive.ok };
+  const { reviewClassItem } = await import("@/lib/classGalleryReview.server");
+  const status = await reviewClassItem(opts.photoId, deadline);
+  return { id: opts.photoId, url: classMediaUrl(opts.photoId), kind, status };
 }
 
 /** The sections a parent's children on roll are in. */
@@ -225,7 +225,9 @@ export function parentSections(householdStudents: SisStudent[], sessionAy: strin
 }
 
 /** One item, for the media route: its storage path and its album's audience. */
-export async function readClassMedia(photoId: string): Promise<{ path: string; url: string; sectionIds: string[] } | null> {
+export async function readClassMedia(
+  photoId: string,
+): Promise<{ path: string; url: string; sectionIds: string[]; reviewStatus: ReviewStatus } | null> {
   const { sb, tenantId } = await db();
   const { data: p, error } = await sb.from("school_comms_desk_photos").select("*").eq("tenant_id", tenantId).eq("id", photoId).maybeSingle();
   if (error) throw new ApiError("server_error", "Could not read — try again", 503);
@@ -241,6 +243,7 @@ export async function readClassMedia(photoId: string): Promise<{ path: string; u
   return {
     path: photo.storagePath || "",
     url: photo.url,
+    reviewStatus: photo.reviewStatus ?? "ok",
     sectionIds: Array.isArray((a as { section_ids?: unknown } | null)?.section_ids) ? ((a as { section_ids: string[] }).section_ids) : [],
   };
 }

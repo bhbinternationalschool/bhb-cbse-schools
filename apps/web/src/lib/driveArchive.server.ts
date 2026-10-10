@@ -11,7 +11,7 @@
  * bucket URL, receipts keep living in the database. Drive failing must not
  * fail the thing being archived; it fails the archive row.
  */
-import { uploadFileToDrive } from "@/lib/googleDrive.server";
+import { uploadFileToDrive, type DriveStream } from "@/lib/googleDrive.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { driveViewUrl, type ArchiveKind } from "@/lib/driveArchive";
 
@@ -56,7 +56,7 @@ export async function archiveToDrive(input: {
   folderPath: string[];
   fileName: string;
   mimeType: string;
-  data: Buffer;
+  data: Buffer | DriveStream;
 }): Promise<
   | { ok: true; driveFileId: string; driveUrl: string; alreadyArchived: boolean }
   | { ok: false; error: string }
@@ -107,7 +107,7 @@ export async function archiveToDrive(input: {
     folder,
     file_name: input.fileName,
     mime_type: input.mimeType,
-    bytes: input.data.length,
+    bytes: Buffer.isBuffer(input.data) ? input.data.length : input.data.bytes,
     attempts,
     updated_at: now,
     drive_file_id: uploaded.ok ? uploaded.driveFileId : "",

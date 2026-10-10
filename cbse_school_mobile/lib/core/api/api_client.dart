@@ -652,23 +652,77 @@ class ClassGalleryEvent {
     required this.videos,
     required this.coverUrl,
     required this.createdAt,
+    this.checking = 0,
+    this.held = 0,
   });
 
-  factory ClassGalleryEvent.fromJson(Map<String, dynamic> j, String base) => ClassGalleryEvent(
-    id: "${j["id"] ?? ""}",
-    title: "${j["title"] ?? ""}",
-    photos: (j["photos"] as num?)?.toInt() ?? 0,
-    videos: (j["videos"] as num?)?.toInt() ?? 0,
-    coverUrl: "${j["coverUrl"] ?? ""}".startsWith("/") ? "$base${j["coverUrl"]}" : "${j["coverUrl"] ?? ""}",
-    createdAt: "${j["createdAt"] ?? ""}",
-  );
+  factory ClassGalleryEvent.fromJson(Map<String, dynamic> j, String base) =>
+      ClassGalleryEvent(
+        id: "${j["id"] ?? ""}",
+        title: "${j["title"] ?? ""}",
+        photos: (j["photos"] as num?)?.toInt() ?? 0,
+        videos: (j["videos"] as num?)?.toInt() ?? 0,
+        coverUrl: "${j["coverUrl"] ?? ""}".startsWith("/")
+            ? "$base${j["coverUrl"]}"
+            : "${j["coverUrl"] ?? ""}",
+        createdAt: "${j["createdAt"] ?? ""}",
+        checking: (j["checking"] as num?)?.toInt() ?? 0,
+        held: (j["held"] as num?)?.toInt() ?? 0,
+      );
 
   final String id;
   final String title;
+
+  /// Passed the check — what parents see.
   final int photos;
   final int videos;
   final String coverUrl;
   final String createdAt;
+
+  /// Still being checked by the AI.
+  final int checking;
+
+  /// Held for the principal.
+  final int held;
+}
+
+/// A class-gallery item the AI check held (or is still checking), for the principal.
+class ClassReviewItem {
+  const ClassReviewItem({
+    required this.id,
+    required this.isVideo,
+    required this.url,
+    required this.status,
+    required this.note,
+    required this.event,
+    required this.classLabel,
+    required this.uploadedBy,
+  });
+
+  factory ClassReviewItem.fromJson(Map<String, dynamic> j, String base) =>
+      ClassReviewItem(
+        id: "${j["id"] ?? ""}",
+        isVideo: j["kind"] == "video",
+        url: "${j["url"] ?? ""}".startsWith("/")
+            ? "$base${j["url"]}"
+            : "${j["url"] ?? ""}",
+        status: "${j["status"] ?? ""}",
+        note: "${j["note"] ?? ""}",
+        event: "${j["event"] ?? ""}",
+        classLabel: "${j["classLabel"] ?? ""}",
+        uploadedBy: "${j["uploadedBy"] ?? ""}",
+      );
+
+  final String id;
+  final bool isVideo;
+  final String url;
+
+  /// "held" or "pending".
+  final String status;
+  final String note;
+  final String event;
+  final String classLabel;
+  final String uploadedBy;
 }
 
 /// The class teacher's class gallery: their class(es) and its events.
@@ -678,7 +732,13 @@ class ClassGallery {
     required this.classLabel,
     required this.classes,
     required this.events,
+    this.canReview = false,
+    this.heldCount = 0,
   });
+
+  /// The principal and leadership decide on held items.
+  final bool canReview;
+  final int heldCount;
 
   /// "classId|sectionId" of the class shown.
   final String section;
@@ -3261,12 +3321,19 @@ class ApiClient {
   }
 
   /// Counts a screen where someone hit the same error twice. Best effort.
-  Future<void> appGuideStuck({required String screen, required String message}) async {
+  Future<void> appGuideStuck({
+    required String screen,
+    required String message,
+  }) async {
     try {
       await http.post(
         _uri("/api/v1/app-guide"),
         headers: await _authHeaders(),
-        body: jsonEncode({"action": "stuck", "screen": screen, "message": message}),
+        body: jsonEncode({
+          "action": "stuck",
+          "screen": screen,
+          "message": message,
+        }),
       );
     } catch (_) {
       /* never in the user's way */
@@ -3284,13 +3351,12 @@ class ApiClient {
     required double lat,
     required double lng,
     double? accuracyM,
-  }) =>
-      _postData("/api/v1/transport/pickup-pin", {
-        "action": "save",
-        "lat": lat,
-        "lng": lng,
-        "accuracyM": ?accuracyM,
-      });
+  }) => _postData("/api/v1/transport/pickup-pin", {
+    "action": "save",
+    "lat": lat,
+    "lng": lng,
+    "accuracyM": ?accuracyM,
+  });
 
   /// "Not now" — recorded so the family is not asked again.
   Future<void> declinePickupPin() async {
@@ -3321,7 +3387,11 @@ class ApiClient {
   /// Completes a pop-up's form (Aadhaar numbers, a consent answer). Throws
   /// [ApiException] with the server's reason if it was not saved.
   Future<void> appPopupDone(String popupId, Map<String, dynamic> value) async {
-    await _postData("/api/v1/app/popups", {"popupId": popupId, "action": "done", ...value});
+    await _postData("/api/v1/app/popups", {
+      "popupId": popupId,
+      "action": "done",
+      ...value,
+    });
   }
 
   /// Reports an AI reply as wrong, unsafe or offensive.
@@ -3809,7 +3879,9 @@ class ApiClient {
 
   /// A ten-minute link to a class-gallery video, for the phone's player.
   Future<String> galleryVideoLink(String photoId) async {
-    final data = await _getData("/api/v1/gallery/media/${Uri.encodeComponent(photoId)}?link=1");
+    final data = await _getData(
+      "/api/v1/gallery/media/${Uri.encodeComponent(photoId)}?link=1",
+    );
     return "${data["url"] ?? ""}";
   }
 
@@ -3823,24 +3895,55 @@ class ApiClient {
       section: "${data["section"] ?? ""}",
       classLabel: "${data["classLabel"] ?? ""}",
       classes: ((data["classes"] as List?) ?? const [])
-          .map((c) => (section: "${(c as Map)["section"]}", classLabel: "${c["classLabel"]}"))
+          .map(
+            (c) => (
+              section: "${(c as Map)["section"]}",
+              classLabel: "${c["classLabel"]}",
+            ),
+          )
           .toList(),
       events: ((data["events"] as List?) ?? const [])
-          .map((e) => ClassGalleryEvent.fromJson(e as Map<String, dynamic>, base))
+          .map(
+            (e) => ClassGalleryEvent.fromJson(e as Map<String, dynamic>, base),
+          )
           .toList(),
+      canReview: data["canReview"] == true,
+      heldCount: (data["heldCount"] as num?)?.toInt() ?? 0,
     );
+  }
+
+  /// Items the AI check held (and those still being checked) — principal only.
+  Future<List<ClassReviewItem>> fetchClassReview() async {
+    final data = await _getData("/api/v1/staff/class-gallery/review");
+    final base = config.apiBaseUrl;
+    return ((data["items"] as List?) ?? const [])
+        .map((e) => ClassReviewItem.fromJson(e as Map<String, dynamic>, base))
+        .toList();
+  }
+
+  /// [action] "approve" (parents see it) or "remove" (the file is deleted).
+  Future<void> decideClassItem(String id, String action) async {
+    await _postData("/api/v1/staff/class-gallery/review", {
+      "id": id,
+      "action": action,
+    });
   }
 
   /// An event of the class ("Sports day"); made if it does not exist. Returns its id.
   Future<String> createClassEvent(String section, String name) async {
-    final data = await _postData("/api/v1/staff/class-gallery/event", {"section": section, "name": name});
+    final data = await _postData("/api/v1/staff/class-gallery/event", {
+      "section": section,
+      "name": name,
+    });
     return "${data["id"] ?? ""}";
   }
 
   /// One photo or video into an event: the file goes straight from the phone
   /// to storage (a video does not fit through the server), then the ERP
-  /// records it and copies it to Drive. [onProgress] gets 0..1.
-  Future<void> uploadClassMedia({
+  /// records it and runs the AI check. [onProgress] gets 0..1. Returns
+  /// "ok" (parents see it), "held" (the principal decides) or "pending"
+  /// (still being checked).
+  Future<String> uploadClassMedia({
     required String albumId,
     required String fileName,
     required String contentType,
@@ -3872,14 +3975,18 @@ class ApiClient {
     );
     final res = await http.Response.fromStream(await req.send());
     if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw ApiException("The file did not upload (${res.statusCode}) — check the connection and try again.", res.statusCode);
+      throw ApiException(
+        "The file did not upload (${res.statusCode}) — check the connection and try again.",
+        res.statusCode,
+      );
     }
-    await _postData("/api/v1/staff/class-gallery/complete", {
+    final done = await _postData("/api/v1/staff/class-gallery/complete", {
       "albumId": albumId,
       "photoId": start["photoId"],
       "path": start["path"],
       "caption": caption,
     });
+    return "${done["status"] ?? "pending"}";
   }
 
   // ---- leave --------------------------------------------------------------

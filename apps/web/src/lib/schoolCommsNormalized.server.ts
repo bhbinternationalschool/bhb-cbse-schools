@@ -2,6 +2,7 @@
  * School comms desk — Supabase normalized tables (school_comms_desk_*).
  */
 
+import { reviewStatusOf } from "@/lib/classGallery";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   GalleryAlbum,
@@ -371,6 +372,10 @@ export function photoToRow(tenantId: string, p: GalleryPhoto): Record<string, un
     updated_at: nowIso(),
     media_kind: p.mediaKind === "video" ? "video" : "photo",
     storage_path: p.storagePath || "",
+    // Never the browser's word: a class item a desk save inserts (a stale
+    // copy of one removed, say) is checked again. Rows are insert-only, so
+    // a save never moves a stored item's status.
+    review_status: p.storagePath ? "pending" : "ok",
   };
 }
 
@@ -384,6 +389,8 @@ export function rowToPhoto(r: Record<string, unknown>): GalleryPhoto {
     uploadedBy: String(r.uploaded_by || ""),
     mediaKind: r.media_kind === "video" ? "video" : "photo",
     storagePath: String(r.storage_path || ""),
+    reviewStatus: reviewStatusOf(r.review_status),
+    reviewNote: String(r.review_note || ""),
   };
 }
 

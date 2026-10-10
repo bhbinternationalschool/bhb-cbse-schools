@@ -6,6 +6,7 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { assertMaySection, classLabelFor, listClassEvents, postableSections } from "@/lib/classGallery.server";
+import { listItemsForReview } from "@/lib/classGalleryReview.server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,8 +18,12 @@ export async function GET(request: Request) {
     const mine = await postableSections(ctx);
     const asked = new URL(request.url).searchParams.get("section") || "";
     const section = asked || mine.sections[0] || "";
+    // The principal and leadership decide on held items.
+    const canReview = mine.unrestricted;
+    const review = canReview ? await listItemsForReview().catch(() => []) : [];
+    const heldCount = review.filter((r) => r.status === "held").length;
     if (!section) {
-      return apiOk({ classes: [], section: "", classLabel: "", events: [], note: "The class gallery is for class teachers." });
+      return apiOk({ classes: [], section: "", classLabel: "", events: [], canReview, heldCount, note: "The class gallery is for class teachers." });
     }
     await assertMaySection(ctx, section);
     return apiOk({
@@ -26,6 +31,8 @@ export async function GET(request: Request) {
       section,
       classLabel: classLabelFor(ctx.masters, section),
       events: await listClassEvents(section),
+      canReview,
+      heldCount,
     });
   } catch (e) {
     return apiErr(e);

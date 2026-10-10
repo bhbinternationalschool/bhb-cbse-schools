@@ -8,6 +8,11 @@
  * Class gallery / <year> / <class> / <event>. Only the families of that class
  * see it in the parent app; staff see every class.
  *
+ * Nothing reaches parents unchecked: each item is 'pending' until an AI
+ * check makes it 'ok', or 'held' for the principal, who approves or removes
+ * it. An AI that cannot answer never passes an item — after a few tries it
+ * is held for a person.
+ *
  * Pure rules: who may see an album, which files are accepted, where they go.
  */
 
@@ -17,16 +22,20 @@ export const CLASS_GALLERY_BUCKET = "class-gallery";
 
 const MB = 1024 * 1024;
 
+/** Five minutes of phone video (director, 10 Oct 2026). */
+export const VIDEO_MAX_MINUTES = 5;
+export const VIDEO_MAX_BYTES = 500 * MB;
+
 /** What the bucket accepts (kept in step with migration 20261010210000_class_gallery_bucket). */
 export const CLASS_GALLERY_TYPES: Record<string, { ext: string; kind: "photo" | "video"; maxBytes: number }> = {
   "image/jpeg": { ext: "jpg", kind: "photo", maxBytes: 15 * MB },
   "image/png": { ext: "png", kind: "photo", maxBytes: 15 * MB },
   "image/webp": { ext: "webp", kind: "photo", maxBytes: 15 * MB },
   "image/heic": { ext: "heic", kind: "photo", maxBytes: 15 * MB },
-  "video/mp4": { ext: "mp4", kind: "video", maxBytes: 100 * MB },
-  "video/quicktime": { ext: "mov", kind: "video", maxBytes: 100 * MB },
-  "video/webm": { ext: "webm", kind: "video", maxBytes: 100 * MB },
-  "video/3gpp": { ext: "3gp", kind: "video", maxBytes: 100 * MB },
+  "video/mp4": { ext: "mp4", kind: "video", maxBytes: VIDEO_MAX_BYTES },
+  "video/quicktime": { ext: "mov", kind: "video", maxBytes: VIDEO_MAX_BYTES },
+  "video/webm": { ext: "webm", kind: "video", maxBytes: VIDEO_MAX_BYTES },
+  "video/3gpp": { ext: "3gp", kind: "video", maxBytes: VIDEO_MAX_BYTES },
 };
 
 /** The content type for a picked file, from its declared type or its name. */
@@ -55,7 +64,7 @@ export function classGalleryFileProblem(contentType: string, bytes: number): str
   if (!(bytes > 0)) return "The file is empty.";
   if (bytes > t.maxBytes) {
     return t.kind === "video"
-      ? `This video is ${Math.round(bytes / MB)} MB — the limit is 100 MB (about 1–2 minutes). Trim it or record a shorter clip.`
+      ? `This video is ${Math.round(bytes / MB)} MB — the limit is 500 MB (about 5 minutes). Trim it or record a shorter clip.`
       : `This photo is ${Math.round(bytes / MB)} MB — the limit is 15 MB.`;
   }
   return "";
@@ -100,3 +109,44 @@ export function classGalleryDriveFolder(academicYear: string, classLabel: string
 
 /** The ERP route a class-gallery item is served from (it checks the viewer). */
 export const classMediaUrl = (photoId: string) => `/api/v1/gallery/media/${encodeURIComponent(photoId)}`;
+
+export type ReviewStatus = "pending" | "ok" | "held" | "removed";
+
+export function reviewStatusOf(v: unknown): ReviewStatus {
+  return v === "pending" || v === "held" || v === "removed" ? v : "ok";
+}
+
+/** Tries before an item the AI could not check is held for a person. */
+export const REVIEW_MAX_ATTEMPTS = 3;
+
+/** May a parent see this item? Only once it has passed. */
+export const parentMaySee = (p: { reviewStatus?: ReviewStatus }) => (p.reviewStatus ?? "ok") === "ok";
+
+export const MODERATION_SYSTEM = [
+  "You check photos and videos a class teacher took at an Indian school before they are shown to the parents of that class in the school app.",
+  "Most are ordinary school moments — classroom work, assemblies, sports, festivals, prize giving, trips, group photos — and those are fine.",
+  "Hold an item if it shows ANY of: a child undressed or partly dressed (changing clothes, bathing, toilet), nudity or sexual content;",
+  "an injury, blood or a child being hurt; fighting, bullying, physical punishment or a child being scolded or humiliated;",
+  "a child visibly crying or distressed as the subject; weapons, alcohol, tobacco or drugs; rude gestures or offensive words;",
+  "a readable personal document or record (Aadhaar, report card, mark sheet, fee receipt, register, phone numbers, addresses);",
+  "a screenshot, meme or anything that is not a school moment; or anything else a careful principal would not send to all parents.",
+  "When unsure, hold. Do not hold an item only because it shows children's faces, uniforms or the school.",
+].join(" ");
+
+export const MODERATION_PROMPT =
+  'Reply as JSON: {"verdict":"ok"|"hold","reason":"<under 15 words, for the principal; empty if ok>"}';
+
+/** The model's reply as a verdict; anything unreadable is not a pass. */
+export function parseModerationVerdict(text: string): { verdict: "ok" | "hold"; reason: string } | null {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(String(text ?? "").trim());
+  } catch {
+    return null;
+  }
+  const r = (raw ?? {}) as { verdict?: unknown; reason?: unknown };
+  const reason = String(r.reason ?? "").replace(/\s+/g, " ").trim().slice(0, 160);
+  if (r.verdict === "ok") return { verdict: "ok", reason: "" };
+  if (r.verdict === "hold") return { verdict: "hold", reason: reason || "Flagged by the AI check" };
+  return null;
+}

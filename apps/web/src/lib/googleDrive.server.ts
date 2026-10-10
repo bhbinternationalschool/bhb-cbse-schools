@@ -152,11 +152,15 @@ export type DriveFileMeta = {
  */
 const MULTIPART_MAX_BYTES = 4 * 1024 * 1024;
 
+/** A body read as it is sent: its length must be known up front. */
+export type DriveStream = { stream: ReadableStream<Uint8Array>; bytes: number };
+
 async function uploadResumable(
   accessToken: string,
   folderId: string,
-  input: { fileName: string; mimeType: string; data: Buffer },
+  input: { fileName: string; mimeType: string; data: Buffer | DriveStream },
 ): Promise<{ ok: true; driveFileId: string } | { ok: false; error: string }> {
+  const length = Buffer.isBuffer(input.data) ? input.data.length : input.data.bytes;
   try {
     const open = await fetch(
       `${DRIVE_UPLOAD_API}/files?uploadType=resumable&fields=id`,
@@ -166,7 +170,7 @@ async function uploadResumable(
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json; charset=UTF-8",
           "X-Upload-Content-Type": input.mimeType,
-          "X-Upload-Content-Length": String(input.data.length),
+          "X-Upload-Content-Length": String(length),
         },
         body: JSON.stringify({ name: input.fileName, parents: [folderId] }),
       },
@@ -180,10 +184,13 @@ async function uploadResumable(
       method: "PUT",
       headers: {
         "Content-Type": input.mimeType,
-        "Content-Length": String(input.data.length),
+        "Content-Length": String(length),
       },
-      body: new Uint8Array(input.data),
-    });
+      // A stream (a class-gallery video, up to 500 MB) is passed through, never held in memory.
+      ...(Buffer.isBuffer(input.data)
+        ? { body: new Uint8Array(input.data) }
+        : { body: input.data.stream, duplex: "half" }),
+    } as RequestInit);
     const json = (await put.json().catch(() => ({}))) as { id?: string; error?: { message?: string } };
     if (!put.ok || !json.id) {
       return { ok: false, error: json.error?.message || `Drive HTTP ${put.status} uploading` };
@@ -199,7 +206,7 @@ export async function uploadFileToDrive(input: {
   folderPath: string[];
   fileName: string;
   mimeType: string;
-  data: Buffer;
+  data: Buffer | DriveStream;
 }): Promise<
   | { ok: true; driveFileId: string }
   | { ok: false; error: string }
@@ -210,9 +217,10 @@ export async function uploadFileToDrive(input: {
   const folder = await resolveFolderPath(token.accessToken, input.folderPath);
   if (!folder.ok) return folder;
 
-  if (input.data.length > MULTIPART_MAX_BYTES) {
+  if (!Buffer.isBuffer(input.data) || input.data.length > MULTIPART_MAX_BYTES) {
     return uploadResumable(token.accessToken, folder.folderId, input);
   }
+  const data = input.data;
 
   const boundary = `bhbdrive-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const metadata = JSON.stringify({
@@ -226,7 +234,7 @@ export async function uploadFileToDrive(input: {
     Buffer.from(
       `--${boundary}\r\nContent-Type: ${input.mimeType}\r\n\r\n`,
     ),
-    input.data,
+    data,
     Buffer.from(`\r\n--${boundary}--`),
   ]);
 

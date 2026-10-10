@@ -15,8 +15,10 @@ values (
   'class-gallery',
   'class-gallery',
   false,
-  -- 100 MB: a one- to two-minute phone video. Photos land far below.
-  104857600,
+  -- 500 MB: a five-minute phone video (director: storage is not the limit).
+  -- Photos land far below. The project-wide upload cap (Storage settings)
+  -- must be at least this, or big videos are refused before this applies.
+  524288000,
   array[
     'image/jpeg',
     'image/png',
@@ -46,3 +48,16 @@ alter table public.school_comms_desk_albums
 alter table public.school_comms_desk_photos
   add column if not exists media_kind text not null default 'photo',
   add column if not exists storage_path text not null default '';
+
+-- Nothing reaches parents unchecked (director, 10 Oct 2026). A class-gallery
+-- item starts 'pending'; an AI check makes it 'ok' or 'held' (with a reason);
+-- the principal approves a held item ('ok') or removes it ('removed' — the
+-- row stays so a stale browser copy cannot bring it back; the file goes).
+-- Everything before this, and office uploads, are 'ok'.
+alter table public.school_comms_desk_photos
+  add column if not exists review_status text not null default 'ok',
+  add column if not exists review_note text not null default '',
+  add column if not exists review_attempts integer not null default 0;
+create index if not exists school_comms_desk_photos_review_pending
+  on public.school_comms_desk_photos (tenant_id, review_status)
+  where review_status = 'pending';

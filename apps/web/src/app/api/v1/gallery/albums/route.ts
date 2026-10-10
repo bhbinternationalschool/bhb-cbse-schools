@@ -1,6 +1,6 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
-import { albumVisibleTo } from "@/lib/classGallery";
+import { albumVisibleTo, parentMaySee } from "@/lib/classGallery";
 import { parentSections } from "@/lib/classGallery.server";
 import { fetchGalleryDeskFromDb } from "@/lib/schoolCommsNormalized.server";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
@@ -41,7 +41,8 @@ export async function GET(request: Request) {
 
     const byAlbum = new Map<string, typeof state.photos>();
     for (const p of state.photos) {
-      if (!p.url) continue;
+      // A class item reaches anyone here only once it passed its check.
+      if (!p.url || !parentMaySee(p)) continue;
       const list = byAlbum.get(p.albumId) ?? [];
       list.push(p);
       byAlbum.set(p.albumId, list);
